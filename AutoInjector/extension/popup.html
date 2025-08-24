@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>AutoInjector v1.6.6</title>
+<style>
+body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:12px;width:380px}
+h1{font-size:16px;margin:0 0 8px}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.led{width:10px;height:10px;border-radius:50%;background:#bbb}.led.green{background:#22c55e}.led.red{background:#ef4444}
+button{padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer}
+textarea,input,select{width:100%;box-sizing:border-box;padding:6px;border:1px solid #e5e7eb;border-radius:8px}
+#log{height:140px;overflow:auto;font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1020;color:#cbd5e1;padding:8px;border-radius:8px}
+.section{border-top:1px solid #e5e7eb;margin-top:10px;padding-top:10px}
+small.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.warn{color:#b45309}
+</style></head>
+<body>
+<h1>AutoInjector <small class="mono">v1.6.6</small></h1>
+<div class="row"><div>Relay:</div><div id="led-relay" class="led red"></div><div>Tab:</div><div id="led-tab" class="led red"></div><div>Content:</div><div id="led-content" class="led red"></div><div>Phase:</div><div id="phase">idle</div></div>
+<div class="row"><button id="btn-preflight">Preflight</button><button id="btn-retry">Retry WS</button><button id="btn-health">Check Relay</button><button id="btn-open-health">Open Health</button></div>
+<div class="row"><button id="btn-selftest">Self-Test</button><button id="btn-dryrun">Dry-Run</button><button id="btn-live">Live Test</button></div>
+<div class="row"><div id="view" style="font:12px ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%"></div></div>
+<div class="section">
+  <div class="row"><select id="tabs" style="flex:1"></select><button id="btn-refresh">Refresh</button><button id="btn-activate">Activate</button></div>
+  <textarea id="prompt" rows="3" placeholder="Prompt for Live Test...">Say: hello from AutoInjector</textarea>
+</div>
+<div class="section">
+  <div class="row"><input id="wsHost" placeholder="ws host"><input id="wsPort" placeholder="ws port" style="width:80px"></div>
+  <div class="row"><input id="httpHost" placeholder="http host"><input id="httpPort" placeholder="http port" style="width:80px"></div>
+  <div id="guard" class="warn"></div>
+  <button id="btn-save">Save Config</button>
+</div>
+<div class="section"><div id="log"></div></div>
+<script src="popup.js"></script>
+</body></html>
