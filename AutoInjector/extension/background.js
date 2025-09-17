@@ -1,0 +1,41 @@
+\
+// background.js â€” MV3 service worker (module) v2.2.3
+const DEFAULT_CFG = { wsHost: "127.0.0.1", wsPort: 8765, httpHost: "127.0.0.1", httpPort: 17890 };
+let CFG = { ...DEFAULT_CFG };
+let WS = null, reconnectTimer = null, backoffMs = 1000;
+const STATE = { wsConnected:false, lastWsError:null, lastPing:null, lastRequestId:null, hasTab:false, contentOk:false, targetTabId:null, wsHintHasWss:false, wsHintUrls:[] };
+let popupPort = null;
+const HTTP_URL = () => `http://${CFG.httpHost}:${CFG.httpPort}`;
+const WS_URL = () => `ws://${CFG.wsHost}:${CFG.wsPort}`;
+const sleep = (ms) => new Promise(r=>setTimeout(r,ms));
+const logln = (s) => popupPort && popupPort.postMessage({ type:"WS_LOG", line:s });
+const publish = (m) => popupPort && popupPort.postMessage(m);
+
+// Tabs
+async function listChatTabs(){ return chrome.tabs.query({ url:["*://chat.openai.com/*","*://chatgpt.com/*"] }); }
+async function preferredChatTab(){ const t=await listChatTabs(); if(!t?.length) return null; if(STATE.targetTabId){ const hit=t.find(x=>x.id===STATE.targetTabId); if(hit) return hit; } return t.find(x=>x.active)||t[0]; }
+async function forceInjectContent(tabId){ try{ await chrome.scripting.executeScript({ target:{tabId}, files:["selectors.js","content.js"] }); logln(`Forced content injection on tab ${tabId}`);}catch(e){ logln(`Force inject failed on tab ${tabId}: ${e}`);} }
+async function pingContent(tabId,{forceIfMissing=true}={}){ return new Promise((resolve)=>{ try{ chrome.tabs.sendMessage(tabId,{type:"PING_CONTENT"}, async (resp)=>{ const ok=!!(resp&&resp.ok); if(!ok&&forceIfMissing){ await forceInjectContent(tabId); chrome.tabs.sendMessage(tabId,{type:"PING_CONTENT"},(r2)=>resolve(!!(r2&&r2.ok))); } else resolve(ok); }); }  } catch (e) {
+    logln("pingContent unexpected error: " + String(e));
+    resolve(false);
+  } }); }
+async function wsHealth(tabId){ return new Promise((resolve)=>{ try{ chrome.tabs.sendMessage(tabId,{type:"WS_HEALTH"},(resp)=>resolve(resp||{ok:false})); }catch{ resolve({ok:false}); } }); }
+async function injectAndWait(tabId,messages,timeoutMs=180000){ return new Promise((resolve)=>{ try{ chrome.tabs.sendMessage(tabId,{type:"INJECT_AND_WAIT",messages,timeoutMs},(resp)=>resolve(resp||{ok:false,error:"no response from content script"})); }catch(e){ resolve({ok:false,error:String(e)}); } }); }
+async function ensureChatTab(){ const tab=await preferredChatTab(); if(tab) return tab; const created=await chrome.tabs.create({ url:"https://chat.openai.com" }); await sleep(2000); return created; }
+async function publishTabStatus(){ try{ const tabs=await listChatTabs(); STATE.hasTab=tabs.length>0; let contentOk=false; let wsHint={ok:false,hasWss:false,urls:[]}; const tab=await preferredChatTab(); if(tab){ contentOk=await pingContent(tab.id); wsHint=await wsHealth(tab.id); } STATE.contentOk=contentOk; STATE.wsHintHasWss=!!wsHint?.hasWss; STATE.wsHintUrls=Array.isArray(wsHint?.urls)?wsHint.urls:[]; publish({ type:"TAB_STATUS", hasTab:STATE.hasTab, contentOk:STATE.contentOk, targetTabId:STATE.targetTabId, wsHintHasWss:STATE.wsHintHasWss, wsHintUrls:STATE.wsHintUrls }); }catch(e){ publish({ type:"TAB_STATUS", hasTab:false, contentOk:false, error:String(e) }); } }
+
+// WS
+function resetBackoff(){ backoffMs=1000; }
+function scheduleReconnect(){ if(reconnectTimer) return; const delay=Math.min(backoffMs,10000); reconnectTimer=setTimeout(()=>{ reconnectTimer=null; backoffMs=Math.min(backoffMs*2,10000); connectWS(); }, delay); logln(`WS reconnect in ${delay}ms`); }
+function connectWS(force=false){ if(WS && STATE.wsConnected && !force) return; try{ WS && WS.close(); }catch{}; try{ WS=new WebSocket(WS_URL()); }catch(e){ STATE.lastWsError=String(e); logln("WS ctor error: "+e); publish({type:"WS_STATUS",ok:false,error:STATE.lastWsError}); scheduleReconnect(); return; } WS.onopen=()=>{ STATE.wsConnected=true; STATE.lastWsError=null; resetBackoff(); logln("WS connected"); publish({type:"WS_STATUS",ok:true}); }; WS.onclose=(ev)=>{ STATE.wsConnected=false; logln("WS closed ("+ev.code+")"); publish({type:"WS_STATUS",ok:false,code:ev.code}); scheduleReconnect(); }; WS.onerror=()=>{ STATE.lastWsError="WebSocket error"; logln("WS onerror"); }; WS.onmessage=async (evt)=>{ try{ const msg=JSON.parse(evt.data); if(msg.type==="PING"){ STATE.lastPing=Date.now(); WS.send(JSON.stringify({type:"PONG"})); return; } if(msg.type==="REQUEST"){ const requestId=msg.id; STATE.lastRequestId=requestId; publish({ type:"WS_LOG", line:`REQUEST ${requestId} received` }); try{ const tab=await ensureChatTab(); const result=await injectAndWait(tab.id, msg.messages||[], msg.timeoutMs??180000); if(result.ok){ WS.send(JSON.stringify({type:"RESPONSE", id:requestId, ok:true, text:result.text||"" })); publish({ type:"JOB_OK", id:requestId, chars:(result.text||"").length }); } else { WS.send(JSON.stringify({type:"ERROR", id:requestId, error:result.error||"unknown"})); publish({ type:"JOB_ERROR", id:requestId, error:result.error||"unknown" }); } }catch(e){ WS.send(JSON.stringify({type:"ERROR", id:requestId, error:String(e)})); publish({ type:"JOB_ERROR", id:requestId, error:String(e) }); } } }catch(e){ logln("WS parse error: "+e); } }; }
+
+// Popup wiring
+chrome.runtime.onConnect.addListener((port)=>{ popupPort=port; port.postMessage({type:"INIT"}); publishTabStatus(); publish({type:"WS_STATUS",ok:STATE.wsConnected}); port.onDisconnect.addListener(()=>{ popupPort=null; }); });
+chrome.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{ (async ()=>{ try{ if(msg==="PREFLIGHT"){ const httpOk=await (async()=>{ try{ const r=await fetch(HTTP_URL()+"/health"); return r.ok; }catch{ return false; } })(); await publishTabStatus(); sendResponse({ok:true, wsOk:STATE.wsConnected, httpOk, hasTab:STATE.hasTab, contentOk:STATE.contentOk}); return; } if(msg==="SELFTEST"){ sendResponse({ ok:true, echo:"[_selftest ok]" }); return; } if(msg==="DRYRUN"){ try{ const body={ messages:[{role:"user", content:"dry run check"}], dry_run:true }; const resp=await fetch(HTTP_URL()+"/v1/chat/completions", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }); const json=await resp.json(); sendResponse({ ok:resp.ok, json }); }catch(e){ sendResponse({ ok:false, error:String(e) }); } return; } if(msg==="RETRY"){ connectWS(true); sendResponse({ ok:true }); return; } if(typeof msg==="object" && msg){ if(msg.type==="LIST_TABS"){ const tabs=await listChatTabs(); sendResponse({ ok:true, tabs: tabs.map(t=>({ id:t.id, url:t.url, active:t.active, title:t.title })) }); return; } if(msg.type==="SET_TARGET_TAB"){ STATE.targetTabId=msg.tabId||null; await chrome.storage.local.set({ TARGET_TAB_ID: STATE.targetTabId }); await publishTabStatus(); sendResponse({ ok:true, targetTabId: STATE.targetTabId }); return; } if(msg.type==="ACTIVATE_TAB"){ const tab=await ensureChatTab(); await chrome.tabs.update(tab.id,{active:true}); await publishTabStatus(); sendResponse({ ok:true }); return; } if(msg.type==="LIVE"){ const tab=await ensureChatTab(); const messages = msg.messages && Array.isArray(msg.messages) ? msg.messages : [{ role:"user", content: msg.prompt || "Say: hello from AutoInjector" }]; const res=await injectAndWait(tab.id, messages); sendResponse(res); return; } if(msg.type==="GET_STATUS"){ await publishTabStatus(); sendResponse({ ok:true, state:{...STATE}, cfg:{...CFG} }); return; } if(msg.type==="SET_CFG"){ const next={ ...CFG, ...msg.cfg }; CFG=next; await chrome.storage.local.set({ CFG: next }); connectWS(true); sendResponse({ ok:true, cfg: next }); return; } } sendResponse({ ok:false, error:"UNKNOWN_MESSAGE" }); }catch(e){ sendResponse({ ok:false, error:String(e) }); } })(); return true; });
+
+// Boot & keepalive
+async function boot(){ const store = await chrome.storage.local.get(["CFG","TARGET_TAB_ID"]); CFG = store.CFG || DEFAULT_CFG; STATE.targetTabId = store.TARGET_TAB_ID || null; connectWS(true); publishTabStatus(); logln("background.js initialized v2.2.3"); }
+chrome.runtime.onInstalled.addListener(boot);
+chrome.runtime.onStartup.addListener(boot);
+chrome.alarms.create("keepalive", { periodInMinutes: 0.9 });
+chrome.alarms.onAlarm.addListener(async (alarm)=>{ if(alarm.name==="keepalive"){ chrome.runtime.getPlatformInfo(()=>{}); connectWS(); publishTabStatus(); } });

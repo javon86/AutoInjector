@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector v2.0</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 10px; background:#111; color:#eee; width:360px; }
+    h1 { margin: 0 0 8px; font-size: 16px; }
+    .row { margin: 6px 0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .led { width:10px; height:10px; border-radius:50%; background:#444; display:inline-block; margin-right:6px; }
+    .label { font-size:12px; opacity:.8; margin-right:8px; }
+    button { padding:6px 8px; background:#222; color:#eee; border:1px solid #333; border-radius:6px; }
+    button:hover { background:#2a2a2a; }
+    select, input, textarea { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:6px; }
+    textarea { width:100%; height:70px; }
+    #log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0b0b0b; border:1px solid #333; height:150px; overflow:auto; padding:6px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>AutoInjector v2.0</h1>
+  <div class="row">
+    <span class="label">Tab</span><span id="led-tab" class="led"></span>
+    <span class="label">Content</span><span id="led-content" class="led"></span>
+    <span class="label">WS</span><span id="led-ws" class="led"></span>
+  </div>
+  <div id="view" class="row" style="font-size:12px; opacity:.9;">Ready</div>
+  <div class="row">
+    <button id="btn-preflight">Preflight</button>
+    <button id="btn-selftest">Self-Test</button>
+    <button id="btn-dryrun">Dry-Run</button>
+    <button id="btn-retry">Retry</button>
+  </div>
+  <div class="row">
+    <button id="btn-health">/health</button>
+    <button id="btn-open-health">Open /health</button>
+  </div>
+  <div class="row">
+    <div class="label">Tabs</div>
+    <select id="tabs" style="flex:1"></select>
+    <button id="btn-refresh">Refresh Tabs</button>
+    <button id="btn-activate">Activate</button>
+  </div>
+  <div class="row">
+    <textarea id="prompt">Say: hello from AutoInjector</textarea>
+    <button id="btn-live">Live Test</button>
+  </div>
+  <div class="row">
+    <div class="label">WS</div>
+    <input id="wsHost" placeholder="127.0.0.1" style="width:110px">
+    <input id="wsPort" placeholder="8765" style="width:70px">
+    <div class="label">HTTP</div>
+    <input id="httpHost" placeholder="127.0.0.1" style="width:110px">
+    <input id="httpPort" placeholder="17890" style="width:70px">
+    <button id="btn-save">Save</button>
+  </div>
+  <div id="guard" class="row" style="color:#f5c542; font-size:12px;">Using defaults.</div>
+  <div id="log"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

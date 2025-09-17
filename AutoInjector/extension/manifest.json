@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "AutoInjector",
+  "version": "2.2.3",
+  "description": "MV3 extension that bridges a local fake OpenAI API to ChatGPT web UI.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*",
+    "http://127.0.0.1:17890/*",
+    "ws://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "AutoInjector",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "selectors.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
