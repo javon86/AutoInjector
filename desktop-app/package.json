@@ -2,12 +2,33 @@
   "name": "autoinjector-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "Desktop app: ChatGPT, Claude and Gemini as three real browser panes in one window, roundtabling a topic via browser copy/paste automation (no API keys).",
+  "description": "Desktop app: ChatGPT, Claude and Gemini as three real browser panes in one window, routing messages between them via browser copy/paste automation (no API keys).",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.autoinjector.desktop",
+    "productName": "AutoInjector Desktop",
+    "directories": { "output": "dist" },
+    "files": [
+      "main.js",
+      "preload.js",
+      "automation.js",
+      "selectors.js",
+      "controls.html",
+      "controls.js"
+    ],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
   }
 }

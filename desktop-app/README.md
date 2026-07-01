@@ -14,12 +14,49 @@ need Chrome open with three tabs.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js — the one thing you need installed. Get it free from
+  [nodejs.org](https://nodejs.org/) (pick the **LTS** button), run the installer,
+  click through with defaults, done. (This is what actually runs the app — there's
+  no separate "AutoInjector install", it's not on an app store.)
 - Windows, macOS, or Linux desktop (Electron doesn't run on Android/iOS — see the
   root `README.md` for the Android path, which reuses the browser extension in
   Kiwi Browser instead)
 
-## Run it
+## Quick start (recommended — no typing commands)
+
+1. Get the code onto your computer: on the GitHub page for this repo, click the
+   green **Code** button → **Download ZIP**, then unzip it wherever you like.
+   (If you already use git, `git clone` works too.)
+2. Open the `desktop-app` folder.
+3. Double-click:
+   - **Windows** → `run-windows.bat`
+   - **macOS** → `run-mac.command`
+     (macOS will likely warn "unidentified developer" the first time — right-click
+     the file → **Open** → **Open** to approve it once. See "macOS Gatekeeper" below
+     if you still get blocked.)
+   - **Linux** → open a terminal in that folder and run `./run-linux.sh`
+     (or double-click it if your file manager runs `.sh` scripts)
+4. First time only: a black/terminal window pops up and installs dependencies —
+   this takes a minute or two and only happens once. After that it opens the app
+   window automatically.
+5. Every time after that, the same double-click just opens the app directly
+   (a few seconds).
+
+That's the "one click" version — the launcher script handles installing and
+starting for you. Nothing gets installed system-wide; it all lives inside the
+`desktop-app` folder (well, inside its `node_modules` subfolder), so deleting the
+folder removes it cleanly.
+
+### macOS Gatekeeper
+
+If double-clicking `run-mac.command` does nothing or says it's damaged/blocked,
+open Terminal, `cd` into the `desktop-app` folder, and run:
+```bash
+xattr -d com.apple.quarantine run-mac.command
+```
+then double-click it again.
+
+## Run it manually (if you prefer the terminal)
 
 ```bash
 cd desktop-app
@@ -75,9 +112,29 @@ curate which replies matter enough to forward on.
 Selectors are best-effort with fallbacks, same caveat as the extension: if a site
 redesigns its chat UI, `selectors.js` is the first place to fix.
 
-## Packaging an installer (optional, not set up yet)
+## Building a real installer (.exe / .dmg / .AppImage)
 
-This repo only wires up `npm start` for local/dev use. To ship a double-clickable
-installer, add `electron-builder` or `electron-forge` and a build config — not
-included here to keep the surface area small; happy to add it if you want a
-distributable `.exe`/`.dmg`/`.AppImage`.
+The `run-*` scripts above are the fastest way to get running (they still need
+Node.js once), but if you want an actual double-clickable installer that bundles
+Node/Electron so nothing needs to be installed at all, this repo is wired up for
+that too, via [electron-builder](https://www.electron.build/):
+
+```bash
+cd desktop-app
+npm install
+npm run dist          # builds for whatever OS you're running this on
+# or target a specific OS explicitly:
+npm run dist:win      # -> dist/*.exe (NSIS installer)
+npm run dist:mac      # -> dist/*.dmg
+npm run dist:linux    # -> dist/*.AppImage
+```
+
+The output lands in `desktop-app/dist/`. That installer file is the thing you'd
+actually hand someone else to install with one double-click, no Node.js required
+on their end. Building for an OS other than the one you're on ("cross-building",
+e.g. making a `.exe` from macOS/Linux) can need extra platform tooling — building
+on the target OS itself is the most reliable option.
+
+I wired up the config but haven't produced/tested an actual build here (this
+dev environment can't download the Electron binaries needed to build) — if
+`npm run dist` errors out for you, send me the output and I'll fix the config.

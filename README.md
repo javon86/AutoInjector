@@ -1,9 +1,8 @@
 # AutoInjector
 
 Automates the ChatGPT, Claude and Gemini **web UIs** by copy/paste-style DOM
-injection — no API keys, it drives your already-logged-in browser sessions. The
-core feature is the **AI Roundtable**: give it a topic, it sends it to ChatGPT,
-feeds the reply to Claude, feeds *that* reply to Gemini, and so on, keeping one
+injection — no API keys, it drives your already-logged-in browser sessions, so
+you can get two or three AIs working on the same problem together and keep one
 running local transcript you can copy or download (e.g. to send to someone).
 
 Two ways to run it, same underlying automation:
@@ -12,8 +11,8 @@ Two ways to run it, same underlying automation:
 |---|---|---|
 | What it is | Chrome (MV3) browser extension | Standalone Electron program |
 | Platforms | Desktop Chrome (and Kiwi Browser on **Android**, see below) | Desktop only (Windows/macOS/Linux) |
-| UI | Extension popup + a roundtable tab | One window, three AI panes side by side you watch live |
-| Setup | Load unpacked in Chrome | `npm install && npm start` |
+| UI | Extension popup + a roundtable tab, fixed turn order | One window, three AI panes side by side you watch live, message routing (send to one/some/all, one-off or on autopilot) |
+| Setup | Load unpacked in Chrome | Double-click a launcher script — see below |
 
 Plus a **fake OpenAI bridge** (`server/`) — a local WebSocket/HTTP server that lets
 any OpenAI-API-compatible client talk to the ChatGPT web UI as if it were the real
@@ -37,9 +36,13 @@ sign-in to all three sites works normally, and the same roundtable page runs as-
 
 ## Desktop app
 
-See [`desktop-app/README.md`](desktop-app/README.md) — `cd desktop-app && npm install && npm start`
-opens one window with ChatGPT, Claude and Gemini as three live panes plus a
-built-in roundtable control panel. No Chrome/extension needed.
+The easiest way to try this: go into `desktop-app/`, double-click `run-windows.bat`
+(Windows) or `run-mac.command` (macOS) — it installs what it needs the first time
+and opens one window with ChatGPT, Claude and Gemini as three live panes plus a
+control panel for routing messages between them. No Chrome/extension needed, only
+[Node.js](https://nodejs.org/) as a one-time prerequisite. Full walkthrough,
+Linux instructions, and how to build a real `.exe`/`.dmg` installer are in
+[`desktop-app/README.md`](desktop-app/README.md).
 
 ## Install the extension
 
