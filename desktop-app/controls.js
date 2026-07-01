@@ -1,42 +1,149 @@
-// controls.js — drives the control panel pane (topic/participants/rounds, live
-// transcript, export) and talks to the main process via the window.api bridge from
-// preload.js. The three AI panes themselves are separate WebContentsViews positioned
-// by main.js, visible directly below this panel.
+// controls.js — builds the per-site routing cards, wires the composer and export
+// buttons, and reflects live events (capture / sent / send-error) from main.js.
 const SITES = ["chatgpt", "claude", "gemini"];
 const SITE_LABELS = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 
-let currentTopic = "";
 let currentTranscript = [];
+let routing = { chatgpt: [], claude: [], gemini: [] };
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
-const setRunningUI = (running) => {
-  el("btn-start").disabled = running;
-  el("btn-stop").disabled = !running;
-};
+const otherSites = (site) => SITES.filter((s) => s !== site);
 
 function led(site, ok) {
-  el(`led-${site}`).style.background = ok ? "#29c447" : "#444";
+  const node = document.getElementById(`led-${site}`);
+  if (node) node.style.background = ok ? "#29c447" : "#444";
 }
 
-async function refreshSites() {
-  const res = await window.api.listSites();
-  if (!res?.ok) return;
+function buildComposerButtons() {
+  const box = el("composer-buttons");
+  box.innerHTML = "";
   for (const site of SITES) {
-    led(site, !!res.sites[site]?.url);
+    const btn = document.createElement("button");
+    btn.textContent = `→ ${SITE_LABELS[site]}`;
+    btn.onclick = () => sendCompose([site]);
+    box.appendChild(btn);
   }
+  const all = document.createElement("button");
+  all.textContent = "→ All";
+  all.onclick = () => sendCompose([...SITES]);
+  box.appendChild(all);
+}
+
+async function sendCompose(targets) {
+  const text = el("composer-text").value.trim();
+  if (!text) { setStatus("Type a message first."); return; }
+  setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
+  const res = await window.api.sendCompose(text, targets);
+  if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
+}
+
+function buildCard(site) {
+  const card = document.createElement("div");
+  card.className = `site-card ${site}`;
+
+  const head = document.createElement("div");
+  head.className = "site-card-head";
+  head.innerHTML = `<span class="led" id="led-${site}"></span><span>${SITE_LABELS[site]}</span>`;
+  const reloadBtn = document.createElement("button");
+  reloadBtn.textContent = "⟳";
+  reloadBtn.title = "Reload this pane";
+  reloadBtn.onclick = async () => {
+    await window.api.reloadSite(site);
+    setStatus(`Reloading ${SITE_LABELS[site]}…`);
+    setTimeout(refreshSites, 1500);
+  };
+  head.appendChild(reloadBtn);
+  card.appendChild(head);
+
+  const preview = document.createElement("div");
+  preview.className = "preview";
+  preview.id = `preview-${site}`;
+  preview.textContent = "No reply captured yet.";
+  card.appendChild(preview);
+
+  const fwdRow = document.createElement("div");
+  fwdRow.className = "btns";
+  fwdRow.innerHTML = `<span class="row-label">Forward:</span>`;
+  for (const target of otherSites(site)) {
+    const btn = document.createElement("button");
+    btn.textContent = `→${SITE_LABELS[target]}`;
+    btn.onclick = async () => {
+      setStatus(`Forwarding ${SITE_LABELS[site]}'s reply to ${SITE_LABELS[target]}…`);
+      const res = await window.api.sendForward(site, [target]);
+      if (!res?.ok) setStatus(`Forward failed: ${res?.error || "unknown error"}`);
+    };
+    fwdRow.appendChild(btn);
+  }
+  const bothBtn = document.createElement("button");
+  bothBtn.textContent = "→Both";
+  bothBtn.onclick = async () => {
+    setStatus(`Forwarding ${SITE_LABELS[site]}'s reply to both others…`);
+    const res = await window.api.sendForward(site, otherSites(site));
+    if (!res?.ok) setStatus(`Forward failed: ${res?.error || "unknown error"}`);
+  };
+  fwdRow.appendChild(bothBtn);
+  card.appendChild(fwdRow);
+
+  const autoRow = document.createElement("div");
+  autoRow.className = "btns";
+  autoRow.innerHTML = `<span class="row-label">Auto:</span>`;
+  for (const target of otherSites(site)) {
+    const btn = document.createElement("button");
+    btn.className = "auto-toggle";
+    btn.textContent = `→${SITE_LABELS[target]}`;
+    btn.dataset.autoSource = site;
+    btn.dataset.autoTarget = target;
+    btn.onclick = async () => {
+      const enabled = !btn.classList.contains("on");
+      const res = await window.api.setRouting(site, target, enabled);
+      if (res?.ok) applyRouting(res.routing);
+    };
+    autoRow.appendChild(btn);
+  }
+  card.appendChild(autoRow);
+
+  return card;
+}
+
+function buildCards() {
+  const box = el("col-cards");
+  box.innerHTML = "";
+  for (const site of SITES) box.appendChild(buildCard(site));
+}
+
+function applyRouting(next) {
+  routing = next || routing;
+  document.querySelectorAll(".auto-toggle").forEach((btn) => {
+    const source = btn.dataset.autoSource;
+    const target = btn.dataset.autoTarget;
+    const on = (routing[source] || []).includes(target);
+    btn.classList.toggle("on", on);
+  });
+}
+
+function renderPreview(site, turn) {
+  const box = el(`preview-${site}`);
+  if (!box) return;
+  const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
+  box.innerHTML = "";
+  const tsEl = document.createElement("span");
+  tsEl.className = "ts";
+  tsEl.textContent = ts;
+  box.appendChild(tsEl);
+  box.appendChild(document.createTextNode(turn.text || ""));
 }
 
 function turnEl(turn) {
   const wrap = document.createElement("div");
-  wrap.className = `turn ${turn.site}${turn.error ? " error" : ""}`;
+  wrap.className = `turn ${turn.site}`;
   const meta = document.createElement("div");
   meta.className = "meta";
   const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
-  meta.textContent = turn.error ? `${turn.label} — error (${ts})` : `${turn.label} — ${ts}`;
+  meta.textContent = `${turn.label} — ${ts}`;
   const text = document.createElement("div");
   text.className = "text";
-  text.textContent = turn.error ? `[${turn.error}]` : turn.text;
+  text.textContent = turn.text;
   wrap.appendChild(meta);
   wrap.appendChild(text);
   return wrap;
@@ -50,74 +157,45 @@ function renderTranscript(transcript) {
   box.scrollTop = box.scrollHeight;
 }
 
-function appendTurn(turn) {
+function appendTranscriptTurn(turn) {
   currentTranscript.push(turn);
   const box = el("transcript");
   box.appendChild(turnEl(turn));
   box.scrollTop = box.scrollHeight;
 }
 
-function selectedParticipants() {
-  return SITES.filter((s) => el(`p-${s}`).checked);
-}
-
 function buildExportText() {
-  const lines = [];
-  lines.push("# AI Roundtable Transcript");
-  lines.push(`Topic: ${currentTopic || "(none)"}`);
-  lines.push(`Generated: ${new Date().toLocaleString()}`);
-  lines.push("");
+  const lines = ["# AI Roundtable Transcript", `Generated: ${new Date().toLocaleString()}`, ""];
   for (const turn of currentTranscript) {
     const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
     lines.push(`## ${turn.label} (${ts})`);
-    lines.push(turn.error ? `[error: ${turn.error}]` : turn.text);
+    lines.push(turn.text);
     lines.push("");
   }
   return lines.join("\n");
 }
 
-window.api.onTurnStart(({ site }) => setStatus(`Waiting on ${SITE_LABELS[site]}…`));
-window.api.onTurn((turn) => { appendTurn(turn); setStatus(`Got reply from ${turn.label}.`); });
-window.api.onError(({ site, error }) => setStatus(`Error from ${SITE_LABELS[site] || site}: ${error}`));
-window.api.onDone(({ stopped }) => { setRunningUI(false); setStatus(stopped ? "Stopped." : "Roundtable finished."); });
+async function refreshSites() {
+  const res = await window.api.listSites();
+  if (!res?.ok) return;
+  for (const site of SITES) led(site, !!res.sites[site]?.url);
+}
 
-document.querySelectorAll("[data-reload]").forEach((btn) => {
-  btn.onclick = async () => {
-    const site = btn.getAttribute("data-reload");
-    await window.api.reloadSite(site);
-    setStatus(`Reloading ${SITE_LABELS[site]}…`);
-    setTimeout(refreshSites, 1500);
-  };
+window.api.onCapture((turn) => {
+  renderPreview(turn.site, turn);
+  appendTranscriptTurn(turn);
+  setStatus(`Captured new reply from ${turn.label}.`);
+});
+window.api.onSent(({ target, from }) => {
+  setStatus(from ? `Sent ${SITE_LABELS[from]}'s reply to ${SITE_LABELS[target]}.` : `Sent to ${SITE_LABELS[target]}.`);
+});
+window.api.onSendError(({ target, error }) => {
+  setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
 });
 
-el("btn-start").onclick = async () => {
-  const participants = selectedParticipants();
-  if (participants.length < 2) { setStatus("Pick at least two participants."); return; }
-  const topic = el("topic").value.trim();
-  if (!topic) { setStatus("Enter a topic or opening message."); return; }
-  const starter = el("starter").value;
-  const rounds = Number(el("rounds").value) || 3;
-
-  currentTopic = topic;
-  renderTranscript([]);
-  setRunningUI(true);
-  setStatus("Starting…");
-  const res = await window.api.startRoundtable({ topic, participants, starter, rounds });
-  if (!res?.ok) {
-    setRunningUI(false);
-    setStatus(`Failed to start: ${res?.error || "unknown error"}`);
-  }
-};
-
-el("btn-stop").onclick = async () => {
-  await window.api.stopRoundtable();
-  setStatus("Stopping after the current reply…");
-};
-
-el("btn-clear").onclick = async () => {
-  const res = await window.api.clearRoundtable();
-  if (res?.ok) renderTranscript([]);
-  else setStatus(`Could not clear: ${res?.error || "unknown error"}`);
+el("btn-pause-all").onclick = async () => {
+  const res = await window.api.pauseAllRouting();
+  if (res?.ok) { applyRouting(res.routing); setStatus("All auto-forwarding paused."); }
 };
 
 el("btn-copy").onclick = async () => {
@@ -141,17 +219,24 @@ el("btn-download").onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
+el("btn-clear").onclick = async () => {
+  const res = await window.api.clearTranscript();
+  if (res?.ok) renderTranscript([]);
+};
+
 (async () => {
+  buildComposerButtons();
+  buildCards();
   await refreshSites();
   setInterval(refreshSites, 4000);
-  const res = await window.api.getRoundtable();
-  if (res?.ok && res.roundtable) {
-    currentTopic = res.roundtable.topic || currentTopic;
-    if (res.roundtable.topic) el("topic").value = res.roundtable.topic;
-    if (res.roundtable.starter) el("starter").value = res.roundtable.starter;
-    if (res.roundtable.rounds) el("rounds").value = res.roundtable.rounds;
-    renderTranscript(res.roundtable.transcript);
-    setRunningUI(res.roundtable.running);
-    setStatus(res.roundtable.running ? "Roundtable running…" : "Idle.");
+
+  const res = await window.api.getState();
+  if (res?.ok) {
+    applyRouting(res.routing);
+    renderTranscript(res.transcript);
+    for (const site of SITES) {
+      if (res.captured[site]) renderPreview(site, res.captured[site]);
+    }
+    setStatus("Ready.");
   }
 })();

@@ -3,14 +3,15 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
-  startRoundtable: (cfg) => ipcRenderer.invoke("roundtable:start", cfg),
-  stopRoundtable: () => ipcRenderer.invoke("roundtable:stop"),
-  getRoundtable: () => ipcRenderer.invoke("roundtable:get"),
-  clearRoundtable: () => ipcRenderer.invoke("roundtable:clear"),
+  sendCompose: (text, targets) => ipcRenderer.invoke("send:compose", { text, targets }),
+  sendForward: (source, targets) => ipcRenderer.invoke("send:forward", { source, targets }),
+  setRouting: (source, target, enabled) => ipcRenderer.invoke("routing:set", { source, target, enabled }),
+  pauseAllRouting: () => ipcRenderer.invoke("routing:pause-all"),
+  getState: () => ipcRenderer.invoke("state:get"),
+  clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
   listSites: () => ipcRenderer.invoke("site:list"),
-  onTurnStart: (cb) => ipcRenderer.on("roundtable:turn-start", (_e, payload) => cb(payload)),
-  onTurn: (cb) => ipcRenderer.on("roundtable:turn", (_e, payload) => cb(payload)),
-  onError: (cb) => ipcRenderer.on("roundtable:error", (_e, payload) => cb(payload)),
-  onDone: (cb) => ipcRenderer.on("roundtable:done", (_e, payload) => cb(payload))
+  onCapture: (cb) => ipcRenderer.on("capture", (_e, payload) => cb(payload)),
+  onSent: (cb) => ipcRenderer.on("sent", (_e, payload) => cb(payload)),
+  onSendError: (cb) => ipcRenderer.on("send-error", (_e, payload) => cb(payload))
 });

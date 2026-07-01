@@ -1,21 +1,27 @@
-// automation.js — builds a self-contained script string that, when run inside a
-// site's WebContentsView via webContents.executeJavaScript(), types a prompt into
-// that site's chat box, clicks send, waits for the reply to finish streaming, and
-// resolves with { ok:true, text } or { ok:false, error }. This mirrors the injection
-// logic in AutoInjector/extension/content.js, but runs as a one-shot script instead
-// of a persistent content-script message listener.
+// automation.js — builds the small scripts run inside each site's WebContentsView
+// via webContents.executeJavaScript(). Two independent one-shot scripts instead of
+// one big type+send+wait script:
+//   - buildSendScript: types text into the chat box and clicks send. Returns
+//     immediately once sent — it does NOT wait for a reply.
+//   - buildReadScript: just reads whatever the latest assistant message currently
+//     says. Cheap enough to poll repeatedly from main.js to notice when a reply
+//     finishes streaming, independently of who sent what to whom.
+// Splitting these lets main.js route messages freely between panes (any pane to
+// any other pane, on demand or automatically) instead of a fixed turn order.
 const SITES = require("./selectors");
 
-function buildAutomationScript(site, promptText, timeoutMs) {
+function siteConfig(site) {
   const cfg = SITES[site];
   if (!cfg) throw new Error(`Unknown site: ${site}`);
+  return cfg;
+}
 
+function buildSendScript(site, text) {
+  const cfg = siteConfig(site);
   const payload = JSON.stringify({
-    text: promptText,
-    timeoutMs: timeoutMs,
+    text,
     INPUT_CANDIDATES: cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: cfg.SEND_CANDIDATES,
-    ASSISTANT_CANDIDATES: cfg.ASSISTANT_CANDIDATES
+    SEND_CANDIDATES: cfg.SEND_CANDIDATES
   });
 
   return `
@@ -86,50 +92,29 @@ function buildAutomationScript(site, promptText, timeoutMs) {
       return { ok: false, error: "SEND_FAILED" };
     }
 
-    function readAssistantLatest() {
-      const all = [];
-      for (const sel of CFG.ASSISTANT_CANDIDATES) {
-        document.querySelectorAll(sel).forEach((n) => all.push(n));
-      }
-      if (!all.length) return "";
-      const node = all[all.length - 1];
-      return node.innerText || node.textContent || "";
-    }
-
-    function waitForReply(timeoutMs) {
-      const start = Date.now();
-      let last = readAssistantLatest();
-      return new Promise((resolve) => {
-        let stableTimer = null;
-        const obs = new MutationObserver(() => {
-          const cur = readAssistantLatest();
-          if (cur !== last) {
-            last = cur;
-            if (stableTimer) clearTimeout(stableTimer);
-            stableTimer = setTimeout(() => {
-              obs.disconnect();
-              resolve({ ok: true, text: cur });
-            }, 2000);
-          }
-        });
-        obs.observe(document.body, { subtree: true, childList: true, characterData: true });
-        const t = setInterval(() => {
-          if (Date.now() - start > timeoutMs) {
-            try { obs.disconnect(); } catch {}
-            try { clearInterval(t); } catch {}
-            resolve({ ok: false, error: "TIMEOUT_REPLY" });
-          }
-        }, 500);
-      });
-    }
-
     const inj = await injectText(CFG.text);
     if (!inj.ok) return inj;
-    const sent = clickSendOrEnter();
-    if (!sent.ok) return sent;
-    return await waitForReply(CFG.timeoutMs);
+    return clickSendOrEnter();
   })();
   `;
 }
 
-module.exports = { buildAutomationScript };
+function buildReadScript(site) {
+  const cfg = siteConfig(site);
+  const payload = JSON.stringify({ ASSISTANT_CANDIDATES: cfg.ASSISTANT_CANDIDATES });
+
+  return `
+  (() => {
+    const CFG = ${payload};
+    const all = [];
+    for (const sel of CFG.ASSISTANT_CANDIDATES) {
+      document.querySelectorAll(sel).forEach((n) => all.push(n));
+    }
+    if (!all.length) return { ok: true, text: "" };
+    const node = all[all.length - 1];
+    return { ok: true, text: node.innerText || node.textContent || "" };
+  })();
+  `;
+}
+
+module.exports = { buildSendScript, buildReadScript };
