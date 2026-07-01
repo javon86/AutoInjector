@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector Desktop</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background:#111; color:#eee; font-size:12px; overflow:hidden; }
+    #bar { display:flex; gap:14px; padding:10px 14px; height:100vh; }
+    .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:8px 10px; overflow:auto; }
+    .col h2 { font-size:11px; margin:0 0 6px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
+    #col-sites { flex: 0 0 190px; }
+    #col-setup { flex: 0 0 300px; }
+    #col-export { flex: 0 0 160px; }
+    #col-transcript { flex: 1 1 auto; }
+    .site-row { display:flex; align-items:center; gap:6px; margin:5px 0; }
+    .led { width:8px; height:8px; border-radius:50%; background:#444; flex:0 0 auto; }
+    .site-row span.name { flex:1; }
+    select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 6px; font-family:inherit; font-size:12px; }
+    button { cursor:pointer; }
+    button:hover { background:#242424; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    textarea#topic { width:100%; height:52px; }
+    .field { margin:6px 0; }
+    .field label { display:block; font-size:10px; opacity:.75; margin-bottom:3px; }
+    .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    #status { margin-top:6px; opacity:.85; }
+    .turn { border-left:3px solid #444; padding:4px 8px; margin-bottom:8px; background:#141414; border-radius:0 6px 6px 0; }
+    .turn.chatgpt { border-color:#10a37f; }
+    .turn.claude { border-color:#d97757; }
+    .turn.gemini { border-color:#4285f4; }
+    .turn.error { border-color:#c44; }
+    .turn .meta { font-size:10px; opacity:.65; margin-bottom:2px; }
+    .turn .text { white-space:pre-wrap; line-height:1.35; }
+    .turn.error .text { color:#e88; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <div id="col-sites" class="col">
+      <h2>Panes</h2>
+      <div class="site-row"><span class="led" id="led-chatgpt"></span><span class="name">ChatGPT</span><button data-reload="chatgpt">Reload</button></div>
+      <div class="site-row"><span class="led" id="led-claude"></span><span class="name">Claude</span><button data-reload="claude">Reload</button></div>
+      <div class="site-row"><span class="led" id="led-gemini"></span><span class="name">Gemini</span><button data-reload="gemini">Reload</button></div>
+      <p style="opacity:.6; margin-top:8px;">Sign in to each AI in its pane below if you haven't already.</p>
+    </div>
+
+    <div id="col-setup" class="col">
+      <h2>Roundtable</h2>
+      <div class="field">
+        <label>Topic / opening message</label>
+        <textarea id="topic">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="p-chatgpt" checked> ChatGPT</label>
+        <label><input type="checkbox" id="p-claude" checked> Claude</label>
+        <label><input type="checkbox" id="p-gemini" checked> Gemini</label>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>Starts</label>
+          <select id="starter" style="width:100%;">
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+          </select>
+        </div>
+        <div class="field" style="width:70px;">
+          <label>Rounds</label>
+          <input id="rounds" type="number" min="1" max="20" value="3" style="width:100%;">
+        </div>
+      </div>
+      <div class="row">
+        <button id="btn-start" style="flex:1; background:#1a3a2a; border-color:#2a5a3a;">Start</button>
+        <button id="btn-stop" disabled>Stop</button>
+      </div>
+      <div id="status">Idle.</div>
+    </div>
+
+    <div id="col-transcript" class="col">
+      <h2>Transcript</h2>
+      <div id="transcript"></div>
+    </div>
+
+    <div id="col-export" class="col">
+      <h2>Export</h2>
+      <div class="row" style="flex-direction:column; align-items:stretch;">
+        <button id="btn-copy">Copy Transcript</button>
+        <button id="btn-download">Download .md</button>
+        <button id="btn-clear">Clear</button>
+      </div>
+    </div>
+  </div>
+  <script src="controls.js"></script>
+</body>
+</html>

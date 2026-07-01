@@ -1,18 +1,45 @@
 # AutoInjector
 
-A Chrome (MV3) extension that automates the ChatGPT, Claude and Gemini **web UIs** by
-copy/paste-style DOM injection — no API keys needed, it drives your already-logged-in
-browser tabs. It ships two things:
+Automates the ChatGPT, Claude and Gemini **web UIs** by copy/paste-style DOM
+injection — no API keys, it drives your already-logged-in browser sessions. The
+core feature is the **AI Roundtable**: give it a topic, it sends it to ChatGPT,
+feeds the reply to Claude, feeds *that* reply to Gemini, and so on, keeping one
+running local transcript you can copy or download (e.g. to send to someone).
 
-1. **Fake OpenAI bridge** — a local WebSocket/HTTP server (`server/`) that lets any
-   OpenAI-API-compatible client talk to the ChatGPT web UI as if it were the real API.
-2. **AI Roundtable** — a round-robin conversation runner that takes a topic, sends it
-   to ChatGPT, feeds the reply to Claude, feeds *that* reply to Gemini, and so on,
-   keeping one running local transcript you can copy or download.
+Two ways to run it, same underlying automation:
+
+| | `extension/` | `desktop-app/` |
+|---|---|---|
+| What it is | Chrome (MV3) browser extension | Standalone Electron program |
+| Platforms | Desktop Chrome (and Kiwi Browser on **Android**, see below) | Desktop only (Windows/macOS/Linux) |
+| UI | Extension popup + a roundtable tab | One window, three AI panes side by side you watch live |
+| Setup | Load unpacked in Chrome | `npm install && npm start` |
+
+Plus a **fake OpenAI bridge** (`server/`) — a local WebSocket/HTTP server that lets
+any OpenAI-API-compatible client talk to the ChatGPT web UI as if it were the real
+API. That's separate from the roundtable feature and only ships with the extension.
 
 > Automating these sites' web UIs may be against their terms of service. This tool
-> only drives tabs where *you* are already signed in, in *your* own browser — use it
-> at your own discretion and risk.
+> only drives sessions where *you* are already signed in, in *your* own
+> browser — use it at your own discretion and risk.
+
+## Android
+
+Mobile Chrome/Safari don't support installing extensions, and a native app
+embedding these sites in a WebView **can't** log into Google (Google blocks
+sign-in inside embedded WebViews), so Gemini wouldn't work that way. The one path
+that actually works: install [**Kiwi Browser**](https://kiwibrowser.com/) (a real
+Chromium browser for Android that supports loading desktop extensions), then load
+the same `extension/` folder as an unpacked extension there (Kiwi → Extensions →
+Developer mode → Load unpacked, point it at the `extension/` folder copied onto
+the device). Because it's a genuine browser engine and not an embedded WebView,
+sign-in to all three sites works normally, and the same roundtable page runs as-is.
+
+## Desktop app
+
+See [`desktop-app/README.md`](desktop-app/README.md) — `cd desktop-app && npm install && npm start`
+opens one window with ChatGPT, Claude and Gemini as three live panes plus a
+built-in roundtable control panel. No Chrome/extension needed.
 
 ## Install the extension
 
@@ -21,7 +48,7 @@ browser tabs. It ships two things:
 3. Sign in to [chatgpt.com](https://chatgpt.com), [claude.ai](https://claude.ai) and/or
    [gemini.google.com](https://gemini.google.com) in normal tabs.
 
-## AI Roundtable (ChatGPT + Claude + Gemini)
+## AI Roundtable (ChatGPT + Claude + Gemini) — extension version
 
 1. Click the AutoInjector toolbar icon → **Open AI Roundtable**. This opens a full
    extension page (`roundtable.html`).
