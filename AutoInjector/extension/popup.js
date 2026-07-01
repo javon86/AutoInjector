@@ -1,4 +1,3 @@
-\
 // popup.js
 const led = (id, state) => {
   const el = document.getElementById(id);
@@ -73,6 +72,10 @@ document.getElementById("btn-open-health").onclick = async () => {
   const cfg = await send({ type:"GET_STATUS" });
   const http = cfg?.cfg ? `http://${cfg.cfg.httpHost}:${cfg.cfg.httpPort}/health` : "http://127.0.0.1:17890/health";
   window.open(http, "_blank");
+};
+
+document.getElementById("btn-roundtable").onclick = async () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("roundtable.html") });
 };
 
 document.getElementById("btn-refresh").onclick = refreshTabs;

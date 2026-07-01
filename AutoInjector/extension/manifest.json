@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AutoInjector",
-  "version": "2.2.3",
-  "description": "MV3 extension that bridges a local fake OpenAI API to ChatGPT web UI.",
+  "version": "2.3.0",
+  "description": "MV3 extension that bridges a local fake OpenAI API to the ChatGPT web UI, and runs a copy/paste style roundtable conversation across ChatGPT, Claude and Gemini.",
   "permissions": [
     "tabs",
     "activeTab",
@@ -13,6 +13,8 @@
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://gemini.google.com/*",
     "http://127.0.0.1:17890/*",
     "ws://127.0.0.1:8765/*"
   ],
@@ -40,7 +42,9 @@
     {
       "matches": [
         "https://chat.openai.com/*",
-        "https://chatgpt.com/*"
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
       ],
       "js": [
         "selectors.js",

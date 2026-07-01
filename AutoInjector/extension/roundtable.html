@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector — AI Roundtable</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background:#111; color:#eee; }
+    header { padding: 14px 20px; border-bottom: 1px solid #2a2a2a; }
+    header h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; font-size: 12px; opacity:.7; }
+    main { display:grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px 20px; max-width: 1200px; }
+    section { background:#171717; border:1px solid #2a2a2a; border-radius:10px; padding:12px; margin-bottom:14px; }
+    section h2 { font-size:13px; margin:0 0 8px; text-transform:uppercase; letter-spacing:.04em; opacity:.8; }
+    .site-row { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+    .led { width:9px; height:9px; border-radius:50%; background:#444; display:inline-block; flex:0 0 auto; }
+    .site-row label { flex:0 0 74px; display:flex; align-items:center; gap:6px; }
+    select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:6px; font-family:inherit; font-size:12px; }
+    select { flex:1; min-width:0; }
+    button { cursor:pointer; }
+    button:hover { background:#242424; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    textarea#topic { width:100%; height:64px; box-sizing:border-box; }
+    .field { margin:8px 0; }
+    .field label { display:block; font-size:11px; opacity:.75; margin-bottom:4px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .transcript { height: 60vh; overflow-y:auto; }
+    .turn { border-left:3px solid #444; padding:6px 10px; margin-bottom:10px; background:#141414; border-radius:0 6px 6px 0; }
+    .turn.chatgpt { border-color:#10a37f; }
+    .turn.claude { border-color:#d97757; }
+    .turn.gemini { border-color:#4285f4; }
+    .turn .meta { font-size:11px; opacity:.65; margin-bottom:4px; }
+    .turn .text { white-space:pre-wrap; font-size:13px; line-height:1.4; }
+    .turn.error { border-color:#c44; }
+    .turn.error .text { color:#e88; }
+    #status { font-size:12px; opacity:.85; margin-top:4px; }
+    #export-area textarea { width:100%; height:80px; box-sizing:border-box; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Roundtable</h1>
+    <p>Round-robins a topic across ChatGPT, Claude and Gemini in your browser (copy/paste style) and keeps one local transcript you can copy or save.</p>
+  </header>
+  <main>
+    <div>
+      <section>
+        <h2>Tabs</h2>
+        <div class="site-row"><label><span id="led-chatgpt" class="led"></span>ChatGPT</label><select id="tabs-chatgpt"></select></div>
+        <div class="site-row"><label><span id="led-claude" class="led"></span>Claude</label><select id="tabs-claude"></select></div>
+        <div class="site-row"><label><span id="led-gemini" class="led"></span>Gemini</label><select id="tabs-gemini"></select></div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btn-refresh-tabs">Refresh</button>
+          <button id="btn-open-chatgpt">Open ChatGPT</button>
+          <button id="btn-open-claude">Open Claude</button>
+          <button id="btn-open-gemini">Open Gemini</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Setup</h2>
+        <div class="field">
+          <label>Topic / opening message</label>
+          <textarea id="topic" placeholder="e.g. Debate whether remote work is better than office work.">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
+        </div>
+        <div class="field">
+          <label>Participants</label>
+          <div class="row">
+            <label><input type="checkbox" id="p-chatgpt" checked> ChatGPT</label>
+            <label><input type="checkbox" id="p-claude" checked> Claude</label>
+            <label><input type="checkbox" id="p-gemini" checked> Gemini</label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1;">
+            <label>Starts</label>
+            <select id="starter" style="width:100%;">
+              <option value="chatgpt">ChatGPT</option>
+              <option value="claude">Claude</option>
+              <option value="gemini">Gemini</option>
+            </select>
+          </div>
+          <div class="field" style="width:100px;">
+            <label>Rounds</label>
+            <input id="rounds" type="number" min="1" max="20" value="3" style="width:100%; box-sizing:border-box;">
+          </div>
+        </div>
+        <div class="row">
+          <button id="btn-start" style="flex:1; background:#1a3a2a; border-color:#2a5a3a;">Start Roundtable</button>
+          <button id="btn-stop" disabled>Stop</button>
+        </div>
+        <div id="status">Idle.</div>
+      </section>
+
+      <section id="export-area">
+        <h2>Export</h2>
+        <div class="row">
+          <button id="btn-copy">Copy Transcript</button>
+          <button id="btn-download">Download .md</button>
+          <button id="btn-clear">Clear</button>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Transcript</h2>
+      <div id="transcript" class="transcript"></div>
+    </section>
+  </main>
+  <script src="roundtable.js"></script>
+</body>
+</html>

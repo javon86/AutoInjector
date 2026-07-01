@@ -1,11 +1,11 @@
-\
-// content.js â€” injected into ChatGPT pages
+// content.js â€” injected into ChatGPT / Claude / Gemini pages
 // Provides: PING_CONTENT, INJECT_AND_WAIT, WS_HEALTH, GET_TRACE
 
 (function() {
   const TRACE = [];
   const addTrace = (t) => { TRACE.push({ t, ts: Date.now() }); if (TRACE.length > 200) TRACE.shift(); };
 
+  const SITE = window.__AI_SITE__ || null;
   const SEL = (window.__AI_SELECTORS__ || {}).INPUT_CANDIDATES ? window.__AI_SELECTORS__ : {
     INPUT_CANDIDATES: ["#prompt-textarea",'div[role="textbox"]','div[data-testid="textbox"]',"main textarea","textarea",'div[contenteditable="true"]'],
     SEND_CANDIDATES: ['button[data-testid="send-button"]','button[aria-label*="Send"]','form button[type="submit"]'],
@@ -143,7 +143,7 @@
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
-        if (msg?.type === "PING_CONTENT") { sendResponse({ ok:true, version:"v2.2.3" }); return; }
+        if (msg?.type === "PING_CONTENT") { sendResponse({ ok:true, version:"v2.3.0", site:SITE }); return; }
         if (msg?.type === "WS_HEALTH") { sendResponse(wsHealth()); return; }
         if (msg?.type === "GET_TRACE") { sendResponse({ ok:true, trace: TRACE.slice(-20) }); return; }
         if (msg?.type === "INJECT_AND_WAIT") {
