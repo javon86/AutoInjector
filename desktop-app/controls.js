@@ -1,10 +1,13 @@
-// controls.js — builds the per-site routing cards, wires the composer and export
-// buttons, and reflects live events (capture / sent / send-error) from main.js.
+// controls.js — builds the per-site cards, wires the composer/participant/global
+// controls, and reflects live events (capture / sent / send-error / log) from
+// main.js.
 const SITES = ["chatgpt", "claude", "gemini"];
 const SITE_LABELS = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 
 let currentTranscript = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
+let enabled = { chatgpt: true, claude: true, gemini: true };
+let panesHidden = false;
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
@@ -26,13 +29,14 @@ function buildComposerButtons() {
   }
   const all = document.createElement("button");
   all.textContent = "→ All";
-  all.onclick = () => sendCompose([...SITES]);
+  all.onclick = () => sendCompose(SITES.filter((s) => enabled[s]));
   box.appendChild(all);
 }
 
 async function sendCompose(targets) {
   const text = el("composer-text").value.trim();
   if (!text) { setStatus("Type a message first."); return; }
+  if (!targets.length) { setStatus("No enabled participants to send to."); return; }
   setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
   const res = await window.api.sendCompose(text, targets);
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
@@ -41,10 +45,16 @@ async function sendCompose(targets) {
 function buildCard(site) {
   const card = document.createElement("div");
   card.className = `site-card ${site}`;
+  card.id = `card-${site}`;
 
   const head = document.createElement("div");
   head.className = "site-card-head";
-  head.innerHTML = `<span class="led" id="led-${site}"></span><span>${SITE_LABELS[site]}</span>`;
+  head.innerHTML = `<span class="led" id="led-${site}"></span><span>${SITE_LABELS[site]}</span><span class="spacer"></span>`;
+  const inspectBtn = document.createElement("button");
+  inspectBtn.textContent = "🔍";
+  inspectBtn.title = "Open DevTools on this pane (for fixing selectors)";
+  inspectBtn.onclick = () => window.api.inspectSite(site);
+  head.appendChild(inspectBtn);
   const reloadBtn = document.createElement("button");
   reloadBtn.textContent = "⟳";
   reloadBtn.title = "Reload this pane";
@@ -95,8 +105,8 @@ function buildCard(site) {
     btn.dataset.autoSource = site;
     btn.dataset.autoTarget = target;
     btn.onclick = async () => {
-      const enabled = !btn.classList.contains("on");
-      const res = await window.api.setRouting(site, target, enabled);
+      const wantOn = !btn.classList.contains("on");
+      const res = await window.api.setRouting(site, target, wantOn);
       if (res?.ok) applyRouting(res.routing);
     };
     autoRow.appendChild(btn);
@@ -107,7 +117,7 @@ function buildCard(site) {
 }
 
 function buildCards() {
-  const box = el("col-cards");
+  const box = el("cards-row");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildCard(site));
 }
@@ -120,6 +130,27 @@ function applyRouting(next) {
     const on = (routing[source] || []).includes(target);
     btn.classList.toggle("on", on);
   });
+}
+
+function applyGlobal(global) {
+  if (!global) return;
+  if (global.routing) applyRouting(global.routing);
+  if (global.enabled) {
+    enabled = global.enabled;
+    for (const site of SITES) {
+      el(`p-${site}`).checked = !!enabled[site];
+      el(`card-${site}`).classList.toggle("disabled", !enabled[site]);
+    }
+  }
+  if (typeof global.meshActive === "boolean") {
+    el("mesh-status").textContent = global.meshActive
+      ? "Auto is ON — enabled participants keep forwarding replies to each other."
+      : "Auto is off.";
+  }
+  if (typeof global.panesHidden === "boolean") {
+    panesHidden = global.panesHidden;
+    el("btn-toggle-panes").textContent = panesHidden ? "Show Browser Panes" : "Hide Browser Panes";
+  }
 }
 
 function renderPreview(site, turn) {
@@ -175,6 +206,35 @@ function buildExportText() {
   return lines.join("\n");
 }
 
+function logLineText(entry) {
+  const parts = [];
+  if (entry.detail?.site) parts.push(entry.detail.site);
+  if (entry.detail?.source) parts.push(`${entry.detail.source}->${entry.detail.target}`);
+  if (entry.detail?.from || entry.detail?.target) {
+    if (entry.detail.from) parts.push(`from ${entry.detail.from}`);
+    if (entry.detail.target && entry.kind !== "routing-changed") parts.push(`to ${entry.detail.target}`);
+  }
+  if (entry.detail?.participants) parts.push(`[${entry.detail.participants.join(", ")}]`);
+  if (typeof entry.detail?.enabled === "boolean") parts.push(entry.detail.enabled ? "ON" : "OFF");
+  if (entry.detail?.chars != null) parts.push(`${entry.detail.chars} chars`);
+  if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
+  return `${entry.kind} ${parts.join(" ")}`.trim();
+}
+
+function appendLog(entry) {
+  const box = el("activity-log");
+  const line = document.createElement("div");
+  const isErr = entry.kind.includes("error");
+  line.className = `log-line${isErr ? " err" : ""}`;
+  const t = document.createElement("span");
+  t.className = "t";
+  t.textContent = new Date(entry.ts).toLocaleTimeString();
+  line.appendChild(t);
+  line.appendChild(document.createTextNode(logLineText(entry)));
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
 async function refreshSites() {
   const res = await window.api.listSites();
   if (!res?.ok) return;
@@ -192,10 +252,30 @@ window.api.onSent(({ target, from }) => {
 window.api.onSendError(({ target, error }) => {
   setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
 });
+window.api.onLog(appendLog);
 
+for (const site of SITES) {
+  el(`p-${site}`).onchange = async (e) => {
+    const res = await window.api.setParticipant(site, e.target.checked);
+    if (res?.ok) applyGlobal(res.global);
+  };
+}
+
+el("btn-auto-all").onclick = async () => {
+  const res = await window.api.autoAllRouting();
+  if (res?.ok) { applyGlobal(res.global); setStatus("Auto enabled for checked participants."); }
+};
 el("btn-pause-all").onclick = async () => {
   const res = await window.api.pauseAllRouting();
-  if (res?.ok) { applyRouting(res.routing); setStatus("All auto-forwarding paused."); }
+  if (res?.ok) { applyGlobal(res.global); setStatus("Paused — participant selection kept."); }
+};
+el("btn-stop-all").onclick = async () => {
+  const res = await window.api.stopAllRouting();
+  if (res?.ok) { applyGlobal(res.global); setStatus("Stopped — all participants unchecked."); }
+};
+el("btn-toggle-panes").onclick = async () => {
+  const res = await window.api.setPanesHidden(!panesHidden);
+  if (res?.ok) applyGlobal(res.global);
 };
 
 el("btn-copy").onclick = async () => {
@@ -232,8 +312,9 @@ el("btn-clear").onclick = async () => {
 
   const res = await window.api.getState();
   if (res?.ok) {
-    applyRouting(res.routing);
+    applyGlobal(res.global);
     renderTranscript(res.transcript);
+    for (const entry of res.log || []) appendLog(entry);
     for (const site of SITES) {
       if (res.captured[site]) renderPreview(site, res.captured[site]);
     }

@@ -7,11 +7,17 @@ contextBridge.exposeInMainWorld("api", {
   sendForward: (source, targets) => ipcRenderer.invoke("send:forward", { source, targets }),
   setRouting: (source, target, enabled) => ipcRenderer.invoke("routing:set", { source, target, enabled }),
   pauseAllRouting: () => ipcRenderer.invoke("routing:pause-all"),
+  stopAllRouting: () => ipcRenderer.invoke("routing:stop-all"),
+  autoAllRouting: () => ipcRenderer.invoke("routing:auto-all"),
+  setParticipant: (site, enabled) => ipcRenderer.invoke("participants:set", { site, enabled }),
+  setPanesHidden: (hidden) => ipcRenderer.invoke("layout:set-panes-hidden", hidden),
   getState: () => ipcRenderer.invoke("state:get"),
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
+  inspectSite: (site) => ipcRenderer.invoke("site:inspect", site),
   listSites: () => ipcRenderer.invoke("site:list"),
   onCapture: (cb) => ipcRenderer.on("capture", (_e, payload) => cb(payload)),
   onSent: (cb) => ipcRenderer.on("sent", (_e, payload) => cb(payload)),
-  onSendError: (cb) => ipcRenderer.on("send-error", (_e, payload) => cb(payload))
+  onSendError: (cb) => ipcRenderer.on("send-error", (_e, payload) => cb(payload)),
+  onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload))
 });

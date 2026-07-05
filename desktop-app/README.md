@@ -73,34 +73,62 @@ if a pane gets stuck or you need to re-navigate.
 
 ## Using it
 
-1. Sign in to whichever sites you want to include, in their panes.
-2. **Compose** (top-left): type an opening message and click **→ ChatGPT** /
-   **→ Claude** / **→ Gemini** / **→ All** to kick things off with one, some, or
-   all of them.
-3. Each AI has its own card in the control panel. The moment a pane's reply
-   finishes streaming (checked every ~1.5s, waits for the text to stop changing),
-   it shows up in that card's preview and gets logged to the transcript.
-4. From a card you can:
-   - **Forward** — one-off: send that AI's latest reply to one specific other AI,
-     or to both, right now.
-   - **Auto → X** — toggle on to make *every future reply* from that AI get
-     forwarded to X automatically, no clicking needed. Turning this on in both
-     directions between two AIs makes them talk to each other indefinitely —
-     use **Pause All Auto-Forward** (top right) to stop everything at once.
-5. **Copy Transcript** / **Download .md** save the running conversation locally
+The window is laid out with the **control panel as the main view** (left/center)
+and the three AI panes stacked as a strip on the **right side** — you mostly work
+from the control panel, and only need the panes themselves to sign in or eyeball
+what's actually happening on a site.
+
+1. Sign in to whichever sites you want to include, in their panes on the right.
+2. **Participants** (top): uncheck any AI you want to sit out — everything below
+   only applies to checked ones.
+3. **Compose** (top-left): type a message and click **→ ChatGPT** / **→ Claude** /
+   **→ Gemini** / **→ All** to send it to one, some, or all checked participants —
+   this is also how you interject at any point, auto running or not.
+4. Each AI has its own card. The moment a pane's reply finishes streaming (checked
+   every ~1.5s, waits for the text to stop changing), it shows up in that card's
+   preview and gets logged to the transcript. Forwarded replies always get labeled
+   (`[ChatGPT says] ...`) so whoever receives it knows who said what.
+5. **Global controls**:
+   - **Auto** — turns on full back-and-forth forwarding between every checked
+     participant: whatever one says gets forwarded to the others, whose replies
+     get forwarded back, and so on — this is the "three-way conversation" mode.
+     With 2+ participants it will run indefinitely once started.
+   - **Pause** — halts all forwarding but keeps your participant selection, so
+     hitting **Auto** again picks up where you left off.
+   - **Stop** — halts all forwarding *and* unchecks every participant, forcing a
+     deliberate restart.
+   - A card's own **Forward**/**Auto → X** buttons still work independently, for
+     fine-grained one-off or standing routes instead of the full-mesh version.
+6. **Hide Browser Panes** shrinks the site panes to nothing so the control panel
+   gets the whole window (they keep running in the background) — **Show Browser
+   Panes** brings them back, e.g. to log in or check what a site is actually
+   doing.
+7. **Copy Transcript** / **Download .md** save the running conversation locally
    so you can share it elsewhere (e.g. email it to someone).
 
-Nothing is forced into a fixed turn order — you decide per-message whether it's
-one AI, a broadcast to all, or a standing auto-forward rule, so you can run two
-AIs bouncing ideas off each other, broadcast one prompt to all three, or manually
-curate which replies matter enough to forward on.
+### Troubleshooting
+
+The **Activity / Troubleshooting** panel next to the transcript logs every
+internal action live — polls that captured a new reply, sends, forwards, errors,
+routing/participant changes — each with a timestamp, so if something isn't
+working you can see exactly where it's getting stuck instead of guessing.
+
+If a specific AI's card never shows a captured reply even though its pane clearly
+has one on screen, that means the DOM selector for reading its messages
+(`selectors.js`) doesn't match that site's current layout — sites change their
+markup without notice. Click the 🔍 button on that AI's card to open Chrome
+DevTools on that exact pane, right-click the assistant's reply bubble → **Inspect**,
+and send me the element's tag/class/attributes — that's what lets me fix the
+selector for real instead of guessing again.
 
 ## How it's built
 
 - `main.js` — Electron main process. Creates the window, one `WebContentsView` per
-  AI site plus one for the control panel, lays them out, polls each pane's latest
-  reply every ~1.5s to detect when it's finished streaming, and routes messages
-  (manual or auto) between panes.
+  AI site plus one for the control panel, lays them out (control panel main view,
+  site panes as a collapsible side strip), polls each pane's latest reply every
+  ~1.5s to detect when it's finished streaming, routes messages (manual, per-pane
+  auto, or the global full-mesh Auto) between panes, and keeps an in-memory
+  activity log of everything that happens.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
@@ -110,7 +138,8 @@ curate which replies matter enough to forward on.
   the page, same as the sites' own panes).
 
 Selectors are best-effort with fallbacks, same caveat as the extension: if a site
-redesigns its chat UI, `selectors.js` is the first place to fix.
+redesigns its chat UI, `selectors.js` is the first place to fix — use the 🔍
+Inspect button described above to get the real answer instead of guessing.
 
 ## Building a real installer (.exe / .dmg / .AppImage)
 
