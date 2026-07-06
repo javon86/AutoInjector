@@ -8,6 +8,11 @@
 // strip stays visible and usable. A lightweight poller reads each pane's latest
 // assistant message every couple of seconds and treats it as "captured" once it
 // stops changing. Every notable event is also pushed to an in-app activity log.
+//
+// On top of manual routing (per-card Forward/Auto, global full-mesh Auto), there's
+// a House Rules subsystem: six structured conversation formats (Who Wants to Speak,
+// Debate, Free-for-All, Devil & Angel, Chargeback, Brainstorm), each a small state
+// machine driven off the same capture events as everything else.
 const { app, BaseWindow, WebContentsView, ipcMain } = require("electron");
 const path = require("path");
 const SITES = require("./selectors");
@@ -18,6 +23,8 @@ const POLL_MS = 1500;
 const STABLE_MS = 1800;
 const MAX_LOG = 300;
 const PANE_SYNC_MS = 700;
+const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm"];
+const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback"]);
 
 let win = null;
 let controlsView = null;
@@ -31,10 +38,11 @@ const state = {
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
   lastSentTo: {}, // site -> exact final text last sent to it (for Regenerate)
   enabled: {}, // site -> bool — participant is "in play": counts for Auto/"All" AND shows its pane
-  transcript: [], // { id, site, label, text, ts, pinned } — every captured reply, for export
+  transcript: [], // { id, site, label, text, ts, pinned, isVerdict?, isFinalPlan? } — every captured reply
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
   meshActive: false, // whether global Auto is currently on
-  nextTurnId: 1
+  nextTurnId: 1,
+  hr: null // House Rules run state, see resetHouseRule()
 };
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
@@ -45,6 +53,28 @@ for (const site of SITE_IDS) {
   state.lastSentTo[site] = null;
   state.enabled[site] = true;
 }
+
+function resetHouseRule(mode, topic, rounds) {
+  state.hr = {
+    mode: mode || null,
+    active: false,
+    topic: topic || "",
+    rounds: Number(rounds) || 0, // 0 = unlimited, runs until Stop
+    roundNum: 0,
+    order: [], // Debate speaking order
+    turnIndex: 0,
+    roles: {}, // site -> role name, once assigned
+    rolesIntroduced: {}, // site -> bool, whether the role explanation has been sent once
+    buffer: {}, // Devil & Angel fan-in buffer while waiting on both replies
+    phase: null,
+    optinPending: new Set(),
+    optinYes: [],
+    realPending: new Set(),
+    realReplies: {},
+    ignoreCaptureFrom: new Map() // site -> count of pending informational sends whose ack should be swallowed
+  };
+}
+resetHouseRule(null, "", 0);
 
 function logEvent(kind, detail) {
   const entry = { ts: Date.now(), kind, detail };
@@ -148,6 +178,22 @@ function globalSnapshot() {
   };
 }
 
+function houseRuleSnapshot() {
+  const hr = state.hr;
+  return {
+    mode: hr.mode,
+    active: hr.active,
+    topic: hr.topic,
+    rounds: hr.rounds,
+    roundNum: hr.roundNum,
+    roles: { ...hr.roles }
+  };
+}
+
+function broadcastHouseRule() {
+  sendToControls("houserule-state", houseRuleSnapshot());
+}
+
 async function sendTextTo(target, text, fromSite) {
   const view = siteViews[target];
   if (!view || view.webContents.isDestroyed()) {
@@ -175,6 +221,246 @@ async function sendTextTo(target, text, fromSite) {
     logEvent("sent", { target, from: fromSite || null });
   }
   return res;
+}
+
+// --- House Rules: shared helpers -------------------------------------------
+
+function shuffledCopy(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function otherLabels(checked, exclude) {
+  return checked.filter((s) => s !== exclude).map((s) => SITES[s].label).join(" and ");
+}
+
+function findRoleSite(role) {
+  return Object.keys(state.hr.roles).find((s) => state.hr.roles[s] === role);
+}
+
+function queueIgnore(site) {
+  const hr = state.hr;
+  hr.ignoreCaptureFrom.set(site, (hr.ignoreCaptureFrom.get(site) || 0) + 1);
+}
+
+function endHouseRule(reason) {
+  state.hr.active = false;
+  logEvent("houserule-done", { mode: state.hr.mode, rounds: state.hr.roundNum, reason });
+  broadcastHouseRule();
+}
+
+// --- House Rules: per-mode kickoffs -----------------------------------------
+
+async function startFreeForAll(checked) {
+  for (const s of checked) state.routing[s] = new Set(checked.filter((t) => t !== s));
+  state.meshActive = true;
+  for (const s of checked) {
+    const prompt = `You're one voice in an open discussion with ${otherLabels(checked, s)} on: "${state.hr.topic}". Anyone can jump in at any point — react to whoever said something interesting, don't wait for a formal turn.`;
+    await sendTextTo(s, prompt, null);
+  }
+}
+
+async function startBrainstorm(checked) {
+  for (const s of checked) state.routing[s] = new Set(checked.filter((t) => t !== s));
+  state.meshActive = true;
+  for (const s of checked) {
+    const prompt = `You're brainstorming with ${otherLabels(checked, s)} on: "${state.hr.topic}". This isn't a debate — no need to find flaws or pick a side. Build on what's already been suggested, add a new angle, or combine ideas.`;
+    await sendTextTo(s, prompt, null);
+  }
+}
+
+async function wrapUpBrainstorm() {
+  const checked = SITE_IDS.filter((s) => state.enabled[s]);
+  for (const s of checked) state.routing[s].clear();
+  state.meshActive = false;
+  const synth = checked[Math.floor(Math.random() * checked.length)];
+  state.hr.roles = { [synth]: "synthesizer" };
+  state.hr.phase = "awaiting-synthesis";
+  await sendTextTo(
+    synth,
+    `We've been brainstorming on "${state.hr.topic}" for a while. Don't add a new idea — pull everything together into ONE single, fully fleshed-out plan: take the best pieces from what's been suggested, resolve any contradictions, and present it as a complete answer.`,
+    null
+  );
+  broadcastHouseRule();
+}
+
+async function startDebate(checked) {
+  state.hr.order = shuffledCopy(checked);
+  state.hr.turnIndex = 0;
+  await sendTextTo(state.hr.order[0], `You're kicking off a debate on: "${state.hr.topic}". Give your opening position.`, null);
+}
+
+async function startDevilAngel(checked) {
+  const [middle, devil, angel] = shuffledCopy(checked);
+  state.hr.roles = { [middle]: "middle", [devil]: "devil", [angel]: "angel" };
+  state.hr.phase = "awaiting-middle";
+  await sendTextTo(middle, `Here's a goal/idea I want to stress-test: "${state.hr.topic}". Lay out your initial take or plan for it.`, null);
+}
+
+async function startChargeback(checked) {
+  const [d1, d2, ref] = shuffledCopy(checked);
+  state.hr.roles = { [d1]: "debater1", [d2]: "debater2", [ref]: "referee" };
+  state.hr.phase = "awaiting-debater1";
+  queueIgnore(ref);
+  await sendTextTo(ref, `You're the referee for a debate on "${state.hr.topic}" between two other AIs. Just observe for now — you'll be asked for a final verdict after round ${state.hr.rounds}.`, null);
+  await sendTextTo(d1, `You're arguing FOR this: "${state.hr.topic}". State your opening case.`, null);
+}
+
+async function startWhoWants(checked) {
+  state.hr.phase = "awaiting-optins";
+  state.hr.optinPending = new Set(checked);
+  state.hr.optinYes = [];
+  const prompt = `Here's a topic to think about: "${state.hr.topic}".\n\nDo you have something worth adding right now — a new point, disagreement, or question? Reply with just YES or NO, and if YES, one line on your angle.`;
+  for (const s of checked) await sendTextTo(s, prompt, null);
+}
+
+// --- House Rules: per-mode reactions to a new captured reply ----------------
+
+async function handleDebateCapture(turn) {
+  const hr = state.hr;
+  if (turn.site !== hr.order[hr.turnIndex]) return;
+  hr.turnIndex = (hr.turnIndex + 1) % hr.order.length;
+  if (hr.turnIndex === 0) {
+    hr.roundNum++;
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+  }
+  const next = hr.order[hr.turnIndex];
+  const msg = `[${turn.label} says]\n\n${turn.text}\n\nRespond directly to the strongest point they just made — agree, refute, or build on it — then add your own point.`;
+  await sendTextTo(next, msg, null);
+}
+
+async function handleDevilAngelCapture(turn) {
+  const hr = state.hr;
+  const role = hr.roles[turn.site];
+  if (!role) return;
+
+  if (role === "middle" && hr.phase === "awaiting-middle") {
+    const devilSite = findRoleSite("devil");
+    const angelSite = findRoleSite("angel");
+    const devilIntro = hr.rolesIntroduced.devil ? "" : `You're the Devil here — find every reason this could fail: weaknesses, risks, blind spots. Don't hold back.\n\n`;
+    const angelIntro = hr.rolesIntroduced.angel ? "" : `You're the Angel here — find every reason this could succeed: strengths, what's already working, the strongest case for it.\n\n`;
+    hr.rolesIntroduced.devil = true;
+    hr.rolesIntroduced.angel = true;
+    hr.buffer = {};
+    hr.phase = "awaiting-devil-angel";
+    await sendTextTo(devilSite, `${devilIntro}[Middle says]\n\n${turn.text}`, null);
+    await sendTextTo(angelSite, `${angelIntro}[Middle says]\n\n${turn.text}`, null);
+    return;
+  }
+
+  if (role === "devil" && hr.phase === "awaiting-devil-angel") {
+    hr.buffer.devil = turn.text;
+  } else if (role === "angel" && hr.phase === "awaiting-devil-angel") {
+    hr.buffer.angel = turn.text;
+  } else {
+    return;
+  }
+
+  if (hr.buffer.devil != null && hr.buffer.angel != null) {
+    hr.roundNum++;
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+    const middleSite = findRoleSite("middle");
+    const combined = `[Devil says]\n\n${hr.buffer.devil}\n\n[Angel says]\n\n${hr.buffer.angel}\n\nYou've heard both sides above. Respond to both: what do you concede, what do you push back on, how does your position evolve? State it clearly, since that's what goes back to them next.`;
+    hr.buffer = {};
+    hr.phase = "awaiting-middle";
+    await sendTextTo(middleSite, combined, null);
+  }
+}
+
+async function handleChargebackCapture(turn) {
+  const hr = state.hr;
+  const role = hr.roles[turn.site];
+  if (!role) return;
+  const referee = findRoleSite("referee");
+
+  if (role === "referee") {
+    if (hr.phase === "awaiting-verdict") {
+      turn.isVerdict = true;
+      endHouseRule("verdict delivered");
+    }
+    return; // any other referee reply is just an ack to an informational copy, ignored via ignoreCaptureFrom
+  }
+
+  const d1 = findRoleSite("debater1");
+  const d2 = findRoleSite("debater2");
+
+  if (role === "debater1" && hr.phase === "awaiting-debater1") {
+    queueIgnore(referee);
+    await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
+    hr.phase = "awaiting-debater2";
+    await sendTextTo(d2, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null);
+    return;
+  }
+
+  if (role === "debater2" && hr.phase === "awaiting-debater2") {
+    hr.roundNum++;
+    queueIgnore(referee);
+    await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
+    if (hr.roundNum >= hr.rounds) {
+      hr.phase = "awaiting-verdict";
+      await sendTextTo(referee, `The debate is over. Based on everything you've observed, deliver your verdict: who argued better, and why? Declare a winner.`, null);
+    } else {
+      hr.phase = "awaiting-debater1";
+      await sendTextTo(d1, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null);
+    }
+  }
+}
+
+async function handleWhoWantsCapture(turn) {
+  const hr = state.hr;
+
+  if (hr.phase === "awaiting-optins" && hr.optinPending.has(turn.site)) {
+    hr.optinPending.delete(turn.site);
+    if (turn.text.trim().toUpperCase().startsWith("YES")) hr.optinYes.push(turn.site);
+    if (hr.optinPending.size > 0) return;
+
+    if (hr.optinYes.length === 0) { endHouseRule("nobody opted in"); return; }
+    hr.phase = "awaiting-real";
+    hr.realPending = new Set(hr.optinYes);
+    hr.realReplies = {};
+    for (const s of hr.optinYes) await sendTextTo(s, "Go ahead — give your point.", null);
+    return;
+  }
+
+  if (hr.phase === "awaiting-real" && hr.realPending.has(turn.site)) {
+    hr.realPending.delete(turn.site);
+    hr.realReplies[turn.site] = turn.text;
+    if (hr.realPending.size > 0) return;
+
+    hr.roundNum++;
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+
+    const checked = SITE_IDS.filter((s) => state.enabled[s]);
+    const recap = Object.entries(hr.realReplies).map(([s, t]) => `[${SITES[s].label} says]\n\n${t}`).join("\n\n");
+    const prompt = `Here's what came up last round:\n\n${recap}\n\nDo you have something worth adding right now — a new point, disagreement, or question? Reply with just YES or NO, and if YES, one line on your angle.`;
+    hr.phase = "awaiting-optins";
+    hr.optinPending = new Set(checked);
+    hr.optinYes = [];
+    for (const s of checked) await sendTextTo(s, prompt, null);
+  }
+}
+
+async function handleBrainstormCapture(turn) {
+  const hr = state.hr;
+  if (hr.phase === "awaiting-synthesis" && hr.roles[turn.site] === "synthesizer") {
+    turn.isFinalPlan = true;
+    endHouseRule("synthesis delivered");
+  }
+}
+
+async function handleHouseRuleCapture(turn) {
+  switch (state.hr.mode) {
+    case "debate": return handleDebateCapture(turn);
+    case "devil-angel": return handleDevilAngelCapture(turn);
+    case "chargeback": return handleChargebackCapture(turn);
+    case "who-wants-to-speak": return handleWhoWantsCapture(turn);
+    case "brainstorm": return handleBrainstormCapture(turn);
+    default: return; // free-for-all rides entirely on the generic routing mesh below
+  }
 }
 
 async function pollSite(site) {
@@ -205,9 +491,15 @@ async function pollSite(site) {
       sendToControls("waiting-changed", { site, waiting: false });
     }
 
-    for (const target of state.routing[site]) {
-      if (target === site) continue;
-      await sendTextTo(target, text, site);
+    const ignoreCount = state.hr.active ? state.hr.ignoreCaptureFrom.get(site) || 0 : 0;
+    if (ignoreCount > 0) {
+      state.hr.ignoreCaptureFrom.set(site, ignoreCount - 1);
+    } else {
+      for (const target of state.routing[site]) {
+        if (target === site) continue;
+        await sendTextTo(target, text, site);
+      }
+      if (state.hr.active) await handleHouseRuleCapture(turn);
     }
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
@@ -274,6 +566,7 @@ ipcMain.handle("routing:pause-all", () => {
 ipcMain.handle("routing:stop-all", () => {
   for (const site of SITE_IDS) { state.routing[site].clear(); state.enabled[site] = false; }
   state.meshActive = false;
+  if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
   logEvent("stopped", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
@@ -298,9 +591,54 @@ ipcMain.handle("participants:set", (_evt, { site, enabled }) => {
   return { ok: true, global: globalSnapshot() };
 });
 
+ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
+  if (!HOUSE_RULES.includes(mode)) return { ok: false, error: "BAD_MODE" };
+  if (state.hr.active) return { ok: false, error: "ALREADY_RUNNING" };
+  if (!topic || !String(topic).trim()) return { ok: false, error: "NEEDS_TOPIC" };
+
+  const checked = SITE_IDS.filter((s) => state.enabled[s]);
+  if (NEEDS_EXACTLY_THREE.has(mode) && checked.length !== 3) return { ok: false, error: "NEEDS_EXACTLY_THREE" };
+  if (!NEEDS_EXACTLY_THREE.has(mode) && checked.length < 2) return { ok: false, error: "NEEDS_AT_LEAST_TWO" };
+  if (mode === "chargeback" && (!rounds || Number(rounds) < 1)) return { ok: false, error: "NEEDS_ROUNDS" };
+
+  resetHouseRule(mode, topic, rounds);
+  state.hr.active = true;
+  for (const s of SITE_IDS) state.routing[s].clear();
+  state.meshActive = false;
+  logEvent("houserule-start", { mode, participants: checked, rounds: state.hr.rounds });
+
+  try {
+    if (mode === "free-for-all") await startFreeForAll(checked);
+    else if (mode === "brainstorm") await startBrainstorm(checked);
+    else if (mode === "debate") await startDebate(checked);
+    else if (mode === "devil-angel") await startDevilAngel(checked);
+    else if (mode === "chargeback") await startChargeback(checked);
+    else if (mode === "who-wants-to-speak") await startWhoWants(checked);
+  } catch (e) {
+    state.hr.active = false;
+    return { ok: false, error: String(e) };
+  }
+  broadcastHouseRule();
+  return { ok: true, houseRule: houseRuleSnapshot() };
+});
+
+ipcMain.handle("houserule:stop", () => {
+  state.hr.active = false;
+  logEvent("houserule-stop", { mode: state.hr.mode });
+  broadcastHouseRule();
+  return { ok: true, houseRule: houseRuleSnapshot() };
+});
+
+ipcMain.handle("houserule:wrap-up-brainstorm", async () => {
+  if (!state.hr.active || state.hr.mode !== "brainstorm") return { ok: false, error: "NOT_BRAINSTORMING" };
+  await wrapUpBrainstorm();
+  return { ok: true };
+});
+
 ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),
+  houseRule: houseRuleSnapshot(),
   captured: state.captured,
   transcript: state.transcript,
   log: state.log

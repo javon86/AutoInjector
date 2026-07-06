@@ -109,6 +109,44 @@ last captured reply) stays visible and usable.
 7. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
+## House Rules
+
+Instead of manually wiring up Forward/Auto buttons, **House Rules** (in the
+Global area) structures the whole conversation for you — pick a format, hit
+**Start**, and it runs itself. It uses whatever's typed in **Compose** as the
+topic/goal. While a House Rules run is active, the manual Auto/Pause buttons
+are disabled (Stop always works and ends both) so there's only one thing
+driving the conversation at a time.
+
+- **Who Wants to Speak?** — each round, every checked AI is asked whether it
+  has something worth adding (reply YES or NO). Only the ones that say yes get
+  asked for their real point, which then gets recapped to everyone before the
+  next round's check-in. Nobody's forced to talk every round.
+- **Debate** — a fixed, randomly-shuffled speaking order. Each speaker
+  responds to whoever went right before them, then hands off to the next.
+  Runs for the **Rounds** you set (0 = until you hit Stop).
+- **Free-for-All** — everyone's told the topic and can jump in on each other
+  at any point — the open, unstructured version. Runs until you Stop it (no
+  rounds limit).
+- **Devil & Angel** *(needs all 3 participants checked)* — roles are
+  auto-assigned, not user-picked: one AI is **Middle** (has the goal), one is
+  **Devil** (attacks it), one is **Angel** (defends it). Middle's statement
+  goes to both Devil and Angel; their replies both come back to Middle only —
+  Devil and Angel never see each other — and Middle responds to both at once
+  before the cycle repeats.
+- **Chargeback** *(needs all 3 checked, and a Rounds value)* — two AIs
+  (auto-assigned) argue opposite sides of the topic directly with each other;
+  the third is a neutral **Referee** who watches everything live but stays
+  silent until the rounds run out, then delivers a verdict naming a winner
+  (marked with a 🏆 in the transcript).
+- **Brainstorm** — collaborative, not adversarial: everyone builds on what's
+  already been suggested. Runs like Free-for-All until you click **Wrap Up**,
+  at which point one participant (auto-picked) is asked to pull everything
+  into one final, fully fleshed-out plan (marked with a ✅ in the transcript).
+
+Role assignments show up as a small badge next to that AI's name once a mode
+with roles is running.
+
 ### Troubleshooting
 
 The **Activity / Troubleshooting** panel next to the transcript logs every
@@ -134,7 +172,10 @@ selector for real instead of guessing again.
   cleanly when the participant is unchecked — no hardcoded split. Polls each
   pane's latest reply every ~1.5s to detect when it's finished streaming, routes
   messages (manual, per-pane auto, or the global full-mesh Auto) between panes,
-  and keeps an in-memory activity log of everything that happens.
+  and keeps an in-memory activity log of everything that happens. The House
+  Rules formats are small state machines layered on top of the same capture
+  events — each one reacts to a new reply by deciding who gets sent what next,
+  based on whichever format is active.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.

@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld("api", {
   stopAllRouting: () => ipcRenderer.invoke("routing:stop-all"),
   autoAllRouting: () => ipcRenderer.invoke("routing:auto-all"),
   setParticipant: (site, enabled) => ipcRenderer.invoke("participants:set", { site, enabled }),
+  startHouseRule: (mode, topic, rounds) => ipcRenderer.invoke("houserule:start", { mode, topic, rounds }),
+  stopHouseRule: () => ipcRenderer.invoke("houserule:stop"),
+  wrapUpBrainstorm: () => ipcRenderer.invoke("houserule:wrap-up-brainstorm"),
   getState: () => ipcRenderer.invoke("state:get"),
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
@@ -21,5 +24,6 @@ contextBridge.exposeInMainWorld("api", {
   onSent: (cb) => ipcRenderer.on("sent", (_e, payload) => cb(payload)),
   onSendError: (cb) => ipcRenderer.on("send-error", (_e, payload) => cb(payload)),
   onWaitingChanged: (cb) => ipcRenderer.on("waiting-changed", (_e, payload) => cb(payload)),
+  onHouseRuleState: (cb) => ipcRenderer.on("houserule-state", (_e, payload) => cb(payload)),
   onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload))
 });

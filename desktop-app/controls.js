@@ -3,6 +3,14 @@
 // (capture / sent / send-error / waiting-changed / log) from main.js.
 const SITES = ["chatgpt", "claude", "gemini"];
 const SITE_LABELS = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+const HOUSE_RULE_LABELS = {
+  "who-wants-to-speak": "Who Wants to Speak?",
+  "debate": "Debate",
+  "free-for-all": "Free-for-All",
+  "devil-angel": "Devil & Angel",
+  "chargeback": "Chargeback",
+  "brainstorm": "Brainstorm"
+};
 const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
 
@@ -69,7 +77,7 @@ function buildAiColumn(site) {
 
   const head = document.createElement("div");
   head.className = "card-head";
-  head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="spacer"></span>`;
   const inspectBtn = document.createElement("button");
   inspectBtn.textContent = "🔍";
   inspectBtn.title = "Open DevTools on this pane (for fixing selectors)";
@@ -193,6 +201,25 @@ function setGenerating(site, on) {
   if (dot) dot.classList.toggle("on", on);
 }
 
+function applyHouseRule(hr) {
+  if (!hr) return;
+  for (const site of SITES) {
+    const badge = el(`role-badge-${site}`);
+    if (badge) badge.textContent = hr.roles && hr.roles[site] ? hr.roles[site].toUpperCase() : "";
+  }
+  if (hr.mode) {
+    const label = HOUSE_RULE_LABELS[hr.mode] || hr.mode;
+    const roundText = hr.rounds ? `round ${hr.roundNum}/${hr.rounds}` : `round ${hr.roundNum}`;
+    el("hr-status").textContent = `${label} — ${hr.active ? "running" : "finished"} — ${roundText}`;
+  } else {
+    el("hr-status").textContent = "";
+  }
+  el("btn-hr-wrapup").style.display = hr.mode === "brainstorm" && hr.active ? "" : "none";
+  el("btn-hr-start").disabled = !!hr.active;
+  el("btn-auto-all").disabled = !!hr.active;
+  el("btn-pause-all").disabled = !!hr.active;
+}
+
 function flashReceived(site) {
   const col = el(`col-${site}`);
   if (!col) return;
@@ -215,7 +242,8 @@ function renderPreview(site, turn) {
 
 function turnEl(turn) {
   const wrap = document.createElement("div");
-  wrap.className = `turn ${turn.site}${turn.pinned ? " pinned" : ""}`;
+  const extra = turn.isVerdict ? " verdict" : turn.isFinalPlan ? " final-plan" : "";
+  wrap.className = `turn ${turn.site}${turn.pinned ? " pinned" : ""}${extra}`;
   wrap.dataset.turnId = turn.id;
   const meta = document.createElement("div");
   meta.className = "meta";
@@ -234,6 +262,18 @@ function turnEl(turn) {
   };
   meta.appendChild(pinBtn);
   meta.appendChild(document.createTextNode(`${turn.label} — ${ts}`));
+  if (turn.isVerdict) {
+    const b = document.createElement("span");
+    b.className = "badge-verdict";
+    b.textContent = "🏆 VERDICT";
+    meta.appendChild(b);
+  }
+  if (turn.isFinalPlan) {
+    const b = document.createElement("span");
+    b.className = "badge-final-plan";
+    b.textContent = "✅ FINAL PLAN";
+    meta.appendChild(b);
+  }
   const text = document.createElement("div");
   text.className = "text";
   text.textContent = turn.text;
@@ -261,7 +301,8 @@ function buildExportText() {
   const lines = ["# AI Roundtable Transcript", `Generated: ${new Date().toLocaleString()}`, ""];
   for (const turn of currentTranscript) {
     const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
-    lines.push(`## ${turn.pinned ? "📌 " : ""}${turn.label} (${ts})`);
+    const marker = turn.pinned ? "📌 " : turn.isVerdict ? "🏆 VERDICT — " : turn.isFinalPlan ? "✅ FINAL PLAN — " : "";
+    lines.push(`## ${marker}${turn.label} (${ts})`);
     lines.push(turn.text);
     lines.push("");
   }
@@ -323,6 +364,7 @@ window.api.onSendError(({ target, error }) => {
   setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
 });
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
+window.api.onHouseRuleState(applyHouseRule);
 window.api.onLog(appendLog);
 
 for (const site of SITES) {
@@ -345,6 +387,32 @@ el("btn-pause-all").onclick = async () => {
 el("btn-stop-all").onclick = async () => {
   const res = await window.api.stopAllRouting();
   if (res?.ok) { applyGlobal(res.global); setStatus("Stopped — all participants unchecked."); }
+  applyHouseRule({ mode: null, active: false, roundNum: 0, roles: {} });
+};
+
+el("btn-hr-start").onclick = async () => {
+  const mode = el("hr-mode").value;
+  if (!mode) { setStatus("Pick a House Rules format first."); return; }
+  const topic = el("composer-text").value.trim();
+  if (!topic) { setStatus("Type a topic/goal in Compose first."); return; }
+  const rounds = Number(el("hr-rounds").value) || 0;
+  setStatus(`Starting ${HOUSE_RULE_LABELS[mode] || mode}…`);
+  const res = await window.api.startHouseRule(mode, topic, rounds);
+  if (!res?.ok) {
+    setStatus(`Couldn't start: ${res?.error || "unknown error"}`);
+  } else {
+    applyHouseRule(res.houseRule);
+    setStatus(`${HOUSE_RULE_LABELS[mode] || mode} started.`);
+  }
+};
+el("btn-hr-stop").onclick = async () => {
+  const res = await window.api.stopHouseRule();
+  if (res?.ok) { applyHouseRule(res.houseRule); setStatus("House Rules run stopped."); }
+};
+el("btn-hr-wrapup").onclick = async () => {
+  const res = await window.api.wrapUpBrainstorm();
+  if (!res?.ok) setStatus(`Couldn't wrap up: ${res?.error || "unknown error"}`);
+  else setStatus("Wrapping up — asking one participant to synthesize a final plan…");
 };
 
 el("btn-copy").onclick = async () => {
@@ -383,6 +451,7 @@ el("btn-clear").onclick = async () => {
   const res = await window.api.getState();
   if (res?.ok) {
     applyGlobal(res.global);
+    applyHouseRule(res.houseRule);
     renderTranscript(res.transcript);
     for (const entry of res.log || []) appendLog(entry);
     for (const site of SITES) {

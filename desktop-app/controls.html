@@ -12,11 +12,14 @@
     .col h2 { font-size:11px; margin:0 0 5px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
 
     #topbar { display:flex; gap:8px; flex:0 0 auto; }
-    #col-composer { flex: 1 1 260px; max-width:340px; display:flex; flex-direction:column; }
+    #col-composer { flex: 1 1 240px; max-width:300px; display:flex; flex-direction:column; }
     #col-composer textarea { width:100%; height:56px; resize:none; }
-    #col-participants { flex: 0 0 150px; }
-    #col-global { flex: 1 1 260px; }
+    #col-participants { flex: 0 0 130px; }
+    #col-global { flex: 0 0 210px; }
+    #col-houserules { flex: 1 1 260px; }
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
+    .role-badge { font-size:9px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
+    .role-badge:empty { display:none; }
 
     /* ---- merged AI columns: control strip + a native-view slot, stacked ---- */
     #ai-row { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
@@ -79,6 +82,9 @@
     .pin-btn:hover { opacity:.9; }
     .pin-btn.pinned { opacity:1; }
     .turn.pinned { border-left-width:4px; background:#191614; }
+    .turn.verdict, .turn.final-plan { border-left-color:#f5b642 !important; background:#1d1608; }
+    .badge-verdict { color:#f5b642; }
+    .badge-final-plan { color:#8ef0b0; }
   </style>
 </head>
 <body>
@@ -107,6 +113,27 @@
         </div>
         <div id="mesh-status" style="margin-top:6px;">Auto is off.</div>
         <div id="status">Idle.</div>
+      </div>
+
+      <div id="col-houserules" class="col">
+        <h2>House Rules</h2>
+        <p style="opacity:.6; margin:0 0 6px;">Structures the conversation for you — uses the Compose text above as the topic/goal.</p>
+        <select id="hr-mode" style="width:100%;">
+          <option value="">— pick a format —</option>
+          <option value="who-wants-to-speak">Who Wants to Speak?</option>
+          <option value="debate">Debate</option>
+          <option value="free-for-all">Free-for-All</option>
+          <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
+          <option value="chargeback">Chargeback (needs 3 + rounds)</option>
+          <option value="brainstorm">Brainstorm</option>
+        </select>
+        <div class="btns" style="margin-top:5px;">
+          <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
+          <button id="btn-hr-start" class="primary">Start</button>
+          <button id="btn-hr-stop" class="danger">Stop</button>
+          <button id="btn-hr-wrapup" style="display:none;">Wrap Up</button>
+        </div>
+        <div id="hr-status" style="margin-top:6px;"></div>
       </div>
     </div>
 
