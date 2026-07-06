@@ -387,7 +387,8 @@ el("btn-pause-all").onclick = async () => {
 el("btn-stop-all").onclick = async () => {
   const res = await window.api.stopAllRouting();
   if (res?.ok) { applyGlobal(res.global); setStatus("Stopped — all participants unchecked."); }
-  applyHouseRule({ mode: null, active: false, roundNum: 0, roles: {} });
+  // if a House Rules run was active, main.js follows up with its own
+  // houserule-state broadcast (mode kept, active:false) — nothing to force here
 };
 
 el("btn-hr-start").onclick = async () => {
@@ -407,7 +408,11 @@ el("btn-hr-start").onclick = async () => {
 };
 el("btn-hr-stop").onclick = async () => {
   const res = await window.api.stopHouseRule();
-  if (res?.ok) { applyHouseRule(res.houseRule); setStatus("House Rules run stopped."); }
+  if (res?.ok) {
+    applyHouseRule(res.houseRule);
+    applyGlobal(res.global);
+    setStatus("House Rules run stopped.");
+  }
 };
 el("btn-hr-wrapup").onclick = async () => {
   const res = await window.api.wrapUpBrainstorm();

@@ -398,12 +398,16 @@ async function handleChargebackCapture(turn) {
 
   if (role === "debater2" && hr.phase === "awaiting-debater2") {
     hr.roundNum++;
-    queueIgnore(referee);
-    await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
     if (hr.roundNum >= hr.rounds) {
+      // Fold the last exchange and the verdict request into ONE message to the
+      // referee — sending two separate messages back-to-back to the same chat
+      // risks the second landing while the site's input is still disabled from
+      // generating a reply to the first.
       hr.phase = "awaiting-verdict";
-      await sendTextTo(referee, `The debate is over. Based on everything you've observed, deliver your verdict: who argued better, and why? Declare a winner.`, null);
+      await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}\n\nThe debate is over. Based on everything you've observed, deliver your verdict: who argued better, and why? Declare a winner.`, null);
     } else {
+      queueIgnore(referee);
+      await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
       hr.phase = "awaiting-debater1";
       await sendTextTo(d1, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null);
     }
@@ -585,7 +589,10 @@ ipcMain.handle("routing:auto-all", () => {
 ipcMain.handle("participants:set", (_evt, { site, enabled }) => {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   state.enabled[site] = !!enabled;
-  if (!enabled) state.routing[site].clear();
+  if (!enabled) {
+    state.routing[site].clear();
+    for (const s of SITE_IDS) state.routing[s].delete(site); // also drop it as a target everywhere else
+  }
   logEvent("participant-changed", { site, enabled: !!enabled });
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
@@ -624,9 +631,14 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
 
 ipcMain.handle("houserule:stop", () => {
   state.hr.active = false;
+  // Free-for-All/Brainstorm ride on the generic routing mesh, which the poll
+  // loop forwards on regardless of hr.active — clear it here too, or "Stop"
+  // wouldn't actually stop those two.
+  for (const s of SITE_IDS) state.routing[s].clear();
+  state.meshActive = false;
   logEvent("houserule-stop", { mode: state.hr.mode });
   broadcastHouseRule();
-  return { ok: true, houseRule: houseRuleSnapshot() };
+  return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
 });
 
 ipcMain.handle("houserule:wrap-up-brainstorm", async () => {
