@@ -188,6 +188,29 @@ Selectors are best-effort with fallbacks, same caveat as the extension: if a sit
 redesigns its chat UI, `selectors.js` is the first place to fix — use the 🔍
 Inspect button described above to get the real answer instead of guessing.
 
+## Running the test suite
+
+```bash
+npm test
+```
+
+This mocks out Electron itself (`test/mock-electron.js`) — no browser, no display
+needed — and requires the real `main.js` against it, driving it through its
+actual IPC handlers exactly like the control panel does: simulate a reply
+appearing on a site, check what gets sent next. It covers the House Rules state
+machines (Debate's turn order and round-ending, Devil & Angel's role isolation
+and fan-in, Chargeback's silent Referee and final verdict, Who Wants to Speak's
+opt-in filtering, Free-for-All/Brainstorm's mesh setup and teardown) and a
+couple of routing edge cases (disabling a participant mid-run, House Rules'
+own Stop button actually clearing the mesh it set up).
+
+What it can't cover: the actual DOM automation (typing into a real chat box,
+clicking a real send button, reading a real reply) — that needs an actual
+browser against the actual sites, which is exactly what running the app for
+real tests. This suite is about the orchestration logic around that boundary
+— who gets sent what, in what order, under what conditions — which is also
+where the subtlest bugs turned out to live.
+
 ## Building a real installer (.exe / .dmg / .AppImage)
 
 The `run-*` scripts above are the fastest way to get running (they still need

@@ -339,6 +339,14 @@ async function handleDevilAngelCapture(turn) {
   if (!role) return;
 
   if (role === "middle" && hr.phase === "awaiting-middle") {
+    // Every middle capture starts a round — the very first (the opening
+    // statement) as well as every later synthesis. Check the limit BEFORE
+    // fanning out again (not after collecting Devil & Angel's replies), so a
+    // "rounds: 1" run still lets Middle respond once to their feedback
+    // instead of cutting off the moment those replies are collected.
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+    hr.roundNum++;
+
     const devilSite = findRoleSite("devil");
     const angelSite = findRoleSite("angel");
     const devilIntro = hr.rolesIntroduced.devil ? "" : `You're the Devil here — find every reason this could fail: weaknesses, risks, blind spots. Don't hold back.\n\n`;
@@ -361,8 +369,6 @@ async function handleDevilAngelCapture(turn) {
   }
 
   if (hr.buffer.devil != null && hr.buffer.angel != null) {
-    hr.roundNum++;
-    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
     const middleSite = findRoleSite("middle");
     const combined = `[Devil says]\n\n${hr.buffer.devil}\n\n[Angel says]\n\n${hr.buffer.angel}\n\nYou've heard both sides above. Respond to both: what do you concede, what do you push back on, how does your position evolve? State it clearly, since that's what goes back to them next.`;
     hr.buffer = {};
