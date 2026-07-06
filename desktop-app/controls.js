@@ -1,13 +1,14 @@
-// controls.js — builds the per-site cards, wires the composer/participant/global
-// controls, and reflects live events (capture / sent / send-error / log) from
-// main.js.
+// controls.js — builds the merged AI columns (control strip + native pane slot),
+// wires the composer/participant/global controls, and reflects live events
+// (capture / sent / send-error / waiting-changed / log) from main.js.
 const SITES = ["chatgpt", "claude", "gemini"];
 const SITE_LABELS = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+const CHAR_WARN_AT = 2000;
+const HIGHLIGHT_MS = 2500;
 
 let currentTranscript = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
-let panesHidden = false;
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
@@ -16,6 +17,22 @@ const otherSites = (site) => SITES.filter((s) => s !== site);
 function led(site, ok) {
   const node = document.getElementById(`led-${site}`);
   if (node) node.style.background = ok ? "#29c447" : "#444";
+}
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
+    osc.onended = () => ctx.close();
+  } catch {}
 }
 
 function buildComposerButtons() {
@@ -42,14 +59,17 @@ async function sendCompose(targets) {
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
 }
 
-function buildCard(site) {
-  const card = document.createElement("div");
-  card.className = `site-card ${site}`;
-  card.id = `card-${site}`;
+function buildAiColumn(site) {
+  const col = document.createElement("div");
+  col.className = `ai-col ${site}`;
+  col.id = `col-${site}`;
+
+  const strip = document.createElement("div");
+  strip.className = "control-strip";
 
   const head = document.createElement("div");
-  head.className = "site-card-head";
-  head.innerHTML = `<span class="led" id="led-${site}"></span><span>${SITE_LABELS[site]}</span><span class="spacer"></span>`;
+  head.className = "card-head";
+  head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="spacer"></span>`;
   const inspectBtn = document.createElement("button");
   inspectBtn.textContent = "🔍";
   inspectBtn.title = "Open DevTools on this pane (for fixing selectors)";
@@ -64,16 +84,17 @@ function buildCard(site) {
     setTimeout(refreshSites, 1500);
   };
   head.appendChild(reloadBtn);
-  card.appendChild(head);
+  strip.appendChild(head);
 
   const preview = document.createElement("div");
   preview.className = "preview";
   preview.id = `preview-${site}`;
   preview.textContent = "No reply captured yet.";
-  card.appendChild(preview);
+  strip.appendChild(preview);
 
   const fwdRow = document.createElement("div");
   fwdRow.className = "btns";
+  fwdRow.style.marginTop = "5px";
   fwdRow.innerHTML = `<span class="row-label">Forward:</span>`;
   for (const target of otherSites(site)) {
     const btn = document.createElement("button");
@@ -93,7 +114,15 @@ function buildCard(site) {
     if (!res?.ok) setStatus(`Forward failed: ${res?.error || "unknown error"}`);
   };
   fwdRow.appendChild(bothBtn);
-  card.appendChild(fwdRow);
+  const regenBtn = document.createElement("button");
+  regenBtn.textContent = "↻ Regenerate";
+  regenBtn.onclick = async () => {
+    setStatus(`Resending ${SITE_LABELS[site]}'s last prompt…`);
+    const res = await window.api.regenerate(site);
+    if (!res?.ok) setStatus(`Regenerate failed: ${res?.error || "unknown error"}`);
+  };
+  fwdRow.appendChild(regenBtn);
+  strip.appendChild(fwdRow);
 
   const autoRow = document.createElement("div");
   autoRow.className = "btns";
@@ -111,15 +140,22 @@ function buildCard(site) {
     };
     autoRow.appendChild(btn);
   }
-  card.appendChild(autoRow);
+  strip.appendChild(autoRow);
 
-  return card;
+  col.appendChild(strip);
+
+  const slot = document.createElement("div");
+  slot.className = "pane-slot";
+  slot.id = `pane-slot-${site}`;
+  col.appendChild(slot);
+
+  return col;
 }
 
-function buildCards() {
-  const box = el("cards-row");
+function buildAiRow() {
+  const box = el("ai-row");
   box.innerHTML = "";
-  for (const site of SITES) box.appendChild(buildCard(site));
+  for (const site of SITES) box.appendChild(buildAiColumn(site));
 }
 
 function applyRouting(next) {
@@ -139,18 +175,30 @@ function applyGlobal(global) {
     enabled = global.enabled;
     for (const site of SITES) {
       el(`p-${site}`).checked = !!enabled[site];
-      el(`card-${site}`).classList.toggle("disabled", !enabled[site]);
+      el(`col-${site}`).classList.toggle("disabled", !enabled[site]);
     }
+  }
+  if (global.waiting) {
+    for (const site of SITES) setGenerating(site, !!global.waiting[site]);
   }
   if (typeof global.meshActive === "boolean") {
     el("mesh-status").textContent = global.meshActive
       ? "Auto is ON — enabled participants keep forwarding replies to each other."
       : "Auto is off.";
   }
-  if (typeof global.panesHidden === "boolean") {
-    panesHidden = global.panesHidden;
-    el("btn-toggle-panes").textContent = panesHidden ? "Show Browser Panes" : "Hide Browser Panes";
-  }
+}
+
+function setGenerating(site, on) {
+  const dot = el(`gendot-${site}`);
+  if (dot) dot.classList.toggle("on", on);
+}
+
+function flashReceived(site) {
+  const col = el(`col-${site}`);
+  if (!col) return;
+  col.classList.add("just-received");
+  clearTimeout(col._flashTimer);
+  col._flashTimer = setTimeout(() => col.classList.remove("just-received"), HIGHLIGHT_MS);
 }
 
 function renderPreview(site, turn) {
@@ -167,11 +215,25 @@ function renderPreview(site, turn) {
 
 function turnEl(turn) {
   const wrap = document.createElement("div");
-  wrap.className = `turn ${turn.site}`;
+  wrap.className = `turn ${turn.site}${turn.pinned ? " pinned" : ""}`;
+  wrap.dataset.turnId = turn.id;
   const meta = document.createElement("div");
   meta.className = "meta";
   const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
-  meta.textContent = `${turn.label} — ${ts}`;
+  const pinBtn = document.createElement("button");
+  pinBtn.className = `pin-btn${turn.pinned ? " pinned" : ""}`;
+  pinBtn.textContent = "📌";
+  pinBtn.title = "Pin this turn";
+  pinBtn.onclick = async () => {
+    const res = await window.api.togglePin(turn.id);
+    if (res?.ok) {
+      turn.pinned = res.pinned;
+      pinBtn.classList.toggle("pinned", res.pinned);
+      wrap.classList.toggle("pinned", res.pinned);
+    }
+  };
+  meta.appendChild(pinBtn);
+  meta.appendChild(document.createTextNode(`${turn.label} — ${ts}`));
   const text = document.createElement("div");
   text.className = "text";
   text.textContent = turn.text;
@@ -199,7 +261,7 @@ function buildExportText() {
   const lines = ["# AI Roundtable Transcript", `Generated: ${new Date().toLocaleString()}`, ""];
   for (const turn of currentTranscript) {
     const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
-    lines.push(`## ${turn.label} (${ts})`);
+    lines.push(`## ${turn.pinned ? "📌 " : ""}${turn.label} (${ts})`);
     lines.push(turn.text);
     lines.push("");
   }
@@ -210,10 +272,8 @@ function logLineText(entry) {
   const parts = [];
   if (entry.detail?.site) parts.push(entry.detail.site);
   if (entry.detail?.source) parts.push(`${entry.detail.source}->${entry.detail.target}`);
-  if (entry.detail?.from || entry.detail?.target) {
-    if (entry.detail.from) parts.push(`from ${entry.detail.from}`);
-    if (entry.detail.target && entry.kind !== "routing-changed") parts.push(`to ${entry.detail.target}`);
-  }
+  if (entry.detail?.from) parts.push(`from ${entry.detail.from}`);
+  if (entry.detail?.target && entry.kind !== "routing-changed") parts.push(`to ${entry.detail.target}`);
   if (entry.detail?.participants) parts.push(`[${entry.detail.participants.join(", ")}]`);
   if (typeof entry.detail?.enabled === "boolean") parts.push(entry.detail.enabled ? "ON" : "OFF");
   if (entry.detail?.chars != null) parts.push(`${entry.detail.chars} chars`);
@@ -241,17 +301,28 @@ async function refreshSites() {
   for (const site of SITES) led(site, !!res.sites[site]?.url);
 }
 
+function updateCharCount() {
+  const n = el("composer-text").value.length;
+  const box = el("char-count");
+  box.textContent = `${n} chars`;
+  box.classList.toggle("warn", n > CHAR_WARN_AT);
+  if (n > CHAR_WARN_AT) box.textContent += " — some sites may truncate very long messages";
+}
+
 window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
   setStatus(`Captured new reply from ${turn.label}.`);
+  beep();
 });
 window.api.onSent(({ target, from }) => {
   setStatus(from ? `Sent ${SITE_LABELS[from]}'s reply to ${SITE_LABELS[target]}.` : `Sent to ${SITE_LABELS[target]}.`);
+  flashReceived(target);
 });
 window.api.onSendError(({ target, error }) => {
   setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
 });
+window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onLog(appendLog);
 
 for (const site of SITES) {
@@ -260,6 +331,8 @@ for (const site of SITES) {
     if (res?.ok) applyGlobal(res.global);
   };
 }
+
+el("composer-text").addEventListener("input", updateCharCount);
 
 el("btn-auto-all").onclick = async () => {
   const res = await window.api.autoAllRouting();
@@ -272,10 +345,6 @@ el("btn-pause-all").onclick = async () => {
 el("btn-stop-all").onclick = async () => {
   const res = await window.api.stopAllRouting();
   if (res?.ok) { applyGlobal(res.global); setStatus("Stopped — all participants unchecked."); }
-};
-el("btn-toggle-panes").onclick = async () => {
-  const res = await window.api.setPanesHidden(!panesHidden);
-  if (res?.ok) applyGlobal(res.global);
 };
 
 el("btn-copy").onclick = async () => {
@@ -306,7 +375,8 @@ el("btn-clear").onclick = async () => {
 
 (async () => {
   buildComposerButtons();
-  buildCards();
+  buildAiRow();
+  updateCharCount();
   await refreshSites();
   setInterval(refreshSites, 4000);
 

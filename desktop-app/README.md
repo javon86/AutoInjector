@@ -73,21 +73,25 @@ if a pane gets stuck or you need to re-navigate.
 
 ## Using it
 
-The window is laid out with the **control panel as the main view** (left/center)
-and the three AI panes stacked as a strip on the **right side** — you mostly work
-from the control panel, and only need the panes themselves to sign in or eyeball
-what's actually happening on a site.
+Each AI gets one merged column: a compact control strip on top (status, preview,
+Forward/Auto/Regenerate buttons), its actual live browser pane directly below.
+There's no separate "cards row" and "browser strip" anymore — unchecking that
+AI in **Participants** collapses just its pane, but its control strip (and its
+last captured reply) stays visible and usable.
 
-1. Sign in to whichever sites you want to include, in their panes on the right.
-2. **Participants** (top): uncheck any AI you want to sit out — everything below
-   only applies to checked ones.
+1. Sign in to whichever sites you want to include, right in their panes.
+2. **Participants** (top): uncheck any AI you want to sit out of Auto/"All" —
+   its pane collapses too, since there's nothing to watch if it's not in play.
 3. **Compose** (top-left): type a message and click **→ ChatGPT** / **→ Claude** /
    **→ Gemini** / **→ All** to send it to one, some, or all checked participants —
-   this is also how you interject at any point, auto running or not.
-4. Each AI has its own card. The moment a pane's reply finishes streaming (checked
-   every ~1.5s, waits for the text to stop changing), it shows up in that card's
-   preview and gets logged to the transcript. Forwarded replies always get labeled
-   (`[ChatGPT says] ...`) so whoever receives it knows who said what.
+   this is also how you interject at any point, auto running or not. It warns you
+   if a message is long enough that a site might choke on it.
+4. The moment a pane's reply finishes streaming (checked every ~1.5s, waits for
+   the text to stop changing), a soft chime plays, its column's preview updates,
+   and it's logged to the transcript. While waiting on a reply, that column shows
+   a pulsing amber dot; the instant it sends something new to another AI, that
+   AI's whole column glows briefly so you can actually follow who's talking to
+   whom. Forwarded replies are always labeled (`[ChatGPT says] ...`).
 5. **Global controls**:
    - **Auto** — turns on full back-and-forth forwarding between every checked
      participant: whatever one says gets forwarded to the others, whose replies
@@ -97,14 +101,13 @@ what's actually happening on a site.
      hitting **Auto** again picks up where you left off.
    - **Stop** — halts all forwarding *and* unchecks every participant, forcing a
      deliberate restart.
-   - A card's own **Forward**/**Auto → X** buttons still work independently, for
-     fine-grained one-off or standing routes instead of the full-mesh version.
-6. **Hide Browser Panes** shrinks the site panes to nothing so the control panel
-   gets the whole window (they keep running in the background) — **Show Browser
-   Panes** brings them back, e.g. to log in or check what a site is actually
-   doing.
+   - A column's own **Forward**/**Auto → X**/**↻ Regenerate** buttons still work
+     independently, for fine-grained one-off routes or resending a prompt that
+     missed the mark, instead of the full-mesh version.
+6. **📌** on any transcript turn pins it, so you can spot it again later without
+   scrolling back through everything.
 7. **Copy Transcript** / **Download .md** save the running conversation locally
-   so you can share it elsewhere (e.g. email it to someone).
+   (pinned turns are marked in the export) so you can share it elsewhere.
 
 ### Troubleshooting
 
@@ -124,11 +127,14 @@ selector for real instead of guessing again.
 ## How it's built
 
 - `main.js` — Electron main process. Creates the window, one `WebContentsView` per
-  AI site plus one for the control panel, lays them out (control panel main view,
-  site panes as a collapsible side strip), polls each pane's latest reply every
-  ~1.5s to detect when it's finished streaming, routes messages (manual, per-pane
-  auto, or the global full-mesh Auto) between panes, and keeps an in-memory
-  activity log of everything that happens.
+  AI site plus one full-window `WebContentsView` for the control panel. Each site's
+  pane is positioned by measuring an empty placeholder div (`#pane-slot-<site>`)
+  inside the control panel's own HTML and copying its exact on-screen rectangle,
+  so the live pane sits directly under that AI's control strip and collapses
+  cleanly when the participant is unchecked — no hardcoded split. Polls each
+  pane's latest reply every ~1.5s to detect when it's finished streaming, routes
+  messages (manual, per-pane auto, or the global full-mesh Auto) between panes,
+  and keeps an in-memory activity log of everything that happens.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
