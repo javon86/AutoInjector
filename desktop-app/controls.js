@@ -311,12 +311,15 @@ function buildExportText() {
 
 function logLineText(entry) {
   const parts = [];
+  if (entry.detail?.mode) parts.push(HOUSE_RULE_LABELS[entry.detail.mode] || entry.detail.mode);
   if (entry.detail?.site) parts.push(entry.detail.site);
   if (entry.detail?.source) parts.push(`${entry.detail.source}->${entry.detail.target}`);
   if (entry.detail?.from) parts.push(`from ${entry.detail.from}`);
   if (entry.detail?.target && entry.kind !== "routing-changed") parts.push(`to ${entry.detail.target}`);
   if (entry.detail?.participants) parts.push(`[${entry.detail.participants.join(", ")}]`);
   if (typeof entry.detail?.enabled === "boolean") parts.push(entry.detail.enabled ? "ON" : "OFF");
+  if (entry.detail?.rounds != null) parts.push(`rounds=${entry.detail.rounds}`);
+  if (entry.detail?.reason) parts.push(`(${entry.detail.reason})`);
   if (entry.detail?.chars != null) parts.push(`${entry.detail.chars} chars`);
   if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
   return `${entry.kind} ${parts.join(" ")}`.trim();
