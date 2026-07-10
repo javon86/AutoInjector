@@ -46,7 +46,12 @@ module.exports = {
     ASSISTANT_CANDIDATES: [
       '[data-testid="chat-message"]',
       "div.font-claude-message",
-      '[data-testid="message-content"]'
+      '[data-testid="message-content"]',
+      // confirmed via live DOM inspection (2026-07): the reply text now lives in
+      // <p class="font-claude-response-body"> inside this markdown container div —
+      // read the whole container (not the <p> alone) so multi-paragraph/list/code
+      // replies aren't truncated to just their last block.
+      "div.standard-markdown"
     ]
   },
   gemini: {
