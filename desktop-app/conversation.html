@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector — Conversation</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background:#111; color:#eee; font-size:13px; overflow:hidden; font-family: system-ui, sans-serif; }
+    #wrap { display:flex; flex-direction:column; height:100vh; min-height:0; }
+
+    #header { flex:0 0 auto; padding:12px 18px 10px; border-bottom:1px solid #2a2a2a; }
+    #header h1 { font-size:15px; margin:0 0 8px; letter-spacing:.02em; }
+    #topic-line { opacity:.8; font-size:12.5px; margin-bottom:10px; min-height:1.3em; }
+    #topic-line.empty { opacity:.45; font-style:italic; }
+
+    #speaker-row { display:flex; gap:8px; align-items:center; }
+    .speaker-chip { display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; border:1px solid #333; background:#181818; opacity:.55; transition: opacity .2s, box-shadow .2s; font-size:12px; }
+    .speaker-chip .dot { width:8px; height:8px; border-radius:50%; }
+    .speaker-chip.chatgpt .dot { background:#10a37f; }
+    .speaker-chip.claude .dot { background:#d97757; }
+    .speaker-chip.gemini .dot { background:#4285f4; }
+    .speaker-chip.current { opacity:1; box-shadow:0 0 0 2px #7c5ce0, 0 0 14px 1px rgba(124,92,224,.4); }
+    .speaker-chip.next { opacity:1; border-color:#555; }
+    .speaker-chip .tag { font-size:9px; text-transform:uppercase; letter-spacing:.05em; opacity:.7; margin-left:2px; }
+    #run-status { margin-left:auto; font-size:11.5px; opacity:.8; padding:3px 9px; border-radius:6px; background:#181818; border:1px solid #2a2a2a; }
+    #run-status.running { color:#8ef0b0; border-color:#2a5a3a; }
+    #run-status.paused { color:#f0ac52; border-color:#5a4a2a; }
+
+    #transcript { flex:1 1 auto; overflow:auto; padding:16px 18px; min-height:0; }
+    #transcript-empty { opacity:.45; font-style:italic; padding:30px 0; text-align:center; }
+    .turn { max-width:78%; margin-bottom:14px; padding:9px 13px; border-radius:12px; background:#181818; border:1px solid #262626; }
+    .turn .meta { font-size:11px; font-weight:600; opacity:.85; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+    .turn .dot { width:7px; height:7px; border-radius:50%; }
+    .turn .text { white-space:pre-wrap; line-height:1.45; }
+    .turn.chatgpt { border-left:3px solid #10a37f; }
+    .turn.claude { border-left:3px solid #d97757; margin-left:auto; }
+    .turn.gemini { border-left:3px solid #4285f4; }
+    .turn.chatgpt .dot { background:#10a37f; }
+    .turn.claude .dot { background:#d97757; }
+    .turn.gemini .dot { background:#4285f4; }
+    .turn.verdict, .turn.final-plan { border-left-color:#f5b642; background:#1d1608; }
+
+    #footer { flex:0 0 auto; border-top:1px solid #2a2a2a; padding:10px 18px 14px; }
+    #msg-row { display:flex; gap:8px; align-items:flex-end; }
+    #msg-box { flex:1 1 auto; resize:none; height:52px; }
+    #btn-col { display:flex; gap:6px; flex-wrap:wrap; }
+
+    select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:6px 9px; font-family:inherit; font-size:12.5px; }
+    button { cursor:pointer; }
+    button:hover { background:#242424; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button.primary { background:#1a3a2a; border-color:#2a5a3a; }
+    button.danger { background:#3a1a1a; border-color:#5a2a2a; }
+    button.warn { background:#3a2f14; border-color:#5a4a2a; }
+
+    #hint { margin-top:6px; font-size:11px; opacity:.55; }
+
+    #roles-toggle { margin-top:8px; }
+    #roles-panel { display:none; margin-top:8px; padding:10px 12px; background:#161616; border:1px solid #2a2a2a; border-radius:8px; }
+    #roles-panel.open { display:block; }
+    .role-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+    .role-row label { width:70px; flex:0 0 auto; font-size:12px; opacity:.85; }
+    .role-row input { flex:1 1 auto; }
+    .role-row .role-current { font-size:10.5px; opacity:.6; margin-left:2px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="header">
+      <h1>AutoInjector — Conversation</h1>
+      <div id="topic-line" class="empty">No conversation started yet.</div>
+      <div id="speaker-row">
+        <div class="speaker-chip chatgpt" data-site="chatgpt"><span class="dot"></span>ChatGPT<span class="tag"></span></div>
+        <div class="speaker-chip claude" data-site="claude"><span class="dot"></span>Claude<span class="tag"></span></div>
+        <div class="speaker-chip gemini" data-site="gemini"><span class="dot"></span>Gemini<span class="tag"></span></div>
+        <div id="run-status">Idle</div>
+      </div>
+    </div>
+
+    <div id="transcript">
+      <div id="transcript-empty">The conversation will appear here once you Send a message or Start Rotation.</div>
+    </div>
+
+    <div id="footer">
+      <div id="msg-row">
+        <textarea id="msg-box" placeholder="Type a question or message…">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
+        <div id="btn-col">
+          <button id="btn-send">Send</button>
+          <button id="btn-start" class="primary">Start</button>
+          <button id="btn-pause" class="warn">Pause</button>
+          <button id="btn-resume" class="primary">Resume</button>
+          <button id="btn-stop" class="danger">Stop</button>
+        </div>
+      </div>
+      <div id="hint">Send delivers your message to all three AIs right away. Start begins the ChatGPT → Claude → Gemini rotation using your message as the topic.</div>
+
+      <button id="roles-toggle">Role Assignment ▾</button>
+      <div id="roles-panel">
+        <div class="role-row">
+          <label>ChatGPT</label>
+          <input id="role-chatgpt" placeholder="e.g. Project manager (leave blank for general-purpose)">
+          <button class="role-apply" data-site="chatgpt">Apply</button>
+          <button class="role-clear" data-site="chatgpt">Clear</button>
+          <span class="role-current" id="role-current-chatgpt"></span>
+        </div>
+        <div class="role-row">
+          <label>Claude</label>
+          <input id="role-claude" placeholder="e.g. Critic (leave blank for general-purpose)">
+          <button class="role-apply" data-site="claude">Apply</button>
+          <button class="role-clear" data-site="claude">Clear</button>
+          <span class="role-current" id="role-current-claude"></span>
+        </div>
+        <div class="role-row">
+          <label>Gemini</label>
+          <input id="role-gemini" placeholder="e.g. Fact-checker (leave blank for general-purpose)">
+          <button class="role-apply" data-site="gemini">Apply</button>
+          <button class="role-clear" data-site="gemini">Clear</button>
+          <span class="role-current" id="role-current-gemini"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="conversation.js"></script>
+</body>
+</html>

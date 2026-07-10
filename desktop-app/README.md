@@ -1,11 +1,19 @@
 # AutoInjector Desktop
 
-One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
+One program, two windows: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
 by copy/paste-style DOM automation, no API keys, using your normal logged-in
 sessions. It's built for using two (or three) AIs together as thinking partners:
 you send them a problem, and route replies between them however you want —
 one-off, or on autopilot.
+
+Alongside the **Automation** window (the panes + control panel, the "engine
+room") there's a **Conversation** window — a separate, resizable/maximizable
+window that's the one you actually watch and type into day to day. It shows
+just the clean back-and-forth between the three AIs (who's speaking, who's up
+next, a message box, Send/Start/Pause/Resume/Stop) with all the internal
+automation machinery — copy/paste operations, internal prompts, silent
+acknowledgments — kept out of view.
 
 This is the desktop counterpart to the `AutoInjector/extension` Chrome extension —
 same automation idea (type into the chat box, click send, watch for the reply),
@@ -143,9 +151,52 @@ driving the conversation at a time.
   already been suggested. Runs like Free-for-All until you click **Wrap Up**,
   at which point one participant (auto-picked) is asked to pull everything
   into one final, fully fleshed-out plan (marked with a ✅ in the transcript).
+- **Rotation** *(needs all 3 checked)* — the format behind the **Conversation**
+  window (see below): a fixed ChatGPT → Claude → Gemini → ChatGPT cycle. Each
+  AI keeps its own full history; only the newest reply gets relayed. Whoever's
+  next in the cycle gets it framed as **RESPOND** and produces the next visible
+  reply; the third AI (not yet its turn) gets it framed as **UPDATE** — told
+  explicitly not to join in yet, just to stay caught up — and its one-word
+  `"UPDATED"` acknowledgment is swallowed entirely, never shown anywhere.
+  Unlike the other formats, the order is fixed on purpose, not shuffled.
 
 Role assignments show up as a small badge next to that AI's name once a mode
-with roles is running.
+with roles is running (that's the *structural* role auto-assigned by these
+formats, like Devil/Angel/Referee — not the same thing as the optional Role
+Assignment persona feature described below, which you set yourself).
+
+## The Conversation window
+
+This is the primary window for actually using the app once everyone's signed
+in on the Automation side. It shows only the natural conversation:
+
+- The current topic/question, each AI's visible reply in order, and who said
+  it — nothing else. "UPDATED" acknowledgments, RESPOND/UPDATE instructions,
+  and any other internal prompting never appear here, by construction: the
+  shared transcript main.js maintains never contains that content in the
+  first place, so this window has nothing left to filter out on the way in.
+- Two speaker indicators up top — the AI that spoke most recently, and (once
+  Rotation is running) whichever AI is up next.
+- **Send** — delivers whatever's in the message box to all three AIs
+  immediately, independent of whether Rotation is running. Use this to kick
+  off a one-off exchange or interject at any point.
+- **Start** — begins the ChatGPT → Claude → Gemini Rotation using the message
+  box's text as the opening topic. ChatGPT always goes first.
+- **Pause** / **Resume** — halts the rotation's message flow without losing
+  its place (mode, round count, whose turn is next are all preserved); Resume
+  picks back up exactly where it left off.
+- **Stop** — ends the run for good; starting again means a fresh Start.
+- **Role Assignment** *(optional, collapsed by default)* — give each AI its
+  own persona for this conversation (e.g. Project manager, Critic,
+  Fact-checker, Financial analyst) by typing a role and clicking Apply, or
+  Clear to send it back to general-purpose. This only shapes *what* each AI
+  contributes — it has no effect on *when* they speak, which is entirely
+  driven by the Rotation order above.
+
+The Automation window's panes and control panel keep working normally
+alongside this — you can still sign in, reload a stuck pane, or watch the
+Activity log there. Both windows share the same live state, so a reply
+captured on one side shows up on the other instantly.
 
 ### Troubleshooting
 
@@ -164,25 +215,35 @@ selector for real instead of guessing again.
 
 ## How it's built
 
-- `main.js` — Electron main process. Creates the window, one `WebContentsView` per
-  AI site plus one full-window `WebContentsView` for the control panel. Each site's
-  pane is positioned by measuring an empty placeholder div (`#pane-slot-<site>`)
-  inside the control panel's own HTML and copying its exact on-screen rectangle,
-  so the live pane sits directly under that AI's control strip and collapses
-  cleanly when the participant is unchecked — no hardcoded split. Polls each
-  pane's latest reply every ~1.5s to detect when it's finished streaming, routes
-  messages (manual, per-pane auto, or the global full-mesh Auto) between panes,
-  and keeps an in-memory activity log of everything that happens. The House
-  Rules formats are small state machines layered on top of the same capture
-  events — each one reacts to a new reply by deciding who gets sent what next,
-  based on whichever format is active.
+- `main.js` — Electron main process. Creates two `BaseWindow`s: the Automation
+  window (one `WebContentsView` per AI site plus one full-window
+  `WebContentsView` for the control panel) and the Conversation window (a
+  single full-window `WebContentsView`). Each site's pane is positioned by
+  measuring an empty placeholder div (`#pane-slot-<site>`) inside the control
+  panel's own HTML and copying its exact on-screen rectangle, so the live pane
+  sits directly under that AI's control strip and collapses cleanly when the
+  participant is unchecked — no hardcoded split. Polls each pane's latest
+  reply every ~1.5s to detect when it's finished streaming, routes messages
+  (manual, per-pane auto, the global full-mesh Auto, or a House Rules format)
+  between panes, and keeps an in-memory activity log of everything that
+  happens. A generic `broadcast()` sends every UI update to both windows at
+  once, so they always stay in sync. The House Rules formats (including
+  Rotation) are small state machines layered on top of the same capture
+  events — each one reacts to a new reply by deciding who gets sent what next.
+  Captures can also be swallowed *silently* (never reaching the transcript or
+  either window) — used for Chargeback's Referee acknowledgments and
+  Rotation's "UPDATED" confirmations.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
   Mirrors the selectors used by the browser extension's `content.js`/`selectors.js`.
-- `controls.html` / `controls.js` / `preload.js` — the control panel UI, talking to
-  the main process over `ipcRenderer`/`contextBridge` (no direct Node access from
-  the page, same as the sites' own panes).
+- `controls.html` / `controls.js` — the Automation window's control panel UI.
+- `conversation.html` / `conversation.js` — the Conversation window's UI:
+  renders the shared transcript, current/next speaker, Send/Start/Pause/
+  Resume/Stop, and Role Assignment.
+- `preload.js` — the IPC bridge shared by both windows, talking to the main
+  process over `ipcRenderer`/`contextBridge` (no direct Node access from
+  either page, same as the sites' own panes).
 
 Selectors are best-effort with fallbacks, same caveat as the extension: if a site
 redesigns its chat UI, `selectors.js` is the first place to fix — use the 🔍
@@ -200,9 +261,12 @@ actual IPC handlers exactly like the control panel does: simulate a reply
 appearing on a site, check what gets sent next. It covers the House Rules state
 machines (Debate's turn order and round-ending, Devil & Angel's role isolation
 and fan-in, Chargeback's silent Referee and final verdict, Who Wants to Speak's
-opt-in filtering, Free-for-All/Brainstorm's mesh setup and teardown) and a
-couple of routing edge cases (disabling a participant mid-run, House Rules'
-own Stop button actually clearing the mesh it set up).
+opt-in filtering, Free-for-All/Brainstorm's mesh setup and teardown, Rotation's
+fixed RESPOND/UPDATE cycle and its "UPDATED" acks never reaching the
+transcript), Pause/Resume round-tripping routing state, Role Assignment's
+persona clause injection, and a couple of routing edge cases (disabling a
+participant mid-run, House Rules' own Stop button actually clearing the mesh
+it set up).
 
 What it can't cover: the actual DOM automation (typing into a real chat box,
 clicking a real send button, reading a real reply) — that needs an actual

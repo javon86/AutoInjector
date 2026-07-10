@@ -241,6 +241,103 @@ async function testParticipantDisableRemovesAsTarget() {
   assert(g.routing.claude.length === 0, "claude's own outgoing routing is also cleared");
 }
 
+async function testRotation() {
+  console.log("\n== Rotation: fixed ChatGPT -> Claude -> Gemini order, UPDATE hidden from transcript ==");
+  await resetAllParticipants();
+  const startRes = await call("houserule:start", { mode: "rotation", topic: "Let's discuss the future of AI", rounds: 0 });
+  assert(startRes.ok, "starts successfully");
+  assert(sentLog("chatgpt").length === 1 && sentLog("chatgpt")[0].text === "Let's discuss the future of AI", "ChatGPT (order[0]) gets the raw topic, unwrapped");
+
+  const state0 = await call("state:get", {});
+  assert(state0.houseRule.nextSpeaker === "chatgpt", "before any reply, nextSpeaker is chatgpt (awaiting-first)");
+
+  say("chatgpt", "ChatGPT's opening reply");
+  await waitUntil(() => sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "chatgpt's reply fans out RESPOND to claude, UPDATE to gemini" });
+  assert(sentLog("claude")[0].text.includes("[ChatGPT says]") && sentLog("claude")[0].text.includes("Respond to this, continuing"), "claude gets the RESPOND-framed message");
+  assert(sentLog("gemini")[0].text.includes("[ChatGPT says]") && sentLog("gemini")[0].text.includes("reply with exactly: UPDATED"), "gemini gets the UPDATE-framed message instructing it not to join yet");
+
+  const state1 = await call("state:get", {});
+  assert(state1.houseRule.nextSpeaker === "claude", "after chatgpt speaks, nextSpeaker is claude");
+
+  say("gemini", "UPDATED");
+  await new Promise((r) => setTimeout(r, 3000));
+  const afterUpdateAck = await call("state:get", {});
+  assert(afterUpdateAck.transcript.every((t) => t.text !== "UPDATED"), "gemini's 'UPDATED' ack never lands in the transcript");
+  assert(sentLog("claude").length === 1 && sentLog("chatgpt").length === 1, "gemini's silent ack doesn't trigger any further sends");
+
+  say("claude", "Claude's reply responding to chatgpt");
+  await waitUntil(() => sentLog("gemini").length === 2 && sentLog("chatgpt").length === 2, { label: "claude's reply fans out RESPOND to gemini, UPDATE to chatgpt" });
+  assert(sentLog("gemini")[1].text.includes("Respond to this, continuing"), "gemini gets a real RESPOND turn this time");
+  assert(sentLog("chatgpt")[1].text.includes("reply with exactly: UPDATED"), "chatgpt gets UPDATEd since it's not its turn");
+
+  say("chatgpt", "UPDATED");
+  await new Promise((r) => setTimeout(r, 3000));
+
+  say("gemini", "Gemini's reply, closing the loop");
+  await waitUntil(() => sentLog("chatgpt").length === 3 && sentLog("claude").length === 2, { label: "gemini's reply fans out RESPOND to chatgpt, UPDATE to claude" });
+  assert(sentLog("chatgpt")[2].text.includes("Respond to this, continuing"), "rotation wraps back around to chatgpt (RESPOND), completing the fixed cycle");
+  assert(sentLog("claude")[1].text.includes("reply with exactly: UPDATED"), "claude gets UPDATEd on the wrap-around");
+
+  const finalState = await call("state:get", {});
+  const visible = finalState.transcript.map((t) => t.text);
+  assert(visible.includes("ChatGPT's opening reply") && visible.includes("Claude's reply responding to chatgpt") && visible.includes("Gemini's reply, closing the loop"), "all 3 real replies are visible in the transcript");
+  assert(!visible.some((t) => t === "UPDATED"), "no 'UPDATED' acknowledgment ever appears in the visible transcript");
+  assert(finalState.houseRule.roundNum === 2, `roundNum tracks completed RESPOND turns after the kickoff (got ${finalState.houseRule.roundNum})`);
+
+  const dupStart = await call("houserule:start", { mode: "rotation", topic: "anything", rounds: 0 });
+  assert(!dupStart.ok && dupStart.error === "ALREADY_RUNNING", "can't start a new run while rotation is still active");
+
+  await call("houserule:stop", {});
+}
+
+async function testPauseResume() {
+  console.log("\n== Pause/Resume: routing round-trips correctly ==");
+  await resetAllParticipants();
+  await call("houserule:start", { mode: "free-for-all", topic: "Best pizza topping", rounds: 0 });
+  const running = await call("state:get", {});
+  assert(SITES.every((s) => running.global.routing[s].length === 2), "free-for-all's full mesh is set up as a baseline");
+  assert(running.houseRule.active === true && running.houseRule.paused === false, "freshly started run is active, not paused");
+
+  const pauseRes = await call("houserule:pause", {});
+  assert(pauseRes.ok, "pause succeeds");
+  assert(SITES.every((s) => pauseRes.global.routing[s].length === 0), "pausing clears live routing so nothing keeps forwarding");
+  assert(pauseRes.global.meshActive === false, "meshActive turned off while paused");
+  assert(pauseRes.houseRule.active === false && pauseRes.houseRule.paused === true, "houseRule reports active:false, paused:true");
+  assert(pauseRes.houseRule.mode === "free-for-all", "mode is preserved across pause, not reset");
+
+  const startWhilePaused = await call("houserule:start", { mode: "brainstorm", topic: "x", rounds: 0 });
+  assert(!startWhilePaused.ok && startWhilePaused.error === "ALREADY_RUNNING", "can't start a new run while the current one is only paused");
+
+  const resumeRes = await call("houserule:resume", {});
+  assert(resumeRes.ok, "resume succeeds");
+  assert(SITES.every((s) => resumeRes.global.routing[s].length === 2), "resuming restores the exact routing that was active before pause");
+  assert(resumeRes.global.meshActive === true, "meshActive restored on resume");
+  assert(resumeRes.houseRule.active === true && resumeRes.houseRule.paused === false, "houseRule reports active:true, paused:false after resume");
+
+  await call("houserule:stop", {});
+}
+
+async function testRoleInjection() {
+  console.log("\n== Role Assignment: custom persona clause injected generically ==");
+  await resetAllParticipants();
+
+  const setRes = await call("roles:set", { site: "claude", role: "Skeptical Engineer" });
+  assert(setRes.ok && setRes.global.customRole.claude === "Skeptical Engineer", "role stored for claude");
+
+  await call("send:compose", { text: "What do you think of this plan?", targets: ["claude"] });
+  const sent = sentLog("claude");
+  assert(sent[sent.length - 1].text.startsWith("(You're playing the role of: Skeptical Engineer. Keep that in mind in your reply.)"), "role clause is prepended to a plain compose send");
+  assert(sent[sent.length - 1].text.includes("What do you think of this plan?"), "original message text still follows the role clause");
+
+  assert(sentLog("chatgpt").length === 0 || !sentLog("chatgpt").some((s) => s.text.includes("Skeptical Engineer")), "role assignment doesn't leak to a different, unassigned site");
+
+  const clearRes = await call("roles:set", { site: "claude", role: "" });
+  assert(clearRes.ok && clearRes.global.customRole.claude === "", "role can be cleared back to general-purpose");
+  await call("send:compose", { text: "Second message, no role now.", targets: ["claude"] });
+  const sent2 = sentLog("claude");
+  assert(!sent2[sent2.length - 1].text.includes("playing the role of"), "no role clause once cleared");
+}
+
 async function main() {
   require(path.join(__dirname, "..", "main.js"));
   await new Promise((r) => setTimeout(r, 100)); // let app.whenReady().then(createWindow) settle
@@ -251,6 +348,9 @@ async function main() {
   await testWhoWantsToSpeak();
   await testFreeForAllAndBrainstormTeardown();
   await testParticipantDisableRemovesAsTarget();
+  await testRotation();
+  await testPauseResume();
+  await testRoleInjection();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

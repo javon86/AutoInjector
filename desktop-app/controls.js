@@ -9,7 +9,8 @@ const HOUSE_RULE_LABELS = {
   "free-for-all": "Free-for-All",
   "devil-angel": "Devil & Angel",
   "chargeback": "Chargeback",
-  "brainstorm": "Brainstorm"
+  "brainstorm": "Brainstorm",
+  "rotation": "Rotation"
 };
 const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
@@ -210,12 +211,13 @@ function applyHouseRule(hr) {
   if (hr.mode) {
     const label = HOUSE_RULE_LABELS[hr.mode] || hr.mode;
     const roundText = hr.rounds ? `round ${hr.roundNum}/${hr.rounds}` : `round ${hr.roundNum}`;
-    el("hr-status").textContent = `${label} — ${hr.active ? "running" : "finished"} — ${roundText}`;
+    const state = hr.active ? "running" : (hr.paused ? "paused" : "finished");
+    el("hr-status").textContent = `${label} — ${state} — ${roundText}`;
   } else {
     el("hr-status").textContent = "";
   }
   el("btn-hr-wrapup").style.display = hr.mode === "brainstorm" && hr.active ? "" : "none";
-  el("btn-hr-start").disabled = !!hr.active;
+  el("btn-hr-start").disabled = !!hr.active || !!hr.paused;
   el("btn-auto-all").disabled = !!hr.active;
   el("btn-pause-all").disabled = !!hr.active;
 }

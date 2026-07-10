@@ -26,7 +26,9 @@
       "automation.js",
       "selectors.js",
       "controls.html",
-      "controls.js"
+      "controls.js",
+      "conversation.html",
+      "conversation.js"
     ],
     "win": { "target": "nsis" },
     "mac": { "target": "dmg" },
