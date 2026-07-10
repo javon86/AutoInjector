@@ -14,6 +14,11 @@ let hr = { mode: null, active: false, paused: false, topic: "", nextSpeaker: nul
 
 function el(id) { return document.getElementById(id); }
 
+// Captured once, up front: renderTranscript() detaches/reattaches this same
+// node across renders. Re-querying by ID each time would fail once it's been
+// removed — getElementById only finds nodes still in the document.
+const emptyTranscriptEl = el("transcript-empty");
+
 function renderTopic() {
   const line = el("topic-line");
   if (hr.mode && hr.topic) {
@@ -78,12 +83,11 @@ function turnEl(turn) {
 
 function renderTranscript() {
   const box = el("transcript");
-  const empty = el("transcript-empty");
   if (!transcript.length) {
-    if (!empty.isConnected) box.appendChild(empty);
+    if (!emptyTranscriptEl.isConnected) box.appendChild(emptyTranscriptEl);
     return;
   }
-  if (empty.isConnected) box.removeChild(empty);
+  if (emptyTranscriptEl.isConnected) box.removeChild(emptyTranscriptEl);
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
   box.innerHTML = "";
   for (const turn of transcript) box.appendChild(turnEl(turn));
@@ -122,9 +126,27 @@ async function hydrate() {
 window.api.onCapture((turn) => addTurn(turn));
 window.api.onHouseRuleState((snapshot) => { hr = snapshot; renderAll(); });
 
+async function startRotation(topic) {
+  const res = await window.api.startHouseRule("rotation", topic, 0);
+  if (res && res.ok) {
+    hr = res.houseRule;
+    el("msg-box").value = "";
+    renderAll();
+  }
+  return res;
+}
+
 el("btn-send").onclick = async () => {
   const text = el("msg-box").value.trim();
   if (!text) return;
+  // Nothing running yet: this first message IS the topic — kick off the full
+  // ChatGPT -> Claude -> Gemini rotation automatically instead of making the
+  // user click Start separately. Once a rotation is active or paused, Send
+  // goes back to being a plain interjection to all three.
+  if (!hr.mode || (!hr.active && !hr.paused)) {
+    await startRotation(text);
+    return;
+  }
   await window.api.sendCompose(text, SITES);
   el("msg-box").value = "";
 };
@@ -132,12 +154,7 @@ el("btn-send").onclick = async () => {
 el("btn-start").onclick = async () => {
   const topic = el("msg-box").value.trim();
   if (!topic) return;
-  const res = await window.api.startHouseRule("rotation", topic, 0);
-  if (res && res.ok) {
-    hr = res.houseRule;
-    el("msg-box").value = "";
-    renderAll();
-  }
+  await startRotation(topic);
 };
 
 el("btn-pause").onclick = async () => {

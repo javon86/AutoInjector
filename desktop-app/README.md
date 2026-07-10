@@ -268,12 +268,22 @@ persona clause injection, and a couple of routing edge cases (disabling a
 participant mid-run, House Rules' own Stop button actually clearing the mesh
 it set up).
 
-What it can't cover: the actual DOM automation (typing into a real chat box,
-clicking a real send button, reading a real reply) — that needs an actual
-browser against the actual sites, which is exactly what running the app for
-real tests. This suite is about the orchestration logic around that boundary
-— who gets sent what, in what order, under what conditions — which is also
-where the subtlest bugs turned out to live.
+`npm test` also runs `test/conversation.test.js`, which loads the *real*
+`conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
+no real browser needed) with `window.api` stubbed the way `preload.js` exposes
+it, then clicks real buttons and fires simulated `capture`/`houserule-state`
+events to check what actually renders. This is what caught a real crash: the
+Conversation window's transcript renderer looked up its "empty" placeholder
+by ID on every render, which broke the instant that node was ever removed
+from the page — i.e. the moment a second reply arrived in any real
+conversation. Fixed and now covered by a regression test.
+
+What neither suite can cover: the actual DOM automation (typing into a real
+chat box, clicking a real send button, reading a real reply) — that needs an
+actual browser against the actual sites, which is exactly what running the
+app for real tests. These suites are about everything around that boundary —
+who gets sent what and in what order, and what the UI actually does with it
+— which is also where the subtlest bugs turned out to live.
 
 ## Building a real installer (.exe / .dmg / .AppImage)
 
