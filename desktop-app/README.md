@@ -278,12 +278,42 @@ by ID on every render, which broke the instant that node was ever removed
 from the page — i.e. the moment a second reply arrived in any real
 conversation. Fixed and now covered by a regression test.
 
-What neither suite can cover: the actual DOM automation (typing into a real
-chat box, clicking a real send button, reading a real reply) — that needs an
-actual browser against the actual sites, which is exactly what running the
-app for real tests. These suites are about everything around that boundary —
-who gets sent what and in what order, and what the UI actually does with it
-— which is also where the subtlest bugs turned out to live.
+### Optional: real-browser selector tests
+
+```bash
+npm install --no-save playwright   # one-time, NOT part of npm install/npm test
+npx playwright install chromium    # skip if a browser is already installed
+npm run test:browser
+```
+
+`test/browser.test.js` runs the *actual* `buildSendScript`/`buildReadScript`
+output from `automation.js` inside a real Chromium (via
+[Playwright](https://playwright.dev)) against static HTML fixtures in
+`test/fixtures/` — as close to Electron's real `WebContentsView` as this
+project can get without Electron itself. Unlike the two suites above, this
+one exercises real `document.querySelector` matching, real contenteditable
+typing, and real click events — the layer jsdom can't fully simulate. Right
+now `test/fixtures/claude-reply.html` is a reconstruction of Claude's actual
+DOM (captured via DevTools "Copy outerHTML" during troubleshooting the
+selector bug) — if ChatGPT or Gemini selectors ever break the same way,
+grabbing their outerHTML the same way and adding a fixture here lets this
+get verified against real markup too, not just re-read by eye.
+
+Playwright is deliberately **not** a listed `devDependency` — if it were,
+every user's plain `npm install` (including the one the `run-*.bat`/
+`.command`/`.sh` launchers do automatically) would trigger Playwright's own
+postinstall browser download, the same multi-hundred-MB download problem
+this project already works around for Electron. So this stays a manual,
+opt-in step for whoever's actively debugging a selector, not something
+regular users ever need to run.
+
+What none of the three suites can fully replace: an actual logged-in session
+against the real chatgpt.com/claude.ai/gemini.google.com — login walls, bot
+detection, and live UI changes are outside what any local test can see.
+These suites are about everything short of that: who gets sent what and in
+what order, what the UI actually renders, and whether the DOM-reading logic
+matches real markup — which is also where the subtlest bugs turned out to
+live.
 
 ## Building a real installer (.exe / .dmg / .AppImage)
 
