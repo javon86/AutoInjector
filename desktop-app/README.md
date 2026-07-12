@@ -117,6 +117,26 @@ last captured reply) stays visible and usable.
 7. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
+### Collapsing things when one screen isn't enough room
+
+Everything that takes up screen space can be shrunk out of the way without
+losing anything — nothing closes or resets, it just gets small:
+
+- **Each AI's column** — click the **⌄** button in that column's header
+  (next to 🔍 and ⟳) to collapse it to a thin strip; click it again (now **›**)
+  to bring it back. This is purely visual — a collapsed AI is still enabled,
+  still participating in Auto/House Rules, still receiving and capturing
+  replies, it's just out of view. Independent per column — collapsing Claude's
+  doesn't touch ChatGPT's or Gemini's.
+- **Each whole window** — both the Automation window and the Conversation
+  window have their own **⌄** button in a thin titlebar at the very top.
+  Clicking it shrinks that entire window down to just that titlebar (same
+  screen position, just much shorter); clicking it again (now **›**) restores
+  it to exactly the size and position it had before. Since a collapsed
+  Automation window's panes are, by definition, too small to see, this also
+  automatically hides the live embedded browser views — nothing extra to
+  manage.
+
 ## House Rules
 
 Instead of manually wiring up Forward/Auto buttons, **House Rules** (in the
@@ -264,9 +284,12 @@ and fan-in, Chargeback's silent Referee and final verdict, Who Wants to Speak's
 opt-in filtering, Free-for-All/Brainstorm's mesh setup and teardown, Rotation's
 fixed RESPOND/UPDATE cycle and its "UPDATED" acks never reaching the
 transcript), Pause/Resume round-tripping routing state, Role Assignment's
-persona clause injection, and a couple of routing edge cases (disabling a
-participant mid-run, House Rules' own Stop button actually clearing the mesh
-it set up).
+persona clause injection, window-collapse bounds math (shrinks to a 44px
+titlebar in place and restores the exact original bounds — including
+temporarily relaxing the Conversation window's minHeight so it can actually
+collapse, then putting it back), and a couple of routing edge cases (disabling
+a participant mid-run, House Rules' own Stop button actually clearing the
+mesh it set up).
 
 `npm test` also runs `test/conversation.test.js`, which loads the *real*
 `conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
@@ -277,6 +300,11 @@ Conversation window's transcript renderer looked up its "empty" placeholder
 by ID on every render, which broke the instant that node was ever removed
 from the page — i.e. the moment a second reply arrived in any real
 conversation. Fixed and now covered by a regression test.
+
+`npm test` also runs `test/controls.test.js`, the same jsdom approach applied
+to `controls.html`/`controls.js` — currently focused on the collapse feature
+(each AI column's own toggle, the Automation window's titlebar toggle, and
+that a collapse event for the *other* window is correctly ignored).
 
 ### Optional: real-browser selector tests
 

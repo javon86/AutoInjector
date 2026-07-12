@@ -338,6 +338,40 @@ async function testRoleInjection() {
   assert(!sent2[sent2.length - 1].text.includes("playing the role of"), "no role clause once cleared");
 }
 
+async function testWindowCollapse() {
+  console.log("\n== Window collapse: shrinks to a titlebar in place, restores exactly on expand ==");
+  const automationWin = mockElectron.__windowRegistry["AutoInjector Desktop — Automation"];
+  const convWin = mockElectron.__windowRegistry["AutoInjector — Conversation"];
+  assert(!!automationWin && !!convWin, "both real BaseWindows are reachable via the mock registry");
+
+  const before = await call("window:toggle-collapse", { which: "bogus" });
+  assert(!before.ok && before.error === "NO_WINDOW", "an unknown window id is rejected cleanly");
+
+  const origBounds = automationWin.getBounds();
+  const collapseRes = await call("window:toggle-collapse", { which: "automation" });
+  assert(collapseRes.ok && collapseRes.collapsed === true, "first toggle collapses the Automation window");
+  const collapsedBounds = automationWin.getBounds();
+  assert(collapsedBounds.height === 44, `height shrinks to the titlebar height (got ${collapsedBounds.height})`);
+  assert(collapsedBounds.x === origBounds.x && collapsedBounds.y === origBounds.y && collapsedBounds.width === origBounds.width, "position and width stay exactly where they were — it collapses in place, not somewhere else");
+
+  const expandRes = await call("window:toggle-collapse", { which: "automation" });
+  assert(expandRes.ok && expandRes.collapsed === false, "second toggle expands it back");
+  const restoredBounds = automationWin.getBounds();
+  assert(JSON.stringify(restoredBounds) === JSON.stringify(origBounds), "expanding restores the exact original bounds, not just 'some' larger size");
+
+  // Conversation window has an explicit minHeight (500) set at construction —
+  // collapsing to a 44px titlebar only works if that minimum is temporarily
+  // relaxed, and it must be put back afterward, not left at 44 forever (which
+  // would silently block the user from ever resizing it back up normally).
+  assert(convWin.getMinimumSize()[1] === 500, "sanity: Conversation window's real minHeight is 500 before collapsing");
+  await call("window:toggle-collapse", { which: "conversation" });
+  assert(convWin.getBounds().height === 44, "Conversation window (which has a real minHeight) also collapses to 44px");
+  assert(convWin.getMinimumSize()[1] === 44, "its minimum height is relaxed while collapsed, or setBounds would just get clamped back up to 500");
+  await call("window:toggle-collapse", { which: "conversation" });
+  assert(convWin.getBounds().height === 860, "expanding restores its original height (constructed at 860)");
+  assert(convWin.getMinimumSize()[1] === 500, "its minHeight constraint is restored too, not left at 44 permanently");
+}
+
 async function main() {
   require(path.join(__dirname, "..", "main.js"));
   await new Promise((r) => setTimeout(r, 100)); // let app.whenReady().then(createWindow) settle
@@ -351,6 +385,7 @@ async function main() {
   await testRotation();
   await testPauseResume();
   await testRoleInjection();
+  await testWindowCollapse();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

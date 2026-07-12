@@ -66,9 +66,20 @@ class WebContentsView {
   setBounds() {}
 }
 
+const windowRegistry = {};
+
 class BaseWindow {
-  constructor() { this.contentView = { addChildView() {} }; }
-  getContentSize() { return [1600, 1000]; }
+  constructor(opts) {
+    this.contentView = { addChildView() {} };
+    this._bounds = { x: 0, y: 0, width: (opts && opts.width) || 1600, height: (opts && opts.height) || 1000 };
+    this._minSize = [(opts && opts.minWidth) || 0, (opts && opts.minHeight) || 0];
+    if (opts && opts.title) windowRegistry[opts.title] = this;
+  }
+  getContentSize() { return [this._bounds.width, this._bounds.height]; }
+  getBounds() { return { ...this._bounds }; }
+  setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
+  getMinimumSize() { return this._minSize.slice(); }
+  setMinimumSize(w, h) { this._minSize = [w, h]; }
   on() {}
 }
 
@@ -77,4 +88,4 @@ const app = {
   on() {}
 };
 
-module.exports = { app, BaseWindow, WebContentsView, ipcMain, __ipcHandlers: ipcHandlers, __registry: registry };
+module.exports = { app, BaseWindow, WebContentsView, ipcMain, __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry };

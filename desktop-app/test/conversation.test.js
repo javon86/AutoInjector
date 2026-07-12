@@ -24,10 +24,12 @@ function makeApi() {
   const calls = [];
   let captureCb = null;
   let houseRuleCb = null;
+  let windowCollapseCb = null;
   const api = {
     calls,
     fireCapture: (turn) => captureCb && captureCb(turn),
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
+    fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
     getState: async () => api.__state,
     sendCompose: async (text, targets) => { calls.push({ fn: "sendCompose", text, targets }); return { ok: true }; },
     startHouseRule: async (mode, topic, rounds) => {
@@ -38,8 +40,10 @@ function makeApi() {
     resumeHouseRule: async () => { calls.push({ fn: "resumeHouseRule" }); return { ok: true, houseRule: { mode: "rotation", active: true, paused: false, topic: "t", roundNum: 1, nextSpeaker: "claude" } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", roundNum: 0, nextSpeaker: null } }; },
     setRole: async (site, role) => { calls.push({ fn: "setRole", site, role }); return { ok: true }; },
+    toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
     onCapture: (cb) => { captureCb = cb; },
-    onHouseRuleState: (cb) => { houseRuleCb = cb; }
+    onHouseRuleState: (cb) => { houseRuleCb = cb; },
+    onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; }
   };
   api.__state = { ok: true, transcript: [], houseRule: { mode: null, active: false, paused: false, topic: "", roundNum: 0, nextSpeaker: null }, global: { customRole: {} } };
   return api;
@@ -154,12 +158,39 @@ async function testRoleAssignment() {
   assert(dom.window.document.getElementById("role-current-claude").textContent === "", "current-role label clears too");
 }
 
+async function testWindowCollapseToggle() {
+  console.log("\n== Window titlebar collapse button wires through and hides the body ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  click(dom, "btn-collapse-window");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "toggleWindowCollapse" && c.which === "conversation"), "clicking the titlebar button calls toggleWindowCollapse('conversation')");
+
+  // main.js broadcasts the actual result back to every window: only react to
+  // events naming THIS window, and let the broadcast (not the click) be what
+  // drives the visible state, since main.js is the source of truth.
+  api.fireWindowCollapseChanged({ which: "automation", collapsed: true });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "a collapse event for the OTHER window ('automation') is ignored here");
+
+  api.fireWindowCollapseChanged({ which: "conversation", collapsed: true });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "a collapse event for THIS window hides the main body");
+  assert(dom.window.document.getElementById("btn-collapse-window").textContent === "›", "the button's own icon flips to the 'expand' state");
+
+  api.fireWindowCollapseChanged({ which: "conversation", collapsed: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "expanding again shows the body");
+}
+
 async function main() {
   await testAutoStartOnFirstSend();
   await testSendInterjectsOnceRunning();
   await testTranscriptRendersAndHidesInternals();
   await testSpeakerChipsAndButtons();
   await testRoleAssignment();
+  await testWindowCollapseToggle();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

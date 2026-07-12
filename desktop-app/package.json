@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/run.js && node test/conversation.test.js",
+    "test": "node test/run.js && node test/conversation.test.js && node test/controls.test.js",
     "test:browser": "node test/browser.test.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",

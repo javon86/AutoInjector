@@ -125,6 +125,14 @@ async function hydrate() {
 
 window.api.onCapture((turn) => addTurn(turn));
 window.api.onHouseRuleState((snapshot) => { hr = snapshot; renderAll(); });
+window.api.onWindowCollapseChanged(({ which, collapsed }) => {
+  if (which !== "conversation") return;
+  el("wrap").classList.toggle("window-collapsed", collapsed);
+  el("btn-collapse-window").textContent = collapsed ? "›" : "⌄";
+  el("btn-collapse-window").title = collapsed ? "Expand this window" : "Collapse this window to a titlebar";
+});
+
+el("btn-collapse-window").onclick = () => window.api.toggleWindowCollapse("conversation");
 
 async function startRotation(topic) {
   const res = await window.api.startHouseRule("rotation", topic, 0);

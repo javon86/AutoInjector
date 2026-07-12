@@ -29,6 +29,7 @@ const MAX_LOG = 300;
 const PANE_SYNC_MS = 700;
 const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation"];
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation"]);
+const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 
 let win = null;
 let convWin = null;
@@ -36,6 +37,18 @@ let controlsView = null;
 let conversationView = null;
 const siteViews = {};
 const uiViews = []; // every renderer that should receive broadcasts (controls + conversation)
+
+// Per top-level window: whether it's currently collapsed to just a titlebar,
+// and (while collapsed) the full bounds to restore on expand. Keyed by the
+// same "automation"/"conversation" id the renderers use over IPC.
+const windowCollapse = {
+  automation: { collapsed: false, savedBounds: null, savedMinSize: null },
+  conversation: { collapsed: false, savedBounds: null, savedMinSize: null }
+};
+
+function targetWindow(which) {
+  return which === "automation" ? win : which === "conversation" ? convWin : null;
+}
 
 const state = {
   routing: {}, // site -> Set<target site id> to auto-forward new replies to
@@ -852,6 +865,30 @@ ipcMain.handle("site:list", () => {
     out[site] = view ? { url: view.webContents.getURL(), title: view.webContents.getTitle(), label: SITES[site].label } : null;
   }
   return { ok: true, sites: out };
+});
+
+ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
+  const target = targetWindow(which);
+  const entry = windowCollapse[which];
+  if (!target || !entry) return { ok: false, error: "NO_WINDOW" };
+
+  if (!entry.collapsed) {
+    entry.savedBounds = target.getBounds();
+    entry.savedMinSize = typeof target.getMinimumSize === "function" ? target.getMinimumSize() : null;
+    if (typeof target.setMinimumSize === "function") target.setMinimumSize(200, COLLAPSED_HEIGHT);
+    target.setBounds({ x: entry.savedBounds.x, y: entry.savedBounds.y, width: entry.savedBounds.width, height: COLLAPSED_HEIGHT });
+    entry.collapsed = true;
+  } else {
+    if (entry.savedBounds) target.setBounds(entry.savedBounds);
+    if (entry.savedMinSize && typeof target.setMinimumSize === "function") target.setMinimumSize(entry.savedMinSize[0], entry.savedMinSize[1]);
+    entry.collapsed = false;
+    entry.savedBounds = null;
+    entry.savedMinSize = null;
+  }
+
+  logEvent("window-collapse-changed", { which, collapsed: entry.collapsed });
+  broadcast("window-collapse-changed", { which, collapsed: entry.collapsed });
+  return { ok: true, which, collapsed: entry.collapsed };
 });
 
 app.whenReady().then(() => {
