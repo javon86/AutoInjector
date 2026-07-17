@@ -80,11 +80,13 @@ function buildAiColumn(site) {
   head.className = "card-head";
   head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="spacer"></span>`;
   const inspectBtn = document.createElement("button");
+  inspectBtn.className = "inspect-btn";
   inspectBtn.textContent = "🔍";
   inspectBtn.title = "Open DevTools on this pane (for fixing selectors)";
   inspectBtn.onclick = () => window.api.inspectSite(site);
   head.appendChild(inspectBtn);
   const reloadBtn = document.createElement("button");
+  reloadBtn.className = "reload-btn";
   reloadBtn.textContent = "⟳";
   reloadBtn.title = "Reload this pane";
   reloadBtn.onclick = async () => {
@@ -93,6 +95,12 @@ function buildAiColumn(site) {
     setTimeout(refreshSites, 1500);
   };
   head.appendChild(reloadBtn);
+  const collapseBtn = document.createElement("button");
+  collapseBtn.className = "collapse-btn";
+  collapseBtn.textContent = "⌄";
+  collapseBtn.title = "Collapse this pane";
+  collapseBtn.onclick = () => toggleColumnCollapse(site);
+  head.appendChild(collapseBtn);
   strip.appendChild(head);
 
   const preview = document.createElement("div");
@@ -165,6 +173,23 @@ function buildAiRow() {
   const box = el("ai-row");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildAiColumn(site));
+}
+
+// Purely a visual/layout toggle — collapsing a pane does NOT change whether
+// that AI is enabled/participating (that's the separate Participants
+// checkbox). syncPaneBounds() in main.js measures pane-slot's real on-screen
+// rect every ~700ms and zeroes out the live browser view's bounds once it's
+// too small to see, so hiding .pane-slot here is enough to also hide the
+// actual embedded browser pane — no main.js change needed for this part.
+function toggleColumnCollapse(site) {
+  const col = el(`col-${site}`);
+  if (!col) return;
+  const collapsed = col.classList.toggle("collapsed");
+  const btn = col.querySelector(".collapse-btn");
+  if (btn) {
+    btn.textContent = collapsed ? "›" : "⌄";
+    btn.title = collapsed ? "Expand this pane" : "Collapse this pane";
+  }
 }
 
 function applyRouting(next) {
@@ -371,6 +396,14 @@ window.api.onSendError(({ target, error }) => {
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);
 window.api.onLog(appendLog);
+window.api.onWindowCollapseChanged(({ which, collapsed }) => {
+  if (which !== "automation") return;
+  el("wrap").classList.toggle("window-collapsed", collapsed);
+  el("btn-collapse-window").textContent = collapsed ? "›" : "⌄";
+  el("btn-collapse-window").title = collapsed ? "Expand this window" : "Collapse this window to a titlebar";
+});
+
+el("btn-collapse-window").onclick = () => window.api.toggleWindowCollapse("automation");
 
 for (const site of SITES) {
   el(`p-${site}`).onchange = async (e) => {
@@ -412,6 +445,7 @@ el("btn-hr-start").onclick = async () => {
   }
 };
 el("btn-hr-stop").onclick = async () => {
+  if (!window.confirm("This will end the House Rules run. You'll need to Start again to resume it. Continue?")) return;
   const res = await window.api.stopHouseRule();
   if (res?.ok) {
     applyHouseRule(res.houseRule);

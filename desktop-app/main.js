@@ -18,6 +18,7 @@
 // shown to the user.
 const { app, BaseWindow, WebContentsView, ipcMain } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript } = require("./automation");
 
@@ -29,6 +30,33 @@ const MAX_LOG = 300;
 const PANE_SYNC_MS = 700;
 const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation"];
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation"]);
+const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
+const MAX_DEBUG_LOG_LINES = 2000;
+const SAVE_DEBOUNCE_MS = 500;
+
+// Rate-limit/usage-cap replies are short by nature ("You've reached your
+// usage limit...") — gating on length before pattern-matching keeps this
+// from false-positiving on a genuine, substantive reply that happens to
+// discuss rate limits as a topic.
+const RATE_LIMIT_PATTERNS = [
+  /rate limit/i,
+  /usage limit/i,
+  /quota exceeded/i,
+  /reached your (current |daily |hourly )?(usage |message )?limit/i,
+  /too many requests/i,
+  /please (wait|try again) (before|in|later)/i,
+  /temporarily (unavailable|blocked)/i
+];
+function looksLikeRateLimit(text) {
+  if (!text || text.length > 400) return false;
+  return RATE_LIMIT_PATTERNS.some((re) => re.test(text));
+}
+
+function userDataDir() {
+  try { return app.getPath("userData"); } catch { return __dirname; }
+}
+function stateFilePath() { return path.join(userDataDir(), "autoinjector-state.json"); }
+function debugLogPath() { return path.join(userDataDir(), "autoinjector-debug.log"); }
 
 let win = null;
 let convWin = null;
@@ -37,12 +65,25 @@ let conversationView = null;
 const siteViews = {};
 const uiViews = []; // every renderer that should receive broadcasts (controls + conversation)
 
+// Per top-level window: whether it's currently collapsed to just a titlebar,
+// and (while collapsed) the full bounds to restore on expand. Keyed by the
+// same "automation"/"conversation" id the renderers use over IPC.
+const windowCollapse = {
+  automation: { collapsed: false, savedBounds: null, savedMinSize: null },
+  conversation: { collapsed: false, savedBounds: null, savedMinSize: null }
+};
+
+function targetWindow(which) {
+  return which === "automation" ? win : which === "conversation" ? convWin : null;
+}
+
 const state = {
   routing: {}, // site -> Set<target site id> to auto-forward new replies to
   captured: {}, // site -> { id, site, label, text, ts, pinned } | null — last stable reply seen
   pending: {}, // site -> { text, sinceTs } — used to detect when a reply has stopped changing
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
+  waitingSince: {}, // site -> timestamp | null — when waiting flipped true, so UIs can flag "hasn't replied in a while"
   lastSentTo: {}, // site -> exact final text last sent to it (for Regenerate)
   enabled: {}, // site -> bool — participant is "in play": counts for Auto/"All" AND shows its pane
   customRole: {}, // site -> user-assigned persona string ("", i.e. falsy, means general-purpose)
@@ -58,6 +99,7 @@ for (const site of SITE_IDS) {
   state.pending[site] = { text: "", sinceTs: Date.now() };
   state.busy[site] = false;
   state.waiting[site] = false;
+  state.waitingSince[site] = null;
   state.lastSentTo[site] = null;
   state.enabled[site] = true;
   state.customRole[site] = "";
@@ -83,16 +125,110 @@ function resetHouseRule(mode, topic, rounds) {
     realReplies: {},
     ignoreCaptureFrom: new Map(), // site -> count of pending informational sends whose ack should be swallowed (visible in the log, not the transcript)
     silentAckFrom: new Map(), // site -> count of pending "UPDATE" sends whose "UPDATED" ack should be swallowed entirely
-    pausedRouting: null // stashed routing snapshot while paused, restored on resume
+    pausedRouting: null, // stashed routing snapshot while paused, restored on resume
+    pauseReason: null // null = manual pause/never paused; "rate-limit" = auto-paused after detecting a usage-cap reply
   };
 }
 resetHouseRule(null, "", 0);
+
+// --- On-disk debug log: a rolling file so a real crash still leaves
+// something to troubleshoot from, since the in-memory state.log ring buffer
+// (MAX_LOG entries) is lost the moment the process dies. Best-effort only —
+// any failure here (permissions, disk full) must never crash the app.
+let debugLogLineCount = 0;
+function appendDebugLog(entry) {
+  try {
+    fs.appendFileSync(debugLogPath(), JSON.stringify(entry) + "\n");
+    debugLogLineCount++;
+    if (debugLogLineCount > MAX_DEBUG_LOG_LINES * 1.2) trimDebugLog();
+  } catch {}
+}
+function trimDebugLog() {
+  try {
+    const lines = fs.readFileSync(debugLogPath(), "utf8").split("\n").filter(Boolean);
+    const kept = lines.slice(-MAX_DEBUG_LOG_LINES);
+    fs.writeFileSync(debugLogPath(), kept.join("\n") + "\n");
+    debugLogLineCount = kept.length;
+  } catch {}
+}
 
 function logEvent(kind, detail) {
   const entry = { ts: Date.now(), kind, detail };
   state.log.push(entry);
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
+  appendDebugLog(entry);
+}
+
+// --- Persistence: transcript, custom roles, and (if a House Rule run was in
+// progress) enough of its state to show the user where things left off. On
+// load, any restored run comes back PAUSED, never active — restarting the
+// app must never auto-send anything. Panes also always reload to their site's
+// home URL on startup (see createWindow()), so there's no stale "already
+// captured" reply sitting on screen to accidentally re-trigger the state
+// machine with — resume only reacts once a genuinely new reply appears.
+let saveStateTimer = null;
+function saveStateDebounced() {
+  clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(() => {
+    try {
+      const hr = state.hr;
+      const snapshot = {
+        schemaVersion: 1,
+        savedAt: Date.now(),
+        transcript: state.transcript,
+        customRole: state.customRole,
+        hr: hr && hr.mode ? {
+          mode: hr.mode,
+          topic: hr.topic,
+          rounds: hr.rounds,
+          roundNum: hr.roundNum,
+          order: hr.order,
+          phase: hr.phase,
+          lastSpeakerIndex: hr.lastSpeakerIndex,
+          roles: hr.roles
+        } : null
+      };
+      fs.writeFileSync(stateFilePath(), JSON.stringify(snapshot));
+    } catch (e) {
+      logEvent("persist-error", { error: String(e) });
+    }
+  }, SAVE_DEBOUNCE_MS);
+}
+
+function loadPersistedState() {
+  let raw;
+  try {
+    raw = fs.readFileSync(stateFilePath(), "utf8");
+  } catch {
+    return; // nothing saved yet — first run, or file was removed
+  }
+  let snap;
+  try {
+    snap = JSON.parse(raw);
+  } catch (e) {
+    logEvent("persist-error", { error: `corrupt state file: ${String(e)}` });
+    return;
+  }
+  if (Array.isArray(snap.transcript)) {
+    state.transcript = snap.transcript;
+    state.nextTurnId = snap.transcript.reduce((m, t) => Math.max(m, (t.id || 0) + 1), 1);
+  }
+  if (snap.customRole) {
+    for (const site of SITE_IDS) if (typeof snap.customRole[site] === "string") state.customRole[site] = snap.customRole[site];
+  }
+  if (snap.hr && snap.hr.mode) {
+    resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
+    state.hr.roundNum = snap.hr.roundNum || 0;
+    state.hr.order = Array.isArray(snap.hr.order) ? snap.hr.order : [];
+    state.hr.phase = snap.hr.phase || null;
+    state.hr.lastSpeakerIndex = typeof snap.hr.lastSpeakerIndex === "number" ? snap.hr.lastSpeakerIndex : -1;
+    state.hr.roles = snap.hr.roles || {};
+    state.hr.active = false;
+    state.hr.pausedRouting = {};
+    for (const s of SITE_IDS) state.hr.pausedRouting[s] = [];
+  }
+  logEvent("state-restored", { transcriptTurns: state.transcript.length, hrMode: state.hr.mode });
 }
 
 function broadcast(channel, payload) {
@@ -222,6 +358,7 @@ function globalSnapshot() {
     routing: routingSnapshot(),
     enabled: { ...state.enabled },
     waiting: { ...state.waiting },
+    waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
     customRole: { ...state.customRole }
   };
@@ -238,6 +375,7 @@ function houseRuleSnapshot() {
     mode: hr.mode,
     active: hr.active,
     paused: !hr.active && !!hr.pausedRouting,
+    pauseReason: hr.pauseReason || null,
     topic: hr.topic,
     rounds: hr.rounds,
     roundNum: hr.roundNum,
@@ -273,6 +411,7 @@ async function sendTextTo(target, text, fromSite) {
   } else {
     state.lastSentTo[target] = prompt;
     state.waiting[target] = true;
+    state.waitingSince[target] = Date.now();
     broadcast("sent", { target, from: fromSite || null, ts: Date.now() });
     broadcast("waiting-changed", { site: target, waiting: true });
     logEvent("sent", { target, from: fromSite || null });
@@ -593,6 +732,33 @@ async function pollSite(site) {
     const already = state.captured[site];
     if (already && already.text === text) return; // no new stable reply
 
+    // A rate-limit/usage-cap message isn't a real contribution — feeding it
+    // into the House Rule's state machine would relay "try again later" to
+    // the other AIs as if it were a genuine reply, cascading garbage through
+    // the whole run. Catch it first (ahead of the ignore/silentAck checks
+    // below) and auto-pause instead, regardless of what phase we were in.
+    if (state.hr.active && looksLikeRateLimit(text)) {
+      const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, isRateLimited: true };
+      state.captured[site] = turn;
+      state.transcript.push(turn);
+      broadcast("capture", turn);
+      logEvent("rate-limit-detected", { site, chars: text.length });
+      if (state.waiting[site]) {
+        state.waiting[site] = false;
+        state.waitingSince[site] = null;
+        broadcast("waiting-changed", { site, waiting: false });
+      }
+      state.hr.active = false;
+      state.hr.pauseReason = "rate-limit";
+      state.hr.pausedRouting = routingSnapshot();
+      for (const s of SITE_IDS) state.routing[s].clear();
+      state.meshActive = false;
+      logEvent("houserule-paused", { mode: state.hr.mode, reason: "rate-limit" });
+      broadcastHouseRule();
+      saveStateDebounced();
+      return;
+    }
+
     const ignoreCount = state.hr.active ? state.hr.ignoreCaptureFrom.get(site) || 0 : 0;
     const silentAckCount = state.hr.active ? state.hr.silentAckFrom.get(site) || 0 : 0;
 
@@ -607,6 +773,7 @@ async function pollSite(site) {
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
       if (state.waiting[site]) {
         state.waiting[site] = false;
+        state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
       logEvent(silentAckCount > 0 ? "update-ack" : "ignored-ack", { site, chars: text.length });
@@ -618,9 +785,11 @@ async function pollSite(site) {
     state.transcript.push(turn);
     broadcast("capture", turn);
     logEvent("captured", { site, chars: text.length });
+    saveStateDebounced();
 
     if (state.waiting[site]) {
       state.waiting[site] = false;
+      state.waitingSince[site] = null;
       broadcast("waiting-changed", { site, waiting: false });
     }
 
@@ -671,6 +840,7 @@ ipcMain.handle("send:regenerate", async (_evt, site) => {
     logEvent("send-error", { target: site, error: res?.error || "unknown", regenerate: true });
   } else {
     state.waiting[site] = true;
+    state.waitingSince[site] = Date.now();
     broadcast("waiting-changed", { site, waiting: true });
     logEvent("regenerate", { site });
   }
@@ -726,6 +896,7 @@ ipcMain.handle("roles:set", (_evt, { site, role }) => {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   state.customRole[site] = String(role || "").slice(0, 200);
   logEvent("role-changed", { site, role: state.customRole[site] || "(cleared)" });
+  saveStateDebounced();
   return { ok: true, global: globalSnapshot() };
 });
 
@@ -758,6 +929,7 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
     return { ok: false, error: String(e) };
   }
   broadcastHouseRule();
+  saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot() };
 });
 
@@ -769,25 +941,30 @@ ipcMain.handle("houserule:stop", () => {
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   state.hr.pausedRouting = null;
+  state.hr.pauseReason = null;
   logEvent("houserule-stop", { mode: state.hr.mode });
   broadcastHouseRule();
+  saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
 });
 
 ipcMain.handle("houserule:pause", () => {
   if (!state.hr.mode) return { ok: false, error: "NOT_RUNNING" };
   state.hr.active = false;
+  state.hr.pauseReason = null; // manual pause — distinct from an automatic rate-limit pause
   state.hr.pausedRouting = routingSnapshot();
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   logEvent("houserule-paused", { mode: state.hr.mode });
   broadcastHouseRule();
+  saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
 });
 
 ipcMain.handle("houserule:resume", () => {
   if (!state.hr.mode) return { ok: false, error: "NOTHING_TO_RESUME" };
   state.hr.active = true;
+  state.hr.pauseReason = null;
   if (state.hr.pausedRouting) {
     let any = false;
     for (const s of SITE_IDS) {
@@ -800,6 +977,7 @@ ipcMain.handle("houserule:resume", () => {
   }
   logEvent("houserule-resumed", { mode: state.hr.mode });
   broadcastHouseRule();
+  saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
 });
 
@@ -818,7 +996,7 @@ ipcMain.handle("state:get", () => ({
   log: state.log
 }));
 
-ipcMain.handle("transcript:clear", () => { state.transcript = []; return { ok: true }; });
+ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
 
 ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
   const turn = state.transcript.find((t) => t.id === id);
@@ -854,7 +1032,32 @@ ipcMain.handle("site:list", () => {
   return { ok: true, sites: out };
 });
 
+ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
+  const target = targetWindow(which);
+  const entry = windowCollapse[which];
+  if (!target || !entry) return { ok: false, error: "NO_WINDOW" };
+
+  if (!entry.collapsed) {
+    entry.savedBounds = target.getBounds();
+    entry.savedMinSize = typeof target.getMinimumSize === "function" ? target.getMinimumSize() : null;
+    if (typeof target.setMinimumSize === "function") target.setMinimumSize(200, COLLAPSED_HEIGHT);
+    target.setBounds({ x: entry.savedBounds.x, y: entry.savedBounds.y, width: entry.savedBounds.width, height: COLLAPSED_HEIGHT });
+    entry.collapsed = true;
+  } else {
+    if (entry.savedBounds) target.setBounds(entry.savedBounds);
+    if (entry.savedMinSize && typeof target.setMinimumSize === "function") target.setMinimumSize(entry.savedMinSize[0], entry.savedMinSize[1]);
+    entry.collapsed = false;
+    entry.savedBounds = null;
+    entry.savedMinSize = null;
+  }
+
+  logEvent("window-collapse-changed", { which, collapsed: entry.collapsed });
+  broadcast("window-collapse-changed", { which, collapsed: entry.collapsed });
+  return { ok: true, which, collapsed: entry.collapsed };
+});
+
 app.whenReady().then(() => {
+  loadPersistedState();
   createWindow();
   createConversationWindow();
 });
