@@ -81,20 +81,41 @@ function buildSendScript(site, text) {
       return { ok: false, error: "INJECT_FAILED" };
     }
 
-    function clickSendOrEnter() {
+    // Clicking a wrong or disabled button never throws -- it just silently
+    // does nothing, and the old version of this script reported that as a
+    // success. Every real chat UI clears its input box the instant a message
+    // is actually submitted (a local UI action, not waiting on the network),
+    // so checking for that is a reliable, site-agnostic way to tell a real
+    // send from a no-op click.
+    async function inputIsEmpty() {
+      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      if (!input) return true; // can't find it to check anymore -- don't block success on that
+      const remaining = (input.tagName === "TEXTAREA" ? input.value : input.textContent) || "";
+      return remaining.trim().length === 0;
+    }
+
+    async function confirmSent() {
+      await new Promise((r) => setTimeout(r, 500));
+      return inputIsEmpty();
+    }
+
+    async function attemptSend() {
       const btn = qsAllAny(CFG.SEND_CANDIDATES);
-      if (btn) { try { btn.click(); return { ok: true }; } catch {} }
+      if (btn) {
+        try { btn.click(); } catch {}
+        if (await confirmSent()) return { ok: true, method: "click" };
+      }
       const active = document.activeElement || document.body;
       try {
         active.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
-        return { ok: true };
       } catch {}
-      return { ok: false, error: "SEND_FAILED" };
+      if (await confirmSent()) return { ok: true, method: "enter" };
+      return { ok: false, error: "SEND_NOT_CONFIRMED" };
     }
 
     const inj = await injectText(CFG.text);
     if (!inj.ok) return inj;
-    return clickSendOrEnter();
+    return attemptSend();
   })();
   `;
 }
