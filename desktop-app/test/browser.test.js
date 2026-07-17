@@ -68,18 +68,40 @@ async function testClaudeReadMultiParagraph() {
 }
 
 async function testClaudeSendReal() {
-  console.log("\n== buildSendScript('claude') typing + send-click against a real Chromium DOM ==");
+  console.log("\n== buildSendScript('claude') typing + send-click against a real Chromium DOM (button actually submits) ==");
   await withFixture("claude-reply.html", async (page) => {
+    // Real chat UIs clear the input box the instant a message is actually
+    // submitted -- simulate that so this fixture behaves like the real site
+    // instead of a static page.
     await page.evaluate(() => {
       window.__clicked = false;
-      document.querySelector('button[aria-label="Send Message"]').addEventListener("click", () => { window.__clicked = true; });
+      const box = document.querySelector('div[contenteditable="true"]');
+      document.querySelector('button[aria-label="Send Message"]').addEventListener("click", () => {
+        window.__clicked = true;
+        box.textContent = "";
+      });
     });
     const res = await page.evaluate(buildSendScript("claude", "hello from AutoInjector"));
-    assert(res.ok, `send script reports ok (got: ${JSON.stringify(res)})`);
-    const boxText = await page.evaluate(() => document.querySelector('div[contenteditable="true"]').textContent);
-    assert(boxText === "hello from AutoInjector", `the contenteditable box actually contains the typed text (got: ${JSON.stringify(boxText)})`);
+    assert(res.ok === true, `send script reports ok when the button genuinely submits (got: ${JSON.stringify(res)})`);
     const clicked = await page.evaluate(() => window.__clicked);
     assert(clicked === true, "the real Send button's click handler actually fired");
+    const boxText = await page.evaluate(() => document.querySelector('div[contenteditable="true"]').textContent);
+    assert(boxText === "", "the input box is empty afterward, confirming a real submit (not just a no-op click)");
+  });
+}
+
+async function testClaudeSendNotConfirmedReal() {
+  console.log("\n== buildSendScript('claude') correctly reports failure when the click does nothing ==");
+  await withFixture("claude-reply.html", async (page) => {
+    // No click listener attached at all this time -- clicking "Send" is a
+    // real no-op, exactly like a stale/wrong SEND_CANDIDATES selector
+    // matching the wrong element. Before the send-confirmation fix, the
+    // script would have reported {ok:true} anyway since btn.click() itself
+    // never throws.
+    const res = await page.evaluate(buildSendScript("claude", "this should not silently succeed"));
+    assert(res.ok === false && res.error === "SEND_NOT_CONFIRMED", `send script correctly reports failure instead of a false success (got: ${JSON.stringify(res)})`);
+    const boxText = await page.evaluate(() => document.querySelector('div[contenteditable="true"]').textContent);
+    assert(boxText === "this should not silently succeed", "the typed text is still sitting in the box, visible proof nothing was actually sent");
   });
 }
 
@@ -87,6 +109,7 @@ async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
   await testClaudeSendReal();
+  await testClaudeSendNotConfirmedReal();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

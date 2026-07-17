@@ -277,9 +277,23 @@ async function syncPaneBounds() {
   for (const site of SITE_IDS) {
     const view = siteViews[site];
     if (!view || view.webContents.isDestroyed()) continue;
-    const r = rects && rects[site];
-    if (!state.enabled[site] || !r || r.width < 4 || r.height < 4) {
+    if (!state.enabled[site]) {
+      // Genuinely not participating -- fine to fully zero out, nothing
+      // should be getting sent to it anyway.
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+      continue;
+    }
+    const r = rects && rects[site];
+    if (!r || r.width < 4 || r.height < 4) {
+      // Still enabled and participating -- just its pane got collapsed (or
+      // this is a transient layout-measurement gap). Keep the view at a
+      // real, non-zero size but move it off-screen instead of shrinking it
+      // to 0x0: a genuinely zero-size WebContentsView risks Chromium
+      // treating it as occluded/hidden and throttling its renderer, which
+      // would silently break the automation (typing, reading replies) this
+      // whole app depends on -- exactly the kind of stall collapsing a pane
+      // should never cause.
+      view.setBounds({ x: -4000, y: 0, width: 800, height: 600 });
     } else {
       view.setBounds(r);
     }

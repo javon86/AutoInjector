@@ -125,17 +125,21 @@ losing anything — nothing closes or resets, it just gets small:
 - **Each AI's column** — click the **⌄** button in that column's header
   (next to 🔍 and ⟳) to collapse it to a thin strip; click it again (now **›**)
   to bring it back. This is purely visual — a collapsed AI is still enabled,
-  still participating in Auto/House Rules, still receiving and capturing
-  replies, it's just out of view. Independent per column — collapsing Claude's
-  doesn't touch ChatGPT's or Gemini's.
+  still participating in Auto/House Rules, still sending, receiving, and
+  capturing replies exactly as before, it's just out of view. Independent per
+  column — collapsing Claude's doesn't touch ChatGPT's or Gemini's.
 - **Each whole window** — both the Automation window and the Conversation
   window have their own **⌄** button in a thin titlebar at the very top.
   Clicking it shrinks that entire window down to just that titlebar (same
   screen position, just much shorter); clicking it again (now **›**) restores
-  it to exactly the size and position it had before. Since a collapsed
-  Automation window's panes are, by definition, too small to see, this also
-  automatically hides the live embedded browser views — nothing extra to
-  manage.
+  it to exactly the size and position it had before.
+
+Collapsed panes are moved off-screen rather than shrunk to nothing, on
+purpose: a zero-size browser view risks Chromium treating it as hidden and
+throttling it, which would quietly break the very automation collapsing is
+supposed to leave alone. Whether a column is collapsed individually or the
+whole Automation window is collapsed to its titlebar, every AI keeps sending
+and receiving in the background exactly the same as when fully visible.
 
 ## House Rules
 
@@ -278,6 +282,17 @@ DevTools on that exact pane, right-click the assistant's reply bubble → **Insp
 and send me the element's tag/class/attributes — that's what lets me fix the
 selector for real instead of guessing again.
 
+The same applies to the *sending* side: if messages seem to stop going out
+entirely, `automation.js` now actively checks that clicking Send (or pressing
+Enter) actually cleared the input box — every real chat UI does this the
+instant a message is genuinely submitted — instead of just trusting that the
+click didn't throw an error. A send that doesn't actually go through now
+reports `SEND_NOT_CONFIRMED` (visible as an error in the Activity Log and as
+a banner in the Conversation window) rather than silently pretending to
+succeed. If you see that error repeatedly for one AI, its `SEND_CANDIDATES`
+in `selectors.js` is likely stale — the same 🔍 Inspect flow works here too,
+just right-click that site's actual Send button instead of a reply bubble.
+
 ## How it's built
 
 - `main.js` — Electron main process. Creates two `BaseWindow`s: the Automation
@@ -309,7 +324,12 @@ selector for real instead of guessing again.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
-  Mirrors the selectors used by the browser extension's `content.js`/`selectors.js`.
+  The send script doesn't trust that clicking Send "worked" just because the
+  click didn't throw — it checks that the input box actually went empty
+  afterward (what every real chat UI does on a genuine submit), retrying via
+  Enter if a wrong/disabled button was clicked instead, and only reports
+  success once that's confirmed. Mirrors the selectors used by the browser
+  extension's `content.js`/`selectors.js`.
 - `controls.html` / `controls.js` — the Automation window's control panel UI.
 - `conversation.html` / `conversation.js` — the Conversation window's UI:
   renders the shared transcript, current/next speaker, Send/Start/Pause/
