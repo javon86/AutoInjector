@@ -26,7 +26,8 @@ function makeApi() {
     fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
     sendCompose: noop, sendForward: noop, regenerate: noop, setRouting: noop,
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
-    setParticipant: noop, startHouseRule: noop, stopHouseRule: noop,
+    setParticipant: noop, startHouseRule: noop,
+    stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: {}, waiting: {}, meshActive: false, customRole: {} } }; },
     pauseHouseRule: noop, resumeHouseRule: noop, wrapUpBrainstorm: noop,
     setRole: noop, clearTranscript: noop, togglePin: noop, reloadSite: noop,
     inspectSite: noop,
@@ -47,10 +48,11 @@ function makeApi() {
   return api;
 }
 
-async function loadWindow(api) {
+async function loadWindow(api, { confirmReturns = true } = {}) {
   const html = fs.readFileSync(path.join(__dirname, "..", "controls.html"), "utf8");
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/controls.html" });
   dom.window.api = api;
+  dom.window.confirm = () => confirmReturns;
   // controls.js uses navigator.clipboard, which jsdom doesn't implement — stub
   // it so loading the script doesn't throw when it wires up the Copy button.
   Object.defineProperty(dom.window.navigator, "clipboard", { value: { writeText: async () => {} }, configurable: true });
@@ -107,9 +109,25 @@ async function testWindowTitlebarCollapse() {
   assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "expanding again shows the body");
 }
 
+async function testHouseRuleStopConfirmation() {
+  console.log("\n== House Rules Stop asks for confirmation before ending the run ==");
+  const apiCancel = makeApi();
+  const domCancel = await loadWindow(apiCancel, { confirmReturns: false });
+  click(domCancel, "btn-hr-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!apiCancel.calls.some((c) => c.fn === "stopHouseRule"), "declining the confirm() dialog does NOT call stopHouseRule");
+
+  const apiConfirm = makeApi();
+  const domConfirm = await loadWindow(apiConfirm, { confirmReturns: true });
+  click(domConfirm, "btn-hr-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(apiConfirm.calls.some((c) => c.fn === "stopHouseRule"), "accepting the confirm() dialog does call stopHouseRule");
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testWindowTitlebarCollapse();
+  await testHouseRuleStopConfirmation();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

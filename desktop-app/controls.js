@@ -445,6 +445,7 @@ el("btn-hr-start").onclick = async () => {
   }
 };
 el("btn-hr-stop").onclick = async () => {
+  if (!window.confirm("This will end the House Rules run. You'll need to Start again to resume it. Continue?")) return;
   const res = await window.api.stopHouseRule();
   if (res?.ok) {
     applyHouseRule(res.houseRule);

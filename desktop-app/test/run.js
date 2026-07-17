@@ -4,6 +4,7 @@
 // logic for real; does not (and cannot, without a browser) test the DOM
 // automation itself. Run with: node test/run.js
 const path = require("path");
+const fs = require("fs");
 const Module = require("module");
 
 const mockElectronPath = path.join(__dirname, "mock-electron.js");
@@ -372,9 +373,75 @@ async function testWindowCollapse() {
   assert(convWin.getMinimumSize()[1] === 500, "its minHeight constraint is restored too, not left at 44 permanently");
 }
 
+async function testRateLimitAutoPause() {
+  console.log("\n== Rate-limit detection: auto-pauses instead of cascading a usage-cap message ==");
+  await resetAllParticipants();
+  await call("houserule:start", { mode: "rotation", topic: "Let's talk about renewable energy", rounds: 0 });
+  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "kickoff sent" });
+
+  say("chatgpt", "You've reached your usage limit for GPT-4. Try again later or upgrade your plan.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.active === false, { label: "run auto-pauses on a rate-limit-looking reply" });
+
+  const state1 = await call("state:get", {});
+  assert(state1.houseRule.paused === true, "run is marked paused (not stopped) so Resume is available once the limit clears");
+  assert(state1.houseRule.pauseReason === "rate-limit", "pauseReason explains why it paused automatically");
+  assert(sentLog("claude").length === 0 && sentLog("gemini").length === 0, "the rate-limit message was NOT relayed to the other AIs as if it were a real reply");
+  const turn = state1.transcript.find((t) => t.site === "chatgpt");
+  assert(!!turn && turn.isRateLimited === true, "the turn is still visible in the transcript, marked isRateLimited, so the user can see what actually happened");
+
+  await call("houserule:stop", {});
+}
+
+async function testWaitingSinceTracking() {
+  console.log("\n== waitingSince: tracks when a send started waiting, clears once captured ==");
+  await resetAllParticipants();
+  await call("send:compose", { text: "Quick question", targets: ["chatgpt"] });
+  let g = (await call("state:get", {})).global;
+  assert(typeof g.waitingSince.chatgpt === "number" && g.waitingSince.chatgpt > 0, "waitingSince is set to a timestamp once a send goes out");
+
+  say("chatgpt", "Quick answer.");
+  await waitUntil(async () => !(await call("state:get", {})).global.waiting.chatgpt, { label: "waiting clears once the reply is captured" });
+  g = (await call("state:get", {})).global;
+  assert(g.waitingSince.chatgpt === null, "waitingSince is cleared back to null once the reply lands, not left stale");
+}
+
+async function testPersistenceSavesToDisk() {
+  console.log("\n== Persistence: role/state changes get written to disk (debounced) ==");
+  await resetAllParticipants();
+  await call("roles:set", { site: "gemini", role: "Fact-checker" });
+  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
+  const saved = JSON.parse(raw);
+  assert(saved.customRole && saved.customRole.gemini === "Fact-checker", "the file on disk reflects the new role");
+  await call("roles:set", { site: "gemini", role: "" }); // leave roles clean for later tests
+  await new Promise((r) => setTimeout(r, 700));
+}
+
 async function main() {
+  // Seed a plausible saved-state file BEFORE main.js is first required, so its
+  // startup loadPersistedState() call actually has something to restore —
+  // this has to happen here (not as a normal test-after-require scenario)
+  // since main.js's app.whenReady() handler only fires once per process.
+  const seedFile = path.join(mockElectron.__userDataDir, "autoinjector-state.json");
+  fs.writeFileSync(seedFile, JSON.stringify({
+    schemaVersion: 1,
+    savedAt: Date.now(),
+    transcript: [{ id: 1, site: "chatgpt", label: "ChatGPT", text: "Restored opening message", ts: Date.now() - 10000, pinned: false }],
+    customRole: { chatgpt: "", claude: "Skeptical Engineer", gemini: "" },
+    hr: { mode: "rotation", topic: "Restored topic", rounds: 0, roundNum: 2, order: ["chatgpt", "claude", "gemini"], phase: "rotating", lastSpeakerIndex: 0, roles: {} }
+  }));
+
   require(path.join(__dirname, "..", "main.js"));
   await new Promise((r) => setTimeout(r, 100)); // let app.whenReady().then(createWindow) settle
+
+  console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
+  const restored = await call("state:get", {});
+  assert(restored.transcript.length === 1 && restored.transcript[0].text === "Restored opening message", "transcript restored from disk on startup");
+  assert(restored.global.customRole.claude === "Skeptical Engineer", "custom roles restored from disk");
+  assert(restored.houseRule.mode === "rotation" && restored.houseRule.topic === "Restored topic", "House Rule mode/topic restored");
+  assert(restored.houseRule.active === false, "restored run comes back NOT active — a restart must never auto-send anything");
+  assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
+  assert(restored.houseRule.nextSpeaker === "claude", "nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex");
 
   await testDebate();
   await testDevilAngel();
@@ -386,6 +453,9 @@ async function main() {
   await testPauseResume();
   await testRoleInjection();
   await testWindowCollapse();
+  await testRateLimitAutoPause();
+  await testWaitingSinceTracking();
+  await testPersistenceSavesToDisk();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

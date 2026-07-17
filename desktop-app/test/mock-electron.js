@@ -8,6 +8,14 @@
 // can't unit-test without an actual browser; everything on the Node side of that
 // boundary — who gets sent what, in what order, with what role/label — is real.
 const { EventEmitter } = require("events");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+// A fresh, isolated temp dir per test process — mirrors what app.getPath("userData")
+// gives a real Electron app, so persistence/debug-log code paths exercise real
+// file IO instead of being mocked away entirely.
+const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "autoinjector-test-"));
 
 const ipcHandlers = {};
 const ipcMain = {
@@ -85,7 +93,8 @@ class BaseWindow {
 
 const app = {
   whenReady: () => Promise.resolve(),
+  getPath: () => userDataDir,
   on() {}
 };
 
-module.exports = { app, BaseWindow, WebContentsView, ipcMain, __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry };
+module.exports = { app, BaseWindow, WebContentsView, ipcMain, __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir };

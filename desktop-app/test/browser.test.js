@@ -9,10 +9,24 @@
 // browser would, closest to what Electron's WebContentsView would do.
 // Run with: node test/browser.test.js
 const path = require("path");
+const fs = require("fs");
 const { chromium } = require("playwright");
 const { buildSendScript, buildReadScript } = require("../automation");
 
-const CHROMIUM_PATH = "/opt/pw-browsers/chromium";
+// Playwright's own auto-detected browser (e.g. what `npx playwright install`
+// puts in ~/.cache/ms-playwright on a normal machine or CI runner) is tried
+// first. This specific sandbox pre-caches Chromium at a fixed, non-standard
+// path instead (see the environment notes on PLAYWRIGHT_BROWSERS_PATH) and
+// ships a Playwright version that doesn't match what's cached there, so
+// auto-detection fails here specifically — fall back to that known path only
+// when it actually exists, rather than hardcoding it as the primary path.
+const SANDBOX_CHROMIUM_PATH = "/opt/pw-browsers/chromium";
+function resolveExecutablePath() {
+  try {
+    if (fs.existsSync(SANDBOX_CHROMIUM_PATH)) return SANDBOX_CHROMIUM_PATH;
+  } catch {}
+  return undefined; // let Playwright auto-detect its own installed browser
+}
 
 let passed = 0;
 let failed = 0;
@@ -23,7 +37,8 @@ function assert(cond, msg) {
 }
 
 async function withFixture(file, fn) {
-  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH });
+  const executablePath = resolveExecutablePath();
+  const browser = await chromium.launch(executablePath ? { executablePath } : {});
   try {
     const page = await browser.newPage();
     await page.goto(`file://${path.join(__dirname, "fixtures", file)}`);

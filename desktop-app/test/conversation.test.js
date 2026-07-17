@@ -25,11 +25,15 @@ function makeApi() {
   let captureCb = null;
   let houseRuleCb = null;
   let windowCollapseCb = null;
+  let waitingChangedCb = null;
+  let sendErrorCb = null;
   const api = {
     calls,
     fireCapture: (turn) => captureCb && captureCb(turn),
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
     fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
+    fireWaitingChanged: (payload) => waitingChangedCb && waitingChangedCb(payload),
+    fireSendError: (payload) => sendErrorCb && sendErrorCb(payload),
     getState: async () => api.__state,
     sendCompose: async (text, targets) => { calls.push({ fn: "sendCompose", text, targets }); return { ok: true }; },
     startHouseRule: async (mode, topic, rounds) => {
@@ -43,16 +47,20 @@ function makeApi() {
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
     onCapture: (cb) => { captureCb = cb; },
     onHouseRuleState: (cb) => { houseRuleCb = cb; },
-    onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; }
+    onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
+    onWaitingChanged: (cb) => { waitingChangedCb = cb; },
+    onSendError: (cb) => { sendErrorCb = cb; }
   };
-  api.__state = { ok: true, transcript: [], houseRule: { mode: null, active: false, paused: false, topic: "", roundNum: 0, nextSpeaker: null }, global: { customRole: {} } };
+  api.__state = { ok: true, transcript: [], houseRule: { mode: null, active: false, paused: false, topic: "", roundNum: 0, nextSpeaker: null }, global: { customRole: {}, waiting: {} } };
   return api;
 }
 
-async function loadWindow(api) {
+async function loadWindow(api, { confirmReturns = true } = {}) {
   const html = fs.readFileSync(path.join(__dirname, "..", "conversation.html"), "utf8");
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/conversation.html" });
   dom.window.api = api;
+  dom.window.confirm = () => confirmReturns;
+  Object.defineProperty(dom.window.navigator, "clipboard", { value: { writeText: async (text) => { dom.window.__clipboardText = text; } }, configurable: true });
   const script = fs.readFileSync(path.join(__dirname, "..", "conversation.js"), "utf8");
   dom.window.eval(script);
   // hydrate() is fired at the bottom of conversation.js and is async — let it settle.
@@ -184,6 +192,145 @@ async function testWindowCollapseToggle() {
   assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "expanding again shows the body");
 }
 
+async function testSendErrorBanner() {
+  console.log("\n== send-error shows a clean, generic banner — never the raw internal error ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireSendError({ target: "claude", error: "SELECTOR_NOT_FOUND: div.font-claude-response-body missing from DOM" });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const banner = dom.window.document.getElementById("banner");
+  assert(banner.classList.contains("show") && banner.classList.contains("error"), "banner becomes visible, styled as an error");
+  assert(banner.textContent.includes("Claude"), "banner names the AI that had trouble");
+  assert(!banner.textContent.includes("SELECTOR_NOT_FOUND") && !banner.textContent.includes("font-claude-response-body"), "the raw internal error string never appears in the banner");
+
+  dom.window.document.getElementById("btn-banner-dismiss").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!banner.classList.contains("show"), "Dismiss hides the banner");
+}
+
+async function testRateLimitBanner() {
+  console.log("\n== Rate-limit auto-pause shows/clears a distinct banner, tied to houseRule.pauseReason ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireHouseRuleState({ mode: "rotation", active: false, paused: true, pauseReason: "rate-limit", topic: "t", roundNum: 1, nextSpeaker: "claude" });
+  await new Promise((r) => setTimeout(r, 20));
+  const banner = dom.window.document.getElementById("banner");
+  assert(banner.classList.contains("show") && banner.classList.contains("warn"), "a rate-limit pause shows a warning banner");
+  assert(dom.window.document.getElementById("run-status").textContent.includes("usage limit"), "status line also mentions the usage limit");
+
+  api.fireHouseRuleState({ mode: "rotation", active: true, paused: false, pauseReason: null, topic: "t", roundNum: 1, nextSpeaker: "gemini" });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!banner.classList.contains("show"), "banner clears automatically once the run resumes (pauseReason back to null)");
+}
+
+async function testRateLimitedTurnStyling() {
+  console.log("\n== A turn marked isRateLimited renders with a distinct badge ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "You've reached your usage limit.", isRateLimited: true });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const turn = dom.window.document.querySelector("#transcript .turn");
+  assert(turn.classList.contains("rate-limited"), "the turn element gets the rate-limited class");
+  assert(turn.textContent.includes("USAGE LIMIT"), "a visible badge explains why, right in the transcript");
+}
+
+async function testGeneratingPulse() {
+  console.log("\n== onWaitingChanged drives the 'generating' pulse on a speaker chip ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireWaitingChanged({ site: "gemini", waiting: true });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(dom.window.document.querySelector('.speaker-chip[data-site="gemini"]').classList.contains("generating"), "chip gets the 'generating' class while waiting on that AI");
+
+  api.fireWaitingChanged({ site: "gemini", waiting: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!dom.window.document.querySelector('.speaker-chip[data-site="gemini"]').classList.contains("generating"), "class clears once the reply lands");
+}
+
+async function testStructuralRoleTags() {
+  console.log("\n== Structural House Rule roles (Devil/Angel/etc.) show on the speaker chips ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireHouseRuleState({ mode: "devil-angel", active: true, paused: false, topic: "t", roundNum: 0, nextSpeaker: null, roles: { chatgpt: "middle", claude: "devil", gemini: "angel" } });
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(dom.window.document.querySelector('.speaker-chip[data-site="chatgpt"] .role-tag').textContent === "MIDDLE", "chatgpt's structural role (Middle) shows on its chip");
+  assert(dom.window.document.querySelector('.speaker-chip[data-site="claude"] .role-tag').textContent === "DEVIL", "claude's structural role (Devil) shows too");
+}
+
+async function testStopConfirmation() {
+  console.log("\n== Stop asks for confirmation before actually ending the run ==");
+  const apiCancel = makeApi();
+  const domCancel = await loadWindow(apiCancel, { confirmReturns: false });
+  click(domCancel, "btn-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!apiCancel.calls.some((c) => c.fn === "stopHouseRule"), "declining the confirm() dialog does NOT call stopHouseRule");
+
+  const apiConfirm = makeApi();
+  const domConfirm = await loadWindow(apiConfirm, { confirmReturns: true });
+  click(domConfirm, "btn-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(apiConfirm.calls.some((c) => c.fn === "stopHouseRule"), "accepting the confirm() dialog does call stopHouseRule");
+}
+
+async function testEnterToSend() {
+  console.log("\n== Enter sends; Shift+Enter does not ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  setMsg(dom, "hello via enter key");
+  const box = dom.window.document.getElementById("msg-box");
+  box.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", shiftKey: false, bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "startHouseRule" && c.topic === "hello via enter key"), "plain Enter triggers Send");
+
+  const api2 = makeApi();
+  const dom2 = await loadWindow(api2);
+  setMsg(dom2, "hello via shift enter");
+  const box2 = dom2.window.document.getElementById("msg-box");
+  box2.dispatchEvent(new dom2.window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api2.calls.length === 0, "Shift+Enter does NOT send (leaves room for a newline instead)");
+}
+
+async function testExport() {
+  console.log("\n== Copy/Download export the visible conversation ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "Exported reply text." });
+  await new Promise((r) => setTimeout(r, 20));
+
+  click(dom, "btn-copy");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(typeof dom.window.__clipboardText === "string" && dom.window.__clipboardText.includes("Exported reply text."), "Copy puts the real transcript text on the clipboard");
+  assert(dom.window.__clipboardText.includes("ChatGPT"), "export includes the speaker's name");
+}
+
+async function testTitleFlashOnLiveReply() {
+  console.log("\n== Title flashes on a live reply when the window isn't focused (jsdom defaults to unfocused) ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  const before = dom.window.document.title;
+  assert(!before.includes("🔔"), "title starts clean");
+
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "New reply while you're away." });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(dom.window.document.title.includes("🔔"), "title flashes to flag a new reply arrived");
+
+  dom.window.dispatchEvent(new dom.window.Event("focus"));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!dom.window.document.title.includes("🔔"), "title resets back to normal once the window regains focus");
+}
+
 async function main() {
   await testAutoStartOnFirstSend();
   await testSendInterjectsOnceRunning();
@@ -191,6 +338,15 @@ async function main() {
   await testSpeakerChipsAndButtons();
   await testRoleAssignment();
   await testWindowCollapseToggle();
+  await testSendErrorBanner();
+  await testRateLimitBanner();
+  await testRateLimitedTurnStyling();
+  await testGeneratingPulse();
+  await testStructuralRoleTags();
+  await testStopConfirmation();
+  await testEnterToSend();
+  await testExport();
+  await testTitleFlashOnLiveReply();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

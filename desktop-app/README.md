@@ -205,18 +205,56 @@ in on the Automation side. It shows only the natural conversation:
 - **Pause** / **Resume** — halts the rotation's message flow without losing
   its place (mode, round count, whose turn is next are all preserved); Resume
   picks back up exactly where it left off.
-- **Stop** — ends the run for good; starting again means a fresh Start.
+- **Stop** — ends the run for good (asks you to confirm first, since unlike
+  Pause there's no undo); starting again means a fresh Start.
+- Press **Enter** in the message box to send; **Shift+Enter** for a newline.
 - **Role Assignment** *(optional, collapsed by default)* — give each AI its
   own persona for this conversation (e.g. Project manager, Critic,
   Fact-checker, Financial analyst) by typing a role and clicking Apply, or
   Clear to send it back to general-purpose. This only shapes *what* each AI
   contributes — it has no effect on *when* they speak, which is entirely
-  driven by the Rotation order above.
+  driven by the Rotation order above. Structural roles from other House Rules
+  formats (Devil/Angel/Referee/etc., if you started one from the Automation
+  side) show up as a small badge on the relevant speaker chip too.
+- **Copy** / **Download** at the top export the visible conversation, same
+  idea as the Automation window's transcript export.
+
+**If something goes wrong**, a banner appears right under the topic line
+instead of the conversation just silently stalling:
+- A send/read problem on one AI shows a short, generic notice (which AI, and
+  to check the Automation window's Activity Log) — never the raw internal
+  error text.
+- If an AI hasn't replied in a few minutes, a "may be stuck" warning appears
+  — worth checking the Automation window, or trying Pause then Resume.
+- If a reply looks like a rate-limit/usage-cap message (short text matching
+  phrases like "usage limit" or "try again later"), the run **auto-pauses**
+  instead of relaying that message to the other AIs as if it were a real
+  reply — the turn still shows up in the transcript (marked ⚠ USAGE LIMIT) so
+  you can see what happened, and Resume once the limit clears.
 
 The Automation window's panes and control panel keep working normally
 alongside this — you can still sign in, reload a stuck pane, or watch the
 Activity log there. Both windows share the same live state, so a reply
-captured on one side shows up on the other instantly.
+captured on one side shows up on the other instantly. If the Conversation
+window isn't focused (or is collapsed) when a new reply lands, it also plays
+a soft chime and flashes the window title until you switch back to it.
+
+### Picking up where you left off
+
+Your transcript, any custom Role Assignments, and an in-progress House Rules
+run (if one was going) are saved to disk automatically as you go, and
+restored the next time you open the app. A restored run always comes back
+**paused**, never active — the app will never auto-send anything just because
+you relaunched it; you decide when to hit Resume. This is separate from
+signing in — each site's own login session is already remembered by the
+browser pane itself (see above), independent of this.
+
+The saved file lives at:
+- **Windows**: `%APPDATA%\autoinjector-desktop\autoinjector-state.json`
+- **macOS**: `~/Library/Application Support/autoinjector-desktop/autoinjector-state.json`
+- **Linux**: `~/.config/autoinjector-desktop/autoinjector-state.json`
+
+Delete that file (app closed) if you ever want a completely clean slate.
 
 ### Troubleshooting
 
@@ -224,6 +262,13 @@ The **Activity / Troubleshooting** panel next to the transcript logs every
 internal action live — polls that captured a new reply, sends, forwards, errors,
 routing/participant changes — each with a timestamp, so if something isn't
 working you can see exactly where it's getting stuck instead of guessing.
+
+That panel only shows the current session, though — if the app crashes or you
+close it before catching the problem, that log is gone. A rolling copy is
+also written to disk (capped at ~2000 lines) right next to the state file
+above, as `autoinjector-debug.log`. If something breaks and you want help
+tracking it down, that file plus a description of what you were doing is the
+most useful thing you can send.
 
 If a specific AI's card never shows a captured reply even though its pane clearly
 has one on screen, that means the DOM selector for reading its messages
@@ -252,7 +297,15 @@ selector for real instead of guessing again.
   events — each one reacts to a new reply by deciding who gets sent what next.
   Captures can also be swallowed *silently* (never reaching the transcript or
   either window) — used for Chargeback's Referee acknowledgments and
-  Rotation's "UPDATED" confirmations.
+  Rotation's "UPDATED" confirmations. A short list of rate-limit/usage-cap
+  phrases is checked against every new reply while a House Rules run is
+  active — a match auto-pauses the run instead of relaying it as a real
+  contribution. Transcript, custom roles, and paused-run state are written to
+  a debounced JSON snapshot in `app.getPath("userData")` on every meaningful
+  change and reloaded on startup (always as **paused**, never active — a
+  restart must never auto-send). `logEvent()` also appends every internal
+  event to a capped, rolling debug log file in the same folder, so a real
+  crash still leaves something to troubleshoot from.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
@@ -303,8 +356,23 @@ conversation. Fixed and now covered by a regression test.
 
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
 to `controls.html`/`controls.js` — currently focused on the collapse feature
-(each AI column's own toggle, the Automation window's titlebar toggle, and
-that a collapse event for the *other* window is correctly ignored).
+(each AI column's own toggle, the Automation window's titlebar toggle, that a
+collapse event for the *other* window is correctly ignored) and the Stop
+confirmation prompt.
+
+Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
+copies of the selector config — `desktop-app/selectors.js` (CommonJS) and
+`AutoInjector/extension/selectors.js` (loaded via Node's `vm` module with a
+fake `window`, since it's written for a browser content script) — and diffs
+every `INPUT_CANDIDATES`/`SEND_CANDIDATES`/`ASSISTANT_CANDIDATES` array
+between them per site. The two files are hand-maintained copies of the same
+information; nothing else catches it if one gets updated and the other
+doesn't.
+
+Every one of these runs automatically on push/PR via GitHub Actions
+(`.github/workflows/desktop-app-tests.yml`) — a real CI runner (unlike this
+dev environment) also has clean network access, so a second job in that
+workflow installs Playwright fresh and runs `test:browser` (below) too.
 
 ### Optional: real-browser selector tests
 
@@ -369,3 +437,13 @@ on the target OS itself is the most reliable option.
 I wired up the config but haven't produced/tested an actual build here (this
 dev environment can't download the Electron binaries needed to build) — if
 `npm run dist` errors out for you, send me the output and I'll fix the config.
+
+## A note on the Electron version
+
+`package.json` pins Electron to `~43.0.0` (patch-level updates only, not
+minor/major) rather than the usual `^43.0.0` caret range. `BaseWindow` /
+`WebContentsView` — the multi-window architecture this app is built on — is
+a newer part of Electron's API surface than the older `BrowserWindow`/
+`BrowserView` pattern, so it's worth being deliberate about which minor
+version this has actually been built and tested against instead of silently
+picking up whatever's newest at install time.

@@ -1,0 +1,52 @@
+name: Desktop app tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop-app/**"
+      - "AutoInjector/extension/selectors.js"
+      - ".github/workflows/desktop-app-tests.yml"
+  pull_request:
+    paths:
+      - "desktop-app/**"
+      - "AutoInjector/extension/selectors.js"
+      - ".github/workflows/desktop-app-tests.yml"
+
+jobs:
+  test:
+    name: Mocked + jsdom suites
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-app/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  browser-test:
+    name: Real-Chromium selector tests (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-app/package-lock.json
+      - run: npm ci
+      # Playwright is deliberately not a devDependency (see README) so a
+      # regular `npm install` never triggers this download for end users —
+      # CI installs it explicitly, on a runner with real network access.
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
