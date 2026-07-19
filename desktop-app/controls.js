@@ -111,7 +111,7 @@ function buildAiColumn(site) {
   strip.appendChild(preview);
 
   const fwdRow = document.createElement("div");
-  fwdRow.className = "btns";
+  fwdRow.className = "btns fwd-row";
   fwdRow.style.marginTop = "5px";
   fwdRow.innerHTML = `<span class="row-label">Forward:</span>`;
   for (const target of otherSites(site)) {
@@ -143,7 +143,7 @@ function buildAiColumn(site) {
   strip.appendChild(fwdRow);
 
   const autoRow = document.createElement("div");
-  autoRow.className = "btns";
+  autoRow.className = "btns auto-row";
   autoRow.innerHTML = `<span class="row-label">Auto:</span>`;
   for (const target of otherSites(site)) {
     const btn = document.createElement("button");
@@ -191,6 +191,16 @@ function toggleColumnCollapse(site) {
     btn.textContent = collapsed ? "›" : "⌄";
     btn.title = collapsed ? "Expand this pane" : "Collapse this pane";
   }
+  updateAllCollapsedState();
+}
+
+// When every AI pane is collapsed there's nothing left to look at up top —
+// shrink the AI row down to just the collapsed titlebars and let the
+// Transcript/Activity Log panel below grow to fill the freed space, instead
+// of leaving it stuck at a fixed height.
+function updateAllCollapsedState() {
+  const allCollapsed = SITES.every((site) => el(`col-${site}`)?.classList.contains("collapsed"));
+  el("wrap").classList.toggle("all-collapsed", allCollapsed);
 }
 
 function applyRouting(next) {
@@ -234,6 +244,13 @@ function applyHouseRule(hr) {
     const badge = el(`role-badge-${site}`);
     if (badge) badge.textContent = hr.roles && hr.roles[site] ? hr.roles[site].toUpperCase() : "";
   }
+  // Once a House Rules format has been picked, its own state machine (or,
+  // for Roundtable v2, each AI's own [TO: X] tag) is what decides who gets
+  // sent what — the manual per-pane Forward/Auto buttons would just fight
+  // it, so hide them for as long as a format is in play (mode stays set
+  // through "finished" and Stop; a fresh Start with a different format is
+  // what changes it).
+  el("ai-row").classList.toggle("hr-active", !!hr.mode);
   if (hr.mode) {
     const label = HOUSE_RULE_LABELS[hr.mode] || hr.mode;
     const roundText = hr.rounds ? `round ${hr.roundNum}/${hr.rounds}` : `round ${hr.roundNum}`;
@@ -496,6 +513,7 @@ el("btn-clear").onclick = async () => {
 (async () => {
   buildComposerButtons();
   buildAiRow();
+  updateAllCollapsedState();
   updateCharCount();
   await refreshSites();
   setInterval(refreshSites, 4000);

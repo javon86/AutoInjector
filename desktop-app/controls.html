@@ -31,7 +31,16 @@
     .role-badge:empty { display:none; }
 
     /* ---- merged AI columns: control strip + a native-view slot, stacked ---- */
-    #ai-row { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
+    #ai-row { display:flex; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
+    /* Once a House Rules format is in play (Roundtable v2's [TO: X] tags or
+       any other format's own state machine), routing happens automatically —
+       the manual per-pane Forward/Auto buttons would just fight it. */
+    #ai-row.hr-active .fwd-row, #ai-row.hr-active .auto-row { display:none; }
+    /* All three AI panes collapsed = nothing left to look at up there — give
+       that space to the Transcript/Activity Log panel instead of leaving it
+       empty at a fixed height. */
+    #wrap.all-collapsed #ai-row { flex: 0 0 140px; }
+    #wrap.all-collapsed #main-row { flex: 1 1 auto; }
     .ai-col {
       flex:1 1 0; min-width:0; display:flex; flex-direction:column;
       background:#171717; border:1px solid #2a2a2a; border-radius:8px; overflow:hidden;
@@ -72,7 +81,7 @@
     .pane-slot { flex:1 1 auto; min-height:140px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
-    #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; }
+    #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
     #col-transcript { flex:2 1 0; min-width:0; }
     #col-log { flex:1 1 0; min-width:0; }
     #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:10.5px; line-height:1.5; }

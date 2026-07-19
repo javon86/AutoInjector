@@ -21,11 +21,13 @@ function makeApi() {
   const calls = [];
   let windowCollapseCb = null;
   let captureCb = null;
+  let houseRuleCb = null;
   const noop = async () => ({ ok: true });
   const api = {
     calls,
     fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
     fireCapture: (turn) => captureCb && captureCb(turn),
+    fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
     sendCompose: noop, sendForward: noop, regenerate: noop, setRouting: noop,
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
     setParticipant: noop,
@@ -45,7 +47,7 @@ function makeApi() {
       log: []
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
-    onHouseRuleState: () => {}, onLog: () => {},
+    onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: () => {},
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; }
   };
   return api;
@@ -159,12 +161,51 @@ async function testRoundtableBadgeParity() {
   if (badge) assert(badge.textContent === "→ Claude", `badge text is correct (got "${badge.textContent}")`);
 }
 
+async function testHouseRuleModeHidesManualControls() {
+  console.log("\n== Manual Forward/Auto buttons hide once a House Rules format is in play ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  const aiRow = dom.window.document.getElementById("ai-row");
+  assert(!aiRow.classList.contains("hr-active"), "no House Rule ever run yet — manual controls stay visible");
+
+  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, topic: "x", rounds: 24, roundNum: 1, roles: {}, nextSpeaker: null, phase: "active", ackPending: [] });
+  assert(aiRow.classList.contains("hr-active"), "starting Roundtable v2 hides the manual Forward/Auto rows");
+
+  api.fireHouseRuleState({ mode: "roundtable", active: false, paused: false, topic: "x", rounds: 24, roundNum: 24, roles: {}, nextSpeaker: null, phase: "active", ackPending: [] });
+  assert(aiRow.classList.contains("hr-active"), "still hidden once the run finishes (hop limit reached) — mode is still 'roundtable', just not active");
+
+  api.fireHouseRuleState({ mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null });
+  assert(!aiRow.classList.contains("hr-active"), "mode reset back to null (e.g. after Stop clears it) shows the manual controls again");
+}
+
+async function testAllPanesCollapsedExpandsTranscript() {
+  console.log("\n== Collapsing every AI pane hands its space to the Transcript/Log panel ==");
+  const dom = await loadWindow(makeApi());
+  const wrap = dom.window.document.getElementById("wrap");
+
+  const collapseBtn = (site) => dom.window.document.getElementById(`col-${site}`).querySelector(".collapse-btn");
+  assert(!wrap.classList.contains("all-collapsed"), "starts expanded — no extra space handed over yet");
+
+  collapseBtn("claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!wrap.classList.contains("all-collapsed"), "only one of three collapsed — not enough to hand over space yet");
+
+  collapseBtn("chatgpt").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  collapseBtn("gemini").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(wrap.classList.contains("all-collapsed"), "all three collapsed — Transcript/Log panel grows into the freed space");
+
+  collapseBtn("claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!wrap.classList.contains("all-collapsed"), "expanding just one pane again gives the space back");
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testWindowTitlebarCollapse();
   await testHouseRuleStopConfirmation();
   await testRoundtableDropdownOption();
   await testRoundtableBadgeParity();
+  await testHouseRuleModeHidesManualControls();
+  await testAllPanesCollapsedExpandsTranscript();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
