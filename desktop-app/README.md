@@ -118,17 +118,22 @@ last captured reply) stays visible and usable.
      they come back once you pick a different format or the run's `mode`
      resets.
 6. **Prompt Library**: saved, reusable prompts you can fire off with one
-   click, without retyping them or going through House Rules. Each saved
-   prompt has its own text box *per AI* — ChatGPT, Claude, and Gemini can each
-   get different wording in the same **Send**, and leaving a box blank skips
-   that AI entirely. **+ New Prompt** adds a blank one to edit; **Save** keeps
-   your edits, **Delete** removes it. A built-in **System Test** prompt ships
-   by default — a one-click sanity check that tells all three AIs this is a
-   diagnostic (not a real task) and asks them to confirm they received it and
-   report whether messages from the other two are actually arriving, so you
-   can confirm the whole pipeline works without running a full session first.
-   The panel has its own collapse button (**⌄** in its header) if you'd rather
-   keep it out of the way. Saved prompts persist across restarts, same as the
+   click, without retyping them or going through House Rules. It's a compact
+   dropdown (pick a saved prompt by name) plus **Send** / **+ New** / **Edit**
+   / **Delete** — no big text boxes cluttering the main window. **+ New** and
+   **Edit** open a small separate popup window with the actual editing
+   surface: a name field, one text box *per AI* (ChatGPT, Claude, and Gemini
+   can each get different wording — leaving a box blank skips that AI
+   entirely on Send), and a **→ All** shortcut that copies one shared draft
+   into all three boxes at once if you *do* want them all the same. **Save**
+   there closes the popup and updates the dropdown back in the main window
+   immediately. Ships with two built-ins: **System Test**, a one-click
+   sanity check that tells all three AIs this is a diagnostic (not a real
+   task) and asks them to confirm they received it and report whether
+   messages from the other two are actually arriving; and **System Prompt
+   (How Routing Works)**, a reference explainer covering the `[TO: X]` tag
+   syntax that you can send any time it's useful, not just at the start of a
+   Roundtable v2 session. Saved prompts persist across restarts, same as the
    transcript and custom roles.
 7. **📌** on any transcript turn pins it, so you can spot it again later without
    scrolling back through everything.
@@ -141,17 +146,19 @@ Everything that takes up screen space can be shrunk out of the way without
 losing anything — nothing closes or resets, it just gets small:
 
 - **Each AI's column** — click the **⌄** button in that column's header
-  (next to 🔍 and ⟳) to collapse it down to a short horizontal bar; click it
-  again (now **›**) to bring it back to full size. This is purely visual — a
-  collapsed AI is still enabled, still participating in Auto/House Rules,
-  still sending, receiving, and capturing replies exactly as before, it's
-  just out of view. Independent per column — collapsing Claude's doesn't
-  touch ChatGPT's or Gemini's. Collapsing saves *vertical* space on purpose
-  (not just width): collapsed columns stack as short bars above whichever
-  columns are still expanded, which share the row side by side and get to
-  stay full height — and once all three are collapsed, that freed vertical
-  space goes straight to the Transcript/Activity Log panel below instead of
-  sitting there unused.
+  (next to 🔍 and ⟳) to collapse it down to a short bar; click it again (now
+  **›**) to bring it back to full size. This is purely visual — a collapsed
+  AI is still enabled, still participating in Auto/House Rules, still
+  sending, receiving, and capturing replies exactly as before, it's just out
+  of view. Independent per column — collapsing Claude's doesn't touch
+  ChatGPT's or Gemini's. Collapsed columns move up into the mostly-empty
+  space beside the House Rules panel and share it evenly — one collapsed
+  column gets the whole width, two split it in half, three in thirds —
+  instead of piling up as separate rows the way a fully expanded column
+  would. Whatever's still expanded stays in the main row below, full height,
+  side by side. Once all three are collapsed that row is empty, so it
+  collapses down to nothing and the Transcript/Activity Log panel grows to
+  fill the space instead of leaving it unused.
 - **Each whole window** — both the Automation window and the Conversation
   window have their own **⌄** button in a thin titlebar at the very top.
   Clicking it shrinks that entire window down to just that titlebar (same
@@ -394,7 +401,10 @@ just right-click that site's actual Send button instead of a reply bubble.
   auto-send). Prompt Library sends (`prompts:send`) reuse the same
   `sendTextTo()` every other manual send goes through, just once per AI with
   that AI's own text instead of one shared message — an empty/blank field for
-  a site is treated as "don't send to it," not "send nothing." `logEvent()`
+  a site is treated as "don't send to it," not "send nothing." Saving or
+  deleting a prompt also broadcasts `prompts-changed` to every open window,
+  which is how the Automation window's dropdown stays in sync when a save
+  actually happened from the separate prompt-editor popup. `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
   crash still leaves something to troubleshoot from.
@@ -408,14 +418,20 @@ just right-click that site's actual Send button instead of a reply bubble.
   success once that's confirmed. Mirrors the selectors used by the browser
   extension's `content.js`/`selectors.js`.
 - `controls.html` / `controls.js` — the Automation window's control panel UI,
-  including the Prompt Library panel (each saved prompt renders one text box
-  per AI; Send reads whatever's currently typed, live edits included, not
-  just what was last Saved).
+  including the Prompt Library's compact dropdown + Send/New/Edit/Delete, and
+  the collapsed-pane strip that shares House Rules' unused space.
 - `conversation.html` / `conversation.js` — the Conversation window's UI:
   renders the shared transcript, current/next speaker, Send/Start/Pause/
   Resume/Stop, and Role Assignment.
-- `preload.js` — the IPC bridge shared by both windows, talking to the main
-  process over `ipcRenderer`/`contextBridge` (no direct Node access from
+- `prompt-editor.html` / `prompt-editor.js` — the small, on-demand popup
+  window for creating/editing one Prompt Library entry: a name field, one
+  text box per AI, a `→ All` shortcut that copies a shared draft into all
+  three, and Save/Cancel. Only created the first time `+ New` or `Edit` is
+  clicked (not at startup like the other two windows); re-navigates the same
+  window (via a `?id=<n>` query string, or none for a blank prompt) instead
+  of opening a second one if it's already open.
+- `preload.js` — the IPC bridge shared by all three windows, talking to the
+  main process over `ipcRenderer`/`contextBridge` (no direct Node access from
   either page, same as the sites' own panes).
 
 Selectors are best-effort with fallbacks, same caveat as the extension: if a site
@@ -458,14 +474,22 @@ correctly costs two hops, not one; a run ends the instant the limit is hit
 rather than drifting one relay past it; a zero/unset hop limit falls back to
 the default of 24).
 
-It also covers the Prompt Library backend: the built-in "System Test" preset
-existing by default (with each AI's own version correctly naming the *other*
-two), saving a new prompt with different text per AI, sending it and
-confirming each AI got its own exact text with no forwarding wrapper while a
-blank field's AI got nothing at all, rejecting a send where every field is
-blank/whitespace-only instead of silently doing nothing, editing an existing
-prompt in place (no duplicate), deleting one, and that the deletion actually
-lands in the persisted state file on disk.
+It also covers the Prompt Library backend: both built-ins existing by
+default ("System Test," with each AI's own version correctly naming the
+*other* two; "System Prompt (How Routing Works)," whose text for every AI
+actually mentions the `[TO: X]` tag syntax), saving a new prompt with
+different text per AI, sending it and confirming each AI got its own exact
+text with no forwarding wrapper while a blank field's AI got nothing at all,
+rejecting a send where every field is blank/whitespace-only instead of
+silently doing nothing, editing an existing prompt in place (no duplicate),
+deleting one, and that the deletion actually lands in the persisted state
+file on disk. It also covers the standalone prompt-editor popup window
+itself at the `main.js` level: opening it targets the right prompt (its id
+riding along in the URL as a query string), re-opening while it's already
+open re-navigates that same window instead of spawning a second one, saving
+from it broadcasts `prompts-changed` so the Automation window's dropdown
+picks up the change without polling, and closing it actually destroys the
+window.
 
 `npm test` also runs `test/conversation.test.js`, which loads the *real*
 `conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
@@ -488,21 +512,35 @@ replies, to avoid badging the common case).
 
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
 to `controls.html`/`controls.js` — currently focused on the collapse feature
-(each AI column's own toggle now actually relocating it between the collapsed
-and expanded strips, not just adding a class; the Automation window's
-titlebar toggle; that a collapse event for the *other* window is correctly
-ignored; the Transcript/Log panel expanding only once *all three* panes are
-collapsed), the Stop confirmation prompt, that the manual Forward/Auto rows
-hide as soon as any House Rules format is picked (and stay hidden through
-"finished," only reappearing once `mode` resets), the Roundtable v2 dropdown
-option (present, correctly labeled, and actually dispatches
+(each AI column's own toggle relocating it between the collapsed and expanded
+strips rather than just adding a class, and that `#collapsed-strip` actually
+lives inside the House Rules box; the Automation window's titlebar toggle;
+that a collapse event for the *other* window is correctly ignored; the
+Transcript/Log panel expanding only once *all three* panes are collapsed),
+the Stop confirmation prompt, that the manual Forward/Auto rows hide as soon
+as any House Rules format is picked (and stay hidden through "finished,"
+only reappearing once `mode` resets), the Roundtable v2 dropdown option
+(present, correctly labeled, and actually dispatches
 `startHouseRule("roundtable", …)` with the right topic and hop count), the
 same routing badge rendering on captured turns for parity with the
-Conversation window, and the Prompt Library panel — the built-in prompt
-rendering with one field per AI, its own collapse toggle, Send using
-whatever's currently typed in each field (not what was last Saved) and
-correctly leaving a blank field out of the send, and adding/deleting a
-prompt actually re-rendering the list.
+Conversation window, and the Prompt Library dropdown — options rendering
+from the saved list (and a placeholder + disabled buttons when there are
+none), Send using the *selected* prompt's saved text, `+ New`/`Edit` calling
+`openPromptEditor` with the right id (`null` for new) rather than editing
+anything inline, Delete removing the selected entry, and a `prompts-changed`
+event (simulating the popup window having saved elsewhere) re-rendering the
+dropdown live.
+
+`npm test` also runs `test/prompt-editor.test.js`, the same jsdom approach
+applied to the standalone `prompt-editor.html`/`prompt-editor.js` popup:
+fields start blank with no `?id=` in the URL, populate correctly from the
+matching saved prompt when one's given (and degrade gracefully — blank, no
+crash — if that id no longer exists), `→ All` copies one shared draft into
+all three per-AI boxes, Save passes the id/name/text to `savePrompt` (`null`
+id for a new prompt, the original id for an edit — so it updates in place
+instead of duplicating) and then closes the window, an empty name is saved
+as "Untitled" rather than blank, and Cancel closes without ever calling
+`savePrompt` at all.
 
 Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
 copies of the selector config — `desktop-app/selectors.js` (CommonJS) and

@@ -47,7 +47,7 @@ class FakeWebContents extends EventEmitter {
   }
   isDestroyed() { return this.destroyedFlag; }
   loadURL(u) { this._url = u; }
-  loadFile(f) { this._url = f; }
+  loadFile(f, opts) { this._url = f; this._loadOpts = opts || {}; }
   getURL() { return this._url; }
   getTitle() { return `Mock ${this.label}`; }
   send(channel, payload) { this.emit("ipc-send", channel, payload); }
@@ -76,11 +76,13 @@ class WebContentsView {
 
 const windowRegistry = {};
 
-class BaseWindow {
+class BaseWindow extends EventEmitter {
   constructor(opts) {
+    super();
     this.contentView = { addChildView() {} };
     this._bounds = { x: 0, y: 0, width: (opts && opts.width) || 1600, height: (opts && opts.height) || 1000 };
     this._minSize = [(opts && opts.minWidth) || 0, (opts && opts.minHeight) || 0];
+    this._destroyed = false;
     if (opts && opts.title) windowRegistry[opts.title] = this;
   }
   getContentSize() { return [this._bounds.width, this._bounds.height]; }
@@ -88,7 +90,9 @@ class BaseWindow {
   setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
   getMinimumSize() { return this._minSize.slice(); }
   setMinimumSize(w, h) { this._minSize = [w, h]; }
-  on() {}
+  focus() {}
+  isDestroyed() { return this._destroyed; }
+  close() { if (this._destroyed) return; this._destroyed = true; this.emit("closed"); }
 }
 
 const app = {

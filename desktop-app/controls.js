@@ -70,84 +70,41 @@ async function sendCompose(targets) {
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
 }
 
-function readPromptFields(card) {
-  const text = {};
-  for (const site of SITES) {
-    const ta = card.querySelector(`textarea[data-site="${site}"]`);
-    text[site] = ta ? ta.value : "";
-  }
-  return text;
+// The Prompt Library is just a compact dropdown + a few buttons here —
+// creating/editing a prompt's actual per-AI text happens in the separate
+// popup window (prompt-editor.html), not inline. Saving there broadcasts
+// "prompts-changed", which is what keeps this dropdown in sync.
+function selectedPrompt() {
+  const id = Number(el("prompt-select").value);
+  return currentPrompts.find((p) => p.id === id) || null;
 }
 
-function promptCardEl(prompt) {
-  const card = document.createElement("div");
-  card.className = "prompt-card";
-  card.dataset.id = prompt.id;
-
-  const head = document.createElement("div");
-  head.className = "prompt-card-head";
-  const nameInput = document.createElement("input");
-  nameInput.className = "prompt-name";
-  nameInput.value = prompt.name;
-  head.appendChild(nameInput);
-
-  const btns = document.createElement("div");
-  btns.className = "btns";
-  const sendBtn = document.createElement("button");
-  sendBtn.className = "primary";
-  sendBtn.textContent = "Send";
-  sendBtn.onclick = async () => {
-    const text = readPromptFields(card);
-    setStatus(`Sending "${nameInput.value}"…`);
-    const res = await window.api.sendPrompt(text);
-    if (!res?.ok) setStatus(`Send failed: ${res?.error === "NEED_TEXT" ? "no text entered for any AI" : (res?.error || "unknown error")}`);
-    else setStatus(`Sent "${nameInput.value}".`);
-  };
-  const saveBtn = document.createElement("button");
-  saveBtn.textContent = "Save";
-  saveBtn.onclick = async () => {
-    const text = readPromptFields(card);
-    const res = await window.api.savePrompt(prompt.id, nameInput.value, text);
-    if (res?.ok) { currentPrompts = res.prompts; setStatus("Prompt saved."); }
-  };
-  const delBtn = document.createElement("button");
-  delBtn.className = "danger";
-  delBtn.textContent = "Delete";
-  delBtn.onclick = async () => {
-    if (!window.confirm(`Delete the "${prompt.name}" prompt?`)) return;
-    const res = await window.api.deletePrompt(prompt.id);
-    if (res?.ok) renderPrompts(res.prompts);
-  };
-  btns.appendChild(sendBtn);
-  btns.appendChild(saveBtn);
-  btns.appendChild(delBtn);
-  head.appendChild(btns);
-  card.appendChild(head);
-
-  const fields = document.createElement("div");
-  fields.className = "prompt-fields";
-  for (const site of SITES) {
-    const field = document.createElement("div");
-    field.className = "prompt-field";
-    const label = document.createElement("label");
-    label.textContent = SITE_LABELS[site];
-    const ta = document.createElement("textarea");
-    ta.dataset.site = site;
-    ta.value = (prompt.text && prompt.text[site]) || "";
-    ta.placeholder = `Leave blank to skip ${SITE_LABELS[site]}`;
-    field.appendChild(label);
-    field.appendChild(ta);
-    fields.appendChild(field);
-  }
-  card.appendChild(fields);
-  return card;
+function updatePromptButtons() {
+  const has = !!selectedPrompt();
+  el("btn-prompt-send").disabled = !has;
+  el("btn-prompt-edit").disabled = !has;
+  el("btn-prompt-delete").disabled = !has;
 }
 
 function renderPrompts(prompts) {
   currentPrompts = prompts || [];
-  const box = el("prompts-list");
-  box.innerHTML = "";
-  for (const p of currentPrompts) box.appendChild(promptCardEl(p));
+  const sel = el("prompt-select");
+  const prevValue = sel.value;
+  sel.innerHTML = "";
+  if (!currentPrompts.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(no saved prompts)";
+    sel.appendChild(opt);
+  }
+  for (const p of currentPrompts) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  if (currentPrompts.some((p) => String(p.id) === prevValue)) sel.value = prevValue;
+  updatePromptButtons();
 }
 
 function buildAiColumn(site) {
@@ -579,17 +536,33 @@ el("btn-hr-wrapup").onclick = async () => {
   else setStatus("Wrapping up — asking one participant to synthesize a final plan…");
 };
 
-el("btn-prompts-collapse").onclick = () => {
-  const collapsed = el("prompts-body").classList.toggle("collapsed");
-  el("prompts-hint").classList.toggle("collapsed", collapsed);
-  el("btn-prompts-collapse").textContent = collapsed ? "›" : "⌄";
-  el("btn-prompts-collapse").title = collapsed ? "Expand the Prompt Library" : "Collapse the Prompt Library";
+el("prompt-select").onchange = updatePromptButtons;
+
+el("btn-prompt-send").onclick = async () => {
+  const p = selectedPrompt();
+  if (!p) return;
+  setStatus(`Sending "${p.name}"…`);
+  const res = await window.api.sendPrompt(p.text);
+  if (!res?.ok) setStatus(`Send failed: ${res?.error === "NEED_TEXT" ? "that prompt has no text for any AI" : (res?.error || "unknown error")}`);
+  else setStatus(`Sent "${p.name}".`);
 };
 
-el("btn-prompt-add").onclick = async () => {
-  const res = await window.api.savePrompt(null, "New Prompt", { chatgpt: "", claude: "", gemini: "" });
+el("btn-prompt-new").onclick = () => window.api.openPromptEditor(null);
+
+el("btn-prompt-edit").onclick = () => {
+  const p = selectedPrompt();
+  if (p) window.api.openPromptEditor(p.id);
+};
+
+el("btn-prompt-delete").onclick = async () => {
+  const p = selectedPrompt();
+  if (!p) return;
+  if (!window.confirm(`Delete the "${p.name}" prompt?`)) return;
+  const res = await window.api.deletePrompt(p.id);
   if (res?.ok) renderPrompts(res.prompts);
 };
+
+window.api.onPromptsChanged((prompts) => renderPrompts(prompts));
 
 el("btn-copy").onclick = async () => {
   try {

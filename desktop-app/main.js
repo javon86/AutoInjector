@@ -119,8 +119,20 @@ function defaultTestPrompt() {
   }
   return { id: 1, name: "System Test", text };
 }
-state.prompts = [defaultTestPrompt()];
-state.nextPromptId = 2;
+
+// Second built-in: a reference explainer, not a diagnostic — tells each AI
+// how message routing on this app actually works ([TO: X] tags), so it can
+// be sent any time (not just at the start of a Roundtable v2 session) if it
+// ever comes up mid-conversation.
+function defaultRoutingExplainerPrompt() {
+  const text = {};
+  for (const site of SITE_IDS) {
+    text[site] = `Quick reference, not a task — no need to reply. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Some conversations use a format called Roundtable v2, where each of you starts your own reply with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next. Other messages (like this one) are just sent directly to you as a one-off, no tag needed.`;
+  }
+  return { id: 2, name: "System Prompt (How Routing Works)", text };
+}
+state.prompts = [defaultTestPrompt(), defaultRoutingExplainerPrompt()];
+state.nextPromptId = 3;
 
 function resetHouseRule(mode, topic, rounds) {
   state.hr = {
@@ -382,6 +394,43 @@ function createConversationWindow() {
   layoutConversation();
   convWin.on("resize", layoutConversation);
   convWin.on("closed", () => { convWin = null; });
+}
+
+// A small, on-demand third window for creating/editing one Prompt Library
+// entry at a time — not created at startup like the other two, only when
+// "+ New" or "Edit" is clicked. Re-navigating an already-open editor (rather
+// than opening a second one) keeps this to at most one instance.
+let promptEditorWin = null;
+let promptEditorView = null;
+function openPromptEditorWindow(id) {
+  const search = id != null ? `id=${id}` : "";
+  if (promptEditorWin && promptEditorView) {
+    promptEditorView.webContents.loadFile(path.join(__dirname, "prompt-editor.html"), { search });
+    promptEditorWin.focus();
+    return;
+  }
+  promptEditorWin = new BaseWindow({ width: 560, height: 600, resizable: true, title: "AutoInjector — Edit Prompt" });
+  promptEditorView = new WebContentsView({
+    webPreferences: {
+      partition: "prompt-editor-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  promptEditorWin.contentView.addChildView(promptEditorView);
+  promptEditorView.webContents.loadFile(path.join(__dirname, "prompt-editor.html"), { search });
+  const layoutEditor = () => {
+    if (!promptEditorWin || !promptEditorView) return;
+    const [w, h] = promptEditorWin.getContentSize();
+    promptEditorView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutEditor();
+  promptEditorWin.on("resize", layoutEditor);
+  promptEditorWin.on("closed", () => { promptEditorWin = null; promptEditorView = null; });
+}
+function closePromptEditorWindow() {
+  if (promptEditorWin) promptEditorWin.close();
 }
 
 function routingSnapshot() {
@@ -1010,6 +1059,7 @@ ipcMain.handle("prompts:save", (_evt, { id, name, text }) => {
   }
   logEvent("prompt-saved", { name: cleanName });
   saveStateDebounced();
+  broadcast("prompts-changed", state.prompts);
   return { ok: true, prompts: state.prompts };
 });
 
@@ -1017,7 +1067,21 @@ ipcMain.handle("prompts:delete", (_evt, id) => {
   state.prompts = state.prompts.filter((p) => p.id !== id);
   logEvent("prompt-deleted", { id });
   saveStateDebounced();
+  broadcast("prompts-changed", state.prompts);
   return { ok: true, prompts: state.prompts };
+});
+
+// Opens (or re-targets, if already open) the standalone Prompt Library
+// editor window — a separate BaseWindow, not a panel inline in the
+// Automation window, so editing a prompt doesn't crowd out the AI panes.
+ipcMain.handle("prompts:open-editor", (_evt, id) => {
+  openPromptEditorWindow(id != null ? id : null);
+  return { ok: true };
+});
+
+ipcMain.handle("prompt-editor:close", () => {
+  closePromptEditorWindow();
+  return { ok: true };
 });
 
 // Sends whatever's currently in each site's field — independent of whether

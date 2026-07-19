@@ -456,6 +456,41 @@ async function testPromptLibrary() {
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
   const saved = JSON.parse(raw);
   assert(Array.isArray(saved.prompts) && !saved.prompts.some((p) => p.id === created.id), "the deletion is reflected in the persisted state file too");
+
+  const explainer = state0.prompts.find((p) => p.name === "System Prompt (How Routing Works)");
+  assert(!!explainer, "a second built-in prompt explaining [TO: X] tag routing also exists by default");
+  assert(explainer.text.chatgpt.includes("[TO:") && explainer.text.claude.includes("[TO:") && explainer.text.gemini.includes("[TO:"), "every AI's version actually mentions the [TO: X] tag syntax");
+}
+
+async function testPromptEditorWindow() {
+  console.log("\n== Prompt Library's popup editor window: opens targeting the right prompt, closes on request, and saving there broadcasts to other windows ==");
+  await resetAllParticipants();
+
+  const openRes = await call("prompts:open-editor", 1);
+  assert(openRes.ok, "opening the editor for an existing prompt (id 1) succeeds");
+  const editorWin = mockElectron.__windowRegistry["AutoInjector — Edit Prompt"];
+  assert(!!editorWin, "a real, separate window was created for it");
+  assert(!editorWin.isDestroyed(), "it's open, not already closed");
+  const editorView = reg("prompt-editor-ui");
+  assert(!!editorView && editorView.webContents._loadOpts && editorView.webContents._loadOpts.search === "id=1", "it navigates with the target prompt's id in the URL, so the popup's own page knows which one to load");
+
+  const openNewRes = await call("prompts:open-editor", null);
+  assert(openNewRes.ok, "requesting a blank/new prompt while the editor is already open re-targets it rather than opening a second window");
+  assert(reg("prompt-editor-ui").webContents._loadOpts.search === "", "re-navigates with no id — a blank prompt this time");
+  assert(mockElectron.__windowRegistry["AutoInjector — Edit Prompt"] === editorWin, "still the same single window instance, not a second one");
+
+  let broadcastPrompts = null;
+  const onSend = (channel, payload) => { if (channel === "prompts-changed") broadcastPrompts = payload; };
+  reg("controls-ui").webContents.on("ipc-send", onSend);
+  const saveRes = await call("prompts:save", { id: null, name: "From The Popup", text: { chatgpt: "hi", claude: "", gemini: "" } });
+  assert(saveRes.ok, "saving from what would be the popup's Save button works the same as any other save");
+  assert(!!broadcastPrompts && broadcastPrompts.some((p) => p.name === "From The Popup"), "the Automation window gets a 'prompts-changed' broadcast so its dropdown updates without a manual refresh");
+  reg("controls-ui").webContents.off("ipc-send", onSend);
+  await call("prompts:delete", saveRes.prompts.find((p) => p.name === "From The Popup").id); // leave state clean for later tests
+
+  const closeRes = await call("prompt-editor:close", {});
+  assert(closeRes.ok, "closing the editor succeeds");
+  assert(editorWin.isDestroyed(), "the window is actually closed");
 }
 
 async function startRoundtableAndSkipAcks(topic, rounds) {
@@ -654,6 +689,7 @@ async function main() {
   await testWaitingSinceTracking();
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
+  await testPromptEditorWindow();
   await testRoundtableAckHandshake();
   await testRoundtableDuplicateAck();
   await testRoundtableTagRouting();

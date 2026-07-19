@@ -25,41 +25,38 @@
     #col-composer textarea { width:100%; height:56px; resize:none; }
     #col-participants { flex: 0 0 130px; }
     #col-global { flex: 0 0 210px; }
-    #col-houserules { flex: 1 1 260px; }
+    /* House Rules is a wide box whose actual controls (dropdown, rounds,
+       buttons) don't need the full width it's given — #collapsed-strip lives
+       in that left-over space, showing whichever AI panes are collapsed as
+       one thin row that splits evenly between them (full width for 1, half
+       each for 2, a third each for 3), rather than a separate row of its
+       own taking space nothing else can use. */
+    #col-houserules { flex: 1 1 260px; display:flex; gap:10px; align-items:flex-start; }
+    #houserules-main { flex: 1 1 260px; min-width:220px; }
+    #collapsed-strip { display:flex; gap:6px; flex:1 1 auto; min-width:0; height:44px; }
+    #collapsed-strip:empty { display:none; }
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
     .role-badge { font-size:9px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
     .role-badge:empty { display:none; }
 
     #col-prompts { flex:0 0 auto; }
-    #prompts-head { display:flex; align-items:center; gap:6px; cursor:pointer; }
-    #prompts-body.collapsed, #prompts-hint.collapsed { display:none; }
-    .prompt-card { background:#141414; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px; margin-bottom:6px; }
-    .prompt-card-head { display:flex; align-items:center; gap:6px; margin-bottom:5px; }
-    .prompt-name { flex:1 1 auto; font-weight:600; }
-    .prompt-fields { display:flex; gap:6px; flex-wrap:wrap; }
-    .prompt-field { flex:1 1 180px; min-width:160px; display:flex; flex-direction:column; gap:2px; }
-    .prompt-field label { font-size:9px; opacity:.6; text-transform:uppercase; letter-spacing:.03em; }
-    .prompt-field textarea { width:100%; height:64px; resize:vertical; }
+    #prompt-controls select { flex:1 1 220px; min-width:0; }
 
-    /* ---- merged AI columns: control strip + a native-view slot, stacked ----
-       #ai-row stacks two sub-rows: collapsed panes as slim full-width bars
-       (stacked, auto-height — collapsing saves VERTICAL space, not just
-       width, so it actually frees room for the transcript below), and
-       expanded panes side by side underneath, absorbing whatever room is
-       left. Columns are physically moved between the two by JS when their
-       collapsed state changes (see relocateColumn() in controls.js). */
+    /* ---- merged AI columns: control strip + a native-view slot ----
+       #ai-row holds whichever AI panes are still expanded, side by side.
+       Collapsed ones live in #collapsed-strip instead (see above, inside
+       House Rules) — moved there by JS (relocateColumn() in controls.js)
+       when a pane's collapsed state changes. */
     #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
     /* Once a House Rules format is in play (Roundtable v2's [TO: X] tags or
        any other format's own state machine), routing happens automatically —
        the manual per-pane Forward/Auto buttons would just fight it. */
     #ai-row.hr-active .fwd-row, #ai-row.hr-active .auto-row { display:none; }
-    #collapsed-strip { display:flex; flex-direction:column; gap:8px; flex:0 0 auto; }
-    #collapsed-strip:empty { display:none; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
-       space — collapse #ai-row down to just the collapsed-strip's own
-       content height and give the rest to Transcript/Activity Log. */
+       space — collapse #ai-row down to nothing and give the rest to
+       Transcript/Activity Log. */
     #wrap.all-collapsed #ai-row { flex: 0 0 auto; }
     #wrap.all-collapsed #main-row { flex: 1 1 auto; }
     .ai-col {
@@ -73,12 +70,21 @@
     .ai-col.disabled .control-strip { opacity:.5; }
     .ai-col.just-received { box-shadow: 0 0 0 2px #7c5ce0, 0 0 16px 2px rgba(124,92,224,.45); }
 
-    .ai-col.collapsed { flex:0 0 44px; height:44px; }
+    /* Collapsed panes now live in a narrow, width-shared strip (see
+       #collapsed-strip above) rather than their own full-width row, so only
+       the essentials (name + expand toggle) fit — the rest would just
+       overflow. */
+    .ai-col.collapsed { flex:1 1 0; height:44px; min-width:0; }
     .ai-col.collapsed .preview,
     .ai-col.collapsed .btns,
-    .ai-col.collapsed .pane-slot { display:none; }
-    .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; }
-    .ai-col.collapsed .card-head { margin-bottom:0; }
+    .ai-col.collapsed .pane-slot,
+    .ai-col.collapsed .gendot,
+    .ai-col.collapsed .role-badge,
+    .ai-col.collapsed .inspect-btn,
+    .ai-col.collapsed .reload-btn { display:none; }
+    .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; min-width:0; }
+    .ai-col.collapsed .card-head { margin-bottom:0; min-width:0; overflow:hidden; }
+    .ai-col.collapsed .card-head span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
     .control-strip { padding:7px 9px; flex:0 0 auto; }
     .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
@@ -169,46 +175,44 @@
       </div>
 
       <div id="col-houserules" class="col">
-        <h2>House Rules</h2>
-        <p style="opacity:.6; margin:0 0 6px;">Structures the conversation for you — uses the Compose text above as the topic/goal.</p>
-        <select id="hr-mode" style="width:100%;">
-          <option value="">— pick a format —</option>
-          <option value="who-wants-to-speak">Who Wants to Speak?</option>
-          <option value="debate">Debate</option>
-          <option value="free-for-all">Free-for-All</option>
-          <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
-          <option value="chargeback">Chargeback (needs 3 + rounds)</option>
-          <option value="brainstorm">Brainstorm</option>
-          <option value="rotation">Rotation (needs 3 — legacy, see Conversation window)</option>
-          <option value="roundtable">Roundtable v2 (needs 3 — tag-routed, see Conversation window)</option>
-        </select>
-        <div class="btns" style="margin-top:5px;">
-          <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
-          <button id="btn-hr-start" class="primary">Start</button>
-          <button id="btn-hr-stop" class="danger">Stop</button>
-          <button id="btn-hr-wrapup" style="display:none;">Wrap Up</button>
+        <div id="houserules-main">
+          <h2>House Rules</h2>
+          <p style="opacity:.6; margin:0 0 6px;">Structures the conversation for you — uses the Compose text above as the topic/goal.</p>
+          <select id="hr-mode" style="width:100%;">
+            <option value="">— pick a format —</option>
+            <option value="who-wants-to-speak">Who Wants to Speak?</option>
+            <option value="debate">Debate</option>
+            <option value="free-for-all">Free-for-All</option>
+            <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
+            <option value="chargeback">Chargeback (needs 3 + rounds)</option>
+            <option value="brainstorm">Brainstorm</option>
+            <option value="rotation">Rotation (needs 3 — legacy, see Conversation window)</option>
+            <option value="roundtable">Roundtable v2 (needs 3 — tag-routed, see Conversation window)</option>
+          </select>
+          <div class="btns" style="margin-top:5px;">
+            <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
+            <button id="btn-hr-start" class="primary">Start</button>
+            <button id="btn-hr-stop" class="danger">Stop</button>
+            <button id="btn-hr-wrapup" style="display:none;">Wrap Up</button>
+          </div>
+          <div id="hr-status" style="margin-top:6px;"></div>
         </div>
-        <div id="hr-status" style="margin-top:6px;"></div>
+        <div id="collapsed-strip"></div>
       </div>
     </div>
 
     <div id="col-prompts" class="col">
-      <h2 id="prompts-head">
-        <span>Prompt Library</span>
-        <span class="spacer"></span>
-        <button id="btn-prompts-collapse" class="collapse-btn" title="Collapse the Prompt Library">⌄</button>
-      </h2>
-      <p id="prompts-hint" style="opacity:.6; margin:0 0 6px;">Saved prompts you can send with one click — each AI can get its own text (or leave a box blank to skip that AI).</p>
-      <div id="prompts-body">
-        <div id="prompts-list"></div>
-        <div class="btns" style="margin-top:6px;">
-          <button id="btn-prompt-add">+ New Prompt</button>
-        </div>
+      <h2>Prompt Library</h2>
+      <div class="btns" id="prompt-controls">
+        <select id="prompt-select"></select>
+        <button id="btn-prompt-send" class="primary">Send</button>
+        <button id="btn-prompt-new">+ New</button>
+        <button id="btn-prompt-edit">Edit</button>
+        <button id="btn-prompt-delete" class="danger">Delete</button>
       </div>
     </div>
 
     <div id="ai-row">
-      <div id="collapsed-strip"></div>
       <div id="expanded-strip"></div>
     </div>
 

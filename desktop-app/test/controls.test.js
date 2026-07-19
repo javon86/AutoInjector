@@ -22,6 +22,7 @@ function makeApi({ initialPrompts } = {}) {
   let windowCollapseCb = null;
   let captureCb = null;
   let houseRuleCb = null;
+  let promptsChangedCb = null;
   let prompts = initialPrompts || [{ id: 1, name: "System Test", text: { chatgpt: "hi chatgpt", claude: "hi claude", gemini: "hi gemini" } }];
   let nextPromptId = prompts.reduce((m, p) => Math.max(m, p.id + 1), 1);
   const noop = async () => ({ ok: true });
@@ -30,6 +31,7 @@ function makeApi({ initialPrompts } = {}) {
     fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
     fireCapture: (turn) => captureCb && captureCb(turn),
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
+    firePromptsChanged: (p) => promptsChangedCb && promptsChangedCb(p),
     sendCompose: noop, sendForward: noop, regenerate: noop, setRouting: noop,
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
     setParticipant: noop,
@@ -59,6 +61,7 @@ function makeApi({ initialPrompts } = {}) {
       if (!targets.length) return { ok: false, error: "NEED_TEXT" };
       return { ok: true, results: {} };
     },
+    openPromptEditor: async (id) => { calls.push({ fn: "openPromptEditor", id }); return { ok: true }; },
     getState: async () => ({
       ok: true,
       global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: { chatgpt: true, claude: true, gemini: true }, waiting: {}, meshActive: false, customRole: {} },
@@ -70,7 +73,8 @@ function makeApi({ initialPrompts } = {}) {
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: () => {},
-    onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; }
+    onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
+    onPromptsChanged: (cb) => { promptsChangedCb = cb; }
   };
   return api;
 }
@@ -202,16 +206,18 @@ async function testHouseRuleModeHidesManualControls() {
 }
 
 async function testCollapsedPanesMoveToTheirOwnStrip() {
-  console.log("\n== Collapsing a pane saves VERTICAL space — it moves into #collapsed-strip as a short bar, not a narrow column ==");
+  console.log("\n== Collapsing a pane saves space — it moves into the shared #collapsed-strip beside House Rules, not a narrow column ==");
   const dom = await loadWindow(makeApi());
   const doc = dom.window.document;
+
+  assert(doc.getElementById("col-houserules").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip lives inside House Rules, in its otherwise-unused space");
 
   const claudeCol = doc.getElementById("col-claude");
   assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanded by default — lives in the side-by-side strip");
   assert(!doc.getElementById("collapsed-strip").contains(claudeCol), "not in the collapsed strip yet");
 
   claudeCol.querySelector(".collapse-btn").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(doc.getElementById("collapsed-strip").contains(claudeCol), "collapsing moves it into the stacked collapsed strip");
+  assert(doc.getElementById("collapsed-strip").contains(claudeCol), "collapsing moves it into the shared collapsed strip");
   assert(!doc.getElementById("expanded-strip").contains(claudeCol), "...and out of the side-by-side strip");
   assert(doc.getElementById("col-chatgpt") && doc.getElementById("expanded-strip").contains(doc.getElementById("col-chatgpt")), "the other, still-expanded panes are unaffected");
 
@@ -239,64 +245,91 @@ async function testAllPanesCollapsedExpandsTranscript() {
   assert(!wrap.classList.contains("all-collapsed"), "expanding just one pane again gives the space back");
 }
 
-async function testPromptLibraryRenders() {
-  console.log("\n== Prompt Library: the built-in preset loads with a field per AI ==");
-  const dom = await loadWindow(makeApi());
+async function testPromptLibraryDropdownRenders() {
+  console.log("\n== Prompt Library: a compact dropdown, not inline cards ==");
+  const dom = await loadWindow(makeApi({
+    initialPrompts: [
+      { id: 1, name: "System Test", text: { chatgpt: "a", claude: "b", gemini: "c" } },
+      { id: 2, name: "Kickoff", text: { chatgpt: "x", claude: "", gemini: "" } }
+    ]
+  }));
   const doc = dom.window.document;
+  const sel = doc.getElementById("prompt-select");
 
-  const cards = doc.querySelectorAll("#prompts-list .prompt-card");
-  assert(cards.length === 1, `exactly one prompt card renders (got ${cards.length})`);
-  assert(cards[0].querySelector(".prompt-name").value === "System Test", "the built-in 'System Test' prompt is there by default");
-  assert(cards[0].querySelectorAll("textarea").length === 3, "one textarea per AI (ChatGPT/Claude/Gemini)");
-  assert(cards[0].querySelector('textarea[data-site="claude"]').value === "hi claude", "each AI's textarea is pre-filled with its own text");
+  assert(sel.options.length === 2, `both saved prompts appear as options (got ${sel.options.length})`);
+  assert(sel.options[0].textContent === "System Test" && sel.options[1].textContent === "Kickoff", "options are labeled by name");
+  assert(!doc.getElementById("btn-prompt-send").disabled, "Send is enabled once something's selected (first option, by default)");
+  assert(!doc.querySelector(".prompt-card"), "no inline per-AI text boxes/cards render anymore");
 }
 
-async function testPromptLibraryCollapse() {
-  console.log("\n== Prompt Library collapses independently ==");
-  const dom = await loadWindow(makeApi());
-  const body = dom.window.document.getElementById("prompts-body");
-  assert(!body.classList.contains("collapsed"), "starts expanded");
-
-  click(dom, "btn-prompts-collapse");
-  assert(body.classList.contains("collapsed"), "collapsing hides the list");
-
-  click(dom, "btn-prompts-collapse");
-  assert(!body.classList.contains("collapsed"), "clicking again expands it back");
+async function testPromptLibraryEmptyState() {
+  console.log("\n== Prompt Library: no saved prompts yet ==");
+  const dom = await loadWindow(makeApi({ initialPrompts: [] }));
+  const doc = dom.window.document;
+  assert(doc.getElementById("prompt-select").options.length === 1, "a single placeholder option shows instead of an empty dropdown");
+  assert(doc.getElementById("btn-prompt-send").disabled, "Send is disabled when there's nothing to select");
+  assert(doc.getElementById("btn-prompt-delete").disabled, "Delete is disabled too");
 }
 
-async function testPromptLibrarySendUsesLiveEdits() {
-  console.log("\n== Prompt Library Send uses whatever is currently typed, blank fields are skipped ==");
-  const api = makeApi();
+async function testPromptLibrarySend() {
+  console.log("\n== Prompt Library Send uses the selected prompt's saved text ==");
+  const api = makeApi({
+    initialPrompts: [{ id: 1, name: "Kickoff", text: { chatgpt: "hi chatgpt", claude: "", gemini: "hi gemini" } }]
+  });
   const dom = await loadWindow(api);
-  const card = dom.window.document.querySelector("#prompts-list .prompt-card");
-
-  card.querySelector('textarea[data-site="chatgpt"]').value = "edited chatgpt text";
-  card.querySelector('textarea[data-site="gemini"]').value = ""; // blank = skip gemini
-  card.querySelector('button.primary').dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  click(dom, "btn-prompt-send");
   await new Promise((r) => setTimeout(r, 20));
 
   const sendCall = api.calls.find((c) => c.fn === "sendPrompt");
   assert(!!sendCall, "clicking Send calls sendPrompt");
-  assert(sendCall.text.chatgpt === "edited chatgpt text", "sends the live-edited text, not the originally-loaded value");
-  assert(sendCall.text.gemini === "", "a blank field is sent as empty (main.js treats that as 'skip this AI')");
+  assert(sendCall.text.chatgpt === "hi chatgpt" && sendCall.text.gemini === "hi gemini" && sendCall.text.claude === "", "sends exactly the selected prompt's saved per-AI text, blank field included");
 }
 
-async function testPromptLibraryAddAndDelete() {
-  console.log("\n== Prompt Library: add a new prompt, then delete one ==");
-  const api = makeApi();
+async function testPromptLibraryNewAndEditOpenThePopup() {
+  console.log("\n== '+ New' and 'Edit' open the standalone prompt editor window, they don't edit inline ==");
+  const api = makeApi({
+    initialPrompts: [{ id: 5, name: "Kickoff", text: { chatgpt: "x", claude: "", gemini: "" } }]
+  });
+  const dom = await loadWindow(api);
+
+  click(dom, "btn-prompt-new");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "openPromptEditor" && c.id == null), "'+ New' opens the editor with no id (blank prompt)");
+
+  click(dom, "btn-prompt-edit");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "openPromptEditor" && c.id === 5), "'Edit' opens the editor targeting the currently-selected prompt's id");
+}
+
+async function testPromptLibraryDelete() {
+  console.log("\n== Prompt Library Delete ==");
+  const api = makeApi({
+    initialPrompts: [
+      { id: 1, name: "System Test", text: { chatgpt: "a", claude: "b", gemini: "c" } },
+      { id: 2, name: "Kickoff", text: { chatgpt: "x", claude: "", gemini: "" } }
+    ]
+  });
   const dom = await loadWindow(api);
   const doc = dom.window.document;
 
-  click(dom, "btn-prompt-add");
+  click(dom, "btn-prompt-delete");
   await new Promise((r) => setTimeout(r, 20));
-  assert(doc.querySelectorAll("#prompts-list .prompt-card").length === 2, "a second card appears after '+ New Prompt'");
-  assert(api.calls.some((c) => c.fn === "savePrompt" && c.id == null && c.name === "New Prompt"), "it's created via savePrompt with no id (new entry) and a default name");
+  assert(api.calls.some((c) => c.fn === "deletePrompt" && c.id === 1), "Delete removes the currently-selected prompt (the first one, by default)");
+  assert(doc.getElementById("prompt-select").options.length === 1, "the dropdown re-renders with one fewer option");
+}
 
-  const firstCard = doc.querySelector("#prompts-list .prompt-card");
-  firstCard.querySelector("button.danger").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "deletePrompt"), "Delete calls deletePrompt");
-  assert(doc.querySelectorAll("#prompts-list .prompt-card").length === 1, "the deleted card is gone from the re-rendered list");
+async function testPromptLibraryLiveSync() {
+  console.log("\n== Prompt Library dropdown updates when the popup editor saves elsewhere ==");
+  const api = makeApi({ initialPrompts: [{ id: 1, name: "System Test", text: {} }] });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(doc.getElementById("prompt-select").options.length === 1, "starts with one saved prompt");
+
+  api.firePromptsChanged([
+    { id: 1, name: "System Test", text: {} },
+    { id: 2, name: "New Prompt", text: { chatgpt: "hi" } }
+  ]);
+  assert(doc.getElementById("prompt-select").options.length === 2, "a 'prompts-changed' broadcast (from the popup window saving) re-renders the dropdown without needing a manual refresh");
 }
 
 async function main() {
@@ -308,10 +341,12 @@ async function main() {
   await testHouseRuleModeHidesManualControls();
   await testCollapsedPanesMoveToTheirOwnStrip();
   await testAllPanesCollapsedExpandsTranscript();
-  await testPromptLibraryRenders();
-  await testPromptLibraryCollapse();
-  await testPromptLibrarySendUsesLiveEdits();
-  await testPromptLibraryAddAndDelete();
+  await testPromptLibraryDropdownRenders();
+  await testPromptLibraryEmptyState();
+  await testPromptLibrarySend();
+  await testPromptLibraryNewAndEditOpenThePopup();
+  await testPromptLibraryDelete();
+  await testPromptLibraryLiveSync();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
