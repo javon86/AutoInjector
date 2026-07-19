@@ -30,16 +30,26 @@
     .role-badge { font-size:9px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
     .role-badge:empty { display:none; }
 
-    /* ---- merged AI columns: control strip + a native-view slot, stacked ---- */
-    #ai-row { display:flex; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
+    /* ---- merged AI columns: control strip + a native-view slot, stacked ----
+       #ai-row stacks two sub-rows: collapsed panes as slim full-width bars
+       (stacked, auto-height — collapsing saves VERTICAL space, not just
+       width, so it actually frees room for the transcript below), and
+       expanded panes side by side underneath, absorbing whatever room is
+       left. Columns are physically moved between the two by JS when their
+       collapsed state changes (see relocateColumn() in controls.js). */
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
     /* Once a House Rules format is in play (Roundtable v2's [TO: X] tags or
        any other format's own state machine), routing happens automatically —
        the manual per-pane Forward/Auto buttons would just fight it. */
     #ai-row.hr-active .fwd-row, #ai-row.hr-active .auto-row { display:none; }
-    /* All three AI panes collapsed = nothing left to look at up there — give
-       that space to the Transcript/Activity Log panel instead of leaving it
-       empty at a fixed height. */
-    #wrap.all-collapsed #ai-row { flex: 0 0 140px; }
+    #collapsed-strip { display:flex; flex-direction:column; gap:8px; flex:0 0 auto; }
+    #collapsed-strip:empty { display:none; }
+    #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
+    /* All three AI panes collapsed = #expanded-strip is empty and would
+       otherwise still claim its flex-grow share of #ai-row's height as dead
+       space — collapse #ai-row down to just the collapsed-strip's own
+       content height and give the rest to Transcript/Activity Log. */
+    #wrap.all-collapsed #ai-row { flex: 0 0 auto; }
     #wrap.all-collapsed #main-row { flex: 1 1 auto; }
     .ai-col {
       flex:1 1 0; min-width:0; display:flex; flex-direction:column;
@@ -52,17 +62,12 @@
     .ai-col.disabled .control-strip { opacity:.5; }
     .ai-col.just-received { box-shadow: 0 0 0 2px #7c5ce0, 0 0 16px 2px rgba(124,92,224,.45); }
 
-    .ai-col.collapsed { flex:0 0 40px; min-width:40px; }
+    .ai-col.collapsed { flex:0 0 44px; height:44px; }
     .ai-col.collapsed .preview,
     .ai-col.collapsed .btns,
     .ai-col.collapsed .pane-slot { display:none; }
-    .ai-col.collapsed .control-strip { height:100%; }
-    .ai-col.collapsed .card-head {
-      writing-mode: vertical-rl; text-orientation: mixed; height:100%;
-      margin-bottom:0; padding:8px 0; justify-content:flex-start; gap:8px;
-    }
-    .ai-col.collapsed .card-head .inspect-btn,
-    .ai-col.collapsed .card-head .reload-btn { display:none; }
+    .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; }
+    .ai-col.collapsed .card-head { margin-bottom:0; }
 
     .control-strip { padding:7px 9px; flex:0 0 auto; }
     .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
@@ -176,7 +181,10 @@
       </div>
     </div>
 
-    <div id="ai-row"></div>
+    <div id="ai-row">
+      <div id="collapsed-strip"></div>
+      <div id="expanded-strip"></div>
+    </div>
 
     <div id="main-row">
       <div id="col-transcript" class="col">

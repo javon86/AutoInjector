@@ -171,9 +171,22 @@ function buildAiColumn(site) {
 }
 
 function buildAiRow() {
-  const box = el("ai-row");
+  const box = el("expanded-strip");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildAiColumn(site));
+}
+
+// Collapsed panes live in #collapsed-strip (stacked, auto-height bars) and
+// expanded ones in #expanded-strip (side by side, sharing whatever room is
+// left) — moving a column between the two (appendChild on an already-
+// attached node relocates it, no clone needed) is what actually frees up
+// vertical space when a pane collapses, rather than just narrowing it in
+// place and leaving its full row-height allocation unused.
+function relocateColumn(site) {
+  const col = el(`col-${site}`);
+  if (!col) return;
+  const target = col.classList.contains("collapsed") ? el("collapsed-strip") : el("expanded-strip");
+  target.appendChild(col);
 }
 
 // Purely a visual/layout toggle — collapsing a pane does NOT change whether
@@ -191,6 +204,7 @@ function toggleColumnCollapse(site) {
     btn.textContent = collapsed ? "›" : "⌄";
     btn.title = collapsed ? "Expand this pane" : "Collapse this pane";
   }
+  relocateColumn(site);
   updateAllCollapsedState();
 }
 

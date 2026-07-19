@@ -179,6 +179,25 @@ async function testHouseRuleModeHidesManualControls() {
   assert(!aiRow.classList.contains("hr-active"), "mode reset back to null (e.g. after Stop clears it) shows the manual controls again");
 }
 
+async function testCollapsedPanesMoveToTheirOwnStrip() {
+  console.log("\n== Collapsing a pane saves VERTICAL space — it moves into #collapsed-strip as a short bar, not a narrow column ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+
+  const claudeCol = doc.getElementById("col-claude");
+  assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanded by default — lives in the side-by-side strip");
+  assert(!doc.getElementById("collapsed-strip").contains(claudeCol), "not in the collapsed strip yet");
+
+  claudeCol.querySelector(".collapse-btn").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(doc.getElementById("collapsed-strip").contains(claudeCol), "collapsing moves it into the stacked collapsed strip");
+  assert(!doc.getElementById("expanded-strip").contains(claudeCol), "...and out of the side-by-side strip");
+  assert(doc.getElementById("col-chatgpt") && doc.getElementById("expanded-strip").contains(doc.getElementById("col-chatgpt")), "the other, still-expanded panes are unaffected");
+
+  claudeCol.querySelector(".collapse-btn").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanding it again moves it back");
+  assert(!doc.getElementById("collapsed-strip").contains(claudeCol), "...and out of the collapsed strip");
+}
+
 async function testAllPanesCollapsedExpandsTranscript() {
   console.log("\n== Collapsing every AI pane hands its space to the Transcript/Log panel ==");
   const dom = await loadWindow(makeApi());
@@ -205,6 +224,7 @@ async function main() {
   await testRoundtableDropdownOption();
   await testRoundtableBadgeParity();
   await testHouseRuleModeHidesManualControls();
+  await testCollapsedPanesMoveToTheirOwnStrip();
   await testAllPanesCollapsedExpandsTranscript();
 
   console.log(`\n${passed} passed, ${failed} failed`);
