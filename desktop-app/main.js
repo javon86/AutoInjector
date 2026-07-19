@@ -93,7 +93,9 @@ const state = {
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
   meshActive: false, // whether global Auto is currently on
   nextTurnId: 1,
-  hr: null // House Rules run state, see resetHouseRule()
+  hr: null, // House Rules run state, see resetHouseRule()
+  prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
+  nextPromptId: 1
 };
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
@@ -106,6 +108,19 @@ for (const site of SITE_IDS) {
   state.enabled[site] = true;
   state.customRole[site] = "";
 }
+
+// Built-in starter prompt: a one-click sanity check that the whole
+// automation pipeline (typing, sending, reading replies, routing) actually
+// works, without needing to run a full House Rules session first.
+function defaultTestPrompt() {
+  const text = {};
+  for (const site of SITE_IDS) {
+    text[site] = `This is a diagnostic test of the AutoInjector automation system, not a real task. Please: (1) reply here to confirm this message reached you, (2) briefly confirm what you understand your role to be right now, and (3) if messages from ${otherLabels(SITE_IDS, site)} show up afterward, say so — that confirms routing between the three of us is actually working end-to-end. Keep your reply short.`;
+  }
+  return { id: 1, name: "System Test", text };
+}
+state.prompts = [defaultTestPrompt()];
+state.nextPromptId = 2;
 
 function resetHouseRule(mode, topic, rounds) {
   state.hr = {
@@ -181,6 +196,7 @@ function saveStateDebounced() {
         savedAt: Date.now(),
         transcript: state.transcript,
         customRole: state.customRole,
+        prompts: state.prompts,
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -219,6 +235,10 @@ function loadPersistedState() {
   }
   if (snap.customRole) {
     for (const site of SITE_IDS) if (typeof snap.customRole[site] === "string") state.customRole[site] = snap.customRole[site];
+  }
+  if (Array.isArray(snap.prompts)) {
+    state.prompts = snap.prompts;
+    state.nextPromptId = snap.prompts.reduce((m, p) => Math.max(m, (p.id || 0) + 1), 1);
   }
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
@@ -977,6 +997,42 @@ ipcMain.handle("send:regenerate", async (_evt, site) => {
   return res;
 });
 
+ipcMain.handle("prompts:save", (_evt, { id, name, text }) => {
+  const cleanText = {};
+  for (const site of SITE_IDS) cleanText[site] = String((text && text[site]) || "").slice(0, 8000);
+  const cleanName = String(name || "Untitled").slice(0, 120);
+  const existing = id != null ? state.prompts.find((p) => p.id === id) : null;
+  if (existing) {
+    existing.name = cleanName;
+    existing.text = cleanText;
+  } else {
+    state.prompts.push({ id: state.nextPromptId++, name: cleanName, text: cleanText });
+  }
+  logEvent("prompt-saved", { name: cleanName });
+  saveStateDebounced();
+  return { ok: true, prompts: state.prompts };
+});
+
+ipcMain.handle("prompts:delete", (_evt, id) => {
+  state.prompts = state.prompts.filter((p) => p.id !== id);
+  logEvent("prompt-deleted", { id });
+  saveStateDebounced();
+  return { ok: true, prompts: state.prompts };
+});
+
+// Sends whatever's currently in each site's field — independent of whether
+// it's been Saved to the library yet, so a one-off custom prompt per AI
+// doesn't need to be saved first just to be sent. An empty/blank field for a
+// site means "don't send to it," not "send an empty message."
+ipcMain.handle("prompts:send", async (_evt, { text }) => {
+  const targets = SITE_IDS.filter((s) => text && String(text[s] || "").trim());
+  if (!targets.length) return { ok: false, error: "NEED_TEXT" };
+  logEvent("prompt-send", { targets });
+  const results = {};
+  for (const s of targets) results[s] = await sendTextTo(s, String(text[s]).trim(), null);
+  return { ok: true, results };
+});
+
 ipcMain.handle("routing:set", (_evt, { source, target, enabled }) => {
   if (!SITES[source] || !SITES[target] || source === target) return { ok: false, error: "BAD_ROUTE" };
   if (enabled) state.routing[source].add(target); else state.routing[source].delete(target);
@@ -1129,7 +1185,8 @@ ipcMain.handle("state:get", () => ({
   houseRule: houseRuleSnapshot(),
   captured: state.captured,
   transcript: state.transcript,
-  log: state.log
+  log: state.log,
+  prompts: state.prompts
 }));
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });

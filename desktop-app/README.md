@@ -111,10 +111,28 @@ last captured reply) stays visible and usable.
      deliberate restart.
    - A column's own **Forward**/**Auto → X**/**↻ Regenerate** buttons still work
      independently, for fine-grained one-off routes or resending a prompt that
-     missed the mark, instead of the full-mesh version.
-6. **📌** on any transcript turn pins it, so you can spot it again later without
+     missed the mark, instead of the full-mesh version. They're only shown when
+     no House Rules format is in play — once one's running (or has finished),
+     routing is already automatic (Roundtable v2's `[TO: X]` tags, or the
+     format's own state machine), so the manual buttons would just fight it;
+     they come back once you pick a different format or the run's `mode`
+     resets.
+6. **Prompt Library**: saved, reusable prompts you can fire off with one
+   click, without retyping them or going through House Rules. Each saved
+   prompt has its own text box *per AI* — ChatGPT, Claude, and Gemini can each
+   get different wording in the same **Send**, and leaving a box blank skips
+   that AI entirely. **+ New Prompt** adds a blank one to edit; **Save** keeps
+   your edits, **Delete** removes it. A built-in **System Test** prompt ships
+   by default — a one-click sanity check that tells all three AIs this is a
+   diagnostic (not a real task) and asks them to confirm they received it and
+   report whether messages from the other two are actually arriving, so you
+   can confirm the whole pipeline works without running a full session first.
+   The panel has its own collapse button (**⌄** in its header) if you'd rather
+   keep it out of the way. Saved prompts persist across restarts, same as the
+   transcript and custom roles.
+7. **📌** on any transcript turn pins it, so you can spot it again later without
    scrolling back through everything.
-7. **Copy Transcript** / **Download .md** save the running conversation locally
+8. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
 ### Collapsing things when one screen isn't enough room
@@ -123,11 +141,17 @@ Everything that takes up screen space can be shrunk out of the way without
 losing anything — nothing closes or resets, it just gets small:
 
 - **Each AI's column** — click the **⌄** button in that column's header
-  (next to 🔍 and ⟳) to collapse it to a thin strip; click it again (now **›**)
-  to bring it back. This is purely visual — a collapsed AI is still enabled,
-  still participating in Auto/House Rules, still sending, receiving, and
-  capturing replies exactly as before, it's just out of view. Independent per
-  column — collapsing Claude's doesn't touch ChatGPT's or Gemini's.
+  (next to 🔍 and ⟳) to collapse it down to a short horizontal bar; click it
+  again (now **›**) to bring it back to full size. This is purely visual — a
+  collapsed AI is still enabled, still participating in Auto/House Rules,
+  still sending, receiving, and capturing replies exactly as before, it's
+  just out of view. Independent per column — collapsing Claude's doesn't
+  touch ChatGPT's or Gemini's. Collapsing saves *vertical* space on purpose
+  (not just width): collapsed columns stack as short bars above whichever
+  columns are still expanded, which share the row side by side and get to
+  stay full height — and once all three are collapsed, that freed vertical
+  space goes straight to the Transcript/Activity Log panel below instead of
+  sitting there unused.
 - **Each whole window** — both the Automation window and the Conversation
   window have their own **⌄** button in a thin titlebar at the very top.
   Clicking it shrinks that entire window down to just that titlebar (same
@@ -363,10 +387,15 @@ just right-click that site's actual Send button instead of a reply bubble.
   list of rate-limit/usage-cap
   phrases is checked against every new reply while a House Rules run is
   active — a match auto-pauses the run instead of relaying it as a real
-  contribution. Transcript, custom roles, and paused-run state are written to
-  a debounced JSON snapshot in `app.getPath("userData")` on every meaningful
-  change and reloaded on startup (always as **paused**, never active — a
-  restart must never auto-send). `logEvent()` also appends every internal
+  contribution. Transcript, custom roles, saved Prompt Library entries, and
+  paused-run state are written to a debounced JSON snapshot in
+  `app.getPath("userData")` on every meaningful change and reloaded on
+  startup (always as **paused**, never active — a restart must never
+  auto-send). Prompt Library sends (`prompts:send`) reuse the same
+  `sendTextTo()` every other manual send goes through, just once per AI with
+  that AI's own text instead of one shared message — an empty/blank field for
+  a site is treated as "don't send to it," not "send nothing." `logEvent()`
+  also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
   crash still leaves something to troubleshoot from.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
@@ -378,7 +407,10 @@ just right-click that site's actual Send button instead of a reply bubble.
   Enter if a wrong/disabled button was clicked instead, and only reports
   success once that's confirmed. Mirrors the selectors used by the browser
   extension's `content.js`/`selectors.js`.
-- `controls.html` / `controls.js` — the Automation window's control panel UI.
+- `controls.html` / `controls.js` — the Automation window's control panel UI,
+  including the Prompt Library panel (each saved prompt renders one text box
+  per AI; Send reads whatever's currently typed, live edits included, not
+  just what was last Saved).
 - `conversation.html` / `conversation.js` — the Conversation window's UI:
   renders the shared transcript, current/next speaker, Send/Start/Pause/
   Resume/Stop, and Role Assignment.
@@ -426,6 +458,15 @@ correctly costs two hops, not one; a run ends the instant the limit is hit
 rather than drifting one relay past it; a zero/unset hop limit falls back to
 the default of 24).
 
+It also covers the Prompt Library backend: the built-in "System Test" preset
+existing by default (with each AI's own version correctly naming the *other*
+two), saving a new prompt with different text per AI, sending it and
+confirming each AI got its own exact text with no forwarding wrapper while a
+blank field's AI got nothing at all, rejecting a send where every field is
+blank/whitespace-only instead of silently doing nothing, editing an existing
+prompt in place (no duplicate), deleting one, and that the deletion actually
+lands in the persisted state file on disk.
+
 `npm test` also runs `test/conversation.test.js`, which loads the *real*
 `conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
 no real browser needed) with `window.api` stubbed the way `preload.js` exposes
@@ -447,13 +488,21 @@ replies, to avoid badging the common case).
 
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
 to `controls.html`/`controls.js` — currently focused on the collapse feature
-(each AI column's own toggle, the Automation window's titlebar toggle, that a
-collapse event for the *other* window is correctly ignored), the Stop
-confirmation prompt, and — for parity with the Conversation window, since the
-Automation window's transcript is also user-visible — the Roundtable v2
-dropdown option (present, correctly labeled, and actually dispatches
-`startHouseRule("roundtable", …)` with the right topic and hop count) and the
-same routing badge rendering on captured turns.
+(each AI column's own toggle now actually relocating it between the collapsed
+and expanded strips, not just adding a class; the Automation window's
+titlebar toggle; that a collapse event for the *other* window is correctly
+ignored; the Transcript/Log panel expanding only once *all three* panes are
+collapsed), the Stop confirmation prompt, that the manual Forward/Auto rows
+hide as soon as any House Rules format is picked (and stay hidden through
+"finished," only reappearing once `mode` resets), the Roundtable v2 dropdown
+option (present, correctly labeled, and actually dispatches
+`startHouseRule("roundtable", …)` with the right topic and hop count), the
+same routing badge rendering on captured turns for parity with the
+Conversation window, and the Prompt Library panel — the built-in prompt
+rendering with one field per AI, its own collapse toggle, Send using
+whatever's currently typed in each field (not what was last Saved) and
+correctly leaving a blank field out of the send, and adding/deleting a
+prompt actually re-rendering the list.
 
 Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
 copies of the selector config — `desktop-app/selectors.js` (CommonJS) and

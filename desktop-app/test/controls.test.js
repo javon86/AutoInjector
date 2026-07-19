@@ -17,11 +17,13 @@ function assert(cond, msg) {
   return cond;
 }
 
-function makeApi() {
+function makeApi({ initialPrompts } = {}) {
   const calls = [];
   let windowCollapseCb = null;
   let captureCb = null;
   let houseRuleCb = null;
+  let prompts = initialPrompts || [{ id: 1, name: "System Test", text: { chatgpt: "hi chatgpt", claude: "hi claude", gemini: "hi gemini" } }];
+  let nextPromptId = prompts.reduce((m, p) => Math.max(m, p.id + 1), 1);
   const noop = async () => ({ ok: true });
   const api = {
     calls,
@@ -38,13 +40,33 @@ function makeApi() {
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
+    savePrompt: async (id, name, text) => {
+      calls.push({ fn: "savePrompt", id, name, text });
+      const cleanText = { chatgpt: (text && text.chatgpt) || "", claude: (text && text.claude) || "", gemini: (text && text.gemini) || "" };
+      const existing = id != null ? prompts.find((p) => p.id === id) : null;
+      if (existing) { existing.name = name; existing.text = cleanText; }
+      else { prompts.push({ id: nextPromptId++, name, text: cleanText }); }
+      return { ok: true, prompts };
+    },
+    deletePrompt: async (id) => {
+      calls.push({ fn: "deletePrompt", id });
+      prompts = prompts.filter((p) => p.id !== id);
+      return { ok: true, prompts };
+    },
+    sendPrompt: async (text) => {
+      const targets = ["chatgpt", "claude", "gemini"].filter((s) => text && String(text[s] || "").trim());
+      calls.push({ fn: "sendPrompt", text, targets });
+      if (!targets.length) return { ok: false, error: "NEED_TEXT" };
+      return { ok: true, results: {} };
+    },
     getState: async () => ({
       ok: true,
       global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: { chatgpt: true, claude: true, gemini: true }, waiting: {}, meshActive: false, customRole: {} },
       houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null },
       captured: { chatgpt: null, claude: null, gemini: null },
       transcript: [],
-      log: []
+      log: [],
+      prompts
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: () => {},
@@ -217,6 +239,66 @@ async function testAllPanesCollapsedExpandsTranscript() {
   assert(!wrap.classList.contains("all-collapsed"), "expanding just one pane again gives the space back");
 }
 
+async function testPromptLibraryRenders() {
+  console.log("\n== Prompt Library: the built-in preset loads with a field per AI ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+
+  const cards = doc.querySelectorAll("#prompts-list .prompt-card");
+  assert(cards.length === 1, `exactly one prompt card renders (got ${cards.length})`);
+  assert(cards[0].querySelector(".prompt-name").value === "System Test", "the built-in 'System Test' prompt is there by default");
+  assert(cards[0].querySelectorAll("textarea").length === 3, "one textarea per AI (ChatGPT/Claude/Gemini)");
+  assert(cards[0].querySelector('textarea[data-site="claude"]').value === "hi claude", "each AI's textarea is pre-filled with its own text");
+}
+
+async function testPromptLibraryCollapse() {
+  console.log("\n== Prompt Library collapses independently ==");
+  const dom = await loadWindow(makeApi());
+  const body = dom.window.document.getElementById("prompts-body");
+  assert(!body.classList.contains("collapsed"), "starts expanded");
+
+  click(dom, "btn-prompts-collapse");
+  assert(body.classList.contains("collapsed"), "collapsing hides the list");
+
+  click(dom, "btn-prompts-collapse");
+  assert(!body.classList.contains("collapsed"), "clicking again expands it back");
+}
+
+async function testPromptLibrarySendUsesLiveEdits() {
+  console.log("\n== Prompt Library Send uses whatever is currently typed, blank fields are skipped ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const card = dom.window.document.querySelector("#prompts-list .prompt-card");
+
+  card.querySelector('textarea[data-site="chatgpt"]').value = "edited chatgpt text";
+  card.querySelector('textarea[data-site="gemini"]').value = ""; // blank = skip gemini
+  card.querySelector('button.primary').dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const sendCall = api.calls.find((c) => c.fn === "sendPrompt");
+  assert(!!sendCall, "clicking Send calls sendPrompt");
+  assert(sendCall.text.chatgpt === "edited chatgpt text", "sends the live-edited text, not the originally-loaded value");
+  assert(sendCall.text.gemini === "", "a blank field is sent as empty (main.js treats that as 'skip this AI')");
+}
+
+async function testPromptLibraryAddAndDelete() {
+  console.log("\n== Prompt Library: add a new prompt, then delete one ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  click(dom, "btn-prompt-add");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.querySelectorAll("#prompts-list .prompt-card").length === 2, "a second card appears after '+ New Prompt'");
+  assert(api.calls.some((c) => c.fn === "savePrompt" && c.id == null && c.name === "New Prompt"), "it's created via savePrompt with no id (new entry) and a default name");
+
+  const firstCard = doc.querySelector("#prompts-list .prompt-card");
+  firstCard.querySelector("button.danger").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "deletePrompt"), "Delete calls deletePrompt");
+  assert(doc.querySelectorAll("#prompts-list .prompt-card").length === 1, "the deleted card is gone from the re-rendered list");
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testWindowTitlebarCollapse();
@@ -226,6 +308,10 @@ async function main() {
   await testHouseRuleModeHidesManualControls();
   await testCollapsedPanesMoveToTheirOwnStrip();
   await testAllPanesCollapsedExpandsTranscript();
+  await testPromptLibraryRenders();
+  await testPromptLibraryCollapse();
+  await testPromptLibrarySendUsesLiveEdits();
+  await testPromptLibraryAddAndDelete();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

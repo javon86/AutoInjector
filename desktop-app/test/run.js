@@ -417,6 +417,47 @@ async function testPersistenceSavesToDisk() {
   await new Promise((r) => setTimeout(r, 700));
 }
 
+async function testPromptLibrary() {
+  console.log("\n== Prompt Library: built-in test prompt, save/send-different-text-per-AI/delete, persisted ==");
+  await resetAllParticipants();
+
+  const state0 = await call("state:get", {});
+  const builtin = state0.prompts.find((p) => p.name === "System Test");
+  assert(!!builtin, "the built-in 'System Test' prompt exists by default");
+  assert(builtin.text.chatgpt.includes("Claude and Gemini"), "chatgpt's version of the built-in prompt names the other two AIs (Claude and Gemini)");
+  assert(builtin.text.claude.includes("ChatGPT and Gemini"), "claude's version names the other two (ChatGPT and Gemini)");
+  assert(builtin.text.gemini.includes("ChatGPT and Claude"), "gemini's version names the other two (ChatGPT and Claude)");
+
+  const saveRes = await call("prompts:save", { id: null, name: "Custom Kickoff", text: { chatgpt: "Hello ChatGPT only", claude: "", gemini: "Hello Gemini only" } });
+  assert(saveRes.ok, "saving a new prompt succeeds");
+  const created = saveRes.prompts.find((p) => p.name === "Custom Kickoff");
+  assert(!!created, "the new prompt comes back in the returned list");
+  assert(created.text.claude === "", "an intentionally blank field stays blank rather than getting defaulted to something");
+
+  const before = { chatgpt: sentLog("chatgpt").length, claude: sentLog("claude").length, gemini: sentLog("gemini").length };
+  const sendRes = await call("prompts:send", { text: created.text });
+  assert(sendRes.ok, "prompts:send succeeds when at least one field has text");
+  await waitUntil(() => sentLog("chatgpt").length > before.chatgpt && sentLog("gemini").length > before.gemini, { label: "chatgpt and gemini both receive their own send" });
+  assert(sentLog("claude").length === before.claude, "claude (the blank field) receives nothing at all");
+  assert(sentLog("chatgpt")[sentLog("chatgpt").length - 1].text === "Hello ChatGPT only", "chatgpt gets its own exact text verbatim, no wrapper (this isn't a forward)");
+  assert(sentLog("gemini")[sentLog("gemini").length - 1].text === "Hello Gemini only", "gemini gets its own distinct text in that same send");
+
+  const emptyRes = await call("prompts:send", { text: { chatgpt: "", claude: "   ", gemini: "" } });
+  assert(!emptyRes.ok && emptyRes.error === "NEED_TEXT", "sending with every field blank (or whitespace-only) is rejected, not a silent no-op");
+
+  const editRes = await call("prompts:save", { id: created.id, name: "Custom Kickoff (edited)", text: { chatgpt: "v2", claude: "", gemini: "" } });
+  assert(editRes.prompts.filter((p) => p.id === created.id).length === 1, "saving again with the same id updates it in place, doesn't duplicate");
+  assert(editRes.prompts.find((p) => p.id === created.id).name === "Custom Kickoff (edited)", "the name is updated by the edit");
+
+  const delRes = await call("prompts:delete", created.id);
+  assert(delRes.ok && !delRes.prompts.some((p) => p.id === created.id), "deleting removes it from the list");
+
+  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
+  const saved = JSON.parse(raw);
+  assert(Array.isArray(saved.prompts) && !saved.prompts.some((p) => p.id === created.id), "the deletion is reflected in the persisted state file too");
+}
+
 async function startRoundtableAndSkipAcks(topic, rounds) {
   await call("houserule:start", { mode: "roundtable", topic, rounds });
   await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "house-rules kickoff sent to all three" });
@@ -612,6 +653,7 @@ async function main() {
   await testRateLimitAutoPause();
   await testWaitingSinceTracking();
   await testPersistenceSavesToDisk();
+  await testPromptLibrary();
   await testRoundtableAckHandshake();
   await testRoundtableDuplicateAck();
   await testRoundtableTagRouting();

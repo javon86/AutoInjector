@@ -17,6 +17,7 @@ const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
 
 let currentTranscript = [];
+let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
 
@@ -67,6 +68,86 @@ async function sendCompose(targets) {
   setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
   const res = await window.api.sendCompose(text, targets);
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
+}
+
+function readPromptFields(card) {
+  const text = {};
+  for (const site of SITES) {
+    const ta = card.querySelector(`textarea[data-site="${site}"]`);
+    text[site] = ta ? ta.value : "";
+  }
+  return text;
+}
+
+function promptCardEl(prompt) {
+  const card = document.createElement("div");
+  card.className = "prompt-card";
+  card.dataset.id = prompt.id;
+
+  const head = document.createElement("div");
+  head.className = "prompt-card-head";
+  const nameInput = document.createElement("input");
+  nameInput.className = "prompt-name";
+  nameInput.value = prompt.name;
+  head.appendChild(nameInput);
+
+  const btns = document.createElement("div");
+  btns.className = "btns";
+  const sendBtn = document.createElement("button");
+  sendBtn.className = "primary";
+  sendBtn.textContent = "Send";
+  sendBtn.onclick = async () => {
+    const text = readPromptFields(card);
+    setStatus(`Sending "${nameInput.value}"…`);
+    const res = await window.api.sendPrompt(text);
+    if (!res?.ok) setStatus(`Send failed: ${res?.error === "NEED_TEXT" ? "no text entered for any AI" : (res?.error || "unknown error")}`);
+    else setStatus(`Sent "${nameInput.value}".`);
+  };
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "Save";
+  saveBtn.onclick = async () => {
+    const text = readPromptFields(card);
+    const res = await window.api.savePrompt(prompt.id, nameInput.value, text);
+    if (res?.ok) { currentPrompts = res.prompts; setStatus("Prompt saved."); }
+  };
+  const delBtn = document.createElement("button");
+  delBtn.className = "danger";
+  delBtn.textContent = "Delete";
+  delBtn.onclick = async () => {
+    if (!window.confirm(`Delete the "${prompt.name}" prompt?`)) return;
+    const res = await window.api.deletePrompt(prompt.id);
+    if (res?.ok) renderPrompts(res.prompts);
+  };
+  btns.appendChild(sendBtn);
+  btns.appendChild(saveBtn);
+  btns.appendChild(delBtn);
+  head.appendChild(btns);
+  card.appendChild(head);
+
+  const fields = document.createElement("div");
+  fields.className = "prompt-fields";
+  for (const site of SITES) {
+    const field = document.createElement("div");
+    field.className = "prompt-field";
+    const label = document.createElement("label");
+    label.textContent = SITE_LABELS[site];
+    const ta = document.createElement("textarea");
+    ta.dataset.site = site;
+    ta.value = (prompt.text && prompt.text[site]) || "";
+    ta.placeholder = `Leave blank to skip ${SITE_LABELS[site]}`;
+    field.appendChild(label);
+    field.appendChild(ta);
+    fields.appendChild(field);
+  }
+  card.appendChild(fields);
+  return card;
+}
+
+function renderPrompts(prompts) {
+  currentPrompts = prompts || [];
+  const box = el("prompts-list");
+  box.innerHTML = "";
+  for (const p of currentPrompts) box.appendChild(promptCardEl(p));
 }
 
 function buildAiColumn(site) {
@@ -498,6 +579,18 @@ el("btn-hr-wrapup").onclick = async () => {
   else setStatus("Wrapping up — asking one participant to synthesize a final plan…");
 };
 
+el("btn-prompts-collapse").onclick = () => {
+  const collapsed = el("prompts-body").classList.toggle("collapsed");
+  el("prompts-hint").classList.toggle("collapsed", collapsed);
+  el("btn-prompts-collapse").textContent = collapsed ? "›" : "⌄";
+  el("btn-prompts-collapse").title = collapsed ? "Expand the Prompt Library" : "Collapse the Prompt Library";
+};
+
+el("btn-prompt-add").onclick = async () => {
+  const res = await window.api.savePrompt(null, "New Prompt", { chatgpt: "", claude: "", gemini: "" });
+  if (res?.ok) renderPrompts(res.prompts);
+};
+
 el("btn-copy").onclick = async () => {
   try {
     await navigator.clipboard.writeText(buildExportText());
@@ -536,6 +629,7 @@ el("btn-clear").onclick = async () => {
   if (res?.ok) {
     applyGlobal(res.global);
     applyHouseRule(res.houseRule);
+    renderPrompts(res.prompts);
     renderTranscript(res.transcript);
     for (const entry of res.log || []) appendLog(entry);
     for (const site of SITES) {
