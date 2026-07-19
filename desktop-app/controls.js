@@ -10,7 +10,8 @@ const HOUSE_RULE_LABELS = {
   "devil-angel": "Devil & Angel",
   "chargeback": "Chargeback",
   "brainstorm": "Brainstorm",
-  "rotation": "Rotation"
+  "rotation": "Rotation",
+  "roundtable": "Roundtable v2"
 };
 const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
@@ -299,6 +300,13 @@ function turnEl(turn) {
     const b = document.createElement("span");
     b.className = "badge-final-plan";
     b.textContent = "✅ FINAL PLAN";
+    meta.appendChild(b);
+  }
+  if (turn.roundtableTag && turn.roundtableTag !== "USER") {
+    const label = turn.roundtableTag === "ALL" ? "Everyone" : SITE_LABELS[turn.roundtableTag.toLowerCase()] || turn.roundtableTag;
+    const b = document.createElement("span");
+    b.className = "badge-roundtable";
+    b.textContent = `→ ${label}`;
     meta.appendChild(b);
   }
   const text = document.createElement("div");

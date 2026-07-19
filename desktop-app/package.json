@@ -29,6 +29,7 @@
       "preload.js",
       "automation.js",
       "selectors.js",
+      "roundtable-rules.js",
       "controls.html",
       "controls.js",
       "conversation.html",

@@ -40,8 +40,8 @@ function makeApi() {
       calls.push({ fn: "startHouseRule", mode, topic, rounds });
       return api.__startHouseRuleResult || { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds: 0, roundNum: 0, nextSpeaker: "chatgpt" } };
     },
-    pauseHouseRule: async () => { calls.push({ fn: "pauseHouseRule" }); return { ok: true, houseRule: { mode: "rotation", active: false, paused: true, topic: "t", roundNum: 1, nextSpeaker: "claude" } }; },
-    resumeHouseRule: async () => { calls.push({ fn: "resumeHouseRule" }); return { ok: true, houseRule: { mode: "rotation", active: true, paused: false, topic: "t", roundNum: 1, nextSpeaker: "claude" } }; },
+    pauseHouseRule: async () => { calls.push({ fn: "pauseHouseRule" }); return { ok: true, houseRule: { mode: "roundtable", active: false, paused: true, topic: "t", roundNum: 1, nextSpeaker: "claude" } }; },
+    resumeHouseRule: async () => { calls.push({ fn: "resumeHouseRule" }); return { ok: true, houseRule: { mode: "roundtable", active: true, paused: false, topic: "t", roundNum: 1, nextSpeaker: "claude" } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", roundNum: 0, nextSpeaker: null } }; },
     setRole: async (site, role) => { calls.push({ fn: "setRole", site, role }); return { ok: true }; },
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -77,7 +77,7 @@ function setMsg(dom, text) {
 }
 
 async function testAutoStartOnFirstSend() {
-  console.log("\n== Send auto-starts Rotation when nothing is running yet ==");
+  console.log("\n== Send auto-starts the roundtable when nothing is running yet ==");
   const api = makeApi();
   const dom = await loadWindow(api);
 
@@ -86,15 +86,15 @@ async function testAutoStartOnFirstSend() {
   await new Promise((r) => setTimeout(r, 20));
 
   assert(api.calls.length === 1 && api.calls[0].fn === "startHouseRule", "clicking Send with nothing running calls startHouseRule, not sendCompose");
-  assert(api.calls[0].mode === "rotation" && api.calls[0].topic === "What's the best way to learn a language?", "the typed message becomes the rotation's topic");
+  assert(api.calls[0].mode === "roundtable" && api.calls[0].topic === "What's the best way to learn a language?", "the typed message becomes the roundtable's topic");
   assert(dom.window.document.getElementById("msg-box").value === "", "message box is cleared after auto-starting");
   assert(dom.window.document.getElementById("run-status").textContent === "Running", "status line reflects the run starting");
 }
 
 async function testSendInterjectsOnceRunning() {
-  console.log("\n== Send just interjects once Rotation is already active ==");
+  console.log("\n== Send just interjects once the roundtable is already active ==");
   const api = makeApi();
-  api.__state.houseRule = { mode: "rotation", active: true, paused: false, topic: "existing topic", roundNum: 1, nextSpeaker: "claude" };
+  api.__state.houseRule = { mode: "roundtable", active: true, paused: false, topic: "existing topic", roundNum: 1, nextSpeaker: "claude" };
   const dom = await loadWindow(api);
 
   setMsg(dom, "one more thing to consider");
@@ -130,7 +130,7 @@ async function testSpeakerChipsAndButtons() {
   const dom = await loadWindow(api);
 
   api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "opening" });
-  api.fireHouseRuleState({ mode: "rotation", active: true, paused: false, topic: "t", roundNum: 0, nextSpeaker: "claude" });
+  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, topic: "t", roundNum: 0, nextSpeaker: "claude" });
   await new Promise((r) => setTimeout(r, 20));
 
   const chatgptChip = dom.window.document.querySelector('.speaker-chip[data-site="chatgpt"]');
@@ -141,7 +141,7 @@ async function testSpeakerChipsAndButtons() {
   assert(dom.window.document.getElementById("btn-pause").disabled === false, "Pause is enabled while active");
   assert(dom.window.document.getElementById("btn-resume").disabled === true, "Resume is disabled while active (not paused)");
 
-  api.fireHouseRuleState({ mode: "rotation", active: false, paused: true, topic: "t", roundNum: 0, nextSpeaker: "claude" });
+  api.fireHouseRuleState({ mode: "roundtable", active: false, paused: true, topic: "t", roundNum: 0, nextSpeaker: "claude" });
   await new Promise((r) => setTimeout(r, 20));
   assert(dom.window.document.getElementById("btn-pause").disabled === true, "Pause disabled once paused");
   assert(dom.window.document.getElementById("btn-resume").disabled === false, "Resume enabled once paused");
@@ -215,13 +215,13 @@ async function testRateLimitBanner() {
   const api = makeApi();
   const dom = await loadWindow(api);
 
-  api.fireHouseRuleState({ mode: "rotation", active: false, paused: true, pauseReason: "rate-limit", topic: "t", roundNum: 1, nextSpeaker: "claude" });
+  api.fireHouseRuleState({ mode: "roundtable", active: false, paused: true, pauseReason: "rate-limit", topic: "t", roundNum: 1, nextSpeaker: "claude" });
   await new Promise((r) => setTimeout(r, 20));
   const banner = dom.window.document.getElementById("banner");
   assert(banner.classList.contains("show") && banner.classList.contains("warn"), "a rate-limit pause shows a warning banner");
   assert(dom.window.document.getElementById("run-status").textContent.includes("usage limit"), "status line also mentions the usage limit");
 
-  api.fireHouseRuleState({ mode: "rotation", active: true, paused: false, pauseReason: null, topic: "t", roundNum: 1, nextSpeaker: "gemini" });
+  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, pauseReason: null, topic: "t", roundNum: 1, nextSpeaker: "gemini" });
   await new Promise((r) => setTimeout(r, 20));
   assert(!banner.classList.contains("show"), "banner clears automatically once the run resumes (pauseReason back to null)");
 }
@@ -331,6 +331,68 @@ async function testTitleFlashOnLiveReply() {
   assert(!dom.window.document.title.includes("🔔"), "title resets back to normal once the window regains focus");
 }
 
+async function testHopsInput() {
+  console.log("\n== Hops input: defaults to 24, its value is passed through as the hop limit ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  const hopsInput = dom.window.document.getElementById("hr-hops");
+  assert(!!hopsInput && hopsInput.type === "number", "#hr-hops exists and is a number input");
+  assert(hopsInput.value === "24", "defaults to 24");
+
+  setMsg(dom, "Plan the roadmap");
+  click(dom, "btn-send");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls[0].mode === "roundtable" && api.calls[0].rounds === 24, "Send with the default Hops value starts roundtable mode with rounds:24");
+
+  const api2 = makeApi();
+  const dom2 = await loadWindow(api2);
+  dom2.window.document.getElementById("hr-hops").value = "8";
+  dom2.window.document.getElementById("msg-box").value = "Different topic";
+  click(dom2, "btn-start");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api2.calls[0].rounds === 8, "changing the Hops value before Start passes the new value through");
+
+  const api3 = makeApi();
+  const dom3 = await loadWindow(api3);
+  dom3.window.document.getElementById("hr-hops").value = ""; // cleared/invalid
+  dom3.window.document.getElementById("msg-box").value = "Yet another topic";
+  click(dom3, "btn-start");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api3.calls[0].rounds === 24, "an empty/invalid Hops value falls back to the 24 default rather than sending NaN/0");
+}
+
+async function testRoundtableAckStatus() {
+  console.log("\n== Status line shows ack-phase progress, distinct from the normal Running/Paused states ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, topic: "t", roundNum: 0, nextSpeaker: null, phase: "ack", ackPending: ["claude", "gemini"] });
+  await new Promise((r) => setTimeout(r, 20));
+  const status = dom.window.document.getElementById("run-status").textContent;
+  assert(status.includes("acknowledge") && status.includes("1/3"), `status shows ack progress (got: "${status}")`);
+
+  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, topic: "t", roundNum: 0, nextSpeaker: null, phase: "active", ackPending: [] });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(dom.window.document.getElementById("run-status").textContent === "Running", "status returns to the normal 'Running' text once phase flips to active");
+}
+
+async function testRoundtableTagBadge() {
+  console.log("\n== Turns show a routing badge for their [TO: X] tag, except plain USER ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "Can you write this?", roundtableTag: "CLAUDE" });
+  api.fireCapture({ id: 2, site: "claude", label: "Claude", text: "Everyone should see this.", roundtableTag: "ALL" });
+  api.fireCapture({ id: 3, site: "gemini", label: "Gemini", text: "Here's the answer.", roundtableTag: "USER" });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const turns = dom.window.document.querySelectorAll("#transcript .turn");
+  assert(turns[0].querySelector(".badge-roundtable").textContent === "→ Claude", "a CLAUDE-tagged turn shows a '→ Claude' badge");
+  assert(turns[1].querySelector(".badge-roundtable").textContent === "→ Everyone", "an ALL-tagged turn shows a '→ Everyone' badge");
+  assert(!turns[2].querySelector(".badge-roundtable"), "a USER-tagged turn (the common case) shows no badge at all");
+}
+
 async function main() {
   await testAutoStartOnFirstSend();
   await testSendInterjectsOnceRunning();
@@ -347,6 +409,9 @@ async function main() {
   await testEnterToSend();
   await testExport();
   await testTitleFlashOnLiveReply();
+  await testHopsInput();
+  await testRoundtableAckStatus();
+  await testRoundtableTagBadge();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -417,6 +417,162 @@ async function testPersistenceSavesToDisk() {
   await new Promise((r) => setTimeout(r, 700));
 }
 
+async function startRoundtableAndSkipAcks(topic, rounds) {
+  await call("houserule:start", { mode: "roundtable", topic, rounds });
+  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "house-rules kickoff sent to all three" });
+  say("chatgpt", "[TO: USER] Acknowledged, understood.");
+  say("claude", "[TO: USER] Acknowledged, understood.");
+  say("gemini", "[TO: USER] Acknowledged, understood.");
+  await waitUntil(() => sentLog("chatgpt").length === 2 && sentLog("claude").length === 2 && sentLog("gemini").length === 2, { label: "real topic sent to all three once every ack lands" });
+}
+
+async function testRoundtableAckHandshake() {
+  console.log("\n== Roundtable: acknowledgment handshake is fully hidden, real topic sent only once all three ack ==");
+  await resetAllParticipants();
+  const startRes = await call("houserule:start", { mode: "roundtable", topic: "Let's plan a product launch", rounds: 10 });
+  assert(startRes.ok, "starts successfully");
+  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "house-rules kickoff sent to all three" });
+  assert(sentLog("claude")[0].text.includes("ROLE ADDENDUM") && sentLog("claude")[0].text.includes("code generation"), "claude gets its own role addendum in the kickoff");
+  assert(sentLog("gemini")[0].text.includes("NotebookLM"), "gemini gets its own role addendum in the kickoff");
+  assert(sentLog("chatgpt")[0].text.includes("human-language reasoning"), "chatgpt gets its own role addendum in the kickoff");
+
+  const state0 = await call("state:get", {});
+  assert(state0.houseRule.phase === "ack", "phase is 'ack' immediately after start");
+  assert(state0.houseRule.ackPending.length === 3, "all three are pending ack");
+  assert(state0.transcript.length === 0, "nothing in the transcript yet");
+
+  // acks arrive out of order: gemini, then chatgpt, then claude last
+  say("gemini", "[TO: USER] Acknowledged. I understand the rules and my role.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 2, { label: "gemini's ack consumed" });
+  let s = await call("state:get", {});
+  assert(s.transcript.length === 0, "gemini's ack never appears in the transcript");
+  assert(sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, "no real topic sent yet — still waiting on 2 more acks");
+
+  say("chatgpt", "[TO: USER] Acknowledged, I got it.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 1, { label: "chatgpt's ack consumed" });
+  assert(sentLog("chatgpt").length === 1, "still no real topic sent — claude hasn't acked yet");
+
+  say("claude", "[TO: USER] Acknowledged, understood.");
+  await waitUntil(() => sentLog("chatgpt").length === 2 && sentLog("claude").length === 2 && sentLog("gemini").length === 2, { label: "real topic sent to all three once the last ack lands" });
+  assert(sentLog("chatgpt")[1].text === "Let's plan a product launch", "the real topic (raw, no wrapper) goes out once acks are complete");
+  const s2 = await call("state:get", {});
+  assert(s2.houseRule.phase === "active", "phase flips to active");
+  assert(s2.transcript.length === 0, "still nothing visible in the transcript — only acks and the kickoff have happened so far");
+
+  await call("houserule:stop", {});
+}
+
+async function testRoundtableDuplicateAck() {
+  console.log("\n== Roundtable: a duplicate ack from an already-acked site doesn't cause problems ==");
+  await resetAllParticipants();
+  await call("houserule:start", { mode: "roundtable", topic: "Topic X", rounds: 10 });
+  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "kickoff sent" });
+
+  say("chatgpt", "[TO: USER] Acknowledged.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 2, { label: "chatgpt acked" });
+
+  say("chatgpt", "[TO: USER] Acknowledged again, just in case."); // a stray second reply from an already-acked site
+  await new Promise((r) => setTimeout(r, 3000));
+  const s = await call("state:get", {});
+  assert(s.houseRule.ackPending.length === 2, "still exactly 2 pending — the duplicate didn't remove anyone twice or error");
+  assert(s.transcript.length === 0, "still nothing visible");
+
+  await call("houserule:stop", {});
+}
+
+async function testRoundtableTagRouting() {
+  console.log("\n== Roundtable: [TO: X] tag parsing, stripping, and routing ==");
+  await resetAllParticipants();
+  await startRoundtableAndSkipAcks("Discuss project X", 30);
+
+  // [TO: CLAUDE] -- single relay, tag stripped, roundtableTag recorded
+  let before = sentLog("claude").length;
+  say("chatgpt", "[TO: CLAUDE]\nCan you write the migration script?");
+  await waitUntil(() => sentLog("claude").length === before + 1, { label: "claude gets the relay" });
+  const relayedText = sentLog("claude")[sentLog("claude").length - 1].text;
+  assert(relayedText.includes("Can you write the migration script?") && !relayedText.includes("[TO:"), "relayed text has the tag stripped, framed with the usual [ChatGPT says] wrapper like any other forward");
+  let s = await call("state:get", {});
+  let turn = s.transcript.find((t) => t.site === "chatgpt" && t.text === "Can you write the migration script?");
+  assert(turn && turn.roundtableTag === "CLAUDE", "the visible transcript turn is tag-stripped and carries roundtableTag");
+  assert(!turn.text.includes("[TO:"), "no raw tag leaks into the visible text");
+
+  // [TO: ALL] -- relays to the other two, not itself
+  const beforeChatgpt = sentLog("chatgpt").length;
+  const beforeGemini = sentLog("gemini").length;
+  const beforeClaude = sentLog("claude").length;
+  say("claude", "[TO: ALL]\nEveryone should review the API contract.");
+  await waitUntil(() => sentLog("chatgpt").length === beforeChatgpt + 1 && sentLog("gemini").length === beforeGemini + 1, { label: "ALL relays to both others" });
+  assert(sentLog("claude").length === beforeClaude, "claude itself gets no copy of its own [TO: ALL] message");
+
+  // [TO: USER] -- visible, zero relays
+  const totalBefore = totalSent();
+  say("gemini", "[TO: USER]\nHere's the market research summary.");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.site === "gemini" && t.roundtableTag === "USER"), { label: "TO:USER turn appears in the transcript" });
+  assert(totalSent() === totalBefore, "TO:USER triggers zero relays");
+  s = await call("state:get", {});
+  turn = s.transcript.find((t) => t.site === "gemini" && t.roundtableTag === "USER");
+  assert(turn.text === "Here's the market research summary.", "TO:USER turn is tag-stripped");
+
+  // [TO: NONE] -- fully hidden, zero relays
+  const transcriptLenBefore = (await call("state:get", {})).transcript.length;
+  const totalBefore2 = totalSent();
+  say("chatgpt", "[TO: NONE]");
+  await new Promise((r) => setTimeout(r, 3000));
+  s = await call("state:get", {});
+  assert(s.transcript.length === transcriptLenBefore, "TO:NONE never appears in the transcript");
+  assert(totalSent() === totalBefore2, "TO:NONE triggers zero relays");
+
+  // missing tag -- defaults to USER per Rule 1, text left completely unstripped
+  say("claude", "This has no tag at all, just plain text.");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text === "This has no tag at all, just plain text."), { label: "no-tag reply still appears, defaulted to USER" });
+  s = await call("state:get", {});
+  turn = s.transcript.find((t) => t.text === "This has no tag at all, just plain text.");
+  assert(turn.roundtableTag === "USER", "missing tag defaults to USER (Rule 1's documented fallback)");
+
+  // case-insensitive tag parsing
+  const beforeChatgpt2 = sentLog("chatgpt").length;
+  say("gemini", "[to: chatgpt]\nHere's a lowercase-tagged message.");
+  await waitUntil(() => sentLog("chatgpt").length === beforeChatgpt2 + 1, { label: "lowercase tag still parsed and routed correctly" });
+  s = await call("state:get", {});
+  turn = s.transcript.find((t) => t.text === "Here's a lowercase-tagged message.");
+  assert(turn.roundtableTag === "CHATGPT", "tag parsing is case-insensitive");
+
+  // self-address guard -- visible, but no send back to the same site
+  const totalBefore3 = totalSent();
+  say("chatgpt", "[TO: CHATGPT]\nNote to self.");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text === "Note to self."), { label: "self-addressed reply still appears" });
+  assert(totalSent() === totalBefore3, "a site addressing itself triggers no relay back to itself");
+
+  await call("houserule:stop", {});
+}
+
+async function testRoundtableHopLimit() {
+  console.log("\n== Roundtable: hop limit stops the run, [TO: ALL] costs 2 hops ==");
+  await resetAllParticipants();
+  await startRoundtableAndSkipAcks("Short hop-limited topic", 3);
+
+  say("chatgpt", "[TO: CLAUDE]\nHop 1.");
+  await waitUntil(() => sentLog("claude").length === 3, { label: "hop 1 relay sent" });
+  let s = await call("state:get", {});
+  assert(s.houseRule.active === true && s.houseRule.roundNum === 1, "1 hop consumed, still running");
+
+  say("claude", "[TO: ALL]\nHop 2 and 3 -- broadcasts to both others.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.active === false, { label: "run ends once the hop limit (3) is reached by this 2-hop broadcast" });
+  s = await call("state:get", {});
+  assert(s.houseRule.roundNum === 3, `roundNum reflects exactly 3 hops consumed (got ${s.houseRule.roundNum})`);
+  assert(sentLog("chatgpt").length === 3 && sentLog("gemini").length === 3, "both chatgpt and gemini got the [TO: ALL] broadcast before the run ended");
+}
+
+async function testRoundtableDefaultHopLimit() {
+  console.log("\n== Roundtable: rounds<=0 defaults to a real hop limit, not unlimited ==");
+  await resetAllParticipants();
+  const res = await call("houserule:start", { mode: "roundtable", topic: "No explicit hop limit given", rounds: 0 });
+  assert(res.ok, "starts successfully even with rounds:0");
+  const s = await call("state:get", {});
+  assert(s.houseRule.rounds === 24, `rounds:0 is overridden to a real default (got ${s.houseRule.rounds}) — the rules text promises the AIs a real limit exists`);
+  await call("houserule:stop", {});
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -456,6 +612,11 @@ async function main() {
   await testRateLimitAutoPause();
   await testWaitingSinceTracking();
   await testPersistenceSavesToDisk();
+  await testRoundtableAckHandshake();
+  await testRoundtableDuplicateAck();
+  await testRoundtableTagRouting();
+  await testRoundtableHopLimit();
+  await testRoundtableDefaultHopLimit();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

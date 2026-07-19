@@ -21,6 +21,7 @@ const path = require("path");
 const fs = require("fs");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript } = require("./automation");
+const roundtableRules = require("./roundtable-rules");
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
@@ -28,8 +29,9 @@ const POLL_MS = 1500;
 const STABLE_MS = 1800;
 const MAX_LOG = 300;
 const PANE_SYNC_MS = 700;
-const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation"];
-const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation"]);
+const DEFAULT_ROUNDTABLE_HOP_LIMIT = 24;
+const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation", "roundtable"];
+const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "roundtable"]);
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = 500;
@@ -123,6 +125,7 @@ function resetHouseRule(mode, topic, rounds) {
     optinYes: [],
     realPending: new Set(),
     realReplies: {},
+    ackPending: new Set(), // Roundtable: site ids that haven't acknowledged the house rules yet
     ignoreCaptureFrom: new Map(), // site -> count of pending informational sends whose ack should be swallowed (visible in the log, not the transcript)
     silentAckFrom: new Map(), // site -> count of pending "UPDATE" sends whose "UPDATED" ack should be swallowed entirely
     pausedRouting: null, // stashed routing snapshot while paused, restored on resume
@@ -394,7 +397,9 @@ function houseRuleSnapshot() {
     rounds: hr.rounds,
     roundNum: hr.roundNum,
     roles: { ...hr.roles },
-    nextSpeaker
+    nextSpeaker,
+    phase: hr.phase,
+    ackPending: hr.phase === "ack" ? Array.from(hr.ackPending) : []
   };
 }
 
@@ -541,6 +546,62 @@ async function startRotation() {
   state.hr.phase = "awaiting-first";
   state.hr.lastSpeakerIndex = -1;
   await sendTextTo(ROTATION_ORDER[0], state.hr.topic, null);
+}
+
+// Unlike every other mode, Roundtable lets each AI pick its own addressee via
+// a "[TO: X]" tag it writes as literally the first thing in its own reply —
+// the tag is part of the captured text, not something main.js wraps around
+// what it sends. See pollSite()'s roundtable-specific interception for why
+// that tag has to be parsed and stripped BEFORE a turn is ever pushed to the
+// transcript/broadcast, not in a post-push handler like Rotation uses.
+const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO:\s*(GEMINI|CHATGPT|CLAUDE|ALL|USER|NONE)\s*\]\s*/i;
+function parseRoundtableTag(text) {
+  const m = ROUNDTABLE_TAG_RE.exec(text);
+  if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user
+  return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
+}
+
+async function startRoundtable() {
+  // resetHouseRule()/state.hr.active are already set by the houserule:start
+  // handler before dispatch (same as every other mode's start function) —
+  // this only sets the fields specific to Roundtable's ack-then-active flow.
+  state.hr.phase = "ack";
+  state.hr.ackPending = new Set(ROTATION_ORDER);
+  for (const site of ROTATION_ORDER) {
+    await sendTextTo(site, roundtableRules.buildKickoffMessage(site), null);
+  }
+}
+
+async function sendRoundtableTopic() {
+  for (const site of ROTATION_ORDER) {
+    await sendTextTo(site, state.hr.topic, null);
+  }
+}
+
+async function handleRoundtableCapture(turn) {
+  const hr = state.hr;
+  if (hr.phase !== "active") return;
+
+  const tag = turn.roundtableTag || "USER";
+  let targets = [];
+  if (tag === "ALL") targets = ROTATION_ORDER.filter((s) => s !== turn.site);
+  else if (tag === "CLAUDE" || tag === "CHATGPT" || tag === "GEMINI") {
+    const target = tag.toLowerCase();
+    if (target !== turn.site) targets = [target]; // self-address guard
+  }
+  // tag === "USER" -> nothing to relay, the reply is already visible to the user
+
+  for (const target of targets) {
+    hr.roundNum++;
+    await sendTextTo(target, turn.text, turn.site);
+    // Check AFTER sending, not before: this ends the run the instant the
+    // Nth hop goes out, rather than leaving it "active" indefinitely until
+    // some future (N+1)th relay happens to be attempted and gets blocked.
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) {
+      endHouseRule("hop limit reached");
+      return;
+    }
+  }
 }
 
 // --- House Rules: per-mode reactions to a new captured reply ----------------
@@ -725,6 +786,7 @@ async function handleHouseRuleCapture(turn) {
     case "who-wants-to-speak": return handleWhoWantsCapture(turn);
     case "brainstorm": return handleBrainstormCapture(turn);
     case "rotation": return handleRotationCapture(turn);
+    case "roundtable": return handleRoundtableCapture(turn);
     default: return; // free-for-all rides entirely on the generic routing mesh below
   }
 }
@@ -773,6 +835,53 @@ async function pollSite(site) {
       return;
     }
 
+    // Roundtable's acknowledgment handshake: every reply captured while
+    // waiting on acks is swallowed entirely (not pushed/broadcast) — the
+    // human never needs to see three AIs each restate the house rules back.
+    // Once the last of the three acks, flip to "active" and send the real
+    // topic to all three at once.
+    if (state.hr.active && state.hr.mode === "roundtable" && state.hr.phase === "ack") {
+      state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      if (state.waiting[site]) {
+        state.waiting[site] = false;
+        state.waitingSince[site] = null;
+        broadcast("waiting-changed", { site, waiting: false });
+      }
+      if (state.hr.ackPending.has(site)) {
+        state.hr.ackPending.delete(site);
+        logEvent("roundtable-ack", { site, remaining: state.hr.ackPending.size });
+        if (state.hr.ackPending.size === 0) {
+          state.hr.phase = "active";
+          await sendRoundtableTopic();
+        }
+        broadcastHouseRule();
+        saveStateDebounced();
+      }
+      return;
+    }
+
+    // Roundtable's [TO: X] tag is literally the first thing the AI typed —
+    // it has to be parsed and stripped BEFORE the turn is built below, since
+    // that's what gets pushed to the transcript and broadcast live. [TO:
+    // NONE] means "nothing to add" and is swallowed exactly like an ack.
+    let roundtableTag = null;
+    let displayText = text;
+    if (state.hr.active && state.hr.mode === "roundtable" && state.hr.phase === "active") {
+      const parsed = parseRoundtableTag(text);
+      roundtableTag = parsed.tag;
+      displayText = parsed.body;
+      if (roundtableTag === "NONE") {
+        state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+        if (state.waiting[site]) {
+          state.waiting[site] = false;
+          state.waitingSince[site] = null;
+          broadcast("waiting-changed", { site, waiting: false });
+        }
+        logEvent("roundtable-skip", { site });
+        return;
+      }
+    }
+
     const ignoreCount = state.hr.active ? state.hr.ignoreCaptureFrom.get(site) || 0 : 0;
     const silentAckCount = state.hr.active ? state.hr.silentAckFrom.get(site) || 0 : 0;
 
@@ -794,11 +903,18 @@ async function pollSite(site) {
       return;
     }
 
-    const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
-    state.captured[site] = turn;
+    const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text: displayText, ts: Date.now(), pinned: false };
+    if (roundtableTag) turn.roundtableTag = roundtableTag;
+    // state.captured[site] tracks the RAW text (matching what pollSite reads
+    // straight off the page) so the "already.text === text" dedup check
+    // above keeps working on the next poll — storing the tag-stripped
+    // displayText here instead would make it permanently mismatch the raw
+    // DOM text every subsequent poll, causing the exact same roundtable
+    // reply to be re-captured and re-relayed forever.
+    state.captured[site] = roundtableTag ? { ...turn, text } : turn;
     state.transcript.push(turn);
     broadcast("capture", turn);
-    logEvent("captured", { site, chars: text.length });
+    logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
 
     if (state.waiting[site]) {
@@ -926,6 +1042,11 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
 
   resetHouseRule(mode, topic, rounds);
   state.hr.active = true;
+  // Roundtable's rules text explicitly promises the AIs a real hop limit
+  // exists ("the system will automatically stop you") — unlike every other
+  // mode, 0/unspecified defaults to a real cap here instead of "unlimited",
+  // so that promise stays true regardless of which window started it.
+  if (mode === "roundtable" && !(state.hr.rounds > 0)) state.hr.rounds = DEFAULT_ROUNDTABLE_HOP_LIMIT;
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   logEvent("houserule-start", { mode, participants: checked, rounds: state.hr.rounds });
@@ -938,6 +1059,7 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
     else if (mode === "chargeback") await startChargeback(checked);
     else if (mode === "who-wants-to-speak") await startWhoWants(checked);
     else if (mode === "rotation") await startRotation();
+    else if (mode === "roundtable") await startRoundtable();
   } catch (e) {
     state.hr.active = false;
     return { ok: false, error: String(e) };

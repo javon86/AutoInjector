@@ -13,7 +13,7 @@ const STUCK_CHECK_INTERVAL_MS = 15000;
 
 let transcript = [];
 let seenIds = new Set();
-let hr = { mode: null, active: false, paused: false, pauseReason: null, topic: "", nextSpeaker: null };
+let hr = { mode: null, active: false, paused: false, pauseReason: null, topic: "", nextSpeaker: null, phase: null, ackPending: [] };
 let waitingState = {}; // site -> bool, driven by onWaitingChanged, for the "generating" pulse
 let waitingSince = {}; // site -> local Date.now() when waiting started, for stuck detection
 let rateLimitBannerShown = false;
@@ -68,6 +68,10 @@ function renderStatus() {
   status.classList.remove("running", "paused");
   if (!hr.mode) {
     status.textContent = "Idle";
+  } else if (hr.mode === "roundtable" && hr.phase === "ack") {
+    const acked = 3 - (hr.ackPending ? hr.ackPending.length : 0);
+    status.textContent = `Waiting for all three AIs to acknowledge the house rules… (${acked}/3)`;
+    status.classList.add("running");
   } else if (hr.active) {
     status.textContent = "Running";
     status.classList.add("running");
@@ -124,6 +128,13 @@ function turnEl(turn) {
     const b = document.createElement("span");
     b.className = "badge-rate-limited";
     b.textContent = "⚠ USAGE LIMIT";
+    meta.appendChild(b);
+  }
+  if (turn.roundtableTag && turn.roundtableTag !== "USER") {
+    const label = turn.roundtableTag === "ALL" ? "Everyone" : LABELS[turn.roundtableTag.toLowerCase()] || turn.roundtableTag;
+    const b = document.createElement("span");
+    b.className = "badge-roundtable";
+    b.textContent = `→ ${label}`;
     meta.appendChild(b);
   }
   const text = document.createElement("div");
@@ -209,8 +220,13 @@ window.api.onWindowCollapseChanged(({ which, collapsed }) => {
 
 el("btn-collapse-window").onclick = () => window.api.toggleWindowCollapse("conversation");
 
-async function startRotation(topic) {
-  const res = await window.api.startHouseRule("rotation", topic, 0);
+function currentHopLimit() {
+  const n = parseInt(el("hr-hops").value, 10);
+  return n > 0 ? n : 24;
+}
+
+async function startRoundtable(topic) {
+  const res = await window.api.startHouseRule("roundtable", topic, currentHopLimit());
   if (res && res.ok) {
     hr = res.houseRule;
     el("msg-box").value = "";
@@ -223,11 +239,11 @@ el("btn-send").onclick = async () => {
   const text = el("msg-box").value.trim();
   if (!text) return;
   // Nothing running yet: this first message IS the topic — kick off the full
-  // ChatGPT -> Claude -> Gemini rotation automatically instead of making the
-  // user click Start separately. Once a rotation is active or paused, Send
-  // goes back to being a plain interjection to all three.
+  // Roundtable v2 house rules automatically instead of making the user click
+  // Start separately. Once a run is active or paused, Send goes back to
+  // being a plain interjection to all three.
   if (!hr.mode || (!hr.active && !hr.paused)) {
-    await startRotation(text);
+    await startRoundtable(text);
     return;
   }
   await window.api.sendCompose(text, SITES);
@@ -244,7 +260,7 @@ el("msg-box").addEventListener("keydown", (e) => {
 el("btn-start").onclick = async () => {
   const topic = el("msg-box").value.trim();
   if (!topic) return;
-  await startRotation(topic);
+  await startRoundtable(topic);
 };
 
 el("btn-pause").onclick = async () => {
@@ -291,7 +307,9 @@ function buildExportText() {
   const lines = ["# AutoInjector Conversation", `Topic: ${hr.topic || "(none)"}`, `Generated: ${new Date().toLocaleString()}`, ""];
   for (const turn of transcript) {
     const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
-    const marker = turn.isVerdict ? "🏆 VERDICT — " : turn.isFinalPlan ? "✅ FINAL PLAN — " : turn.isRateLimited ? "⚠ USAGE LIMIT — " : "";
+    const marker = turn.isVerdict ? "🏆 VERDICT — " : turn.isFinalPlan ? "✅ FINAL PLAN — "
+      : turn.isRateLimited ? "⚠ USAGE LIMIT — "
+      : (turn.roundtableTag && turn.roundtableTag !== "USER") ? `→ ${turn.roundtableTag === "ALL" ? "Everyone" : LABELS[turn.roundtableTag.toLowerCase()] || turn.roundtableTag} — ` : "";
     lines.push(`## ${marker}${LABELS[turn.site] || turn.label} (${ts})`);
     lines.push(turn.text);
     lines.push("");

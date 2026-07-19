@@ -20,13 +20,16 @@ function assert(cond, msg) {
 function makeApi() {
   const calls = [];
   let windowCollapseCb = null;
+  let captureCb = null;
   const noop = async () => ({ ok: true });
   const api = {
     calls,
     fireWindowCollapseChanged: (payload) => windowCollapseCb && windowCollapseCb(payload),
+    fireCapture: (turn) => captureCb && captureCb(turn),
     sendCompose: noop, sendForward: noop, regenerate: noop, setRouting: noop,
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
-    setParticipant: noop, startHouseRule: noop,
+    setParticipant: noop,
+    startHouseRule: async (mode, topic, rounds) => { calls.push({ fn: "startHouseRule", mode, topic, rounds }); return { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds, roundNum: 0, roles: {}, nextSpeaker: null } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: {}, waiting: {}, meshActive: false, customRole: {} } }; },
     pauseHouseRule: noop, resumeHouseRule: noop, wrapUpBrainstorm: noop,
     setRole: noop, clearTranscript: noop, togglePin: noop, reloadSite: noop,
@@ -41,7 +44,7 @@ function makeApi() {
       transcript: [],
       log: []
     }),
-    onCapture: () => {}, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
+    onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: () => {}, onLog: () => {},
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; }
   };
@@ -124,10 +127,44 @@ async function testHouseRuleStopConfirmation() {
   assert(apiConfirm.calls.some((c) => c.fn === "stopHouseRule"), "accepting the confirm() dialog does call stopHouseRule");
 }
 
+async function testRoundtableDropdownOption() {
+  console.log("\n== Roundtable v2 dropdown option and start dispatch ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  const option = dom.window.document.querySelector('#hr-mode option[value="roundtable"]');
+  assert(!!option, "hr-mode has a roundtable option");
+  assert(option.textContent.includes("Roundtable v2") && option.textContent.includes("needs 3"), `option label is descriptive (got "${option.textContent}")`);
+
+  dom.window.document.getElementById("hr-mode").value = "roundtable";
+  dom.window.document.getElementById("composer-text").value = "Plan the launch";
+  dom.window.document.getElementById("hr-rounds").value = "15";
+  click(dom, "btn-hr-start");
+  await new Promise((r) => setTimeout(r, 20));
+
+  const startCall = api.calls.find((c) => c.fn === "startHouseRule");
+  assert(!!startCall && startCall.mode === "roundtable" && startCall.topic === "Plan the launch" && startCall.rounds === 15, "selecting Roundtable v2 and clicking Start calls startHouseRule with the right mode/topic/rounds");
+}
+
+async function testRoundtableBadgeParity() {
+  console.log("\n== Automation window's transcript also shows the roundtable routing badge ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "Do this", roundtableTag: "CLAUDE", ts: Date.now(), pinned: false });
+  await new Promise((r) => setTimeout(r, 20));
+
+  const badge = dom.window.document.querySelector("#transcript .turn .badge-roundtable");
+  assert(!!badge, "a roundtableTag on a turn renders a badge in the Automation window's transcript too");
+  if (badge) assert(badge.textContent === "→ Claude", `badge text is correct (got "${badge.textContent}")`);
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testWindowTitlebarCollapse();
   await testHouseRuleStopConfirmation();
+  await testRoundtableDropdownOption();
+  await testRoundtableBadgeParity();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -175,14 +175,20 @@ driving the conversation at a time.
   already been suggested. Runs like Free-for-All until you click **Wrap Up**,
   at which point one participant (auto-picked) is asked to pull everything
   into one final, fully fleshed-out plan (marked with a ✅ in the transcript).
-- **Rotation** *(needs all 3 checked)* — the format behind the **Conversation**
-  window (see below): a fixed ChatGPT → Claude → Gemini → ChatGPT cycle. Each
-  AI keeps its own full history; only the newest reply gets relayed. Whoever's
-  next in the cycle gets it framed as **RESPOND** and produces the next visible
-  reply; the third AI (not yet its turn) gets it framed as **UPDATE** — told
-  explicitly not to join in yet, just to stay caught up — and its one-word
-  `"UPDATED"` acknowledgment is swallowed entirely, never shown anywhere.
-  Unlike the other formats, the order is fixed on purpose, not shuffled.
+- **Rotation** *(needs all 3 checked)* — a fixed ChatGPT → Claude → Gemini →
+  ChatGPT cycle. Each AI keeps its own full history; only the newest reply
+  gets relayed. Whoever's next in the cycle gets it framed as **RESPOND** and
+  produces the next visible reply; the third AI (not yet its turn) gets it
+  framed as **UPDATE** — told explicitly not to join in yet, just to stay
+  caught up — and its one-word `"UPDATED"` acknowledgment is swallowed
+  entirely, never shown anywhere. Unlike the other formats, the order is
+  fixed on purpose, not shuffled. This was the original format behind the
+  Conversation window; it's now superseded there by **Roundtable v2**
+  (below), but stays fully available here for manual/legacy use.
+- **Roundtable v2** *(needs all 3 checked)* — the format behind the
+  **Conversation** window today (see below for the full writeup). Instead of
+  a fixed rotation, each AI decides for itself who its reply is for by
+  starting it with a `[TO: X]` tag, and the app routes accordingly.
 
 Role assignments show up as a small badge next to that AI's name once a mode
 with roles is running (that's the *structural* role auto-assigned by these
@@ -192,36 +198,73 @@ Assignment persona feature described below, which you set yourself).
 ## The Conversation window
 
 This is the primary window for actually using the app once everyone's signed
-in on the Automation side. It shows only the natural conversation:
+in on the Automation side. Starting a conversation here now uses
+**Roundtable v2**: instead of a fixed speaking order, each AI is given a
+house-rules document up front and decides for itself, message by message,
+who its reply is for.
 
-- The current topic/question, each AI's visible reply in order, and who said
-  it — nothing else. "UPDATED" acknowledgments, RESPOND/UPDATE instructions,
-  and any other internal prompting never appear here, by construction: the
-  shared transcript main.js maintains never contains that content in the
-  first place, so this window has nothing left to filter out on the way in.
-- Two speaker indicators up top — the AI that spoke most recently, and (once
-  Rotation is running) whichever AI is up next.
+### Roundtable v2: how the tagging works
+
+Every reply an AI gives must start with one tag, on its own line: `[TO:
+CHATGPT]`, `[TO: CLAUDE]`, `[TO: GEMINI]`, `[TO: ALL]`, `[TO: USER]`, or `[TO:
+NONE]`. The app strips that tag before showing the message and routes it
+accordingly:
+
+- **`[TO: CLAUDE]`/`[TO: CHATGPT]`/`[TO: GEMINI]`** — relayed to just that one
+  AI. Still shown to you in the transcript, marked with a small "→ Claude"
+  style badge so you know who it was for.
+- **`[TO: ALL]`** — relayed to both of the other AIs. Badged "→ Everyone".
+- **`[TO: USER]`** — meant for you, not another AI. Shown with no badge (this
+  is the common case — badging every single message "→ You" would just be
+  noise). Nothing gets relayed onward from it.
+- **`[TO: NONE]`** — "I have nothing to add." Fully hidden, exactly like
+  Rotation's old `"UPDATED"` acknowledgments — never shown, never relayed.
+- **No tag at all** — treated as `[TO: USER]` and shown as-is (this is a
+  deliberate fallback, not a silent drop, so a model that forgets the format
+  doesn't just vanish).
+
+Before any of that starts, the app sends the full house-rules document (plus
+a role-specific addendum — Gemini is framed as retrieval/reference, ChatGPT
+as human-language reasoning, Claude as code/external actions) to all three
+AIs and waits for each to acknowledge it. That handshake is completely
+invisible in the transcript, same treatment as everything else this app
+hides — you'll just see the status line count up ("...(2/3)") until it flips
+to "Running."
+
 - **Send** — delivers whatever's in the message box to all three AIs
-  immediately, independent of whether Rotation is running. Use this to kick
-  off a one-off exchange or interject at any point.
-- **Start** — begins the ChatGPT → Claude → Gemini Rotation using the message
-  box's text as the opening topic. ChatGPT always goes first.
-- **Pause** / **Resume** — halts the rotation's message flow without losing
-  its place (mode, round count, whose turn is next are all preserved); Resume
-  picks back up exactly where it left off.
+  immediately, independent of whether a run is active. Use this to kick off
+  a one-off exchange or interject at any point.
+- **Start** — sends the house rules, waits for all three acknowledgments,
+  then sends the message box's text as the real opening topic to all three
+  at once (not to a single "first" AI — any of them may pick it up).
+- **Hops** — the number next to Start/Send caps how many relays the AIs can
+  make before the app stops them itself (each individual relay counts as one
+  hop; a `[TO: ALL]` reply costs two). Defaults to 24. The house-rules text
+  explicitly tells the AIs a limit like this exists, so it's worth leaving a
+  real number here rather than emptying the field.
+- **Pause** / **Resume** — halts the message flow without losing its place
+  (hop count, acknowledgment state, everything); Resume picks back up
+  exactly where it left off.
 - **Stop** — ends the run for good (asks you to confirm first, since unlike
-  Pause there's no undo); starting again means a fresh Start.
+  Pause there's no undo); starting again means a fresh Start (and a fresh
+  handshake).
 - Press **Enter** in the message box to send; **Shift+Enter** for a newline.
-- **Role Assignment** *(optional, collapsed by default)* — give each AI its
-  own persona for this conversation (e.g. Project manager, Critic,
-  Fact-checker, Financial analyst) by typing a role and clicking Apply, or
-  Clear to send it back to general-purpose. This only shapes *what* each AI
-  contributes — it has no effect on *when* they speak, which is entirely
-  driven by the Rotation order above. Structural roles from other House Rules
-  formats (Devil/Angel/Referee/etc., if you started one from the Automation
-  side) show up as a small badge on the relevant speaker chip too.
+- **Role Assignment** *(optional, collapsed by default)* — give each AI an
+  *additional* persona for this conversation (e.g. Project manager, Critic,
+  Fact-checker) on top of the roundtable role it already has, by typing a
+  role and clicking Apply, or Clear to remove it. This only shapes *what*
+  each AI contributes — it has no effect on *when*/*who* they address, which
+  is entirely up to the `[TO: X]` tag they choose. Structural roles from
+  other House Rules formats (Devil/Angel/Referee/etc., if you started one
+  from the Automation side) show up as a small badge on the relevant speaker
+  chip too.
 - **Copy** / **Download** at the top export the visible conversation, same
   idea as the Automation window's transcript export.
+
+Rotation (the original fixed ChatGPT → Claude → Gemini cycle) still exists
+and works exactly as before — it's just no longer what this window's Start
+button uses. Start it manually from the Automation window's House Rules
+dropdown if you want that simpler, deterministic format instead.
 
 **If something goes wrong**, a banner appears right under the topic line
 instead of the conversation just silently stalling:
@@ -311,8 +354,13 @@ just right-click that site's actual Send button instead of a reply bubble.
   Rotation) are small state machines layered on top of the same capture
   events — each one reacts to a new reply by deciding who gets sent what next.
   Captures can also be swallowed *silently* (never reaching the transcript or
-  either window) — used for Chargeback's Referee acknowledgments and
-  Rotation's "UPDATED" confirmations. A short list of rate-limit/usage-cap
+  either window) — used for Chargeback's Referee acknowledgments, Rotation's
+  "UPDATED" confirmations, and Roundtable v2's acknowledgment handshake and
+  `[TO: NONE]` replies. Roundtable v2 is the one mode where an AI's own
+  output has to be parsed and edited *before* it's ever pushed to the
+  transcript (its `[TO: X]` tag is literally the first thing the AI typed) —
+  everything else's "swallow" logic runs on a full, untouched reply. A short
+  list of rate-limit/usage-cap
   phrases is checked against every new reply while a House Rules run is
   active — a match auto-pauses the run instead of relaying it as a real
   contribution. Transcript, custom roles, and paused-run state are written to
@@ -364,6 +412,20 @@ collapse, then putting it back), and a couple of routing edge cases (disabling
 a participant mid-run, House Rules' own Stop button actually clearing the
 mesh it set up).
 
+It also covers Roundtable v2's tag-routing protocol: the acknowledgment
+handshake (acks arriving in any order, a site acking twice being harmless,
+the real topic only going out once all three have acked — with the ack
+messages themselves never reaching the transcript), routing for every
+`[TO: X]` tag (`CLAUDE`/`CHATGPT`/`GEMINI` relay to just that one and strip
+the tag before display, `ALL` relays to the other two, `USER` stays purely
+visible with no relay, `NONE` never reaches the transcript at all), a
+missing-tag reply falling back to `USER` per the house rules' own documented
+default, case-insensitive tag matching, an AI addressing itself being a
+no-op instead of a self-relay, and hop-limit accounting (`[TO: ALL]`
+correctly costs two hops, not one; a run ends the instant the limit is hit
+rather than drifting one relay past it; a zero/unset hop limit falls back to
+the default of 24).
+
 `npm test` also runs `test/conversation.test.js`, which loads the *real*
 `conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
 no real browser needed) with `window.api` stubbed the way `preload.js` exposes
@@ -374,11 +436,24 @@ by ID on every render, which broke the instant that node was ever removed
 from the page — i.e. the moment a second reply arrived in any real
 conversation. Fixed and now covered by a regression test.
 
+This suite also covers the Conversation window's Roundtable v2 support: the
+Hops number input (defaults to 24, is actually read and passed through on
+both Send and Start, falls back to 24 if left empty or set to something
+invalid), the ack-phase status line counting up as each AI acknowledges the
+house rules (e.g. "…(2/3)") and reverting to the normal running status once
+all three have, and the `→ Claude`/`→ Everyone`-style routing badge
+rendering on tagged turns (and *not* rendering at all for plain `[TO: USER]`
+replies, to avoid badging the common case).
+
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
 to `controls.html`/`controls.js` — currently focused on the collapse feature
 (each AI column's own toggle, the Automation window's titlebar toggle, that a
-collapse event for the *other* window is correctly ignored) and the Stop
-confirmation prompt.
+collapse event for the *other* window is correctly ignored), the Stop
+confirmation prompt, and — for parity with the Conversation window, since the
+Automation window's transcript is also user-visible — the Roundtable v2
+dropdown option (present, correctly labeled, and actually dispatches
+`startHouseRule("roundtable", …)` with the right topic and hop count) and the
+same routing badge rendering on captured turns.
 
 Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
 copies of the selector config — `desktop-app/selectors.js` (CommonJS) and

@@ -66,11 +66,13 @@
     .turn.verdict, .turn.final-plan { border-left-color:#f5b642; background:#1d1608; }
     .turn.rate-limited { border-left-color:#e88 !important; background:#2a1414; }
     .badge-rate-limited { color:#e88; font-weight:600; }
+    .badge-roundtable { color:#7fd4e0; font-weight:600; text-transform:none; }
 
     #footer { flex:0 0 auto; border-top:1px solid #2a2a2a; padding:10px 18px 14px; }
     #msg-row { display:flex; gap:8px; align-items:flex-end; }
     #msg-box { flex:1 1 auto; resize:none; height:52px; }
-    #btn-col { display:flex; gap:6px; flex-wrap:wrap; }
+    #btn-col { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    #hr-hops { width:54px; padding:6px 4px; text-align:center; }
 
     select, input, textarea, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:6px 9px; font-family:inherit; font-size:12.5px; }
     button { cursor:pointer; }
@@ -116,13 +118,14 @@
     </div>
 
     <div id="transcript">
-      <div id="transcript-empty">The conversation will appear here once you Send a message or Start Rotation.</div>
+      <div id="transcript-empty">The conversation will appear here once you Send a message or Start the roundtable.</div>
     </div>
 
     <div id="footer">
       <div id="msg-row">
         <textarea id="msg-box" placeholder="Type a question or message…">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
         <div id="btn-col">
+          <input id="hr-hops" type="number" min="1" value="24" title="Hop limit — how many relays the roundtable can make before it stops itself">
           <button id="btn-send">Send</button>
           <button id="btn-start" class="primary">Start</button>
           <button id="btn-pause" class="warn">Pause</button>
@@ -130,7 +133,7 @@
           <button id="btn-stop" class="danger">Stop</button>
         </div>
       </div>
-      <div id="hint">Send your first message to automatically kick off the ChatGPT → Claude → Gemini rotation. Once it's running, Send just interjects your message to all three; Start is there if you ever need to (re)begin it explicitly.</div>
+      <div id="hint">Send your first message to automatically kick off the roundtable (house rules go to all three AIs first, then your message once they've all acknowledged). Once it's running, Send just interjects your message to all three; Start is there if you ever need to (re)begin it explicitly. "Hops" caps how many relays the AIs can make before the system stops them.</div>
 
       <button id="roles-toggle">Role Assignment ▾</button>
       <div id="roles-panel">
