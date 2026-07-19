@@ -7,8 +7,8 @@ running local transcript you can copy or download (e.g. to send to someone).
 
 Two ways to run it, same underlying automation:
 
-| | `extension/` | `desktop-app/` |
-|---|---|---|
+|  | `extension/` | `desktop-app/` |
+| --- | --- | --- |
 | What it is | Chrome (MV3) browser extension | Standalone Electron program |
 | Platforms | Desktop Chrome (and Kiwi Browser on **Android**, see below) | Desktop only (Windows/macOS/Linux) |
 | UI | Extension popup + a roundtable tab, fixed turn order | One window, three AI panes side by side you watch live, message routing (send to one/some/all, one-off or on autopilot) |
@@ -42,7 +42,7 @@ and opens one window with ChatGPT, Claude and Gemini as three live panes plus a
 control panel for routing messages between them. No Chrome/extension needed, only
 [Node.js](https://nodejs.org/) as a one-time prerequisite. Full walkthrough,
 Linux instructions, and how to build a real `.exe`/`.dmg` installer are in
-[`desktop-app/README.md`](desktop-app/README.md).
+[`desktop-app/README.md`](C:\Users\javon\Documents\GitHub\AutoInjector\desktop-app\README.md).
 
 ## Install the extension
 
@@ -55,19 +55,19 @@ Linux instructions, and how to build a real `.exe`/`.dmg` installer are in
 
 1. Click the AutoInjector toolbar icon → **Open AI Roundtable**. This opens a full
    extension page (`roundtable.html`).
-2. Under **Tabs**, hit **Refresh**, or use **Open ChatGPT / Open Claude / Open Gemini**
+1. Under **Tabs**, hit **Refresh**, or use **Open ChatGPT / Open Claude / Open Gemini**
    to launch tabs for any site you don't already have open. Pick which tab to use per
    site if you have several.
-3. Under **Setup**, enter a topic/opening message, pick which of the three AIs should
+1. Under **Setup**, enter a topic/opening message, pick which of the three AIs should
    participate (need at least two), who starts, and how many rounds to run.
-4. Click **Start Roundtable**. The extension will, in order:
-   - inject the topic (or the running conversation so far) into the active
+1. Click **Start Roundtable**. The extension will, in order:
+- inject the topic (or the running conversation so far) into the active
      participant's chat box,
-   - click send,
-   - watch the DOM until a reply finishes streaming,
-   - append that reply to the local transcript,
-   - hand the whole transcript to the next participant as context, and repeat.
-5. Watch replies stream into the **Transcript** panel in real time. Use **Stop** to
+- click send,
+- watch the DOM until a reply finishes streaming,
+- append that reply to the local transcript,
+- hand the whole transcript to the next participant as context, and repeat.
+1. Watch replies stream into the **Transcript** panel in real time. Use **Stop** to
    end the run after the current reply. **Copy Transcript** copies a Markdown version
    to your clipboard; **Download .md** saves it as a file — handy for sending to
    someone (e.g. a teacher) or archiving.
