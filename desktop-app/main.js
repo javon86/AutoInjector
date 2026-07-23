@@ -16,11 +16,12 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression } = require("./automation");
 const roundtableRules = require("./roundtable-rules");
 
 const SITE_IDS = Object.keys(SITES);
@@ -35,6 +36,10 @@ const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "r
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = 500;
+const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
+const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
+const TEXT_PREVIEW_SIZE_CAP = 500 * 1024; // 500KB
 
 // Rate-limit/usage-cap replies are short by nature ("You've reached your
 // usage limit...") — gating on length before pattern-matching keeps this
@@ -433,6 +438,42 @@ function closePromptEditorWindow() {
   if (promptEditorWin) promptEditorWin.close();
 }
 
+// A small, on-demand fourth window for previewing a document before sending
+// it to one or more AIs — same single-instance, re-navigate-via-query-string
+// pattern as the prompt editor window above.
+let documentViewerWin = null;
+let documentViewerView = null;
+function openDocumentViewerWindow(filePath) {
+  const search = `path=${encodeURIComponent(filePath)}`;
+  if (documentViewerWin && documentViewerView) {
+    documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
+    documentViewerWin.focus();
+    return;
+  }
+  documentViewerWin = new BaseWindow({ width: 820, height: 700, resizable: true, title: "AutoInjector — Document" });
+  documentViewerView = new WebContentsView({
+    webPreferences: {
+      partition: "document-viewer-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  documentViewerWin.contentView.addChildView(documentViewerView);
+  documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
+  const layoutViewer = () => {
+    if (!documentViewerWin || !documentViewerView) return;
+    const [w, h] = documentViewerWin.getContentSize();
+    documentViewerView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutViewer();
+  documentViewerWin.on("resize", layoutViewer);
+  documentViewerWin.on("closed", () => { documentViewerWin = null; documentViewerView = null; });
+}
+function closeDocumentViewerWindow() {
+  if (documentViewerWin) documentViewerWin.close();
+}
+
 function routingSnapshot() {
   const out = {};
   for (const site of SITE_IDS) out[site] = Array.from(state.routing[site]);
@@ -505,6 +546,63 @@ async function sendTextTo(target, text, fromSite) {
     logEvent("sent", { target, from: fromSite || null });
   }
   return res;
+}
+
+// Delivers a real file into a live pane's chat, using the Chrome DevTools
+// Protocol (Puppeteer/Playwright use the same technique under the hood for
+// file uploads) — there's no other way to get real file bytes into a page
+// from the main process; executeJavaScript() can only inject text.
+// DOM.setFileInputFiles fires real input/change events on the target
+// element, same as a genuine drag-drop, so sites wired to a change listener
+// need nothing extra from us. The attach/detach cycle is transient (scoped
+// to a single call) so it doesn't fight the 🔍 Inspect DevTools feature,
+// which uses the same underlying CDP slot — but if DevTools happens to be
+// open on this pane when this runs, attach() can still throw; that's
+// reported as ATTACH_FAILED rather than specifically diagnosed, since it's
+// a rare, transient collision, not a distinct failure mode worth its own code.
+async function attachFileToSite(site, absolutePath) {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) {
+    logEvent("file-attach-error", { site, error: "NO_VIEW" });
+    return { ok: false, error: "NO_VIEW" };
+  }
+  const dbg = view.webContents.debugger;
+
+  try {
+    dbg.attach(FILE_ATTACH_PROTOCOL_VERSION);
+  } catch (e) {
+    logEvent("file-attach-error", { site, error: "ATTACH_FAILED", detail: String(e) });
+    return { ok: false, error: "ATTACH_FAILED", detail: String(e) };
+  }
+
+  try {
+    let evalRes;
+    try {
+      evalRes = await dbg.sendCommand("Runtime.evaluate", {
+        expression: buildFileInputFinderExpression(site),
+        returnByValue: false
+      });
+    } catch (e) {
+      logEvent("file-attach-error", { site, error: "EVAL_FAILED", detail: String(e) });
+      return { ok: false, error: "EVAL_FAILED", detail: String(e) };
+    }
+    const objectId = evalRes && evalRes.result && evalRes.result.objectId;
+    if (!objectId) {
+      logEvent("file-attach-error", { site, error: "NO_FILE_INPUT_FOUND" });
+      return { ok: false, error: "NO_FILE_INPUT_FOUND" };
+    }
+    try {
+      await dbg.sendCommand("DOM.setFileInputFiles", { files: [absolutePath], objectId });
+    } catch (e) {
+      logEvent("file-attach-error", { site, error: "SET_FILES_FAILED", detail: String(e) });
+      return { ok: false, error: "SET_FILES_FAILED", detail: String(e) };
+    }
+    try { await dbg.sendCommand("Runtime.releaseObject", { objectId }); } catch {}
+    logEvent("file-attached", { site, path: absolutePath });
+    return { ok: true };
+  } finally {
+    try { dbg.detach(); } catch {}
+  }
 }
 
 // --- House Rules: shared helpers -------------------------------------------
@@ -1287,6 +1385,61 @@ ipcMain.handle("site:list", () => {
     out[site] = view ? { url: view.webContents.getURL(), title: view.webContents.getTitle(), label: SITES[site].label } : null;
   }
   return { ok: true, sites: out };
+});
+
+ipcMain.handle("document:choose", async () => {
+  if (!win) return { ok: false, error: "NO_WINDOW" };
+  const res = await dialog.showOpenDialog(win, { properties: ["openFile"] });
+  if (res.canceled || !res.filePaths.length) return { ok: false, error: "CANCELLED" };
+  const chosen = res.filePaths[0];
+  openDocumentViewerWindow(chosen);
+  logEvent("document-chosen", { path: chosen });
+  return { ok: true, path: chosen };
+});
+
+ipcMain.handle("document-viewer:close", () => {
+  closeDocumentViewerWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("document:read", async (_evt, filePath) => {
+  if (!filePath || typeof filePath !== "string") return { ok: false, error: "NO_PATH" };
+  let stat;
+  try {
+    stat = await fs.promises.stat(filePath);
+  } catch (e) {
+    return { ok: false, error: "FILE_NOT_FOUND", detail: String(e) };
+  }
+  const ext = path.extname(filePath).toLowerCase();
+  const base = { ok: true, path: filePath, name: path.basename(filePath), size: stat.size, ext };
+
+  if (ext === ".pdf") return { ...base, kind: "pdf", fileUrl: pathToFileURL(filePath).href };
+  if (IMAGE_EXTS.has(ext)) return { ...base, kind: "image", fileUrl: pathToFileURL(filePath).href };
+  if (TEXT_EXTS.has(ext)) {
+    if (stat.size > TEXT_PREVIEW_SIZE_CAP) return { ...base, kind: "text", tooLarge: true, text: "" };
+    try {
+      const text = await fs.promises.readFile(filePath, "utf8");
+      return { ...base, kind: "text", tooLarge: false, text };
+    } catch (e) {
+      return { ok: false, error: "READ_FAILED", detail: String(e) };
+    }
+  }
+  return { ...base, kind: "other" };
+});
+
+ipcMain.handle("document:send", async (_evt, { path: filePath, targets }) => {
+  if (!filePath) return { ok: false, error: "NO_PATH" };
+  try {
+    await fs.promises.access(filePath, fs.constants.R_OK);
+  } catch (e) {
+    return { ok: false, error: "FILE_NOT_FOUND", detail: String(e) };
+  }
+  const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  logEvent("document-send", { path: filePath, targets: list });
+  const results = {};
+  for (const t of list) results[t] = await attachFileToSite(t, filePath);
+  return { ok: true, results };
 });
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {

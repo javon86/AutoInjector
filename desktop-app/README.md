@@ -135,9 +135,25 @@ last captured reply) stays visible and usable.
    syntax that you can send any time it's useful, not just at the start of a
    Roundtable v2 session. Saved prompts persist across restarts, same as the
    transcript and custom roles.
-7. **📌** on any transcript turn pins it, so you can spot it again later without
+7. **📎 Attach Document**: pick a real file (image, PDF, text, or anything
+   else) via a normal file picker, and preview it in its own popup window
+   before deciding what to do with it. Images and text get a genuine inline
+   preview; PDFs embed via Chromium's built-in viewer; anything else just
+   shows the filename — you can still send it either way. For images and
+   text, you can **highlight** parts of it (click-drag a rectangle on an
+   image, or select text and hit **Mark Selection**) purely as a visual note
+   to yourself — highlights never get sent anywhere and never touch the
+   actual file, they just help you remember what you meant to mention. When
+   you're ready, check off ChatGPT/Claude/Gemini (defaults to whichever are
+   currently enabled) and hit **Send** — the real file lands in each
+   checked AI's chat the same way it would if you'd dragged it there
+   yourself, delivered underneath via the Chrome DevTools Protocol (the same
+   technique browser-automation tools use for file uploads), not typed as a
+   path. This is genuinely new, less-tested territory — see the note on file
+   upload selectors in "How it's built" below.
+8. **📌** on any transcript turn pins it, so you can spot it again later without
    scrolling back through everything.
-8. **Copy Transcript** / **Download .md** save the running conversation locally
+9. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
 ### Collapsing things when one screen isn't enough room
@@ -407,7 +423,18 @@ just right-click that site's actual Send button instead of a reply bubble.
   actually happened from the separate prompt-editor popup. `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
-  crash still leaves something to troubleshoot from.
+  crash still leaves something to troubleshoot from. Delivering an actual
+  *file* into a pane (📎 Attach Document) can't go through
+  `executeJavaScript()` like everything else, since that can only inject
+  text — `attachFileToSite()` instead drives the Chrome DevTools Protocol
+  directly (`webContents.debugger`), the same underlying technique
+  Puppeteer/Playwright use for file uploads: find the page's file input,
+  then `DOM.setFileInputFiles` it with the real path, which fires the same
+  `input`/`change` events a genuine drag-drop would. The attach/detach cycle
+  is scoped to a single Send click, but it shares its underlying CDP slot
+  with the 🔍 Inspect DevTools feature — having both attached to the same
+  pane at once can make the attach fail (reported as `ATTACH_FAILED`), a
+  rare, self-resolving collision rather than something worth special-casing.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
@@ -416,7 +443,15 @@ just right-click that site's actual Send button instead of a reply bubble.
   afterward (what every real chat UI does on a genuine submit), retrying via
   Enter if a wrong/disabled button was clicked instead, and only reports
   success once that's confirmed. Mirrors the selectors used by the browser
-  extension's `content.js`/`selectors.js`.
+  extension's `content.js`/`selectors.js`. A third builder,
+  `buildFileInputFinderExpression`, is different in kind from the other
+  two — it's not run via `executeJavaScript()`, it's the `expression` field
+  of a CDP `Runtime.evaluate` call (see `attachFileToSite()` above), since
+  that's what hands back the raw `objectId` `DOM.setFileInputFiles` needs.
+  Each site's `FILE_INPUT_CANDIDATES` in `selectors.js` are **best-effort
+  guesses, not yet verified against the real sites** — same caveat as every
+  other selector list here, fix the same way (🔍 Inspect on the live pane,
+  find the actual upload input, update the list).
 - `controls.html` / `controls.js` — the Automation window's control panel UI,
   including the Prompt Library's compact dropdown + Send/New/Edit/Delete, and
   the collapsed-pane strip that shares House Rules' unused space.
@@ -430,7 +465,22 @@ just right-click that site's actual Send button instead of a reply bubble.
   clicked (not at startup like the other two windows); re-navigates the same
   window (via a `?id=<n>` query string, or none for a blank prompt) instead
   of opening a second one if it's already open.
-- `preload.js` — the IPC bridge shared by all three windows, talking to the
+- `document-viewer.html` / `document-viewer.js` — the on-demand popup for
+  previewing a file before sending it, same lazy single-instance pattern as
+  the prompt editor (`?path=<encoded path>` query string). Renders
+  differently by file type: images get an `<img>` plus a transparent
+  `<canvas>` overlay for click-drag highlight rectangles; text files (capped
+  at 500KB) render as real, selectable text with a `Mark Selection` button
+  that wraps the current selection in a `<mark>`; PDFs embed via an
+  `<iframe>` pointed at a `file://` URL, relying on Chromium's built-in PDF
+  viewer — **no highlighting support for PDFs in this version**, since doing
+  that properly would mean rendering pages to a canvas ourselves (bundling
+  pdf.js) instead of using the built-in viewer, a meaningfully bigger lift
+  than "a visual note to yourself" called for; anything else just shows the
+  filename, no preview, Send still works. Every highlight (canvas rectangles
+  or `<mark>` tags) lives only in that page's own memory/DOM — never
+  persisted, never sent to any AI, never touches the actual file on disk.
+- `preload.js` — the IPC bridge shared by all four windows, talking to the
   main process over `ipcRenderer`/`contextBridge` (no direct Node access from
   either page, same as the sites' own panes).
 
@@ -491,6 +541,24 @@ from it broadcasts `prompts-changed` so the Automation window's dropdown
 picks up the change without polling, and closing it actually destroys the
 window.
 
+It also covers the 📎 Attach Document backend, using a mocked
+`webContents.debugger` (`test/mock-electron.js` records what CDP command was
+sent with what params, the same level of fidelity as the rest of that mock —
+real DOM stays Playwright's job): a successful send delivers the file to
+exactly the checked targets and nothing to the ones left unchecked;
+`NO_FILE_INPUT_FOUND`, `SET_FILES_FAILED`, and `ATTACH_FAILED` are each
+reported distinctly rather than one generic failure, and — critically — the
+debugger session actually detaches even on the failure paths (proving the
+`finally` block runs, not just the happy path); a missing file or an empty
+target list are both rejected before any per-site work happens;
+`document:read` classifies files correctly by extension (text, including
+respecting the 500KB preview cap; image and PDF, both getting a `file://`
+URL rather than bytes shuttled through IPC; anything else falling back to
+filename-only); and `document:choose` opens the file dialog, then the
+viewer window targeting whatever was picked, re-targets that same window
+(not a second one) if a different file is chosen while it's still open, and
+closing it actually destroys the window.
+
 `npm test` also runs `test/conversation.test.js`, which loads the *real*
 `conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
 no real browser needed) with `window.api` stubbed the way `preload.js` exposes
@@ -542,6 +610,22 @@ instead of duplicating) and then closes the window, an empty name is saved
 as "Untitled" rather than blank, and Cancel closes without ever calling
 `savePrompt` at all.
 
+`npm test` also runs `test/document-viewer.test.js`, the same jsdom approach
+applied to the standalone document-preview popup: a missing `?path=` degrades
+gracefully instead of crashing; each `kind` from `document:read` renders the
+right thing (image → `<img>` + highlight canvas with Clear Highlights, text →
+the real content with a working Mark Selection that wraps a selection in
+`<mark>`, oversized text → the size-limit message with no mark tool, PDF →
+an iframe with *no* highlight tools since those aren't supported there,
+unrecognized types → no preview element at all); the image highlight
+interaction (mousedown → mousemove → mouseup on the canvas) wires up without
+throwing — deliberately not asserted pixel-by-pixel, since jsdom doesn't
+implement a real 2D canvas context and the real rendering only matters
+inside actual Chromium anyway, same division of labor as everywhere else in
+this suite; Send collects only the checked boxes and calls `sendDocument`
+with the real decoded path; and the checkboxes default to whichever
+participants are currently enabled.
+
 Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
 copies of the selector config — `desktop-app/selectors.js` (CommonJS) and
 `AutoInjector/extension/selectors.js` (loaded via Node's `vm` module with a
@@ -576,6 +660,15 @@ DOM (captured via DevTools "Copy outerHTML" during troubleshooting the
 selector bug) — if ChatGPT or Gemini selectors ever break the same way,
 grabbing their outerHTML the same way and adding a fixture here lets this
 get verified against real markup too, not just re-read by eye.
+
+It also has one check for `buildFileInputFinderExpression` — confirming its
+selector-matching logic actually resolves to a real `<input type="file">`
+element against genuine Chromium DOM, not just in theory. That's the limit
+of what this suite can verify for 📎 Attach Document, though: the actual CDP
+wiring (`Runtime.evaluate` → `DOM.setFileInputFiles`) has no Playwright
+equivalent, since `webContents.debugger` is an Electron main-process-only
+API — that part is covered by the mocked orchestration tests in
+`test/run.js` instead, plus manual testing against the real app.
 
 Playwright is deliberately **not** a listed `devDependency` — if it were,
 every user's plain `npm install` (including the one the `run-*.bat`/

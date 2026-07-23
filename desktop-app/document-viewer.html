@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector — Document</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background:#111; color:#eee; font-size:12px; font-family: system-ui, sans-serif; padding:14px; display:flex; flex-direction:column; gap:10px; }
+    label { display:block; font-size:10px; opacity:.6; text-transform:uppercase; letter-spacing:.03em; margin-bottom:3px; }
+    input, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 7px; font-family:inherit; font-size:12px; }
+    button { cursor:pointer; }
+    button:hover { background:#242424; }
+    button.primary { background:#1a3a2a; border-color:#2a5a3a; }
+
+    #header { display:flex; align-items:center; gap:10px; flex:0 0 auto; }
+    #doc-name { font-weight:600; }
+    #doc-size { opacity:.6; font-size:10.5px; }
+    #header .spacer { flex:1; }
+
+    #preview { flex:1 1 auto; min-height:0; overflow:auto; background:#0b0b0b; border:1px solid #2a2a2a; border-radius:8px; padding:10px; position:relative; }
+    #preview:empty { display:none; }
+
+    #image-wrap { position:relative; display:inline-block; max-width:100%; }
+    #doc-image { max-width:100%; display:block; }
+    #highlight-canvas { position:absolute; top:0; left:0; cursor:crosshair; }
+
+    #doc-text { white-space:pre-wrap; line-height:1.4; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    #doc-text mark { background:rgba(245,182,66,.5); color:inherit; }
+
+    #pdf-frame { width:100%; height:100%; min-height:400px; border:none; background:#fff; }
+
+    #preview-tools { display:flex; gap:8px; flex:0 0 auto; }
+
+    #send-row { display:flex; align-items:center; gap:10px; flex:0 0 auto; flex-wrap:wrap; }
+    #send-row label.checkbox { display:flex; align-items:center; gap:4px; font-size:11px; text-transform:none; letter-spacing:0; opacity:1; margin-bottom:0; }
+    #doc-status { opacity:.8; min-height:1em; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <span id="doc-name">—</span>
+    <span id="doc-size"></span>
+    <span class="spacer"></span>
+    <button id="btn-close">Close</button>
+  </div>
+
+  <div id="preview-tools">
+    <button id="btn-mark-selection" style="display:none;">Mark Selection</button>
+    <button id="btn-clear-highlights" style="display:none;">Clear Highlights</button>
+  </div>
+
+  <div id="preview"></div>
+
+  <div id="send-row">
+    <span>Send to:</span>
+    <label class="checkbox"><input type="checkbox" id="send-chatgpt"> ChatGPT</label>
+    <label class="checkbox"><input type="checkbox" id="send-claude"> Claude</label>
+    <label class="checkbox"><input type="checkbox" id="send-gemini"> Gemini</label>
+    <button id="btn-send-doc" class="primary">Send</button>
+  </div>
+  <div id="doc-status"></div>
+
+  <script src="document-viewer.js"></script>
+</body>
+</html>

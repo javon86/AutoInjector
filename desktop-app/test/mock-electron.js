@@ -44,6 +44,36 @@ class FakeWebContents extends EventEmitter {
     this._url = "";
     this.currentText = ""; // what this site's page "currently shows" as its latest reply
     this.sentLog = []; // { text, ts } — every send-script execution against this site, in order
+    this.fileInputSets = []; // { files, objectId } — every successful DOM.setFileInputFiles call
+    this._debuggerAttached = false;
+    this._fileInputExists = true; // toggle false to simulate NO_FILE_INPUT_FOUND
+    this._forceAttachFail = false; // toggle true to simulate ATTACH_FAILED
+    this._forceSetFilesFail = false; // toggle true to simulate SET_FILES_FAILED
+    const self = this;
+    // A minimal stand-in for webContents.debugger, at the same fidelity as
+    // the rest of this mock: it asserts WHAT CDP command was sent with what
+    // params, not real DOM behavior (that stays Playwright's job, same
+    // division of labor as executeJavaScript() above).
+    this.debugger = {
+      attach(_protocolVersion) {
+        if (self._forceAttachFail) throw new Error("Another debugger is already attached to the specified page");
+        if (self._debuggerAttached) throw new Error("Debugger is already attached to this page");
+        self._debuggerAttached = true;
+      },
+      detach() { self._debuggerAttached = false; },
+      isAttached() { return self._debuggerAttached; },
+      async sendCommand(method, params) {
+        if (method === "Runtime.evaluate") {
+          return self._fileInputExists ? { result: { objectId: `objid-${self.label}` } } : { result: { type: "undefined" } };
+        }
+        if (method === "DOM.setFileInputFiles") {
+          if (self._forceSetFilesFail) throw new Error("setFileInputFiles failed: node not found");
+          self.fileInputSets.push({ files: params.files, objectId: params.objectId });
+          return {};
+        }
+        return {}; // Runtime.releaseObject and anything else
+      }
+    };
   }
   isDestroyed() { return this.destroyedFlag; }
   loadURL(u) { this._url = u; }
@@ -101,4 +131,14 @@ const app = {
   on() {}
 };
 
-module.exports = { app, BaseWindow, WebContentsView, ipcMain, __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir };
+let dialogResult = { canceled: true, filePaths: [] };
+const dialog = {
+  showOpenDialog: async () => dialogResult
+};
+function __setDialogResult(r) { dialogResult = r; }
+
+module.exports = {
+  app, BaseWindow, WebContentsView, ipcMain, dialog,
+  __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir,
+  __setDialogResult
+};

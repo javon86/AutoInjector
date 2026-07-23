@@ -24,6 +24,15 @@ module.exports = {
       '[data-testid="assistant-message"]',
       'div[data-message-author-role="assistant"]',
       'article:has([data-message-author-role="assistant"])'
+    ],
+    // Best-effort/unverified, same as every other candidate list in this
+    // file — used to deliver a real file into the chat via the CDP-based
+    // attach flow in main.js's attachFileToSite(). Fix via the 🔍 Inspect
+    // button on the live pane if these ever stop matching.
+    FILE_INPUT_CANDIDATES: [
+      'input[type="file"]',
+      'input[data-testid="file-upload-input"]',
+      'form input[type="file"]'
     ]
   },
   claude: {
@@ -52,6 +61,11 @@ module.exports = {
       // read the whole container (not the <p> alone) so multi-paragraph/list/code
       // replies aren't truncated to just their last block.
       "div.standard-markdown"
+    ],
+    FILE_INPUT_CANDIDATES: [
+      'input[type="file"]',
+      'input[data-testid="file-upload"]',
+      'form input[type="file"]'
     ]
   },
   gemini: {
@@ -72,6 +86,11 @@ module.exports = {
       "message-content .markdown",
       "div.model-response-text",
       "div[data-response-index]"
+    ],
+    FILE_INPUT_CANDIDATES: [
+      'input[type="file"]',
+      'input[name="Filedata"]',
+      'form input[type="file"]'
     ]
   }
 };

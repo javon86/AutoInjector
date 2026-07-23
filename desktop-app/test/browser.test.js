@@ -11,7 +11,7 @@
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
-const { buildSendScript, buildReadScript } = require("../automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression } = require("../automation");
 
 // Playwright's own auto-detected browser (e.g. what `npx playwright install`
 // puts in ~/.cache/ms-playwright on a normal machine or CI runner) is tried
@@ -105,11 +105,36 @@ async function testClaudeSendNotConfirmedReal() {
   });
 }
 
+async function testFileInputFinderExpressionReal() {
+  console.log("\n== buildFileInputFinderExpression('claude') against a real Chromium DOM ==");
+  await withFixture("claude-reply.html", async (page) => {
+    // buildFileInputFinderExpression's output is designed to be the
+    // `expression` field of a CDP Runtime.evaluate call (see
+    // attachFileToSite() in main.js), not something run via
+    // page.evaluate() — but it's the same IIFE-returns-a-node shape as the
+    // other two builders, so it's still a valid, cheap sanity check that
+    // the selector-matching logic and syntax are correct against real DOM.
+    // The actual CDP wiring (Runtime.evaluate's objectId ->
+    // DOM.setFileInputFiles) has no Playwright equivalent — Electron's
+    // webContents.debugger is a main-process-only API — so that part is
+    // covered by the mocked orchestration tests in test/run.js instead.
+    await page.evaluate(() => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.style.display = "none";
+      document.body.appendChild(input);
+    });
+    const isFileInput = await page.evaluate(`(${buildFileInputFinderExpression("claude")}).tagName === "INPUT"`);
+    assert(isFileInput === true, "resolves to the real <input type=\"file\"> element, not null");
+  });
+}
+
 async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
   await testClaudeSendReal();
   await testClaudeSendNotConfirmedReal();
+  await testFileInputFinderExpressionReal();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

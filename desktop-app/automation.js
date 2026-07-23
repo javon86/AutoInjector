@@ -138,4 +138,23 @@ function buildReadScript(site) {
   `;
 }
 
-module.exports = { buildSendScript, buildReadScript };
+// buildFileInputFinderExpression is different in kind from buildSendScript/
+// buildReadScript: it's NOT run via webContents.executeJavaScript(). It's the
+// `expression` field of a CDP Runtime.evaluate call (see attachFileToSite()
+// in main.js) — we need Runtime.evaluate's raw objectId (a live handle
+// DOM.setFileInputFiles can target directly), not a JSON-serializable return
+// value like the send/read scripts produce.
+function buildFileInputFinderExpression(site) {
+  const cfg = siteConfig(site);
+  const candidates = JSON.stringify(cfg.FILE_INPUT_CANDIDATES || []);
+  return `(() => {
+    const CANDIDATES = ${candidates};
+    for (const sel of CANDIDATES) {
+      const node = document.querySelector(sel);
+      if (node) return node;
+    }
+    return null;
+  })()`;
+}
+
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression };

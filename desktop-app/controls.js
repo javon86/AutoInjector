@@ -491,6 +491,11 @@ for (const site of SITES) {
 
 el("composer-text").addEventListener("input", updateCharCount);
 
+el("btn-attach-document").onclick = async () => {
+  const res = await window.api.chooseDocument();
+  if (!res?.ok && res?.error !== "CANCELLED") setStatus(`Couldn't open file picker: ${res?.error || "unknown error"}`);
+};
+
 el("btn-auto-all").onclick = async () => {
   const res = await window.api.autoAllRouting();
   if (res?.ok) { applyGlobal(res.global); setStatus("Auto enabled for checked participants."); }
