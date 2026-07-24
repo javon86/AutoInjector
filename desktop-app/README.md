@@ -1,19 +1,25 @@
 # AutoInjector Desktop
 
-One program, two windows: ChatGPT, Claude and Gemini as three real Chromium panes
+One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
 by copy/paste-style DOM automation, no API keys, using your normal logged-in
 sessions. It's built for using two (or three) AIs together as thinking partners:
 you send them a problem, and route replies between them however you want —
 one-off, or on autopilot.
 
-Alongside the **Automation** window (the panes + control panel, the "engine
-room") there's a **Conversation** window — a separate, resizable/maximizable
-window that's the one you actually watch and type into day to day. It shows
-just the clean back-and-forth between the three AIs (who's speaking, who's up
-next, a message box, Send/Start/Pause/Resume/Stop) with all the internal
-automation machinery — copy/paste operations, internal prompts, silent
-acknowledgments — kept out of view.
+Everything lives in one **Automation** window: the three live panes, the
+control panel, the shared Transcript/Activity Log, House Rules, the Prompt
+Library — all in one place, with panes and panels you don't need right now
+collapsible so the ones you do care about get more screen space. A few
+features (editing a Prompt Library entry, previewing a document before
+sending it, building a Prompt Sequence) open their own small on-demand popup
+window, but there's no separate always-open second window anymore.
+
+By default, every reply any AI sends is read for a `[TO: X]` tag at the very
+start — this is **Roundtable v2**, and unlike everything else in this app
+it's not a mode you turn on: it's just how the program behaves, all the time,
+for as long as it's running. See "Roundtable v2: the always-on baseline"
+below for exactly how that works, and how it relates to House Rules.
 
 This is the desktop counterpart to the `AutoInjector/extension` Chrome extension —
 same automation idea (type into the chat box, click send, watch for the reply),
@@ -81,26 +87,36 @@ if a pane gets stuck or you need to re-navigate.
 
 ## Using it
 
-Each AI gets one merged column: a compact control strip on top (status, preview,
-Forward/Auto/Regenerate buttons), its actual live browser pane directly below.
-There's no separate "cards row" and "browser strip" anymore — unchecking that
-AI in **Participants** collapses just its pane, but its control strip (and its
-last captured reply) stays visible and usable.
+Each AI gets one merged column: a compact control strip on top (zoom,
+status, preview, Forward/Auto/Regenerate buttons), its actual live browser
+pane directly below. There's no separate "cards row" and "browser strip" —
+unchecking that AI in **Participants** collapses just its pane, but its
+control strip (and its last captured reply) stays visible and usable.
 
 1. Sign in to whichever sites you want to include, right in their panes.
-2. **Participants** (top): uncheck any AI you want to sit out of Auto/"All" —
+2. The moment each pane finishes loading for the first time, the app
+   automatically sends it a short routing-explainer prompt (see "Roundtable
+   v2" below) explaining the `[TO: X]` tag system — this happens once per
+   app launch, before you do anything else, with no reply expected. It also
+   lives in the **Prompt Library** (as "System Prompt (How Routing Works)")
+   so you can resend it manually any time an AI seems to have forgotten it.
+3. **Participants** (top): uncheck any AI you want to sit out of Auto/"All" —
    its pane collapses too, since there's nothing to watch if it's not in play.
-3. **Compose** (top-left): type a message and click **→ ChatGPT** / **→ Claude** /
+4. **Compose** (top-left): type a message and click **→ ChatGPT** / **→ Claude** /
    **→ Gemini** / **→ All** to send it to one, some, or all checked participants —
    this is also how you interject at any point, auto running or not. It warns you
    if a message is long enough that a site might choke on it.
-4. The moment a pane's reply finishes streaming (checked every ~1.5s, waits for
+5. The moment a pane's reply finishes streaming (checked every ~1.5s, waits for
    the text to stop changing), a soft chime plays, its column's preview updates,
    and it's logged to the transcript. While waiting on a reply, that column shows
    a pulsing amber dot; the instant it sends something new to another AI, that
    AI's whole column glows briefly so you can actually follow who's talking to
    whom. Forwarded replies are always labeled (`[ChatGPT says] ...`).
-5. **Global controls**:
+6. **Zoom** — each column's header has **－** / **＋** buttons (and a live
+   percentage) that zoom the *actual embedded page* in that pane, not just
+   the app's own UI — handy for fitting more of a long conversation on
+   screen at once. Ranges from 40% to 200%, independent per pane.
+7. **Global controls**:
    - **Auto** — turns on full back-and-forth forwarding between every checked
      participant: whatever one says gets forwarded to the others, whose replies
      get forwarded back, and so on — this is the "three-way conversation" mode.
@@ -109,15 +125,31 @@ last captured reply) stays visible and usable.
      hitting **Auto** again picks up where you left off.
    - **Stop** — halts all forwarding *and* unchecks every participant, forcing a
      deliberate restart.
-   - A column's own **Forward**/**Auto → X**/**↻ Regenerate** buttons still work
-     independently, for fine-grained one-off routes or resending a prompt that
-     missed the mark, instead of the full-mesh version. They're only shown when
-     no House Rules format is in play — once one's running (or has finished),
-     routing is already automatic (Roundtable v2's `[TO: X]` tags, or the
-     format's own state machine), so the manual buttons would just fight it;
-     they come back once you pick a different format or the run's `mode`
-     resets.
-6. **Prompt Library**: saved, reusable prompts you can fire off with one
+   - A column's own **Forward**/**Auto → X**/**Auto → Both**/**↻ Regenerate**
+     buttons are **always visible and always clickable**, no matter what's
+     going on — including while a House Rules format is actively running.
+     There's no mode where they hide or get disabled; if you want to
+     override or interject on top of whatever House Rules or Roundtable v2
+     is doing, you always can. **Auto → Both** is a single toggle that turns
+     both of that column's individual Auto routes on (or off) together,
+     instead of clicking each one separately.
+8. **Role Assignment** *(collapsed by default, in its own panel)* — give each
+   AI an optional persona (e.g. "Skeptical Engineer," "Project Manager") that
+   gets prepended to every message sent to it, however it's sent (Compose,
+   Forward, Auto, a House Rules format, Prompt Library, a Prompt Sequence
+   step). Type a role and click **Apply**, or **Clear** to remove it. This
+   only shapes *what* that AI contributes — it has no effect on *who* it
+   addresses, which is entirely up to its own `[TO: X]` tag choice.
+9. **🧵 Prompt Sequence** *(top of the House Rules panel)* — opens a small
+   popup window where you build a numbered list of prompts, each aimed at a
+   specific AI or **All**. Hit **Run Sequence** and it sends step 1, waits
+   for that step's target to actually reply (for an **All** step, the
+   *first* of the three to reply is enough), then sends step 2, and so on —
+   it never fires everything at once. The popup's status line tracks
+   progress ("step 2 of 4…") and the Run button disables itself while a
+   sequence is active; **Close** just hides the window, it doesn't stop a
+   run in progress.
+10. **Prompt Library**: saved, reusable prompts you can fire off with one
    click, without retyping them or going through House Rules. It's a compact
    dropdown (pick a saved prompt by name) plus **Send** / **+ New** / **Edit**
    / **Delete** — no big text boxes cluttering the main window. **+ New** and
@@ -131,11 +163,10 @@ last captured reply) stays visible and usable.
    sanity check that tells all three AIs this is a diagnostic (not a real
    task) and asks them to confirm they received it and report whether
    messages from the other two are actually arriving; and **System Prompt
-   (How Routing Works)**, a reference explainer covering the `[TO: X]` tag
-   syntax that you can send any time it's useful, not just at the start of a
-   Roundtable v2 session. Saved prompts persist across restarts, same as the
-   transcript and custom roles.
-7. **📎 Attach Document**: pick a real file (image, PDF, text, or anything
+   (How Routing Works)**, the same routing-explainer text that's auto-sent
+   on startup, so you can resend it any time it's useful. Saved prompts
+   persist across restarts, same as the transcript and custom roles.
+11. **📎 Attach Document**: pick a real file (image, PDF, text, or anything
    else) via a normal file picker, and preview it in its own popup window
    before deciding what to do with it. Images and text get a genuine inline
    preview; PDFs embed via Chromium's built-in viewer; anything else just
@@ -151,9 +182,9 @@ last captured reply) stays visible and usable.
    technique browser-automation tools use for file uploads), not typed as a
    path. This is genuinely new, less-tested territory — see the note on file
    upload selectors in "How it's built" below.
-8. **📌** on any transcript turn pins it, so you can spot it again later without
+12. **📌** on any transcript turn pins it, so you can spot it again later without
    scrolling back through everything.
-9. **Copy Transcript** / **Download .md** save the running conversation locally
+13. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
 ### Collapsing things when one screen isn't enough room
@@ -175,27 +206,71 @@ losing anything — nothing closes or resets, it just gets small:
   side by side. Once all three are collapsed that row is empty, so it
   collapses down to nothing and the Transcript/Activity Log panel grows to
   fill the space instead of leaving it unused.
-- **Each whole window** — both the Automation window and the Conversation
-  window have their own **⌄** button in a thin titlebar at the very top.
-  Clicking it shrinks that entire window down to just that titlebar (same
-  screen position, just much shorter); clicking it again (now **›**) restores
-  it to exactly the size and position it had before.
+- **The whole window** — the Automation window has its own **⌄** button in a
+  thin titlebar at the very top. Clicking it shrinks the entire window down
+  to just that titlebar (same screen position, just much shorter); clicking
+  it again (now **›**) restores it to exactly the size and position it had
+  before.
+- **The Transcript/Activity Log panel** — its own header has a **⌄**
+  collapse button too, independent of the AI panes: shrink it out of the way
+  when you want the panes to have more room and don't need to watch the log
+  right now, and bring it back the same way.
+- **Role Assignment** — collapsed by default (a small **▾**/**▴** header
+  toggle), since it's an occasional-use panel, not something you need open
+  all the time.
 
 Collapsed panes are moved off-screen rather than shrunk to nothing, on
 purpose: a zero-size browser view risks Chromium treating it as hidden and
 throttling it, which would quietly break the very automation collapsing is
 supposed to leave alone. Whether a column is collapsed individually or the
-whole Automation window is collapsed to its titlebar, every AI keeps sending
-and receiving in the background exactly the same as when fully visible.
+whole window is collapsed to its titlebar, every AI keeps sending and
+receiving in the background exactly the same as when fully visible.
+
+## Roundtable v2: the always-on baseline
+
+This is the program's default, permanent behavior — not a House Rules format
+you start and stop. Every reply any AI gives is checked for a `[TO: X]` tag
+on its own line at the very start: `[TO: CHATGPT]`, `[TO: CLAUDE]`, `[TO:
+GEMINI]`, `[TO: ALL]`, `[TO: USER]`, or `[TO: NONE]`. The app strips that tag
+before showing the message and routes it accordingly:
+
+- **`[TO: CLAUDE]`/`[TO: CHATGPT]`/`[TO: GEMINI]`** — relayed to just that one
+  AI. Still shown to you in the transcript, marked with a small "→ Claude"
+  style badge so you know who it was for.
+- **`[TO: ALL]`** — relayed to both of the other AIs. Badged "→ Everyone".
+- **`[TO: USER]`** — meant for you, not another AI. Shown with no badge (this
+  is the common case — badging every single message "→ You" would just be
+  noise). Nothing gets relayed onward from it.
+- **`[TO: NONE]`** — "I have nothing to add." Fully hidden — never shown,
+  never relayed.
+- **No tag at all** — treated as `[TO: USER]` and shown as-is (this is a
+  deliberate fallback, not a silent drop, so a model that forgets the format
+  doesn't just vanish).
+
+This runs unconditionally, on every site, for the entire time the app is
+open — there's no "start" button for it and nothing to configure. The one
+thing that ever suspends it is a **House Rules format** (see below) actively
+running: while one of those seven is active, it drives replies with its own
+state machine instead, and a `[TO: X]`-looking line in a reply is just left
+as plain text, not parsed as a tag. The moment that format is stopped,
+tag-routing resumes automatically underneath — there's no separate action
+needed to "turn it back on."
+
+The app auto-sends a short prompt explaining this whole system to all three
+AIs the first time each pane finishes loading after the app starts (once per
+launch, no reply expected) — see step 2 under "Using it" above. That same
+text lives in the Prompt Library as **"System Prompt (How Routing Works)"**
+if you ever need to resend it.
 
 ## House Rules
 
 Instead of manually wiring up Forward/Auto buttons, **House Rules** (in the
-Global area) structures the whole conversation for you — pick a format, hit
-**Start**, and it runs itself. It uses whatever's typed in **Compose** as the
-topic/goal. While a House Rules run is active, the manual Auto/Pause buttons
-are disabled (Stop always works and ends both) so there's only one thing
-driving the conversation at a time.
+Global area) lets you temporarily layer a structured format on top of the
+Roundtable v2 baseline above — pick one, hit **Start**, and it runs itself,
+suspending tag-routing for as long as it's active. It uses whatever's typed
+in **Compose** as the topic/goal. The manual Forward/Auto buttons stay
+visible and clickable the whole time (see "Global controls" above) — Stop
+always ends the run and hands control back to tag-routing.
 
 - **Who Wants to Speak?** — each round, every checked AI is asked whether it
   has something worth adding (reply YES or NO). Only the ones that say yes get
@@ -229,111 +304,21 @@ driving the conversation at a time.
   framed as **UPDATE** — told explicitly not to join in yet, just to stay
   caught up — and its one-word `"UPDATED"` acknowledgment is swallowed
   entirely, never shown anywhere. Unlike the other formats, the order is
-  fixed on purpose, not shuffled. This was the original format behind the
-  Conversation window; it's now superseded there by **Roundtable v2**
-  (below), but stays fully available here for manual/legacy use.
-- **Roundtable v2** *(needs all 3 checked)* — the format behind the
-  **Conversation** window today (see below for the full writeup). Instead of
-  a fixed rotation, each AI decides for itself who its reply is for by
-  starting it with a `[TO: X]` tag, and the app routes accordingly.
+  fixed on purpose, not shuffled.
 
-Role assignments show up as a small badge next to that AI's name once a mode
-with roles is running (that's the *structural* role auto-assigned by these
-formats, like Devil/Angel/Referee — not the same thing as the optional Role
-Assignment persona feature described below, which you set yourself).
+Role assignments show up as a small badge next to that AI's name once a
+format with structural roles is running (that's the auto-assigned
+Devil/Angel/Referee-style role — not the same thing as the optional Role
+Assignment persona feature described above, which you set yourself).
 
-## The Conversation window
+If a reply looks like a rate-limit/usage-cap message (short text matching
+phrases like "usage limit" or "try again later") while a House Rules format
+is active, the run **auto-pauses** instead of relaying that message to the
+other AIs as if it were a real reply — the turn still shows up in the
+transcript (marked ⚠ USAGE LIMIT) so you can see what happened, and Resume
+once the limit clears.
 
-This is the primary window for actually using the app once everyone's signed
-in on the Automation side. Starting a conversation here now uses
-**Roundtable v2**: instead of a fixed speaking order, each AI is given a
-house-rules document up front and decides for itself, message by message,
-who its reply is for.
-
-### Roundtable v2: how the tagging works
-
-Every reply an AI gives must start with one tag, on its own line: `[TO:
-CHATGPT]`, `[TO: CLAUDE]`, `[TO: GEMINI]`, `[TO: ALL]`, `[TO: USER]`, or `[TO:
-NONE]`. The app strips that tag before showing the message and routes it
-accordingly:
-
-- **`[TO: CLAUDE]`/`[TO: CHATGPT]`/`[TO: GEMINI]`** — relayed to just that one
-  AI. Still shown to you in the transcript, marked with a small "→ Claude"
-  style badge so you know who it was for.
-- **`[TO: ALL]`** — relayed to both of the other AIs. Badged "→ Everyone".
-- **`[TO: USER]`** — meant for you, not another AI. Shown with no badge (this
-  is the common case — badging every single message "→ You" would just be
-  noise). Nothing gets relayed onward from it.
-- **`[TO: NONE]`** — "I have nothing to add." Fully hidden, exactly like
-  Rotation's old `"UPDATED"` acknowledgments — never shown, never relayed.
-- **No tag at all** — treated as `[TO: USER]` and shown as-is (this is a
-  deliberate fallback, not a silent drop, so a model that forgets the format
-  doesn't just vanish).
-
-Before any of that starts, the app sends the full house-rules document (plus
-a role-specific addendum — Gemini is framed as retrieval/reference, ChatGPT
-as human-language reasoning, Claude as code/external actions) to all three
-AIs and waits for each to acknowledge it. That handshake is completely
-invisible in the transcript, same treatment as everything else this app
-hides — you'll just see the status line count up ("...(2/3)") until it flips
-to "Running."
-
-- **Send** — delivers whatever's in the message box to all three AIs
-  immediately, independent of whether a run is active. Use this to kick off
-  a one-off exchange or interject at any point.
-- **Start** — sends the house rules, waits for all three acknowledgments,
-  then sends the message box's text as the real opening topic to all three
-  at once (not to a single "first" AI — any of them may pick it up).
-- **Hops** — the number next to Start/Send caps how many relays the AIs can
-  make before the app stops them itself (each individual relay counts as one
-  hop; a `[TO: ALL]` reply costs two). Defaults to 24. The house-rules text
-  explicitly tells the AIs a limit like this exists, so it's worth leaving a
-  real number here rather than emptying the field.
-- **Pause** / **Resume** — halts the message flow without losing its place
-  (hop count, acknowledgment state, everything); Resume picks back up
-  exactly where it left off.
-- **Stop** — ends the run for good (asks you to confirm first, since unlike
-  Pause there's no undo); starting again means a fresh Start (and a fresh
-  handshake).
-- Press **Enter** in the message box to send; **Shift+Enter** for a newline.
-- **Role Assignment** *(optional, collapsed by default)* — give each AI an
-  *additional* persona for this conversation (e.g. Project manager, Critic,
-  Fact-checker) on top of the roundtable role it already has, by typing a
-  role and clicking Apply, or Clear to remove it. This only shapes *what*
-  each AI contributes — it has no effect on *when*/*who* they address, which
-  is entirely up to the `[TO: X]` tag they choose. Structural roles from
-  other House Rules formats (Devil/Angel/Referee/etc., if you started one
-  from the Automation side) show up as a small badge on the relevant speaker
-  chip too.
-- **Copy** / **Download** at the top export the visible conversation, same
-  idea as the Automation window's transcript export.
-
-Rotation (the original fixed ChatGPT → Claude → Gemini cycle) still exists
-and works exactly as before — it's just no longer what this window's Start
-button uses. Start it manually from the Automation window's House Rules
-dropdown if you want that simpler, deterministic format instead.
-
-**If something goes wrong**, a banner appears right under the topic line
-instead of the conversation just silently stalling:
-- A send/read problem on one AI shows a short, generic notice (which AI, and
-  to check the Automation window's Activity Log) — never the raw internal
-  error text.
-- If an AI hasn't replied in a few minutes, a "may be stuck" warning appears
-  — worth checking the Automation window, or trying Pause then Resume.
-- If a reply looks like a rate-limit/usage-cap message (short text matching
-  phrases like "usage limit" or "try again later"), the run **auto-pauses**
-  instead of relaying that message to the other AIs as if it were a real
-  reply — the turn still shows up in the transcript (marked ⚠ USAGE LIMIT) so
-  you can see what happened, and Resume once the limit clears.
-
-The Automation window's panes and control panel keep working normally
-alongside this — you can still sign in, reload a stuck pane, or watch the
-Activity log there. Both windows share the same live state, so a reply
-captured on one side shows up on the other instantly. If the Conversation
-window isn't focused (or is collapsed) when a new reply lands, it also plays
-a soft chime and flashes the window title until you switch back to it.
-
-### Picking up where you left off
+## Picking up where you left off
 
 Your transcript, any custom Role Assignments, and an in-progress House Rules
 run (if one was going) are saved to disk automatically as you go, and
@@ -350,7 +335,7 @@ The saved file lives at:
 
 Delete that file (app closed) if you ever want a completely clean slate.
 
-### Troubleshooting
+## Troubleshooting
 
 The **Activity / Troubleshooting** panel next to the transcript logs every
 internal action live — polls that captured a new reply, sends, forwards, errors,
@@ -377,18 +362,15 @@ entirely, `automation.js` now actively checks that clicking Send (or pressing
 Enter) actually cleared the input box — every real chat UI does this the
 instant a message is genuinely submitted — instead of just trusting that the
 click didn't throw an error. A send that doesn't actually go through now
-reports `SEND_NOT_CONFIRMED` (visible as an error in the Activity Log and as
-a banner in the Conversation window) rather than silently pretending to
-succeed. If you see that error repeatedly for one AI, its `SEND_CANDIDATES`
-in `selectors.js` is likely stale — the same 🔍 Inspect flow works here too,
-just right-click that site's actual Send button instead of a reply bubble.
+reports `SEND_NOT_CONFIRMED` (visible as an error in the Activity Log) rather
+than silently pretending to succeed. If you see that error repeatedly for
+one AI, its `SEND_CANDIDATES` in `selectors.js` is likely stale — the same
+🔍 Inspect flow works here too, just right-click that site's actual Send
+button instead of a reply bubble.
 
 ## How it's built
 
-- `main.js` — Electron main process. Creates two `BaseWindow`s: the Automation
-  window (one `WebContentsView` per AI site plus one full-window
-  `WebContentsView` for the control panel) and the Conversation window (a
-  single full-window `WebContentsView`). Each site's pane is positioned by
+- `main.js` — Electron main process. Each site's pane is positioned by
   measuring an empty placeholder div (`#pane-slot-<site>`) inside the control
   panel's own HTML and copying its exact on-screen rectangle, so the live pane
   sits directly under that AI's control strip and collapses cleanly when the
@@ -396,19 +378,26 @@ just right-click that site's actual Send button instead of a reply bubble.
   reply every ~1.5s to detect when it's finished streaming, routes messages
   (manual, per-pane auto, the global full-mesh Auto, or a House Rules format)
   between panes, and keeps an in-memory activity log of everything that
-  happens. A generic `broadcast()` sends every UI update to both windows at
-  once, so they always stay in sync. The House Rules formats (including
-  Rotation) are small state machines layered on top of the same capture
-  events — each one reacts to a new reply by deciding who gets sent what next.
-  Captures can also be swallowed *silently* (never reaching the transcript or
-  either window) — used for Chargeback's Referee acknowledgments, Rotation's
-  "UPDATED" confirmations, and Roundtable v2's acknowledgment handshake and
-  `[TO: NONE]` replies. Roundtable v2 is the one mode where an AI's own
-  output has to be parsed and edited *before* it's ever pushed to the
-  transcript (its `[TO: X]` tag is literally the first thing the AI typed) —
-  everything else's "swallow" logic runs on a full, untouched reply. A short
-  list of rate-limit/usage-cap
-  phrases is checked against every new reply while a House Rules run is
+  happens. Everything lives in one `BaseWindow` — one `WebContentsView` per
+  AI site plus one full-window `WebContentsView` for the control panel —
+  plus three on-demand popup windows (Prompt Editor, Document Viewer, Prompt
+  Sequence) that only get created the first time they're actually needed. A
+  generic `broadcast()` sends every UI update to every open window at once,
+  so they all stay in sync. Roundtable v2's `[TO: X]` tag-parsing is the
+  program's permanent baseline: `pollSite()` runs it on every captured reply
+  from every site unconditionally, *unless* one of the seven House Rules
+  "stage" formats (tracked in a `STAGE_MODES` set) is currently active, in
+  which case that format's own state machine takes over instead — there's no
+  separate "start Roundtable" event, so the instant a stage is stopped,
+  tag-routing is simply what runs on the next captured reply, automatically.
+  A `[TO: NONE]` reply, or a stage's own internal "swallow" cases
+  (Chargeback's Referee acknowledgments, Rotation's `"UPDATED"`
+  confirmations), never reach the transcript at all. Each site view gets a
+  one-time `did-finish-load` listener that fires
+  `sendStartupRoutingPromptOnce()` — sends the routing-explainer prompt
+  (Prompt Library id 2) once per app launch, guarded by a `Set` so a later
+  manual reload doesn't re-trigger it. A short list of rate-limit/usage-cap
+  phrases is checked against every new reply while a House Rules stage is
   active — a match auto-pauses the run instead of relaying it as a real
   contribution. Transcript, custom roles, saved Prompt Library entries, and
   paused-run state are written to a debounced JSON snapshot in
@@ -420,7 +409,15 @@ just right-click that site's actual Send button instead of a reply bubble.
   a site is treated as "don't send to it," not "send nothing." Saving or
   deleting a prompt also broadcasts `prompts-changed` to every open window,
   which is how the Automation window's dropdown stays in sync when a save
-  actually happened from the separate prompt-editor popup. `logEvent()`
+  actually happened from the separate prompt-editor popup. The **Prompt
+  Sequence** backend (`startSequence()`/`sendSequenceStep()`/
+  `handleSequenceCapture()`) is a linear queue of `{target, text}` steps,
+  sent one at a time — each step's target's next captured reply (or, for an
+  "all" step, the first of the three to reply) advances to the next step,
+  rather than firing on a timer. **Zoom** (`site:zoom`) calls
+  `webContents.setZoomFactor()` directly on the live site view, clamped to
+  [0.4, 2.0] — it zooms the real embedded page, not the app's own UI.
+  `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
   crash still leaves something to troubleshoot from. Delivering an actual
@@ -452,19 +449,29 @@ just right-click that site's actual Send button instead of a reply bubble.
   guesses, not yet verified against the real sites** — same caveat as every
   other selector list here, fix the same way (🔍 Inspect on the live pane,
   find the actual upload input, update the list).
-- `controls.html` / `controls.js` — the Automation window's control panel UI,
-  including the Prompt Library's compact dropdown + Send/New/Edit/Delete, and
-  the collapsed-pane strip that shares House Rules' unused space.
-- `conversation.html` / `conversation.js` — the Conversation window's UI:
-  renders the shared transcript, current/next speaker, Send/Start/Pause/
-  Resume/Stop, and Role Assignment.
+- `controls.html` / `controls.js` — the Automation window's control panel UI:
+  the AI columns (with zoom, Forward/Auto/Auto-Both, collapse), Role
+  Assignment, House Rules, the Prompt Library's compact dropdown +
+  Send/New/Edit/Delete, the 🧵 Prompt Sequence trigger, the collapsed-pane
+  strip that shares House Rules' unused space, and the collapsible
+  Transcript/Activity Log panel. This is the only window now — there's no
+  separate always-open Conversation window anymore, so everything that used
+  to live there (the transcript, Role Assignment, Send/Start/Pause/Resume/
+  Stop-equivalent controls) is here instead.
 - `prompt-editor.html` / `prompt-editor.js` — the small, on-demand popup
   window for creating/editing one Prompt Library entry: a name field, one
   text box per AI, a `→ All` shortcut that copies a shared draft into all
   three, and Save/Cancel. Only created the first time `+ New` or `Edit` is
-  clicked (not at startup like the other two windows); re-navigates the same
-  window (via a `?id=<n>` query string, or none for a blank prompt) instead
-  of opening a second one if it's already open.
+  clicked; re-navigates the same window (via a `?id=<n>` query string, or
+  none for a blank prompt) instead of opening a second one if it's already
+  open.
+- `prompt-sequence.html` / `prompt-sequence.js` — the small, on-demand popup
+  for building a Prompt Sequence: an add/remove-able list of `{target, text}`
+  step rows (target picked from a dropdown: All/ChatGPT/Claude/Gemini), a
+  Run button that calls `runSequence()` and disables itself while active, a
+  status line reflecting `sequence-state` broadcasts from `main.js`, and
+  Close. This window doesn't run the sequence itself — `main.js` owns all of
+  that state, same division of labor as everywhere else in this app.
 - `document-viewer.html` / `document-viewer.js` — the on-demand popup for
   previewing a file before sending it, same lazy single-instance pattern as
   the prompt editor (`?path=<encoded path>` query string). Renders
@@ -480,9 +487,10 @@ just right-click that site's actual Send button instead of a reply bubble.
   filename, no preview, Send still works. Every highlight (canvas rectangles
   or `<mark>` tags) lives only in that page's own memory/DOM — never
   persisted, never sent to any AI, never touches the actual file on disk.
-- `preload.js` — the IPC bridge shared by all four windows, talking to the
-  main process over `ipcRenderer`/`contextBridge` (no direct Node access from
-  either page, same as the sites' own panes).
+- `preload.js` — the IPC bridge shared by every window (the Automation
+  window and all three popups), talking to the main process over
+  `ipcRenderer`/`contextBridge` (no direct Node access from either page,
+  same as the sites' own panes).
 
 Selectors are best-effort with fallbacks, same caveat as the extension: if a site
 redesigns its chat UI, `selectors.js` is the first place to fix — use the 🔍
@@ -504,25 +512,39 @@ opt-in filtering, Free-for-All/Brainstorm's mesh setup and teardown, Rotation's
 fixed RESPOND/UPDATE cycle and its "UPDATED" acks never reaching the
 transcript), Pause/Resume round-tripping routing state, Role Assignment's
 persona clause injection, window-collapse bounds math (shrinks to a 44px
-titlebar in place and restores the exact original bounds — including
-temporarily relaxing the Conversation window's minHeight so it can actually
-collapse, then putting it back), and a couple of routing edge cases (disabling
-a participant mid-run, House Rules' own Stop button actually clearing the
-mesh it set up).
+titlebar in place and restores the exact original bounds), and a couple of
+routing edge cases (disabling a participant mid-run, House Rules' own Stop
+button actually clearing the mesh it set up).
 
-It also covers Roundtable v2's tag-routing protocol: the acknowledgment
-handshake (acks arriving in any order, a site acking twice being harmless,
-the real topic only going out once all three have acked — with the ack
-messages themselves never reaching the transcript), routing for every
-`[TO: X]` tag (`CLAUDE`/`CHATGPT`/`GEMINI` relay to just that one and strip
-the tag before display, `ALL` relays to the other two, `USER` stays purely
-visible with no relay, `NONE` never reaches the transcript at all), a
-missing-tag reply falling back to `USER` per the house rules' own documented
-default, case-insensitive tag matching, an AI addressing itself being a
-no-op instead of a self-relay, and hop-limit accounting (`[TO: ALL]`
-correctly costs two hops, not one; a run ends the instant the limit is hit
-rather than drifting one relay past it; a zero/unset hop limit falls back to
-the default of 24).
+It also covers Roundtable v2's always-on baseline: the routing-explainer
+prompt getting auto-sent to every site exactly once on startup, before
+anything else; routing for every `[TO: X]` tag with no House Rule ever
+started (`CLAUDE`/`CHATGPT`/`GEMINI` relay to just that one and strip the tag
+before display, `ALL` relays to the other two, `USER` stays purely visible
+with no relay, `NONE` never reaches the transcript at all), a missing-tag
+reply falling back to `USER` per the routing prompt's own documented
+default, case-insensitive tag matching, and an AI addressing itself being a
+no-op instead of a self-relay; and — the core of the stage-vs-baseline
+model — that starting a House Rules format (e.g. Debate) suspends
+tag-parsing entirely (a `[TO: X]`-looking line in a reply during Debate is
+left as plain, untouched text, and the format's own state machine drives the
+next send instead of a tag-routed relay), and that stopping it hands control
+back to tag-routing automatically on the very next captured reply, with no
+separate action needed to re-enable it.
+
+It also covers the Prompt Sequence backend: `sequence:open`/
+`sequence-editor:close` managing a single popup window instance the same way
+the other popups do; steps firing one at a time, each waiting for that
+step's actual target to reply before advancing (an unaddressed site's reply
+is correctly ignored); an "all" step advancing on the *first* of the three
+replies rather than waiting for all three; `sequence:run` rejecting a second
+run while one's already active (`ALREADY_RUNNING`) and filtering out
+malformed steps (bad target, blank-after-trim text) before rejecting an
+empty result (`NO_VALID_STEPS`); and `sequence:stop` marking a run inactive
+mid-flight. It also covers the `site:zoom` handler: an in-range factor
+passing straight through to `webContents.setZoomFactor()`, and out-of-range
+values clamping to the documented [0.4, 2.0] range rather than being
+rejected outright.
 
 It also covers the Prompt Library backend: both built-ins existing by
 default ("System Test," with each AI's own version correctly naming the
@@ -559,45 +581,33 @@ viewer window targeting whatever was picked, re-targets that same window
 (not a second one) if a different file is chosen while it's still open, and
 closing it actually destroys the window.
 
-`npm test` also runs `test/conversation.test.js`, which loads the *real*
-`conversation.html`/`conversation.js` into a `jsdom` (an in-memory DOM, still
-no real browser needed) with `window.api` stubbed the way `preload.js` exposes
-it, then clicks real buttons and fires simulated `capture`/`houserule-state`
-events to check what actually renders. This is what caught a real crash: the
-Conversation window's transcript renderer looked up its "empty" placeholder
-by ID on every render, which broke the instant that node was ever removed
-from the page — i.e. the moment a second reply arrived in any real
-conversation. Fixed and now covered by a regression test.
-
-This suite also covers the Conversation window's Roundtable v2 support: the
-Hops number input (defaults to 24, is actually read and passed through on
-both Send and Start, falls back to 24 if left empty or set to something
-invalid), the ack-phase status line counting up as each AI acknowledges the
-house rules (e.g. "…(2/3)") and reverting to the normal running status once
-all three have, and the `→ Claude`/`→ Everyone`-style routing badge
-rendering on tagged turns (and *not* rendering at all for plain `[TO: USER]`
-replies, to avoid badging the common case).
-
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
-to `controls.html`/`controls.js` — currently focused on the collapse feature
-(each AI column's own toggle relocating it between the collapsed and expanded
-strips rather than just adding a class, and that `#collapsed-strip` actually
-lives inside the House Rules box; the Automation window's titlebar toggle;
-that a collapse event for the *other* window is correctly ignored; the
-Transcript/Log panel expanding only once *all three* panes are collapsed),
-the Stop confirmation prompt, that the manual Forward/Auto rows hide as soon
-as any House Rules format is picked (and stay hidden through "finished,"
-only reappearing once `mode` resets), the Roundtable v2 dropdown option
-(present, correctly labeled, and actually dispatches
-`startHouseRule("roundtable", …)` with the right topic and hop count), the
-same routing badge rendering on captured turns for parity with the
-Conversation window, and the Prompt Library dropdown — options rendering
-from the saved list (and a placeholder + disabled buttons when there are
-none), Send using the *selected* prompt's saved text, `+ New`/`Edit` calling
-`openPromptEditor` with the right id (`null` for new) rather than editing
-anything inline, Delete removing the selected entry, and a `prompts-changed`
-event (simulating the popup window having saved elsewhere) re-rendering the
-dropdown live.
+to `controls.html`/`controls.js`: the collapse feature (each AI column's own
+toggle relocating it between the collapsed and expanded strips rather than
+just adding a class, and that `#collapsed-strip` actually lives inside the
+House Rules box; the Automation window's titlebar toggle; that a collapse
+event for a different window id is correctly ignored; the Transcript/Log
+panel expanding only once *all three* panes are collapsed; the
+Transcript/Log panel's own independent collapse button), the Stop
+confirmation prompt, that Roundtable v2 has **no** dropdown option anymore
+(it isn't a stage you start/stop) while the seven real stage formats still
+are, the `→ Claude`/`→ Everyone`-style routing badge rendering on captured
+turns, that the manual Forward/Auto/Auto-Both buttons stay visible *and*
+genuinely clickable no matter what a House Rules stage is doing (clicking
+Auto mid-stage still calls `setRouting`) — proving the old hide-while-active
+behavior is gone for good, the combined Auto → Both toggle (one click turns
+both individual routes on together, lights up once both are on, a second
+click turns both off), the zoom buttons (clicking calls `setZoom` and the
+on-screen percentage label updates to match), the Role Assignment panel
+(starts collapsed, Apply/Clear call `setRole` and update the "current: X"
+label, the collapse toggle works both ways), the 🧵 Prompt Sequence trigger
+button calling `openSequenceEditor`, and the Prompt Library dropdown —
+options rendering from the saved list (and a placeholder + disabled buttons
+when there are none), Send using the *selected* prompt's saved text, `+
+New`/`Edit` calling `openPromptEditor` with the right id (`null` for new)
+rather than editing anything inline, Delete removing the selected entry, and
+a `prompts-changed` event (simulating the popup window having saved
+elsewhere) re-rendering the dropdown live.
 
 `npm test` also runs `test/prompt-editor.test.js`, the same jsdom approach
 applied to the standalone `prompt-editor.html`/`prompt-editor.js` popup:
@@ -625,6 +635,19 @@ inside actual Chromium anyway, same division of labor as everywhere else in
 this suite; Send collects only the checked boxes and calls `sendDocument`
 with the real decoded path; and the checkboxes default to whichever
 participants are currently enabled.
+
+`npm test` also runs `test/prompt-sequence.test.js`, the same jsdom approach
+applied to the standalone `prompt-sequence.html`/`prompt-sequence.js` popup:
+starts with a single blank "all" step; `+ Add Step` adds rows and removing
+one renumbers the rest so there's never a gap; each step's target dropdown
+offers All plus each of the three sites; Run Sequence collects every step
+with actual text and calls `runSequence` with the right target/text pairs,
+per step; blank/whitespace-only steps are filtered out before that call;
+Run with nothing filled in shows a status message instead of ever calling
+the backend; a rejected run (e.g. `ALREADY_RUNNING`) re-enables the Run
+button and surfaces the real error; `sequence-state` broadcasts drive the
+status line's progress text and the Run button's disabled state, both while
+running and once finished; and Close calls `closeSequenceEditor`.
 
 Finally, `npm test` runs `test/selectors-sync.test.js`, which loads *both*
 copies of the selector config — `desktop-app/selectors.js` (CommonJS) and

@@ -343,8 +343,7 @@ async function testRoleInjection() {
 async function testWindowCollapse() {
   console.log("\n== Window collapse: shrinks to a titlebar in place, restores exactly on expand ==");
   const automationWin = mockElectron.__windowRegistry["AutoInjector Desktop — Automation"];
-  const convWin = mockElectron.__windowRegistry["AutoInjector — Conversation"];
-  assert(!!automationWin && !!convWin, "both real BaseWindows are reachable via the mock registry");
+  assert(!!automationWin, "the real BaseWindow is reachable via the mock registry");
 
   const before = await call("window:toggle-collapse", { which: "bogus" });
   assert(!before.ok && before.error === "NO_WINDOW", "an unknown window id is rejected cleanly");
@@ -361,17 +360,7 @@ async function testWindowCollapse() {
   const restoredBounds = automationWin.getBounds();
   assert(JSON.stringify(restoredBounds) === JSON.stringify(origBounds), "expanding restores the exact original bounds, not just 'some' larger size");
 
-  // Conversation window has an explicit minHeight (500) set at construction —
-  // collapsing to a 44px titlebar only works if that minimum is temporarily
-  // relaxed, and it must be put back afterward, not left at 44 forever (which
-  // would silently block the user from ever resizing it back up normally).
-  assert(convWin.getMinimumSize()[1] === 500, "sanity: Conversation window's real minHeight is 500 before collapsing");
-  await call("window:toggle-collapse", { which: "conversation" });
-  assert(convWin.getBounds().height === 44, "Conversation window (which has a real minHeight) also collapses to 44px");
-  assert(convWin.getMinimumSize()[1] === 44, "its minimum height is relaxed while collapsed, or setBounds would just get clamped back up to 500");
-  await call("window:toggle-collapse", { which: "conversation" });
-  assert(convWin.getBounds().height === 860, "expanding restores its original height (constructed at 860)");
-  assert(convWin.getMinimumSize()[1] === 500, "its minHeight constraint is restored too, not left at 44 permanently");
+  assert(!mockElectron.__windowRegistry["AutoInjector — Conversation"], "the Conversation window no longer exists at all — everything lives in the Automation window now");
 }
 
 async function testRateLimitAutoPause() {
@@ -622,73 +611,101 @@ async function testDocumentChooseAndViewerWindow() {
   assert(viewerWin.isDestroyed(), "the window is actually closed");
 }
 
-async function startRoundtableAndSkipAcks(topic, rounds) {
-  await call("houserule:start", { mode: "roundtable", topic, rounds });
-  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "house-rules kickoff sent to all three" });
-  say("chatgpt", "[TO: USER] Acknowledged, understood.");
-  say("claude", "[TO: USER] Acknowledged, understood.");
-  say("gemini", "[TO: USER] Acknowledged, understood.");
-  await waitUntil(() => sentLog("chatgpt").length === 2 && sentLog("claude").length === 2 && sentLog("gemini").length === 2, { label: "real topic sent to all three once every ack lands" });
+async function testSequenceWindowManagement() {
+  console.log("\n== sequence:open / sequence-editor:close manage a single popup window ==");
+  const openRes = await call("sequence:open", {});
+  assert(openRes.ok, "opens successfully");
+  const seqWin = mockElectron.__windowRegistry["AutoInjector — Prompt Sequence"];
+  assert(!!seqWin && !seqWin.isDestroyed(), "a real window opens for it");
+
+  await call("sequence:open", {});
+  assert(mockElectron.__windowRegistry["AutoInjector — Prompt Sequence"] === seqWin, "opening again re-focuses the SAME window, not a second one");
+
+  const closeRes = await call("sequence-editor:close", {});
+  assert(closeRes.ok, "closing succeeds");
+  assert(seqWin.isDestroyed(), "the window is actually closed");
 }
 
-async function testRoundtableAckHandshake() {
-  console.log("\n== Roundtable: acknowledgment handshake is fully hidden, real topic sent only once all three ack ==");
+async function testSequenceBackend() {
+  console.log("\n== Prompt Sequence: steps fire one at a time, each waiting for that step's target to actually reply ==");
   await resetAllParticipants();
-  const startRes = await call("houserule:start", { mode: "roundtable", topic: "Let's plan a product launch", rounds: 10 });
-  assert(startRes.ok, "starts successfully");
-  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "house-rules kickoff sent to all three" });
-  assert(sentLog("claude")[0].text.includes("ROLE ADDENDUM") && sentLog("claude")[0].text.includes("code generation"), "claude gets its own role addendum in the kickoff");
-  assert(sentLog("gemini")[0].text.includes("NotebookLM"), "gemini gets its own role addendum in the kickoff");
-  assert(sentLog("chatgpt")[0].text.includes("human-language reasoning"), "chatgpt gets its own role addendum in the kickoff");
+  await call("sequence:stop", {}); // defensive, mirrors resetAllParticipants()'s own houserule:stop
 
-  const state0 = await call("state:get", {});
-  assert(state0.houseRule.phase === "ack", "phase is 'ack' immediately after start");
-  assert(state0.houseRule.ackPending.length === 3, "all three are pending ack");
-  assert(state0.transcript.length === 0, "nothing in the transcript yet");
+  const steps = [
+    { target: "chatgpt", text: "Step 1 for chatgpt" },
+    { target: "all", text: "Step 2 for everyone" },
+    { target: "claude", text: "Step 3 for claude" }
+  ];
+  const runRes = await call("sequence:run", { steps });
+  assert(runRes.ok, "sequence starts successfully");
 
-  // acks arrive out of order: gemini, then chatgpt, then claude last
-  say("gemini", "[TO: USER] Acknowledged. I understand the rules and my role.");
-  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 2, { label: "gemini's ack consumed" });
+  await waitUntil(() => sentLog("chatgpt").some((e) => e.text === "Step 1 for chatgpt"), { label: "step 1 sent to chatgpt only" });
+  assert(sentLog("claude").length === 0 && sentLog("gemini").length === 0, "nobody else gets anything yet -- waiting on chatgpt's reply");
   let s = await call("state:get", {});
-  assert(s.transcript.length === 0, "gemini's ack never appears in the transcript");
-  assert(sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, "no real topic sent yet — still waiting on 2 more acks");
+  assert(s.sequence.active === true && s.sequence.index === 0, "sequence state reports step 0 active");
 
-  say("chatgpt", "[TO: USER] Acknowledged, I got it.");
-  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 1, { label: "chatgpt's ack consumed" });
-  assert(sentLog("chatgpt").length === 1, "still no real topic sent — claude hasn't acked yet");
-
-  say("claude", "[TO: USER] Acknowledged, understood.");
-  await waitUntil(() => sentLog("chatgpt").length === 2 && sentLog("claude").length === 2 && sentLog("gemini").length === 2, { label: "real topic sent to all three once the last ack lands" });
-  assert(sentLog("chatgpt")[1].text === "Let's plan a product launch", "the real topic (raw, no wrapper) goes out once acks are complete");
-  const s2 = await call("state:get", {});
-  assert(s2.houseRule.phase === "active", "phase flips to active");
-  assert(s2.transcript.length === 0, "still nothing visible in the transcript — only acks and the kickoff have happened so far");
-
-  await call("houserule:stop", {});
-}
-
-async function testRoundtableDuplicateAck() {
-  console.log("\n== Roundtable: a duplicate ack from an already-acked site doesn't cause problems ==");
-  await resetAllParticipants();
-  await call("houserule:start", { mode: "roundtable", topic: "Topic X", rounds: 10 });
-  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "kickoff sent" });
-
-  say("chatgpt", "[TO: USER] Acknowledged.");
-  await waitUntil(async () => (await call("state:get", {})).houseRule.ackPending.length === 2, { label: "chatgpt acked" });
-
-  say("chatgpt", "[TO: USER] Acknowledged again, just in case."); // a stray second reply from an already-acked site
+  // a reply from a site the current step didn't address must NOT advance it
+  say("claude", "I wasn't asked anything, ignore me.");
   await new Promise((r) => setTimeout(r, 3000));
-  const s = await call("state:get", {});
-  assert(s.houseRule.ackPending.length === 2, "still exactly 2 pending — the duplicate didn't remove anyone twice or error");
-  assert(s.transcript.length === 0, "still nothing visible");
+  s = await call("state:get", {});
+  assert(s.sequence.index === 0, "an unaddressed site's reply does not advance the sequence");
 
-  await call("houserule:stop", {});
+  say("chatgpt", "Here's my reply to step 1.");
+  await waitUntil(() => SITES.every((s2) => sentLog(s2).some((e) => e.text === "Step 2 for everyone")), { label: "step 2 ('all') sent to all three once chatgpt's reply advances the sequence" });
+  s = await call("state:get", {});
+  assert(s.sequence.index === 1, "advanced to step 1 (the 'all' step)");
+
+  // for an 'all' step, the FIRST of the three to reply is enough to advance
+  say("gemini", "Gemini replies first.");
+  await waitUntil(() => sentLog("claude").some((e) => e.text === "Step 3 for claude"), { label: "step 3 sent to claude once the first reply to the 'all' step lands" });
+  s = await call("state:get", {});
+  assert(s.sequence.index === 2, "advanced to step 2 off the first of the three replies, without waiting for the other two");
+
+  say("claude", "Final reply.");
+  await waitUntil(async () => !(await call("state:get", {})).sequence.active, { label: "sequence finishes after the last step's reply" });
+  s = await call("state:get", {});
+  assert(s.sequence.active === false, "sequence reports inactive once every step is done");
 }
 
-async function testRoundtableTagRouting() {
-  console.log("\n== Roundtable: [TO: X] tag parsing, stripping, and routing ==");
+async function testSequenceRejectsWhileRunningAndInvalidSteps() {
+  console.log("\n== Prompt Sequence: rejects starting a second run while one is active, and filters malformed steps ==");
   await resetAllParticipants();
-  await startRoundtableAndSkipAcks("Discuss project X", 30);
+  await call("sequence:stop", {});
+
+  const res1 = await call("sequence:run", { steps: [{ target: "chatgpt", text: "Go" }] });
+  assert(res1.ok, "first run starts");
+  const res2 = await call("sequence:run", { steps: [{ target: "claude", text: "Also go" }] });
+  assert(!res2.ok && res2.error === "ALREADY_RUNNING", "a second run while one is active is rejected");
+
+  const stopRes = await call("sequence:stop", {});
+  assert(stopRes.ok, "sequence:stop succeeds");
+  const s = await call("state:get", {});
+  assert(s.sequence.active === false, "stopping mid-run marks it inactive");
+
+  const badRes = await call("sequence:run", { steps: [{ target: "not-a-site", text: "bad target" }, { target: "chatgpt", text: "   " }] });
+  assert(!badRes.ok && badRes.error === "NO_VALID_STEPS", "steps with a bad target or blank-after-trim text are filtered out, and an empty result after filtering is rejected");
+
+  await call("sequence:stop", {});
+}
+
+async function testZoomIPC() {
+  console.log("\n== site:zoom clamps the factor and calls setZoomFactor on the real embedded page ==");
+  const res = await call("site:zoom", { site: "gemini", factor: 1.5 });
+  assert(res.ok && res.factor === 1.5, "an in-range factor passes through unchanged");
+  assert(reg("gemini").webContents.zoomFactor === 1.5, "setZoomFactor was actually called with it");
+
+  const tooHigh = await call("site:zoom", { site: "gemini", factor: 5 });
+  assert(tooHigh.ok && tooHigh.factor === 2, "an out-of-range high factor is clamped to the max (2)");
+
+  const tooLow = await call("site:zoom", { site: "gemini", factor: 0.01 });
+  assert(tooLow.ok && tooLow.factor === 0.4, "an out-of-range low factor is clamped to the min (0.4)");
+
+  reg("gemini").webContents.setZoomFactor(1); // restore, so this doesn't leak into later scenarios
+}
+
+async function testAlwaysOnTagRouting() {
+  console.log("\n== Roundtable v2 baseline: [TO: X] tag parsing, stripping, and routing run always, with no House Rule started ==");
+  await resetAllParticipants();
 
   // [TO: CLAUDE] -- single relay, tag stripped, roundtableTag recorded
   let before = sentLog("claude").length;
@@ -747,35 +764,36 @@ async function testRoundtableTagRouting() {
   say("chatgpt", "[TO: CHATGPT]\nNote to self.");
   await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text === "Note to self."), { label: "self-addressed reply still appears" });
   assert(totalSent() === totalBefore3, "a site addressing itself triggers no relay back to itself");
-
-  await call("houserule:stop", {});
 }
 
-async function testRoundtableHopLimit() {
-  console.log("\n== Roundtable: hop limit stops the run, [TO: ALL] costs 2 hops ==");
+async function testStageOverridesBaseline() {
+  console.log("\n== A House Rule 'stage' suspends tag-routing while active, and tag-routing resumes automatically once it's stopped ==");
   await resetAllParticipants();
-  await startRoundtableAndSkipAcks("Short hop-limited topic", 3);
 
-  say("chatgpt", "[TO: CLAUDE]\nHop 1.");
-  await waitUntil(() => sentLog("claude").length === 3, { label: "hop 1 relay sent" });
-  let s = await call("state:get", {});
-  assert(s.houseRule.active === true && s.houseRule.roundNum === 1, "1 hop consumed, still running");
+  const startRes = await call("houserule:start", { mode: "debate", topic: "Is TDD worth it?", rounds: 2 });
+  assert(startRes.ok, "debate stage starts successfully");
+  await waitUntil(() => totalSent() === 1, { label: "debate kickoff sent to exactly one participant" });
+  const kickedOff = SITES.find((s) => sentLog(s).length === 1);
 
-  say("claude", "[TO: ALL]\nHop 2 and 3 -- broadcasts to both others.");
-  await waitUntil(async () => (await call("state:get", {})).houseRule.active === false, { label: "run ends once the hop limit (3) is reached by this 2-hop broadcast" });
-  s = await call("state:get", {});
-  assert(s.houseRule.roundNum === 3, `roundNum reflects exactly 3 hops consumed (got ${s.houseRule.roundNum})`);
-  assert(sentLog("chatgpt").length === 3 && sentLog("gemini").length === 3, "both chatgpt and gemini got the [TO: ALL] broadcast before the run ended");
-}
-
-async function testRoundtableDefaultHopLimit() {
-  console.log("\n== Roundtable: rounds<=0 defaults to a real hop limit, not unlimited ==");
-  await resetAllParticipants();
-  const res = await call("houserule:start", { mode: "roundtable", topic: "No explicit hop limit given", rounds: 0 });
-  assert(res.ok, "starts successfully even with rounds:0");
+  const totalBefore = totalSent();
+  say(kickedOff, "[TO: CLAUDE]\nThis looks like a routing tag, but debate is running so it should be ignored as one.");
+  await waitUntil(() => totalSent() > totalBefore, { label: "debate's own state machine sends the next turn" });
+  const afterDebateTurn = totalSent();
+  assert(afterDebateTurn === totalBefore + 1, "exactly one send happened (debate's own next-speaker logic), not a tag-routed relay on top of it");
   const s = await call("state:get", {});
-  assert(s.houseRule.rounds === 24, `rounds:0 is overridden to a real default (got ${s.houseRule.rounds}) — the rules text promises the AIs a real limit exists`);
+  const turn = s.transcript.find((t) => t.text.includes("This looks like a routing tag"));
+  assert(turn && !turn.roundtableTag, "while a stage is active, captured turns get no roundtableTag at all -- the [TO: CLAUDE] text is left as plain, untouched dialogue");
+
   await call("houserule:stop", {});
+  await resetAllParticipants();
+
+  // now that the stage is stopped, tag-routing resumes underneath with no extra action needed
+  const before2 = sentLog("claude").length;
+  say("chatgpt", "[TO: CLAUDE]\nStage is stopped now, so this really is a routing tag.");
+  await waitUntil(() => sentLog("claude").length === before2 + 1, { label: "tag-routing resumes automatically once the stage is stopped" });
+  const s2 = await call("state:get", {});
+  const turn2 = s2.transcript.find((t) => t.text === "Stage is stopped now, so this really is a routing tag.");
+  assert(turn2 && turn2.roundtableTag === "CLAUDE", "the post-stage turn is tag-parsed again, same as baseline");
 }
 
 async function main() {
@@ -804,6 +822,12 @@ async function main() {
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
   assert(restored.houseRule.nextSpeaker === "claude", "nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex");
 
+  console.log("\n== Startup: the routing-explainer prompt is auto-sent to every site once, before anything else ==");
+  for (const s of SITES) {
+    assert(sentLog(s).length === 1, `${s} received exactly one send on startup (got ${sentLog(s).length})`);
+    assert(sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
+  }
+
   await testDebate();
   await testDevilAngel();
   await testChargeback();
@@ -826,11 +850,12 @@ async function main() {
   await testDocumentSendFileNotFoundOrNoTargets();
   await testDocumentRead();
   await testDocumentChooseAndViewerWindow();
-  await testRoundtableAckHandshake();
-  await testRoundtableDuplicateAck();
-  await testRoundtableTagRouting();
-  await testRoundtableHopLimit();
-  await testRoundtableDefaultHopLimit();
+  await testSequenceWindowManagement();
+  await testSequenceBackend();
+  await testSequenceRejectsWhileRunningAndInvalidSteps();
+  await testZoomIPC();
+  await testAlwaysOnTagRouting();
+  await testStageOverridesBaseline();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

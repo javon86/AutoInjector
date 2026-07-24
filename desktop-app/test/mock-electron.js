@@ -82,6 +82,7 @@ class FakeWebContents extends EventEmitter {
   getTitle() { return `Mock ${this.label}`; }
   send(channel, payload) { this.emit("ipc-send", channel, payload); }
   openDevTools() {}
+  setZoomFactor(factor) { this.zoomFactor = factor; }
   once(evt, cb) { if (evt === "did-finish-load") setImmediate(cb); return this; }
   async executeJavaScript(script) {
     if (script.includes("typeByKeyboard")) {

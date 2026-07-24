@@ -42,16 +42,20 @@
     #col-prompts { flex:0 0 auto; }
     #prompt-controls select { flex:1 1 220px; min-width:0; }
 
+    #col-roles { flex:0 0 auto; }
+    #roles-body.collapsed { display:none; }
+    #roles-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+    .role-row { display:flex; align-items:center; gap:6px; }
+    .role-row .role-site-label { width:60px; opacity:.75; flex:0 0 auto; }
+    .role-row input { flex:1 1 auto; min-width:0; }
+    .role-row .role-current { opacity:.55; font-size:10px; min-width:90px; }
+
     /* ---- merged AI columns: control strip + a native-view slot ----
        #ai-row holds whichever AI panes are still expanded, side by side.
        Collapsed ones live in #collapsed-strip instead (see above, inside
        House Rules) — moved there by JS (relocateColumn() in controls.js)
        when a pane's collapsed state changes. */
     #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
-    /* Once a House Rules format is in play (Roundtable v2's [TO: X] tags or
-       any other format's own state machine), routing happens automatically —
-       the manual per-pane Forward/Auto buttons would just fight it. */
-    #ai-row.hr-active .fwd-row, #ai-row.hr-active .auto-row { display:none; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -90,6 +94,10 @@
     .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
     .collapse-btn { background:none; border:none; padding:0 2px; font-size:12px; opacity:.55; cursor:pointer; }
     .collapse-btn:hover { opacity:1; }
+    .zoom-btn { background:none; border:none; padding:0 2px; font-size:11px; opacity:.55; cursor:pointer; }
+    .zoom-btn:hover { opacity:1; }
+    .zoom-level { font-size:9px; opacity:.5; min-width:30px; text-align:center; }
+    .ai-col.collapsed .zoom-btn, .ai-col.collapsed .zoom-level { display:none; }
     .led { width:8px; height:8px; border-radius:50%; background:#444; flex:0 0 auto; }
     .gendot { width:7px; height:7px; border-radius:50%; background:#333; flex:0 0 auto; }
     .gendot.on { background:#f5b642; animation: pulse 1.1s ease-in-out infinite; }
@@ -104,6 +112,11 @@
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
+    /* Minimizes both the Transcript and Activity Log together — frees the
+       vertical space for the AI panes above, same "collapse to save room"
+       idea already used everywhere else in this window. */
+    #main-row.collapsed { flex: 0 0 auto; }
+    #main-row.collapsed #transcript, #main-row.collapsed #activity-log { display:none; }
     #col-transcript { flex:2 1 0; min-width:0; }
     #col-log { flex:1 1 0; min-width:0; }
     #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:10.5px; line-height:1.5; }
@@ -177,8 +190,12 @@
 
       <div id="col-houserules" class="col">
         <div id="houserules-main">
-          <h2>House Rules</h2>
-          <p style="opacity:.6; margin:0 0 6px;">Structures the conversation for you — uses the Compose text above as the topic/goal.</p>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <h2 style="margin:0;">House Rules</h2>
+            <span style="flex:1;"></span>
+            <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another">🧵 Prompt Sequence</button>
+          </div>
+          <p style="opacity:.6; margin:6px 0 6px;">Roundtable v2's [TO: X] tag routing always runs by default. Pick a format below to temporarily take over instead — uses the Compose text above as the topic/goal.</p>
           <select id="hr-mode" style="width:100%;">
             <option value="">— pick a format —</option>
             <option value="who-wants-to-speak">Who Wants to Speak?</option>
@@ -187,8 +204,7 @@
             <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
             <option value="chargeback">Chargeback (needs 3 + rounds)</option>
             <option value="brainstorm">Brainstorm</option>
-            <option value="rotation">Rotation (needs 3 — legacy, see Conversation window)</option>
-            <option value="roundtable">Roundtable v2 (needs 3 — tag-routed, see Conversation window)</option>
+            <option value="rotation">Rotation (needs 3)</option>
           </select>
           <div class="btns" style="margin-top:5px;">
             <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
@@ -213,13 +229,26 @@
       </div>
     </div>
 
+    <div id="col-roles" class="col">
+      <h2 id="roles-toggle" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <span>Role Assignment</span>
+        <span class="spacer"></span>
+        <span id="roles-toggle-icon">▾</span>
+      </h2>
+      <div id="roles-body" class="collapsed"></div>
+    </div>
+
     <div id="ai-row">
       <div id="expanded-strip"></div>
     </div>
 
     <div id="main-row">
       <div id="col-transcript" class="col">
-        <h2>Transcript</h2>
+        <h2 style="display:flex; align-items:center; gap:6px;">
+          <span>Transcript</span>
+          <span class="spacer"></span>
+          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Transcript/Log panel">⌄</button>
+        </h2>
         <div id="transcript"></div>
       </div>
       <div id="col-log" class="col">

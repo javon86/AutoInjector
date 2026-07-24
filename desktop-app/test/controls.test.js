@@ -25,6 +25,7 @@ function makeApi({ initialPrompts } = {}) {
   let promptsChangedCb = null;
   let prompts = initialPrompts || [{ id: 1, name: "System Test", text: { chatgpt: "hi chatgpt", claude: "hi claude", gemini: "hi gemini" } }];
   let nextPromptId = prompts.reduce((m, p) => Math.max(m, p.id + 1), 1);
+  const routing = { chatgpt: [], claude: [], gemini: [] };
   const noop = async () => ({ ok: true });
   const api = {
     calls,
@@ -32,13 +33,22 @@ function makeApi({ initialPrompts } = {}) {
     fireCapture: (turn) => captureCb && captureCb(turn),
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
     firePromptsChanged: (p) => promptsChangedCb && promptsChangedCb(p),
-    sendCompose: noop, sendForward: noop, regenerate: noop, setRouting: noop,
+    sendCompose: noop, sendForward: noop, regenerate: noop,
+    setRouting: async (source, target, on) => {
+      calls.push({ fn: "setRouting", source, target, on });
+      if (on) { if (!routing[source].includes(target)) routing[source].push(target); }
+      else { routing[source] = routing[source].filter((t) => t !== target); }
+      return { ok: true, routing: JSON.parse(JSON.stringify(routing)) };
+    },
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
     setParticipant: noop,
     startHouseRule: async (mode, topic, rounds) => { calls.push({ fn: "startHouseRule", mode, topic, rounds }); return { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds, roundNum: 0, roles: {}, nextSpeaker: null } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: {}, waiting: {}, meshActive: false, customRole: {} } }; },
     pauseHouseRule: noop, resumeHouseRule: noop, wrapUpBrainstorm: noop,
-    setRole: noop, clearTranscript: noop, togglePin: noop, reloadSite: noop,
+    setRole: async (site, role) => { calls.push({ fn: "setRole", site, role }); return { ok: true }; },
+    setZoom: async (site, factor) => { calls.push({ fn: "setZoom", site, factor }); return { ok: true, factor }; },
+    openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
+    clearTranscript: noop, togglePin: noop, reloadSite: noop,
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -130,8 +140,8 @@ async function testWindowTitlebarCollapse() {
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "toggleWindowCollapse" && c.which === "automation"), "clicking the titlebar button calls toggleWindowCollapse('automation')");
 
-  api.fireWindowCollapseChanged({ which: "conversation", collapsed: true });
-  assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "a collapse event for the OTHER window ('conversation') is ignored here");
+  api.fireWindowCollapseChanged({ which: "some-other-window", collapsed: true });
+  assert(!dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "a collapse event for a different window id is ignored here");
 
   api.fireWindowCollapseChanged({ which: "automation", collapsed: true });
   assert(dom.window.document.getElementById("wrap").classList.contains("window-collapsed"), "a collapse event for THIS window hides the main body");
@@ -155,23 +165,16 @@ async function testHouseRuleStopConfirmation() {
   assert(apiConfirm.calls.some((c) => c.fn === "stopHouseRule"), "accepting the confirm() dialog does call stopHouseRule");
 }
 
-async function testRoundtableDropdownOption() {
-  console.log("\n== Roundtable v2 dropdown option and start dispatch ==");
+async function testNoRoundtableDropdownOption() {
+  console.log("\n== Roundtable v2 is the always-on baseline now, not a House Rules dropdown option ==");
   const api = makeApi();
   const dom = await loadWindow(api);
 
   const option = dom.window.document.querySelector('#hr-mode option[value="roundtable"]');
-  assert(!!option, "hr-mode has a roundtable option");
-  assert(option.textContent.includes("Roundtable v2") && option.textContent.includes("needs 3"), `option label is descriptive (got "${option.textContent}")`);
+  assert(!option, "hr-mode has no roundtable option — it isn't a stage you start/stop, it's the program's default behavior");
 
-  dom.window.document.getElementById("hr-mode").value = "roundtable";
-  dom.window.document.getElementById("composer-text").value = "Plan the launch";
-  dom.window.document.getElementById("hr-rounds").value = "15";
-  click(dom, "btn-hr-start");
-  await new Promise((r) => setTimeout(r, 20));
-
-  const startCall = api.calls.find((c) => c.fn === "startHouseRule");
-  assert(!!startCall && startCall.mode === "roundtable" && startCall.topic === "Plan the launch" && startCall.rounds === 15, "selecting Roundtable v2 and clicking Start calls startHouseRule with the right mode/topic/rounds");
+  const debateOption = dom.window.document.querySelector('#hr-mode option[value="debate"]');
+  assert(!!debateOption, "the 7 real stage formats (e.g. debate) are still present");
 }
 
 async function testRoundtableBadgeParity() {
@@ -187,22 +190,137 @@ async function testRoundtableBadgeParity() {
   if (badge) assert(badge.textContent === "→ Claude", `badge text is correct (got "${badge.textContent}")`);
 }
 
-async function testHouseRuleModeHidesManualControls() {
-  console.log("\n== Manual Forward/Auto buttons hide once a House Rules format is in play ==");
+async function testManualControlsStayVisibleAndClickableAlways() {
+  console.log("\n== Manual Forward/Auto buttons are always visible and always clickable, no matter what a House Rules stage is doing ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const fwdRow = doc.querySelector("#col-claude .fwd-row");
+  const autoRow = doc.querySelector("#col-claude .auto-row");
+  const isVisible = (elm) => elm && elm.offsetParent !== null || (elm && dom.window.getComputedStyle(elm).display !== "none");
+  assert(isVisible(fwdRow) && isVisible(autoRow), "with no House Rule ever run, Forward/Auto rows are visible");
+
+  api.fireHouseRuleState({ mode: "debate", active: true, paused: false, topic: "x", rounds: 2, roundNum: 1, roles: {}, nextSpeaker: null });
+  assert(isVisible(fwdRow) && isVisible(autoRow), "still visible while a stage (debate) is actively running");
+  assert(!doc.getElementById("ai-row").classList.contains("hr-active"), "the old hr-active hiding class is gone entirely — nothing toggles it anymore");
+
+  const autoBtn = autoRow.querySelector('.auto-toggle[data-auto-target="chatgpt"]');
+  autoBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "setRouting" && c.source === "claude" && c.target === "chatgpt"), "the buttons stay genuinely clickable during a stage — clicking Auto still calls setRouting");
+
+  api.fireHouseRuleState({ mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null });
+  assert(isVisible(fwdRow) && isVisible(autoRow), "still visible once the stage is stopped and tag-routing resumes underneath");
+}
+
+async function testAutoBothButton() {
+  console.log("\n== The combined 'Both' Auto toggle turns both individual routes on/off together ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const bothBtn = doc.querySelector('#col-claude .auto-toggle[data-auto-target="both"]');
+  assert(!!bothBtn, "each column has a combined Both auto-toggle button");
+  assert(!bothBtn.classList.contains("on"), "starts off — no routing set up yet");
+
+  bothBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const onCalls = api.calls.filter((c) => c.fn === "setRouting" && c.source === "claude" && c.on === true);
+  assert(onCalls.length === 2 && onCalls.some((c) => c.target === "chatgpt") && onCalls.some((c) => c.target === "gemini"), "one click turns BOTH individual routes on, in a single action");
+  assert(bothBtn.classList.contains("on"), "the Both button itself lights up once both individual routes are on");
+
+  const singleBtn = doc.querySelector('#col-claude .auto-toggle[data-auto-target="chatgpt"]');
+  assert(singleBtn.classList.contains("on"), "the individual →ChatGPT toggle also reflects as on");
+
+  bothBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const offCalls = api.calls.filter((c) => c.fn === "setRouting" && c.source === "claude" && c.on === false);
+  assert(offCalls.length === 2, "clicking it again while both are on turns both routes off together");
+  assert(!bothBtn.classList.contains("on"), "Both button turns back off");
+}
+
+async function testZoomControls() {
+  console.log("\n== Per-pane zoom buttons call setZoom and update the on-screen percentage label ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const zoomLabel = doc.getElementById("zoom-level-gemini");
+  assert(!!zoomLabel && zoomLabel.textContent === "100%", "starts at 100%");
+
+  const buttons = doc.querySelectorAll("#col-gemini .zoom-btn");
+  assert(buttons.length === 2, "each column has a zoom-out and a zoom-in button");
+  const [zoomOutBtn, zoomInBtn] = buttons;
+
+  zoomOutBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "setZoom" && c.site === "gemini" && c.factor < 1), "zoom-out calls setZoom with a factor below 1");
+  assert(zoomLabel.textContent === "90%", `label reflects the new factor (got "${zoomLabel.textContent}")`);
+
+  zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(zoomLabel.textContent === "110%", `label updates back up (got "${zoomLabel.textContent}")`);
+}
+
+async function testRoleAssignmentPanel() {
+  console.log("\n== Role Assignment panel: collapse toggle, Apply, Clear ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const body = doc.getElementById("roles-body");
+  assert(body.classList.contains("collapsed"), "starts collapsed");
+
+  click(dom, "roles-toggle");
+  assert(!body.classList.contains("collapsed"), "clicking the header expands it");
+  assert(doc.getElementById("roles-toggle-icon").textContent === "▴", `icon flips to the expanded state (got "${doc.getElementById("roles-toggle-icon").textContent}")`);
+
+  const claudeInput = doc.getElementById("role-claude");
+  assert(!!claudeInput, "each site gets its own role input");
+  claudeInput.value = "Skeptical Engineer";
+  const applyBtn = claudeInput.closest(".role-row").querySelector("button");
+  applyBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === "Skeptical Engineer"), "Apply calls setRole with the typed text");
+  assert(doc.getElementById("role-current-claude").textContent === "current: Skeptical Engineer", "the 'current' label updates");
+
+  const clearBtn = claudeInput.closest(".role-row").querySelectorAll("button")[1];
+  clearBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === ""), "Clear calls setRole with an empty string");
+  assert(claudeInput.value === "", "the input itself is cleared too");
+  assert(doc.getElementById("role-current-claude").textContent === "", "the 'current' label clears");
+
+  click(dom, "roles-toggle");
+  assert(body.classList.contains("collapsed"), "clicking the header again collapses it back");
+}
+
+async function testOpenSequenceEditorButton() {
+  console.log("\n== The Prompt Sequence trigger button opens the sequence popup ==");
   const api = makeApi();
   const dom = await loadWindow(api);
 
-  const aiRow = dom.window.document.getElementById("ai-row");
-  assert(!aiRow.classList.contains("hr-active"), "no House Rule ever run yet — manual controls stay visible");
+  click(dom, "btn-open-sequence");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "openSequenceEditor"), "clicking 🧵 Prompt Sequence calls openSequenceEditor");
+}
 
-  api.fireHouseRuleState({ mode: "roundtable", active: true, paused: false, topic: "x", rounds: 24, roundNum: 1, roles: {}, nextSpeaker: null, phase: "active", ackPending: [] });
-  assert(aiRow.classList.contains("hr-active"), "starting Roundtable v2 hides the manual Forward/Auto rows");
+async function testMainRowCollapse() {
+  console.log("\n== The Transcript/Activity Log panel can be collapsed to free up vertical space ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+  const mainRow = doc.getElementById("main-row");
 
-  api.fireHouseRuleState({ mode: "roundtable", active: false, paused: false, topic: "x", rounds: 24, roundNum: 24, roles: {}, nextSpeaker: null, phase: "active", ackPending: [] });
-  assert(aiRow.classList.contains("hr-active"), "still hidden once the run finishes (hop limit reached) — mode is still 'roundtable', just not active");
+  assert(!mainRow.classList.contains("collapsed"), "starts expanded");
 
-  api.fireHouseRuleState({ mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null });
-  assert(!aiRow.classList.contains("hr-active"), "mode reset back to null (e.g. after Stop clears it) shows the manual controls again");
+  click(dom, "btn-main-row-collapse");
+  assert(mainRow.classList.contains("collapsed"), "clicking the collapse button on the Transcript header collapses the whole panel");
+
+  click(dom, "btn-main-row-collapse");
+  assert(!mainRow.classList.contains("collapsed"), "clicking again expands it back");
 }
 
 async function testCollapsedPanesMoveToTheirOwnStrip() {
@@ -336,9 +454,14 @@ async function main() {
   await testPaneCollapseToggle();
   await testWindowTitlebarCollapse();
   await testHouseRuleStopConfirmation();
-  await testRoundtableDropdownOption();
+  await testNoRoundtableDropdownOption();
   await testRoundtableBadgeParity();
-  await testHouseRuleModeHidesManualControls();
+  await testManualControlsStayVisibleAndClickableAlways();
+  await testAutoBothButton();
+  await testZoomControls();
+  await testRoleAssignmentPanel();
+  await testOpenSequenceEditorButton();
+  await testMainRowCollapse();
   await testCollapsedPanesMoveToTheirOwnStrip();
   await testAllPanesCollapsedExpandsTranscript();
   await testPromptLibraryDropdownRenders();

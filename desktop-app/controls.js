@@ -10,8 +10,7 @@ const HOUSE_RULE_LABELS = {
   "devil-angel": "Devil & Angel",
   "chargeback": "Chargeback",
   "brainstorm": "Brainstorm",
-  "rotation": "Rotation",
-  "roundtable": "Roundtable v2"
+  "rotation": "Rotation"
 };
 const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
@@ -20,10 +19,28 @@ let currentTranscript = [];
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
+let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 2;
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
 const otherSites = (site) => SITES.filter((s) => s !== site);
+
+// Zooms the actual live embedded page (via Electron's real WebContents zoom
+// API in main.js), not the app's own UI — lets more of the real
+// chatgpt.com/claude.ai/gemini.google.com conversation fit on screen
+// without scrolling, same as Ctrl+- in a normal browser tab.
+async function adjustZoom(site, delta) {
+  const next = Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomLevels[site] + delta)) * 100) / 100;
+  const res = await window.api.setZoom(site, next);
+  if (res?.ok) {
+    zoomLevels[site] = res.factor;
+    const label = el(`zoom-level-${site}`);
+    if (label) label.textContent = `${Math.round(res.factor * 100)}%`;
+  }
+}
 
 function led(site, ok) {
   const node = document.getElementById(`led-${site}`);
@@ -118,6 +135,23 @@ function buildAiColumn(site) {
   const head = document.createElement("div");
   head.className = "card-head";
   head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="spacer"></span>`;
+  const zoomOutBtn = document.createElement("button");
+  zoomOutBtn.className = "zoom-btn";
+  zoomOutBtn.textContent = "－";
+  zoomOutBtn.title = "Zoom out this pane (fit more of the real conversation)";
+  zoomOutBtn.onclick = () => adjustZoom(site, -ZOOM_STEP);
+  head.appendChild(zoomOutBtn);
+  const zoomLabel = document.createElement("span");
+  zoomLabel.className = "zoom-level";
+  zoomLabel.id = `zoom-level-${site}`;
+  zoomLabel.textContent = "100%";
+  head.appendChild(zoomLabel);
+  const zoomInBtn = document.createElement("button");
+  zoomInBtn.className = "zoom-btn";
+  zoomInBtn.textContent = "＋";
+  zoomInBtn.title = "Zoom in this pane";
+  zoomInBtn.onclick = () => adjustZoom(site, ZOOM_STEP);
+  head.appendChild(zoomInBtn);
   const inspectBtn = document.createElement("button");
   inspectBtn.className = "inspect-btn";
   inspectBtn.textContent = "🔍";
@@ -196,6 +230,24 @@ function buildAiColumn(site) {
     };
     autoRow.appendChild(btn);
   }
+  const autoBothBtn = document.createElement("button");
+  autoBothBtn.className = "auto-toggle";
+  autoBothBtn.textContent = "→Both";
+  autoBothBtn.dataset.autoSource = site;
+  autoBothBtn.dataset.autoTarget = "both";
+  autoBothBtn.onclick = async () => {
+    // On if EITHER individual toggle is currently off, so one click always
+    // gets you to "both on" first, and a second click turns both off again
+    // — rather than each click only flipping whichever happened to be
+    // already-off, which would need three clicks in the worst case.
+    const already = otherSites(site).every((t) => (routing[site] || []).includes(t));
+    const wantOn = !already;
+    for (const target of otherSites(site)) {
+      const res = await window.api.setRouting(site, target, wantOn);
+      if (res?.ok) applyRouting(res.routing);
+    }
+  };
+  autoRow.appendChild(autoBothBtn);
   strip.appendChild(autoRow);
 
   col.appendChild(strip);
@@ -206,6 +258,55 @@ function buildAiColumn(site) {
   col.appendChild(slot);
 
   return col;
+}
+
+// A per-AI persona clause (state.customRole in main.js) gets prepended to
+// every message sent to that site, regardless of how it's sent (Compose,
+// Forward, Auto, a House Rules format, Prompt Library, a Sequence step) —
+// see sendTextTo() in main.js. This is the only UI for it now that the
+// Conversation window is gone.
+function buildRoleAssignment() {
+  const box = el("roles-body");
+  box.innerHTML = "";
+  for (const site of SITES) {
+    const row = document.createElement("div");
+    row.className = "role-row";
+
+    const label = document.createElement("span");
+    label.className = "role-site-label";
+    label.textContent = SITE_LABELS[site];
+    row.appendChild(label);
+
+    const input = document.createElement("input");
+    input.id = `role-${site}`;
+    input.placeholder = "e.g. Skeptical Engineer";
+    row.appendChild(input);
+
+    const current = document.createElement("span");
+    current.className = "role-current";
+    current.id = `role-current-${site}`;
+    row.appendChild(current);
+
+    const applyBtn = document.createElement("button");
+    applyBtn.textContent = "Apply";
+    applyBtn.onclick = async () => {
+      const role = input.value.trim();
+      const res = await window.api.setRole(site, role);
+      if (res?.ok) current.textContent = role ? `current: ${role}` : "";
+    };
+    row.appendChild(applyBtn);
+
+    const clearBtn = document.createElement("button");
+    clearBtn.textContent = "Clear";
+    clearBtn.onclick = async () => {
+      input.value = "";
+      const res = await window.api.setRole(site, "");
+      if (res?.ok) current.textContent = "";
+    };
+    row.appendChild(clearBtn);
+
+    box.appendChild(row);
+  }
 }
 
 function buildAiRow() {
@@ -260,7 +361,9 @@ function applyRouting(next) {
   document.querySelectorAll(".auto-toggle").forEach((btn) => {
     const source = btn.dataset.autoSource;
     const target = btn.dataset.autoTarget;
-    const on = (routing[source] || []).includes(target);
+    const on = target === "both"
+      ? otherSites(source).every((t) => (routing[source] || []).includes(t))
+      : (routing[source] || []).includes(target);
     btn.classList.toggle("on", on);
   });
 }
@@ -283,6 +386,15 @@ function applyGlobal(global) {
       ? "Auto is ON — enabled participants keep forwarding replies to each other."
       : "Auto is off.";
   }
+  if (global.customRole) {
+    for (const site of SITES) {
+      const role = global.customRole[site] || "";
+      const input = el(`role-${site}`);
+      const current = el(`role-current-${site}`);
+      if (input) input.value = role;
+      if (current) current.textContent = role ? `current: ${role}` : "";
+    }
+  }
 }
 
 function setGenerating(site, on) {
@@ -296,13 +408,6 @@ function applyHouseRule(hr) {
     const badge = el(`role-badge-${site}`);
     if (badge) badge.textContent = hr.roles && hr.roles[site] ? hr.roles[site].toUpperCase() : "";
   }
-  // Once a House Rules format has been picked, its own state machine (or,
-  // for Roundtable v2, each AI's own [TO: X] tag) is what decides who gets
-  // sent what — the manual per-pane Forward/Auto buttons would just fight
-  // it, so hide them for as long as a format is in play (mode stays set
-  // through "finished" and Stop; a fresh Start with a different format is
-  // what changes it).
-  el("ai-row").classList.toggle("hr-active", !!hr.mode);
   if (hr.mode) {
     const label = HOUSE_RULE_LABELS[hr.mode] || hr.mode;
     const roundText = hr.rounds ? `round ${hr.roundNum}/${hr.rounds}` : `round ${hr.roundNum}`;
@@ -482,6 +587,20 @@ window.api.onWindowCollapseChanged(({ which, collapsed }) => {
 
 el("btn-collapse-window").onclick = () => window.api.toggleWindowCollapse("automation");
 
+el("roles-toggle").onclick = () => {
+  const body = el("roles-body");
+  const collapsed = body.classList.toggle("collapsed");
+  el("roles-toggle-icon").textContent = collapsed ? "▾" : "▴";
+};
+
+el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
+
+el("btn-main-row-collapse").onclick = () => {
+  const collapsed = el("main-row").classList.toggle("collapsed");
+  el("btn-main-row-collapse").textContent = collapsed ? "›" : "⌄";
+  el("btn-main-row-collapse").title = collapsed ? "Expand the Transcript/Log panel" : "Collapse the Transcript/Log panel";
+};
+
 for (const site of SITES) {
   el(`p-${site}`).onchange = async (e) => {
     const res = await window.api.setParticipant(site, e.target.checked);
@@ -597,6 +716,7 @@ el("btn-clear").onclick = async () => {
 
 (async () => {
   buildComposerButtons();
+  buildRoleAssignment();
   buildAiRow();
   updateAllCollapsedState();
   updateCharCount();

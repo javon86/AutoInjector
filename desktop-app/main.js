@@ -1,18 +1,20 @@
-// main.js — Electron main process. Two windows share one automation core:
-//   - the Automation window: ChatGPT/Claude/Gemini panes merged with their
-//     control strips (preview, Forward, Auto, Regenerate), plus the full House
-//     Rules box and the Activity/Troubleshooting log — the "engine room."
-//   - the Conversation window: the primary, resizable/maximizable user-facing
-//     window. Shows only the clean back-and-forth (topic, each AI's visible
-//     reply, current/next speaker) with Send/Start/Pause/Resume/Stop controls
-//     and per-AI role assignment. Built around the Rotation format (see below).
-// Both talk to the same in-memory state and get the same broadcasts.
+// main.js — Electron main process, built around the Automation window:
+// ChatGPT/Claude/Gemini panes merged with their control strips (preview,
+// Forward, Auto, Regenerate), the House Rules box, Role Assignment, Prompt
+// Library, and the Activity/Troubleshooting log. Three more on-demand popup
+// windows (Prompt Editor, Document Viewer, Prompt Sequence) open only when
+// needed, not at startup.
 //
-// On top of manual routing (per-card Forward/Auto, global full-mesh Auto),
-// there's a House Rules subsystem: seven structured conversation formats (Who
-// Wants to Speak, Debate, Free-for-All, Devil & Angel, Chargeback, Brainstorm,
-// Rotation), each a small state machine driven off the same capture events as
-// everything else. A capture can also be "silent" — swallowed before it ever
+// Roundtable v2's [TO: X] tag routing (see pollSite()) is the program's
+// permanent baseline, not something you start — every captured reply from
+// every site gets parsed for a tag and routed accordingly (a specific AI,
+// all of them, the user only, or nothing) all the time. On top of that,
+// there's a House Rules subsystem: seven structured "stage" formats (Who
+// Wants to Speak, Debate, Free-for-All, Devil & Angel, Chargeback,
+// Brainstorm, Rotation) you can start to temporarily take over routing —
+// each a small state machine driven off the same capture events as
+// everything else — reverting back to the tag-routing baseline the moment
+// you stop one. A capture can also be "silent" — swallowed before it ever
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
@@ -22,7 +24,6 @@ const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression } = require("./automation");
-const roundtableRules = require("./roundtable-rules");
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
@@ -30,9 +31,13 @@ const POLL_MS = 1500;
 const STABLE_MS = 1800;
 const MAX_LOG = 300;
 const PANE_SYNC_MS = 700;
-const DEFAULT_ROUNDTABLE_HOP_LIMIT = 24;
-const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation", "roundtable"];
-const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "roundtable"]);
+// The 7 structured formats that temporarily take over from the always-on
+// Roundtable v2 [TO: X] tag routing (see pollSite()) — "roundtable" itself
+// is no longer a House Rules mode you start/stop, it's just how the program
+// behaves by default whenever none of these 7 are active.
+const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation"];
+const STAGE_MODES = new Set(HOUSE_RULES);
+const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation"]);
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = 500;
@@ -66,22 +71,18 @@ function stateFilePath() { return path.join(userDataDir(), "autoinjector-state.j
 function debugLogPath() { return path.join(userDataDir(), "autoinjector-debug.log"); }
 
 let win = null;
-let convWin = null;
 let controlsView = null;
-let conversationView = null;
 const siteViews = {};
-const uiViews = []; // every renderer that should receive broadcasts (controls + conversation)
+const uiViews = []; // every renderer that should receive broadcasts
 
 // Per top-level window: whether it's currently collapsed to just a titlebar,
-// and (while collapsed) the full bounds to restore on expand. Keyed by the
-// same "automation"/"conversation" id the renderers use over IPC.
+// and (while collapsed) the full bounds to restore on expand.
 const windowCollapse = {
-  automation: { collapsed: false, savedBounds: null, savedMinSize: null },
-  conversation: { collapsed: false, savedBounds: null, savedMinSize: null }
+  automation: { collapsed: false, savedBounds: null, savedMinSize: null }
 };
 
 function targetWindow(which) {
-  return which === "automation" ? win : which === "conversation" ? convWin : null;
+  return which === "automation" ? win : null;
 }
 
 const state = {
@@ -100,7 +101,8 @@ const state = {
   nextTurnId: 1,
   hr: null, // House Rules run state, see resetHouseRule()
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
-  nextPromptId: 1
+  nextPromptId: 1,
+  sequence: { active: false, steps: [], index: 0 } // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
 };
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
@@ -126,13 +128,15 @@ function defaultTestPrompt() {
 }
 
 // Second built-in: a reference explainer, not a diagnostic — tells each AI
-// how message routing on this app actually works ([TO: X] tags), so it can
-// be sent any time (not just at the start of a Roundtable v2 session) if it
-// ever comes up mid-conversation.
+// how message routing on this app actually works ([TO: X] tags). This exact
+// text is auto-sent to every site once on every app startup (see
+// sendStartupRoutingPromptOnce()) and stays here in the Prompt Library so it
+// can be resent manually any time, e.g. if one of them seems to have
+// forgotten how the tagging works mid-conversation.
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Some conversations use a format called Roundtable v2, where each of you starts your own reply with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next. Other messages (like this one) are just sent directly to you as a one-off, no tag needed.`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. By default, every reply you send gets read for a tag on its own line at the start — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. If you leave the tag off, it's treated as [TO: USER]. This applies all the time, not just for a specific "mode."`;
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -157,7 +161,6 @@ function resetHouseRule(mode, topic, rounds) {
     optinYes: [],
     realPending: new Set(),
     realReplies: {},
-    ackPending: new Set(), // Roundtable: site ids that haven't acknowledged the house rules yet
     ignoreCaptureFrom: new Map(), // site -> count of pending informational sends whose ack should be swallowed (visible in the log, not the transcript)
     silentAckFrom: new Map(), // site -> count of pending "UPDATE" sends whose "UPDATED" ack should be swallowed entirely
     pausedRouting: null, // stashed routing snapshot while paused, restored on resume
@@ -288,12 +291,6 @@ function layout() {
   controlsView.setBounds({ x: 0, y: 0, width: w, height: h });
 }
 
-function layoutConversation() {
-  if (!convWin || !conversationView) return;
-  const [w, h] = convWin.getContentSize();
-  conversationView.setBounds({ x: 0, y: 0, width: w, height: h });
-}
-
 async function syncPaneBounds() {
   if (!win || !controlsView || controlsView.webContents.isDestroyed()) return;
   let rects;
@@ -364,6 +361,11 @@ function createWindow() {
     win.contentView.addChildView(view);
     view.webContents.loadURL(SITES[site].home);
     siteViews[site] = view;
+    // Fires once this site's page has actually finished loading (not on a
+    // fixed delay, which would race against a slow connection) — sending
+    // any earlier would hit a chat UI whose input box doesn't exist yet.
+    // Only ever fires once per app launch, not on a later manual 🔍/⟳ reload.
+    view.webContents.once("did-finish-load", () => sendStartupRoutingPromptOnce(site));
   }
 
   layout();
@@ -371,34 +373,6 @@ function createWindow() {
   win.on("closed", () => { win = null; });
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); }, POLL_MS);
-}
-
-function createConversationWindow() {
-  convWin = new BaseWindow({
-    width: 1200,
-    height: 860,
-    minWidth: 700,
-    minHeight: 500,
-    resizable: true,
-    maximizable: true,
-    title: "AutoInjector — Conversation"
-  });
-
-  conversationView = new WebContentsView({
-    webPreferences: {
-      partition: "conversation-ui",
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  convWin.contentView.addChildView(conversationView);
-  conversationView.webContents.loadFile(path.join(__dirname, "conversation.html"));
-  uiViews.push(conversationView);
-
-  layoutConversation();
-  convWin.on("resize", layoutConversation);
-  convWin.on("closed", () => { convWin = null; });
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -474,6 +448,42 @@ function closeDocumentViewerWindow() {
   if (documentViewerWin) documentViewerWin.close();
 }
 
+// A fourth on-demand window: build a numbered list of prompts to fire off
+// one at a time. Same lazy single-instance pattern as the other two popups,
+// but it never needs to be re-targeted at a different id (there's no
+// existing entity to edit) — reopening while it's already open just
+// refocuses it.
+let sequenceWin = null;
+let sequenceView = null;
+function openSequenceWindow() {
+  if (sequenceWin && sequenceView) {
+    sequenceWin.focus();
+    return;
+  }
+  sequenceWin = new BaseWindow({ width: 640, height: 640, resizable: true, title: "AutoInjector — Prompt Sequence" });
+  sequenceView = new WebContentsView({
+    webPreferences: {
+      partition: "prompt-sequence-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  sequenceWin.contentView.addChildView(sequenceView);
+  sequenceView.webContents.loadFile(path.join(__dirname, "prompt-sequence.html"));
+  const layoutSequence = () => {
+    if (!sequenceWin || !sequenceView) return;
+    const [w, h] = sequenceWin.getContentSize();
+    sequenceView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutSequence();
+  sequenceWin.on("resize", layoutSequence);
+  sequenceWin.on("closed", () => { sequenceWin = null; sequenceView = null; });
+}
+function closeSequenceWindow() {
+  if (sequenceWin) sequenceWin.close();
+}
+
 function routingSnapshot() {
   const out = {};
   for (const site of SITE_IDS) out[site] = Array.from(state.routing[site]);
@@ -508,8 +518,7 @@ function houseRuleSnapshot() {
     roundNum: hr.roundNum,
     roles: { ...hr.roles },
     nextSpeaker,
-    phase: hr.phase,
-    ackPending: hr.phase === "ack" ? Array.from(hr.ackPending) : []
+    phase: hr.phase
   };
 }
 
@@ -546,6 +555,23 @@ async function sendTextTo(target, text, fromSite) {
     logEvent("sent", { target, from: fromSite || null });
   }
   return res;
+}
+
+// The routing-explainer prompt (Prompt Library id 2) gets sent to every
+// site automatically, once, the first time its page loads after app
+// startup — establishing baseline awareness of the [TO: X] tag system
+// without the user having to remember to trigger it. Fire-and-forget, no
+// acknowledgment wait. Pulls from state.prompts (not a fresh-generated
+// copy) so a user edit to that saved prompt is reflected here too; if
+// they've deleted it, this just quietly does nothing.
+const startupPromptSent = new Set();
+async function sendStartupRoutingPromptOnce(site) {
+  if (startupPromptSent.has(site)) return;
+  startupPromptSent.add(site);
+  const prompt = state.prompts.find((p) => p.id === 2);
+  const text = prompt && prompt.text && prompt.text[site];
+  if (!text) return;
+  await sendTextTo(site, text, null);
 }
 
 // Delivers a real file into a live pane's chat, using the Chrome DevTools
@@ -728,27 +754,12 @@ function parseRoundtableTag(text) {
   return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
 }
 
-async function startRoundtable() {
-  // resetHouseRule()/state.hr.active are already set by the houserule:start
-  // handler before dispatch (same as every other mode's start function) —
-  // this only sets the fields specific to Roundtable's ack-then-active flow.
-  state.hr.phase = "ack";
-  state.hr.ackPending = new Set(ROTATION_ORDER);
-  for (const site of ROTATION_ORDER) {
-    await sendTextTo(site, roundtableRules.buildKickoffMessage(site), null);
-  }
-}
-
-async function sendRoundtableTopic() {
-  for (const site of ROTATION_ORDER) {
-    await sendTextTo(site, state.hr.topic, null);
-  }
-}
-
+// The always-on baseline router: relays a tagged reply per Rule 1's
+// semantics (ALL -> both others, a named AI -> just that one with a
+// self-address guard, USER -> nothing further, it's already visible). No
+// session, no hop limit, no start/stop — this just runs on every capture
+// whenever no stage format has taken over (see pollSite()).
 async function handleRoundtableCapture(turn) {
-  const hr = state.hr;
-  if (hr.phase !== "active") return;
-
   const tag = turn.roundtableTag || "USER";
   let targets = [];
   if (tag === "ALL") targets = ROTATION_ORDER.filter((s) => s !== turn.site);
@@ -756,19 +767,57 @@ async function handleRoundtableCapture(turn) {
     const target = tag.toLowerCase();
     if (target !== turn.site) targets = [target]; // self-address guard
   }
-  // tag === "USER" -> nothing to relay, the reply is already visible to the user
-
   for (const target of targets) {
-    hr.roundNum++;
     await sendTextTo(target, turn.text, turn.site);
-    // Check AFTER sending, not before: this ends the run the instant the
-    // Nth hop goes out, rather than leaving it "active" indefinitely until
-    // some future (N+1)th relay happens to be attempted and gets blocked.
-    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) {
-      endHouseRule("hop limit reached");
-      return;
-    }
   }
+}
+
+// --- Prompt Sequence: a numbered list of prompts, each targeted at a
+// specific AI (or "all"), sent one at a time — the next step only goes out
+// once the current step's target has actually replied, not on a timer.
+// Runs independently of everything above (it's not a House Rules stage);
+// its steps' replies still go through the normal capture/broadcast/tag-
+// routing path, this just also watches for "was that the reply we were
+// waiting on" to advance.
+function broadcastSequenceState() {
+  const seq = state.sequence;
+  broadcast("sequence-state", { active: seq.active, index: seq.index, total: seq.steps.length });
+}
+
+async function sendSequenceStep() {
+  const seq = state.sequence;
+  if (!seq.active || seq.index >= seq.steps.length) {
+    seq.active = false;
+    logEvent("sequence-done", {});
+    broadcastSequenceState();
+    return;
+  }
+  const step = seq.steps[seq.index];
+  const targets = step.target === "all" ? SITE_IDS : [step.target];
+  for (const t of targets) {
+    if (SITES[t]) await sendTextTo(t, step.text, null);
+  }
+  logEvent("sequence-step-sent", { index: seq.index, target: step.target });
+  broadcastSequenceState();
+}
+
+async function startSequence(steps) {
+  state.sequence = { active: true, steps, index: 0 };
+  await sendSequenceStep();
+}
+
+async function handleSequenceCapture(turn) {
+  const seq = state.sequence;
+  if (!seq.active) return;
+  const step = seq.steps[seq.index];
+  if (!step) { seq.active = false; broadcastSequenceState(); return; }
+  // For an "all" step, the first of the three replies to arrive is enough
+  // to advance — waiting for all three would mean one slow AI blocks the
+  // whole sequence indefinitely.
+  const matches = step.target === "all" ? true : step.target === turn.site;
+  if (!matches) return;
+  seq.index++;
+  await sendSequenceStep();
 }
 
 // --- House Rules: per-mode reactions to a new captured reply ----------------
@@ -953,7 +1002,6 @@ async function handleHouseRuleCapture(turn) {
     case "who-wants-to-speak": return handleWhoWantsCapture(turn);
     case "brainstorm": return handleBrainstormCapture(turn);
     case "rotation": return handleRotationCapture(turn);
-    case "roundtable": return handleRoundtableCapture(turn);
     default: return; // free-for-all rides entirely on the generic routing mesh below
   }
 }
@@ -1002,38 +1050,21 @@ async function pollSite(site) {
       return;
     }
 
-    // Roundtable's acknowledgment handshake: every reply captured while
-    // waiting on acks is swallowed entirely (not pushed/broadcast) — the
-    // human never needs to see three AIs each restate the house rules back.
-    // Once the last of the three acks, flip to "active" and send the real
-    // topic to all three at once.
-    if (state.hr.active && state.hr.mode === "roundtable" && state.hr.phase === "ack") {
-      state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
-      if (state.waiting[site]) {
-        state.waiting[site] = false;
-        state.waitingSince[site] = null;
-        broadcast("waiting-changed", { site, waiting: false });
-      }
-      if (state.hr.ackPending.has(site)) {
-        state.hr.ackPending.delete(site);
-        logEvent("roundtable-ack", { site, remaining: state.hr.ackPending.size });
-        if (state.hr.ackPending.size === 0) {
-          state.hr.phase = "active";
-          await sendRoundtableTopic();
-        }
-        broadcastHouseRule();
-        saveStateDebounced();
-      }
-      return;
-    }
-
-    // Roundtable's [TO: X] tag is literally the first thing the AI typed —
-    // it has to be parsed and stripped BEFORE the turn is built below, since
-    // that's what gets pushed to the transcript and broadcast live. [TO:
-    // NONE] means "nothing to add" and is swallowed exactly like an ack.
+    // Roundtable v2's [TO: X] tag routing is the program's permanent
+    // baseline — it applies to every captured reply on every site, all the
+    // time, EXCEPT while one of the 7 structured "stage" formats (Debate,
+    // Chargeback, etc.) is actively driving replies instead. A stage
+    // temporarily takes over; the moment it's stopped, tag-routing resumes
+    // underneath automatically (there's no separate "start Roundtable"
+    // event to re-trigger — it's just always there). The tag is literally
+    // the first thing the AI typed, so it has to be parsed and stripped
+    // BEFORE the turn is built below, since that's what gets pushed to the
+    // transcript and broadcast live. [TO: NONE] means "nothing to add" and
+    // is swallowed entirely, never reaching the transcript.
+    const stageActive = state.hr.active && STAGE_MODES.has(state.hr.mode);
     let roundtableTag = null;
     let displayText = text;
-    if (state.hr.active && state.hr.mode === "roundtable" && state.hr.phase === "active") {
+    if (!stageActive) {
       const parsed = parseRoundtableTag(text);
       roundtableTag = parsed.tag;
       displayText = parsed.body;
@@ -1094,7 +1125,9 @@ async function pollSite(site) {
       if (target === site) continue;
       await sendTextTo(target, text, site);
     }
-    if (state.hr.active) await handleHouseRuleCapture(turn);
+    if (stageActive) await handleHouseRuleCapture(turn);
+    else await handleRoundtableCapture(turn);
+    if (state.sequence.active) await handleSequenceCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
@@ -1260,11 +1293,6 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
 
   resetHouseRule(mode, topic, rounds);
   state.hr.active = true;
-  // Roundtable's rules text explicitly promises the AIs a real hop limit
-  // exists ("the system will automatically stop you") — unlike every other
-  // mode, 0/unspecified defaults to a real cap here instead of "unlimited",
-  // so that promise stays true regardless of which window started it.
-  if (mode === "roundtable" && !(state.hr.rounds > 0)) state.hr.rounds = DEFAULT_ROUNDTABLE_HOP_LIMIT;
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   logEvent("houserule-start", { mode, participants: checked, rounds: state.hr.rounds });
@@ -1277,7 +1305,6 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
     else if (mode === "chargeback") await startChargeback(checked);
     else if (mode === "who-wants-to-speak") await startWhoWants(checked);
     else if (mode === "rotation") await startRotation();
-    else if (mode === "roundtable") await startRoundtable();
   } catch (e) {
     state.hr.active = false;
     return { ok: false, error: String(e) };
@@ -1348,7 +1375,8 @@ ipcMain.handle("state:get", () => ({
   captured: state.captured,
   transcript: state.transcript,
   log: state.log,
-  prompts: state.prompts
+  prompts: state.prompts,
+  sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length }
 }));
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
@@ -1442,6 +1470,43 @@ ipcMain.handle("document:send", async (_evt, { path: filePath, targets }) => {
   return { ok: true, results };
 });
 
+ipcMain.handle("sequence:open", () => {
+  openSequenceWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("sequence-editor:close", () => {
+  closeSequenceWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("sequence:run", async (_evt, { steps }) => {
+  if (state.sequence.active) return { ok: false, error: "ALREADY_RUNNING" };
+  const clean = (Array.isArray(steps) ? steps : [])
+    .map((s) => ({ target: s && s.target, text: String((s && s.text) || "").trim() }))
+    .filter((s) => s.text && (s.target === "all" || SITES[s.target]));
+  if (!clean.length) return { ok: false, error: "NO_VALID_STEPS" };
+  logEvent("sequence-start", { steps: clean.length });
+  await startSequence(clean);
+  return { ok: true };
+});
+
+ipcMain.handle("sequence:stop", () => {
+  state.sequence.active = false;
+  logEvent("sequence-stop", {});
+  broadcastSequenceState();
+  return { ok: true };
+});
+
+ipcMain.handle("site:zoom", (_evt, { site, factor }) => {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  const clamped = Math.max(0.4, Math.min(2, Number(factor) || 1));
+  view.webContents.setZoomFactor(clamped);
+  logEvent("zoom-changed", { site, factor: clamped });
+  return { ok: true, factor: clamped };
+});
+
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
@@ -1469,7 +1534,6 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 app.whenReady().then(() => {
   loadPersistedState();
   createWindow();
-  createConversationWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (!win) createWindow(); if (!convWin) createConversationWindow(); });
+app.on("activate", () => { if (!win) createWindow(); });
