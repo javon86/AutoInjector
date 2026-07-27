@@ -78,6 +78,42 @@ async function clearPickOverrides(site) {
   setStatus(`${SITE_LABELS[site]}: selector overrides cleared.`);
 }
 
+function setTestLed(site, resultState) {
+  const dot = el(`test-led-${site}`);
+  if (!dot) return;
+  dot.classList.remove("pending", "ok", "fail");
+  if (resultState) dot.classList.add(resultState);
+  const titles = { pending: "Connectivity test: running…", ok: "Connectivity test: passed", fail: "Connectivity test: failed" };
+  dot.title = titles[resultState] || "Connectivity test: not run yet";
+}
+
+// Sends a real prompt carrying a fresh token and waits for it to actually
+// come back -- this is a genuine round-trip check (send AND read both have
+// to work, with the right content), not just "did something happen."
+async function runSelfTest(site) {
+  const statusEl = el(`pick-status-${site}`);
+  setTestLed(site, "pending");
+  if (statusEl) statusEl.textContent = `Testing ${SITE_LABELS[site]}: sent a prompt, waiting for it to reply back…`;
+  setStatus(`Testing ${SITE_LABELS[site]}'s connection — this can take up to 45s…`);
+  const res = await window.api.runSelfTest(site);
+  if (res?.ok) {
+    setTestLed(site, "ok");
+    if (statusEl) statusEl.textContent = `✅ ${SITE_LABELS[site]} is hooked up correctly — it replied with exactly what was asked.`;
+    setStatus(`${SITE_LABELS[site]}: connectivity test passed.`);
+  } else {
+    setTestLed(site, "fail");
+    const reason = res?.error === "REPLY_MISMATCH"
+      ? "it replied, but not with what was asked — reading may be picking up the wrong text"
+      : res?.error === "TIMEOUT"
+        ? "no reply arrived in time"
+        : res?.error === "ALREADY_RUNNING"
+          ? "a test is already running for this site"
+          : `sending failed (${res?.error || "unknown error"})`;
+    if (statusEl) statusEl.textContent = `❌ ${SITE_LABELS[site]}: ${reason}.`;
+    setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${reason}.`);
+  }
+}
+
 function led(site, ok) {
   const node = document.getElementById(`led-${site}`);
   if (node) node.style.background = ok ? "#29c447" : "#444";
@@ -170,7 +206,7 @@ function buildAiColumn(site) {
 
   const head = document.createElement("div");
   head.className = "card-head";
-  head.innerHTML = `<span class="led" id="led-${site}"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="led" id="led-${site}" title="Pane loaded"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
   const zoomOutBtn = document.createElement("button");
   zoomOutBtn.className = "zoom-btn";
   zoomOutBtn.textContent = "－";
@@ -222,6 +258,11 @@ function buildAiColumn(site) {
   pickMenu.className = "pick-menu collapsed";
   pickMenu.id = `pick-menu-${site}`;
   pickMenu.innerHTML = `<span class="row-label">Fix:</span>`;
+  const testBtn = document.createElement("button");
+  testBtn.textContent = "🧪 Test";
+  testBtn.title = "Send a real test prompt, wait for the reply, and light up green/red based on whether it actually round-tripped";
+  testBtn.onclick = () => runSelfTest(site);
+  pickMenu.appendChild(testBtn);
   for (const role of PICK_ROLES) {
     const btn = document.createElement("button");
     btn.textContent = PICK_ROLE_LABELS[role];

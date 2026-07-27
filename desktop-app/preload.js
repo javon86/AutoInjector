@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("api", {
   setZoom: (site, factor) => ipcRenderer.invoke("site:zoom", { site, factor }),
   pickSelector: (site, role) => ipcRenderer.invoke("selector:pick", { site, role }),
   clearSelectorOverride: (site, role) => ipcRenderer.invoke("selector:clear", { site, role }),
+  runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
   openSequenceEditor: () => ipcRenderer.invoke("sequence:open"),
   closeSequenceEditor: () => ipcRenderer.invoke("sequence-editor:close"),
   runSequence: (steps) => ipcRenderer.invoke("sequence:run", { steps }),

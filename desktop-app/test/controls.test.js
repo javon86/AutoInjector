@@ -17,7 +17,7 @@ function assert(cond, msg) {
   return cond;
 }
 
-function makeApi({ initialPrompts, pickResult } = {}) {
+function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
   const calls = [];
   let windowCollapseCb = null;
   let captureCb = null;
@@ -49,6 +49,7 @@ function makeApi({ initialPrompts, pickResult } = {}) {
     setZoom: async (site, factor) => { calls.push({ fn: "setZoom", site, factor }); return { ok: true, factor }; },
     pickSelector: async (site, role) => { calls.push({ fn: "pickSelector", site, role }); return pickResult || { ok: true, selector: `#mock-${site}-${role}`, tag: "div", sample: "sample text" }; },
     clearSelectorOverride: async (site, role) => { calls.push({ fn: "clearSelectorOverride", site, role }); return { ok: true }; },
+    runSelfTest: async (site) => { calls.push({ fn: "runSelfTest", site }); return selfTestResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
     inspectSite: noop,
@@ -332,6 +333,45 @@ async function testClearOverridesButton() {
   assert(clearCalls.length === 3 && ["input", "send", "assistant"].every((role) => clearCalls.some((c) => c.role === role)), "Clear Overrides clears input, send, and assistant for that site");
 }
 
+async function testConnectivityTestButtonSuccess() {
+  console.log("\n== Connectivity Test: a pass calls runSelfTest and lights the indicator green ==");
+  const api = makeApi({ selfTestResult: { ok: true } });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const led = doc.getElementById("test-led-claude");
+  assert(!led.classList.contains("ok") && !led.classList.contains("fail"), "starts with no result yet");
+
+  const menu = doc.getElementById("pick-menu-claude");
+  const testBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "🧪 Test");
+  assert(!!testBtn, "each column's picker menu has a Test button");
+  testBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(led.classList.contains("pending"), "the indicator shows pending immediately, before the result comes back");
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(api.calls.some((c) => c.fn === "runSelfTest" && c.site === "claude"), "clicking Test calls runSelfTest('claude')");
+  assert(led.classList.contains("ok") && !led.classList.contains("pending"), "a passing result lights the indicator green");
+  const statusEl = doc.getElementById("pick-status-claude");
+  assert(statusEl.textContent.includes("hooked up correctly"), `the status line confirms success in plain language (got "${statusEl.textContent}")`);
+}
+
+async function testConnectivityTestButtonFailure() {
+  console.log("\n== Connectivity Test: a failure calls out the specific reason and lights the indicator red ==");
+  const api = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "REPLY_MISMATCH" } });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("pick-menu-gemini");
+  const testBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "🧪 Test");
+  testBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const led = doc.getElementById("test-led-gemini");
+  assert(led.classList.contains("fail") && !led.classList.contains("pending"), "a failing result lights the indicator red");
+  const statusEl = doc.getElementById("pick-status-gemini");
+  assert(statusEl.textContent.includes("not with what was asked"), `the mismatch reason is spelled out, not just a generic failure (got "${statusEl.textContent}")`);
+}
+
 async function testRoleAssignmentPanel() {
   console.log("\n== Role Assignment panel: collapse toggle, Apply, Clear ==");
   const api = makeApi();
@@ -530,6 +570,8 @@ async function main() {
   await testSelectorPickSuccess();
   await testSelectorPickFailure();
   await testClearOverridesButton();
+  await testConnectivityTestButtonSuccess();
+  await testConnectivityTestButtonFailure();
   await testRoleAssignmentPanel();
   await testOpenSequenceEditorButton();
   await testMainRowCollapse();

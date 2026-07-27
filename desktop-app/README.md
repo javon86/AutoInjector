@@ -361,21 +361,37 @@ that clicking Send (or pressing Enter) actually cleared the input box, which
 every real chat UI does the instant a message is genuinely submitted,
 instead of just trusting that the click didn't throw an error.
 
+### 🧪 Checking whether it's actually working: the connectivity test
+
+Every AI column has a **🧪 Test** button (inside the 🎯 menu described
+below). Click it and the app sends that site a real prompt containing a
+fresh, one-off token and asks it to reply with exactly that token — then
+waits for a real reply to actually come back. A small dot next to the AI's
+name turns **amber** while it's running, **green** the moment a reply
+containing the token lands (send *and* read are both genuinely working, with
+the right content — not just "something happened"), or **red** if either
+nothing comes back within 45 seconds, or something *does* come back but
+without the token (send is fine, but reading is very likely picking up the
+wrong element — the failure reason is spelled out inline either way, not
+just a bare red light). This is the fast way to answer "is this AI actually
+hooked up right now" without having to read anything yourself or guess from
+the Activity Log.
+
 ### 🎯 Fixing it yourself: the selector picker
 
-Every AI column has a **🎯** button that opens a small menu: **Pick Input**,
-**Pick Send**, **Pick Reply**, **Clear Overrides**. Click one of the first
-three, then click the real element live in that pane — the input box you
-type into, the actual Send button, or the text of an actual reply. The app
-captures that exact click (it never actually submits anything — the click's
-default action is prevented), works out a selector for it, and saves it as
-an override for that site/role that's tried *before* the built-in guesses in
-`selectors.js`, with those built-ins kept as a fallback rather than replaced.
-The picked selector (and, for a reply pick, a short sample of its text) is
-shown right there as confirmation — there's no separate "test" step, since
-the sample text you see back *is* the test. **Clear Overrides** drops all
+The same button also opens a small menu with **Pick Input**, **Pick Send**,
+**Pick Reply**, and **Clear Overrides**. Click one of the first three, then
+click the real element live in that pane — the input box you type into, the
+actual Send button, or the text of an actual reply. The app captures that
+exact click (it never actually submits anything — the click's default
+action is prevented), works out a selector for it, and saves it as an
+override for that site/role that's tried *before* the built-in guesses in
+`selectors.js`, with those built-ins kept as a fallback rather than
+replaced. The picked selector (and, for a reply pick, a short sample of its
+text) is shown right there as confirmation. **Clear Overrides** drops all
 three roles for that site back to the built-in defaults if a pick turns out
 wrong. Overrides persist across restarts the same way everything else does.
+Run 🧪 Test again afterward to confirm the pick actually fixed things.
 
 This replaces needing to open DevTools yourself for the common case (a site
 renamed a class or restructured its composer). If picking doesn't land on
@@ -446,7 +462,18 @@ me fix `selectors.js` itself for real, rather than guessing again.
   into `buildSendScript()`/`buildReadScript()`, which try it *before*
   `selectors.js`'s built-in candidates rather than instead of them, so a bad
   pick never fully locks you out — clearing the override (or just picking
-  again) falls straight back to the built-ins.
+  again) falls straight back to the built-ins. The **connectivity test**
+  (`selftest:run`) is a genuine end-to-end check, not a ping: it generates a
+  fresh, effectively-unique token, sends a prompt asking that site to reply
+  with exactly it (via the same `sendTextTo()` every other manual send uses,
+  bypassing routing entirely), then polls `state.captured[site]` — which
+  `pollSite()` already keeps current on its normal cycle — for a capture at
+  or after the send that actually contains the token. A capture arriving
+  without it is reported as `REPLY_MISMATCH` (send is fine, reading likely
+  isn't), distinct from `TIMEOUT` (nothing came back at all) or a `stage:
+  "send"` failure (never even got a reply chance). A `selftestInFlight` set
+  keyed by site rejects a second concurrent run for the same site
+  (`ALREADY_RUNNING`) rather than crossing two tests' results.
   `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
@@ -494,7 +521,8 @@ me fix `selectors.js` itself for real, rather than guessing again.
   single-child wrapper elements so clicking inner reply text still resolves
   to the smallest element containing the *whole* reply.
 - `controls.html` / `controls.js` — the Automation window's control panel UI:
-  the AI columns (with zoom, the 🎯 selector-picker menu, Forward/Auto/Auto-Both, collapse), Role
+  the AI columns (with zoom, the 🎯 selector-picker menu including 🧪 Test and
+  its green/amber/red indicator dot, Forward/Auto/Auto-Both, collapse), Role
   Assignment, House Rules, the Prompt Library's compact dropdown +
   Send/New/Edit/Delete, the 🧵 Prompt Sequence trigger, the collapsed-pane
   strip that shares House Rules' unused space, and the collapsible
@@ -606,6 +634,17 @@ independently without clobbering each other; a timed-out pick reports
 `TIMEOUT` and never stores anything; `selector:pick`/`selector:clear` reject
 an unknown site or role; and clearing an override actually removes it.
 
+It also covers the 🧪 connectivity test end to end: the sent prompt actually
+asks for a token and embeds a real one; a reply containing that exact token
+is a pass; a reply that arrives but doesn't contain it is `REPLY_MISMATCH`,
+not miscounted as a pass or a timeout; `test/mock-electron.js` gained a
+`_forceSendFail` flag (mirroring the CDP mock's existing `_forceAttachFail`/
+`_forceSetFilesFail`) so a send that never actually submits is reported at
+the `send` stage without the test needing to wait out anything; an unknown
+site is rejected; and starting a second test for a site that already has one
+in flight is rejected as `ALREADY_RUNNING` rather than the two crossing
+results, with the original run still resolving normally afterward.
+
 It also covers the Prompt Library backend: both built-ins existing by
 default ("System Test," with each AI's own version correctly naming the
 *other* two; "System Prompt (How Routing Works)," whose text for every AI
@@ -663,7 +702,9 @@ on-screen percentage label updates to match), the 🎯 selector-picker menu
 `pickSelector` with the right site/role and show the returned selector plus
 sample text inline as confirmation; a failed/timed-out pick shows the real
 error instead of pretending success; Clear Overrides clears all three roles
-for that site), the Role Assignment panel
+for that site; 🧪 Test calls `runSelfTest`, flips its indicator dot to
+pending immediately and to green/red once the result lands, and a failure
+shows the specific reason rather than a bare red light), the Role Assignment panel
 (starts collapsed, Apply/Clear call `setRole` and update the "current: X"
 label, the collapse toggle works both ways), the 🧵 Prompt Sequence trigger
 button calling `openSequenceEditor`, and the Prompt Library dropdown —

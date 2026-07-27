@@ -49,6 +49,7 @@ class FakeWebContents extends EventEmitter {
     this._fileInputExists = true; // toggle false to simulate NO_FILE_INPUT_FOUND
     this._forceAttachFail = false; // toggle true to simulate ATTACH_FAILED
     this._forceSetFilesFail = false; // toggle true to simulate SET_FILES_FAILED
+    this._forceSendFail = false; // toggle true to simulate a send that never actually submitted (SEND_NOT_CONFIRMED)
     this._nextPickResult = null; // test-settable: what the next selector:pick "click" resolves to
     this.pickCalls = []; // { role } — every pick script executed against this site, in order
     const self = this;
@@ -93,6 +94,7 @@ class FakeWebContents extends EventEmitter {
       return this._nextPickResult || { ok: false, error: "TIMEOUT" };
     }
     if (script.includes("typeByKeyboard")) {
+      if (this._forceSendFail) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
       return { ok: true };
     }

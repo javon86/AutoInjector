@@ -780,6 +780,53 @@ async function testSelectorPicker() {
   await call("selector:clear", { site: "gemini", role: "assistant" }); // leave state clean for later scenarios
 }
 
+async function testSelfTestConnectivity() {
+  console.log("\n== Connectivity Test: sends a real prompt, waits for the token to come back, and reports success/mismatch/send-failure distinctly ==");
+  await resetAllParticipants();
+
+  // happy path -- the site actually echoes the token back
+  const okPromise = call("selftest:run", { site: "claude" });
+  await waitUntil(() => sentLog("claude").length === 1, { label: "test prompt sent to claude" });
+  const sentText = sentLog("claude")[0].text;
+  assert(sentText.includes("Reply with exactly this token and nothing else:"), "the test prompt actually asks for a token echo, not something else");
+  const tokenMatch = sentText.match(/token and nothing else: (\S+)/);
+  assert(!!tokenMatch, "a token was actually embedded in the sent prompt");
+  say("claude", tokenMatch[1]);
+  const okRes = await okPromise;
+  assert(okRes.ok === true, "a reply containing exactly the token is reported as a pass");
+
+  // mismatch -- a reply DOES come back, but not with the right content
+  await resetAllParticipants();
+  const mismatchPromise = call("selftest:run", { site: "gemini" });
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
+  say("gemini", "Sure, here's an unrelated reply that doesn't contain any token.");
+  const mismatchRes = await mismatchPromise;
+  assert(!mismatchRes.ok && mismatchRes.error === "REPLY_MISMATCH", "a reply that arrives but doesn't contain the token is reported as REPLY_MISMATCH, not a pass");
+
+  // a send that never actually goes through is reported at the send stage, without waiting on any reply at all
+  await resetAllParticipants();
+  reg("chatgpt").webContents._forceSendFail = true;
+  const sendFailRes = await call("selftest:run", { site: "chatgpt" });
+  assert(!sendFailRes.ok && sendFailRes.stage === "send" && sendFailRes.error === "SEND_NOT_CONFIRMED", "a send that never actually submits is reported at the send stage, not misread as a missing reply");
+  reg("chatgpt").webContents._forceSendFail = false;
+
+  // validation
+  const badSite = await call("selftest:run", { site: "not-a-site" });
+  assert(!badSite.ok && badSite.error === "BAD_SITE", "an unknown site is rejected");
+
+  // running a second test for the same site while one's already in flight is rejected, not queued or crossed
+  await resetAllParticipants();
+  const firstRunPromise = call("selftest:run", { site: "claude" });
+  await waitUntil(() => sentLog("claude").length === 1, { label: "first test's prompt sent" });
+  const secondRun = await call("selftest:run", { site: "claude" });
+  assert(!secondRun.ok && secondRun.error === "ALREADY_RUNNING", "a second test for the same site while one is already running is rejected");
+  const firstSentText = sentLog("claude")[0].text;
+  const firstToken = firstSentText.match(/token and nothing else: (\S+)/)[1];
+  say("claude", firstToken);
+  const firstRunRes = await firstRunPromise;
+  assert(firstRunRes.ok === true, "the original in-flight test still resolves normally afterward");
+}
+
 async function testAlwaysOnTagRouting() {
   console.log("\n== Roundtable v2 baseline: [TO: X] tag parsing, stripping, and routing run always, with no House Rule started ==");
   await resetAllParticipants();
@@ -933,6 +980,7 @@ async function main() {
   await testZoomIPC();
   testSelectorOverridePriorityInScripts();
   await testSelectorPicker();
+  await testSelfTestConnectivity();
   await testAlwaysOnTagRouting();
   await testStageOverridesBaseline();
 

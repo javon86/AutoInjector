@@ -45,6 +45,8 @@ const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
 const TEXT_PREVIEW_SIZE_CAP = 500 * 1024; // 500KB
+const SELFTEST_TIMEOUT_MS = 45000;
+const SELFTEST_POLL_MS = 500;
 
 // Rate-limit/usage-cap replies are short by nature ("You've reached your
 // usage limit...") — gating on length before pattern-matching keeps this
@@ -564,6 +566,31 @@ async function sendTextTo(target, text, fromSite) {
     logEvent("sent", { target, from: fromSite || null });
   }
   return res;
+}
+
+// The connectivity Test button: send a prompt carrying a fresh, effectively
+// unique token straight to one site (bypassing routing entirely, like
+// Compose does) asking it to reply with exactly that token, then watch
+// state.captured[site] -- which pollSite() already keeps up to date on its
+// normal ~1.5s cycle -- for a capture at or after the moment we sent that
+// actually contains it. A real reply arriving that DOESN'T contain the
+// token still proves send+capture are wired up, just not with confidence
+// the content is right, so that's reported distinctly (REPLY_MISMATCH) from
+// never getting anything back at all (TIMEOUT).
+const selftestInFlight = new Set();
+function makeSelftestToken() {
+  return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+async function waitForTestReply(site, token, sentTs, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const cap = state.captured[site];
+    if (cap && cap.ts >= sentTs && cap.text.includes(token)) return { ok: true };
+    await new Promise((r) => setTimeout(r, SELFTEST_POLL_MS));
+  }
+  const cap = state.captured[site];
+  if (cap && cap.ts >= sentTs) return { ok: false, error: "REPLY_MISMATCH" };
+  return { ok: false, error: "TIMEOUT" };
 }
 
 // The routing-explainer prompt (Prompt Library id 2) gets sent to every
@@ -1555,6 +1582,27 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
   saveStateDebounced();
   logEvent("selector-override-cleared", { site, role });
   return { ok: true };
+});
+
+ipcMain.handle("selftest:run", async (_evt, { site }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (selftestInFlight.has(site)) return { ok: false, error: "ALREADY_RUNNING" };
+  selftestInFlight.add(site);
+  try {
+    const token = makeSelftestToken();
+    const prompt = `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reply with exactly this token and nothing else: ${token}`;
+    const sentTs = Date.now();
+    const sendRes = await sendTextTo(site, prompt, null);
+    if (!sendRes || !sendRes.ok) {
+      logEvent("selftest-send-error", { site, error: (sendRes && sendRes.error) || "unknown" });
+      return { ok: false, stage: "send", error: (sendRes && sendRes.error) || "unknown" };
+    }
+    const waitRes = await waitForTestReply(site, token, sentTs, SELFTEST_TIMEOUT_MS);
+    logEvent(waitRes.ok ? "selftest-ok" : "selftest-failed", { site, error: waitRes.error || null });
+    return { ok: waitRes.ok, stage: "reply", error: waitRes.error };
+  } finally {
+    selftestInFlight.delete(site);
+  }
 });
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
