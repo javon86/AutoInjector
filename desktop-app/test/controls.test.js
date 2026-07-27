@@ -23,6 +23,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
   let captureCb = null;
   let houseRuleCb = null;
   let promptsChangedCb = null;
+  let logCb = null;
   let prompts = initialPrompts || [{ id: 1, name: "System Test", text: { chatgpt: "hi chatgpt", claude: "hi claude", gemini: "hi gemini" } }];
   let nextPromptId = prompts.reduce((m, p) => Math.max(m, p.id + 1), 1);
   const routing = { chatgpt: [], claude: [], gemini: [] };
@@ -33,6 +34,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
     fireCapture: (turn) => captureCb && captureCb(turn),
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
     firePromptsChanged: (p) => promptsChangedCb && promptsChangedCb(p),
+    fireLog: (entry) => logCb && logCb(entry),
     sendCompose: noop, sendForward: noop, regenerate: noop,
     setRouting: async (source, target, on) => {
       calls.push({ fn: "setRouting", source, target, on });
@@ -85,7 +87,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
       prompts
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
-    onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: () => {},
+    onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
     onPromptsChanged: (cb) => { promptsChangedCb = cb; }
   };
@@ -355,6 +357,27 @@ async function testConnectivityTestButtonSuccess() {
   assert(statusEl.textContent.includes("hooked up correctly"), `the status line confirms success in plain language (got "${statusEl.textContent}")`);
 }
 
+async function testActivityLogShowsPickAndTestDetail() {
+  console.log("\n== Activity Log renders the rich pick/test detail (role, selector, sample, token, what was actually captured), not just the bare event name ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const box = doc.getElementById("activity-log");
+
+  api.fireLog({ ts: Date.now(), kind: "selector-pick-started", detail: { site: "claude", role: "assistant" } });
+  let lastLine = box.lastChild.textContent;
+  assert(lastLine.includes("role=assistant"), `a pick-started entry shows which role was requested (got "${lastLine}")`);
+
+  api.fireLog({ ts: Date.now(), kind: "selector-picked", detail: { site: "claude", role: "assistant", selector: "div.reply-body", tag: "div", sample: "AUTOINJ-4F7K2Q" } });
+  lastLine = box.lastChild.textContent;
+  assert(lastLine.includes("div.reply-body") && lastLine.includes("AUTOINJ-4F7K2Q"), `a successful pick shows the selector AND the sample text it actually captured (got "${lastLine}")`);
+
+  api.fireLog({ ts: Date.now(), kind: "selftest-error", detail: { site: "gemini", token: "AUTOINJ-XYZ123", error: "REPLY_MISMATCH", capturedText: "Sure, happy to help!" } });
+  lastLine = box.lastChild.textContent;
+  assert(lastLine.includes("AUTOINJ-XYZ123") && lastLine.includes("REPLY_MISMATCH") && lastLine.includes("Sure, happy to help!"), `a failed test shows the token, the error, AND what was actually captured instead (got "${lastLine}")`);
+  assert(box.lastChild.className.includes("err"), "an error-kind entry is styled distinctly as an error line");
+}
+
 async function testConnectivityTestButtonFailure() {
   console.log("\n== Connectivity Test: a failure calls out the specific reason and lights the indicator red ==");
   const api = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "REPLY_MISMATCH" } });
@@ -572,6 +595,7 @@ async function main() {
   await testClearOverridesButton();
   await testConnectivityTestButtonSuccess();
   await testConnectivityTestButtonFailure();
+  await testActivityLogShowsPickAndTestDetail();
   await testRoleAssignmentPanel();
   await testOpenSequenceEditorButton();
   await testMainRowCollapse();

@@ -341,6 +341,14 @@ The **Activity / Troubleshooting** panel next to the transcript logs every
 internal action live — polls that captured a new reply, sends, forwards, errors,
 routing/participant changes — each with a timestamp, so if something isn't
 working you can see exactly where it's getting stuck instead of guessing.
+Picking a selector and running the connectivity Test both log in detail, not
+just "started"/"done": a pick logs which role was requested, and on success
+the exact selector it landed on plus a sample of the text/element it actually
+captured; a Test run logs the token it sent, when it started waiting on a
+reply, and on failure exactly what went wrong — including, for a mismatch,
+what text it *did* capture instead of the token, which is usually the
+fastest way to tell whether a selector is finding nothing at all versus
+finding the wrong element.
 
 That panel only shows the current session, though — if the app crashes or you
 close it before catching the problem, that log is gone. A rolling copy is
@@ -704,7 +712,11 @@ sample text inline as confirmation; a failed/timed-out pick shows the real
 error instead of pretending success; Clear Overrides clears all three roles
 for that site; 🧪 Test calls `runSelfTest`, flips its indicator dot to
 pending immediately and to green/red once the result lands, and a failure
-shows the specific reason rather than a bare red light), the Role Assignment panel
+shows the specific reason rather than a bare red light), that the Activity
+Log itself renders the rich detail these two features log (role, selector,
+captured sample, token, and — on a mismatch — the actual text that was
+captured instead) rather than just the bare event name, with a `*-error`
+entry visibly styled as an error line, the Role Assignment panel
 (starts collapsed, Apply/Clear call `setRole` and update the "current: X"
 label, the collapse toggle works both ways), the 🧵 Prompt Sequence trigger
 button calling `openSequenceEditor`, and the Prompt Library dropdown —

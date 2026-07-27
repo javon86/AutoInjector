@@ -589,7 +589,11 @@ async function waitForTestReply(site, token, sentTs, timeoutMs) {
     await new Promise((r) => setTimeout(r, SELFTEST_POLL_MS));
   }
   const cap = state.captured[site];
-  if (cap && cap.ts >= sentTs) return { ok: false, error: "REPLY_MISMATCH" };
+  // A capture that arrived but doesn't contain the token still proves the
+  // read pipeline picked SOMETHING up -- surfacing what it actually was is
+  // the single most useful clue for fixing a broken ASSISTANT_CANDIDATES
+  // selector (stale/wrong content captured vs. genuinely nothing at all).
+  if (cap && cap.ts >= sentTs) return { ok: false, error: "REPLY_MISMATCH", text: cap.text.slice(0, 200) };
   return { ok: false, error: "TIMEOUT" };
 }
 
@@ -1557,6 +1561,7 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
   if (!VALID_PICK_ROLES.has(role)) return { ok: false, error: "BAD_ROLE" };
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  logEvent("selector-pick-started", { site, role });
   let res;
   try {
     res = await view.webContents.executeJavaScript(buildPickScript(role), true);
@@ -1566,7 +1571,7 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
   if (res && res.ok && res.selector) {
     state.selectorOverrides[site] = { ...state.selectorOverrides[site], [role]: res.selector };
     saveStateDebounced();
-    logEvent("selector-picked", { site, role, selector: res.selector });
+    logEvent("selector-picked", { site, role, selector: res.selector, tag: res.tag || null, sample: res.sample || null });
   } else {
     logEvent("selector-pick-error", { site, role, error: (res && res.error) || "unknown" });
   }
@@ -1590,16 +1595,18 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
   selftestInFlight.add(site);
   try {
     const token = makeSelftestToken();
+    logEvent("selftest-started", { site, token });
     const prompt = `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reply with exactly this token and nothing else: ${token}`;
     const sentTs = Date.now();
     const sendRes = await sendTextTo(site, prompt, null);
     if (!sendRes || !sendRes.ok) {
-      logEvent("selftest-send-error", { site, error: (sendRes && sendRes.error) || "unknown" });
+      logEvent("selftest-send-error", { site, token, error: (sendRes && sendRes.error) || "unknown" });
       return { ok: false, stage: "send", error: (sendRes && sendRes.error) || "unknown" };
     }
+    logEvent("selftest-waiting-for-reply", { site, token, timeoutMs: SELFTEST_TIMEOUT_MS });
     const waitRes = await waitForTestReply(site, token, sentTs, SELFTEST_TIMEOUT_MS);
-    logEvent(waitRes.ok ? "selftest-ok" : "selftest-failed", { site, error: waitRes.error || null });
-    return { ok: waitRes.ok, stage: "reply", error: waitRes.error };
+    logEvent(waitRes.ok ? "selftest-ok" : "selftest-error", { site, token, error: waitRes.error || null, capturedText: waitRes.text || null });
+    return { ok: waitRes.ok, stage: "reply", error: waitRes.error, text: waitRes.text };
   } finally {
     selftestInFlight.delete(site);
   }

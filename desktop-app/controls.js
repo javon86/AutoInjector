@@ -102,15 +102,16 @@ async function runSelfTest(site) {
     setStatus(`${SITE_LABELS[site]}: connectivity test passed.`);
   } else {
     setTestLed(site, "fail");
+    const sample = res?.text ? ` It actually captured: "${res.text.slice(0, 80)}${res.text.length > 80 ? "…" : ""}"` : "";
     const reason = res?.error === "REPLY_MISMATCH"
-      ? "it replied, but not with what was asked — reading may be picking up the wrong text"
+      ? `it replied, but not with what was asked — reading may be picking up the wrong text.${sample}`
       : res?.error === "TIMEOUT"
         ? "no reply arrived in time"
         : res?.error === "ALREADY_RUNNING"
           ? "a test is already running for this site"
           : `sending failed (${res?.error || "unknown error"})`;
-    if (statusEl) statusEl.textContent = `❌ ${SITE_LABELS[site]}: ${reason}.`;
-    setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${reason}.`);
+    if (statusEl) statusEl.textContent = `❌ ${SITE_LABELS[site]}: ${reason}`;
+    setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${res?.error === "REPLY_MISMATCH" ? "reply didn't match" : reason}.`);
   }
 }
 
@@ -633,6 +634,13 @@ function logLineText(entry) {
   if (entry.detail?.rounds != null) parts.push(`rounds=${entry.detail.rounds}`);
   if (entry.detail?.reason) parts.push(`(${entry.detail.reason})`);
   if (entry.detail?.chars != null) parts.push(`${entry.detail.chars} chars`);
+  if (entry.detail?.role) parts.push(`role=${entry.detail.role}`);
+  if (entry.detail?.token) parts.push(`token=${entry.detail.token}`);
+  if (entry.detail?.timeoutMs != null) parts.push(`timeout=${Math.round(entry.detail.timeoutMs / 1000)}s`);
+  if (entry.detail?.selector) parts.push(`selector=${JSON.stringify(entry.detail.selector)}`);
+  if (entry.detail?.tag) parts.push(`<${entry.detail.tag}>`);
+  if (entry.detail?.sample) parts.push(`sample=${JSON.stringify(entry.detail.sample)}`);
+  if (entry.detail?.capturedText) parts.push(`got=${JSON.stringify(entry.detail.capturedText)}`);
   if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
   return `${entry.kind} ${parts.join(" ")}`.trim();
 }

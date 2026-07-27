@@ -748,6 +748,8 @@ async function testSelectorPicker() {
 
   s = await call("state:get", {});
   assert(s.global.selectorOverrides.claude.input === '[data-testid="composer-input"]', "the override is stored and visible via state:get");
+  assert(s.log.some((l) => l.kind === "selector-pick-started" && l.detail.site === "claude" && l.detail.role === "input"), "the Activity Log records that a pick started, not just its eventual result");
+  assert(s.log.some((l) => l.kind === "selector-picked" && l.detail.selector === '[data-testid="composer-input"]' && l.detail.tag === "div"), "the Activity Log records the picked selector and tag on success");
 
   await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
@@ -760,12 +762,14 @@ async function testSelectorPicker() {
   s = await call("state:get", {});
   assert(!s.global.selectorOverrides.claude.assistant, "claude's assistant role is untouched by gemini's pick");
   assert(s.global.selectorOverrides.gemini.assistant === "div.reply-body", "gemini's assistant override is stored separately");
+  assert(s.log.some((l) => l.kind === "selector-picked" && l.detail.site === "gemini" && l.detail.sample === "Hello there"), "the Activity Log also records the sample text that was actually captured, so you can tell a good pick from a bad one just by reading the log");
 
   reg("chatgpt").webContents._nextPickResult = { ok: false, error: "TIMEOUT" };
   const timeoutRes = await call("selector:pick", { site: "chatgpt", role: "send" });
   assert(!timeoutRes.ok && timeoutRes.error === "TIMEOUT", "a pick that times out (no click) is reported, not silently ignored");
   s = await call("state:get", {});
   assert(JSON.stringify(s.global.selectorOverrides.chatgpt) === "{}", "a failed pick never stores an override");
+  assert(s.log.some((l) => l.kind === "selector-pick-error" && l.detail.site === "chatgpt" && l.detail.role === "send" && l.detail.error === "TIMEOUT"), "a failed pick is logged with its specific reason too, not silently dropped");
 
   const badSite = await call("selector:pick", { site: "not-a-site", role: "input" });
   assert(!badSite.ok && badSite.error === "BAD_SITE", "an unknown site is rejected");
@@ -794,6 +798,10 @@ async function testSelfTestConnectivity() {
   say("claude", tokenMatch[1]);
   const okRes = await okPromise;
   assert(okRes.ok === true, "a reply containing exactly the token is reported as a pass");
+  let s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-started" && l.detail.site === "claude" && l.detail.token === tokenMatch[1]), "the Activity Log records the test starting, with the exact token used");
+  assert(s.log.some((l) => l.kind === "selftest-waiting-for-reply" && l.detail.site === "claude"), "the Activity Log shows it's specifically waiting on a reply now, not just silence");
+  assert(s.log.some((l) => l.kind === "selftest-ok" && l.detail.site === "claude"), "the Activity Log records the pass");
 
   // mismatch -- a reply DOES come back, but not with the right content
   await resetAllParticipants();
@@ -802,6 +810,9 @@ async function testSelfTestConnectivity() {
   say("gemini", "Sure, here's an unrelated reply that doesn't contain any token.");
   const mismatchRes = await mismatchPromise;
   assert(!mismatchRes.ok && mismatchRes.error === "REPLY_MISMATCH", "a reply that arrives but doesn't contain the token is reported as REPLY_MISMATCH, not a pass");
+  assert(mismatchRes.text === "Sure, here's an unrelated reply that doesn't contain any token.", "the mismatch result carries back exactly what WAS captured, so a broken read-selector can actually be diagnosed");
+  s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-error" && l.detail.site === "gemini" && l.detail.error === "REPLY_MISMATCH" && l.detail.capturedText.includes("unrelated reply")), "the Activity Log records the mismatch AND what was actually captured instead");
 
   // a send that never actually goes through is reported at the send stage, without waiting on any reply at all
   await resetAllParticipants();
@@ -809,6 +820,8 @@ async function testSelfTestConnectivity() {
   const sendFailRes = await call("selftest:run", { site: "chatgpt" });
   assert(!sendFailRes.ok && sendFailRes.stage === "send" && sendFailRes.error === "SEND_NOT_CONFIRMED", "a send that never actually submits is reported at the send stage, not misread as a missing reply");
   reg("chatgpt").webContents._forceSendFail = false;
+  s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-send-error" && l.detail.site === "chatgpt" && l.detail.error === "SEND_NOT_CONFIRMED"), "a send-stage failure is logged distinctly from a reply-stage failure");
 
   // validation
   const badSite = await call("selftest:run", { site: "not-a-site" });
