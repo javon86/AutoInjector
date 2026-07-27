@@ -17,7 +17,7 @@ function assert(cond, msg) {
   return cond;
 }
 
-function makeApi({ initialPrompts } = {}) {
+function makeApi({ initialPrompts, pickResult } = {}) {
   const calls = [];
   let windowCollapseCb = null;
   let captureCb = null;
@@ -47,6 +47,8 @@ function makeApi({ initialPrompts } = {}) {
     pauseHouseRule: noop, resumeHouseRule: noop, wrapUpBrainstorm: noop,
     setRole: async (site, role) => { calls.push({ fn: "setRole", site, role }); return { ok: true }; },
     setZoom: async (site, factor) => { calls.push({ fn: "setZoom", site, factor }); return { ok: true, factor }; },
+    pickSelector: async (site, role) => { calls.push({ fn: "pickSelector", site, role }); return pickResult || { ok: true, selector: `#mock-${site}-${role}`, tag: "div", sample: "sample text" }; },
+    clearSelectorOverride: async (site, role) => { calls.push({ fn: "clearSelectorOverride", site, role }); return { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
     inspectSite: noop,
@@ -265,6 +267,71 @@ async function testZoomControls() {
   assert(zoomLabel.textContent === "110%", `label updates back up (got "${zoomLabel.textContent}")`);
 }
 
+async function testSelectorPickMenuToggle() {
+  console.log("\n== Selector picker: the 🎯 menu is collapsed by default and toggles open/closed ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+  const menu = doc.getElementById("pick-menu-claude");
+  assert(menu.classList.contains("collapsed"), "starts collapsed");
+
+  const pickBtn = doc.querySelector("#col-claude .pick-btn");
+  assert(!!pickBtn, "each column has its own 🎯 pick button");
+  pickBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!menu.classList.contains("collapsed"), "clicking it opens the menu");
+  pickBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(menu.classList.contains("collapsed"), "clicking it again closes the menu");
+}
+
+async function testSelectorPickSuccess() {
+  console.log("\n== Selector picker: a successful pick calls pickSelector with the right site/role and shows the result inline ==");
+  const api = makeApi({ pickResult: { ok: true, selector: '[data-testid="composer"]', tag: "div", sample: "Hello world" } });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("pick-menu-claude");
+  const inputBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Input");
+  assert(!!inputBtn, "menu has a Pick Input button");
+  inputBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const pickCall = api.calls.find((c) => c.fn === "pickSelector");
+  assert(!!pickCall && pickCall.site === "claude" && pickCall.role === "input", "clicking Pick Input calls pickSelector('claude', 'input')");
+
+  const statusEl = doc.getElementById("pick-status-claude");
+  assert(statusEl.textContent.includes('[data-testid="composer"]'), "the picked selector is shown inline as confirmation");
+  assert(statusEl.textContent.includes("Hello world"), "the sample text is shown too -- no separate test panel needed");
+}
+
+async function testSelectorPickFailure() {
+  console.log("\n== Selector picker: a failed/timed-out pick reports the error instead of pretending success ==");
+  const api = makeApi({ pickResult: { ok: false, error: "TIMEOUT" } });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("pick-menu-gemini");
+  const sendBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Send");
+  sendBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const statusEl = doc.getElementById("pick-status-gemini");
+  assert(statusEl.textContent.includes("TIMEOUT"), `the failure reason is shown, not silently swallowed (got "${statusEl.textContent}")`);
+}
+
+async function testClearOverridesButton() {
+  console.log("\n== Selector picker: Clear Overrides clears all three roles for that site ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("pick-menu-chatgpt");
+  const clearBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Clear Overrides");
+  clearBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const clearCalls = api.calls.filter((c) => c.fn === "clearSelectorOverride" && c.site === "chatgpt");
+  assert(clearCalls.length === 3 && ["input", "send", "assistant"].every((role) => clearCalls.some((c) => c.role === role)), "Clear Overrides clears input, send, and assistant for that site");
+}
+
 async function testRoleAssignmentPanel() {
   console.log("\n== Role Assignment panel: collapse toggle, Apply, Clear ==");
   const api = makeApi();
@@ -459,6 +526,10 @@ async function main() {
   await testManualControlsStayVisibleAndClickableAlways();
   await testAutoBothButton();
   await testZoomControls();
+  await testSelectorPickMenuToggle();
+  await testSelectorPickSuccess();
+  await testSelectorPickFailure();
+  await testClearOverridesButton();
   await testRoleAssignmentPanel();
   await testOpenSequenceEditorButton();
   await testMainRowCollapse();

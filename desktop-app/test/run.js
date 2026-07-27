@@ -15,6 +15,7 @@ Module._load = function (request, parent, isMain) {
   return originalLoad.apply(this, arguments);
 };
 const mockElectron = require(mockElectronPath);
+const automation = require(path.join(__dirname, "..", "automation"));
 
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
@@ -703,6 +704,82 @@ async function testZoomIPC() {
   reg("gemini").webContents.setZoomFactor(1); // restore, so this doesn't leak into later scenarios
 }
 
+function extractCFG(script) {
+  const marker = "const CFG = ";
+  const start = script.indexOf(marker);
+  const jsonStart = start + marker.length;
+  const end = script.indexOf(";\n", jsonStart);
+  return JSON.parse(script.slice(jsonStart, end));
+}
+
+function testSelectorOverridePriorityInScripts() {
+  console.log("\n== automation.js: a picked override is tried BEFORE the built-in candidates, not instead of them ==");
+
+  const sendWithOverride = extractCFG(automation.buildSendScript("claude", "hi", { input: "#my-input", send: "#my-send" }));
+  assert(sendWithOverride.INPUT_CANDIDATES[0] === "#my-input" && sendWithOverride.INPUT_CANDIDATES.length > 1, "input override is tried first, built-ins still follow as fallback");
+  assert(sendWithOverride.SEND_CANDIDATES[0] === "#my-send" && sendWithOverride.SEND_CANDIDATES.length > 1, "send override is tried first, built-ins still follow as fallback");
+
+  const sendNoOverride = extractCFG(automation.buildSendScript("claude", "hi", {}));
+  assert(sendNoOverride.INPUT_CANDIDATES[0] !== "#my-input", "with no override, the built-in candidate list is used unmodified");
+  const sendUndefinedOverride = extractCFG(automation.buildSendScript("claude", "hi"));
+  assert(sendUndefinedOverride.INPUT_CANDIDATES[0] !== "#my-input", "overrides argument is optional -- omitting it entirely doesn't throw");
+
+  const readWithOverride = extractCFG(automation.buildReadScript("gemini", { assistant: ".my-reply" }));
+  assert(readWithOverride.ASSISTANT_CANDIDATES[0] === ".my-reply" && readWithOverride.ASSISTANT_CANDIDATES.length > 1, "assistant override is tried first for reading too, with built-ins as fallback");
+  const readNoOverride = extractCFG(automation.buildReadScript("gemini", {}));
+  assert(readNoOverride.ASSISTANT_CANDIDATES[0] !== ".my-reply", "with no override, reading uses the built-in candidate list unmodified");
+
+  const pickScript = automation.buildPickScript("input");
+  assert(pickScript.includes("__AUTOINJECTOR_PICK__"), "the pick script carries the marker the test mock (and nothing else) keys off of");
+  assert(pickScript.includes('const ROLE = "input"'), "the requested role is embedded in the script");
+}
+
+async function testSelectorPicker() {
+  console.log("\n== Selector picker: click-to-pick overrides are captured, take priority, persist, and can be cleared ==");
+  await resetAllParticipants();
+
+  let s = await call("state:get", {});
+  assert(JSON.stringify(s.global.selectorOverrides.claude) === "{}", "starts with no overrides for claude");
+
+  reg("claude").webContents._nextPickResult = { ok: true, selector: '[data-testid="composer-input"]', tag: "div", sample: "" };
+  const pickRes = await call("selector:pick", { site: "claude", role: "input" });
+  assert(pickRes.ok && pickRes.selector === '[data-testid="composer-input"]', "a successful pick returns the captured selector");
+  assert(reg("claude").webContents.pickCalls.length === 1 && reg("claude").webContents.pickCalls[0].role === "input", "the injected script actually requested the 'input' role");
+
+  s = await call("state:get", {});
+  assert(s.global.selectorOverrides.claude.input === '[data-testid="composer-input"]', "the override is stored and visible via state:get");
+
+  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
+  const saved = JSON.parse(raw);
+  assert(saved.selectorOverrides && saved.selectorOverrides.claude && saved.selectorOverrides.claude.input === '[data-testid="composer-input"]', "the override survives to the persisted state file");
+
+  reg("gemini").webContents._nextPickResult = { ok: true, selector: "div.reply-body", tag: "div", sample: "Hello there" };
+  const pickRes2 = await call("selector:pick", { site: "gemini", role: "assistant" });
+  assert(pickRes2.ok && pickRes2.sample === "Hello there", "a different site/role picks independently and returns its own sample text");
+  s = await call("state:get", {});
+  assert(!s.global.selectorOverrides.claude.assistant, "claude's assistant role is untouched by gemini's pick");
+  assert(s.global.selectorOverrides.gemini.assistant === "div.reply-body", "gemini's assistant override is stored separately");
+
+  reg("chatgpt").webContents._nextPickResult = { ok: false, error: "TIMEOUT" };
+  const timeoutRes = await call("selector:pick", { site: "chatgpt", role: "send" });
+  assert(!timeoutRes.ok && timeoutRes.error === "TIMEOUT", "a pick that times out (no click) is reported, not silently ignored");
+  s = await call("state:get", {});
+  assert(JSON.stringify(s.global.selectorOverrides.chatgpt) === "{}", "a failed pick never stores an override");
+
+  const badSite = await call("selector:pick", { site: "not-a-site", role: "input" });
+  assert(!badSite.ok && badSite.error === "BAD_SITE", "an unknown site is rejected");
+  const badRole = await call("selector:pick", { site: "claude", role: "not-a-role" });
+  assert(!badRole.ok && badRole.error === "BAD_ROLE", "an unknown role is rejected");
+
+  const clearRes = await call("selector:clear", { site: "claude", role: "input" });
+  assert(clearRes.ok, "clearing succeeds");
+  s = await call("state:get", {});
+  assert(!s.global.selectorOverrides.claude.input, "the override is gone after clearing");
+
+  await call("selector:clear", { site: "gemini", role: "assistant" }); // leave state clean for later scenarios
+}
+
 async function testAlwaysOnTagRouting() {
   console.log("\n== Roundtable v2 baseline: [TO: X] tag parsing, stripping, and routing run always, with no House Rule started ==");
   await resetAllParticipants();
@@ -854,6 +931,8 @@ async function main() {
   await testSequenceBackend();
   await testSequenceRejectsWhileRunningAndInvalidSteps();
   await testZoomIPC();
+  testSelectorOverridePriorityInScripts();
+  await testSelectorPicker();
   await testAlwaysOnTagRouting();
   await testStageOverridesBaseline();
 

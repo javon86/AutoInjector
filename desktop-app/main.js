@@ -23,7 +23,7 @@ const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript } = require("./automation");
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
@@ -102,7 +102,8 @@ const state = {
   hr: null, // House Rules run state, see resetHouseRule()
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
   nextPromptId: 1,
-  sequence: { active: false, steps: [], index: 0 } // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
+  sequence: { active: false, steps: [], index: 0 }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
+  selectorOverrides: {} // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
 };
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
@@ -114,6 +115,7 @@ for (const site of SITE_IDS) {
   state.lastSentTo[site] = null;
   state.enabled[site] = true;
   state.customRole[site] = "";
+  state.selectorOverrides[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -217,6 +219,7 @@ function saveStateDebounced() {
         transcript: state.transcript,
         customRole: state.customRole,
         prompts: state.prompts,
+        selectorOverrides: state.selectorOverrides,
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -259,6 +262,11 @@ function loadPersistedState() {
   if (Array.isArray(snap.prompts)) {
     state.prompts = snap.prompts;
     state.nextPromptId = snap.prompts.reduce((m, p) => Math.max(m, (p.id || 0) + 1), 1);
+  }
+  if (snap.selectorOverrides) {
+    for (const site of SITE_IDS) {
+      if (snap.selectorOverrides[site]) state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
+    }
   }
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
@@ -497,7 +505,8 @@ function globalSnapshot() {
     waiting: { ...state.waiting },
     waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
-    customRole: { ...state.customRole }
+    customRole: { ...state.customRole },
+    selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
 }
 
@@ -539,7 +548,7 @@ async function sendTextTo(target, text, fromSite) {
 
   let res;
   try {
-    res = await view.webContents.executeJavaScript(buildSendScript(target, prompt), true);
+    res = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true);
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
@@ -1012,7 +1021,7 @@ async function pollSite(site) {
   if (!view || view.webContents.isDestroyed()) return;
   state.busy[site] = true;
   try {
-    const res = await view.webContents.executeJavaScript(buildReadScript(site));
+    const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
     const text = (res && res.text) || "";
     const pend = state.pending[site];
 
@@ -1161,7 +1170,7 @@ ipcMain.handle("send:regenerate", async (_evt, site) => {
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   let res;
   try {
-    res = await view.webContents.executeJavaScript(buildSendScript(site, text), true);
+    res = await view.webContents.executeJavaScript(buildSendScript(site, text, state.selectorOverrides[site]), true);
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
@@ -1505,6 +1514,47 @@ ipcMain.handle("site:zoom", (_evt, { site, factor }) => {
   view.webContents.setZoomFactor(clamped);
   logEvent("zoom-changed", { site, factor: clamped });
   return { ok: true, factor: clamped };
+});
+
+// The selector picker: instead of the user hand-typing a CSS selector (or
+// needing DevTools at all), they pick a role here, then click the real
+// element live in that site's pane -- buildPickScript() captures that next
+// click, works out a selector for it, and we save it as an override tried
+// ahead of selectors.js's built-in candidates (see automation.js). No
+// separate "test" step: the picked element's own sample text (for
+// "assistant") or tag/attributes (for input/send) is the confirmation.
+const VALID_PICK_ROLES = new Set(["input", "send", "assistant"]);
+
+ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!VALID_PICK_ROLES.has(role)) return { ok: false, error: "BAD_ROLE" };
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  let res;
+  try {
+    res = await view.webContents.executeJavaScript(buildPickScript(role), true);
+  } catch (e) {
+    res = { ok: false, error: String(e) };
+  }
+  if (res && res.ok && res.selector) {
+    state.selectorOverrides[site] = { ...state.selectorOverrides[site], [role]: res.selector };
+    saveStateDebounced();
+    logEvent("selector-picked", { site, role, selector: res.selector });
+  } else {
+    logEvent("selector-pick-error", { site, role, error: (res && res.error) || "unknown" });
+  }
+  return res || { ok: false, error: "unknown" };
+});
+
+ipcMain.handle("selector:clear", (_evt, { site, role }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!VALID_PICK_ROLES.has(role)) return { ok: false, error: "BAD_ROLE" };
+  const next = { ...state.selectorOverrides[site] };
+  delete next[role];
+  state.selectorOverrides[site] = next;
+  saveStateDebounced();
+  logEvent("selector-override-cleared", { site, role });
+  return { ok: true };
 });
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {

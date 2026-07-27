@@ -85,6 +85,8 @@
     .ai-col.collapsed .gendot,
     .ai-col.collapsed .role-badge,
     .ai-col.collapsed .inspect-btn,
+    .ai-col.collapsed .pick-btn,
+    .ai-col.collapsed .pick-menu,
     .ai-col.collapsed .reload-btn { display:none; }
     .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; min-width:0; }
     .ai-col.collapsed .card-head { margin-bottom:0; min-width:0; overflow:hidden; }
@@ -98,6 +100,12 @@
     .zoom-btn:hover { opacity:1; }
     .zoom-level { font-size:9px; opacity:.5; min-width:30px; text-align:center; }
     .ai-col.collapsed .zoom-btn, .ai-col.collapsed .zoom-level { display:none; }
+    .pick-btn { background:none; border:none; padding:0 2px; font-size:12px; opacity:.55; cursor:pointer; }
+    .pick-btn:hover { opacity:1; }
+    .pick-menu { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 6px; font-size:10px; }
+    .pick-menu.collapsed { display:none; }
+    .pick-menu button { font-size:10px; padding:2px 6px; }
+    .pick-status { flex-basis:100%; opacity:.7; font-size:10px; }
     .led { width:8px; height:8px; border-radius:50%; background:#444; flex:0 0 auto; }
     .gendot { width:7px; height:7px; border-radius:50%; background:#333; flex:0 0 auto; }
     .gendot.on { background:#f5b642; animation: pulse 1.1s ease-in-out infinite; }

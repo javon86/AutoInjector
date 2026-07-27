@@ -16,12 +16,13 @@ function siteConfig(site) {
   return cfg;
 }
 
-function buildSendScript(site, text) {
+function buildSendScript(site, text, overrides) {
   const cfg = siteConfig(site);
+  const ov = overrides || {};
   const payload = JSON.stringify({
     text,
-    INPUT_CANDIDATES: cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: cfg.SEND_CANDIDATES
+    INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES
   });
 
   return `
@@ -120,9 +121,12 @@ function buildSendScript(site, text) {
   `;
 }
 
-function buildReadScript(site) {
+function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
-  const payload = JSON.stringify({ ASSISTANT_CANDIDATES: cfg.ASSISTANT_CANDIDATES });
+  const ov = overrides || {};
+  const payload = JSON.stringify({
+    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES
+  });
 
   return `
   (() => {
@@ -135,6 +139,87 @@ function buildReadScript(site) {
     const node = all[all.length - 1];
     return { ok: true, text: node.innerText || node.textContent || "" };
   })();
+  `;
+}
+
+// buildPickScript builds a one-shot "click-to-pick" script for the selector
+// picker feature: instead of the user hand-typing a CSS selector (or opening
+// DevTools themselves), they click a role (input/send/assistant) in the
+// control panel, then click the real element live in the pane. This script
+// shows a small banner, captures the NEXT click on the real page (preventing
+// its default action so nothing actually submits/navigates), works out a
+// best-effort selector for it, and resolves with that -- executeJavaScript()
+// awaits the returned Promise automatically, same as the other scripts here,
+// it just doesn't resolve until a click happens (or TIMEOUT_MS elapses).
+// __AUTOINJECTOR_PICK__ is a literal marker so the test mock can recognize
+// this script by content, the same way it recognizes buildSendScript's
+// output via "typeByKeyboard".
+function buildPickScript(role) {
+  const TIMEOUT_MS = 30000;
+  const label = role === "input" ? "the message box you type into" : role === "send" ? "the Send button" : "the text of a reply";
+  return `
+  (() => new Promise((resolve) => {
+    // __AUTOINJECTOR_PICK__
+    const ROLE = ${JSON.stringify(role)};
+    let done = false;
+    const banner = document.createElement("div");
+    banner.textContent = "AutoInjector: click ${label} now\\u2026";
+    banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#111;color:#fff;font:14px system-ui,sans-serif;padding:8px 14px;text-align:center;pointer-events:none;";
+    document.documentElement.appendChild(banner);
+    const prevCursor = document.documentElement.style.cursor;
+    document.documentElement.style.cursor = "crosshair";
+
+    function cleanup() {
+      document.removeEventListener("click", onClick, true);
+      banner.remove();
+      document.documentElement.style.cursor = prevCursor;
+    }
+
+    function attrSelector(el) {
+      if (el.getAttribute && el.getAttribute("data-testid")) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
+      if (el.getAttribute && el.getAttribute("aria-label")) return el.tagName.toLowerCase() + '[aria-label="' + el.getAttribute("aria-label") + '"]';
+      if (el.id && !/^[a-f0-9]{6,}$/i.test(el.id)) return "#" + CSS.escape(el.id);
+      if (el.className && typeof el.className === "string") {
+        const cls = el.className.trim().split(/\\s+/).filter((c) => c && c.length > 2 && !/\\d{4,}/.test(c)).slice(0, 2);
+        if (cls.length) return el.tagName.toLowerCase() + "." + cls.map((c) => CSS.escape(c)).join(".");
+      }
+      return el.tagName.toLowerCase();
+    }
+
+    function nearestByRole(el) {
+      if (ROLE === "input") return el.closest('textarea, [contenteditable="true"]') || el;
+      if (ROLE === "send") return el.closest('button, [role="button"], input[type="submit"]') || el;
+      // assistant: climb through plain single-child wrapper elements only,
+      // so clicking inner text lands on the smallest element that still
+      // contains the whole reply rather than the message list container.
+      let node = el, depth = 0;
+      while (node.parentElement && node.parentElement.children.length <= 1 && depth < 6) {
+        node = node.parentElement;
+        depth++;
+      }
+      return node;
+    }
+
+    function onClick(e) {
+      if (done) return;
+      done = true;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const target = nearestByRole(e.target);
+      const selector = attrSelector(target);
+      const sample = (target.innerText || target.textContent || "").trim().slice(0, 120);
+      cleanup();
+      resolve({ ok: true, selector, tag: target.tagName.toLowerCase(), sample });
+    }
+    document.addEventListener("click", onClick, true);
+
+    setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve({ ok: false, error: "TIMEOUT" });
+    }, ${TIMEOUT_MS});
+  }))();
   `;
 }
 
@@ -157,4 +242,4 @@ function buildFileInputFinderExpression(site) {
   })()`;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression };
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript };

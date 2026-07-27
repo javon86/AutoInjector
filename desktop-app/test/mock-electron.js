@@ -49,6 +49,8 @@ class FakeWebContents extends EventEmitter {
     this._fileInputExists = true; // toggle false to simulate NO_FILE_INPUT_FOUND
     this._forceAttachFail = false; // toggle true to simulate ATTACH_FAILED
     this._forceSetFilesFail = false; // toggle true to simulate SET_FILES_FAILED
+    this._nextPickResult = null; // test-settable: what the next selector:pick "click" resolves to
+    this.pickCalls = []; // { role } — every pick script executed against this site, in order
     const self = this;
     // A minimal stand-in for webContents.debugger, at the same fidelity as
     // the rest of this mock: it asserts WHAT CDP command was sent with what
@@ -85,6 +87,11 @@ class FakeWebContents extends EventEmitter {
   setZoomFactor(factor) { this.zoomFactor = factor; }
   once(evt, cb) { if (evt === "did-finish-load") setImmediate(cb); return this; }
   async executeJavaScript(script) {
+    if (script.includes("__AUTOINJECTOR_PICK__")) {
+      const roleMatch = script.match(/const ROLE = "([^"]+)"/);
+      this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
+      return this._nextPickResult || { ok: false, error: "TIMEOUT" };
+    }
     if (script.includes("typeByKeyboard")) {
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
       return { ok: true };

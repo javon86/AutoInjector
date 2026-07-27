@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld("api", {
   sendDocument: (path, targets) => ipcRenderer.invoke("document:send", { path, targets }),
   closeDocumentViewer: () => ipcRenderer.invoke("document-viewer:close"),
   setZoom: (site, factor) => ipcRenderer.invoke("site:zoom", { site, factor }),
+  pickSelector: (site, role) => ipcRenderer.invoke("selector:pick", { site, role }),
+  clearSelectorOverride: (site, role) => ipcRenderer.invoke("selector:clear", { site, role }),
   openSequenceEditor: () => ipcRenderer.invoke("sequence:open"),
   closeSequenceEditor: () => ipcRenderer.invoke("sequence-editor:close"),
   runSequence: (steps) => ipcRenderer.invoke("sequence:run", { steps }),

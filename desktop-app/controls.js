@@ -23,6 +23,9 @@ let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
 const ZOOM_STEP = 0.1;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 2;
+const PICK_ROLES = ["input", "send", "assistant"];
+const PICK_ROLE_LABELS = { input: "Pick Input", send: "Pick Send", assistant: "Pick Reply" };
+const PICK_ROLE_TARGET_DESC = { input: "the message box you type into", send: "the Send button", assistant: "the text of a reply" };
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
@@ -40,6 +43,39 @@ async function adjustZoom(site, delta) {
     const label = el(`zoom-level-${site}`);
     if (label) label.textContent = `${Math.round(res.factor * 100)}%`;
   }
+}
+
+function togglePickMenu(site) {
+  const menu = el(`pick-menu-${site}`);
+  if (menu) menu.classList.toggle("collapsed");
+}
+
+// The selector picker: pick a role, then click the real element live in that
+// site's pane -- main.js captures the next click there and works out a
+// selector for it (see automation.js's buildPickScript). No separate "test"
+// step; the picked sample text (for a reply) or tag (for input/send) IS the
+// confirmation, shown right here.
+async function runPick(site, role) {
+  const statusEl = el(`pick-status-${site}`);
+  const desc = PICK_ROLE_TARGET_DESC[role];
+  if (statusEl) statusEl.textContent = `Click ${desc} in ${SITE_LABELS[site]}'s pane now…`;
+  setStatus(`Waiting for a click in ${SITE_LABELS[site]}'s pane to pick ${desc}…`);
+  const res = await window.api.pickSelector(site, role);
+  if (res?.ok) {
+    const sample = res.sample ? ` — "${res.sample.slice(0, 60)}${res.sample.length > 60 ? "…" : ""}"` : "";
+    if (statusEl) statusEl.textContent = `Picked <${res.tag}> ${res.selector}${sample}`;
+    setStatus(`${SITE_LABELS[site]}: picked a new selector for ${desc}.`);
+  } else {
+    if (statusEl) statusEl.textContent = `Didn't catch a click (${res?.error || "unknown"}). Try again.`;
+    setStatus(`${SITE_LABELS[site]}: selector pick failed (${res?.error || "unknown"}).`);
+  }
+}
+
+async function clearPickOverrides(site) {
+  for (const role of PICK_ROLES) await window.api.clearSelectorOverride(site, role);
+  const statusEl = el(`pick-status-${site}`);
+  if (statusEl) statusEl.textContent = "Overrides cleared — back to the built-in selectors.";
+  setStatus(`${SITE_LABELS[site]}: selector overrides cleared.`);
 }
 
 function led(site, ok) {
@@ -158,6 +194,12 @@ function buildAiColumn(site) {
   inspectBtn.title = "Open DevTools on this pane (for fixing selectors)";
   inspectBtn.onclick = () => window.api.inspectSite(site);
   head.appendChild(inspectBtn);
+  const pickBtn = document.createElement("button");
+  pickBtn.className = "pick-btn";
+  pickBtn.textContent = "🎯";
+  pickBtn.title = "Fix selectors: pick the real input box / send button / reply text live in this pane -- no DevTools needed";
+  pickBtn.onclick = () => togglePickMenu(site);
+  head.appendChild(pickBtn);
   const reloadBtn = document.createElement("button");
   reloadBtn.className = "reload-btn";
   reloadBtn.textContent = "⟳";
@@ -175,6 +217,26 @@ function buildAiColumn(site) {
   collapseBtn.onclick = () => toggleColumnCollapse(site);
   head.appendChild(collapseBtn);
   strip.appendChild(head);
+
+  const pickMenu = document.createElement("div");
+  pickMenu.className = "pick-menu collapsed";
+  pickMenu.id = `pick-menu-${site}`;
+  pickMenu.innerHTML = `<span class="row-label">Fix:</span>`;
+  for (const role of PICK_ROLES) {
+    const btn = document.createElement("button");
+    btn.textContent = PICK_ROLE_LABELS[role];
+    btn.onclick = () => runPick(site, role);
+    pickMenu.appendChild(btn);
+  }
+  const clearOverridesBtn = document.createElement("button");
+  clearOverridesBtn.textContent = "Clear Overrides";
+  clearOverridesBtn.onclick = () => clearPickOverrides(site);
+  pickMenu.appendChild(clearOverridesBtn);
+  const pickStatus = document.createElement("div");
+  pickStatus.className = "pick-status";
+  pickStatus.id = `pick-status-${site}`;
+  pickMenu.appendChild(pickStatus);
+  strip.appendChild(pickMenu);
 
   const preview = document.createElement("div");
   preview.className = "preview";

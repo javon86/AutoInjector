@@ -349,24 +349,43 @@ above, as `autoinjector-debug.log`. If something breaks and you want help
 tracking it down, that file plus a description of what you were doing is the
 most useful thing you can send.
 
-If a specific AI's card never shows a captured reply even though its pane clearly
-has one on screen, that means the DOM selector for reading its messages
-(`selectors.js`) doesn't match that site's current layout — sites change their
-markup without notice. Click the 🔍 button on that AI's card to open Chrome
-DevTools on that exact pane, right-click the assistant's reply bubble → **Inspect**,
-and send me the element's tag/class/attributes — that's what lets me fix the
-selector for real instead of guessing again.
+If a specific AI's card never shows a captured reply even though its pane
+clearly has one on screen, or messages seem to stop going out entirely, that
+means the DOM selector for reading (or typing into/sending) that site
+(`selectors.js`) doesn't match its current layout anymore — sites change
+their markup without notice, and this app has no way to detect *why*
+something isn't matching, only that it isn't. A send that doesn't actually
+go through gets reported distinctly, as `SEND_NOT_CONFIRMED` in the Activity
+Log, rather than silently pretending to succeed — `automation.js` checks
+that clicking Send (or pressing Enter) actually cleared the input box, which
+every real chat UI does the instant a message is genuinely submitted,
+instead of just trusting that the click didn't throw an error.
 
-The same applies to the *sending* side: if messages seem to stop going out
-entirely, `automation.js` now actively checks that clicking Send (or pressing
-Enter) actually cleared the input box — every real chat UI does this the
-instant a message is genuinely submitted — instead of just trusting that the
-click didn't throw an error. A send that doesn't actually go through now
-reports `SEND_NOT_CONFIRMED` (visible as an error in the Activity Log) rather
-than silently pretending to succeed. If you see that error repeatedly for
-one AI, its `SEND_CANDIDATES` in `selectors.js` is likely stale — the same
-🔍 Inspect flow works here too, just right-click that site's actual Send
-button instead of a reply bubble.
+### 🎯 Fixing it yourself: the selector picker
+
+Every AI column has a **🎯** button that opens a small menu: **Pick Input**,
+**Pick Send**, **Pick Reply**, **Clear Overrides**. Click one of the first
+three, then click the real element live in that pane — the input box you
+type into, the actual Send button, or the text of an actual reply. The app
+captures that exact click (it never actually submits anything — the click's
+default action is prevented), works out a selector for it, and saves it as
+an override for that site/role that's tried *before* the built-in guesses in
+`selectors.js`, with those built-ins kept as a fallback rather than replaced.
+The picked selector (and, for a reply pick, a short sample of its text) is
+shown right there as confirmation — there's no separate "test" step, since
+the sample text you see back *is* the test. **Clear Overrides** drops all
+three roles for that site back to the built-in defaults if a pick turns out
+wrong. Overrides persist across restarts the same way everything else does.
+
+This replaces needing to open DevTools yourself for the common case (a site
+renamed a class or restructured its composer). If picking doesn't land on
+the right element (rare, but a heavily nested or virtualized UI can confuse
+the "find the nearest meaningful ancestor" heuristic it uses), or if you'd
+rather hand me the fix directly, the manual route still works: click the 🔍
+button on that AI's card to open Chrome DevTools on that exact pane,
+right-click the actual input box, Send button, or a reply bubble →
+**Inspect**, and send the element's tag/class/attributes — that's what lets
+me fix `selectors.js` itself for real, rather than guessing again.
 
 ## How it's built
 
@@ -416,7 +435,18 @@ button instead of a reply bubble.
   "all" step, the first of the three to reply) advances to the next step,
   rather than firing on a timer. **Zoom** (`site:zoom`) calls
   `webContents.setZoomFactor()` directly on the live site view, clamped to
-  [0.4, 2.0] — it zooms the real embedded page, not the app's own UI.
+  [0.4, 2.0] — it zooms the real embedded page, not the app's own UI. The
+  **selector picker** (`selector:pick`/`selector:clear`) is the self-service
+  alternative to sending me a DevTools screenshot: it runs
+  `buildPickScript()` (see `automation.js` below) in the target pane, which
+  resolves once the user clicks the real element for that role, and stores
+  the resulting CSS selector in `state.selectorOverrides[site][role]`
+  (`input`/`send`/`assistant`), persisted the same way as everything else.
+  `sendTextTo()` and `pollSite()` both pass `state.selectorOverrides[site]`
+  into `buildSendScript()`/`buildReadScript()`, which try it *before*
+  `selectors.js`'s built-in candidates rather than instead of them, so a bad
+  pick never fully locks you out — clearing the override (or just picking
+  again) falls straight back to the built-ins.
   `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
@@ -448,9 +478,23 @@ button instead of a reply bubble.
   Each site's `FILE_INPUT_CANDIDATES` in `selectors.js` are **best-effort
   guesses, not yet verified against the real sites** — same caveat as every
   other selector list here, fix the same way (🔍 Inspect on the live pane,
-  find the actual upload input, update the list).
+  find the actual upload input, update the list). A fourth builder,
+  `buildPickScript(role)`, backs the 🎯 selector picker: it's an IIFE that
+  returns a `Promise`, which `executeJavaScript()` awaits automatically —
+  it shows a small on-page banner, then resolves once the user clicks a real
+  element in that pane (capturing that click with `preventDefault`/
+  `stopImmediatePropagation` so nothing actually submits or navigates), or
+  after a 30s timeout with no click. Selector generation prefers
+  `data-testid`/`aria-label`/a non-hashed-looking `id`, then a couple of
+  short, non-numeric class names, falling back to a bare tag name; for the
+  `input`/`send` roles it first walks up to the nearest `textarea`/
+  `[contenteditable="true"]` or `button`/`[role="button"]` ancestor (since a
+  click usually lands on an inner text node or icon, not the actual editable
+  container or button itself), while `assistant` climbs through plain
+  single-child wrapper elements so clicking inner reply text still resolves
+  to the smallest element containing the *whole* reply.
 - `controls.html` / `controls.js` — the Automation window's control panel UI:
-  the AI columns (with zoom, Forward/Auto/Auto-Both, collapse), Role
+  the AI columns (with zoom, the 🎯 selector-picker menu, Forward/Auto/Auto-Both, collapse), Role
   Assignment, House Rules, the Prompt Library's compact dropdown +
   Send/New/Edit/Delete, the 🧵 Prompt Sequence trigger, the collapsed-pane
   strip that shares House Rules' unused space, and the collapsible
@@ -546,6 +590,22 @@ passing straight through to `webContents.setZoomFactor()`, and out-of-range
 values clamping to the documented [0.4, 2.0] range rather than being
 rejected outright.
 
+It also covers the 🎯 selector picker, at two levels. A pure unit-level check
+on `automation.js` itself (no Electron mocking involved) confirms a picked
+override is embedded *ahead* of the built-in candidates in the scripts
+`buildSendScript`/`buildReadScript` actually produce, with the built-ins
+still present as fallback, and that omitting the overrides argument
+entirely doesn't throw. Then, against the mocked `main.js` orchestration
+(`test/mock-electron.js` gained a settable `_nextPickResult` and a
+`pickCalls` log, recognizing a pick script by its `__AUTOINJECTOR_PICK__`
+marker the same way it recognizes a send script via `typeByKeyboard` —
+never simulating real DOM, same fidelity as the rest of that mock): a
+successful pick stores the override, reflects it in `state:get`, and
+survives to the persisted state file; different sites/roles pick
+independently without clobbering each other; a timed-out pick reports
+`TIMEOUT` and never stores anything; `selector:pick`/`selector:clear` reject
+an unknown site or role; and clearing an override actually removes it.
+
 It also covers the Prompt Library backend: both built-ins existing by
 default ("System Test," with each AI's own version correctly naming the
 *other* two; "System Prompt (How Routing Works)," whose text for every AI
@@ -598,7 +658,12 @@ Auto mid-stage still calls `setRouting`) — proving the old hide-while-active
 behavior is gone for good, the combined Auto → Both toggle (one click turns
 both individual routes on together, lights up once both are on, a second
 click turns both off), the zoom buttons (clicking calls `setZoom` and the
-on-screen percentage label updates to match), the Role Assignment panel
+on-screen percentage label updates to match), the 🎯 selector-picker menu
+(collapsed by default and toggles open/closed; Pick Input/Send/Reply call
+`pickSelector` with the right site/role and show the returned selector plus
+sample text inline as confirmation; a failed/timed-out pick shows the real
+error instead of pretending success; Clear Overrides clears all three roles
+for that site), the Role Assignment panel
 (starts collapsed, Apply/Clear call `setRole` and update the "current: X"
 label, the collapse toggle works both ways), the 🧵 Prompt Sequence trigger
 button calling `openSequenceEditor`, and the Prompt Library dropdown —
