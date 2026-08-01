@@ -24,6 +24,8 @@ const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript } = require("./automation");
+const managerProvider = require("./manager-provider");
+const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
@@ -70,6 +72,13 @@ function userDataDir() {
   try { return app.getPath("userData"); } catch { return __dirname; }
 }
 function stateFilePath() { return path.join(userDataDir(), "autoinjector-state.json"); }
+// Manager task output goes somewhere the user will actually look for it
+// (Documents), not buried in the app's internal userData folder alongside
+// the state/debug-log files -- falls back to userDataDir() if Documents
+// isn't available for some reason (matches userDataDir()'s own try/catch).
+function projectsRootDir() {
+  try { return path.join(app.getPath("documents"), "AutoInjector Projects"); } catch { return path.join(userDataDir(), "Projects"); }
+}
 function debugLogPath() { return path.join(userDataDir(), "autoinjector-debug.log"); }
 
 let win = null;
@@ -105,7 +114,21 @@ const state = {
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
   nextPromptId: 1,
   sequence: { active: false, steps: [], index: 0 }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
-  selectorOverrides: {} // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
+  selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
+  managerConfig: {
+    provider: "runpod-serverless", // runpod-serverless | runpod-pod | openai-compatible
+    endpoint: "",
+    apiKey: "",
+    model: "",
+    tier: 2,
+    timeoutMs: 180000,
+    podId: "", // only meaningful for provider "runpod-pod"
+    approvalMode: false,
+    maximumTurns: 20,
+    costLimit: 5
+  },
+  manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
+  managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
@@ -173,6 +196,119 @@ function resetHouseRule(mode, topic, rounds) {
 }
 resetHouseRule(null, "", 0);
 
+// The manager/orchestrator's task state — see manager-provider.js's header
+// comment for why this is allowed to call out to a real API (a RunPod/
+// Ollama/LM Studio-hosted model acting as supervisor) while ChatGPT/Claude/
+// Gemini delegation still goes exclusively through sendTextTo()/pollSite().
+// Always reset to idle on startup, same reasoning as House Rules: a restart
+// must never silently resume a live task or auto-send anything.
+function resetManagerTask() {
+  state.manager = {
+    taskId: null,
+    userRequest: "",
+    deliverableSpecification: {},
+    plan: [],
+    activeAssignments: [], // { target, task, sentTs }
+    completedAssignments: [], // { target, task, response, ts }
+    latestResponses: { chatgpt: null, claude: null, gemini: null },
+    allResponses: [], // { id, target, text, ts } — every response ever captured for this task, never overwritten
+    conflicts: [],
+    missingRequirements: [],
+    previousManagerActions: [], // the last N validated decisions, for the model's own context
+    pendingModels: [], // targets an active DELEGATE/WAIT is still waiting on
+    currentTier: state.managerConfig.tier,
+    turnNumber: 0,
+    maximumTurns: state.managerConfig.maximumTurns,
+    costUsed: 0,
+    costLimit: state.managerConfig.costLimit,
+    status: "idle", // idle|classifying|planning|delegating|waiting|reviewing|comparing|validating|assembling|saving|paused|finished|error
+    projectDir: null,
+    startedTs: null,
+    finishedTs: null,
+    noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
+    pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
+  };
+}
+resetManagerTask();
+
+// A decision's action alone being in MANAGER_ACTIONS (already guaranteed by
+// manager-provider.js's own contract) isn't enough on its own -- this is the
+// second, independent layer of validation the spec calls for: per-action
+// shape checks, a hard target allowlist (only chatgpt/claude/gemini, ever),
+// safe relative paths for anything that touches disk, and a scan for
+// obviously dangerous content (code injection attempts, credential leakage)
+// in any field the manager controls. Nothing here ever gets eval'd or
+// executed -- assignment "task" text just becomes a sendTextTo() prompt like
+// any other -- but rejecting it outright at the door is cheap insurance and
+// exactly what section 6 of the spec asks for.
+const DANGEROUS_CONTENT_PATTERNS = [
+  /\brequire\s*\(/, /\beval\s*\(/, /\bnew\s+Function\s*\(/, /<script[\s>]/i,
+  /\bprocess\s*\./, /\bchild_process\b/, /\b(document|window)\s*\.\s*(cookie|localStorage|sessionStorage)\b/i
+];
+const MANAGER_CONTENT_CAP = 2 * 1024 * 1024; // 2MB — generous for real document content, still bounded
+
+function scanForDangerousContent(value, path, violations) {
+  if (typeof value === "string") {
+    if (value.length > MANAGER_CONTENT_CAP) violations.push(`${path}: exceeds ${MANAGER_CONTENT_CAP} char cap`);
+    if (state.managerConfig.apiKey && value.includes(state.managerConfig.apiKey)) violations.push(`${path}: contains what looks like the configured API key`);
+    for (const re of DANGEROUS_CONTENT_PATTERNS) {
+      if (re.test(value)) { violations.push(`${path}: matches a disallowed pattern (${re})`); break; }
+    }
+  } else if (Array.isArray(value)) {
+    value.forEach((v, i) => scanForDangerousContent(v, `${path}[${i}]`, violations));
+  } else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) scanForDangerousContent(v, `${path}.${k}`, violations);
+  }
+}
+
+// No ".." segments, no absolute paths, no drive letters, no null bytes --
+// every manager-proposed filename must resolve strictly inside that task's
+// own project directory. Deliberately conservative: reject anything that
+// isn't obviously a plain relative path rather than trying to enumerate
+// every way path traversal can be spelled.
+function isSafeRelativePath(p) {
+  if (typeof p !== "string" || !p || p.length > 500) return false;
+  if (p.includes("\0")) return false;
+  if (path.isAbsolute(p)) return false;
+  const normalized = path.normalize(p);
+  if (normalized.split(path.sep).includes("..")) return false;
+  if (/^[a-zA-Z]:/.test(p)) return false; // Windows drive letter
+  return true;
+}
+
+function validateManagerAction(decision) {
+  if (!decision || typeof decision !== "object" || Array.isArray(decision)) return { ok: false, error: "MALFORMED" };
+  if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) return { ok: false, error: "UNKNOWN_ACTION" };
+
+  const violations = [];
+  scanForDangerousContent(decision, "decision", violations);
+
+  const NEEDS_ASSIGNMENTS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+  if (NEEDS_ASSIGNMENTS.has(decision.action)) {
+    if (!Array.isArray(decision.assignments) || !decision.assignments.length) {
+      return { ok: false, error: "MISSING_ASSIGNMENTS" };
+    }
+    for (const a of decision.assignments) {
+      if (!a || typeof a !== "object" || !SITES[a.target] || typeof a.task !== "string" || !a.task.trim()) {
+        return { ok: false, error: "BAD_ASSIGNMENT", detail: a };
+      }
+    }
+  }
+
+  if (decision.action === "SAVE" || decision.action === "EXPORT") {
+    if (!isSafeRelativePath(decision.filename)) return { ok: false, error: "UNSAFE_PATH" };
+    if (typeof decision.content !== "string") return { ok: false, error: "MISSING_CONTENT" };
+  }
+
+  if (decision.action === "ESCALATE") {
+    const tier = Number(decision.toTier);
+    if (!Number.isInteger(tier) || tier < 1 || tier > 4) return { ok: false, error: "BAD_TIER" };
+  }
+
+  if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
+  return { ok: true, decision };
+}
+
 // --- On-disk debug log: a rolling file so a real crash still leaves
 // something to troubleshoot from, since the in-memory state.log ring buffer
 // (MAX_LOG entries) is lost the moment the process dies. Best-effort only —
@@ -202,6 +338,49 @@ function logEvent(kind, detail) {
   appendDebugLog(entry);
 }
 
+// The shared normalized event system (spec section 14): one event, up to
+// two views. Manager-specific detail (tier, provider, model, action,
+// target) always goes to the dedicated Manager Activity Log; the same
+// event optionally also gets folded into the existing global Activity Log
+// (as a "manager-<category>" kind, through the ordinary logEvent() path
+// above) so the global log stays a complete application-wide record without
+// a second, parallel log-writing implementation.
+let managerEventSeq = 1;
+function logManagerEvent({ category, severity, action, target, summary, details, visibleInManagerLog = true, visibleInGlobalLog = true }) {
+  let safeDetails = details || {};
+  try {
+    safeDetails = JSON.parse(managerProvider.redactSecrets(JSON.stringify(safeDetails), state.managerConfig));
+  } catch { /* best effort -- never let a logging call itself throw */ }
+
+  const entry = {
+    eventId: `mgr-${managerEventSeq++}`,
+    ts: Date.now(),
+    taskId: state.manager.taskId,
+    source: "manager",
+    category: category || "general",
+    severity: severity || "info",
+    tier: state.manager.currentTier,
+    provider: state.managerConfig.provider,
+    model: state.managerConfig.model,
+    action: action || null,
+    target: target || null,
+    summary: summary || "",
+    details: safeDetails
+  };
+
+  if (visibleInManagerLog) {
+    state.managerLog.push(entry);
+    if (state.managerLog.length > MAX_LOG) state.managerLog.shift();
+    broadcast("manager-log", entry);
+  }
+  if (visibleInGlobalLog) {
+    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails });
+  } else if (visibleInManagerLog) {
+    appendDebugLog(entry); // still worth a debug-log trace even when it's not going in the global Activity Log
+  }
+  return entry;
+}
+
 // --- Persistence: transcript, custom roles, and (if a House Rule run was in
 // progress) enough of its state to show the user where things left off. On
 // load, any restored run comes back PAUSED, never active — restarting the
@@ -222,6 +401,7 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        managerConfig: state.managerConfig, // the live task itself (state.manager) is deliberately NOT persisted -- same reasoning as House Rules, below
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -269,6 +449,12 @@ function loadPersistedState() {
     for (const site of SITE_IDS) {
       if (snap.selectorOverrides[site]) state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
     }
+  }
+  if (snap.managerConfig && typeof snap.managerConfig === "object") {
+    state.managerConfig = { ...state.managerConfig, ...snap.managerConfig };
+    state.manager.currentTier = state.managerConfig.tier;
+    state.manager.maximumTurns = state.managerConfig.maximumTurns;
+    state.manager.costLimit = state.managerConfig.costLimit;
   }
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
@@ -510,6 +696,39 @@ function globalSnapshot() {
     customRole: { ...state.customRole },
     selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
+}
+
+function managerSnapshot() {
+  const m = state.manager;
+  return {
+    taskId: m.taskId,
+    userRequest: m.userRequest,
+    deliverableSpecification: m.deliverableSpecification,
+    plan: m.plan,
+    activeAssignments: m.activeAssignments,
+    completedAssignments: m.completedAssignments,
+    latestResponses: { ...m.latestResponses },
+    conflicts: m.conflicts,
+    missingRequirements: m.missingRequirements,
+    previousManagerActions: m.previousManagerActions,
+    pendingModels: m.pendingModels,
+    currentTier: m.currentTier,
+    turnNumber: m.turnNumber,
+    maximumTurns: m.maximumTurns,
+    costUsed: m.costUsed,
+    costLimit: m.costLimit,
+    status: m.status,
+    projectDir: m.projectDir,
+    pendingApproval: m.pendingApproval
+  };
+}
+
+function managerConfigSnapshot() {
+  // Never send the raw API key to a renderer -- the config UI only needs to
+  // know one is set, not to see it (it already has its own input box for
+  // entering/replacing it).
+  const { apiKey, ...rest } = state.managerConfig;
+  return { ...rest, hasApiKey: !!apiKey };
 }
 
 function houseRuleSnapshot() {
@@ -860,6 +1079,359 @@ async function handleSequenceCapture(turn) {
   await sendSequenceStep();
 }
 
+// --- Manager/orchestrator: the supervisory loop over a managed task --------
+// Delegation (DELEGATE/SEND/FORWARD/COMPARE/CRITIQUE/VERIFY) reuses
+// sendTextTo()/pollSite() exactly like every other feature in this app --
+// the only new thing here is WHO decides what to send next: a call out to
+// manager-provider.js's askManager() instead of a fixed state machine like
+// House Rules' formats. The loop is event-driven, not a blocking wait: after
+// dispatching to state.manager.pendingModels, runManagerTurn() returns, and
+// handleManagerCapture() (hooked into pollSite()'s dispatch, same pattern as
+// handleSequenceCapture) resumes it once every pending target has replied.
+
+function sanitizeTaskFolderName(text) {
+  return (String(text || "task").trim().slice(0, 60).replace(/[^a-zA-Z0-9 _-]/g, "").replace(/\s+/g, "-")) || "task";
+}
+
+async function createProjectDir(taskId, userRequest) {
+  const base = path.join(projectsRootDir(), `${sanitizeTaskFolderName(userRequest)}-${taskId}`);
+  for (const sub of ["raw-responses", "working", "sources", "versions", "final"]) {
+    await fs.promises.mkdir(path.join(base, sub), { recursive: true });
+  }
+  return base;
+}
+
+async function saveManagerFile(filename, content) {
+  const m = state.manager;
+  if (!m.projectDir || !isSafeRelativePath(filename)) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Refused to save to an unsafe or missing path: ${filename}` });
+    return { ok: false, error: "UNSAFE_PATH" };
+  }
+  const fullPath = path.join(m.projectDir, "final", filename);
+  try {
+    await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.promises.writeFile(fullPath, content, "utf8");
+    logManagerEvent({ category: "file", summary: `Saved final/${filename}`, details: { bytes: content.length } });
+    return { ok: true, path: fullPath };
+  } catch (e) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Failed to save ${filename}: ${String(e)}` });
+    return { ok: false, error: String(e) };
+  }
+}
+
+async function saveRawResponse(entry) {
+  const m = state.manager;
+  if (!m.projectDir) return;
+  try {
+    await fs.promises.writeFile(path.join(m.projectDir, "raw-responses", `${entry.id}-${entry.target}.md`), entry.text, "utf8");
+    await fs.promises.appendFile(path.join(m.projectDir, "manager-log.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
+  } catch (e) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Failed to save raw response: ${String(e)}` });
+  }
+}
+
+async function saveTaskCheckpoint() {
+  const m = state.manager;
+  if (!m.projectDir) return;
+  try {
+    await fs.promises.writeFile(path.join(m.projectDir, "project.json"), JSON.stringify(managerSnapshot(), null, 2), "utf8");
+  } catch (e) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Failed to save checkpoint: ${String(e)}` });
+  }
+}
+
+function broadcastManagerState() {
+  broadcast("manager-state", managerSnapshot());
+}
+
+function detectNoProgress() {
+  return state.manager.noProgressStreak >= 2;
+}
+
+function selectManagerTier() {
+  // Phase 1: one configurable tier plus manual/error-driven escalation --
+  // the full automatic 0-4 ladder from the spec (routing different tiers to
+  // different provider configs) is a later phase once this core loop is
+  // proven out. Tier 4 is handled specially in runManagerTurn(): it routes
+  // to a real ChatGPT/Claude/Gemini pane instead of the configured
+  // RunPod/Ollama/LM Studio endpoint, per the spec's "cloud adjudication".
+  return state.manager.currentTier || state.managerConfig.tier || 2;
+}
+
+// toTier lets an explicit ESCALATE action (which validateManagerAction()
+// already confirmed is an integer 1-4) jump straight to a requested tier in
+// one step -- e.g. straight to Tier 4 cloud adjudication -- while the
+// error-driven call sites (a provider failure, a repeatedly invalid action)
+// omit it and just step up by exactly one. Escalation only ever moves up;
+// a lower toTier than the current one is ignored rather than treated as a
+// de-escalation request, which is handled separately in handleManagerCapture().
+async function escalateManagerTier(reason, toTier) {
+  const m = state.manager;
+  const next = toTier != null ? Math.max(m.currentTier || 2, Math.min(4, toTier)) : Math.min(4, (m.currentTier || 2) + 1);
+  logManagerEvent({ category: "escalation", severity: "warning", summary: `Escalating tier ${m.currentTier} -> ${next}: ${reason}`, details: { from: m.currentTier, to: next, reason } });
+  m.currentTier = next;
+  m.noProgressStreak = 0;
+  await runManagerTurn();
+}
+
+function assembleTaskState() {
+  return { ...state.manager };
+}
+
+async function runTierFourAdjudication() {
+  const m = state.manager;
+  const adjudicator = (state.managerConfig.adjudicatorSite && SITES[state.managerConfig.adjudicatorSite]) ? state.managerConfig.adjudicatorSite : "claude";
+  const question = `[Manager escalation -- tier 4 cloud adjudication for task "${m.taskId}"]\nOriginal request: ${m.userRequest}\n\nConflict/disagreement: ${JSON.stringify(m.conflicts)}\n\nMissing requirements: ${JSON.stringify(m.missingRequirements)}\n\nRelevant responses so far: ${JSON.stringify(m.latestResponses)}\n\nPlease resolve this and state clearly what should happen next.`;
+  m.activeAssignments = [{ target: adjudicator, task: question, sentTs: Date.now() }];
+  m.pendingModels = [adjudicator];
+  m.status = "waiting";
+  logManagerEvent({ category: "escalation", severity: "warning", summary: `Escalated to Tier 4 cloud adjudication via ${SITES[adjudicator].label}`, target: [adjudicator] });
+  await sendTextTo(adjudicator, question, null);
+  broadcastManagerState();
+}
+
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving"]);
+
+async function runManagerTurn() {
+  const m = state.manager;
+  if (!MANAGER_ACTIVE_STATUSES.has(m.status)) return; // idle/waiting/paused/finished/error -- nothing to advance right now
+  const myTaskId = m.taskId; // see the guard right after the askManager await below
+
+  m.turnNumber++;
+  if (m.turnNumber > m.maximumTurns) { await finishManagedTask({ ok: false, reason: "MAX_TURNS_EXCEEDED" }); return; }
+  if (m.costLimit && m.costUsed > m.costLimit) { await finishManagedTask({ ok: false, reason: "COST_LIMIT_EXCEEDED" }); return; }
+
+  const tier = selectManagerTier();
+  m.currentTier = tier;
+  broadcastManagerState();
+
+  if (tier >= 4) { await runTierFourAdjudication(); return; }
+
+  logManagerEvent({ category: "decision", summary: `Asking the manager (tier ${tier}, turn ${m.turnNumber}/${m.maximumTurns})` });
+  const res = await managerProvider.askManager(assembleTaskState(), { ...state.managerConfig, tier });
+  // runManagerTurn() is always fire-and-forget from its callers (manager:stop,
+  // manager:reject, etc. don't await it) so a slow provider call can still be
+  // in flight when the user stops this task or starts a new one -- without
+  // this check, that stale response would go on to mutate whatever task
+  // state.manager now points to instead of quietly becoming irrelevant.
+  if (state.manager.taskId !== myTaskId || ["finished", "error"].includes(state.manager.status)) return;
+
+  if (!res.ok) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Manager call failed: ${res.error}`, details: { error: res.error, detail: res.detail || null } });
+    m.noProgressStreak++;
+    if (detectNoProgress()) await escalateManagerTier(`provider error: ${res.error}`);
+    else await runManagerTurn();
+    return;
+  }
+
+  const validated = validateManagerAction(res.decision);
+  if (!validated.ok) {
+    logManagerEvent({ category: "error", severity: "error", summary: `Manager proposed an invalid action: ${validated.error}`, details: { decision: res.decision, violations: validated.violations || null } });
+    m.previousManagerActions.push({ ...res.decision, rejected: true, rejectReason: validated.error, ts: Date.now() });
+    m.noProgressStreak++;
+    if (detectNoProgress()) await escalateManagerTier(`invalid action repeated: ${validated.error}`);
+    else await runManagerTurn();
+    return;
+  }
+
+  const decision = validated.decision;
+  m.previousManagerActions.push({ ...decision, ts: Date.now() });
+  if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
+
+  if (state.managerConfig.approvalMode && decision.action !== "REQUEST_APPROVAL") {
+    m.pendingApproval = decision;
+    m.status = "paused";
+    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}`, action: decision.action, details: decision });
+    broadcastManagerState();
+    return;
+  }
+  await executeManagerAction(decision);
+}
+
+const MANAGER_DELEGATING_ACTIONS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+
+async function executeManagerAction(decision) {
+  const m = state.manager;
+  const action = decision.action;
+  const targets = decision.assignments ? decision.assignments.map((a) => a.target) : null;
+  logManagerEvent({ category: "action", action, target: targets, summary: decision.reason || action, details: decision });
+
+  if (MANAGER_DELEGATING_ACTIONS.has(action)) {
+    m.status = (action === "COMPARE" || action === "CRITIQUE") ? "comparing" : (action === "VERIFY" ? "reviewing" : "delegating");
+    m.activeAssignments = decision.assignments.map((a) => ({ target: a.target, task: a.task, sentTs: Date.now() }));
+    m.pendingModels = decision.assignments.map((a) => a.target);
+    for (const a of decision.assignments) {
+      await sendTextTo(a.target, `[Manager assignment -- task "${m.taskId}"]\n${a.task}`, null);
+    }
+    m.status = "waiting"; // paused here until handleManagerCapture() sees every pending target reply
+    broadcastManagerState();
+    return;
+  }
+
+  switch (action) {
+    case "CLASSIFY":
+      if (decision.deliverableSpecification) m.deliverableSpecification = decision.deliverableSpecification;
+      m.status = "classifying";
+      await runManagerTurn();
+      break;
+    case "PLAN":
+      if (Array.isArray(decision.plan)) m.plan = decision.plan;
+      m.status = "planning";
+      await runManagerTurn();
+      break;
+    case "EXTRACT":
+    case "ASSEMBLE":
+    case "REVISE":
+      if (decision.result != null) m.deliverableSpecification = { ...m.deliverableSpecification, draft: decision.result };
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    case "VALIDATE":
+      m.status = "validating";
+      if (Array.isArray(decision.missingRequirements)) m.missingRequirements = decision.missingRequirements;
+      if (decision.satisfied === true) await finishManagedTask({ ok: true });
+      else await runManagerTurn();
+      break;
+    case "SAVE":
+    case "EXPORT":
+      m.status = "saving";
+      await saveManagerFile(decision.filename, decision.content);
+      await runManagerTurn();
+      break;
+    case "ESCALATE":
+      await escalateManagerTier(decision.reason || "manager-requested", decision.toTier);
+      break;
+    case "WAIT":
+      setTimeout(() => runManagerTurn(), 2000); // a deliberate no-op turn -- try again shortly instead of spinning immediately
+      break;
+    case "REQUEST_APPROVAL":
+      m.pendingApproval = decision;
+      m.status = "paused";
+      break;
+    case "PAUSE":
+      m.status = "paused";
+      break;
+    case "FINISH":
+      await finishManagedTask({ ok: true });
+      break;
+    default:
+      break; // unreachable -- validateManagerAction() already rejected anything else
+  }
+  broadcastManagerState();
+}
+
+async function handleManagerCapture(turn) {
+  const m = state.manager;
+  if (m.status !== "waiting" || !m.pendingModels.includes(turn.site)) return;
+  const myTaskId = m.taskId;
+
+  const responseEntry = { id: m.allResponses.length + 1, target: turn.site, text: turn.text, ts: turn.ts };
+  m.allResponses.push(responseEntry);
+  m.latestResponses[turn.site] = turn.text;
+  const assignment = m.activeAssignments.find((a) => a.target === turn.site);
+  if (assignment) {
+    m.completedAssignments.push({ ...assignment, response: turn.text, ts: turn.ts });
+    m.activeAssignments = m.activeAssignments.filter((a) => a.target !== turn.site);
+  }
+  m.pendingModels = m.pendingModels.filter((t) => t !== turn.site);
+  await saveRawResponse(responseEntry);
+  if (state.manager.taskId !== myTaskId || ["finished", "error"].includes(state.manager.status)) return; // this task was stopped/replaced while the save was in flight
+  logManagerEvent({ category: "response", target: [turn.site], summary: `${SITES[turn.site].label} responded (${turn.text.length} chars)` });
+
+  if (m.pendingModels.length === 0) {
+    m.status = "reviewing";
+    m.noProgressStreak = 0;
+    if (m.currentTier > (state.managerConfig.tier || 2)) {
+      m.currentTier -= 1; // de-escalate back toward the configured baseline now that things are progressing again
+      logManagerEvent({ category: "escalation", summary: `De-escalating to tier ${m.currentTier} now that a response landed` });
+    }
+    await runManagerTurn();
+  } else {
+    broadcastManagerState();
+  }
+}
+
+async function startManagedTask(userRequest) {
+  const m0 = state.manager;
+  if (m0 && !["idle", "finished", "error"].includes(m0.status)) return { ok: false, error: "ALREADY_RUNNING" };
+  if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
+  if (!userRequest || !String(userRequest).trim()) return { ok: false, error: "NEEDS_REQUEST" };
+
+  resetManagerTask();
+  const m = state.manager;
+  m.taskId = `task-${Date.now()}`;
+  m.userRequest = String(userRequest).trim();
+  m.status = "classifying";
+  m.startedTs = Date.now();
+  m.projectDir = await createProjectDir(m.taskId, m.userRequest);
+
+  logManagerEvent({ category: "task", summary: `Managed task started: "${m.userRequest.slice(0, 120)}"` });
+  broadcastManagerState();
+  runManagerTurn(); // fire-and-forget -- progresses asynchronously via capture events, same pattern as startSequence()
+  return { ok: true, taskId: m.taskId };
+}
+
+async function finishManagedTask({ ok, reason }) {
+  const m = state.manager;
+  m.status = ok ? "finished" : "error";
+  m.finishedTs = Date.now();
+  await saveTaskCheckpoint();
+  logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
+  broadcastManagerState();
+}
+
+function stopManagedTask() {
+  const m = state.manager;
+  if (m.status === "idle") return { ok: false, error: "NOT_RUNNING" };
+  m.status = "finished";
+  m.pendingModels = [];
+  m.finishedTs = Date.now();
+  logManagerEvent({ category: "task", summary: "Task stopped by user" });
+  broadcastManagerState();
+  return { ok: true };
+}
+
+function pauseManagedTask() {
+  if (state.manager.status === "idle") return { ok: false, error: "NOT_RUNNING" };
+  state.manager.status = "paused";
+  logManagerEvent({ category: "task", summary: "Task paused" });
+  broadcastManagerState();
+  return { ok: true };
+}
+
+function resumeManagedTask() {
+  const m = state.manager;
+  if (m.status !== "paused") return { ok: false, error: "NOT_PAUSED" };
+  m.status = m.pendingModels.length ? "waiting" : "reviewing";
+  logManagerEvent({ category: "task", summary: "Task resumed" });
+  broadcastManagerState();
+  if (!m.pendingModels.length) runManagerTurn();
+  return { ok: true };
+}
+
+async function approveManagerAction() {
+  const m = state.manager;
+  if (!m.pendingApproval) return { ok: false, error: "NOTHING_PENDING" };
+  const decision = m.pendingApproval;
+  m.pendingApproval = null;
+  m.status = "reviewing";
+  logManagerEvent({ category: "approval", summary: "Action approved", action: decision.action, details: decision });
+  await executeManagerAction(decision);
+  return { ok: true };
+}
+
+function rejectManagerAction(reason) {
+  const m = state.manager;
+  if (!m.pendingApproval) return { ok: false, error: "NOTHING_PENDING" };
+  logManagerEvent({ category: "approval", summary: `Action rejected: ${reason || "no reason given"}`, action: m.pendingApproval.action, details: m.pendingApproval });
+  m.pendingApproval = null;
+  m.previousManagerActions.push({ action: "REJECTED_BY_USER", reason: reason || null, ts: Date.now() });
+  m.status = "reviewing";
+  broadcastManagerState();
+  runManagerTurn();
+  return { ok: true };
+}
+
 // --- House Rules: per-mode reactions to a new captured reply ----------------
 
 async function handleDebateCapture(turn) {
@@ -1168,6 +1740,7 @@ async function pollSite(site) {
     if (stageActive) await handleHouseRuleCapture(turn);
     else await handleRoundtableCapture(turn);
     if (state.sequence.active) await handleSequenceCapture(turn);
+    if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
@@ -1416,7 +1989,10 @@ ipcMain.handle("state:get", () => ({
   transcript: state.transcript,
   log: state.log,
   prompts: state.prompts,
-  sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length }
+  sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length },
+  manager: managerSnapshot(),
+  managerConfig: managerConfigSnapshot(),
+  managerLog: state.managerLog
 }));
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
@@ -1611,6 +2187,39 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
     selftestInFlight.delete(site);
   }
 });
+
+ipcMain.handle("manager:start-task", async (_evt, { userRequest }) => startManagedTask(userRequest));
+ipcMain.handle("manager:pause", () => pauseManagedTask());
+ipcMain.handle("manager:resume", () => resumeManagedTask());
+ipcMain.handle("manager:stop", () => stopManagedTask());
+ipcMain.handle("manager:approve", async () => approveManagerAction());
+ipcMain.handle("manager:reject", (_evt, { reason } = {}) => rejectManagerAction(reason));
+
+ipcMain.handle("manager:configure-provider", (_evt, config) => {
+  if (!config || typeof config !== "object") return { ok: false, error: "BAD_CONFIG" };
+  const allowedProviders = new Set(["runpod-serverless", "runpod-pod", "openai-compatible"]);
+  if (config.provider && !allowedProviders.has(config.provider)) return { ok: false, error: "BAD_PROVIDER" };
+  if (config.tier != null && (!Number.isInteger(config.tier) || config.tier < 1 || config.tier > 4)) return { ok: false, error: "BAD_TIER" };
+  // Only overwrite fields actually present in the payload -- lets the config UI
+  // save "just changed the model" without needing to resend the API key.
+  const next = { ...state.managerConfig };
+  for (const key of ["provider", "endpoint", "apiKey", "model", "tier", "timeoutMs", "podId", "approvalMode", "maximumTurns", "costLimit", "adjudicatorSite"]) {
+    if (config[key] !== undefined) next[key] = config[key];
+  }
+  state.managerConfig = next;
+  saveStateDebounced();
+  logManagerEvent({ category: "config", summary: "Manager provider configuration updated", details: { provider: next.provider, model: next.model, tier: next.tier }, visibleInManagerLog: true, visibleInGlobalLog: true });
+  return { ok: true, config: managerConfigSnapshot() };
+});
+
+ipcMain.handle("manager:test-connection", async () => {
+  if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
+  const res = await managerProvider.testConnection(state.managerConfig);
+  logManagerEvent({ category: "config", severity: res.ok ? "success" : "error", summary: res.ok ? "Provider connection test passed" : `Provider connection test failed: ${res.error}` });
+  return res;
+});
+
+ipcMain.handle("manager:get-state", () => ({ ok: true, manager: managerSnapshot(), managerConfig: managerConfigSnapshot(), managerLog: state.managerLog }));
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);

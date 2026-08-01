@@ -318,6 +318,106 @@ other AIs as if it were a real reply — the turn still shows up in the
 transcript (marked ⚠ USAGE LIMIT) so you can see what happened, and Resume
 once the limit clears.
 
+## Manager / Orchestrator (Phase 1 — backend only, no UI panel yet)
+
+A supervisory layer on top of everything above: instead of you deciding
+what to send to which AI and reading through the results yourself, a
+**manager** — its own model, separate from ChatGPT/Claude/Gemini — plans a
+task, delegates pieces of it to whichever of the three fit, watches what
+comes back, asks for corrections or a second opinion when something looks
+wrong or the AIs disagree, and saves the result to a real project folder on
+disk. It's a supervisor, not a fourth worker: it only writes/researches/
+analyzes itself when there's genuinely nothing to delegate.
+
+**The one deliberate exception to "no API keys."** Everywhere else in this
+app, that rule means "don't call ChatGPT/Claude/Gemini's official APIs —
+drive their real web UIs instead," because that's the entire premise of the
+project. The manager is a *different* model — one you run yourself, since
+this app assumes you don't have local GPU hardware for it — reached via a
+real HTTP API: **RunPod** (serverless or a dedicated pod you rent), **Ollama**
+or **LM Studio** (if you ever do get local hardware), or any other
+OpenAI-compatible chat-completions endpoint. ChatGPT/Claude/Gemini
+themselves are still never touched by anything but `sendTextTo()`/
+`pollSite()` — the manager delegates to them exactly the same way Forward,
+Auto, House Rules, and Prompt Sequence already do.
+
+**Current status: this is backend + IPC only.** There's no Manager panel in
+`controls.html` yet — driving it today means calling the IPC handlers below
+directly (e.g. from DevTools console via `window.api`). The two-column
+Manager Activity Log / Communication panel, the full automatic 0-4 tier
+ladder, RunPod pod idle-shutdown automation, and desktop notifications are
+all deferred to a later phase, once this core loop has been used for real.
+None of it has been run against an actual RunPod/Ollama/LM Studio backend
+from this dev environment either — same caveat as every DOM selector in
+this app, the shapes are carefully matched to each provider's documented
+API, but real verification needs your actual account/instance.
+
+### Configuring it
+
+`window.api.configureManagerProvider({ provider, endpoint, apiKey, model, tier, timeoutMs, podId, approvalMode, maximumTurns, costLimit, adjudicatorSite })`
+— `provider` is one of `"runpod-serverless"`, `"runpod-pod"`, or
+`"openai-compatible"` (this last one also covers Ollama/LM Studio, since
+both already speak the OpenAI chat-completions shape natively). `endpoint`
+is the **full URL** to POST to — this app never guesses or constructs a
+RunPod endpoint id into a URL itself, since that composition is
+worker-template-specific and is your deployment's call, not this app's.
+`window.api.testManagerConnection()` sends a trivial request and reports
+whether the endpoint is reachable at all, independent of whether the model
+actually followed the JSON-only format.
+
+### Running a task
+
+- `window.api.startManagedTask(userRequest)` — starts a new task (rejected
+  with `NOT_CONFIGURED` if no endpoint/model is set, `NEEDS_REQUEST` if the
+  request is blank, `ALREADY_RUNNING` if one's already in progress). Creates
+  a real folder under your **Documents/AutoInjector Projects/** for this
+  task (`project.json` checkpoint, `manager-log.jsonl`, `raw-responses/`,
+  `working/`, `sources/`, `versions/`, `final/`) — every response any AI
+  gives is preserved raw in `raw-responses/` regardless of what the manager
+  later does with it, kept separate from whatever ends up in `final/`.
+- `window.api.pauseManagedTask()` / `resumeManagedTask()` / `stopManagedTask()`
+  — pausing holds the loop exactly where it is (mid-wait-for-a-reply or
+  between turns); resuming picks back up from there, not from the start.
+- **Approval mode** (`approvalMode: true`) holds every proposed action
+  (except one the manager itself flagged `REQUEST_APPROVAL` for, which is
+  always held) for a real decision before it does anything — critically,
+  *nothing is sent to any AI pane until approved*, not just hidden from
+  view. `window.api.approveManagerAction()` / `rejectManagerAction(reason)`.
+- `window.api.getManagerState()` (or the `manager`/`managerConfig`/
+  `managerLog` fields already included in the regular `getState()`) reads
+  current status, plan, assignments, responses, tier, and any pending
+  approval. `onManagerState`/`onManagerLog` subscribe to live updates.
+
+### What the manager can actually do
+
+A fixed action vocabulary — `CLASSIFY, PLAN, DELEGATE, SEND, FORWARD,
+COMPARE, CRITIQUE, VERIFY, EXTRACT, ASSEMBLE, REVISE, VALIDATE, SAVE,
+EXPORT, ESCALATE, WAIT, FINISH, PAUSE, REQUEST_APPROVAL` — nothing else.
+Every decision is validated twice before anything executes: once by
+`manager-provider.js` (is this valid JSON with a real action name), then
+again by `main.js` (are the targets actually chatgpt/claude/gemini, is a
+`SAVE`/`EXPORT` path actually a safe relative path inside this task's own
+project folder — no `..`, no absolute paths, ever — does any field contain
+something that looks like an attempt at code injection or credential
+exposure). A decision that fails either check is logged with the specific
+reason and never executed; repeated failures escalate the tier rather than
+retrying the same broken thing forever, and a `maximumTurns` cap (default
+20) or `costLimit` ends the task outright if it truly can't make progress.
+
+### Tiers, simplified for this phase
+
+The full spec's automatic 0-4 ladder (routing cheaper/more-expensive
+provider configs to different situations) is deferred — Phase 1 has one
+configurable tier (`managerConfig.tier`, default 2) that escalates by
+exactly one step on a provider failure or a repeatedly invalid decision,
+and an explicit `ESCALATE` action can jump straight to a requested tier.
+**Tier 4 is special even in this phase**: instead of calling the configured
+RunPod/Ollama/LM Studio endpoint, it routes the specific question straight
+to a real ChatGPT/Claude/Gemini pane (`adjudicatorSite`, default Claude) —
+matching the spec's "cloud adjudication" — and steps back down toward the
+configured baseline tier automatically once a response lands and the task
+is making progress again.
+
 ## Picking up where you left off
 
 Your transcript, any custom Role Assignments, and an in-progress House Rules
@@ -497,6 +597,34 @@ me fix `selectors.js` itself for real, rather than guessing again.
   with the 🔍 Inspect DevTools feature — having both attached to the same
   pane at once can make the attach fail (reported as `ATTACH_FAILED`), a
   rare, self-resolving collision rather than something worth special-casing.
+  The **manager/orchestrator loop** (`runManagerTurn()`/`executeManagerAction()`/
+  `handleManagerCapture()`, see the section above) is event-driven the same
+  way Prompt Sequence is: a `DELEGATE`-family action sends via `sendTextTo()`
+  and returns immediately, and `handleManagerCapture()` — hooked into
+  `pollSite()`'s dispatch exactly like `handleSequenceCapture()` — resumes
+  the loop once every pending target has actually replied, rather than
+  blocking on a wait. Because `runManagerTurn()`/`handleManagerCapture()`
+  are always fire-and-forget from whatever triggers them (`manager:stop`,
+  a reject/approve, a captured reply), each one captures its task's id
+  before its first `await` and re-checks `state.manager.taskId` (and that
+  the task hasn't been stopped) immediately after — otherwise a slow
+  provider response arriving after the user stops or replaces the task
+  could still go on to mutate whatever task is running *now*.
+- `manager-provider.js` — the manager's interchangeable backend
+  (`askManager()`), the one deliberate exception to "no API keys" in this
+  app (see the Manager section above for why). Every supported provider —
+  RunPod Serverless's own OpenAI-compatible workers, a dedicated RunPod pod,
+  Ollama, LM Studio, or any other OpenAI-compatible endpoint — speaks the
+  same request/response shape, so there's no provider switch in the HTTP
+  logic itself, only `config.endpoint`/`config.apiKey` change; a separate
+  `startPod`/`getPodStatus`/`waitUntilReady`/`stopPod` group handles a
+  dedicated RunPod pod's own lifecycle via RunPod's REST API, kept isolated
+  since it's the least-standardized, least-tested part of this file. A
+  response is only ever treated as a decision once it round-trips through
+  real JSON parsing (recovering a `{...}` block even if the model wrapped it
+  in stray prose) and its `action` is confirmed to be one this app actually
+  knows — main.js's own, deeper validation (safe paths, real targets, no
+  injection attempts) happens on top of this, not instead of it.
 - `automation.js` / `selectors.js` — build two small scripts run inside each AI's
   pane via `webContents.executeJavaScript()`: one to type text into the chat box
   and click send, one to just read whatever the latest reply currently says.
@@ -652,6 +780,35 @@ the `send` stage without the test needing to wait out anything; an unknown
 site is rejected; and starting a second test for a site that already has one
 in flight is rejected as `ALREADY_RUNNING` rather than the two crossing
 results, with the original run still resolving normally afterward.
+
+It also covers the manager/orchestrator loop, stubbing out
+`manager-provider.js`'s `askManager()` at the module level (main.js's own
+`require("./manager-provider")` resolves to the exact same module-cache
+entry, so this intercepts every call main.js makes without touching main.js
+itself) so full task lifecycles run against a scripted sequence of
+decisions instead of a real backend: a complete classify→delegate→capture
+a real reply→finish run, checking that the real project folder, checkpoint
+file, and raw response actually land on disk; approval mode holding a
+proposed action until approved (with an assertion that nothing was actually
+sent while it was pending, not just hidden) or discarded on rejection, with
+the rejection itself recorded in the manager's own action history; a
+decision that's syntactically valid but targets something outside chatgpt/
+claude/gemini being rejected and, if it keeps happening, escalating the
+tier and eventually ending the task via `maximumTurns` rather than looping
+forever; an explicit `ESCALATE` action jumping straight to a requested
+tier, Tier 4 routing to a real AI pane instead of the configured provider
+and never touching it while at that tier, then de-escalating back down and
+resuming the configured provider once a response lands; a `SAVE` action
+writing real content to disk under that task's own `final/` folder, and a
+path-traversal attempt being refused rather than ever landing outside it;
+and pause/resume/stop leaving an in-flight delegation exactly where it was
+rather than re-sending anything. `test/manager-provider.test.js` covers the
+provider layer directly with a mocked `global.fetch` (no Electron needed at
+all): the exact request shape sent (endpoint, Bearer auth, model/messages),
+recovering a JSON decision even when wrapped in stray prose, distinguishing
+an unparseable reply, a non-2xx response, a network error, and a timeout
+from each other, redacting the API key from every error path, and the
+RunPod dedicated-pod lifecycle calls hitting the right REST routes.
 
 It also covers the Prompt Library backend: both built-ins existing by
 default ("System Test," with each AI's own version correctly naming the

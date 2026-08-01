@@ -49,5 +49,16 @@ contextBridge.exposeInMainWorld("api", {
   onSendError: (cb) => ipcRenderer.on("send-error", (_e, payload) => cb(payload)),
   onWaitingChanged: (cb) => ipcRenderer.on("waiting-changed", (_e, payload) => cb(payload)),
   onHouseRuleState: (cb) => ipcRenderer.on("houserule-state", (_e, payload) => cb(payload)),
-  onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload))
+  onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload)),
+  startManagedTask: (userRequest) => ipcRenderer.invoke("manager:start-task", { userRequest }),
+  pauseManagedTask: () => ipcRenderer.invoke("manager:pause"),
+  resumeManagedTask: () => ipcRenderer.invoke("manager:resume"),
+  stopManagedTask: () => ipcRenderer.invoke("manager:stop"),
+  approveManagerAction: () => ipcRenderer.invoke("manager:approve"),
+  rejectManagerAction: (reason) => ipcRenderer.invoke("manager:reject", { reason }),
+  configureManagerProvider: (config) => ipcRenderer.invoke("manager:configure-provider", config),
+  testManagerConnection: () => ipcRenderer.invoke("manager:test-connection"),
+  getManagerState: () => ipcRenderer.invoke("manager:get-state"),
+  onManagerState: (cb) => ipcRenderer.on("manager-state", (_e, payload) => cb(payload)),
+  onManagerLog: (cb) => ipcRenderer.on("manager-log", (_e, payload) => cb(payload))
 });

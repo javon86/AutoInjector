@@ -17,6 +17,27 @@ Module._load = function (request, parent, isMain) {
 const mockElectron = require(mockElectronPath);
 const automation = require(path.join(__dirname, "..", "automation"));
 
+// The manager loop's HTTP boundary (manager-provider.js's askManager) gets
+// stubbed the same way Electron itself does here -- main.js's own
+// `const managerProvider = require("./manager-provider")` resolves to this
+// exact same module-cache entry, so overwriting its export intercepts every
+// call main.js makes without touching main.js at all. testConnection()'s
+// internal call to the real askManager (a separate closured reference) is
+// deliberately NOT intercepted -- see testManagerConfigureAndConnection().
+const managerProvider = require(path.join(__dirname, "..", "manager-provider"));
+let managerAskQueue = []; // strict FIFO -- one entry consumed per call, exactly the sequence a test queued
+let managerAskRepeat = null; // falls back to this (without consuming it) once the FIFO queue is empty
+let managerAskCalls = [];
+managerProvider.askManager = async (managerState, config) => {
+  managerAskCalls.push({ managerState, config });
+  if (managerAskQueue.length) return managerAskQueue.shift();
+  if (managerAskRepeat) return managerAskRepeat;
+  return { ok: false, error: "NO_STUB_QUEUED" };
+};
+function queueManagerDecision(decision) { managerAskQueue.push({ ok: true, decision }); }
+function queueManagerDecisionRepeating(decision) { managerAskRepeat = { ok: true, decision }; }
+function resetManagerStub() { managerAskQueue = []; managerAskRepeat = null; managerAskCalls = []; }
+
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
 let failed = 0;
@@ -840,6 +861,245 @@ async function testSelfTestConnectivity() {
   assert(firstRunRes.ok === true, "the original in-flight test still resolves normally afterward");
 }
 
+const MANAGER_TEST_CONFIG = { provider: "openai-compatible", endpoint: "http://localhost:1234/v1/chat/completions", apiKey: "mgr-test-key", model: "test-model", tier: 2, timeoutMs: 5000, approvalMode: false, maximumTurns: 20, costLimit: 5 };
+
+async function resetManagerState() {
+  const s = await call("state:get", {});
+  if (!["idle", "finished", "error"].includes(s.manager.status)) await call("manager:stop", {});
+  resetManagerStub();
+  await resetAllParticipants(); // clears sentLog/pending/captured/busy for every site -- manager tests are just as stateful as House Rules tests, same reset discipline applies
+}
+
+async function testManagerConfigureAndConnection() {
+  console.log("\n== Manager: configuring the provider, and connection testing ==");
+  await resetManagerState();
+
+  const cfgRes = await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  assert(cfgRes.ok, "a well-formed config is accepted");
+  assert(cfgRes.config.hasApiKey === true && cfgRes.config.apiKey === undefined, "the response confirms a key is set without ever echoing the raw key back");
+
+  const s = await call("state:get", {});
+  assert(s.managerConfig.provider === "openai-compatible" && s.managerConfig.model === "test-model" && s.managerConfig.hasApiKey === true, "state:get reflects the saved config, key redacted");
+
+  const badProvider = await call("manager:configure-provider", { provider: "not-a-real-provider" });
+  assert(!badProvider.ok && badProvider.error === "BAD_PROVIDER", "an unrecognized provider is rejected");
+  const badTier = await call("manager:configure-provider", { tier: 9 });
+  assert(!badTier.ok && badTier.error === "BAD_TIER", "a tier outside 1-4 is rejected");
+
+  const noConfigTest = await call("manager:test-connection", {});
+  await call("manager:configure-provider", { endpoint: "", model: "" });
+  const notConfigured = await call("manager:test-connection", {});
+  assert(!notConfigured.ok && notConfigured.error === "NOT_CONFIGURED", "testing the connection with nothing configured is rejected before attempting any network call");
+  void noConfigTest;
+
+  // Restores real config for the network-reachability half of this check --
+  // this actually calls the real (un-stubbed) askManager/testConnection
+  // internals against http://localhost:1234, which nothing is listening on
+  // in this sandbox, so a real, deterministic connection failure is the
+  // correct and expected outcome here -- it proves the IPC plumbing and
+  // error handling work end-to-end, not that a live backend exists.
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, timeoutMs: 2000 });
+  const unreachable = await call("manager:test-connection", {});
+  assert(unreachable.ok === false, "a configured-but-unreachable endpoint reports a real, non-crashing connection failure");
+}
+
+async function testManagerTaskLifecycleHappyPath() {
+  console.log("\n== Manager: full task lifecycle -- classify/delegate, capture a real reply, finish, and check the on-disk project files ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+
+  const notConfiguredStart = await (async () => {
+    await call("manager:configure-provider", { endpoint: "" });
+    const r = await call("manager:start-task", { userRequest: "write something" });
+    await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+    return r;
+  })();
+  assert(!notConfiguredStart.ok && notConfiguredStart.error === "NOT_CONFIGURED", "starting a task with no endpoint/model configured is rejected");
+
+  const noRequest = await call("manager:start-task", { userRequest: "   " });
+  assert(!noRequest.ok && noRequest.error === "NEEDS_REQUEST", "starting a task with a blank request is rejected");
+
+  queueManagerDecision({ action: "DELEGATE", assignments: [{ target: "chatgpt", task: "Write a first draft." }], reason: "Delegating the initial draft.", confidence: 0.8 });
+  const startRes = await call("manager:start-task", { userRequest: "Write me a short project summary." });
+  assert(startRes.ok && !!startRes.taskId, "starting a properly-configured task succeeds and returns a taskId");
+
+  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "the DELEGATE assignment reaches chatgpt" });
+  assert(sentLog("chatgpt")[0].text.includes("Write a first draft.") && sentLog("chatgpt")[0].text.includes(startRes.taskId), "the assignment text and a task-identifying wrapper both reach the real send");
+
+  let s = await call("state:get", {});
+  assert(s.manager.status === "waiting" && s.manager.pendingModels.includes("chatgpt"), "the task is now waiting on chatgpt specifically");
+  assert(managerAskCalls.length === 1, "exactly one manager decision call happened before delegation paused the loop");
+
+  queueManagerDecision({ action: "FINISH", reason: "The draft is good enough.", confidence: 0.9 });
+  say("chatgpt", "Here is the draft you asked for.");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "the task finishes once chatgpt's reply is captured and the manager says FINISH" });
+
+  s = await call("state:get", {});
+  assert(s.manager.completedAssignments.length === 1 && s.manager.completedAssignments[0].response.includes("draft you asked for"), "the completed assignment carries the real captured response text");
+  assert(s.managerLog.some((l) => l.category === "task" && l.severity === "success"), "the Manager Activity Log records task completion");
+  assert(s.log.some((l) => l.kind === "manager-task"), "task events also flow into the existing global Activity Log, not just the manager-only one");
+
+  assert(fs.existsSync(s.manager.projectDir), "a real project directory was created on disk");
+  const checkpointRaw = fs.readFileSync(path.join(s.manager.projectDir, "project.json"), "utf8");
+  const checkpoint = JSON.parse(checkpointRaw);
+  assert(checkpoint.taskId === startRes.taskId, "the saved checkpoint reflects the actual finished task");
+  const rawResponseFiles = fs.readdirSync(path.join(s.manager.projectDir, "raw-responses"));
+  assert(rawResponseFiles.length === 1 && fs.readFileSync(path.join(s.manager.projectDir, "raw-responses", rawResponseFiles[0]), "utf8").includes("draft you asked for"), "the raw, unedited response was preserved on disk separately from the manager's own summary");
+
+  const getStateRes = await call("manager:get-state", {});
+  assert(getStateRes.ok && getStateRes.manager.taskId === startRes.taskId, "the dedicated manager:get-state handler returns the same task state");
+
+  const alreadyRunning = await call("manager:start-task", { userRequest: "" });
+  void alreadyRunning; // status is "finished" here, not blocking -- ALREADY_RUNNING is covered implicitly by resetManagerState()'s own guard in every other test
+}
+
+async function testManagerApprovalModeAndRejection() {
+  console.log("\n== Manager: approval mode holds an action for a human decision before it ever reaches a real send ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: true });
+
+  // Both decisions are queued up front, before the task even starts -- the
+  // FIFO queue holds the FINISH ready and waiting so it's there the instant
+  // reject()'s fire-and-forget continuation asks for the next one, rather
+  // than racing this test's own code to call queueManagerDecision() in time.
+  queueManagerDecision({ action: "DELEGATE", assignments: [{ target: "gemini", task: "Summarize the findings." }], reason: "Needs a summary.", confidence: 0.7 });
+  queueManagerDecision({ action: "FINISH", reason: "Stopping here for this test.", confidence: 0.5 });
+  const startRes = await call("manager:start-task", { userRequest: "Summarize this for me." });
+  assert(startRes.ok, "task starts");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "paused", { label: "approval mode pauses before executing" });
+  let s = await call("state:get", {});
+  assert(!!s.manager.pendingApproval && s.manager.pendingApproval.action === "DELEGATE", "the proposed action is held for approval, visible to the UI");
+  assert(sentLog("gemini").length === 0, "critically, nothing was actually sent yet -- approval gates real side effects, not just visibility");
+
+  const rejectRes = await call("manager:reject", { reason: "Not ready yet." });
+  assert(rejectRes.ok, "rejecting succeeds");
+  assert(sentLog("gemini").length === 0, "rejecting truly never sent anything");
+
+  // approvalMode is still ON, so the loop's very next decision (our queued
+  // FINISH) also gets held for approval -- reading state here isn't safe
+  // until that second pause has actually happened (reject()'s continuation
+  // runs in the background), so synchronize on the state transition itself
+  // rather than assuming any particular timing.
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "paused", { label: "after a rejection, the loop's next decision is also held for approval since approval mode is still on" });
+  s = await call("state:get", {});
+  assert(!!s.manager.pendingApproval && s.manager.pendingApproval.action === "FINISH", "the rejected DELEGATE is gone and a fresh decision is what's pending now");
+  assert(s.manager.previousManagerActions.some((a) => a.action === "REJECTED_BY_USER" && a.reason === "Not ready yet."), "the rejection itself, with its reason, is recorded in the manager's own action history");
+
+  await call("manager:approve", {});
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "approving the follow-up decision lets the loop finish normally" });
+
+  // second scenario: approving instead of rejecting actually lets the send through
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: true });
+  queueManagerDecision({ action: "DELEGATE", assignments: [{ target: "claude", task: "Draft an outline." }], reason: "Needs an outline.", confidence: 0.75 });
+  await call("manager:start-task", { userRequest: "Outline this topic." });
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "paused", { label: "second scenario also pauses for approval" });
+
+  const approveRes = await call("manager:approve", {});
+  assert(approveRes.ok, "approving succeeds");
+  await waitUntil(() => sentLog("claude").length === 1, { label: "approving the held DELEGATE action finally lets the real send happen" });
+  assert(sentLog("claude")[0].text.includes("Draft an outline."), "the send carries the exact assignment that was approved");
+
+  await call("manager:configure-provider", { approvalMode: false }); // leave state clean for later scenarios
+}
+
+async function testManagerValidationEscalationAndMaxTurns() {
+  console.log("\n== Manager: an invalid decision is rejected, escalates the tier after repeating, and a small maximumTurns cap still ends the task ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 3, approvalMode: false });
+
+  // this DELEGATE names a target outside chatgpt/claude/gemini -- valid per
+  // manager-provider.js's own action vocabulary, but rejected by main.js's
+  // deeper target-allowlist check, exactly the two-layer validation this
+  // feature is built around.
+  queueManagerDecisionRepeating({ action: "DELEGATE", assignments: [{ target: "some-other-model", task: "do it" }], reason: "bad target", confidence: 0.5 });
+
+  const startRes = await call("manager:start-task", { userRequest: "This will keep failing validation." });
+  assert(startRes.ok, "the task itself starts fine -- the failure is in what the manager proposes, not in starting");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "repeated invalid decisions eventually exhaust maximumTurns and end the task" });
+  const s = await call("state:get", {});
+  assert(s.manager.currentTier > 2, `the tier escalated at least once while repeatedly failing to make progress (got tier ${s.manager.currentTier})`);
+  assert(s.manager.previousManagerActions.some((a) => a.rejected && a.rejectReason === "BAD_ASSIGNMENT"), "each rejected decision is recorded with the specific reason it was rejected for");
+  assert(s.managerLog.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), "the Manager Activity Log explains exactly why the task ended, not just that it did");
+  assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "an invalid target never results in an actual send to anyone");
+}
+
+async function testManagerEscalateActionAndTierFourAdjudication() {
+  console.log("\n== Manager: an explicit ESCALATE action jumps straight to the requested tier, Tier 4 routes to a real AI pane instead of the configured provider, and it de-escalates back down afterward ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 20, approvalMode: false, adjudicatorSite: "claude" });
+
+  queueManagerDecision({ action: "ESCALATE", toTier: 4, reason: "Models disagree and need cloud adjudication." });
+  const startRes = await call("manager:start-task", { userRequest: "Resolve this disagreement." });
+  assert(startRes.ok, "task starts");
+
+  await waitUntil(() => sentLog("claude").length === 1, { label: "Tier 4 sends an adjudication prompt directly to a real AI pane" });
+  assert(sentLog("claude")[0].text.includes("tier 4 cloud adjudication"), "the adjudication send is clearly labeled as such");
+  let s = await call("state:get", {});
+  assert(s.manager.currentTier === 4, "the tier actually reached 4, exactly as the ESCALATE action requested, not just incrementally");
+  assert(managerAskCalls.length === 1, "Tier 4 does NOT call the configured RunPod/Ollama/LM Studio provider at all -- only the initial ESCALATE decision did");
+
+  queueManagerDecision({ action: "FINISH", reason: "Adjudication resolved it.", confidence: 0.9 });
+  say("claude", "After reviewing both, the correct approach is X.");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "the loop resumes at the configured provider after the adjudicator replies, and can finish normally" });
+
+  s = await call("state:get", {});
+  assert(s.manager.currentTier < 4, `de-escalated back down from Tier 4 after making progress again (got tier ${s.manager.currentTier})`);
+  assert(managerAskCalls.length === 2, "exactly one real call to the configured provider happened after de-escalating, to produce the FINISH decision");
+}
+
+async function testManagerSaveActionWritesRealFiles() {
+  console.log("\n== Manager: a SAVE action writes real content to disk under the task's own final/ folder, and an unsafe path is refused ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+
+  queueManagerDecision({ action: "SAVE", filename: "summary.md", content: "# Summary\n\nAll done.", reason: "Saving the final result.", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "Saved and done.", confidence: 0.9 });
+  const startRes = await call("manager:start-task", { userRequest: "Produce and save a short summary." });
+  assert(startRes.ok, "task starts");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "SAVE needs no browser reply at all -- it's a pure Tier 0 file operation, so the task finishes immediately" });
+  const s = await call("state:get", {});
+  const savedPath = path.join(s.manager.projectDir, "final", "summary.md");
+  assert(fs.existsSync(savedPath) && fs.readFileSync(savedPath, "utf8") === "# Summary\n\nAll done.", "the exact saved content lands on disk at the expected path");
+
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 3, approvalMode: false });
+  queueManagerDecisionRepeating({ action: "SAVE", filename: "../../escape.txt", content: "should never land", reason: "trying to escape the project dir", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "Try to save outside the project directory." });
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "a path-traversal attempt eventually exhausts maximumTurns rather than ever succeeding" });
+  const s2 = await call("state:get", {});
+  assert(s2.manager.previousManagerActions.some((a) => a.rejected && a.rejectReason === "UNSAFE_PATH"), "the unsafe path is caught and rejected specifically, never silently written");
+}
+
+async function testManagerPauseResumeStop() {
+  console.log("\n== Manager: pause/resume/stop controls work without disturbing an in-flight delegation ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+
+  queueManagerDecision({ action: "DELEGATE", assignments: [{ target: "chatgpt", task: "Do the thing." }], reason: "x", confidence: 0.6 });
+  await call("manager:start-task", { userRequest: "Pause/resume test." });
+  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "delegation sent" });
+
+  const pauseRes = await call("manager:pause", {});
+  assert(pauseRes.ok, "pausing succeeds while waiting on a reply");
+  let s = await call("state:get", {});
+  assert(s.manager.status === "paused", "status reflects paused");
+
+  const resumeRes = await call("manager:resume", {});
+  assert(resumeRes.ok, "resuming succeeds");
+  s = await call("state:get", {});
+  assert(s.manager.status === "waiting" && s.manager.pendingModels.includes("chatgpt"), "resuming a task that was still waiting on a reply goes back to waiting, not straight to another decision");
+  assert(sentLog("chatgpt").length === 1, "pause/resume never re-sent anything");
+
+  const stopRes = await call("manager:stop", {});
+  assert(stopRes.ok, "stopping succeeds");
+  s = await call("state:get", {});
+  assert(s.manager.status === "finished" && s.manager.pendingModels.length === 0, "stopping ends the task and clears anything it was still waiting on");
+}
+
 async function testAlwaysOnTagRouting() {
   console.log("\n== Roundtable v2 baseline: [TO: X] tag parsing, stripping, and routing run always, with no House Rule started ==");
   await resetAllParticipants();
@@ -994,6 +1254,13 @@ async function main() {
   testSelectorOverridePriorityInScripts();
   await testSelectorPicker();
   await testSelfTestConnectivity();
+  await testManagerConfigureAndConnection();
+  await testManagerTaskLifecycleHappyPath();
+  await testManagerApprovalModeAndRejection();
+  await testManagerValidationEscalationAndMaxTurns();
+  await testManagerEscalateActionAndTierFourAdjudication();
+  await testManagerSaveActionWritesRealFiles();
+  await testManagerPauseResumeStop();
   await testAlwaysOnTagRouting();
   await testStageOverridesBaseline();
 
