@@ -267,6 +267,16 @@ launch, no reply expected) — see step 2 under "Using it" above. That same
 text lives in the Prompt Library as **"System Prompt (How Routing Works)"**
 if you ever need to resend it.
 
+**Tag routing and mesh routing (Auto/Auto-Both/manual `routing:set`) don't
+double up.** Both can independently point at the same target for the same
+reply — full mesh routing on, and the AI's own `[TO: X]` tag also naming a
+site already covered by that mesh. If you turn a mesh direction on, tag
+routing always takes priority for any target it already covers; mesh only
+forwards to whatever's left. This used to genuinely duplicate deliveries (a
+target getting sent to twice for one reply — once via mesh with the raw,
+un-stripped tag still in the body, once via tag routing with the clean,
+stripped version) until it was root-caused and fixed.
+
 ## House Rules
 
 Instead of manually wiring up Forward/Auto buttons, **House Rules** (in the
@@ -854,6 +864,16 @@ left as plain, untouched text, and the format's own state machine drives the
 next send instead of a tag-routed relay), and that stopping it hands control
 back to tag-routing automatically on the very next captured reply, with no
 separate action needed to re-enable it.
+
+It also covers the mesh/tag double-dispatch bugfix directly: with full mesh
+routing on (`routing:auto-all`) and a `[TO: CLAUDE]` tag also naming a
+mesh-covered target, that target gets exactly one delivery (the clean,
+tag-stripped one from tag routing, not the raw mesh copy) while an
+unaddressed site in the same mesh still correctly gets its own separate
+mesh copy — checked against `sentLog` counts, the actual message content,
+and the delivery ledger (exactly one entry, not flagged `duplicate:true`);
+and the same for a `[TO: ALL]` reply with full mesh on, where both other
+sites still get exactly one copy each, not two.
 
 It also covers the Prompt Sequence backend: `sequence:open`/
 `sequence-editor:close` managing a single popup window instance the same way

@@ -1371,6 +1371,38 @@ async function testAlwaysOnTagRouting() {
   assert(totalSent() === totalBefore3, "a site addressing itself triggers no relay back to itself");
 }
 
+async function testMeshAndTagRoutingDontDoubleDispatch() {
+  console.log("\n== Bugfix regression: mesh routing (Auto-Both) and a [TO: X] tag pointing at the SAME target must not both send -- confirmed real duplicate-delivery bug from a live test session ==");
+  await resetAllParticipants();
+
+  // Full mesh routing on, same as the session that originally surfaced
+  // this: every site auto-forwards to every other site, AND the always-on
+  // tag baseline is still live underneath it.
+  await call("routing:auto-all", {});
+
+  say("chatgpt", "[TO: CLAUDE]\nOnly claude should get exactly one copy of this.");
+  await waitUntil(() => sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "claude gets the tag relay, gemini gets the separate (correct) mesh forward" });
+  await new Promise((r) => setTimeout(r, 2000)); // give a would-be second (mesh) send to claude time to land if the bug were still present
+  assert(sentLog("claude").length === 1, `claude (the tag's target) gets exactly ONE copy, not two (got ${sentLog("claude").length})`);
+  assert(sentLog("gemini").length === 1, `gemini (not addressed by the tag) still correctly gets its own separate mesh copy, exactly one (got ${sentLog("gemini").length})`);
+  assert(!sentLog("claude")[0].text.includes("[TO:"), "claude's one copy is the clean, tag-stripped version (tag routing's copy), never a raw mesh copy with the tag still embedded");
+  assert(sentLog("gemini")[0].text.includes("[TO: CLAUDE]"), "gemini's mesh copy is untouched raw text, exactly as mesh routing has always forwarded it -- this reply just wasn't addressed to gemini");
+
+  const s = await call("state:get", {});
+  const claudeEntries = s.ledger.filter((e) => e.target === "claude" && e.textPreview.includes("Only claude should get exactly one copy"));
+  assert(claudeEntries.length === 1 && claudeEntries[0].duplicate === false, "the delivery ledger also shows exactly one entry, correctly not flagged as a duplicate");
+
+  // [TO: ALL] with full mesh on: every other site still gets exactly one copy, not two
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("gemini", "[TO: ALL]\nEveryone gets exactly one copy of this too.");
+  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, { label: "both other sites receive the ALL relay" });
+  await new Promise((r) => setTimeout(r, 2000));
+  assert(sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, `both get exactly one copy each, not two (got chatgpt:${sentLog("chatgpt").length}, claude:${sentLog("claude").length})`);
+
+  await call("routing:stop-all", {});
+}
+
 async function testStageOverridesBaseline() {
   console.log("\n== A House Rule 'stage' suspends tag-routing while active, and tag-routing resumes automatically once it's stopped ==");
   await resetAllParticipants();
@@ -1484,6 +1516,7 @@ async function main() {
   await testManagerSaveActionWritesRealFiles();
   await testManagerPauseResumeStop();
   await testAlwaysOnTagRouting();
+  await testMeshAndTagRoutingDontDoubleDispatch();
   await testStageOverridesBaseline();
 
   console.log(`\n${passed} passed, ${failed} failed`);

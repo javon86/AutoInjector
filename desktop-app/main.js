@@ -1159,20 +1159,28 @@ function parseRoundtableTag(text) {
   return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
 }
 
-// The always-on baseline router: relays a tagged reply per Rule 1's
-// semantics (ALL -> both others, a named AI -> just that one with a
-// self-address guard, USER -> nothing further, it's already visible). No
-// session, no hop limit, no start/stop — this just runs on every capture
-// whenever no stage format has taken over (see pollSite()).
-async function handleRoundtableCapture(turn) {
+// Pure target computation, shared by handleRoundtableCapture() and pollSite()'s
+// mesh-forward loop below -- pulled out on its own specifically so pollSite()
+// can dedupe against it BEFORE sending anything, rather than each mechanism
+// independently deciding to send to the same target and producing two
+// deliveries for one reply. Rule 1's semantics: ALL -> both others, a named
+// AI -> just that one with a self-address guard, USER -> nothing further
+// (it's already visible).
+function roundtableTargetsFor(turn) {
   const tag = turn.roundtableTag || "USER";
-  let targets = [];
-  if (tag === "ALL") targets = ROTATION_ORDER.filter((s) => s !== turn.site);
-  else if (tag === "CLAUDE" || tag === "CHATGPT" || tag === "GEMINI") {
+  if (tag === "ALL") return ROTATION_ORDER.filter((s) => s !== turn.site);
+  if (tag === "CLAUDE" || tag === "CHATGPT" || tag === "GEMINI") {
     const target = tag.toLowerCase();
-    if (target !== turn.site) targets = [target]; // self-address guard
+    return target !== turn.site ? [target] : []; // self-address guard
   }
-  for (const target of targets) {
+  return [];
+}
+
+// The always-on baseline router: relays a tagged reply per Rule 1's
+// semantics. No session, no hop limit, no start/stop — this just runs on
+// every capture whenever no stage format has taken over (see pollSite()).
+async function handleRoundtableCapture(turn) {
+  for (const target of roundtableTargetsFor(turn)) {
     await sendTextTo(target, turn.text, turn.site);
   }
 }
@@ -1925,8 +1933,19 @@ async function pollSite(site) {
       broadcast("waiting-changed", { site, waiting: false });
     }
 
+    // Mesh routing (Auto/Auto-Both/manual routing:set) and tag-based
+    // Roundtable relay can both independently name the SAME target for the
+    // SAME captured reply -- e.g. full mesh routing is on AND the AI's own
+    // [TO: X] tag also points at that site. Without this dedupe, that
+    // target used to get sent to TWICE for one reply: once via mesh with
+    // the raw, un-stripped text (the [TO: X] tag still sitting in the
+    // body), once via tag routing with the clean, stripped text -- a real,
+    // confirmed duplicate-delivery bug, not a timing race. Tag routing
+    // (when active) takes priority for any target it already covers; mesh
+    // only forwards to whatever's left.
+    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : new Set();
     for (const target of state.routing[site]) {
-      if (target === site) continue;
+      if (target === site || roundtableTargets.has(target)) continue;
       await sendTextTo(target, text, site);
     }
     if (stageActive) await handleHouseRuleCapture(turn);
