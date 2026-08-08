@@ -95,8 +95,17 @@ function buildSendScript(site, text, overrides) {
       return remaining.trim().length === 0;
     }
 
+    // A single fixed-delay snapshot (the old version of this) reports a
+    // false SEND_NOT_CONFIRMED on any page that's just a bit slower than
+    // usual to clear its input box (a big paste, a laggy tab) -- polling
+    // over a longer window gives a genuinely slow-but-real send room to
+    // actually confirm, instead of a one-shot guess.
     async function confirmSent() {
-      await new Promise((r) => setTimeout(r, 500));
+      const start = Date.now();
+      while (Date.now() - start < 2500) {
+        if (await inputIsEmpty()) return true;
+        await new Promise((r) => setTimeout(r, 150));
+      }
       return inputIsEmpty();
     }
 

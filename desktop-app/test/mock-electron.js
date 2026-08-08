@@ -52,6 +52,7 @@ class FakeWebContents extends EventEmitter {
     this._forceSendFail = false; // toggle true to simulate a send that never actually submitted (SEND_NOT_CONFIRMED)
     this._nextPickResult = null; // test-settable: what the next selector:pick "click" resolves to
     this.pickCalls = []; // { role } — every pick script executed against this site, in order
+    this._sendDelayQueue = []; // test-settable: ms to artificially delay each successive send script (shifted per call, 0 once empty) -- used to deterministically prove two concurrent sends to the same target get serialized rather than racing
     const self = this;
     // A minimal stand-in for webContents.debugger, at the same fidelity as
     // the rest of this mock: it asserts WHAT CDP command was sent with what
@@ -94,6 +95,8 @@ class FakeWebContents extends EventEmitter {
       return this._nextPickResult || { ok: false, error: "TIMEOUT" };
     }
     if (script.includes("typeByKeyboard")) {
+      const delay = this._sendDelayQueue.length ? this._sendDelayQueue.shift() : 0;
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       if (this._forceSendFail) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
       return { ok: true };

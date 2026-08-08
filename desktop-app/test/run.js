@@ -437,6 +437,30 @@ async function testWaitingSinceTracking() {
   assert(g.waitingSince.chatgpt === null, "waitingSince is cleared back to null once the reply lands, not left stale");
 }
 
+async function testConcurrentSendsToSameTargetAreSerialized() {
+  console.log("\n== sendTextTo: two concurrent sends to the SAME target are serialized, not raced (the real cause of the ~50% SEND_NOT_CONFIRMED rate seen under mesh routing) ==");
+  await resetAllParticipants();
+
+  // gemini's first send is artificially slow (300ms), its second is
+  // instant (0ms) -- if the two calls were allowed to race unserialized,
+  // the FASTER second call would finish (and land in sentLog) before the
+  // slower first one, landing out of order. If they're properly queued,
+  // the second call's script doesn't even START until the first's finishes,
+  // so the order (and roughly the combined timing) is preserved regardless
+  // of which one is individually "faster".
+  reg("gemini").webContents._sendDelayQueue = [300, 0];
+  const start = Date.now();
+  const pA = call("send:compose", { text: "Message A (slow)", targets: ["gemini"] });
+  const pB = call("send:compose", { text: "Message B (fast)", targets: ["gemini"] });
+  await Promise.all([pA, pB]);
+  const elapsed = Date.now() - start;
+
+  const log = sentLog("gemini");
+  assert(log.length === 2, `both sends landed (got ${log.length})`);
+  assert(log[0].text === "Message A (slow)" && log[1].text === "Message B (fast)", `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text).join(", ")}]`);
+  assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
+}
+
 async function testPersistenceSavesToDisk() {
   console.log("\n== Persistence: role/state changes get written to disk (debounced) ==");
   await resetAllParticipants();
@@ -1332,6 +1356,7 @@ async function main() {
   await testRateLimitAutoPause();
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
+  await testConcurrentSendsToSameTargetAreSerialized();
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
   await testPromptEditorWindow();

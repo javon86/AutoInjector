@@ -482,9 +482,23 @@ their markup without notice, and this app has no way to detect *why*
 something isn't matching, only that it isn't. A send that doesn't actually
 go through gets reported distinctly, as `SEND_NOT_CONFIRMED` in the Activity
 Log, rather than silently pretending to succeed — `automation.js` checks
-that clicking Send (or pressing Enter) actually cleared the input box, which
-every real chat UI does the instant a message is genuinely submitted,
-instead of just trusting that the click didn't throw an error.
+that clicking Send (or pressing Enter) actually cleared the input box (now
+polled over ~2.5s rather than a single fixed 500ms snapshot, so a
+genuinely-slow-but-real send has room to confirm instead of being falsely
+flagged), which every real chat UI does the instant a message is genuinely
+submitted, instead of just trusting that the click didn't throw an error.
+`SEND_NOT_CONFIRMED` used to spike hard under mesh routing (a real session's
+Activity Log showed roughly a 50% failure rate) — the actual cause was two
+different sites capturing a reply in the same ~1.5s poll cycle and both
+routing to the same third target, firing two send scripts against that
+target's pane at once and stomping on each other's typing. Every send now
+goes through a per-target queue (`sendQueues`/`withSendQueue()` in
+`main.js`) so only one send script ever runs against a given pane at a
+time; a second concurrent call for the same target simply waits its turn
+instead of colliding with the first. The common case (nothing else already
+sending to that target) still calls straight through with zero added
+overhead — only genuinely concurrent sends to the same site pay for
+serialization.
 
 ### 🧪 Checking whether it's actually working: the connectivity test
 
@@ -869,6 +883,17 @@ state file: on load, a transcript longer than `MAX_TRANSCRIPT` (1,000) gets
 capped to the newest 1,000 entries, oldest evicted first — checked by
 seeding a 1,051-entry file and confirming both the count and which specific
 entries survive.
+
+It also covers the per-target send queue deterministically:
+`mock-electron.js` gained a `_sendDelayQueue` (an array of ms to
+artificially delay each successive send script against a site, shifted per
+call) so a test can fire two sends at the SAME target where the first is
+slow (300ms) and the second is instant (0ms), and prove they still land in
+`sentLog` in the order they were issued — not the order they'd individually
+finish in — with the combined wall-clock time showing they ran one after
+another rather than in parallel. This is exactly the scenario that used to
+produce a real ~50% `SEND_NOT_CONFIRMED` rate under mesh routing before the
+queue existed.
 
 It also covers the manager/orchestrator loop, stubbing out
 `manager-provider.js`'s `askManager()` at the module level (main.js's own

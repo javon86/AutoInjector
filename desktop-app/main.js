@@ -790,6 +790,38 @@ function broadcastHouseRule() {
   broadcast("houserule-state", houseRuleSnapshot());
 }
 
+// pollSite() runs all three sites' poll cycles concurrently (one setInterval
+// tick fires pollSite() for chatgpt/claude/gemini back to back, none of them
+// awaited against each other) -- so with full mesh routing on, it's entirely
+// normal for two DIFFERENT sites to each capture a reply in the same cycle
+// and both route to the same third target. Without something serializing
+// that, two sendTextTo() calls for the same target would run their
+// executeJavaScript "type + click send" scripts against that pane's SAME
+// input box at the same time, stomping on each other's typing and making
+// the send-confirmation check (which just checks "is the input empty now")
+// unreliable -- this was the actual cause of a ~50% SEND_NOT_CONFIRMED rate
+// under mesh routing, confirmed from a real Activity Log where errors
+// clustered on the same target from two different senders within the same
+// second. sendQueues[target] is a promise chain: each call for a given
+// target is appended after whatever's already queued for it, so only one
+// send script ever runs against a given pane at a time -- concurrent
+// callers simply wait their turn instead of colliding.
+// sendQueues[target] only exists while a send is actually in flight/queued
+// for that target -- the common case (nothing else currently sending to it)
+// calls fn() directly and synchronously, identical to the pre-queue code
+// path, so this adds zero extra latency/microtask overhead when there's no
+// real contention. Only a genuinely concurrent second call for the same
+// target pays for serialization, by chaining after the first's promise.
+const sendQueues = {};
+function withSendQueue(target, fn) {
+  const prior = sendQueues[target];
+  const run = prior ? prior.then(fn, fn) : fn();
+  const tail = Promise.resolve(run).then(() => {}, () => {}); // never let one failed send jam the queue for the next
+  sendQueues[target] = tail;
+  tail.then(() => { if (sendQueues[target] === tail) delete sendQueues[target]; }); // idle again once nothing newer is queued behind it
+  return run;
+}
+
 async function sendTextTo(target, text, fromSite) {
   const view = siteViews[target];
   if (!view || view.webContents.isDestroyed()) {
@@ -803,7 +835,7 @@ async function sendTextTo(target, text, fromSite) {
 
   let res;
   try {
-    res = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true);
+    res = await withSendQueue(target, () => view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true));
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
