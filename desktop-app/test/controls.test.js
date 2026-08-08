@@ -395,6 +395,50 @@ async function testConnectivityTestButtonFailure() {
   assert(statusEl.textContent.includes("not with what was asked"), `the mismatch reason is spelled out, not just a generic failure (got "${statusEl.textContent}")`);
 }
 
+async function testConnectivityTestButtonDistinguishesTooBroadAndEcho() {
+  console.log("\n== Connectivity Test: SELECTOR_TOO_BROAD and REPLY_ECHO each get their own distinct, actionable explanation ==");
+
+  const broadApi = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "SELECTOR_TOO_BROAD", text: "prompt+reply mixed together" } });
+  let dom = await loadWindow(broadApi);
+  let doc = dom.window.document;
+  let testBtn = Array.from(doc.getElementById("pick-menu-gemini").querySelectorAll("button")).find((b) => b.textContent === "🧪 Test");
+  testBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  let statusEl = doc.getElementById("pick-status-gemini");
+  assert(statusEl.textContent.includes("too broad"), `SELECTOR_TOO_BROAD gets its own distinct explanation, not the generic mismatch text (got "${statusEl.textContent}")`);
+
+  const echoApi = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "REPLY_ECHO", text: "the sent prompt again" } });
+  dom = await loadWindow(echoApi);
+  doc = dom.window.document;
+  testBtn = Array.from(doc.getElementById("pick-menu-gemini").querySelectorAll("button")).find((b) => b.textContent === "🧪 Test");
+  testBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  statusEl = doc.getElementById("pick-status-gemini");
+  assert(statusEl.textContent.includes("echo"), `REPLY_ECHO gets its own distinct explanation too (got "${statusEl.textContent}")`);
+}
+
+async function testSelectorPickValidationRejections() {
+  console.log("\n== Selector picker: each post-pick validation rejection shows its own specific, actionable reason ==");
+
+  const cases = [
+    { error: "NOT_FOUND", expect: "doesn't actually match" },
+    { error: "NOT_VISIBLE", expect: "hidden or zero-size" },
+    { error: "WRONG_ELEMENT_TYPE", expect: "doesn't look like" },
+    { error: "LOOKS_LIKE_ECHO", expect: "last message sent" }
+  ];
+  for (const { error, expect } of cases) {
+    const api = makeApi({ pickResult: { ok: false, error } });
+    const dom = await loadWindow(api);
+    const doc = dom.window.document;
+    const menu = doc.getElementById("pick-menu-claude");
+    const inputBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Input");
+    inputBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    const statusEl = doc.getElementById("pick-status-claude");
+    assert(statusEl.textContent.includes(expect), `${error} shows its own specific reason (got "${statusEl.textContent}")`);
+  }
+}
+
 async function testRoleAssignmentPanel() {
   console.log("\n== Role Assignment panel: collapse toggle, Apply, Clear ==");
   const api = makeApi();
@@ -592,9 +636,11 @@ async function main() {
   await testSelectorPickMenuToggle();
   await testSelectorPickSuccess();
   await testSelectorPickFailure();
+  await testSelectorPickValidationRejections();
   await testClearOverridesButton();
   await testConnectivityTestButtonSuccess();
   await testConnectivityTestButtonFailure();
+  await testConnectivityTestButtonDistinguishesTooBroadAndEcho();
   await testActivityLogShowsPickAndTestDetail();
   await testRoleAssignmentPanel();
   await testOpenSequenceEditorButton();

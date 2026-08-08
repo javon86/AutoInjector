@@ -66,7 +66,14 @@ async function runPick(site, role) {
     if (statusEl) statusEl.textContent = `Picked <${res.tag}> ${res.selector}${sample}`;
     setStatus(`${SITE_LABELS[site]}: picked a new selector for ${desc}.`);
   } else {
-    if (statusEl) statusEl.textContent = `Didn't catch a click (${res?.error || "unknown"}). Try again.`;
+    const REJECT_REASONS = {
+      NOT_FOUND: "the generated selector doesn't actually match the clicked element — try clicking again",
+      NOT_VISIBLE: "the clicked element is hidden or zero-size — try clicking the visible part of it",
+      WRONG_ELEMENT_TYPE: `that doesn't look like ${desc} — try clicking more precisely`,
+      LOOKS_LIKE_ECHO: "that looks like it's just the last message sent, not a real reply — try clicking the actual reply text"
+    };
+    const reason = REJECT_REASONS[res?.error] || `didn't catch a click (${res?.error || "unknown"})`;
+    if (statusEl) statusEl.textContent = `Pick rejected: ${reason}. Try again.`;
     setStatus(`${SITE_LABELS[site]}: selector pick failed (${res?.error || "unknown"}).`);
   }
 }
@@ -103,15 +110,19 @@ async function runSelfTest(site) {
   } else {
     setTestLed(site, "fail");
     const sample = res?.text ? ` It actually captured: "${res.text.slice(0, 80)}${res.text.length > 80 ? "…" : ""}"` : "";
-    const reason = res?.error === "REPLY_MISMATCH"
-      ? `it replied, but not with what was asked — reading may be picking up the wrong text.${sample}`
-      : res?.error === "TIMEOUT"
-        ? "no reply arrived in time"
-        : res?.error === "ALREADY_RUNNING"
-          ? "a test is already running for this site"
-          : `sending failed (${res?.error || "unknown error"})`;
+    const reason = res?.error === "SELECTOR_TOO_BROAD"
+      ? `the reply selector is reading BOTH the sent prompt and the actual reply — it's too broad and needs to be picked more precisely.${sample}`
+      : res?.error === "REPLY_ECHO"
+        ? `nothing came back but an echo of what was sent — the reply selector is likely reading the outgoing message, not the actual reply.${sample}`
+        : res?.error === "REPLY_MISMATCH"
+          ? `it replied, but not with what was asked — reading may be picking up the wrong text.${sample}`
+          : res?.error === "TIMEOUT"
+            ? "no reply arrived in time"
+            : res?.error === "ALREADY_RUNNING"
+              ? "a test is already running for this site"
+              : `sending failed (${res?.error || "unknown error"})`;
     if (statusEl) statusEl.textContent = `❌ ${SITE_LABELS[site]}: ${reason}`;
-    setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${res?.error === "REPLY_MISMATCH" ? "reply didn't match" : reason}.`);
+    setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${res?.error || "error"}.`);
   }
 }
 

@@ -32,6 +32,7 @@ const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — n
 const POLL_MS = 1500;
 const STABLE_MS = 1800;
 const MAX_LOG = 300;
+const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
 const PANE_SYNC_MS = 700;
 // The 7 structured formats that temporarily take over from the always-on
 // Roundtable v2 [TO: X] tag routing (see pollSite()) — "roundtable" itself
@@ -66,6 +67,22 @@ const RATE_LIMIT_PATTERNS = [
 function looksLikeRateLimit(text) {
   if (!text || text.length > 400) return false;
   return RATE_LIMIT_PATTERNS.some((re) => re.test(text));
+}
+
+// Shared by the connectivity self-test and the selector-picker's post-pick
+// validation: both need to recognize "what we just read off the page is
+// really just an echo of what we sent it" (e.g. a too-broad selector that
+// reads the composer/user bubble instead of the assistant's actual reply)
+// rather than a genuine response. Whitespace/case-normalized so trivial
+// formatting differences don't defeat it, and matched both directions since
+// either text can be a truncated/wrapped version of the other.
+function looksLikeEcho(capturedText, recentlySentText) {
+  if (!capturedText || !recentlySentText) return false;
+  const norm = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
+  const a = norm(capturedText);
+  const b = norm(recentlySentText);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
 }
 
 function userDataDir() {
@@ -113,7 +130,7 @@ const state = {
   hr: null, // House Rules run state, see resetHouseRule()
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
   nextPromptId: 1,
-  sequence: { active: false, steps: [], index: 0 }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
+  sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   managerConfig: {
     provider: "runpod-serverless", // runpod-serverless | runpod-pod | openai-compatible
@@ -330,6 +347,15 @@ function trimDebugLog() {
   } catch {}
 }
 
+// The only place a turn is ever added to the visible transcript -- keeps it
+// bounded the same way the debug log already is, oldest-first eviction, so
+// a long-running relay session can't grow this (and the state file it gets
+// persisted into) without limit.
+function pushTranscriptTurn(turn) {
+  state.transcript.push(turn);
+  if (state.transcript.length > MAX_TRANSCRIPT) state.transcript.splice(0, state.transcript.length - MAX_TRANSCRIPT);
+}
+
 function logEvent(kind, detail) {
   const entry = { ts: Date.now(), kind, detail };
   state.log.push(entry);
@@ -413,7 +439,15 @@ function saveStateDebounced() {
           roles: hr.roles
         } : null
       };
-      fs.writeFileSync(stateFilePath(), JSON.stringify(snapshot));
+      // Atomic write: a crash/power-loss mid-write to the real path can
+      // leave a truncated, unparseable file behind -- writing to a sibling
+      // temp file first and rename()-ing it over the real path means the
+      // real path only ever points at a complete write (rename is atomic on
+      // the same filesystem, which a sibling file in the same dir always is).
+      const target = stateFilePath();
+      const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(snapshot));
+      fs.renameSync(tmp, target);
     } catch (e) {
       logEvent("persist-error", { error: String(e) });
     }
@@ -435,7 +469,7 @@ function loadPersistedState() {
     return;
   }
   if (Array.isArray(snap.transcript)) {
-    state.transcript = snap.transcript;
+    state.transcript = snap.transcript.length > MAX_TRANSCRIPT ? snap.transcript.slice(snap.transcript.length - MAX_TRANSCRIPT) : snap.transcript;
     state.nextTurnId = snap.transcript.reduce((m, t) => Math.max(m, (t.id || 0) + 1), 1);
   }
   if (snap.customRole) {
@@ -789,28 +823,47 @@ async function sendTextTo(target, text, fromSite) {
 
 // The connectivity Test button: send a prompt carrying a fresh, effectively
 // unique token straight to one site (bypassing routing entirely, like
-// Compose does) asking it to reply with exactly that token, then watch
-// state.captured[site] -- which pollSite() already keeps up to date on its
-// normal ~1.5s cycle -- for a capture at or after the moment we sent that
-// actually contains it. A real reply arriving that DOESN'T contain the
-// token still proves send+capture are wired up, just not with confidence
-// the content is right, so that's reported distinctly (REPLY_MISMATCH) from
-// never getting anything back at all (TIMEOUT).
+// Compose does), but instead of asking for the token back verbatim -- which
+// a too-broad ASSISTANT_CANDIDATES selector can "pass" simply by reading the
+// sent prompt itself back, since the token is right there in it -- ask for
+// the token REVERSED. A real reply then has to contain the reversed form
+// and NOT the original, which a mere echo of the outgoing prompt can never
+// satisfy. state.captured[site] -- which pollSite() already keeps up to date
+// on its normal ~1.5s cycle -- is watched for a capture at or after the
+// moment we sent, and classified into one of four distinct outcomes:
+//   ok                -- reversed present, original absent: a real reply
+//   SELECTOR_TOO_BROAD -- both present: almost certainly reading the whole
+//                         thread (prompt + reply) rather than just the reply
+//   REPLY_ECHO         -- only the original is present: just echoing what
+//                         was sent, never actually answered
+//   REPLY_MISMATCH     -- something else came back that matches neither
+//   TIMEOUT            -- nothing came back at all
 const selftestInFlight = new Set();
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
-async function waitForTestReply(site, token, sentTs, timeoutMs) {
+async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs) {
+  const classify = (cap) => {
+    if (!cap || cap.ts < sentTs) return null;
+    const hasReversed = cap.text.includes(reversedToken);
+    const hasOriginal = cap.text.includes(token);
+    if (hasReversed && hasOriginal) return { ok: false, error: "SELECTOR_TOO_BROAD", text: cap.text.slice(0, 200) };
+    if (hasReversed) return { ok: true };
+    if (hasOriginal) return { ok: false, error: "REPLY_ECHO", text: cap.text.slice(0, 200) };
+    return null;
+  };
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const cap = state.captured[site];
-    if (cap && cap.ts >= sentTs && cap.text.includes(token)) return { ok: true };
+    const verdict = classify(state.captured[site]);
+    if (verdict) return verdict;
     await new Promise((r) => setTimeout(r, SELFTEST_POLL_MS));
   }
   const cap = state.captured[site];
-  // A capture that arrived but doesn't contain the token still proves the
-  // read pipeline picked SOMETHING up -- surfacing what it actually was is
-  // the single most useful clue for fixing a broken ASSISTANT_CANDIDATES
+  const verdict = classify(cap);
+  if (verdict) return verdict;
+  // A capture that arrived but matches neither form still proves the read
+  // pipeline picked SOMETHING up -- surfacing what it actually was is the
+  // single most useful clue for fixing a broken ASSISTANT_CANDIDATES
   // selector (stale/wrong content captured vs. genuinely nothing at all).
   if (cap && cap.ts >= sentTs) return { ok: false, error: "REPLY_MISMATCH", text: cap.text.slice(0, 200) };
   return { ok: false, error: "TIMEOUT" };
@@ -1051,17 +1104,29 @@ async function sendSequenceStep() {
     broadcastSequenceState();
     return;
   }
+  // Every dispatch gets its own generation number, stamped per-site into
+  // dispatchGen — handleSequenceCapture() below only accepts a capture from
+  // a site whose OWN last-dispatched generation is the current one. Without
+  // this, a reply that's still in flight for a step this app already
+  // advanced past (most easily triggered by an "all" step, where the first
+  // of three replies advances the index while the other two are still
+  // coming) could get matched against whatever step comes next instead of
+  // being recognized as a stale leftover of the step it actually answers.
+  seq.generation++;
   const step = seq.steps[seq.index];
   const targets = step.target === "all" ? SITE_IDS : [step.target];
   for (const t of targets) {
-    if (SITES[t]) await sendTextTo(t, step.text, null);
+    if (SITES[t]) {
+      seq.dispatchGen[t] = seq.generation;
+      await sendTextTo(t, step.text, null);
+    }
   }
-  logEvent("sequence-step-sent", { index: seq.index, target: step.target });
+  logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation });
   broadcastSequenceState();
 }
 
 async function startSequence(steps) {
-  state.sequence = { active: true, steps, index: 0 };
+  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {} };
   await sendSequenceStep();
 }
 
@@ -1075,6 +1140,10 @@ async function handleSequenceCapture(turn) {
   // whole sequence indefinitely.
   const matches = step.target === "all" ? true : step.target === turn.site;
   if (!matches) return;
+  if (seq.dispatchGen[turn.site] !== seq.generation) {
+    logEvent("sequence-stale-capture-ignored", { site: turn.site, expectedGeneration: seq.dispatchGen[turn.site] ?? null, currentGeneration: seq.generation });
+    return;
+  }
   seq.index++;
   await sendSequenceStep();
 }
@@ -1636,28 +1705,36 @@ async function pollSite(site) {
     if (already && already.text === text) return; // no new stable reply
 
     // A rate-limit/usage-cap message isn't a real contribution — feeding it
-    // into the House Rule's state machine would relay "try again later" to
-    // the other AIs as if it were a genuine reply, cascading garbage through
-    // the whole run. Catch it first (ahead of the ignore/silentAck checks
-    // below) and auto-pause instead, regardless of what phase we were in.
-    if (state.hr.active && looksLikeRateLimit(text)) {
+    // into routing/House Rules/Prompt Sequence/the manager loop would relay
+    // "try again later" to the other AIs (or the manager) as if it were a
+    // genuine reply, cascading garbage through the whole run. Catch it first
+    // (ahead of the ignore/silentAck checks below), always — not just while
+    // a House Rule is active, since plain Auto-routing and Prompt Sequence
+    // are just as vulnerable to this. It's still captured and shown (marked
+    // isRateLimited) so the user can see what actually happened, but nothing
+    // downstream of this point runs for it. A House Rule additionally
+    // auto-pauses itself, same as before; outside one, routing/mesh state is
+    // left alone — there's nothing structured to pause.
+    if (looksLikeRateLimit(text)) {
       const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, isRateLimited: true };
       state.captured[site] = turn;
-      state.transcript.push(turn);
+      pushTranscriptTurn(turn);
       broadcast("capture", turn);
-      logEvent("rate-limit-detected", { site, chars: text.length });
+      logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
       if (state.waiting[site]) {
         state.waiting[site] = false;
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
-      state.hr.active = false;
-      state.hr.pauseReason = "rate-limit";
-      state.hr.pausedRouting = routingSnapshot();
-      for (const s of SITE_IDS) state.routing[s].clear();
-      state.meshActive = false;
-      logEvent("houserule-paused", { mode: state.hr.mode, reason: "rate-limit" });
-      broadcastHouseRule();
+      if (state.hr.active) {
+        state.hr.active = false;
+        state.hr.pauseReason = "rate-limit";
+        state.hr.pausedRouting = routingSnapshot();
+        for (const s of SITE_IDS) state.routing[s].clear();
+        state.meshActive = false;
+        logEvent("houserule-paused", { mode: state.hr.mode, reason: "rate-limit" });
+        broadcastHouseRule();
+      }
       saveStateDebounced();
       return;
     }
@@ -1722,7 +1799,7 @@ async function pollSite(site) {
     // DOM text every subsequent poll, causing the exact same roundtable
     // reply to be re-captured and re-relayed forever.
     state.captured[site] = roundtableTag ? { ...turn, text } : turn;
-    state.transcript.push(turn);
+    pushTranscriptTurn(turn);
     broadcast("capture", turn);
     logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
@@ -2145,6 +2222,22 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
     res = { ok: false, error: String(e) };
   }
   if (res && res.ok && res.selector) {
+    // Post-pick validation, before anything gets saved: the click alone
+    // proves the user clicked SOMETHING, not that it's a good override.
+    // Checked against the live page (matchCount/visible/roleOk are computed
+    // by buildPickScript at click-time, see automation.js) plus, for the
+    // "assistant" role, against the shared echo-detector so a selector that
+    // just reads back the composer/last-sent message doesn't get saved as
+    // if it were a real reply-reading override.
+    const problems = [];
+    if (typeof res.matchCount === "number" && res.matchCount < 1) problems.push("NOT_FOUND");
+    if (res.visible === false) problems.push("NOT_VISIBLE");
+    if (res.roleOk === false) problems.push("WRONG_ELEMENT_TYPE");
+    if (role === "assistant" && looksLikeEcho(res.sample, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
+    if (problems.length) {
+      logEvent("selector-pick-rejected", { site, role, selector: res.selector, reasons: problems, sample: res.sample || null });
+      return { ok: false, error: problems[0], reasons: problems };
+    }
     state.selectorOverrides[site] = { ...state.selectorOverrides[site], [role]: res.selector };
     saveStateDebounced();
     logEvent("selector-picked", { site, role, selector: res.selector, tag: res.tag || null, sample: res.sample || null });
@@ -2171,8 +2264,9 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
   selftestInFlight.add(site);
   try {
     const token = makeSelftestToken();
-    logEvent("selftest-started", { site, token });
-    const prompt = `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reply with exactly this token and nothing else: ${token}`;
+    const reversedToken = token.split("").reverse().join("");
+    logEvent("selftest-started", { site, token, reversedToken });
+    const prompt = `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reverse the letters of this token and reply with ONLY the reversed result, nothing else -- no punctuation, no explanation: ${token}`;
     const sentTs = Date.now();
     const sendRes = await sendTextTo(site, prompt, null);
     if (!sendRes || !sendRes.ok) {
@@ -2180,7 +2274,7 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
       return { ok: false, stage: "send", error: (sendRes && sendRes.error) || "unknown" };
     }
     logEvent("selftest-waiting-for-reply", { site, token, timeoutMs: SELFTEST_TIMEOUT_MS });
-    const waitRes = await waitForTestReply(site, token, sentTs, SELFTEST_TIMEOUT_MS);
+    const waitRes = await waitForTestReply(site, token, reversedToken, sentTs, SELFTEST_TIMEOUT_MS);
     logEvent(waitRes.ok ? "selftest-ok" : "selftest-error", { site, token, error: waitRes.error || null, capturedText: waitRes.text || null });
     return { ok: waitRes.ok, stage: "reply", error: waitRes.error, text: waitRes.text };
   } finally {

@@ -208,8 +208,22 @@ function buildPickScript(role) {
       const target = nearestByRole(e.target);
       const selector = attrSelector(target);
       const sample = (target.innerText || target.textContent || "").trim().slice(0, 120);
+      const tag = target.tagName.toLowerCase();
+      // Validated right here, against the live page, in the same tick as the
+      // click -- not trusted blindly. matchCount catches a generated selector
+      // that doesn't actually resolve back to (only) the clicked element;
+      // visible catches picking something hidden/zero-size; roleOk catches
+      // clicking the wrong kind of element for input/send (an "assistant"
+      // pick has no fixed expected tag, so it's always considered role-ok).
+      let matchCount = 0;
+      try { matchCount = document.querySelectorAll(selector).length; } catch { matchCount = 0; }
+      const rect = target.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0;
+      const isEditable = tag === "textarea" || target.isContentEditable === true;
+      const isButton = tag === "button" || target.getAttribute("role") === "button" || (tag === "input" && target.type === "submit");
+      const roleOk = ROLE === "input" ? isEditable : ROLE === "send" ? isButton : true;
       cleanup();
-      resolve({ ok: true, selector, tag: target.tagName.toLowerCase(), sample });
+      resolve({ ok: true, selector, tag, sample, matchCount, visible, roleOk });
     }
     document.addEventListener("click", onClick, true);
 

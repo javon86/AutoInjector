@@ -404,6 +404,26 @@ async function testRateLimitAutoPause() {
   await call("houserule:stop", {});
 }
 
+async function testRateLimitDetectedOutsideHouseRules() {
+  console.log("\n== Rate-limit detection: also catches a usage-cap message during plain Auto-routing, not just House Rules ==");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  let g = (await call("state:get", {})).global;
+  assert(g.routing.claude.includes("chatgpt") && g.routing.gemini.includes("chatgpt"), "full mesh routing set up as a baseline, no House Rule active");
+
+  say("chatgpt", "You've reached your usage limit for GPT-4. Try again later or upgrade your plan.");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.site === "chatgpt" && t.isRateLimited), { label: "the rate-limit reply is captured and marked" });
+
+  const s = await call("state:get", {});
+  assert(sentLog("claude").length === 0 && sentLog("gemini").length === 0, "the rate-limit message was NOT relayed through plain Auto-routing either, even though a mesh was fully wired up");
+  assert(s.houseRule.active === false && s.houseRule.paused === false, "there's no House Rule to pause -- nothing structured gets touched outside one");
+  g = s.global;
+  assert(g.routing.claude.includes("chatgpt") && g.routing.gemini.includes("chatgpt"), "the mesh routing itself is left alone (not cleared) outside a House Rule run");
+  assert(s.log.some((l) => l.kind === "rate-limit-detected" && l.detail.site === "chatgpt" && l.detail.houseRuleActive === false), "the Activity Log records the detection and that no House Rule was active for it");
+
+  await call("routing:stop-all", {});
+}
+
 async function testWaitingSinceTracking() {
   console.log("\n== waitingSince: tracks when a send started waiting, clears once captured ==");
   await resetAllParticipants();
@@ -805,32 +825,98 @@ async function testSelectorPicker() {
   await call("selector:clear", { site: "gemini", role: "assistant" }); // leave state clean for later scenarios
 }
 
-async function testSelfTestConnectivity() {
-  console.log("\n== Connectivity Test: sends a real prompt, waits for the token to come back, and reports success/mismatch/send-failure distinctly ==");
+async function testSelectorPickerValidation() {
+  console.log("\n== Selector picker: a click alone isn't enough -- the pick is validated against the live page before it's ever saved ==");
   await resetAllParticipants();
 
-  // happy path -- the site actually echoes the token back
+  reg("claude").webContents._nextPickResult = { ok: true, selector: ".stale-selector", tag: "div", sample: "", matchCount: 0, visible: true, roleOk: true };
+  let res = await call("selector:pick", { site: "claude", role: "input" });
+  assert(!res.ok && res.error === "NOT_FOUND", "a selector that doesn't actually resolve back to any element (matchCount 0) is rejected, not saved");
+  let s = await call("state:get", {});
+  assert(!s.global.selectorOverrides.claude.input, "the rejected pick never becomes an override");
+  assert(s.log.some((l) => l.kind === "selector-pick-rejected" && l.detail.site === "claude" && l.detail.reasons.includes("NOT_FOUND")), "the Activity Log records why it was rejected");
+
+  reg("claude").webContents._nextPickResult = { ok: true, selector: ".hidden-el", tag: "textarea", sample: "", matchCount: 1, visible: false, roleOk: true };
+  res = await call("selector:pick", { site: "claude", role: "input" });
+  assert(!res.ok && res.error === "NOT_VISIBLE", "a matched but zero-size/hidden element is rejected");
+
+  reg("claude").webContents._nextPickResult = { ok: true, selector: ".wrong-kind", tag: "span", sample: "", matchCount: 1, visible: true, roleOk: false };
+  res = await call("selector:pick", { site: "claude", role: "send" });
+  assert(!res.ok && res.error === "WRONG_ELEMENT_TYPE", "an element of the wrong kind for the role (e.g. not a button for 'send') is rejected");
+
+  // echo detection: the "assistant" pick just reads back the last thing WE sent
+  await call("send:compose", { text: "What's the capital of France?", targets: ["claude"] });
+  reg("claude").webContents._nextPickResult = { ok: true, selector: ".composer-echo", tag: "div", sample: "What's the capital of France?", matchCount: 1, visible: true, roleOk: true };
+  res = await call("selector:pick", { site: "claude", role: "assistant" });
+  assert(!res.ok && res.error === "LOOKS_LIKE_ECHO", "an 'assistant' pick whose sample just echoes the last message WE sent is rejected, not saved as if it read a real reply");
+  s = await call("state:get", {});
+  assert(!s.global.selectorOverrides.claude.assistant, "the echo pick never becomes an override");
+
+  // a fully valid pick (all fields present and passing) still saves normally
+  reg("claude").webContents._nextPickResult = { ok: true, selector: '[data-testid="reply"]', tag: "div", sample: "Paris is the capital of France.", matchCount: 1, visible: true, roleOk: true };
+  res = await call("selector:pick", { site: "claude", role: "assistant" });
+  assert(res.ok && res.selector === '[data-testid="reply"]', "a pick that passes every check still saves normally");
+  s = await call("state:get", {});
+  assert(s.global.selectorOverrides.claude.assistant === '[data-testid="reply"]', "the valid override is actually stored");
+
+  await call("selector:clear", { site: "claude", role: "assistant" });
+}
+
+function extractSelftestToken(sentText) {
+  const m = sentText.match(/: (\S+)$/);
+  return m ? m[1] : null;
+}
+function reverseStr(s) { return s.split("").reverse().join(""); }
+
+async function testSelfTestConnectivity() {
+  console.log("\n== Connectivity Test: sends a reverse-the-token challenge, waits for it to come back transformed, and reports each distinct outcome (pass/too-broad/echo/mismatch/send-failure) ==");
+  await resetAllParticipants();
+
+  // happy path -- the site actually reverses the token like it was asked to
   const okPromise = call("selftest:run", { site: "claude" });
   await waitUntil(() => sentLog("claude").length === 1, { label: "test prompt sent to claude" });
   const sentText = sentLog("claude")[0].text;
-  assert(sentText.includes("Reply with exactly this token and nothing else:"), "the test prompt actually asks for a token echo, not something else");
-  const tokenMatch = sentText.match(/token and nothing else: (\S+)/);
-  assert(!!tokenMatch, "a token was actually embedded in the sent prompt");
-  say("claude", tokenMatch[1]);
+  assert(sentText.includes("Reverse the letters of this token"), "the test prompt asks for the token REVERSED, not echoed verbatim -- a selector that just reads the sent prompt back can't satisfy that");
+  const token = extractSelftestToken(sentText);
+  assert(!!token, "a token was actually embedded in the sent prompt");
+  say("claude", reverseStr(token));
   const okRes = await okPromise;
-  assert(okRes.ok === true, "a reply containing exactly the token is reported as a pass");
+  assert(okRes.ok === true, "a reply containing the reversed token (and not the original) is reported as a pass");
   let s = await call("state:get", {});
-  assert(s.log.some((l) => l.kind === "selftest-started" && l.detail.site === "claude" && l.detail.token === tokenMatch[1]), "the Activity Log records the test starting, with the exact token used");
+  assert(s.log.some((l) => l.kind === "selftest-started" && l.detail.site === "claude" && l.detail.token === token && l.detail.reversedToken === reverseStr(token)), "the Activity Log records the test starting, with both the original and reversed token");
   assert(s.log.some((l) => l.kind === "selftest-waiting-for-reply" && l.detail.site === "claude"), "the Activity Log shows it's specifically waiting on a reply now, not just silence");
   assert(s.log.some((l) => l.kind === "selftest-ok" && l.detail.site === "claude"), "the Activity Log records the pass");
 
-  // mismatch -- a reply DOES come back, but not with the right content
+  // too-broad -- a selector reading both the sent prompt (with the original
+  // token) AND the real reply (with the reversed token) must NOT pass, since
+  // that's exactly the false-positive a plain token-echo test couldn't catch
+  await resetAllParticipants();
+  const broadPromise = call("selftest:run", { site: "chatgpt" });
+  await waitUntil(() => sentLog("chatgpt").length === 1, { label: "test prompt sent to chatgpt" });
+  const broadToken = extractSelftestToken(sentLog("chatgpt")[0].text);
+  say("chatgpt", `You said: ${broadToken}\nReversed: ${reverseStr(broadToken)}`);
+  const broadRes = await broadPromise;
+  assert(!broadRes.ok && broadRes.error === "SELECTOR_TOO_BROAD", "a capture containing BOTH the original and reversed token is reported as SELECTOR_TOO_BROAD, not a pass");
+  s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-error" && l.detail.site === "chatgpt" && l.detail.error === "SELECTOR_TOO_BROAD"), "the Activity Log records the too-broad verdict");
+
+  // echo -- only the ORIGINAL token comes back (selector reading the
+  // outgoing prompt, not any real reply) -- must be distinguished from a pass
+  await resetAllParticipants();
+  const echoPromise = call("selftest:run", { site: "gemini" });
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
+  const echoToken = extractSelftestToken(sentLog("gemini")[0].text);
+  say("gemini", `Reverse the letters of this token and reply with ONLY the reversed result: ${echoToken}`);
+  const echoRes = await echoPromise;
+  assert(!echoRes.ok && echoRes.error === "REPLY_ECHO", "a capture containing only the ORIGINAL token (never the reversed form) is reported as REPLY_ECHO, not a pass");
+
+  // mismatch -- a reply DOES come back, but matches neither form
   await resetAllParticipants();
   const mismatchPromise = call("selftest:run", { site: "gemini" });
   await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
   say("gemini", "Sure, here's an unrelated reply that doesn't contain any token.");
   const mismatchRes = await mismatchPromise;
-  assert(!mismatchRes.ok && mismatchRes.error === "REPLY_MISMATCH", "a reply that arrives but doesn't contain the token is reported as REPLY_MISMATCH, not a pass");
+  assert(!mismatchRes.ok && mismatchRes.error === "REPLY_MISMATCH", "a reply that arrives but matches neither the original nor reversed token is reported as REPLY_MISMATCH, not a pass");
   assert(mismatchRes.text === "Sure, here's an unrelated reply that doesn't contain any token.", "the mismatch result carries back exactly what WAS captured, so a broken read-selector can actually be diagnosed");
   s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "selftest-error" && l.detail.site === "gemini" && l.detail.error === "REPLY_MISMATCH" && l.detail.capturedText.includes("unrelated reply")), "the Activity Log records the mismatch AND what was actually captured instead");
@@ -854,9 +940,8 @@ async function testSelfTestConnectivity() {
   await waitUntil(() => sentLog("claude").length === 1, { label: "first test's prompt sent" });
   const secondRun = await call("selftest:run", { site: "claude" });
   assert(!secondRun.ok && secondRun.error === "ALREADY_RUNNING", "a second test for the same site while one is already running is rejected");
-  const firstSentText = sentLog("claude")[0].text;
-  const firstToken = firstSentText.match(/token and nothing else: (\S+)/)[1];
-  say("claude", firstToken);
+  const firstToken = extractSelftestToken(sentLog("claude")[0].text);
+  say("claude", reverseStr(firstToken));
   const firstRunRes = await firstRunPromise;
   assert(firstRunRes.ok === true, "the original in-flight test still resolves normally afterward");
 }
@@ -1198,11 +1283,18 @@ async function main() {
   // startup loadPersistedState() call actually has something to restore —
   // this has to happen here (not as a normal test-after-require scenario)
   // since main.js's app.whenReady() handler only fires once per process.
+  // 1050 synthetic entries (oldest first) plus the real "Restored opening
+  // message" as the newest, so the SAME seed also exercises the transcript
+  // cap (MAX_TRANSCRIPT = 1000) on load, not just restoration itself.
+  const oldTranscript = [];
+  for (let i = 0; i < 1050; i++) oldTranscript.push({ id: i + 1, site: "chatgpt", label: "ChatGPT", text: `synthetic old turn #${i}`, ts: Date.now() - (1050 - i) * 1000, pinned: false });
+  oldTranscript.push({ id: 1051, site: "chatgpt", label: "ChatGPT", text: "Restored opening message", ts: Date.now() - 10000, pinned: false });
+
   const seedFile = path.join(mockElectron.__userDataDir, "autoinjector-state.json");
   fs.writeFileSync(seedFile, JSON.stringify({
     schemaVersion: 1,
     savedAt: Date.now(),
-    transcript: [{ id: 1, site: "chatgpt", label: "ChatGPT", text: "Restored opening message", ts: Date.now() - 10000, pinned: false }],
+    transcript: oldTranscript,
     customRole: { chatgpt: "", claude: "Skeptical Engineer", gemini: "" },
     hr: { mode: "rotation", topic: "Restored topic", rounds: 0, roundNum: 2, order: ["chatgpt", "claude", "gemini"], phase: "rotating", lastSpeakerIndex: 0, roles: {} }
   }));
@@ -1212,7 +1304,9 @@ async function main() {
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
-  assert(restored.transcript.length === 1 && restored.transcript[0].text === "Restored opening message", "transcript restored from disk on startup");
+  assert(restored.transcript.length === 1000, `transcript is capped to MAX_TRANSCRIPT (1000) on load, even when the saved file has more (got ${restored.transcript.length})`);
+  assert(restored.transcript[restored.transcript.length - 1].text === "Restored opening message", "the most recent entry survives the cap");
+  assert(restored.transcript[0].text === "synthetic old turn #51", "the cap evicts from the OLDEST end, keeping exactly the newest 1000");
   assert(restored.global.customRole.claude === "Skeptical Engineer", "custom roles restored from disk");
   assert(restored.houseRule.mode === "rotation" && restored.houseRule.topic === "Restored topic", "House Rule mode/topic restored");
   assert(restored.houseRule.active === false, "restored run comes back NOT active — a restart must never auto-send anything");
@@ -1236,6 +1330,7 @@ async function main() {
   await testRoleInjection();
   await testWindowCollapse();
   await testRateLimitAutoPause();
+  await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
@@ -1253,6 +1348,7 @@ async function main() {
   await testZoomIPC();
   testSelectorOverridePriorityInScripts();
   await testSelectorPicker();
+  await testSelectorPickerValidation();
   await testSelfTestConnectivity();
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();

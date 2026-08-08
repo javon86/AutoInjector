@@ -148,7 +148,12 @@ control strip (and its last captured reply) stays visible and usable.
    it never fires everything at once. The popup's status line tracks
    progress ("step 2 of 4…") and the Run button disables itself while a
    sequence is active; **Close** just hides the window, it doesn't stop a
-   run in progress.
+   run in progress. Each step's dispatch is stamped with a generation
+   number, so a reply that's still in flight for a step the sequence has
+   already advanced past (most easily triggered by an **All** step, where
+   the other two replies are still coming after the first one advances
+   things) gets recognized as stale and discarded rather than misread as
+   satisfying whatever step comes next.
 10. **Prompt Library**: saved, reusable prompts you can fire off with one
    click, without retyping them or going through House Rules. It's a compact
    dropdown (pick a saved prompt by name) plus **Send** / **+ New** / **Edit**
@@ -312,11 +317,16 @@ Devil/Angel/Referee-style role — not the same thing as the optional Role
 Assignment persona feature described above, which you set yourself).
 
 If a reply looks like a rate-limit/usage-cap message (short text matching
-phrases like "usage limit" or "try again later") while a House Rules format
-is active, the run **auto-pauses** instead of relaying that message to the
-other AIs as if it were a real reply — the turn still shows up in the
-transcript (marked ⚠ USAGE LIMIT) so you can see what happened, and Resume
-once the limit clears.
+phrases like "usage limit" or "try again later"), it's caught **everywhere**
+— not just while a House Rules format is active. The turn still shows up in
+the transcript (marked ⚠ USAGE LIMIT / `isRateLimited`) so you can see what
+happened, but it's never relayed onward: not to routing/Auto's targets, not
+into a House Rule's state machine, not as a Prompt Sequence step's reply, not
+to a waiting manager task. While a House Rules format is active, it
+additionally **auto-pauses** the run (same as before) so you can Resume once
+the limit clears; outside one (plain Auto-routing, Prompt Sequence, or no
+routing at all), there's nothing structured to pause, so routing/mesh state
+is left exactly as it was — only that one message is swallowed.
 
 ## Manager / Orchestrator (Phase 1 — backend only, no UI panel yet)
 
@@ -428,6 +438,13 @@ you relaunched it; you decide when to hit Resume. This is separate from
 signing in — each site's own login session is already remembered by the
 browser pane itself (see above), independent of this.
 
+Each save writes to a temporary file next to the real one, then renames it
+into place — so a crash or power loss mid-write can't leave you with a
+corrupted, unreadable state file; the real file only ever gets updated as a
+complete write. The transcript itself is capped at the 1,000 most recent
+turns (oldest dropped first, on both save and load) so a long-running relay
+session can't grow it — or the file it's saved into — without bound.
+
 The saved file lives at:
 - **Windows**: `%APPDATA%\autoinjector-desktop\autoinjector-state.json`
 - **macOS**: `~/Library/Application Support/autoinjector-desktop/autoinjector-state.json`
@@ -473,17 +490,29 @@ instead of just trusting that the click didn't throw an error.
 
 Every AI column has a **🧪 Test** button (inside the 🎯 menu described
 below). Click it and the app sends that site a real prompt containing a
-fresh, one-off token and asks it to reply with exactly that token — then
-waits for a real reply to actually come back. A small dot next to the AI's
-name turns **amber** while it's running, **green** the moment a reply
-containing the token lands (send *and* read are both genuinely working, with
-the right content — not just "something happened"), or **red** if either
-nothing comes back within 45 seconds, or something *does* come back but
-without the token (send is fine, but reading is very likely picking up the
-wrong element — the failure reason is spelled out inline either way, not
-just a bare red light). This is the fast way to answer "is this AI actually
-hooked up right now" without having to read anything yourself or guess from
-the Activity Log.
+fresh, one-off token — but instead of asking for that token back verbatim,
+it asks the AI to reply with the token **reversed**. That's deliberate: a
+too-broad reply selector that's actually reading the sent prompt back (not
+a real reply) would trivially "pass" a plain echo test, since the token is
+right there in the outgoing message. Asking for a transformed version and
+checking for it — while confirming the *original*, untransformed token is
+**absent** — closes that hole. A small dot next to the AI's name turns
+**amber** while it's running, **green** the moment a reply containing the
+reversed token (and not the original) lands, or **red** with one of four
+distinct failure reasons spelled out inline:
+- **too broad** — both the original and reversed token came back (almost
+  always means the selector is reading the whole thread, prompt included,
+  not just the actual reply)
+- **echo** — only the original token came back (the selector is very likely
+  reading the outgoing message, not any reply at all)
+- **mismatch** — something came back, but it matches neither form (reading
+  is probably picking up the wrong element entirely)
+- **timeout** — nothing came back within 45 seconds
+
+This is the fast way to answer "is this AI actually hooked up right now"
+without having to read anything yourself or guess from the Activity Log —
+and, unlike a plain token echo, it can't be fooled by a selector that's
+merely reading something back.
 
 ### 🎯 Fixing it yourself: the selector picker
 
@@ -492,14 +521,23 @@ The same button also opens a small menu with **Pick Input**, **Pick Send**,
 click the real element live in that pane — the input box you type into, the
 actual Send button, or the text of an actual reply. The app captures that
 exact click (it never actually submits anything — the click's default
-action is prevented), works out a selector for it, and saves it as an
-override for that site/role that's tried *before* the built-in guesses in
-`selectors.js`, with those built-ins kept as a fallback rather than
-replaced. The picked selector (and, for a reply pick, a short sample of its
-text) is shown right there as confirmation. **Clear Overrides** drops all
-three roles for that site back to the built-in defaults if a pick turns out
-wrong. Overrides persist across restarts the same way everything else does.
-Run 🧪 Test again afterward to confirm the pick actually fixed things.
+action is prevented), works out a selector for it, and — before saving
+anything — validates it against the live page right then, in the same tick
+as the click: the generated selector actually has to resolve back to (at
+least) the clicked element, that element has to be visibly on screen (not
+zero-size/hidden), and it has to be the right *kind* of element for the role
+(an editable box for Input, a real button for Send). A **Pick Reply** also
+gets checked against whatever was most recently sent to that site — if the
+captured sample just echoes that outgoing message, the pick is rejected
+rather than saved as if it read a genuine reply. Any of these failures shows
+the specific reason inline (e.g. "that looks like it's just the last message
+sent, not a real reply") instead of silently saving a bad override. Once a
+pick passes every check, the selector (and, for a reply pick, a short sample
+of its text) is shown right there as confirmation. **Clear Overrides** drops
+all three roles for that site back to the built-in defaults if a pick turns
+out wrong anyway. Overrides persist across restarts the same way everything
+else does. Run 🧪 Test again afterward to confirm the pick actually fixed
+things.
 
 This replaces needing to open DevTools yourself for the common case (a site
 renamed a class or restructured its composer). If picking doesn't land on
@@ -540,13 +578,19 @@ me fix `selectors.js` itself for real, rather than guessing again.
   `sendStartupRoutingPromptOnce()` — sends the routing-explainer prompt
   (Prompt Library id 2) once per app launch, guarded by a `Set` so a later
   manual reload doesn't re-trigger it. A short list of rate-limit/usage-cap
-  phrases is checked against every new reply while a House Rules stage is
-  active — a match auto-pauses the run instead of relaying it as a real
-  contribution. Transcript, custom roles, saved Prompt Library entries, and
-  paused-run state are written to a debounced JSON snapshot in
-  `app.getPath("userData")` on every meaningful change and reloaded on
-  startup (always as **paused**, never active — a restart must never
-  auto-send). Prompt Library sends (`prompts:send`) reuse the same
+  phrases is checked against every new reply unconditionally, not just while
+  a House Rules stage is active — a match is always captured/shown
+  (`isRateLimited`) but never relayed onward (routing, House Rules, Prompt
+  Sequence, and a waiting manager task all skip it); a House Rules stage
+  additionally auto-pauses itself on a match, same as before. Transcript,
+  custom roles, saved Prompt Library entries, and paused-run state are
+  written to a debounced JSON snapshot in `app.getPath("userData")` on every
+  meaningful change (atomically — a temp file is written and renamed into
+  place, never an in-place write, so a crash mid-save can't corrupt it) and
+  reloaded on startup (always as **paused**, never active — a restart must
+  never auto-send). The transcript itself is capped at `MAX_TRANSCRIPT`
+  (1,000) entries, oldest evicted first, both on push and on load. Prompt
+  Library sends (`prompts:send`) reuse the same
   `sendTextTo()` every other manual send goes through, just once per AI with
   that AI's own text instead of one shared message — an empty/blank field for
   a site is treated as "don't send to it," not "send nothing." Saving or
@@ -557,14 +601,32 @@ me fix `selectors.js` itself for real, rather than guessing again.
   `handleSequenceCapture()`) is a linear queue of `{target, text}` steps,
   sent one at a time — each step's target's next captured reply (or, for an
   "all" step, the first of the three to reply) advances to the next step,
-  rather than firing on a timer. **Zoom** (`site:zoom`) calls
+  rather than firing on a timer. Each dispatch stamps `seq.generation` (a
+  monotonic counter) into `seq.dispatchGen[site]` for every site it sends
+  to; `handleSequenceCapture()` requires a capturing site's own
+  `dispatchGen` entry to match the sequence's *current* generation before
+  accepting it, discarding (and logging,
+  `sequence-stale-capture-ignored`) anything that doesn't — the same
+  stale-continuation guard pattern the manager loop uses via `taskId`,
+  applied here to stop an in-flight reply for a step the sequence has
+  already advanced past from being misread as satisfying whatever step
+  comes next. **Zoom** (`site:zoom`) calls
   `webContents.setZoomFactor()` directly on the live site view, clamped to
   [0.4, 2.0] — it zooms the real embedded page, not the app's own UI. The
   **selector picker** (`selector:pick`/`selector:clear`) is the self-service
   alternative to sending me a DevTools screenshot: it runs
   `buildPickScript()` (see `automation.js` below) in the target pane, which
-  resolves once the user clicks the real element for that role, and stores
-  the resulting CSS selector in `state.selectorOverrides[site][role]`
+  resolves once the user clicks the real element for that role — and, in
+  that same click handler, also resolves `matchCount` (does the generated
+  selector actually find the element back), `visible` (is it on-screen with
+  real dimensions), and `roleOk` (is it the right kind of element for
+  `input`/`send`; always true for `assistant`, which has no fixed tag).
+  `selector:pick`'s handler rejects the pick (never saving anything) if any
+  of those come back bad, or — for an `assistant` pick specifically — if the
+  captured sample `looksLikeEcho()` the last thing actually sent to that
+  site (`state.lastSentTo[site]`), the same shared helper the connectivity
+  test's echo detection uses. Only once a pick clears all of that does it
+  get stored in `state.selectorOverrides[site][role]`
   (`input`/`send`/`assistant`), persisted the same way as everything else.
   `sendTextTo()` and `pollSite()` both pass `state.selectorOverrides[site]`
   into `buildSendScript()`/`buildReadScript()`, which try it *before*
@@ -572,14 +634,22 @@ me fix `selectors.js` itself for real, rather than guessing again.
   pick never fully locks you out — clearing the override (or just picking
   again) falls straight back to the built-ins. The **connectivity test**
   (`selftest:run`) is a genuine end-to-end check, not a ping: it generates a
-  fresh, effectively-unique token, sends a prompt asking that site to reply
-  with exactly it (via the same `sendTextTo()` every other manual send uses,
-  bypassing routing entirely), then polls `state.captured[site]` — which
-  `pollSite()` already keeps current on its normal cycle — for a capture at
-  or after the send that actually contains the token. A capture arriving
-  without it is reported as `REPLY_MISMATCH` (send is fine, reading likely
-  isn't), distinct from `TIMEOUT` (nothing came back at all) or a `stage:
-  "send"` failure (never even got a reply chance). A `selftestInFlight` set
+  fresh, effectively-unique token and sends a prompt asking that site to
+  reply with the token **reversed** — not echoed verbatim — via the same
+  `sendTextTo()` every other manual send uses, bypassing routing entirely,
+  then polls `state.captured[site]` — which `pollSite()` already keeps
+  current on its normal cycle — for a capture at or after the send.
+  `waitForTestReply()` classifies whatever lands into one of four outcomes:
+  the reversed token present *without* the original is `ok: true`; both
+  present is `SELECTOR_TOO_BROAD` (almost always reading the whole thread,
+  prompt included); only the original is `REPLY_ECHO` (reading the outgoing
+  message, not any reply); neither is `REPLY_MISMATCH` (something came back,
+  but it's not a match either way); nothing at all is `TIMEOUT`. Asking for
+  a transformation instead of an echo, and requiring the original token's
+  *absence*, closes the specific false-positive a plain echo test can't
+  catch: a too-broad `assistant` selector that reads the sent prompt back
+  would trivially "pass" a verbatim-echo test, since the token is right
+  there in what was sent. A `selftestInFlight` set
   keyed by site rejects a second concurrent run for the same site
   (`ALREADY_RUNNING`) rather than crossing two tests' results.
   `logEvent()`
@@ -768,18 +838,37 @@ successful pick stores the override, reflects it in `state:get`, and
 survives to the persisted state file; different sites/roles pick
 independently without clobbering each other; a timed-out pick reports
 `TIMEOUT` and never stores anything; `selector:pick`/`selector:clear` reject
-an unknown site or role; and clearing an override actually removes it.
+an unknown site or role; and clearing an override actually removes it. A
+separate scenario covers the post-pick validation specifically: a
+`matchCount: 0` pick is rejected as `NOT_FOUND`; `visible: false` as
+`NOT_VISIBLE`; `roleOk: false` as `WRONG_ELEMENT_TYPE`; an `assistant` pick
+whose sample echoes `state.lastSentTo[site]` as `LOOKS_LIKE_ECHO`; none of
+these ever become a stored override; and a pick that clears every check
+still saves normally.
 
 It also covers the 🧪 connectivity test end to end: the sent prompt actually
-asks for a token and embeds a real one; a reply containing that exact token
-is a pass; a reply that arrives but doesn't contain it is `REPLY_MISMATCH`,
-not miscounted as a pass or a timeout; `test/mock-electron.js` gained a
-`_forceSendFail` flag (mirroring the CDP mock's existing `_forceAttachFail`/
-`_forceSetFilesFail`) so a send that never actually submits is reported at
-the `send` stage without the test needing to wait out anything; an unknown
-site is rejected; and starting a second test for a site that already has one
-in flight is rejected as `ALREADY_RUNNING` rather than the two crossing
-results, with the original run still resolving normally afterward.
+asks for the token **reversed**, not echoed, and embeds a real one; a reply
+containing the reversed token (and not the original) is a pass; a reply
+containing *both* forms is `SELECTOR_TOO_BROAD`; a reply containing only the
+original (unreversed) token is `REPLY_ECHO`; a reply that arrives but
+matches neither form is `REPLY_MISMATCH`, not miscounted as a pass or a
+timeout; `test/mock-electron.js` gained a `_forceSendFail` flag (mirroring
+the CDP mock's existing `_forceAttachFail`/`_forceSetFilesFail`) so a send
+that never actually submits is reported at the `send` stage without the
+test needing to wait out anything; an unknown site is rejected; and starting
+a second test for a site that already has one in flight is rejected as
+`ALREADY_RUNNING` rather than the two crossing results, with the original
+run still resolving normally afterward.
+
+It also covers rate-limit detection outside House Rules: with plain
+Auto-routing wired up (no House Rule active), a usage-cap-looking reply is
+still captured and marked `isRateLimited`, but never relayed to any routed
+target — and, since there's no House Rule to pause, the mesh routing itself
+is left untouched rather than being cleared. And it covers the persisted
+state file: on load, a transcript longer than `MAX_TRANSCRIPT` (1,000) gets
+capped to the newest 1,000 entries, oldest evicted first — checked by
+seeding a 1,051-entry file and confirming both the count and which specific
+entries survive.
 
 It also covers the manager/orchestrator loop, stubbing out
 `manager-provider.js`'s `askManager()` at the module level (main.js's own
