@@ -314,6 +314,59 @@ async function testRotation() {
   await call("houserule:stop", {});
 }
 
+async function testBlindRound() {
+  console.log("\n== Blind Round: all three get the same question at once, none see any answer until all three have answered, then each sees the OTHER two's independent answers ==");
+  await resetAllParticipants();
+
+  await call("participants:set", { site: "gemini", enabled: false });
+  const tooFew = await call("houserule:start", { mode: "blind-round", topic: "Should we use microservices?" });
+  assert(!tooFew.ok && tooFew.error === "NEEDS_EXACTLY_THREE", "refuses to start with fewer than 3 participants enabled");
+  await call("participants:set", { site: "gemini", enabled: true });
+  await resetAllParticipants();
+
+  const startRes = await call("houserule:start", { mode: "blind-round", topic: "Should we use microservices?" });
+  assert(startRes.ok, "starts successfully with all 3 enabled");
+  assert(SITES.every((s) => sentLog(s).length === 1), "all three get the question in the SAME kickoff, not staggered");
+  assert(SITES.every((s) => sentLog(s)[0].text.includes("Should we use microservices?") && sentLog(s)[0].text.includes("independently")), "each site's prompt is framed as an independent ask, not a relay of anyone else's view");
+
+  say("chatgpt", "Yes, for the isolation and independent scaling.");
+  let s = await waitUntil(async () => {
+    const st = await call("state:get", {});
+    return !st.houseRule.pendingReplies.includes("chatgpt") ? st : null;
+  }, { label: "chatgpt's independent answer is captured and removed from pendingReplies" });
+  assert(!!s, "capture actually happened within the timeout");
+  assert(SITES.every((site) => sentLog(site).length === 1), "chatgpt answering FIRST does not get shown to claude or gemini yet -- nobody's seen anyone else's answer");
+  assert(s.houseRule.active === true, "still running -- only 1 of 3 have answered");
+  assert(s.houseRule.pendingReplies.includes("claude") && s.houseRule.pendingReplies.includes("gemini") && !s.houseRule.pendingReplies.includes("chatgpt"), "pendingReplies reflects exactly who's left to answer");
+
+  say("gemini", "No, the operational overhead isn't worth it at our scale.");
+  s = await waitUntil(async () => {
+    const st = await call("state:get", {});
+    return !st.houseRule.pendingReplies.includes("gemini") ? st : null;
+  }, { label: "gemini's independent answer is captured and removed from pendingReplies" });
+  assert(!!s, "capture actually happened within the timeout");
+  assert(SITES.every((site) => sentLog(site).length === 1), "still nothing revealed with 2 of 3 in -- claude hasn't answered yet");
+  assert(s.houseRule.pendingReplies.length === 1 && s.houseRule.pendingReplies[0] === "claude", "only claude is left pending now");
+
+  say("claude", "It depends on team size and deployment maturity.");
+  await waitUntil(() => SITES.every((s) => sentLog(s).length === 2), { label: "the reveal goes out to all three once the last (claude's) independent answer lands" });
+
+  const chatgptReveal = sentLog("chatgpt")[1].text;
+  assert(chatgptReveal.includes("Gemini's independent answer") && chatgptReveal.includes("operational overhead isn't worth it"), "chatgpt's reveal includes gemini's independent answer, correctly labeled");
+  assert(chatgptReveal.includes("Claude's independent answer") && chatgptReveal.includes("depends on team size"), "chatgpt's reveal includes claude's independent answer too");
+  assert(!chatgptReveal.includes("isolation and independent scaling"), "chatgpt's OWN reveal does not include its own answer echoed back to it");
+
+  const claudeReveal = sentLog("claude")[1].text;
+  assert(claudeReveal.includes("isolation and independent scaling") && claudeReveal.includes("operational overhead isn't worth it"), "claude's reveal includes both chatgpt's and gemini's independent answers");
+  assert(!claudeReveal.includes("depends on team size"), "claude's OWN reveal does not include its own answer");
+
+  s = await call("state:get", {});
+  assert(s.houseRule.active === false, "the run ends itself automatically once the reveal goes out -- it's single-round by design");
+
+  const visible = s.transcript.map((t) => t.text);
+  assert(visible.includes("Yes, for the isolation and independent scaling.") && visible.includes("No, the operational overhead isn't worth it at our scale.") && visible.includes("It depends on team size and deployment maturity."), "all three independent answers are visible in the transcript");
+}
+
 async function testPauseResume() {
   console.log("\n== Pause/Resume: routing round-trips correctly ==");
   await resetAllParticipants();
@@ -459,6 +512,52 @@ async function testConcurrentSendsToSameTargetAreSerialized() {
   assert(log.length === 2, `both sends landed (got ${log.length})`);
   assert(log[0].text === "Message A (slow)" && log[1].text === "Message B (fast)", `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text).join(", ")}]`);
   assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
+}
+
+async function testDeliveryLedger() {
+  console.log("\n== Delivery ledger: the program's own record of what was actually sent where, independent of what any AI believes happened ==");
+  await resetAllParticipants();
+
+  const before = (await call("state:get", {})).ledger.length;
+  const composeRes = await call("send:compose", { text: "Ledger test message", targets: ["claude"] });
+  assert(composeRes.ok, "the underlying send still succeeds normally");
+  let s = await call("state:get", {});
+  let entries = s.ledger.slice(before);
+  assert(entries.length === 1, `exactly one ledger entry was recorded for the one send (got ${entries.length})`);
+  const entry = entries[0];
+  assert(entry.target === "claude" && entry.source === null && entry.status === "delivered" && entry.error === null, `a successful compose (no fromSite) is recorded as delivered with no error and source:null (got ${JSON.stringify(entry)})`);
+  assert(entry.textPreview.includes("Ledger test message"), "the ledger records what was actually sent, not just that something was");
+  assert(typeof entry.id === "string" && entry.id.startsWith("MSG-"), "each entry gets its own program-assigned message id, never something an AI could claim to have invented");
+  assert(entry.duplicate === false, "a first-of-its-kind send isn't flagged as a duplicate");
+
+  // a relayed send (fromSite set) records the real source, not null
+  reg("claude").webContents._forceSendFail = false;
+  say("chatgpt", "[TO: GEMINI]\nRelay this specific one.");
+  await waitUntil(async () => {
+    const st = await call("state:get", {});
+    return st.ledger.some((e) => e.target === "gemini" && e.textPreview.includes("Relay this specific one"));
+  }, { label: "the tag-routed relay to gemini gets its own ledger entry" });
+  s = await call("state:get", {});
+  const relayed = s.ledger.find((e) => e.target === "gemini" && e.textPreview.includes("Relay this specific one"));
+  assert(relayed.source === "chatgpt", "a relayed send records the ACTUAL originating site as source, not left null or trusted from anything inside the message text");
+
+  // a failed send is still recorded, with the real error, not silently dropped
+  await resetAllParticipants();
+  const beforeFail = (await call("state:get", {})).ledger.length;
+  reg("chatgpt").webContents._forceSendFail = true;
+  await call("send:compose", { text: "This one will fail", targets: ["chatgpt"] });
+  reg("chatgpt").webContents._forceSendFail = false;
+  s = await call("state:get", {});
+  const failEntry = s.ledger.slice(beforeFail).find((e) => e.target === "chatgpt");
+  assert(!!failEntry && failEntry.status === "failed" && failEntry.error === "SEND_NOT_CONFIRMED", `a failed send is recorded as failed with the real error, not silently dropped from the ledger (got ${JSON.stringify(failEntry)})`);
+
+  // duplicate detection: the exact same (target, text) sent twice in quick succession is flagged
+  await resetAllParticipants();
+  await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
+  await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
+  s = await call("state:get", {});
+  const repeats = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Repeat me exactly");
+  assert(repeats.length === 2 && repeats[0].duplicate === false && repeats[1].duplicate === true, `the first of two identical sends isn't flagged, the second (within the duplicate window) is (got flags [${repeats.map((e) => e.duplicate).join(", ")}])`);
 }
 
 async function testPersistenceSavesToDisk() {
@@ -1350,6 +1449,7 @@ async function main() {
   await testFreeForAllAndBrainstormTeardown();
   await testParticipantDisableRemovesAsTarget();
   await testRotation();
+  await testBlindRound();
   await testPauseResume();
   await testRoleInjection();
   await testWindowCollapse();
@@ -1357,6 +1457,7 @@ async function main() {
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testConcurrentSendsToSameTargetAreSerialized();
+  await testDeliveryLedger();
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
   await testPromptEditorWindow();

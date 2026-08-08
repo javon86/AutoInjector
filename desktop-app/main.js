@@ -33,14 +33,16 @@ const POLL_MS = 1500;
 const STABLE_MS = 1800;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
+const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
+const DUPLICATE_WINDOW_MS = 5000; // a second identical (target, text) send within this window gets flagged duplicate:true in the ledger
 const PANE_SYNC_MS = 700;
 // The 7 structured formats that temporarily take over from the always-on
 // Roundtable v2 [TO: X] tag routing (see pollSite()) — "roundtable" itself
 // is no longer a House Rules mode you start/stop, it's just how the program
 // behaves by default whenever none of these 7 are active.
-const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation"];
+const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation", "blind-round"];
 const STAGE_MODES = new Set(HOUSE_RULES);
-const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation"]);
+const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "blind-round"]);
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = 500;
@@ -125,8 +127,10 @@ const state = {
   customRole: {}, // site -> user-assigned persona string ("", i.e. falsy, means general-purpose)
   transcript: [], // { id, site, label, text, ts, pinned, isVerdict?, isFinalPlan? } — every VISIBLE captured reply
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
+  ledger: [], // { id, ts, source, target, textPreview, status, error, duplicate } — one entry per sendTextTo() attempt; see recordLedgerEntry(). Program-owned transport record, independent of what any AI believes happened -- never trust an AI's own claim about whether a message arrived.
   meshActive: false, // whether global Auto is currently on
   nextTurnId: 1,
+  nextLedgerId: 1,
   hr: null, // House Rules run state, see resetHouseRule()
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
   nextPromptId: 1,
@@ -362,6 +366,39 @@ function logEvent(kind, detail) {
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
   appendDebugLog(entry);
+}
+
+// The message delivery ledger: the program's own record of what was
+// actually sent where, independent of what any AI's own reasoning
+// concludes about it. Recorded from ONE place -- inside sendTextTo() itself
+// -- so every send path in the app (compose, forward, roundtable relay,
+// House Rules dispatch, Prompt Sequence, manager delegation) is covered
+// automatically, with no per-call-site bookkeeping to keep in sync.
+// "status" reflects only what browser automation can actually observe (the
+// send-script's own confirmation that the input cleared) -- it is NOT proof
+// the target model read or processed the message, only that our side of
+// the send genuinely went out. duplicate:true means the same (target, text)
+// pair was already sent within DUPLICATE_WINDOW_MS -- surfaced for
+// visibility, never auto-suppressed, since a legitimate retry can look
+// identical to an accidental double-send.
+function recordLedgerEntry({ source, target, text, ok, error }) {
+  const recentDuplicate = state.ledger.some(
+    (e) => e.target === target && e.textPreview === text.slice(0, 200) && Date.now() - e.ts < DUPLICATE_WINDOW_MS
+  );
+  const entry = {
+    id: `MSG-${state.nextLedgerId++}`,
+    ts: Date.now(),
+    source: source || null,
+    target,
+    textPreview: text.slice(0, 200),
+    status: ok ? "delivered" : "failed",
+    error: ok ? null : error || "unknown",
+    duplicate: recentDuplicate
+  };
+  state.ledger.push(entry);
+  if (state.ledger.length > MAX_LEDGER) state.ledger.splice(0, state.ledger.length - MAX_LEDGER);
+  broadcast("ledger-entry", entry);
+  return entry;
 }
 
 // The shared normalized event system (spec section 14): one event, up to
@@ -782,7 +819,8 @@ function houseRuleSnapshot() {
     roundNum: hr.roundNum,
     roles: { ...hr.roles },
     nextSpeaker,
-    phase: hr.phase
+    phase: hr.phase,
+    pendingReplies: hr.realPending ? [...hr.realPending] : []
   };
 }
 
@@ -825,6 +863,7 @@ function withSendQueue(target, fn) {
 async function sendTextTo(target, text, fromSite) {
   const view = siteViews[target];
   if (!view || view.webContents.isDestroyed()) {
+    recordLedgerEntry({ source: fromSite || null, target, text, ok: false, error: "NO_VIEW" });
     broadcast("send-error", { target, error: "NO_VIEW" });
     logEvent("send-error", { target, error: "NO_VIEW" });
     return { ok: false, error: "NO_VIEW" };
@@ -839,6 +878,7 @@ async function sendTextTo(target, text, fromSite) {
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
+  recordLedgerEntry({ source: fromSite || null, target, text: prompt, ok: res && res.ok, error: res && res.error });
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown" });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown" });
@@ -1011,6 +1051,27 @@ function endHouseRule(reason) {
 }
 
 // --- House Rules: per-mode kickoffs -----------------------------------------
+
+// Blind Round: for a decision that matters, three models agreeing isn't
+// worth much if the second and third only saw the first's answer before
+// forming their own -- that's anchoring, not independent agreement. Every
+// participant gets the exact same question at the exact same time, with
+// none of them able to see the others' answers until all three have
+// answered; only once every answer is in does each site get shown what the
+// OTHER two independently said. Single-round by design (a technique you
+// reach for on one important question, not an ongoing conversational mode)
+// -- it ends itself the moment the reveal goes out. Reuses the generic
+// hr.realPending/hr.realReplies fan-in shape "Who Wants to Speak" already
+// uses for its own opt-in fan-in, rather than inventing a parallel one.
+async function startBlindRound(checked) {
+  state.hr.phase = "awaiting-blind";
+  state.hr.realPending = new Set(checked);
+  state.hr.realReplies = {};
+  for (const s of checked) {
+    const prompt = `You're being asked this independently and at the same time as ${otherLabels(checked, s)} -- none of you can see any answer but your own yet, so give your own honest take rather than guessing what they'd say. Once everyone has answered, you'll each see exactly what the others independently said.\n\n${state.hr.topic}`;
+    await sendTextTo(s, prompt, null);
+  }
+}
 
 async function startFreeForAll(checked) {
   for (const s of checked) state.routing[s] = new Set(checked.filter((t) => t !== s));
@@ -1707,6 +1768,27 @@ async function handleRotationCapture(turn) {
   await sendTextTo(thirdSite, updateMsg, null);
 }
 
+async function handleBlindRoundCapture(turn) {
+  const hr = state.hr;
+  if (hr.phase !== "awaiting-blind" || !hr.realPending.has(turn.site)) return;
+  hr.realPending.delete(turn.site);
+  hr.realReplies[turn.site] = turn.text;
+  if (hr.realPending.size > 0) return; // still waiting on the others -- nobody gets shown anything yet
+
+  // All three are in. Reveal each site's own independent answer to the
+  // OTHER two (never its own back to itself), clearly framed as having been
+  // given blind, then end the run -- this is a one-shot technique, not a
+  // mode that keeps going.
+  const sites = Object.keys(hr.realReplies);
+  for (const s of sites) {
+    const others = sites.filter((o) => o !== s)
+      .map((o) => `[${SITES[o].label}'s independent answer]\n\n${hr.realReplies[o]}`)
+      .join("\n\n");
+    await sendTextTo(s, `Here's what everyone answered independently, before anyone could see anyone else's response:\n\n${others}`, null);
+  }
+  endHouseRule("all three answered independently");
+}
+
 async function handleHouseRuleCapture(turn) {
   switch (state.hr.mode) {
     case "debate": return handleDebateCapture(turn);
@@ -1715,6 +1797,7 @@ async function handleHouseRuleCapture(turn) {
     case "who-wants-to-speak": return handleWhoWantsCapture(turn);
     case "brainstorm": return handleBrainstormCapture(turn);
     case "rotation": return handleRotationCapture(turn);
+    case "blind-round": return handleBlindRoundCapture(turn);
     default: return; // free-for-all rides entirely on the generic routing mesh below
   }
 }
@@ -2027,6 +2110,7 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
     else if (mode === "chargeback") await startChargeback(checked);
     else if (mode === "who-wants-to-speak") await startWhoWants(checked);
     else if (mode === "rotation") await startRotation();
+    else if (mode === "blind-round") await startBlindRound(checked);
   } catch (e) {
     state.hr.active = false;
     return { ok: false, error: String(e) };
@@ -2097,6 +2181,7 @@ ipcMain.handle("state:get", () => ({
   captured: state.captured,
   transcript: state.transcript,
   log: state.log,
+  ledger: state.ledger,
   prompts: state.prompts,
   sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length },
   manager: managerSnapshot(),

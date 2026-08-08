@@ -10,7 +10,8 @@ const HOUSE_RULE_LABELS = {
   "devil-angel": "Devil & Angel",
   "chargeback": "Chargeback",
   "brainstorm": "Brainstorm",
-  "rotation": "Rotation"
+  "rotation": "Rotation",
+  "blind-round": "Blind Round"
 };
 const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;

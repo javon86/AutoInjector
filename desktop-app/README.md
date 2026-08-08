@@ -310,6 +310,16 @@ always ends the run and hands control back to tag-routing.
   caught up — and its one-word `"UPDATED"` acknowledgment is swallowed
   entirely, never shown anywhere. Unlike the other formats, the order is
   fixed on purpose, not shuffled.
+- **Blind Round** *(needs all 3 checked)* — for a decision that actually
+  matters: all three get the exact same question at the exact same time, and
+  none of them can see any answer — not even a hint that the others have
+  answered — until all three have independently responded. Only once the
+  last one is in does each AI get shown what the *other* two said (never its
+  own answer echoed back to it). This exists because three AIs agreeing
+  isn't worth much if the second and third only formed their answer after
+  seeing the first's — that's anchoring, not independent agreement. It's a
+  one-shot technique, not an ongoing mode: it ends itself automatically the
+  moment the reveal goes out.
 
 Role assignments show up as a small badge next to that AI's name once a
 format with structural roles is running (that's the auto-assigned
@@ -499,6 +509,27 @@ instead of colliding with the first. The common case (nothing else already
 sending to that target) still calls straight through with zero added
 overhead — only genuinely concurrent sends to the same site pay for
 serialization.
+
+### The delivery ledger: the program's own record of what actually happened
+
+Every send the app ever makes — Compose, Forward, a House Rules dispatch, a
+tag-routed relay, a Prompt Sequence step, a manager delegation, all of it —
+gets its own entry in a delivery ledger, recorded from one place
+(`recordLedgerEntry()`, called from inside `sendTextTo()` itself) so nothing
+needs separate bookkeeping to stay covered. Each entry carries a
+program-assigned id (`MSG-<n>`), the real source site (or `null` for
+something you sent directly), the target, a preview of what was actually
+sent, whether it was confirmed delivered or failed (and the specific error
+if it failed), and whether it looks like a duplicate of something sent to
+the same target within the last 5 seconds. This is deliberately the
+program's own record, not any AI's — an AI's own reasoning about whether its
+message "got through" is never trustworthy on its own, since it has no real
+visibility into browser automation succeeding or failing. The ledger is
+available via `state:get` (`ledger`) and broadcasts a `ledger-entry` event
+live as each one is recorded, ready for a future UI panel; this pass is
+data-only, on purpose — nothing in this app currently injects delivery
+status back into what gets sent to an AI, since that's a real behavior
+change worth deciding deliberately rather than bundling in silently.
 
 ### 🧪 Checking whether it's actually working: the connectivity test
 
@@ -894,6 +925,26 @@ finish in — with the combined wall-clock time showing they ran one after
 another rather than in parallel. This is exactly the scenario that used to
 produce a real ~50% `SEND_NOT_CONFIRMED` rate under mesh routing before the
 queue existed.
+
+It also covers the delivery ledger: a successful compose records exactly
+one entry with the real target, `source:null`, `status:"delivered"`, and a
+program-assigned `MSG-<n>` id; a tag-routed relay records the actual
+originating site as `source`, never left null or trusted from anything
+inside the message text; a forced `SEND_NOT_CONFIRMED` failure still gets
+recorded (with the real error), not silently dropped; and sending the exact
+same text to the exact same target twice in quick succession flags the
+second entry `duplicate:true` while leaving the first alone.
+
+It also covers Blind Round end to end: refuses to start with fewer than 3
+participants enabled; all three get the identical prompt in the same
+kickoff, each framed as an independent ask; the first (and second) reply to
+land does NOT get shown to anyone — `pendingReplies` in the House Rule
+snapshot tracks exactly who's left, verified after each of the first two
+answers — until the third and final independent answer arrives, at which
+point each site's own reveal is checked to contain the OTHER two answers
+(correctly labeled) and specifically NOT its own; and the run marks itself
+inactive automatically once the reveal goes out, with no further action
+needed to end it.
 
 It also covers the manager/orchestrator loop, stubbing out
 `manager-provider.js`'s `askManager()` at the module level (main.js's own
