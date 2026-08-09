@@ -520,6 +520,23 @@ sending to that target) still calls straight through with zero added
 overhead — only genuinely concurrent sends to the same site pay for
 serialization.
 
+On top of that, `sendTextTo()` retries a failed send automatically, up to 3
+total attempts, with a 1.5s backoff between them, before ever reporting it
+as a failure. This is aimed specifically at a pattern seen in real runs: a
+pane that's cold or still settling (just loaded, just finished a previous
+reply) fails the confirmation check on the very first attempt, then sends
+cleanly on an immediate retry — a real, transient failure, not a broken
+selector or a dead connection, and previously indistinguishable from one in
+the Activity Log. Every retried attempt is logged individually as
+`send-retry` (with its own attempt number and error), and the eventual
+outcome — `sent` or `send-error` — carries the real `attempts` count and,
+on success, a `selfRecovered: true` flag whenever it took more than one try,
+so a clean first-try send is never conflated with one that only worked
+because of the retry. The delivery ledger records the same `attempts` count
+on every entry, successful or not. Only a send that fails all 3 attempts is
+ever reported as `SEND_NOT_CONFIRMED` — at that point it's a real failure,
+not a timing fluke, and retrying further wouldn't change that.
+
 ### The delivery ledger: the program's own record of what actually happened
 
 Every send the app ever makes — Compose, Forward, a House Rules dispatch, a
@@ -608,12 +625,23 @@ fires tells you, unambiguously, whether the message actually arrived.
 A failed leg is reported with the exact stage it failed at: `source-send`
 (couldn't even send to the source), `source-reply` (source never answered
 its own half correctly — that's the same class of problem the 🧪 Test
-button would catch), or `relay` (source answered fine, but target never got
-the forward, or got it and didn't reply as expected — this is the one that
-specifically points at the relay path itself, not either AI's own
-connection). That's the "what do we need to fix to get to 100%" breakdown —
-a broken relay leg looks different from a broken individual connection, and
-now you can tell which one you're looking at.
+button would catch), `forward-send` (source answered fine, but the internal
+mesh forward to target itself never went through — a real send failure on
+the relay hop, e.g. `SEND_NOT_CONFIRMED`, nothing to do with target at all),
+or `relay` (the forward genuinely sent, but target never replied as
+expected — this is the one that actually points at target's own
+reply-reading, not the relay path). The `forward-send` check works by
+watching the delivery ledger itself (`waitForLedgerEntry()`) for the
+program's own record of that internal forward, rather than inferring
+anything from target's silence — a leg that times out waiting on target
+used to get reported as an undifferentiated `relay` failure even when the
+real cause was the forward never sending in the first place; now that's
+caught and reported as `forward-send` directly, distinct from target simply
+never answering. That's the "what do we need to fix to get to 100%"
+breakdown — a broken relay leg looks different from a broken individual
+connection, and a forward that never sent looks different from a target
+that never answered, so now you can tell exactly which one you're looking
+at.
 
 ### 🎯 Fixing it yourself: the selector picker
 
@@ -1051,7 +1079,14 @@ is fully cleaned up afterward (nothing left on that wasn't already there),
 and that both the start and the final tally land in the Activity Log. A
 second scenario proves a concurrent second Tuner run is rejected
 (`ALREADY_RUNNING`) and, further, that a manual 🧪 Test is refused
-(`TUNER_RUNNING`) while one is in flight rather than racing it.
+(`TUNER_RUNNING`) while one is in flight rather than racing it. A third
+scenario proves the `forward-send` vs. `relay` distinction is real: it runs
+a full Tuner pass but sabotages just the internal forward on one specific
+leg (`chatgpt->claude`, via the mock's `_forceSendFail`) so source answers
+its own half correctly but the mesh forward to target never actually sends
+— and checks that leg is reported with `stage:"forward-send"` and the real
+underlying error, not lumped in with (or mistaken for) target simply never
+replying, while the other 5 legs — answered normally — still pass.
 
 It also covers the 🔑 saved-logins feature end to end, with a real
 (non-secure, but functionally real) `safeStorage` mock so the actual
@@ -1095,6 +1130,21 @@ finish in — with the combined wall-clock time showing they ran one after
 another rather than in parallel. This is exactly the scenario that used to
 produce a real ~50% `SEND_NOT_CONFIRMED` rate under mesh routing before the
 queue existed.
+
+It also covers the auto-retry behavior: `mock-electron.js` gained a
+`_sendFailQueue` (per-attempt pass/fail overrides, shifted on every real
+send AND every retry of it) so a test can script "fails twice, then
+succeeds on the 3rd try" precisely — checking the caller only ever sees the
+eventual success, exactly one real message actually lands (not three),
+both earlier failed attempts are logged individually as `send-retry`, and
+the final `sent` log entry and delivery-ledger entry both carry the real
+attempt count (3) with `selfRecovered:true`. A second case scripts all 3
+attempts failing, confirming it's then reported as a genuine
+`SEND_NOT_CONFIRMED` failure (never silently swallowed), nothing was ever
+actually sent, all 3 attempts really ran with real backoff between them
+(checked against wall-clock time, not just call count), and the ledger and
+`send-error` log entry both still carry the real attempt count even for a
+total failure.
 
 It also covers the delivery ledger: a successful compose records exactly
 one entry with the real target, `source:null`, `status:"delivered"`, and a

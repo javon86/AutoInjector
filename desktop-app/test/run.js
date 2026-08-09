@@ -514,6 +514,40 @@ async function testConcurrentSendsToSameTargetAreSerialized() {
   assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
 }
 
+async function testSendAutoRetry() {
+  console.log("\n== sendTextTo: a failed send is retried automatically (up to 3 total attempts) before ever being reported as a failure ==");
+  await resetAllParticipants();
+
+  // fails twice, then succeeds on the 3rd (real) attempt -- self-recovers
+  // without the caller ever seeing a failure
+  reg("claude").webContents._sendFailQueue = [true, true, false];
+  const res = await call("send:compose", { text: "Should self-recover", targets: ["claude"] });
+  assert(res.ok && res.results.claude.ok, "the overall call still succeeds -- the caller never sees the two earlier failures");
+  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text === "Should self-recover", "exactly one real send lands (the successful 3rd attempt), not three separate messages");
+
+  let s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 1) && s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 2), "both earlier failed attempts are logged as retries, individually");
+  assert(s.log.some((l) => l.kind === "sent" && l.detail.target === "claude" && l.detail.attempts === 3 && l.detail.selfRecovered === true), "the final success is logged with the real attempt count and flagged as self-recovered, not indistinguishable from a clean first try");
+
+  const ledgerEntry = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Should self-recover").pop();
+  assert(ledgerEntry && ledgerEntry.status === "delivered" && ledgerEntry.attempts === 3, `the delivery ledger also records the real attempt count for the successful entry (got ${JSON.stringify(ledgerEntry)})`);
+
+  // fails all 3 attempts -- genuinely reported as broken, not retried forever
+  await resetAllParticipants();
+  reg("gemini").webContents._sendFailQueue = [true, true, true];
+  const start = Date.now();
+  const failRes = await call("send:compose", { text: "Genuinely broken", targets: ["gemini"] });
+  const elapsed = Date.now() - start;
+  assert(!failRes.results.gemini.ok && failRes.results.gemini.error === "SEND_NOT_CONFIRMED", "after all 3 attempts fail, it's reported as a real failure, not silently swallowed");
+  assert(sentLog("gemini").length === 0, "nothing ever actually landed -- all 3 attempts genuinely failed, not a partial success");
+  assert(elapsed >= 2900, `all 3 attempts actually ran, backing off between each (~3s total for 2 backoffs), not fast-failing after one try (took ${elapsed}ms)`);
+
+  s = await call("state:get", {});
+  const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview === "Genuinely broken").pop();
+  assert(failLedgerEntry && failLedgerEntry.status === "failed" && failLedgerEntry.attempts === 3, "the ledger records the real attempt count (3) even for a total failure, not left at 1");
+  assert(s.log.some((l) => l.kind === "send-error" && l.detail.target === "gemini" && l.detail.attempts === 3), "the final send-error log entry also carries the real attempt count");
+}
+
 async function testDeliveryLedger() {
   console.log("\n== Delivery ledger: the program's own record of what was actually sent where, independent of what any AI believes happened ==");
   await resetAllParticipants();
@@ -1235,6 +1269,52 @@ async function testTunerRejectsConcurrentRuns() {
   await firstRun;
 }
 
+async function testTunerDistinguishesForwardFailureFromNoReply() {
+  console.log("\n== The Tuner: a relay leg whose internal forward silently fails to send is reported as exactly that, not confused with the target never answering ==");
+  await resetAllParticipants();
+
+  const tunerRunPromise = call("tuner:run", {});
+
+  // Phase 1: answer all 3 connectivity checks normally
+  for (const site of SITES) {
+    const before = sentLog(site).length;
+    await waitUntil(() => sentLog(site).length > before, { label: `tuner connectivity check reaches ${site}` });
+    const token = extractSelftestToken(sentLog(site)[sentLog(site).length - 1].text);
+    say(site, reverseStr(token));
+  }
+
+  const legs = [];
+  for (const source of SITES) for (const target of SITES) if (source !== target) legs.push([source, target]);
+
+  for (const [source, target] of legs) {
+    const beforeSource = sentLog(source).length;
+    await waitUntil(() => sentLog(source).length > beforeSource, { label: `relay prompt reaches ${source} (leg ${source}->${target})` });
+    const relayToken = sentLog(source)[sentLog(source).length - 1].text.match(/RELAY-TEST (\S+)/)[1];
+
+    if (source === "chatgpt" && target === "claude") {
+      // this is the one leg whose forward we sabotage
+      reg("claude").webContents._forceSendFail = true;
+      say("chatgpt", `RELAY-TEST ${relayToken}`);
+      await waitUntil(async () => {
+        const st = await call("state:get", {});
+        return st.log.some((l) => l.kind === "tuner-leg-error" && l.detail.leg === "chatgpt->claude" && l.detail.stage === "forward-send");
+      }, { label: "leg chatgpt->claude reported as a forward-send failure", timeout: 30000 });
+      reg("claude").webContents._forceSendFail = false;
+      continue; // claude never receives anything for this leg -- nothing more to answer
+    }
+
+    const beforeTarget = sentLog(target).length;
+    say(source, `RELAY-TEST ${relayToken}`);
+    await waitUntil(() => sentLog(target).length > beforeTarget, { label: `mesh forwards ${source}'s reply to ${target} (leg ${source}->${target})` });
+    say(target, `RELAY-RECEIVED ${relayToken}`);
+  }
+
+  const res = await tunerRunPromise;
+  const leg1 = res.legs["chatgpt->claude"];
+  assert(!leg1.ok && leg1.stage === "forward-send" && leg1.error === "SEND_NOT_CONFIRMED", `the leg result itself carries the forward-send stage and real error (got ${JSON.stringify(leg1)})`);
+  assert(res.summary.legsOk === 5 && res.summary.legsTotal === 6, "exactly the one sabotaged leg fails, the other 5 (answered normally) still pass");
+}
+
 const MANAGER_TEST_CONFIG ={ provider: "openai-compatible", endpoint: "http://localhost:1234/v1/chat/completions", apiKey: "mgr-test-key", model: "test-model", tier: 2, timeoutMs: 5000, approvalMode: false, maximumTurns: 20, costLimit: 5 };
 
 async function resetManagerState() {
@@ -1655,6 +1735,7 @@ async function main() {
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testConcurrentSendsToSameTargetAreSerialized();
+  await testSendAutoRetry();
   await testDeliveryLedger();
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
@@ -1677,6 +1758,7 @@ async function main() {
   await testSelfTestConnectivity();
   await testTunerFullRun();
   await testTunerRejectsConcurrentRuns();
+  await testTunerDistinguishesForwardFailureFromNoReply();
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
   await testManagerApprovalModeAndRejection();
