@@ -911,6 +911,7 @@ async function sendTextTo(target, text, fromSite) {
 //   REPLY_MISMATCH     -- something else came back that matches neither
 //   TIMEOUT            -- nothing came back at all
 const selftestInFlight = new Set();
+const tunerInFlight = { active: false }; // guards against a manual 🧪 Test colliding with a Tuner run touching the same site
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -2394,7 +2395,10 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
   return { ok: true };
 });
 
-ipcMain.handle("selftest:run", async (_evt, { site }) => {
+// Extracted so the Tuner (see below) can run the exact same connectivity
+// check the 🧪 Test button does, on multiple sites, without duplicating the
+// send/wait/log logic. The ipcMain handler is now a thin wrapper.
+async function runConnectivityTest(site) {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (selftestInFlight.has(site)) return { ok: false, error: "ALREADY_RUNNING" };
   selftestInFlight.add(site);
@@ -2415,6 +2419,122 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
     return { ok: waitRes.ok, stage: "reply", error: waitRes.error, text: waitRes.text };
   } finally {
     selftestInFlight.delete(site);
+  }
+}
+
+ipcMain.handle("selftest:run", async (_evt, { site }) => {
+  if (tunerInFlight.active) return { ok: false, error: "TUNER_RUNNING" };
+  return runConnectivityTest(site);
+});
+
+// --- The Tuner: a one-click diagnostic that answers "is the connection
+// between the AIs actually working" -- not just "can I reach each one
+// individually" (the 🧪 Test button already answers that), but "does a
+// message genuinely get from A to B." Root-caused from a real live-testing
+// session's duplicate-delivery/relay findings: the request was for
+// something the models themselves could be run through, whose output tells
+// you exactly what to fix to get to 100%.
+//
+// The relay-leg check deliberately uses MESH routing (a temporary
+// routing:set on just the pair being tested, restored after), not tag
+// routing -- mesh forwards a site's captured reply verbatim regardless of
+// whether the model correctly formats a [TO: X] tag, which removes one
+// whole axis of "is this a relay bug or a formatting-compliance quirk"
+// ambiguity from the result.
+//
+// The harder problem this has to solve: pollSite() only ever reads what an
+// AI's OWN reply says, never what it received -- so "prove B actually got
+// A's message" requires B to produce some checkable reply, which means
+// asking the model to do SOMETHING with what it receives. Asking a model to
+// "relay this text literally without answering it" is fragile in practice
+// (models tend to answer what's in front of them rather than pass it
+// through inertly). Instead, ONE question is asked that works for both
+// hops: source, addressed directly, replies "RELAY-TEST <token>" plus a
+// trailing conditional instruction. Mesh then forwards that ENTIRE reply
+// (instruction included) to target, now wrapped in "[Source says] ...".
+// Target, seeing itself addressed via a forward rather than directly,
+// follows the ELSE branch and replies "RELAY-RECEIVED <token>" instead. No
+// model is ever asked to suppress its own reasoning and blindly forward
+// something -- both hops just answer the message actually in front of them.
+const RELAY_LEG_TIMEOUT_MS = 45000;
+async function waitForLiteralReply(site, expectedSubstring, sentTs, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const cap = state.captured[site];
+    if (cap && cap.ts >= sentTs && cap.text.includes(expectedSubstring)) return { ok: true, text: cap.text.slice(0, 200) };
+    await new Promise((r) => setTimeout(r, SELFTEST_POLL_MS));
+  }
+  const cap = state.captured[site];
+  if (cap && cap.ts >= sentTs) return { ok: false, error: "MISMATCH", text: cap.text.slice(0, 200) };
+  return { ok: false, error: "TIMEOUT" };
+}
+
+async function runRelayLegTest(source, target) {
+  const leg = `${source}->${target}`;
+  const token = makeSelftestToken();
+  // Only add the routing pair if it isn't already there, and only remove it
+  // afterward if THIS test was the one that added it -- never clobber a
+  // routing setup the user deliberately configured themselves.
+  const alreadyRouted = state.routing[source].has(target);
+  if (!alreadyRouted) state.routing[source].add(target);
+  logEvent("tuner-leg-started", { source, target, leg, token });
+  try {
+    const prompt = `[AutoInjector automated relay test -- not a real task] Reply with EXACTLY this and nothing else: RELAY-TEST ${token}\nIf you're seeing this specific message because it was forwarded to you by another AI (rather than sent to you directly by the operator), instead reply with EXACTLY: RELAY-RECEIVED ${token}`;
+    const sentTs = Date.now();
+    const sendRes = await sendTextTo(source, prompt, null);
+    if (!sendRes || !sendRes.ok) {
+      const error = (sendRes && sendRes.error) || "unknown";
+      logEvent("tuner-leg-error", { source, target, leg, stage: "source-send", error });
+      return { ok: false, leg, source, target, stage: "source-send", error };
+    }
+    const sourceWait = await waitForLiteralReply(source, `RELAY-TEST ${token}`, sentTs, RELAY_LEG_TIMEOUT_MS);
+    if (!sourceWait.ok) {
+      logEvent("tuner-leg-error", { source, target, leg, stage: "source-reply", error: sourceWait.error, capturedText: sourceWait.text || null });
+      return { ok: false, leg, source, target, stage: "source-reply", error: sourceWait.error, text: sourceWait.text };
+    }
+    const relayWait = await waitForLiteralReply(target, `RELAY-RECEIVED ${token}`, sentTs, RELAY_LEG_TIMEOUT_MS);
+    if (!relayWait.ok) {
+      logEvent("tuner-leg-error", { source, target, leg, stage: "relay", error: relayWait.error, capturedText: relayWait.text || null });
+      return { ok: false, leg, source, target, stage: "relay", error: relayWait.error, text: relayWait.text };
+    }
+    logEvent("tuner-leg-ok", { source, target, leg });
+    return { ok: true, leg, source, target };
+  } finally {
+    if (!alreadyRouted) state.routing[source].delete(target);
+  }
+}
+
+ipcMain.handle("tuner:run", async () => {
+  if (tunerInFlight.active) return { ok: false, error: "ALREADY_RUNNING" };
+  tunerInFlight.active = true;
+  logEvent("tuner-started", {});
+  broadcast("tuner-state", { active: true, phase: "starting" });
+  const sites = {};
+  const legs = {};
+  try {
+    for (const site of SITE_IDS) {
+      broadcast("tuner-state", { active: true, phase: "site", site });
+      sites[site] = await runConnectivityTest(site);
+    }
+    for (const source of SITE_IDS) {
+      for (const target of SITE_IDS) {
+        if (source === target) continue;
+        const leg = `${source}->${target}`;
+        broadcast("tuner-state", { active: true, phase: "leg", leg });
+        legs[leg] = await runRelayLegTest(source, target);
+      }
+    }
+    const summary = {
+      sitesOk: Object.values(sites).filter((r) => r.ok).length,
+      sitesTotal: SITE_IDS.length,
+      legsOk: Object.values(legs).filter((r) => r.ok).length,
+      legsTotal: Object.keys(legs).length
+    };
+    logEvent("tuner-done", summary);
+    broadcast("tuner-state", { active: false, phase: "done", sites, legs, summary });
+    return { ok: true, sites, legs, summary };
+  } finally {
+    tunerInFlight.active = false;
   }
 });
 

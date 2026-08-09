@@ -569,6 +569,52 @@ without having to read anything yourself or guess from the Activity Log —
 and, unlike a plain token echo, it can't be fooled by a selector that's
 merely reading something back.
 
+### 🎛️ The Tuner: testing the whole relay, not just one AI at a time
+
+The 🧪 Test button proves "can I reach this one AI" — it says nothing about
+whether a message actually gets from one AI to another. **Run Tuner**
+(Global panel) answers that: it runs the connectivity test on all three
+sites, then genuinely tests all **6 directed pairs**
+(chatgpt→claude, claude→chatgpt, chatgpt→gemini, gemini→chatgpt,
+claude→gemini, gemini→claude) — not just whichever routing you currently
+have turned on. It takes a few minutes; the Global panel shows live
+progress, and every individual check lands in the Activity Log in detail
+(`tuner-leg-started`/`-ok`/`-error`), with a one-line pass/fail summary at
+the end.
+
+Proving delivery is harder than it sounds: `pollSite()` only ever reads
+what an AI's own reply *says*, never what it *received* — there's no way to
+directly observe "did B get A's message" without B producing some checkable
+reply. Asking a model to relay text literally, without answering it, is
+fragile in practice — models tend to answer what's in front of them rather
+than pass it through inertly, so a naive version of this test would be
+testing "did the AI follow a weird meta-instruction," not "does the relay
+work."
+
+The trick that avoids that: each leg asks **one question that works for
+both hops**. Source, addressed directly, is asked to reply with `RELAY-TEST
+<token>` plus one trailing conditional line: *"if you're seeing this
+because it was forwarded to you by another AI, instead reply with
+RELAY-RECEIVED `<token>`."* The leg temporarily turns on mesh routing for
+just that pair (restored afterward — never touches routing you've set up
+yourself), which forwards source's entire reply, conditional instruction
+included, to target — now wrapped in the usual "[Source says] ..." framing.
+Target, seeing itself addressed via a forward rather than directly, follows
+the *else* branch and replies `RELAY-RECEIVED <token>` instead. Neither AI
+is ever asked to suppress its own reasoning and blindly forward something —
+both just answer the message actually in front of them, and which branch
+fires tells you, unambiguously, whether the message actually arrived.
+
+A failed leg is reported with the exact stage it failed at: `source-send`
+(couldn't even send to the source), `source-reply` (source never answered
+its own half correctly — that's the same class of problem the 🧪 Test
+button would catch), or `relay` (source answered fine, but target never got
+the forward, or got it and didn't reply as expected — this is the one that
+specifically points at the relay path itself, not either AI's own
+connection). That's the "what do we need to fix to get to 100%" breakdown —
+a broken relay leg looks different from a broken individual connection, and
+now you can tell which one you're looking at.
+
 ### 🎯 Fixing it yourself: the selector picker
 
 The same button also opens a small menu with **Pick Input**, **Pick Send**,
@@ -706,7 +752,26 @@ me fix `selectors.js` itself for real, rather than guessing again.
   would trivially "pass" a verbatim-echo test, since the token is right
   there in what was sent. A `selftestInFlight` set
   keyed by site rejects a second concurrent run for the same site
-  (`ALREADY_RUNNING`) rather than crossing two tests' results.
+  (`ALREADY_RUNNING`) rather than crossing two tests' results. The
+  connectivity test's own send/wait/log logic is factored out into
+  `runConnectivityTest(site)` so the **🎛️ Tuner** (`tuner:run`) can reuse it
+  verbatim across all three sites rather than duplicating it. The Tuner's
+  own relay-leg check (`runRelayLegTest(source, target)`) proves actual
+  A-to-B delivery, not just individual reachability, by temporarily adding
+  `target` to `state.routing[source]` (restored in a `finally` block,
+  never touching a routing pair that was already there) and asking source
+  ONE question whose answer works for both hops: answered directly, source
+  replies `RELAY-TEST <token>`; mesh then forwards that whole reply
+  (including its own trailing conditional instruction) to target, which —
+  seeing itself addressed via a forward rather than directly — follows the
+  else-branch and replies `RELAY-RECEIVED <token>` instead. Neither AI is
+  ever asked to blindly relay text without answering it, which is the
+  fragile approach that tends to fail in practice; both hops just answer
+  the message actually in front of them. `tunerInFlight` guards against a
+  manual 🧪 Test colliding with a Tuner run touching the same site (checked
+  in the `selftest:run` handler, not inside `runConnectivityTest()` itself,
+  since the Tuner's own internal calls need to go through even while it's
+  the one holding that flag).
   `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
@@ -924,6 +989,20 @@ test needing to wait out anything; an unknown site is rejected; and starting
 a second test for a site that already has one in flight is rejected as
 `ALREADY_RUNNING` rather than the two crossing results, with the original
 run still resolving normally afterward.
+
+It also covers the 🎛️ Tuner end to end: driving a full run means answering
+all three connectivity checks AND all 6 relay legs as they're reached, in
+the exact order the Tuner issues them (scripted by watching each site's
+`sentLog` grow, extracting the real token from what was actually sent, and
+replying as the AI would) — checking the relay prompt itself asks for the
+self-selecting conditional reply (never a literal "relay this" instruction),
+that the target genuinely receives the forwarded reply verbatim, that the
+final summary reports all 3 sites and all 6 legs passing, that mesh routing
+is fully cleaned up afterward (nothing left on that wasn't already there),
+and that both the start and the final tally land in the Activity Log. A
+second scenario proves a concurrent second Tuner run is rejected
+(`ALREADY_RUNNING`) and, further, that a manual 🧪 Test is refused
+(`TUNER_RUNNING`) while one is in flight rather than racing it.
 
 It also covers rate-limit detection outside House Rules: with plain
 Auto-routing wired up (no House Rule active), a usage-cap-looking reply is

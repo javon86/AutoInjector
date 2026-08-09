@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld("api", {
   pickSelector: (site, role) => ipcRenderer.invoke("selector:pick", { site, role }),
   clearSelectorOverride: (site, role) => ipcRenderer.invoke("selector:clear", { site, role }),
   runSelfTest: (site) => ipcRenderer.invoke("selftest:run", { site }),
+  runTuner: () => ipcRenderer.invoke("tuner:run"),
+  onTunerState: (cb) => ipcRenderer.on("tuner-state", (_e, payload) => cb(payload)),
   openSequenceEditor: () => ipcRenderer.invoke("sequence:open"),
   closeSequenceEditor: () => ipcRenderer.invoke("sequence-editor:close"),
   runSequence: (steps) => ipcRenderer.invoke("sequence:run", { steps }),

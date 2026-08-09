@@ -753,6 +753,49 @@ el("btn-stop-all").onclick = async () => {
   // houserule-state broadcast (mode kept, active:false) — nothing to force here
 };
 
+// The Tuner: runs the 🧪 connectivity check on all 3 sites, then a genuine
+// A-to-B relay check on all 6 directed pairs (a few minutes total). Every
+// individual check is already logged in detail to the Activity Log via the
+// normal logEvent() path in main.js (tuner-leg-started/-ok/-error, etc.) --
+// this listener just drives the button's own live progress text and the
+// final consolidated summary, it doesn't duplicate that per-check logging.
+const TUNER_SITE_LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+function tunerLegLabel(leg) {
+  const [source, target] = leg.split("->");
+  return `${TUNER_SITE_LABEL[source] || source} → ${TUNER_SITE_LABEL[target] || target}`;
+}
+window.api.onTunerState((payload) => {
+  const statusEl = el("tuner-status");
+  if (!statusEl) return;
+  if (payload.phase === "site") {
+    statusEl.textContent = `Running: testing ${TUNER_SITE_LABEL[payload.site] || payload.site}'s own connection…`;
+  } else if (payload.phase === "leg") {
+    statusEl.textContent = `Running: testing ${tunerLegLabel(payload.leg)} relay…`;
+  } else if (payload.phase === "done") {
+    const { summary } = payload;
+    statusEl.textContent = `Done — ${summary.sitesOk}/${summary.sitesTotal} sites OK, ${summary.legsOk}/${summary.legsTotal} relay legs OK.`;
+    const brokenLegs = Object.values(payload.legs).filter((r) => !r.ok).map((r) => `${tunerLegLabel(r.leg)} (${r.stage}: ${r.error})`);
+    const brokenSites = Object.entries(payload.sites).filter(([, r]) => !r.ok).map(([site, r]) => `${TUNER_SITE_LABEL[site] || site} (${r.stage || "reply"}: ${r.error})`);
+    if (brokenLegs.length || brokenSites.length) {
+      setStatus(`Tuner finished with problems — ${[...brokenSites, ...brokenLegs].join("; ")}`);
+    } else {
+      setStatus("Tuner finished — every site and every relay pair is working.");
+    }
+    el("btn-run-tuner").disabled = false;
+  }
+});
+
+el("btn-run-tuner").onclick = async () => {
+  el("btn-run-tuner").disabled = true;
+  el("tuner-status").textContent = "Starting…";
+  setStatus("Running the Tuner — this checks 3 sites and 6 relay pairs, can take a few minutes…");
+  const res = await window.api.runTuner();
+  if (!res?.ok && res?.error) {
+    el("btn-run-tuner").disabled = false;
+    setStatus(`Tuner couldn't start: ${res.error}`);
+  }
+};
+
 el("btn-hr-start").onclick = async () => {
   const mode = el("hr-mode").value;
   if (!mode) { setStatus("Pick a House Rules format first."); return; }

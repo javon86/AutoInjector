@@ -1069,7 +1069,96 @@ async function testSelfTestConnectivity() {
   assert(firstRunRes.ok === true, "the original in-flight test still resolves normally afterward");
 }
 
-const MANAGER_TEST_CONFIG = { provider: "openai-compatible", endpoint: "http://localhost:1234/v1/chat/completions", apiKey: "mgr-test-key", model: "test-model", tier: 2, timeoutMs: 5000, approvalMode: false, maximumTurns: 20, costLimit: 5 };
+async function testTunerFullRun() {
+  console.log("\n== The Tuner: runs the per-site connectivity check on all 3 sites, then a genuine A-to-B relay check on all 6 directed pairs ==");
+  await resetAllParticipants();
+
+  const tunerRunPromise = call("tuner:run", {});
+
+  // Phase 1: one connectivity check per site, same mechanism as the 🧪 Test button
+  for (const site of SITES) {
+    await waitUntil(() => sentLog(site).length >= 1, { label: `tuner's connectivity check sent to ${site}` });
+    const token = extractSelftestToken(sentLog(site)[sentLog(site).length - 1].text);
+    say(site, reverseStr(token));
+  }
+
+  // Phase 2: all 6 directed relay legs -- source answers directly, then
+  // (once mesh has forwarded it) target answers too, exactly like a real
+  // pair of AIs would.
+  const legs = [];
+  for (const source of SITES) for (const target of SITES) if (source !== target) legs.push([source, target]);
+
+  for (const [source, target] of legs) {
+    const beforeSource = sentLog(source).length;
+    const beforeTarget = sentLog(target).length;
+    await waitUntil(() => sentLog(source).length > beforeSource, { label: `tuner's relay prompt sent directly to ${source} (leg ${source}->${target})` });
+    const sourceSentText = sentLog(source)[sentLog(source).length - 1].text;
+    assert(sourceSentText.includes("RELAY-TEST") && sourceSentText.includes("forwarded to you by another AI"), `the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg ${source}->${target})`);
+    const relayToken = sourceSentText.match(/RELAY-TEST (\S+)/)[1];
+    say(source, `RELAY-TEST ${relayToken}`);
+
+    await waitUntil(() => sentLog(target).length > beforeTarget, { label: `mesh forwards ${source}'s reply on to ${target} (leg ${source}->${target})` });
+    assert(sentLog(target)[sentLog(target).length - 1].text.includes(`RELAY-TEST ${relayToken}`), `${target} receives the forwarded reply verbatim, instruction included (leg ${source}->${target})`);
+    say(target, `RELAY-RECEIVED ${relayToken}`);
+  }
+
+  const res = await tunerRunPromise;
+  assert(res.ok, "the full tuner run resolves ok");
+  assert(res.summary.sitesOk === 3 && res.summary.sitesTotal === 3, `all 3 site checks passed (got ${res.summary.sitesOk}/${res.summary.sitesTotal})`);
+  assert(res.summary.legsOk === 6 && res.summary.legsTotal === 6, `all 6 relay legs passed (got ${res.summary.legsOk}/${res.summary.legsTotal})`);
+  assert(Object.keys(res.legs).length === 6, "exactly 6 legs were tested, one per directed pair");
+  assert(SITES.every((site) => res.sites[site].ok), "every individual site result is itself a pass, not just the summary count");
+
+  const s = await call("state:get", {});
+  assert(SITES.every((site) => s.global.routing[site].length === 0), "the tuner cleans up after itself -- no mesh routing left on for any site once it's done, since none was configured beforehand");
+  assert(s.log.some((l) => l.kind === "tuner-started") && s.log.some((l) => l.kind === "tuner-done" && l.detail.sitesOk === 3 && l.detail.legsOk === 6), "the Activity Log records the run starting and its final tally");
+}
+
+async function testTunerRejectsConcurrentRuns() {
+  console.log("\n== The Tuner: refuses to run twice at once, and a manual Test is refused while it's running ==");
+  await resetAllParticipants();
+
+  const firstRun = call("tuner:run", {});
+  await waitUntil(() => sentLog("chatgpt").length >= 1, { label: "tuner's first check sent" });
+
+  const secondRun = await call("tuner:run", {});
+  assert(!secondRun.ok && secondRun.error === "ALREADY_RUNNING", "a second tuner run while one is active is rejected");
+
+  const manualTest = await call("selftest:run", { site: "claude" });
+  assert(!manualTest.ok && manualTest.error === "TUNER_RUNNING", "a manual 🧪 Test is refused while the tuner is running, rather than racing it");
+
+  // let the in-flight run finish cleanly rather than leaving a dangling promise.
+  // chatgpt's connectivity-check prompt was already sent (confirmed above,
+  // before the ALREADY_RUNNING/TUNER_RUNNING checks) -- answer it directly
+  // rather than waiting for a "new" send that will never come until it's
+  // answered. claude's and gemini's checks haven't gone out yet, so those
+  // two DO need to wait. Every wait from here on checks for a count past a
+  // snapshotted "before", not just "length >= 1" or "contains RELAY-TEST" --
+  // sites get reused across multiple legs below, and every leg's prompt
+  // contains that same substring, so a non-snapshotted check would match a
+  // stale, already-answered entry from an earlier leg instead of the new one.
+  say("chatgpt", reverseStr(extractSelftestToken(sentLog("chatgpt")[sentLog("chatgpt").length - 1].text)));
+  for (const site of ["claude", "gemini"]) {
+    const before = sentLog(site).length;
+    await waitUntil(() => sentLog(site).length > before, { label: `tuner check reaches ${site}` });
+    const token = extractSelftestToken(sentLog(site)[sentLog(site).length - 1].text);
+    say(site, reverseStr(token));
+  }
+  const legs = [];
+  for (const source of SITES) for (const target of SITES) if (source !== target) legs.push([source, target]);
+  for (const [source, target] of legs) {
+    const beforeSource = sentLog(source).length;
+    const beforeTarget = sentLog(target).length;
+    await waitUntil(() => sentLog(source).length > beforeSource, { label: `relay prompt reaches ${source}` });
+    const relayToken = sentLog(source)[sentLog(source).length - 1].text.match(/RELAY-TEST (\S+)/)[1];
+    say(source, `RELAY-TEST ${relayToken}`);
+    await waitUntil(() => sentLog(target).length > beforeTarget, { label: `mesh forwards to ${target}` });
+    say(target, `RELAY-RECEIVED ${relayToken}`);
+  }
+  await firstRun;
+}
+
+const MANAGER_TEST_CONFIG ={ provider: "openai-compatible", endpoint: "http://localhost:1234/v1/chat/completions", apiKey: "mgr-test-key", model: "test-model", tier: 2, timeoutMs: 5000, approvalMode: false, maximumTurns: 20, costLimit: 5 };
 
 async function resetManagerState() {
   const s = await call("state:get", {});
@@ -1508,6 +1597,8 @@ async function main() {
   await testSelectorPicker();
   await testSelectorPickerValidation();
   await testSelfTestConnectivity();
+  await testTunerFullRun();
+  await testTunerRejectsConcurrentRuns();
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
   await testManagerApprovalModeAndRejection();

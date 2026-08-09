@@ -17,13 +17,14 @@ function assert(cond, msg) {
   return cond;
 }
 
-function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
+function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult } = {}) {
   const calls = [];
   let windowCollapseCb = null;
   let captureCb = null;
   let houseRuleCb = null;
   let promptsChangedCb = null;
   let logCb = null;
+  let tunerStateCb = null;
   let prompts = initialPrompts || [{ id: 1, name: "System Test", text: { chatgpt: "hi chatgpt", claude: "hi claude", gemini: "hi gemini" } }];
   let nextPromptId = prompts.reduce((m, p) => Math.max(m, p.id + 1), 1);
   const routing = { chatgpt: [], claude: [], gemini: [] };
@@ -35,6 +36,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
     fireHouseRuleState: (hr) => houseRuleCb && houseRuleCb(hr),
     firePromptsChanged: (p) => promptsChangedCb && promptsChangedCb(p),
     fireLog: (entry) => logCb && logCb(entry),
+    fireTunerState: (payload) => tunerStateCb && tunerStateCb(payload),
     sendCompose: noop, sendForward: noop, regenerate: noop,
     setRouting: async (source, target, on) => {
       calls.push({ fn: "setRouting", source, target, on });
@@ -52,6 +54,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
     pickSelector: async (site, role) => { calls.push({ fn: "pickSelector", site, role }); return pickResult || { ok: true, selector: `#mock-${site}-${role}`, tag: "div", sample: "sample text" }; },
     clearSelectorOverride: async (site, role) => { calls.push({ fn: "clearSelectorOverride", site, role }); return { ok: true }; },
     runSelfTest: async (site) => { calls.push({ fn: "runSelfTest", site }); return selfTestResult || { ok: true }; },
+    runTuner: async () => { calls.push({ fn: "runTuner" }); return tunerRunResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
     inspectSite: noop,
@@ -88,6 +91,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult } = {}) {
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
+    onTunerState: (cb) => { tunerStateCb = cb; },
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
     onPromptsChanged: (cb) => { promptsChangedCb = cb; }
   };
@@ -355,6 +359,57 @@ async function testConnectivityTestButtonSuccess() {
   assert(led.classList.contains("ok") && !led.classList.contains("pending"), "a passing result lights the indicator green");
   const statusEl = doc.getElementById("pick-status-claude");
   assert(statusEl.textContent.includes("hooked up correctly"), `the status line confirms success in plain language (got "${statusEl.textContent}")`);
+}
+
+async function testTunerButton() {
+  console.log("\n== The Tuner button: click calls runTuner, shows live progress, and reports a final summary ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const btn = doc.getElementById("btn-run-tuner");
+  assert(!!btn, "the Global panel has a Run Tuner button");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "runTuner"), "clicking it calls runTuner");
+  assert(btn.disabled, "the button disables itself while a run is in flight, so it can't be double-clicked");
+
+  api.fireTunerState({ phase: "site", site: "claude" });
+  assert(doc.getElementById("tuner-status").textContent.includes("Claude"), `live progress names the site currently being checked (got "${doc.getElementById("tuner-status").textContent}")`);
+
+  api.fireTunerState({ phase: "leg", leg: "chatgpt->claude" });
+  assert(doc.getElementById("tuner-status").textContent.includes("ChatGPT") && doc.getElementById("tuner-status").textContent.includes("Claude"), `live progress names both ends of the relay leg currently being checked (got "${doc.getElementById("tuner-status").textContent}")`);
+
+  api.fireTunerState({
+    phase: "done",
+    sites: { chatgpt: { ok: true }, claude: { ok: true }, gemini: { ok: true } },
+    legs: { "chatgpt->claude": { ok: true, leg: "chatgpt->claude" }, "claude->chatgpt": { ok: true, leg: "claude->chatgpt" } },
+    summary: { sitesOk: 3, sitesTotal: 3, legsOk: 2, legsTotal: 2 }
+  });
+  assert(!btn.disabled, "the button re-enables itself once the run finishes");
+  assert(doc.getElementById("tuner-status").textContent.includes("3/3") && doc.getElementById("tuner-status").textContent.includes("2/2"), `the final summary reports the actual pass counts (got "${doc.getElementById("tuner-status").textContent}")`);
+  assert(doc.getElementById("status").textContent.includes("every site and every relay pair is working"), "a fully clean run says so plainly in the main status line, not just the small progress line");
+}
+
+async function testTunerButtonReportsFailures() {
+  console.log("\n== The Tuner button: a run with problems names exactly what failed, not just 'something went wrong' ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  doc.getElementById("btn-run-tuner").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  api.fireTunerState({
+    phase: "done",
+    sites: { chatgpt: { ok: true }, claude: { ok: false, stage: "reply", error: "TIMEOUT" }, gemini: { ok: true } },
+    legs: { "chatgpt->claude": { ok: false, leg: "chatgpt->claude", stage: "relay", error: "TIMEOUT" }, "claude->chatgpt": { ok: true, leg: "claude->chatgpt" } },
+    summary: { sitesOk: 2, sitesTotal: 3, legsOk: 1, legsTotal: 2 }
+  });
+
+  const statusText = doc.getElementById("status").textContent;
+  assert(statusText.includes("Claude") && statusText.includes("TIMEOUT"), `the broken site is named specifically, not just counted (got "${statusText}")`);
+  assert(statusText.includes("ChatGPT") && statusText.includes("relay"), `the broken relay leg is named specifically, with its failure stage, not just counted (got "${statusText}")`);
 }
 
 async function testActivityLogShowsPickAndTestDetail() {
@@ -639,6 +694,8 @@ async function main() {
   await testSelectorPickValidationRejections();
   await testClearOverridesButton();
   await testConnectivityTestButtonSuccess();
+  await testTunerButton();
+  await testTunerButtonReportsFailures();
   await testConnectivityTestButtonFailure();
   await testConnectivityTestButtonDistinguishesTooBroadAndEcho();
   await testActivityLogShowsPickAndTestDetail();
