@@ -22,7 +22,7 @@ const ipcMain = {
   handle(channel, fn) { ipcHandlers[channel] = fn; }
 };
 
-function extractSentText(script) {
+function extractCfg(script) {
   const marker = "const CFG = ";
   const start = script.indexOf(marker);
   if (start === -1) return null;
@@ -30,10 +30,14 @@ function extractSentText(script) {
   const end = script.indexOf(";\n", jsonStart);
   if (end === -1) return null;
   try {
-    return JSON.parse(script.slice(jsonStart, end)).text ?? null;
+    return JSON.parse(script.slice(jsonStart, end));
   } catch {
     return null;
   }
+}
+function extractSentText(script) {
+  const cfg = extractCfg(script);
+  return cfg ? (cfg.text ?? null) : null;
 }
 
 class FakeWebContents extends EventEmitter {
@@ -53,6 +57,8 @@ class FakeWebContents extends EventEmitter {
     this._nextPickResult = null; // test-settable: what the next selector:pick "click" resolves to
     this.pickCalls = []; // { role } — every pick script executed against this site, in order
     this._sendDelayQueue = []; // test-settable: ms to artificially delay each successive send script (shifted per call, 0 once empty) -- used to deterministically prove two concurrent sends to the same target get serialized rather than racing
+    this._nextLoginFillResult = null; // test-settable: what the next login-fill script resolves to
+    this.loginFillCalls = []; // { username, password } — the REAL (decrypted) credentials the script actually received, in order -- lets a test verify the exact plaintext without ever going through the persisted state file
     const self = this;
     // A minimal stand-in for webContents.debugger, at the same fidelity as
     // the rest of this mock: it asserts WHAT CDP command was sent with what
@@ -93,6 +99,11 @@ class FakeWebContents extends EventEmitter {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
       return this._nextPickResult || { ok: false, error: "TIMEOUT" };
+    }
+    if (script.includes("__AUTOINJECTOR_LOGIN_FILL__")) {
+      const cfg = extractCfg(script) || {};
+      this.loginFillCalls.push({ username: cfg.username, password: cfg.password });
+      return this._nextLoginFillResult || { ok: true, filled: ["username", "password"], submitted: true };
     }
     if (script.includes("typeByKeyboard")) {
       const delay = this._sendDelayQueue.length ? this._sendDelayQueue.shift() : 0;
@@ -150,8 +161,22 @@ const dialog = {
 };
 function __setDialogResult(r) { dialogResult = r; }
 
+// A minimal stand-in for the real OS-keychain-backed safeStorage -- doesn't
+// need to be genuinely secure (that's what the real Electron API on the real
+// OS provides), just a real, working encrypt/decrypt round trip so
+// main.js's own logic (never storing the raw password, always going through
+// encrypt/decrypt) can be exercised for real. __setEncryptionAvailable lets
+// a test simulate a system with no keychain backend (e.g. some Linux setups).
+let __encryptionAvailable = true;
+const safeStorage = {
+  isEncryptionAvailable: () => __encryptionAvailable,
+  encryptString: (plainText) => Buffer.from(String(plainText), "utf8"),
+  decryptString: (buf) => Buffer.from(buf).toString("utf8")
+};
+function __setEncryptionAvailable(v) { __encryptionAvailable = v; }
+
 module.exports = {
-  app, BaseWindow, WebContentsView, ipcMain, dialog,
+  app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage,
   __ipcHandlers: ipcHandlers, __registry: registry, __windowRegistry: windowRegistry, __userDataDir: userDataDir,
-  __setDialogResult
+  __setDialogResult, __setEncryptionAvailable
 };

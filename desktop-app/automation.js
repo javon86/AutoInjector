@@ -265,4 +265,61 @@ function buildFileInputFinderExpression(site) {
   })()`;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript };
+// buildLoginFillScript backs the 🔑 saved-logins feature: purely manual
+// (never runs on its own -- only fired when the user clicks a specific
+// saved login), it types the given username/password into whatever login
+// fields are actually present on screen right now and clicks whatever
+// looks like the submit button. Real login flows for these three sites are
+// often multi-step (email on one screen, password on the next), so this
+// doesn't assume both fields exist at once -- it fills whichever is
+// present, which is also why clicking the same saved login again after the
+// page advances to the next step is expected, not a bug.
+function buildLoginFillScript(site, username, password) {
+  const cfg = siteConfig(site);
+  const payload = JSON.stringify({
+    username,
+    password,
+    USERNAME_CANDIDATES: cfg.LOGIN_USERNAME_CANDIDATES || [],
+    PASSWORD_CANDIDATES: cfg.LOGIN_PASSWORD_CANDIDATES || [],
+    SUBMIT_CANDIDATES: cfg.LOGIN_SUBMIT_CANDIDATES || []
+  });
+  return `
+  (() => {
+    // __AUTOINJECTOR_LOGIN_FILL__
+    const CFG = ${payload};
+
+    function qsAllAny(candidates) {
+      for (const sel of candidates) {
+        const node = document.querySelector(sel);
+        if (node && node.offsetParent !== null) return node; // skip hidden/off-screen fields (e.g. a not-yet-revealed password step)
+      }
+      return null;
+    }
+
+    function setNativeValue(elm, value) {
+      const propDesc = Object.getOwnPropertyDescriptor(elm.__proto__, "value");
+      const setter = propDesc && propDesc.set;
+      if (setter) setter.call(elm, value);
+      elm.dispatchEvent(new Event("input", { bubbles: true }));
+      elm.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    const usernameField = qsAllAny(CFG.USERNAME_CANDIDATES);
+    const passwordField = qsAllAny(CFG.PASSWORD_CANDIDATES);
+    if (!usernameField && !passwordField) return { ok: false, error: "NO_LOGIN_FORM_FOUND" };
+
+    const filled = [];
+    // Multi-step login: only fill whichever field(s) are actually present
+    // right now, never assume both are on the same screen.
+    if (usernameField) { setNativeValue(usernameField, CFG.username); filled.push("username"); }
+    if (passwordField) { setNativeValue(passwordField, CFG.password); filled.push("password"); }
+
+    const submitBtn = qsAllAny(CFG.SUBMIT_CANDIDATES);
+    if (!submitBtn) return { ok: true, filled, submitted: false, warning: "SUBMIT_NOT_FOUND" };
+    submitBtn.click();
+    return { ok: true, filled, submitted: true };
+  })();
+  `;
+}
+
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript };

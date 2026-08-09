@@ -18,12 +18,12 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
 const managerProvider = require("./manager-provider");
 const { MANAGER_ACTIONS } = managerProvider;
 
@@ -136,6 +136,8 @@ const state = {
   nextPromptId: 1,
   sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
+  savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
+  nextLoginId: 1,
   managerConfig: {
     provider: "runpod-serverless", // runpod-serverless | runpod-pod | openai-compatible
     endpoint: "",
@@ -464,6 +466,7 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: state.managerConfig, // the live task itself (state.manager) is deliberately NOT persisted -- same reasoning as House Rules, below
         hr: hr && hr.mode ? {
           mode: hr.mode,
@@ -520,6 +523,16 @@ function loadPersistedState() {
     for (const site of SITE_IDS) {
       if (snap.selectorOverrides[site]) state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
     }
+  }
+  if (snap.savedLogins && typeof snap.savedLogins === "object") {
+    let maxId = 0;
+    for (const site of SITE_IDS) {
+      if (Array.isArray(snap.savedLogins[site])) {
+        state.savedLogins[site] = snap.savedLogins[site];
+        for (const l of snap.savedLogins[site]) maxId = Math.max(maxId, l.id || 0);
+      }
+    }
+    state.nextLoginId = maxId + 1;
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...snap.managerConfig };
@@ -2202,6 +2215,7 @@ ipcMain.handle("state:get", () => ({
   transcript: state.transcript,
   log: state.log,
   ledger: state.ledger,
+  logins: sanitizedLoginsAllSites(),
   prompts: state.prompts,
   sequence: { active: state.sequence.active, index: state.sequence.index, total: state.sequence.steps.length },
   manager: managerSnapshot(),
@@ -2393,6 +2407,73 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
   saveStateDebounced();
   logEvent("selector-override-cleared", { site, role });
   return { ok: true };
+});
+
+// --- Saved logins: purely manual, one-click credential fill+submit. Never
+// auto-triggered by detecting a login form -- only runs when the user picks
+// a specific saved login. Passwords are encrypted at rest via Electron's
+// safeStorage (the OS's own keychain/DPAPI/libsecret) the moment they're
+// saved, decrypted only for the instant a fill is actually requested, and
+// never sent to the renderer or written to the Activity Log in any form.
+function sanitizedLogins(site) {
+  return (state.savedLogins[site] || []).map(({ id, label, username }) => ({ id, label, username }));
+}
+function sanitizedLoginsAllSites() {
+  return Object.fromEntries(SITE_IDS.map((s) => [s, sanitizedLogins(s)]));
+}
+
+ipcMain.handle("logins:list", () => ({ ok: true, logins: sanitizedLoginsAllSites() }));
+
+ipcMain.handle("logins:save", (_evt, { site, label, username, password }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!label || !String(label).trim()) return { ok: false, error: "NEEDS_LABEL" };
+  if (!username || !String(username).trim()) return { ok: false, error: "NEEDS_USERNAME" };
+  if (!password) return { ok: false, error: "NEEDS_PASSWORD" };
+  if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: "ENCRYPTION_UNAVAILABLE" };
+  const encryptedPassword = safeStorage.encryptString(password).toString("base64");
+  const entry = { id: state.nextLoginId++, label: String(label).trim(), username: String(username).trim(), encryptedPassword };
+  state.savedLogins[site] = [...(state.savedLogins[site] || []), entry];
+  saveStateDebounced();
+  logEvent("login-saved", { site, id: entry.id, label: entry.label, username: entry.username }); // never the password
+  return { ok: true, logins: sanitizedLogins(site) };
+});
+
+ipcMain.handle("logins:delete", (_evt, { site, id }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const before = (state.savedLogins[site] || []).length;
+  state.savedLogins[site] = (state.savedLogins[site] || []).filter((l) => l.id !== id);
+  if (state.savedLogins[site].length === before) return { ok: false, error: "NOT_FOUND" };
+  saveStateDebounced();
+  logEvent("login-deleted", { site, id });
+  return { ok: true, logins: sanitizedLogins(site) };
+});
+
+ipcMain.handle("logins:fill", async (_evt, { site, id }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const entry = (state.savedLogins[site] || []).find((l) => l.id === id);
+  if (!entry) return { ok: false, error: "NOT_FOUND" };
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  let password;
+  try {
+    password = safeStorage.decryptString(Buffer.from(entry.encryptedPassword, "base64"));
+  } catch {
+    logEvent("login-fill-error", { site, id, label: entry.label, error: "DECRYPT_FAILED" });
+    return { ok: false, error: "DECRYPT_FAILED" };
+  }
+  logEvent("login-fill-started", { site, id, label: entry.label }); // never username/password
+  let res;
+  try {
+    res = await view.webContents.executeJavaScript(buildLoginFillScript(site, entry.username, password), true);
+  } catch (e) {
+    res = { ok: false, error: String(e) };
+  }
+  logEvent(res && res.ok ? "login-fill-ok" : "login-fill-error", {
+    site, id, label: entry.label,
+    error: (res && res.error) || null, warning: (res && res.warning) || null,
+    filled: (res && res.filled) || null, submitted: (res && res.submitted) || false
+  });
+  return res || { ok: false, error: "unknown" };
 });
 
 // Extracted so the Tuner (see below) can run the exact same connectivity
