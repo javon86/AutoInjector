@@ -50,6 +50,8 @@ const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
 const TEXT_PREVIEW_SIZE_CAP = 500 * 1024; // 500KB
+const SEND_RETRY_ATTEMPTS = 3; // real-world evidence: a cold/still-settling pane's very first send often fails confirmation, then succeeds immediately on retry -- this catches that automatically instead of surfacing a false failure
+const SEND_RETRY_BACKOFF_MS = 1500;
 const SELFTEST_TIMEOUT_MS = 45000;
 const SELFTEST_POLL_MS = 500;
 
@@ -383,7 +385,7 @@ function logEvent(kind, detail) {
 // pair was already sent within DUPLICATE_WINDOW_MS -- surfaced for
 // visibility, never auto-suppressed, since a legitimate retry can look
 // identical to an accidental double-send.
-function recordLedgerEntry({ source, target, text, ok, error }) {
+function recordLedgerEntry({ source, target, text, ok, error, attempts }) {
   const recentDuplicate = state.ledger.some(
     (e) => e.target === target && e.textPreview === text.slice(0, 200) && Date.now() - e.ts < DUPLICATE_WINDOW_MS
   );
@@ -395,6 +397,7 @@ function recordLedgerEntry({ source, target, text, ok, error }) {
     textPreview: text.slice(0, 200),
     status: ok ? "delivered" : "failed",
     error: ok ? null : error || "unknown",
+    attempts: attempts || 1, // >1 means it self-recovered after a retry, not a clean first try
     duplicate: recentDuplicate
   };
   state.ledger.push(entry);
@@ -885,23 +888,40 @@ async function sendTextTo(target, text, fromSite) {
   const roleClause = state.customRole[target] ? `(You're playing the role of: ${state.customRole[target]}. Keep that in mind in your reply.)\n\n` : "";
   const prompt = roleClause + (label ? `[${label} says]\n\n${text}` : text);
 
+  // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
+  // pause between each, before it's ever reported as a failure -- a real
+  // Tuner run against the live sites showed exactly this pattern: a pane's
+  // very first send after loading fails confirmation, then the identical
+  // send succeeds immediately on the next try. Self-recovering that
+  // automatically (attempts > 1 in the log/ledger, not silently hidden)
+  // fixes the actual problem instead of just reporting it more accurately.
   let res;
-  try {
-    res = await withSendQueue(target, () => view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true));
-  } catch (e) {
-    res = { ok: false, error: String(e) };
+  let attempts = 0;
+  for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
+    attempts = attempt;
+    try {
+      res = await withSendQueue(target, () => view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true));
+    } catch (e) {
+      res = { ok: false, error: String(e) };
+    }
+    if (res && res.ok) break;
+    if (attempt < SEND_RETRY_ATTEMPTS) {
+      logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (res && res.error) || "unknown" });
+      await new Promise((r) => setTimeout(r, SEND_RETRY_BACKOFF_MS));
+    }
   }
-  recordLedgerEntry({ source: fromSite || null, target, text: prompt, ok: res && res.ok, error: res && res.error });
+
+  recordLedgerEntry({ source: fromSite || null, target, text: prompt, ok: res && res.ok, error: res && res.error, attempts });
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown" });
-    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown" });
+    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
   } else {
     state.lastSentTo[target] = prompt;
     state.waiting[target] = true;
     state.waitingSince[target] = Date.now();
     broadcast("sent", { target, from: fromSite || null, ts: Date.now() });
     broadcast("waiting-changed", { site: target, waiting: true });
-    logEvent("sent", { target, from: fromSite || null });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1 });
   }
   return res;
 }
@@ -2538,6 +2558,7 @@ ipcMain.handle("selftest:run", async (_evt, { site }) => {
 // model is ever asked to suppress its own reasoning and blindly forward
 // something -- both hops just answer the message actually in front of them.
 const RELAY_LEG_TIMEOUT_MS = 45000;
+const RELAY_FORWARD_WAIT_MS = 20000; // how long to wait for the internal mesh forward to show up in the delivery ledger before giving up on distinguishing "forward never sent" from "target never replied"
 async function waitForLiteralReply(site, expectedSubstring, sentTs, timeoutMs) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -2548,6 +2569,24 @@ async function waitForLiteralReply(site, expectedSubstring, sentTs, timeoutMs) {
   const cap = state.captured[site];
   if (cap && cap.ts >= sentTs) return { ok: false, error: "MISMATCH", text: cap.text.slice(0, 200) };
   return { ok: false, error: "TIMEOUT" };
+}
+
+// A relay leg that never gets a reply from target could mean two very
+// different things: the internal mesh forward from source to target never
+// even went out (a send-side problem, same as any other SEND_NOT_CONFIRMED),
+// or it went out fine and target just never answered (a target-side
+// problem). Without checking, both looked identical -- a bare TIMEOUT --
+// which points a fix at the wrong AI. The delivery ledger (already recorded
+// for every send, see recordLedgerEntry()) makes this checkable: watch for
+// the specific (source, target) entry this leg's forward would produce.
+async function waitForLedgerEntry(source, target, sentTs, timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const entry = state.ledger.find((e) => e.source === source && e.target === target && e.ts >= sentTs);
+    if (entry) return entry;
+    await new Promise((r) => setTimeout(r, SELFTEST_POLL_MS));
+  }
+  return null;
 }
 
 async function runRelayLegTest(source, target) {
@@ -2573,6 +2612,18 @@ async function runRelayLegTest(source, target) {
       logEvent("tuner-leg-error", { source, target, leg, stage: "source-reply", error: sourceWait.error, capturedText: sourceWait.text || null });
       return { ok: false, leg, source, target, stage: "source-reply", error: sourceWait.error, text: sourceWait.text };
     }
+
+    // Source answered correctly -- pollSite() should now automatically mesh-
+    // forward that reply on to target. Check the ledger for that specific
+    // delivery before falling back to waiting on target's own reply, so a
+    // forward that silently failed to send is reported as exactly that
+    // instead of masquerading as "target never answered".
+    const forwardEntry = await waitForLedgerEntry(source, target, sentTs, RELAY_FORWARD_WAIT_MS);
+    if (forwardEntry && forwardEntry.status === "failed") {
+      logEvent("tuner-leg-error", { source, target, leg, stage: "forward-send", error: forwardEntry.error });
+      return { ok: false, leg, source, target, stage: "forward-send", error: forwardEntry.error };
+    }
+
     const relayWait = await waitForLiteralReply(target, `RELAY-RECEIVED ${token}`, sentTs, RELAY_LEG_TIMEOUT_MS);
     if (!relayWait.ok) {
       logEvent("tuner-leg-error", { source, target, leg, stage: "relay", error: relayWait.error, capturedText: relayWait.text || null });

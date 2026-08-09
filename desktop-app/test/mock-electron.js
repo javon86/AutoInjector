@@ -57,6 +57,7 @@ class FakeWebContents extends EventEmitter {
     this._nextPickResult = null; // test-settable: what the next selector:pick "click" resolves to
     this.pickCalls = []; // { role } — every pick script executed against this site, in order
     this._sendDelayQueue = []; // test-settable: ms to artificially delay each successive send script (shifted per call, 0 once empty) -- used to deterministically prove two concurrent sends to the same target get serialized rather than racing
+    this._sendFailQueue = []; // test-settable: per-attempt pass/fail override for successive send attempts (retries included), shifted per call -- see executeJavaScript()
     this._nextLoginFillResult = null; // test-settable: what the next login-fill script resolves to
     this.loginFillCalls = []; // { username, password } — the REAL (decrypted) credentials the script actually received, in order -- lets a test verify the exact plaintext without ever going through the persisted state file
     const self = this;
@@ -108,7 +109,14 @@ class FakeWebContents extends EventEmitter {
     if (script.includes("typeByKeyboard")) {
       const delay = this._sendDelayQueue.length ? this._sendDelayQueue.shift() : 0;
       if (delay) await new Promise((r) => setTimeout(r, delay));
-      if (this._forceSendFail) return { ok: false, error: "SEND_NOT_CONFIRMED" };
+      // _sendFailQueue: per-attempt override (shifted on every typeByKeyboard
+      // call, i.e. every real send AND every retry of it) -- lets a test
+      // script "fails twice then succeeds on the 3rd try" precisely, to
+      // verify the real retry loop in sendTextTo(), not just a permanently
+      // broken or permanently working send. Falls back to the simpler
+      // always-fail/always-succeed _forceSendFail once the queue is empty.
+      const failThisAttempt = this._sendFailQueue.length ? this._sendFailQueue.shift() : this._forceSendFail;
+      if (failThisAttempt) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
       return { ok: true };
     }
