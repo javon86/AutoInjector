@@ -87,6 +87,7 @@
     .ai-col.collapsed .inspect-btn,
     .ai-col.collapsed .pick-btn,
     .ai-col.collapsed .pick-menu,
+    .ai-col.collapsed .login-btn,
     .ai-col.collapsed .reload-btn { display:none; }
     .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; min-width:0; }
     .ai-col.collapsed .card-head { margin-bottom:0; min-width:0; overflow:hidden; }
@@ -106,6 +107,14 @@
     .pick-menu.collapsed { display:none; }
     .pick-menu button { font-size:10px; padding:2px 6px; }
     .pick-status { flex-basis:100%; opacity:.7; font-size:10px; }
+    .login-btn { background:none; border:none; padding:0 2px; font-size:12px; opacity:.55; cursor:pointer; }
+    .login-btn:hover { opacity:1; }
+    .login-list { flex-basis:100%; display:flex; flex-direction:column; gap:3px; }
+    .login-list .login-row { display:flex; align-items:center; gap:4px; }
+    .login-row button:first-child { flex:1; text-align:left; }
+    .login-add-form { flex-basis:100%; display:flex; flex-wrap:wrap; gap:4px; margin-top:2px; }
+    .login-add-form.collapsed { display:none; }
+    .login-add-form input { font-size:10px; padding:2px 4px; flex:1 1 100px; min-width:0; }
     .led { width:8px; height:8px; border-radius:50%; background:#444; flex:0 0 auto; }
     .test-led { width:8px; height:8px; border-radius:50%; background:#444; flex:0 0 auto; }
     .test-led.pending { background:#f5b642; animation: pulse 1.1s ease-in-out infinite; }

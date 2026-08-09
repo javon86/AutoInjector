@@ -86,6 +86,93 @@ async function clearPickOverrides(site) {
   setStatus(`${SITE_LABELS[site]}: selector overrides cleared.`);
 }
 
+function toggleLoginMenu(site) {
+  const menu = el(`login-menu-${site}`);
+  if (menu) menu.classList.toggle("collapsed");
+}
+
+// Saved logins: purely manual and one-click, never auto-triggered. Renders
+// the saved list for one site (label + username only -- the password never
+// leaves main.js, not even to render here) with a Fill button per entry.
+function renderLoginList(site, logins) {
+  const list = el(`login-list-${site}`);
+  if (!list) return;
+  list.textContent = "";
+  if (!logins || !logins.length) {
+    list.textContent = "No saved logins yet.";
+    return;
+  }
+  for (const entry of logins) {
+    const row = document.createElement("div");
+    row.className = "login-row";
+    const fillBtn = document.createElement("button");
+    fillBtn.textContent = `🔑 ${entry.label} (${entry.username})`;
+    fillBtn.onclick = () => runFillLogin(site, entry.id, entry.label);
+    row.appendChild(fillBtn);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "✕";
+    deleteBtn.title = `Delete "${entry.label}"`;
+    deleteBtn.onclick = async () => {
+      const res = await window.api.deleteLogin(site, entry.id);
+      if (res?.ok) renderLoginList(site, res.logins);
+    };
+    row.appendChild(deleteBtn);
+    list.appendChild(row);
+  }
+}
+
+function applyLogins(loginsBySite) {
+  for (const site of SITES) renderLoginList(site, loginsBySite?.[site]);
+}
+
+async function saveNewLogin(site) {
+  const label = el(`login-label-${site}`).value.trim();
+  const username = el(`login-username-${site}`).value.trim();
+  const password = el(`login-password-${site}`).value;
+  const statusEl = el(`login-status-${site}`);
+  const res = await window.api.saveLogin(site, label, username, password);
+  if (res?.ok) {
+    renderLoginList(site, res.logins);
+    el(`login-label-${site}`).value = "";
+    el(`login-username-${site}`).value = "";
+    el(`login-password-${site}`).value = "";
+    el(`login-add-form-${site}`).classList.add("collapsed");
+    if (statusEl) statusEl.textContent = `Saved "${label}".`;
+    setStatus(`${SITE_LABELS[site]}: saved login "${label}".`);
+  } else {
+    const reason = res?.error === "ENCRYPTION_UNAVAILABLE"
+      ? "this system can't provide secure credential storage right now"
+      : res?.error === "NEEDS_LABEL" ? "give it a label first"
+      : res?.error === "NEEDS_USERNAME" ? "enter a username/email first"
+      : res?.error === "NEEDS_PASSWORD" ? "enter a password first"
+      : res?.error || "unknown error";
+    if (statusEl) statusEl.textContent = `Couldn't save: ${reason}.`;
+    setStatus(`${SITE_LABELS[site]}: couldn't save login (${reason}).`);
+  }
+}
+
+// Fills in whatever login field(s) are actually on screen right now and
+// clicks Sign In -- real logins for these sites are often multi-step, so a
+// "SUBMIT_NOT_FOUND" or a fill that only touched the username field is
+// expected mid-flow, not necessarily a failure: click the same saved login
+// again once the next step (e.g. the password screen) appears.
+async function runFillLogin(site, id, label) {
+  const statusEl = el(`login-status-${site}`);
+  if (statusEl) statusEl.textContent = `Filling in "${label}"…`;
+  setStatus(`${SITE_LABELS[site]}: filling in saved login "${label}"…`);
+  const res = await window.api.fillLogin(site, id);
+  if (res?.ok) {
+    const what = (res.filled || []).join(" + ") || "nothing";
+    const submitNote = res.submitted ? "and clicked Sign In" : res.warning === "SUBMIT_NOT_FOUND" ? "but couldn't find a Sign In button to click" : "";
+    if (statusEl) statusEl.textContent = `Filled ${what} ${submitNote}.`.replace(/\s+/g, " ").trim();
+    setStatus(`${SITE_LABELS[site]}: filled in "${label}"${res.submitted ? " and submitted" : ""}. If this site logs in over multiple steps, click it again once the next screen appears.`);
+  } else {
+    const reason = res?.error === "NO_LOGIN_FORM_FOUND" ? "no login form found on screen right now" : res?.error || "unknown error";
+    if (statusEl) statusEl.textContent = `Couldn't fill in "${label}": ${reason}.`;
+    setStatus(`${SITE_LABELS[site]}: couldn't fill in "${label}" (${reason}).`);
+  }
+}
+
 function setTestLed(site, resultState) {
   const dot = el(`test-led-${site}`);
   if (!dot) return;
@@ -249,6 +336,12 @@ function buildAiColumn(site) {
   pickBtn.title = "Fix selectors: pick the real input box / send button / reply text live in this pane -- no DevTools needed";
   pickBtn.onclick = () => togglePickMenu(site);
   head.appendChild(pickBtn);
+  const loginBtn = document.createElement("button");
+  loginBtn.className = "login-btn";
+  loginBtn.textContent = "🔑";
+  loginBtn.title = "Saved logins: fill in a saved username/password and click Sign In for this site";
+  loginBtn.onclick = () => toggleLoginMenu(site);
+  head.appendChild(loginBtn);
   const reloadBtn = document.createElement("button");
   reloadBtn.className = "reload-btn";
   reloadBtn.textContent = "⟳";
@@ -291,6 +384,46 @@ function buildAiColumn(site) {
   pickStatus.id = `pick-status-${site}`;
   pickMenu.appendChild(pickStatus);
   strip.appendChild(pickMenu);
+
+  const loginMenu = document.createElement("div");
+  loginMenu.className = "pick-menu collapsed";
+  loginMenu.id = `login-menu-${site}`;
+  loginMenu.innerHTML = `<span class="row-label">Logins:</span>`;
+  const loginList = document.createElement("div");
+  loginList.className = "login-list";
+  loginList.id = `login-list-${site}`;
+  loginList.textContent = "No saved logins yet.";
+  loginMenu.appendChild(loginList);
+  const addLoginBtn = document.createElement("button");
+  addLoginBtn.textContent = "+ Add Login";
+  addLoginBtn.onclick = () => el(`login-add-form-${site}`).classList.toggle("collapsed");
+  loginMenu.appendChild(addLoginBtn);
+  const addForm = document.createElement("div");
+  addForm.className = "login-add-form collapsed";
+  addForm.id = `login-add-form-${site}`;
+  const labelInput = document.createElement("input");
+  labelInput.id = `login-label-${site}`;
+  labelInput.placeholder = "Label (e.g. Personal)";
+  addForm.appendChild(labelInput);
+  const userInput = document.createElement("input");
+  userInput.id = `login-username-${site}`;
+  userInput.placeholder = "Username / email";
+  addForm.appendChild(userInput);
+  const passInput = document.createElement("input");
+  passInput.id = `login-password-${site}`;
+  passInput.type = "password";
+  passInput.placeholder = "Password";
+  addForm.appendChild(passInput);
+  const saveLoginBtn = document.createElement("button");
+  saveLoginBtn.textContent = "Save Login";
+  saveLoginBtn.onclick = () => saveNewLogin(site);
+  addForm.appendChild(saveLoginBtn);
+  loginMenu.appendChild(addForm);
+  const loginStatus = document.createElement("div");
+  loginStatus.className = "pick-status";
+  loginStatus.id = `login-status-${site}`;
+  loginMenu.appendChild(loginStatus);
+  strip.appendChild(loginMenu);
 
   const preview = document.createElement("div");
   preview.className = "preview";
@@ -895,6 +1028,7 @@ el("btn-clear").onclick = async () => {
     applyHouseRule(res.houseRule);
     renderPrompts(res.prompts);
     renderTranscript(res.transcript);
+    applyLogins(res.logins);
     for (const entry of res.log || []) appendLog(entry);
     for (const site of SITES) {
       if (res.captured[site]) renderPreview(site, res.captured[site]);

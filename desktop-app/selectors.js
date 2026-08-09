@@ -33,6 +33,27 @@ module.exports = {
       'input[type="file"]',
       'input[data-testid="file-upload-input"]',
       'form input[type="file"]'
+    ],
+    // Best-effort/unverified, same caveat as every other candidate list in
+    // this file -- ChatGPT's login is Auth0-hosted and typically multi-step
+    // (email first, password on a following screen), so these are tried
+    // against whatever's actually on screen at the moment of a login-fill
+    // click, not assumed to both be present at once. See buildLoginFillScript()
+    // in automation.js.
+    LOGIN_USERNAME_CANDIDATES: [
+      'input[type="email"]',
+      'input[name="username"]',
+      'input[id="email-input"]',
+      'input[type="text"]'
+    ],
+    LOGIN_PASSWORD_CANDIDATES: [
+      'input[type="password"]',
+      'input[name="password"]'
+    ],
+    LOGIN_SUBMIT_CANDIDATES: [
+      'button[type="submit"]',
+      'button[name="action"]',
+      'button[data-action-button-primary="true"]'
     ]
   },
   claude: {
@@ -66,6 +87,21 @@ module.exports = {
       'input[type="file"]',
       'input[data-testid="file-upload"]',
       'form input[type="file"]'
+    ],
+    // Best-effort/unverified. Claude's login also tends to be multi-step
+    // (email, then password or a magic-link/SSO choice) -- see the note on
+    // ChatGPT's list above, same reasoning applies here.
+    LOGIN_USERNAME_CANDIDATES: [
+      'input[type="email"]',
+      'input[name="email"]'
+    ],
+    LOGIN_PASSWORD_CANDIDATES: [
+      'input[type="password"]',
+      'input[name="password"]'
+    ],
+    LOGIN_SUBMIT_CANDIDATES: [
+      'button[type="submit"]',
+      "form button"
     ]
   },
   gemini: {
@@ -91,6 +127,26 @@ module.exports = {
       'input[type="file"]',
       'input[name="Filedata"]',
       'form input[type="file"]'
+    ],
+    // Best-effort/unverified. Gemini's login goes through accounts.google.com,
+    // which is notoriously multi-step (email on one screen, password on the
+    // next, both with somewhat obfuscated markup) -- these candidates target
+    // Google's known, long-stable field/button ids where possible.
+    LOGIN_USERNAME_CANDIDATES: [
+      "#identifierId",
+      'input[type="email"]',
+      'input[name="identifier"]'
+    ],
+    LOGIN_PASSWORD_CANDIDATES: [
+      'input[type="password"]',
+      'input[name="Passwd"]',
+      'input[name="password"]'
+    ],
+    LOGIN_SUBMIT_CANDIDATES: [
+      "#identifierNext button",
+      "#passwordNext button",
+      'button[type="submit"]',
+      'div[role="button"][id*="Next"]'
     ]
   }
 };

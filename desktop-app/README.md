@@ -650,6 +650,38 @@ right-click the actual input box, Send button, or a reply bubble →
 **Inspect**, and send the element's tag/class/attributes — that's what lets
 me fix `selectors.js` itself for real, rather than guessing again.
 
+### 🔑 Saved logins: one click, no typing your password every time
+
+Each AI column has its own **🔑** button. It's entirely manual — nothing is
+auto-detected or auto-filled on its own. Click it, click **+ Add Login**,
+give it a label (e.g. "Personal", "Work" — you can save more than one per
+site, useful if you actually use multiple accounts for the same AI), your
+username/email, and your password, then **Save Login**. Next time that
+site's login page is showing, click 🔑 → the saved login's name, and it
+types your username and password into whatever fields are actually on
+screen and clicks Sign In for you.
+
+**Security:** your password is encrypted the instant you save it, using
+Electron's `safeStorage` — which hands off to your operating system's own
+keychain (macOS Keychain, Windows DPAPI, Linux libsecret/kwallet). It is
+never stored as plain text, not even in the app's own state file, and it's
+only ever decrypted for the split second a fill you personally clicked
+needs it. If your system has no keychain backend available at all (some
+minimal Linux setups), saving is refused outright rather than silently
+falling back to storing it unencrypted.
+
+**Multi-step logins are expected, not a bug.** ChatGPT, Claude, and
+Google's own login pages (which Gemini uses) commonly ask for your email on
+one screen and your password on the next, rather than both at once. If a
+click only fills in one field and doesn't find a Sign In button yet, that's
+normal — the status line says so, and clicking the same saved login again
+once the next screen appears fills in the rest. Like every other DOM
+selector in this app, exactly which fields it looks for is a best-effort
+guess (`LOGIN_USERNAME_CANDIDATES`/`LOGIN_PASSWORD_CANDIDATES`/
+`LOGIN_SUBMIT_CANDIDATES` in `selectors.js`) that may need a touch-up if a
+site's actual login page doesn't match — same story as the chat selectors,
+fixable the same way (send me what the real fields look like).
+
 ## How it's built
 
 - `main.js` — Electron main process. Each site's pane is positioned by
@@ -771,7 +803,24 @@ me fix `selectors.js` itself for real, rather than guessing again.
   manual 🧪 Test colliding with a Tuner run touching the same site (checked
   in the `selftest:run` handler, not inside `runConnectivityTest()` itself,
   since the Tuner's own internal calls need to go through even while it's
-  the one holding that flag).
+  the one holding that flag). The **🔑 saved-logins** feature
+  (`logins:list`/`logins:save`/`logins:delete`/`logins:fill`) is purely
+  manual end to end — nothing auto-detects a login form or auto-triggers a
+  fill. `logins:save` refuses outright (`ENCRYPTION_UNAVAILABLE`) unless
+  `safeStorage.isEncryptionAvailable()`, then stores only
+  `safeStorage.encryptString(password)`'s ciphertext (base64-encoded) in
+  `state.savedLogins[site]` — the plaintext password is never held anywhere
+  once that call returns, never sent back to the renderer (`sanitizedLogins()`
+  strips it before every response), and never appears in `logEvent()` calls
+  (`login-saved`/`login-fill-started`/`login-fill-ok`/`login-fill-error` log
+  the label and username only). `logins:fill` is the only place the
+  ciphertext is ever decrypted, immediately before building and running
+  `buildLoginFillScript()` (see `automation.js`) against the live pane —
+  which fills whichever of `LOGIN_USERNAME_CANDIDATES`/
+  `LOGIN_PASSWORD_CANDIDATES` (per site, in `selectors.js`) are actually
+  present on screen right now (never assuming both exist at once, since
+  ChatGPT/Claude/Google's own login flows are commonly multi-step) and
+  clicks whatever matches `LOGIN_SUBMIT_CANDIDATES`.
   `logEvent()`
   also appends every internal
   event to a capped, rolling debug log file in the same folder, so a real
@@ -1003,6 +1052,28 @@ and that both the start and the final tally land in the Activity Log. A
 second scenario proves a concurrent second Tuner run is rejected
 (`ALREADY_RUNNING`) and, further, that a manual 🧪 Test is refused
 (`TUNER_RUNNING`) while one is in flight rather than racing it.
+
+It also covers the 🔑 saved-logins feature end to end, with a real
+(non-secure, but functionally real) `safeStorage` mock so the actual
+encrypt/decrypt round trip runs, not just the plumbing around it: saving
+returns the new entry's label/username but never its password or
+ciphertext; the raw password never appears anywhere in the persisted state
+file, only its encrypted form under a distinctly-named field; a fill
+decrypts back to the exact original password and reaches the DOM script
+correctly; the Activity Log records saves and fills by label/username only,
+confirmed by grepping every log entry's detail for the raw password and
+finding nothing; multiple independent logins can be saved for the same
+site, and deleting one leaves the others untouched; every validation path
+(blank label/username/password, unknown site, a nonexistent saved login,
+no keychain backend available) is rejected with its own specific reason,
+never a silent no-op or a plaintext fallback; and a multi-step login (only
+one field present, or no login form on screen at all) is reported honestly
+rather than miscounted as a clean pass or a hard failure. `controls.test.js`
+separately covers the UI: adding a login shows it in the list and clears
+the password field from the DOM afterward, clicking a saved login is the
+ONLY thing that ever calls the fill IPC (loading the window never does),
+delete removes just that one entry, and a rejected save (e.g.
+`ENCRYPTION_UNAVAILABLE`) shows its specific reason in the status line.
 
 It also covers rate-limit detection outside House Rules: with plain
 Auto-routing wired up (no House Rule active), a usage-cap-looking reply is

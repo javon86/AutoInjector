@@ -985,6 +985,83 @@ async function testSelectorPickerValidation() {
   await call("selector:clear", { site: "claude", role: "assistant" });
 }
 
+async function testSavedLogins() {
+  console.log("\n== Saved logins: encrypted at rest, decrypted only for an explicit fill, never sent to the renderer or logged in plaintext ==");
+  await resetAllParticipants();
+  mockElectron.__setEncryptionAvailable(true);
+
+  const before = await call("logins:list", {});
+  assert(before.ok && before.logins.claude.length === 0, "starts with no saved logins for claude");
+
+  const saveRes = await call("logins:save", { site: "claude", label: "Personal", username: "me@example.com", password: "hunter2" });
+  assert(saveRes.ok, "saving a login succeeds");
+  assert(saveRes.logins.length === 1 && saveRes.logins[0].label === "Personal" && saveRes.logins[0].username === "me@example.com", "the response includes the new entry's label/username");
+  assert(saveRes.logins[0].password === undefined && saveRes.logins[0].encryptedPassword === undefined, "the password (encrypted or not) is NEVER sent back to the renderer, not even the ciphertext");
+
+  const listed = await call("logins:list", {});
+  assert(listed.logins.claude.length === 1 && listed.logins.claude[0].username === "me@example.com", "logins:list reflects the save");
+  const loginId = listed.logins.claude[0].id;
+
+  // persisted to disk -- but only as ciphertext, never the raw password
+  await new Promise((r) => setTimeout(r, 700));
+  const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
+  assert(!raw.includes("hunter2"), "the raw password never appears anywhere in the persisted state file");
+  const savedOnDisk = JSON.parse(raw);
+  assert(savedOnDisk.savedLogins.claude[0].encryptedPassword && savedOnDisk.savedLogins.claude[0].encryptedPassword !== "hunter2", "what IS persisted is the encrypted ciphertext, keyed under encryptedPassword, distinct from the raw password");
+
+  // the fill actually decrypts back to the real password and reaches the DOM script
+  const fillRes = await call("logins:fill", { site: "claude", id: loginId });
+  assert(fillRes.ok && fillRes.submitted === true, "filling a saved login succeeds and reports it submitted");
+  const fillCall = reg("claude").webContents.loginFillCalls[reg("claude").webContents.loginFillCalls.length - 1];
+  assert(fillCall.username === "me@example.com" && fillCall.password === "hunter2", "the DOM script actually received the real, correctly-decrypted username and password");
+
+  const s = await call("state:get", {});
+  assert(!s.log.some((l) => JSON.stringify(l.detail).includes("hunter2")), "the raw password never appears in the Activity Log either, including around the fill action");
+  assert(s.log.some((l) => l.kind === "login-saved" && l.detail.site === "claude" && l.detail.username === "me@example.com" && l.detail.password === undefined), "a save is logged with the label/username but never the password");
+  assert(s.log.some((l) => l.kind === "login-fill-started" && l.detail.label === "Personal") && s.log.some((l) => l.kind === "login-fill-ok"), "a fill is logged as starting and succeeding, by label, never by credential value");
+
+  // multiple logins per site (e.g. "multiple different types of ChatGPT logins")
+  const secondSave = await call("logins:save", { site: "claude", label: "Work", username: "work@example.com", password: "correcthorse" });
+  assert(secondSave.ok && secondSave.logins.length === 2, "a second, independent login can be saved for the same site");
+
+  const deleteRes = await call("logins:delete", { site: "claude", id: loginId });
+  assert(deleteRes.ok && deleteRes.logins.length === 1 && deleteRes.logins[0].label === "Work", "deleting one login leaves the other untouched");
+  const deleteMissing = await call("logins:delete", { site: "claude", id: loginId });
+  assert(!deleteMissing.ok && deleteMissing.error === "NOT_FOUND", "deleting an already-gone id is rejected cleanly, not a silent no-op");
+
+  // validation
+  const badSite = await call("logins:save", { site: "not-a-site", label: "x", username: "x", password: "x" });
+  assert(!badSite.ok && badSite.error === "BAD_SITE", "an unknown site is rejected");
+  const noLabel = await call("logins:save", { site: "gemini", label: "", username: "x", password: "x" });
+  assert(!noLabel.ok && noLabel.error === "NEEDS_LABEL", "a blank label is rejected");
+  const noUser = await call("logins:save", { site: "gemini", label: "x", username: "", password: "x" });
+  assert(!noUser.ok && noUser.error === "NEEDS_USERNAME", "a blank username is rejected");
+  const noPass = await call("logins:save", { site: "gemini", label: "x", username: "x", password: "" });
+  assert(!noPass.ok && noPass.error === "NEEDS_PASSWORD", "a blank password is rejected");
+
+  const fillMissing = await call("logins:fill", { site: "gemini", id: 99999 });
+  assert(!fillMissing.ok && fillMissing.error === "NOT_FOUND", "filling a nonexistent saved login is rejected cleanly");
+
+  // no OS keychain backend available -- refuses to save rather than silently falling back to plaintext
+  mockElectron.__setEncryptionAvailable(false);
+  const noEncryption = await call("logins:save", { site: "gemini", label: "x", username: "x", password: "x" });
+  assert(!noEncryption.ok && noEncryption.error === "ENCRYPTION_UNAVAILABLE", "refuses to save at all when secure storage isn't available, rather than falling back to storing plaintext");
+  mockElectron.__setEncryptionAvailable(true);
+
+  // the DOM script itself only fills whichever field(s) it actually finds --
+  // a multi-step login (e.g. email-only screen) is a real, expected outcome
+  reg("gemini").webContents._nextLoginFillResult = { ok: true, filled: ["username"], submitted: false, warning: "SUBMIT_NOT_FOUND" };
+  const partialSave = await call("logins:save", { site: "gemini", label: "Multi-step", username: "a@b.com", password: "pw" });
+  const partialFill = await call("logins:fill", { site: "gemini", id: partialSave.logins[0].id });
+  assert(partialFill.ok && partialFill.filled.length === 1 && partialFill.submitted === false, "a multi-step login (only one field present) is reported honestly, not as a full success or a failure");
+
+  // no login form present at all
+  reg("gemini").webContents._nextLoginFillResult = { ok: false, error: "NO_LOGIN_FORM_FOUND" };
+  const noFormFill = await call("logins:fill", { site: "gemini", id: partialSave.logins[0].id });
+  assert(!noFormFill.ok && noFormFill.error === "NO_LOGIN_FORM_FOUND", "no login fields found on screen is reported distinctly, not confused with a real failure");
+  reg("gemini").webContents._nextLoginFillResult = null;
+}
+
 function extractSelftestToken(sentText) {
   const m = sentText.match(/: (\S+)$/);
   return m ? m[1] : null;
@@ -1596,6 +1673,7 @@ async function main() {
   testSelectorOverridePriorityInScripts();
   await testSelectorPicker();
   await testSelectorPickerValidation();
+  await testSavedLogins();
   await testSelfTestConnectivity();
   await testTunerFullRun();
   await testTunerRejectsConcurrentRuns();

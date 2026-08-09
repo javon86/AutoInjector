@@ -17,8 +17,10 @@ function assert(cond, msg) {
   return cond;
 }
 
-function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult } = {}) {
+function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, loginSaveResult, loginFillResult } = {}) {
   const calls = [];
+  const savedLogins = { chatgpt: [], claude: [], gemini: [] };
+  let nextLoginId = 1;
   let windowCollapseCb = null;
   let captureCb = null;
   let houseRuleCb = null;
@@ -80,6 +82,22 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult } 
       return { ok: true, results: {} };
     },
     openPromptEditor: async (id) => { calls.push({ fn: "openPromptEditor", id }); return { ok: true }; },
+    listSavedLogins: async () => { calls.push({ fn: "listSavedLogins" }); return { ok: true, logins: savedLogins }; },
+    saveLogin: async (site, label, username, password) => {
+      calls.push({ fn: "saveLogin", site, label, username, password });
+      if (loginSaveResult) return loginSaveResult;
+      savedLogins[site] = [...savedLogins[site], { id: nextLoginId++, label, username }];
+      return { ok: true, logins: savedLogins[site] };
+    },
+    deleteLogin: async (site, id) => {
+      calls.push({ fn: "deleteLogin", site, id });
+      savedLogins[site] = savedLogins[site].filter((l) => l.id !== id);
+      return { ok: true, logins: savedLogins[site] };
+    },
+    fillLogin: async (site, id) => {
+      calls.push({ fn: "fillLogin", site, id });
+      return loginFillResult || { ok: true, filled: ["username", "password"], submitted: true };
+    },
     getState: async () => ({
       ok: true,
       global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: { chatgpt: true, claude: true, gemini: true }, waiting: {}, meshActive: false, customRole: {} },
@@ -87,6 +105,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult } 
       captured: { chatgpt: null, claude: null, gemini: null },
       transcript: [],
       log: [],
+      logins: savedLogins,
       prompts
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
@@ -337,6 +356,85 @@ async function testClearOverridesButton() {
 
   const clearCalls = api.calls.filter((c) => c.fn === "clearSelectorOverride" && c.site === "chatgpt");
   assert(clearCalls.length === 3 && ["input", "send", "assistant"].every((role) => clearCalls.some((c) => c.role === role)), "Clear Overrides clears input, send, and assistant for that site");
+}
+
+function findByText(nodes, text) {
+  return Array.from(nodes).find((n) => n.textContent === text);
+}
+
+async function testSavedLoginsAddAndFill() {
+  console.log("\n== Saved logins: adding one shows it in the list, clicking it calls fillLogin -- never auto-triggered ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("login-menu-claude");
+  assert(!!menu, "each column has its own login menu");
+  assert(doc.getElementById("login-list-claude").textContent.includes("No saved logins yet"), "starts with no saved logins");
+  assert(!api.calls.some((c) => c.fn === "fillLogin"), "loading the window never calls fillLogin on its own -- purely manual");
+
+  const addToggle = findByText(menu.querySelectorAll("button"), "+ Add Login");
+  addToggle.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("login-add-form-claude").classList.contains("collapsed"), "clicking + Add Login reveals the form");
+
+  doc.getElementById("login-label-claude").value = "Personal";
+  doc.getElementById("login-username-claude").value = "me@example.com";
+  doc.getElementById("login-password-claude").value = "hunter2";
+  const saveBtn = findByText(menu.querySelectorAll("button"), "Save Login");
+  saveBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const saveCall = api.calls.find((c) => c.fn === "saveLogin");
+  assert(!!saveCall && saveCall.site === "claude" && saveCall.label === "Personal" && saveCall.username === "me@example.com" && saveCall.password === "hunter2", "Save Login sends the real label/username/password for the right site");
+  assert(doc.getElementById("login-add-form-claude").classList.contains("collapsed"), "the add form collapses again after a successful save");
+  assert(doc.getElementById("login-label-claude").value === "" && doc.getElementById("login-password-claude").value === "", "the form fields (including the password) are cleared after saving, not left sitting in the DOM");
+
+  const list = doc.getElementById("login-list-claude");
+  const fillBtn = Array.from(list.querySelectorAll("button")).find((b) => b.textContent.includes("Personal") && b.textContent.includes("me@example.com"));
+  assert(!!fillBtn, "the newly saved login appears in the list, labeled with its name and username");
+
+  fillBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const fillCall = api.calls.find((c) => c.fn === "fillLogin");
+  assert(!!fillCall && fillCall.site === "claude" && fillCall.id === 1, "clicking the saved login calls fillLogin with that exact site+id -- this is the ONLY thing that ever triggers a fill");
+  assert(doc.getElementById("login-status-claude").textContent.includes("Filled") || doc.getElementById("login-status-claude").textContent.includes("filled"), "the login status line reports what happened");
+}
+
+async function testSavedLoginsDeleteAndSaveFailure() {
+  console.log("\n== Saved logins: delete removes it from the list, and a rejected save shows the specific reason ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const menu = doc.getElementById("login-menu-gemini");
+  findByText(menu.querySelectorAll("button"), "+ Add Login").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  doc.getElementById("login-label-gemini").value = "Work";
+  doc.getElementById("login-username-gemini").value = "work@example.com";
+  doc.getElementById("login-password-gemini").value = "correcthorse";
+  findByText(menu.querySelectorAll("button"), "Save Login").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const list = doc.getElementById("login-list-gemini");
+  assert(list.textContent.includes("Work"), "the saved login shows up first");
+  const deleteBtn = Array.from(list.querySelectorAll("button")).find((b) => b.textContent === "✕");
+  deleteBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert(api.calls.some((c) => c.fn === "deleteLogin" && c.site === "gemini"), "the ✕ button calls deleteLogin for the right site");
+  assert(doc.getElementById("login-list-gemini").textContent.includes("No saved logins yet"), "the list reflects the deletion immediately");
+
+  // a rejected save (e.g. no OS keychain available) shows the specific reason, not a generic error
+  const failApi = makeApi({ loginSaveResult: { ok: false, error: "ENCRYPTION_UNAVAILABLE" } });
+  const failDom = await loadWindow(failApi);
+  const failDoc = failDom.window.document;
+  const failMenu = failDoc.getElementById("login-menu-chatgpt");
+  findByText(failMenu.querySelectorAll("button"), "+ Add Login").dispatchEvent(new failDom.window.Event("click", { bubbles: true }));
+  failDoc.getElementById("login-label-chatgpt").value = "Test";
+  failDoc.getElementById("login-username-chatgpt").value = "a@b.com";
+  failDoc.getElementById("login-password-chatgpt").value = "x";
+  findByText(failMenu.querySelectorAll("button"), "Save Login").dispatchEvent(new failDom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(failDoc.getElementById("login-status-chatgpt").textContent.toLowerCase().includes("secure credential storage"), `the specific failure reason is shown, not a bare error code (got "${failDoc.getElementById("login-status-chatgpt").textContent}")`);
 }
 
 async function testConnectivityTestButtonSuccess() {
@@ -693,6 +791,8 @@ async function main() {
   await testSelectorPickFailure();
   await testSelectorPickValidationRejections();
   await testClearOverridesButton();
+  await testSavedLoginsAddAndFill();
+  await testSavedLoginsDeleteAndSaveFailure();
   await testConnectivityTestButtonSuccess();
   await testTunerButton();
   await testTunerButtonReportsFailures();
