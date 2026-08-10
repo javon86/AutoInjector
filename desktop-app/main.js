@@ -876,7 +876,7 @@ function withSendQueue(target, fn) {
   return run;
 }
 
-async function sendTextTo(target, text, fromSite) {
+async function sendTextTo(target, text, fromSite, opts = {}) {
   const view = siteViews[target];
   if (!view || view.webContents.isDestroyed()) {
     recordLedgerEntry({ source: fromSite || null, target, text, ok: false, error: "NO_VIEW" });
@@ -886,7 +886,11 @@ async function sendTextTo(target, text, fromSite) {
   }
   const label = fromSite ? SITES[fromSite]?.label : null;
   const roleClause = state.customRole[target] ? `(You're playing the role of: ${state.customRole[target]}. Keep that in mind in your reply.)\n\n` : "";
-  const prompt = roleClause + (label ? `[${label} says]\n\n${text}` : text);
+  // opts.raw skips role-clause/label framing entirely and sends `text`
+  // verbatim -- for callers (Regenerate) whose text is already the exact,
+  // fully-framed string that was actually sent last time, so re-framing it
+  // here would double it up.
+  const prompt = opts.raw ? text : roleClause + (label ? `[${label} says]\n\n${text}` : text);
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -895,26 +899,52 @@ async function sendTextTo(target, text, fromSite) {
   // send succeeds immediately on the next try. Self-recovering that
   // automatically (attempts > 1 in the log/ledger, not silently hidden)
   // fixes the actual problem instead of just reporting it more accurately.
-  let res;
+  // The ENTIRE attempt+backoff sequence runs inside one withSendQueue() call
+  // (not one call per attempt) -- otherwise the queue slot for this target
+  // was released during each backoff sleep, letting a concurrent send for
+  // the same target (e.g. a mesh forward) jump ahead of a message that's
+  // still retrying and land out of order.
   let attempts = 0;
-  for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
-    attempts = attempt;
-    try {
-      res = await withSendQueue(target, () => view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true));
-    } catch (e) {
-      res = { ok: false, error: String(e) };
+  const res = await withSendQueue(target, async () => {
+    let r;
+    for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
+      attempts = attempt;
+      try {
+        r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true);
+      } catch (e) {
+        r = { ok: false, error: String(e) };
+      }
+      if (r && r.ok) break;
+      if (attempt < SEND_RETRY_ATTEMPTS) {
+        logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown" });
+        await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS));
+      }
     }
-    if (res && res.ok) break;
-    if (attempt < SEND_RETRY_ATTEMPTS) {
-      logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (res && res.error) || "unknown" });
-      await new Promise((r) => setTimeout(r, SEND_RETRY_BACKOFF_MS));
-    }
-  }
+    return r;
+  });
 
   recordLedgerEntry({ source: fromSite || null, target, text: prompt, ok: res && res.ok, error: res && res.error, attempts });
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown" });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
+    // opts.hr marks a send made on behalf of an active House Rule turn --
+    // exhausting every retry used to leave the run silently `active`
+    // forever, waiting on a reply that can now never arrive. Park it the
+    // same defined way a rate-limited reply already does (pauseReason,
+    // a restorable routing snapshot), rather than a distinct ambient check
+    // against state.hr.active, since a send failure completely unrelated to
+    // any House Rule (e.g. a plain Compose to an idle site) must never pause
+    // a run that's healthy on other sites.
+    if (opts.hr && state.hr.active) {
+      state.hr.active = false;
+      state.hr.pauseReason = "send-failed";
+      state.hr.pausedRouting = routingSnapshot();
+      for (const s of SITE_IDS) state.routing[s].clear();
+      state.meshActive = false;
+      logEvent("houserule-paused", { mode: state.hr.mode, reason: "send-failed", target, error: res?.error || "unknown" });
+      broadcastHouseRule();
+      saveStateDebounced();
+    }
   } else {
     state.lastSentTo[target] = prompt;
     state.waiting[target] = true;
@@ -924,6 +954,17 @@ async function sendTextTo(target, text, fromSite) {
     logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1 });
   }
   return res;
+}
+
+// Wraps sendTextTo() for every send made on behalf of the active House Rule
+// flow -- both its kickoffs and its per-turn capture reactions. Tags the
+// send opts.hr:true (see sendTextTo's failure branch) and, when a
+// target-tracking Set is passed, records who this House Rule turn actually
+// messaged so pollSite()'s mesh-forward loop can dedupe against it exactly
+// like it already does for tag-routing via roundtableTargetsFor().
+async function hrSendTextTo(target, text, fromSite, sentTargets) {
+  if (sentTargets) sentTargets.add(target);
+  return sendTextTo(target, text, fromSite, { hr: true });
 }
 
 // The connectivity Test button: send a prompt carrying a fresh, effectively
@@ -1103,7 +1144,7 @@ async function startBlindRound(checked) {
   state.hr.realReplies = {};
   for (const s of checked) {
     const prompt = `You're being asked this independently and at the same time as ${otherLabels(checked, s)} -- none of you can see any answer but your own yet, so give your own honest take rather than guessing what they'd say. Once everyone has answered, you'll each see exactly what the others independently said.\n\n${state.hr.topic}`;
-    await sendTextTo(s, prompt, null);
+    await hrSendTextTo(s, prompt, null);
   }
 }
 
@@ -1112,7 +1153,7 @@ async function startFreeForAll(checked) {
   state.meshActive = true;
   for (const s of checked) {
     const prompt = `You're one voice in an open discussion with ${otherLabels(checked, s)} on: "${state.hr.topic}". Anyone can jump in at any point — react to whoever said something interesting, don't wait for a formal turn.`;
-    await sendTextTo(s, prompt, null);
+    await hrSendTextTo(s, prompt, null);
   }
 }
 
@@ -1121,7 +1162,7 @@ async function startBrainstorm(checked) {
   state.meshActive = true;
   for (const s of checked) {
     const prompt = `You're brainstorming with ${otherLabels(checked, s)} on: "${state.hr.topic}". This isn't a debate — no need to find flaws or pick a side. Build on what's already been suggested, add a new angle, or combine ideas.`;
-    await sendTextTo(s, prompt, null);
+    await hrSendTextTo(s, prompt, null);
   }
 }
 
@@ -1132,7 +1173,7 @@ async function wrapUpBrainstorm() {
   const synth = checked[Math.floor(Math.random() * checked.length)];
   state.hr.roles = { [synth]: "synthesizer" };
   state.hr.phase = "awaiting-synthesis";
-  await sendTextTo(
+  await hrSendTextTo(
     synth,
     `We've been brainstorming on "${state.hr.topic}" for a while. Don't add a new idea — pull everything together into ONE single, fully fleshed-out plan: take the best pieces from what's been suggested, resolve any contradictions, and present it as a complete answer.`,
     null
@@ -1143,14 +1184,14 @@ async function wrapUpBrainstorm() {
 async function startDebate(checked) {
   state.hr.order = shuffledCopy(checked);
   state.hr.turnIndex = 0;
-  await sendTextTo(state.hr.order[0], `You're kicking off a debate on: "${state.hr.topic}". Give your opening position.`, null);
+  await hrSendTextTo(state.hr.order[0], `You're kicking off a debate on: "${state.hr.topic}". Give your opening position.`, null);
 }
 
 async function startDevilAngel(checked) {
   const [middle, devil, angel] = shuffledCopy(checked);
   state.hr.roles = { [middle]: "middle", [devil]: "devil", [angel]: "angel" };
   state.hr.phase = "awaiting-middle";
-  await sendTextTo(middle, `Here's a goal/idea I want to stress-test: "${state.hr.topic}". Lay out your initial take or plan for it.`, null);
+  await hrSendTextTo(middle, `Here's a goal/idea I want to stress-test: "${state.hr.topic}". Lay out your initial take or plan for it.`, null);
 }
 
 async function startChargeback(checked) {
@@ -1158,8 +1199,8 @@ async function startChargeback(checked) {
   state.hr.roles = { [d1]: "debater1", [d2]: "debater2", [ref]: "referee" };
   state.hr.phase = "awaiting-debater1";
   queueIgnore(ref);
-  await sendTextTo(ref, `You're the referee for a debate on "${state.hr.topic}" between two other AIs. Just observe for now — you'll be asked for a final verdict after round ${state.hr.rounds}.`, null);
-  await sendTextTo(d1, `You're arguing FOR this: "${state.hr.topic}". State your opening case.`, null);
+  await hrSendTextTo(ref, `You're the referee for a debate on "${state.hr.topic}" between two other AIs. Just observe for now — you'll be asked for a final verdict after round ${state.hr.rounds}.`, null);
+  await hrSendTextTo(d1, `You're arguing FOR this: "${state.hr.topic}". State your opening case.`, null);
 }
 
 async function startWhoWants(checked) {
@@ -1167,7 +1208,7 @@ async function startWhoWants(checked) {
   state.hr.optinPending = new Set(checked);
   state.hr.optinYes = [];
   const prompt = `Here's a topic to think about: "${state.hr.topic}".\n\nDo you have something worth adding right now — a new point, disagreement, or question? Reply with just YES or NO, and if YES, one line on your angle.`;
-  for (const s of checked) await sendTextTo(s, prompt, null);
+  for (const s of checked) await hrSendTextTo(s, prompt, null);
 }
 
 async function startRotation() {
@@ -1177,7 +1218,7 @@ async function startRotation() {
   state.hr.order = ROTATION_ORDER.slice();
   state.hr.phase = "awaiting-first";
   state.hr.lastSpeakerIndex = -1;
-  await sendTextTo(ROTATION_ORDER[0], state.hr.topic, null);
+  await hrSendTextTo(ROTATION_ORDER[0], state.hr.topic, null);
 }
 
 // Unlike every other mode, Roundtable lets each AI pick its own addressee via
@@ -1640,21 +1681,24 @@ function rejectManagerAction(reason) {
 
 async function handleDebateCapture(turn) {
   const hr = state.hr;
-  if (turn.site !== hr.order[hr.turnIndex]) return;
+  const sentTargets = new Set();
+  if (turn.site !== hr.order[hr.turnIndex]) return sentTargets;
   hr.turnIndex = (hr.turnIndex + 1) % hr.order.length;
   if (hr.turnIndex === 0) {
     hr.roundNum++;
-    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return sentTargets; }
   }
   const next = hr.order[hr.turnIndex];
   const msg = `[${turn.label} says]\n\n${turn.text}\n\nRespond directly to the strongest point they just made — agree, refute, or build on it — then add your own point.`;
-  await sendTextTo(next, msg, null);
+  await hrSendTextTo(next, msg, null, sentTargets);
+  return sentTargets;
 }
 
 async function handleDevilAngelCapture(turn) {
   const hr = state.hr;
+  const sentTargets = new Set();
   const role = hr.roles[turn.site];
-  if (!role) return;
+  if (!role) return sentTargets;
 
   if (role === "middle" && hr.phase === "awaiting-middle") {
     // Every middle capture starts a round — the very first (the opening
@@ -1662,7 +1706,7 @@ async function handleDevilAngelCapture(turn) {
     // fanning out again (not after collecting Devil & Angel's replies), so a
     // "rounds: 1" run still lets Middle respond once to their feedback
     // instead of cutting off the moment those replies are collected.
-    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return sentTargets; }
     hr.roundNum++;
 
     const devilSite = findRoleSite("devil");
@@ -1673,9 +1717,9 @@ async function handleDevilAngelCapture(turn) {
     hr.rolesIntroduced.angel = true;
     hr.buffer = {};
     hr.phase = "awaiting-devil-angel";
-    await sendTextTo(devilSite, `${devilIntro}[Middle says]\n\n${turn.text}`, null);
-    await sendTextTo(angelSite, `${angelIntro}[Middle says]\n\n${turn.text}`, null);
-    return;
+    await hrSendTextTo(devilSite, `${devilIntro}[Middle says]\n\n${turn.text}`, null, sentTargets);
+    await hrSendTextTo(angelSite, `${angelIntro}[Middle says]\n\n${turn.text}`, null, sentTargets);
+    return sentTargets;
   }
 
   if (role === "devil" && hr.phase === "awaiting-devil-angel") {
@@ -1683,7 +1727,7 @@ async function handleDevilAngelCapture(turn) {
   } else if (role === "angel" && hr.phase === "awaiting-devil-angel") {
     hr.buffer.angel = turn.text;
   } else {
-    return;
+    return sentTargets;
   }
 
   if (hr.buffer.devil != null && hr.buffer.angel != null) {
@@ -1691,14 +1735,16 @@ async function handleDevilAngelCapture(turn) {
     const combined = `[Devil says]\n\n${hr.buffer.devil}\n\n[Angel says]\n\n${hr.buffer.angel}\n\nYou've heard both sides above. Respond to both: what do you concede, what do you push back on, how does your position evolve? State it clearly, since that's what goes back to them next.`;
     hr.buffer = {};
     hr.phase = "awaiting-middle";
-    await sendTextTo(middleSite, combined, null);
+    await hrSendTextTo(middleSite, combined, null, sentTargets);
   }
+  return sentTargets;
 }
 
 async function handleChargebackCapture(turn) {
   const hr = state.hr;
+  const sentTargets = new Set();
   const role = hr.roles[turn.site];
-  if (!role) return;
+  if (!role) return sentTargets;
   const referee = findRoleSite("referee");
 
   if (role === "referee") {
@@ -1706,7 +1752,7 @@ async function handleChargebackCapture(turn) {
       turn.isVerdict = true;
       endHouseRule("verdict delivered");
     }
-    return; // any other referee reply is just an ack to an informational copy, ignored via ignoreCaptureFrom
+    return sentTargets; // any other referee reply is just an ack to an informational copy, ignored via ignoreCaptureFrom
   }
 
   const d1 = findRoleSite("debater1");
@@ -1714,10 +1760,10 @@ async function handleChargebackCapture(turn) {
 
   if (role === "debater1" && hr.phase === "awaiting-debater1") {
     queueIgnore(referee);
-    await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
+    await hrSendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null, sentTargets);
     hr.phase = "awaiting-debater2";
-    await sendTextTo(d2, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null);
-    return;
+    await hrSendTextTo(d2, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null, sentTargets);
+    return sentTargets;
   }
 
   if (role === "debater2" && hr.phase === "awaiting-debater2") {
@@ -1728,39 +1774,41 @@ async function handleChargebackCapture(turn) {
       // risks the second landing while the site's input is still disabled from
       // generating a reply to the first.
       hr.phase = "awaiting-verdict";
-      await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}\n\nThe debate is over. Based on everything you've observed, deliver your verdict: who argued better, and why? Declare a winner.`, null);
+      await hrSendTextTo(referee, `[${turn.label} says]\n\n${turn.text}\n\nThe debate is over. Based on everything you've observed, deliver your verdict: who argued better, and why? Declare a winner.`, null, sentTargets);
     } else {
       queueIgnore(referee);
-      await sendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null);
+      await hrSendTextTo(referee, `[${turn.label} says]\n\n${turn.text}`, null, sentTargets);
       hr.phase = "awaiting-debater1";
-      await sendTextTo(d1, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null);
+      await hrSendTextTo(d1, `[${turn.label} says]\n\n${turn.text}\n\nRespond with your counter-argument.`, null, sentTargets);
     }
   }
+  return sentTargets;
 }
 
 async function handleWhoWantsCapture(turn) {
   const hr = state.hr;
+  const sentTargets = new Set();
 
   if (hr.phase === "awaiting-optins" && hr.optinPending.has(turn.site)) {
     hr.optinPending.delete(turn.site);
     if (turn.text.trim().toUpperCase().startsWith("YES")) hr.optinYes.push(turn.site);
-    if (hr.optinPending.size > 0) return;
+    if (hr.optinPending.size > 0) return sentTargets;
 
-    if (hr.optinYes.length === 0) { endHouseRule("nobody opted in"); return; }
+    if (hr.optinYes.length === 0) { endHouseRule("nobody opted in"); return sentTargets; }
     hr.phase = "awaiting-real";
     hr.realPending = new Set(hr.optinYes);
     hr.realReplies = {};
-    for (const s of hr.optinYes) await sendTextTo(s, "Go ahead — give your point.", null);
-    return;
+    for (const s of hr.optinYes) await hrSendTextTo(s, "Go ahead — give your point.", null, sentTargets);
+    return sentTargets;
   }
 
   if (hr.phase === "awaiting-real" && hr.realPending.has(turn.site)) {
     hr.realPending.delete(turn.site);
     hr.realReplies[turn.site] = turn.text;
-    if (hr.realPending.size > 0) return;
+    if (hr.realPending.size > 0) return sentTargets;
 
     hr.roundNum++;
-    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return; }
+    if (hr.rounds > 0 && hr.roundNum >= hr.rounds) { endHouseRule("rounds complete"); return sentTargets; }
 
     const checked = SITE_IDS.filter((s) => state.enabled[s]);
     const recap = Object.entries(hr.realReplies).map(([s, t]) => `[${SITES[s].label} says]\n\n${t}`).join("\n\n");
@@ -1768,8 +1816,9 @@ async function handleWhoWantsCapture(turn) {
     hr.phase = "awaiting-optins";
     hr.optinPending = new Set(checked);
     hr.optinYes = [];
-    for (const s of checked) await sendTextTo(s, prompt, null);
+    for (const s of checked) await hrSendTextTo(s, prompt, null, sentTargets);
   }
+  return sentTargets;
 }
 
 async function handleBrainstormCapture(turn) {
@@ -1782,40 +1831,43 @@ async function handleBrainstormCapture(turn) {
 
 async function handleRotationCapture(turn) {
   const hr = state.hr;
+  const sentTargets = new Set();
   const order = hr.order;
   const idx = order.indexOf(turn.site);
-  if (idx === -1) return;
+  if (idx === -1) return sentTargets;
 
   if (hr.phase === "awaiting-first") {
-    if (turn.site !== order[0]) return; // only ChatGPT's first reply starts the rotation
+    if (turn.site !== order[0]) return sentTargets; // only ChatGPT's first reply starts the rotation
     hr.phase = "rotating";
     hr.lastSpeakerIndex = 0;
   } else if (hr.phase === "rotating") {
     const expectedIdx = (hr.lastSpeakerIndex + 1) % order.length;
-    if (idx !== expectedIdx) return; // not whoever we're expecting to RESPOND right now
+    if (idx !== expectedIdx) return sentTargets; // not whoever we're expecting to RESPOND right now
     hr.lastSpeakerIndex = idx;
     hr.roundNum++;
   } else {
-    return;
+    return sentTargets;
   }
 
   const nextSite = order[(hr.lastSpeakerIndex + 1) % order.length];
   const thirdSite = order[(hr.lastSpeakerIndex + 2) % order.length];
 
   const respondMsg = `[${turn.label} says]\n\n${turn.text}\n\nRespond to this, continuing the conversation naturally.`;
-  await sendTextTo(nextSite, respondMsg, null);
+  await hrSendTextTo(nextSite, respondMsg, null, sentTargets);
 
   queueSilentAck(thirdSite);
   const updateMsg = `[${turn.label} says]\n\n${turn.text}\n\nDon't respond to this yet — it's not your turn. Just note it so you're caught up, and reply with exactly: UPDATED`;
-  await sendTextTo(thirdSite, updateMsg, null);
+  await hrSendTextTo(thirdSite, updateMsg, null, sentTargets);
+  return sentTargets;
 }
 
 async function handleBlindRoundCapture(turn) {
   const hr = state.hr;
-  if (hr.phase !== "awaiting-blind" || !hr.realPending.has(turn.site)) return;
+  const sentTargets = new Set();
+  if (hr.phase !== "awaiting-blind" || !hr.realPending.has(turn.site)) return sentTargets;
   hr.realPending.delete(turn.site);
   hr.realReplies[turn.site] = turn.text;
-  if (hr.realPending.size > 0) return; // still waiting on the others -- nobody gets shown anything yet
+  if (hr.realPending.size > 0) return sentTargets; // still waiting on the others -- nobody gets shown anything yet
 
   // All three are in. Reveal each site's own independent answer to the
   // OTHER two (never its own back to itself), clearly framed as having been
@@ -1826,21 +1878,28 @@ async function handleBlindRoundCapture(turn) {
     const others = sites.filter((o) => o !== s)
       .map((o) => `[${SITES[o].label}'s independent answer]\n\n${hr.realReplies[o]}`)
       .join("\n\n");
-    await sendTextTo(s, `Here's what everyone answered independently, before anyone could see anyone else's response:\n\n${others}`, null);
+    await hrSendTextTo(s, `Here's what everyone answered independently, before anyone could see anyone else's response:\n\n${others}`, null, sentTargets);
   }
   endHouseRule("all three answered independently");
+  return sentTargets;
 }
 
+// Runs the active mode's own reaction to a new captured turn, returning the
+// Set of targets it actually messaged (empty if it decided this turn wasn't
+// its business, e.g. not-my-turn or an unrecognized role) -- pollSite()'s
+// mesh-forward loop dedupes against this exact Set so a target already
+// messaged directly by the House Rule never also gets a second, differently
+// worded copy via mesh routing for the same turn.
 async function handleHouseRuleCapture(turn) {
   switch (state.hr.mode) {
-    case "debate": return handleDebateCapture(turn);
-    case "devil-angel": return handleDevilAngelCapture(turn);
-    case "chargeback": return handleChargebackCapture(turn);
-    case "who-wants-to-speak": return handleWhoWantsCapture(turn);
-    case "brainstorm": return handleBrainstormCapture(turn);
-    case "rotation": return handleRotationCapture(turn);
-    case "blind-round": return handleBlindRoundCapture(turn);
-    default: return; // free-for-all rides entirely on the generic routing mesh below
+    case "debate": return (await handleDebateCapture(turn)) || new Set();
+    case "devil-angel": return (await handleDevilAngelCapture(turn)) || new Set();
+    case "chargeback": return (await handleChargebackCapture(turn)) || new Set();
+    case "who-wants-to-speak": return (await handleWhoWantsCapture(turn)) || new Set();
+    case "brainstorm": return (await handleBrainstormCapture(turn)) || new Set();
+    case "rotation": return (await handleRotationCapture(turn)) || new Set();
+    case "blind-round": return (await handleBlindRoundCapture(turn)) || new Set();
+    default: return new Set(); // free-for-all rides entirely on the generic routing mesh below
   }
 }
 
@@ -1967,23 +2026,30 @@ async function pollSite(site) {
       broadcast("waiting-changed", { site, waiting: false });
     }
 
-    // Mesh routing (Auto/Auto-Both/manual routing:set) and tag-based
-    // Roundtable relay can both independently name the SAME target for the
-    // SAME captured reply -- e.g. full mesh routing is on AND the AI's own
-    // [TO: X] tag also points at that site. Without this dedupe, that
-    // target used to get sent to TWICE for one reply: once via mesh with
-    // the raw, un-stripped text (the [TO: X] tag still sitting in the
-    // body), once via tag routing with the clean, stripped text -- a real,
-    // confirmed duplicate-delivery bug, not a timing race. Tag routing
-    // (when active) takes priority for any target it already covers; mesh
-    // only forwards to whatever's left.
-    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : new Set();
+    // Mesh routing (Auto/Auto-Both/manual routing:set) and either tag-based
+    // Roundtable relay OR an active House Rules stage can both independently
+    // name the SAME target for the SAME captured reply -- e.g. full mesh
+    // routing is on AND the AI's own [TO: X] tag also points at that site,
+    // or mesh routing is on AND the active House Rule's own state machine
+    // independently messages that same target (reachable in practice
+    // because the per-pane Auto toggle isn't disabled during a House Rules
+    // run). Without this dedupe, that target used to get sent to TWICE for
+    // one reply -- a real, confirmed duplicate-delivery bug, not a timing
+    // race. Whichever mechanism actually owns this turn (tag routing when
+    // no stage is active, the House Rule's own reaction when one is) takes
+    // priority for any target it already covers; mesh only forwards to
+    // whatever's left. The House Rule's reaction has to run FIRST so its
+    // real target Set exists before mesh decides what's left over --
+    // roundtableTargetsFor() doesn't have this ordering constraint since
+    // it's a pure function of the turn, computable at any point.
+    let hrSentTargets = new Set();
+    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+    else await handleRoundtableCapture(turn);
+    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
     for (const target of state.routing[site]) {
       if (target === site || roundtableTargets.has(target)) continue;
       await sendTextTo(target, text, site);
     }
-    if (stageActive) await handleHouseRuleCapture(turn);
-    else await handleRoundtableCapture(turn);
     if (state.sequence.active) await handleSequenceCapture(turn);
     if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
@@ -2013,25 +2079,22 @@ ipcMain.handle("send:forward", async (_evt, { source, targets }) => {
 });
 
 ipcMain.handle("send:regenerate", async (_evt, site) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   const text = state.lastSentTo[site];
   if (!text) return { ok: false, error: "NOTHING_SENT_YET" };
-  const view = siteViews[site];
-  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
-  let res;
-  try {
-    res = await view.webContents.executeJavaScript(buildSendScript(site, text, state.selectorOverrides[site]), true);
-  } catch (e) {
-    res = { ok: false, error: String(e) };
-  }
-  if (!res || !res.ok) {
-    broadcast("send-error", { target: site, error: res?.error || "unknown" });
-    logEvent("send-error", { target: site, error: res?.error || "unknown", regenerate: true });
-  } else {
-    state.waiting[site] = true;
-    state.waitingSince[site] = Date.now();
-    broadcast("waiting-changed", { site, waiting: true });
-    logEvent("regenerate", { site });
-  }
+  // Routed through sendTextTo() with { raw: true } -- `text` is already the
+  // exact, fully-framed string that was actually sent last time (that's
+  // what state.lastSentTo stores), so raw mode sends it verbatim instead of
+  // re-wrapping it in another layer of role-clause/label framing. Going
+  // through sendTextTo() (rather than calling the send script directly, as
+  // this handler used to) means Regenerate now gets the same per-target
+  // send queue, 3-attempt retry, and delivery-ledger entry every other send
+  // path already gets -- previously a regenerate click could race a
+  // concurrent mesh-forward into the same pane (the exact typing-collision
+  // bug the send queue exists to prevent) and never showed up in the ledger
+  // at all.
+  const res = await sendTextTo(site, text, null, { raw: true });
+  if (res && res.ok) logEvent("regenerate", { site });
   return res;
 });
 
@@ -2166,6 +2229,7 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
     else if (mode === "blind-round") await startBlindRound(checked);
   } catch (e) {
     state.hr.active = false;
+    logEvent("houserule-start-error", { mode, error: String(e) });
     return { ok: false, error: String(e) };
   }
   broadcastHouseRule();
@@ -2253,6 +2317,7 @@ ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
 });
 
 ipcMain.handle("site:reload", (_evt, site) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   const view = siteViews[site];
   if (!view) return { ok: false, error: "NO_VIEW" };
   view.webContents.loadURL(SITES[site].home);
@@ -2263,6 +2328,7 @@ ipcMain.handle("site:reload", (_evt, site) => {
 });
 
 ipcMain.handle("site:inspect", (_evt, site) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   const view = siteViews[site];
   if (!view) return { ok: false, error: "NO_VIEW" };
   view.webContents.openDevTools({ mode: "detach" });
@@ -2363,6 +2429,7 @@ ipcMain.handle("sequence:stop", () => {
 });
 
 ipcMain.handle("site:zoom", (_evt, { site, factor }) => {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   const clamped = Math.max(0.4, Math.min(2, Number(factor) || 1));

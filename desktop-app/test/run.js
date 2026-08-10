@@ -1649,6 +1649,144 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   await call("routing:stop-all", {});
 }
 
+async function testHouseRulesVsMeshDedup() {
+  console.log("\n== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==");
+  await resetAllParticipants();
+
+  const startRes = await call("houserule:start", { mode: "debate", topic: "Is TDD worth it?", rounds: 0 });
+  assert(startRes.ok, "debate starts successfully");
+  await waitUntil(() => totalSent() === 1, { label: "debate kickoff sent to exactly one participant" });
+  const kickedOff = SITES.find((s) => sentLog(s).length === 1);
+  const others = SITES.filter((s) => s !== kickedOff);
+
+  // Live repro from the audit: manually re-enable a per-pane Auto route
+  // mid-run (the UI now disables this button while hr.active, but the
+  // backend dedup has to hold even if this IPC channel is reached
+  // directly). Wire mesh from kickedOff toward BOTH other sites, so no
+  // matter which one debate's shuffled order addresses next, mesh routing
+  // is already live toward it too.
+  for (const t of others) {
+    const r = await call("routing:set", { source: kickedOff, target: t, enabled: true });
+    assert(r.ok, `mesh route ${kickedOff}->${t} enabled`);
+  }
+
+  const beforeCounts = {};
+  for (const s of others) beforeCounts[s] = sentLog(s).length;
+  say(kickedOff, "Opening position from the debate kickoff.");
+  // BOTH other sites are expected to receive exactly one message each here:
+  // debate's actual next speaker (hr.order[1], fixed by the shuffle at
+  // kickoff -- which one that is isn't knowable in advance) gets debate's
+  // own worded reaction, and the other one gets its own legitimate,
+  // separate mesh forward (nothing dedupes a target the House Rule never
+  // addressed). Wait for BOTH to grow, then identify which is which by
+  // CONTENT, not by which one happens to satisfy a predicate first -- both
+  // satisfy "grew by one", so array-order-dependent lookups here would be a
+  // coin flip on which real speaker the shuffle picked.
+  await waitUntil(() => others.every((s) => sentLog(s).length > beforeCounts[s]), { label: "both the real next speaker and the mesh-only target receive their one message" });
+  await new Promise((r) => setTimeout(r, 1500)); // settle window -- a would-be duplicate has time to land if the bug were still present
+
+  for (const s of others) {
+    assert(sentLog(s).length === beforeCounts[s] + 1, `${s} gets exactly ONE message for this turn, not a duplicate (got ${sentLog(s).length - beforeCounts[s]})`);
+  }
+  const next = others.find((s) => sentLog(s)[sentLog(s).length - 1].text.includes("Respond directly to the strongest point"));
+  const other = others.find((s) => s !== next);
+  assert(!!next, "exactly one of the two received debate's own worded reaction (identifying the real next speaker) -- dedup let the House Rule's send win, same as tag routing already wins over mesh");
+  assert(sentLog(other)[sentLog(other).length - 1].text.includes("Opening position from the debate kickoff."), "the OTHER site's one copy is the untouched raw mesh forward (just wrapped in the usual '[X says]' framing every mesh forward gets), not a second copy of debate's own wording -- confirms this isn't two copies landing on the same site under a different guise");
+
+  await call("houserule:stop", {});
+  await call("routing:stop-all", {});
+}
+
+async function testSendFailureAutoPausesHouseRule() {
+  console.log("\n== A House Rule turn whose send fails all 3 retry attempts auto-pauses the run (pauseReason: 'send-failed'), instead of leaving it silently 'active' forever waiting on a reply that can never arrive ==");
+  await resetAllParticipants();
+
+  const startRes = await call("houserule:start", { mode: "debate", topic: "Is TDD worth it?", rounds: 0 });
+  assert(startRes.ok, "debate starts successfully");
+  await waitUntil(() => totalSent() === 1, { label: "debate kickoff sent" });
+  const kickedOff = SITES.find((s) => sentLog(s).length === 1);
+  const others = SITES.filter((s) => s !== kickedOff);
+
+  // Force EVERY other site's send to fail all 3 attempts, so whichever one
+  // debate's shuffled order addresses next is guaranteed to exhaust retries.
+  for (const s of others) reg(s).webContents._sendFailQueue = [true, true, true];
+
+  say(kickedOff, "Opening position from the debate kickoff.");
+  await waitUntil(async () => (await call("state:get", {})).houseRule.paused === true, { label: "the run transitions to paused after the send fails all 3 attempts", timeout: 15000 });
+
+  const s = await call("state:get", {});
+  assert(s.houseRule.active === false && s.houseRule.paused === true, "the run is now paused, not left silently 'active' forever waiting on a reply that will never come");
+  assert(s.houseRule.pauseReason === "send-failed", `paused with the specific 'send-failed' reason, distinguishable from a rate-limit pause (got ${s.houseRule.pauseReason})`);
+  assert(SITES.every((site) => s.global.routing[site].length === 0), "routing was cleared when it paused, same as a rate-limit pause");
+  assert(s.log.some((l) => l.kind === "houserule-paused" && l.detail.reason === "send-failed" && l.detail.mode === "debate"), "the pause is recorded in the Activity Log with the real reason and mode");
+  assert(s.log.some((l) => l.kind === "send-error" && others.includes(l.detail.target) && l.detail.attempts === 3), "the underlying send failure is also logged with its real attempt count, same as any other exhausted retry");
+
+  // resuming works the same as any other pause -- doesn't hang or error
+  const resumeRes = await call("houserule:resume", {});
+  assert(resumeRes.ok, "the paused run can still be resumed cleanly, same as a rate-limit pause");
+
+  for (const site of others) reg(site).webContents._sendFailQueue = [];
+  await call("houserule:stop", {});
+}
+
+async function testRetryHoldsQueueThroughBackoff() {
+  console.log("\n== sendTextTo: a concurrent send to the same target waits out an in-progress retry's ENTIRE backoff, not just its current attempt (regression -- the queue slot used to be released during backoff, letting a concurrent send jump ahead and land out of order) ==");
+  await resetAllParticipants();
+
+  // First call fails once, then succeeds on retry -- forces exactly one
+  // ~1.5s backoff sleep.
+  reg("gemini").webContents._sendFailQueue = [true, false];
+  const pFirst = call("send:compose", { text: "First (retries once)", targets: ["gemini"] });
+
+  // Fire a second, unrelated send to the SAME target while the first is
+  // still mid-backoff (well before its ~1.5s backoff elapses).
+  await new Promise((r) => setTimeout(r, 400));
+  const pSecond = call("send:compose", { text: "Second (fired during first's backoff)", targets: ["gemini"] });
+
+  await Promise.all([pFirst, pSecond]);
+
+  const log = sentLog("gemini");
+  assert(log.length === 2, `both sends eventually land (got ${log.length})`);
+  assert(log[0].text === "First (retries once)" && log[1].text === "Second (fired during first's backoff)", `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text).join(", ")}]`);
+}
+
+async function testRegenerateGoesThroughLedgerQueueRetry() {
+  console.log("\n== Bugfix regression: Regenerate now goes through sendTextTo() -- the delivery ledger, the per-target send queue, and the 3-attempt retry -- instead of bypassing all three ==");
+  await resetAllParticipants();
+
+  const composeRes = await call("send:compose", { text: "Original message", targets: ["claude"] });
+  assert(composeRes.ok, "initial compose succeeds");
+  await new Promise((r) => setTimeout(r, 50));
+
+  const before = (await call("state:get", {})).ledger.length;
+  const regenRes = await call("send:regenerate", "claude");
+  assert(regenRes.ok, "regenerate succeeds");
+  assert(sentLog("claude").length === 2 && sentLog("claude")[1].text === sentLog("claude")[0].text, "regenerate re-sends the exact same text that was actually sent last time, verbatim (not re-wrapped in another layer of framing)");
+
+  const s = await call("state:get", {});
+  const entries = s.ledger.slice(before);
+  assert(entries.length === 1, `regenerate now records its own ledger entry, where it previously recorded none at all (got ${entries.length})`);
+  assert(entries[0].target === "claude" && entries[0].status === "delivered", "the regenerate's ledger entry reflects a real delivered send");
+  assert(entries[0].duplicate === true, "correctly flagged duplicate:true -- a regenerate IS an intentional re-send of identical text, and the ledger surfaces that rather than hiding it");
+
+  // regenerate now also gets the 3-attempt retry it never had before
+  await resetAllParticipants();
+  await call("send:compose", { text: "Will need a retry to regenerate", targets: ["gemini"] });
+  await new Promise((r) => setTimeout(r, 50));
+  reg("gemini").webContents._sendFailQueue = [true, false];
+  const beforeRetry = (await call("state:get", {})).ledger.length;
+  const regenRetryRes = await call("send:regenerate", "gemini");
+  assert(regenRetryRes.ok, "a regenerate that needs a retry still eventually succeeds");
+  const sRetry = await call("state:get", {});
+  const retryEntry = sRetry.ledger.slice(beforeRetry).find((e) => e.target === "gemini");
+  assert(retryEntry && retryEntry.attempts === 2, `the regenerate's ledger entry shows the real attempt count -- it self-recovered via retry, same as any other send path (got ${JSON.stringify(retryEntry)})`);
+  assert(sRetry.log.some((l) => l.kind === "send-retry" && l.detail.target === "gemini"), "the failed first attempt is logged as a retry, same as any other send");
+
+  // an unknown site is rejected cleanly, consistent with every other site-scoped handler
+  const badRes = await call("send:regenerate", "not-a-real-site");
+  assert(!badRes.ok && badRes.error === "BAD_SITE", "an invalid site is rejected as BAD_SITE");
+}
+
 async function testStageOverridesBaseline() {
   console.log("\n== A House Rule 'stage' suspends tag-routing while active, and tag-routing resumes automatically once it's stopped ==");
   await resetAllParticipants();
@@ -1768,6 +1906,10 @@ async function main() {
   await testManagerPauseResumeStop();
   await testAlwaysOnTagRouting();
   await testMeshAndTagRoutingDontDoubleDispatch();
+  await testHouseRulesVsMeshDedup();
+  await testSendFailureAutoPausesHouseRule();
+  await testRetryHoldsQueueThroughBackoff();
+  await testRegenerateGoesThroughLedgerQueueRetry();
   await testStageOverridesBaseline();
 
   console.log(`\n${passed} passed, ${failed} failed`);
