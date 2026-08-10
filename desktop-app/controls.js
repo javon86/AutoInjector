@@ -669,6 +669,16 @@ function applyHouseRule(hr) {
   el("btn-hr-start").disabled = !!hr.active || !!hr.paused;
   el("btn-auto-all").disabled = !!hr.active;
   el("btn-pause-all").disabled = !!hr.active;
+  // A House Rules stage's own state machine already decides who gets
+  // messaged for each turn -- re-enabling a per-pane Auto toggle mid-run
+  // used to let mesh routing independently message the same target a
+  // second time with different wording, since mesh had nothing to dedupe
+  // against for the targets a stage messages directly. Disabling these
+  // here (matching how the global Auto button already is) closes off the
+  // UI path to that; main.js's own mesh-forward loop also dedupes against
+  // the stage's real targets as defense-in-depth for anyone hitting the
+  // routing:set IPC channel directly.
+  document.querySelectorAll(".auto-toggle").forEach((btn) => { btn.disabled = !!hr.active; });
 }
 
 function flashReceived(site) {
