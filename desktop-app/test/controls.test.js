@@ -605,7 +605,24 @@ async function testUserPanelMergedAndNeverCollapses() {
   assert(panel.contains(doc.getElementById("btn-open-roles")), "the Roles trigger lives inside it");
   assert(panel.contains(doc.getElementById("btn-open-sequence")), "Prompt Sequence's trigger now lives inside it too, not in House Rules");
   assert(!panel.querySelector(".collapse-btn"), "it has no collapse button of its own -- unlike Global/House Rules/Prompt Library, it never minimizes");
+
+  // Send + Active is a real two-column grid: SEND / ACTIVE headers, then
+  // one row per AI (send button next to that AI's own checkbox, row-
+  // aligned) in ChatGPT/Claude/Gemini order, then → All on its own row.
+  const grid = doc.getElementById("send-active-grid");
+  const headers = Array.from(grid.querySelectorAll("p.zone-label")).map((p) => p.textContent);
+  assert(JSON.stringify(headers) === JSON.stringify(["Send", "Active"]), `the grid's own Send/Active column headers are present, in order (got ${JSON.stringify(headers)})`);
+
+  const children = Array.from(grid.children).filter((c) => c.tagName !== "P");
+  assert(children.length === 7, `3 AI rows (button+checkbox) plus the → All button = 7 grid cells after the two headers (got ${children.length})`);
+  for (let i = 0; i < 6; i += 2) {
+    const site = ["chatgpt", "claude", "gemini"][i / 2];
+    assert(children[i].tagName === "BUTTON" && children[i].textContent.includes(SITE_LABELS_FOR_TEST[site]), `row ${i / 2}: ${site}'s send button is in the Send column`);
+    assert(children[i + 1].id === `p-${site}`, `row ${i / 2}: ${site}'s own checkbox is row-aligned right next to it, in the Active column (got id="${children[i + 1].id}")`);
+  }
+  assert(children[6].tagName === "BUTTON" && children[6].textContent.trim() === "→ All", "→ All is its own final row, spanning just the Send column (no Active checkbox for it)");
 }
+const SITE_LABELS_FOR_TEST = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 
 async function testMessagesToUserFeed() {
   console.log("\n== User Panel: [TO: USER] replies collect into a live Messages feed + badge, not just the Transcript stream ==");

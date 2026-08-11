@@ -235,19 +235,39 @@ function beep() {
   } catch {}
 }
 
+// Send + Active as a real two-column grid: SEND / ACTIVE headers already
+// sit in the HTML as the grid's first two children, then one row per AI
+// (that AI's send button in column 1, its own checkbox row-aligned in
+// column 2) gets appended after them, then → All on its own row spanning
+// just the Send column. The checkboxes are built here (not static HTML) so
+// their onchange wiring can live right next to where they're created,
+// instead of a second pass that has to run after this one.
 function buildComposerButtons() {
-  const box = el("composer-buttons");
-  box.innerHTML = "";
+  const grid = el("send-active-grid");
+  while (grid.children.length > 2) grid.removeChild(grid.lastChild); // keep the two header labels, rebuild the rows
   for (const site of SITES) {
     const btn = document.createElement("button");
     btn.textContent = `→ ${SITE_LABELS[site]}`;
     btn.onclick = () => sendCompose([site]);
-    box.appendChild(btn);
+    grid.appendChild(btn);
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.id = `p-${site}`;
+    checkbox.checked = true;
+    checkbox.title = `${SITE_LABELS[site]} active`;
+    checkbox.setAttribute("aria-label", `${SITE_LABELS[site]} active`);
+    checkbox.onchange = async (e) => {
+      const res = await window.api.setParticipant(site, e.target.checked);
+      if (res?.ok) applyGlobal(res.global);
+    };
+    grid.appendChild(checkbox);
   }
   const all = document.createElement("button");
+  all.className = "primary";
   all.textContent = "→ All";
   all.onclick = () => sendCompose(SITES.filter((s) => enabled[s]));
-  box.appendChild(all);
+  grid.appendChild(all);
 }
 
 async function sendCompose(targets) {
@@ -981,13 +1001,6 @@ el("btn-main-row-collapse").onclick = () => {
   el("btn-main-row-collapse").textContent = collapsed ? "›" : "⌄";
   el("btn-main-row-collapse").title = collapsed ? "Expand the Transcript/Log panel" : "Collapse the Transcript/Log panel";
 };
-
-for (const site of SITES) {
-  el(`p-${site}`).onchange = async (e) => {
-    const res = await window.api.setParticipant(site, e.target.checked);
-    if (res?.ok) applyGlobal(res.global);
-  };
-}
 
 el("composer-text").addEventListener("input", updateCharCount);
 
