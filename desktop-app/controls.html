@@ -20,41 +20,116 @@
     .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:7px 9px; overflow:auto; }
     .col h2 { font-size:11px; margin:0 0 5px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
 
-    #topbar { display:flex; gap:8px; flex:0 0 auto; }
-    #col-composer { flex: 1 1 240px; max-width:300px; display:flex; flex-direction:column; }
-    #col-composer textarea { width:100%; height:56px; resize:none; }
-    #col-participants { flex: 0 0 130px; }
+    /* ---- top tab strip: where Global / House Rules / Prompt Library land
+       when collapsed -- literally a row of small folder-style tabs at the
+       very top of the window, restoring the panel to its normal spot when
+       clicked. Independent of #collapsed-strip below (that one's for
+       collapsed AI panes, a different mechanism, kept separate on purpose
+       since the two never need to interact). */
+    #top-tab-strip { display:flex; gap:6px; flex:0 0 auto; flex-wrap:wrap; }
+    #top-tab-strip:empty { display:none; }
+    .collapsed-tab {
+      display:flex; align-items:center; gap:5px; padding:5px 10px 3px;
+      background:#1c1c1c; border:1px solid #2a2a2a; border-bottom:none;
+      border-radius:8px 8px 0 0; font-size:10.5px; font-weight:600; cursor:pointer;
+    }
+    .collapsed-tab:hover { background:#242424; }
+    .collapsed-tab .tab-color { width:6px; height:6px; border-radius:50%; background:var(--yellow,#f5cf6b); }
+
+    /* ---- User Panel: one full-width, shallow strip -- Compose on the
+       left, everything else (send/participants/attach/roles/sequence)
+       stacked into one narrow vertical column, and the Messages feed on
+       the right. Spreading these sideways instead of stacking the whole
+       panel vertically is what keeps it SHORT -- the actual point, since
+       it never collapses and always costs this same modest height. */
+    #col-userpanel { display:flex; gap:0; padding:0; overflow:hidden; border-color:#2d4a37; flex:0 0 auto; }
+    .up-zone { padding:7px 9px; display:flex; flex-direction:column; gap:5px; min-width:0; }
+    .up-zone + .up-zone { border-left:1px solid #2a2a2a; }
+    .up-zone .zone-label { font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; color:#8ef0b0; opacity:.85; margin:0; }
+    #up-zone-compose { flex:1 1 260px; min-width:200px; }
+    #up-zone-compose textarea { width:100%; height:100%; min-height:64px; resize:none; }
+    /* Send buttons, participant checkboxes, and Attach/Roles/Sequence all
+       stacked on top of each other in one narrow column -- deliberately
+       vertical, not spread wide, so this whole middle zone stays narrow. */
+    #up-zone-actions { flex:0 0 128px; }
+    #up-zone-actions .btns { flex-direction:column; align-items:stretch; gap:3px; }
+    #up-zone-actions button { text-align:left; }
+    #up-zone-actions .participant-row-inline { display:flex; flex-direction:column; gap:2px; font-size:10.5px; margin:2px 0 4px; }
+    #up-zone-actions .participant-row-inline label { display:flex; align-items:center; gap:4px; }
+    #up-zone-messages { flex:1 1 240px; min-width:200px; }
+    #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
+    #up-zone-messages .feed-head .spacer { flex:1; }
+    #up-zone-messages .see-all { font-size:9.5px; opacity:.65; background:none; border:none; padding:0; text-decoration:underline; }
+    .msg-badge {
+      display:inline-flex; align-items:center; justify-content:center; min-width:15px; height:15px;
+      padding:0 4px; border-radius:999px; background:#7c5ce0; color:#fff; font-size:9px; font-weight:700;
+      font-family:ui-monospace,monospace;
+    }
+    .msg-badge:empty, .msg-badge[data-zero] { display:none; }
+    .feed-list { flex:1 1 auto; overflow-y:auto; max-height:76px; display:flex; flex-direction:column; gap:4px; }
+    .feed-list:empty::after { content:"Nothing addressed to you yet."; opacity:.5; font-size:10.5px; }
+    .feed-row { border-left:3px solid #444; padding:2px 6px; background:#141414; border-radius:0 5px 5px 0; font-size:10.5px; line-height:1.3; cursor:pointer; text-align:left; width:100%; }
+    .feed-row.chatgpt { border-color:#10a37f; }
+    .feed-row.claude { border-color:#d97757; }
+    .feed-row.gemini { border-color:#4285f4; }
+    .feed-row .meta { opacity:.6; font-size:9px; display:flex; gap:5px; }
+    .feed-row .snippet { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* ---- collapsible "yellow" panels: Global, House Rules, Prompt
+       Library. Each gets a header collapse button; collapsing hides the
+       real panel (freeing its row's height for the AI panes below, via
+       ordinary flexbox) and drops a small tab into #top-tab-strip. */
+    .yc-panel.hidden-collapsed { display:none; }
+    .yc-head { display:flex; align-items:center; gap:8px; }
+    .yc-head h2 { margin:0; }
+    #row-global-houserules { display:flex; gap:8px; flex:0 0 auto; }
+    #row-global-houserules:empty { display:none; }
     #col-global { flex: 0 0 210px; }
-    /* House Rules is a wide box whose actual controls (dropdown, rounds,
-       buttons) don't need the full width it's given — #collapsed-strip lives
-       in that left-over space, showing whichever AI panes are collapsed as
-       one thin row that splits evenly between them (full width for 1, half
-       each for 2, a third each for 3), rather than a separate row of its
-       own taking space nothing else can use. */
-    #col-houserules { flex: 1 1 260px; display:flex; gap:10px; align-items:flex-start; }
-    #houserules-main { flex: 1 1 260px; min-width:220px; }
-    #collapsed-strip { display:flex; gap:6px; flex:1 1 auto; min-width:0; height:44px; }
-    #collapsed-strip:empty { display:none; }
+    #col-houserules { flex: 1 1 260px; }
+
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
     .role-badge { font-size:9px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
     .role-badge:empty { display:none; }
 
-    #col-prompts { flex:0 0 auto; }
     #prompt-controls select { flex:1 1 220px; min-width:0; }
 
-    #col-roles { flex:0 0 auto; }
-    #roles-body.collapsed { display:none; }
-    #roles-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
-    .role-row { display:flex; align-items:center; gap:6px; }
-    .role-row .role-site-label { width:60px; opacity:.75; flex:0 0 auto; }
-    .role-row input { flex:1 1 auto; min-width:0; }
-    .role-row .role-current { opacity:.55; font-size:10px; min-width:90px; }
+    /* ---- Messages / Roles popups -- small in-window overlays (not
+       separate OS windows like Prompt Editor/Sequence Editor use), since
+       neither needs its own persistent window state. */
+    .popup-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:50; align-items:center; justify-content:center; padding:24px; }
+    .popup-overlay.open { display:flex; }
+    .popup-window { width:min(440px,92vw); max-height:min(70vh,560px); display:flex; flex-direction:column; background:#181818; border:1px solid #2a2a2a; border-radius:10px; overflow:hidden; box-shadow:0 30px 80px -20px rgba(0,0,0,.7); }
+    .popup-titlebar { display:flex; align-items:center; justify-content:space-between; padding:9px 12px; background:#181818; border-bottom:1px solid #2a2a2a; font-size:12px; font-weight:600; }
+    .popup-titlebar button { padding:2px 8px; }
+    .popup-body { padding:10px 12px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+    .popup-body:empty::after { content:"Nothing addressed to you yet."; opacity:.6; font-size:11px; }
+    .msg-turn { border-left:3px solid #444; padding:5px 8px; background:#141414; border-radius:0 6px 6px 0; font-size:11.5px; }
+    .msg-turn.chatgpt { border-color:#10a37f; }
+    .msg-turn.claude { border-color:#d97757; }
+    .msg-turn.gemini { border-color:#4285f4; }
+    .msg-turn .meta { font-size:10px; opacity:.6; margin-bottom:2px; display:flex; gap:6px; }
+    .msg-turn .meta .site { font-weight:700; }
+    .msg-turn .text { white-space:pre-wrap; line-height:1.35; }
+
+    .roles-popup-row { display:flex; flex-direction:column; gap:4px; padding:7px 8px; background:#141414; border-radius:6px; }
+    .roles-popup-row .site-line { display:flex; align-items:center; gap:6px; font-weight:700; font-size:11px; }
+    .roles-popup-row .site-line .dot { width:8px; height:8px; border-radius:50%; }
+    .roles-popup-row .site-line.chatgpt .dot { background:#10a37f; }
+    .roles-popup-row .site-line.claude .dot { background:#d97757; }
+    .roles-popup-row .site-line.gemini .dot { background:#4285f4; }
+    .roles-popup-row .picker-line { display:flex; gap:6px; }
+    .roles-popup-row select { flex:1 1 auto; min-width:0; }
 
     /* ---- merged AI columns: control strip + a native-view slot ----
        #ai-row holds whichever AI panes are still expanded, side by side.
-       Collapsed ones live in #collapsed-strip instead (see above, inside
-       House Rules) — moved there by JS (relocateColumn() in controls.js)
-       when a pane's collapsed state changes. */
+       Collapsed ones live in #collapsed-strip (its own always-present row
+       just above #ai-row, NOT nested inside House Rules anymore -- House
+       Rules can now collapse itself, so collapsed AI panes need a home
+       that doesn't disappear along with it) -- moved there by JS
+       (relocateColumn() in controls.js) when a pane's collapsed state
+       changes. */
+    #collapsed-strip { display:flex; gap:6px; flex:0 0 auto; min-width:0; height:44px; }
+    #collapsed-strip:empty { display:none; }
     #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
@@ -182,24 +257,52 @@
     <button id="btn-collapse-window" title="Collapse this window to a titlebar">⌄</button>
   </div>
   <div id="wrap">
-    <div id="topbar">
-      <div id="col-composer" class="col">
-        <h2>Compose</h2>
+    <div id="top-tab-strip"></div>
+
+    <!-- User Panel: one full-width, shallow strip. Never collapses -- the
+         one fixed anchor. Compose on the left; send buttons, participant
+         checkboxes, and Attach/Roles/Sequence stacked in one narrow middle
+         column; the Messages-to-you feed on the right. -->
+    <div id="col-userpanel" class="col">
+      <div class="up-zone" id="up-zone-compose">
+        <p class="zone-label">User Panel — Compose</p>
         <textarea id="composer-text" placeholder="Type a message to kick off or interject…">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
         <div id="char-count">0 chars</div>
-        <div class="btns" id="composer-buttons" style="margin-top:4px;"></div>
-        <button id="btn-attach-document" style="margin-top:6px;">📎 Attach Document</button>
       </div>
 
-      <div id="col-participants" class="col">
-        <h2>Participants</h2>
-        <div class="participant-row"><label><input type="checkbox" id="p-chatgpt" checked> ChatGPT</label></div>
-        <div class="participant-row"><label><input type="checkbox" id="p-claude" checked> Claude</label></div>
-        <div class="participant-row"><label><input type="checkbox" id="p-gemini" checked> Gemini</label></div>
+      <div class="up-zone" id="up-zone-actions">
+        <p class="zone-label">Send</p>
+        <div class="btns" id="composer-buttons"></div>
+        <p class="zone-label" style="margin-top:4px;">Active</p>
+        <div class="participant-row-inline">
+          <label><input type="checkbox" id="p-chatgpt" checked> ChatGPT</label>
+          <label><input type="checkbox" id="p-claude" checked> Claude</label>
+          <label><input type="checkbox" id="p-gemini" checked> Gemini</label>
+        </div>
+        <div class="btns">
+          <button id="btn-attach-document">📎 Attach Document</button>
+          <button id="btn-open-roles">🎭 Roles</button>
+          <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another">🧵 Prompt Sequence</button>
+        </div>
       </div>
 
-      <div id="col-global" class="col">
-        <h2>Global</h2>
+      <div class="up-zone" id="up-zone-messages">
+        <div class="feed-head">
+          <p class="zone-label" style="margin:0;">💬 Messages to you</p>
+          <span class="msg-badge" id="messages-badge" data-zero>0</span>
+          <span class="spacer"></span>
+          <button class="see-all" id="btn-open-messages">see all →</button>
+        </div>
+        <div class="feed-list" id="messages-feed"></div>
+      </div>
+    </div>
+
+    <div id="row-global-houserules">
+      <div id="col-global" class="col yc-panel">
+        <div class="yc-head">
+          <h2>Global</h2><span class="spacer"></span>
+          <button class="collapse-btn" id="btn-collapse-global" title="Collapse Global">⌄</button>
+        </div>
         <div class="btns">
           <button id="btn-auto-all" class="primary">Auto (checked participants)</button>
           <button id="btn-pause-all">Pause</button>
@@ -213,39 +316,38 @@
         <div id="status">Idle.</div>
       </div>
 
-      <div id="col-houserules" class="col">
-        <div id="houserules-main">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <h2 style="margin:0;">House Rules</h2>
-            <span style="flex:1;"></span>
-            <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another">🧵 Prompt Sequence</button>
-          </div>
-          <p style="opacity:.6; margin:6px 0 6px;">Roundtable v2's [TO: X] tag routing always runs by default. Pick a format below to temporarily take over instead — uses the Compose text above as the topic/goal.</p>
-          <select id="hr-mode" style="width:100%;">
-            <option value="">— pick a format —</option>
-            <option value="who-wants-to-speak">Who Wants to Speak?</option>
-            <option value="debate">Debate</option>
-            <option value="free-for-all">Free-for-All</option>
-            <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
-            <option value="chargeback">Chargeback (needs 3 + rounds)</option>
-            <option value="brainstorm">Brainstorm</option>
-            <option value="rotation">Rotation (needs 3)</option>
-            <option value="blind-round">Blind Round (needs 3)</option>
-          </select>
-          <div class="btns" style="margin-top:5px;">
-            <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
-            <button id="btn-hr-start" class="primary">Start</button>
-            <button id="btn-hr-stop" class="danger">Stop</button>
-            <button id="btn-hr-wrapup" style="display:none;">Wrap Up</button>
-          </div>
-          <div id="hr-status" style="margin-top:6px;"></div>
+      <div id="col-houserules" class="col yc-panel">
+        <div class="yc-head">
+          <h2>House Rules</h2><span class="spacer"></span>
+          <button class="collapse-btn" id="btn-collapse-houserules" title="Collapse House Rules">⌄</button>
         </div>
-        <div id="collapsed-strip"></div>
+        <p style="opacity:.6; margin:6px 0 6px;">Roundtable v2's [TO: X] tag routing always runs by default. Pick a format below to temporarily take over instead — uses the Compose text above as the topic/goal.</p>
+        <select id="hr-mode" style="width:100%;">
+          <option value="">— pick a format —</option>
+          <option value="who-wants-to-speak">Who Wants to Speak?</option>
+          <option value="debate">Debate</option>
+          <option value="free-for-all">Free-for-All</option>
+          <option value="devil-angel">Devil &amp; Angel (needs 3)</option>
+          <option value="chargeback">Chargeback (needs 3 + rounds)</option>
+          <option value="brainstorm">Brainstorm</option>
+          <option value="rotation">Rotation (needs 3)</option>
+          <option value="blind-round">Blind Round (needs 3)</option>
+        </select>
+        <div class="btns" style="margin-top:5px;">
+          <input id="hr-rounds" type="number" min="0" placeholder="Rounds (0=∞)" style="width:110px;">
+          <button id="btn-hr-start" class="primary">Start</button>
+          <button id="btn-hr-stop" class="danger">Stop</button>
+          <button id="btn-hr-wrapup" style="display:none;">Wrap Up</button>
+        </div>
+        <div id="hr-status" style="margin-top:6px;"></div>
       </div>
     </div>
 
-    <div id="col-prompts" class="col">
-      <h2>Prompt Library</h2>
+    <div id="col-prompts" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Prompt Library</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-prompts" title="Collapse Prompt Library">⌄</button>
+      </div>
       <div class="btns" id="prompt-controls">
         <select id="prompt-select"></select>
         <button id="btn-prompt-send" class="primary">Send</button>
@@ -255,14 +357,7 @@
       </div>
     </div>
 
-    <div id="col-roles" class="col">
-      <h2 id="roles-toggle" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-        <span>Role Assignment</span>
-        <span class="spacer"></span>
-        <span id="roles-toggle-icon">▾</span>
-      </h2>
-      <div id="roles-body" class="collapsed"></div>
-    </div>
+    <div id="collapsed-strip"></div>
 
     <div id="ai-row">
       <div id="expanded-strip"></div>
@@ -289,6 +384,27 @@
       <button id="btn-clear">Clear Transcript</button>
     </div>
   </div>
+
+  <div class="popup-overlay" id="messages-popup">
+    <div class="popup-window">
+      <div class="popup-titlebar">
+        <span>Messages to you</span>
+        <button id="btn-close-messages">✕</button>
+      </div>
+      <div class="popup-body" id="messages-popup-body"></div>
+    </div>
+  </div>
+
+  <div class="popup-overlay" id="roles-popup">
+    <div class="popup-window">
+      <div class="popup-titlebar">
+        <span>Role Assignment</span>
+        <button id="btn-close-roles">✕</button>
+      </div>
+      <div class="popup-body" id="roles-body"></div>
+    </div>
+  </div>
+
   <script src="controls.js"></script>
 </body>
 </html>

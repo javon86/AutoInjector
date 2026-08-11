@@ -592,37 +592,140 @@ async function testSelectorPickValidationRejections() {
   }
 }
 
-async function testRoleAssignmentPanel() {
-  console.log("\n== Role Assignment panel: collapse toggle, Apply, Clear ==");
+async function testUserPanelMergedAndNeverCollapses() {
+  console.log("\n== User Panel: Compose + Participants + Send + Attach + Roles + Sequence are all one panel that never collapses ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+
+  const panel = doc.getElementById("col-userpanel");
+  assert(!!panel, "the merged User Panel exists");
+  assert(panel.contains(doc.getElementById("composer-text")), "Compose lives inside it");
+  assert(panel.contains(doc.getElementById("p-chatgpt")) && panel.contains(doc.getElementById("p-claude")) && panel.contains(doc.getElementById("p-gemini")), "the participant checkboxes live inside it too");
+  assert(panel.contains(doc.getElementById("btn-attach-document")), "Attach Document lives inside it");
+  assert(panel.contains(doc.getElementById("btn-open-roles")), "the Roles trigger lives inside it");
+  assert(panel.contains(doc.getElementById("btn-open-sequence")), "Prompt Sequence's trigger now lives inside it too, not in House Rules");
+  assert(!panel.querySelector(".collapse-btn"), "it has no collapse button of its own -- unlike Global/House Rules/Prompt Library, it never minimizes");
+}
+
+async function testMessagesToUserFeed() {
+  console.log("\n== User Panel: [TO: USER] replies collect into a live Messages feed + badge, not just the Transcript stream ==");
   const api = makeApi();
   const dom = await loadWindow(api);
   const doc = dom.window.document;
 
-  const body = doc.getElementById("roles-body");
-  assert(body.classList.contains("collapsed"), "starts collapsed");
+  assert(doc.getElementById("messages-badge").textContent === "0", "starts at zero");
+  assert(doc.getElementById("messages-badge").hasAttribute("data-zero"), "the zero state is visually hidden via the data-zero attribute");
+  assert(doc.getElementById("messages-feed").children.length === 0, "feed starts empty");
 
-  click(dom, "roles-toggle");
-  assert(!body.classList.contains("collapsed"), "clicking the header expands it");
-  assert(doc.getElementById("roles-toggle-icon").textContent === "▴", `icon flips to the expanded state (got "${doc.getElementById("roles-toggle-icon").textContent}")`);
+  // A reply addressed to another AI (not the user) must NOT show up here.
+  api.fireCapture({ id: 1, site: "chatgpt", label: "ChatGPT", text: "Handing this to Claude", roundtableTag: "CLAUDE", ts: Date.now(), pinned: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("messages-badge").textContent === "0", "a reply tagged for another AI doesn't count as a message to the user");
+
+  // A reply explicitly [TO: USER] (or the documented no-tag fallback --
+  // both carry the same roundtableTag value) does.
+  api.fireCapture({ id: 2, site: "claude", label: "Claude", text: "Here's the summary you asked for.", roundtableTag: "USER", ts: Date.now(), pinned: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("messages-badge").textContent === "1", "a [TO: USER] reply increments the badge");
+  let feedRows = doc.querySelectorAll("#messages-feed .feed-row");
+  assert(feedRows.length === 1 && feedRows[0].classList.contains("claude"), "it shows up inline in the feed, color-coded by site");
+  assert(feedRows[0].querySelector(".snippet").textContent.includes("summary you asked for"), "the inline row shows the actual message text");
+
+  feedRows[0].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(doc.getElementById("messages-popup").classList.contains("open"), "clicking a feed row opens the full Messages popup");
+  assert(doc.querySelectorAll("#messages-popup-body .msg-turn").length === 1, "the popup lists the same message");
+  doc.getElementById("btn-close-messages").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("messages-popup").classList.contains("open"), "the ✕ button closes it");
+
+  // Only the 3 most recent show inline; the popup shows every one, newest first.
+  for (let i = 3; i <= 6; i++) {
+    api.fireCapture({ id: i, site: "gemini", label: "Gemini", text: `Message number ${i}`, roundtableTag: "USER", ts: Date.now(), pinned: false });
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("messages-badge").textContent === "5", `badge tracks the real total (got ${doc.getElementById("messages-badge").textContent})`);
+  feedRows = doc.querySelectorAll("#messages-feed .feed-row");
+  assert(feedRows.length === 3, "the inline feed caps at the 3 most recent, not all 5");
+  assert(feedRows[0].querySelector(".snippet").textContent.includes("Message number 6"), "the newest one is shown first inline");
+  assert(doc.querySelectorAll("#messages-popup-body .msg-turn").length === 5, "the popup itself lists every one of them, not just the recent 3");
+}
+
+async function testCollapsibleYellowPanels() {
+  console.log("\n== Global / House Rules / Prompt Library each collapse to a tab in #top-tab-strip, freeing their row's space for the AI panes ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+
+  assert(doc.getElementById("top-tab-strip").children.length === 0, "no tabs by default -- nothing collapsed");
+  assert(!doc.getElementById("col-global").classList.contains("hidden-collapsed"), "Global starts expanded");
+
+  click(dom, "btn-collapse-global");
+  assert(doc.getElementById("col-global").classList.contains("hidden-collapsed"), "collapsing Global hides the real panel");
+  const tab = doc.getElementById("tab-global");
+  assert(!!tab, "a tab for it appears in the top strip");
+  assert(tab.textContent.includes("Global"), "the tab is labeled");
+
+  click(dom, "btn-collapse-houserules");
+  click(dom, "btn-collapse-prompts");
+  assert(doc.getElementById("top-tab-strip").children.length === 3, "all three collapse independently, each getting its own tab");
+  assert(doc.getElementById("col-houserules").classList.contains("hidden-collapsed") && doc.getElementById("col-prompts").classList.contains("hidden-collapsed"), "House Rules and Prompt Library are both hidden too");
+
+  tab.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("col-global").classList.contains("hidden-collapsed"), "clicking the tab restores the panel");
+  assert(!doc.getElementById("tab-global"), "...and removes its own tab");
+  assert(doc.getElementById("top-tab-strip").children.length === 2, "the other two tabs are unaffected");
+}
+
+async function testRoleAssignmentPanel() {
+  console.log("\n== Role Assignment popup: open/close, presets, Apply, Clear ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const overlay = doc.getElementById("roles-popup");
+  assert(!overlay.classList.contains("open"), "starts closed");
+
+  click(dom, "btn-open-roles");
+  assert(overlay.classList.contains("open"), "the 🎭 Roles button in the User Panel opens it");
 
   const claudeInput = doc.getElementById("role-claude");
-  assert(!!claudeInput, "each site gets its own role input");
-  claudeInput.value = "Skeptical Engineer";
-  const applyBtn = claudeInput.closest(".role-row").querySelector("button");
+  assert(!!claudeInput, "each site gets its own role input, inside the popup");
+  const claudeRow = claudeInput.closest(".roles-popup-row");
+  const claudePreset = claudeRow.querySelector("select");
+  assert(!!claudePreset, "each row also has a preset dropdown");
+  const presetOptions = Array.from(claudePreset.options).map((o) => o.textContent);
+  assert(presetOptions.includes("Project Manager") && presetOptions.includes("Detective") && presetOptions.includes("Custom…"), `presets include general-purpose roles plus a Custom option (got ${JSON.stringify(presetOptions)})`);
+
+  // Picking a preset fills the input; Apply is still the one thing that
+  // actually commits it -- selecting a preset must not silently send
+  // anything on its own.
+  claudePreset.value = "Detective";
+  claudePreset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert(claudeInput.value === "Detective", "selecting a preset fills the free-text input");
+  assert(!api.calls.some((c) => c.fn === "setRole"), "picking a preset alone doesn't call setRole yet");
+
+  const applyBtn = claudeRow.querySelector("button");
   applyBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === "Skeptical Engineer"), "Apply calls setRole with the typed text");
-  assert(doc.getElementById("role-current-claude").textContent === "current: Skeptical Engineer", "the 'current' label updates");
+  assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === "Detective"), "Apply calls setRole with the preset that was picked");
+  assert(doc.getElementById("role-current-claude").textContent === "current: Detective", "the 'current' label updates");
 
-  const clearBtn = claudeInput.closest(".role-row").querySelectorAll("button")[1];
+  // Custom free text still works exactly as before, independent of presets.
+  claudeInput.value = "Skeptical Engineer";
+  applyBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === "Skeptical Engineer"), "Apply also calls setRole with typed custom text");
+  assert(doc.getElementById("role-current-claude").textContent === "current: Skeptical Engineer", "the 'current' label reflects the custom text");
+
+  const clearBtn = claudeRow.querySelectorAll("button")[1];
   clearBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "setRole" && c.site === "claude" && c.role === ""), "Clear calls setRole with an empty string");
   assert(claudeInput.value === "", "the input itself is cleared too");
+  assert(claudePreset.value === "", "the preset dropdown resets to '— none —' too");
   assert(doc.getElementById("role-current-claude").textContent === "", "the 'current' label clears");
 
-  click(dom, "roles-toggle");
-  assert(body.classList.contains("collapsed"), "clicking the header again collapses it back");
+  click(dom, "btn-close-roles");
+  assert(!overlay.classList.contains("open"), "the ✕ button closes the popup");
 }
 
 async function testOpenSequenceEditorButton() {
@@ -651,11 +754,15 @@ async function testMainRowCollapse() {
 }
 
 async function testCollapsedPanesMoveToTheirOwnStrip() {
-  console.log("\n== Collapsing a pane saves space — it moves into the shared #collapsed-strip beside House Rules, not a narrow column ==");
+  console.log("\n== Collapsing a pane saves space — it moves into its own always-present #collapsed-strip, not a narrow column ==");
   const dom = await loadWindow(makeApi());
   const doc = dom.window.document;
 
-  assert(doc.getElementById("col-houserules").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip lives inside House Rules, in its otherwise-unused space");
+  // #collapsed-strip lives as its own row, independent of House Rules --
+  // House Rules can now collapse itself too, so a collapsed AI pane needs a
+  // home that doesn't disappear along with it.
+  assert(!doc.getElementById("col-houserules").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip is NOT nested inside House Rules anymore, since House Rules itself can now collapse");
+  assert(doc.getElementById("wrap").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip still exists as its own row in the window");
 
   const claudeCol = doc.getElementById("col-claude");
   assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanded by default — lives in the side-by-side strip");
@@ -799,6 +906,9 @@ async function main() {
   await testConnectivityTestButtonFailure();
   await testConnectivityTestButtonDistinguishesTooBroadAndEcho();
   await testActivityLogShowsPickAndTestDetail();
+  await testUserPanelMergedAndNeverCollapses();
+  await testMessagesToUserFeed();
+  await testCollapsibleYellowPanels();
   await testRoleAssignmentPanel();
   await testOpenSequenceEditorButton();
   await testMainRowCollapse();

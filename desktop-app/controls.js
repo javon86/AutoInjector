@@ -512,47 +512,75 @@ function buildAiColumn(site) {
 // A per-AI persona clause (state.customRole in main.js) gets prepended to
 // every message sent to that site, regardless of how it's sent (Compose,
 // Forward, Auto, a House Rules format, Prompt Library, a Sequence step) —
-// see sendTextTo() in main.js. This is the only UI for it now that the
-// Conversation window is gone.
+// see sendTextTo() in main.js. Reachable from the 🎭 Roles button in the
+// User Panel, which opens #roles-popup (this function's container).
+// General-purpose presets alongside free text, since most role assignment
+// falls into one of a handful of common shapes rather than needing a fresh
+// custom description every time.
+const ROLE_PRESETS = [
+  "Project Manager", "Detective", "Research Analyst", "Editor",
+  "Skeptical Engineer", "Strategist", "Devil's Advocate", "Fact-Checker", "Summarizer"
+];
+
 function buildRoleAssignment() {
   const box = el("roles-body");
   box.innerHTML = "";
   for (const site of SITES) {
     const row = document.createElement("div");
-    row.className = "role-row";
+    row.className = "roles-popup-row";
 
-    const label = document.createElement("span");
-    label.className = "role-site-label";
-    label.textContent = SITE_LABELS[site];
-    row.appendChild(label);
+    const siteLine = document.createElement("div");
+    siteLine.className = `site-line ${site}`;
+    siteLine.innerHTML = `<span class="dot"></span>${SITE_LABELS[site]}`;
+    row.appendChild(siteLine);
+
+    const pickerLine = document.createElement("div");
+    pickerLine.className = "picker-line";
 
     const input = document.createElement("input");
     input.id = `role-${site}`;
     input.placeholder = "e.g. Skeptical Engineer";
-    row.appendChild(input);
 
+    const preset = document.createElement("select");
+    preset.innerHTML = `<option value="">— none —</option>` +
+      ROLE_PRESETS.map((r) => `<option value="${r}">${r}</option>`).join("") +
+      `<option value="__custom__">Custom…</option>`;
+    preset.onchange = () => {
+      if (preset.value === "__custom__") { input.value = ""; input.focus(); }
+      else input.value = preset.value;
+    };
+    pickerLine.appendChild(preset);
+    pickerLine.appendChild(input);
+    row.appendChild(pickerLine);
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "btns";
     const current = document.createElement("span");
     current.className = "role-current";
     current.id = `role-current-${site}`;
-    row.appendChild(current);
 
     const applyBtn = document.createElement("button");
     applyBtn.textContent = "Apply";
     applyBtn.onclick = async () => {
       const role = input.value.trim();
       const res = await window.api.setRole(site, role);
-      if (res?.ok) current.textContent = role ? `current: ${role}` : "";
+      if (res?.ok) {
+        current.textContent = role ? `current: ${role}` : "";
+        preset.value = ROLE_PRESETS.includes(role) ? role : "";
+      }
     };
-    row.appendChild(applyBtn);
-
     const clearBtn = document.createElement("button");
     clearBtn.textContent = "Clear";
     clearBtn.onclick = async () => {
       input.value = "";
+      preset.value = "";
       const res = await window.api.setRole(site, "");
       if (res?.ok) current.textContent = "";
     };
-    row.appendChild(clearBtn);
+    btnRow.appendChild(applyBtn);
+    btnRow.appendChild(clearBtn);
+    btnRow.appendChild(current);
+    row.appendChild(btnRow);
 
     box.appendChild(row);
   }
@@ -750,8 +778,54 @@ function turnEl(turn) {
   return wrap;
 }
 
+// Messages to you: main.js's Roundtable v2 tags every captured reply with
+// roundtableTag === "USER" whenever an AI explicitly addresses [TO: USER],
+// AND (per Rule 1's documented fallback) whenever it forgets the tag
+// entirely -- both cases genuinely mean "this one's for you," which is
+// exactly what should land here instead of only in the Transcript stream.
+// No new backend/IPC surface needed: this is derived entirely from turns
+// the renderer already receives.
+let messagesToUser = [];
+
+function messageRowEl(turn, compact) {
+  const row = document.createElement(compact ? "button" : "div");
+  row.className = `${compact ? "feed-row" : "msg-turn"} ${turn.site}`;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  const ts = turn.ts ? new Date(turn.ts).toLocaleTimeString() : "";
+  const siteLabel = document.createElement("span");
+  if (!compact) siteLabel.className = "site";
+  siteLabel.textContent = turn.label;
+  meta.appendChild(siteLabel);
+  meta.appendChild(document.createTextNode(ts));
+  row.appendChild(meta);
+  const textEl = document.createElement("div");
+  textEl.className = compact ? "snippet" : "text";
+  textEl.textContent = (turn.text || "").replace(/\s+/g, " ").trim();
+  row.appendChild(textEl);
+  if (compact) row.onclick = () => el("messages-popup").classList.add("open");
+  return row;
+}
+
+function renderMessagesFeed() {
+  const badge = el("messages-badge");
+  badge.textContent = String(messagesToUser.length);
+  if (messagesToUser.length) badge.removeAttribute("data-zero");
+  else badge.setAttribute("data-zero", "");
+
+  const feed = el("messages-feed");
+  feed.innerHTML = "";
+  for (const turn of messagesToUser.slice(-3).reverse()) feed.appendChild(messageRowEl(turn, true));
+
+  const popupBody = el("messages-popup-body");
+  popupBody.innerHTML = "";
+  for (const turn of messagesToUser.slice().reverse()) popupBody.appendChild(messageRowEl(turn, false));
+}
+
 function renderTranscript(transcript) {
   currentTranscript = transcript || [];
+  messagesToUser = currentTranscript.filter((t) => t.roundtableTag === "USER");
+  renderMessagesFeed();
   const box = el("transcript");
   box.innerHTML = "";
   for (const turn of currentTranscript) box.appendChild(turnEl(turn));
@@ -760,6 +834,10 @@ function renderTranscript(transcript) {
 
 function appendTranscriptTurn(turn) {
   currentTranscript.push(turn);
+  if (turn.roundtableTag === "USER") {
+    messagesToUser.push(turn);
+    renderMessagesFeed();
+  }
   const box = el("transcript");
   box.appendChild(turnEl(turn));
   box.scrollTop = box.scrollHeight;
@@ -853,11 +931,48 @@ window.api.onWindowCollapseChanged(({ which, collapsed }) => {
 
 el("btn-collapse-window").onclick = () => window.api.toggleWindowCollapse("automation");
 
-el("roles-toggle").onclick = () => {
-  const body = el("roles-body");
-  const collapsed = body.classList.toggle("collapsed");
-  el("roles-toggle-icon").textContent = collapsed ? "▾" : "▴";
+// Messages / Roles: small in-window popups (not separate OS windows like
+// Prompt Editor/Sequence Editor use, since neither needs persistent window
+// state of its own). Closing on a click outside the popup's own card
+// matches how a native modal behaves.
+function wirePopup(openBtnId, overlayId, closeBtnId) {
+  const overlay = el(overlayId);
+  el(openBtnId).onclick = () => overlay.classList.add("open");
+  el(closeBtnId).onclick = () => overlay.classList.remove("open");
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.classList.remove("open"); });
+}
+wirePopup("btn-open-messages", "messages-popup", "btn-close-messages");
+wirePopup("btn-open-roles", "roles-popup", "btn-close-roles");
+
+// Global / House Rules / Prompt Library each collapse to a small tab in
+// #top-tab-strip -- unlike an AI pane's in-place shrink, these vanish
+// entirely from their row (display:none), so the row itself naturally
+// collapses to zero height once every panel in it is gone, freeing that
+// space for the AI panes below via the same flex:1 1 auto #ai-row already
+// uses. Clicking the tab restores the panel to its normal spot.
+const COLLAPSIBLE_PANELS = {
+  global: { panelId: "col-global", label: "Global" },
+  houserules: { panelId: "col-houserules", label: "House Rules" },
+  prompts: { panelId: "col-prompts", label: "Prompt Library" }
 };
+function collapseYellowPanel(key) {
+  const { panelId, label } = COLLAPSIBLE_PANELS[key];
+  el(panelId).classList.add("hidden-collapsed");
+  const tab = document.createElement("button");
+  tab.className = "collapsed-tab";
+  tab.id = `tab-${key}`;
+  tab.title = `Expand ${label}`;
+  tab.innerHTML = `<span class="tab-color"></span>${label}`;
+  tab.onclick = () => expandYellowPanel(key);
+  el("top-tab-strip").appendChild(tab);
+}
+function expandYellowPanel(key) {
+  el(COLLAPSIBLE_PANELS[key].panelId).classList.remove("hidden-collapsed");
+  el(`tab-${key}`)?.remove();
+}
+el("btn-collapse-global").onclick = () => collapseYellowPanel("global");
+el("btn-collapse-houserules").onclick = () => collapseYellowPanel("houserules");
+el("btn-collapse-prompts").onclick = () => collapseYellowPanel("prompts");
 
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
