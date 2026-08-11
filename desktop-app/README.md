@@ -100,12 +100,57 @@ control strip (and its last captured reply) stays visible and usable.
    app launch, before you do anything else, with no reply expected. It also
    lives in the **Prompt Library** (as "System Prompt (How Routing Works)")
    so you can resend it manually any time an AI seems to have forgotten it.
-3. **Participants** (top): uncheck any AI you want to sit out of Auto/"All" —
-   its pane collapses too, since there's nothing to watch if it's not in play.
-4. **Compose** (top-left): type a message and click **→ ChatGPT** / **→ Claude** /
-   **→ Gemini** / **→ All** to send it to one, some, or all checked participants —
-   this is also how you interject at any point, auto running or not. It warns you
-   if a message is long enough that a site might choke on it.
+3. **User Panel** — one shallow, full-width strip at the top that never
+   collapses (everything else in the window can shrink out of the way; this
+   is the one fixed anchor). Compose is on the left; send buttons,
+   participant checkboxes, and 📎 Attach/🎭 Roles/🧵 Sequence are stacked in
+   one narrow middle column; a live 💬 **Messages to you** feed sits on the
+   right. Spreading these sideways instead of stacking the whole thing
+   vertically is what keeps it short — it costs the same modest height
+   whether it's doing one job or four.
+   - **Participants**: uncheck any AI to sit it out of Auto/"All" — its pane
+     collapses too, since there's nothing to watch if it's not in play.
+   - **Compose**: type a message and click **→ ChatGPT** / **→ Claude** /
+     **→ Gemini** / **→ All** to send it to one, some, or all checked
+     participants — this is also how you interject at any point, auto
+     running or not. It warns you if a message is long enough that a site
+     might choke on it.
+   - **💬 Messages to you**: every reply an AI addresses `[TO: USER]` (or
+     leaves untagged, which Roundtable v2 also treats as meant for you)
+     lands here — not just mixed into the Transcript stream where it's easy
+     to miss. The badge shows a running count; the feed inline shows the 3
+     most recent (click one, or **see all →**, to open the full list in a
+     popup). Purely a read of what the app already captures — no new setup,
+     nothing to configure.
+   - **🎭 Roles**: opens a popup — give each AI an optional persona (e.g.
+     "Skeptical Engineer") that gets prepended to every message sent to it,
+     however it's sent (Compose, Forward, Auto, a House Rules format,
+     Prompt Library, a Prompt Sequence step). Pick from a preset dropdown
+     (Project Manager, Detective, Research Analyst, Editor, Skeptical
+     Engineer, Strategist, Devil's Advocate, Fact-Checker, Summarizer) or
+     choose **Custom…** to type your own, then click **Apply** — picking a
+     preset only fills the field, it doesn't send anything until you
+     actually apply it. **Clear** removes it. This only shapes *what* that
+     AI contributes — it has no effect on *who* it addresses, which is
+     entirely up to its own `[TO: X]` tag choice.
+   - **🧵 Prompt Sequence**: opens a small popup window where you build a
+     numbered list of prompts, each aimed at a specific AI or **All**. Hit
+     **Run Sequence** and it sends step 1, waits for that step's target to
+     actually reply (for an **All** step, the *first* of the three to reply
+     is enough), then sends step 2, and so on — it never fires everything at
+     once. The popup's status line tracks progress ("step 2 of 4…") and the
+     Run button disables itself while a sequence is active; **Close** just
+     hides the window, it doesn't stop a run in progress. Each step's
+     dispatch is stamped with a generation number, so a reply that's still
+     in flight for a step the sequence has already advanced past (most
+     easily triggered by an **All** step, where the other two replies are
+     still coming after the first one advances things) gets recognized as
+     stale and discarded rather than misread as satisfying whatever step
+     comes next.
+4. **Global** and **House Rules** sit below the User Panel, and **Prompt
+   Library** below that — see the next sections for what each does. All
+   three can collapse (see "Collapsing things" below) to free up room for
+   the AI panes; the User Panel never does.
 5. The moment a pane's reply finishes streaming (checked every ~1.5s, waits for
    the text to stop changing), a soft chime plays, its column's preview updates,
    and it's logged to the transcript. While waiting on a reply, that column shows
@@ -133,28 +178,7 @@ control strip (and its last captured reply) stays visible and usable.
      is doing, you always can. **Auto → Both** is a single toggle that turns
      both of that column's individual Auto routes on (or off) together,
      instead of clicking each one separately.
-8. **Role Assignment** *(collapsed by default, in its own panel)* — give each
-   AI an optional persona (e.g. "Skeptical Engineer," "Project Manager") that
-   gets prepended to every message sent to it, however it's sent (Compose,
-   Forward, Auto, a House Rules format, Prompt Library, a Prompt Sequence
-   step). Type a role and click **Apply**, or **Clear** to remove it. This
-   only shapes *what* that AI contributes — it has no effect on *who* it
-   addresses, which is entirely up to its own `[TO: X]` tag choice.
-9. **🧵 Prompt Sequence** *(top of the House Rules panel)* — opens a small
-   popup window where you build a numbered list of prompts, each aimed at a
-   specific AI or **All**. Hit **Run Sequence** and it sends step 1, waits
-   for that step's target to actually reply (for an **All** step, the
-   *first* of the three to reply is enough), then sends step 2, and so on —
-   it never fires everything at once. The popup's status line tracks
-   progress ("step 2 of 4…") and the Run button disables itself while a
-   sequence is active; **Close** just hides the window, it doesn't stop a
-   run in progress. Each step's dispatch is stamped with a generation
-   number, so a reply that's still in flight for a step the sequence has
-   already advanced past (most easily triggered by an **All** step, where
-   the other two replies are still coming after the first one advances
-   things) gets recognized as stale and discarded rather than misread as
-   satisfying whatever step comes next.
-10. **Prompt Library**: saved, reusable prompts you can fire off with one
+8. **Prompt Library**: saved, reusable prompts you can fire off with one
    click, without retyping them or going through House Rules. It's a compact
    dropdown (pick a saved prompt by name) plus **Send** / **+ New** / **Edit**
    / **Delete** — no big text boxes cluttering the main window. **+ New** and
@@ -171,9 +195,10 @@ control strip (and its last captured reply) stays visible and usable.
    (How Routing Works)**, the same routing-explainer text that's auto-sent
    on startup, so you can resend it any time it's useful. Saved prompts
    persist across restarts, same as the transcript and custom roles.
-11. **📎 Attach Document**: pick a real file (image, PDF, text, or anything
-   else) via a normal file picker, and preview it in its own popup window
-   before deciding what to do with it. Images and text get a genuine inline
+9. **📎 Attach Document** *(the button lives in the User Panel, next to 🎭
+   Roles)*: pick a real file (image, PDF, text, or anything else) via a
+   normal file picker, and preview it in its own popup window before
+   deciding what to do with it. Images and text get a genuine inline
    preview; PDFs embed via Chromium's built-in viewer; anything else just
    shows the filename — you can still send it either way. For images and
    text, you can **highlight** parts of it (click-drag a rectangle on an
@@ -187,9 +212,9 @@ control strip (and its last captured reply) stays visible and usable.
    technique browser-automation tools use for file uploads), not typed as a
    path. This is genuinely new, less-tested territory — see the note on file
    upload selectors in "How it's built" below.
-12. **📌** on any transcript turn pins it, so you can spot it again later without
+10. **📌** on any transcript turn pins it, so you can spot it again later without
    scrolling back through everything.
-13. **Copy Transcript** / **Download .md** save the running conversation locally
+11. **Copy Transcript** / **Download .md** save the running conversation locally
    (pinned turns are marked in the export) so you can share it elsewhere.
 
 ### Collapsing things when one screen isn't enough room
@@ -203,14 +228,23 @@ losing anything — nothing closes or resets, it just gets small:
   AI is still enabled, still participating in Auto/House Rules, still
   sending, receiving, and capturing replies exactly as before, it's just out
   of view. Independent per column — collapsing Claude's doesn't touch
-  ChatGPT's or Gemini's. Collapsed columns move up into the mostly-empty
-  space beside the House Rules panel and share it evenly — one collapsed
+  ChatGPT's or Gemini's. Collapsed columns move into their own always-present
+  strip just above the AI panes row and share it evenly — one collapsed
   column gets the whole width, two split it in half, three in thirds —
   instead of piling up as separate rows the way a fully expanded column
   would. Whatever's still expanded stays in the main row below, full height,
   side by side. Once all three are collapsed that row is empty, so it
   collapses down to nothing and the Transcript/Activity Log panel grows to
   fill the space instead of leaving it unused.
+- **Global, House Rules, and Prompt Library** — each has its own **⌄** in its
+  header. Collapsing one doesn't shrink it in place; it moves entirely into a
+  row of small tabs at the very top of the window (like folder tabs), and the
+  space it was taking gets handed straight to the AI panes below, via the
+  same flex layout that already grows the AI row when every pane's own
+  Transcript space frees up. Click a tab to bring that panel back to its
+  normal spot. The **User Panel** (Compose/Participants/Messages/Roles) is
+  the one thing that never does this — it's the fixed anchor everything else
+  collapses around.
 - **The whole window** — the Automation window has its own **⌄** button in a
   thin titlebar at the very top. Clicking it shrinks the entire window down
   to just that titlebar (same screen position, just much shorter); clicking
@@ -220,9 +254,6 @@ losing anything — nothing closes or resets, it just gets small:
   collapse button too, independent of the AI panes: shrink it out of the way
   when you want the panes to have more room and don't need to watch the log
   right now, and bring it back the same way.
-- **Role Assignment** — collapsed by default (a small **▾**/**▴** header
-  toggle), since it's an occasional-use panel, not something you need open
-  all the time.
 
 Collapsed panes are moved off-screen rather than shrunk to nothing, on
 purpose: a zero-size browser view risks Chromium treating it as hidden and
@@ -245,7 +276,9 @@ before showing the message and routes it accordingly:
 - **`[TO: ALL]`** — relayed to both of the other AIs. Badged "→ Everyone".
 - **`[TO: USER]`** — meant for you, not another AI. Shown with no badge (this
   is the common case — badging every single message "→ You" would just be
-  noise). Nothing gets relayed onward from it.
+  noise). Nothing gets relayed onward from it — and it also lands in the
+  User Panel's 💬 **Messages to you** feed, so it's not something you only
+  catch by happening to be watching the Transcript stream.
 - **`[TO: NONE]`** — "I have nothing to add." Fully hidden — never shown,
   never relayed.
 - **No tag at all** — treated as `[TO: USER]` and shown as-is (this is a
@@ -1233,11 +1266,13 @@ closing it actually destroys the window.
 `npm test` also runs `test/controls.test.js`, the same jsdom approach applied
 to `controls.html`/`controls.js`: the collapse feature (each AI column's own
 toggle relocating it between the collapsed and expanded strips rather than
-just adding a class, and that `#collapsed-strip` actually lives inside the
-House Rules box; the Automation window's titlebar toggle; that a collapse
-event for a different window id is correctly ignored; the Transcript/Log
-panel expanding only once *all three* panes are collapsed; the
-Transcript/Log panel's own independent collapse button), the Stop
+just adding a class, and that `#collapsed-strip` is its own always-present
+row, specifically **not** nested inside House Rules — House Rules can now
+collapse itself too, so a collapsed AI pane needs a home that doesn't
+disappear along with it; the Automation window's titlebar toggle; that a
+collapse event for a different window id is correctly ignored; the
+Transcript/Log panel expanding only once *all three* panes are collapsed;
+the Transcript/Log panel's own independent collapse button), the Stop
 confirmation prompt, that Roundtable v2 has **no** dropdown option anymore
 (it isn't a stage you start/stop) while the seven real stage formats still
 are, the `→ Claude`/`→ Everyone`-style routing badge rendering on captured
@@ -1258,16 +1293,36 @@ shows the specific reason rather than a bare red light), that the Activity
 Log itself renders the rich detail these two features log (role, selector,
 captured sample, token, and — on a mismatch — the actual text that was
 captured instead) rather than just the bare event name, with a `*-error`
-entry visibly styled as an error line, the Role Assignment panel
-(starts collapsed, Apply/Clear call `setRole` and update the "current: X"
-label, the collapse toggle works both ways), the 🧵 Prompt Sequence trigger
-button calling `openSequenceEditor`, and the Prompt Library dropdown —
-options rendering from the saved list (and a placeholder + disabled buttons
-when there are none), Send using the *selected* prompt's saved text, `+
-New`/`Edit` calling `openPromptEditor` with the right id (`null` for new)
-rather than editing anything inline, Delete removing the selected entry, and
+entry visibly styled as an error line, the 🎭 Role Assignment popup
+(opens/closes via its trigger button; presets fill the free-text field but
+don't call `setRole` until Apply is actually clicked, proving a preset pick
+alone is inert; Apply works for both a picked preset and typed custom text;
+Clear resets the input, the preset dropdown, and the "current: X" label
+together), the 🧵 Prompt Sequence trigger button (now inside the User Panel,
+not House Rules) calling `openSequenceEditor`, and the Prompt Library
+dropdown — options rendering from the saved list (and a placeholder +
+disabled buttons when there are none), Send using the *selected* prompt's
+saved text, `+ New`/`Edit` calling `openPromptEditor` with the right id
+(`null` for new) rather than editing anything inline, Delete removing the
+selected entry, and
 a `prompts-changed` event (simulating the popup window having saved
 elsewhere) re-rendering the dropdown live.
+
+Also covered: the merged **User Panel** itself — Compose, the three
+participant checkboxes, Attach Document, the 🎭 Roles trigger, and the 🧵
+Prompt Sequence trigger all genuinely live inside `#col-userpanel` (not
+scattered across separate panels the way they used to be), and it has no
+collapse button of its own, unlike Global/House Rules/Prompt Library. The
+💬 **Messages to you** feed: a captured turn tagged for another AI
+(`roundtableTag: "CLAUDE"`) never counts; one tagged `"USER"` increments the
+badge, renders inline color-coded by site, and opens the full popup when
+clicked; the badge's zero state is visually suppressed via a `data-zero`
+attribute; and past the third message, the inline feed caps at the 3 most
+recent (newest first) while the popup still lists every one. The
+**collapsible yellow panels**: each of Global/House Rules/Prompt Library
+collapses independently into its own tab in `#top-tab-strip`, all three can
+be collapsed at once, and clicking a tab restores that one panel and removes
+just its own tab, leaving the others untouched.
 
 `npm test` also runs `test/prompt-editor.test.js`, the same jsdom approach
 applied to the standalone `prompt-editor.html`/`prompt-editor.js` popup:
