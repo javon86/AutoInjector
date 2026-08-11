@@ -48,14 +48,18 @@
     .up-zone .zone-label { font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; color:#8ef0b0; opacity:.85; margin:0; }
     #up-zone-compose { flex:1 1 260px; min-width:200px; }
     #up-zone-compose textarea { width:100%; height:100%; min-height:64px; resize:none; }
-    /* Send buttons, participant checkboxes, and Attach/Roles/Sequence all
-       stacked on top of each other in one narrow column -- deliberately
-       vertical, not spread wide, so this whole middle zone stays narrow. */
-    #up-zone-actions { flex:0 0 128px; }
-    #up-zone-actions .btns { flex-direction:column; align-items:stretch; gap:3px; }
-    #up-zone-actions button { text-align:left; }
-    #up-zone-actions .participant-row-inline { display:flex; flex-direction:column; gap:2px; font-size:10.5px; margin:2px 0 4px; }
-    #up-zone-actions .participant-row-inline label { display:flex; align-items:center; gap:4px; }
+    /* Send + Active as a real two-column grid -- SEND / ACTIVE headers,
+       then one row per AI (that AI's send button next to its own
+       checkbox, row-aligned), then → All on its own row spanning just the
+       Send column. Attach/Roles/Sequence stack in their own group to the
+       right of the grid. Sized to content, not a fixed narrow column --
+       still just a few rows tall, so the whole User Panel stays shallow. */
+    #up-zone-actions { flex:0 0 auto; display:flex; gap:14px; flex-direction:row; }
+    .send-active-grid { display:grid; grid-template-columns:auto auto; gap:5px 10px; align-items:center; }
+    .send-active-grid .zone-label { margin:0 0 2px; }
+    .send-active-grid input[type="checkbox"] { justify-self:center; margin:0; }
+    #up-actions-extra { flex-direction:column; align-items:stretch; gap:4px; }
+    #up-actions-extra button { text-align:left; }
     #up-zone-messages { flex:1 1 240px; min-width:200px; }
     #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
     #up-zone-messages .feed-head .spacer { flex:1; }
@@ -260,9 +264,9 @@
     <div id="top-tab-strip"></div>
 
     <!-- User Panel: one full-width, shallow strip. Never collapses -- the
-         one fixed anchor. Compose on the left; send buttons, participant
-         checkboxes, and Attach/Roles/Sequence stacked in one narrow middle
-         column; the Messages-to-you feed on the right. -->
+         one fixed anchor. Compose on the left; Send+Active paired per AI
+         (left to right: ChatGPT, Claude, Gemini) plus Attach/Roles/Sequence
+         in the middle; the Messages-to-you feed on the right. -->
     <div id="col-userpanel" class="col">
       <div class="up-zone" id="up-zone-compose">
         <p class="zone-label">User Panel — Compose</p>
@@ -271,18 +275,14 @@
       </div>
 
       <div class="up-zone" id="up-zone-actions">
-        <p class="zone-label">Send</p>
-        <div class="btns" id="composer-buttons"></div>
-        <p class="zone-label" style="margin-top:4px;">Active</p>
-        <div class="participant-row-inline">
-          <label><input type="checkbox" id="p-chatgpt" checked> ChatGPT</label>
-          <label><input type="checkbox" id="p-claude" checked> Claude</label>
-          <label><input type="checkbox" id="p-gemini" checked> Gemini</label>
+        <div class="send-active-grid" id="send-active-grid">
+          <p class="zone-label">Send</p>
+          <p class="zone-label">Active</p>
         </div>
-        <div class="btns">
-          <button id="btn-attach-document">📎 Attach Document</button>
+        <div class="btns" id="up-actions-extra">
+          <button id="btn-attach-document">📎 Attach</button>
           <button id="btn-open-roles">🎭 Roles</button>
-          <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another">🧵 Prompt Sequence</button>
+          <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
         </div>
       </div>
 
