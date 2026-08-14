@@ -1,0 +1,15 @@
+===== END OF SPECIFICATION =====
+
+ATELIER SPECIFICATION v0.3.3
+Delivery complete. 05 of 05 parts transmitted.
+
+WHOLE_BYTES:  116516
+WHOLE_SHA256: 25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+PART_COUNT:   05
+
+Confirm PART 01 through PART 05 received, each exactly once, none truncated.
+If any check fails, name the part and STOP.
+
+If all pass, state: INTEGRITY VALIDATED - 05/05 parts, v0.3.3
+
+===== END OF SPECIFICATION =====

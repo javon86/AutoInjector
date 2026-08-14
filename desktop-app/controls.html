@@ -357,6 +357,34 @@
       </div>
     </div>
 
+    <div id="col-atelier" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Book Governance (ATELIER)</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-atelier" title="Collapse Governance">⌄</button>
+      </div>
+      <div id="atelier-body">
+        <p style="opacity:.6; margin:6px 0 6px;">Optional. When on, each pane's reply is checked against ATELIER's write-authority rules before it's routed on. A reply a pane isn't allowed to write is <b>held</b> (shown, not forwarded). Needs Python 3 installed. Leave off to keep the normal roundtable behaviour.</p>
+        <div id="atelier-status" style="margin:4px 0; opacity:.85;">Checking for the ATELIER toolkit…</div>
+        <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+          <input type="checkbox" id="atelier-enabled"> <span>Enable governance</span>
+        </label>
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Book project folder</label>
+        <input id="atelier-projectdir" type="text" placeholder="e.g. C:\Users\you\Documents\AutoInjector Projects\my-book" style="width:100%;">
+        <p style="opacity:.6; margin:8px 0 4px;">Target artifact each pane writes (relative to the project, e.g. <code>04_CHAPTERS/ch01/scenes/s01.md</code>). Leave blank to not govern that pane.</p>
+        <label style="display:block; margin:4px 0 2px; opacity:.8;">ChatGPT →</label>
+        <input id="atelier-target-chatgpt" type="text" placeholder="01_DESIGN/… or 00_CONTROL/…" style="width:100%;">
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Claude →</label>
+        <input id="atelier-target-claude" type="text" placeholder="04_CHAPTERS/… or 02_BIBLE/…" style="width:100%;">
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Gemini →</label>
+        <input id="atelier-target-gemini" type="text" placeholder="06_AUDIT/… (auditor)" style="width:100%;">
+        <div class="btns" style="margin-top:8px;">
+          <button id="btn-atelier-save" class="primary">Save</button>
+          <button id="btn-atelier-recheck">Re-check toolkit</button>
+        </div>
+        <div id="atelier-save-status" style="margin-top:6px; opacity:.75;"></div>
+      </div>
+    </div>
+
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">

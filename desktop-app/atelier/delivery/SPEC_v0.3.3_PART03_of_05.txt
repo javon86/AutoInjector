@@ -1,0 +1,574 @@
+===== ATELIER SPECIFICATION — PART 03 OF 05 =====
+SOURCE_VERSION:  v0.3.3
+SOURCE_FILE:     SYSTEM_SPEC.md
+PART_NUMBER:     03 of 05
+BYTE_RANGE:      [60835, 85450)
+PART_BYTES:      24615
+PART_LINES:      556
+PART_SHA256:     c92c1f9776af6999f49c8d2e2432c81ef9dfaa216f84d9e23efd41cdbe50ea60
+WHOLE_BYTES:     116516
+WHOLE_SHA256:    25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+BEGINS_WITH:     # 19. STORY STATE
+CONTINUES:       yes - PART 04 follows
+===== BEGIN PART 03 CONTENT =====
+# 19. STORY STATE
+
+`STATE_SNAPSHOT.md` — the story's condition at the last approved point, so no
+model ever rereads the manuscript to find out where things stand.
+
+```yaml
+as_of: CH07 S03 approved 2026-03-14
+in_world_datetime:
+chapter_position: 7 of 32
+phase: ESCALATION
+
+characters:
+  marla_vane: {location, physical, emotional, carrying[], knows_recently[],
+               believes_wrongly[], arc_position}
+  ...
+active_threads[]:      with status
+imminent_deadlines[]:
+reader_knows[]:
+reader_suspects[]:
+reader_doesnt_know[]:
+last_scene_ending:     the final 2-3 sentences verbatim
+next_scene_opens:      required starting condition
+tension_level: 7
+```
+
+`last_scene_ending` verbatim is small and disproportionately valuable: scene-to-
+scene transitions are where seams show most, and giving the Author the literal
+last sentences produces continuity of rhythm that a summary cannot.
+
+---
+
+# 20. OPEN THREAD REGISTER
+
+```yaml
+thread_id: THR-011
+thread:            "Who sent the second letter?"
+origin:            CH02 S04
+characters[]:
+importance:        major | moderate | minor
+current_status:    open | developing | resolving | closed
+planned_development:
+expected_payoff:
+target_chapter:    CH24
+completed:         false
+last_advanced:     CH07     ← staleness detector
+```
+
+**Abandonment detection:** any major thread not advanced in 5 chapters, or any
+thread whose `target_chapter` has passed while `completed: false`, is
+automatically raised as a Severity-2 issue. Threads do not die because someone
+decided to drop them; they die because everyone forgot. Mechanical detection is
+the only reliable fix.
+
+---
+
+# 21. SETUP / PAYOFF REGISTER
+
+```yaml
+id: SP-034
+setup:          "Brass lighter engraved V.R. — Marla's father's initials
+                 are J.V., not V.R."
+planted:        CH07 S03
+subtlety:       background | noticeable | flagged
+payoff_planned: "Lighter belonged to the man who killed him"
+payoff_target:  CH19
+payoff_actual:  —
+status:         planted | paid | orphaned | cut
+```
+
+Two automated checks:
+- **Orphan check:** planted, target chapter passed, unpaid → Severity-2.
+- **Unearned payoff check:** payoff appears with no `planted` entry → Severity-2,
+  unless flagged as an intentional cold surprise.
+
+**Spacing is a heuristic, not system law.** Revised on Showrunner review — the
+original three-chapter rule was too rigid. Micro-setups can pay within a scene, a
+chapter-one promise can land in chapter two, and some genres run deliberately
+tight setup/payoff rhythms.
+
+The rule: **spacing is evaluated relative to narrative weight.** Major setups
+should ordinarily have enough narrative distance that the payoff does not feel
+mechanically immediate. The `subtlety` field gives the check something to bite
+on — `background` setups warrant more distance, `flagged` setups can pay fast
+because the reader is already holding them consciously.
+
+---
+
+# 22. DECISION LOG
+
+```yaml
+decision_id: DEC-023
+date, stage
+question:            "Does Marla learn the truth at midpoint or at CH24?"
+alternatives:
+  A: {proposal, source: chatgpt, reasoning}
+  B: {proposal, source: gemini, reasoning}
+  C: {synthesis, source: chatgpt}
+positions:           each model's stated view, verbatim
+selected: C
+reasoning:           why, in full
+rejected_because:    per alternative  ← prevents relitigation
+documents_affected:  [BLUEPRINT, ROADMAP, CH12-CH24 cards, THR-011]
+downstream_impact:   which chapters need reevaluation
+version: BLUEPRINT v4 → v5
+```
+
+Recording `rejected_because` is what makes the log load-bearing rather than
+ceremonial. Without it, a later model rediscovers the rejected option, finds it
+appealing, and reopens a settled question at cost.
+
+---
+
+# 23. TWO-AXIS AUTHORITY MODEL
+
+The master prompt proposed: approved story state → continuity memory → current
+chapter info → blueprint → older planning. **I think this is subtly wrong and
+want to argue the point**, because it's the rule everything else inherits.
+
+## 23.1 The flaw
+
+That ordering treats all facts as one kind. They are two kinds:
+
+- **Established Reality** — what the reader has already read. Authoritative
+  until changed by an approved revision transaction (§27, §4.10.2).
+- **Intent** — what is planned to happen. Fully negotiable until it becomes
+  established.
+
+> **Correction from v0.1.** I originally wrote that approved manuscript text is
+> "immutable in place." That was wrong and the Showrunner caught it: it makes
+> revision levels L4–L8 logically impossible. The manuscript is not immutable —
+> it is **authoritative until revised through an approved transaction.** The
+> distinction that matters is not permanence but that established reality cannot
+> be changed *silently* or *incidentally*; it changes only through a transaction
+> that propagates completely or not at all.
+
+A flat hierarchy lets a drafted scene silently overwrite the Blueprint's design
+simply by being more recent. That is how a book wanders off its own plan one
+convenient sentence at a time, with every individual step looking reasonable.
+
+## 23.2 The two axes
+
+Renamed from "hierarchy" on Showrunner ruling — there are two axes, and neither
+outranks the other. Within each axis there is an order.
+
+**ESTABLISHED REALITY AUTHORITY** — what is true in the story:
+
+```
+1. Approved manuscript text          (authoritative until revised by transaction)
+2. Effective Continuity Ledger state (resolved per §18.1; if it disagrees with
+                                      #1, IT is wrong)
+3. Story State                       (derived from #2)
+4. Bible / current-state documents   (derived from #2, #3)
+5. Unapproved drafts                 (no authority)
+```
+
+**INTENT AUTHORITY** — what should happen:
+
+```
+1. Approved Blueprint
+2. Latest controlling Decision Log ruling
+3. Roadmap
+4. Chapter Card
+5. Scene/Beat Map
+6. Superseded planning               (no authority)
+```
+
+Note the asymmetry that makes this work: within Established Reality, everything
+below #1 is *derived* and therefore correctable by regeneration. Within Intent,
+each level is *authored* and correctable only by decision.
+
+## 23.3 AUTHORITY_CONFLICT — the collision procedure
+
+When an approved descriptive fact contradicts an approved prescriptive document,
+**neither wins automatically.** This is the error type `AUTHORITY_CONFLICT`,
+severity S1, and it has a fixed procedure. It is never resolved by inference,
+recency, or preference.
+
+**Procedure:**
+
+1. **HALT.** The affected chapter stops advancing. It cannot pass any gate while
+   an AUTHORITY_CONFLICT is open.
+2. **REPORT.** Claude files a Conflict Report: the descriptive fact with its
+   manuscript citation, the prescriptive claim with its document citation, both
+   version numbers, and the list of affected chapters.
+3. **CONFIRM.** Gemini independently verifies this is a real conflict and not a
+   misreading. Roughly a third of apparent conflicts are misreads, and resolving
+   a misread does real damage to a correct document.
+4. **RULE.** ChatGPT chooses exactly one, with reasoning:
+   - `RETCON_PLAN` — the drafting discovered something better. Amend the
+     prescriptive document, bump its version, propagate downstream.
+   - `REVISE_TEXT` — the draft drifted. The scene is wrong; fix it.
+
+   There is no third option and no ordinary deferral. A deferred
+   AUTHORITY_CONFLICT is a stall, and §4.7 does not apply here — a provisional
+   default is not acceptable for an S1 contradiction.
+
+### 23.3.1 Auditor timeout — degraded progress, not audit bypass
+
+*(Added v0.3.3 per audit finding F-04, as ruled.)*
+
+Step 3 requires independent confirmation. Without a timeout, an unresponsive
+Auditor halts the affected chapter permanently. After **one defined operational
+timeout cycle**:
+
+- The Showrunner **may rule the conflict**, logged `UNCONFIRMED_CONFLICT`.
+- **Drafting and transactional propagation may continue.**
+- The affected chapter **remains `PENDING_AUDIT`.**
+- **It cannot reach APPROVED.**
+- The conflict **reopens automatically** for independent confirmation when the
+  Auditor returns.
+
+> **Any APPROVED state with an unresolved `UNCONFIRMED_CONFLICT` in its lineage
+> is S0.**
+
+**This is a degraded-progress mechanism, not an audit bypass.** The distinction
+is the same one §29's completion states already draw between `AI_COMPLETE` and
+`HUMAN_QA_COMPLETE`: work continues, the claim of correctness waits. Allowing the
+ruling to also confer approval would let an S1 clear with no independent check —
+the `PENDING_AUDIT` bypass this system explicitly guards against.
+5. **PROPAGATE.** Per §27, through every document in the `affects` list.
+6. **LOG.** Decision Log entry including the rejected option.
+
+**The system must never silently pick.** This is the rule the master prompt asked
+for in §23. What the two-axis model adds is precision about *where* collisions
+occur — at the descriptive/prescriptive boundary, which is nearly all of them.
+
+**Status: RULED.** Adopted by Showrunner ruling; DEC-003 approved. Now a
+non-waivable protocol requirement (§4.8.1). The minority position is preserved in
+DEC-003: confidence is high on the split being real, medium on the orderings
+within each column, and the orderings remain open to attack.
+
+---
+
+# 24. CONTEXT-MANAGEMENT ARCHITECTURE
+
+Never dump the project into a prompt. Context is assembled deterministically per
+job, from IDs already named in the Chapter Card and Scene Card — so assembly is
+lookup, not search, and produces identical packages for identical jobs.
+
+## 24.1 Package for a scene-drafting job
+
+| Component | Source | Approx. budget |
+|---|---|---|
+| Scene Card + beats | `beats.md` | 500 |
+| Chapter Card (purpose, ending condition, hook) | `CARD.md` | 400 |
+| POV character: full profile | `characters/` | 800 |
+| Other present characters: dynamic zone only | `characters/` | 200 ea |
+| Location profile | `locations/` | 400 |
+| Relevant world/magic/tech rules only | `world/` | 400 |
+| Continuity facts touching these entities | `CONTINUITY.md` | 600 |
+| Previous scene: final 300 words verbatim | manuscript | 400 |
+| Style Sheet | `STYLE_SHEET.md` | 500 |
+| Active setups to plant | `SETUP_PAYOFF.md` | 200 |
+| **Total** | | **~4,500** |
+
+Against a modern context window this is small — deliberately. The failure mode of
+large context is not truncation but **dilution**: a model given 80,000 tokens of
+bible attends to all of it weakly. A model given 4,500 tokens of exactly the
+right material attends to it strongly. Precision beats volume.
+
+### 24.1.1 Budgets are soft targets, never silent truncation limits
+
+*(Added v0.3.3 per audit finding F-05.)*
+
+The 600-token continuity allocation is realistic at chapter 7 and not at chapter
+28, where accumulated injuries, carried objects, relationship states, and
+knowledge entries for active entities can exceed 2,000 tokens.
+
+> **No continuity omission may occur silently.**
+
+`build_context.py` must emit, at minimum:
+
+```
+facts_available:  total facts touching the scene's entities
+facts_included:   facts placed in the package
+facts_omitted:    the difference
+```
+
+**If `facts_omitted > 0`, the Job Packet explicitly flags continuity
+truncation.** Prioritization is deterministic: active facts and current or recent
+state outrank historical superseded material — but omission remains **visible to
+both the auditor and the gate.**
+
+Why visibility rather than a bigger budget: truncation of continuity facts is
+otherwise invisible in its effects. The drafter simply does not know a fact and
+writes something that contradicts it, and the resulting error is
+indistinguishable from carelessness. A drafter working from a truncated set is
+not the same as a drafter who made a mistake, and the audit must be able to tell
+them apart.
+
+## 24.2 Package for an audit job
+
+Scene text + continuity facts for every entity appearing in it + hard rules +
+timeline segment + chapter's `continuity_requirements`. **Deliberately excludes**
+authorial intent and the beat map — an auditor who knows what the scene was
+trying to do will forgive it for not doing it.
+
+## 24.3 Retrieval rule
+
+Entities are pulled by **ID from the cards**, never by keyword similarity. If a
+scene needs an entity not listed on its card, that is itself a planning defect
+worth surfacing — the card should have said so.
+
+---
+
+# 25. WRITING PIPELINE
+
+```
+PLAN → PACKAGE → DRAFT → SELF-PASS → AUDIT → RULE → REVISE
+     → BRANCH → EXTRACT CANDIDATES → GATE → PROPAGATE
+     → VALIDATE → COMMIT/MERGE → ADVANCE
+```
+
+**The working branch opens before extraction, not after the gate.** *(Corrected
+in v0.3.3 per audit finding F-01.)* Under the previous ordering the branch did
+not exist at gate time, so when the extraction-completeness audit found a missing
+fact, the resulting write to `CANDIDATES.md` landed on trunk — outside any
+transaction, with no rollback guarantee. A gate that subsequently failed left an
+orphaned candidate behind.
+
+**All candidate mutations from extraction onward occur on the transaction
+branch.** Trunk must remain clean throughout gate evaluation. **Candidate
+mutation on trunk before merge is S0.**
+
+**Nothing propagated becomes authoritative before the merge.** Validation confirms
+every document in the `affects` set was updated; the merge to trunk *is* the
+commit. Failure at any point leaves the last committed state authoritative and
+sets `ROLLBACK_REQUIRED` (§4.10.2).
+
+> **Bug fixed in v0.3.** v0.1 ordered this `APPROVE → EXTRACT` while §29 listed
+> "continuity extracted" as a *precondition* of scene approval. Both could not be
+> true. Under the corrected order, Claude extracts **candidate** facts before the
+> gate, Gemini checks extraction completeness *as part of* the gate, and only
+> approved facts are committed to the ledger. This closes a window in which an
+> approved scene could exist without its canonical state represented anywhere.
+
+| Stage | Who | Output |
+|---|---|---|
+| PLAN | ChatGPT | Scene card + beats |
+| PACKAGE | Orchestrator | Context package |
+| DRAFT | Claude | Prose in boundary markers |
+| SELF-PASS | Claude | One line-edit pass before submission |
+| AUDIT | Gemini | Findings, severity-classified |
+| RULE | ChatGPT | Accept / reject / arbitrate each finding |
+| REVISE | Claude | Revised draft |
+| BRANCH | Claude | Transaction branch opened. Every mutation below is inside it |
+| EXTRACT CANDIDATES | Claude | Proposed facts, uncommitted, on branch |
+| GATE | ChatGPT + Gemini | Approval, including extraction completeness |
+| PROPAGATE | Claude | Ledger, bibles, state, registers on branch — none authoritative yet |
+| VALIDATE | Claude + scripts | Every document in `affects` updated; registers reconcile; **evaluated ref recorded** (§4.12) |
+| COMMIT/MERGE | Claude | Merge to trunk. This is the moment anything becomes authoritative |
+| ADVANCE | Orchestrator | `STATE.md` moves to next scene |
+
+**No authoritative state mutation occurs after merge** except advancing workflow
+state as defined by the committed transaction. A post-merge propagation stage
+would mean documents changing outside the transaction that approved them, which
+is the precise failure §4.10.2 exists to prevent.
+
+**SELF-PASS is not redundant with AUDIT.** They catch different classes: the
+self-pass catches prose the writer can see is weak on second look; the audit
+catches errors invisible from inside the drafting frame. Cheap, and it raises the
+floor of what the auditor spends attention on.
+
+**Revision cap: two cycles per scene.** A third failure means the *plan* is
+wrong, not the prose — escalate to the Showrunner for a re-plan rather than
+grinding. Uncapped revision loops are the primary way multi-agent systems burn
+budget without converging.
+
+---
+
+# 26. MULTI-AI REVIEW
+
+## 26.1 Tiered, not uniform
+
+Reviewing everything at every level is how a system spends its budget on
+ceremony. Tiering:
+
+**Scene level — Gemini, every scene** (fast pass, ~10 min of attention):
+continuity contradictions, character voice drift, timeline violation, rule
+violations, information-leak errors (does someone know something they shouldn't?)
+
+**Chapter level — Gemini + ChatGPT, every chapter:**
+chapter objective achieved, entry ≠ exit state, pacing, dialogue quality,
+repetition against prior chapters, setup/payoff register reconciliation,
+hook strength, reader-engagement critique
+
+**Act level — all three, ~every 8 chapters:**
+structural integrity, tension curve shape, thread health, arc progression,
+promise-to-reader tracking, whole-act read-through for drag
+
+**Book level — all three, once at full draft:**
+full continuity sweep, complete register reconciliation, voice consistency
+sampling, theme coherence, ending-satisfaction check against `promise_to_reader`
+
+## 26.2 Review assignment by comparative strength
+
+- **Prose quality, voice, rhythm, dialogue naturalness** → Claude (self-pass)
+  with Gemini as adversary
+- **Continuity, contradiction, fact, rule violation** → Gemini
+- **Structure, pacing, plot logic, arc** → ChatGPT
+- **Reader engagement, predictability, emotional effect** → Gemini
+- **Setup/payoff and thread reconciliation** → scripted checks first, then
+  ChatGPT on what the script flags
+
+Scripted checks run before model review in every case. Never spend model
+attention on something arithmetic can decide.
+
+---
+
+# 27. REVISION SYSTEM
+
+Eight levels, each with defined scope and propagation:
+
+| Level | Scope | Propagates to |
+|---|---|---|
+| L1 Line | Sentences, word choice | Nothing |
+| L2 Scene | One scene rewritten | Continuity, state |
+| L3 Chapter | Chapter restructured | Cards, roadmap, continuity, registers |
+| L4 Continuity | Fact correction | Every scene containing the fact |
+| L5 Character | Arc or voice correction | All scenes with that character |
+| L6 Structural | Chapter order, added/cut chapters | Roadmap, all downstream cards |
+| L7 Developmental | Full-book architecture | Blueprint and everything below |
+| L8 Polish | Final line pass, whole book | Nothing |
+
+**Propagation rule:** a revision is not complete when the text changes. It is
+complete when every document in the `affects` list has been updated and the
+Revision Log entry is written. Incomplete propagation is the mechanism by which a
+"fixed" book is inconsistent in three new places.
+
+**L7 requires user approval** (§4 escalation) — a developmental revision changes
+what book the user receives.
+
+---
+
+# 28. VERSION CONTROL
+
+Git, with an enforced convention.
+
+- **Commit at every gate pass**, never mid-work.
+  Message format: `[CH07-S03] APPROVE v2 — fixed timeline contradiction FACT-0418`
+- **Tags** at chapter approval: `ch07-approved`
+- **Branch** for L6/L7 structural revisions, so an experiment that fails can be
+  abandoned without contaminating the approved book.
+- **Never force-push.** An old draft silently overwriting approved material is
+  the failure mode §28 exists to prevent, and force-push is exactly how it
+  happens.
+
+`REVISION_LOG.md` carries the human-readable layer git cannot: *why*, and
+**`downstream_reevaluation_required: [CH12, CH19]`** — the field that closes the
+loop by naming what must now be re-checked.
+
+**[VERIFY]** Gemini: confirm the practical repository size ceiling for a book
+project with per-scene commits and, if imagery is canonical, binary reference
+images. My expectation is that text is trivial and images dominate, arguing for
+storing images outside the repo with pointers — but I have not measured this.
+
+---
+
+# 29. QUALITY GATES
+
+Severity classes, revised on Showrunner review — v0.1 overloaded S1 by putting
+build failures and shirt-color drift in the same bucket as a dead character
+speaking. **Severity is now separate from error class.**
+
+- **S0 — Build failure.** The machinery is broken, not the story. **Never
+  waivable** and never subject to §4.7 defaults. Covers:
+  malformed, nested, or unclosed markers · noncanonical markers in a strict build ·
+  corrupt state · version collision · more than one `active` record for an
+  `(entity, property)` pair · **`STALE_JOB`** · **conflicting duplicate
+  delivery** · **invalid state transition** · **failed or incomplete
+  transaction** · **prohibited mutation caused by a stale instruction** ·
+  a P3 provisional actually created or propagated · **candidate mutation on trunk
+  before merge** · **validation ref mismatch** · **APPROVED with an unresolved
+  `UNCONFIRMED_CONFLICT` in lineage**.
+- **S1 — Critical story error.** Contradiction that materially breaks story
+  logic: impossible event, dead character acting, knowledge violation, hard-rule
+  violation, AUTHORITY_CONFLICT. Cannot pass any gate.
+- **S2 — Major.** Continuity, pacing, thread, or payoff defect affecting reader
+  comprehension or structure. Orphaned setup, stalled thread, voice drift,
+  unachieved objective. Resolved or explicitly waived with logged reasoning.
+- **S3 — Minor.** Weak prose, small repetition, pacing wobble, shirt-color drift.
+  Fix if cheap; batch otherwise.
+- **S4 — Note.** Opportunity, not defect. Never blocking.
+
+### `PROCESS_VIOLATION` — a blocked attempt, not a severity
+
+Distinct from the S0–S4 scale. A `PROCESS_VIOLATION` records that a rule was
+*attempted to be broken* and the attempt was **stopped before it took effect.**
+Nothing propagated; no state was corrupted.
+
+The distinction that matters:
+
+| Condition | Classification | Meaning |
+|---|---|---|
+| Improper action **detected before** adoption or propagation | `PROCESS_VIOLATION`, blocked immediately | The guard worked |
+| Improper action **created**, or downstream work allowed to inherit it | **S0** | The authority mechanism itself failed |
+
+A blocked attempt is the system functioning correctly and must not be classified
+as a build failure — otherwise every successful interception looks identical to a
+breach, and the register stops distinguishing "we caught it" from "it got
+through." That distinction is the whole value of the register.
+
+> **No approval gate may pass while an improperly provisional P3 decision
+> actually exists anywhere in the Decision Log, or has propagated into
+> downstream work. That condition is S0**, and it applies log-wide, not merely
+> to the current path.
+>
+> A `PROCESS_VIOLATION` that was successfully blocked before creation or
+> propagation is **recorded but does not itself block subsequent gates**, once
+> the attempted action has been contained.
+
+The distinction is the whole point of separating the two classifications: if an
+intercepted attempt blocked gates indefinitely, a working guard would be
+indistinguishable in effect from a breach, and the incentive would run toward
+not recording interceptions at all.
+
+**S0 carries a retroactive obligation.** A marker defect discovered late means
+every prior build is suspect — prose may have been silently dropped or notes
+silently included. On any S0 marker error, all previous builds are marked
+`SUSPECT` and re-run before the finding is closed.
+
+### Gate criteria
+
+**Scene approval:** zero S1 · scene objective achieved · change occurred ·
+continuity extracted · word target ±25% · voice sampled against Style Sheet
+
+**Chapter approval:** all scenes approved · zero S1 · S2s resolved or waived ·
+entry ≠ exit · ending condition met · hook present · registers reconciled ·
+timeline validated
+
+**Act approval:** all chapters approved · tension curve non-flat · every major
+thread advanced or deliberately parked · arcs progressed · no promise silently
+dropped
+
+**Manuscript approval:** all acts approved · full continuity sweep clean ·
+all threads resolved or logged-open · all setups paid or logged-cut ·
+voice consistency verified by blind sampling · ending satisfies
+`promise_to_reader`
+
+**Completion is three distinct states**, not one — added on Showrunner review to
+resolve an apparent conflict between "autonomous completion" and "mandatory
+human read." Both objectives survive once the states are named:
+
+| State | Criteria | Who |
+|---|---|---|
+| `AI_COMPLETE` | L8 polish done · `--strict` build with zero S0/S1 · all registers reconciled · build report reviewed | The system, autonomously |
+| `HUMAN_QA_COMPLETE` | One full human read, start to finish | The user |
+| `PUBLICATION_READY` | QA findings resolved · front/back matter · final build | Both |
+
+**The system can autonomously reach `AI_COMPLETE` without pretending it has
+passed the human gate.** That is the honest claim. No configuration of three
+models substitutes for one person reading the book start to finish, and a system
+that labels its own output "finished" is making a claim it cannot verify.
+
+---
+
+
+===== END PART 03 OF 05 =====
+ENDED_WITH:      ---
+PART_SHA256:     c92c1f9776af6999f49c8d2e2432c81ef9dfaa216f84d9e23efd41cdbe50ea60
+NEXT:            PART 04 OF 05

@@ -1,0 +1,311 @@
+COMPLETION AUDIT - ROUND 3 (NARROW)
+Target: ATELIER SPECIFICATION v0.3.3 implementations
+Gate: PENDING_AUDIT - PASS WITH REQUIRED FIXES - FAILURE-INJECTION COVERAGE PARTIAL
+
+Six questions. Answer only these. The specification is NOT being resent - you
+do not need it. Everything required to attack these questions is below.
+
+You are NOT asked to rule, edit, integrate, or claim repository execution.
+
+------------------------------------------------------------------
+EVIDENCE INTEGRITY - READ FIRST
+------------------------------------------------------------------
+You have NO execution environment. You cannot run this code.
+
+Separate two things and label them differently:
+  - what you can establish BY REASONING from the code and tests below
+  - what would require ACTUAL EXECUTION to establish
+
+The second category is UNPROVEN. Do not report reasoning as performed testing.
+Do not describe simulated runs as executed. A prior round reported test results
+citing files that do not exist; that is the failure mode this instruction
+exists to prevent.
+
+UNPROVEN is a correct, useful answer.
+
+------------------------------------------------------------------
+THE SIX QUESTIONS
+------------------------------------------------------------------
+Q1  F-06 NON-EMISSION. Can any nested or unclosed boundary-marker input still
+    emit manuscript output in ANY assembler mode- Distinguish DETECTION from
+    NON-EMISSION - the two are not the same and the ruling requires both.
+
+Q2  F-07 AUTHORIZATION SEMANTICS. Does the implemented stale-job acceptance
+    contain or mechanically establish every required element:
+      - override_reason
+      - stale controlling-input versions
+      - current controlling-input versions
+      - why rebase is unnecessary
+    If not, identify exactly which are missing and whether any is established
+    indirectly rather than explicitly.
+
+Q3  F-07 BYPASS. Find any path by which stale output reaches COMMITTED without
+    either a rebase or a valid authorized acceptance. Consider: who calls
+    check(), what happens if nobody does, ordering of advance/commit, and
+    whether the acceptance parser can be satisfied by text that does not
+    constitute a real authorization.
+
+Q4  F-08 DURABLE-OPEN INVARIANT. Does BRANCH create a durable open-transaction
+    record, and does that record remain authoritative until a successful
+    COMMIT/MERGE- Do NOT substitute "a branch exists" or "no COMMITTED
+    transition" for this test - those are different properties. Determine what
+    the code actually keys on.
+
+Q5  F-08 CRASH RECOVERY. Attack SIGKILL / power-loss recovery at EVERY
+    lifecycle transition. Can partial generated state ever become
+    authoritative automatically after restart- Consider a crash between the
+    state flip and the merge.
+
+Q6  EVIDENCE INTEGRITY. For each of Q1-Q5, state which part of your answer is
+    reasoning from the code and which would require execution.
+
+------------------------------------------------------------------
+RETURN FORMAT - each item exactly this shape
+------------------------------------------------------------------
+  Qn | PASS | FAIL | UNPROVEN
+     safeguard examined:
+     attack / result:
+     required correction:
+     confidence:
+
+Then exactly one final line:
+
+  GATE RECOMMENDATION: PASS | PASS WITH REQUIRED FIXES | FAIL
+
+==================================================================
+EVIDENCE
+==================================================================
+
+----- A. transaction.py - record creation at open/BRANCH -----
+        if args.cmd == "open":
+            write_record({"job_id": args.job_id, "branch": args.branch,
+                          "inputs": kv(args.inputs), "state": "DISPATCHED",
+                          "opened_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                     time.gmtime())})
+            print(f"[OK] {args.job_id}: DISPATCHED on branch {args.branch}")
+            return 0
+
+----- B. transaction.py - commit -----
+        if args.cmd == "commit":
+            rec = read_record(args.job_id)
+            if rec is None:
+                print(f"[FATAL] no record for {args.job_id}", file=sys.stderr); return 3
+            if rec["state"] != "COMMIT_PENDING":
+                print(f"[S0] commit from {rec['state']}, expected COMMIT_PENDING",
+                      file=sys.stderr)
+                return S0
+            rec["state"] = "COMMITTED"; rec.pop("recovery", None); write_record(rec)
+            print(f"[OK] {args.job_id}: COMMITTED")
+            return 0
+
+----- C. transaction.py - recovery predicate -----
+def recover(discard: bool = False) -> tuple[int, list[str]]:
+    """
+    On startup: any job without a COMMITTED transition that still holds a
+    branch died mid-transaction. Its branch is evidence, not authority.
+
+    try/finally cannot cover SIGKILL, power loss, or reboot -- so recovery is
+    driven by the durable record on restart rather than by cleanup at crash
+    time. Nothing is ever auto-merged.
+    """
+    msgs, worst = [], 0
+    for rec in all_records():
+        jid, state, branch = rec.get("job_id"), rec.get("state"), rec.get("branch")
+
+        if state == "CORRUPT":
+            msgs.append(f"[S0] {jid}: lifecycle record unreadable - "
+                        f"RECOVERY_REQUIRED, manual disposition")
+            worst = max(worst, S0)
+            continue
+        if state == "COMMITTED" or not branch:
+            continue
+
+        rec["recovery"] = "RECOVERY_REQUIRED"
+        rec["recovery_detected_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                    time.gmtime())
+        msgs.append(
+            f"[RECOVERY_REQUIRED] {jid}: died at {state} holding branch "
+            f"{branch!r}. NOT merge-eligible."
+        )
+        if discard:
+            rec["recovery"] = "DISCARDED"
+            rec["disposition"] = f"branch {branch} discarded on recovery"
+            msgs.append(f"        discarded - run: git branch -D {branch}")
+        else:
+            msgs.append("        Options: discard the branch, or re-run full "
+                        "validation against the current authoritative ref.")
+            msgs.append("        Job/input versions must be re-checked before "
+                        "the branch can become merge-eligible.")
+        write_record(rec)
+        worst = max(worst, PROCESS_VIOLATION)
+
+    if not msgs:
+        msgs.append("[OK] no interrupted transactions; nothing to recover")
+    return worst, msgs
+
+----- D. transaction.py - stale-job acceptance check -----
+def acceptance_is_valid(rec: dict, decision_log: str) -> tuple[bool, str]:
+    """
+    Authorized staleness acceptance, per -4.1 - 'the staleness is explicitly
+    accepted with logged reasoning'.
+
+    Represented in the existing Decision Log mechanism rather than a bespoke
+    signed-override format: an entry naming this job_id, with status FINAL or
+    APPROVED, and version-locked to the same inputs the job actually ran on.
+    An acceptance that does not name the exact input versions accepts nothing
+    in particular -- it would remain valid after the inputs moved again.
+    """
+    jid = rec["job_id"]
+    blocks = re.split(r"^## (DEC-\d+)", decision_log, flags=re.M)
+    for i in range(1, len(blocks) - 1, 2):
+        dec_id, body = blocks[i], blocks[i + 1]
+        if jid not in body:
+            continue
+        if not re.search(r"status:\*{0,2}\s*\**(FINAL|APPROVED)", body, re.I):
+            return False, f"{dec_id} names the job but is not FINAL/APPROVED"
+        locked = all(f"{k}@{v}" in body or f"{k}: {v}" in body
+                     for k, v in rec.get("inputs", {}).items())
+        if not locked:
+            return False, f"{dec_id} is not version-locked to this job's inputs"
+        return True, dec_id
+    return False, "no Decision Log entry names this job"
+
+----- E. transaction.py - durable write -----
+def write_record(rec: dict) -> None:
+    STORE.mkdir(parents=True, exist_ok=True)
+    p = _path(rec["job_id"])
+    tmp = p.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=2, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(p)
+    try:                                  # durability of the rename itself
+        d = os.open(str(STORE), os.O_RDONLY)
+        os.fsync(d)
+        os.close(d)
+    except OSError:
+        pass
+
+----- F. assemble_manuscript.py - nested/unclosed handling -----
+        kind = m.group(1).lower()
+
+        if raw.rstrip() != CANONICAL[kind]:
+            result.problems.append(Problem(
+                "NONCANONICAL", label, lineno,
+                f"marker parsed but is not canonical form; expected "
+                f"{CANONICAL[kind]!r} ? run --normalize-markers to fix",
+            ))
+
+        if kind == "start":
+            if open_at is not None:
+                result.problems.append(Problem(
+                    "ERROR", label, lineno,
+                    f"nested Start (block still open from line {open_at}); "
+                    "blocks cannot nest",
+                ))
+                continue
+            open_at = lineno
+            buffer = []
+        else:  # finish
+            if open_at is None:
+                result.problems.append(Problem(
+                    "ERROR", label, lineno,
+                    "finish with no matching Start",
+                ))
+                continue
+            body = "\n".join(buffer).strip("\n")
+            if body.strip():
+                result.blocks.append(Block(label, open_at, lineno, body))
+            else:
+                result.problems.append(Problem(
+                    "WARN", label, open_at,
+                    "empty book block contributed nothing",
+                ))
+            open_at = None
+            buffer = []
+
+    if open_at is not None:
+        result.problems.append(Problem(
+            "ERROR", label, open_at,
+            "Start never closed by a finish; block DISCARDED "
+            "(nothing is guessed into the book)",
+        ))
+
+
+def normalize(path: Path, exts: tuple[str, ...]) -> int:
+    """Rewrite recoverable marker variants to canonical form, in place."""
+    fixed = 0
+    for f in collect_files(path, exts):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines(keepends=True)
+        except (OSError, UnicodeDecodeError):
+            continue
+        changed = False
+        for i, raw in enumerate(lines):
+            m = MARKER_LINE_RE.match(raw)
+            if m is None:
+                continue
+            canon = CANONICAL[m.group(1).lower()]
+            if raw.rstrip("\r\n") != canon:
+                nl = "\n" if raw.endswith("\n") else ""
+                lines[i] = canon + nl
+                changed = True
+                fixed += 1
+        if changed:
+            try:
+                f.write_text("".join(lines), encoding="utf-8")
+            except OSError as e:
+                print(f"[WARN] could not normalize {f}: {e}", file=sys.stderr)
+    return fixed
+
+----- G. assemble_manuscript.py - emission decision -----
+    if args.strict and result.noncanonical:
+        print(
+            f"[FATAL] strict mode: {len(result.noncanonical)} noncanonical "
+            "marker(s); nothing written. Run --normalize-markers.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if result.errors and args.strict:
+        print(
+            f"[FATAL] strict mode: {len(result.errors)} error(s); "
+            "nothing written. Fix markers and rebuild.",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not result.blocks:
+        if result.errors:
+            print("[FATAL] no in-book content found; nothing written.", file=sys.stderr)
+            return 2
+        print("[STOP] no in-book content yet; nothing written.", file=sys.stderr)
+        return 1
+
+    out_path = Path(args.out).expanduser()
+    manuscript = args.sep.join(b.text for b in result.blocks).rstrip() + "\n"
+
+    try:
+        if out_path.parent and not out_path.parent.exists():
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write to a temp sibling then swap, so a crash never truncates a
+        # good manuscript that already exists.
+        tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp.write_text(manuscript, encoding="utf-8")
+        tmp.replace(out_path)
+    except OSError as e:
+        print(f"[FATAL] could not write {out_path}: {e}", file=sys.stderr)
+        return 2
+
+----- H. test evidence (fail-before / pass-after) -----
+A pre-fix build with ONLY the F-07 and F-08 controls removed scored 3/9.
+The current implementation scores 9/9. Six tests flip; three do not, and
+those three exercise paths correctly insensitive to these controls.
+
+Tests kill a real process with SIGKILL at four lifecycle stages rather than
+raising an exception.
+
+NOTE: green tests demonstrate conformity to what was IMPLEMENTED. They do not
+establish conformity to what was RULED. Q2 and Q4 are precisely the places
+where those may differ.

@@ -25,6 +25,7 @@ const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
 const managerProvider = require("./manager-provider");
+const atelierGov = require("./atelier-governance");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2014,6 +2015,24 @@ async function pollSite(site) {
     // displayText here instead would make it permanently mismatch the raw
     // DOM text every subsequent poll, causing the exact same roundtable
     // reply to be re-captured and re-relayed forever.
+    // ATELIER governance (opt-in, off by default). When enabled and this pane
+    // is mapped to a target artifact, ask the write-authority gate whether this
+    // reply is a permitted write. A refused reply is HELD: still shown in the
+    // transcript, but not routed on to the other panes. Failing open on any
+    // error preserves the original behaviour — governance never silently eats a
+    // reply.
+    let govHold = false;
+    try {
+      const g = await atelierGov.governTurn(turn);
+      if (g && g.governed) {
+        turn.governance = g;
+        govHold = !!g.held;
+        logEvent("atelier-govern", { site, ok: g.ok, held: g.held, target: g.target, available: g.available });
+      }
+    } catch (e) {
+      logEvent("atelier-govern-error", { site, error: String(e) });
+    }
+
     state.captured[site] = roundtableTag ? { ...turn, text } : turn;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -2042,22 +2061,53 @@ async function pollSite(site) {
     // real target Set exists before mesh decides what's left over --
     // roundtableTargetsFor() doesn't have this ordering constraint since
     // it's a pure function of the turn, computable at any point.
-    let hrSentTargets = new Set();
-    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-    else await handleRoundtableCapture(turn);
-    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-    for (const target of state.routing[site]) {
-      if (target === site || roundtableTargets.has(target)) continue;
-      await sendTextTo(target, text, site);
+    // A governance-held reply is displayed but never propagated: skip every
+    // re-routing path (House Rules, Roundtable tag, mesh, Sequence, manager).
+    if (govHold) {
+      logEvent("atelier-held", { site, target: turn.governance && turn.governance.target });
+    } else {
+      let hrSentTargets = new Set();
+      if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+      else await handleRoundtableCapture(turn);
+      const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
+      for (const target of state.routing[site]) {
+        if (target === site || roundtableTargets.has(target)) continue;
+        await sendTextTo(target, text, site);
+      }
+      if (state.sequence.active) await handleSequenceCapture(turn);
+      if (state.manager.status === "waiting") await handleManagerCapture(turn);
     }
-    if (state.sequence.active) await handleSequenceCapture(turn);
-    if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
     state.busy[site] = false;
   }
 }
+
+// --- ATELIER governance IPC ------------------------------------------------
+ipcMain.handle("atelier:detect", async () => {
+  try { return atelierGov.detect({ force: true }); }
+  catch (e) { return { available: false, reason: String(e) }; }
+});
+ipcMain.handle("atelier:stages", async () => {
+  try { return atelierGov.stages(); } catch (e) { return { available: false, stages: [], reason: String(e) }; }
+});
+ipcMain.handle("atelier:get-settings", async () => {
+  try { return atelierGov.getSettings(); } catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("atelier:set-settings", async (_evt, patch) => {
+  try { const s = atelierGov.setSettings(patch || {}); logEvent("atelier-settings", { enabled: s.enabled }); return s; }
+  catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("atelier:check", async (_evt, { role, path: p }) => {
+  try { return atelierGov.checkAuthority(role, p); } catch (e) { return { available: false, ok: false, reason: String(e) }; }
+});
+ipcMain.handle("atelier:status", async (_evt, dir) => {
+  try { return atelierGov.status(dir); } catch (e) { return { available: false, lines: [], reason: String(e) }; }
+});
+ipcMain.handle("atelier:deliver", async (_evt, { turn, jobId }) => {
+  try { return atelierGov.deliverTurn(turn, jobId); } catch (e) { return { available: false, ok: false, message: String(e) }; }
+});
 
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
@@ -2796,6 +2846,7 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 
 app.whenReady().then(() => {
   loadPersistedState();
+  try { atelierGov.init(userDataDir()); } catch (e) { logEvent("atelier-init-error", { error: String(e) }); }
   createWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

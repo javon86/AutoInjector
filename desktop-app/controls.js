@@ -790,6 +790,15 @@ function turnEl(turn) {
     b.textContent = `→ ${label}`;
     meta.appendChild(b);
   }
+  if (turn.governance && turn.governance.governed) {
+    const g = turn.governance;
+    const b = document.createElement("span");
+    b.className = g.held ? "badge-verdict" : "badge-roundtable";
+    b.style.background = g.held ? "#7a2020" : "#1f5130";
+    b.textContent = g.held ? "⛔ HELD" : (g.available === false ? "⚠ gate off" : "✓ authorised");
+    b.title = `${g.role || ""} → ${g.target || ""}${g.reason ? "\n" + g.reason : ""}`;
+    meta.appendChild(b);
+  }
   const text = document.createElement("div");
   text.className = "text";
   text.textContent = turn.text;
@@ -994,6 +1003,79 @@ el("btn-collapse-global").onclick = () => collapseYellowPanel("global");
 el("btn-collapse-houserules").onclick = () => collapseYellowPanel("houserules");
 el("btn-collapse-prompts").onclick = () => collapseYellowPanel("prompts");
 
+// --- ATELIER governance panel ---------------------------------------------
+if (el("btn-collapse-atelier")) {
+  el("btn-collapse-atelier").onclick = () => {
+    const body = el("atelier-body");
+    const hidden = body.style.display === "none";
+    body.style.display = hidden ? "" : "none";
+    el("btn-collapse-atelier").textContent = hidden ? "⌄" : "›";
+  };
+}
+
+async function atelierRefreshStatus() {
+  const statusEl = el("atelier-status");
+  if (!statusEl || !window.api.atelierDetect) return;
+  try {
+    const d = await window.api.atelierDetect();
+    if (d && d.available) {
+      statusEl.textContent = `✓ Toolkit ready — ${d.version}`;
+      statusEl.style.color = "#7ad19a";
+    } else {
+      statusEl.textContent = `⚠ Not available: ${(d && d.reason) || "unknown"} (governance will pass replies through untouched)`;
+      statusEl.style.color = "#e0b060";
+    }
+  } catch (e) {
+    statusEl.textContent = `⚠ ${String(e)}`;
+  }
+}
+
+async function atelierLoadSettings() {
+  if (!window.api.atelierGetSettings) return;
+  try {
+    const s = await window.api.atelierGetSettings();
+    if (!s || s.error) return;
+    if (el("atelier-enabled")) el("atelier-enabled").checked = !!s.enabled;
+    if (el("atelier-projectdir")) el("atelier-projectdir").value = s.projectDir || "";
+    for (const site of ["chatgpt", "claude", "gemini"]) {
+      const inp = el(`atelier-target-${site}`);
+      if (inp) inp.value = (s.targets && s.targets[site]) || "";
+    }
+  } catch (_) { /* leave fields as-is */ }
+}
+
+if (el("btn-atelier-save")) {
+  el("btn-atelier-save").onclick = async () => {
+    const patch = {
+      enabled: el("atelier-enabled").checked,
+      projectDir: el("atelier-projectdir").value.trim(),
+      targets: {
+        chatgpt: el("atelier-target-chatgpt").value.trim(),
+        claude: el("atelier-target-claude").value.trim(),
+        gemini: el("atelier-target-gemini").value.trim(),
+      },
+    };
+    const out = el("atelier-save-status");
+    try {
+      const s = await window.api.atelierSetSettings(patch);
+      if (s && !s.error) {
+        out.textContent = s.enabled ? "Saved — governance is ON." : "Saved — governance is OFF.";
+        out.style.color = "#7ad19a";
+      } else {
+        out.textContent = `Could not save: ${(s && s.error) || "unknown"}`;
+        out.style.color = "#e08080";
+      }
+    } catch (e) {
+      out.textContent = String(e);
+      out.style.color = "#e08080";
+    }
+  };
+}
+
+if (el("btn-atelier-recheck")) {
+  el("btn-atelier-recheck").onclick = atelierRefreshStatus;
+}
+
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
 el("btn-main-row-collapse").onclick = () => {
@@ -1173,4 +1255,6 @@ el("btn-clear").onclick = async () => {
     }
     setStatus("Ready.");
   }
+  atelierRefreshStatus();
+  atelierLoadSettings();
 })();

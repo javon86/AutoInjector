@@ -381,6 +381,19 @@ the limit clears; outside one (plain Auto-routing, Prompt Sequence, or no
 routing at all), there's nothing structured to pause, so routing/mesh state
 is left exactly as it was — only that one message is swallowed.
 
+## Book Governance (ATELIER) — optional, off by default
+
+If you're using the three panes to *build a structured book project*, you can
+turn on **ATELIER governance**: each pane's reply is checked against
+write-authority rules before it's routed anywhere, so an AI can't silently write
+something it shouldn't (e.g. the auditor pane handing back a chapter). A reply
+that fails the check is **held** — shown in the Transcript tagged `⛔ HELD`, but
+not forwarded. Everything is opt-in; leave it off and the app works exactly as
+before. It needs **Python 3** installed (and fails open — passing replies
+through — if Python isn't found). Full details, the role→path policy, and setup
+steps are in [`ATELIER_INTEGRATION.md`](ATELIER_INTEGRATION.md); the toolkit
+itself lives under [`atelier/`](atelier/).
+
 ## Manager / Orchestrator (Phase 1 — backend only, no UI panel yet)
 
 A supervisory layer on top of everything above: instead of you deciding

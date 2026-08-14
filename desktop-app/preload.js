@@ -67,5 +67,12 @@ contextBridge.exposeInMainWorld("api", {
   testManagerConnection: () => ipcRenderer.invoke("manager:test-connection"),
   getManagerState: () => ipcRenderer.invoke("manager:get-state"),
   onManagerState: (cb) => ipcRenderer.on("manager-state", (_e, payload) => cb(payload)),
-  onManagerLog: (cb) => ipcRenderer.on("manager-log", (_e, payload) => cb(payload))
+  onManagerLog: (cb) => ipcRenderer.on("manager-log", (_e, payload) => cb(payload)),
+  atelierDetect: () => ipcRenderer.invoke("atelier:detect"),
+  atelierStages: () => ipcRenderer.invoke("atelier:stages"),
+  atelierGetSettings: () => ipcRenderer.invoke("atelier:get-settings"),
+  atelierSetSettings: (patch) => ipcRenderer.invoke("atelier:set-settings", patch),
+  atelierCheck: (role, path) => ipcRenderer.invoke("atelier:check", { role, path }),
+  atelierStatus: (dir) => ipcRenderer.invoke("atelier:status", dir),
+  atelierDeliver: (turn, jobId) => ipcRenderer.invoke("atelier:deliver", { turn, jobId })
 });

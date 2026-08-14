@@ -1,0 +1,83 @@
+{
+  "frozen_at": "2026-08-13T00:09:31Z",
+  "state": {
+    "MANUSCRIPT_PRODUCTION": "COMPLETE / FROZEN",
+    "LOCAL_VERIFICATION": "COMPLETE FOR RECORDED CONTROLS",
+    "INDEPENDENT_AUDIT": "OUTSTANDING",
+    "CROSS_MACHINE_VERIFICATION": "NOT ESTABLISHED",
+    "SYSTEM_PRODUCTION_READINESS": "BLOCKED"
+  },
+  "manuscript": {
+    "words": 11832,
+    "chapters": 12,
+    "note": "in-book == assembled == 11,832. The earlier 11,820 / 12-word-delta figure was a Custodian arithmetic error (markers are 3 tokens, not 4). See ISS-009."
+  },
+  "candidates": {
+    "structured": 106,
+    "promoted": 0,
+    "chapters_extracted": 12
+  },
+  "suites": {
+    "assembler": "16/16",
+    "classifier": "6/6",
+    "transaction": "18/18",
+    "controls": "8/8",
+    "propagation": "4/4",
+    "candidates": "23/23"
+  },
+  "audit": {
+    "chapters": "ALL PENDING_AUDIT (\u00a74.8.3)",
+    "round_3": "0 of 6",
+    "cross_machine": "NOT ESTABLISHED",
+    "F-06": "residual implemented+locally tested; audit closure outstanding",
+    "F-07": "merge-route exclusivity UNPROVEN",
+    "F-08": "transaction provenance UNPROVEN"
+  },
+  "sequencing_caveat": "CH09-CH12 were drafted under a continuous-execution instruction BEFORE check_candidates.py existed. Their candidate extraction was verified retroactively, once the control was green. No T4/T5 result is claimed to have passed a control that did not yet exist at drafting time.",
+  "artifacts": {
+    "07_BUILD/manuscript.md": "c52f0508da12ae5ee878ea59a9d75c773e6b6cc72983625962beee49d39391c1",
+    "03_MEMORY/CANDIDATES.md": "b7fcd0bd193ba29c5d802285190118a80699de4a5c34ba970202fbfabfc72c5a",
+    "00_CONTROL/STATE.md": "8a3c63d19fe4c4547744cd5a97391af281c7af471482525ae79c53a4705ce83b",
+    "01_DESIGN/SETUP_PAYOFF.md": "98a65542d97644a58311b974ae47549c62d7872075dbfaa1cd7afe6db2bddb16",
+    "01_DESIGN/OPEN_THREADS.md": "9f006c39ca3be6e82a061c436b4cd91414b37d89458f3c1dfa1e9588aedfa0d5",
+    "02_BIBLE/TIMELINE.md": "6831c04bc718c10ef9e90e90733b55fea48e1238a37a2b916a12021eb0b44905",
+    "03_MEMORY/STATE_SNAPSHOT.md": "312dc1f4c74652af25b5f0b77351b4106cdb099c57b68881312a34f7e63f75d2",
+    "00_CONTROL/ISSUES.md": "9d84cc619e2c7ad615047795e65df469a5ed47f1f347b71aa51e2ec6c8158e07",
+    "04_CHAPTERS/ch01/scenes/s01.md": "42b90a9b76192e1784dd11e897caf540d2ef9e1d81bc3554fde98b00ca61f4f6",
+    "04_CHAPTERS/ch02/scenes/s01.md": "16c5df58d48fbfa9d39c2e1e5ca5da74b21f5d5f7922553f18196043340f519e",
+    "04_CHAPTERS/ch03/scenes/s01.md": "220371d6fd20b39753378f9d641c4300ee8192ade58cd9189afca4dd96d4d361",
+    "04_CHAPTERS/ch04/scenes/s01.md": "fdc4700dc7ee5ecc6d6454d3e8d03fc20d2892149071a379831ced342a4616a6",
+    "04_CHAPTERS/ch05/scenes/s01.md": "da5ba81720d6df781094f96a5714163f7446ccfcf6b989bb2183fd037c585783",
+    "04_CHAPTERS/ch06/scenes/s01.md": "fd1fd3b026a37ff5ed5f8ff92582ecd71299756d0f504bb6ac2e2485755ae84c",
+    "04_CHAPTERS/ch07/scenes/s01.md": "6b6d68556d4c34c4dbd1c9f480aff764160014865d54d243a385f48deab1f117",
+    "04_CHAPTERS/ch08/scenes/s01.md": "8941b0145648a42324568135364684e377844dc0ad1353c9977b89ff4e110f0a",
+    "04_CHAPTERS/ch09/scenes/s01.md": "890f97203dd694a122fc95e75947bd1613c94a72f7fa98b47ec602025229b7d6",
+    "04_CHAPTERS/ch10/scenes/s01.md": "ebfaeed9a53b8ed11a43ce43de15a98a751d814fc79b18bbe0f71567a1858fb6",
+    "04_CHAPTERS/ch11/scenes/s01.md": "48b5d82d7197fc5c7696d525dd1c02d37055b7c1f6f62ed9b9adda2f13f69886",
+    "04_CHAPTERS/ch12/scenes/s01.md": "6bf8041e7c1681fd6c7dfaa2bea4950b6cf1bd1d5dd212360d9a182ebf368506"
+  },
+  "tools": {
+    "assemble_manuscript.py": "4a4fd7b1475038cfe3e79b8ad24ad0892ac8aeb739af9d58af1351ba57135171",
+    "check_propagation.py": "785bd4905b4d20b46e6a39430339e50b506325e2fb386233b5dabf368dd93b3d",
+    "check_candidates.py": "0fd18578c68014ec33caa6464df9d4b697be65f31e2b50dce90a3a7fffdf6d58",
+    "transaction.py": "b4f088f5db642e5616ad05be3e7307c3fd374ab1677161791f4a0fe6d8e77be9",
+    "check_jobs.py": "150b2aeac6a9555f68d930596c839eaea62c9bd9e21c5ff0b9db9b4dfc47a668",
+    "check_manuscript.py": "5b4a2d0898ec8ca4d480b9244f5249d0875b7c5b48ebe381f0e3ff1afdf056bc",
+    "components.py": "212d1abff0cbdefda22ec1f341e23eba4d807ed1ce4a0e3e01828b71a50f07dd",
+    "verify_delivery.py": "916a99a129f3c675837b60d1cf0d71c524d906c578c270e71c34847932f43c47",
+    "init_project.py": "f2e94c8ed7f1b18ab8eb12f9380d3748a395f00b4c74ca1ff5ce58d4995be317"
+  },
+  "suite_growth_note": "candidates suite grew 10\u219211\u219213\u219214\u219220\u219223 through Showrunner-ordered fixture additions (parser-bleed, count mismatch, per-field mutation, malformed-ID token, Fixture 1/2 sets, ID-grammar surfaces). Growth is added coverage, NOT regression drift. Zero regressions at any step. Earlier reported figures 11/11 and 14/14 are superseded.",
+  "schema": {
+    "version": 2,
+    "manuscript_hash_path": "artifacts['07_BUILD/manuscript.md']",
+    "superseded_paths": [
+      "manuscript_sha256 (top level, schema v1)"
+    ],
+    "note": "Schema v1 stored the manuscript hash at top level as 'manuscript_sha256'. v2 moved it under 'artifacts' alongside per-scene and per-tool hashes. The v1 path is HISTORICAL, not operative. A probe raising KeyError on the old path is a schema/key-path failure and must never be reported as a hash mismatch. verify_freeze.py resolves by search, not by assumed location.",
+    "expected_mutable": [
+      "00_CONTROL/ISSUES.md"
+    ],
+    "expected_mutable_note": "Defect registration continues after a manuscript freeze; drift in live registers is expected and is not an integrity failure."
+  }
+}
