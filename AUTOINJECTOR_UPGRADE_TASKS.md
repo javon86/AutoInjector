@@ -41,6 +41,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 | MDC-002-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` + `shared/entities.js` · test `test/memory.test.js` |
 | MDC-003-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` (Search, FTS5) · test `test/memory.test.js` |
 | MDC-008-PG | Claude | ✅ DONE | `desktop-app/shared/artifacts.js` · test `test/memory.test.js` |
+| SCS-013-PG | Claude | ✅ DONE | `desktop-app/shared/ownership.js` · test `test/files.test.js` |
+| MDC-009-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` · test `test/files.test.js` |
+| MDC-007-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` (request) · test `test/files.test.js` |
 
 ---
 
@@ -215,7 +218,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-013-PG — Task Ownership & Collision Prevention
+### [x] SUBTASK SCS-013-PG — Task Ownership & Collision Prevention — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `TaskOwnership` in `desktop-app/shared/ownership.js`: `claim()` grants an unowned/own/expired task and refuses a second claim on an owned one with a clear reason. Ownership carries a lease; an expired lease releases with a logged `OWNER_LEASE_EXPIRED` (via `claim` takeover or `sweepExpired()`), returning the task to the queue. Verified with an injectable clock in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002
@@ -309,7 +314,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK MDC-007-PG — AI File Request System
+### [x] SUBTASK MDC-007-PG — AI File Request System — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `FileManager.request()` in `desktop-app/shared/file-manager.js` routes a model's file request through the gateway, returns the authoritative current version, and logs every request (requester, file, version, result) to `file_requests`. An unknown file returns structured `FILE_NOT_FOUND` plus the closest matching names; a denied request returns explicit `ACCESS_DENIED` — never an empty body. Verified in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-009
@@ -333,7 +340,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK MDC-009-PG — Shared Project File Manager
+### [x] SUBTASK MDC-009-PG — Shared Project File Manager — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `FileManager` in `desktop-app/shared/file-manager.js` is the single gateway: a native role→path write policy (deny by default, path-traversal rejected), atomic writes (temp file + rename) under a per-path lock, a failed/denied write leaves the previous version untouched and logs, and every write is versioned + hashed through the artifact store (MDC-008). Verified in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-008

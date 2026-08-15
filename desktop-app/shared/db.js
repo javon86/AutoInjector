@@ -161,6 +161,30 @@ const MIGRATIONS = [
     entity_type UNINDEXED, entity_id UNINDEXED, project_id UNINDEXED, text
   );
   `,
+
+  // v4 — task ownership with leases (SCS-013) and the file-request audit log
+  // (MDC-007). The shared file manager (MDC-009) writes to disk and reuses the
+  // artifact tables from v3 for versioning.
+  `
+  CREATE TABLE IF NOT EXISTS task_ownership (
+    project_id       TEXT NOT NULL,
+    task_id          TEXT NOT NULL,
+    owner            TEXT NOT NULL,
+    lease_expires_at TEXT,
+    claimed_at       TEXT NOT NULL,
+    PRIMARY KEY (project_id, task_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS file_requests (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT,
+    requester   TEXT,
+    path        TEXT,
+    version     INTEGER,
+    result      TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];
 
 const PRAGMAS = 'PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;';

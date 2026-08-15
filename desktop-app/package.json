@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/run.js && node test/controls.test.js && node test/prompt-editor.test.js && node test/document-viewer.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/atelier-bridge.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js",
+    "test": "node test/run.js && node test/controls.test.js && node test/prompt-editor.test.js && node test/document-viewer.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/atelier-bridge.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js && node test/files.test.js",
     "test:browser": "node test/browser.test.js",
     "quality": "node scripts/quality-check.js",
     "dist": "electron-builder",
