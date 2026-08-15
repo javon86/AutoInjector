@@ -56,6 +56,72 @@ const MIGRATIONS = [
     parked_at   TEXT NOT NULL
   );
   `,
+
+  // v2 — threading, read positions, delivery tracking, dedup, baselines, and a
+  // shared system log (the "nothing fails silently" sink from the spec's global
+  // rule). Covers SCS-003, SCS-004, SCS-006, SCS-007, SCS-012.
+  `
+  ALTER TABLE messages ADD COLUMN content_hash   TEXT;
+  ALTER TABLE messages ADD COLUMN routing_status TEXT NOT NULL DEFAULT 'RESOLVED';
+  CREATE INDEX IF NOT EXISTS idx_messages_hash ON messages(project_id, content_hash);
+
+  -- SCS-004: how far each model has actually read, per project.
+  CREATE TABLE IF NOT EXISTS read_positions (
+    project_id  TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    position    INTEGER NOT NULL DEFAULT 0,   -- last CONFIRMED seq read
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (project_id, model)
+  );
+
+  -- SCS-006: per-recipient delivery state for a message.
+  CREATE TABLE IF NOT EXISTS deliveries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT NOT NULL,
+    msg_id          TEXT NOT NULL,
+    recipient       TEXT NOT NULL,
+    state           TEXT NOT NULL DEFAULT 'PENDING', -- PENDING|DELIVERED|FAILED|TIMEOUT|RETRY|FAILED_PERMANENT
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, msg_id, recipient)
+  );
+
+  -- SCS-007: audit of dropped duplicates (kept, not lost).
+  CREATE TABLE IF NOT EXISTS message_drops (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      TEXT,
+    original_msg_id TEXT,
+    reason          TEXT NOT NULL,
+    content_hash    TEXT,
+    dropped_at      TEXT NOT NULL
+  );
+
+  -- SCS-012: authoritative baseline, append-only with previous-hash linkage.
+  CREATE TABLE IF NOT EXISTS baselines (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT NOT NULL,
+    hash        TEXT NOT NULL,
+    prev_hash   TEXT,
+    stage       TEXT,
+    task_state  TEXT,
+    is_current  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_one_current_baseline
+    ON baselines(project_id) WHERE is_current = 1;
+
+  -- Global rule: nothing fails silently — every anomaly writes a row here.
+  CREATE TABLE IF NOT EXISTS system_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT,
+    level       TEXT NOT NULL DEFAULT 'INFO',   -- INFO | WARN | ERROR
+    code        TEXT NOT NULL,                  -- machine code, e.g. DROP_DUPLICATE
+    message     TEXT,
+    ref_id      TEXT,                           -- affected MSG/JOB/TASK id
+    created_at  TEXT NOT NULL
+  );
+  `,
 ];
 
 const PRAGMAS = 'PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;';

@@ -33,6 +33,11 @@ already carries someone's name — pick the next unclaimed one from the top.
 | MDC-001-PG | Claude | ✅ DONE | `desktop-app/shared/db.js` · test `test/shared-db.test.js` |
 | SCS-001-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · test `test/shared-db.test.js` |
 | SCS-002-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · 1,000-concurrent-insert proof |
+| SCS-003-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` (thread/routing) · test `test/sync.test.js` |
+| SCS-004-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (ReadPositions) · test `test/sync.test.js` |
+| SCS-006-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Deliveries) · test `test/sync.test.js` |
+| SCS-007-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` (dedup) · test `test/sync.test.js` |
+| SCS-012-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Baselines) · test `test/sync.test.js` |
 
 ---
 
@@ -87,7 +92,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-003-PG — FROM / TO / REPLY-TO Tracking
+### [x] SUBTASK SCS-003-PG — FROM / TO / REPLY-TO Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `MessageLog.thread()`/`originOf()` in `desktop-app/shared/message-log.js` walk REPLY-TO back to the origin; an unknown recipient is flagged `ROUTING_UNRESOLVED` (kept, logged), and a reply_to pointing at a nonexistent message is nulled and logged. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-002
@@ -98,7 +105,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-004-PG — Per-Model Read Position Tracking
+### [x] SUBTASK SCS-004-PG — Per-Model Read Position Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `ReadPositions` in `desktop-app/shared/sync.js`: a `read_positions` row per model per project, advance-only via `confirm()`, exact `lag()` in message count, and a stored position ahead of the log clamps back with a `READ_POSITION_CLAMPED` flag. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-001
@@ -120,7 +129,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-006-PG — Message Delivery & Retry Tracking
+### [x] SUBTASK SCS-006-PG — Message Delivery & Retry Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Deliveries` in `desktop-app/shared/sync.js`: per-recipient PENDING/DELIVERED/RETRY/FAILED_PERMANENT, exponential backoff 5s/15s/45s, max 3 retries then FAILED_PERMANENT with an alert; `sweep()` guarantees nothing sits in PENDING past its timeout; retries reuse the same MSG id (one delivery row), so a retry never creates a second message. Verified with an injectable clock in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-003
@@ -131,7 +142,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-007-PG — Duplicate Message Prevention
+### [x] SUBTASK SCS-007-PG — Duplicate Message Prevention — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `MessageLog.append()` in `desktop-app/shared/message-log.js` dedups by content hash within a configurable window: a replay stores one message and one `DROP_DUPLICATE` row in `message_drops` (with the original MSG id, so a wrongly-dropped message is recoverable). Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-002
@@ -186,7 +199,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK SCS-012-PG — Current-State / Baseline Tracking
+### [x] SUBTASK SCS-012-PG — Current-State / Baseline Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Baselines` in `desktop-app/shared/sync.js`: append-only `baselines` table with previous-hash linkage, a partial unique index enforcing exactly one CURRENT per project, and `promote()` refusing a mismatched/empty prev-hash while keeping the prior baseline CURRENT. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
