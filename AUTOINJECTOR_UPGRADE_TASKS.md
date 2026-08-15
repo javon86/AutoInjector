@@ -22,6 +22,20 @@ Every subtask uses the same block:
 
 ---
 
+## Claims ledger
+
+A subtask heading prefixed with `[x]` is **complete**; `[~]` means **claimed / in
+progress**. The claimant's name follows the prefix. Do not start a subtask that
+already carries someone's name — pick the next unclaimed one from the top.
+
+| Subtask | Owner | Status | Evidence |
+|---|---|---|---|
+| MDC-001-PG | Claude | ✅ DONE | `desktop-app/shared/db.js` · test `test/shared-db.test.js` |
+| SCS-001-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · test `test/shared-db.test.js` |
+| SCS-002-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · 1,000-concurrent-insert proof |
+
+---
+
 ## Master task order
 
 | # | Task | Prefix | Difficulty | Blocked by |
@@ -47,7 +61,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-001-PG — Shared Ordered Message Log
+### [x] SUBTASK SCS-001-PG — Shared Ordered Message Log — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Built in `desktop-app/shared/message-log.js` (table in `shared/db.js`). One `messages` table for all sources; seq-order read reproduces the conversation with no gaps; failed writes park in `messages_deadletter` in a single transaction. Verified by `desktop-app/test/shared-db.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
@@ -58,7 +74,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-002-PG — Automatic Message ID Numbering
+### [x] SUBTASK SCS-002-PG — Automatic Message ID Numbering — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Numbering is assigned only by the log (`append()` rejects a caller-supplied seq/msgId), inside a transaction with `UNIQUE(project_id, seq)` and retry-against-max on collision. Proven by a real multi-process test in `desktop-app/test/shared-db.test.js`: 1,000 concurrent inserts across 8 processes produce IDs 1..1000 with zero duplicates and zero gaps.
 
 **Type:** PG
 **Depends on:** SCS-001
@@ -201,7 +219,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-001-PG — Local SQLite Project Database
+### [x] SUBTASK MDC-001-PG — Local SQLite Project Database — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Built in `desktop-app/shared/db.js` on Node's built-in `node:sqlite` (no new dependency). WAL mode on; versioned via `PRAGMA user_version` with a pre-migration snapshot; on corruption the open path refuses to run dirty and restores the last good snapshot (`VACUUM INTO`), or fails loudly if none exists. Survives restart with data intact. Verified by `desktop-app/test/shared-db.test.js`.
 
 **Type:** PG
 **Depends on:** —
