@@ -38,6 +38,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 | SCS-006-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Deliveries) · test `test/sync.test.js` |
 | SCS-007-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` (dedup) · test `test/sync.test.js` |
 | SCS-012-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Baselines) · test `test/sync.test.js` |
+| MDC-002-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` + `shared/entities.js` · test `test/memory.test.js` |
+| MDC-003-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` (Search, FTS5) · test `test/memory.test.js` |
+| MDC-008-PG | Claude | ✅ DONE | `desktop-app/shared/artifacts.js` · test `test/memory.test.js` |
 
 ---
 
@@ -247,7 +250,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK MDC-002-PG — Structured Shared Memory
+### [x] SUBTASK MDC-002-PG — Structured Shared Memory — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Typed entity tables (task/character/decision/timeline/fact/status) generated from `desktop-app/shared/entities.js`; CRUD in `shared/memory.js`. Every entity gets a stable prefixed id (CHAR-000001, …), created/updated timestamps and a `project_id` FK; writes are validated against the type schema and rejected with a field-level reason; an orphaned row (unknown project) is rejected at write time by the FK. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
@@ -258,7 +263,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK MDC-003-PG — Full-Text Project Search
+### [x] SUBTASK MDC-003-PG — Full-Text Project Search — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Search` in `desktop-app/shared/memory.js` over a SQLite FTS5 index (`mem_fts`) kept in sync as entities are written; word/phrase search returns hits across all entity types well under a second (verified on 303 records). A missing/stale index rebuilds via `ensureIndex()`; if FTS fails, `search()` falls back to a LIKE scan flagged `DEGRADED` rather than returning nothing. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002
@@ -313,7 +320,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK MDC-008-PG — Artifact Version & Hash Tracking
+### [x] SUBTASK MDC-008-PG — Artifact Version & Hash Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `ArtifactStore` in `desktop-app/shared/artifacts.js`: every write is a new immutable version with a SHA-256 hash; `get()` verifies the current version against its recorded hash and, on mismatch, blocks delivery with `ARTIFACT_INTEGRITY_FAIL` and offers the previous verified version instead. Full version history retained. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002

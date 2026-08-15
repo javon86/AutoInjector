@@ -17,6 +17,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const fs = require('fs');
 const path = require('path');
+const entities = require('./entities');
 
 // Ordered, append-only list. Index i in this array corresponds to schema
 // version i+1. Never edit a shipped migration — add a new one.
@@ -120,6 +121,44 @@ const MIGRATIONS = [
     message     TEXT,
     ref_id      TEXT,                           -- affected MSG/JOB/TASK id
     created_at  TEXT NOT NULL
+  );
+  `,
+
+  // v3 — structured shared memory (MDC-002), artifact version/hash tracking
+  // (MDC-008), and a full-text index (MDC-003).
+  `
+  ${entities.allEntityTablesSql()}
+
+  -- MDC-008: artifacts and their full version/hash history.
+  CREATE TABLE IF NOT EXISTS artifacts (
+    id              TEXT PRIMARY KEY,           -- ART-000001
+    project_id      TEXT NOT NULL,
+    seq             INTEGER NOT NULL,
+    path            TEXT NOT NULL,
+    title           TEXT,
+    current_version INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, seq),
+    UNIQUE(project_id, path),
+    FOREIGN KEY(project_id) REFERENCES projects(project_id)
+  );
+  CREATE TABLE IF NOT EXISTS artifact_versions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    version     INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE(artifact_id, version),
+    FOREIGN KEY(artifact_id) REFERENCES artifacts(id)
+  );
+
+  -- MDC-003: one full-text index across every structured entity type.
+  CREATE VIRTUAL TABLE IF NOT EXISTS mem_fts USING fts5(
+    entity_type UNINDEXED, entity_id UNINDEXED, project_id UNINDEXED, text
   );
   `,
 ];
