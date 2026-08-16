@@ -26,6 +26,7 @@ const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
 const managerProvider = require("./manager-provider");
 const atelierGov = require("./atelier-governance");
+const dbService = require("./db-service");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2033,6 +2034,10 @@ async function pollSite(site) {
       logEvent("atelier-govern-error", { site, error: String(e) });
     }
 
+    // Record the captured reply into the shared SQLite message log (guarded;
+    // no-ops if the database backend is unavailable).
+    try { dbService.recordTurn(turn); } catch (_) {}
+
     state.captured[site] = roundtableTag ? { ...turn, text } : turn;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -2084,6 +2089,14 @@ async function pollSite(site) {
   }
 }
 
+// --- Shared database (SQLite) IPC ------------------------------------------
+ipcMain.handle("db:status", async () => {
+  try { return dbService.status(); } catch (e) { return { available: false, reason: String(e) }; }
+});
+ipcMain.handle("db:recent-messages", async (_evt, limit) => {
+  try { return dbService.recent(limit || 100); } catch (e) { return []; }
+});
+
 // --- ATELIER governance IPC ------------------------------------------------
 ipcMain.handle("atelier:detect", async () => {
   try { return atelierGov.detect({ force: true }); }
@@ -2112,6 +2125,7 @@ ipcMain.handle("atelier:deliver", async (_evt, { turn, jobId }) => {
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
+  try { dbService.recordUserMessage(text, list); } catch (_) {}
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   for (const t of list) results[t] = await sendTextTo(t, text, null);
@@ -2847,6 +2861,8 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 app.whenReady().then(() => {
   loadPersistedState();
   try { atelierGov.init(userDataDir()); } catch (e) { logEvent("atelier-init-error", { error: String(e) }); }
+  try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
+  catch (e) { logEvent("db-init-error", { error: String(e) }); }
   createWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

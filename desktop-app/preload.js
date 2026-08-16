@@ -74,5 +74,7 @@ contextBridge.exposeInMainWorld("api", {
   atelierSetSettings: (patch) => ipcRenderer.invoke("atelier:set-settings", patch),
   atelierCheck: (role, path) => ipcRenderer.invoke("atelier:check", { role, path }),
   atelierStatus: (dir) => ipcRenderer.invoke("atelier:status", dir),
-  atelierDeliver: (turn, jobId) => ipcRenderer.invoke("atelier:deliver", { turn, jobId })
+  atelierDeliver: (turn, jobId) => ipcRenderer.invoke("atelier:deliver", { turn, jobId }),
+  dbStatus: () => ipcRenderer.invoke("db:status"),
+  dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit)
 });
