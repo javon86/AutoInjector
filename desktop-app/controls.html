@@ -398,20 +398,6 @@
       </div>
     </div>
 
-    <div id="col-database" class="col yc-panel">
-      <div class="yc-head">
-        <h2>Conversation Database (SQLite)</h2><span class="spacer"></span>
-        <button class="collapse-btn" id="btn-collapse-database" title="Minimize this panel">⌄</button>
-      </div>
-      <div id="database-body">
-        <div id="database-status" style="opacity:.8; margin:4px 0;">Checking database…</div>
-        <div class="btns" style="margin:6px 0;">
-          <button id="btn-database-refresh">Refresh</button>
-        </div>
-        <div id="database-list" style="max-height:180px; overflow-y:auto; display:flex; flex-direction:column; gap:3px;"></div>
-      </div>
-    </div>
-
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">
@@ -421,9 +407,10 @@
     <div id="main-row">
       <div id="col-transcript" class="col">
         <h2 style="display:flex; align-items:center; gap:6px;">
-          <span>Transcript</span>
+          <span>Conversation</span>
+          <span id="database-status" style="font-size:9.5px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span>
           <span class="spacer"></span>
-          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Transcript/Log panel">⌄</button>
+          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Conversation/Log panel">⌄</button>
         </h2>
         <div id="transcript"></div>
       </div>

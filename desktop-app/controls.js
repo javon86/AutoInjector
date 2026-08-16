@@ -1077,55 +1077,25 @@ if (el("btn-atelier-recheck")) {
   el("btn-atelier-recheck").onclick = atelierRefreshStatus;
 }
 
-// --- Conversation Database (SQLite) panel ----------------------------------
-if (el("btn-collapse-database")) {
-  el("btn-collapse-database").onclick = () => {
-    const body = el("database-body");
-    const hidden = body.style.display === "none";
-    body.style.display = hidden ? "" : "none";
-    el("btn-collapse-database").textContent = hidden ? "⌄" : "›";
-  };
-}
-
+// --- Conversation database status ------------------------------------------
+// The Conversation window (formerly the separate Transcript + Database panels,
+// now merged into one) is saved to the shared SQLite database. This shows a
+// live saved-count next to its heading; the messages themselves render in the
+// #transcript box below via renderTranscript/appendTranscriptTurn.
 async function databaseRefresh() {
   const statusEl = el("database-status");
-  const listEl = el("database-list");
   if (!statusEl || !window.api.dbStatus) return;
   try {
     const s = await window.api.dbStatus();
     if (s && s.available) {
-      statusEl.textContent = `✓ Recording — ${s.count} message(s) stored`;
+      statusEl.textContent = `· saved to database (${s.count})`;
       statusEl.style.color = "#7ad19a";
     } else {
-      statusEl.textContent = `⚠ Database not active${s && s.reason ? " — " + s.reason : ""}`;
+      statusEl.textContent = "· not saved (database off)";
       statusEl.style.color = "#e0b060";
     }
-    const msgs = (window.api.dbRecentMessages ? await window.api.dbRecentMessages(60) : []) || [];
-    if (listEl) {
-      listEl.innerHTML = "";
-      for (const m of msgs.slice().reverse()) {
-        const row = document.createElement("div");
-        row.className = `feed-row ${m.from || ""}`;
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = `${m.msgId} · ${m.from}${m.to ? " → " + m.to : ""}`;
-        const snip = document.createElement("div");
-        snip.className = "snippet";
-        snip.textContent = (m.body || "").replace(/\s+/g, " ").trim();
-        row.appendChild(meta);
-        row.appendChild(snip);
-        listEl.appendChild(row);
-      }
-      if (!msgs.length) listEl.innerHTML = '<div style="opacity:.5; font-size:10.5px;">No messages recorded yet.</div>';
-    }
-  } catch (e) {
-    statusEl.textContent = `⚠ ${String(e)}`;
-  }
+  } catch (_) { statusEl.textContent = ""; }
 }
-
-if (el("btn-database-refresh")) el("btn-database-refresh").onclick = databaseRefresh;
-// (Live refresh on capture is folded into the main onCapture handler above so
-// we don't register a second listener.)
 
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
