@@ -357,7 +357,11 @@
       </div>
     </div>
 
-    <div id="col-atelier" class="col yc-panel">
+    <!-- ON HOLD: the ATELIER governance panel is hidden from the UI. The
+         feature and all its code are kept intact (opt-in, off by default). To
+         bring it back, remove the style="display:none" below and re-enable the
+         atelierRefreshStatus()/atelierLoadSettings() calls in controls.js. -->
+    <div id="col-atelier" class="col yc-panel" style="display:none;">
       <div class="yc-head">
         <h2>Book Governance (ATELIER)</h2><span class="spacer"></span>
         <button class="collapse-btn" id="btn-collapse-atelier" title="Collapse Governance">⌄</button>

@@ -1255,6 +1255,9 @@ el("btn-clear").onclick = async () => {
     }
     setStatus("Ready.");
   }
-  atelierRefreshStatus();
-  atelierLoadSettings();
+  // ON HOLD: the ATELIER governance panel is hidden (see controls.html). Skip
+  // its startup probes so nothing runs while it's parked. To restore, un-hide
+  // #col-atelier and re-enable these two calls:
+  // atelierRefreshStatus();
+  // atelierLoadSettings();
 })();
