@@ -76,5 +76,9 @@ contextBridge.exposeInMainWorld("api", {
   atelierStatus: (dir) => ipcRenderer.invoke("atelier:status", dir),
   atelierDeliver: (turn, jobId) => ipcRenderer.invoke("atelier:deliver", { turn, jobId }),
   dbStatus: () => ipcRenderer.invoke("db:status"),
-  dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit)
+  dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit),
+  dbMemorySummary: () => ipcRenderer.invoke("db:memory-summary"),
+  dbMemoryCreate: (type, data) => ipcRenderer.invoke("db:memory-create", { type, data }),
+  dbMemorySearch: (query) => ipcRenderer.invoke("db:memory-search", query),
+  dbProjectState: () => ipcRenderer.invoke("db:project-state")
 });

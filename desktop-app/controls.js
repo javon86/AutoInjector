@@ -1097,6 +1097,79 @@ async function databaseRefresh() {
   } catch (_) { statusEl.textContent = ""; }
 }
 
+// --- Project Memory + Project State panels (backend-module panels) ----------
+function wireCollapse(btnId, bodyId) {
+  const b = el(btnId);
+  if (!b) return;
+  b.onclick = () => {
+    const body = el(bodyId);
+    const hidden = body.style.display === "none";
+    body.style.display = hidden ? "" : "none";
+    b.textContent = hidden ? "⌄" : "›";
+  };
+}
+wireCollapse("btn-collapse-memory", "memory-body");
+wireCollapse("btn-collapse-state", "state-body");
+
+async function memoryRefresh() {
+  const sum = el("memory-summary");
+  if (!sum || !window.api.dbMemorySummary) return;
+  try { const s = await window.api.dbMemorySummary(); sum.textContent = s && s.available ? `${s.total} item(s)` : "(db off)"; }
+  catch (_) { sum.textContent = ""; }
+}
+
+async function memoryRunSearch() {
+  const box = el("memory-results");
+  if (!box || !window.api.dbMemorySearch) return;
+  try {
+    const r = await window.api.dbMemorySearch(el("memory-query").value);
+    box.innerHTML = "";
+    if (!r || !r.results || !r.results.length) { box.innerHTML = '<div style="opacity:.5;">No matches.</div>'; return; }
+    for (const x of r.results) {
+      const row = document.createElement("div");
+      row.className = "feed-row";
+      row.textContent = `${x.id} — ${x.title || x.type}`;
+      box.appendChild(row);
+    }
+  } catch (_) {}
+}
+
+if (el("btn-memory-add")) el("btn-memory-add").onclick = async () => {
+  if (!window.api.dbMemoryCreate) return;
+  const type = el("memory-type").value;
+  const text = el("memory-text").value.trim();
+  if (!text) return;
+  const field = { character: "name", task: "title", decision: "summary", fact: "statement", timeline: "label", status: "label" }[type] || "name";
+  const data = {}; data[field] = text;
+  const res = await window.api.dbMemoryCreate(type, data);
+  if (res && res.ok) { el("memory-text").value = ""; memoryRefresh(); }
+  else if (el("memory-results")) { el("memory-results").innerHTML = ""; const d = document.createElement("div"); d.style.color = "#e08080"; d.textContent = (res && res.error) || "failed"; el("memory-results").appendChild(d); }
+};
+if (el("btn-memory-search")) el("btn-memory-search").onclick = memoryRunSearch;
+
+async function stateRefresh() {
+  const box = el("state-content");
+  if (!box || !window.api.dbProjectState) return;
+  try {
+    const s = await window.api.dbProjectState();
+    box.innerHTML = "";
+    if (!s || !s.available) { box.innerHTML = '<div style="opacity:.5;">Database off.</div>'; return; }
+    const section = (label, lines) => {
+      const wrap = document.createElement("div");
+      const b = document.createElement("b"); b.style.opacity = ".7"; b.textContent = label;
+      wrap.appendChild(b);
+      const rows = lines.length ? lines : ["—"];
+      for (const ln of rows) { const p = document.createElement("div"); p.style.opacity = ".85"; p.textContent = ln; wrap.appendChild(p); }
+      return wrap;
+    };
+    box.appendChild(section("Read positions", (s.readPositions || []).map((p) => `${p.model}: ${p.position} (lag ${p.lag})`)));
+    box.appendChild(section("Baseline", s.baseline ? [`${s.baseline.hash} (${s.baseline.stage || "?"})`] : []));
+    box.appendChild(section("Artifacts", (s.artifacts || []).map((a) => `${a.path} v${a.current_version}`)));
+    box.appendChild(section("Owned tasks", (s.ownedTasks || []).map((t) => `${t.task_id} → ${t.owner}`)));
+  } catch (_) {}
+}
+if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
+
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
 el("btn-main-row-collapse").onclick = () => {
@@ -1282,4 +1355,6 @@ el("btn-clear").onclick = async () => {
   // atelierRefreshStatus();
   // atelierLoadSettings();
   databaseRefresh();
+  memoryRefresh();
+  stateRefresh();
 })();

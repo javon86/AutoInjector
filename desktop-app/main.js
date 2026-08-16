@@ -2096,6 +2096,18 @@ ipcMain.handle("db:status", async () => {
 ipcMain.handle("db:recent-messages", async (_evt, limit) => {
   try { return dbService.recent(limit || 100); } catch (e) { return []; }
 });
+ipcMain.handle("db:memory-summary", async () => {
+  try { return dbService.memorySummary(); } catch (e) { return { available: false, counts: {}, total: 0 }; }
+});
+ipcMain.handle("db:memory-create", async (_evt, { type, data }) => {
+  try { return dbService.memoryCreate(type, data); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("db:memory-search", async (_evt, query) => {
+  try { return dbService.memorySearch(query); } catch (e) { return { available: false, results: [] }; }
+});
+ipcMain.handle("db:project-state", async () => {
+  try { return dbService.projectState(); } catch (e) { return { available: false }; }
+});
 
 // --- ATELIER governance IPC ------------------------------------------------
 ipcMain.handle("atelier:detect", async () => {
