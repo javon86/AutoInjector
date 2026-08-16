@@ -15,8 +15,13 @@
     }
     #btn-collapse-window { font-size:13px; line-height:1; padding:3px 9px; }
 
-    #wrap { display:flex; flex-direction:column; gap:8px; padding:8px 10px; flex:1 1 auto; min-height:0; overflow:auto; }
+    #wrap { display:flex; flex-direction:column; gap:8px; padding:8px 10px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
     #wrap.window-collapsed { display:none; }
+    /* Visible scrollbar so it's obvious the panel scrolls vertically. */
+    #wrap::-webkit-scrollbar { width:11px; }
+    #wrap::-webkit-scrollbar-track { background:#141414; }
+    #wrap::-webkit-scrollbar-thumb { background:#3a3a3a; border-radius:6px; border:2px solid #141414; }
+    #wrap::-webkit-scrollbar-thumb:hover { background:#4a4a4a; }
     .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:7px 9px; overflow:auto; }
     .col h2 { font-size:11px; margin:0 0 5px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
 
@@ -134,13 +139,17 @@
        changes. */
     #collapsed-strip { display:flex; gap:6px; flex:0 0 auto; min-width:0; height:44px; }
     #collapsed-strip:empty { display:none; }
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
+    /* The AI panes grow to fill spare height, but keep a usable floor so that
+       adding more panels makes the whole #wrap scroll (it is overflow:auto)
+       instead of crushing the panes. The floor is lifted when every pane is
+       collapsed (see the .all-collapsed rule below) so no dead space is left. */
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:320px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
        space — collapse #ai-row down to nothing and give the rest to
        Transcript/Activity Log. */
-    #wrap.all-collapsed #ai-row { flex: 0 0 auto; }
+    #wrap.all-collapsed #ai-row { flex: 0 0 auto; min-height: 0; }
     #wrap.all-collapsed #main-row { flex: 1 1 auto; }
     .ai-col {
       flex:1 1 0; min-width:0; display:flex; flex-direction:column;
