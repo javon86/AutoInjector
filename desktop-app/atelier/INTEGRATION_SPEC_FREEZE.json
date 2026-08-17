@@ -1,0 +1,51 @@
+{
+  "freeze_id": "INTEGRATION-SPEC-FREEZE-02",
+  "generated_at": "2026-08-13T00:26:40Z",
+  "scope": "AutoInjector integration specification. FROZEN SEPARATELY from the manuscript baseline; does not endorse or re-verify the manuscript.",
+  "integration_spec_sha256": "6334fe88a0589b7ac4da19bf2460a5ff281988ba5573c2455f06dde43509fc2b",
+  "byte_count": 26347,
+  "control_count": 32,
+  "portable_now": 13,
+  "must_adapt": 8,
+  "not_built": 11,
+  "portable_now_semantics": "locally proven mechanism \u2014 executed regression coverage plus red-state proof on the Custodian's machine. NOT cross-machine, NOT independently audited, NOT AutoInjector-production proven.",
+  "defect_register_hash": {
+    "PROCESS_DEFECTS.md": "b82f290c0a257d88beb7a1bd13a0f6ccba6f7ed7c8d23e5f22c5070bd447e3e0",
+    "ISSUES.md": "9c3c310ae6994026d8e9cb08226ee84ccb00ba0d85561956cfd58c4ecf9c4c1b"
+  },
+  "candidate_gate_freeze_hash": "3664ee873e8844bdea75225fa8952e48165768c993a1ee744fe79eee2d2fe912",
+  "manuscript_baseline_reference_only": "c52f0508da12ae5ee878ea59a9d75c773e6b6cc72983625962beee49d39391c1",
+  "documents": {
+    "AUTOINJECTOR_INTEGRATION.md": "b0a2d8f9b061a643842a4f3d7cdc182cc0633ad9d01cfc1218532a7757918d2b",
+    "AUTOINJECTOR_CONTROL_MATRIX.md": "5b3c771b5e2ac35aaccf82be89c83250e75ca97d173263e617f57b759c548d46",
+    "C32_RECONCILIATION.md": "70e984dc4056f62a8b508d7620427e3c148276b83e330d40f82e8044cee293eb",
+    "SPEC_RECONCILIATION.md": "f71951527b107af978d0e133da74d8f56e34200ef424ee4f5732ac623e60bf9a"
+  },
+  "blockers": [
+    "cross-machine NOT ESTABLISHED",
+    "Round 3 0/6",
+    "F-06 audit closure OUTSTANDING",
+    "F-07 merge-route exclusivity UNPROVEN",
+    "F-08 transaction-specific merge provenance UNPROVEN",
+    "11 controls NOT BUILT",
+    "\u00a736 surfaces 1-11,18,21,22 UNPROVEN",
+    "CH01-CH12 PENDING_AUDIT",
+    "106 candidates UNPROMOTED",
+    "CH09-CH12 prospective candidate-gate enforcement NOT ESTABLISHED"
+  ],
+  "implementation_order": [
+    "identity.py + project namespace fields",
+    "authority.py write gate",
+    "provenance schema + validator",
+    "check_instruction.py",
+    "duplicate-redelivery guard",
+    "shared refscope.py",
+    "build_depgraph.py",
+    "validate_timeline.py",
+    "check_knowledge.py",
+    "check_registers.py",
+    "distinct-runner cross-machine CI"
+  ],
+  "integration_precondition": "No control may be integrated into AutoInjector without its own regression fixture and red-before/green-after evidence. This applies to all 11 NOT BUILT controls without exception.",
+  "design_expansion": "HALTED"
+}

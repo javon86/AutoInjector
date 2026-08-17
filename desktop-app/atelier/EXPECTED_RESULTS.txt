@@ -1,0 +1,46 @@
+CROSS-MACHINE VERIFICATION — EXPECTED OUTCOMES
+
+Run every command from the ATELIER root after a clean extract.
+
+SUITES
+  python test_assembler.py                16/16
+  python test_provisional_classifier.py    6/6
+  python test_transaction.py              20/20   (or 15/15 + 5 skipped if git
+                                                   is unavailable — SKIPs are
+                                                   NOT passes)
+  python test_controls.py                  8/8
+  python test_propagation.py               4/4
+  python test_candidates.py               23/23
+  python test_timeline.py                  7/7
+  python test_depgraph.py                  6/6
+  python test_knowledge.py                 5/5
+  python test_registers.py                 7/7
+  python test_context.py                   7/7
+  python test_refscope.py                  5/5    (skips without git)
+  python test_identity.py                  4/4
+  python test_authority.py                 5/5
+  python test_provenance.py                5/5
+  python test_instruction.py               5/5
+  python test_redelivery.py                6/6
+
+ONE COMMAND FOR ALL OF IT
+  python harness.py all examples/salt-line
+      expect the final line: ALL GREEN
+
+RED-STATE GUARDS — each MUST report FAIL
+  python harness.py prove
+      every line must read OK; a PASS here means that suite cannot detect
+      failure and is worthless.
+
+END TO END
+  python harness.py e2e
+      scaffold -> empty build STOPs(1) -> one scene builds to exact bytes
+
+FREEZE
+  python verify_freeze.py examples/salt-line
+      expect: freeze integrity : PRESERVED
+
+A TIMEOUT IS A FAILURE OF THE FIX, NOT OF THE TEST
+  Every subprocess is bounded (20s git, 30s tool). PDF-010 was exactly this:
+  passed in seconds locally, hung past 3 minutes elsewhere. If anything hangs,
+  report the elapsed time you allowed.

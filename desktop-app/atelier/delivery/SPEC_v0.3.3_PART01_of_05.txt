@@ -1,0 +1,773 @@
+===== ATELIER SPECIFICATION — PART 01 OF 05 =====
+SOURCE_VERSION:  v0.3.3
+SOURCE_FILE:     SYSTEM_SPEC.md
+PART_NUMBER:     01 of 05
+BYTE_RANGE:      [0, 36300)
+PART_BYTES:      36300
+PART_LINES:      755
+PART_SHA256:     5373163d2feeadbfec2310de388bd8372a70b87cb4d639b78a696ede5a66486e
+WHOLE_BYTES:     116516
+WHOLE_SHA256:    25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+BEGINS_WITH:     # THE ATELIER SPECIFICATION
+CONTINUES:       yes - PART 02 follows
+===== BEGIN PART 01 CONTENT =====
+# THE ATELIER SPECIFICATION
+### A Three-AI Autonomous Bookmaking System
+**Version 0.3.3 — audit findings integrated**
+**Status:** DEC-001..006 FINAL · Gemini partial audit integrated (F-01..F-05, V1..V4) · Gate: PASS WITH REQUIRED FIXES — PENDING FOCUSED RE-AUDIT
+**Owner of this document:** Claude (Document Custodian)
+
+---
+
+## READING NOTES FOR CHATGPT AND GEMINI
+
+This is a complete baseline, not a partial workstream. Three partial drafts would
+have to be merged by someone, and merging is more expensive than editing. So I
+took the whole thing to a coherent v0.1 and marked the places where my authority
+is weakest.
+
+Two flag types appear throughout:
+
+- **[ARBITRATE]** — a real design fork where I picked one option and the other
+  is defensible. ChatGPT owns the final call. My reasoning is stated so you can
+  attack it rather than guess at it.
+- **[VERIFY]** — a technical or factual claim affecting implementation that I
+  could not confirm. Gemini owns verification. Do not build on these until checked.
+
+Do not rubber-stamp. A review that returns "looks good" is a failed review and
+should be re-run. Per §35 of the master prompt, agreement loops are a defect.
+
+**v0.3.3 status.** **DEC-001 through DEC-006 are all FINAL.** No Showrunner
+decision is outstanding. Four practices are non-waivable protocol requirements
+(§4.8). All four Gemini [VERIFY] items remain unanswered and run under §4.9
+graceful-degradation assumptions — each chosen so that being wrong costs an
+optimization, never a correctness failure. Gemini has not reviewed any version;
+its independent adversarial review is the next required gate.
+
+---
+
+# 1. SYSTEM PURPOSE
+
+**Atelier** takes a small user concept and produces a complete, internally
+consistent, professionally revised book with minimal further user involvement.
+
+The problem it solves is not generation. Any single model can generate a chapter.
+The problem is **entropy across length**: past roughly 30,000 words, a book
+written by language models decays — eye colors drift, dead characters speak,
+travel takes no time, established rules bend to plot convenience, threads open
+and never close, and the prose voice slowly reverts to model-default.
+
+Atelier's core thesis:
+
+> **The manuscript is not the memory. The repository is the memory.**
+> Models are stateless workers. State lives in versioned documents. No model is
+> ever asked to remember; every model is handed exactly what it needs.
+
+Everything downstream — role division, context packaging, quality gates —
+follows from that one sentence.
+
+### Success criteria
+
+The system succeeds if a finished book satisfies all of:
+
+1. Zero unresolved **Severity-1** continuity errors (§29 defines severity).
+2. Every registered setup either paid off or deliberately closed in the register.
+3. Every open thread resolved or intentionally left open with a logged decision.
+4. Full manuscript reads as one authorial voice, verified by blind voice sampling.
+5. Total user decisions required after intake: **fewer than 25** across a full novel.
+6. The book is finishable. A system that produces a perfect 40% of a book has failed.
+
+---
+
+# 2. SYSTEM ARCHITECTURE
+
+## 2.1 Four components
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  THE REPOSITORY  — the only source of truth               │
+│  Versioned files on disk. Survives every model.           │
+└────────────────────┬─────────────────────────────────────┘
+                     │ reads/writes mediated by
+┌────────────────────┴─────────────────────────────────────┐
+│  THE ORCHESTRATOR — state machine + context assembler     │
+│  Knows current stage, next action, who gets called,       │
+│  and exactly which bytes they receive.                    │
+└────────────────────┬─────────────────────────────────────┘
+                     │ dispatches jobs to
+┌────────────────────┴─────────────────────────────────────┐
+│  THE THREE MODELS — stateless workers                     │
+│  ChatGPT: Showrunner  Claude: Author  Gemini: Auditor     │
+└────────────────────┬─────────────────────────────────────┘
+                     │ surfaces status to
+┌────────────────────┴─────────────────────────────────────┐
+│  THE DASHBOARD — user's window; read-mostly               │
+└──────────────────────────────────────────────────────────┘
+```
+
+## 2.2 The constraint nobody should design around silently
+
+The three models **cannot talk to each other**. They have no shared channel. Every
+"AI-to-AI conversation" is really a file written by one model and handed to
+another by something outside all three.
+
+That something is the Orchestrator, and it exists in one of two forms:
+
+**Manual Mode** — the user is the Orchestrator. Copy-paste between three chat
+windows, files kept in a folder. Works today, zero build cost, but the user
+becomes the bottleneck and the master prompt's "minimal involvement" goal is only
+partly met.
+
+**Automated Mode** — a local script calls three APIs, assembles context packages,
+writes files, advances the state machine. This is what actually delivers
+autonomy.
+
+**Design rule: every artifact in this spec must be usable in both modes.** That
+means human-readable markdown with machine-parseable front matter — never a
+binary format, never a database-only representation. A user in Manual Mode must
+be able to open any file and understand it; a script in Automated Mode must be
+able to parse the same file without ambiguity.
+
+**[ARBITRATE]** I recommend building Manual Mode first with the exact file
+formats Automated Mode will use, so migration is a script swap and not a rewrite.
+Counter-position worth arguing: go straight to Automated Mode, because Manual
+Mode's real cost is that the user experiences the friction and abandons the
+project before the automation arrives.
+
+## 2.3 Separation of powers
+
+The single most important structural decision in this system:
+
+> **No model is the sole approving reviewer of its own work. No model writes the
+> documents that constrain it.**
+
+Self-editing is permitted and encouraged — the SELF-PASS in §25 is a revision
+pass, not an approval. Independent gate review is mandatory and cannot be
+performed by the producing model. (v0.1 stated this as "no model reviews its own
+work," which contradicted §25. Corrected.)
+
+- The **Showrunner** decides what happens but does not write prose.
+- The **Author** writes prose but cannot change canon.
+- The **Auditor** challenges everything but writes nothing into the book.
+
+This is a deliberate cost. It means more round trips than a single model would
+need. It buys the one thing a long book cannot survive without: an adversary who
+has no stake in the text being good already.
+
+---
+
+# 3. RESPONSIBILITIES OF CHATGPT, CLAUDE, AND GEMINI
+
+The master prompt asked us not to blindly accept the suggested divisions. I mostly
+did accept them, because they track real capability differences — but I moved
+three things and I'll say why.
+
+## 3.1 ChatGPT — **The Showrunner**
+
+Owns: project management, story architecture, structural planning, synthesis,
+arbitration, and the decision of what happens next.
+
+Writes and owns:
+`BLUEPRINT.md`, `ROADMAP.md`, `chapters/cards/`, `DECISION_LOG.md`,
+`OPEN_THREADS.md`, `SETUP_PAYOFF.md`, `STATE.md`
+
+Specific duties:
+- Convert intake into Blueprint. Expand a thin concept into a full book design.
+- Own the Roadmap and all chapter cards; decide scene breakdowns.
+- **Arbitrate.** When Claude and Gemini disagree, ChatGPT rules and logs it.
+  Arbitration is not consensus-finding; it is a decision with stated reasoning.
+- Decide escalation class for every question (§4).
+- Own pacing across the whole book — the thing no chapter-level view can see.
+- Declare the current stage and the next required action, always.
+
+Why the Showrunner also arbitrates: whoever arbitrates must hold the whole-book
+view, and the Showrunner is the only role that does by construction. Splitting
+arbitration to a fourth party would require rebuilding that view somewhere else.
+
+## 3.2 Claude — **The Author & Document Custodian**
+
+> Renamed from "Document Authority" on Showrunner review. *Authority* conflated
+> write permission with truth ownership. **The repository is the authority;
+> roles hold permissions over it.** That matches this system's own thesis (§1)
+> and is not a cosmetic change — see §5.4.
+
+Owns: long-form drafting, all manuscript text, document maintenance, continuity
+bookkeeping, line and copy editing.
+
+Writes and owns:
+`manuscript/`, `CONTINUITY.md`, `STYLE_SHEET.md`, `characters/`, `world/`,
+`locations/`, `TIMELINE.md`, `REVISION_LOG.md`
+
+Specific duties:
+- Draft every scene from its context package. Never from memory of the book.
+- **Maintain the Continuity Memory.** After revision and **before the gate**,
+  extract every new concrete fact as a **CANON CANDIDATE**. Candidates are
+  proposals, not canon. Gemini audits extraction completeness at the gate, and
+  approved candidates mutate the authoritative ledger **only during a successful
+  commit transaction** (§4.10.2). This is the highest-value repetitive task in
+  the system and it is a documentation task — but recording is not deciding.
+- Own voice. The Style Sheet is Claude's instrument and Claude is accountable for
+  the book sounding like one person wrote it.
+- Execute revisions at every level (§27) and propagate changes into affected docs.
+- Assemble the final manuscript via the boundary-rule assembler (§18.5). No hand
+  assembly, ever.
+- Refuse to invent canon. If a scene needs a fact that does not exist, Claude
+  raises a **Canon Request** to the Showrunner rather than making it up.
+
+**Canon has three separate operations.** Conflating them was an ambiguity in
+v0.1:
+
+| Operation | Who | Note |
+|---|---|---|
+| **Canon Proposal** | Any authorized worker, including Claude mid-draft | A proposal is not canon |
+| **Canon Approval** | ChatGPT, unless an approved rule already determines it, or it escalates to the user | The only step that creates canon |
+| **Canon Recording** | Claude, after approval | Writing it down is not deciding it |
+| **Canon Audit** | Gemini | Independently checks recorded state against approved manuscript and controlling decisions |
+
+**A manuscript fact does not become canon merely because Claude typed it.**
+Drafted invention enters as a **canon candidate** in the handoff and is ruled on
+(§30.4); it enters authoritative continuity only after approval and successful
+commit.
+
+The fourth stage was added on Showrunner review and closes a real gap: recording
+and deciding are different acts performed by different roles, and nothing
+otherwise verified that what was recorded matched what was approved.
+
+**Moved from the suggested division:** the master prompt floated continuity
+*review* for Claude. I've split it — Claude **records** continuity, Gemini
+**audits** it. The recorder must not be the auditor, or errors introduced during
+recording become invisible. This is the separation-of-powers rule applied to the
+most failure-prone document in the system.
+
+## 3.3 Gemini — **The Auditor & Red Team**
+
+Owns: research, fact-checking, adversarial review, contradiction hunting,
+independent creative alternatives.
+
+Writes and owns:
+`research/`, `audits/`, `ISSUES.md`
+
+Writes nothing into the manuscript or the bibles. Ever. Gemini's output is
+**findings**, and findings become changes only when the Showrunner rules or the
+Author implements.
+
+Specific duties:
+- **Adversarial continuity audit.** Given a chapter plus the continuity extract,
+  find every contradiction. Instructed to assume errors exist and hunt them —
+  neutral framing measurably under-finds, and an auditor told "check whether this
+  is fine" will tend to find that it is fine.
+- Research: period detail, technical accuracy, procedure, geography, culture.
+  Everything researched lands in `research/` with sources.
+- **Independent alternatives — MANDATORY, selective (§4.8.4).** On qualifying
+  forks Gemini generates options *without seeing Claude's or ChatGPT's proposal
+  first*. Blind generation is the whole point; showing it the existing proposal
+  converts an independent mind into an agreeable one. "Selective" means
+  criteria-triggered, not discretionary — see §4.8.4 for the trigger list.
+- Reader-experience critique: pacing drag, confusion, predictability, emotional
+  flatness, unearned turns.
+- Hunt abandoned threads and missing setups by register-diff, not vibes.
+
+**Moved from the suggested division:** Gemini gets *blind* alternative generation
+as a formal duty, not an optional one. This is the system's only defense against
+three models converging on the first idea anyone proposed.
+
+## 3.4 Authority table
+
+| Domain | Decides | Writes | Audits |
+|---|---|---|---|
+| Premise, structure, plot | ChatGPT | ChatGPT | Gemini |
+| Prose text | Claude | Claude | Gemini |
+| Voice & style | Claude | Claude | Gemini |
+| Canon facts | ChatGPT | Claude (records) | Gemini |
+| Continuity ledger | — | Claude | Gemini |
+| Research & fact | Gemini | Gemini | ChatGPT |
+| Conflict resolution | ChatGPT | ChatGPT | — |
+| Final manuscript build | — | Claude (script) | Gemini (spot) |
+
+## 3.5 Prose Objections — RULED, ADOPTED
+
+The Author may raise an objection but has **no unilateral authority to alter
+structure or canon**. Fixed format:
+
+```
+PROSE_OBJECTION
+Beat/Requirement:
+Observed problem:
+Why it fails in execution:
+Minimal proposed change:
+Downstream effect:
+Can current scene still be completed? yes/no
+```
+
+Showrunner rules exactly one: `ACCEPT` / `MODIFY` / `REJECT` / `REPLAN`.
+
+> **A Prose Objection is a proposal, not authority to deviate.** Filing one does
+> not license writing something other than the approved beat. The Author drafts
+> to the ruling, including when the ruling is `REJECT`.
+
+Rejected objections are logged in the Decision Log only when materially useful;
+trivial objections do not earn permanent entries.
+
+**Counting rule — RULED (DEC-002).** Trivial objections are not individually
+logged, but they **are counted per chapter.** At five or more in one chapter:
+
+> **S3 — `BEAT_MAP_FRICTION`**
+
+This is a diagnostic against the **planning layer**, not against the Author or
+the prose. It triggers Showrunner review of the chapter's beat-map granularity.
+It does **not** automatically require replanning and does **not** block the
+chapter gate.
+
+Repeated small objections are signal: they usually mean the chapter was
+over-specified at planning. Discarding them individually discards the pattern,
+which is not recoverable any other way.
+
+---
+
+# 4. AI COMMUNICATION WORKFLOW
+
+## 4.1 The Job Packet
+
+Every dispatch to a model is a **Job Packet** with fixed structure:
+
+```yaml
+job_id: CH07-S03-DRAFT-v1        # immutable; returned artifact must carry it
+stage: DRAFT
+assigned_to: claude
+dispatched_at: 2026-08-12T14:02:11Z
+inputs:                          # VERSION-LOCKED — not just file names
+  blueprint:            BLUEPRINT@v8
+  chapter_card:         CH07-CARD@v3
+  beat_map:             CH07-BEATS@v2
+  continuity_snapshot:  CONT@commit-a821d3
+  style_sheet:          STYLE@v4
+task: "Draft scene 3 of chapter 7 from the beat map below."
+deliverable: 04_CHAPTERS/ch07/scenes/s03.md
+constraints:
+  - "Boundary rule enforced: prose inside markers, all else outside."
+  - "Word target 1400-1800."
+  - "No new canon. Raise a Canon Request if you need a fact that isn't here."
+context_package: [assembled per §24]
+return_format: [handoff format per §4.3]
+```
+
+Nothing is dispatched conversationally. The packet is the interface.
+
+**Version locking.** Inputs are identified by version, not by name. A job whose
+controlling input changed after dispatch returns as `STALE_JOB`: its output
+cannot be approved until it is rebased on current inputs or the staleness is
+explicitly accepted with logged reasoning. Without this, a response arriving
+after its context moved will quietly overwrite work built on newer information —
+and the overwrite looks like ordinary progress.
+
+**Idempotency.** `job_id` is immutable and every returned artifact carries it. A
+second delivery of an already-committed job is **ignored or quarantined, never
+re-applied.** This is not theoretical: the relay layer between three models
+duplicates and reorders messages in practice, and duplicate application of a
+committed revision is silent corruption.
+
+## 4.2 The strict manuscript boundary rule (governing law)
+
+```
+}-----< Start >-----{
+   ...everything here IS in the book...
+}-----< finish >-----{
+   ...everything here is NOT in the book...
+```
+
+**Position decides. Content is never interpreted.** Prose outside the markers is
+cut. A note inside the markers is printed exactly as written. No model, at any
+stage, may reason about whether something "seems like" book content.
+
+Consequences that are rules, not exceptions:
+- Never type anything inside the markers you would not publish.
+- Markers sit alone on their own line, are never nested, and are always matched.
+- Markers never appear in the final book.
+- Final assembly is mechanical only (§18.4).
+
+This rule binds writing, editing, revision, transfer, storage, retrieval, and
+assembly, for all three models.
+
+## 4.3 Handoff format
+
+```
+[TO: <destination>]
+
+}-----< Start >-----{
+<prose only>
+}-----< finish >-----{
+
+JOB_ID:            <immutable; must match the dispatched packet>
+BASE_VERSION:      <repository state this work was built on>
+OUTPUT_VERSION:    <new version produced>
+TO: <role>         FROM: <role>
+CANON REQUESTS:    <facts needed but not supplied, or "none">
+CANON CANDIDATES:  <facts this draft introduces — proposals, not canon>
+PROSE OBJECTIONS:  <PROSE_OBJECTION blocks, or "none">
+CONFIDENCE:        <high|medium|low> on <what>
+RESPONSE REQUIRED: <yes/no + recipient>
+NOTES: <...>
+```
+
+Field names match Protocol v2 §4 exactly. `CANON CANDIDATES` replaced
+`CANON CHANGES` — the old name implied the change had already occurred, which is
+precisely the promotion-by-typing the canon model exists to prevent.
+
+Prose block first, always. A truncated handoff then loses metadata rather than
+manuscript — fail-safe by ordering.
+
+## 4.4 Disagreement protocol
+
+Triggered when any model's output contradicts another's, or Gemini files a
+Severity-1 or Severity-2 issue.
+
+1. **State positions.** Each model's position recorded verbatim, no summarizing
+   by the opponent.
+2. **Steelman.** Each model states the strongest version of the *other's*
+   position. If a model cannot, it does not understand the disagreement yet and
+   the step repeats.
+3. **Test.** Where possible the disagreement is resolved against evidence — the
+   text, the ledger, the timeline — not against preference.
+4. **Rule.** ChatGPT decides. Reasoning is stated.
+5. **Log.** `DECISION_LOG.md` entry, including the rejected position.
+6. **Propagate.** Claude updates every affected document.
+
+**Never** resolve by averaging, by splitting the difference, or by the loudest
+confidence. Recording the rejected position is not bureaucracy — it is what stops
+the team from reopening the same argument in chapter 19.
+
+## 4.5 Anti-sycophancy rules
+
+- Reviews may not open with praise. Findings first.
+- A review returning zero findings must state what it checked and why each check
+  passed. Empty reviews are re-run once with a sharper prompt.
+- Gemini never sees "Claude thinks X" before forming its own view on a fork.
+- Confidence must be declared. "High confidence, wrong" is a loggable defect;
+  "low confidence, flagged" is correct behavior.
+
+## 4.6 Routing protocol
+
+Relay turns are a hard budget. In Manual Mode every message costs the user an
+action; in Automated Mode it costs a call. Routing is therefore explicit.
+
+**Every response begins with exactly one routing tag on its first line:**
+
+| Tag | Destination |
+|---|---|
+| `[TO: ALL]` | Both other models |
+| `[TO: CHATGPT]` / `[TO: CLAUDE]` / `[TO: GEMINI]` | That model only |
+| `[TO: USER]` | The human operator only |
+| `[TO: NONE]` | Nothing is relayed |
+
+An untagged response defaults to `[TO: USER]`.
+
+**Rules:**
+1. One tag. First line. Never mid-message, never two.
+2. Route narrowly. `[TO: ALL]` is for decisions that bind everyone —
+   arbitration rulings, canon changes, protocol changes, gate failures.
+   Findings for one owner go to that owner.
+3. **No acknowledgment-only messages.** "Understood" costs a relay turn and
+   returns nothing. Acknowledge by acting, or by attaching acknowledgment to a
+   message that carries substance.
+4. Batch. One message with four questions beats four messages.
+5. Every relayed message states what response it needs, or states that it needs
+   none. A message that leaves the recipient guessing whether to reply burns two
+   turns to learn one thing.
+6. The routing tag lives **outside** the boundary markers and never reaches the
+   manuscript (§4.2).
+
+**Interaction with the Job Packet (§4.1):** in Automated Mode the Orchestrator
+sets routing from the job definition and models do not choose it. The tag
+protocol governs Manual Mode and any model-initiated message in either mode.
+
+## 4.7 Stall handling and provisional defaults
+
+The system must not block on a silent arbiter. A question that is asked twice
+without a ruling is a stall, and stalls are more expensive than wrong answers,
+because a wrong answer is visible and reversible while a stall is neither.
+
+But the v0.2 form of this rule was too broad, and the Showrunner was right to
+refuse it. "A provisional decision is fully binding on downstream work" lets a
+missing response manufacture expensive downstream work from a weak assumption.
+**Silence may stop small decisions from blocking production. Silence may not
+manufacture high-authority canon.**
+
+**Rule:** if an AI-Decidable question receives no ruling after two requests, the
+proposing model classifies it and acts by class.
+
+### Provisional classes
+
+| Class | Scope | Behavior on silence |
+|---|---|---|
+| **P1 — Low impact** | Local, cheap to reverse, no downstream propagation | Adopt and proceed normally |
+| **P2 — Reversible** | Real downstream effect but bounded reversal cost | Adopt and proceed, but **every downstream output is flagged provisional** and inherits the flag until the ruling lands |
+| **P3 — High impact** | See list below | **Cannot auto-adopt.** Production halts on this path; requires the owning arbiter or user escalation. An attempt to auto-adopt is a `PROCESS_VIOLATION`, blocked immediately (§29); a P3 provisional actually created, or inherited downstream, is **S0** |
+
+**P3 by definition** — anything affecting: premise · **high-impact canon
+decisions or canon-system architecture** · major character fate · ending ·
+authority rules · structural chapter changes.
+
+**Plus the governing catch-all:** any decision with **HIGH reversal cost or
+expensive downstream propagation** is P3 regardless of whether it matches a named
+example. The named list is illustrative, not exhaustive — without the catch-all a
+high-impact decision could escape P3 by not resembling anything on it.
+
+> **Silence may unblock low-risk work. Silence may not manufacture
+> high-authority canon or architecture.**
+
+A provisional decision at any class:
+- Is logged in `DECISION_LOG.md` with `status: provisional`, its class, and the
+  reason (`no ruling after 2 requests`).
+- Records `reversal_cost`.
+- Is overturned by a later ruling from the owning role at any time, with normal
+  propagation (§27).
+
+### Self-correction
+
+**My own adoption of DEC-003 under the v0.2 rule was improper.** It was a P3
+decision — it altered authority rules, `reversal_cost: HIGH` — and I auto-adopted
+it after two unanswered requests. It happened to be ruled correct afterward,
+which is luck, not process. Under the corrected rule it would have halted that
+path and escalated. The rule change stands as written and DEC-003's validity now
+rests on the explicit ruling, not on my provisional adoption.
+
+This is the failure mode the class system exists to prevent, and it occurred in
+the first live use of the rule.
+
+**Escalation to the user requires justification.** Any model routing a question
+to the user must state which §32.1 class it falls in and why the team cannot
+resolve it. A question that is AI-Decidable and sent upward anyway is a defect
+and gets returned to the sender.
+
+**Anti-pattern:** deflecting a decision to the user is the cheapest way for a
+model to avoid being wrong. It is also the fastest way for a system designed
+around minimal user involvement to fail at its central purpose. Cost the user's
+attention like a scarce resource, because it is the scarcest one here.
+
+## 4.8 Non-waivable protocol requirements
+
+Elevated from advisory to mandatory by Showrunner ruling. These four cannot be
+skipped for schedule, cost, or convenience. A build that omits any of them is not
+this system.
+
+### 4.8.1 Two-axis authority model
+Descriptive and prescriptive facts rank on separate ladders (§23). Collisions
+raise `AUTHORITY_CONFLICT` and follow the §23.3 procedure. No inference-based
+resolution, ever.
+
+### 4.8.2 AUTHORITY_CONFLICT behavior
+The §23.3 procedure is fixed: HALT → REPORT → CONFIRM → RULE → PROPAGATE → LOG.
+An open AUTHORITY_CONFLICT blocks every gate on the affected chapter. §4.7
+provisional defaults do **not** apply — an S1 contradiction may not be defaulted.
+
+### 4.8.3 Independent continuity auditing
+Claude records continuity; **Gemini audits it.** The recorder may never audit its
+own records, or errors introduced during recording become structurally invisible.
+
+Operational consequence: **a chapter cannot reach APPROVED without an audit of
+record.** If Gemini is unavailable, the chapter is drafted and held at
+`PENDING_AUDIT`. It does not pass.
+
+**The mandatory audit is not routable-around.** Work that does not depend on the
+audit gate proceeds normally; **nothing requiring independent audit may be
+represented as approved until that audit occurs.** `PENDING_AUDIT` is the
+designed degraded state and is correct behavior — approval without the audit is
+the defect. This matters most in Manual Mode, where the
+temptation to skip the third window is strongest and the cost is invisible until
+chapter 20.
+
+### 4.8.4 Selective blind-alternative generation
+Mandatory and criteria-triggered, not discretionary. Gemini generates
+alternatives **before seeing any other model's proposal** when *any* of these
+hold:
+
+1. The decision alters a Blueprint core field — premise, story question,
+   protagonist want/need, midpoint, climax, resolution, ending state.
+2. The decision affects **3 or more chapters**.
+3. The decision's `reversal_cost` is HIGH.
+4. It concerns a thread or setup marked `importance: major`.
+5. Only one proposal exists and no alternative is on record.
+
+**Not triggered** by scene-level craft, character naming, minor cast, dialogue,
+chapter titles, sensory detail, or prose choices within the Style Sheet. Those
+are AI-Decidable (§32.1) and blind generation on them is pure overhead.
+
+**Cap: 2 alternatives, one round.** Blind generation exists to prevent premature
+convergence, not to multiply options indefinitely.
+
+## 4.9 Unverified claims
+
+§4.7 governs stalled *decisions*. It cannot govern stalled *facts* — a
+provisional default on a question of truth is just a guess with paperwork.
+
+**Rule:** a `[VERIFY]` item unanswered after two requests becomes a logged
+`ASSUMPTION`, and the design is refactored so that **no gate depends on it.**
+Where dependency cannot be removed, the dependent section is marked `BLOCKED` and
+scoped out of Phase 1 rather than built on an unverified claim.
+
+Current assumptions, each with its graceful-degradation default:
+
+| Item | Assumption adopted | Degradation |
+|---|---|---|
+| §5.3 retrieval | Structured ID lookup (§24.3) | **May optimize §24.3; does not block it.** Structured ID lookup remains the correctness-preserving default unless verification demonstrates a material benefit from vector retrieval |
+| §12 imagery | Character identity consistency across generations is **unreliable** | Turnarounds are canonical **as text**; generated imagery is decorative and never a source of truth |
+| §28 repo size | Binary images stored **outside** the repo with pointers | Text-only repos are trivially small; the pointer scheme is correct either way |
+| §17 timeline | Arithmetic checks are necessary but not sufficient | Non-linear time, unreliable narration, and relativistic settings are flagged for **manual** review rather than auto-passed |
+
+Each default is chosen so that being wrong costs an optimization, never a
+correctness failure. That is the test any assumption must pass before it is
+allowed to stand in for verification.
+
+## 4.10 Execution engineering principles
+
+Four principles added on Showrunner review. Without them Atelier is a writing
+protocol; with them it can survive autonomous execution.
+
+### 4.10.1 Version-locked jobs
+Every job identifies its inputs by version (§4.1). Any controlling input that
+changes after dispatch marks the result `STALE_JOB`, unapprovable until rebased
+or explicitly accepted.
+
+### 4.10.2 Transactional propagation
+A revision touching manuscript + continuity + timeline + registers is **one
+transaction**. States: `OPEN → VALIDATED → COMMITTED`. Failure mid-propagation
+sets `ROLLBACK_REQUIRED` and nothing becomes authoritative.
+
+This closes the failure the spec warns about everywhere else: text updated,
+memory not updated. A half-propagated revision is worse than no revision,
+because the book now contradicts its own records while appearing fixed.
+
+**Implementation:** git-native rather than a bespoke transaction manager.
+Propagation happens on a working branch; the merge to trunk *is* the commit.
+Rollback is `git branch -D`. This is a deliberate simplification of the
+Showrunner's proposal — same semantics, no new machinery, and the audit trail
+comes free.
+
+### 4.10.3 Idempotent execution
+Immutable `job_id` on every packet and every returned artifact. Re-delivery of a
+committed job is ignored or quarantined, never re-applied.
+
+### 4.10.4 Authority separated from file ownership
+See §5.4. Ownership is *write permission*. It is not *truth ownership*.
+
+## 4.11 Crash and resume
+
+`STATE.md` names the current node. That is insufficient on its own: it does not
+say what happens when an interruption lands mid-job. Every job carries an
+explicit lifecycle:
+
+```
+DISPATCHED → RESPONSE_RECEIVED → VALIDATION_PENDING → COMMIT_PENDING → COMMITTED
+```
+
+**On restart, the Orchestrator resumes from the last COMMITTED transition —
+never from the last generated output.** Generated-but-uncommitted work is
+re-validated from scratch or discarded. Trusting an uncommitted artifact after a
+crash is how a system silently adopts output that never passed a gate.
+
+## 4.12 The dependency graph
+
+`affects:` arrays in front matter are useful but insufficient — they are
+manually maintained and will drift. The system derives a real directed graph:
+
+```
+FACT-0418 → CHAR-marla → CH07-S03 → CH07 → ACT2 → MANUSCRIPT
+```
+
+Edges are derived from actual references (which facts a scene cites, which
+entities a card names, which scenes a chapter contains), not from hand-written
+lists. When a node changes, the system traverses downstream and marks every
+reachable node `REEVALUATION_REQUIRED`.
+
+Hand-maintained `affects` arrays remain as a **declaration of intent**, and a
+divergence between declared and derived edges is itself a finding — it usually
+means someone changed a document without understanding its reach.
+
+### 4.12.1 Explicit ref evaluation — REQUIRED
+
+*(Added v0.3.3 per audit finding F-02.)*
+
+> **Every validation or read-side script whose result can affect a transaction
+> must evaluate an explicit repository ref, and must default to `HEAD` — never
+> implicitly to trunk.**
+
+Applies at minimum to `build_depgraph.py`, `check_registers.py`, and
+`resolve_facts.py`, and to any later validator operating on repository state.
+
+```
+build_depgraph.py --ref <branch|commit>     # defaults to HEAD
+```
+
+**Validation records the ref it evaluated.** A recorded ref that does not match
+the branch being merged is **S0** (invalid state transition).
+
+The dangerous case is not the false positive. During an L6/L7 structural revision
+on a branch, a script reading trunk *misses* downstream propagation on exactly the
+files the branch changed — and a structural revision is when downstream
+propagation matters most. A silent miss there merges a revision whose downstream
+chapters were never re-checked.
+
+## 4.13 STALE_INSTRUCTION
+
+**Distinct from `STALE_JOB`.** A job can be perfectly current while carrying an
+instruction generated against an obsolete specification state. The message is
+fresh; its premise is not.
+
+> **Rule:** before applying any received revision request, compare it against the
+> current authoritative version. If the requested change is already implemented,
+> superseded, or conflicts with a later final ruling, record it as
+> `STALE_INSTRUCTION` and **perform no mutation.** New, nonconflicting
+> information in the same message is processed normally.
+
+| | Stale in | Effect |
+|---|---|---|
+| `STALE_JOB` | Its **inputs** — context moved after dispatch | Output cannot commit; rebase or accept explicitly |
+| `STALE_INSTRUCTION` | Its **premise** — written against an older spec | No mutation; log and continue |
+
+The failure this prevents is subtle and expensive: obediently applying an older
+correction set rolls the specification *backward*, and because each individual
+instruction looks reasonable, the regression is invisible at the point it
+happens. **Mixed messages are processed component-wise.** Genuinely new instructions are
+preserved and applied; only stale portions are rejected or quarantined. A message
+can be 90% stale and 10% new, and the 10% still matters — discarding the whole
+message because most of it is obsolete loses real instructions.
+
+### 4.13.1 Component boundaries and atomicity
+
+*(Added v0.3.3 per audit finding F-03.)*
+
+**A whole mixed instruction is never rejected solely because one component is
+conditional.** But splitting has a hard rule:
+
+> **Component boundaries may be created only from unambiguous structural
+> divisions** — numbered or bulleted items, separately headed sections, or
+> discrete structured command blocks.
+>
+> **A component containing a conditional, dependency, qualifier, or scoping
+> clause is atomic.** It may be accepted, rejected, quarantined, or marked stale
+> **as one unit**, but never subdivided.
+>
+> **Ambiguous component scope is quarantined individually** while independently
+> separable components continue processing.
+
+The failure this prevents: *"Revise Chapter 7, but only if Marla hasn't left the
+workshop"* split heuristically can execute the action while dropping the
+condition — converting a conditional instruction into an unconditional one, which
+is worse than rejecting it outright. Atomicity keeps the condition and its action
+in the same unit, making detachment structurally impossible rather than merely
+discouraged.
+
+**Lexical pre-check:** a component containing `if`, `unless`, `only when`,
+`provided that`, `assuming`, or an equivalent qualifier is flagged
+atomic-mandatory and cannot be split.
+
+**Never regenerate a section solely because the relay delivered an older
+correction set.**
+
+---
+
+
+===== END PART 01 OF 05 =====
+ENDED_WITH:      ---
+PART_SHA256:     5373163d2feeadbfec2310de388bd8372a70b87cb4d639b78a696ede5a66486e
+NEXT:            PART 02 OF 05

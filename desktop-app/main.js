@@ -25,6 +25,9 @@ const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
 const managerProvider = require("./manager-provider");
+const atelierGov = require("./atelier-governance");
+const dbService = require("./db-service");
+const sdProvider = require("./sd-provider");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2014,6 +2017,48 @@ async function pollSite(site) {
     // displayText here instead would make it permanently mismatch the raw
     // DOM text every subsequent poll, causing the exact same roundtable
     // reply to be re-captured and re-relayed forever.
+    // ATELIER governance (opt-in, off by default). When enabled and this pane
+    // is mapped to a target artifact, ask the write-authority gate whether this
+    // reply is a permitted write. A refused reply is HELD: still shown in the
+    // transcript, but not routed on to the other panes. Failing open on any
+    // error preserves the original behaviour — governance never silently eats a
+    // reply.
+    let govHold = false;
+    try {
+      const g = await atelierGov.governTurn(turn);
+      if (g && g.governed) {
+        turn.governance = g;
+        govHold = !!g.held;
+        logEvent("atelier-govern", { site, ok: g.ok, held: g.held, target: g.target, available: g.available });
+      }
+    } catch (e) {
+      logEvent("atelier-govern-error", { site, error: String(e) });
+    }
+
+    // Record the captured reply into the shared SQLite message log (guarded;
+    // no-ops if the database backend is unavailable).
+    try { dbService.recordTurn(turn); } catch (_) {}
+
+    // AI-triggered image generation: if this reply opens with an [IMAGE: ...]
+    // tag and Stable Diffusion auto-mode is on, render it in the background and
+    // push the result to the UI. Never blocks the poll loop.
+    try {
+      if (sdProvider.autoFromAI()) {
+        const imgPrompt = sdProvider.parseImageTag(turn.text);
+        if (imgPrompt) {
+          logEvent("sd-ai-trigger", { site, prompt: imgPrompt.slice(0, 80) });
+          sdProvider.generate({ prompt: imgPrompt, from: site })
+            .then((r) => {
+              if (r && r.ok) {
+                try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+                broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+              } else logEvent("sd-ai-error", { site, error: r && r.error });
+            })
+            .catch((e) => logEvent("sd-ai-error", { site, error: String(e) }));
+        }
+      }
+    } catch (_) {}
+
     state.captured[site] = roundtableTag ? { ...turn, text } : turn;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -2042,16 +2087,22 @@ async function pollSite(site) {
     // real target Set exists before mesh decides what's left over --
     // roundtableTargetsFor() doesn't have this ordering constraint since
     // it's a pure function of the turn, computable at any point.
-    let hrSentTargets = new Set();
-    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-    else await handleRoundtableCapture(turn);
-    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-    for (const target of state.routing[site]) {
-      if (target === site || roundtableTargets.has(target)) continue;
-      await sendTextTo(target, text, site);
+    // A governance-held reply is displayed but never propagated: skip every
+    // re-routing path (House Rules, Roundtable tag, mesh, Sequence, manager).
+    if (govHold) {
+      logEvent("atelier-held", { site, target: turn.governance && turn.governance.target });
+    } else {
+      let hrSentTargets = new Set();
+      if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+      else await handleRoundtableCapture(turn);
+      const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
+      for (const target of state.routing[site]) {
+        if (target === site || roundtableTargets.has(target)) continue;
+        await sendTextTo(target, text, site);
+      }
+      if (state.sequence.active) await handleSequenceCapture(turn);
+      if (state.manager.status === "waiting") await handleManagerCapture(turn);
     }
-    if (state.sequence.active) await handleSequenceCapture(turn);
-    if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
@@ -2059,9 +2110,80 @@ async function pollSite(site) {
   }
 }
 
+// --- Shared database (SQLite) IPC ------------------------------------------
+ipcMain.handle("db:status", async () => {
+  try { return dbService.status(); } catch (e) { return { available: false, reason: String(e) }; }
+});
+ipcMain.handle("db:recent-messages", async (_evt, limit) => {
+  try { return dbService.recent(limit || 100); } catch (e) { return []; }
+});
+ipcMain.handle("db:memory-summary", async () => {
+  try { return dbService.memorySummary(); } catch (e) { return { available: false, counts: {}, total: 0 }; }
+});
+ipcMain.handle("db:memory-create", async (_evt, { type, data }) => {
+  try { return dbService.memoryCreate(type, data); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("db:memory-search", async (_evt, query) => {
+  try { return dbService.memorySearch(query); } catch (e) { return { available: false, results: [] }; }
+});
+ipcMain.handle("db:project-state", async () => {
+  try { return dbService.projectState(); } catch (e) { return { available: false }; }
+});
+
+// --- Stable Diffusion (Image Studio) IPC -----------------------------------
+ipcMain.handle("sd:get-settings", async () => {
+  try { return sdProvider.getSettings(); } catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("sd:set-settings", async (_evt, patch) => {
+  try { const s = sdProvider.setSettings(patch || {}); logEvent("sd-settings", { enabled: s.enabled, autoFromAI: s.autoFromAI }); return s; }
+  catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("sd:test", async () => {
+  try { return await sdProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("sd:generate", async (_evt, opts) => {
+  try {
+    const r = await sdProvider.generate(opts || {});
+    if (r && r.ok) {
+      try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+      broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+    }
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("sd:gallery", async (_evt, limit) => {
+  try { return sdProvider.gallery(limit || 24); } catch (e) { return []; }
+});
+
+// --- ATELIER governance IPC ------------------------------------------------
+ipcMain.handle("atelier:detect", async () => {
+  try { return atelierGov.detect({ force: true }); }
+  catch (e) { return { available: false, reason: String(e) }; }
+});
+ipcMain.handle("atelier:stages", async () => {
+  try { return atelierGov.stages(); } catch (e) { return { available: false, stages: [], reason: String(e) }; }
+});
+ipcMain.handle("atelier:get-settings", async () => {
+  try { return atelierGov.getSettings(); } catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("atelier:set-settings", async (_evt, patch) => {
+  try { const s = atelierGov.setSettings(patch || {}); logEvent("atelier-settings", { enabled: s.enabled }); return s; }
+  catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("atelier:check", async (_evt, { role, path: p }) => {
+  try { return atelierGov.checkAuthority(role, p); } catch (e) { return { available: false, ok: false, reason: String(e) }; }
+});
+ipcMain.handle("atelier:status", async (_evt, dir) => {
+  try { return atelierGov.status(dir); } catch (e) { return { available: false, lines: [], reason: String(e) }; }
+});
+ipcMain.handle("atelier:deliver", async (_evt, { turn, jobId }) => {
+  try { return atelierGov.deliverTurn(turn, jobId); } catch (e) { return { available: false, ok: false, message: String(e) }; }
+});
+
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
+  try { dbService.recordUserMessage(text, list); } catch (_) {}
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   for (const t of list) results[t] = await sendTextTo(t, text, null);
@@ -2796,6 +2918,10 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 
 app.whenReady().then(() => {
   loadPersistedState();
+  try { atelierGov.init(userDataDir()); } catch (e) { logEvent("atelier-init-error", { error: String(e) }); }
+  try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
+  catch (e) { logEvent("db-init-error", { error: String(e) }); }
+  try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   createWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

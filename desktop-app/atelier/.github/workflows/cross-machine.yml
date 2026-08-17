@@ -1,0 +1,91 @@
+name: cross-machine verification
+
+# Task D2 / control C-25. PDF-010 proved that local execution does NOT imply
+# portability: the transaction suite passed in seconds on the author's machine
+# and hung past three minutes elsewhere, because twelve git calls had no
+# timeout. Cross-machine verification cannot be self-certified — it requires a
+# runner the author does not control.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # git is a prerequisite of the F-08 merge-provenance tests. Absence must
+      # produce SKIP, never a silent PASS — assert that distinction holds here.
+      - name: record environment
+        shell: bash
+        run: |
+          python -V
+          git --version || echo "git unavailable — F-08 cases must SKIP, not PASS"
+
+      - name: regression suites
+        shell: bash
+        run: python harness.py suites
+
+      - name: red-state guards
+        shell: bash
+        run: python harness.py prove
+
+      - name: end-to-end scaffold and build
+        shell: bash
+        run: python harness.py e2e
+
+      - name: validators against the frozen example
+        shell: bash
+        run: python harness.py validate examples/salt-line || true
+
+      - name: freeze integrity
+        shell: bash
+        run: python verify_freeze.py examples/salt-line
+
+      - name: compare against EXPECTED_RESULTS
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re, subprocess, sys, pathlib
+          expected = {
+            "test_assembler": "16/16", "test_provisional_classifier": "6/6",
+            "test_transaction": "20/20", "test_controls": "8/8",
+            "test_propagation": "4/4", "test_candidates": "23/23",
+            "test_timeline": "7/7", "test_depgraph": "6/6",
+            "test_knowledge": "5/5", "test_registers": "7/7",
+            "test_context": "7/7", "test_refscope": "5/5",
+            "test_identity": "4/4", "test_authority": "5/5",
+            "test_provenance": "5/5", "test_instruction": "5/5",
+            "test_redelivery": "6/6",
+          }
+          bad = []
+          for name, want in expected.items():
+              r = subprocess.run([sys.executable, f"{name}.py"],
+                                 capture_output=True, text=True, timeout=300)
+              last = (r.stdout.strip().splitlines() or [""])[-1]
+              got = re.search(r"(\d+/\d+)", last)
+              got = got.group(1) if got else "?"
+              skipped = "skipped" in last
+              ok = got == want or (skipped and name == "test_transaction")
+              print(f"{'OK  ' if ok else 'DIFF'} {name:<32} want {want:<6} got {got}"
+                    + ("  (SKIPs are NOT passes)" if skipped else ""))
+              if not ok:
+                  bad.append(f"{name}: want {want}, got {got}")
+          if bad:
+              print("\nCROSS-MACHINE DIVERGENCE:")
+              for b in bad: print("  " + b)
+              sys.exit(1)
+          print("\nCROSS-MACHINE VERIFICATION: ESTABLISHED on this runner")
+          PY

@@ -1,0 +1,129 @@
+===== ATELIER SPECIFICATION — PART 05 OF 05 =====
+SOURCE_VERSION:  v0.3.3
+SOURCE_FILE:     SYSTEM_SPEC.md
+PART_NUMBER:     05 of 05
+BYTE_RANGE:      [110360, 116516)
+PART_BYTES:      6156
+PART_LINES:      111
+PART_SHA256:     0cbf2af1c62af0912d94bc2ed1fb1d9b93ec57dd5a03c00348e0ad313b14a8de
+WHOLE_BYTES:     116516
+WHOLE_SHA256:    25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+BEGINS_WITH:     # APPENDIX B — CHANGE LOG
+CONTINUES:       no - final part
+===== BEGIN PART 05 CONTENT =====
+# APPENDIX B — CHANGE LOG
+
+**v0.1 → v0.2**
+
+| Change | Section | Source |
+|---|---|---|
+| Routing protocol added | §4.6 | ChatGPT |
+| Stall handling / provisional defaults | §4.7 | Claude |
+| Non-waivable protocol requirements | §4.8 | ChatGPT ruling |
+| Blind-alternative trigger criteria defined | §4.8.4 | Claude (defining "selective") |
+| `PENDING_AUDIT` state added | §4.8.3 | Claude (enforcing mandatory audit) |
+| Unverified-claim handling + 4 degradation defaults | §4.9 | Claude |
+| Collision rule → `AUTHORITY_CONFLICT` with fixed procedure | §23.3 | ChatGPT named it, Claude specified it |
+| `AUTHORITY_CONFLICT` added to error taxonomy | §30.2 | Claude |
+| DEC-003 ruled and approved | Appendix A | ChatGPT |
+| DEC-001/002/004 adopted provisionally *(later superseded — see v0.3.1)* | Appendix A | §4.7 |
+
+**Open at v0.2:** four Gemini `[VERIFY]` items, running on §4.9 assumptions.
+DEC-001, DEC-002, DEC-004 were provisional at v0.2. **All six decisions received
+explicit Showrunner rulings and are FINAL as of v0.3.1** — the provisional states
+are preserved as history and are not the current status.
+
+---
+
+**v0.2 → v0.3** — Showrunner adversarial review integrated.
+
+*Bugs fixed:* self-review principle contradicted SELF-PASS (§2.3) · manuscript
+"immutable" contradicted L4–L8 revision (§23.1) · gate-order bug, APPROVE before
+EXTRACT (§25).
+
+*Added:* execution engineering principles (§4.10) · crash/resume lifecycle
+(§4.11) · derived dependency graph (§4.12) · write-vs-decision authority (§5.4) ·
+three canon operations (§3.2) · Prose Objection format (§3.5) · structured fact
+records with resolver (§18.1) · Knowledge Matrix (§18.4) · S0 severity class with
+retroactive build check (§29) · three completion states (§29) · failure-injection
+validation (§36) · five scripts (§33).
+
+*Relaxed:* three-chapter payoff rule → weight-relative heuristic (§21).
+
+*Renamed:* Document Authority → **Document Custodian** · source-of-truth
+hierarchy → **Authority Model**, with axes named Established Reality and Intent.
+
+*Disputed, one item:* trivial Prose Objections should be **counted** even when
+not logged (§3.5).
+
+**v0.3.3** — Gemini partial adversarial audit integrated. Gate:
+**PASS WITH REQUIRED FIXES — PENDING FOCUSED RE-AUDIT.**
+
+*Audit findings, all accepted as ruled:*
+**F-01** transaction branch opens before `EXTRACT CANDIDATES`, not after `GATE`
+(§25, §18.5.1, §34, §35) — candidate mutation on trunk before merge is S0.
+**F-02** every validation script takes an explicit `--ref` defaulting to `HEAD`,
+never implicitly trunk; validation records the ref; mismatch is S0 (§4.12.1).
+**F-03** component boundaries only from unambiguous structural divisions; a
+component containing a conditional is atomic and never subdivided (§4.13.1).
+**F-04** Auditor timeout permits `UNCONFIRMED_CONFLICT` ruling and continued
+propagation, but the chapter holds at `PENDING_AUDIT` and cannot reach APPROVED;
+APPROVED with unresolved `UNCONFIRMED_CONFLICT` in lineage is S0 (§23.3.1).
+**F-05** context budgets are soft targets; `build_context.py` emits
+`facts_available` / `facts_included` / `facts_omitted` and the Job Packet flags
+truncation — no silent continuity omission (§24.1.1).
+
+*Verifications:* V1 VERIFIED (structured ID retrieval permanent default) ·
+V2 NOT VERIFIED (imagery stays decorative) · V3 VERIFIED (binaries external) ·
+V4 PARTIALLY VERIFIED (arithmetic necessary, insufficient).
+
+*Staged items merged:* `check_jobs.py`, `test_provisional_classifier.py`, and
+`verify_delivery.py` recorded as implemented (§33) · `--prove` red-state
+verification (§30.1.2) · PDF-001 corrected to S0 · engineering guidance that
+tests and specification review are separate controls (§30.1.3) · §12 wording
+aligned to the approved formulation.
+
+*Five S0 conditions added to the error taxonomy (§30.2).*
+
+**v0.3.2** — Showrunner synchronization pass 2. Canon candidates now stored in a
+**separate file** (`03_MEMORY/CANDIDATES.md`) rather than flagged inside the
+authoritative ledger (§18.5.1). Manuscript assembly split out of update
+discipline into its own §18.6 — extraction is judgment, assembly is mechanical.
+Canon Approval separated from Canon Recording in the §35 worked example.
+`STALE_INSTRUCTION` and candidate-leakage added to the failure-injection suite
+(§36, injections 21–22). §5 subsection numbering resequenced (5.4 had been
+inserted between 5.1 and 5.2). Candidate leakage and stale-instruction mutation
+added to the §30.2 error taxonomy as S0.
+
+**v0.3.1** — Decision Log and full-document synchronization. Stale prose removed:
+§3.2 extraction model, §4.3 handoff fields (`CANON CHANGES` → `CANON CANDIDATES`,
+plus JOB_ID / BASE_VERSION / OUTPUT_VERSION / RESPONSE REQUIRED), §18.5 update
+discipline, §25 and §34 and §35 transaction ordering, §29 S0 execution failures,
+Appendix A arbitration block, Appendix B provisional states, header owner title.
+Decision Log synchronization: DEC-002 counting dispute ruled:
+trivial Prose Objections counted per chapter, 5+ raises S3 `BEAT_MAP_FRICTION`
+against the planning layer (§3.5). DEC-005 implementing specifications approved;
+provisional language removed. DEC-006 P3 scope clarified with an explicit
+catch-all for HIGH reversal cost or expensive downstream propagation (§4.7).
+Gemini VERIFY #1 reclassified as optimizing rather than blocking (§4.9).
+No architectural changes. All six decisions final.
+
+**v0.3 amendments** — Showrunner rulings final on DEC-001 through DEC-004.
+§4.7 narrowed into P1/P2/P3 provisional classes (DEC-006); high-impact decisions
+can no longer be auto-adopted on silence. §23 renamed to **TWO-AXIS AUTHORITY
+MODEL** per required terminology. Claude's earlier auto-adoption of DEC-003
+recorded as improper under the corrected rule.
+
+---
+
+*End of SYSTEM_SPEC v0.3.3 — authoritative.*
+
+*§12, §31, and §33 remain the weakest sections by the author's own assessment.
+Gemini has not completed an adversarial review of any version; the audit gate
+stands at `PENDING_AUDIT` and no section of this document has been independently
+attacked.*
+
+===== END PART 05 OF 05 =====
+ENDED_WITH:      attacked.*
+PART_SHA256:     0cbf2af1c62af0912d94bc2ed1fb1d9b93ec57dd5a03c00348e0ad313b14a8de
+NEXT:            END OF SPECIFICATION message

@@ -15,8 +15,13 @@
     }
     #btn-collapse-window { font-size:13px; line-height:1; padding:3px 9px; }
 
-    #wrap { display:flex; flex-direction:column; gap:8px; padding:8px 10px; flex:1 1 auto; min-height:0; overflow:auto; }
+    #wrap { display:flex; flex-direction:column; gap:8px; padding:8px 10px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
     #wrap.window-collapsed { display:none; }
+    /* Visible scrollbar so it's obvious the panel scrolls vertically. */
+    #wrap::-webkit-scrollbar { width:11px; }
+    #wrap::-webkit-scrollbar-track { background:#141414; }
+    #wrap::-webkit-scrollbar-thumb { background:#3a3a3a; border-radius:6px; border:2px solid #141414; }
+    #wrap::-webkit-scrollbar-thumb:hover { background:#4a4a4a; }
     .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:7px 9px; overflow:auto; }
     .col h2 { font-size:11px; margin:0 0 5px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
 
@@ -134,13 +139,17 @@
        changes. */
     #collapsed-strip { display:flex; gap:6px; flex:0 0 auto; min-width:0; height:44px; }
     #collapsed-strip:empty { display:none; }
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:0; transition: flex-basis .2s ease; }
+    /* The AI panes grow to fill spare height, but keep a usable floor so that
+       adding more panels makes the whole #wrap scroll (it is overflow:auto)
+       instead of crushing the panes. The floor is lifted when every pane is
+       collapsed (see the .all-collapsed rule below) so no dead space is left. */
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:320px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
        space — collapse #ai-row down to nothing and give the rest to
        Transcript/Activity Log. */
-    #wrap.all-collapsed #ai-row { flex: 0 0 auto; }
+    #wrap.all-collapsed #ai-row { flex: 0 0 auto; min-height: 0; }
     #wrap.all-collapsed #main-row { flex: 1 1 auto; }
     .ai-col {
       flex:1 1 0; min-width:0; display:flex; flex-direction:column;
@@ -357,6 +366,104 @@
       </div>
     </div>
 
+    <!-- ON HOLD: the ATELIER governance panel is hidden from the UI. The
+         feature and all its code are kept intact (opt-in, off by default). To
+         bring it back, remove the style="display:none" below and re-enable the
+         atelierRefreshStatus()/atelierLoadSettings() calls in controls.js. -->
+    <div id="col-atelier" class="col yc-panel" style="display:none;">
+      <div class="yc-head">
+        <h2>Book Governance (ATELIER)</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-atelier" title="Collapse Governance">⌄</button>
+      </div>
+      <div id="atelier-body">
+        <p style="opacity:.6; margin:6px 0 6px;">Optional. When on, each pane's reply is checked against ATELIER's write-authority rules before it's routed on. A reply a pane isn't allowed to write is <b>held</b> (shown, not forwarded). Needs Python 3 installed. Leave off to keep the normal roundtable behaviour.</p>
+        <div id="atelier-status" style="margin:4px 0; opacity:.85;">Checking for the ATELIER toolkit…</div>
+        <label style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+          <input type="checkbox" id="atelier-enabled"> <span>Enable governance</span>
+        </label>
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Book project folder</label>
+        <input id="atelier-projectdir" type="text" placeholder="e.g. C:\Users\you\Documents\AutoInjector Projects\my-book" style="width:100%;">
+        <p style="opacity:.6; margin:8px 0 4px;">Target artifact each pane writes (relative to the project, e.g. <code>04_CHAPTERS/ch01/scenes/s01.md</code>). Leave blank to not govern that pane.</p>
+        <label style="display:block; margin:4px 0 2px; opacity:.8;">ChatGPT →</label>
+        <input id="atelier-target-chatgpt" type="text" placeholder="01_DESIGN/… or 00_CONTROL/…" style="width:100%;">
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Claude →</label>
+        <input id="atelier-target-claude" type="text" placeholder="04_CHAPTERS/… or 02_BIBLE/…" style="width:100%;">
+        <label style="display:block; margin:6px 0 2px; opacity:.8;">Gemini →</label>
+        <input id="atelier-target-gemini" type="text" placeholder="06_AUDIT/… (auditor)" style="width:100%;">
+        <div class="btns" style="margin-top:8px;">
+          <button id="btn-atelier-save" class="primary">Save</button>
+          <button id="btn-atelier-recheck">Re-check toolkit</button>
+        </div>
+        <div id="atelier-save-status" style="margin-top:6px; opacity:.75;"></div>
+      </div>
+    </div>
+
+    <div id="col-memory" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Project Memory</h2><span class="spacer"></span>
+        <span id="memory-summary" style="font-size:9.5px; opacity:.7;"></span>
+        <button class="collapse-btn" id="btn-collapse-memory" title="Minimize this panel">⌄</button>
+      </div>
+      <div id="memory-body">
+        <div class="btns" style="margin:4px 0;">
+          <select id="memory-type" style="flex:0 0 auto;">
+            <option value="character">Character</option>
+            <option value="task">Task</option>
+            <option value="decision">Decision</option>
+            <option value="fact">Fact</option>
+            <option value="timeline">Timeline</option>
+            <option value="status">Status</option>
+          </select>
+          <input id="memory-text" type="text" placeholder="name / title…" style="flex:1 1 120px; min-width:0;">
+          <button id="btn-memory-add">+ Add</button>
+        </div>
+        <div class="btns" style="margin:4px 0;">
+          <input id="memory-query" type="text" placeholder="search project memory…" style="flex:1 1 140px; min-width:0;">
+          <button id="btn-memory-search">Search</button>
+        </div>
+        <div id="memory-results" style="max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:3px; font-size:10.5px;"></div>
+      </div>
+    </div>
+
+    <div id="col-state" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Project State</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-state" title="Minimize this panel">⌄</button>
+      </div>
+      <div id="state-body">
+        <div class="btns" style="margin:4px 0;"><button id="btn-state-refresh">Refresh</button></div>
+        <div id="state-content" style="font-size:10.5px; display:flex; flex-direction:column; gap:6px;"></div>
+      </div>
+    </div>
+
+    <div id="col-imagestudio" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Image Studio (Stable Diffusion)</h2><span class="spacer"></span>
+        <span id="sd-status" style="font-size:9.5px; opacity:.7;"></span>
+        <button class="collapse-btn" id="btn-collapse-sd" title="Minimize this panel">⌄</button>
+      </div>
+      <div id="sd-body">
+        <p style="opacity:.6; margin:4px 0;">Optional. Point at an Automatic1111 server (local or RunPod). Both you and the AIs can generate: an AI reply that starts with <code>[IMAGE: ...]</code> auto-renders when the checkbox below is on.</p>
+        <div class="btns" style="margin:4px 0;">
+          <input id="sd-endpoint" type="text" placeholder="http://127.0.0.1:7860" style="flex:1 1 160px; min-width:0;">
+          <button id="btn-sd-test">Test</button>
+        </div>
+        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="sd-enabled"> <span>Enable image generation</span></label>
+        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="sd-auto"> <span>Let AIs trigger with <code>[IMAGE: …]</code></span></label>
+        <div class="btns" style="margin:3px 0;"><button id="btn-sd-save">Save settings</button></div>
+        <textarea id="sd-prompt" placeholder="a lighthouse at dusk, cinematic, highly detailed" style="width:100%; min-height:44px; resize:vertical;"></textarea>
+        <textarea id="sd-negative" placeholder="negative prompt (optional)" style="width:100%; min-height:26px; resize:vertical; margin-top:3px;"></textarea>
+        <div class="btns" style="margin:4px 0;">
+          <button id="btn-sd-generate" class="primary">Generate</button>
+          <button id="btn-sd-use-chatgpt" title="Use ChatGPT's last reply as the prompt">↳ ChatGPT</button>
+          <button id="btn-sd-use-claude" title="Use Claude's last reply as the prompt">↳ Claude</button>
+          <button id="btn-sd-use-gemini" title="Use Gemini's last reply as the prompt">↳ Gemini</button>
+        </div>
+        <div id="sd-message" style="font-size:10.5px; opacity:.8; margin:2px 0;"></div>
+        <div id="sd-gallery" style="display:flex; flex-wrap:wrap; gap:5px; max-height:200px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">
@@ -366,9 +473,10 @@
     <div id="main-row">
       <div id="col-transcript" class="col">
         <h2 style="display:flex; align-items:center; gap:6px;">
-          <span>Transcript</span>
+          <span>Conversation</span>
+          <span id="database-status" style="font-size:9.5px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span>
           <span class="spacer"></span>
-          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Transcript/Log panel">⌄</button>
+          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Conversation/Log panel">⌄</button>
         </h2>
         <div id="transcript"></div>
       </div>

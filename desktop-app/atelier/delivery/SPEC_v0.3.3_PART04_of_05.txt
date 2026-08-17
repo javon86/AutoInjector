@@ -1,0 +1,545 @@
+===== ATELIER SPECIFICATION — PART 04 OF 05 =====
+SOURCE_VERSION:  v0.3.3
+SOURCE_FILE:     SYSTEM_SPEC.md
+PART_NUMBER:     04 of 05
+BYTE_RANGE:      [85450, 110360)
+PART_BYTES:      24910
+PART_LINES:      527
+PART_SHA256:     b6b23e1e8ffb729cd3556d4e6dde6b50537102cf7729abf662a5fe9404e2221d
+WHOLE_BYTES:     116516
+WHOLE_SHA256:    25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+BEGINS_WITH:     # 30. CONTRADICTION AND ERROR HANDLING
+CONTINUES:       yes - PART 05 follows
+===== BEGIN PART 04 CONTENT =====
+# 30. CONTRADICTION AND ERROR HANDLING
+
+## 30.1 Procedure
+
+### 30.1.1 The general resolution cycle
+
+Applies to **any** defect Atelier produces or permits — manuscript defects and
+system/protocol defects alike:
+
+```
+DETECT → CLASSIFY → CORRECT → PROPAGATE → RECORD → PREVENT
+```
+
+**Manuscript errors use the fuller specialization** (unchanged):
+
+**Detect → Classify → Locate → Determine truth → Correct → Propagate → Log →
+Prevent**
+
+### 30.1.2 PREVENT is a required stage, not a closing remark
+
+`PREVENT` requires determining whether the defect is **mechanically detectable
+in future runs**, and the answer branches:
+
+**If yes:**
+1. Add or strengthen the appropriate validator or check.
+2. Add a **regression test reproducing the defect.**
+3. Record the defect class and its detection rule.
+4. **Verify the test fails before the fix and passes after it.**
+
+Step 4 is the one that carries the weight. A regression test that has never been
+observed to fail may be testing nothing, and a green suite that cannot go red is
+worse than no suite — it manufactures confidence without evidence.
+
+**If no deterministic check is practical:**
+1. Document why.
+2. Assign detection responsibility to the appropriate model audit or gate.
+3. Add the failure pattern to that audit's checklist.
+
+> **A defect is not fully closed merely because the current instance was
+> repaired, when a practical recurrence detector could have been added.**
+
+### 30.1.3 Tests and specification review are separate controls
+
+> **Tests establish conformity to an encoded specification. They do not
+> establish that the specification itself is correct.** Specification review and
+> executable regression testing are separate controls, and **neither substitutes
+> for the other.**
+
+This generalizes three recorded defects that otherwise read as unrelated
+accidents:
+
+| Defect | What a green suite failed to catch |
+|---|---|
+| PDF-003 | An assertion whose comparison basis was corrupted by the operation under test |
+| PDF-004 | A sweep that tested only for presence, never absence |
+| PDF-005 | A line-based search for a phrase that spanned a line break |
+
+The cleanest illustration is not in that table. `test_provisional_classifier.py`
+ran 6/6 green while asserting that a contained `PROCESS_VIOLATION` blocks
+approval gates. The suite was working correctly. The rule it encoded was wrong.
+Only independent review caught it, and no amount of additional testing would
+have.
+
+**Consequence for §26 review tiering.** Scripted checks run before model review
+because arithmetic is cheaper and deterministic — but this is the boundary.
+**Scripts verify conformity to the rules; only review verifies the rules.** A
+system that migrated everything to scripts as they matured would slowly lose the
+only control capable of finding a wrong rule.
+
+**Operating rule:** a passing regression suite is never evidence that a rule is
+correct, only that behavior matches the rule as encoded. Every rule change
+carries a review record, not merely a green test.
+
+This is the difference between a system that fixes bugs and a system that gets
+harder to break. Every S1 and every process defect ends with the same question:
+*what check would have caught this automatically?* If an answer exists, it
+becomes a script and a test.
+
+## 30.2 Error taxonomy
+
+| Error | Detection | Severity |
+|---|---|---|
+| Contradictory character fact | Continuity diff | S1 |
+| Broken timeline | Timeline script | S1 |
+| Impossible travel | Distance ÷ speed script | S1 |
+| Forgotten object | Object-location tracking | S2 |
+| Dead character appears | Continuity DEATH flag | S1 |
+| Character knows what they shouldn't | `knows[]` diff | S1 |
+| Location inconsistency | Location state diff | S2 |
+| Magic-rule violation | Hard-rule check | S1 |
+| Tech-rule violation | Capability check | S1 |
+| Duplicate scene | Similarity scan | S2 |
+| Repeated exposition | Info-introduced register | S2 |
+| Missing setup | Payoff-without-plant check | S2 |
+| Missing payoff | Orphan check | S2 |
+| Plot hole | Model review | S1/S2 |
+| Unresolved thread | Staleness check | S2 |
+| **Hallucinated canon** | Fact not in ledger | S1 |
+| Document version conflict | Front-matter version check | S1 |
+| **AUTHORITY_CONFLICT** | Descriptive vs. prescriptive diff (§23.3) | S1 |
+| Candidate leakage into authoritative ledger | `CANDIDATES.md` / `CONTINUITY.md` diff (§18.5.1) | S0 |
+| Candidate mutation on trunk before merge | `git status` clean-check at gate (§25) | S0 |
+| Validation ref mismatch against merged branch | Recorded ref vs. branch (§4.12.1) | S0 |
+| APPROVED with unresolved `UNCONFIRMED_CONFLICT` in lineage | Lineage scan (§23.3.1) | S0 |
+| Silent continuity truncation | `facts_omitted > 0` unflagged (§24.1.1) | S1 |
+| Prohibited mutation from stale instruction | Pre-mutation version diff (§4.13) | S0 |
+
+## 30.3 Process defects
+
+Errors in the system's own operation get the same discipline as errors in the
+book: detect, classify, correct, log, **and prevent.** Recorded in
+`PROCESS_DEFECTS.md`.
+
+```yaml
+defect_id: PDF-001
+observed:         what actually happened
+should_have:      what the rule required
+root_cause:
+classification:   PROCESS_VIOLATION | DEFECT
+severity:         S0 | S1 | S2 | S3 | S4 | none
+rule_changed:     which spec section was amended
+detection:        the check that would catch a recurrence  ← mandatory
+regression_test:  test name, or "none practical — assigned to <audit>"  ← mandatory
+test_verified:    failed before fix, passed after  ← mandatory when a test exists
+status:           open | closed
+```
+
+**Classification is separate from severity**, because `PROCESS_VIOLATION` is not
+a point on the S0–S4 scale (§29) — it records that a prohibited action was
+intercepted.
+
+> `severity: none` is permitted **only** when `classification:
+> PROCESS_VIOLATION` **and** the prohibited action was intercepted before
+> adoption, mutation, or propagation. Actual defects use S0–S4.
+
+Without this split, an intercepted attempt would have to be logged as a build
+failure it never caused, and the register would stop distinguishing the guard
+working from the guard failing.
+
+The `detection` field is not optional. A process defect recorded without a
+detection rule is an anecdote — it documents that the failure happened once and
+does nothing to stop it happening again. If no automatable detection exists, the
+entry must say so explicitly and name the manual gate that substitutes.
+
+**Why this register is separate from `ISSUES.md`:** story errors are found by
+audit, and process defects are found by the system failing at its own rules. The
+second kind is rarer, more expensive, and much easier to rationalize away as a
+one-off — which is exactly why it needs a register that makes the pattern
+visible.
+
+## 30.4 Hallucination handling
+
+Any fact in drafted prose that does not appear in the continuity ledger, the
+bible, or the scene's context package is treated as **hallucinated canon** until
+ruled on. Three outcomes:
+
+1. **Adopt** — it's good; Showrunner approves, Claude logs it as canon.
+2. **Reject** — it contradicts something; scene is revised.
+3. **Escalate** — it materially changes the book; user decision (§4).
+
+This is not a punitive frame. Drafting invention is often the best material in a
+book. The rule is only that invention must become canon **explicitly**, through a
+logged decision — never by quietly existing in a paragraph until three chapters
+later it contradicts something and nobody can tell which fact came first.
+
+---
+
+# 31. USER INTERFACE / WORKSPACE DESIGN
+
+Should feel like a book-production application, not three chat windows.
+
+**Dashboard** — book title, phase, progress bar (chapters approved / total),
+current word count vs. target, current stage and next action, live AI activity,
+issues requiring user attention, recent decisions.
+
+**Views:**
+- *Roadmap* — whole-book table with the tension curve rendered as a sparkline
+- *Chapter* — card, beats, drafted scenes, audit findings, approval state
+- *Manuscript* — assembled read view, with continuity facts on hover
+- *Bible* — browsable characters, locations, world, timeline
+- *Threads* — open register with staleness highlighting
+- *Issues* — filterable by severity, assignable
+- *History* — decisions and revisions, with diffs
+
+**Attention queue** — the one screen that matters. Everything requiring the user,
+ranked, with enough context to decide in under a minute. If this queue is well
+built, "minimal user involvement" is achieved; if it is badly built, no amount of
+autonomy elsewhere compensates.
+
+**[ARBITRATE]** UI implementation. My position: Phase 1 ships a generated static
+HTML dashboard rebuilt from the repo on each state change — near-zero build cost,
+readable, no server. A real interactive app is a Phase 3 concern, and building it
+early trades away the thing actually worth building first, which is the engine.
+
+---
+
+# 32. INITIAL USER INTAKE
+
+Smallest practical questionnaire. The team expands; the user should not have to
+design the book.
+
+**Required (7):**
+1. What is the book about? (2–5 sentences is enough)
+2. Genre / subgenre
+3. Approximate length — novella / novel / long novel
+4. Who is the main character, and what do they want?
+5. What kind of ending — hopeful, dark, bittersweet, ambiguous, triumphant?
+6. Point of view — first / third limited / third omniscient (or "you pick")
+7. Anything this book must contain, or must never contain?
+
+**Optional (3):**
+8. Comparable titles — "like X meets Y"
+9. Any characters, scenes, or images you already have in mind
+10. Anything you've already written
+
+Everything else — theme, structure, cast, world, chapter count, timeline, magic
+or tech systems — is generated by the team and presented as a Blueprint for one
+approval.
+
+**Intake output:** Blueprint v1 with a one-page summary, plus a short list of
+Critical Approval questions (§4) if any genuine forks exist. One review, one
+approval, production begins.
+
+## 32.1 Decision classification
+
+**AI-Decidable** (resolve silently — the overwhelming majority): character names,
+minor cast, location detail, scene structure, dialogue, chapter titles, word
+distribution, sensory detail, minor plot mechanics, prose style within the Style
+Sheet.
+
+**User-Preference** (batch and ask in groups, never one at a time): tone shifts,
+POV changes, explicit content level, major character death, romance presence,
+ending register, series-vs-standalone.
+
+**Critical Approval** (stop and ask): premise change, genre change, protagonist
+change, ending fundamentally different from what was approved, L7 developmental
+revision, cutting a major thread the user named.
+
+**Rule: batch questions.** Ten questions in one queue costs the user five
+minutes; ten interruptions across three days costs the project.
+
+---
+
+# 33. AUTOMATION OPPORTUNITIES
+
+Scripted, never model-attention:
+
+1. `assemble_manuscript.py` — boundary-rule assembly *(built)*
+2. `validate_timeline.py` — the six timeline checks (§17)
+3. `check_registers.py` — orphaned setups, stale threads, unearned payoffs
+4. `build_context.py` — deterministic package assembly (§24)
+5. `continuity_diff.py` — new facts vs. ledger; flags unlogged canon
+6. `voice_sample.py` — pull random paragraphs across chapters for blind
+   consistency review
+7. `word_report.py` — counts vs. targets by chapter, act, book
+8. `state_advance.py` — the state machine
+9. `build_dashboard.py` — static HTML from repo state
+10. `archive.py` — supersede-and-tombstone
+11. `resolve_facts.py` — current effective fact per (entity, property) (§18.1)
+12. `check_knowledge.py` — Knowledge Matrix violations (§18.4)
+13. `build_depgraph.py` — derived dependency graph; marks `REEVALUATION_REQUIRED`
+14. `check_jobs.py` — **implemented.** P1/P2/P3 provisional classification with
+    the HIGH-cost / expensive-propagation catch-all, `PROCESS_VIOLATION` vs. S0
+    classification, and the log-wide gate guard. Stale-input detection and
+    duplicate-delivery quarantine remain to be added.
+15. `export_state.py` — structured JSON/YAML state for the dashboard and any
+    future interactive UI, so the UI never becomes a second source of truth
+16. `test_assembler.py` — **implemented.** 9 boundary-rule regression cases
+    covering §36 injections 12–16, strict-mode enforcement, and normalization
+    limits. Carries a `--prove` red-state guard.
+17. `test_provisional_classifier.py` — **implemented.** 6 fixtures covering the
+    PDF-001 detection rule. Carries a `--prove` red-state guard.
+18. `verify_delivery.py` — **implemented.** Multipart delivery integrity:
+    missing, duplicated, corrupted, reordered, and truncated part detection with
+    byte-range and hash verification.
+
+**All validation scripts take an explicit `--ref` and default to `HEAD`
+(§4.12.1). None may read trunk implicitly.**
+
+**Design principle: scripts decide facts, models decide judgments.** Every check
+moved from a model to a script is cheaper, faster, deterministic, and cannot have
+an off day. Reserve model attention for what actually requires taste.
+
+---
+
+# 34. FULL BOOK LIFECYCLE
+
+```
+INTAKE
+  └→ CONCEPT      ChatGPT expands; Gemini generates 2 blind alternatives
+  └→ BLUEPRINT    ChatGPT drafts; Gemini attacks; ChatGPT rules
+                  ═══ USER APPROVAL GATE ═══
+  └→ WORLD        Claude writes bibles from Blueprint; Gemini researches
+  └→ CHARACTERS   Claude writes profiles; Gemini stress-tests arcs
+  └→ SYSTEMS      Magic/tech bibles if applicable; Gemini attacks rules
+  └→ ROADMAP      ChatGPT; all three review the tension curve
+  └→ CHAPTER CARDS  ChatGPT; Gemini checks coverage and thread health
+                  ═══ GATE: every card has a defensible purpose ═══
+  └→ PRODUCTION LOOP  per chapter:
+        beats → draft → self-pass → audit → rule → revise
+              → branch → extract candidates → gate → propagate
+              → validate → commit/merge → advance
+              [act gate every ~8 chapters]
+  └→ FULL DRAFT   ═══ GATE: manuscript approval criteria ═══
+  └→ DEVELOPMENTAL REVISION  L7 if needed  ═══ USER APPROVAL ═══
+  └→ CONTINUITY SWEEP   full-book, scripted + Gemini
+  └→ POLISH       L8, Claude, whole book, one voice
+  └→ ASSEMBLE     --strict, zero errors
+  └→ FINAL READ   human
+  └→ COMPLETE
+```
+
+`STATE.md` always names the current node and the next required action. That
+single invariant is what lets the system resume cleanly after any interruption —
+including one that lasts three weeks.
+
+---
+
+# 35. EXAMPLE END-TO-END WORKFLOW
+
+**Scene CH07-S03. Marla searches her father's workshop and finds the lighter.**
+
+1. **PLAN.** ChatGPT writes the scene card: POV Marla, workshop at night,
+   objective *find the ledger*, obstacle *someone has been here first*,
+   discovery *brass lighter engraved V.R.*, decision *tell no one*, change
+   *Marla now suspects her father lied*. Plants SP-034. 1,400–1,800 words.
+
+2. **PACKAGE.** Orchestrator assembles ~4,500 tokens: scene card, chapter card,
+   Marla's full profile, workshop location profile, 14 continuity facts touching
+   Marla / workshop / father, last 300 words of S02 verbatim, Style Sheet,
+   SP-034 planting instruction.
+
+3. **DRAFT.** Claude writes 1,650 words inside boundary markers. Raises one
+   **Canon Request**: *are the father's initials established?* — refuses to invent
+   them.
+
+4. **CANON APPROVAL (interim).** ChatGPT rules that the father's initials are
+   J.V. This is the *approval* — the fact becomes canon at this moment, by
+   decision. Notes that it makes the V.R. engraving load-bearing; confirms
+   SP-034. **Nothing is written to any ledger by this step.**
+
+   *(Canon Recording of FACT-0422 happens later, at step 9 as a candidate and at
+   step 13 as an authoritative entry. Approval and recording are different acts
+   by different roles — §3.2. Collapsing them is how a model ends up creating
+   canon by writing it down.)*
+
+5. **SELF-PASS.** Claude cuts 90 words of throat-clearing, tightens the discovery
+   beat, checks voice against `what_they_never_say`.
+
+6. **AUDIT.** Gemini, without the beat map, reports:
+   - **S1** — Marla uses her left hand to lift the crate; FACT-0418 has her left
+     palm burned and wrapped as of S02.
+   - **S2** — the workshop is described as dusty; FACT-0392 established it was
+     swept in CH04.
+   - **S3** — three sentences in a row open with "She".
+   - **S4** — the lighter's warmth could foreshadow the culvert scene.
+
+7. **RULE.** ChatGPT: fix S1 (use right hand, and let the burn cost her — the
+   awkwardness is characterizing). Fix S2 (dust is *disturbed*, which is better —
+   someone was here). S3 fix. S4 adopted; logged as SP-035.
+
+8. **REVISE.** Claude implements. 1,590 words.
+
+9. **BRANCH.** Claude opens the transaction branch. Every mutation from here to
+   the merge lives on it; trunk stays clean and `git status` on trunk is checked
+   at gate evaluation.
+
+10. **EXTRACT CANDIDATES.** Claude proposes — not commits — FACT-0417 (lighter),
+   FACT-0420 (workshop disturbed), FACT-0421 (Marla suspects father lied,
+   KNOWLEDGE), FACT-0422 (father's initials J.V., per DEC-024). Nothing enters
+   the authoritative ledger yet.
+
+11. **GATE.** ChatGPT + Gemini. Zero S1, objective achieved, change occurred,
+    word target in range, voice sampled clean. Gemini also audits **extraction
+    completeness** and catches one omission: the crate's new position is a
+    continuity fact the extraction missed. Added as FACT-0423.
+
+12. **PROPAGATE.** Marla's profile: `carrying[]` += lighter;
+    `believes_wrongly[]` −= "father was honest with her"; arc position advanced.
+    Workshop `current_condition` updated. Knowledge Matrix updated for FACT-0421.
+    SETUP_PAYOFF: SP-034 planted, SP-035 added. STATE_SNAPSHOT rewritten.
+    Timeline +40 minutes in-world. **None of this is authoritative yet.**
+
+13. **VALIDATE.** Every document in the `affects` set confirmed updated;
+    registers reconcile; `resolve_facts.py` finds exactly one `active` record per
+    `(entity, property)`; timeline arithmetic passes.
+
+14. **COMMIT/MERGE.** Branch merges to trunk. *This* is the moment the ledger,
+    bibles, and state become authoritative. Commit message:
+    `[CH07-S03] APPROVE v2 — burn-hand continuity fix, SP-034 planted`.
+    Had validation failed, `ROLLBACK_REQUIRED` would fire and the last committed
+    state would remain authoritative — the scene approved but its records
+    untouched, which is recoverable. A half-propagated commit is not.
+
+15. **ADVANCE.** `STATE.md` → CH07-S04.
+
+Two things to notice.
+
+**Step 6** — the S1 catch was possible only because Gemini had FACT-0418 and did
+**not** have the beat map. An auditor who knew the scene wanted Marla to lift the
+crate would have been more likely to let it go.
+
+**Step 11** — the extraction-completeness audit caught a fact Claude missed. This
+is why extraction happens *before* the gate rather than after it. Under the old
+ordering that omission would have surfaced three chapters later as an unexplained
+crate, with no record of when it moved.
+
+---
+
+# 36. IMPLEMENTATION ROADMAP
+
+**Phase 1 — Skeleton (usable immediately, Manual Mode)**
+Repository structure · PROTOCOL.md · `assemble_manuscript.py` · Blueprint,
+card, profile, and continuity templates · handoff format · git conventions.
+*Deliverable: three chat windows and a folder produce a consistent short book.*
+
+**Phase 2 — Mechanization**
+`validate_timeline.py` · `check_registers.py` · `continuity_diff.py` ·
+`word_report.py` · static dashboard.
+*Deliverable: mechanical errors stop reaching model review.*
+
+**Phase 3 — Orchestration (Automated Mode)**
+`build_context.py` · `state_advance.py` · three API clients · job dispatch ·
+gate enforcement · retry and failure handling.
+*Deliverable: the loop runs unattended between approval gates.*
+
+**Phase 4 — Refinement**
+Attention queue · interactive dashboard · voice sampling · turnaround imagery
+(pending §12 verification) · act-level automation.
+
+**Phase 5 — Validation by deliberate failure injection**
+
+A clean run proves nothing. The novella test **injects failures** and passes only
+if the system catches what it is designed to catch and fails loudly where
+recovery would otherwise require guessing.
+
+*Story-layer injections:*
+1. Character eye-color contradiction
+2. Impossible travel
+3. Missing object (carried item vanishes)
+4. Character acts on an unrevealed fact
+5. Abandoned major thread
+6. Payoff without setup
+7. Setup never paid
+8. Hard magic-rule violation
+9. Continuity fact supersession
+10. Blueprint/manuscript AUTHORITY_CONFLICT
+11. Structural revision invalidating downstream chapters
+
+*Machinery-layer injections:*
+12. Malformed boundary marker
+13. Nested `Start`
+14. Unclosed `Start`
+15. Notes accidentally inside manuscript markers
+16. Prose accidentally outside markers
+17. Stale Job Packet (input changed after dispatch)
+18. Duplicate response delivery
+19. Interrupted propagation transaction
+20. Resume after shutdown mid-chapter
+21. **`STALE_INSTRUCTION`** — a revision request whose premise targets a
+    superseded specification state. Must be detected, classified, and produce
+    **no mutation**, while any genuinely new instruction in the same message is
+    still processed (component-wise handling, §4.13)
+22. Candidate leakage — a canon candidate appearing in `CONTINUITY.md` before
+    commit, or surviving a rollback
+
+**Pass criteria:** every injection is detected, correctly classified by severity,
+and either corrected or halted loudly. Note the asymmetry between 15 and 16 —
+both must be *detected*, but they resolve differently.
+
+**Injection 15 requires `detect → report → halt for correction`, never semantic
+auto-repair.** Notes inside the markers are book content by definition (§4.2).
+Removing them would require judging that they do not belong, which is the
+judgment the Non-Interpretation Clause forbids. A test expecting auto-correction
+here would be testing for a protocol violation.
+
+Injection 16 (prose outside the markers) is recoverable by *moving the markers*,
+which is a positional operation and therefore permitted.
+
+*Also measured:* S1s reaching final draft, user decisions required, cost per
+1,000 words, revision cycles per scene.
+
+**Recommended first build:** Phase 1 + `validate_timeline.py` + `check_registers.py`,
+tested on a 15,000-word novella before anything longer. A system that cannot hold
+a novella together will not hold a novel together, and finding that out at 15,000
+words costs a great deal less than finding it out at 90,000.
+
+---
+
+# APPENDIX A — OPEN ITEMS
+
+**Showrunner decisions — ALL FINAL. None outstanding.**
+
+| ID | Section | Ruling |
+|---|---|---|
+| DEC-001 | §2.2 | Manual-first validation with automation-ready formats; mechanize immediately once stable |
+| DEC-002 | §3.5 | Prose Objections adopted; 5+ trivial in a chapter → S3 `BEAT_MAP_FRICTION` |
+| DEC-003 | §23 | Two-Axis Authority Model; non-waivable (§4.8.1) |
+| DEC-004 | §31 | Static dashboard Phase 1/2, structured JSON/YAML state from the start |
+| DEC-005 | §4.8 | Four practices elevated to non-waivable protocol |
+| DEC-006 | §4.7 | P1/P2/P3 provisional classes; silence cannot manufacture high-authority canon |
+
+Provisional history is preserved in `DECISION_LOG.md`. DEC-003's procedural note
+documents the failure that produced DEC-006 and is not to be removed.
+
+**[VERIFY] for Gemini** — all four unanswered; running on §4.9 assumptions.
+**None blocks any design element**; each has a graceful-degradation default.
+1. §5.3 — Does vector search beat structured ID lookup for context assembly at
+   100k+ words? **May optimize §24.3; does not block it. Structured ID lookup
+   remains the correctness-preserving default** unless verification demonstrates
+   a material benefit from vector retrieval.
+2. §12 — Character identity consistency across image generations.
+   **NOT VERIFIED** (V2, ruled). Identity drift past roughly 5–10 generations
+   without fine-tuning. **Turnaround text is canonical; generated imagery
+   remains decorative/reference-only and never becomes a source of canonical
+   truth** unless a later explicit design ruling promotes a verified mechanism.
+   Does not block §12.
+3. §28 — Practical repo size ceiling with per-scene commits and binary images.
+4. Cross-check §17's timeline validation logic for cases arithmetic misses
+   (relativistic settings, non-linear time, unreliable narration).
+
+**Known weakest sections, by my own assessment:** §12 (turnarounds — I am least
+confident here and it is the most tool-dependent), §31 (UI — outside my lane),
+§33 (automation — needs cost measurement, not estimation).
+
+---
+
+
+===== END PART 04 OF 05 =====
+ENDED_WITH:      ---
+PART_SHA256:     b6b23e1e8ffb729cd3556d4e6dde6b50537102cf7729abf662a5fe9404e2221d
+NEXT:            PART 05 OF 05

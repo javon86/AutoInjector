@@ -1,0 +1,36 @@
+{
+  "frozen_at": "2026-08-13T00:16:06Z",
+  "gate": "CANDIDATE-ENFORCEMENT",
+  "status": "CLOSED",
+  "suite_total": "23/23",
+  "prove": "FAIL (correct)",
+  "production_ledger": {
+    "records": 106,
+    "promoted": 0,
+    "chapters": "12/12",
+    "findings": 0
+  },
+  "validation_surfaces": {
+    "1_id_grammar": "runs FIRST; gates record validation. CAND-nnnn, four zero-padded digits",
+    "2_record_structure": "entity/property/value/status; SKIPPED for malformed ids",
+    "3_duplicate_id": "only among syntactically valid ids"
+  },
+  "id_grammar_cases": {
+    "CAND-0001": "PASS",
+    "CAND-XX": "FAIL",
+    "CAND-7": "FAIL",
+    "CAND-00001": "FAIL (over-padded)",
+    "CAND-001": "FAIL (under-width)"
+  },
+  "load_bearing_cases": {
+    "control": "PASS exit 0",
+    "value_only": "FAIL exit 1",
+    "affects_omitted": "FAIL exit 1",
+    "affects_listed_downstream_absent": "FAIL exit 1",
+    "restored": "PASS exit 0"
+  },
+  "tools": {
+    "check_candidates.py": "d27cb5ff8a05ced206b0eb25ad4e7d6d4054cf2d38a8da183f0abc8f38ff39ee",
+    "test_candidates.py": "4d66e2ef1accb291bda91adcd5b2aed55ddab75fefa3c7a9517e48c21eddf4a9"
+  }
+}

@@ -1,0 +1,655 @@
+===== ATELIER SPECIFICATION — PART 02 OF 05 =====
+SOURCE_VERSION:  v0.3.3
+SOURCE_FILE:     SYSTEM_SPEC.md
+PART_NUMBER:     02 of 05
+BYTE_RANGE:      [36300, 60835)
+PART_BYTES:      24535
+PART_LINES:      637
+PART_SHA256:     a41f44a39b5ff54e82bf709a50232c76c207ba1bba9dbd1fc0b1c3b26e449463
+WHOLE_BYTES:     116516
+WHOLE_SHA256:    25cf6d739b6f52384c88fecd423d46b3967ed663a074dd41dffad4ca39148e55
+BEGINS_WITH:     # 5. DOCUMENT ARCHITECTURE
+CONTINUES:       yes - PART 03 follows
+===== BEGIN PART 02 CONTENT =====
+# 5. DOCUMENT ARCHITECTURE
+
+## 5.1 Repository layout
+
+```
+BOOK_PROJECT/
+├── 00_CONTROL/
+│   ├── STATE.md                  # where we are, what's next   [ChatGPT]
+│   ├── PROTOCOL.md               # boundary rule + handoff law [Claude]
+│   ├── DECISION_LOG.md           # major decisions + rejected  [ChatGPT]
+│   ├── REVISION_LOG.md           # what changed, why           [Claude]
+│   └── ISSUES.md                 # open defects                [Gemini]
+├── 01_DESIGN/
+│   ├── BLUEPRINT.md              # controlled source of truth  [ChatGPT]
+│   ├── ROADMAP.md                # whole-book progression      [ChatGPT]
+│   ├── STYLE_SHEET.md            # voice, mechanics, taboos    [Claude]
+│   ├── OPEN_THREADS.md                                         [ChatGPT]
+│   └── SETUP_PAYOFF.md                                         [ChatGPT]
+├── 02_BIBLE/
+│   ├── characters/<slug>.md      # one file per character      [Claude]
+│   ├── turnarounds/<slug>.md     # visual consistency sheets   [Claude]
+│   ├── locations/<slug>.md                                     [Claude]
+│   ├── world/WORLD.md                                          [Claude]
+│   ├── world/MAGIC.md            # if applicable               [Claude]
+│   ├── world/TECHNOLOGY.md       # if applicable               [Claude]
+│   └── TIMELINE.md                                             [Claude]
+├── 03_MEMORY/
+│   ├── CONTINUITY.md             # authoritative ledger; commit-only  [Claude]
+│   ├── CANDIDATES.md             # proposals, pre-gate; cleared at commit [Claude]
+│   └── STATE_SNAPSHOT.md         # story state at last approval [Claude]
+├── 04_CHAPTERS/
+│   └── ch07/
+│       ├── CARD.md               # chapter card                [ChatGPT]
+│       ├── ROADMAP.md            # chapter-level progression   [ChatGPT]
+│       ├── beats.md              # scene/beat map              [ChatGPT]
+│       └── scenes/s01.md ...     # drafted prose               [Claude]
+├── 05_RESEARCH/                                                [Gemini]
+├── 06_AUDITS/                                                  [Gemini]
+├── 07_BUILD/
+│   ├── manuscript.md             # assembled output
+│   └── build_report.txt
+└── 99_ARCHIVE/                   # superseded versions
+```
+
+**One writer per file.** Concurrent writes to a shared file across three models
+with no locking is a corruption bug waiting to happen. Ownership is in brackets
+above and is enforced, not advisory.
+
+## 5.2 Universal front matter
+
+Every document opens with:
+
+```yaml
+---
+doc_id: CHAR-marla-vane
+doc_type: character_profile
+owner: claude
+version: 7
+last_updated: 2026-03-14
+canon_status: approved        # draft | approved | superseded
+supersedes: v6
+affects: [CH03, CH07, CH11]
+---
+```
+
+`affects` is what makes change propagation tractable: edit a document, and the
+system immediately knows which chapters need reevaluation.
+
+## 5.3 Document operations
+
+Create, edit, save, retrieve, search, copy, delete, replace, version, organize,
+archive — all satisfied by a plain filesystem plus git. Nothing here needs a
+database.
+
+- **Versioning:** git commit per approved gate. Human-readable diffs.
+- **Archiving:** superseded documents move to `99_ARCHIVE/` with a tombstone
+  pointer left behind. Nothing is deleted; deletion loses the reasoning.
+- **Search:** ripgrep over markdown. **[VERIFY]** Gemini to confirm whether
+  vector search over the bible measurably improves context assembly at
+  100k+ words, or whether structured ID lookup is sufficient. My prior is that
+  structured lookup wins because our retrieval targets are known by ID, not by
+  fuzzy similarity — but I have not tested it.
+
+## 5.4 Ownership is write permission, not truth ownership
+
+A critical distinction added on Showrunner review.
+
+| | Means | Held by |
+|---|---|---|
+| **Write authority** | Only this role may execute writes to the file | See brackets in §5.1 |
+| **Decision authority** | This role determines what is true or intended | See §3.4 table |
+
+These are deliberately different. Claude holds write authority over the
+character, world, and location bibles — but the Showrunner holds decision
+authority over canon. Claude writing a fact into a bible does **not** make it
+canon; it records a canon decision that was already made.
+
+Without this split, the Author would hold both the pen and the truth for most of
+the repository, which silently defeats §2.3.
+
+---
+
+# 6. BOOK BLUEPRINT STRUCTURE
+
+Created before any manuscript production. Owned by ChatGPT. Changes to an
+approved Blueprint require a Decision Log entry.
+
+```yaml
+--- IDENTITY ---
+working_title, genre, subgenre, audience, comp_titles
+tone, style, narrative_perspective, tense, target_word_count, chapter_count
+
+--- CORE ---
+premise:            one paragraph
+story_question:     the single question the reader wants answered
+theme_primary:      stated as a tension, not a topic
+                    ("loyalty vs. truth", not "loyalty")
+theme_secondary
+promise_to_reader:  what the opening implicitly guarantees the book delivers
+
+--- CONFLICT ---
+protagonist_want    (external, conscious, pursued)
+protagonist_need    (internal, often unconscious, resisted)
+antagonistic_force  (person, system, or condition)
+central_conflict
+stakes_external / stakes_internal / stakes_escalation_path
+
+--- SHAPE ---
+beginning_state     the world before
+inciting_incident
+first_turn          point of no return
+midpoint            reversal or revelation that changes the game
+low_point
+final_escalation
+climax
+resolution
+ending_state        the world after; must contrast with beginning_state
+
+--- CAST ---
+character_arcs:     per major character — from → through → to
+
+--- WORLD ---
+world_overview, hard_rules[], soft_rules[]
+
+--- MYSTERY & CRAFT ---
+major_mysteries[], reveals[] (with target chapters)
+foreshadowing_requirements[]
+tonal_boundaries:   what this book will never do
+```
+
+`promise_to_reader`, `protagonist_want` vs `need`, and `tonal_boundaries` are
+additions to the master prompt's list. Each earns its place: the first is the
+commonest cause of an unsatisfying ending, the second is the engine of character
+arc, and the third prevents genre drift over long production runs.
+
+---
+
+# 7. BOOK ROADMAP STRUCTURE
+
+The Roadmap answers, at any moment: **where are we, how did we get here, where
+are we going?**
+
+Eight phases: Beginning → Development → Escalation → Midpoint → Consequences →
+Final Escalation → Climax → Resolution.
+
+Represented as a table with one row per chapter and these tracked columns:
+
+| Track | What it records |
+|---|---|
+| Plot | External events advancing the story question |
+| Character | Internal position of each POV character |
+| Relationship | State of each significant pairing |
+| World | What the reader has learned about the world |
+| Mystery | What's open, what's closed, what's suspected |
+| Tension | 1–10 rating — the pacing curve, made visible |
+| Reader knows | Information the reader holds |
+| Reader doesn't | Information deliberately withheld |
+| Setup/Payoff | IDs planted or cashed |
+
+The **reader knows / reader doesn't** pair is the most underrated part of this
+structure. Dramatic irony, suspense, and surprise are all functions of the gap
+between character knowledge and reader knowledge, and no other document tracks
+that gap. Without it, a system will accidentally spoil its own reveals and never
+notice.
+
+The **Tension column** is the only place whole-book pacing is visible. Flat runs
+of 4-4-4-5-4 across five chapters are a structural defect detectable at a glance
+and invisible from inside any single chapter.
+
+---
+
+# 8. CHAPTER OUTLINE — THE CHAPTER CARD
+
+One card per chapter, all cards complete before uncontrolled generation begins.
+
+```yaml
+chapter: 07
+title: "The Long Way Down"
+phase: ESCALATION
+pov: Marla Vane
+word_target: 4200
+
+purpose:              why this chapter exists; cut it and what breaks?
+starting_situation:
+characters_present:   [ids]
+locations:            [ids]
+timeframe:            in-world date/time, duration
+
+objectives:           per character, what they want in this chapter
+conflict:
+major_events:         []
+information_introduced:
+information_revealed_to_reader:
+information_withheld:
+character_development:
+relationship_changes:
+worldbuilding_introduced:
+
+foreshadowing:        [setup ids planted]
+setup:                [ids]
+payoff:               [ids cashed]
+turning_point:
+ending_condition:     required state at chapter close
+hook:                 pull into next chapter
+
+continuity_requirements: [facts that MUST hold]
+open_threads_touched:    [ids]
+```
+
+The `purpose` field is a gate, not decoration. If no one can answer "cut this
+chapter and what breaks?", the chapter does not get written.
+
+---
+
+# 9. CHAPTER ROADMAP STRUCTURE
+
+Each chapter carries its own progression map:
+
+```
+Chapter Start → Scene 1 → Development → Scene 2 → Complication
+              → Scene 3 → Turning Point → Chapter Ending → Hook
+```
+
+Recorded per chapter: entry state, scene sequence with one-line function each,
+the turn, exit state, and the delta between entry and exit.
+
+**Rule: if entry state equals exit state, the chapter is inert.** Something must
+change — situation, knowledge, relationship, or resolve. This single check catches
+the most common structural failure in AI-generated long fiction, which is
+chapters that are pleasant, competent, and do nothing.
+
+---
+
+# 10. SCENE AND BEAT SYSTEM
+
+## 10.1 Scene Card
+
+```yaml
+scene_id: CH07-S03
+pov, location, in_world_time, duration, characters_present
+emotional_state_start
+objective:      what POV wants in this scene
+obstacle:
+conflict:
+dialogue_purpose:      what dialogue must accomplish
+information_exchanged: who learns what
+physical_action:
+discovery:
+decision:
+change:         what is different at scene end
+emotional_state_end
+continuity_updates: [facts this scene creates]
+setup_payoff:   [ids]
+transition:     how we get to the next scene
+word_target:
+```
+
+## 10.2 Beats
+
+Beats are 3–7 per scene, one line each, describing motion — not prose, not
+dialogue lines. Beats say *what happens*; the Author decides *how*.
+
+## 10.3 The anti-suffocation rule
+
+The master prompt warns against over-planning, and it is right to. The operating
+rule:
+
+> **Plan what must be true. Leave open how it feels.**
+
+Planning owns: who, where, when, what changes, what is learned, what is promised.
+Drafting owns: sentence rhythm, imagery, dialogue texture, silence, subtext,
+what the character notices.
+
+A beat map that specifies a metaphor has overreached. A beat map that leaves the
+scene's outcome undecided has underreached.
+
+---
+
+# 11. CHARACTER SYSTEM
+
+One file per significant character. Two zones — **Static** rarely changes,
+**Dynamic** updates after every approved chapter.
+
+```yaml
+--- STATIC ---
+full_name, aliases, age, dob
+physical: height, build, hair, eyes, skin, distinguishing_marks
+appearance_notes, clothing_tendencies
+voice: pitch, pace, accent
+speech_patterns: verbal_tics[], vocabulary_register, profanity_use,
+                 sentence_length, what_they_never_say
+personality, strengths[], weaknesses[], skills[], beliefs[]
+motivation, desire (want), need, fears[], secrets[]
+backstory
+internal_conflict, external_conflict
+arc: from → through → to
+signature_possessions[]
+
+--- DYNAMIC (as of chapter N) ---
+current_location
+current_condition:       physical, including injuries
+current_emotional_state
+carrying[]:              objects on person
+knows[]:                 facts, with chapter learned
+believes_incorrectly[]:  ← the most valuable field in this document
+relationships:           per character — status, tension, last interaction
+arc_position:            where on the from→to path
+```
+
+**`believes_incorrectly` deserves special emphasis.** Dramatic irony, betrayal,
+and misunderstanding all live in the gap between what a character knows and what
+is true. Models default to characters knowing whatever the narrative knows, which
+flattens every scene that depends on that gap. Tracking wrong beliefs explicitly
+is what allows a character to walk into a room and be wrong on purpose.
+
+**`what_they_never_say`** is a voice-preservation device. Negative constraints
+hold character voice across a long book far better than positive descriptions do
+— "never uses contractions when frightened" survives 300 pages; "speaks
+formally" dissolves by chapter 5.
+
+---
+
+# 12. CHARACTER TURNAROUND SYSTEM
+
+Purpose: visual and behavioral consistency, and reference imagery where image
+generation is available.
+
+```yaml
+character_id
+front / side / back:      described views
+height_build, hair (cut, color, texture, how worn)
+eyes, skin, distinguishing_features[]
+default_clothing, alternate_outfits[], equipment[], accessories[]
+expressions: neutral, angry, afraid, amused, lying
+body_language, movement_style, posture
+physical_changes_by_chapter:
+  - ch01: baseline
+  - ch07: left hand bandaged
+  - ch14: hair cut short, scar across jaw
+image_prompt_base:   locked descriptive string for generation
+reference_images[]:  paths + chapter validity range
+```
+
+`physical_changes_by_chapter` is the field that prevents the classic long-book
+failure where an injury inflicted in chapter 7 has vanished by chapter 9 without
+healing.
+
+**[VERIFY]** Gemini: confirm current image-generation capability for consistent
+character identity across multiple generations — whether identity locking via
+reference image is reliably available, and in which tools. My understanding is
+that consistency across generations remains imperfect and prompt-only identity
+locking drifts, but this is exactly the kind of fast-moving claim I should not be
+trusted on. If consistency is unreliable, turnarounds remain text-only and the
+imagery is decorative rather than canonical.
+
+---
+
+# 13. WORLDBUILDING SYSTEM
+
+`world/WORLD.md`, structured in layers so context assembly can pull a slice
+rather than the whole thing:
+
+- **Physical:** geography, climate, regions, cities, landscapes, transportation
+- **Political:** governments, laws, factions, organizations, power structure
+- **Social:** cultures, customs, class, religion, languages, taboos
+- **Economic:** currency, trade, resources, who has what and why
+- **Historical:** timeline of prior events, conflicts, myths
+- **Material:** important objects, artifacts, everyday texture
+
+Every world fact carries `established_in: CHnn` or `established_in: PLAN`. A fact
+established in the manuscript is harder to change than one that only exists in
+planning, because a reader has already seen it (§23).
+
+**Hard rules vs. soft rules.** Hard rules are inviolable and their violation is a
+Severity-1 error. Soft rules are tendencies with exceptions, and the exceptions
+must be logged when used. Ambiguity here is the root of most magic- and
+tech-system failures — a rule that is neither firmly hard nor explicitly soft
+becomes whatever the current scene needs.
+
+---
+
+# 14. LOCATION SYSTEM
+
+One file per significant location. Locations gain state as the book proceeds —
+this is what stops a burned building from being intact three chapters later.
+
+```yaml
+name, purpose, controlled_by, inhabitants[]
+geography, layout, architecture, appearance
+sensory: light, sound, smell, temperature, texture
+atmosphere
+important_objects[], entrances_exits[], nearby_locations[]
+historical_significance
+events_occurred_here: [chapter refs]
+current_condition:    ← updated per chapter; damage persists
+first_appearance: CHnn
+```
+
+The `sensory` block exists because returning to a location should feel like the
+same place. Consistent sensory anchors — a specific smell, a particular quality
+of light — do more for that recognition than repeated architectural description.
+
+---
+
+# 15. MAGIC SYSTEM
+
+Instantiated only when the genre requires it.
+
+```yaml
+source:              where power comes from
+who_can_use:         and how that's determined
+how_learned:
+hard_rules[]:        inviolable
+abilities[]:         with specific effects and limits
+limitations[]:
+costs[]:             every use costs something — physical, temporal, moral
+risks[]:
+prohibited_uses[]:
+power_progression:   how strength changes, and what gates it
+countermeasures[]:   how magic is resisted or defeated
+artifacts[]:
+social_consequences: how magic shapes law, class, religion, economy
+known_exceptions[]:  each with logged justification
+```
+
+**Enforcement:** every scene involving magic is checked against `hard_rules` and
+`costs` before approval. A use with no cost is a Severity-1 error unless an
+exception is logged.
+
+The load-bearing entry is `costs`. Magic without cost is not a system but a
+plot-hole generator, and models will reach for it precisely when the plot is
+stuck — which is exactly when the constraint matters most.
+
+---
+
+# 16. TECHNOLOGY SYSTEM
+
+Same shape as §15, adapted:
+
+```yaml
+tech_level, major_inventions[], devices[], weapons[]
+transportation: with speeds and ranges  ← feeds timeline validation
+communications:  with latency and range ← feeds "why not just call"
+computing_ai, energy, medicine, manufacturing
+capabilities[], limitations[]
+availability:    who can get it
+cost:
+controlled_by:
+societal_effects:
+```
+
+Two fields do disproportionate work. **Transportation speed** feeds the timeline
+checker and makes impossible travel mechanically detectable. **Communication
+latency and range** answers the question that quietly destroys the tension of a
+great many plots: *why doesn't someone just call for help?* Answer it once, in the
+bible, and every scene inherits the answer.
+
+**Rule:** technology cannot gain a capability because the plot needs it. New
+capabilities require a Decision Log entry and a Blueprint amendment.
+
+---
+
+# 17. TIMELINE SYSTEM
+
+`TIMELINE.md` holds a master chronology in in-world time, keyed to chapters.
+
+Tracked: absolute dates/times, character ages, travel durations, event durations,
+historical events, simultaneous events, flashbacks (with frame markers), time
+jumps, and active deadlines.
+
+**Automated validation** — this is one of the highest-value scripts in the
+system because these errors are mechanical, common, and invisible to prose review:
+
+1. **Travel check** — distance ÷ transport speed vs. elapsed time.
+2. **Simultaneity check** — no character in two places at one time.
+3. **Age check** — ages consistent with dates and stated events.
+4. **Deadline check** — declared deadlines still arithmetically live.
+5. **Duration check** — stated durations match elapsed in-world time.
+6. **Ordering check** — no effect precedes its cause.
+
+Model prose review catches these badly; arithmetic catches them perfectly.
+
+---
+
+# 18. CONTINUITY MEMORY
+
+The single most important document in the system.
+
+## 18.1 Form
+
+**Append-only.** Facts are never edited in place. A fact that becomes wrong is
+superseded by a new entry that points back at it. This preserves the history of
+what was true when, which is exactly what's needed to fix a contradiction
+correctly rather than paper over it.
+
+Append-only history is necessary but not sufficient — consumers need *the
+current effective fact*, not every historical version. So each fact is a
+structured record, and a deterministic resolver answers "what is true now?"
+without asking a model to interpret history.
+
+```yaml
+fact_id:    FACT-0418
+entity_id:  CHAR-marla
+property:   injury.left_palm
+value:      "burned, blistered, wrapped in a strip of her shirt"
+valid_from: CH07-S03
+valid_until: null            # or CHnn when superseded
+supersedes: null
+status:     active           # active | superseded | disputed | retracted
+source:     04_CHAPTERS/ch07/scenes/s03.md
+expires:    "~3 weeks in-world"
+```
+
+`status: disputed` exists for the window during an open AUTHORITY_CONFLICT — the
+fact is neither trusted nor discarded while the Showrunner rules. `retracted`
+covers facts removed by revision rather than superseded by events, which is a
+different thing and must not be conflated: superseded means the story moved on,
+retracted means it never happened.
+
+**Resolver rule:** current truth for any `(entity_id, property)` is the single
+record with `status: active` and `valid_until: null`. More than one match is a
+data error (S0), not a judgment call.
+
+## 18.2 Categories
+
+INJURY · CLOTHING · OBJECT · OBJECT_LOCATION · CHARACTER_LOCATION ·
+RELATIONSHIP · KNOWLEDGE · SECRET_REVEALED · PROMISE · DEATH · DAMAGE ·
+ENVIRONMENT · MAGIC_USE · TECH_USE · TIME · QUESTION_OPEN
+
+## 18.3 The expiry field
+
+Facts with natural lifetimes carry `expires`. A blistered palm should not be
+blistered in chapter 30. On expiry the fact is flagged for review rather than
+auto-deleted — the system asks whether it healed, scarred, or worsened, and a
+human-legible answer replaces the guess.
+
+## 18.4 The Knowledge Matrix
+
+Added on Showrunner review. §7 tracks reader knowledge and §11 tracks character
+knowledge, but nothing linked them — which left information-leak detection as
+prose interpretation. The matrix makes it deterministic.
+
+```yaml
+FACT-0121:
+  truth:       "Jon's brother is alive"
+  reader:      knows_from: CH09
+  CHAR-marla:  knows_from: CH11
+  CHAR-jon:    believes_opposite: through CH17
+  CHAR-antagonist: knew_before: book_start
+```
+
+This gives the knowledge-violation audit something to compare against
+mechanically. A scene in which Marla acts on FACT-0121 before CH11 is a
+detectable S1, not a judgment call. It also makes dramatic irony *plannable*:
+the gap between the reader's row and each character's row is the raw material
+of suspense, and it is now visible rather than implied.
+
+## 18.5 Update discipline
+
+Extraction is a **dedicated job run after revision**, by Claude — never a side
+effect of drafting. Extraction while drafting is unreliable because the model is
+attending to prose and the extraction quietly degrades.
+
+The sequence is fixed:
+
+1. **Dedicated extraction after revision** — Claude produces facts as
+   **candidates only.** Nothing is written to the authoritative ledger.
+2. **Gemini audits extraction completeness at the gate** — did the extraction
+   miss facts the scene actually establishes? Incompleteness is a gate failure,
+   not later cleanup.
+3. **Authoritative ledger mutation occurs only during a successful commit
+   transaction.** If the transaction fails the ledger is untouched and the last
+   committed state remains authoritative (§4.10.2).
+
+This closes the window in which an approved scene could exist without its
+canonical state represented, and prevents a draft from promoting its own
+invention by the act of recording it.
+
+### 18.5.1 Candidates are stored separately from the authoritative ledger
+
+Candidates **never** touch `CONTINUITY.md`. They are written to a separate file
+and remain there until a successful commit transaction moves them:
+
+```
+03_MEMORY/
+├── CONTINUITY.md        ← authoritative. Mutated ONLY at commit/merge.
+└── CANDIDATES.md        ← proposals. Written at extraction, cleared at commit.
+```
+
+Physical separation, not a status flag inside one file. A flag would leave
+proposals and canon in the same document, one careless read away from being
+treated alike — and the resolver in §18.1 would have to filter rather than simply
+read. Two files make "is this canon?" answerable by location.
+
+**Both files live on the transaction branch from `BRANCH` onward** (§25, F-01).
+Trunk is never written during extraction or gate evaluation; `git status` on
+trunk must be clean at every gate evaluation, and any modification to
+`CANDIDATES.md` on trunk is **S0**.
+
+On successful commit, approved candidates are appended to `CONTINUITY.md` and
+removed from `CANDIDATES.md`. On rollback, the branch is discarded — both files
+revert together and `CONTINUITY.md` is untouched, which is the whole point.
+
+## 18.6 Manuscript assembly
+
+Kept separate from update discipline: extraction is a **judgment** task about
+what a scene established; assembly is a **mechanical** task about what sits
+between markers. Merging them invites the assembler to be treated as a continuity
+authority, which it is not.
+
+Approved repository content plus the boundary rule determine manuscript
+membership. `assemble_manuscript.py` mechanically enforces that rule and is the
+only authorized final-build path. **It does not itself define truth.** Never
+assemble by hand.
+
+---
+
+
+===== END PART 02 OF 05 =====
+ENDED_WITH:      ---
+PART_SHA256:     a41f44a39b5ff54e82bf709a50232c76c207ba1bba9dbd1fc0b1c3b26e449463
+NEXT:            PART 03 OF 05

@@ -1,0 +1,168 @@
+{
+  "tool": "clean_verify.py",
+  "suite_count": 20,
+  "passed": 20,
+  "failed": 0,
+  "results": [
+    {
+      "suite": "test_assembler.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.066,
+      "stdout": "\n16/16 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_provisional_classifier.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.045,
+      "stdout": "\n6/6 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_transaction.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 3.756,
+      "stdout": "\n20/20 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_controls.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.576,
+      "stdout": "\n8/8 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_propagation.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.362,
+      "stdout": "\n4/4 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_candidates.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 2.27,
+      "stdout": "\n23/23 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_timeline.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.275,
+      "stdout": "\n7/7 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_depgraph.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.241,
+      "stdout": "\n6/6 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_knowledge.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.204,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_registers.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.309,
+      "stdout": "\n7/7 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_context.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.277,
+      "stdout": "\n7/7 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_refscope.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.299,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_identity.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.05,
+      "stdout": "\n4/4 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_authority.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.037,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_provenance.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.047,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_instruction.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.209,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_redelivery.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.047,
+      "stdout": "\n6/6 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_safe_write.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.052,
+      "stdout": "\n6/6 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_capture.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.1,
+      "stdout": "\n5/5 passed\n",
+      "stderr": ""
+    },
+    {
+      "suite": "test_merge_guard.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.223,
+      "stdout": "\n6/6 passed\n",
+      "stderr": ""
+    }
+  ]
+}

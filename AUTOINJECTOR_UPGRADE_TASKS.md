@@ -22,6 +22,32 @@ Every subtask uses the same block:
 
 ---
 
+## Claims ledger
+
+A subtask heading prefixed with `[x]` is **complete**; `[~]` means **claimed / in
+progress**. The claimant's name follows the prefix. Do not start a subtask that
+already carries someone's name — pick the next unclaimed one from the top.
+
+| Subtask | Owner | Status | Evidence |
+|---|---|---|---|
+| MDC-001-PG | Claude | ✅ DONE | `desktop-app/shared/db.js` · test `test/shared-db.test.js` |
+| SCS-001-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · test `test/shared-db.test.js` |
+| SCS-002-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · 1,000-concurrent-insert proof |
+| SCS-003-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` (thread/routing) · test `test/sync.test.js` |
+| SCS-004-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (ReadPositions) · test `test/sync.test.js` |
+| SCS-006-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Deliveries) · test `test/sync.test.js` |
+| SCS-007-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` (dedup) · test `test/sync.test.js` |
+| SCS-012-PG | Claude | ✅ DONE | `desktop-app/shared/sync.js` (Baselines) · test `test/sync.test.js` |
+| MDC-002-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` + `shared/entities.js` · test `test/memory.test.js` |
+| MDC-003-PG | Claude | ✅ DONE | `desktop-app/shared/memory.js` (Search, FTS5) · test `test/memory.test.js` |
+| MDC-008-PG | Claude | ✅ DONE | `desktop-app/shared/artifacts.js` · test `test/memory.test.js` |
+| SCS-013-PG | Claude | ✅ DONE | `desktop-app/shared/ownership.js` · test `test/files.test.js` |
+| MDC-009-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` · test `test/files.test.js` |
+| MDC-007-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` (request) · test `test/files.test.js` |
+| LSI-001-LM | Claude | ✅ CODE DONE | `desktop-app/lsi-provider.js` · test `test/lsi-provider.test.js` (runtime needs a local model endpoint) |
+
+---
+
 ## Master task order
 
 | # | Task | Prefix | Difficulty | Blocked by |
@@ -47,7 +73,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-001-PG — Shared Ordered Message Log
+### [x] SUBTASK SCS-001-PG — Shared Ordered Message Log — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Built in `desktop-app/shared/message-log.js` (table in `shared/db.js`). One `messages` table for all sources; seq-order read reproduces the conversation with no gaps; failed writes park in `messages_deadletter` in a single transaction. Verified by `desktop-app/test/shared-db.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
@@ -58,7 +86,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-002-PG — Automatic Message ID Numbering
+### [x] SUBTASK SCS-002-PG — Automatic Message ID Numbering — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Numbering is assigned only by the log (`append()` rejects a caller-supplied seq/msgId), inside a transaction with `UNIQUE(project_id, seq)` and retry-against-max on collision. Proven by a real multi-process test in `desktop-app/test/shared-db.test.js`: 1,000 concurrent inserts across 8 processes produce IDs 1..1000 with zero duplicates and zero gaps.
 
 **Type:** PG
 **Depends on:** SCS-001
@@ -69,7 +99,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-003-PG — FROM / TO / REPLY-TO Tracking
+### [x] SUBTASK SCS-003-PG — FROM / TO / REPLY-TO Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `MessageLog.thread()`/`originOf()` in `desktop-app/shared/message-log.js` walk REPLY-TO back to the origin; an unknown recipient is flagged `ROUTING_UNRESOLVED` (kept, logged), and a reply_to pointing at a nonexistent message is nulled and logged. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-002
@@ -80,7 +112,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-004-PG — Per-Model Read Position Tracking
+### [x] SUBTASK SCS-004-PG — Per-Model Read Position Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `ReadPositions` in `desktop-app/shared/sync.js`: a `read_positions` row per model per project, advance-only via `confirm()`, exact `lag()` in message count, and a stored position ahead of the log clamps back with a `READ_POSITION_CLAMPED` flag. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-001
@@ -102,7 +136,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-006-PG — Message Delivery & Retry Tracking
+### [x] SUBTASK SCS-006-PG — Message Delivery & Retry Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Deliveries` in `desktop-app/shared/sync.js`: per-recipient PENDING/DELIVERED/RETRY/FAILED_PERMANENT, exponential backoff 5s/15s/45s, max 3 retries then FAILED_PERMANENT with an alert; `sweep()` guarantees nothing sits in PENDING past its timeout; retries reuse the same MSG id (one delivery row), so a retry never creates a second message. Verified with an injectable clock in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-003
@@ -113,7 +149,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-007-PG — Duplicate Message Prevention
+### [x] SUBTASK SCS-007-PG — Duplicate Message Prevention — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `MessageLog.append()` in `desktop-app/shared/message-log.js` dedups by content hash within a configurable window: a replay stores one message and one `DROP_DUPLICATE` row in `message_drops` (with the original MSG id, so a wrongly-dropped message is recoverable). Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-002
@@ -168,7 +206,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-012-PG — Current-State / Baseline Tracking
+### [x] SUBTASK SCS-012-PG — Current-State / Baseline Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Baselines` in `desktop-app/shared/sync.js`: append-only `baselines` table with previous-hash linkage, a partial unique index enforcing exactly one CURRENT per project, and `promote()` refusing a mismatched/empty prev-hash while keeping the prior baseline CURRENT. Verified in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
@@ -179,7 +219,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK SCS-013-PG — Task Ownership & Collision Prevention
+### [x] SUBTASK SCS-013-PG — Task Ownership & Collision Prevention — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `TaskOwnership` in `desktop-app/shared/ownership.js`: `claim()` grants an unowned/own/expired task and refuses a second claim on an owned one with a clear reason. Ownership carries a lease; an expired lease releases with a logged `OWNER_LEASE_EXPIRED` (via `claim` takeover or `sweepExpired()`), returning the task to the queue. Verified with an injectable clock in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002
@@ -201,7 +243,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-001-PG — Local SQLite Project Database
+### [x] SUBTASK MDC-001-PG — Local SQLite Project Database — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Built in `desktop-app/shared/db.js` on Node's built-in `node:sqlite` (no new dependency). WAL mode on; versioned via `PRAGMA user_version` with a pre-migration snapshot; on corruption the open path refuses to run dirty and restores the last good snapshot (`VACUUM INTO`), or fails loudly if none exists. Survives restart with data intact. Verified by `desktop-app/test/shared-db.test.js`.
 
 **Type:** PG
 **Depends on:** —
@@ -212,7 +256,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-002-PG — Structured Shared Memory
+### [x] SUBTASK MDC-002-PG — Structured Shared Memory — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). Typed entity tables (task/character/decision/timeline/fact/status) generated from `desktop-app/shared/entities.js`; CRUD in `shared/memory.js`. Every entity gets a stable prefixed id (CHAR-000001, …), created/updated timestamps and a `project_id` FK; writes are validated against the type schema and rejected with a field-level reason; an orphaned row (unknown project) is rejected at write time by the FK. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-001
@@ -223,7 +269,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-003-PG — Full-Text Project Search
+### [x] SUBTASK MDC-003-PG — Full-Text Project Search — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `Search` in `desktop-app/shared/memory.js` over a SQLite FTS5 index (`mem_fts`) kept in sync as entities are written; word/phrase search returns hits across all entity types well under a second (verified on 303 records). A missing/stale index rebuilds via `ensureIndex()`; if FTS fails, `search()` falls back to a LIKE scan flagged `DEGRADED` rather than returning nothing. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002
@@ -267,7 +315,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-007-PG — AI File Request System
+### [x] SUBTASK MDC-007-PG — AI File Request System — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `FileManager.request()` in `desktop-app/shared/file-manager.js` routes a model's file request through the gateway, returns the authoritative current version, and logs every request (requester, file, version, result) to `file_requests`. An unknown file returns structured `FILE_NOT_FOUND` plus the closest matching names; a denied request returns explicit `ACCESS_DENIED` — never an empty body. Verified in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-009
@@ -278,7 +328,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-008-PG — Artifact Version & Hash Tracking
+### [x] SUBTASK MDC-008-PG — Artifact Version & Hash Tracking — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `ArtifactStore` in `desktop-app/shared/artifacts.js`: every write is a new immutable version with a SHA-256 hash; `get()` verifies the current version against its recorded hash and, on mismatch, blocks delivery with `ARTIFACT_INTEGRITY_FAIL` and offers the previous verified version instead. Full version history retained. Verified in `test/memory.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-002
@@ -289,7 +341,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK MDC-009-PG — Shared Project File Manager
+### [x] SUBTASK MDC-009-PG — Shared Project File Manager — Claimed by Claude
+
+**Status:** ✅ DONE (Claude, 2026-08-15). `FileManager` in `desktop-app/shared/file-manager.js` is the single gateway: a native role→path write policy (deny by default, path-traversal rejected), atomic writes (temp file + rename) under a per-path lock, a failed/denied write leaves the previous version untouched and logs, and every write is versioned + hashed through the artifact store (MDC-008). Verified in `test/files.test.js`.
 
 **Type:** PG
 **Depends on:** MDC-008
@@ -311,7 +365,9 @@ Every subtask uses the same block:
 
 ---
 
-### SUBTASK LSI-001-LM — Local Supervisor AI
+### [x] SUBTASK LSI-001-LM — Local Supervisor AI — Claimed by Claude
+
+**Status:** ✅ CODE DONE (Claude, 2026-08-17). `desktop-app/lsi-provider.js`: a fixed prompt-contract-in / strict-JSON-verdict-out interface over a configurable OpenAI-compatible local model (Ollama / LM Studio / RunPod). Every call returns a schema-valid `{verdict, confidence}`, is logged with input **hash** (never the raw input), verdict and latency; invalid JSON triggers exactly one reparse then `VERDICT_UNAVAILABLE` + the caller's safe default; hard 10s timeout; **offline ⇒ PG-only mode** (degraded judgment, zero downtime). Verified in `test/lsi-provider.test.js`. NOTE: like the manager/SD providers, actually running it needs a local model endpoint configured at runtime (its effective SRI-016 dependency); the code/contract and degradation are complete and tested. This unblocks the LM subtasks (SCS-008/009/010/011, LSI-002…009) to call `lsi.ask(check, input, {allowed, safeDefault})`.
 
 **Type:** LM
 **Depends on:** SRI-016
