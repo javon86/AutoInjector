@@ -72,9 +72,22 @@ function testMemoryAndState() {
   assert(st.available && Array.isArray(st.readPositions) && Array.isArray(st.ownedTasks), 'projectState returns the sync/ownership/artifact snapshot');
 }
 
+function testRecordImage() {
+  console.log('\n== db-service records a Stable Diffusion render as a searchable project image ==');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlimg-'));
+  svc.init(dir);
+  const row = svc.recordImage({ prompt: 'a lighthouse at dusk', seed: 42, from: 'claude', path: '/tmp/sd-images/img-1.png', sha256: 'abc123' });
+  assert(row && /^IMG-/.test(row.id), 'the render is stored as an IMG- entity');
+  const imgs = svc.imageEntries();
+  assert(imgs.length === 1 && imgs[0].prompt === 'a lighthouse at dusk' && imgs[0].from === 'claude', 'imageEntries returns it with prompt and requester');
+  const found = svc.memorySearch('lighthouse');
+  assert(found.available && found.results.some((r) => r.type === 'image'), 'the image is findable via project memory search');
+}
+
 function main() {
   testRecordsAndReads();
   testMemoryAndState();
+  testRecordImage();
   testSafeWhenUninitialized();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

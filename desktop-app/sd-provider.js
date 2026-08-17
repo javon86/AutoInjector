@@ -12,6 +12,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:7860';
 const DEFAULT_TIMEOUT_MS = 180000; // generation can be slow
@@ -156,16 +157,18 @@ async function generate(opts) {
   if (!b64) return { ok: false, error: 'NO_IMAGE_RETURNED' };
 
   const clean = String(b64).replace(/^data:image\/\w+;base64,/, '');
+  const bytes = Buffer.from(clean, 'base64');
+  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
   const ts = nowMs();
   const file = _imagesDir ? path.join(_imagesDir, `img-${ts}.png`) : null;
-  try { if (file) fs.writeFileSync(file, Buffer.from(clean, 'base64')); } catch (_) { /* keep going; still return dataUri */ }
+  try { if (file) fs.writeFileSync(file, bytes); } catch (_) { /* keep going; still return dataUri */ }
 
-  const entry = { file, prompt, ts, from: opts.from || 'user', seed: _seedFromInfo(body) };
+  const entry = { file, prompt, ts, from: opts.from || 'user', seed: _seedFromInfo(body), sha256 };
   _gallery.push(entry);
   if (_gallery.length > GALLERY_MAX) _gallery = _gallery.slice(-GALLERY_MAX);
   _saveGallery();
 
-  return { ok: true, file, dataUri: `data:image/png;base64,${clean}`, prompt, from: entry.from, seed: entry.seed };
+  return { ok: true, file, dataUri: `data:image/png;base64,${clean}`, prompt, from: entry.from, seed: entry.seed, sha256 };
 }
 
 function _seedFromInfo(body) {

@@ -18,6 +18,7 @@ const ENTITIES = {
   timeline:  { prefix: 'TL',   fields: { label: { required: true }, when: {}, notes: {} } },
   fact:      { prefix: 'FACT', fields: { statement: { required: true }, value: {}, source: {} } },
   status:    { prefix: 'STAT', fields: { label: { required: true }, state: {} } },
+  image:     { prefix: 'IMG',  fields: { prompt: { required: true }, seed: {}, model: {}, path: {}, from: {}, sha256: {} } },
 };
 
 const TYPES = Object.keys(ENTITIES);

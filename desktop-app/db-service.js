@@ -77,6 +77,32 @@ function memorySearch(query) {
   } catch (e) { return { available: false, results: [], error: String(e) }; }
 }
 
+// ---- Stable Diffusion renders as project records (SD Phase 2) --------------
+function recordImage(entry) {
+  if (!_memory) return null;
+  entry = entry || {};
+  const rel = entry.path ? 'sd-images/' + path.basename(String(entry.path)) : `sd-images/img-${Date.now()}.png`;
+  let row = null;
+  try {
+    row = _memory.create('image', PROJECT_ID, {
+      prompt: String(entry.prompt || ''),
+      seed: entry.seed != null ? String(entry.seed) : '',
+      model: String(entry.model || ''),
+      path: rel,
+      from: String(entry.from || 'user'),
+      sha256: String(entry.sha256 || ''),
+    });
+  } catch (_) { return null; }
+  // Also register a versioned artifact (integrity + history) for the render.
+  try { if (_artifacts) _artifacts.put(PROJECT_ID, rel, JSON.stringify({ prompt: entry.prompt, seed: entry.seed, sha256: entry.sha256 }), { title: 'render' }); } catch (_) {}
+  return row;
+}
+
+function imageEntries() {
+  if (!_memory) return [];
+  try { return _memory.list('image', PROJECT_ID); } catch (_) { return []; }
+}
+
 // ---- Project state: sync + ownership + artifacts ---------------------------
 function projectState() {
   if (!_db) return { available: false };
@@ -131,4 +157,5 @@ function recent(limit = 100) {
 module.exports = {
   init, status, recordTurn, recordUserMessage, recent, PROJECT_ID,
   memorySummary, memoryCreate, memorySearch, projectState,
+  recordImage, imageEntries,
 };

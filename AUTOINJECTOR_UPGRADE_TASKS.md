@@ -44,6 +44,7 @@ already carries someone's name — pick the next unclaimed one from the top.
 | SCS-013-PG | Claude | ✅ DONE | `desktop-app/shared/ownership.js` · test `test/files.test.js` |
 | MDC-009-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` · test `test/files.test.js` |
 | MDC-007-PG | Claude | ✅ DONE | `desktop-app/shared/file-manager.js` (request) · test `test/files.test.js` |
+| LSI-001-LM | Claude | ✅ CODE DONE | `desktop-app/lsi-provider.js` · test `test/lsi-provider.test.js` (runtime needs a local model endpoint) |
 
 ---
 
@@ -364,7 +365,9 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ---
 
-### SUBTASK LSI-001-LM — Local Supervisor AI
+### [x] SUBTASK LSI-001-LM — Local Supervisor AI — Claimed by Claude
+
+**Status:** ✅ CODE DONE (Claude, 2026-08-17). `desktop-app/lsi-provider.js`: a fixed prompt-contract-in / strict-JSON-verdict-out interface over a configurable OpenAI-compatible local model (Ollama / LM Studio / RunPod). Every call returns a schema-valid `{verdict, confidence}`, is logged with input **hash** (never the raw input), verdict and latency; invalid JSON triggers exactly one reparse then `VERDICT_UNAVAILABLE` + the caller's safe default; hard 10s timeout; **offline ⇒ PG-only mode** (degraded judgment, zero downtime). Verified in `test/lsi-provider.test.js`. NOTE: like the manager/SD providers, actually running it needs a local model endpoint configured at runtime (its effective SRI-016 dependency); the code/contract and degradation are complete and tested. This unblocks the LM subtasks (SCS-008/009/010/011, LSI-002…009) to call `lsi.ask(check, input, {allowed, safeDefault})`.
 
 **Type:** LM
 **Depends on:** SRI-016

@@ -2048,7 +2048,12 @@ async function pollSite(site) {
         if (imgPrompt) {
           logEvent("sd-ai-trigger", { site, prompt: imgPrompt.slice(0, 80) });
           sdProvider.generate({ prompt: imgPrompt, from: site })
-            .then((r) => { if (r && r.ok) broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed }); else logEvent("sd-ai-error", { site, error: r && r.error }); })
+            .then((r) => {
+              if (r && r.ok) {
+                try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+                broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+              } else logEvent("sd-ai-error", { site, error: r && r.error });
+            })
             .catch((e) => logEvent("sd-ai-error", { site, error: String(e) }));
         }
       }
@@ -2139,7 +2144,10 @@ ipcMain.handle("sd:test", async () => {
 ipcMain.handle("sd:generate", async (_evt, opts) => {
   try {
     const r = await sdProvider.generate(opts || {});
-    if (r && r.ok) broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+    if (r && r.ok) {
+      try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+      broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+    }
     return r;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
