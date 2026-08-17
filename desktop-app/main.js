@@ -27,6 +27,7 @@ const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildP
 const managerProvider = require("./manager-provider");
 const atelierGov = require("./atelier-governance");
 const dbService = require("./db-service");
+const sdProvider = require("./sd-provider");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2038,6 +2039,21 @@ async function pollSite(site) {
     // no-ops if the database backend is unavailable).
     try { dbService.recordTurn(turn); } catch (_) {}
 
+    // AI-triggered image generation: if this reply opens with an [IMAGE: ...]
+    // tag and Stable Diffusion auto-mode is on, render it in the background and
+    // push the result to the UI. Never blocks the poll loop.
+    try {
+      if (sdProvider.autoFromAI()) {
+        const imgPrompt = sdProvider.parseImageTag(turn.text);
+        if (imgPrompt) {
+          logEvent("sd-ai-trigger", { site, prompt: imgPrompt.slice(0, 80) });
+          sdProvider.generate({ prompt: imgPrompt, from: site })
+            .then((r) => { if (r && r.ok) broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed }); else logEvent("sd-ai-error", { site, error: r && r.error }); })
+            .catch((e) => logEvent("sd-ai-error", { site, error: String(e) }));
+        }
+      }
+    } catch (_) {}
+
     state.captured[site] = roundtableTag ? { ...turn, text } : turn;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -2107,6 +2123,28 @@ ipcMain.handle("db:memory-search", async (_evt, query) => {
 });
 ipcMain.handle("db:project-state", async () => {
   try { return dbService.projectState(); } catch (e) { return { available: false }; }
+});
+
+// --- Stable Diffusion (Image Studio) IPC -----------------------------------
+ipcMain.handle("sd:get-settings", async () => {
+  try { return sdProvider.getSettings(); } catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("sd:set-settings", async (_evt, patch) => {
+  try { const s = sdProvider.setSettings(patch || {}); logEvent("sd-settings", { enabled: s.enabled, autoFromAI: s.autoFromAI }); return s; }
+  catch (e) { return { error: String(e) }; }
+});
+ipcMain.handle("sd:test", async () => {
+  try { return await sdProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("sd:generate", async (_evt, opts) => {
+  try {
+    const r = await sdProvider.generate(opts || {});
+    if (r && r.ok) broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("sd:gallery", async (_evt, limit) => {
+  try { return sdProvider.gallery(limit || 24); } catch (e) { return []; }
 });
 
 // --- ATELIER governance IPC ------------------------------------------------
@@ -2875,6 +2913,7 @@ app.whenReady().then(() => {
   try { atelierGov.init(userDataDir()); } catch (e) { logEvent("atelier-init-error", { error: String(e) }); }
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
+  try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   createWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

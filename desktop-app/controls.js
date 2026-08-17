@@ -17,6 +17,7 @@ const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
 
 let currentTranscript = [];
+const lastReplyBySite = {}; // most recent reply text per AI, for "use as image prompt"
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
@@ -938,6 +939,7 @@ function updateCharCount() {
 window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
+  if (turn && turn.site) lastReplyBySite[turn.site] = turn.text || "";
   setStatus(`Captured new reply from ${turn.label}.`);
   beep();
   if (typeof databaseRefresh === "function" && el("database-status")) databaseRefresh();
@@ -1170,6 +1172,75 @@ async function stateRefresh() {
 }
 if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
 
+// --- Image Studio (Stable Diffusion) panel ---------------------------------
+wireCollapse("btn-collapse-sd", "sd-body");
+
+function sdStatus(s) {
+  const st = el("sd-status"); if (!st) return;
+  st.textContent = s && s.enabled ? "· on" : "· off";
+  st.style.color = s && s.enabled ? "#7ad19a" : "#888";
+}
+async function sdLoadSettings() {
+  if (!window.api.sdGetSettings) return;
+  try {
+    const s = await window.api.sdGetSettings();
+    if (!s || s.error) return;
+    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
+    if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
+    if (el("sd-auto")) el("sd-auto").checked = !!s.autoFromAI;
+    if (el("sd-negative")) el("sd-negative").value = s.negativePrompt || "";
+    sdStatus(s);
+  } catch (_) {}
+}
+async function sdRenderGallery() {
+  const g = el("sd-gallery");
+  if (!g || !window.api.sdGallery) return;
+  try {
+    const items = (await window.api.sdGallery(24)) || [];
+    g.innerHTML = "";
+    for (const it of items) {
+      if (!it.dataUri) continue;
+      const img = document.createElement("img");
+      img.src = it.dataUri;
+      img.title = `${it.from || "?"}: ${it.prompt || ""}`;
+      img.style.cssText = "width:72px; height:72px; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a;";
+      g.appendChild(img);
+    }
+  } catch (_) {}
+}
+if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
+  if (!window.api.sdSetSettings) return;
+  const s = await window.api.sdSetSettings({
+    endpoint: el("sd-endpoint").value.trim(),
+    enabled: el("sd-enabled").checked,
+    autoFromAI: el("sd-auto").checked,
+    negativePrompt: el("sd-negative").value,
+  });
+  sdStatus(s);
+  if (el("sd-message")) el("sd-message").textContent = "Saved.";
+};
+if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
+  if (!window.api.sdTest) return;
+  const m = el("sd-message"); if (m) m.textContent = "Testing…";
+  const r = await window.api.sdTest();
+  if (m) m.textContent = r && r.ok ? `✓ Connected (${r.models} model(s))` : `⚠ ${(r && r.error) || "failed"}`;
+};
+if (el("btn-sd-generate")) el("btn-sd-generate").onclick = async () => {
+  if (!window.api.sdGenerate) return;
+  const prompt = el("sd-prompt").value.trim();
+  const m = el("sd-message");
+  if (!prompt) { if (m) m.textContent = "Enter a prompt first."; return; }
+  if (m) m.textContent = "Generating… (this can take a moment)";
+  const r = await window.api.sdGenerate({ prompt, negativePrompt: el("sd-negative").value });
+  if (r && r.ok) { if (m) m.textContent = "Done."; sdRenderGallery(); }
+  else if (m) m.textContent = `⚠ ${(r && r.error) || "failed"}`;
+};
+function sdUseReply(site) { if (el("sd-prompt") && lastReplyBySite[site]) el("sd-prompt").value = lastReplyBySite[site]; }
+if (el("btn-sd-use-chatgpt")) el("btn-sd-use-chatgpt").onclick = () => sdUseReply("chatgpt");
+if (el("btn-sd-use-claude")) el("btn-sd-use-claude").onclick = () => sdUseReply("claude");
+if (el("btn-sd-use-gemini")) el("btn-sd-use-gemini").onclick = () => sdUseReply("gemini");
+if (window.api.onSdImage) window.api.onSdImage(() => sdRenderGallery());
+
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
 el("btn-main-row-collapse").onclick = () => {
@@ -1357,4 +1428,6 @@ el("btn-clear").onclick = async () => {
   databaseRefresh();
   memoryRefresh();
   stateRefresh();
+  sdLoadSettings();
+  sdRenderGallery();
 })();

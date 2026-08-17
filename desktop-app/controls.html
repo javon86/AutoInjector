@@ -436,6 +436,34 @@
       </div>
     </div>
 
+    <div id="col-imagestudio" class="col yc-panel">
+      <div class="yc-head">
+        <h2>Image Studio (Stable Diffusion)</h2><span class="spacer"></span>
+        <span id="sd-status" style="font-size:9.5px; opacity:.7;"></span>
+        <button class="collapse-btn" id="btn-collapse-sd" title="Minimize this panel">⌄</button>
+      </div>
+      <div id="sd-body">
+        <p style="opacity:.6; margin:4px 0;">Optional. Point at an Automatic1111 server (local or RunPod). Both you and the AIs can generate: an AI reply that starts with <code>[IMAGE: ...]</code> auto-renders when the checkbox below is on.</p>
+        <div class="btns" style="margin:4px 0;">
+          <input id="sd-endpoint" type="text" placeholder="http://127.0.0.1:7860" style="flex:1 1 160px; min-width:0;">
+          <button id="btn-sd-test">Test</button>
+        </div>
+        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="sd-enabled"> <span>Enable image generation</span></label>
+        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="sd-auto"> <span>Let AIs trigger with <code>[IMAGE: …]</code></span></label>
+        <div class="btns" style="margin:3px 0;"><button id="btn-sd-save">Save settings</button></div>
+        <textarea id="sd-prompt" placeholder="a lighthouse at dusk, cinematic, highly detailed" style="width:100%; min-height:44px; resize:vertical;"></textarea>
+        <textarea id="sd-negative" placeholder="negative prompt (optional)" style="width:100%; min-height:26px; resize:vertical; margin-top:3px;"></textarea>
+        <div class="btns" style="margin:4px 0;">
+          <button id="btn-sd-generate" class="primary">Generate</button>
+          <button id="btn-sd-use-chatgpt" title="Use ChatGPT's last reply as the prompt">↳ ChatGPT</button>
+          <button id="btn-sd-use-claude" title="Use Claude's last reply as the prompt">↳ Claude</button>
+          <button id="btn-sd-use-gemini" title="Use Gemini's last reply as the prompt">↳ Gemini</button>
+        </div>
+        <div id="sd-message" style="font-size:10.5px; opacity:.8; margin:2px 0;"></div>
+        <div id="sd-gallery" style="display:flex; flex-wrap:wrap; gap:5px; max-height:200px; overflow-y:auto;"></div>
+      </div>
+    </div>
+
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">
