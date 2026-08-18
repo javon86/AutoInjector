@@ -141,22 +141,29 @@ async function testPaneCollapseToggle() {
 
   const col = dom.window.document.getElementById("col-claude");
   assert(!!col, "buildAiRow() created a column for claude");
-  assert(!col.classList.contains("collapsed"), "starts expanded");
+  assert(col.classList.contains("state-open"), "starts in the OPEN state");
 
   const btn = col.querySelector(".collapse-btn");
-  assert(!!btn, "each column has its own collapse button");
-  assert(btn.textContent === "⌄", "starts with the 'collapse' icon");
+  assert(!!btn, "each column has its own state-cycle button");
 
+  // Three-state cycle: open -> reduced -> min -> open.
   btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(col.classList.contains("collapsed"), "clicking it adds the 'collapsed' class");
-  assert(btn.textContent === "›", "icon flips to the 'expand' state");
+  assert(col.classList.contains("state-reduced") && !col.classList.contains("state-open"), "first click -> REDUCED (the middle state)");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(col.classList.contains("state-min") && !col.classList.contains("state-reduced"), "second click -> MINIMIZED");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(col.classList.contains("state-open") && !col.classList.contains("state-min"), "third click -> back to OPEN (full cycle)");
 
   const otherCol = dom.window.document.getElementById("col-chatgpt");
-  assert(!otherCol.classList.contains("collapsed"), "collapsing claude's pane does NOT collapse chatgpt's — each is independent");
+  assert(otherCol.classList.contains("state-open"), "cycling claude's pane does NOT change chatgpt's — each is independent");
 
-  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(!col.classList.contains("collapsed"), "clicking again expands it back");
-  assert(btn.textContent === "⌄", "icon flips back to 'collapse'");
+  // The whole minimized bar is an expand target: clicking the column (not the
+  // button) while minimized opens it fully.
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); // -> reduced
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); // -> min
+  assert(col.classList.contains("state-min"), "back to minimized for the bar-click test");
+  col.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(col.classList.contains("state-open"), "clicking anywhere on the minimized bar opens the pane fully");
 }
 
 async function testWindowTitlebarCollapse() {
@@ -771,28 +778,26 @@ async function testMainRowCollapse() {
 }
 
 async function testCollapsedPanesMoveToTheirOwnStrip() {
-  console.log("\n== Collapsing a pane saves space — it moves into its own always-present #collapsed-strip, not a narrow column ==");
+  console.log("\n== A pane's state never changes its position — providers keep a fixed order (AI-UI-003/006) ==");
   const dom = await loadWindow(makeApi());
   const doc = dom.window.document;
+  const strip = doc.getElementById("expanded-strip");
+  const orderOf = () => Array.from(strip.querySelectorAll(".ai-col")).map((c) => c.id).join(",");
+  const FIXED = "col-chatgpt,col-claude,col-gemini";
 
-  // #collapsed-strip lives as its own row, independent of House Rules --
-  // House Rules can now collapse itself too, so a collapsed AI pane needs a
-  // home that doesn't disappear along with it.
-  assert(!doc.getElementById("col-houserules").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip is NOT nested inside House Rules anymore, since House Rules itself can now collapse");
-  assert(doc.getElementById("wrap").contains(doc.getElementById("collapsed-strip")), "#collapsed-strip still exists as its own row in the window");
+  assert(orderOf() === FIXED, "panes start in fixed provider order in the side-by-side strip");
 
   const claudeCol = doc.getElementById("col-claude");
-  assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanded by default — lives in the side-by-side strip");
-  assert(!doc.getElementById("collapsed-strip").contains(claudeCol), "not in the collapsed strip yet");
+  const btn = claudeCol.querySelector(".collapse-btn");
 
-  claudeCol.querySelector(".collapse-btn").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(doc.getElementById("collapsed-strip").contains(claudeCol), "collapsing moves it into the shared collapsed strip");
-  assert(!doc.getElementById("expanded-strip").contains(claudeCol), "...and out of the side-by-side strip");
-  assert(doc.getElementById("col-chatgpt") && doc.getElementById("expanded-strip").contains(doc.getElementById("col-chatgpt")), "the other, still-expanded panes are unaffected");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); // -> reduced
+  assert(strip.contains(claudeCol) && orderOf() === FIXED, "reducing claude keeps it in the same strip and position");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); // -> min
+  assert(strip.contains(claudeCol) && orderOf() === FIXED, "minimizing claude keeps it in place — order never changes");
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true })); // -> open
+  assert(strip.contains(claudeCol) && orderOf() === FIXED, "reopening claude keeps it in place — order still fixed");
 
-  claudeCol.querySelector(".collapse-btn").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(doc.getElementById("expanded-strip").contains(claudeCol), "expanding it again moves it back");
-  assert(!doc.getElementById("collapsed-strip").contains(claudeCol), "...and out of the collapsed strip");
+  assert(doc.getElementById("col-chatgpt").classList.contains("state-open"), "the other panes are unaffected by claude's state changes");
 }
 
 async function testAllPanesCollapsedExpandsTranscript() {
@@ -800,18 +805,20 @@ async function testAllPanesCollapsedExpandsTranscript() {
   const dom = await loadWindow(makeApi());
   const wrap = dom.window.document.getElementById("wrap");
 
-  const collapseBtn = (site) => dom.window.document.getElementById(`col-${site}`).querySelector(".collapse-btn");
-  assert(!wrap.classList.contains("all-collapsed"), "starts expanded — no extra space handed over yet");
+  const btnFor = (site) => dom.window.document.getElementById(`col-${site}`).querySelector(".collapse-btn");
+  const click = (b) => b.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  const minimize = (site) => { const b = btnFor(site); click(b); click(b); }; // open -> reduced -> min
+  assert(!wrap.classList.contains("all-collapsed"), "starts open — no extra space handed over yet");
 
-  collapseBtn("claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(!wrap.classList.contains("all-collapsed"), "only one of three collapsed — not enough to hand over space yet");
+  minimize("claude");
+  assert(!wrap.classList.contains("all-collapsed"), "only one of three minimized — not enough to hand over space yet");
 
-  collapseBtn("chatgpt").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  collapseBtn("gemini").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(wrap.classList.contains("all-collapsed"), "all three collapsed — Transcript/Log panel grows into the freed space");
+  minimize("chatgpt");
+  minimize("gemini");
+  assert(wrap.classList.contains("all-collapsed"), "all three minimized — Conversation/Log panel grows into the freed space");
 
-  collapseBtn("claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  assert(!wrap.classList.contains("all-collapsed"), "expanding just one pane again gives the space back");
+  click(btnFor("claude")); // min -> open
+  assert(!wrap.classList.contains("all-collapsed"), "opening just one pane again gives the space back");
 }
 
 async function testPromptLibraryDropdownRenders() {
