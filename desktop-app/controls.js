@@ -985,7 +985,10 @@ wirePopup("btn-open-roles", "roles-popup", "btn-close-roles");
 const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
-  prompts: { panelId: "col-prompts", label: "Prompt Library" }
+  prompts: { panelId: "col-prompts", label: "Prompt Library" },
+  memory: { panelId: "col-memory", label: "Project Memory" },
+  state: { panelId: "col-state", label: "Project State" },
+  imagestudio: { panelId: "col-imagestudio", label: "Image Studio" }
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
@@ -1100,18 +1103,10 @@ async function databaseRefresh() {
 }
 
 // --- Project Memory + Project State panels (backend-module panels) ----------
-function wireCollapse(btnId, bodyId) {
-  const b = el(btnId);
-  if (!b) return;
-  b.onclick = () => {
-    const body = el(bodyId);
-    const hidden = body.style.display === "none";
-    body.style.display = hidden ? "" : "none";
-    b.textContent = hidden ? "⌄" : "›";
-  };
-}
-wireCollapse("btn-collapse-memory", "memory-body");
-wireCollapse("btn-collapse-state", "state-body");
+// Collapse to the top tab strip, exactly like Global / House Rules / Prompt
+// Library, so every panel minimizes the same predictable way.
+if (el("btn-collapse-memory")) el("btn-collapse-memory").onclick = () => collapseYellowPanel("memory");
+if (el("btn-collapse-state")) el("btn-collapse-state").onclick = () => collapseYellowPanel("state");
 
 async function memoryRefresh() {
   const sum = el("memory-summary");
@@ -1173,7 +1168,7 @@ async function stateRefresh() {
 if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
 
 // --- Image Studio (Stable Diffusion) panel ---------------------------------
-wireCollapse("btn-collapse-sd", "sd-body");
+if (el("btn-collapse-sd")) el("btn-collapse-sd").onclick = () => collapseYellowPanel("imagestudio");
 
 function sdStatus(s) {
   const st = el("sd-status"); if (!st) return;
