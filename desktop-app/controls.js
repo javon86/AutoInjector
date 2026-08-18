@@ -22,6 +22,16 @@ let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
 let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
+
+// Each AI pane has three states, cycled in this order. The button's glyph and
+// tooltip always describe what the NEXT click does.
+const PANE_STATES = ["open", "reduced", "min"];
+const STATE_GLYPH = { open: "⌄", reduced: "▁", min: "▸" };
+const STATE_TITLE = {
+  open: "Open — showing the website. Click to reduce (hide the site, keep the reply area).",
+  reduced: "Reduced — website hidden, replies shown. Click to minimize to a bar.",
+  min: "Minimized. Click anywhere on the bar to open fully.",
+};
 const ZOOM_STEP = 0.1;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 2;
@@ -319,15 +329,17 @@ function renderPrompts(prompts) {
 
 function buildAiColumn(site) {
   const col = document.createElement("div");
-  col.className = `ai-col ${site}`;
+  col.className = `ai-col ${site} state-open`;
   col.id = `col-${site}`;
+  // When minimized, the whole thin bar is an expand target.
+  col.addEventListener("click", () => { if (col.classList.contains("state-min")) setColumnState(site, "open"); });
 
   const strip = document.createElement("div");
   strip.className = "control-strip";
 
   const head = document.createElement("div");
   head.className = "card-head";
-  head.innerHTML = `<span class="led" id="led-${site}" title="Pane loaded"></span><span class="gendot" id="gendot-${site}"></span><span>${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="led" id="led-${site}" title="Pane loaded"></span><span class="gendot" id="gendot-${site}"></span><span class="pane-name">${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
   const zoomOutBtn = document.createElement("button");
   zoomOutBtn.className = "zoom-btn";
   zoomOutBtn.textContent = "－";
@@ -375,9 +387,9 @@ function buildAiColumn(site) {
   head.appendChild(reloadBtn);
   const collapseBtn = document.createElement("button");
   collapseBtn.className = "collapse-btn";
-  collapseBtn.textContent = "⌄";
-  collapseBtn.title = "Collapse this pane";
-  collapseBtn.onclick = () => toggleColumnCollapse(site);
+  collapseBtn.textContent = STATE_GLYPH.open;
+  collapseBtn.title = STATE_TITLE.open;
+  collapseBtn.onclick = (e) => { e.stopPropagation(); cycleColumnState(site); };
   head.appendChild(collapseBtn);
   strip.appendChild(head);
 
@@ -613,36 +625,34 @@ function buildAiRow() {
   for (const site of SITES) box.appendChild(buildAiColumn(site));
 }
 
-// Collapsed panes live in #collapsed-strip (stacked, auto-height bars) and
-// expanded ones in #expanded-strip (side by side, sharing whatever room is
-// left) — moving a column between the two (appendChild on an already-
-// attached node relocates it, no clone needed) is what actually frees up
-// vertical space when a pane collapses, rather than just narrowing it in
-// place and leaving its full row-height allocation unused.
-function relocateColumn(site) {
+// The three AI panes ALWAYS stay in #expanded-strip in SITES order — a state
+// change never moves a pane, so provider order (ChatGPT, Claude, Gemini) is
+// fixed regardless of open/reduced/minimized. Only the pane's own state class
+// changes its size in place.
+//
+// Purely a visual/layout change — a pane's state does NOT change whether that
+// AI is enabled/participating (that's the separate Participants checkbox).
+// syncPaneBounds() in main.js measures pane-slot's real on-screen rect every
+// ~700ms and zeroes out the live browser view once it's too small to see, so
+// hiding .pane-slot (in reduced and minimized) also hides the embedded browser
+// pane — no main.js change needed.
+function setColumnState(site, state) {
   const col = el(`col-${site}`);
-  if (!col) return;
-  const target = col.classList.contains("collapsed") ? el("collapsed-strip") : el("expanded-strip");
-  target.appendChild(col);
-}
-
-// Purely a visual/layout toggle — collapsing a pane does NOT change whether
-// that AI is enabled/participating (that's the separate Participants
-// checkbox). syncPaneBounds() in main.js measures pane-slot's real on-screen
-// rect every ~700ms and zeroes out the live browser view's bounds once it's
-// too small to see, so hiding .pane-slot here is enough to also hide the
-// actual embedded browser pane — no main.js change needed for this part.
-function toggleColumnCollapse(site) {
-  const col = el(`col-${site}`);
-  if (!col) return;
-  const collapsed = col.classList.toggle("collapsed");
+  if (!col || !PANE_STATES.includes(state)) return;
+  col.classList.remove("state-open", "state-reduced", "state-min");
+  col.classList.add(`state-${state}`);
   const btn = col.querySelector(".collapse-btn");
-  if (btn) {
-    btn.textContent = collapsed ? "›" : "⌄";
-    btn.title = collapsed ? "Expand this pane" : "Collapse this pane";
-  }
-  relocateColumn(site);
+  if (btn) { btn.textContent = STATE_GLYPH[state]; btn.title = STATE_TITLE[state]; }
   updateAllCollapsedState();
+}
+function currentColumnState(col) {
+  return PANE_STATES.find((s) => col.classList.contains(`state-${s}`)) || "open";
+}
+function cycleColumnState(site) {
+  const col = el(`col-${site}`);
+  if (!col) return;
+  const cur = currentColumnState(col);
+  setColumnState(site, PANE_STATES[(PANE_STATES.indexOf(cur) + 1) % PANE_STATES.length]);
 }
 
 // When every AI pane is collapsed there's nothing left to look at up top —
@@ -650,8 +660,8 @@ function toggleColumnCollapse(site) {
 // Transcript/Activity Log panel below grow to fill the freed space, instead
 // of leaving it stuck at a fixed height.
 function updateAllCollapsedState() {
-  const allCollapsed = SITES.every((site) => el(`col-${site}`)?.classList.contains("collapsed"));
-  el("wrap").classList.toggle("all-collapsed", allCollapsed);
+  const allMinimized = SITES.every((site) => el(`col-${site}`)?.classList.contains("state-min"));
+  el("wrap").classList.toggle("all-collapsed", allMinimized);
 }
 
 function applyRouting(next) {

@@ -162,24 +162,32 @@
     .ai-col.disabled .control-strip { opacity:.5; }
     .ai-col.just-received { box-shadow: 0 0 0 2px #7c5ce0, 0 0 16px 2px rgba(124,92,224,.45); }
 
-    /* Collapsed panes now live in a narrow, width-shared strip (see
-       #collapsed-strip above) rather than their own full-width row, so only
-       the essentials (name + expand toggle) fit — the rest would just
-       overflow. */
-    .ai-col.collapsed { flex:1 1 0; height:44px; min-width:0; }
-    .ai-col.collapsed .preview,
-    .ai-col.collapsed .btns,
-    .ai-col.collapsed .pane-slot,
-    .ai-col.collapsed .gendot,
-    .ai-col.collapsed .role-badge,
-    .ai-col.collapsed .inspect-btn,
-    .ai-col.collapsed .pick-btn,
-    .ai-col.collapsed .pick-menu,
-    .ai-col.collapsed .login-btn,
-    .ai-col.collapsed .reload-btn { display:none; }
-    .ai-col.collapsed .control-strip { height:100%; display:flex; align-items:center; min-width:0; }
-    .ai-col.collapsed .card-head { margin-bottom:0; min-width:0; overflow:hidden; }
-    .ai-col.collapsed .card-head span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* --- Three-state AI panes --------------------------------------------
+       Each provider pane cycles OPEN (embedded website) -> REDUCED (top
+       controls + reply area, website hidden) -> MIN (thin provider bar).
+       Panes NEVER move between containers, so provider order is fixed
+       (ChatGPT, Claude, Gemini stay in that column order in every state). */
+
+    /* REDUCED: keep the column in place, hide the website, let the reply
+       area fill the space. */
+    .ai-col.state-reduced .pane-slot { display:none; }
+    .ai-col.state-reduced .preview { flex:1 1 auto; height:auto; max-height:none; }
+
+    /* MIN: a thin vertical provider bar, in the same column position. The
+       whole bar is an expand target (see the click handler in controls.js). */
+    .ai-col.state-min { flex:0 0 48px; min-width:48px; cursor:pointer; }
+    .ai-col.state-min:hover { background:#1c1c1c; }
+    .ai-col.state-min .pane-slot,
+    .ai-col.state-min .preview,
+    .ai-col.state-min .btns,
+    .ai-col.state-min .pick-menu,
+    .ai-col.state-min .login-list,
+    .ai-col.state-min .login-add-form { display:none; }
+    .ai-col.state-min .control-strip { height:100%; padding:8px 4px; }
+    .ai-col.state-min .card-head { flex-direction:column; align-items:center; gap:10px; height:100%; margin:0; min-width:0; }
+    .ai-col.state-min .card-head > * { display:none; }
+    .ai-col.state-min .card-head > .collapse-btn { display:block; font-size:15px; opacity:.9; padding:0; }
+    .ai-col.state-min .card-head > .pane-name { display:block; writing-mode:vertical-rl; transform:rotate(180deg); font-weight:600; font-size:11.5px; letter-spacing:.06em; white-space:nowrap; }
 
     .control-strip { padding:7px 9px; flex:0 0 auto; }
     .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
@@ -188,7 +196,7 @@
     .zoom-btn { background:none; border:none; padding:0 2px; font-size:11px; opacity:.55; cursor:pointer; }
     .zoom-btn:hover { opacity:1; }
     .zoom-level { font-size:9px; opacity:.5; min-width:30px; text-align:center; }
-    .ai-col.collapsed .zoom-btn, .ai-col.collapsed .zoom-level { display:none; }
+    .ai-col.state-min .zoom-btn, .ai-col.state-min .zoom-level { display:none; }
     .pick-btn { background:none; border:none; padding:0 2px; font-size:12px; opacity:.55; cursor:pointer; }
     .pick-btn:hover { opacity:1; }
     .pick-menu { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 6px; font-size:10px; }
