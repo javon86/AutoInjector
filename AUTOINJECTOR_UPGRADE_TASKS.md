@@ -11,7 +11,6 @@
 Every subtask uses the same block:
 
 | Field | Meaning |
-|---|---|
 | **Type** | `PG` = ordinary program code (authoritative). `LM` = local AI model (judgment only). |
 | **Depends on** | Subtasks that must be DONE before this one starts. `—` means nothing blocks it. |
 | **Build** | What actually gets built. |
@@ -29,7 +28,6 @@ progress**. The claimant's name follows the prefix. Do not start a subtask that
 already carries someone's name — pick the next unclaimed one from the top.
 
 | Subtask | Owner | Status | Evidence |
-|---|---|---|---|
 | MDC-001-PG | Claude | ✅ DONE | `desktop-app/shared/db.js` · test `test/shared-db.test.js` |
 | SCS-001-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · test `test/shared-db.test.js` |
 | SCS-002-PG | Claude | ✅ DONE | `desktop-app/shared/message-log.js` · 1,000-concurrent-insert proof |
@@ -50,7 +48,6 @@ already carries someone's name — pick the next unclaimed one from the top.
 ## Master task order
 
 | # | Task | Prefix | Difficulty | Blocked by |
-|---|---|---|---|---|
 | TASK 1 | Shared Conversation & Synchronization System | SCS | Easiest | — |
 | TASK 2 | Shared Memory, Database & Context System | MDC | Easy → Moderate | Partially TASK 1 |
 | TASK 3 | Local AI Supervisor & Intelligence Layer | LSI | Moderate | TASK 1, TASK 2 |
@@ -78,7 +75,6 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 **Type:** PG
 **Depends on:** MDC-001
-**Build:** One `messages` table holding every user, ChatGPT, Claude, Gemini, local-AI, and system message in a single chronological conversation instead of separate chat histories. Columns: msg_id, project_id, seq, from, to, reply_to, body, created_at, status.
 **Example:** `MSG-000124 — Claude completed Task 7.`
 **Done when:** all five sources write to the same table, and reading the project in `seq` order reproduces the full conversation with no gaps.
 **Error handling:** a write that fails is retried 3× with backoff, then parked in `messages_deadletter` with the raw payload; the message is never dropped and never partially committed (single transaction).
@@ -137,7 +133,6 @@ already carries someone's name — pick the next unclaimed one from the top.
 
 ### [x] SUBTASK SCS-006-PG — Message Delivery & Retry Tracking — Claimed by Claude
 
-**Status:** ✅ DONE (Claude, 2026-08-15). `Deliveries` in `desktop-app/shared/sync.js`: per-recipient PENDING/DELIVERED/RETRY/FAILED_PERMANENT, exponential backoff 5s/15s/45s, max 3 retries then FAILED_PERMANENT with an alert; `sweep()` guarantees nothing sits in PENDING past its timeout; retries reuse the same MSG id (one delivery row), so a retry never creates a second message. Verified with an injectable clock in `test/sync.test.js`.
 
 **Type:** PG
 **Depends on:** SCS-003
@@ -1023,13 +1018,11 @@ These are acceptance scenarios. Each one is an end-to-end test that spans multip
 # Subtask count
 
 | Task | Prefix | Subtasks |
-|---|---|---|
 | TASK 1 | SCS | 13 |
 | TASK 2 | MDC | 9 |
 | TASK 3 | LSI | 9 (+ authority-split enforcement) |
 | TASK 4 | UIF | 15 |
 | TASK 5 | SRI | 28 |
-| **Total** | | **74** |
 
 ---
 
