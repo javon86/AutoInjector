@@ -76,5 +76,15 @@ contextBridge.exposeInMainWorld("api", {
   atelierStatus: (dir) => ipcRenderer.invoke("atelier:status", dir),
   atelierDeliver: (turn, jobId) => ipcRenderer.invoke("atelier:deliver", { turn, jobId }),
   dbStatus: () => ipcRenderer.invoke("db:status"),
-  dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit)
+  dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit),
+  dbMemorySummary: () => ipcRenderer.invoke("db:memory-summary"),
+  dbMemoryCreate: (type, data) => ipcRenderer.invoke("db:memory-create", { type, data }),
+  dbMemorySearch: (query) => ipcRenderer.invoke("db:memory-search", query),
+  dbProjectState: () => ipcRenderer.invoke("db:project-state"),
+  sdGetSettings: () => ipcRenderer.invoke("sd:get-settings"),
+  sdSetSettings: (patch) => ipcRenderer.invoke("sd:set-settings", patch),
+  sdTest: () => ipcRenderer.invoke("sd:test"),
+  sdGenerate: (opts) => ipcRenderer.invoke("sd:generate", opts),
+  sdGallery: (limit) => ipcRenderer.invoke("sd:gallery", limit),
+  onSdImage: (cb) => ipcRenderer.on("sd-image", (_e, payload) => cb(payload))
 });

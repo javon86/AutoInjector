@@ -49,8 +49,45 @@ function testSafeWhenUninitialized() {
   assert(typeof s.available === 'boolean', 'init always returns a status object');
 }
 
+function testMemoryAndState() {
+  console.log('\n== db-service exposes memory (create/search/summary) and project state ==');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlsvc2-'));
+  svc.init(dir);
+
+  const a = svc.memoryCreate('character', { name: 'Mara Vey', notes: 'keeps the lighthouse lens' });
+  const b = svc.memoryCreate('task', { title: 'Draft chapter 7' });
+  assert(a.ok && /^CHAR-/.test(a.id) && b.ok && /^TASK-/.test(b.id), 'memoryCreate stores typed entities with prefixed ids');
+
+  const bad = svc.memoryCreate('character', {});
+  assert(!bad.ok && /required/.test(bad.error), 'a schema-invalid create is rejected with a reason');
+
+  const sum = svc.memorySummary();
+  assert(sum.available && sum.total === 2 && sum.counts.character === 1, 'memorySummary counts entities per type');
+
+  const found = svc.memorySearch('lighthouse');
+  assert(found.available && found.results.length === 1 && found.results[0].title === 'Mara Vey', 'memorySearch returns the matching entity with a title');
+  assert(svc.memorySearch('').results.length === 0, 'an empty query returns no results (no crash)');
+
+  const st = svc.projectState();
+  assert(st.available && Array.isArray(st.readPositions) && Array.isArray(st.ownedTasks), 'projectState returns the sync/ownership/artifact snapshot');
+}
+
+function testRecordImage() {
+  console.log('\n== db-service records a Stable Diffusion render as a searchable project image ==');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlimg-'));
+  svc.init(dir);
+  const row = svc.recordImage({ prompt: 'a lighthouse at dusk', seed: 42, from: 'claude', path: '/tmp/sd-images/img-1.png', sha256: 'abc123' });
+  assert(row && /^IMG-/.test(row.id), 'the render is stored as an IMG- entity');
+  const imgs = svc.imageEntries();
+  assert(imgs.length === 1 && imgs[0].prompt === 'a lighthouse at dusk' && imgs[0].from === 'claude', 'imageEntries returns it with prompt and requester');
+  const found = svc.memorySearch('lighthouse');
+  assert(found.available && found.results.some((r) => r.type === 'image'), 'the image is findable via project memory search');
+}
+
 function main() {
   testRecordsAndReads();
+  testMemoryAndState();
+  testRecordImage();
   testSafeWhenUninitialized();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

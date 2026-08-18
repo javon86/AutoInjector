@@ -185,6 +185,13 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   `,
+
+  // v5 — the `image` entity type (Stable Diffusion renders as searchable
+  // project records). Fresh databases already get this from v3; this backfills
+  // databases created before the type existed.
+  `
+  ${entities.createTableSql('image')}
+  `,
 ];
 
 const PRAGMAS = 'PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;';

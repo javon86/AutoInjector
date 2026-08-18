@@ -17,6 +17,7 @@ const CHAR_WARN_AT = 2000;
 const HIGHLIGHT_MS = 2500;
 
 let currentTranscript = [];
+const lastReplyBySite = {}; // most recent reply text per AI, for "use as image prompt"
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
@@ -938,6 +939,7 @@ function updateCharCount() {
 window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
+  if (turn && turn.site) lastReplyBySite[turn.site] = turn.text || "";
   setStatus(`Captured new reply from ${turn.label}.`);
   beep();
   if (typeof databaseRefresh === "function" && el("database-status")) databaseRefresh();
@@ -1077,55 +1079,167 @@ if (el("btn-atelier-recheck")) {
   el("btn-atelier-recheck").onclick = atelierRefreshStatus;
 }
 
-// --- Conversation Database (SQLite) panel ----------------------------------
-if (el("btn-collapse-database")) {
-  el("btn-collapse-database").onclick = () => {
-    const body = el("database-body");
-    const hidden = body.style.display === "none";
-    body.style.display = hidden ? "" : "none";
-    el("btn-collapse-database").textContent = hidden ? "⌄" : "›";
-  };
-}
-
+// --- Conversation database status ------------------------------------------
+// The Conversation window (formerly the separate Transcript + Database panels,
+// now merged into one) is saved to the shared SQLite database. This shows a
+// live saved-count next to its heading; the messages themselves render in the
+// #transcript box below via renderTranscript/appendTranscriptTurn.
 async function databaseRefresh() {
   const statusEl = el("database-status");
-  const listEl = el("database-list");
   if (!statusEl || !window.api.dbStatus) return;
   try {
     const s = await window.api.dbStatus();
     if (s && s.available) {
-      statusEl.textContent = `✓ Recording — ${s.count} message(s) stored`;
+      statusEl.textContent = `· saved to database (${s.count})`;
       statusEl.style.color = "#7ad19a";
     } else {
-      statusEl.textContent = `⚠ Database not active${s && s.reason ? " — " + s.reason : ""}`;
+      statusEl.textContent = "· not saved (database off)";
       statusEl.style.color = "#e0b060";
     }
-    const msgs = (window.api.dbRecentMessages ? await window.api.dbRecentMessages(60) : []) || [];
-    if (listEl) {
-      listEl.innerHTML = "";
-      for (const m of msgs.slice().reverse()) {
-        const row = document.createElement("div");
-        row.className = `feed-row ${m.from || ""}`;
-        const meta = document.createElement("div");
-        meta.className = "meta";
-        meta.textContent = `${m.msgId} · ${m.from}${m.to ? " → " + m.to : ""}`;
-        const snip = document.createElement("div");
-        snip.className = "snippet";
-        snip.textContent = (m.body || "").replace(/\s+/g, " ").trim();
-        row.appendChild(meta);
-        row.appendChild(snip);
-        listEl.appendChild(row);
-      }
-      if (!msgs.length) listEl.innerHTML = '<div style="opacity:.5; font-size:10.5px;">No messages recorded yet.</div>';
-    }
-  } catch (e) {
-    statusEl.textContent = `⚠ ${String(e)}`;
-  }
+  } catch (_) { statusEl.textContent = ""; }
 }
 
-if (el("btn-database-refresh")) el("btn-database-refresh").onclick = databaseRefresh;
-// (Live refresh on capture is folded into the main onCapture handler above so
-// we don't register a second listener.)
+// --- Project Memory + Project State panels (backend-module panels) ----------
+function wireCollapse(btnId, bodyId) {
+  const b = el(btnId);
+  if (!b) return;
+  b.onclick = () => {
+    const body = el(bodyId);
+    const hidden = body.style.display === "none";
+    body.style.display = hidden ? "" : "none";
+    b.textContent = hidden ? "⌄" : "›";
+  };
+}
+wireCollapse("btn-collapse-memory", "memory-body");
+wireCollapse("btn-collapse-state", "state-body");
+
+async function memoryRefresh() {
+  const sum = el("memory-summary");
+  if (!sum || !window.api.dbMemorySummary) return;
+  try { const s = await window.api.dbMemorySummary(); sum.textContent = s && s.available ? `${s.total} item(s)` : "(db off)"; }
+  catch (_) { sum.textContent = ""; }
+}
+
+async function memoryRunSearch() {
+  const box = el("memory-results");
+  if (!box || !window.api.dbMemorySearch) return;
+  try {
+    const r = await window.api.dbMemorySearch(el("memory-query").value);
+    box.innerHTML = "";
+    if (!r || !r.results || !r.results.length) { box.innerHTML = '<div style="opacity:.5;">No matches.</div>'; return; }
+    for (const x of r.results) {
+      const row = document.createElement("div");
+      row.className = "feed-row";
+      row.textContent = `${x.id} — ${x.title || x.type}`;
+      box.appendChild(row);
+    }
+  } catch (_) {}
+}
+
+if (el("btn-memory-add")) el("btn-memory-add").onclick = async () => {
+  if (!window.api.dbMemoryCreate) return;
+  const type = el("memory-type").value;
+  const text = el("memory-text").value.trim();
+  if (!text) return;
+  const field = { character: "name", task: "title", decision: "summary", fact: "statement", timeline: "label", status: "label" }[type] || "name";
+  const data = {}; data[field] = text;
+  const res = await window.api.dbMemoryCreate(type, data);
+  if (res && res.ok) { el("memory-text").value = ""; memoryRefresh(); }
+  else if (el("memory-results")) { el("memory-results").innerHTML = ""; const d = document.createElement("div"); d.style.color = "#e08080"; d.textContent = (res && res.error) || "failed"; el("memory-results").appendChild(d); }
+};
+if (el("btn-memory-search")) el("btn-memory-search").onclick = memoryRunSearch;
+
+async function stateRefresh() {
+  const box = el("state-content");
+  if (!box || !window.api.dbProjectState) return;
+  try {
+    const s = await window.api.dbProjectState();
+    box.innerHTML = "";
+    if (!s || !s.available) { box.innerHTML = '<div style="opacity:.5;">Database off.</div>'; return; }
+    const section = (label, lines) => {
+      const wrap = document.createElement("div");
+      const b = document.createElement("b"); b.style.opacity = ".7"; b.textContent = label;
+      wrap.appendChild(b);
+      const rows = lines.length ? lines : ["—"];
+      for (const ln of rows) { const p = document.createElement("div"); p.style.opacity = ".85"; p.textContent = ln; wrap.appendChild(p); }
+      return wrap;
+    };
+    box.appendChild(section("Read positions", (s.readPositions || []).map((p) => `${p.model}: ${p.position} (lag ${p.lag})`)));
+    box.appendChild(section("Baseline", s.baseline ? [`${s.baseline.hash} (${s.baseline.stage || "?"})`] : []));
+    box.appendChild(section("Artifacts", (s.artifacts || []).map((a) => `${a.path} v${a.current_version}`)));
+    box.appendChild(section("Owned tasks", (s.ownedTasks || []).map((t) => `${t.task_id} → ${t.owner}`)));
+  } catch (_) {}
+}
+if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
+
+// --- Image Studio (Stable Diffusion) panel ---------------------------------
+wireCollapse("btn-collapse-sd", "sd-body");
+
+function sdStatus(s) {
+  const st = el("sd-status"); if (!st) return;
+  st.textContent = s && s.enabled ? "· on" : "· off";
+  st.style.color = s && s.enabled ? "#7ad19a" : "#888";
+}
+async function sdLoadSettings() {
+  if (!window.api.sdGetSettings) return;
+  try {
+    const s = await window.api.sdGetSettings();
+    if (!s || s.error) return;
+    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
+    if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
+    if (el("sd-auto")) el("sd-auto").checked = !!s.autoFromAI;
+    if (el("sd-negative")) el("sd-negative").value = s.negativePrompt || "";
+    sdStatus(s);
+  } catch (_) {}
+}
+async function sdRenderGallery() {
+  const g = el("sd-gallery");
+  if (!g || !window.api.sdGallery) return;
+  try {
+    const items = (await window.api.sdGallery(24)) || [];
+    g.innerHTML = "";
+    for (const it of items) {
+      if (!it.dataUri) continue;
+      const img = document.createElement("img");
+      img.src = it.dataUri;
+      img.title = `${it.from || "?"}: ${it.prompt || ""}`;
+      img.style.cssText = "width:72px; height:72px; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a;";
+      g.appendChild(img);
+    }
+  } catch (_) {}
+}
+if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
+  if (!window.api.sdSetSettings) return;
+  const s = await window.api.sdSetSettings({
+    endpoint: el("sd-endpoint").value.trim(),
+    enabled: el("sd-enabled").checked,
+    autoFromAI: el("sd-auto").checked,
+    negativePrompt: el("sd-negative").value,
+  });
+  sdStatus(s);
+  if (el("sd-message")) el("sd-message").textContent = "Saved.";
+};
+if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
+  if (!window.api.sdTest) return;
+  const m = el("sd-message"); if (m) m.textContent = "Testing…";
+  const r = await window.api.sdTest();
+  if (m) m.textContent = r && r.ok ? `✓ Connected (${r.models} model(s))` : `⚠ ${(r && r.error) || "failed"}`;
+};
+if (el("btn-sd-generate")) el("btn-sd-generate").onclick = async () => {
+  if (!window.api.sdGenerate) return;
+  const prompt = el("sd-prompt").value.trim();
+  const m = el("sd-message");
+  if (!prompt) { if (m) m.textContent = "Enter a prompt first."; return; }
+  if (m) m.textContent = "Generating… (this can take a moment)";
+  const r = await window.api.sdGenerate({ prompt, negativePrompt: el("sd-negative").value });
+  if (r && r.ok) { if (m) m.textContent = "Done."; sdRenderGallery(); }
+  else if (m) m.textContent = `⚠ ${(r && r.error) || "failed"}`;
+};
+function sdUseReply(site) { if (el("sd-prompt") && lastReplyBySite[site]) el("sd-prompt").value = lastReplyBySite[site]; }
+if (el("btn-sd-use-chatgpt")) el("btn-sd-use-chatgpt").onclick = () => sdUseReply("chatgpt");
+if (el("btn-sd-use-claude")) el("btn-sd-use-claude").onclick = () => sdUseReply("claude");
+if (el("btn-sd-use-gemini")) el("btn-sd-use-gemini").onclick = () => sdUseReply("gemini");
+if (window.api.onSdImage) window.api.onSdImage(() => sdRenderGallery());
 
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 
@@ -1312,4 +1426,8 @@ el("btn-clear").onclick = async () => {
   // atelierRefreshStatus();
   // atelierLoadSettings();
   databaseRefresh();
+  memoryRefresh();
+  stateRefresh();
+  sdLoadSettings();
+  sdRenderGallery();
 })();
