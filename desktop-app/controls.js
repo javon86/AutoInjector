@@ -1314,6 +1314,9 @@ if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
 };
 if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
 
+// User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
+if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
+
 // User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
 if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
   if (!window.api.startNewChatAll) return;

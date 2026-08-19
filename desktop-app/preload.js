@@ -99,5 +99,13 @@ contextBridge.exposeInMainWorld("api", {
   ollamaList: (endpoint) => ipcRenderer.invoke("ollama:list", endpoint),
   ollamaRecommended: (vramGB) => ipcRenderer.invoke("ollama:recommended", vramGB),
   ollamaPull: (model) => ipcRenderer.invoke("ollama:pull", model),
-  onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload))
+  onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload)),
+  openWizard: () => ipcRenderer.invoke("wizard:open"),
+  closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
+  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
+  downloadsEnqueue: (spec) => ipcRenderer.invoke("downloads:enqueue", spec),
+  downloadsList: () => ipcRenderer.invoke("downloads:list"),
+  downloadsCancel: (id) => ipcRenderer.invoke("downloads:cancel", id),
+  downloadsClearFinished: () => ipcRenderer.invoke("downloads:clear-finished"),
+  onDownloadsChanged: (cb) => ipcRenderer.on("downloads-changed", (_e, payload) => cb(payload))
 });

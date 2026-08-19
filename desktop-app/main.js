@@ -31,6 +31,7 @@ const sdProvider = require("./sd-provider");
 const systemMonitor = require("./system-monitor");
 const lsiProvider = require("./lsi-provider");
 const ollamaManager = require("./ollama-manager");
+const downloadManager = require("./download-manager");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -771,6 +772,38 @@ function openSequenceWindow() {
 }
 function closeSequenceWindow() {
   if (sequenceWin) sequenceWin.close();
+}
+
+// --- Setup Wizard window ----------------------------------------------------
+let wizardWin = null;
+let wizardView = null;
+function openWizardWindow() {
+  if (wizardWin && wizardView) { wizardWin.focus(); return; }
+  wizardWin = new BaseWindow({ width: 900, height: 700, resizable: true, title: "AutoInjector — Setup Wizard" });
+  wizardView = new WebContentsView({
+    webPreferences: {
+      partition: "setup-wizard-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  wizardWin.contentView.addChildView(wizardView);
+  wizardView.webContents.loadFile(path.join(__dirname, "setup-wizard.html"));
+  const layoutWizard = () => {
+    if (!wizardWin || !wizardView) return;
+    const [w, h] = wizardWin.getContentSize();
+    wizardView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutWizard();
+  wizardWin.on("resize", layoutWizard);
+  wizardWin.on("closed", () => { wizardWin = null; wizardView = null; });
+}
+function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
+// Downloads keep running in the main process even when the wizard is closed;
+// push updates to the wizard window only when it's open.
+function broadcastToWizard(channel, payload) {
+  try { if (wizardView && wizardView.webContents && !wizardView.webContents.isDestroyed()) wizardView.webContents.send(channel, payload); } catch (_) {}
 }
 
 function routingSnapshot() {
@@ -2212,6 +2245,51 @@ ipcMain.handle("ollama:pull", async (_evt, model) => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
+// --- Setup Wizard + background downloads ------------------------------------
+// Configure the download queue with the runners it knows how to run. The first
+// is Ollama model pulls; more (SD checkpoints, etc.) slot in here later.
+function initDownloadManager() {
+  downloadManager.init({
+    concurrency: 2,
+    onChange: (jobs) => broadcastToWizard("downloads-changed", jobs),
+    runners: {
+      "ollama-model": (job, hooks) => {
+        const { child, done } = ollamaManager.pull(job.model, (line) => {
+          const m = /(\d+(?:\.\d+)?)\s*%/.exec(line);
+          hooks.progress(m ? parseFloat(m[1]) : null, line);
+        });
+        done.then((r) => hooks.done(!!(r && r.ok), r && r.error)).catch((e) => hooks.done(false, String(e)));
+        return { cancel: () => { try { child && child.kill(); } catch (_) {} } };
+      },
+    },
+  });
+}
+
+ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
+ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
+// Hardware scan + a machine-matched catalog for the wizard to render.
+ipcMain.handle("wizard:catalog", async () => {
+  try {
+    const rep = await systemMonitor.report();
+    const vram = rep && rep.recommendation ? rep.recommendation.vramGB : null;
+    let ollama = { available: false };
+    try { ollama = await ollamaManager.detect(); } catch (_) {}
+    return {
+      ok: true,
+      system: rep,
+      ollama,
+      models: ollamaManager.recommended(vram).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
+    };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("downloads:enqueue", (_evt, spec) => {
+  try { return { ok: true, id: downloadManager.enqueue(spec || {}) }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("downloads:list", () => ({ ok: true, jobs: downloadManager.list() }));
+ipcMain.handle("downloads:cancel", (_evt, id) => ({ ok: downloadManager.cancel(id) }));
+ipcMain.handle("downloads:clear-finished", () => { downloadManager.clearFinished(); return { ok: true }; });
+
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.
 function buildAppMenu() {
@@ -2227,6 +2305,8 @@ function buildAppMenu() {
         { role: "togglefullscreen" }, { role: "toggleDevTools" },
       ] },
       { label: "Tools", submenu: [
+        { label: "Setup Wizard", click: () => openWizardWindow() },
+        { type: "separator" },
         { label: "System Monitor", click: () => broadcast("focus-panel", "system") },
         { label: "Image Studio", click: () => broadcast("focus-panel", "imagestudio") },
       ] },
@@ -3026,6 +3106,7 @@ app.whenReady().then(() => {
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
+  try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
 });
