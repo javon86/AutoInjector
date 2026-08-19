@@ -4,7 +4,10 @@
 // Downloads tray. The actual downloads run in the main process, so they keep
 // going even if this window is closed.
 const el = (id) => document.getElementById(id);
-const api = window.api || {};
+// NOTE: don't name this `api` — Electron's contextBridge already exposes a
+// global `api` in the page, and a top-level `const api` throws "Identifier
+// 'api' has already been declared", which would kill this whole script.
+const dl = window.api || {};
 
 // ---- Tabs ----
 for (const tab of document.querySelectorAll(".tab")) {
@@ -28,8 +31,8 @@ function fmtSystem(rep) {
 // ---- Catalog / model list ----
 let catalog = null;
 async function loadCatalog() {
-  if (!api.wizardCatalog) return;
-  const c = await api.wizardCatalog();
+  if (!dl.wizardCatalog) return;
+  const c = await dl.wizardCatalog();
   catalog = c && c.ok ? c : null;
   el("scan").innerHTML = fmtSystem(catalog && catalog.system);
   renderOllamaState();
@@ -75,9 +78,9 @@ for (const r of document.querySelectorAll('input[name="runtime"]')) {
 }
 
 async function queue(spec, btn) {
-  if (!api.downloadsEnqueue) return;
+  if (!dl.downloadsEnqueue) return;
   if (btn) { btn.disabled = true; btn.textContent = "Queued ✓"; }
-  await api.downloadsEnqueue({ kind: spec.kind, model: spec.model, label: spec.model, category: spec.category });
+  await dl.downloadsEnqueue({ kind: spec.kind, model: spec.model, label: spec.model, category: spec.category });
   refreshTray();
 }
 
@@ -102,19 +105,19 @@ function renderJobs(jobs) {
     if (j.status === "running" || j.status === "queued") {
       const x = document.createElement("button");
       x.className = "x"; x.textContent = "✕"; x.title = "Cancel";
-      x.onclick = () => api.downloadsCancel && api.downloadsCancel(j.id).then(refreshTray);
+      x.onclick = () => dl.downloadsCancel && dl.downloadsCancel(j.id).then(refreshTray);
       box.querySelector(".top").appendChild(x);
     }
     list.appendChild(box);
   }
 }
 async function refreshTray() {
-  if (!api.downloadsList) return;
-  const r = await api.downloadsList();
+  if (!dl.downloadsList) return;
+  const r = await dl.downloadsList();
   if (r && r.ok) renderJobs(r.jobs);
 }
-if (api.onDownloadsChanged) api.onDownloadsChanged((jobs) => renderJobs(jobs || []));
-if (el("btn-clear-finished")) el("btn-clear-finished").onclick = () => api.downloadsClearFinished && api.downloadsClearFinished().then(refreshTray);
+if (dl.onDownloadsChanged) dl.onDownloadsChanged((jobs) => renderJobs(jobs || []));
+if (el("btn-clear-finished")) el("btn-clear-finished").onclick = () => dl.downloadsClearFinished && dl.downloadsClearFinished().then(refreshTray);
 
 // ---- Boot ----
 loadCatalog();
