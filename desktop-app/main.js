@@ -32,6 +32,7 @@ const systemMonitor = require("./system-monitor");
 const lsiProvider = require("./lsi-provider");
 const ollamaManager = require("./ollama-manager");
 const downloadManager = require("./download-manager");
+const fileDownloader = require("./file-downloader");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2261,10 +2262,60 @@ function initDownloadManager() {
         done.then((r) => hooks.done(!!(r && r.ok), r && r.error)).catch((e) => hooks.done(false, String(e)));
         return { cancel: () => { try { child && child.kill(); } catch (_) {} } };
       },
+      // Download a file (e.g. a Stable Diffusion checkpoint) into the app's
+      // sd-models folder, with progress and cancel.
+      "http-download": (job, hooks) => {
+        const controller = new AbortController();
+        const dest = path.join(sdModelsDir(), job.filename || path.basename(new URL(job.url).pathname));
+        const mb = (n) => (n / 1e6).toFixed(0);
+        fileDownloader.download(job.url, dest, {
+          signal: controller.signal,
+          onProgress: ({ pct, got, total }) => hooks.progress(pct, total ? `${mb(got)} / ${mb(total)} MB` : `${mb(got)} MB`),
+        }).then(() => hooks.done(true, `saved to ${dest}`)).catch((e) => hooks.done(false, (e && e.message) || String(e)));
+        return { cancel: () => controller.abort() };
+      },
     },
   });
 }
+// Where downloaded Stable Diffusion checkpoints land.
+function sdModelsDir() { return path.join(userDataDir(), "sd-models"); }
 
+// The optional Images (Stable Diffusion) add-ons, matched to the machine's VRAM.
+function imagesCatalog(vramGB) {
+  const v = vramGB || 0;
+  const models = [{
+    kind: "http-download", category: "Images", label: "SD 1.5 checkpoint", sizeLabel: "~4 GB",
+    filename: "v1-5-pruned-emaonly.safetensors",
+    url: "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+    why: "light, runs almost anywhere", ok: true,
+  }];
+  models.push({
+    kind: "http-download", category: "Images", label: "SDXL base 1.0", sizeLabel: "~7 GB",
+    filename: "sd_xl_base_1.0.safetensors",
+    url: "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+    why: v >= 8 ? "great quality for your GPU" : "needs ~8 GB VRAM — may be slow/tight here", ok: v >= 8,
+  });
+  models.push({
+    kind: "http-download", category: "Images", label: "FLUX.1 schnell", sizeLabel: "~24 GB",
+    filename: "flux1-schnell.safetensors",
+    url: "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+    why: v >= 16 ? "high-end, top quality" : "high-end only — needs a big GPU", ok: v >= 16,
+  });
+  return {
+    engine: {
+      name: "Forge",
+      note: "Forge is the recommended Stable Diffusion engine (lighter than A1111). It's a separate program with Python — install it from its GitHub page, then point Image Studio at its address. Guided install coming soon.",
+      url: "https://github.com/lllyasviel/stable-diffusion-webui-forge",
+    },
+    modelsDir: sdModelsDir(),
+    models,
+  };
+}
+
+ipcMain.handle("external:open", (_evt, url) => {
+  try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
 ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Hardware scan + a machine-matched catalog for the wizard to render.
@@ -2279,6 +2330,7 @@ ipcMain.handle("wizard:catalog", async () => {
       system: rep,
       ollama,
       models: ollamaManager.recommended(vram).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
+      images: imagesCatalog(vram),
     };
   } catch (e) { return { ok: false, error: String(e) }; }
 });

@@ -260,8 +260,10 @@ Setup Wizard**).
 - Downloads **keep going even if you close the wizard** (they run in the app's
   background), so you can reopen it any time to check.
 
-This is the first version: the **Local AI** tab works now; **Images**, **Video**
-and **Advanced** tabs are placeholders that will fill in next.
+Tabs so far: **Local AI** (download local models via Ollama) and **Images**
+(Stable Diffusion — a **Get Forge** button for the engine, plus hardware‑matched
+**checkpoint** downloads: SD 1.5, SDXL, Flux; models land in a folder you point
+Forge at). **Video** and **Advanced** are placeholders that fill in next.
 
 ---
 

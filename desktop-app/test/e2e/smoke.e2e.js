@@ -63,6 +63,18 @@ async function main() {
       const modelCount = await wizard.$$eval('#model-list .item', (els) => els.length).catch(() => 0);
       assert(modelCount > 0, `wizard lists recommended models (${modelCount} shown)`);
       await shot(wizard, 'setup-wizard');
+
+      // Images tab: switch to it and confirm the SD engine + checkpoint cards render.
+      await wizard.click('.tab[data-tab="images"]');
+      await wizard.waitForFunction(() => {
+        const p = document.getElementById('panel-images');
+        return p && p.classList.contains('active') && document.querySelectorAll('#sd-model-list .item').length > 0;
+      }, { timeout: 8000 }).catch(() => {});
+      const engine = await wizard.$('#sd-engine .item');
+      const sdModels = await wizard.$$eval('#sd-model-list .item', (els) => els.length).catch(() => 0);
+      assert(engine, 'Images tab shows the Forge engine card');
+      assert(sdModels > 0, `Images tab lists SD checkpoints (${sdModels} shown)`);
+      await shot(wizard, 'setup-wizard-images');
     }
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);

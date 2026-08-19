@@ -37,6 +37,41 @@ async function loadCatalog() {
   el("scan").innerHTML = fmtSystem(catalog && catalog.system);
   renderOllamaState();
   renderModels();
+  renderImages();
+}
+
+// ---- Images (Stable Diffusion) tab ----
+function renderImages() {
+  const cat = catalog && catalog.images;
+  const eng = el("sd-engine"), list = el("sd-model-list"), dir = el("sd-modelsdir");
+  if (!eng || !list) return;
+  if (!cat) { list.innerHTML = '<div class="muted">No image options available.</div>'; return; }
+  // Engine card (guided install — opens Forge's page in the browser).
+  eng.innerHTML = "";
+  const e = document.createElement("div");
+  e.className = "item";
+  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${cat.engine.name} <span class="why">— image engine</span></div><div class="why">${cat.engine.note}</div></div>`;
+  const link = document.createElement("button");
+  link.className = "primary";
+  link.textContent = "Get Forge ↗";
+  link.onclick = () => dl.openExternal && dl.openExternal(cat.engine.url);
+  e.appendChild(link);
+  eng.appendChild(e);
+  // Checkpoint cards.
+  list.innerHTML = "";
+  for (const m of cat.models || []) {
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${m.label} <span class="why">${m.sizeLabel || ""}</span></div>` +
+      `<div class="${m.ok ? "why" : "warn"}">${m.why || ""}</div></div>`;
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = "⬇ Download";
+    btn.onclick = () => queue({ kind: m.kind, url: m.url, filename: m.filename, label: m.label, category: m.category }, btn);
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
+  if (dir) dir.textContent = cat.modelsDir ? `Models download to: ${cat.modelsDir} (point Forge's checkpoint folder here, or copy them over).` : "";
 }
 function renderOllamaState() {
   const box = el("ollama-state");
@@ -80,7 +115,14 @@ for (const r of document.querySelectorAll('input[name="runtime"]')) {
 async function queue(spec, btn) {
   if (!dl.downloadsEnqueue) return;
   if (btn) { btn.disabled = true; btn.textContent = "Queued ✓"; }
-  await dl.downloadsEnqueue({ kind: spec.kind, model: spec.model, label: spec.model, category: spec.category });
+  await dl.downloadsEnqueue({
+    kind: spec.kind,
+    model: spec.model,
+    url: spec.url,
+    filename: spec.filename,
+    label: spec.label || spec.model,
+    category: spec.category,
+  });
   refreshTray();
 }
 
