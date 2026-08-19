@@ -9,8 +9,10 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -d "node_modules" ]; then
-  echo "First run: installing dependencies, this can take a minute..."
+# Install on first run, and re-install whenever package.json changed since the
+# last install (e.g. after pulling an update that added a dependency).
+if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
+  echo "Installing/updating dependencies, this can take a minute..."
   npm install || { echo "npm install failed - see the error above."; read -p "Press Enter to close..."; exit 1; }
 fi
 

@@ -6,14 +6,24 @@
  * Everything is best-effort and defensive: it never throws into the caller, and
  * a metric it can't read comes back as null (e.g. CPU temperature is often
  * unavailable without extra drivers; GPU temperature is reliable on NVIDIA).
+ *
+ * `systeminformation` is the one runtime dependency. If it isn't installed
+ * (e.g. the app was updated without re-running `npm install`), we degrade
+ * gracefully — the panel shows a clear message instead of the app crashing on
+ * load.
  */
-const si = require('systeminformation');
+let si = null;
+try { si = require('systeminformation'); } catch (_) { si = null; }
 
 function n1(x) { return x == null || isNaN(x) ? null : Math.round(x * 10) / 10; }
 
 /** A snapshot of the machine's CPU / RAM / GPU(s) / OS / temperatures. */
 async function snapshot() {
   const out = { cpu: {}, mem: {}, gpus: [], os: {}, temps: {}, error: null };
+  if (!si) {
+    out.error = "The system-info library isn't installed. Run `npm install` in the desktop-app folder (or use the launcher), then reopen the app.";
+    return out;
+  }
   try {
     const [cpu, mem, graphics, osInfo, temp] = await Promise.all([
       si.cpu(), si.mem(), si.graphics(), si.osInfo(),
@@ -87,7 +97,9 @@ function recommend(snap) {
 /** Snapshot + recommendation together (what the UI asks for). */
 async function report() {
   const snap = await snapshot();
-  return { snapshot: snap, recommendation: recommend(snap) };
+  // With no data (library missing / read failed) a recommendation would be
+  // misleading, so return none and let the UI show the snapshot's message.
+  return { snapshot: snap, recommendation: snap.error ? null : recommend(snap) };
 }
 
 module.exports = { snapshot, recommend, report };
