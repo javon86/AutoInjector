@@ -2141,6 +2141,9 @@ ipcMain.handle("sd:set-settings", async (_evt, patch) => {
 ipcMain.handle("sd:test", async () => {
   try { return await sdProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; }
 });
+ipcMain.handle("sd:models", async () => {
+  try { return await sdProvider.listModels(); } catch (e) { return { ok: false, error: String(e), models: [] }; }
+});
 ipcMain.handle("sd:generate", async (_evt, opts) => {
   try {
     const r = await sdProvider.generate(opts || {});

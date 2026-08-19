@@ -28,6 +28,9 @@ const DEFAULTS = {
   apiKey: '',
   steps: 25, cfg: 7, width: 512, height: 512,
   negativePrompt: '',
+  sampler: 'Euler a',
+  model: '',                  // checkpoint name; '' = whatever the server has loaded (default: a light SD 1.5)
+  batch: 1,                   // images per Generate
 };
 let _settings = Object.assign({}, DEFAULTS);
 
@@ -42,7 +45,7 @@ function init(userDataDir) {
     fs.mkdirSync(_imagesDir, { recursive: true });
     if (fs.existsSync(_settingsPath)) _settings = Object.assign({}, DEFAULTS, JSON.parse(fs.readFileSync(_settingsPath, 'utf8')));
     const idx = path.join(_imagesDir, 'gallery.json');
-    if (fs.existsSync(idx)) _gallery = JSON.parse(fs.readFileSync(idx, 'utf8')) || [];
+    _gallery = fs.existsSync(idx) ? (JSON.parse(fs.readFileSync(idx, 'utf8')) || []) : [];
   } catch (_) { _settings = Object.assign({}, DEFAULTS); _gallery = []; }
   return getSettings();
 }
@@ -101,6 +104,20 @@ function parseImageTag(text) {
   return m ? m[1].trim() : null;
 }
 
+/** List the checkpoint models the server has (for the Model picker). */
+async function listModels() {
+  if (!_settings.endpoint) return { ok: false, error: 'NO_ENDPOINT', models: [] };
+  try {
+    const res = await fetchWithTimeout(`${_settings.endpoint}/sdapi/v1/sd-models`, { method: 'GET', headers: _headers() }, 8000);
+    if (!res.ok) return { ok: false, error: `HTTP_${res.status}`, models: [] };
+    const rows = await res.json();
+    const models = (Array.isArray(rows) ? rows : []).map((m) => m.model_name || m.title).filter(Boolean);
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, error: e && e.name === 'AbortError' ? 'TIMEOUT' : `NETWORK_ERROR: ${redactSecrets(String(e))}`, models: [] };
+  }
+}
+
 /** Reachability check for the config UI's "Test" button. */
 async function testConnection() {
   if (!_settings.endpoint) return { ok: false, error: 'NO_ENDPOINT' };
@@ -128,6 +145,8 @@ async function generate(opts) {
   const prompt = String(opts.prompt || '').trim();
   if (!prompt) return { ok: false, error: 'NO_PROMPT' };
 
+  const batch = Math.max(1, Math.min(Number(opts.batch || _settings.batch || 1), 8));
+  const model = opts.model != null ? String(opts.model) : _settings.model;
   const payload = {
     prompt,
     negative_prompt: opts.negativePrompt != null ? String(opts.negativePrompt) : _settings.negativePrompt,
@@ -136,9 +155,12 @@ async function generate(opts) {
     width: opts.width || _settings.width,
     height: opts.height || _settings.height,
     seed: opts.seed != null ? opts.seed : -1,
-    batch_size: 1,
+    sampler_name: opts.sampler || _settings.sampler || undefined,
+    batch_size: batch,
     n_iter: 1,
   };
+  // Pick a specific checkpoint (e.g. an SD 1.5 vs an SDXL model) per request.
+  if (model) payload.override_settings = { sd_model_checkpoint: model };
 
   let res;
   try {
@@ -153,22 +175,27 @@ async function generate(opts) {
   }
   let body;
   try { body = await res.json(); } catch (_) { return { ok: false, error: 'INVALID_RESPONSE_BODY' }; }
-  const b64 = body && Array.isArray(body.images) ? body.images[0] : null;
-  if (!b64) return { ok: false, error: 'NO_IMAGE_RETURNED' };
+  const imgs = body && Array.isArray(body.images) ? body.images : [];
+  if (!imgs.length) return { ok: false, error: 'NO_IMAGE_RETURNED' };
 
-  const clean = String(b64).replace(/^data:image\/\w+;base64,/, '');
-  const bytes = Buffer.from(clean, 'base64');
-  const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
-  const ts = nowMs();
-  const file = _imagesDir ? path.join(_imagesDir, `img-${ts}.png`) : null;
-  try { if (file) fs.writeFileSync(file, bytes); } catch (_) { /* keep going; still return dataUri */ }
-
-  const entry = { file, prompt, ts, from: opts.from || 'user', seed: _seedFromInfo(body), sha256 };
-  _gallery.push(entry);
+  const seed = _seedFromInfo(body);
+  const from = opts.from || 'user';
+  const saved = [];
+  for (const b64 of imgs) {
+    const clean = String(b64).replace(/^data:image\/\w+;base64,/, '');
+    const bytes = Buffer.from(clean, 'base64');
+    const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+    const ts = nowMs() + saved.length;
+    const file = _imagesDir ? path.join(_imagesDir, `img-${ts}.png`) : null;
+    try { if (file) fs.writeFileSync(file, bytes); } catch (_) { /* keep going; still return dataUri */ }
+    _gallery.push({ file, prompt, ts, from, seed, sha256 });
+    saved.push({ file, dataUri: `data:image/png;base64,${clean}`, sha256 });
+  }
   if (_gallery.length > GALLERY_MAX) _gallery = _gallery.slice(-GALLERY_MAX);
   _saveGallery();
 
-  return { ok: true, file, dataUri: `data:image/png;base64,${clean}`, prompt, from: entry.from, seed: entry.seed, sha256 };
+  const first = saved[0];
+  return { ok: true, file: first.file, dataUri: first.dataUri, sha256: first.sha256, prompt, from, seed, images: saved, count: saved.length };
 }
 
 function _seedFromInfo(body) {
@@ -189,5 +216,5 @@ function gallery(limit = 24) {
 
 module.exports = {
   DEFAULTS, init, getSettings, setSettings, isEnabled, autoFromAI,
-  testConnection, generate, parseImageTag, gallery, redactSecrets,
+  testConnection, listModels, generate, parseImageTag, gallery, redactSecrets,
 };

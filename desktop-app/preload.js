@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld("api", {
   sdGetSettings: () => ipcRenderer.invoke("sd:get-settings"),
   sdSetSettings: (patch) => ipcRenderer.invoke("sd:set-settings", patch),
   sdTest: () => ipcRenderer.invoke("sd:test"),
+  sdModels: () => ipcRenderer.invoke("sd:models"),
   sdGenerate: (opts) => ipcRenderer.invoke("sd:generate", opts),
   sdGallery: (limit) => ipcRenderer.invoke("sd:gallery", limit),
   onSdImage: (cb) => ipcRenderer.on("sd-image", (_e, payload) => cb(payload))
