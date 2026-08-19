@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AutoInjector — Setup Wizard</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; background:#111; color:#eee; font-size:12px; font-family: system-ui, sans-serif; display:flex; flex-direction:column; }
+    select, input, button { background:#1a1a1a; color:#eee; border:1px solid #333; border-radius:6px; padding:5px 7px; font-family:inherit; font-size:12px; }
+    button { cursor:pointer; }
+    button:hover { background:#242424; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    button.primary { background:#1a3a2a; border-color:#2a5a3a; }
+    button:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; }
+
+    header { flex:0 0 auto; padding:14px 16px; border-bottom:1px solid #2a2a2a; background:#161616; }
+    header h1 { margin:0 0 6px; font-size:15px; }
+    #scan { opacity:.85; font-size:11.5px; line-height:1.5; }
+    #scan b { color:#8ef0b0; }
+
+    #tabs { flex:0 0 auto; display:flex; gap:6px; padding:10px 16px 0; }
+    .tab { border:1px solid #2a2a2a; border-bottom:none; border-radius:8px 8px 0 0; padding:7px 14px; font-weight:600; background:#161616; opacity:.7; }
+    .tab.active { opacity:1; background:#1d1d1d; }
+    .tab:focus-visible { outline:2px solid #7c5ce0; outline-offset:-2px; }
+
+    main { flex:1 1 auto; min-height:0; overflow:auto; padding:14px 16px; }
+    .panel { display:none; flex-direction:column; gap:10px; }
+    .panel.active { display:flex; }
+    .muted { opacity:.6; }
+    .soon { opacity:.55; font-style:italic; padding:20px; text-align:center; }
+
+    .runtime-row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+    .runtime-row label { display:flex; gap:6px; align-items:center; }
+
+    .item { display:flex; align-items:center; gap:10px; background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 11px; }
+    .item .name { font-weight:600; }
+    .item .why { opacity:.6; font-size:10.5px; }
+    .item .spacer { flex:1; }
+    .warn { color:#f5b642; font-size:10.5px; }
+
+    /* Downloads tray — always visible, pinned to the bottom. */
+    #tray { flex:0 0 auto; border-top:1px solid #2a2a2a; background:#141414; max-height:40%; display:flex; flex-direction:column; }
+    #tray-head { display:flex; align-items:center; gap:8px; padding:8px 16px; font-weight:600; }
+    #tray-head .spacer { flex:1; }
+    #tray-list { overflow:auto; padding:0 16px 12px; display:flex; flex-direction:column; gap:7px; }
+    #tray-list:empty::after { content:"No downloads yet. Add something above and it downloads here in the background."; opacity:.45; font-size:11px; padding:8px 0; }
+    .job { background:#191919; border:1px solid #2a2a2a; border-radius:7px; padding:7px 9px; }
+    .job .top { display:flex; align-items:center; gap:8px; }
+    .job .jname { font-weight:600; }
+    .job .jstatus { font-size:10px; opacity:.7; font-family:ui-monospace,monospace; }
+    .job .spacer { flex:1; }
+    .job .bar { height:7px; background:#0e0e0e; border-radius:5px; overflow:hidden; margin-top:6px; }
+    .job .fill { height:100%; width:0%; background:#4a8cff; transition:width .2s ease; }
+    .job.done .fill { background:#29c447; }
+    .job.failed .fill, .job.canceled .fill { background:#e5484d; }
+    .job .detail { font-size:9.5px; opacity:.55; font-family:ui-monospace,monospace; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .job .x { font-size:12px; padding:2px 7px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧙 Setup Wizard</h1>
+    <div id="scan">Scanning your machine…</div>
+  </header>
+
+  <div id="tabs">
+    <button class="tab active" data-tab="localai">Local AI</button>
+    <button class="tab" data-tab="images">Images</button>
+    <button class="tab" data-tab="video">Video</button>
+    <button class="tab" data-tab="advanced">Advanced</button>
+  </div>
+
+  <main>
+    <div class="panel active" id="panel-localai">
+      <p class="muted">A local AI runs a language model on your own machine — used by the System AI helper. Pick a runtime, then add the models you want. Downloads run in the background while you keep browsing.</p>
+      <div class="runtime-row">
+        <span class="muted">Runtime:</span>
+        <label><input type="radio" name="runtime" value="ollama" checked> Ollama <span class="muted">(recommended)</span></label>
+        <label><input type="radio" name="runtime" value="lmstudio"> LM Studio</label>
+        <label><input type="radio" name="runtime" value="openrouter"> OpenRouter <span class="muted">(cloud key)</span></label>
+      </div>
+      <div id="ollama-state" class="muted"></div>
+      <div id="model-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+
+    <div class="panel" id="panel-images">
+      <div class="soon">Image generation (Stable Diffusion via Forge) — coming in the next step of the wizard.</div>
+    </div>
+    <div class="panel" id="panel-video">
+      <div class="soon">Video generation (ComfyUI) — coming later; needs a high-end GPU.</div>
+    </div>
+    <div class="panel" id="panel-advanced">
+      <div class="soon">Book Governance (Python) and developer tools — coming later.</div>
+    </div>
+  </main>
+
+  <div id="tray">
+    <div id="tray-head">⬇ Downloads <span class="muted" id="tray-count"></span><span class="spacer"></span>
+      <button id="btn-clear-finished">Clear finished</button>
+    </div>
+    <div id="tray-list"></div>
+  </div>
+
+  <script src="setup-wizard.js"></script>
+</body>
+</html>

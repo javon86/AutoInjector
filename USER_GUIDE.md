@@ -111,6 +111,8 @@ From top to bottom you'll typically see:
     participating.
   - **Attach, Roles, Sequence** — attach a document, assign roles, or build a
     prompt sequence.
+  - **🧙 Setup** — opens the **Setup Wizard** to download optional add-ons (local
+    AI models now; images/video later). Downloads run in the background *(see §7d)*.
   - **🆕 Start New Chat** — one click starts a **fresh chat in all three AIs at
     once** *(see §7c)*.
   - **🤖 System AI** — a one‑click switch that turns the System AI helper on or
@@ -241,6 +243,24 @@ clears the app's memory of each pane's last reply, so a fresh chat won't be
 confused with the previous one. Use it whenever you want a clean slate for all
 three AIs without reloading them one at a time. *(Your logins stay signed in —
 this only opens a new conversation.)*
+
+### 7d. Setup Wizard (optional downloads) ✅ *(early version)*
+
+The app itself opens with **nothing extra to download**. Everything heavy — local
+AI models, image tools, video tools — is optional and lives in the **Setup
+Wizard**, opened from the **🧙 Setup** button in the User Panel (or **Tools →
+Setup Wizard**).
+
+- It **scans your machine** and tells you what it can comfortably run.
+- Pick items (starting with **local AI models** via Ollama) and they **download in
+  the background** — a **Downloads tray** at the bottom shows each one's progress,
+  and you can keep browsing or add more while they run. A couple download at once;
+  the rest queue.
+- Downloads **keep going even if you close the wizard** (they run in the app's
+  background), so you can reopen it any time to check.
+
+This is the first version: the **Local AI** tab works now; **Images**, **Video**
+and **Advanced** tabs are placeholders that will fill in next.
 
 ---
 
