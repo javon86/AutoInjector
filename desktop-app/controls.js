@@ -1180,22 +1180,57 @@ if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
 // --- Image Studio (Stable Diffusion) panel ---------------------------------
 if (el("btn-collapse-sd")) el("btn-collapse-sd").onclick = () => collapseYellowPanel("imagestudio");
 
+let sdLastImage = null; // {dataUri, prompt, from, seed}
+
 function sdStatus(s) {
   const st = el("sd-status"); if (!st) return;
   st.textContent = s && s.enabled ? "· on" : "· off";
   st.style.color = s && s.enabled ? "#7ad19a" : "#888";
 }
+function sdSetVal(id, v) { const e = el(id); if (e != null && v != null) e.value = v; }
 async function sdLoadSettings() {
   if (!window.api.sdGetSettings) return;
   try {
     const s = await window.api.sdGetSettings();
     if (!s || s.error) return;
-    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
+    sdSetVal("sd-endpoint", s.endpoint || "");
     if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
     if (el("sd-auto")) el("sd-auto").checked = !!s.autoFromAI;
-    if (el("sd-negative")) el("sd-negative").value = s.negativePrompt || "";
+    sdSetVal("sd-negative", s.negativePrompt || "");
+    sdSetVal("sd-steps", s.steps); sdSetVal("sd-cfg", s.cfg);
+    sdSetVal("sd-width", s.width); sdSetVal("sd-height", s.height);
+    sdSetVal("sd-batch", s.batch); sdSetVal("sd-sampler", s.sampler);
+    if (el("sd-model") && s.model) { sdEnsureModelOption(s.model); el("sd-model").value = s.model; }
     sdStatus(s);
   } catch (_) {}
+}
+function sdEnsureModelOption(name) {
+  const sel = el("sd-model"); if (!sel || !name) return;
+  if (!Array.from(sel.options).some((o) => o.value === name)) {
+    const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o);
+  }
+}
+function sdSettingsPatch() {
+  return {
+    endpoint: el("sd-endpoint").value.trim(),
+    enabled: el("sd-enabled").checked,
+    autoFromAI: el("sd-auto").checked,
+    negativePrompt: el("sd-negative").value,
+    model: el("sd-model") ? el("sd-model").value : "",
+    steps: Number(el("sd-steps").value) || 25,
+    cfg: Number(el("sd-cfg").value) || 7,
+    width: Number(el("sd-width").value) || 512,
+    height: Number(el("sd-height").value) || 512,
+    sampler: el("sd-sampler") ? el("sd-sampler").value : "Euler a",
+    batch: Number(el("sd-batch").value) || 1,
+  };
+}
+function sdShowImage(it) {
+  sdLastImage = it;
+  const img = el("sd-viewer-img"), empty = el("sd-viewer-empty"), actions = el("sd-viewer-actions");
+  if (img && it && it.dataUri) { img.src = it.dataUri; img.style.display = "block"; if (empty) empty.style.display = "none"; if (actions) actions.style.display = "flex"; }
+  const meta = el("sd-viewer-meta");
+  if (meta && it) meta.textContent = `${it.from || "you"}${it.seed != null ? " · seed " + it.seed : ""}`;
 }
 async function sdRenderGallery() {
   const g = el("sd-gallery");
@@ -1208,27 +1243,58 @@ async function sdRenderGallery() {
       const img = document.createElement("img");
       img.src = it.dataUri;
       img.title = `${it.from || "?"}: ${it.prompt || ""}`;
-      img.style.cssText = "width:72px; height:72px; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a;";
+      img.style.cssText = "width:56px; height:56px; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a; cursor:pointer;";
+      img.onclick = () => sdShowImage(it);
       g.appendChild(img);
     }
+    if (items[0] && !sdLastImage) sdShowImage(items[0]);
   } catch (_) {}
 }
+async function sdRefreshModels() {
+  const sel = el("sd-model"); const m = el("sd-message");
+  if (!sel || !window.api.sdModels) return;
+  const keep = sel.value;
+  if (m) m.textContent = "Loading models…";
+  try {
+    const r = await window.api.sdModels();
+    if (r && r.ok) {
+      sel.innerHTML = '<option value="">(server default — a light SD 1.5)</option>';
+      for (const name of r.models) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
+      if (keep) { sdEnsureModelOption(keep); sel.value = keep; }
+      if (m) m.textContent = `${r.models.length} model(s) available.`;
+    } else if (m) m.textContent = `⚠ ${(r && r.error) || "could not list models"}`;
+  } catch (_) {}
+}
+
+const SD_PRESETS = {
+  fast: { steps: 15, cfg: 6 },
+  quality: { steps: 35, cfg: 8 },
+  portrait: { width: 512, height: 768 },
+  landscape: { width: 768, height: 512 },
+  square: { width: 512, height: 512 },
+};
+document.querySelectorAll(".sd-preset").forEach((btn) => {
+  btn.onclick = () => {
+    const p = SD_PRESETS[btn.dataset.preset]; if (!p) return;
+    for (const [k, v] of Object.entries(p)) sdSetVal(`sd-${k}`, v);
+    if (el("sd-message")) el("sd-message").textContent = `Preset applied: ${btn.textContent}.`;
+  };
+});
+
+if (el("btn-sd-seed-random")) el("btn-sd-seed-random").onclick = () => sdSetVal("sd-seed", Math.floor(Math.random() * 2147483647));
+if (el("btn-sd-models")) el("btn-sd-models").onclick = sdRefreshModels;
 if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
   if (!window.api.sdSetSettings) return;
-  const s = await window.api.sdSetSettings({
-    endpoint: el("sd-endpoint").value.trim(),
-    enabled: el("sd-enabled").checked,
-    autoFromAI: el("sd-auto").checked,
-    negativePrompt: el("sd-negative").value,
-  });
+  const s = await window.api.sdSetSettings(sdSettingsPatch());
   sdStatus(s);
-  if (el("sd-message")) el("sd-message").textContent = "Saved.";
+  if (el("sd-message")) el("sd-message").textContent = "Settings saved.";
 };
 if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
   if (!window.api.sdTest) return;
   const m = el("sd-message"); if (m) m.textContent = "Testing…";
   const r = await window.api.sdTest();
   if (m) m.textContent = r && r.ok ? `✓ Connected (${r.models} model(s))` : `⚠ ${(r && r.error) || "failed"}`;
+  if (r && r.ok) sdRefreshModels();
 };
 if (el("btn-sd-generate")) el("btn-sd-generate").onclick = async () => {
   if (!window.api.sdGenerate) return;
@@ -1236,15 +1302,36 @@ if (el("btn-sd-generate")) el("btn-sd-generate").onclick = async () => {
   const m = el("sd-message");
   if (!prompt) { if (m) m.textContent = "Enter a prompt first."; return; }
   if (m) m.textContent = "Generating… (this can take a moment)";
-  const r = await window.api.sdGenerate({ prompt, negativePrompt: el("sd-negative").value });
-  if (r && r.ok) { if (m) m.textContent = "Done."; sdRenderGallery(); }
-  else if (m) m.textContent = `⚠ ${(r && r.error) || "failed"}`;
+  const seedVal = el("sd-seed").value.trim();
+  const p = sdSettingsPatch();
+  const r = await window.api.sdGenerate({
+    prompt, negativePrompt: el("sd-negative").value,
+    steps: p.steps, cfg: p.cfg, width: p.width, height: p.height,
+    sampler: p.sampler, batch: p.batch, model: p.model,
+    seed: seedVal === "" ? -1 : Number(seedVal),
+  });
+  if (r && r.ok) {
+    if (m) m.textContent = `Done${r.count > 1 ? ` — ${r.count} images` : ""}.`;
+    sdShowImage({ dataUri: r.dataUri, prompt, from: r.from, seed: r.seed });
+    sdRenderGallery();
+  } else if (m) m.textContent = `⚠ ${(r && r.error) || "failed"}`;
+};
+if (el("btn-sd-copy-prompt")) el("btn-sd-copy-prompt").onclick = () => {
+  if (sdLastImage && navigator.clipboard) navigator.clipboard.writeText(sdLastImage.prompt || "");
+  if (el("sd-message")) el("sd-message").textContent = "Prompt copied.";
+};
+if (el("btn-sd-send-convo")) el("btn-sd-send-convo").onclick = () => {
+  if (sdLastImage && el("composer-text")) { el("composer-text").value = `[image] ${sdLastImage.prompt || ""}`; updateCharCount(); }
+  if (el("sd-message")) el("sd-message").textContent = "Prompt placed in Compose.";
+};
+if (el("btn-sd-save-img")) el("btn-sd-save-img").onclick = () => {
+  if (el("sd-message")) el("sd-message").textContent = "Images are already saved with the project (Project Memory → search).";
 };
 function sdUseReply(site) { if (el("sd-prompt") && lastReplyBySite[site]) el("sd-prompt").value = lastReplyBySite[site]; }
 if (el("btn-sd-use-chatgpt")) el("btn-sd-use-chatgpt").onclick = () => sdUseReply("chatgpt");
 if (el("btn-sd-use-claude")) el("btn-sd-use-claude").onclick = () => sdUseReply("claude");
 if (el("btn-sd-use-gemini")) el("btn-sd-use-gemini").onclick = () => sdUseReply("gemini");
-if (window.api.onSdImage) window.api.onSdImage(() => sdRenderGallery());
+if (window.api.onSdImage) window.api.onSdImage((payload) => { if (payload) sdShowImage(payload); sdRenderGallery(); });
 
 el("btn-open-sequence").onclick = () => window.api.openSequenceEditor();
 

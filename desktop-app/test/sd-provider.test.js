@@ -62,6 +62,37 @@ async function testGenerateHappyPath() {
   assert(g.length === 1 && g[0].prompt === "a lighthouse at dusk" && g[0].dataUri, "the render lands in the gallery with its prompt");
 }
 
+async function testModelSamplerBatch() {
+  console.log("\n== generate: model override, sampler, and a batch of images ==");
+  initTmp();
+  sd.setSettings({ enabled: true, endpoint: "http://sd.local:7860", sampler: "Euler a" });
+  let seen = null;
+  await withFetch(async (url, opts) => { seen = opts; return res({ jsonBody: { images: [PNG_B64, PNG_B64], info: JSON.stringify({ seed: 7 }) } }); }, async () => {
+    const r = await sd.generate({ prompt: "two lighthouses", model: "sd15.safetensors", sampler: "DDIM", batch: 2 });
+    assert(r.ok && r.count === 2 && r.images.length === 2, "a batch of 2 returns 2 images");
+    assert(r.images.every((i) => i.dataUri && i.file), "each image has its own data URI and saved file");
+  });
+  const body = JSON.parse(seen.body);
+  assert(body.batch_size === 2, "batch_size reflects the requested batch");
+  assert(body.sampler_name === "DDIM", "the chosen sampler is sent");
+  assert(body.override_settings && body.override_settings.sd_model_checkpoint === "sd15.safetensors", "the model override selects the checkpoint (SD 1.5 vs SDXL etc.)");
+  assert(sd.gallery(10).length === 2, "both images land in the gallery");
+}
+
+async function testListModels() {
+  console.log("\n== listModels: reports the server's checkpoints for the Model picker ==");
+  initTmp();
+  sd.setSettings({ enabled: true, endpoint: "http://sd.local:7860" });
+  await withFetch(async () => res({ jsonBody: [{ model_name: "sd_v1-5" }, { model_name: "sdxl_base" }] }), async () => {
+    const r = await sd.listModels();
+    assert(r.ok && r.models.length === 2 && r.models[0] === "sd_v1-5", "returns the model names");
+  });
+  await withFetch(async () => { throw new Error("ECONNREFUSED"); }, async () => {
+    const r = await sd.listModels();
+    assert(!r.ok && r.models.length === 0, "an unreachable server returns no models, not a crash");
+  });
+}
+
 async function testErrorMapping() {
   console.log("\n== generate: HTTP/timeout/no-image failures are reported distinctly ==");
   initTmp();
@@ -103,6 +134,8 @@ async function main() {
   testTagParser();
   await testDisabledAndValidation();
   await testGenerateHappyPath();
+  await testModelSamplerBatch();
+  await testListModels();
   await testErrorMapping();
   await testSettingsAndConnection();
   console.log(`\n${passed} passed, ${failed} failed`);
