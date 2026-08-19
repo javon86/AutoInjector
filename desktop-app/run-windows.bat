@@ -11,8 +11,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "node_modules" (
-  echo First run: installing dependencies, this can take a minute...
+rem Install on first run, and re-install whenever package.json changed since the
+rem last install (e.g. after pulling an update that added a dependency).
+set "NEED_INSTALL=0"
+if not exist "node_modules" set "NEED_INSTALL=1"
+if exist "node_modules" (
+  for /f %%i in ('powershell -NoProfile -Command "if((Get-Item package.json).LastWriteTime -gt (Get-Item node_modules).LastWriteTime){'1'}else{'0'}" 2^>nul') do set "NEED_INSTALL=%%i"
+)
+if "%NEED_INSTALL%"=="1" (
+  echo Installing/updating dependencies, this can take a minute...
   call npm install
   if errorlevel 1 (
     echo.

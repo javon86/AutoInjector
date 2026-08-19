@@ -2172,6 +2172,7 @@ ipcMain.handle("system:info", async () => {
 function formatSystemReport(rep) {
   const s = rep.snapshot || {}, r = rep.recommendation || {};
   const lines = ["SYSTEM CHECK", ""];
+  if (s.error) { lines.push(`⚠ ${s.error}`); return lines.join("\n"); }
   if (s.cpu) lines.push(`CPU: ${s.cpu.brand || "?"} · ${s.cpu.cores || "?"} cores${s.cpu.speedGHz ? ` · ${s.cpu.speedGHz} GHz` : ""}${s.temps && s.temps.cpuMainC ? ` · ${s.temps.cpuMainC}°C` : ""}`);
   if (s.mem) lines.push(`RAM: ${s.mem.totalGB} GB total · ${s.mem.usedGB} GB used`);
   if (s.gpus && s.gpus.length) { for (const g of s.gpus) lines.push(`GPU: ${g.model}${g.vramGB ? ` · ${g.vramGB} GB VRAM` : ""}${g.tempC ? ` · ${g.tempC}°C` : ""}`); }

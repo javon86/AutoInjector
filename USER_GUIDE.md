@@ -420,6 +420,14 @@ It requires Python 3 when active.
   **⌄** button, and **scroll** — the whole control area scrolls vertically.
 - **I want my conversation saved.** It already is — in the database — and you can
   also **Copy Transcript** or **Download .md** at any time from the export bar.
+- **After updating, the app won't start / "Cannot find module …".** An update added
+  a dependency your machine doesn't have yet. Just launch again with the normal
+  launcher (`run-windows.bat` / `run-mac.command` / `run-linux.sh`) — it now
+  **re‑installs automatically** whenever the requirements change. To do it by
+  hand, open a terminal in the **`desktop-app`** folder and run **`npm install`**,
+  then start the app. (Even if it slips through, the app no longer crashes — the
+  **System Monitor** just shows a "run `npm install`" note and everything else
+  keeps working.)
 
 ---
 
