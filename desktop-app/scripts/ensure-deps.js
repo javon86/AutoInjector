@@ -55,8 +55,12 @@ function main() {
     console.log('Installing dependencies, this can take a minute…');
   }
 
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const res = spawnSync(npmCmd, ['install'], { cwd: appDir, stdio: 'inherit' });
+  // Run through a shell. On Windows, `npm` is a `.cmd` batch file, and newer
+  // Node versions refuse to spawn `.cmd`/`.bat` directly (they throw EINVAL
+  // since the CVE-2024-27980 fix) unless a shell resolves it — so `shell: true`
+  // is required there. On macOS/Linux a shell resolves `npm` on PATH just the
+  // same. Args here are fixed literals ("install"), so there's nothing to inject.
+  const res = spawnSync('npm', ['install'], { cwd: appDir, stdio: 'inherit', shell: true });
   if (res.error) { console.error(`Could not run npm: ${res.error.message}`); return 1; }
   if (res.status !== 0) return res.status || 1;
 
