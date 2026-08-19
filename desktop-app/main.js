@@ -18,7 +18,7 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
@@ -28,6 +28,7 @@ const managerProvider = require("./manager-provider");
 const atelierGov = require("./atelier-governance");
 const dbService = require("./db-service");
 const sdProvider = require("./sd-provider");
+const systemMonitor = require("./system-monitor");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2158,6 +2159,39 @@ ipcMain.handle("sd:gallery", async (_evt, limit) => {
   try { return sdProvider.gallery(limit || 24); } catch (e) { return []; }
 });
 
+// --- System monitor IPC ----------------------------------------------------
+ipcMain.handle("system:info", async () => {
+  try { return await systemMonitor.report(); }
+  catch (e) { return { snapshot: { error: String(e) }, recommendation: null }; }
+});
+
+// Native top menu bar (File / View / Tools / Help). Guarded so the test
+// harness (which has no Menu) is unaffected.
+function buildAppMenu() {
+  if (!Menu || !Menu.buildFromTemplate) return;
+  try {
+    const isMac = process.platform === "darwin";
+    const template = [
+      ...(isMac ? [{ role: "appMenu" }] : []),
+      { label: "File", submenu: [isMac ? { role: "close" } : { role: "quit" }] },
+      { label: "View", submenu: [
+        { role: "reload" }, { role: "forceReload" }, { type: "separator" },
+        { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" },
+        { role: "togglefullscreen" }, { role: "toggleDevTools" },
+      ] },
+      { label: "Tools", submenu: [
+        { label: "System Monitor", click: () => broadcast("focus-panel", "system") },
+        { label: "Image Studio", click: () => broadcast("focus-panel", "imagestudio") },
+      ] },
+      { label: "Help", submenu: [
+        { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
+        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: "AutoInjector Desktop", detail: "Runs ChatGPT, Claude and Gemini together. See the User Guide (Help menu)." }); } },
+      ] },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  } catch (e) { logEvent("menu-error", { error: String(e) }); }
+}
+
 // --- ATELIER governance IPC ------------------------------------------------
 ipcMain.handle("atelier:detect", async () => {
   try { return atelierGov.detect({ force: true }); }
@@ -2925,6 +2959,7 @@ app.whenReady().then(() => {
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
+  try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

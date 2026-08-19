@@ -87,5 +87,7 @@ contextBridge.exposeInMainWorld("api", {
   sdModels: () => ipcRenderer.invoke("sd:models"),
   sdGenerate: (opts) => ipcRenderer.invoke("sd:generate", opts),
   sdGallery: (limit) => ipcRenderer.invoke("sd:gallery", limit),
-  onSdImage: (cb) => ipcRenderer.on("sd-image", (_e, payload) => cb(payload))
+  onSdImage: (cb) => ipcRenderer.on("sd-image", (_e, payload) => cb(payload)),
+  systemInfo: () => ipcRenderer.invoke("system:info"),
+  onFocusPanel: (cb) => ipcRenderer.on("focus-panel", (_e, payload) => cb(payload))
 });
