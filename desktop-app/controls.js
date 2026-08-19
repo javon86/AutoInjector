@@ -998,6 +998,7 @@ const COLLAPSIBLE_PANELS = {
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
   memory: { panelId: "col-memory", label: "Project Memory" },
   state: { panelId: "col-state", label: "Project State" },
+  system: { panelId: "col-system", label: "System Monitor" },
   imagestudio: { panelId: "col-imagestudio", label: "Image Studio" }
 };
 function collapseYellowPanel(key) {
@@ -1176,6 +1177,51 @@ async function stateRefresh() {
   } catch (_) {}
 }
 if (el("btn-state-refresh")) el("btn-state-refresh").onclick = stateRefresh;
+
+// --- System Monitor panel ---------------------------------------------------
+if (el("btn-collapse-system")) el("btn-collapse-system").onclick = () => collapseYellowPanel("system");
+
+async function systemRefresh() {
+  const rec = el("system-recommend"), stats = el("system-stats"), msg = el("system-msg");
+  if (!rec || !window.api.systemInfo) return;
+  if (msg) msg.textContent = "reading…";
+  try {
+    const r = await window.api.systemInfo();
+    const s = r && r.snapshot, reco = r && r.recommendation;
+    if (msg) msg.textContent = "";
+    rec.innerHTML = "";
+    if (reco) {
+      const d = document.createElement("div");
+      d.innerHTML = `<b>This machine can run</b><br>• Local models: <b>${reco.llm.tier}</b> — ${reco.llm.detail}<br>• Stable Diffusion: <b>${reco.sd.tier}</b> — ${reco.sd.detail}`;
+      rec.appendChild(d);
+    } else { rec.textContent = "—"; }
+    stats.innerHTML = "";
+    const add = (label, val) => {
+      const d = document.createElement("div");
+      const b = document.createElement("b"); b.style.opacity = ".7"; b.textContent = `${label}: `;
+      d.appendChild(b); d.appendChild(document.createTextNode(val));
+      stats.appendChild(d);
+    };
+    if (s && !s.error) {
+      add("CPU", `${s.cpu.brand || "?"} · ${s.cpu.cores || "?"} cores${s.cpu.speedGHz ? ` · ${s.cpu.speedGHz} GHz` : ""}${s.temps.cpuMainC ? ` · ${s.temps.cpuMainC}°C` : ""}`);
+      add("RAM", `${s.mem.totalGB} GB total · ${s.mem.usedGB} GB used`);
+      if ((s.gpus || []).length) {
+        for (const g of s.gpus) add("GPU", `${g.model}${g.vramGB ? ` · ${g.vramGB} GB VRAM` : ""}${g.tempC ? ` · ${g.tempC}°C` : ""}${g.utilizationPct != null ? ` · ${g.utilizationPct}% used` : ""}`);
+      } else { add("GPU", "none detected (integrated or headless)"); }
+      add("OS", `${s.os.distro || s.os.platform || "?"} ${s.os.release || ""} (${s.os.arch || ""})`);
+      if (!s.temps.cpuMainC) add("Note", "CPU temperature not available on this system.");
+    } else { stats.textContent = s && s.error ? `⚠ ${s.error}` : "unavailable"; }
+  } catch (e) { if (msg) msg.textContent = String(e); }
+}
+if (el("btn-system-refresh")) el("btn-system-refresh").onclick = systemRefresh;
+
+// Tools menu (or any code) can ask the UI to reveal a panel.
+function focusPanel(key) {
+  try { if (typeof expandYellowPanel === "function") expandYellowPanel(key); } catch (_) {}
+  const p = COLLAPSIBLE_PANELS[key] && el(COLLAPSIBLE_PANELS[key].panelId);
+  if (p && p.scrollIntoView) p.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+if (window.api.onFocusPanel) window.api.onFocusPanel((key) => focusPanel(key));
 
 // --- Image Studio (Stable Diffusion) panel ---------------------------------
 if (el("btn-collapse-sd")) el("btn-collapse-sd").onclick = () => collapseYellowPanel("imagestudio");
@@ -1520,6 +1566,7 @@ el("btn-clear").onclick = async () => {
   databaseRefresh();
   memoryRefresh();
   stateRefresh();
+  systemRefresh();
   sdLoadSettings();
   sdRenderGallery();
 })();
