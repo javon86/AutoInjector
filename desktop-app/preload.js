@@ -101,6 +101,7 @@ contextBridge.exposeInMainWorld("api", {
   ollamaPull: (model) => ipcRenderer.invoke("ollama:pull", model),
   onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload)),
   openWizard: () => ipcRenderer.invoke("wizard:open"),
+  openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
   wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
   downloadsEnqueue: (spec) => ipcRenderer.invoke("downloads:enqueue", spec),

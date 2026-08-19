@@ -42,6 +42,8 @@ function enqueue(spec) {
     id: `job-${_seq++}`,
     kind: spec.kind,
     model: spec.model || null,
+    url: spec.url || null,           // for http-download jobs
+    filename: spec.filename || null, // for http-download jobs
     label: spec.label || spec.model || spec.kind || 'download',
     category: spec.category || '',
     status: 'queued',
