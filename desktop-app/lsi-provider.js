@@ -130,7 +130,20 @@ async function ask(check, input, opts = {}) {
   return _record(check, input, { verdict: parsed.verdict, confidence: parsed.confidence, reason: parsed.reason }, t0);
 }
 
+/** Lightweight reachability check for the panel's Test button. */
+async function testConnection() {
+  if (!_settings.endpoint) return { ok: false, error: 'NO_ENDPOINT' };
+  try {
+    // OpenAI-compatible servers expose GET /models (or /v1/models); accept any response as reachable.
+    const base = _settings.endpoint.replace(/\/chat\/completions.*$/, '').replace(/\/$/, '');
+    const res = await fetchWithTimeout(`${base}/models`, { method: 'GET', headers: _settings.apiKey ? { Authorization: `Bearer ${_settings.apiKey}` } : {} }, 6000);
+    return { ok: res.ok || res.status === 404, status: res.status };
+  } catch (e) {
+    return { ok: false, error: e && e.name === 'AbortError' ? 'TIMEOUT' : `NETWORK_ERROR: ${redactSecrets(String(e))}` };
+  }
+}
+
 /** Recent supervisor-call log (input HASHES only, never the raw input). */
 function logs(limit = 50) { return _log.slice(-limit).reverse(); }
 
-module.exports = { DEFAULTS, init, getSettings, setSettings, isEnabled, ask, logs, redactSecrets, extractJsonObject };
+module.exports = { DEFAULTS, init, getSettings, setSettings, isEnabled, ask, testConnection, logs, redactSecrets, extractJsonObject };

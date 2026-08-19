@@ -999,6 +999,7 @@ const COLLAPSIBLE_PANELS = {
   memory: { panelId: "col-memory", label: "Project Memory" },
   state: { panelId: "col-state", label: "Project State" },
   system: { panelId: "col-system", label: "System Monitor" },
+  systemai: { panelId: "col-systemai", label: "System AI" },
   imagestudio: { panelId: "col-imagestudio", label: "Image Studio" }
 };
 function collapseYellowPanel(key) {
@@ -1222,6 +1223,92 @@ function focusPanel(key) {
   if (p && p.scrollIntoView) p.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 if (window.api.onFocusPanel) window.api.onFocusPanel((key) => focusPanel(key));
+
+// --- System AI (Local Supervisor) panel + User Panel switch ----------------
+if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
+
+function lsiReflect(enabled) {
+  if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
+  const b = el("btn-ai-toggle");
+  if (b) { b.classList.toggle("on", !!enabled); b.textContent = `🤖 System AI: ${enabled ? "On" : "Off"}`; }
+  const st = el("lsi-status");
+  if (st) { st.textContent = enabled ? "· on" : "· off"; st.style.color = enabled ? "#7ad19a" : "#888"; }
+}
+function lsiEnsureModelOption(name) {
+  const sel = el("lsi-model"); if (!sel || !name) return;
+  if (!Array.from(sel.options).some((o) => o.value === name)) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
+}
+async function lsiLoadSettings() {
+  if (!window.api.lsiGetSettings) return;
+  try {
+    const s = await window.api.lsiGetSettings();
+    if (!s || s.error) return;
+    if (el("lsi-endpoint")) el("lsi-endpoint").value = s.endpoint || "";
+    if (el("lsi-model") && s.model) { lsiEnsureModelOption(s.model); el("lsi-model").value = s.model; }
+    lsiReflect(!!s.enabled);
+  } catch (_) {}
+}
+async function lsiSetEnabled(on) {
+  if (!window.api.lsiSetSettings) return;
+  const s = await window.api.lsiSetSettings({ enabled: on });
+  lsiReflect(s && s.enabled);
+}
+if (el("btn-ai-toggle")) el("btn-ai-toggle").onclick = () => lsiSetEnabled(!(el("lsi-enabled") && el("lsi-enabled").checked));
+if (el("lsi-enabled")) el("lsi-enabled").onchange = () => lsiSetEnabled(el("lsi-enabled").checked);
+if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
+  if (!window.api.lsiSetSettings) return;
+  const s = await window.api.lsiSetSettings({ enabled: el("lsi-enabled").checked, endpoint: el("lsi-endpoint").value.trim(), model: el("lsi-model") ? el("lsi-model").value : "" });
+  lsiReflect(s && s.enabled);
+  if (el("lsi-msg")) el("lsi-msg").textContent = "Saved.";
+};
+if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
+  if (!window.api.lsiTest) return;
+  const m = el("lsi-msg"); if (m) m.textContent = "Testing…";
+  const r = await window.api.lsiTest();
+  if (m) m.textContent = r && r.ok ? "✓ Reachable." : `⚠ ${(r && r.error) || "not reachable"}`;
+};
+async function lsiRefreshModels() {
+  const sel = el("lsi-model"); if (!sel || !window.api.ollamaList) return;
+  const keep = sel.value;
+  const r = await window.api.ollamaList();
+  sel.innerHTML = '<option value="">(choose a model)</option>';
+  for (const name of (r && r.models) || []) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
+  if (keep) { lsiEnsureModelOption(keep); sel.value = keep; }
+  if (el("lsi-msg")) el("lsi-msg").textContent = (r && r.ok) ? `${((r.models) || []).length} model(s) installed.` : "Ollama not reachable — install it to run a local model.";
+}
+if (el("btn-lsi-models")) el("btn-lsi-models").onclick = lsiRefreshModels;
+async function lsiLoadRecommended() {
+  const rec = el("lsi-recommend"), dl = el("lsi-download-model");
+  if (!rec || !window.api.systemInfo || !window.api.ollamaRecommended) return;
+  try {
+    const info = await window.api.systemInfo();
+    const vram = info && info.recommendation ? info.recommendation.vramGB : null;
+    const r = await window.api.ollamaRecommended(vram);
+    const models = (r && r.models) || [];
+    rec.textContent = `Recommended for your machine${vram ? ` (${vram} GB VRAM)` : ""}: ${models.slice(0, 3).join(", ")}`;
+    if (dl) { dl.innerHTML = ""; for (const name of models) { const o = document.createElement("option"); o.value = name; o.textContent = name; dl.appendChild(o); } }
+  } catch (_) {}
+}
+if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
+  if (!window.api.ollamaPull) return;
+  const model = el("lsi-download-model") ? el("lsi-download-model").value : "";
+  const st = el("lsi-download-status");
+  if (!model) { if (st) st.textContent = "Pick a model to download."; return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { if (st) st.textContent = "Ollama isn't installed. Get it from ollama.com, then try again."; return; } }
+  if (st) st.textContent = `Starting download of ${model}…`;
+  const r = await window.api.ollamaPull(model);
+  if (st) st.textContent = r && r.ok ? `✓ ${model} installed.` : `⚠ ${(r && r.error) || "download failed"}`;
+  lsiRefreshModels();
+};
+if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
+
+// User Panel: 🧪 Test -> run the system check and post the report to messages.
+if (el("btn-run-test")) el("btn-run-test").onclick = async () => {
+  if (!window.api.systemReport) return;
+  setStatus("Running system check…");
+  const r = await window.api.systemReport();
+  setStatus(r && r.ok ? "System check posted to your messages." : `System check failed: ${(r && r.error) || "error"}`);
+};
 
 // --- Image Studio (Stable Diffusion) panel ---------------------------------
 if (el("btn-collapse-sd")) el("btn-collapse-sd").onclick = () => collapseYellowPanel("imagestudio");
@@ -1567,6 +1654,8 @@ el("btn-clear").onclick = async () => {
   memoryRefresh();
   stateRefresh();
   systemRefresh();
+  lsiLoadSettings();
+  lsiLoadRecommended();
   sdLoadSettings();
   sdRenderGallery();
 })();

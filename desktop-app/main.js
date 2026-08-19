@@ -29,6 +29,8 @@ const atelierGov = require("./atelier-governance");
 const dbService = require("./db-service");
 const sdProvider = require("./sd-provider");
 const systemMonitor = require("./system-monitor");
+const lsiProvider = require("./lsi-provider");
+const ollamaManager = require("./ollama-manager");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2165,6 +2167,50 @@ ipcMain.handle("system:info", async () => {
   catch (e) { return { snapshot: { error: String(e) }, recommendation: null }; }
 });
 
+// Run the system check, post the report into the conversation/message log, and
+// save it. Returns the report text.
+function formatSystemReport(rep) {
+  const s = rep.snapshot || {}, r = rep.recommendation || {};
+  const lines = ["SYSTEM CHECK", ""];
+  if (s.cpu) lines.push(`CPU: ${s.cpu.brand || "?"} · ${s.cpu.cores || "?"} cores${s.cpu.speedGHz ? ` · ${s.cpu.speedGHz} GHz` : ""}${s.temps && s.temps.cpuMainC ? ` · ${s.temps.cpuMainC}°C` : ""}`);
+  if (s.mem) lines.push(`RAM: ${s.mem.totalGB} GB total · ${s.mem.usedGB} GB used`);
+  if (s.gpus && s.gpus.length) { for (const g of s.gpus) lines.push(`GPU: ${g.model}${g.vramGB ? ` · ${g.vramGB} GB VRAM` : ""}${g.tempC ? ` · ${g.tempC}°C` : ""}`); }
+  else lines.push("GPU: none detected");
+  if (s.os) lines.push(`OS: ${s.os.distro || s.os.platform || "?"} ${s.os.release || ""} (${s.os.arch || ""})`);
+  if (r.llm) lines.push("", `Can run — local models: ${r.llm.tier} (${r.llm.detail})`, `Can run — Stable Diffusion: ${r.sd.tier} (${r.sd.detail})`);
+  return lines.join("\n");
+}
+ipcMain.handle("system:report", async () => {
+  try {
+    const rep = await systemMonitor.report();
+    const text = formatSystemReport(rep);
+    const turn = { id: state.nextTurnId++, site: "system", label: "System Check", text, ts: Date.now(), pinned: false, roundtableTag: "USER" };
+    pushTranscriptTurn(turn);
+    broadcast("capture", turn);
+    try { dbService.recordTurn(turn); } catch (_) {}
+    saveStateDebounced();
+    return { ok: true, text };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// --- System AI (Local Supervisor / LSI) IPC --------------------------------
+ipcMain.handle("lsi:get-settings", async () => { try { return lsiProvider.getSettings(); } catch (e) { return { error: String(e) }; } });
+ipcMain.handle("lsi:set-settings", async (_evt, patch) => { try { const s = lsiProvider.setSettings(patch || {}); logEvent("lsi-settings", { enabled: s.enabled }); return s; } catch (e) { return { error: String(e) }; } });
+ipcMain.handle("lsi:test", async () => { try { return await lsiProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; } });
+
+// --- Ollama model manager IPC ----------------------------------------------
+ipcMain.handle("ollama:detect", async () => { try { return await ollamaManager.detect(); } catch (e) { return { available: false, reason: String(e) }; } });
+ipcMain.handle("ollama:list", async (_evt, endpoint) => { try { return await ollamaManager.listInstalled(endpoint); } catch (e) { return { ok: false, models: [] }; } });
+ipcMain.handle("ollama:recommended", async (_evt, vramGB) => { try { return { models: ollamaManager.recommended(vramGB) }; } catch (e) { return { models: [] }; } });
+ipcMain.handle("ollama:pull", async (_evt, model) => {
+  try {
+    const { done } = ollamaManager.pull(model, (line) => broadcast("ollama-progress", { model, line }));
+    const r = await done;
+    broadcast("ollama-progress", { model, line: r.ok ? "✓ done" : `⚠ ${r.error}`, done: true, ok: !!r.ok });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.
 function buildAppMenu() {
@@ -2959,6 +3005,7 @@ app.whenReady().then(() => {
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
+  try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
 });

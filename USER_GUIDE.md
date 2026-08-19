@@ -23,11 +23,12 @@ no prior setup knowledge assumed.
 8. [The Conversation window and your project database](#8-the-conversation-window-and-your-project-database)
 9. [Project Memory and Project State panels](#9-project-memory-and-project-state-panels)
 10. [Image Studio (Stable Diffusion)](#10-image-studio-stable-diffusion)
-11. [The Manager (optional 4th brain)](#11-the-manager-optional-4th-brain)
-12. [The Local Supervisor (LSI)](#12-the-local-supervisor-lsi)
-13. [Book Governance (ATELIER) — on hold](#13-book-governance-atelier--on-hold)
-14. [What you need to run each part](#14-what-you-need-to-run-each-part)
-15. [Troubleshooting](#15-troubleshooting)
+11. [System Monitor and the Test button](#11-system-monitor-and-the-test-button)
+12. [The Manager (optional 4th brain)](#12-the-manager-optional-4th-brain)
+13. [The System AI / Local Supervisor](#13-the-system-ai--local-supervisor)
+14. [Book Governance (ATELIER) — on hold](#14-book-governance-atelier--on-hold)
+15. [What you need to run each part](#15-what-you-need-to-run-each-part)
+16. [Troubleshooting](#16-troubleshooting)
 
 ---
 
@@ -57,7 +58,7 @@ You need two things:
   to be able to log in normally.
 
 Optional extras (only for the advanced features) are listed in
-[section 14](#14-what-you-need-to-run-each-part).
+[section 15](#15-what-you-need-to-run-each-part).
 
 ---
 
@@ -84,10 +85,15 @@ deleting the folder removes it cleanly.
 
 ## 4. A tour of the window
 
-The window has a **title bar** at the top and one big scrollable area below it.
-**If there's more than fits, scroll up and down** — a scrollbar appears on the
-right. Most panels have a **⌄ button** in their heading to **minimize** them;
-minimizing frees space, and the window keeps scrolling.
+At the very top is a **menu bar** — **File / View / Tools / Help**. It's a quick
+way to jump around: **Tools → System Monitor** or **Tools → Image Studio** scrolls
+that panel into view, and **Help** links back to this guide.
+
+Below the menu bar is one big scrollable area. **If there's more than fits, scroll
+up and down** — a scrollbar appears on the right. Almost every panel has a **⌄
+button** in its heading; clicking it **minimizes the panel to a thin strip at its
+own place in the column** (it doesn't jump to the top), and the window keeps
+scrolling. Click the strip to bring the panel back.
 
 From top to bottom you'll typically see:
 
@@ -97,15 +103,26 @@ From top to bottom you'll typically see:
     participating.
   - **Attach, Roles, Sequence** — attach a document, assign roles, or build a
     prompt sequence.
+  - **🤖 System AI** — a one‑click switch that turns the System AI helper on or
+    off without opening its panel; the button shows **On/Off** *(see §13)*.
+  - **🧪 Test** — runs a full system check and drops the report straight into your
+    messages *(see §11)*.
   - **Messages to you** — a small feed of replies an AI addressed directly to you.
 - **Global** — the master **Auto / Pause / Stop** buttons and the **Tuner**.
 - **House Rules** — structured conversation formats (Debate, Brainstorm, …).
 - **Prompt Library** — saved prompts you can reuse.
 - **Project Memory** — add and search project records *(see §9)*.
 - **Project State** — a read‑out of the project's internal state *(see §9)*.
-- **Image Studio (Stable Diffusion)** — generate images *(see §10)*.
+- **System Monitor** — a read‑only look at your CPU/GPU/RAM and what this machine
+  can run *(see §11)*.
+- **System AI (Supervisor)** — switch on a small local AI that helps run the app,
+  and download a model for it *(see §13)*.
+- **Image Studio (Stable Diffusion)** — generate images, with presets and a
+  built‑in viewer *(see §10)*.
 - **The three AI panes** — ChatGPT, Claude and Gemini live, side by side. Each
-  pane can be collapsed to a thin strip.
+  pane has **three states**, cycled with the button in its corner: **open**
+  (full), **reduced** (a shorter preview) and **minimized** (a thin strip). The
+  panes keep their fixed left‑to‑right order no matter which state each is in.
 - **Conversation** — the running transcript, saved to the database *(see §8)*.
 - **Activity / Troubleshooting** — a technical log of what the app is doing.
 - **Export bar** — **Copy Transcript**, **Download .md**, **Clear Transcript**.
@@ -206,8 +223,19 @@ These surface the app's project database directly.
 ## 10. Image Studio (Stable Diffusion) 🔌
 
 Generate images — and **both you and the AIs can trigger it**. This needs a
-Stable Diffusion server (an [Automatic1111](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
-instance, local with a GPU or on a RunPod pod).
+Stable Diffusion server. It speaks the **Automatic1111 API**, so anything that
+serves that API works:
+
+- **Forge** ([lllyasviel/stable-diffusion-webui-forge](https://github.com/lllyasviel/stable-diffusion-webui-forge))
+  — **recommended**. It's API‑compatible with Automatic1111 but noticeably
+  **lighter and easier on your system**, and runs comfortably with an **SD 1.5**
+  model.
+- **Automatic1111 (A1111)** ([AUTOMATIC1111/stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui))
+  — the original; heavier, also fully supported.
+
+Either one can run locally with a GPU or on a RunPod pod. Start light with an
+SD 1.5 model; you can **install bigger models later** and pick them from the
+panel's model dropdown.
 
 **Set it up:**
 1. Open **Image Studio (Stable Diffusion)**.
@@ -216,9 +244,19 @@ instance, local with a GPU or on a RunPod pod).
 3. Tick **Enable image generation**, and optionally **Let AIs trigger with
    `[IMAGE: …]`**. Click **Save settings**.
 
+**Choose a model:** the **model dropdown** lists the checkpoints your server has
+installed; **⟳** refreshes it. Pick the one to render with — no need to keep the
+lighter model if you've added a bigger one.
+
+**Presets & controls:** one‑click **presets** set sensible values for common
+looks, and you can fine‑tune **steps, CFG scale, width, height, sampler, batch
+size and seed** before generating.
+
 **You generate:** type a prompt (and optional negative prompt), click
 **Generate**. Or click **↳ ChatGPT / ↳ Claude / ↳ Gemini** to drop that AI's last
-reply into the prompt box first. Images appear in the gallery.
+reply into the prompt box first. The result shows in the **built‑in image
+viewer**, and you can **save** or **copy** it or **send** it on. Past renders stay
+in the gallery.
 
 **The AIs generate:** with the checkbox on, any AI reply that **starts with**
 `[IMAGE: a lighthouse at dusk]` renders that image automatically — the same idea
@@ -231,7 +269,25 @@ the server.)
 
 ---
 
-## 11. The Manager (optional 4th brain) 🔌
+## 11. System Monitor and the Test button
+
+**System Monitor** ✅ is a **read‑only** panel that looks at your hardware and
+tells you, in plain language, **what this machine can run**. It reports your
+**CPU** (model, cores, and temperature when available), **RAM** (total/used),
+**GPU(s)** and their **VRAM**, and your **OS**. From that it recommends a **local‑
+model tier** and a **Stable Diffusion tier** — so you know which model to get
+before you download anything. It **installs nothing** and changes nothing; it
+just measures and advises. (Reach it any time from **Tools → System Monitor**.)
+
+**🧪 Test button** ✅ — in the **User Panel**, right after **🧵 Sequence**. One
+click runs that same system check and **posts the report straight into your
+messages** (it appears in the **Conversation**/message log, labelled *System
+Check*) — and it's **saved to the project database** like any other message, so
+you can scroll back to it or export it later.
+
+---
+
+## 12. The Manager (optional 4th brain) 🔌
 
 The **Manager** is a supervising model that plans a task and delegates pieces to
 the three panes, reads what comes back, asks for corrections when they disagree,
@@ -241,19 +297,34 @@ pod (it can even start/stop the pod for you). It stays off until configured.
 
 ---
 
-## 12. The Local Supervisor (LSI) 🔌
+## 13. The System AI / Local Supervisor 🔌
 
-A small local model that makes the app's **fuzzy judgment calls** — things like
-"is this reply just a duplicate 'ok'?" or "does this message need an answer?".
-It takes a question in and returns a strict **verdict + confidence**, always
-logged. If it's offline, the app simply runs without it (plain‑code mode) — **no
-downtime, just less smart filtering**. It needs a local model endpoint to
-actually run, and is the foundation for smarter routing and filtering coming
-next.
+A small **local** AI that helps **run the app itself** — the app's **fuzzy
+judgment calls** like "is this reply just a duplicate 'ok'?" or "does this message
+need an answer?". It takes a question in and returns a strict **verdict +
+confidence**, always logged. It **never touches the three chat AIs' logins**, and
+if it's off the app simply runs without it (plain‑code mode) — **no downtime, just
+less smart filtering**.
+
+It now has its own panel, **System AI (Supervisor)**, and two switches:
+
+- **The one‑click switch** — the **🤖 System AI: On/Off** button in the **User
+  Panel** (next to **🧵 Sequence**) flips it on or off without opening anything.
+  The same checkbox lives inside the panel.
+- **Choose, download and install a model** — the panel recommends models that fit
+  **your machine** (based on the System Monitor reading). Pick one under **Get**
+  and click **⬇ Download**: if you have **[Ollama](https://ollama.com)** installed,
+  the app downloads and installs the model for you and streams progress; the
+  **Model** dropdown (with **⟳**) then lists what's installed so you can select
+  it. Set the **endpoint** (default `http://127.0.0.1:11434/v1/chat/completions`),
+  click **Test** to confirm it's reachable, and **Save settings**.
+
+If Ollama isn't installed, the panel tells you so and points you to ollama.com —
+nothing is installed silently.
 
 ---
 
-## 13. Book Governance (ATELIER) — on hold ⏸️
+## 14. Book Governance (ATELIER) — on hold ⏸️
 
 There's an optional system for using the app to **write a structured book**,
 where each AI has a role and may only write certain files (so, for example, the
@@ -263,20 +334,21 @@ It requires Python 3 when active.
 
 ---
 
-## 14. What you need to run each part
+## 15. What you need to run each part
 
 | Part | What it needs |
 | --- | --- |
 | **The app + the three AIs** | Node.js, and login accounts. That's it. ✅ |
 | **Conversation, database, memory, search** | Nothing extra — built in. ✅ |
+| **System Monitor + 🧪 Test** | Nothing extra — built in. ✅ |
 | **Manager** | An OpenAI‑compatible model endpoint (Ollama / LM Studio / RunPod). 🔌 |
-| **Local Supervisor (LSI)** | An OpenAI‑compatible model endpoint. 🔌 |
-| **Image Studio** | An Automatic1111 server with a GPU (local or RunPod). 🔌 |
+| **System AI (Supervisor)** | A local model — easiest with [Ollama](https://ollama.com); the panel downloads one for you. 🔌 |
+| **Image Studio** | A **Forge** (recommended, lighter) or **Automatic1111** server with a GPU (local or RunPod). 🔌 |
 | **Book Governance (ATELIER)** | Python 3 — but it's on hold, so nothing for now. ⏸️ |
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 - **A reply isn't being read / nothing happens.** Make sure you're **signed in**
   to that site in its pane, and that the pane isn't collapsed. Use **🎛️ Run
@@ -289,7 +361,7 @@ It requires Python 3 when active.
   sending pane, or whether a `[TO: X]` tag is present. **Pause/Stop** in Global
   halt all routing.
 - **An optional panel says "off" or "not active".** That feature needs its server
-  configured — see [section 14](#14-what-you-need-to-run-each-part). Nothing
+  configured — see [section 15](#15-what-you-need-to-run-each-part). Nothing
   breaks; the rest of the app keeps working.
 - **The window feels cramped.** **Minimize panels** you aren't using with their
   **⌄** button, and **scroll** — the whole control area scrolls vertically.
