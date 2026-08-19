@@ -123,6 +123,9 @@ From top to bottom you'll typically see:
   pane has **three states**, cycled with the button in its corner: **open**
   (full), **reduced** (a shorter preview) and **minimized** (a thin strip). The
   panes keep their fixed left‑to‑right order no matter which state each is in.
+  Every pane also has a small **row of buttons in its header** *(see §7a)*:
+  **－ / 100% / ＋** zoom, **🔍** DevTools, **🎯** fix‑selectors, **🔑** saved
+  logins, **⟳** reload, and a **🧪** self‑test.
 - **Conversation** — the running transcript, saved to the database *(see §8)*.
 - **Activity / Troubleshooting** — a technical log of what the app is doing.
 - **Export bar** — **Copy Transcript**, **Download .md**, **Clear Transcript**.
@@ -167,10 +170,35 @@ topic:
   **Rotation**, **Blind Round**, and (with 3 AIs) **Devil & Angel** and
   **Chargeback**.
 Set the number of **Rounds** (0 = keep going), click **Start**, **Stop** to end.
+During a **Brainstorm**, a **Wrap up** button appears to make the AIs pull their
+ideas together into a summary.
 
 ---
 
 ## 7. Other sending tools
+
+### 7a. Each AI pane's own controls ✅
+
+The header of **every AI pane** carries a small row of buttons that act on that
+one pane:
+
+- **－ / 100% / ＋** — **zoom** the live embedded page in/out (fit more of the
+  real conversation, or make it bigger).
+- **🔍** — open **DevTools** on that pane (mainly for fixing selectors).
+- **🎯 Fix selectors** — opens a small menu to **teach the app where a site's
+  boxes are**: **Pick Input**, **Pick Send**, **Pick Reply** (click the button,
+  then click the real element in the pane), plus **Clear Overrides** to undo. Use
+  this if a site changes its layout and injection stops working — no DevTools
+  needed. The menu also has a **🧪 Test** *(see below)*.
+- **🔑 Logins** — open the **saved‑logins** menu for that site: fill a saved
+  username/password and click **Sign In** *(also listed below)*.
+- **⟳** — **reload** that pane.
+- **🧪 Test (per pane)** — sends a **real test prompt**, waits for the reply, and
+  lights the pane's dot **green or red** depending on whether the round‑trip
+  actually worked. *(This is different from the User Panel's **🧪 Test**, which
+  runs a hardware system check — see §11.)*
+
+### 7b. Sending and helper tools
 
 - **Prompt Library ✅** — save prompts you use often; **+ New** / **Edit** open a
   small editor; **Send** fires the selected one.
@@ -255,8 +283,8 @@ size and seed** before generating.
 **You generate:** type a prompt (and optional negative prompt), click
 **Generate**. Or click **↳ ChatGPT / ↳ Claude / ↳ Gemini** to drop that AI's last
 reply into the prompt box first. The result shows in the **built‑in image
-viewer**, and you can **save** or **copy** it or **send** it on. Past renders stay
-in the gallery.
+viewer**, where you can **save the image**, **copy its prompt**, or **send it into
+the conversation**. Past renders stay in the gallery.
 
 **The AIs generate:** with the checkbox on, any AI reply that **starts with**
 `[IMAGE: a lighthouse at dusk]` renders that image automatically — the same idea
@@ -277,7 +305,8 @@ tells you, in plain language, **what this machine can run**. It reports your
 **GPU(s)** and their **VRAM**, and your **OS**. From that it recommends a **local‑
 model tier** and a **Stable Diffusion tier** — so you know which model to get
 before you download anything. It **installs nothing** and changes nothing; it
-just measures and advises. (Reach it any time from **Tools → System Monitor**.)
+just measures and advises. Click **Refresh** to re‑read the hardware. (Reach it
+any time from **Tools → System Monitor**.)
 
 **🧪 Test button** ✅ — in the **User Panel**, right after **🧵 Sequence**. One
 click runs that same system check and **posts the report straight into your
@@ -287,40 +316,50 @@ you can scroll back to it or export it later.
 
 ---
 
-## 12. The Manager (optional 4th brain) 🔌
+## 12. The Manager (optional 4th brain) ⚙️
 
 The **Manager** is a supervising model that plans a task and delegates pieces to
 the three panes, reads what comes back, asks for corrections when they disagree,
-and saves results to a folder. Unlike the three chat panes, it uses a real model
-endpoint, so you provide one: **Ollama** or **LM Studio** locally, or a **RunPod**
-pod (it can even start/stop the pod for you). It stays off until configured.
+and saves results to a folder. Unlike the three chat panes, it would use a real
+model endpoint (**Ollama** / **LM Studio** locally, or a **RunPod** pod).
+
+> **Status:** the Manager is **built and wired in the background, but it has no
+> on‑screen control yet** — there is no Manager panel or button in the current
+> interface, so you can't switch it on from the app. It's listed here so you know
+> it exists and is coming; nothing to test for it right now.
 
 ---
 
 ## 13. The System AI / Local Supervisor 🔌
 
-A small **local** AI that helps **run the app itself** — the app's **fuzzy
-judgment calls** like "is this reply just a duplicate 'ok'?" or "does this message
-need an answer?". It takes a question in and returns a strict **verdict +
-confidence**, always logged. It **never touches the three chat AIs' logins**, and
-if it's off the app simply runs without it (plain‑code mode) — **no downtime, just
-less smart filtering**.
+This is a small **local** AI meant to help **run the app itself** — the app's
+**fuzzy judgment calls** like "is this reply just a duplicate 'ok'?" or "does this
+message need an answer?". It **never touches the three chat AIs' logins**.
 
-It now has its own panel, **System AI (Supervisor)**, and two switches:
+**What works right now** — the whole **setup and control** side:
 
 - **The one‑click switch** — the **🤖 System AI: On/Off** button in the **User
   Panel** (next to **🧵 Sequence**) flips it on or off without opening anything.
-  The same checkbox lives inside the panel.
+  The same checkbox lives inside the **System AI (Supervisor)** panel, and the
+  button always shows the current state.
 - **Choose, download and install a model** — the panel recommends models that fit
   **your machine** (based on the System Monitor reading). Pick one under **Get**
   and click **⬇ Download**: if you have **[Ollama](https://ollama.com)** installed,
-  the app downloads and installs the model for you and streams progress; the
+  the app downloads and installs the model for you and **streams progress**; the
   **Model** dropdown (with **⟳**) then lists what's installed so you can select
-  it. Set the **endpoint** (default `http://127.0.0.1:11434/v1/chat/completions`),
-  click **Test** to confirm it's reachable, and **Save settings**.
+  it. If Ollama isn't installed, the panel tells you so and points you to
+  ollama.com — **nothing is installed silently**.
+- **Endpoint + Test + Save** — set the **endpoint** (default
+  `http://127.0.0.1:11434/v1/chat/completions`), click **Test** to confirm it's
+  reachable, and **Save settings**.
 
-If Ollama isn't installed, the panel tells you so and points you to ollama.com —
-nothing is installed silently.
+**What isn't wired up yet** — turning the switch on, downloading a model, and
+saving settings all work, but the app does **not yet route any live decisions
+through this AI**: it isn't doing the duplicate‑filtering or smart‑routing yet.
+That connection is the next step. So for now, testing this section means testing
+**the switch, the model download/install, the connection test, and saving** — not
+a change in how messages get filtered. With it off, the app runs exactly as it
+does today (plain‑code mode) — **no downtime**.
 
 ---
 
@@ -341,8 +380,8 @@ It requires Python 3 when active.
 | **The app + the three AIs** | Node.js, and login accounts. That's it. ✅ |
 | **Conversation, database, memory, search** | Nothing extra — built in. ✅ |
 | **System Monitor + 🧪 Test** | Nothing extra — built in. ✅ |
-| **Manager** | An OpenAI‑compatible model endpoint (Ollama / LM Studio / RunPod). 🔌 |
-| **System AI (Supervisor)** | A local model — easiest with [Ollama](https://ollama.com); the panel downloads one for you. 🔌 |
+| **Manager** | Built in the background, but **no on‑screen control yet** — nothing to run today. ⚙️ |
+| **System AI (Supervisor)** | A local model — easiest with [Ollama](https://ollama.com); the panel downloads one for you. Setup/switch work; it isn't filtering messages yet. 🔌 |
 | **Image Studio** | A **Forge** (recommended, lighter) or **Automatic1111** server with a GPU (local or RunPod). 🔌 |
 | **Book Governance (ATELIER)** | Python 3 — but it's on hold, so nothing for now. ⏸️ |
 
@@ -355,8 +394,10 @@ It requires Python 3 when active.
   Tuner** to see exactly which connections work.
 - **A site changed its layout and injection breaks.** The app keeps several
   fallback ways to find each site's input box and send button; if a site updates,
-  this is the first thing that may need a small fix. The **Activity /
-  Troubleshooting** log will show the error.
+  this is the first thing that may need a small fix. Use the pane's **🎯 Fix
+  selectors** menu (**Pick Input / Send / Reply**) to point the app at the right
+  elements live *(see §7a)*, and the **Activity / Troubleshooting** log will show
+  the error.
 - **A reply won't forward to another AI.** Check whether **Auto** is on for the
   sending pane, or whether a `[TO: X]` tag is present. **Pause/Stop** in Global
   halt all routing.
