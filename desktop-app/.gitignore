@@ -1,4 +1,5 @@
 node_modules/
+test/e2e/__screenshots__/
 atelier/**/__pycache__/
 atelier/**/*.pyc
 atelier-governance.json

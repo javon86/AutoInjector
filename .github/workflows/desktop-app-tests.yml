@@ -50,3 +50,36 @@ jobs:
       - run: npm install --no-save playwright
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+
+  e2e-test:
+    name: Real Electron GUI end-to-end (Playwright + xvfb)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-app/package-lock.json
+      # `npm ci` runs electron's postinstall, which downloads the real Electron
+      # binary the GUI test launches.
+      - run: npm ci
+      # Playwright drives the app via its Electron binary (not a browser), but
+      # its install-deps step also pulls the shared system libraries Electron
+      # itself needs on a headless Linux runner.
+      - run: npm install --no-save playwright
+      - run: npx playwright install-deps chromium
+      - run: sudo apt-get install -y xvfb
+      # A virtual display so Electron can render; the e2e test launches the real
+      # app, clicks through it, and screenshots it.
+      - run: xvfb-run -a npm run test:e2e
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: desktop-app/test/e2e/__screenshots__/
+          if-no-files-found: ignore
