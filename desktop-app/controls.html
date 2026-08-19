@@ -34,11 +34,12 @@
     #top-tab-strip { display:flex; gap:6px; flex:0 0 auto; flex-wrap:wrap; }
     #top-tab-strip:empty { display:none; }
     .collapsed-tab {
-      display:flex; align-items:center; gap:5px; padding:5px 10px 3px;
+      display:flex; align-items:center; gap:6px; padding:7px 12px 5px;
       background:#1c1c1c; border:1px solid #2a2a2a; border-bottom:none;
-      border-radius:8px 8px 0 0; font-size:10.5px; font-weight:600; cursor:pointer;
+      border-radius:8px 8px 0 0; font-size:11.5px; font-weight:600; cursor:pointer; color:inherit;
     }
     .collapsed-tab:hover { background:#242424; }
+    .collapsed-tab:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; }
     .collapsed-tab .tab-color { width:6px; height:6px; border-radius:50%; background:var(--yellow,#f5cf6b); }
 
     /* ---- User Panel: one full-width, shallow strip -- Compose on the
@@ -90,7 +91,9 @@
        ordinary flexbox) and drops a small tab into #top-tab-strip. */
     .yc-panel.hidden-collapsed { display:none; }
     .yc-head { display:flex; align-items:center; gap:8px; }
-    .yc-head h2 { margin:0; }
+    .yc-head h2 { margin:0; cursor:pointer; border-radius:5px; padding:2px 4px; }
+    .yc-head h2:hover { background:#242424; }
+    .yc-head h2:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; }
     #row-global-houserules { display:flex; gap:8px; flex:0 0 auto; }
     #row-global-houserules:empty { display:none; }
     #col-global { flex: 0 0 210px; }
@@ -191,8 +194,9 @@
 
     .control-strip { padding:7px 9px; flex:0 0 auto; }
     .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
-    .collapse-btn { background:none; border:none; padding:0 2px; font-size:12px; opacity:.55; cursor:pointer; }
-    .collapse-btn:hover { opacity:1; }
+    .collapse-btn { background:none; border:1px solid transparent; border-radius:6px; padding:3px 8px; font-size:16px; line-height:1; opacity:.85; cursor:pointer; color:inherit; min-width:28px; min-height:24px; }
+    .collapse-btn:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }
+    .collapse-btn:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; opacity:1; }
     .zoom-btn { background:none; border:none; padding:0 2px; font-size:11px; opacity:.55; cursor:pointer; }
     .zoom-btn:hover { opacity:1; }
     .zoom-level { font-size:9px; opacity:.5; min-width:30px; text-align:center; }

@@ -166,6 +166,20 @@ async function testPaneCollapseToggle() {
   assert(col.classList.contains("state-open"), "clicking anywhere on the minimized bar opens the pane fully");
 }
 
+async function testUtilityPanelHeadingCollapses() {
+  console.log("\n== Utility panel heading is a clickable collapse target (accessibility) ==");
+  const dom = await loadWindow(makeApi());
+  const doc = dom.window.document;
+  const panel = doc.getElementById("col-memory");
+  const h2 = panel.querySelector(".yc-head h2");
+  assert(!!h2, "the panel heading exists");
+  assert(h2.getAttribute("role") === "button" && h2.getAttribute("tabindex") === "0", "heading is exposed as a keyboard-focusable button");
+  assert(!panel.classList.contains("hidden-collapsed"), "panel starts expanded");
+  h2.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(panel.classList.contains("hidden-collapsed"), "clicking the heading collapses the panel");
+  assert(!!doc.getElementById("tab-memory"), "a tab appears in the top strip when collapsed");
+}
+
 async function testWindowTitlebarCollapse() {
   console.log("\n== Automation window titlebar collapse ==");
   const api = makeApi();
@@ -910,6 +924,7 @@ async function testPromptLibraryLiveSync() {
 
 async function main() {
   await testPaneCollapseToggle();
+  await testUtilityPanelHeadingCollapses();
   await testWindowTitlebarCollapse();
   await testHouseRuleStopConfirmation();
   await testNoRoundtableDropdownOption();

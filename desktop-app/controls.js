@@ -1017,6 +1017,18 @@ function expandYellowPanel(key) {
   el(COLLAPSIBLE_PANELS[key].panelId).classList.remove("hidden-collapsed");
   el(`tab-${key}`)?.remove();
 }
+// Make each utility panel's heading a second, larger click target for collapsing
+// it — and keyboard-operable (Enter/Space), with a visible focus ring via CSS.
+for (const key of Object.keys(COLLAPSIBLE_PANELS)) {
+  const panel = el(COLLAPSIBLE_PANELS[key].panelId);
+  const h2 = panel && panel.querySelector(".yc-head h2");
+  if (!h2) continue;
+  h2.setAttribute("role", "button");
+  h2.setAttribute("tabindex", "0");
+  h2.title = "Minimize this panel to the top tab strip";
+  h2.addEventListener("click", () => collapseYellowPanel(key));
+  h2.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); collapseYellowPanel(key); } });
+}
 el("btn-collapse-global").onclick = () => collapseYellowPanel("global");
 el("btn-collapse-houserules").onclick = () => collapseYellowPanel("houserules");
 el("btn-collapse-prompts").onclick = () => collapseYellowPanel("prompts");
