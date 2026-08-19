@@ -2541,6 +2541,25 @@ ipcMain.handle("site:inspect", (_evt, site) => {
   return { ok: true };
 });
 
+// Start a fresh chat/session in every AI pane at once. Navigates each pane to
+// its "new chat" URL and clears that pane's pending/captured state so the app
+// doesn't mistake the old conversation for a new reply.
+ipcMain.handle("sites:new-chat-all", () => {
+  const results = {};
+  for (const site of SITE_IDS) {
+    const view = siteViews[site];
+    if (!view) { results[site] = false; continue; }
+    try {
+      view.webContents.loadURL(SITES[site].newChat || SITES[site].home);
+      state.pending[site] = { text: "", sinceTs: Date.now() };
+      state.captured[site] = null;
+      results[site] = true;
+    } catch (e) { results[site] = false; logEvent("new-chat-error", { site, error: String(e) }); }
+  }
+  logEvent("new-chat-all", results);
+  return { ok: true, results };
+});
+
 ipcMain.handle("site:list", () => {
   const out = {};
   for (const site of SITE_IDS) {

@@ -103,6 +103,8 @@ From top to bottom you'll typically see:
     participating.
   - **Attach, Roles, Sequence** — attach a document, assign roles, or build a
     prompt sequence.
+  - **🆕 Start New Chat** — one click starts a **fresh chat in all three AIs at
+    once** *(see §7c)*.
   - **🤖 System AI** — a one‑click switch that turns the System AI helper on or
     off without opening its panel; the button shows **On/Off** *(see §13)*.
   - **🧪 Test** — runs a full system check and drops the report straight into your
@@ -211,6 +213,16 @@ one pane:
 - **Tuner ✅** — **🎛️ Run Tuner** tests each AI's connection and every A‑to‑B relay
   path, and tells you exactly which links work.
 - **Logins ✅** — you can save and autofill site logins per pane.
+
+### 7c. Start New Chat (all three at once) ✅
+
+The **🆕 Start New Chat** button in the **User Panel** (right after **🧵
+Sequence**) starts a **brand‑new chat/session in ChatGPT, Claude and Gemini
+together** — one click, all three panes jump to a fresh conversation. It also
+clears the app's memory of each pane's last reply, so a fresh chat won't be
+confused with the previous one. Use it whenever you want a clean slate for all
+three AIs without reloading them one at a time. *(Your logins stay signed in —
+this only opens a new conversation.)*
 
 ---
 

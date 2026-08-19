@@ -1302,6 +1302,16 @@ if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
 };
 if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
 
+// User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
+if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
+  if (!window.api.startNewChatAll) return;
+  setStatus("Starting a new chat in all three AIs…");
+  const r = await window.api.startNewChatAll();
+  const started = r && r.results ? Object.entries(r.results).filter(([, ok]) => ok).map(([s]) => SITE_LABELS[s] || s) : [];
+  setStatus(started.length ? `New chat started in: ${started.join(", ")}.` : "Couldn't start a new chat — are the panes loaded?");
+  setTimeout(refreshSites, 1500);
+};
+
 // User Panel: 🧪 Test -> run the system check and post the report to messages.
 if (el("btn-run-test")) el("btn-run-test").onclick = async () => {
   if (!window.api.systemReport) return;

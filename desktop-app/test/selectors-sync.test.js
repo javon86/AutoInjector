@@ -52,6 +52,8 @@ async function main() {
       );
     }
     assert(desktop[site].label === extension[site].label, `${site}.label matches`);
+    // Every desktop site must expose a new-chat URL for the "Start New Chat" button.
+    assert(/^https?:\/\//.test(desktop[site].newChat || ""), `${site}.newChat is a URL for Start New Chat`);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

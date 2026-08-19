@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("api", {
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
+  startNewChatAll: () => ipcRenderer.invoke("sites:new-chat-all"),
   inspectSite: (site) => ipcRenderer.invoke("site:inspect", site),
   listSites: () => ipcRenderer.invoke("site:list"),
   chooseDocument: () => ipcRenderer.invoke("document:choose"),

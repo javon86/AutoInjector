@@ -7,6 +7,7 @@ module.exports = {
   chatgpt: {
     label: "ChatGPT",
     home: "https://chatgpt.com",
+    newChat: "https://chatgpt.com/",
     INPUT_CANDIDATES: [
       "#prompt-textarea",
       'div[role="textbox"]',
@@ -59,6 +60,7 @@ module.exports = {
   claude: {
     label: "Claude",
     home: "https://claude.ai/new",
+    newChat: "https://claude.ai/new",
     INPUT_CANDIDATES: [
       'div[contenteditable="true"][data-testid]',
       'div[contenteditable="true"].ProseMirror',
@@ -107,6 +109,7 @@ module.exports = {
   gemini: {
     label: "Gemini",
     home: "https://gemini.google.com/app",
+    newChat: "https://gemini.google.com/app",
     INPUT_CANDIDATES: [
       'rich-textarea div[contenteditable="true"]',
       'div.ql-editor[contenteditable="true"]',
