@@ -50,8 +50,9 @@ have a permanent, searchable record you can copy, download, or build on.
 You need two things:
 
 - **Node.js** — this is what runs the app. Get it free from
-  [nodejs.org](https://nodejs.org/) (click the **LTS** button) and install with
-  the defaults. This is the only required install.
+  [nodejs.org](https://nodejs.org/) (click the **LTS** button — that's version
+  22 or newer, which the app's built‑in database needs) and install with the
+  defaults. This is the only required install.
 - **Accounts** for the AIs you want to use — ChatGPT
   ([chatgpt.com](https://chatgpt.com)), Claude ([claude.ai](https://claude.ai)),
   and/or Gemini ([gemini.google.com](https://gemini.google.com)). You just need
