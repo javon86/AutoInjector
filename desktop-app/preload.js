@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("api", {
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
+  startNewChatAll: () => ipcRenderer.invoke("sites:new-chat-all"),
   inspectSite: (site) => ipcRenderer.invoke("site:inspect", site),
   listSites: () => ipcRenderer.invoke("site:list"),
   chooseDocument: () => ipcRenderer.invoke("document:choose"),
@@ -89,5 +90,14 @@ contextBridge.exposeInMainWorld("api", {
   sdGallery: (limit) => ipcRenderer.invoke("sd:gallery", limit),
   onSdImage: (cb) => ipcRenderer.on("sd-image", (_e, payload) => cb(payload)),
   systemInfo: () => ipcRenderer.invoke("system:info"),
-  onFocusPanel: (cb) => ipcRenderer.on("focus-panel", (_e, payload) => cb(payload))
+  systemReport: () => ipcRenderer.invoke("system:report"),
+  onFocusPanel: (cb) => ipcRenderer.on("focus-panel", (_e, payload) => cb(payload)),
+  lsiGetSettings: () => ipcRenderer.invoke("lsi:get-settings"),
+  lsiSetSettings: (patch) => ipcRenderer.invoke("lsi:set-settings", patch),
+  lsiTest: () => ipcRenderer.invoke("lsi:test"),
+  ollamaDetect: () => ipcRenderer.invoke("ollama:detect"),
+  ollamaList: (endpoint) => ipcRenderer.invoke("ollama:list", endpoint),
+  ollamaRecommended: (vramGB) => ipcRenderer.invoke("ollama:recommended", vramGB),
+  ollamaPull: (model) => ipcRenderer.invoke("ollama:pull", model),
+  onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload))
 });
