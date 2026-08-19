@@ -90,10 +90,18 @@ way to jump around: **Tools → System Monitor** or **Tools → Image Studio** s
 that panel into view, and **Help** links back to this guide.
 
 Below the menu bar is one big scrollable area. **If there's more than fits, scroll
-up and down** — a scrollbar appears on the right. Almost every panel has a **⌄
-button** in its heading; clicking it **minimizes the panel to a thin strip at its
-own place in the column** (it doesn't jump to the top), and the window keeps
-scrolling. Click the strip to bring the panel back.
+up and down** — a scrollbar appears on the right.
+
+There are **two different ways things collapse**, on purpose:
+
+- **Utility panels** (Global, House Rules, Prompt Library, Project Memory, Project
+  State, System Monitor, System AI, Image Studio) have a **⌄ button** in their
+  heading — or you can just **click the panel's title**. Either one **tucks the
+  whole panel up into a row of tabs across the top** (the "top tab strip"), freeing
+  the space below. Click that tab to bring the panel back. This lets you keep just
+  the panels you're using open.
+- **The three AI panes** don't move to the top — they stay in the AI workspace and
+  use their **three states** instead *(open → reduced → minimized, see below)*.
 
 From top to bottom you'll typically see:
 
@@ -121,13 +129,21 @@ From top to bottom you'll typically see:
   and download a model for it *(see §13)*.
 - **Image Studio (Stable Diffusion)** — generate images, with presets and a
   built‑in viewer *(see §10)*.
-- **The three AI panes** — ChatGPT, Claude and Gemini live, side by side. Each
-  pane has **three states**, cycled with the button in its corner: **open**
-  (full), **reduced** (a shorter preview) and **minimized** (a thin strip). The
-  panes keep their fixed left‑to‑right order no matter which state each is in.
-  Every pane also has a small **row of buttons in its header** *(see §7a)*:
-  **－ / 100% / ＋** zoom, **🔍** DevTools, **🎯** fix‑selectors, **🔑** saved
-  logins, **⟳** reload, and a **🧪** self‑test.
+- **The three AI panes** — ChatGPT, Claude and Gemini live, side by side, always
+  in that **fixed left‑to‑right order** (ChatGPT | Claude | Gemini). Each pane has
+  **three states**, cycled with the button in its corner — the button shows the
+  **next** state you'll get:
+  - **Open** — the pane's controls, the reply preview, **and** the live embedded
+    website.
+  - **Reduced** — the controls and reply preview, with the embedded website
+    **hidden** (saves height while you still see the last reply).
+  - **Minimized** — just a **thin provider bar**; click **anywhere on the bar** to
+    reopen the pane.
+
+  Changing a pane's state **never moves it** to another slot. Every pane also has a
+  small **row of buttons in its header** *(see §7a)*: **－ / 100% / ＋** zoom,
+  **🔍** DevTools, **🎯** fix‑selectors (which also holds a **🧪** self‑test),
+  **🔑** saved logins, and **⟳** reload.
 - **Conversation** — the running transcript, saved to the database *(see §8)*.
 - **Activity / Troubleshooting** — a technical log of what the app is doing.
 - **Export bar** — **Copy Transcript**, **Download .md**, **Clear Transcript**.
@@ -191,14 +207,16 @@ one pane:
   boxes are**: **Pick Input**, **Pick Send**, **Pick Reply** (click the button,
   then click the real element in the pane), plus **Clear Overrides** to undo. Use
   this if a site changes its layout and injection stops working — no DevTools
-  needed. The menu also has a **🧪 Test** *(see below)*.
+  needed. **This same menu also holds the per‑pane 🧪 Test** (below).
 - **🔑 Logins** — open the **saved‑logins** menu for that site: fill a saved
   username/password and click **Sign In** *(also listed below)*.
 - **⟳** — **reload** that pane.
-- **🧪 Test (per pane)** — sends a **real test prompt**, waits for the reply, and
-  lights the pane's dot **green or red** depending on whether the round‑trip
-  actually worked. *(This is different from the User Panel's **🧪 Test**, which
-  runs a hardware system check — see §11.)*
+
+**🧪 Test (per pane)** lives **inside the 🎯 Fix selectors menu** (not the header
+row). It sends a **real test prompt**, waits for the reply, and lights the pane's
+indicator **green or red** depending on whether the round‑trip actually worked.
+*(This is different from the User Panel's **🧪 Test**, which runs a hardware
+system check — see §11.)*
 
 ### 7b. Sending and helper tools
 

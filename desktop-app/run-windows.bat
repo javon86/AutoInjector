@@ -11,22 +11,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem Install on first run, and re-install whenever package.json changed since the
-rem last install (e.g. after pulling an update that added a dependency).
-set "NEED_INSTALL=0"
-if not exist "node_modules" set "NEED_INSTALL=1"
-if exist "node_modules" (
-  for /f %%i in ('powershell -NoProfile -Command "if((Get-Item package.json).LastWriteTime -gt (Get-Item node_modules).LastWriteTime){'1'}else{'0'}" 2^>nul') do set "NEED_INSTALL=%%i"
-)
-if "%NEED_INSTALL%"=="1" (
-  echo Installing/updating dependencies, this can take a minute...
-  call npm install
-  if errorlevel 1 (
-    echo.
-    echo npm install failed - see the error above.
-    pause
-    exit /b 1
-  )
+rem Make sure every declared dependency is actually present (a partial or
+rem interrupted install leaves node_modules in place but incomplete). The
+rem preflight installs only what's missing and reports clearly if it can't.
+call node scripts\ensure-deps.js
+if errorlevel 1 (
+  echo.
+  echo Could not finish installing dependencies - see the message above.
+  pause
+  exit /b 1
 )
 
 echo Starting AutoInjector Desktop...

@@ -9,12 +9,10 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
-# Install on first run, and re-install whenever package.json changed since the
-# last install (e.g. after pulling an update that added a dependency).
-if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
-  echo "Installing/updating dependencies, this can take a minute..."
-  npm install || { echo "npm install failed - see the error above."; read -p "Press Enter to close..."; exit 1; }
-fi
+# Make sure every declared dependency is actually present (a partial or
+# interrupted install leaves node_modules in place but incomplete). The
+# preflight installs only what's missing and reports clearly if it can't.
+node scripts/ensure-deps.js || { echo "Could not finish installing dependencies - see the message above."; read -p "Press Enter to close..."; exit 1; }
 
 echo "Starting AutoInjector Desktop..."
 npm start
