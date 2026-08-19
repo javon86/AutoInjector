@@ -55,24 +55,38 @@ function main() {
     console.log('Installing dependencies, this can take a minute…');
   }
 
+  // Only `electron` has a heavy post-install step (it downloads and unpacks its
+  // runtime). If electron is already present and only leaf packages like
+  // systeminformation / jsdom are missing, install *just those by name* and skip
+  // lifecycle scripts — that way npm never re-lays-down electron, so a running
+  // copy holding electron's files (the classic Windows EBUSY lock) can't block
+  // the install at all. If electron itself is missing (a fresh checkout), fall
+  // back to a full install so its runtime gets unpacked.
+  const needsFullInstall = missing.includes('electron') || missing.length === declared.length;
+  const args = needsFullInstall
+    ? ['install', '--no-audit', '--no-fund']
+    : ['install', ...missing, '--no-audit', '--no-fund', '--ignore-scripts'];
+
   // Run through a shell. On Windows, `npm` is a `.cmd` batch file, and newer
   // Node versions refuse to spawn `.cmd`/`.bat` directly (they throw EINVAL
   // since the CVE-2024-27980 fix) unless a shell resolves it — so `shell: true`
   // is required there. On macOS/Linux a shell resolves `npm` on PATH just the
-  // same. Args here are fixed literals ("install"), so there's nothing to inject.
-  const res = spawnSync('npm', ['install'], { cwd: appDir, stdio: 'inherit', shell: true });
-  if (res.error) { console.error(`Could not run npm: ${res.error.message}`); return 1; }
-  if (res.status !== 0) return res.status || 1;
+  // same. All args are fixed package names / flags, so there's nothing to inject.
+  const res = spawnSync('npm', args, { cwd: appDir, stdio: 'inherit', shell: true });
+  const installFailed = !!res.error || res.status !== 0;
 
-  // Verify the install actually resolved what was missing (e.g. an EBUSY lock
-  // can make npm exit 0-ish but leave a package unwritten). Report clearly.
+  // Whether npm reported success or not, check what's actually on disk now.
   const stillMissing = declared.filter((n) => !isInstalled(n));
-  if (stillMissing.length) {
+
+  if (installFailed || stillMissing.length) {
     console.error('');
-    console.error(`Some dependencies are still missing after install: ${stillMissing.join(', ')}`);
-    console.error('If you are on Windows, make sure every AutoInjector window is fully closed');
-    console.error('(check the system tray and Task Manager for electron.exe), then try again —');
-    console.error('a running copy locks files and blocks the update.');
+    if (res.error) console.error(`Could not run npm: ${res.error.message}`);
+    if (stillMissing.length) console.error(`Still missing after install: ${stillMissing.join(', ')}`);
+    console.error('');
+    console.error('If you saw a "EBUSY / resource busy or locked" error above, a running copy of');
+    console.error('the app is holding its files. Close every AutoInjector window, then check');
+    console.error('Task Manager for any leftover "electron" process and end it (or just reboot),');
+    console.error('and run the launcher again.');
     return 1;
   }
   return 0;
