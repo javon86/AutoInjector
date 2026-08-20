@@ -2293,10 +2293,17 @@ function initDownloadManager() {
         return { cancel: () => { try { child && child.kill(); } catch (_) {} } };
       },
       // Download a file (e.g. a Stable Diffusion checkpoint) into the app's
-      // sd-models folder, with progress and cancel.
+      // sd-models folder, with progress and cancel. The URL scheme is gated and
+      // the filename is sanitized to a safe basename (no path traversal) before
+      // it's joined into the models folder.
       "http-download": (job, hooks) => {
+        let url;
+        try { url = new URL(job.url); } catch (_) { hooks.done(false, "invalid download URL"); return { cancel: () => {} }; }
+        if (url.protocol !== "https:" && url.protocol !== "http:") { hooks.done(false, `unsupported URL scheme: ${url.protocol}`); return { cancel: () => {} }; }
         const controller = new AbortController();
-        const dest = path.join(sdModelsDir(), job.filename || path.basename(new URL(job.url).pathname));
+        // uniquePath() runs the name through safeName() (strips separators/..) and
+        // never returns a path outside sdModelsDir().
+        const dest = outputManager.uniquePath(sdModelsDir(), job.filename || path.basename(url.pathname) || "download");
         const mb = (n) => (n / 1e6).toFixed(0);
         fileDownloader.download(job.url, dest, {
           signal: controller.signal,

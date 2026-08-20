@@ -54,19 +54,34 @@ function recommended(vramGB) {
  * Ollama is installed.
  * @returns {{child: import('child_process').ChildProcess, done: Promise}}
  */
-function pull(model, onProgress) {
+function pull(model, onProgress, opts = {}) {
   const name = String(model || '').trim();
   if (!name) return { child: null, done: Promise.resolve({ ok: false, error: 'no model specified' }) };
+  // A pull can legitimately run a long time (gigabytes), but it streams progress
+  // the whole way. Watch for *silence*: if nothing arrives for idleMs, the pull
+  // has stalled — kill it so it can't hold a download slot forever.
+  const idleMs = opts.idleMs || 180000; // 3 minutes of no output
   let child;
   const done = new Promise((resolve) => {
     try {
       child = spawn(_ollamaBin(), ['pull', name], { windowsHide: true });
     } catch (e) { return resolve({ ok: false, error: `could not start ollama: ${(e && e.message) || e}` }); }
-    const emit = (buf) => { const s = String(buf).trim(); if (s && typeof onProgress === 'function') onProgress(s); };
+    let stalled = false;
+    let idle = null;
+    const resetIdle = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(() => { stalled = true; try { child.kill(); } catch (_) {} }, idleMs);
+    };
+    const emit = (buf) => { resetIdle(); const s = String(buf).trim(); if (s && typeof onProgress === 'function') onProgress(s); };
     child.stdout && child.stdout.on('data', emit);
     child.stderr && child.stderr.on('data', emit); // ollama writes progress to stderr
-    child.on('error', (e) => resolve({ ok: false, error: String((e && e.message) || e) }));
-    child.on('close', (code) => resolve(code === 0 ? { ok: true, model: name } : { ok: false, error: `ollama pull exited ${code}` }));
+    child.on('error', (e) => { if (idle) clearTimeout(idle); resolve({ ok: false, error: String((e && e.message) || e) }); });
+    child.on('close', (code) => {
+      if (idle) clearTimeout(idle);
+      if (stalled) return resolve({ ok: false, error: 'ollama pull stalled (no progress) and was stopped' });
+      resolve(code === 0 ? { ok: true, model: name } : { ok: false, error: `ollama pull exited ${code}` });
+    });
+    resetIdle();
   });
   return { child, done };
 }

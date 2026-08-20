@@ -94,6 +94,26 @@ function testCorruptionNoSnapshotRefuses() {
   assert(threw, 'refuses to open a corrupt database when there is nothing good to restore');
 }
 
+// ---- SCS-003: routing status handles multi-recipient fan-out sends ----------
+function testMultiTargetRoutingStatus() {
+  console.log('\n== SCS-003: a fan-out send to several known panes is RESOLVED, not a false warning ==');
+  const f = tmpFile('routing.db');
+  const d = db.openDatabase(f);
+  const log = new MessageLog(d);
+  log.ensureProject('P', 'P');
+
+  const single = log.append({ projectId: 'P', from: 'user', to: 'claude', body: 'hi', status: 'SENT' });
+  assert(single.routingStatus === 'RESOLVED', 'a single known recipient is RESOLVED');
+
+  const multi = log.append({ projectId: 'P', from: 'user', to: 'chatgpt,claude,gemini', body: 'all', status: 'SENT' });
+  assert(multi.routingStatus === 'RESOLVED', 'a comma-joined list of KNOWN panes is RESOLVED (was the false-warning bug)');
+
+  const bad = log.append({ projectId: 'P', from: 'user', to: 'chatgpt,mystery', body: 'oops', status: 'SENT' });
+  assert(bad.routingStatus === 'ROUTING_UNRESOLVED', 'a genuinely unknown recipient is still flagged');
+
+  d.close();
+}
+
 // ---- SCS-001 ---------------------------------------------------------------
 function testAllSourcesOneOrderedLog() {
   console.log('\n== SCS-001: all five+ sources write one log; seq order reproduces the conversation, no gaps ==');
@@ -190,6 +210,7 @@ async function main() {
   testCorruptionRestoresSnapshot();
   testCorruptionNoSnapshotRefuses();
   testAllSourcesOneOrderedLog();
+  testMultiTargetRoutingStatus();
   testFailedWriteParkedNotPartial();
   testNumbersAreSystemAssigned();
   await testConcurrentNumbering();

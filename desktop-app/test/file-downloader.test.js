@@ -22,6 +22,11 @@ function makeServer() {
   const srv = http.createServer((req, res) => {
     if (req.url === "/redirect") { res.writeHead(302, { Location: "/file" }); return res.end(); }
     if (req.url === "/missing") { res.writeHead(404); return res.end("nope"); }
+    if (req.url === "/stall") {
+      // Send headers, then go silent forever (never write the body).
+      res.writeHead(200, { "content-length": String(body.length) });
+      return; // no res.end — the socket stalls
+    }
     if (req.url === "/slow") {
       res.writeHead(200, { "content-length": String(body.length) });
       let i = 0;
@@ -81,6 +86,18 @@ async function main() {
     // give the fs a tick to unlink
     await new Promise((r) => setTimeout(r, 50));
     assert(!fs.existsSync(dest), "no completed file after abort");
+  }
+
+  console.log("\n== a stalled connection times out (does not hang forever) ==");
+  {
+    const dest = tmpFile("stall.bin");
+    const t0 = Date.now();
+    let err = null;
+    await download(`${base}/stall`, dest, { timeoutMs: 300 }).catch((e) => { err = e; });
+    assert(err && /timed out/.test(err.message), "a silent connection rejects with a timeout");
+    assert(Date.now() - t0 < 3000, "it gives up quickly (~timeoutMs), not hanging");
+    await new Promise((r) => setTimeout(r, 50));
+    assert(!fs.existsSync(dest) && !fs.existsSync(dest + ".part"), "no file/partial left after a timeout");
   }
 
   srv.close();
