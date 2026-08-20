@@ -41,6 +41,12 @@ async function main() {
       `AI panes are in fixed order (${order.join(', ') || 'not yet built'})`
     );
 
+    // The output folder is laid out under Documents on startup.
+    const docs = await app.evaluate(({ app: a }) => a.getPath('documents')).catch(() => null);
+    const fs = require('fs'), pathMod = require('path');
+    const outRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output') : null;
+    assert(outRoot && fs.existsSync(outRoot), `output folder created on launch (${outRoot})`);
+
     await shot(controls, 'control-panel');
 
     console.log('\n== 🧙 Setup opens the wizard, which scans and lists downloads ==');

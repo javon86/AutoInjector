@@ -33,6 +33,7 @@ const lsiProvider = require("./lsi-provider");
 const ollamaManager = require("./ollama-manager");
 const downloadManager = require("./download-manager");
 const fileDownloader = require("./file-downloader");
+const outputManager = require("./output-manager");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -652,6 +653,18 @@ function createWindow() {
     win.contentView.addChildView(view);
     view.webContents.loadURL(SITES[site].home);
     siteViews[site] = view;
+    // When an AI produces a file you download from its pane, grab it into the
+    // output folder under that AI's name (output/ai-work/<site>/) instead of
+    // popping a save dialog — a tidy local record of each AI's work.
+    try {
+      view.webContents.session.on("will-download", (_event, item) => {
+        try {
+          const dest = outputManager.uniquePath(outputManager.aiWorkDir(site), item.getFilename());
+          item.setSavePath(dest);
+          item.once("done", (_e, stateStr) => logEvent("ai-download", { site, state: stateStr, file: dest }));
+        } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
+      });
+    } catch (_) {}
     // Fires once this site's page has actually finished loading (not on a
     // fixed delay, which would race against a slow connection) — sending
     // any earlier would hit a chat UI whose input box doesn't exist yet.
@@ -2088,6 +2101,7 @@ async function pollSite(site) {
             .then((r) => {
               if (r && r.ok) {
                 try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+                saveGeneratedImage(r);
                 broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
               } else logEvent("sd-ai-error", { site, error: r && r.error });
             })
@@ -2186,6 +2200,7 @@ ipcMain.handle("sd:generate", async (_evt, opts) => {
     const r = await sdProvider.generate(opts || {});
     if (r && r.ok) {
       try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
+      saveGeneratedImage(r);
       broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
     }
     return r;
@@ -2245,6 +2260,21 @@ ipcMain.handle("ollama:pull", async (_evt, model) => {
     return r;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
+
+// Save a freshly generated image (data URI) into output/images/.
+function saveGeneratedImage(r) {
+  try {
+    if (!r || !r.dataUri) return;
+    const m = /^data:image\/([a-z0-9]+);base64,(.+)$/i.exec(r.dataUri);
+    if (!m) return;
+    const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+    const buf = Buffer.from(m[2], "base64");
+    const stem = outputManager.safeName(String(r.prompt || "image").slice(0, 40), "image");
+    const name = `${stem}${r.seed != null ? "-" + r.seed : ""}.${ext}`;
+    const dest = outputManager.saveBuffer(outputManager.imagesDir(), name, buf);
+    logEvent("image-saved", { file: dest });
+  } catch (e) { logEvent("image-save-error", { error: String(e) }); }
+}
 
 // --- Setup Wizard + background downloads ------------------------------------
 // Configure the download queue with the runners it knows how to run. The first
@@ -2358,6 +2388,7 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
+        { label: "Open Output Folder", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
         { type: "separator" },
         { label: "System Monitor", click: () => broadcast("focus-panel", "system") },
         { label: "Image Studio", click: () => broadcast("focus-panel", "imagestudio") },
@@ -2752,6 +2783,9 @@ ipcMain.handle("document:send", async (_evt, { path: filePath, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
   if (!list.length) return { ok: false, error: "NO_TARGETS" };
   logEvent("document-send", { path: filePath, targets: list });
+  // Keep a local copy of everything uploaded to the AIs in output/uploads/.
+  try { const saved = outputManager.copyInto(outputManager.uploadsDir(), filePath); logEvent("upload-saved", { file: saved }); }
+  catch (e) { logEvent("upload-save-error", { error: String(e) }); }
   const results = {};
   for (const t of list) results[t] = await attachFileToSite(t, filePath);
   return { ok: true, results };
@@ -3158,6 +3192,7 @@ app.whenReady().then(() => {
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
+  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
