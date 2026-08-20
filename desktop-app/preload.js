@@ -108,5 +108,17 @@ contextBridge.exposeInMainWorld("api", {
   downloadsList: () => ipcRenderer.invoke("downloads:list"),
   downloadsCancel: (id) => ipcRenderer.invoke("downloads:cancel", id),
   downloadsClearFinished: () => ipcRenderer.invoke("downloads:clear-finished"),
-  onDownloadsChanged: (cb) => ipcRenderer.on("downloads-changed", (_e, payload) => cb(payload))
+  onDownloadsChanged: (cb) => ipcRenderer.on("downloads-changed", (_e, payload) => cb(payload)),
+  bookList: () => ipcRenderer.invoke("book:list"),
+  bookCreate: (title) => ipcRenderer.invoke("book:create", title),
+  bookGet: (id) => ipcRenderer.invoke("book:get", id),
+  bookSetStage: (id, stage) => ipcRenderer.invoke("book:set-stage", { id, stage }),
+  bookAddChapter: (id, title) => ipcRenderer.invoke("book:add-chapter", { id, title }),
+  bookSetChapterStatus: (id, chapterId, status) => ipcRenderer.invoke("book:set-chapter-status", { id, chapterId, status }),
+  bookAddRecord: (id, type, name, content) => ipcRenderer.invoke("book:add-record", { id, type, name, content }),
+  bookReadRecord: (id, recordId) => ipcRenderer.invoke("book:read-record", { id, recordId }),
+  bookLog: (id, text) => ipcRenderer.invoke("book:log", { id, text }),
+  bookOpenFolder: (id) => ipcRenderer.invoke("book:open-folder", id),
+  bookTask: (id, taskId, chapterId) => ipcRenderer.invoke("book:task", { id, taskId, chapterId }),
+  bookBrief: (id) => ipcRenderer.invoke("book:brief", id)
 });

@@ -97,6 +97,24 @@ async function main() {
       await shot(wizard, 'setup-wizard-video-advanced');
     }
 
+    console.log('\n== Book Studio: create a book, stages/tasks/records render ==');
+    assert(await controls.$('#col-bookstudio'), 'Book Studio panel is present');
+    await controls.fill('#book-new-title', 'E2E Test Novel');
+    await controls.click('#btn-book-new');
+    // The new book becomes the selected project and renders its stage tracker.
+    const created = await controls.waitForFunction(() => {
+      const sel = document.getElementById('book-select');
+      return sel && sel.value && document.querySelectorAll('#book-stages button').length >= 8;
+    }, { timeout: 8000 }).then(() => true).catch(() => false);
+    assert(created, 'creating a book selects it and renders the 8 stage steps');
+    const taskBtns = await controls.$$eval('#book-tasks button', (els) => els.length).catch(() => 0);
+    assert(taskBtns >= 10, `task buttons render (${taskBtns})`);
+    // Add a chapter and confirm it appears with a status control.
+    await controls.click('#btn-book-add-chapter');
+    const hasChapter = await controls.waitForFunction(() => document.querySelectorAll('#book-chapters select').length > 0, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(hasChapter, 'adding a chapter shows it with a status dropdown');
+    await shot(controls, 'book-studio');
+
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
     await app.close();
     process.exit(state.failed ? 1 : 0);

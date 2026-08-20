@@ -591,6 +591,71 @@
       </div>
     </div>
 
+    <div id="col-bookstudio" class="col yc-panel">
+      <div class="yc-head">
+        <h2>📖 Book Studio (ATELIER)</h2><span class="spacer"></span>
+        <span id="book-status" style="font-size:9.5px; opacity:.7;"></span>
+        <button class="collapse-btn" id="btn-collapse-bookstudio" title="Minimize this panel">⌄</button>
+      </div>
+      <div id="bookstudio-body">
+        <div class="btns" style="margin:3px 0; align-items:center;">
+          <span class="row-label">Book</span>
+          <select id="book-select" style="flex:1 1 150px; min-width:0;"><option value="">(no book selected)</option></select>
+          <input id="book-new-title" type="text" placeholder="new book title…" style="flex:1 1 130px; min-width:0;">
+          <button id="btn-book-new" class="primary">＋ New Book</button>
+          <button id="btn-book-folder" title="Open this book's folder in Documents/AutoInjector/output/books">📁</button>
+        </div>
+
+        <div style="margin:5px 0;">
+          <div class="row-label" style="margin-bottom:2px;">Stage <span id="book-stage-count" style="opacity:.6;"></span></div>
+          <div id="book-stages" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+        </div>
+
+        <div style="margin:5px 0;">
+          <div class="btns" style="align-items:center;">
+            <span class="row-label">Chapters</span>
+            <input id="book-chapter-title" type="text" placeholder="chapter title…" style="flex:1 1 120px; min-width:0;">
+            <button id="btn-book-add-chapter">＋ Chapter</button>
+          </div>
+          <div id="book-chapters" style="display:flex; flex-direction:column; gap:3px; margin-top:3px;"></div>
+        </div>
+
+        <div style="margin:5px 0;">
+          <div class="row-label" style="margin-bottom:2px;">Send a task to an AI <span style="opacity:.6;">(uses the V2 role prompts; sends to the target pane)</span></div>
+          <div id="book-tasks" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+          <div class="btns" style="margin-top:4px;">
+            <button id="btn-book-brief" class="primary" title="Catch all three AIs up on this book and fill their panes">🧠 Brief the AIs (fill panes)</button>
+          </div>
+        </div>
+
+        <div style="margin:5px 0;">
+          <div class="btns" style="align-items:center;">
+            <span class="row-label">Records</span>
+            <select id="book-rec-type" style="flex:0 0 auto;"></select>
+            <input id="book-rec-name" type="text" placeholder="record name…" style="flex:1 1 120px; min-width:0;">
+            <button id="btn-book-add-record">＋ Add</button>
+          </div>
+          <div id="book-records" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; font-size:10.5px;"></div>
+        </div>
+
+        <div style="margin:5px 0;">
+          <div class="row-label" style="margin-bottom:2px;">Activity log <span style="opacity:.6;">(everything that's happened)</span></div>
+          <div id="book-log" style="max-height:110px; overflow-y:auto; font-size:10px; font-family:ui-monospace,monospace; opacity:.85; display:flex; flex-direction:column-reverse; gap:2px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Record viewer popup (a document pops up when you click it) -->
+    <div class="popup-overlay" id="book-record-overlay">
+      <div class="popup-window">
+        <div class="feed-head" style="padding:8px 10px; border-bottom:1px solid #2a2a2a;">
+          <b id="book-record-title">Record</b><span class="spacer"></span>
+          <button id="btn-book-record-close">✕</button>
+        </div>
+        <pre id="book-record-content" style="margin:0; padding:10px; overflow:auto; white-space:pre-wrap; font-size:11px; line-height:1.4;"></pre>
+      </div>
+    </div>
+
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">
