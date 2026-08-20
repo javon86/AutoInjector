@@ -2341,8 +2341,36 @@ function imagesCatalog(vramGB) {
   return {
     engine: {
       name: "Forge",
-      note: "Forge is the recommended Stable Diffusion engine (lighter than A1111). It's a separate program with Python — install it from its GitHub page, then point Image Studio at its address. Guided install coming soon.",
+      note: "Forge is the recommended Stable Diffusion engine (lighter than A1111). It's a separate program that needs Python — install it from its GitHub page, then point Image Studio at its address.",
       url: "https://github.com/lllyasviel/stable-diffusion-webui-forge",
+    },
+    modelsDir: sdModelsDir(),
+    models,
+  };
+}
+
+// The optional Video (generation) add-ons — heavier, gated to capable GPUs.
+function videoCatalog(vramGB) {
+  const v = vramGB || 0;
+  const models = [
+    {
+      kind: "http-download", category: "Video", label: "LTX-Video 2B", sizeLabel: "~9 GB",
+      filename: "ltx-video-2b-v0.9.safetensors",
+      url: "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors",
+      why: v >= 12 ? "a fast local video model for your GPU" : "needs ~12 GB VRAM — high-end only", ok: v >= 12,
+    },
+    {
+      kind: "http-download", category: "Video", label: "Stable Video Diffusion (XT)", sizeLabel: "~9.5 GB",
+      filename: "svd_xt.safetensors",
+      url: "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors",
+      why: v >= 16 ? "image-to-video, top quality" : "needs a big GPU (~16 GB VRAM)", ok: v >= 16,
+    },
+  ];
+  return {
+    engine: {
+      name: "ComfyUI",
+      note: "ComfyUI is the standard engine for local video generation. It's a separate program that needs Python — install it from its GitHub page, then load a video model below.",
+      url: "https://github.com/comfyanonymous/ComfyUI",
     },
     modelsDir: sdModelsDir(),
     models,
@@ -2368,6 +2396,13 @@ ipcMain.handle("wizard:catalog", async () => {
       ollama,
       models: ollamaManager.recommended(vram).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
       images: imagesCatalog(vram),
+      video: videoCatalog(vram),
+      // Guided installs — the app can't silently install system programs, so it
+      // points you at the official download and you run it.
+      installers: {
+        ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models. Install it, then reopen this wizard." },
+        python: { name: "Python 3", url: "https://www.python.org/downloads/", note: "Needed by the image (Forge) and video (ComfyUI) engines." },
+      },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
 });

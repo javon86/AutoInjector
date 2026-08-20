@@ -40,27 +40,28 @@ async function loadCatalog() {
   el("scan").innerHTML = fmtSystem(catalog && catalog.system);
   renderOllamaState();
   renderModels();
-  renderImages();
+  renderEngineAndModels(catalog && catalog.images, "sd-engine", "sd-model-list", "sd-modelsdir");
+  renderEngineAndModels(catalog && catalog.video, "video-engine", "video-model-list", "video-modelsdir");
+  renderInstallers();
 }
 
-// ---- Images (Stable Diffusion) tab ----
-function renderImages() {
-  const cat = catalog && catalog.images;
-  const eng = el("sd-engine"), list = el("sd-model-list"), dir = el("sd-modelsdir");
+// ---- Shared engine + model-list renderer (Images and Video tabs) ----
+function renderEngineAndModels(cat, engineId, listId, dirId) {
+  const eng = el(engineId), list = el(listId), dir = el(dirId);
   if (!eng || !list) return;
-  if (!cat) { list.innerHTML = '<div class="muted">No image options available.</div>'; return; }
-  // Engine card (guided install — opens Forge's page in the browser).
+  if (!cat) { list.innerHTML = '<div class="muted">Not available.</div>'; return; }
+  // Engine card (guided install — opens the engine's page in the browser).
   eng.innerHTML = "";
   const e = document.createElement("div");
   e.className = "item";
-  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(cat.engine.name)} <span class="why">— image engine</span></div><div class="why">${esc(cat.engine.note)}</div></div>`;
+  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(cat.engine.name)} <span class="why">— engine</span></div><div class="why">${esc(cat.engine.note)}</div></div>`;
   const link = document.createElement("button");
   link.className = "primary";
-  link.textContent = "Get Forge ↗";
+  link.textContent = `Get ${cat.engine.name} ↗`;
   link.onclick = () => dl.openExternal && dl.openExternal(cat.engine.url);
   e.appendChild(link);
   eng.appendChild(e);
-  // Checkpoint cards.
+  // Model cards.
   list.innerHTML = "";
   for (const m of cat.models || []) {
     const row = document.createElement("div");
@@ -74,7 +75,28 @@ function renderImages() {
     row.appendChild(btn);
     list.appendChild(row);
   }
-  if (dir) dir.textContent = cat.modelsDir ? `Models download to: ${cat.modelsDir} (point Forge's checkpoint folder here, or copy them over).` : "";
+  if (dir) dir.textContent = cat.modelsDir ? `Models download to: ${cat.modelsDir} (point the engine's models folder here, or copy them over).` : "";
+}
+
+// ---- Advanced tab: guided installers (Ollama, Python) ----
+function renderInstallers() {
+  const box = el("advanced-installers");
+  if (!box) return;
+  const inst = catalog && catalog.installers;
+  box.innerHTML = "";
+  if (!inst) { box.innerHTML = '<div class="muted">Not available.</div>'; return; }
+  for (const key of Object.keys(inst)) {
+    const it = inst[key];
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(it.name)}</div><div class="why">${esc(it.note)}</div></div>`;
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = `Install ${it.name} ↗`;
+    btn.onclick = () => dl.openExternal && dl.openExternal(it.url);
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
 }
 function renderOllamaState() {
   const box = el("ollama-state");
@@ -87,9 +109,15 @@ function renderOllamaState() {
     return;
   }
   const ok = catalog && catalog.ollama && catalog.ollama.available;
-  box.innerHTML = ok
-    ? "Ollama is installed ✓ — pick models below to download."
-    : 'Ollama isn\'t installed yet. Get it from <b>ollama.com</b>, then reopen this wizard. (Guided install coming soon.) You can still queue models; they\'ll download once Ollama is available.';
+  box.innerHTML = "";
+  if (ok) { box.textContent = "Ollama is installed ✓ — pick models below to download."; return; }
+  box.innerHTML = 'Ollama isn\'t installed yet. Install it, then reopen this wizard. You can still queue models below; they\'ll download once Ollama is available. ';
+  const btn = document.createElement("button");
+  btn.className = "primary";
+  btn.textContent = "Install Ollama ↗";
+  const url = (catalog && catalog.installers && catalog.installers.ollama && catalog.installers.ollama.url) || "https://ollama.com/download";
+  btn.onclick = () => dl.openExternal && dl.openExternal(url);
+  box.appendChild(btn);
 }
 function renderModels() {
   const list = el("model-list");

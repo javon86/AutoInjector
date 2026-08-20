@@ -81,6 +81,20 @@ async function main() {
       assert(engine, 'Images tab shows the Forge engine card');
       assert(sdModels > 0, `Images tab lists SD checkpoints (${sdModels} shown)`);
       await shot(wizard, 'setup-wizard-images');
+
+      // Video tab: ComfyUI engine + video model cards.
+      await wizard.click('.tab[data-tab="video"]');
+      await wizard.waitForFunction(() => document.querySelectorAll('#video-model-list .item').length > 0, { timeout: 8000 }).catch(() => {});
+      assert(await wizard.$('#video-engine .item'), 'Video tab shows the ComfyUI engine card');
+      const vidModels = await wizard.$$eval('#video-model-list .item', (els) => els.length).catch(() => 0);
+      assert(vidModels > 0, `Video tab lists video models (${vidModels} shown)`);
+
+      // Advanced tab: guided installer cards (Ollama, Python).
+      await wizard.click('.tab[data-tab="advanced"]');
+      await wizard.waitForFunction(() => document.querySelectorAll('#advanced-installers .item').length > 0, { timeout: 8000 }).catch(() => {});
+      const installers = await wizard.$$eval('#advanced-installers .item', (els) => els.length).catch(() => 0);
+      assert(installers >= 2, `Advanced tab shows guided installers (${installers} shown)`);
+      await shot(wizard, 'setup-wizard-video-advanced');
     }
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);

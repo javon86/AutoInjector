@@ -91,10 +91,14 @@
       <div id="sd-modelsdir" class="muted" style="font-size:10.5px; word-break:break-all;"></div>
     </div>
     <div class="panel" id="panel-video">
-      <div class="soon">Video generation (ComfyUI) — coming later; needs a high-end GPU.</div>
+      <p class="muted">Generate <b>video</b> locally with ComfyUI. This is the heaviest option — it wants a strong GPU. Get the engine, then download a video model.</p>
+      <div id="video-engine"></div>
+      <div id="video-model-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div id="video-modelsdir" class="muted" style="font-size:10.5px; word-break:break-all;"></div>
     </div>
     <div class="panel" id="panel-advanced">
-      <div class="soon">Book Governance (Python) and developer tools — coming later.</div>
+      <p class="muted">Supporting programs some features need. The app can't install these silently — click to open the official download, then run it.</p>
+      <div id="advanced-installers" style="display:flex; flex-direction:column; gap:8px;"></div>
     </div>
   </main>
 

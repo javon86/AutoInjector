@@ -260,10 +260,21 @@ Setup Wizard**).
 - Downloads **keep going even if you close the wizard** (they run in the app's
   background), so you can reopen it any time to check.
 
-Tabs so far: **Local AI** (download local models via Ollama) and **Images**
-(Stable Diffusion — a **Get Forge** button for the engine, plus hardware‑matched
-**checkpoint** downloads: SD 1.5, SDXL, Flux; models land in a folder you point
-Forge at). **Video** and **Advanced** are placeholders that fill in next.
+The tabs:
+
+- **Local AI** — download local models via Ollama (with an **Install Ollama**
+  button if you don't have it yet).
+- **Images** — Stable Diffusion: a **Get Forge** button for the engine, plus
+  hardware‑matched **checkpoint** downloads (SD 1.5, SDXL, Flux).
+- **Video** — ComfyUI: a **Get ComfyUI** button plus video models (LTX‑Video,
+  Stable Video Diffusion), flagged for high‑end GPUs since video is the heaviest
+  option.
+- **Advanced** — **guided installers** for the supporting programs (**Ollama**,
+  **Python**) — the app can't install those silently, so it opens the official
+  download and you run it.
+
+Downloaded models land in a folder the wizard shows you, so you can point the
+engine (Forge / ComfyUI) at it.
 
 ---
 
