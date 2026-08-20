@@ -4,6 +4,9 @@
 // Downloads tray. The actual downloads run in the main process, so they keep
 // going even if this window is closed.
 const el = (id) => document.getElementById(id);
+// Escape any dynamic string before it goes into innerHTML (hardware/model names,
+// job labels). App-controlled today, but cheap defense-in-depth against markup.
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // NOTE: don't name this `api` — Electron's contextBridge already exposes a
 // global `api` in the page, and a top-level `const api` throws "Identifier
 // 'api' has already been declared", which would kill this whole script.
@@ -21,7 +24,7 @@ function fmtSystem(rep) {
   if (!rep) return "Couldn't read your hardware.";
   const s = rep.snapshot || {}, r = rep.recommendation || null;
   if (s.error) return s.error;
-  const gpu = (s.gpus && s.gpus[0]) ? `${s.gpus[0].model}${s.gpus[0].vramGB ? ` · ${s.gpus[0].vramGB} GB VRAM` : ""}` : "no dedicated GPU";
+  const gpu = (s.gpus && s.gpus[0]) ? `${esc(s.gpus[0].model)}${s.gpus[0].vramGB ? ` · ${s.gpus[0].vramGB} GB VRAM` : ""}` : "no dedicated GPU";
   const ram = s.mem && s.mem.totalGB ? `${s.mem.totalGB} GB RAM` : "";
   const line1 = `Your machine: <b>${gpu}</b>${ram ? ` · ${ram}` : ""}`;
   const line2 = r ? `You can comfortably run — local models: <b>${r.llm.tier}</b>; Stable Diffusion: <b>${r.sd.tier}</b>` : "";
@@ -50,7 +53,7 @@ function renderImages() {
   eng.innerHTML = "";
   const e = document.createElement("div");
   e.className = "item";
-  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${cat.engine.name} <span class="why">— image engine</span></div><div class="why">${cat.engine.note}</div></div>`;
+  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(cat.engine.name)} <span class="why">— image engine</span></div><div class="why">${esc(cat.engine.note)}</div></div>`;
   const link = document.createElement("button");
   link.className = "primary";
   link.textContent = "Get Forge ↗";
@@ -62,8 +65,8 @@ function renderImages() {
   for (const m of cat.models || []) {
     const row = document.createElement("div");
     row.className = "item";
-    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${m.label} <span class="why">${m.sizeLabel || ""}</span></div>` +
-      `<div class="${m.ok ? "why" : "warn"}">${m.why || ""}</div></div>`;
+    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(m.label)} <span class="why">${esc(m.sizeLabel || "")}</span></div>` +
+      `<div class="${m.ok ? "why" : "warn"}">${esc(m.why || "")}</div></div>`;
     const btn = document.createElement("button");
     btn.className = "primary";
     btn.textContent = "⬇ Download";
@@ -99,7 +102,7 @@ function renderModels() {
   for (const m of models) {
     const row = document.createElement("div");
     row.className = "item";
-    row.innerHTML = `<span class="name">${m.model}</span><span class="why">recommended for your machine</span><span class="spacer"></span>`;
+    row.innerHTML = `<span class="name">${esc(m.model)}</span><span class="why">recommended for your machine</span><span class="spacer"></span>`;
     const btn = document.createElement("button");
     btn.className = "primary";
     btn.textContent = "⬇ Download";
@@ -139,11 +142,11 @@ function renderJobs(jobs) {
     box.className = `job ${j.status}`;
     const pct = j.status === "done" ? 100 : (j.progress || 0);
     box.innerHTML =
-      `<div class="top"><span class="jname">${j.label}</span>` +
+      `<div class="top"><span class="jname">${esc(j.label)}</span>` +
       `<span class="jstatus">${STATUS_LABEL[j.status] || j.status}${j.status === "running" && pct ? ` ${pct}%` : ""}</span>` +
       `<span class="spacer"></span></div>` +
       `<div class="bar"><div class="fill" style="width:${pct}%"></div></div>` +
-      `<div class="detail">${(j.detail || "").replace(/</g, "&lt;")}</div>`;
+      `<div class="detail">${esc(j.detail || "")}</div>`;
     if (j.status === "running" || j.status === "queued") {
       const x = document.createElement("button");
       x.className = "x"; x.textContent = "✕"; x.title = "Cancel";
