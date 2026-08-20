@@ -296,6 +296,38 @@ Open it any time from **Tools → Open Output Folder**.
 
 ---
 
+### 7f. Book Studio (ATELIER) ✅ *(early version)*
+
+**Book Studio** turns the three AIs into a governed book‑writing team, using the
+ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
+**Claude = writing**. Open it from the panel or **Tools → Book Studio**.
+
+- **Books & sessions** — **＋ New Book** creates a project folder under
+  `Documents/AutoInjector/output/books/<title>/`. Every book is **saved to disk**,
+  so it survives closing the app — pick it again from the **Book** dropdown any
+  time to pick up exactly where you left off (across sessions). **📁** opens its
+  folder.
+- **Stage tracker** — an 8‑step progress bar (**Setup → Planning → Roadmap →
+  Drafting → Review → Revise → Lock → Export**); click a step to set the stage.
+- **Chapters** — add chapters (CH‑001, CH‑002…), set each one's **status**
+  (Not started / Drafting / In review / Locked / …), and **👁 view** its
+  manuscript. Click a chapter to make it the current one for tasks.
+- **Send a task to an AI** — one‑click buttons that send the right **V2 role
+  prompt** to the right pane: **Write**, **Story review**, **Canon review**,
+  **Writing review**, **Revise**, and the quick actions **↻ Redo**, **⟲ Start
+  over**, **🔁 Check again**.
+- **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
+  book (its stage, chapters and records) so, when you reopen a book, the panes
+  know exactly what they're working on and what to do next.
+- **Records** — create governed records (REQ, CHR, PLC, ART, …) with permanent
+  IDs; click any record to **pop it up** and read it.
+- **Activity log** — every action is logged, so you're never left guessing.
+
+*This is the first version — it drives the AIs and keeps the records/log/stages;
+the deeper canon‑conflict and traceability automation comes next.*
+
+---
+
 ## 8. The Conversation window and your project database
 
 The **Conversation** window (bottom‑left) is the running transcript. Its heading

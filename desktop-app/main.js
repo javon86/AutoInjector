@@ -34,6 +34,8 @@ const ollamaManager = require("./ollama-manager");
 const downloadManager = require("./download-manager");
 const fileDownloader = require("./file-downloader");
 const outputManager = require("./output-manager");
+const bookProject = require("./book-project");
+const bookPrompts = require("./book-prompts");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -2414,6 +2416,35 @@ ipcMain.handle("downloads:list", () => ({ ok: true, jobs: downloadManager.list()
 ipcMain.handle("downloads:cancel", (_evt, id) => ({ ok: downloadManager.cancel(id) }));
 ipcMain.handle("downloads:clear-finished", () => { downloadManager.clearFinished(); return { ok: true }; });
 
+// --- Book Studio (ATELIER V2) IPC ------------------------------------------
+ipcMain.handle("book:list", () => { try { return { ok: true, projects: bookProject.list() }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:create", (_e, title) => { try { return bookProject.create(title); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:get", (_e, id) => { try { const p = bookProject.get(id); return p ? { ok: true, project: p } : { ok: false, error: "no such book" }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-stage", (_e, { id, stage }) => { try { return bookProject.setStage(id, stage); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:add-chapter", (_e, { id, title }) => { try { return bookProject.addChapter(id, title); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status }) => { try { return bookProject.setChapterStatus(id, chapterId, status); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:add-record", (_e, { id, type, name, content }) => { try { return bookProject.addRecord(id, type, name, content); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:read-record", (_e, { id, recordId }) => { try { return bookProject.readRecord(id, recordId); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:log", (_e, { id, text }) => { try { return bookProject.appendLog(id, text); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:open-folder", (_e, id) => { try { const p = bookProject.get(id); if (p && shell) shell.openPath(p.dir); return { ok: !!p }; } catch (e) { return { ok: false, error: String(e) }; } });
+// Compose the role/task prompt for a task (the renderer sends it to the pane).
+ipcMain.handle("book:task", (_e, { id, taskId, chapterId }) => {
+  try {
+    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
+    const d = bookPrompts.digest(p);
+    const composed = bookPrompts.composeTask(taskId, {
+      title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
+      chapter: chapterId || undefined, recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+    });
+    return composed ? { ok: true, ...composed } : { ok: false, error: "unknown task" };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Catch-up briefs for all three panes (fills the panes on book open/resume).
+ipcMain.handle("book:brief", (_e, id) => {
+  try { const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" }; return { ok: true, briefs: bookPrompts.composeBriefAll(p) }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.
 function buildAppMenu() {
@@ -2434,6 +2465,7 @@ function buildAppMenu() {
         { type: "separator" },
         { label: "System Monitor", click: () => broadcast("focus-panel", "system") },
         { label: "Image Studio", click: () => broadcast("focus-panel", "imagestudio") },
+        { label: "Book Studio", click: () => broadcast("focus-panel", "bookstudio") },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
@@ -3235,6 +3267,7 @@ app.whenReady().then(() => {
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
+  try { bookProject.init(outputManager.booksDir()); } catch (e) { logEvent("book-init-error", { error: String(e) }); }
   try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();

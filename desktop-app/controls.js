@@ -1000,7 +1000,8 @@ const COLLAPSIBLE_PANELS = {
   state: { panelId: "col-state", label: "Project State" },
   system: { panelId: "col-system", label: "System Monitor" },
   systemai: { panelId: "col-systemai", label: "System AI" },
-  imagestudio: { panelId: "col-imagestudio", label: "Image Studio" }
+  imagestudio: { panelId: "col-imagestudio", label: "Image Studio" },
+  bookstudio: { panelId: "col-bookstudio", label: "Book Studio" }
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
@@ -1316,6 +1317,168 @@ if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st =
 
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
+
+// --- Book Studio (ATELIER V2) ----------------------------------------------
+if (el("btn-collapse-bookstudio")) el("btn-collapse-bookstudio").onclick = () => collapseYellowPanel("bookstudio");
+let bookCurrentId = null;
+let bookCurrentChapter = null;
+let bookProject = null;
+const BOOK_TASKS = [
+  { id: "initialize", label: "Initialize" }, { id: "outline", label: "Outline" },
+  { id: "bible", label: "Book Bible" }, { id: "roadmap", label: "Roadmap" },
+  { id: "write", label: "✍ Write" }, { id: "story-review", label: "📖 Story review" },
+  { id: "canon-review", label: "🗺 Canon review" }, { id: "writing-review", label: "✅ Writing review" },
+  { id: "revise", label: "Revise" }, { id: "redo", label: "↻ Redo" },
+  { id: "start-over", label: "⟲ Start over" }, { id: "check-again", label: "🔁 Check again" },
+];
+function bookSetStatus(t) { if (el("book-status")) el("book-status").textContent = t || ""; }
+
+async function bookLoadList(selectId) {
+  if (!window.api.bookList) return;
+  const r = await window.api.bookList();
+  const sel = el("book-select"); if (!sel) return;
+  const keep = selectId || sel.value;
+  sel.innerHTML = '<option value="">(no book selected)</option>';
+  for (const p of (r && r.projects) || []) {
+    const o = document.createElement("option"); o.value = p.id; o.textContent = `${p.title} (${p.stage})`; sel.appendChild(o);
+  }
+  if (keep && Array.from(sel.options).some((o) => o.value === keep)) { sel.value = keep; await bookSelect(keep); }
+}
+async function bookSelect(id) {
+  bookCurrentId = id || null;
+  if (!id) { bookProject = null; bookRenderAll(); return; }
+  const r = await window.api.bookGet(id);
+  bookProject = r && r.ok ? r.project : null;
+  bookCurrentChapter = bookProject && bookProject.chapters.length ? bookProject.chapters[bookProject.chapters.length - 1].id : null;
+  bookRenderAll();
+}
+async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
+
+function bookRenderAll() { bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderLog(); }
+
+function bookRenderStages() {
+  const box = el("book-stages"); if (!box) return; box.innerHTML = "";
+  if (!bookProject) { if (el("book-stage-count")) el("book-stage-count").textContent = ""; return; }
+  const stages = bookProject.stages || [];
+  const idx = stages.indexOf(bookProject.stage);
+  if (el("book-stage-count")) el("book-stage-count").textContent = `(${idx + 1}/${stages.length})`;
+  stages.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.textContent = `${i <= idx ? "●" : "○"} ${(bookProject.stageLabels && bookProject.stageLabels[s]) || s}`;
+    b.style.opacity = i === idx ? "1" : ".7";
+    if (i === idx) b.classList.add("primary");
+    b.title = "Set stage";
+    b.onclick = async () => { await window.api.bookSetStage(bookCurrentId, s); bookRefresh(); bookLoadList(bookCurrentId); };
+    box.appendChild(b);
+  });
+}
+function bookRenderChapters() {
+  const box = el("book-chapters"); if (!box) return; box.innerHTML = "";
+  if (!bookProject) return;
+  for (const ch of bookProject.chapters) {
+    const row = document.createElement("div"); row.className = "btns"; row.style.alignItems = "center";
+    const pick = document.createElement("button");
+    pick.textContent = (ch.id === bookCurrentChapter ? "▶ " : "") + ch.id + (ch.title ? " — " + ch.title : "");
+    pick.style.flex = "1 1 auto"; pick.style.textAlign = "left";
+    if (ch.id === bookCurrentChapter) pick.classList.add("primary");
+    pick.title = "Make this the current chapter for tasks";
+    pick.onclick = () => { bookCurrentChapter = ch.id; bookRenderChapters(); };
+    const sel = document.createElement("select");
+    for (const st of bookProject.chapterStates) { const o = document.createElement("option"); o.value = st; o.textContent = st; if (st === ch.status) o.selected = true; sel.appendChild(o); }
+    sel.onchange = async () => { await window.api.bookSetChapterStatus(bookCurrentId, ch.id, sel.value); bookRefresh(); };
+    const view = document.createElement("button"); view.textContent = "👁"; view.title = "View manuscript";
+    view.onclick = () => bookViewRecord(ch.id);
+    row.appendChild(pick); row.appendChild(sel); row.appendChild(view); box.appendChild(row);
+  }
+}
+function bookRenderTasks() {
+  const box = el("book-tasks"); if (!box) return; box.innerHTML = "";
+  for (const t of BOOK_TASKS) {
+    const b = document.createElement("button"); b.textContent = t.label;
+    b.disabled = !bookCurrentId;
+    b.onclick = () => bookSendTask(t.id, t.label);
+    box.appendChild(b);
+  }
+}
+function bookRenderRecordTypes() {
+  const sel = el("book-rec-type"); if (!sel) return; sel.innerHTML = "";
+  const types = (bookProject && bookProject.recordTypes) || ["REQ", "CHR", "PLC", "ART", "SEC", "TWT", "STP", "ARC", "EVT", "CCR", "CNF", "REV"];
+  for (const t of types) { const o = document.createElement("option"); o.value = t; o.textContent = t; sel.appendChild(o); }
+}
+function bookRenderRecords() {
+  const box = el("book-records"); if (!box) return; box.innerHTML = "";
+  if (!bookProject) return;
+  if (!bookProject.records.length) { box.innerHTML = '<span class="muted" style="opacity:.5;">no records yet</span>'; return; }
+  for (const r of bookProject.records) {
+    const b = document.createElement("button"); b.textContent = r.id; b.title = r.name || r.id;
+    b.onclick = () => bookViewRecord(r.id);
+    box.appendChild(b);
+  }
+}
+function bookRenderLog() {
+  const box = el("book-log"); if (!box) return; box.innerHTML = "";
+  if (!bookProject) return;
+  for (const e of (bookProject.log || [])) {
+    const d = document.createElement("div");
+    const t = (e.ts || "").replace("T", " ").replace(/\..*/, "").slice(5);
+    d.textContent = `${t}  ${e.text}`;
+    box.appendChild(d);
+  }
+}
+async function bookViewRecord(recordId) {
+  if (!bookCurrentId) return;
+  const r = await window.api.bookReadRecord(bookCurrentId, recordId);
+  if (el("book-record-title")) el("book-record-title").textContent = `${recordId}${r && r.name ? " — " + r.name : ""}`;
+  if (el("book-record-content")) el("book-record-content").textContent = r && r.ok ? r.content : `Couldn't open: ${(r && r.error) || "error"}`;
+  if (el("book-record-overlay")) el("book-record-overlay").classList.add("open");
+}
+async function bookSendTask(taskId, label) {
+  if (!bookCurrentId || !window.api.bookTask) return;
+  const r = await window.api.bookTask(bookCurrentId, taskId, bookCurrentChapter);
+  if (!r || !r.ok) { setStatus(`Book task failed: ${(r && r.error) || "error"}`); return; }
+  await window.api.sendCompose(r.text, [r.target]);
+  await window.api.bookLog(bookCurrentId, `→ ${SITE_LABELS[r.target] || r.target}: ${label}${bookCurrentChapter ? " (" + bookCurrentChapter + ")" : ""}`);
+  setStatus(`Sent "${label}" to ${SITE_LABELS[r.target] || r.target}.`);
+  bookRefresh();
+}
+if (el("btn-book-new")) el("btn-book-new").onclick = async () => {
+  const title = (el("book-new-title") && el("book-new-title").value || "").trim();
+  if (!title) { setStatus("Give the new book a title first."); return; }
+  const r = await window.api.bookCreate(title);
+  if (!r || !r.ok) { setStatus(`Couldn't create book: ${(r && r.error) || "error"}`); return; }
+  if (el("book-new-title")) el("book-new-title").value = "";
+  await bookLoadList(r.project.id);
+  setStatus(`Created book "${title}".`);
+};
+if (el("book-select")) el("book-select").onchange = () => bookSelect(el("book-select").value);
+if (el("btn-book-folder")) el("btn-book-folder").onclick = () => { if (bookCurrentId && window.api.bookOpenFolder) window.api.bookOpenFolder(bookCurrentId); };
+if (el("btn-book-add-chapter")) el("btn-book-add-chapter").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  const title = (el("book-chapter-title") && el("book-chapter-title").value || "").trim();
+  const r = await window.api.bookAddChapter(bookCurrentId, title);
+  if (el("book-chapter-title")) el("book-chapter-title").value = "";
+  if (r && r.ok) bookCurrentChapter = r.chapterId;
+  bookRefresh();
+};
+if (el("btn-book-add-record")) el("btn-book-add-record").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  const type = el("book-rec-type") ? el("book-rec-type").value : "REQ";
+  const name = (el("book-rec-name") && el("book-rec-name").value || "").trim();
+  await window.api.bookAddRecord(bookCurrentId, type, name, "");
+  if (el("book-rec-name")) el("book-rec-name").value = "";
+  bookRefresh();
+};
+if (el("btn-book-brief")) el("btn-book-brief").onclick = async () => {
+  if (!bookCurrentId || !window.api.bookBrief) { setStatus("Select a book first."); return; }
+  const r = await window.api.bookBrief(bookCurrentId);
+  if (!r || !r.ok) { setStatus(`Brief failed: ${(r && r.error) || "error"}`); return; }
+  for (const b of r.briefs) { await window.api.sendCompose(b.text, [b.target]); }
+  await window.api.bookLog(bookCurrentId, "briefed all three AIs (filled panes)");
+  setStatus("Briefed ChatGPT, Claude and Gemini on this book.");
+  bookRefresh();
+};
+if (el("btn-book-record-close")) el("btn-book-record-close").onclick = () => { if (el("book-record-overlay")) el("book-record-overlay").classList.remove("open"); };
+if (el("book-record-overlay")) el("book-record-overlay").onclick = (e) => { if (e.target === el("book-record-overlay")) el("book-record-overlay").classList.remove("open"); };
 
 // User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
 if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
@@ -1683,4 +1846,5 @@ el("btn-clear").onclick = async () => {
   lsiLoadRecommended();
   sdLoadSettings();
   sdRenderGallery();
+  bookLoadList();
 })();
