@@ -42,7 +42,7 @@ and opens one window with ChatGPT, Claude and Gemini as three live panes plus a
 control panel for routing messages between them. No Chrome/extension needed, only
 [Node.js](https://nodejs.org/) as a one-time prerequisite. Full walkthrough,
 Linux instructions, and how to build a real `.exe`/`.dmg` installer are in
-[`desktop-app/README.md`](desktop-app/README.md).
+[`desktop-app/README.md`](C:\Users\javon\Documents\GitHub\AutoInjector\desktop-app\README.md).
 
 ## Install the extension
 
