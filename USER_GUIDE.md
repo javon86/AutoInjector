@@ -28,7 +28,8 @@ no prior setup knowledge assumed.
 13. [The System AI / Local Supervisor](#13-the-system-ai--local-supervisor)
 14. [Book Governance (ATELIER) — on hold](#14-book-governance-atelier--on-hold)
 15. [What you need to run each part](#15-what-you-need-to-run-each-part)
-16. [Troubleshooting](#16-troubleshooting)
+16. [Network & connectivity — what to allow](#16-network--connectivity--what-to-allow)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -343,6 +344,16 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
 - **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
   book (its stage, chapters and records) so, when you reopen a book, the panes
   know exactly what they're working on and what to do next.
+- **📄 PDF forms (completion gate)** — the rules say a template or chapter isn't
+  *complete* until it exists as a **downloadable PDF** (Rules 36–39). So every
+  finished step and chapter is **automatically saved as a PDF** in the book's
+  `pdfs/` folder, named the standard way (`[Book] - Chapter 01 - Title.pdf`,
+  `[Book] - Book Bible.pdf`). The gate list shows each deliverable with a **✓
+  (PDF on file)** or **⏳ (waiting)**, so you always know what's truly done. Use
+  **📄 Make PDFs** to (re)create them all, **🔎 Find PDFs** to pull in a PDF you
+  downloaded from an AI (it scans your Downloads and output folders for files
+  named for this book), **📂 Open folder** to get to them, and **open** on any
+  row to view that PDF. This is the form you can download.
 - **Records** — create governed records (REQ, CHR, PLC, ART, …) with permanent
   IDs; click any record to **pop it up** and read it.
 - **Activity log** — every action is logged, so you're never left guessing.
@@ -525,7 +536,75 @@ It requires Python 3 when active.
 
 ---
 
-## 16. Troubleshooting
+## 16. Network & connectivity — what to allow
+
+AutoInjector runs on your machine and talks to the internet only where you'd
+expect. Here's exactly what needs network access, so you (or your IT/firewall)
+can allow the right things.
+
+### What the app itself needs
+
+- **The three AI websites.** Each pane is just a logged‑in browser view, so it
+  connects to the normal sites and their sign‑in/CDN domains:
+  - **ChatGPT** — `chatgpt.com`, `*.openai.com`, `auth0.openai.com`
+  - **Claude** — `claude.ai`, `*.anthropic.com`
+  - **Gemini** — `gemini.google.com`, `accounts.google.com`, `*.googleapis.com`,
+    `*.gstatic.com`
+  You log in exactly as you would in a browser; your credentials go straight to
+  those sites, not to AutoInjector.
+- **Nothing else is required.** The app has no telemetry and no "call home." The
+  conversation database, memory, search, System Monitor and the Book Studio all
+  run **fully offline** on your computer.
+
+> **Privacy:** whatever you send in a pane goes to that AI's service (OpenAI,
+> Anthropic, Google) under your own account — the same as using their website.
+> AutoInjector doesn't add any middle‑man server.
+
+### Optional features that need the internet
+
+These only reach out **when you choose to use them** (mostly from the **Setup
+Wizard**):
+
+| Feature | Connects to | Why |
+| --- | --- | --- |
+| **Setup Wizard downloads** | `ollama.com`, `github.com`, `huggingface.co`, `civitai.com`, `python.org` | To download local‑AI runtimes, models and installers you pick. |
+| **System AI / Local models** | `ollama.com` and its model registry | To pull a local model (e.g. Llama, Mistral). |
+| **Image Studio** | your **Forge/Automatic1111** server (local or remote, e.g. RunPod) | To generate images. |
+| **Book PDFs / downloads** | the AI site you download from | When an AI gives you a file, it saves into your output folder. |
+
+Downloads run **in the background** and can be several gigabytes — see the
+Wizard's Downloads tray for progress. Once a local model or engine is installed,
+it runs **offline**; no internet is needed to use it again.
+
+### Local services and ports (only if you enable them)
+
+When you run the optional local engines, they listen on your own machine at:
+
+| Service | Address | Used by |
+| --- | --- | --- |
+| **Ollama** (local models) | `http://localhost:11434` | System AI / Local Supervisor |
+| **Forge / Automatic1111** | `http://localhost:7860` | Image Studio |
+| **ComfyUI** (video, later) | `http://localhost:8188` | Video engine |
+
+These are **local‑only** by default — nothing is exposed to the internet. If you
+point Image Studio at a **remote** GPU (like RunPod), allow that host/port
+instead.
+
+### If you're behind a firewall / proxy or the network is locked down
+
+- **Minimum to use the app:** allow the three AI‑site domain groups above. With
+  just those, everything except the optional downloads works.
+- **To use the Wizard downloads:** also allow the download domains in the table
+  above.
+- **Corporate proxy:** AutoInjector uses your system's normal network settings —
+  if your browser can reach the AI sites, so can the app.
+- **Fully offline:** you can still use the local‑only parts (database, memory,
+  System Monitor, Book Studio records/log, and any local model you already
+  installed). The AI panes need the internet to reach their services.
+
+---
+
+## 17. Troubleshooting
 
 - **A reply isn't being read / nothing happens.** Make sure you're **signed in**
   to that site in its pane, and that the pane isn't collapsed. Use **🎛️ Run

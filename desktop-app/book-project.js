@@ -13,6 +13,17 @@
  */
 const fs = require('fs');
 const path = require('path');
+const bookPdf = require('./book-pdf');
+
+const PDF_DIR = 'pdfs';
+// Friendly deliverable names for each workflow step (used for PDF naming + the
+// completion gate). Mirrors the workflow's step labels.
+const STEP_LABEL = {
+  intake: 'Intake Questionnaire', requirements: 'User Requirements and Story Direction',
+  outline: 'Master Chapter Outline', bible: 'Book Bible', roadmap: 'Chapter Roadmap',
+  'story-review': 'Story Review', 'canon-review': 'Canon Review', 'writing-review': 'Writing Review',
+  revise: 'Consolidated Revision', lock: 'Verify and Lock',
+};
 
 // The user-facing production stages (condensed from the V2 14-step flow).
 const STAGES = ['setup', 'planning', 'roadmap', 'drafting', 'review', 'revision', 'locking', 'assembly'];
@@ -66,7 +77,7 @@ function create(title) {
   const n = _projectDirs().length + 1;
   const book = {
     id: `PRJ-${pad(n)}`, title: clean, stage: 'setup',
-    chapters: [], records: [], counters: {}, log: [],
+    chapters: [], records: [], counters: {}, log: [], pdfs: [],
     workflow: { status: 'idle', step: 0 },
     created: _now(), updated: _now(),
   };
@@ -90,6 +101,7 @@ function get(id) {
   const dir = _dirById(id); if (!dir) return null;
   const b = _read(dir); if (!b) return null;
   if (!b.workflow) b.workflow = { status: 'idle', step: 0 }; // default for older books
+  if (!b.pdfs) b.pdfs = [];
   return { ...b, dir, stages: STAGES, stageLabels: STAGE_LABELS, chapterStates: CHAPTER_STATES, recordTypes: RECORD_TYPES };
 }
 
@@ -119,8 +131,26 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
       `# Step ${(index || 0) + 1}: ${label || stepId || ''}\n\n_from ${target || '?'} · ${_now()}_\n\n${body}\n`);
     b.workflow = Object.assign({ status: 'running', step: index || 0 }, b.workflow);
     b.workflow.outputs = b.workflow.outputs || {};
-    b.workflow.outputs[stepId || `step-${(index || 0) + 1}`] = { file: rel, target: target || null, ts: _now(), chars: body.length };
+    const outKey = stepId || `step-${(index || 0) + 1}`;
+    b.workflow.outputs[outKey] = { file: rel, target: target || null, ts: _now(), chars: body.length };
     b.log.push({ ts: _now(), text: `✓ step ${(index || 0) + 1} (${label || stepId}) output saved from ${target || '?'} → ${rel}` });
+    // Rule 36/37 — the filled-out content must ALSO exist as a downloadable PDF,
+    // named per the protocol. That PDF is what the completion gate looks for.
+    try {
+      if (stepId === 'write' && chapterId) {
+        const ch = b.chapters.find((c) => c.id === chapterId);
+        const pdf = _writeDeliverablePdf(b, dir, {
+          kind: 'chapter', number: _chNum(chapterId), chapterTitle: ch && ch.title,
+          title: `${chapterId}${ch && ch.title ? ' — ' + ch.title : ''}`, name: `Chapter ${_chNum(chapterId)}`,
+          text: body, source: 'generated',
+        });
+        if (ch) ch.pdf = pdf.rel;
+      } else {
+        const nm = STEP_LABEL[stepId] || label || stepId || 'Document';
+        const pdf = _writeDeliverablePdf(b, dir, { kind: 'template', name: nm, title: nm, text: body, source: 'generated' });
+        b.workflow.outputs[outKey].pdf = pdf.rel;
+      }
+    } catch (e) { b.log.push({ ts: _now(), text: `⚠ could not create PDF for step ${(index || 0) + 1}: ${String(e).slice(0, 120)}` }); }
     // The write step's output is the chapter's manuscript — file it there too,
     // unless the chapter is already LOCKED/COMPLETE (never silently overwrite
     // locked material; the steps/ copy still preserves the new draft).
@@ -135,6 +165,155 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
     }
     return { file: rel };
   });
+}
+
+// --- PDF Completion Gate (Rules of Conduct §36–39) --------------------------
+// Every filled-out deliverable must exist as a real, downloadable PDF before it
+// counts as complete. These write PDFs, find ones you downloaded yourself, and
+// report the gate (which deliverables have a PDF and which are still waiting).
+function _chNum(chId) { const m = /(\d+)/.exec(String(chId || '')); return m ? parseInt(m[1], 10) : 1; }
+
+function _registerPdf(b, relFile, meta) {
+  b.pdfs = b.pdfs || [];
+  const e = b.pdfs.find((p) => p.file === relFile);
+  if (e) Object.assign(e, meta, { file: relFile, ts: _now() });
+  else b.pdfs.push(Object.assign({ file: relFile, ts: _now() }, meta));
+}
+
+// Write one deliverable PDF into pdfs/ and register it. Operates directly on
+// (b, dir) — callable both from inside another _mutate and standalone.
+function _writeDeliverablePdf(b, dir, spec) {
+  const fileName = bookPdf.pdfFileName(b.title, spec);
+  ensureDir(path.join(dir, PDF_DIR));
+  const rel = path.join(PDF_DIR, fileName);
+  fs.writeFileSync(path.join(dir, rel), bookPdf.renderTextPdf(spec.title || spec.name || fileName.replace(/\.pdf$/i, ''), spec.text || ''));
+  _registerPdf(b, rel, { name: spec.name || 'Document', kind: spec.kind || 'template', source: spec.source || 'generated', chars: String(spec.text || '').length });
+  return { rel, fileName };
+}
+
+/** Generate a PDF for a deliverable on demand (the "Make PDF" button). */
+function generatePdf(id, spec) {
+  return _mutate(id, (b, dir) => {
+    const r = _writeDeliverablePdf(b, dir, spec || {});
+    b.log.push({ ts: _now(), text: `📄 PDF created: ${r.fileName}` });
+    return { file: r.rel, fileName: r.fileName };
+  });
+}
+
+/**
+ * (Re)generate PDFs for everything the book currently holds that should have one
+ * — each chapter's manuscript and each completed workflow step's output. Used by
+ * the "Make PDFs" button so a book always has its downloadable forms.
+ */
+function generateAllPdfs(id) {
+  return _mutate(id, (b, dir) => {
+    let made = 0;
+    for (const ch of b.chapters) {
+      try {
+        const content = fs.readFileSync(path.join(dir, ch.file), 'utf8');
+        const r = _writeDeliverablePdf(b, dir, { kind: 'chapter', number: _chNum(ch.id), chapterTitle: ch.title, title: `${ch.id}${ch.title ? ' — ' + ch.title : ''}`, name: `Chapter ${_chNum(ch.id)}`, text: content, source: 'generated' });
+        ch.pdf = r.rel; made++;
+      } catch (_) {}
+    }
+    const outs = (b.workflow && b.workflow.outputs) || {};
+    for (const stepId of Object.keys(outs)) {
+      if (stepId === 'write') continue;
+      try {
+        const o = outs[stepId];
+        const content = o.file ? fs.readFileSync(path.join(dir, o.file), 'utf8') : '';
+        const nm = STEP_LABEL[stepId] || stepId;
+        const r = _writeDeliverablePdf(b, dir, { kind: 'template', name: nm, title: nm, text: content, source: 'generated' });
+        o.pdf = r.rel; made++;
+      } catch (_) {}
+    }
+    b.log.push({ ts: _now(), text: `📄 made ${made} PDF${made === 1 ? '' : 's'} for this book's deliverables` });
+    return { made };
+  });
+}
+
+/** Copy a PDF you downloaded into the book and register it (source: imported). */
+function importPdf(id, absPath) {
+  return _mutate(id, (b, dir) => {
+    if (!absPath || !fs.existsSync(absPath)) throw new Error('file not found');
+    ensureDir(path.join(dir, PDF_DIR));
+    const base = bookPdf.cleanPart(path.basename(absPath).replace(/\.pdf$/i, ''), 'imported') + '.pdf';
+    const rel = path.join(PDF_DIR, base);
+    fs.copyFileSync(absPath, path.join(dir, rel));
+    _registerPdf(b, rel, { name: base.replace(/\.pdf$/i, ''), kind: 'imported', source: 'imported' });
+    b.log.push({ ts: _now(), text: `📄 imported PDF: ${base}` });
+    return { file: rel };
+  });
+}
+
+/**
+ * Find PDFs you downloaded (from the AI) in the given folders and pull any that
+ * belong to this book (filename contains the book title) into pdfs/. This is the
+ * "make the program find this form" step. Returns what it found/imported.
+ */
+function scanPdfs(id, extraDirs) {
+  const dir = _dirById(id); if (!dir) return { ok: false, error: 'no such book' };
+  const b0 = _read(dir); if (!b0) return { ok: false, error: 'unreadable book' };
+  const titleKey = bookPdf.cleanPart(b0.title, '').toLowerCase();
+  const found = [], imported = [];
+  for (const d of (extraDirs || [])) {
+    if (!d || !fs.existsSync(d)) continue;
+    let files = []; try { files = fs.readdirSync(d); } catch (_) { continue; }
+    for (const f of files) {
+      if (!/\.pdf$/i.test(f)) continue;
+      found.push(f);
+      if (titleKey && f.toLowerCase().indexOf(titleKey) !== -1) {
+        const rel = path.join(PDF_DIR, f);
+        if (!fs.existsSync(path.join(dir, rel))) {
+          try { ensureDir(path.join(dir, PDF_DIR)); fs.copyFileSync(path.join(d, f), path.join(dir, rel)); imported.push(f); } catch (_) {}
+        }
+      }
+    }
+  }
+  if (imported.length) {
+    _mutate(id, (b) => {
+      for (const f of imported) { _registerPdf(b, path.join(PDF_DIR, f), { name: f.replace(/\.pdf$/i, ''), kind: 'imported', source: 'found' }); }
+      b.log.push({ ts: _now(), text: `📄 found & imported ${imported.length} downloaded PDF${imported.length === 1 ? '' : 's'}` });
+    });
+  }
+  return { ok: true, found, imported };
+}
+
+/** All PDFs registered for a book, each flagged whether the file still exists. */
+function listPdfs(id) {
+  const dir = _dirById(id); if (!dir) return [];
+  const b = _read(dir); if (!b) return [];
+  const list = []; const seen = new Set();
+  for (const p of (b.pdfs || [])) { list.push({ ...p, exists: fs.existsSync(path.join(dir, p.file)) }); seen.add(p.file); }
+  // loose PDFs physically present in pdfs/ but not yet registered.
+  const pdir = path.join(dir, PDF_DIR);
+  if (fs.existsSync(pdir)) {
+    for (const f of fs.readdirSync(pdir)) {
+      if (!/\.pdf$/i.test(f)) continue;
+      const rel = path.join(PDF_DIR, f);
+      if (!seen.has(rel)) list.push({ file: rel, name: f.replace(/\.pdf$/i, ''), kind: 'found', source: 'found', exists: true });
+    }
+  }
+  return list;
+}
+
+/**
+ * The completion gate: for each expected deliverable (every chapter + every
+ * completed workflow step), whether its PDF exists yet. This is how you (and the
+ * runner) know a step is truly done — text alone is not COMPLETE (Rule 38).
+ */
+function pdfGate(id) {
+  const b = get(id); if (!b) return { items: [], present: 0, total: 0 };
+  const exists = (rel) => !!rel && fs.existsSync(path.join(b.dir, rel));
+  const items = [];
+  for (const ch of b.chapters) {
+    items.push({ type: 'Chapter', label: `${ch.id}${ch.title ? ' — ' + ch.title : ''}`, file: ch.pdf || null, present: exists(ch.pdf) });
+  }
+  const outs = (b.workflow && b.workflow.outputs) || {};
+  for (const stepId of Object.keys(outs)) {
+    if (stepId === 'write') continue;
+    items.push({ type: 'Template/Record', label: STEP_LABEL[stepId] || stepId, file: outs[stepId].pdf || null, present: exists(outs[stepId].pdf) });
+  }
+  return { items, present: items.filter((i) => i.present).length, total: items.length };
 }
 
 function _mutate(id, fn) {
@@ -203,5 +382,6 @@ function appendLog(id, text) {
 module.exports = {
   init, create, list, get, setStage, setWorkflow, recordStepOutput, addChapter, setChapterStatus,
   addRecord, listRecords, readRecord, appendLog, safeName,
-  STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES,
+  generatePdf, generateAllPdfs, importPdf, scanPdfs, listPdfs, pdfGate,
+  STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES, PDF_DIR,
 };

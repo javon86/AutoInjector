@@ -125,6 +125,11 @@ contextBridge.exposeInMainWorld("api", {
   bookWorkflowNext: (id, chapterId) => ipcRenderer.invoke("book:workflow-next", { id, chapterId }),
   bookWorkflowSetStatus: (id, status) => ipcRenderer.invoke("book:workflow-set-status", { id, status }),
   bookSendRules: (id) => ipcRenderer.invoke("book:send-rules", { id }),
+  bookPdfGate: (id) => ipcRenderer.invoke("book:pdf-gate", id),
+  bookGeneratePdfs: (id) => ipcRenderer.invoke("book:generate-pdfs", id),
+  bookScanPdfs: (id) => ipcRenderer.invoke("book:scan-pdfs", id),
+  bookOpenPdf: (id, file) => ipcRenderer.invoke("book:open-pdf", { id, file }),
+  bookOpenPdfsFolder: (id) => ipcRenderer.invoke("book:open-pdfs-folder", id),
   bookAiStatus: () => ipcRenderer.invoke("book:ai-status"),
   bookRunnerStatus: () => ipcRenderer.invoke("book:runner-status"),
   onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload))

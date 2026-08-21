@@ -152,6 +152,37 @@ async function main() {
       return box && /Rules of Conduct/i.test(box.textContent);
     }, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(ruleLogged, 'sending the Rules of Conduct is recorded in the activity log');
+
+    // PDF completion gate: the panel is present and lists the chapter as a
+    // deliverable; "Make PDFs" produces a real PDF and the gate flips to ✓.
+    assert(await controls.$('#book-pdf-gate'), 'the PDF completion-gate panel is present');
+    const gateHasChapter = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-pdf-gate');
+      return box && /Chapter/.test(box.textContent) && /⏳/.test(box.textContent);
+    }, { timeout: 4000 }).then(() => true).catch(() => false);
+    assert(gateHasChapter, 'the gate lists the chapter as a deliverable, waiting on its PDF (⏳)');
+    await controls.click('#btn-book-make-pdfs');
+    const gateChecked = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-pdf-gate');
+      const cnt = document.getElementById('book-pdf-count');
+      return box && /✓/.test(box.textContent) && cnt && /have a PDF/.test(cnt.textContent);
+    }, { timeout: 8000 }).then(() => true).catch(() => false);
+    assert(gateChecked, 'Make PDFs creates the PDFs and the gate marks the deliverable complete (✓)');
+    // A real .pdf file exists on disk under some book's pdfs/ folder, and it's a
+    // valid PDF (starts with the header). (docs/fs/pathMod resolved above.)
+    let pdfPath = null;
+    try {
+      const booksRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output', 'books') : null;
+      if (booksRoot && fs.existsSync(booksRoot)) {
+        for (const d of fs.readdirSync(booksRoot)) {
+          const pdir = pathMod.join(booksRoot, d, 'pdfs');
+          if (fs.existsSync(pdir)) { const hit = fs.readdirSync(pdir).find((f) => f.toLowerCase().endsWith('.pdf')); if (hit) { pdfPath = pathMod.join(pdir, hit); break; } }
+        }
+      }
+    } catch (_) {}
+    assert(pdfPath, `a real .pdf file was written into a book's pdfs/ folder (${pdfPath || 'none found'})`);
+    if (pdfPath) assert(fs.readFileSync(pdfPath).slice(0, 5).toString() === '%PDF-', 'that file is a valid PDF (starts with %PDF-)');
+
     // Pause -> Resume controls swap in.
     await controls.click('#btn-book-pause');
     const paused = await controls.waitForFunction(() => {

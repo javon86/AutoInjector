@@ -652,6 +652,18 @@
           <div id="book-records" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; font-size:10.5px;"></div>
         </div>
 
+        <div style="margin:5px 0; padding:7px 9px; background:#1a1526; border:1px solid #3a2f52; border-radius:8px;">
+          <div class="btns" style="align-items:center;">
+            <span class="row-label">📄 PDF forms <span id="book-pdf-count" style="opacity:.6;"></span></span>
+            <span class="spacer"></span>
+            <button id="btn-book-make-pdfs" class="primary" title="Create a downloadable PDF of every deliverable this book holds (chapters + completed steps)">📄 Make PDFs</button>
+            <button id="btn-book-find-pdfs" title="Find PDFs you downloaded from the AIs (Downloads / output folders) and pull this book's into it">🔎 Find PDFs</button>
+            <button id="btn-book-open-pdfs" title="Open this book's PDFs folder">📂 Open folder</button>
+          </div>
+          <div style="font-size:10px; opacity:.7; margin-top:3px;">Every filled-out template &amp; chapter must exist as a PDF before it counts as complete (Rules 36–39). A step isn't "done" until its form is here.</div>
+          <div id="book-pdf-gate" style="display:flex; flex-direction:column; gap:2px; margin-top:5px; font-size:10.5px;"></div>
+        </div>
+
         <div style="margin:5px 0;">
           <div class="row-label" style="margin-bottom:2px;">Activity log <span style="opacity:.6;">(everything that's happened)</span></div>
           <div id="book-log" style="max-height:110px; overflow-y:auto; font-size:10px; font-family:ui-monospace,monospace; opacity:.85; display:flex; flex-direction:column-reverse; gap:2px;"></div>

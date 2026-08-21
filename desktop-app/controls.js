@@ -1381,7 +1381,54 @@ async function bookAiRefresh() {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+
+// The PDF completion gate — which deliverables have a downloadable PDF yet.
+async function bookRenderPdfGate() {
+  const box = el("book-pdf-gate"); if (!box) return;
+  if (!bookCurrentId || !window.api.bookPdfGate) { box.innerHTML = ""; const c = el("book-pdf-count"); if (c) c.textContent = ""; return; }
+  const r = await window.api.bookPdfGate(bookCurrentId);
+  box.innerHTML = "";
+  const gate = r && r.ok ? r.gate : { items: [], present: 0, total: 0 };
+  const cnt = el("book-pdf-count"); if (cnt) cnt.textContent = gate.total ? `(${gate.present}/${gate.total} have a PDF)` : "(nothing to file yet)";
+  if (!gate.items.length) { box.innerHTML = '<span style="opacity:.6;">No deliverables yet — start the book or add a chapter, and each finished step files a PDF here.</span>'; return; }
+  for (const it of gate.items) {
+    const row = document.createElement("div");
+    row.className = "btns"; row.style.alignItems = "center"; row.style.gap = "5px";
+    const dot = document.createElement("span");
+    dot.textContent = it.present ? "✓" : "⏳";
+    dot.style.color = it.present ? "#7fdca0" : "#e0b060";
+    dot.title = it.present ? "PDF is on file — this deliverable counts as complete" : "Waiting on a PDF — not complete yet";
+    const label = document.createElement("span");
+    label.textContent = `${it.type}: ${it.label}`;
+    label.style.flex = "1 1 auto"; label.style.overflow = "hidden"; label.style.textOverflow = "ellipsis"; label.style.whiteSpace = "nowrap";
+    if (!it.present) label.style.opacity = ".7";
+    row.appendChild(dot); row.appendChild(label);
+    if (it.present && it.file) {
+      const open = document.createElement("button");
+      open.textContent = "open"; open.style.flex = "0 0 auto";
+      open.onclick = () => window.api.bookOpenPdf(bookCurrentId, it.file);
+      row.appendChild(open);
+    }
+    box.appendChild(row);
+  }
+}
+if (el("btn-book-make-pdfs")) el("btn-book-make-pdfs").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Making PDFs of this book's deliverables…");
+  const r = await window.api.bookGeneratePdfs(bookCurrentId);
+  setStatus(r && r.ok ? `Made ${r.made} PDF${r.made === 1 ? "" : "s"}.` : `Couldn't make PDFs: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+if (el("btn-book-find-pdfs")) el("btn-book-find-pdfs").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Looking for PDFs you downloaded…");
+  const r = await window.api.bookScanPdfs(bookCurrentId);
+  if (r && r.ok) setStatus(r.imported.length ? `Found & imported ${r.imported.length} PDF${r.imported.length === 1 ? "" : "s"} for this book.` : `Scanned ${r.found.length} PDF${r.found.length === 1 ? "" : "s"} — none matched this book's title.`);
+  else setStatus(`Couldn't scan: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+if (el("btn-book-open-pdfs")) el("btn-book-open-pdfs").onclick = () => { if (bookCurrentId) window.api.bookOpenPdfsFolder(bookCurrentId); };
 
 function bookRenderWorkflow() {
   const wf = (bookProject && bookProject.workflow) ? bookProject.workflow : { status: "idle", step: 0 };

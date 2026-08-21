@@ -105,6 +105,32 @@ function main() {
   const locked = bp.readRecord(id, "CH-001");
   assert(locked.ok && !/OVERWRITE ATTEMPT/.test(locked.content), "a LOCKED chapter is protected from write-step overwrite");
 
+  console.log("\n== PDF completion gate (Rules 36–39): filled-out work becomes a downloadable PDF ==");
+  // recordStepOutput already produced PDFs above — a step output and a chapter.
+  const pdfs = bp.listPdfs(id);
+  assert(pdfs.length >= 2 && pdfs.every((p) => p.exists), `PDFs were generated and exist on disk (${pdfs.length})`);
+  const outlinePdf = pdfs.find((p) => /Master Chapter Outline\.pdf$/.test(p.file));
+  assert(outlinePdf, "the outline step produced a rules-named PDF");
+  const pdfBytes = fs.readFileSync(path.join(books, "My Great Novel", outlinePdf.file));
+  assert(pdfBytes.slice(0, 5).toString() === "%PDF-" && pdfBytes.slice(-5).toString().includes("EOF"), "the PDF is a real, valid PDF file");
+  const chapterPdf = pdfs.find((p) => /Chapter 02/.test(p.file));
+  assert(chapterPdf, "the write step produced a Chapter PDF named per the rules");
+  // The gate reports which deliverables have a PDF.
+  const gate = bp.pdfGate(id);
+  assert(gate.total >= 2 && gate.present >= 1, `the gate lists deliverables and how many have PDFs (${gate.present}/${gate.total})`);
+  assert(gate.items.some((i) => i.type === "Chapter" && i.present), "a chapter shows as PDF-present in the gate");
+  // generateAllPdfs re-makes everything on demand.
+  const all = bp.generateAllPdfs(id);
+  assert(all.ok && all.made >= 2, `generateAllPdfs (re)creates the book's PDFs (${all.made})`);
+  // Finding a downloaded PDF: drop a matching file in a temp "downloads" dir.
+  const dl = fs.mkdtempSync(path.join(os.tmpdir(), "dl-"));
+  fs.writeFileSync(path.join(dl, "My Great Novel - Character Master Record - Hero.pdf"), "%PDF-1.4\n%%EOF");
+  fs.writeFileSync(path.join(dl, "Unrelated Book - notes.pdf"), "%PDF-1.4\n%%EOF");
+  const scan = bp.scanPdfs(id, [dl]);
+  assert(scan.ok && scan.imported.some((f) => /Character Master Record/.test(f)) && !scan.imported.some((f) => /Unrelated/.test(f)),
+    "scanPdfs finds & imports downloaded PDFs for THIS book only");
+  assert(bp.listPdfs(id).some((p) => /Character Master Record/.test(p.file)), "the imported PDF is registered with the book");
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

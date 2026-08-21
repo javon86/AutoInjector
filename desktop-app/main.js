@@ -2679,6 +2679,35 @@ ipcMain.handle("book:runner-status", () => {
   try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 
+// --- Book PDFs (completion gate, Rules of Conduct §36–39) -------------------
+// The gate: which of a book's deliverables have a downloadable PDF yet.
+ipcMain.handle("book:pdf-gate", (_e, id) => {
+  try { return { ok: true, gate: bookProject.pdfGate(id), pdfs: bookProject.listPdfs(id) }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Make PDFs for everything the book currently holds (chapters + step outputs).
+ipcMain.handle("book:generate-pdfs", (_e, id) => {
+  try { return bookProject.generateAllPdfs(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Find PDFs the user downloaded (from the AI) and pull this book's into it.
+ipcMain.handle("book:scan-pdfs", (_e, id) => {
+  try {
+    const dirs = [];
+    try { dirs.push(outputManager.uploadsDir()); } catch (_) {}
+    try { const r = outputManager.root(); if (r) dirs.push(require("path").join(r, "aiwork")); } catch (_) {}
+    try { if (app && app.getPath) dirs.push(app.getPath("downloads")); } catch (_) {}
+    return bookProject.scanPdfs(id, dirs);
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Open a specific PDF (relative path within the book) or the book's pdfs/ folder.
+ipcMain.handle("book:open-pdf", (_e, { id, file }) => {
+  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; shell.openPath(require("path").join(p.dir, file)); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:open-pdfs-folder", (_e, id) => {
+  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; const d = require("path").join(p.dir, bookProject.PDF_DIR); try { require("fs").mkdirSync(d, { recursive: true }); } catch (_) {} shell.openPath(d); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.
 function buildAppMenu() {
