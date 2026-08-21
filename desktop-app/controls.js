@@ -1331,6 +1331,12 @@ const BOOK_TASKS = [
   { id: "revise", label: "Revise" }, { id: "redo", label: "↻ Redo" },
   { id: "start-over", label: "⟲ Start over" }, { id: "check-again", label: "🔁 Check again" },
 ];
+const BOOK_WORKFLOW = [
+  "Intake questionnaire (ChatGPT asks you)", "Capture requirements + Story Direction",
+  "Master chapter outline", "Build the Book Bible", "Chapter roadmap", "Write the chapter",
+  "Story review (ChatGPT)", "Canon review (Gemini)", "Writing review (Claude)",
+  "Consolidated revision", "Verify + lock the chapter",
+];
 function bookSetStatus(t) { if (el("book-status")) el("book-status").textContent = t || ""; }
 
 async function bookLoadList(selectId) {
@@ -1354,7 +1360,46 @@ async function bookSelect(id) {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderLog(); }
+
+function bookRenderWorkflow() {
+  const wf = (bookProject && bookProject.workflow) ? bookProject.workflow : { status: "idle", step: 0 };
+  const has = !!bookCurrentId;
+  const running = wf.status === "running", paused = wf.status === "paused", done = wf.status === "done";
+  const show = (id, on) => { const e = el(id); if (e) e.style.display = on ? "" : "none"; };
+  show("btn-book-start", has && (wf.status === "idle" || done));
+  show("btn-book-continue", has && running);
+  show("btn-book-pause", has && running);
+  show("btn-book-resume", has && paused);
+  show("btn-book-stop", has && (running || paused));
+  if (el("btn-book-start")) el("btn-book-start").disabled = !has;
+  const st = el("book-workflow-status"); if (!st) return;
+  const total = BOOK_WORKFLOW.length, label = BOOK_WORKFLOW[wf.step] || "";
+  if (!has) st.textContent = "Pick or create a book, then press Start.";
+  else if (wf.status === "idle") st.textContent = "Ready. Press ▶ Start Making Book — ChatGPT sends you the intake questionnaire first.";
+  else if (done) st.textContent = "Workflow complete ✓ — press Start to run it again.";
+  else if (running) st.textContent = `Step ${wf.step + 1}/${total}: ${label} — running. Answer/review in the pane, then Continue ▶.`;
+  else if (paused) st.textContent = `Paused at step ${wf.step + 1}/${total}: ${label}. Press ▶ Resume when ready.`;
+}
+async function bookSendComposed(c) {
+  if (!c || !c.ok) { setStatus(`Book step failed: ${(c && c.error) || "error"}`); return; }
+  if (c.done) { setStatus("Book workflow complete."); bookRefresh(); return; }
+  await window.api.sendCompose(c.text, [c.target]);
+  await window.api.bookLog(bookCurrentId, `▶ step ${(c.index || 0) + 1}/${c.total}: ${c.label} → ${SITE_LABELS[c.target] || c.target}`);
+  setStatus(`Sent step ${(c.index || 0) + 1}: ${c.label} → ${SITE_LABELS[c.target] || c.target}.`);
+  bookRefresh();
+}
+if (el("btn-book-start")) el("btn-book-start").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  await bookSendComposed(await window.api.bookWorkflowStart(bookCurrentId, bookCurrentChapter));
+};
+if (el("btn-book-continue")) el("btn-book-continue").onclick = async () => {
+  if (!bookCurrentId) return;
+  await bookSendComposed(await window.api.bookWorkflowNext(bookCurrentId, bookCurrentChapter));
+};
+if (el("btn-book-pause")) el("btn-book-pause").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "paused"); bookRefresh(); } };
+if (el("btn-book-resume")) el("btn-book-resume").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "running"); bookRefresh(); } };
+if (el("btn-book-stop")) el("btn-book-stop").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "idle"); bookRefresh(); } };
 
 function bookRenderStages() {
   const box = el("book-stages"); if (!box) return; box.innerHTML = "";

@@ -52,6 +52,12 @@ const REVIEW_SCHEMA =
 
 // Reusable tasks. target = which AI pane it goes to. review = append the schema.
 const TASKS = [
+  { id: "intake", target: "chatgpt", label: "Intake questionnaire",
+    body: "You are starting a NEW book with the user. Ask the user a concise NUMBERED questionnaire to capture the book's requirements, then STOP and wait for their answers. Cover: (1) working title & genre; (2) one-paragraph premise/logline; (3) target length and audience; (4) tone & 2-3 comparable titles; (5) main character(s) and what they want; (6) setting/world; (7) must-have elements, scenes, or constraints; (8) point of view & tense; (9) content to avoid; (10) deadline/priorities. Ask them to reply in a numbered list. Do NOT start outlining or writing yet — just ask." },
+  { id: "requirements", target: "chatgpt", label: "Capture requirements + Story Direction",
+    body: "Using the user's answers, capture the requirements as REQ records (exact wording, priority MUST/SHOULD/COULD) and write a short Story Direction (premise, arc, tone, audience). List anything still unanswered as an open question rather than inventing it." },
+  { id: "lock", target: "chatgpt", label: "Verify + lock chapter",
+    body: "Verify the current chapter: are its story requirements MET (with manuscript evidence), did all three reviews PASS, and is no MUST requirement unmet and no critical canon conflict open? If yes, mark it ready to LOCK. If not, list exactly what is blocking, by Record/Review ID." },
   { id: "initialize", target: "chatgpt", label: "Initialize project",
     body: "Initialize this book project: confirm the project title, draft the initial user requirements as REQ records, propose the Story Direction, and list the first concrete next action." },
   { id: "outline", target: "chatgpt", label: "Master outline",
@@ -96,6 +102,37 @@ function composeTask(taskId, ctx = {}) {
   return { target: task.target, label: task.label, text: lines.join("\n") };
 }
 
+/*
+ * The guided production sequence. "Start Making Book" begins at step 0 (ChatGPT
+ * sends the intake questionnaire to the user); each "next" advances one step,
+ * sending the right role prompt to the right pane and moving the book's stage.
+ * It's a human-in-the-loop sequence — you answer / review between steps, and can
+ * pause and pick it up later (the step index is saved with the book).
+ */
+const WORKFLOW = [
+  { id: "intake", stage: "setup", kind: "ask-user", label: "Intake questionnaire (ChatGPT asks you)" },
+  { id: "requirements", stage: "setup", label: "Capture requirements + Story Direction" },
+  { id: "outline", stage: "planning", label: "Master chapter outline" },
+  { id: "bible", stage: "planning", label: "Build the Book Bible" },
+  { id: "roadmap", stage: "roadmap", label: "Chapter roadmap" },
+  { id: "write", stage: "drafting", label: "Write the chapter" },
+  { id: "story-review", stage: "review", label: "Story review (ChatGPT)" },
+  { id: "canon-review", stage: "review", label: "Canon review (Gemini)" },
+  { id: "writing-review", stage: "review", label: "Writing review (Claude)" },
+  { id: "revise", stage: "revision", label: "Consolidated revision" },
+  { id: "lock", stage: "locking", label: "Verify + lock the chapter" },
+];
+
+/** Compose the prompt for workflow step `index`, with project context. */
+function composeStep(index, ctx = {}) {
+  const step = WORKFLOW[index];
+  if (!step) return null;
+  const composed = composeTask(step.id, ctx);
+  if (!composed) return null;
+  return { index, total: WORKFLOW.length, id: step.id, stage: step.stage, kind: step.kind || "ai",
+    target: composed.target, label: step.label, text: composed.text };
+}
+
 /** A short digest of a project's chapters + records to reference by ID. */
 function digest(project) {
   const chs = (project.chapters || []).map((c) => `${c.id}[${c.status}]${c.title ? ' ' + c.title : ''}`).join('; ');
@@ -130,4 +167,4 @@ function composeBriefAll(project) {
   return ['chatgpt', 'gemini', 'claude'].map((t) => composeBrief(t, project)).filter(Boolean);
 }
 
-module.exports = { SHARED_SYSTEM, ROLES, REVIEW_SCHEMA, TASKS, composeTask, composeBrief, composeBriefAll, digest };
+module.exports = { SHARED_SYSTEM, ROLES, REVIEW_SCHEMA, TASKS, WORKFLOW, composeTask, composeStep, composeBrief, composeBriefAll, digest };

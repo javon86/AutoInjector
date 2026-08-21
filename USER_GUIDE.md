@@ -316,6 +316,14 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
   prompt** to the right pane: **Write**, **Story review**, **Canon review**,
   **Writing review**, **Revise**, and the quick actions **↻ Redo**, **⟲ Start
   over**, **🔁 Check again**.
+- **▶ Start Making Book** — the one button that **kicks off the whole process**.
+  It begins by having **ChatGPT send you an intake questionnaire** (title, genre,
+  premise, characters, length, tone, must‑haves…). You answer in the ChatGPT
+  pane, then press **Continue ▶** to move to the next step; the runner walks the
+  full sequence (requirements → outline → Book Bible → roadmap → write → the
+  three reviews → revise → lock), sending the right prompt to the right AI and
+  advancing the stage. You can **⏸ Pause** and **▶ Resume any time** — the step
+  is saved with the book, so you can even close the app and pick up later.
 - **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
   book (its stage, chapters and records) so, when you reopen a book, the panes
   know exactly what they're working on and what to do next.

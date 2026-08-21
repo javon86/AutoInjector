@@ -2444,6 +2444,43 @@ ipcMain.handle("book:brief", (_e, id) => {
   try { const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" }; return { ok: true, briefs: bookPrompts.composeBriefAll(p) }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
+// --- Guided "Make Book" workflow runner (Start / Next / Pause / Resume / Stop) ---
+function _bookCtx(p, chapterId) {
+  const d = bookPrompts.digest(p);
+  return {
+    title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
+    chapter: chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : undefined),
+    recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+  };
+}
+ipcMain.handle("book:workflow-start", (_e, { id, chapterId }) => {
+  try {
+    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
+    bookProject.setWorkflow(id, { status: "running", step: 0 }, "▶ started Make Book workflow");
+    const composed = bookPrompts.composeStep(0, _bookCtx(p, chapterId));
+    if (!composed) return { ok: false, error: "no workflow steps" };
+    bookProject.setStage(id, composed.stage);
+    return { ok: true, ...composed, status: "running" };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-next", (_e, { id, chapterId }) => {
+  try {
+    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
+    const next = ((p.workflow && p.workflow.step) || 0) + 1;
+    const composed = bookPrompts.composeStep(next, _bookCtx(p, chapterId));
+    if (!composed) { bookProject.setWorkflow(id, { status: "done" }, "✓ workflow reached the end"); return { ok: true, done: true, status: "done" }; }
+    bookProject.setWorkflow(id, { status: "running", step: next });
+    bookProject.setStage(id, composed.stage);
+    return { ok: true, ...composed, status: "running" };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-set-status", (_e, { id, status }) => {
+  try {
+    const note = status === "paused" ? "⏸ workflow paused" : status === "running" ? "▶ workflow resumed" : status === "idle" ? "⏹ workflow stopped" : null;
+    const patch = status === "idle" ? { status: "idle", step: 0 } : { status };
+    return bookProject.setWorkflow(id, patch, note);
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
 
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.

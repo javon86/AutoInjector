@@ -99,7 +99,9 @@ async function main() {
 
     console.log('\n== Book Studio: create a book, stages/tasks/records render ==');
     assert(await controls.$('#col-bookstudio'), 'Book Studio panel is present');
-    await controls.fill('#book-new-title', 'E2E Test Novel');
+    // Unique title per run — books persist to disk, so a fixed title would clash.
+    const bookTitle = 'E2E Book ' + Date.now();
+    await controls.fill('#book-new-title', bookTitle);
     await controls.click('#btn-book-new');
     // The new book becomes the selected project and renders its stage tracker.
     const created = await controls.waitForFunction(() => {
@@ -113,6 +115,24 @@ async function main() {
     await controls.click('#btn-book-add-chapter');
     const hasChapter = await controls.waitForFunction(() => document.querySelectorAll('#book-chapters select').length > 0, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(hasChapter, 'adding a chapter shows it with a status dropdown');
+
+    // Start Making Book -> workflow enters "running", the banner shows step 1,
+    // and Pause/Continue appear. (The intake prompt is sent to the ChatGPT pane;
+    // in the sandbox the pane isn't logged in, which is expected.)
+    await controls.click('#btn-book-start');
+    const running = await controls.waitForFunction(() => {
+      const s = document.getElementById('book-workflow-status');
+      const pause = document.getElementById('btn-book-pause');
+      return s && /Step 1\//.test(s.textContent) && pause && pause.style.display !== 'none';
+    }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(running, 'Start Making Book launches the workflow at step 1 (Pause/Continue appear)');
+    // Pause -> Resume controls swap in.
+    await controls.click('#btn-book-pause');
+    const paused = await controls.waitForFunction(() => {
+      const r = document.getElementById('btn-book-resume');
+      return r && r.style.display !== 'none';
+    }, { timeout: 5000 }).then(() => true).catch(() => false);
+    assert(paused, 'Pause shows the Resume control (workflow is pausable)');
     await shot(controls, 'book-studio');
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
