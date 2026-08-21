@@ -36,6 +36,7 @@ const fileDownloader = require("./file-downloader");
 const outputManager = require("./output-manager");
 const bookProject = require("./book-project");
 const bookPrompts = require("./book-prompts");
+const bookRules = require("./book-rules");
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -1464,6 +1465,21 @@ async function dispatchBookStep(index) {
   return { ok: true, ...composed, status: r.status };
 }
 
+// Send the 3-AI Rules of Conduct ("their bible") to all three panes. Done once
+// automatically at the start of a run so every AI operates by the same protocol,
+// and available on demand via the "Send Rules" button if a pane forgets it. It's
+// a plain message send (best-effort per pane) and it's logged into the book.
+async function sendBookRules(bookId) {
+  const msg = bookRules.composeRulesMessage();
+  // Log the intent immediately, then fire the three sends in the background —
+  // never block the workflow (or the button) on a slow/not-logged-in pane. Each
+  // send still queues per-pane, so on ChatGPT the rules land before the intake.
+  try { if (bookId) bookProject.appendLog(bookId, `📜 sent the Rules of Conduct (${bookRules.RULES_VERSION}) to all three AIs — their bible for this book`); } catch (_) {}
+  logEvent("book-rules-sent", { bookId: bookId || null, chars: msg.length });
+  for (const t of SITE_IDS) sendTextTo(t, msg, null, { raw: true }).catch((e) => logEvent("book-rules-send-error", { target: t, error: String(e) }));
+  return { ok: true };
+}
+
 async function bookRunStart(bookId, chapterId) {
   const p = bookProject.get(bookId);
   if (!p) return { ok: false, error: "no such book" };
@@ -1472,6 +1488,10 @@ async function bookRunStart(bookId, chapterId) {
   r.active = true; r.bookId = bookId;
   r.chapterId = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
   logEvent("book-run-start", { bookId, chapterId: r.chapterId });
+  // The bible goes out first, before the intake questionnaire — so the AIs are
+  // governed by the protocol from the very first step. Sent once per run.
+  await sendBookRules(bookId);
+  r.rulesSent = true;
   const first = await dispatchBookStep(0);
   return { ok: true, snapshot: bookRunSnapshot(), first };
 }
@@ -2643,6 +2663,12 @@ ipcMain.handle("book:workflow-set-status", async (_e, { id, status }) => {
     if (status === "idle") return bookRunStop(id);
     return { ok: false, error: "unknown status" };
   } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Send the Rules of Conduct ("their bible") to all three panes on demand — the
+// "Send Rules" button, for when a pane forgets. (Also sent automatically at the
+// start of every run.)
+ipcMain.handle("book:send-rules", async (_e, { id } = {}) => {
+  try { return await sendBookRules(id); } catch (e) { return { ok: false, error: String(e) }; }
 });
 // Readiness of the three AI panes ("make sure the AI stuff is up and running").
 ipcMain.handle("book:ai-status", async () => {

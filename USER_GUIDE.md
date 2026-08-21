@@ -317,7 +317,10 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
   **Writing review**, **Revise**, and the quick actions **↻ Redo**, **⟲ Start
   over**, **🔁 Check again**.
 - **▶ Start Making Book** — the one button that **kicks off the whole process**.
-  It begins by having **ChatGPT send you an intake questionnaire** (title, genre,
+  It first sends all three AIs their **Rules of Conduct — the 3‑AI governance
+  "bible"** (authority, voting, communication protocol) so they operate as one
+  governed team (ChatGPT = Story, Gemini = Canon, Claude = Writing) for the whole
+  book. Then it has **ChatGPT send you an intake questionnaire** (title, genre,
   premise, characters, length, tone, must‑haves…). You answer in the ChatGPT
   pane, then press **✓ I've answered — Continue ▶** once. **From there the runner
   advances itself** — it walks the full sequence (requirements → outline → Book
@@ -333,6 +336,10 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
 - **⟳ Check AI** — before (or during) a run, confirm the **ChatGPT / Claude /
   Gemini panes are up and ready** to receive prompts. The readiness line shows a
   ✓ or ✗ (with the reason) for each, so you know the AIs are ready to go.
+- **📜 Send Rules** — (re)send the **Rules of Conduct bible** to all three AIs.
+  It's sent automatically at Start; use this button if a pane forgets it mid‑run.
+  The AIs are told to follow it silently (the rules forbid acknowledgment
+  chatter), so a repeat send is just a reminder, not a new task.
 - **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
   book (its stage, chapters and records) so, when you reopen a book, the panes
   know exactly what they're working on and what to do next.

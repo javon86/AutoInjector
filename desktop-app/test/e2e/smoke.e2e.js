@@ -142,6 +142,16 @@ async function main() {
       return e && /ChatGPT/.test(e.textContent) && /Gemini/.test(e.textContent);
     }, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(aiLine, 'the AI-readiness line reports on the ChatGPT / Claude / Gemini panes');
+    // The Rules of Conduct ("bible") button is present and, when pressed, is
+    // logged into the book's activity log (the send itself is best-effort in the
+    // sandbox where panes aren't logged in, but the log entry is local).
+    assert(await controls.$('#btn-book-send-rules'), 'the "Send Rules" (bible) button is present');
+    await controls.click('#btn-book-send-rules');
+    const ruleLogged = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-log');
+      return box && /Rules of Conduct/i.test(box.textContent);
+    }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(ruleLogged, 'sending the Rules of Conduct is recorded in the activity log');
     // Pause -> Resume controls swap in.
     await controls.click('#btn-book-pause');
     const paused = await controls.waitForFunction(() => {

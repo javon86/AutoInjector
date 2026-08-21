@@ -1409,7 +1409,7 @@ function bookRenderWorkflow() {
   const st = el("book-workflow-status"); if (!st) return;
   const total = (live && live.total) || BOOK_WORKFLOW.length, label = BOOK_WORKFLOW[step] || (live && live.label) || "";
   if (!has) st.textContent = "Pick or create a book, then press Start.";
-  else if (status === "idle") st.textContent = "Ready. Press ▶ Start Making Book — ChatGPT sends you the intake questionnaire first, then it runs the rest on its own.";
+  else if (status === "idle") st.textContent = "Ready. Press ▶ Start Making Book — it first sends the AIs their Rules of Conduct (bible), then ChatGPT's intake questionnaire, then runs the rest on its own.";
   else if (done) st.textContent = "Workflow complete ✓ — every step's output is saved in the book. Press Start to run it again.";
   else if (awaitingUser) st.textContent = `Step ${step + 1}/${total}: ${label} — ChatGPT is asking you the intake questions. Answer in the pane, then press ✓ Continue.`;
   else if (status === "stalled") st.textContent = `Step ${step + 1}/${total}: ${label} — no reply yet from ${SITE_LABELS[live && live.target] || "the pane"}. Check it's logged in, then Resume/Continue.`;
@@ -1434,6 +1434,13 @@ if (el("btn-book-pause")) el("btn-book-pause").onclick = async () => { if (bookC
 if (el("btn-book-resume")) el("btn-book-resume").onclick = async () => { if (bookCurrentId) { const r = await window.api.bookWorkflowSetStatus(bookCurrentId, "running"); if (r && r.snapshot) bookRunner = r.snapshot; bookRefresh(); } };
 if (el("btn-book-stop")) el("btn-book-stop").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "idle"); bookRunner = null; bookRefresh(); } };
 if (el("btn-book-check-ai")) el("btn-book-check-ai").onclick = () => bookAiRefresh();
+if (el("btn-book-send-rules")) el("btn-book-send-rules").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Sending the Rules of Conduct (their bible) to all three AIs…");
+  const r = await window.api.bookSendRules(bookCurrentId);
+  setStatus(r && r.ok ? "Rules of Conduct sent to ChatGPT, Claude and Gemini." : `Couldn't send rules: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
 // Live auto-runner updates: refresh the banner whenever a step is dispatched or
 // completed in the main process (auto-advance, pause, stall, done).
 if (window.api.onBookRunner) window.api.onBookRunner((snap) => {
