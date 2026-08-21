@@ -120,5 +120,8 @@ contextBridge.exposeInMainWorld("api", {
   bookLog: (id, text) => ipcRenderer.invoke("book:log", { id, text }),
   bookOpenFolder: (id) => ipcRenderer.invoke("book:open-folder", id),
   bookTask: (id, taskId, chapterId) => ipcRenderer.invoke("book:task", { id, taskId, chapterId }),
-  bookBrief: (id) => ipcRenderer.invoke("book:brief", id)
+  bookBrief: (id) => ipcRenderer.invoke("book:brief", id),
+  bookWorkflowStart: (id, chapterId) => ipcRenderer.invoke("book:workflow-start", { id, chapterId }),
+  bookWorkflowNext: (id, chapterId) => ipcRenderer.invoke("book:workflow-next", { id, chapterId }),
+  bookWorkflowSetStatus: (id, status) => ipcRenderer.invoke("book:workflow-set-status", { id, status })
 });

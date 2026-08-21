@@ -67,6 +67,7 @@ function create(title) {
   const book = {
     id: `PRJ-${pad(n)}`, title: clean, stage: 'setup',
     chapters: [], records: [], counters: {}, log: [],
+    workflow: { status: 'idle', step: 0 },
     created: _now(), updated: _now(),
   };
   book.log.push({ ts: _now(), text: `created book "${clean}" (${book.id})` });
@@ -88,7 +89,16 @@ function list() { return _projectDirs().map((d) => { const b = _read(d); return 
 function get(id) {
   const dir = _dirById(id); if (!dir) return null;
   const b = _read(dir); if (!b) return null;
+  if (!b.workflow) b.workflow = { status: 'idle', step: 0 }; // default for older books
   return { ...b, dir, stages: STAGES, stageLabels: STAGE_LABELS, chapterStates: CHAPTER_STATES, recordTypes: RECORD_TYPES };
+}
+
+/** Update the persisted workflow runner state ({status, step}), with a log note. */
+function setWorkflow(id, patch, note) {
+  return _mutate(id, (b) => {
+    b.workflow = Object.assign({ status: 'idle', step: 0 }, b.workflow, patch || {});
+    if (note) b.log.push({ ts: _now(), text: note });
+  });
 }
 
 function _mutate(id, fn) {
@@ -155,7 +165,7 @@ function appendLog(id, text) {
 }
 
 module.exports = {
-  init, create, list, get, setStage, addChapter, setChapterStatus,
+  init, create, list, get, setStage, setWorkflow, addChapter, setChapterStatus,
   addRecord, listRecords, readRecord, appendLog, safeName,
   STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES,
 };

@@ -73,6 +73,20 @@ function main() {
   assert(briefs.length === 3 && briefs.some((b) => b.target === "gemini" && /caught up/.test(b.text)),
     "a brief is produced for all three panes to catch them up on the book");
 
+  console.log("\n== workflow runner: starts with ChatGPT intake, steps in order, persists ==");
+  const step0 = prompts.composeStep(0, {});
+  assert(step0 && step0.target === "chatgpt" && /questionnaire/i.test(step0.text) && step0.index === 0,
+    "step 0 is ChatGPT's intake questionnaire");
+  assert(prompts.WORKFLOW.length >= 10 && prompts.composeStep(prompts.WORKFLOW.length) === null,
+    "the workflow has a defined length and stops at the end");
+  bp.setWorkflow(id, { status: "running", step: 0 }, "started");
+  assert(bp.get(id).workflow.status === "running" && bp.get(id).workflow.step === 0, "workflow state is saved");
+  bp.setWorkflow(id, { step: 3 });
+  bp.init(books); // new session
+  assert(bp.get(id).workflow.step === 3, "workflow position survives a restart (resume where you left off)");
+  bp.setWorkflow(id, { status: "paused" }, "paused");
+  assert(bp.get(id).workflow.status === "paused", "workflow can be paused and stays paused");
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
