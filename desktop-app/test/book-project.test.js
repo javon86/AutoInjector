@@ -87,6 +87,24 @@ function main() {
   bp.setWorkflow(id, { status: "paused" }, "paused");
   assert(bp.get(id).workflow.status === "paused", "workflow can be paused and stays paused");
 
+  console.log("\n== step output is saved to disk (so the book HOLDS each step's result) ==");
+  const outline = bp.recordStepOutput(id, { index: 2, stepId: "outline", target: "chatgpt", label: "Master chapter outline", text: "1. Arrival\n2. The Letter" });
+  assert(outline.ok && /steps[\\/]/.test(outline.file), "recordStepOutput writes a steps/ file");
+  assert(fs.existsSync(path.join(books, "My Great Novel", outline.file)), "the step output file exists on disk");
+  assert(fs.readFileSync(path.join(books, "My Great Novel", outline.file), "utf8").includes("The Letter"), "the AI's output text is in the file");
+  assert(bp.get(id).workflow.outputs && bp.get(id).workflow.outputs.outline && bp.get(id).workflow.outputs.outline.target === "chatgpt",
+    "the output is indexed in workflow.outputs by step id");
+  // The write step's output becomes the chapter manuscript (CH-002 is unlocked).
+  const wrote = bp.recordStepOutput(id, { index: 5, stepId: "write", target: "claude", label: "Write the chapter", text: "It was a dark and stormy night.", chapterId: "CH-002" });
+  assert(wrote.ok, "write-step output is recorded");
+  const chRead = bp.readRecord(id, "CH-002");
+  assert(chRead.ok && /dark and stormy night/.test(chRead.content), "the write step's text is written into the chapter manuscript");
+  assert(bp.get(id).chapters[1].status === "DRAFTING", "writing a chapter advances its status out of NOT STARTED");
+  // A LOCKED chapter's manuscript is never overwritten by a later write step.
+  bp.recordStepOutput(id, { index: 5, stepId: "write", target: "claude", label: "Write the chapter", text: "OVERWRITE ATTEMPT", chapterId: "CH-001" });
+  const locked = bp.readRecord(id, "CH-001");
+  assert(locked.ok && !/OVERWRITE ATTEMPT/.test(locked.content), "a LOCKED chapter is protected from write-step overwrite");
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

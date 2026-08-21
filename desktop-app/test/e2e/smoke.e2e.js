@@ -126,6 +126,22 @@ async function main() {
       return s && /Step 1\//.test(s.textContent) && pause && pause.style.display !== 'none';
     }, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(running, 'Start Making Book launches the workflow at step 1 (Pause/Continue appear)');
+    // Step 1 is the intake questionnaire — an "ask-user" step, so the runner
+    // waits for the human (it must NOT auto-advance). The Continue button says
+    // so, and the status names the intake questions.
+    const asksUser = await controls.evaluate(() => {
+      const c = document.getElementById('btn-book-continue');
+      const s = document.getElementById('book-workflow-status');
+      return !!c && /answered/i.test(c.textContent) && !!s && /intake/i.test(s.textContent);
+    });
+    assert(asksUser, 'the first step waits for you (intake questionnaire, "I\'ve answered — Continue")');
+    // The AI-readiness line reports on the three panes ("make sure AI is up").
+    await controls.click('#btn-book-check-ai');
+    const aiLine = await controls.waitForFunction(() => {
+      const e = document.getElementById('book-ai-status');
+      return e && /ChatGPT/.test(e.textContent) && /Gemini/.test(e.textContent);
+    }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(aiLine, 'the AI-readiness line reports on the ChatGPT / Claude / Gemini panes');
     // Pause -> Resume controls swap in.
     await controls.click('#btn-book-pause');
     const paused = await controls.waitForFunction(() => {

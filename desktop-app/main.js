@@ -678,7 +678,7 @@ function createWindow() {
   win.on("resize", () => { layout(); syncPaneBounds(); });
   win.on("closed", () => { win = null; });
 
-  setInterval(() => { for (const site of SITE_IDS) pollSite(site); }, POLL_MS);
+  setInterval(() => { for (const site of SITE_IDS) pollSite(site); bookRunWatchdog(); }, POLL_MS);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -1377,6 +1377,175 @@ async function handleSequenceCapture(turn) {
   }
   seq.index++;
   await sendSequenceStep();
+}
+
+// --- Book Studio auto-runner ------------------------------------------------
+// Drives the guided ATELIER "Make Book" sequence on its own. It uses the exact
+// completion signal Prompt Sequence uses: a stable capture from a step's target
+// pane means that AI finished its output. The moment that lands, we SAVE the
+// output into the book (a real file — see bookProject.recordStepOutput) and
+// advance to the next step, so the workflow moves forward without a "Continue"
+// click. Two things it deliberately does NOT auto-advance on: a "ask-user" step
+// (the intake questionnaire — its output is questions FOR you, so it waits until
+// you answer and press Continue), and a paused/stopped run. Lives in main (not
+// the renderer) because captured replies and sendTextTo already live here. The
+// live run isn't persisted across a restart — like House Rules and the manager,
+// a relaunch never silently resumes sending; the book's saved step position is
+// restored as paused so you resume deliberately.
+const BOOK_STEP_TIMEOUT_MS = 6 * 60 * 1000; // no reply this long → park the run as "stalled" so you're never left staring at "running"
+function resetBookRun() {
+  state.bookRun = {
+    active: false, bookId: null, chapterId: null,
+    step: -1, stepId: null, label: "", total: bookPrompts.WORKFLOW.length,
+    target: null, kind: null,
+    status: "idle", // idle | awaiting-user | waiting-reply | paused | stalled | done | error
+    sentTs: 0, sentText: "", generation: 0, dispatchGen: {}
+  };
+}
+resetBookRun();
+
+function bookRunSnapshot() {
+  const r = state.bookRun;
+  return {
+    active: r.active, bookId: r.bookId, chapterId: r.chapterId,
+    step: r.step, stepId: r.stepId, label: r.label, total: r.total,
+    target: r.target, kind: r.kind, status: r.status,
+    awaitingUser: r.status === "awaiting-user",
+    sinceMs: r.sentTs ? Date.now() - r.sentTs : 0
+  };
+}
+function broadcastBookRun() { broadcast("book-runner", bookRunSnapshot()); }
+
+// Is a given AI pane actually up and readable (view exists, not destroyed,
+// finished loading, read script runs)? Backs the "Check AI" button and the
+// pre-run readiness line, so you know the panes are ready before anything is
+// sent — the whole point of "make sure the AI stuff is up and running".
+async function bookPaneReady(site) {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ready: false, reason: "pane not open" };
+  try {
+    if (view.webContents.isLoading && view.webContents.isLoading()) return { ready: false, reason: "still loading" };
+    const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
+    return (res && res.ok) ? { ready: true, reason: "ready" } : { ready: false, reason: "not responding" };
+  } catch (_) { return { ready: false, reason: "not responding" }; }
+}
+async function bookAiStatus() {
+  const out = {};
+  for (const site of SITE_IDS) out[site] = await bookPaneReady(site);
+  out.allReady = SITE_IDS.every((s) => out[s] && out[s].ready);
+  return out;
+}
+
+// Compose + dispatch one workflow step. Persists the position into the book,
+// advances its stage, arms the completion watcher, and best-effort sends the
+// prompt to the right pane. A not-ready pane never throws the run — readiness is
+// reported separately; the reply (when it lands) is what advances an ai step.
+async function dispatchBookStep(index) {
+  const r = state.bookRun;
+  const p = bookProject.get(r.bookId);
+  if (!p) { r.status = "error"; r.active = false; broadcastBookRun(); return { ok: false, error: "no such book" }; }
+  const composed = bookPrompts.composeStep(index, _bookCtx(p, r.chapterId));
+  if (!composed) {
+    r.status = "done"; r.active = false; r.step = r.total;
+    bookProject.setWorkflow(r.bookId, { status: "done" }, "✓ Make Book workflow reached the end — every step's output is saved in the book");
+    broadcastBookRun();
+    return { ok: true, done: true, status: "done" };
+  }
+  r.step = index; r.stepId = composed.id; r.label = composed.label;
+  r.target = composed.target; r.kind = composed.kind;
+  r.generation++; r.dispatchGen = { [composed.target]: r.generation };
+  r.sentText = composed.text; r.sentTs = Date.now();
+  r.status = composed.kind === "ask-user" ? "awaiting-user" : "waiting-reply";
+  bookProject.setWorkflow(r.bookId, { status: "running", step: index },
+    `▶ step ${index + 1}/${r.total}: ${composed.label} → ${SITES[composed.target] ? SITES[composed.target].label : composed.target}`);
+  bookProject.setStage(r.bookId, composed.stage);
+  broadcastBookRun();
+  sendTextTo(composed.target, composed.text, null, { raw: true }).catch((e) => logEvent("book-send-error", { target: composed.target, error: String(e) }));
+  return { ok: true, ...composed, status: r.status };
+}
+
+async function bookRunStart(bookId, chapterId) {
+  const p = bookProject.get(bookId);
+  if (!p) return { ok: false, error: "no such book" };
+  resetBookRun();
+  const r = state.bookRun;
+  r.active = true; r.bookId = bookId;
+  r.chapterId = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
+  logEvent("book-run-start", { bookId, chapterId: r.chapterId });
+  const first = await dispatchBookStep(0);
+  return { ok: true, snapshot: bookRunSnapshot(), first };
+}
+
+// Manual advance — the button for an ask-user step ("I've answered, continue")
+// and a "skip ahead" override on any step. If no live run (e.g. after a
+// restart), pick up from the book's saved position + 1.
+async function bookRunContinue(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) return { ok: true, res: await dispatchBookStep(r.step + 1), snapshot: bookRunSnapshot() };
+  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
+  resetBookRun();
+  state.bookRun.active = true; state.bookRun.bookId = bookId;
+  state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
+  const next = ((p.workflow && p.workflow.step) || 0) + 1;
+  return { ok: true, res: await dispatchBookStep(next), snapshot: bookRunSnapshot() };
+}
+
+function bookRunPause(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) { r.status = "paused"; broadcastBookRun(); }
+  return bookProject.setWorkflow(bookId, { status: "paused" }, "⏸ workflow paused");
+}
+// Resume: re-arm the step it's on and re-send it (a reply that arrived while
+// paused was ignored, so re-sending gets a fresh one to advance on). Works both
+// for a live paused run and for one restored from disk after a restart.
+async function bookRunResume(bookId) {
+  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
+  const r = state.bookRun;
+  if (!r.active || r.bookId !== bookId) {
+    resetBookRun();
+    state.bookRun.active = true; state.bookRun.bookId = bookId;
+    state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
+    return { ok: true, res: await dispatchBookStep((p.workflow && p.workflow.step) || 0), snapshot: bookRunSnapshot() };
+  }
+  return { ok: true, res: await dispatchBookStep(r.step), snapshot: bookRunSnapshot() };
+}
+function bookRunStop(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) resetBookRun();
+  return bookProject.setWorkflow(bookId, { status: "idle", step: 0 }, "⏹ workflow stopped");
+}
+
+// Called from pollSite on every stable capture. If it's the reply the current
+// ai-step was waiting on, save the output into the book and advance.
+async function handleBookRunCapture(turn) {
+  const r = state.bookRun;
+  if (!r.active || r.status !== "waiting-reply") return;
+  if (turn.site !== r.target) return;
+  if (r.dispatchGen[turn.site] !== r.generation) return; // stale reply from a step we've already moved past
+  if (turn.ts < r.sentTs) return;
+  if (looksLikeEcho(turn.text, r.sentText)) return; // our own prompt echoed back, not a real reply
+  try {
+    bookProject.recordStepOutput(r.bookId, {
+      index: r.step, stepId: r.stepId, target: r.target, label: r.label,
+      text: turn.text, chapterId: r.chapterId
+    });
+  } catch (e) { logEvent("book-step-save-error", { error: String(e) }); }
+  logEvent("book-step-complete", { bookId: r.bookId, step: r.step, stepId: r.stepId, target: r.target, chars: turn.text.length });
+  await dispatchBookStep(r.step + 1);
+}
+
+// Watchdog (ticked from the poll loop): if the pane we're waiting on has gone
+// quiet too long, park the run as stalled so the UI stops implying progress.
+function bookRunWatchdog() {
+  const r = state.bookRun;
+  if (!r.active || r.status !== "waiting-reply") return;
+  if (Date.now() - r.sentTs > BOOK_STEP_TIMEOUT_MS) {
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⏳ no reply from ${SITES[r.target] ? SITES[r.target].label : r.target} for step ${r.step + 1} — paused (check the pane, then Resume/Continue)`);
+    logEvent("book-step-stalled", { bookId: r.bookId, step: r.step, target: r.target });
+    broadcastBookRun();
+  }
 }
 
 // --- Manager/orchestrator: the supervisory loop over a managed task --------
@@ -2118,6 +2287,11 @@ async function pollSite(site) {
     logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
 
+    // Book Studio auto-runner: if this reply is the output the current book
+    // workflow step was waiting on, save it and advance. Orthogonal to routing,
+    // so it runs regardless of governance holds/tags below.
+    try { await handleBookRunCapture(turn); } catch (e) { logEvent("book-run-error", { error: String(e) }); }
+
     if (state.waiting[site]) {
       state.waiting[site] = false;
       state.waitingSince[site] = null;
@@ -2453,33 +2627,30 @@ function _bookCtx(p, chapterId) {
     recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
   };
 }
-ipcMain.handle("book:workflow-start", (_e, { id, chapterId }) => {
+// The runner now drives itself: Start dispatches step 0 and, from there,
+// auto-advances each time a step's target AI produces its output (see
+// handleBookRunCapture). The renderer just reflects the "book-runner" broadcast.
+ipcMain.handle("book:workflow-start", async (_e, { id, chapterId }) => {
+  try { return await bookRunStart(id, chapterId); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-next", async (_e, { id }) => {
+  try { return await bookRunContinue(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-set-status", async (_e, { id, status }) => {
   try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    bookProject.setWorkflow(id, { status: "running", step: 0 }, "▶ started Make Book workflow");
-    const composed = bookPrompts.composeStep(0, _bookCtx(p, chapterId));
-    if (!composed) return { ok: false, error: "no workflow steps" };
-    bookProject.setStage(id, composed.stage);
-    return { ok: true, ...composed, status: "running" };
+    if (status === "paused") return bookRunPause(id);
+    if (status === "running") return await bookRunResume(id);
+    if (status === "idle") return bookRunStop(id);
+    return { ok: false, error: "unknown status" };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("book:workflow-next", (_e, { id, chapterId }) => {
-  try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    const next = ((p.workflow && p.workflow.step) || 0) + 1;
-    const composed = bookPrompts.composeStep(next, _bookCtx(p, chapterId));
-    if (!composed) { bookProject.setWorkflow(id, { status: "done" }, "✓ workflow reached the end"); return { ok: true, done: true, status: "done" }; }
-    bookProject.setWorkflow(id, { status: "running", step: next });
-    bookProject.setStage(id, composed.stage);
-    return { ok: true, ...composed, status: "running" };
-  } catch (e) { return { ok: false, error: String(e) }; }
+// Readiness of the three AI panes ("make sure the AI stuff is up and running").
+ipcMain.handle("book:ai-status", async () => {
+  try { return { ok: true, status: await bookAiStatus() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("book:workflow-set-status", (_e, { id, status }) => {
-  try {
-    const note = status === "paused" ? "⏸ workflow paused" : status === "running" ? "▶ workflow resumed" : status === "idle" ? "⏹ workflow stopped" : null;
-    const patch = status === "idle" ? { status: "idle", step: 0 } : { status };
-    return bookProject.setWorkflow(id, patch, note);
-  } catch (e) { return { ok: false, error: String(e) }; }
+// The live runner snapshot (finer-grained than the persisted book.json status).
+ipcMain.handle("book:runner-status", () => {
+  try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 
 // Native top menu bar (File / View / Tools / Help). Guarded so the test

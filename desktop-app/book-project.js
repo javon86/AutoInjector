@@ -101,6 +101,42 @@ function setWorkflow(id, patch, note) {
   });
 }
 
+/**
+ * Save the AI's output for a completed workflow step to disk, so the book
+ * actually HOLDS the file/information that step was supposed to produce. Every
+ * step's reply is written under steps/NN-<stepid>.md and indexed in
+ * workflow.outputs. The "write" step's output IS the chapter manuscript, so it's
+ * also written into that chapter's file (and the chapter flipped to DRAFTING).
+ * This is what lets the runner know a step is truly done — the artifact exists.
+ */
+function recordStepOutput(id, { index, stepId, target, label, text, chapterId }) {
+  return _mutate(id, (b, dir) => {
+    ensureDir(path.join(dir, 'steps'));
+    const base = safeName(`${pad((index || 0) + 1)}-${stepId || 'step'}`, `step-${(index || 0) + 1}`);
+    const rel = path.join('steps', `${base}.md`);
+    const body = String(text || '').trim();
+    fs.writeFileSync(path.join(dir, rel),
+      `# Step ${(index || 0) + 1}: ${label || stepId || ''}\n\n_from ${target || '?'} · ${_now()}_\n\n${body}\n`);
+    b.workflow = Object.assign({ status: 'running', step: index || 0 }, b.workflow);
+    b.workflow.outputs = b.workflow.outputs || {};
+    b.workflow.outputs[stepId || `step-${(index || 0) + 1}`] = { file: rel, target: target || null, ts: _now(), chars: body.length };
+    b.log.push({ ts: _now(), text: `✓ step ${(index || 0) + 1} (${label || stepId}) output saved from ${target || '?'} → ${rel}` });
+    // The write step's output is the chapter's manuscript — file it there too,
+    // unless the chapter is already LOCKED/COMPLETE (never silently overwrite
+    // locked material; the steps/ copy still preserves the new draft).
+    if (stepId === 'write' && chapterId) {
+      const ch = b.chapters.find((c) => c.id === chapterId);
+      if (ch && ch.status !== 'LOCKED' && ch.status !== 'COMPLETE') {
+        fs.writeFileSync(path.join(dir, ch.file),
+          `# ${ch.id}${ch.title ? ' — ' + ch.title : ''}\n\n${body}\n`);
+        if (ch.status === 'NOT STARTED' || ch.status === 'ACTIVE') ch.status = 'DRAFTING';
+        b.log.push({ ts: _now(), text: `${chapterId} manuscript updated from the Write step (${body.length} chars)` });
+      }
+    }
+    return { file: rel };
+  });
+}
+
 function _mutate(id, fn) {
   const dir = _dirById(id); if (!dir) return { ok: false, error: 'no such book' };
   const b = _read(dir); if (!b) return { ok: false, error: 'unreadable book' };
@@ -165,7 +201,7 @@ function appendLog(id, text) {
 }
 
 module.exports = {
-  init, create, list, get, setStage, setWorkflow, addChapter, setChapterStatus,
+  init, create, list, get, setStage, setWorkflow, recordStepOutput, addChapter, setChapterStatus,
   addRecord, listRecords, readRecord, appendLog, safeName,
   STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES,
 };

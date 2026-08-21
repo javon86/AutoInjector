@@ -319,11 +319,20 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
 - **▶ Start Making Book** — the one button that **kicks off the whole process**.
   It begins by having **ChatGPT send you an intake questionnaire** (title, genre,
   premise, characters, length, tone, must‑haves…). You answer in the ChatGPT
-  pane, then press **Continue ▶** to move to the next step; the runner walks the
-  full sequence (requirements → outline → Book Bible → roadmap → write → the
-  three reviews → revise → lock), sending the right prompt to the right AI and
-  advancing the stage. You can **⏸ Pause** and **▶ Resume any time** — the step
-  is saved with the book, so you can even close the app and pick up later.
+  pane, then press **✓ I've answered — Continue ▶** once. **From there the runner
+  advances itself** — it walks the full sequence (requirements → outline → Book
+  Bible → roadmap → write → the three reviews → revise → lock), sending the right
+  prompt to the right AI, and it **moves to the next step on its own the moment
+  that AI finishes its output** — no clicking between steps. Each step's result
+  is **saved into the book** as a real file (`steps/…` inside the book folder;
+  the Write step's text also lands in the chapter manuscript), which is how it
+  knows a step is truly done. You can **⏸ Pause** and **▶ Resume any time** — the
+  step is saved with the book, so you can even close the app and pick up later.
+  If a pane goes quiet too long the run **parks itself** and tells you to check
+  that pane. Only the intake step waits for you; everything after it is hands‑off.
+- **⟳ Check AI** — before (or during) a run, confirm the **ChatGPT / Claude /
+  Gemini panes are up and ready** to receive prompts. The readiness line shows a
+  ✓ or ✗ (with the reason) for each, so you know the AIs are ready to go.
 - **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
   book (its stage, chapters and records) so, when you reopen a book, the panes
   know exactly what they're working on and what to do next.
