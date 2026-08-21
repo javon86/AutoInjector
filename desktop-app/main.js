@@ -823,6 +823,41 @@ function broadcastToWizard(channel, payload) {
   try { if (wizardView && wizardView.webContents && !wizardView.webContents.isDestroyed()) wizardView.webContents.send(channel, payload); } catch (_) {}
 }
 
+// --- Consolidated AI feed window --------------------------------------------
+// A separate pop-up that shows every AI reply as a colour-coded bubble per LLM.
+// It registers its view in uiViews so the normal broadcast() (capture / sent /
+// book-runner) fans out to it live; on close we splice it back out.
+let feedWin = null;
+let feedView = null;
+function openFeedWindow() {
+  if (feedWin && feedView) { feedWin.focus(); return; }
+  feedWin = new BaseWindow({ width: 560, height: 760, resizable: true, title: "AutoInjector — AI Conversation" });
+  feedView = new WebContentsView({
+    webPreferences: {
+      partition: "feed-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  feedWin.contentView.addChildView(feedView);
+  feedView.webContents.loadFile(path.join(__dirname, "feed.html"));
+  const layoutFeed = () => {
+    if (!feedWin || !feedView) return;
+    const [w, h] = feedWin.getContentSize();
+    feedView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutFeed();
+  feedWin.on("resize", layoutFeed);
+  uiViews.push(feedView); // so broadcast() reaches the feed too
+  feedWin.on("closed", () => {
+    const i = uiViews.indexOf(feedView);
+    if (i >= 0) uiViews.splice(i, 1);
+    feedWin = null; feedView = null;
+  });
+}
+function closeFeedWindow() { if (feedWin) feedWin.close(); }
+
 function routingSnapshot() {
   const out = {};
   for (const site of SITE_IDS) out[site] = Array.from(state.routing[site]);
@@ -1544,13 +1579,28 @@ async function handleBookRunCapture(turn) {
   if (r.dispatchGen[turn.site] !== r.generation) return; // stale reply from a step we've already moved past
   if (turn.ts < r.sentTs) return;
   if (looksLikeEcho(turn.text, r.sentText)) return; // our own prompt echoed back, not a real reply
+  // Save the reply AND generate this section's PDF. The PDF being confirmed on
+  // disk is the "done" signal — only then do we advance and send the next step.
+  let res = null;
   try {
-    bookProject.recordStepOutput(r.bookId, {
+    res = bookProject.recordStepOutput(r.bookId, {
       index: r.step, stepId: r.stepId, target: r.target, label: r.label,
       text: turn.text, chapterId: r.chapterId
     });
   } catch (e) { logEvent("book-step-save-error", { error: String(e) }); }
-  logEvent("book-step-complete", { bookId: r.bookId, step: r.step, stepId: r.stepId, target: r.target, chars: turn.text.length });
+  const pdfReady = !!(res && res.ok && res.pdfExists);
+  if (!pdfReady) {
+    // No confirmed PDF -> section isn't officially complete (Rule 38). Park the
+    // run so the user can see it rather than advancing on an unfiled section.
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⏳ step ${r.step + 1} replied but its PDF wasn't filed — paused (press Resume to retry)`);
+    logEvent("book-step-no-pdf", { bookId: r.bookId, step: r.step, stepId: r.stepId });
+    broadcastBookRun();
+    return;
+  }
+  bookProject.appendLog(r.bookId, `✅ section ${r.step + 1}/${r.total} complete — PDF filed (${(res.pdf || "").split(/[\\/]/).pop()}). Moving to the next section.`);
+  logEvent("book-step-complete", { bookId: r.bookId, step: r.step, stepId: r.stepId, target: r.target, chars: turn.text.length, pdf: res.pdf });
   await dispatchBookStep(r.step + 1);
 }
 
@@ -2579,6 +2629,18 @@ ipcMain.handle("external:open", (_evt, url) => {
 });
 ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
+// Consolidated AI feed window: open/close + backfill recent AI messages so the
+// window shows history, not a blank, when reopened.
+ipcMain.handle("feed:open", () => { openFeedWindow(); return { ok: true }; });
+ipcMain.handle("feed-window:close", () => { closeFeedWindow(); return { ok: true }; });
+ipcMain.handle("feed:history", () => {
+  try {
+    return state.transcript
+      .filter((t) => t && SITES[t.site]) // only the three AI panes (skip system/verdict rows)
+      .slice(-120)
+      .map((t) => ({ id: t.id, site: t.site, label: t.label, text: t.text, ts: t.ts }));
+  } catch (_) { return []; }
+});
 // Hardware scan + a machine-matched catalog for the wizard to render.
 ipcMain.handle("wizard:catalog", async () => {
   try {

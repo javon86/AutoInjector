@@ -246,6 +246,17 @@ confused with the previous one. Use it whenever you want a clean slate for all
 three AIs without reloading them one at a time. *(Your logins stay signed in —
 this only opens a new conversation.)*
 
+### 7c‑2. 💬 AI Feed — all the AIs in one window ✅
+
+The **💬 AI Feed** button in the User Panel opens a **separate pop‑up window that
+consolidates every AI's messages in one place**, shown as **chat bubbles
+colour‑coded by which LLM is talking** (ChatGPT green, Claude terracotta, Gemini
+blue) so it's easy to tell who said what. It shows the recent history when it
+opens and then updates live as replies come in. You can **filter** by AI with the
+chips at the top, toggle **auto‑scroll**, and **open/close/reopen it any time** —
+it's a standalone window you can park on a second monitor while the workflow runs
+itself.
+
 ### 7d. Setup Wizard (optional downloads) ✅ *(early version)*
 
 The app itself opens with **nothing extra to download**. Everything heavy — local
@@ -326,14 +337,19 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
   pane, then press **✓ I've answered — Continue ▶** once. **From there the runner
   advances itself** — it walks the full sequence (requirements → outline → Book
   Bible → roadmap → write → the three reviews → revise → lock), sending the right
-  prompt to the right AI, and it **moves to the next step on its own the moment
-  that AI finishes its output** — no clicking between steps. Each step's result
-  is **saved into the book** as a real file (`steps/…` inside the book folder;
-  the Write step's text also lands in the chapter manuscript), which is how it
-  knows a step is truly done. You can **⏸ Pause** and **▶ Resume any time** — the
-  step is saved with the book, so you can even close the app and pick up later.
-  If a pane goes quiet too long the run **parks itself** and tells you to check
-  that pane. Only the intake step waits for you; everything after it is hands‑off.
+  prompt to the right AI. **How it knows a section is done: it saves the reply,
+  turns it into that section's PDF, and confirms the PDF is on file — only then
+  does it move on and send the next section's prompt.** No clicking between
+  steps. Each result is saved into the book (`steps/…`, the Write step also fills
+  the chapter manuscript) and filed as a PDF (see **📄 PDF forms** below). You can
+  **⏸ Pause** and **▶ Resume any time** — the position is saved with the book, so
+  you can even close the app and pick up later. If a pane goes quiet, or a
+  section's PDF can't be filed, the run **parks itself** and tells you. Only the
+  intake step waits for you; everything after it is hands‑off.
+  - **Always know where it's at.** A **persistent tally** in the bottom action
+    bar (`📖 Section 3/11 — Master Outline ▶ running`) shows exactly which
+    section the system is on at all times, no matter which panel you're looking
+    at — so you're never guessing while it runs itself.
 - **⟳ Check AI** — before (or during) a run, confirm the **ChatGPT / Claude /
   Gemini panes are up and ready** to receive prompts. The readiness line shows a
   ✓ or ✗ (with the reason) for each, so you know the AIs are ready to go.

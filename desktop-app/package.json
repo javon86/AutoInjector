@@ -49,6 +49,8 @@
       "prompt-sequence.js",
       "setup-wizard.html",
       "setup-wizard.js",
+      "feed.html",
+      "feed.js",
       "download-manager.js",
       "file-downloader.js",
       "output-manager.js",

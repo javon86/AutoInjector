@@ -1359,6 +1359,7 @@ async function bookSelect(id) {
   bookCurrentChapter = bookProject && bookProject.chapters.length ? bookProject.chapters[bookProject.chapters.length - 1].id : null;
   // Pull the live runner state (finer than the persisted status) + AI readiness.
   try { const rs = window.api.bookRunnerStatus && await window.api.bookRunnerStatus(); bookRunner = rs && rs.ok ? rs.snapshot : null; } catch (_) { bookRunner = null; }
+  updateBookTally(bookRunner);
   bookRenderAll();
   bookAiRefresh();
 }
@@ -1492,8 +1493,24 @@ if (el("btn-book-send-rules")) el("btn-book-send-rules").onclick = async () => {
 // completed in the main process (auto-advance, pause, stall, done).
 if (window.api.onBookRunner) window.api.onBookRunner((snap) => {
   bookRunner = snap;
+  updateBookTally(snap);
   if (snap && snap.bookId === bookCurrentId) bookRefresh();
 });
+
+// Persistent tally in the bottom action bar — always shows where the book
+// workflow is, no matter which panel is scrolled into view or collapsed.
+function updateBookTally(snap) {
+  const el0 = el("book-tally"); if (!el0) return;
+  if (!snap || !snap.active) { el0.textContent = ""; return; }
+  const label = (BOOK_WORKFLOW[snap.step] || snap.label || "").replace(/\s*\(.*$/, "");
+  const icon = snap.status === "awaiting-user" ? "✍️" : snap.status === "paused" ? "⏸" : snap.status === "stalled" ? "⏳" : snap.status === "done" ? "✅" : "▶";
+  const state = snap.status === "awaiting-user" ? "waiting for you" : snap.status === "waiting-reply" ? "running" : snap.status;
+  el0.textContent = snap.status === "done"
+    ? `✅ Book complete (${snap.total}/${snap.total})`
+    : `📖 Section ${snap.step + 1}/${snap.total} — ${label} ${icon} ${state}`;
+}
+// Open the consolidated AI feed window.
+if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
 
 function bookRenderStages() {
   const box = el("book-stages"); if (!box) return; box.innerHTML = "";

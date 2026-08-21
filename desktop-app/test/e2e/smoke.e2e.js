@@ -126,6 +126,12 @@ async function main() {
       return s && /Step 1\//.test(s.textContent) && pause && pause.style.display !== 'none';
     }, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(running, 'Start Making Book launches the workflow at step 1 (Pause/Continue appear)');
+    // The persistent bottom-bar tally shows where the workflow is, always visible.
+    const tallyShown = await controls.waitForFunction(() => {
+      const t = document.getElementById('book-tally');
+      return t && /Section 1\/\d/.test(t.textContent);
+    }, { timeout: 5000 }).then(() => true).catch(() => false);
+    assert(tallyShown, 'the persistent bottom-bar tally shows "Section 1/N"');
     // Step 1 is the intake questionnaire — an "ask-user" step, so the runner
     // waits for the human (it must NOT auto-advance). The Continue button says
     // so, and the status names the intake questions.
@@ -191,6 +197,24 @@ async function main() {
     }, { timeout: 5000 }).then(() => true).catch(() => false);
     assert(paused, 'Pause shows the Resume control (workflow is pausable)');
     await shot(controls, 'book-studio');
+
+    console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');
+    assert(await controls.$('#btn-open-feed'), 'the AI Feed button is present in the action bar');
+    await controls.click('#btn-open-feed');
+    const feedWin = await findWindow(app, '#feed', 15000);
+    assert(feedWin, 'the AI Feed window opened');
+    if (feedWin) {
+      const chips = await feedWin.$$eval('.chip[data-site]', (els) => els.map((e) => e.getAttribute('data-site'))).catch(() => []);
+      assert(chips.includes('chatgpt') && chips.includes('claude') && chips.includes('gemini'),
+        'the feed has a colour-coded filter chip for each LLM');
+      // The per-LLM bubble colour rules are defined in the window's own styles.
+      const hasColors = await feedWin.evaluate(() => {
+        const css = Array.from(document.styleSheets).flatMap((s) => { try { return Array.from(s.cssRules).map((r) => r.cssText); } catch (_) { return []; } }).join(' ');
+        return /b-chatgpt/.test(css) && /b-claude/.test(css) && /b-gemini/.test(css);
+      }).catch(() => false);
+      assert(hasColors, 'the feed defines a distinct bubble style per LLM');
+      await shot(feedWin, 'ai-feed');
+    }
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
     await app.close();

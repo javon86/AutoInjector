@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Conversation — AutoInjector</title>
+  <style>
+    :root {
+      --bg: #0e0f12; --panel: #16181d; --line: #262a31; --text: #e7e9ee; --muted: #9aa1ac;
+      --chatgpt: #10a37f; --claude: #d9814f; --gemini: #4285f4; --user: #6b7280;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+      font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13px;
+    }
+    header {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: var(--panel); border-bottom: 1px solid var(--line); flex: 0 0 auto;
+    }
+    header b { font-size: 13px; }
+    header .spacer { flex: 1 1 auto; }
+    .filters { display: flex; gap: 5px; align-items: center; }
+    .chip {
+      font-size: 11px; padding: 3px 9px; border-radius: 999px; cursor: pointer; user-select: none;
+      border: 1px solid var(--line); background: #1b1e24; color: var(--muted);
+    }
+    .chip.on { color: #fff; }
+    .chip[data-site="chatgpt"].on { background: var(--chatgpt); border-color: var(--chatgpt); }
+    .chip[data-site="claude"].on { background: var(--claude); border-color: var(--claude); }
+    .chip[data-site="gemini"].on { background: var(--gemini); border-color: var(--gemini); }
+    button.btn {
+      font-size: 11px; padding: 4px 9px; border-radius: 6px; cursor: pointer;
+      border: 1px solid var(--line); background: #20242c; color: var(--text);
+    }
+    button.btn:hover { background: #2a2f38; }
+    #feed { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .empty { color: var(--muted); text-align: center; margin-top: 40px; font-size: 12px; }
+    .bubble {
+      max-width: 82%; border-radius: 12px; padding: 8px 11px; border: 1px solid var(--line);
+      background: var(--panel); position: relative; white-space: pre-wrap; word-break: break-word; line-height: 1.42;
+    }
+    .bubble .who { font-weight: 700; font-size: 11px; margin-bottom: 3px; display: flex; gap: 6px; align-items: baseline; }
+    .bubble .when { font-weight: 400; color: var(--muted); font-size: 10px; }
+    /* Per-LLM colouring: left border + tinted background + coloured name. */
+    .b-chatgpt { align-self: flex-start; border-left: 4px solid var(--chatgpt); background: rgba(16,163,127,.10); }
+    .b-chatgpt .who { color: var(--chatgpt); }
+    .b-claude  { align-self: flex-start; border-left: 4px solid var(--claude); background: rgba(217,129,79,.12); }
+    .b-claude .who { color: var(--claude); }
+    .b-gemini  { align-self: flex-end; border-right: 4px solid var(--gemini); border-left: none; background: rgba(66,133,244,.12); }
+    .b-gemini .who { color: var(--gemini); }
+    .b-user    { align-self: center; max-width: 90%; border: 1px dashed #3a3f48; background: #14161b; color: var(--muted); font-size: 12px; }
+    .b-user .who { color: var(--user); }
+    .count { color: var(--muted); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header>
+    <b>💬 AI Conversation</b>
+    <span class="count" id="count"></span>
+    <span class="spacer"></span>
+    <div class="filters" id="filters">
+      <span class="chip on" data-site="chatgpt">ChatGPT</span>
+      <span class="chip on" data-site="claude">Claude</span>
+      <span class="chip on" data-site="gemini">Gemini</span>
+    </div>
+    <button class="btn" id="btn-clear" title="Clear this window (doesn't affect the conversation)">Clear</button>
+    <button class="btn" id="btn-autoscroll" title="Follow new messages">Auto-scroll: on</button>
+  </header>
+  <div id="feed"><div class="empty" id="empty">Waiting for the AIs… messages will appear here as bubbles, coloured by who's talking.</div></div>
+  <script src="feed.js"></script>
+</body>
+</html>

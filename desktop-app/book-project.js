@@ -135,7 +135,9 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
     b.workflow.outputs[outKey] = { file: rel, target: target || null, ts: _now(), chars: body.length };
     b.log.push({ ts: _now(), text: `✓ step ${(index || 0) + 1} (${label || stepId}) output saved from ${target || '?'} → ${rel}` });
     // Rule 36/37 — the filled-out content must ALSO exist as a downloadable PDF,
-    // named per the protocol. That PDF is what the completion gate looks for.
+    // named per the protocol. That PDF is the completion signal: the runner only
+    // advances once this file is confirmed on disk.
+    let pdfRel = null;
     try {
       if (stepId === 'write' && chapterId) {
         const ch = b.chapters.find((c) => c.id === chapterId);
@@ -144,11 +146,11 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
           title: `${chapterId}${ch && ch.title ? ' — ' + ch.title : ''}`, name: `Chapter ${_chNum(chapterId)}`,
           text: body, source: 'generated',
         });
-        if (ch) ch.pdf = pdf.rel;
+        if (ch) ch.pdf = pdf.rel; pdfRel = pdf.rel;
       } else {
         const nm = STEP_LABEL[stepId] || label || stepId || 'Document';
         const pdf = _writeDeliverablePdf(b, dir, { kind: 'template', name: nm, title: nm, text: body, source: 'generated' });
-        b.workflow.outputs[outKey].pdf = pdf.rel;
+        b.workflow.outputs[outKey].pdf = pdf.rel; pdfRel = pdf.rel;
       }
     } catch (e) { b.log.push({ ts: _now(), text: `⚠ could not create PDF for step ${(index || 0) + 1}: ${String(e).slice(0, 120)}` }); }
     // The write step's output is the chapter's manuscript — file it there too,
@@ -163,7 +165,9 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
         b.log.push({ ts: _now(), text: `${chapterId} manuscript updated from the Write step (${body.length} chars)` });
       }
     }
-    return { file: rel };
+    // Confirm the PDF is really on disk (the "check from the download" step).
+    const pdfExists = !!(pdfRel && fs.existsSync(path.join(dir, pdfRel)));
+    return { file: rel, pdf: pdfRel, pdfExists };
   });
 }
 
