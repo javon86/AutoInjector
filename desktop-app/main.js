@@ -36,12 +36,33 @@ const fileDownloader = require("./file-downloader");
 const outputManager = require("./output-manager");
 const bookProject = require("./book-project");
 const bookPrompts = require("./book-prompts");
+const bookRules = require("./book-rules");
+const secretStore = require("./secret-store");
+// AI-001: the manager API key is persisted only as sealed ciphertext. seal
+// replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
+// restore and migrates any legacy plaintext key.
+function sealManagerConfig(cfg) {
+  const out = { ...(cfg || {}) };
+  const enc = secretStore.seal(out.apiKey);
+  delete out.apiKey;
+  if (enc) out.apiKeyEnc = enc; else delete out.apiKeyEnc;
+  return out;
+}
+function openManagerConfig(cfg) {
+  const out = { ...(cfg || {}) };
+  if (out.apiKeyEnc) { out.apiKey = secretStore.open(out.apiKeyEnc); delete out.apiKeyEnc; }
+  else if (!("apiKey" in out)) out.apiKey = "";
+  return out;
+}
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
-const POLL_MS = 1500;
-const STABLE_MS = 1800;
+// Timing is env-overridable so the integration harness can run the exact same
+// logic on a fast, internally-consistent clock (QA-001) — production defaults
+// are unchanged.
+const POLL_MS = Number(process.env.AUTOINJECTOR_POLL_MS) || 1500;
+const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
 const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
@@ -56,15 +77,15 @@ const STAGE_MODES = new Set(HOUSE_RULES);
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "blind-round"]);
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
-const SAVE_DEBOUNCE_MS = 500;
+const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
 const TEXT_PREVIEW_SIZE_CAP = 500 * 1024; // 500KB
 const SEND_RETRY_ATTEMPTS = 3; // real-world evidence: a cold/still-settling pane's very first send often fails confirmation, then succeeds immediately on retry -- this catches that automatically instead of surfacing a false failure
-const SEND_RETRY_BACKOFF_MS = 1500;
-const SELFTEST_TIMEOUT_MS = 45000;
-const SELFTEST_POLL_MS = 500;
+const SEND_RETRY_BACKOFF_MS = Number(process.env.AUTOINJECTOR_RETRY_BACKOFF_MS) || 1500;
+const SELFTEST_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_SELFTEST_TIMEOUT_MS) || 45000;
+const SELFTEST_POLL_MS = Number(process.env.AUTOINJECTOR_SELFTEST_POLL_MS) || 500;
 
 // Rate-limit/usage-cap replies are short by nature ("You've reached your
 // usage limit...") — gating on length before pattern-matching keeps this
@@ -481,7 +502,7 @@ function saveStateDebounced() {
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
-        managerConfig: state.managerConfig, // the live task itself (state.manager) is deliberately NOT persisted -- same reasoning as House Rules, below
+        managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -549,7 +570,7 @@ function loadPersistedState() {
     state.nextLoginId = maxId + 1;
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
-    state.managerConfig = { ...state.managerConfig, ...snap.managerConfig };
+    state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
     state.manager.currentTier = state.managerConfig.tier;
     state.manager.maximumTurns = state.managerConfig.maximumTurns;
     state.manager.costLimit = state.managerConfig.costLimit;
@@ -678,7 +699,7 @@ function createWindow() {
   win.on("resize", () => { layout(); syncPaneBounds(); });
   win.on("closed", () => { win = null; });
 
-  setInterval(() => { for (const site of SITE_IDS) pollSite(site); }, POLL_MS);
+  setInterval(() => { for (const site of SITE_IDS) pollSite(site); bookRunWatchdog(); }, POLL_MS);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -821,6 +842,41 @@ function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
 function broadcastToWizard(channel, payload) {
   try { if (wizardView && wizardView.webContents && !wizardView.webContents.isDestroyed()) wizardView.webContents.send(channel, payload); } catch (_) {}
 }
+
+// --- Consolidated AI feed window --------------------------------------------
+// A separate pop-up that shows every AI reply as a colour-coded bubble per LLM.
+// It registers its view in uiViews so the normal broadcast() (capture / sent /
+// book-runner) fans out to it live; on close we splice it back out.
+let feedWin = null;
+let feedView = null;
+function openFeedWindow() {
+  if (feedWin && feedView) { feedWin.focus(); return; }
+  feedWin = new BaseWindow({ width: 560, height: 760, resizable: true, title: "AutoInjector — AI Conversation" });
+  feedView = new WebContentsView({
+    webPreferences: {
+      partition: "feed-ui",
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  feedWin.contentView.addChildView(feedView);
+  feedView.webContents.loadFile(path.join(__dirname, "feed.html"));
+  const layoutFeed = () => {
+    if (!feedWin || !feedView) return;
+    const [w, h] = feedWin.getContentSize();
+    feedView.setBounds({ x: 0, y: 0, width: w, height: h });
+  };
+  layoutFeed();
+  feedWin.on("resize", layoutFeed);
+  uiViews.push(feedView); // so broadcast() reaches the feed too
+  feedWin.on("closed", () => {
+    const i = uiViews.indexOf(feedView);
+    if (i >= 0) uiViews.splice(i, 1);
+    feedWin = null; feedView = null;
+  });
+}
+function closeFeedWindow() { if (feedWin) feedWin.close(); }
 
 function routingSnapshot() {
   const out = {};
@@ -1377,6 +1433,221 @@ async function handleSequenceCapture(turn) {
   }
   seq.index++;
   await sendSequenceStep();
+}
+
+// --- Book Studio auto-runner ------------------------------------------------
+// Drives the guided ATELIER "Make Book" sequence on its own. It uses the exact
+// completion signal Prompt Sequence uses: a stable capture from a step's target
+// pane means that AI finished its output. The moment that lands, we SAVE the
+// output into the book (a real file — see bookProject.recordStepOutput) and
+// advance to the next step, so the workflow moves forward without a "Continue"
+// click. Two things it deliberately does NOT auto-advance on: a "ask-user" step
+// (the intake questionnaire — its output is questions FOR you, so it waits until
+// you answer and press Continue), and a paused/stopped run. Lives in main (not
+// the renderer) because captured replies and sendTextTo already live here. The
+// live run isn't persisted across a restart — like House Rules and the manager,
+// a relaunch never silently resumes sending; the book's saved step position is
+// restored as paused so you resume deliberately.
+const BOOK_STEP_TIMEOUT_MS = 6 * 60 * 1000; // no reply this long → park the run as "stalled" so you're never left staring at "running"
+function resetBookRun() {
+  state.bookRun = {
+    active: false, bookId: null, chapterId: null,
+    step: -1, stepId: null, label: "", total: bookPrompts.WORKFLOW.length,
+    target: null, kind: null,
+    status: "idle", // idle | awaiting-user | waiting-reply | paused | stalled | done | error
+    sentTs: 0, sentText: "", generation: 0, dispatchGen: {}
+  };
+}
+resetBookRun();
+
+function bookRunSnapshot() {
+  const r = state.bookRun;
+  return {
+    active: r.active, bookId: r.bookId, chapterId: r.chapterId,
+    step: r.step, stepId: r.stepId, label: r.label, total: r.total,
+    target: r.target, kind: r.kind, status: r.status,
+    awaitingUser: r.status === "awaiting-user",
+    sinceMs: r.sentTs ? Date.now() - r.sentTs : 0
+  };
+}
+function broadcastBookRun() { broadcast("book-runner", bookRunSnapshot()); }
+
+// Is a given AI pane actually up and readable (view exists, not destroyed,
+// finished loading, read script runs)? Backs the "Check AI" button and the
+// pre-run readiness line, so you know the panes are ready before anything is
+// sent — the whole point of "make sure the AI stuff is up and running".
+async function bookPaneReady(site) {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ready: false, reason: "pane not open" };
+  try {
+    if (view.webContents.isLoading && view.webContents.isLoading()) return { ready: false, reason: "still loading" };
+    const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
+    return (res && res.ok) ? { ready: true, reason: "ready" } : { ready: false, reason: "not responding" };
+  } catch (_) { return { ready: false, reason: "not responding" }; }
+}
+async function bookAiStatus() {
+  const out = {};
+  for (const site of SITE_IDS) out[site] = await bookPaneReady(site);
+  out.allReady = SITE_IDS.every((s) => out[s] && out[s].ready);
+  return out;
+}
+
+// Compose + dispatch one workflow step. Persists the position into the book,
+// advances its stage, arms the completion watcher, and best-effort sends the
+// prompt to the right pane. A not-ready pane never throws the run — readiness is
+// reported separately; the reply (when it lands) is what advances an ai step.
+async function dispatchBookStep(index) {
+  const r = state.bookRun;
+  const p = bookProject.get(r.bookId);
+  if (!p) { r.status = "error"; r.active = false; broadcastBookRun(); return { ok: false, error: "no such book" }; }
+  const composed = bookPrompts.composeStep(index, _bookCtx(p, r.chapterId));
+  if (!composed) {
+    r.status = "done"; r.active = false; r.step = r.total;
+    bookProject.setWorkflow(r.bookId, { status: "done" }, "✓ Make Book workflow reached the end — every step's output is saved in the book");
+    broadcastBookRun();
+    return { ok: true, done: true, status: "done" };
+  }
+  r.step = index; r.stepId = composed.id; r.label = composed.label;
+  r.target = composed.target; r.kind = composed.kind;
+  r.generation++; r.dispatchGen = { [composed.target]: r.generation };
+  r.sentText = composed.text; r.sentTs = Date.now();
+  r.status = composed.kind === "ask-user" ? "awaiting-user" : "waiting-reply";
+  bookProject.setWorkflow(r.bookId, { status: "running", step: index },
+    `▶ step ${index + 1}/${r.total}: ${composed.label} → ${SITES[composed.target] ? SITES[composed.target].label : composed.target}`);
+  // The workflow is the authoritative stage driver (ChatGPT owns stage
+  // progression), so it may set the step's stage directly (BG-004 override).
+  bookProject.setStage(r.bookId, composed.stage, { override: true, reason: "workflow step" });
+  broadcastBookRun();
+  sendTextTo(composed.target, composed.text, null, { raw: true }).catch((e) => logEvent("book-send-error", { target: composed.target, error: String(e) }));
+  return { ok: true, ...composed, status: r.status };
+}
+
+// Send the 3-AI Rules of Conduct ("their bible") to all three panes. Done once
+// automatically at the start of a run so every AI operates by the same protocol,
+// and available on demand via the "Send Rules" button if a pane forgets it. It's
+// a plain message send (best-effort per pane) and it's logged into the book.
+async function sendBookRules(bookId) {
+  const msg = bookRules.composeRulesMessage();
+  // Log the intent immediately, then fire the three sends in the background —
+  // never block the workflow (or the button) on a slow/not-logged-in pane. Each
+  // send still queues per-pane, so on ChatGPT the rules land before the intake.
+  try { if (bookId) bookProject.appendLog(bookId, `📜 sent the Rules of Conduct (${bookRules.RULES_VERSION}) to all three AIs — their bible for this book`); } catch (_) {}
+  logEvent("book-rules-sent", { bookId: bookId || null, chars: msg.length });
+  for (const t of SITE_IDS) sendTextTo(t, msg, null, { raw: true }).catch((e) => logEvent("book-rules-send-error", { target: t, error: String(e) }));
+  return { ok: true };
+}
+
+async function bookRunStart(bookId, chapterId) {
+  const p = bookProject.get(bookId);
+  if (!p) return { ok: false, error: "no such book" };
+  resetBookRun();
+  const r = state.bookRun;
+  r.active = true; r.bookId = bookId;
+  r.chapterId = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
+  logEvent("book-run-start", { bookId, chapterId: r.chapterId });
+  // The bible goes out first, before the intake questionnaire — so the AIs are
+  // governed by the protocol from the very first step. Sent once per run.
+  await sendBookRules(bookId);
+  r.rulesSent = true;
+  const first = await dispatchBookStep(0);
+  return { ok: true, snapshot: bookRunSnapshot(), first };
+}
+
+// Manual advance — the button for an ask-user step ("I've answered, continue")
+// and a "skip ahead" override on any step. If no live run (e.g. after a
+// restart), pick up from the book's saved position + 1.
+async function bookRunContinue(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) return { ok: true, res: await dispatchBookStep(r.step + 1), snapshot: bookRunSnapshot() };
+  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
+  resetBookRun();
+  state.bookRun.active = true; state.bookRun.bookId = bookId;
+  state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
+  const next = ((p.workflow && p.workflow.step) || 0) + 1;
+  return { ok: true, res: await dispatchBookStep(next), snapshot: bookRunSnapshot() };
+}
+
+function bookRunPause(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) { r.status = "paused"; broadcastBookRun(); }
+  return bookProject.setWorkflow(bookId, { status: "paused" }, "⏸ workflow paused");
+}
+// Resume: re-arm the step it's on and re-send it (a reply that arrived while
+// paused was ignored, so re-sending gets a fresh one to advance on). Works both
+// for a live paused run and for one restored from disk after a restart.
+async function bookRunResume(bookId) {
+  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
+  const r = state.bookRun;
+  if (!r.active || r.bookId !== bookId) {
+    resetBookRun();
+    state.bookRun.active = true; state.bookRun.bookId = bookId;
+    state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
+    return { ok: true, res: await dispatchBookStep((p.workflow && p.workflow.step) || 0), snapshot: bookRunSnapshot() };
+  }
+  return { ok: true, res: await dispatchBookStep(r.step), snapshot: bookRunSnapshot() };
+}
+function bookRunStop(bookId) {
+  const r = state.bookRun;
+  if (r.active && r.bookId === bookId) resetBookRun();
+  return bookProject.setWorkflow(bookId, { status: "idle", step: 0 }, "⏹ workflow stopped");
+}
+
+// Called from pollSite on every stable capture. If it's the reply the current
+// ai-step was waiting on, save the output into the book and advance.
+async function handleBookRunCapture(turn) {
+  const r = state.bookRun;
+  if (!r.active || r.status !== "waiting-reply") return;
+  if (turn.site !== r.target) return;
+  if (r.dispatchGen[turn.site] !== r.generation) return; // stale reply from a step we've already moved past
+  if (turn.ts < r.sentTs) return;
+  if (looksLikeEcho(turn.text, r.sentText)) return; // our own prompt echoed back, not a real reply
+  // Save the reply AND generate this section's PDF. The PDF being confirmed on
+  // disk is the "done" signal — only then do we advance and send the next step.
+  let res = null;
+  try {
+    res = bookProject.recordStepOutput(r.bookId, {
+      index: r.step, stepId: r.stepId, target: r.target, label: r.label,
+      text: turn.text, chapterId: r.chapterId, sourceTurnId: turn.id
+    });
+  } catch (e) { logEvent("book-step-save-error", { error: String(e) }); }
+  // BG-003/BG-008: governance held this output (authority refused or the toolkit
+  // went away for a governed book) — fail closed, don't advance.
+  if (res && res.held) {
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⛔ step ${r.step + 1} held by governance: ${String(res.reason || "unauthorized").slice(0, 120)} — paused`);
+    logEvent("book-step-held", { bookId: r.bookId, step: r.step, reason: res.reason });
+    broadcastBookRun();
+    return;
+  }
+  const pdfReady = !!(res && res.ok && res.pdfExists);
+  if (!pdfReady) {
+    // No confirmed PDF -> section isn't officially complete (Rule 38). Park the
+    // run so the user can see it rather than advancing on an unfiled section.
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⏳ step ${r.step + 1} replied but its PDF wasn't filed — paused (press Resume to retry)`);
+    logEvent("book-step-no-pdf", { bookId: r.bookId, step: r.step, stepId: r.stepId });
+    broadcastBookRun();
+    return;
+  }
+  bookProject.appendLog(r.bookId, `✅ section ${r.step + 1}/${r.total} complete — PDF filed (${(res.pdf || "").split(/[\\/]/).pop()}). Moving to the next section.`);
+  logEvent("book-step-complete", { bookId: r.bookId, step: r.step, stepId: r.stepId, target: r.target, chars: turn.text.length, pdf: res.pdf });
+  await dispatchBookStep(r.step + 1);
+}
+
+// Watchdog (ticked from the poll loop): if the pane we're waiting on has gone
+// quiet too long, park the run as stalled so the UI stops implying progress.
+function bookRunWatchdog() {
+  const r = state.bookRun;
+  if (!r.active || r.status !== "waiting-reply") return;
+  if (Date.now() - r.sentTs > BOOK_STEP_TIMEOUT_MS) {
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⏳ no reply from ${SITES[r.target] ? SITES[r.target].label : r.target} for step ${r.step + 1} — paused (check the pane, then Resume/Continue)`);
+    logEvent("book-step-stalled", { bookId: r.bookId, step: r.step, target: r.target });
+    broadcastBookRun();
+  }
 }
 
 // --- Manager/orchestrator: the supervisory loop over a managed task --------
@@ -2118,6 +2389,11 @@ async function pollSite(site) {
     logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
 
+    // Book Studio auto-runner: if this reply is the output the current book
+    // workflow step was waiting on, save it and advance. Orthogonal to routing,
+    // so it runs regardless of governance holds/tags below.
+    try { await handleBookRunCapture(turn); } catch (e) { logEvent("book-run-error", { error: String(e) }); }
+
     if (state.waiting[site]) {
       state.waiting[site] = false;
       state.waitingSince[site] = null;
@@ -2385,6 +2661,18 @@ ipcMain.handle("external:open", (_evt, url) => {
 });
 ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
+// Consolidated AI feed window: open/close + backfill recent AI messages so the
+// window shows history, not a blank, when reopened.
+ipcMain.handle("feed:open", () => { openFeedWindow(); return { ok: true }; });
+ipcMain.handle("feed-window:close", () => { closeFeedWindow(); return { ok: true }; });
+ipcMain.handle("feed:history", () => {
+  try {
+    return state.transcript
+      .filter((t) => t && SITES[t.site]) // only the three AI panes (skip system/verdict rows)
+      .slice(-120)
+      .map((t) => ({ id: t.id, site: t.site, label: t.label, text: t.text, ts: t.ts }));
+  } catch (_) { return []; }
+});
 // Hardware scan + a machine-matched catalog for the wizard to render.
 ipcMain.handle("wizard:catalog", async () => {
   try {
@@ -2420,21 +2708,22 @@ ipcMain.handle("downloads:clear-finished", () => { downloadManager.clearFinished
 ipcMain.handle("book:list", () => { try { return { ok: true, projects: bookProject.list() }; } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:create", (_e, title) => { try { return bookProject.create(title); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:get", (_e, id) => { try { const p = bookProject.get(id); return p ? { ok: true, project: p } : { ok: false, error: "no such book" }; } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-stage", (_e, { id, stage }) => { try { return bookProject.setStage(id, stage); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-stage", (_e, { id, stage, override, reason }) => { try { return bookProject.setStage(id, stage, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:add-chapter", (_e, { id, title }) => { try { return bookProject.addChapter(id, title); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status }) => { try { return bookProject.setChapterStatus(id, chapterId, status); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status, override, reason }) => { try { return bookProject.setChapterStatus(id, chapterId, status, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:add-record", (_e, { id, type, name, content }) => { try { return bookProject.addRecord(id, type, name, content); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:read-record", (_e, { id, recordId }) => { try { return bookProject.readRecord(id, recordId); } catch (e) { return { ok: false, error: String(e) }; } });
+// BG-005: edit/save a record's content (and save a captured reply as a record).
+ipcMain.handle("book:set-record", (_e, { id, recordId, content }) => { try { return bookProject.setRecordContent(id, recordId, content); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:log", (_e, { id, text }) => { try { return bookProject.appendLog(id, text); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:open-folder", (_e, id) => { try { const p = bookProject.get(id); if (p && shell) shell.openPath(p.dir); return { ok: !!p }; } catch (e) { return { ok: false, error: String(e) }; } });
 // Compose the role/task prompt for a task (the renderer sends it to the pane).
 ipcMain.handle("book:task", (_e, { id, taskId, chapterId }) => {
   try {
     const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    const d = bookPrompts.digest(p);
     const composed = bookPrompts.composeTask(taskId, {
       title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
-      chapter: chapterId || undefined, recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+      chapter: chapterId || undefined, recordsDigest: _bookContextDigest(p, chapterId),
     });
     return composed ? { ok: true, ...composed } : { ok: false, error: "unknown task" };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -2444,42 +2733,106 @@ ipcMain.handle("book:brief", (_e, id) => {
   try { const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" }; return { ok: true, briefs: bookPrompts.composeBriefAll(p) }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
+// BG-006: build a BOUNDED authoritative context packet — not just record IDs
+// and names, but their actual bodies (capped to a char budget), plus the current
+// chapter's text, so the AI works from real records instead of guessing. This is
+// what "use the authoritative records" is supposed to mean.
+function _bookContextDigest(p, chapterId, budget) {
+  const d = bookPrompts.digest(p);
+  let out = `chapters: ${d.chapters}; records: ${d.records}\n`;
+  let left = budget || 6000;
+  const add = (label, content) => {
+    if (left <= 0 || !content) return;
+    const excerpt = String(content).trim().slice(0, Math.min(left, 1200));
+    out += `\n--- ${label} ---\n${excerpt}${content.length > excerpt.length ? '\n…(truncated)…' : ''}\n`;
+    left -= excerpt.length;
+  };
+  try {
+    const cur = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
+    if (cur) { const r = bookProject.readRecord(p.id, cur); if (r && r.ok) add(`CHAPTER ${cur}${r.name ? ' — ' + r.name : ''}`, r.content); }
+    for (const rec of (p.records || [])) {
+      if (left <= 0) { out += `\n…(more records omitted — context budget reached)…\n`; break; }
+      const r = bookProject.readRecord(p.id, rec.id); if (r && r.ok) add(`${rec.id}${rec.name ? ' — ' + rec.name : ''}`, r.content);
+    }
+  } catch (_) {}
+  return out;
+}
+
 // --- Guided "Make Book" workflow runner (Start / Next / Pause / Resume / Stop) ---
 function _bookCtx(p, chapterId) {
-  const d = bookPrompts.digest(p);
   return {
     title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
     chapter: chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : undefined),
-    recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+    recordsDigest: _bookContextDigest(p, chapterId),
   };
 }
-ipcMain.handle("book:workflow-start", (_e, { id, chapterId }) => {
+// The runner now drives itself: Start dispatches step 0 and, from there,
+// auto-advances each time a step's target AI produces its output (see
+// handleBookRunCapture). The renderer just reflects the "book-runner" broadcast.
+ipcMain.handle("book:workflow-start", async (_e, { id, chapterId }) => {
+  try { return await bookRunStart(id, chapterId); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-next", async (_e, { id }) => {
+  try { return await bookRunContinue(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:workflow-set-status", async (_e, { id, status }) => {
   try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    bookProject.setWorkflow(id, { status: "running", step: 0 }, "▶ started Make Book workflow");
-    const composed = bookPrompts.composeStep(0, _bookCtx(p, chapterId));
-    if (!composed) return { ok: false, error: "no workflow steps" };
-    bookProject.setStage(id, composed.stage);
-    return { ok: true, ...composed, status: "running" };
+    if (status === "paused") return bookRunPause(id);
+    if (status === "running") return await bookRunResume(id);
+    if (status === "idle") return bookRunStop(id);
+    return { ok: false, error: "unknown status" };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("book:workflow-next", (_e, { id, chapterId }) => {
+// Send the Rules of Conduct ("their bible") to all three panes on demand — the
+// "Send Rules" button, for when a pane forgets. (Also sent automatically at the
+// start of every run.)
+ipcMain.handle("book:send-rules", async (_e, { id } = {}) => {
+  try { return await sendBookRules(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Readiness of the three AI panes ("make sure the AI stuff is up and running").
+ipcMain.handle("book:ai-status", async () => {
+  try { return { ok: true, status: await bookAiStatus() }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+// The live runner snapshot (finer-grained than the persisted book.json status).
+ipcMain.handle("book:runner-status", () => {
+  try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// --- Book PDFs (completion gate, Rules of Conduct §36–39) -------------------
+// The gate: which of a book's deliverables have a downloadable PDF yet.
+ipcMain.handle("book:pdf-gate", (_e, id) => {
+  try { return { ok: true, gate: bookProject.pdfGate(id), pdfs: bookProject.listPdfs(id) }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Make PDFs for everything the book currently holds (chapters + step outputs).
+ipcMain.handle("book:generate-pdfs", (_e, id) => {
+  try { return bookProject.generateAllPdfs(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Find PDFs the user downloaded (from the AI) and pull this book's into it.
+ipcMain.handle("book:scan-pdfs", (_e, id) => {
   try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    const next = ((p.workflow && p.workflow.step) || 0) + 1;
-    const composed = bookPrompts.composeStep(next, _bookCtx(p, chapterId));
-    if (!composed) { bookProject.setWorkflow(id, { status: "done" }, "✓ workflow reached the end"); return { ok: true, done: true, status: "done" }; }
-    bookProject.setWorkflow(id, { status: "running", step: next });
-    bookProject.setStage(id, composed.stage);
-    return { ok: true, ...composed, status: "running" };
+    const dirs = [];
+    try { dirs.push(outputManager.uploadsDir()); } catch (_) {}
+    try { const r = outputManager.root(); if (r) dirs.push(require("path").join(r, "aiwork")); } catch (_) {}
+    try { if (app && app.getPath) dirs.push(app.getPath("downloads")); } catch (_) {}
+    return bookProject.scanPdfs(id, dirs);
   } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("book:workflow-set-status", (_e, { id, status }) => {
-  try {
-    const note = status === "paused" ? "⏸ workflow paused" : status === "running" ? "▶ workflow resumed" : status === "idle" ? "⏹ workflow stopped" : null;
-    const patch = status === "idle" ? { status: "idle", step: 0 } : { status };
-    return bookProject.setWorkflow(id, patch, note);
-  } catch (e) { return { ok: false, error: String(e) }; }
+// Open a specific PDF (relative path within the book) or the book's pdfs/ folder.
+ipcMain.handle("book:open-pdf", (_e, { id, file }) => {
+  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; shell.openPath(require("path").join(p.dir, file)); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("book:open-pdfs-folder", (_e, id) => {
+  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; const d = require("path").join(p.dir, bookProject.PDF_DIR); try { require("fs").mkdirSync(d, { recursive: true }); } catch (_) {} shell.openPath(d); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+// BG-007: strict manuscript assembly for a governed book (final Build step).
+ipcMain.handle("book:assemble", (_e, id) => {
+  try { return bookProject.assembleManuscript(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Whether governed (ATELIER v2) mode is available on this machine.
+ipcMain.handle("book:governed-available", () => {
+  try { return { ok: true, available: bookProject.governedAvailable() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
@@ -3251,6 +3604,22 @@ ipcMain.handle("manager:configure-provider", (_evt, config) => {
   const allowedProviders = new Set(["runpod-serverless", "runpod-pod", "openai-compatible"]);
   if (config.provider && !allowedProviders.has(config.provider)) return { ok: false, error: "BAD_PROVIDER" };
   if (config.tier != null && (!Number.isInteger(config.tier) || config.tier < 1 || config.tier > 4)) return { ok: false, error: "BAD_TIER" };
+  // AI-003: validate endpoints, timeouts, turn/cost limits, and the adjudicator
+  // BEFORE saving, so bad values can't produce instant timeouts, ineffective
+  // safeguards, or a key sent in the clear to a remote host.
+  if (config.timeoutMs != null && (!Number.isFinite(config.timeoutMs) || config.timeoutMs < 1000 || config.timeoutMs > 600000)) return { ok: false, error: "BAD_TIMEOUT" };
+  if (config.maximumTurns != null && (!Number.isInteger(config.maximumTurns) || config.maximumTurns < 1 || config.maximumTurns > 1000)) return { ok: false, error: "BAD_MAX_TURNS" };
+  if (config.costLimit != null && (!Number.isFinite(config.costLimit) || config.costLimit < 0)) return { ok: false, error: "BAD_COST_LIMIT" };
+  if (config.adjudicatorSite != null && config.adjudicatorSite !== "" && !SITES[config.adjudicatorSite]) return { ok: false, error: "BAD_ADJUDICATOR" };
+  if (config.endpoint != null && config.endpoint !== "") {
+    let url;
+    try { url = new URL(config.endpoint); } catch (_) { return { ok: false, error: "BAD_ENDPOINT" }; }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return { ok: false, error: "BAD_ENDPOINT" };
+    const isLocal = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1";
+    // A key going to a non-local host must go over HTTPS (no plaintext secrets).
+    const keyPresent = config.apiKey !== undefined ? !!config.apiKey : !!state.managerConfig.apiKey;
+    if (keyPresent && !isLocal && url.protocol !== "https:") return { ok: false, error: "INSECURE_REMOTE_KEY" };
+  }
   // Only overwrite fields actually present in the payload -- lets the config UI
   // save "just changed the model" without needing to resend the API key.
   const next = { ...state.managerConfig };
@@ -3304,7 +3673,14 @@ app.whenReady().then(() => {
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
-  try { bookProject.init(outputManager.booksDir()); } catch (e) { logEvent("book-init-error", { error: String(e) }); }
+  try {
+    bookProject.init(outputManager.booksDir());
+    // BG-001: make the governed ATELIER project canonical (v2 overrides v1) when
+    // Python 3 is available; New Book then scaffolds the governed tree.
+    const atelierBridge = require("./atelier-bridge");
+    const gov = bookProject.configure({ atelier: atelierBridge });
+    logEvent("book-init", { governed: gov });
+  } catch (e) { logEvent("book-init-error", { error: String(e) }); }
   try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();

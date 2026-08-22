@@ -1323,6 +1323,7 @@ if (el("btn-collapse-bookstudio")) el("btn-collapse-bookstudio").onclick = () =>
 let bookCurrentId = null;
 let bookCurrentChapter = null;
 let bookProject = null;
+let bookRunner = null; // live auto-runner snapshot from the "book-runner" broadcast
 const BOOK_TASKS = [
   { id: "initialize", label: "Initialize" }, { id: "outline", label: "Outline" },
   { id: "bible", label: "Book Bible" }, { id: "roadmap", label: "Roadmap" },
@@ -1352,54 +1353,225 @@ async function bookLoadList(selectId) {
 }
 async function bookSelect(id) {
   bookCurrentId = id || null;
-  if (!id) { bookProject = null; bookRenderAll(); return; }
+  if (!id) { bookProject = null; bookRunner = null; bookRenderAll(); return; }
   const r = await window.api.bookGet(id);
   bookProject = r && r.ok ? r.project : null;
   bookCurrentChapter = bookProject && bookProject.chapters.length ? bookProject.chapters[bookProject.chapters.length - 1].id : null;
+  // Pull the live runner state (finer than the persisted status) + AI readiness.
+  try { const rs = window.api.bookRunnerStatus && await window.api.bookRunnerStatus(); bookRunner = rs && rs.ok ? rs.snapshot : null; } catch (_) { bookRunner = null; }
+  updateBookTally(bookRunner);
   bookRenderAll();
+  bookAiRefresh();
+}
+
+// Show whether the three AI panes are up and readable, so you know the book
+// workflow has something to talk to before you press Start.
+async function bookAiRefresh() {
+  const line = el("book-ai-status"); if (!line || !window.api.bookAiStatus) return;
+  line.textContent = "Checking AI panes…";
+  try {
+    const r = await window.api.bookAiStatus();
+    if (!r || !r.ok) { line.textContent = "AI panes: unknown"; return; }
+    const parts = ["chatgpt", "claude", "gemini"].map((s) => {
+      const st = r.status[s] || {};
+      return `${SITE_LABELS[s] || s} ${st.ready ? "✓" : "✗ (" + (st.reason || "not ready") + ")"}`;
+    });
+    line.textContent = (r.status.allReady ? "AI panes ready — " : "AI panes: ") + parts.join(" · ");
+    line.style.color = r.status.allReady ? "#7fdca0" : "#e0b060";
+  } catch (_) { line.textContent = "AI panes: unknown"; }
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+
+// UI-001: the single guided readiness line — current step → waiting for →
+// captured artifact → gate result → the one next safe action. Composed from the
+// live runner snapshot, the book, and the PDF gate.
+async function bookRenderReadiness() {
+  const set = (id, txt) => { const e = el(id); if (e) e.textContent = txt; };
+  if (!bookCurrentId || !bookProject) {
+    set("rd-step", "—"); set("rd-waiting", "—"); set("rd-artifact", "—"); set("rd-gate", "—");
+    set("rd-next", "Pick or create a book, then press ▶ Start.");
+    return;
+  }
+  const wf = bookProject.workflow || { status: "idle", step: 0 };
+  const live = (bookRunner && bookRunner.active && bookRunner.bookId === bookCurrentId) ? bookRunner : null;
+  const status = live ? live.status : (wf.status === "running" ? "paused" : wf.status);
+  const step = live ? live.step : (wf.step || 0);
+  const total = (live && live.total) || BOOK_WORKFLOW.length;
+  const label = BOOK_WORKFLOW[step] || (live && live.label) || "";
+  const target = live && live.target ? (SITE_LABELS[live.target] || live.target) : null;
+
+  set("rd-step", status === "idle" ? "not started" : status === "done" ? `complete (${total}/${total})` : `${step + 1}/${total} — ${label}`);
+  set("rd-waiting",
+    status === "awaiting-user" ? "you — answer in the ChatGPT pane" :
+    status === "waiting-reply" || status === "running" ? (target || "the AI") :
+    status === "stalled" ? `${target || "a pane"} (no reply yet)` : "—");
+
+  // Latest filed artifact + gate summary from the PDF gate.
+  let artifact = "none yet", gate = "—";
+  try {
+    const r = window.api.bookPdfGate && await window.api.bookPdfGate(bookCurrentId);
+    if (r && r.ok) {
+      gate = `${r.gate.present}/${r.gate.total} filed`;
+      const pdfs = (r.pdfs || []).filter((p) => p.exists);
+      if (pdfs.length) artifact = (pdfs[pdfs.length - 1].file || "").split(/[\\/]/).pop();
+    }
+  } catch (_) {}
+  set("rd-artifact", artifact); set("rd-gate", gate);
+
+  set("rd-next",
+    status === "idle" ? "Press ▶ Start Making Book (ChatGPT sends the intake questionnaire)." :
+    status === "done" ? "Done — press ▶ Start to run again, or 📖 Build Manuscript." :
+    status === "awaiting-user" ? "Answer ChatGPT's questions in its pane, then press ✓ I've answered — Continue." :
+    status === "paused" ? "Press ▶ Resume to continue where you left off." :
+    status === "stalled" ? `Check ${target || "the pane"} is signed in (and its PDF filed), then ▶ Resume.` :
+    `Working on its own — advances when ${target || "the AI"} finishes its output. ⏸ Pause anytime.`);
+}
+
+// The PDF completion gate — which deliverables have a downloadable PDF yet.
+async function bookRenderPdfGate() {
+  const box = el("book-pdf-gate"); if (!box) return;
+  if (!bookCurrentId || !window.api.bookPdfGate) { box.innerHTML = ""; const c = el("book-pdf-count"); if (c) c.textContent = ""; return; }
+  const r = await window.api.bookPdfGate(bookCurrentId);
+  box.innerHTML = "";
+  const gate = r && r.ok ? r.gate : { items: [], present: 0, total: 0 };
+  const cnt = el("book-pdf-count"); if (cnt) cnt.textContent = gate.total ? `(${gate.present}/${gate.total} have a PDF)` : "(nothing to file yet)";
+  if (!gate.items.length) { box.innerHTML = '<span style="opacity:.6;">No deliverables yet — start the book or add a chapter, and each finished step files a PDF here.</span>'; return; }
+  for (const it of gate.items) {
+    const row = document.createElement("div");
+    row.className = "btns"; row.style.alignItems = "center"; row.style.gap = "5px";
+    const dot = document.createElement("span");
+    dot.textContent = it.present ? "✓" : "⏳";
+    dot.style.color = it.present ? "#7fdca0" : "#e0b060";
+    dot.title = it.present ? "PDF is on file — this deliverable counts as complete" : "Waiting on a PDF — not complete yet";
+    const label = document.createElement("span");
+    label.textContent = `${it.type}: ${it.label}`;
+    label.style.flex = "1 1 auto"; label.style.overflow = "hidden"; label.style.textOverflow = "ellipsis"; label.style.whiteSpace = "nowrap";
+    if (!it.present) label.style.opacity = ".7";
+    row.appendChild(dot); row.appendChild(label);
+    if (it.present && it.file) {
+      const open = document.createElement("button");
+      open.textContent = "open"; open.style.flex = "0 0 auto";
+      open.onclick = () => window.api.bookOpenPdf(bookCurrentId, it.file);
+      row.appendChild(open);
+    }
+    box.appendChild(row);
+  }
+}
+if (el("btn-book-make-pdfs")) el("btn-book-make-pdfs").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Making PDFs of this book's deliverables…");
+  const r = await window.api.bookGeneratePdfs(bookCurrentId);
+  setStatus(r && r.ok ? `Made ${r.made} PDF${r.made === 1 ? "" : "s"}.` : `Couldn't make PDFs: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+if (el("btn-book-find-pdfs")) el("btn-book-find-pdfs").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Looking for PDFs you downloaded…");
+  const r = await window.api.bookScanPdfs(bookCurrentId);
+  if (r && r.ok) setStatus(r.imported.length ? `Found & imported ${r.imported.length} PDF${r.imported.length === 1 ? "" : "s"} for this book.` : `Scanned ${r.found.length} PDF${r.found.length === 1 ? "" : "s"} — none matched this book's title.`);
+  else setStatus(`Couldn't scan: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+if (el("btn-book-open-pdfs")) el("btn-book-open-pdfs").onclick = () => { if (bookCurrentId) window.api.bookOpenPdfsFolder(bookCurrentId); };
+if (el("btn-book-assemble")) el("btn-book-assemble").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Building the manuscript (strict ATELIER assembly)…");
+  const r = await window.api.bookAssemble(bookCurrentId);
+  setStatus(r && r.ok ? "Manuscript built → 07_BUILD/manuscript.md" : `Build failed: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+// Show whether this book is governed (ATELIER v2) or a V1 flat project, and
+// only offer strict assembly for governed books.
+function bookRenderGovernedBadge() {
+  const badge = el("book-governed-badge"); if (!badge) return;
+  const gov = !!(bookProject && bookProject.governed);
+  badge.textContent = bookProject ? (gov ? "🛡 Governed (ATELIER v2)" : "V1 project — governance off") : "";
+  badge.style.color = gov ? "#7fdca0" : "#9aa1ac";
+  const asm = el("btn-book-assemble"); if (asm) asm.style.display = gov ? "" : "none";
+}
 
 function bookRenderWorkflow() {
   const wf = (bookProject && bookProject.workflow) ? bookProject.workflow : { status: "idle", step: 0 };
   const has = !!bookCurrentId;
-  const running = wf.status === "running", paused = wf.status === "paused", done = wf.status === "done";
+  // The live auto-runner is the source of truth while it's active on THIS book;
+  // otherwise fall back to the book's saved position. A persisted "running" with
+  // no live runner (e.g. after an app restart) is really paused — nothing is
+  // actually sending — so present it that way.
+  const live = (bookRunner && bookRunner.active && bookRunner.bookId === bookCurrentId) ? bookRunner : null;
+  const status = live ? live.status : (wf.status === "running" ? "paused" : wf.status);
+  const step = live ? live.step : (wf.step || 0);
+  const running = status === "running" || status === "waiting-reply" || status === "awaiting-user";
+  const paused = status === "paused" || status === "stalled";
+  const done = status === "done";
+  const awaitingUser = status === "awaiting-user";
   const show = (id, on) => { const e = el(id); if (e) e.style.display = on ? "" : "none"; };
-  show("btn-book-start", has && (wf.status === "idle" || done));
+  show("btn-book-start", has && (status === "idle" || done));
   show("btn-book-continue", has && running);
   show("btn-book-pause", has && running);
   show("btn-book-resume", has && paused);
   show("btn-book-stop", has && (running || paused));
   if (el("btn-book-start")) el("btn-book-start").disabled = !has;
+  const cont = el("btn-book-continue");
+  if (cont) cont.textContent = awaitingUser ? "✓ I've answered — Continue ▶" : "Continue ▶ (skip to next step)";
   const st = el("book-workflow-status"); if (!st) return;
-  const total = BOOK_WORKFLOW.length, label = BOOK_WORKFLOW[wf.step] || "";
+  const total = (live && live.total) || BOOK_WORKFLOW.length, label = BOOK_WORKFLOW[step] || (live && live.label) || "";
   if (!has) st.textContent = "Pick or create a book, then press Start.";
-  else if (wf.status === "idle") st.textContent = "Ready. Press ▶ Start Making Book — ChatGPT sends you the intake questionnaire first.";
-  else if (done) st.textContent = "Workflow complete ✓ — press Start to run it again.";
-  else if (running) st.textContent = `Step ${wf.step + 1}/${total}: ${label} — running. Answer/review in the pane, then Continue ▶.`;
-  else if (paused) st.textContent = `Paused at step ${wf.step + 1}/${total}: ${label}. Press ▶ Resume when ready.`;
-}
-async function bookSendComposed(c) {
-  if (!c || !c.ok) { setStatus(`Book step failed: ${(c && c.error) || "error"}`); return; }
-  if (c.done) { setStatus("Book workflow complete."); bookRefresh(); return; }
-  await window.api.sendCompose(c.text, [c.target]);
-  await window.api.bookLog(bookCurrentId, `▶ step ${(c.index || 0) + 1}/${c.total}: ${c.label} → ${SITE_LABELS[c.target] || c.target}`);
-  setStatus(`Sent step ${(c.index || 0) + 1}: ${c.label} → ${SITE_LABELS[c.target] || c.target}.`);
-  bookRefresh();
+  else if (status === "idle") st.textContent = "Ready. Press ▶ Start Making Book — it first sends the AIs their Rules of Conduct (bible), then ChatGPT's intake questionnaire, then runs the rest on its own.";
+  else if (done) st.textContent = "Workflow complete ✓ — every step's output is saved in the book. Press Start to run it again.";
+  else if (awaitingUser) st.textContent = `Step ${step + 1}/${total}: ${label} — ChatGPT is asking you the intake questions. Answer in the pane, then press ✓ Continue.`;
+  else if (status === "stalled") st.textContent = `Step ${step + 1}/${total}: ${label} — no reply yet from ${SITE_LABELS[live && live.target] || "the pane"}. Check it's logged in, then Resume/Continue.`;
+  else if (running) st.textContent = `Step ${step + 1}/${total}: ${label} — running on its own. It advances automatically when ${SITE_LABELS[live && live.target] || "the AI"} finishes. Pause anytime.`;
+  else if (paused) st.textContent = `Paused at step ${step + 1}/${total}: ${label}. Press ▶ Resume to continue where you left off.`;
 }
 if (el("btn-book-start")) el("btn-book-start").onclick = async () => {
   if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
-  await bookSendComposed(await window.api.bookWorkflowStart(bookCurrentId, bookCurrentChapter));
+  bookAiRefresh();
+  const r = await window.api.bookWorkflowStart(bookCurrentId, bookCurrentChapter);
+  if (r && r.ok) { bookRunner = r.snapshot || bookRunner; setStatus("Making book — ChatGPT sends the intake questionnaire; the workflow advances itself from there."); }
+  else setStatus(`Couldn't start: ${(r && r.error) || "error"}`);
+  bookRefresh();
 };
 if (el("btn-book-continue")) el("btn-book-continue").onclick = async () => {
   if (!bookCurrentId) return;
-  await bookSendComposed(await window.api.bookWorkflowNext(bookCurrentId, bookCurrentChapter));
+  const r = await window.api.bookWorkflowNext(bookCurrentId, bookCurrentChapter);
+  if (r && r.ok) bookRunner = r.snapshot || bookRunner;
+  bookRefresh();
 };
-if (el("btn-book-pause")) el("btn-book-pause").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "paused"); bookRefresh(); } };
-if (el("btn-book-resume")) el("btn-book-resume").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "running"); bookRefresh(); } };
-if (el("btn-book-stop")) el("btn-book-stop").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "idle"); bookRefresh(); } };
+if (el("btn-book-pause")) el("btn-book-pause").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "paused"); const rs = await window.api.bookRunnerStatus(); bookRunner = rs && rs.ok ? rs.snapshot : bookRunner; bookRefresh(); } };
+if (el("btn-book-resume")) el("btn-book-resume").onclick = async () => { if (bookCurrentId) { const r = await window.api.bookWorkflowSetStatus(bookCurrentId, "running"); if (r && r.snapshot) bookRunner = r.snapshot; bookRefresh(); } };
+if (el("btn-book-stop")) el("btn-book-stop").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "idle"); bookRunner = null; bookRefresh(); } };
+if (el("btn-book-check-ai")) el("btn-book-check-ai").onclick = () => bookAiRefresh();
+if (el("btn-book-send-rules")) el("btn-book-send-rules").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Sending the Rules of Conduct (their bible) to all three AIs…");
+  const r = await window.api.bookSendRules(bookCurrentId);
+  setStatus(r && r.ok ? "Rules of Conduct sent to ChatGPT, Claude and Gemini." : `Couldn't send rules: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+// Live auto-runner updates: refresh the banner whenever a step is dispatched or
+// completed in the main process (auto-advance, pause, stall, done).
+if (window.api.onBookRunner) window.api.onBookRunner((snap) => {
+  bookRunner = snap;
+  updateBookTally(snap);
+  if (snap && snap.bookId === bookCurrentId) bookRefresh();
+});
+
+// Persistent tally in the bottom action bar — always shows where the book
+// workflow is, no matter which panel is scrolled into view or collapsed.
+function updateBookTally(snap) {
+  const el0 = el("book-tally"); if (!el0) return;
+  if (!snap || !snap.active) { el0.textContent = ""; return; }
+  const label = (BOOK_WORKFLOW[snap.step] || snap.label || "").replace(/\s*\(.*$/, "");
+  const icon = snap.status === "awaiting-user" ? "✍️" : snap.status === "paused" ? "⏸" : snap.status === "stalled" ? "⏳" : snap.status === "done" ? "✅" : "▶";
+  const state = snap.status === "awaiting-user" ? "waiting for you" : snap.status === "waiting-reply" ? "running" : snap.status;
+  el0.textContent = snap.status === "done"
+    ? `✅ Book complete (${snap.total}/${snap.total})`
+    : `📖 Section ${snap.step + 1}/${snap.total} — ${label} ${icon} ${state}`;
+}
+// Open the consolidated AI feed window.
+if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
 
 function bookRenderStages() {
   const box = el("book-stages"); if (!box) return; box.innerHTML = "";

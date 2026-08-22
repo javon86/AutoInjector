@@ -25,15 +25,23 @@ function detect() {
 }
 
 /** Models already installed locally (via the Ollama API). */
-async function listInstalled(endpoint) {
+// AI-005: bound the discovery call with an abort timeout so a malformed or
+// unreachable endpoint can't hang the refresh on the OS/network timeout, and
+// report a timeout distinctly from "no models installed".
+async function listInstalled(endpoint, timeoutMs) {
   const base = endpoint || DEFAULT_ENDPOINT;
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs || 5000));
   try {
-    const res = await fetch(`${base}/api/tags`, { method: 'GET' });
-    if (!res.ok) return { ok: false, models: [] };
+    const res = await fetch(`${base}/api/tags`, { method: 'GET', signal: controller.signal });
+    if (!res.ok) return { ok: false, models: [], reason: `HTTP ${res.status}` };
     const body = await res.json();
     const models = (body && Array.isArray(body.models) ? body.models : []).map((m) => m.name).filter(Boolean);
     return { ok: true, models };
-  } catch (_) { return { ok: false, models: [] }; }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return { ok: false, models: [], reason: 'timeout' };
+    return { ok: false, models: [], reason: 'unreachable' };
+  } finally { clearTimeout(t); }
 }
 
 // Curated small→large local models keyed to VRAM (GB). These are good general
