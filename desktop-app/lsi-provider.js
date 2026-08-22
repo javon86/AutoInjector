@@ -18,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const secretStore = require('./secret-store');
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const LOG_MAX = 200;
@@ -32,12 +33,33 @@ function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function init(userDataDir) {
   try {
     _settingsPath = path.join(userDataDir || __dirname, 'lsi-settings.json');
-    if (fs.existsSync(_settingsPath)) _settings = Object.assign({}, DEFAULTS, JSON.parse(fs.readFileSync(_settingsPath, 'utf8')));
+    if (fs.existsSync(_settingsPath)) {
+      const raw = JSON.parse(fs.readFileSync(_settingsPath, 'utf8'));
+      // AI-001: the key lives on disk only as sealed ciphertext (apiKeyEnc).
+      // Decrypt into memory for use; migrate any legacy plaintext apiKey.
+      let apiKey = '';
+      if (raw.apiKeyEnc) apiKey = secretStore.open(raw.apiKeyEnc);
+      else if (raw.apiKey) apiKey = raw.apiKey; // legacy plaintext — migrated on next _save
+      _settings = Object.assign({}, DEFAULTS, raw, { apiKey });
+      delete _settings.apiKeyEnc;
+      if (raw.apiKey || raw.apiKeyEnc) _save(); // rewrite in the sealed-only format
+    }
   } catch (_) { _settings = Object.assign({}, DEFAULTS); }
   return getSettings();
 }
 
-function _save() { try { if (_settingsPath) fs.writeFileSync(_settingsPath, JSON.stringify(_settings, null, 2), 'utf8'); } catch (_) {} }
+// Persist WITHOUT the plaintext key: seal it into apiKeyEnc (dropped entirely if
+// encryption is unavailable, so a readable key never touches disk).
+function _save() {
+  try {
+    if (!_settingsPath) return;
+    const out = clone(_settings);
+    delete out.apiKey;
+    const enc = secretStore.seal(_settings.apiKey);
+    if (enc) out.apiKeyEnc = enc; else delete out.apiKeyEnc;
+    fs.writeFileSync(_settingsPath, JSON.stringify(out, null, 2), 'utf8');
+  } catch (_) {}
+}
 
 function getSettings() {
   const s = clone(_settings); const hasApiKey = !!s.apiKey; delete s.apiKey;

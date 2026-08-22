@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const secretStore = require('./secret-store');
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:7860';
 const DEFAULT_TIMEOUT_MS = 180000; // generation can be slow
@@ -43,15 +44,32 @@ function init(userDataDir) {
     _settingsPath = path.join(base, 'sd-settings.json');
     _imagesDir = path.join(base, 'sd-images');
     fs.mkdirSync(_imagesDir, { recursive: true });
-    if (fs.existsSync(_settingsPath)) _settings = Object.assign({}, DEFAULTS, JSON.parse(fs.readFileSync(_settingsPath, 'utf8')));
+    if (fs.existsSync(_settingsPath)) {
+      const raw = JSON.parse(fs.readFileSync(_settingsPath, 'utf8'));
+      // AI-001: key stored sealed (apiKeyEnc); decrypt to memory, migrate legacy.
+      let apiKey = '';
+      if (raw.apiKeyEnc) apiKey = secretStore.open(raw.apiKeyEnc);
+      else if (raw.apiKey) apiKey = raw.apiKey;
+      _settings = Object.assign({}, DEFAULTS, raw, { apiKey });
+      delete _settings.apiKeyEnc;
+      if (raw.apiKey || raw.apiKeyEnc) _save();
+    }
     const idx = path.join(_imagesDir, 'gallery.json');
     _gallery = fs.existsSync(idx) ? (JSON.parse(fs.readFileSync(idx, 'utf8')) || []) : [];
   } catch (_) { _settings = Object.assign({}, DEFAULTS); _gallery = []; }
   return getSettings();
 }
 
+// Persist WITHOUT the plaintext key (AI-001): seal it into apiKeyEnc, or omit.
 function _save() {
-  try { if (_settingsPath) fs.writeFileSync(_settingsPath, JSON.stringify(_settings, null, 2), 'utf8'); } catch (_) {}
+  try {
+    if (!_settingsPath) return;
+    const out = clone(_settings);
+    delete out.apiKey;
+    const enc = secretStore.seal(_settings.apiKey);
+    if (enc) out.apiKeyEnc = enc; else delete out.apiKeyEnc;
+    fs.writeFileSync(_settingsPath, JSON.stringify(out, null, 2), 'utf8');
+  } catch (_) {}
 }
 function _saveGallery() {
   try { if (_imagesDir) fs.writeFileSync(path.join(_imagesDir, 'gallery.json'), JSON.stringify(_gallery.slice(-GALLERY_MAX), null, 2), 'utf8'); } catch (_) {}

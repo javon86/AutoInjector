@@ -37,6 +37,23 @@ const outputManager = require("./output-manager");
 const bookProject = require("./book-project");
 const bookPrompts = require("./book-prompts");
 const bookRules = require("./book-rules");
+const secretStore = require("./secret-store");
+// AI-001: the manager API key is persisted only as sealed ciphertext. seal
+// replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
+// restore and migrates any legacy plaintext key.
+function sealManagerConfig(cfg) {
+  const out = { ...(cfg || {}) };
+  const enc = secretStore.seal(out.apiKey);
+  delete out.apiKey;
+  if (enc) out.apiKeyEnc = enc; else delete out.apiKeyEnc;
+  return out;
+}
+function openManagerConfig(cfg) {
+  const out = { ...(cfg || {}) };
+  if (out.apiKeyEnc) { out.apiKey = secretStore.open(out.apiKeyEnc); delete out.apiKeyEnc; }
+  else if (!("apiKey" in out)) out.apiKey = "";
+  return out;
+}
 const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
@@ -482,7 +499,7 @@ function saveStateDebounced() {
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
-        managerConfig: state.managerConfig, // the live task itself (state.manager) is deliberately NOT persisted -- same reasoning as House Rules, below
+        managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -550,7 +567,7 @@ function loadPersistedState() {
     state.nextLoginId = maxId + 1;
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
-    state.managerConfig = { ...state.managerConfig, ...snap.managerConfig };
+    state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
     state.manager.currentTier = state.managerConfig.tier;
     state.manager.maximumTurns = state.managerConfig.maximumTurns;
     state.manager.costLimit = state.managerConfig.costLimit;
