@@ -39,9 +39,21 @@ function main() {
   assert(fs.existsSync(scene), 'the chapter manuscript lives at 04_CHAPTERS/CH-001/scenes/s01.md');
   assert(/-----< Start >-----/.test(fs.readFileSync(scene, 'utf8')), 'the scene has the strict manuscript boundary markers');
   // The write step fills the manuscript body between the markers.
-  bp.recordStepOutput(id, { index: 5, stepId: 'write', target: 'claude', label: 'Write the chapter', text: 'The salt line held through the night.', chapterId: 'CH-001' });
+  bp.recordStepOutput(id, { index: 5, stepId: 'write', target: 'claude', label: 'Write the chapter', text: 'The salt line held through the night.', chapterId: 'CH-001', sourceTurnId: 42 });
   const filled = fs.readFileSync(scene, 'utf8');
   assert(/salt line held/.test(filled), 'the write step writes the body into the governed scene');
+
+  console.log('\n== BG-003: the chapter is routed through the governed gateway with provenance ==');
+  const prov = bp.get(id).provenance || [];
+  const chapterProv = prov.find((p) => p.stepId === 'write' && p.delivered);
+  assert(chapterProv && chapterProv.role === 'claude' && /04_CHAPTERS/.test(chapterProv.target),
+    'the chapter delivery is recorded (role claude → 04_CHAPTERS)');
+  assert(chapterProv && /^[0-9a-f]{64}$/.test(chapterProv.sha256) && chapterProv.sourceTurnId != null,
+    'provenance carries the content sha256 and the source turn id');
+  // The governed DELIVERIES ledger on disk holds the same digest (provenance).
+  const deliveries = path.join(proj.dir, '00_CONTROL', 'DELIVERIES.json');
+  assert(fs.existsSync(deliveries) && fs.readFileSync(deliveries, 'utf8').includes(chapterProv.sha256),
+    'the ATELIER DELIVERIES.json records the same digest');
 
   console.log('\n== BG-007: strict assembly builds the manuscript ==');
   const asm = bp.assembleManuscript(id);

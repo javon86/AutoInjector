@@ -13,6 +13,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const bookPdf = require('./book-pdf');
 
 const PDF_DIR = 'pdfs';
@@ -121,7 +122,7 @@ function create(title) {
   ensureDir(dir); ensureDir(path.join(dir, 'chapters')); ensureDir(path.join(dir, 'records'));
   const book = {
     id: _nextProjectId(), title: clean, stage: 'setup',
-    chapters: [], records: [], counters: {}, log: [], pdfs: [],
+    chapters: [], records: [], counters: {}, log: [], pdfs: [], provenance: [],
     workflow: { status: 'idle', step: 0 },
     governed, atelierRoot,
     created: _now(), updated: _now(),
@@ -147,6 +148,7 @@ function get(id) {
   const b = _read(dir); if (!b) return null;
   if (!b.workflow) b.workflow = { status: 'idle', step: 0 }; // default for older books
   if (!b.pdfs) b.pdfs = [];
+  if (!b.provenance) b.provenance = [];
   return { ...b, dir, stages: STAGES, stageLabels: STAGE_LABELS, chapterStates: CHAPTER_STATES, recordTypes: RECORD_TYPES };
 }
 
@@ -166,12 +168,32 @@ function setWorkflow(id, patch, note) {
  * also written into that chapter's file (and the chapter flipped to DRAFTING).
  * This is what lets the runner know a step is truly done — the artifact exists.
  */
-function recordStepOutput(id, { index, stepId, target, label, text, chapterId }) {
+function recordStepOutput(id, { index, stepId, target, label, text, chapterId, sourceTurnId }) {
   return _mutate(id, (b, dir) => {
+    const body = String(text || '').trim();
+    const sha256 = _sha256(body);
+    // BG-003/BG-008: a governed book routes its CHAPTER (the core book output)
+    // through the ATELIER authority + provenance gateway before it is written.
+    // Fail closed — if authority refuses or the toolkit is unavailable, HOLD
+    // (write nothing, don't advance) so unauthorised/ungoverned output never
+    // lands. Other step outputs still get local provenance recorded below.
+    if (b.governed && stepId === 'write' && chapterId && _atelier && _atelier.deliver) {
+      const role = _roleForTarget(target) === 'human' ? 'claude' : _roleForTarget(target);
+      const targetPath = _chapterRelFile(true, chapterId);
+      const jobId = `${chapterId}-${(index || 0) + 1}-${sourceTurnId || 'x'}`;
+      const d = _atelier.deliver({ projectDir: dir, jobId, role, content: body, target: targetPath });
+      if (!d || d.ok !== true) {
+        _appendProvenance(b, { step: index, stepId, role, target: targetPath, sourceTurnId: sourceTurnId || null, sha256, held: true, reason: (d && d.message) || 'unavailable' });
+        b.log.push({ ts: _now(), text: `⛔ governance held the chapter (${role} → ${targetPath}): ${String((d && d.message) || 'toolkit unavailable').slice(0, 140)}` });
+        return { held: true, reason: (d && d.message) || 'governance unavailable', sha256 };
+      }
+      _appendProvenance(b, { step: index, stepId, role, target: targetPath, sourceTurnId: sourceTurnId || null, sha256, jobId, delivered: true, message: d.message });
+    } else {
+      _appendProvenance(b, { step: index, stepId, role: _roleForTarget(target), target: null, sourceTurnId: sourceTurnId || null, sha256 });
+    }
     ensureDir(path.join(dir, 'steps'));
     const base = safeName(`${pad((index || 0) + 1)}-${stepId || 'step'}`, `step-${(index || 0) + 1}`);
     const rel = path.join('steps', `${base}.md`);
-    const body = String(text || '').trim();
     fs.writeFileSync(path.join(dir, rel),
       `# Step ${(index || 0) + 1}: ${label || stepId || ''}\n\n_from ${target || '?'} · ${_now()}_\n\n${body}\n`);
     b.workflow = Object.assign({ status: 'running', step: index || 0 }, b.workflow);
@@ -388,6 +410,18 @@ function _governedSceneContent(chId, title, body) {
 }
 function _chapterRelFile(governed, chId) {
   return governed ? path.join('04_CHAPTERS', chId, 'scenes', 's01.md') : path.join('chapters', `${chId}.md`);
+}
+
+// BG-003 provenance helpers.
+function _sha256(s) { return crypto.createHash('sha256').update(String(s == null ? '' : s)).digest('hex'); }
+function _roleForTarget(target) {
+  const t = String(target || '').toLowerCase();
+  return (t === 'chatgpt' || t === 'claude' || t === 'gemini') ? t : 'human';
+}
+function _appendProvenance(b, entry) {
+  b.provenance = b.provenance || [];
+  b.provenance.push(Object.assign({ ts: _now() }, entry));
+  if (b.provenance.length > 500) b.provenance.splice(0, b.provenance.length - 500);
 }
 
 function addChapter(id, title) {

@@ -1602,9 +1602,19 @@ async function handleBookRunCapture(turn) {
   try {
     res = bookProject.recordStepOutput(r.bookId, {
       index: r.step, stepId: r.stepId, target: r.target, label: r.label,
-      text: turn.text, chapterId: r.chapterId
+      text: turn.text, chapterId: r.chapterId, sourceTurnId: turn.id
     });
   } catch (e) { logEvent("book-step-save-error", { error: String(e) }); }
+  // BG-003/BG-008: governance held this output (authority refused or the toolkit
+  // went away for a governed book) — fail closed, don't advance.
+  if (res && res.held) {
+    r.status = "stalled";
+    bookProject.setWorkflow(r.bookId, { status: "paused" },
+      `⛔ step ${r.step + 1} held by governance: ${String(res.reason || "unauthorized").slice(0, 120)} — paused`);
+    logEvent("book-step-held", { bookId: r.bookId, step: r.step, reason: res.reason });
+    broadcastBookRun();
+    return;
+  }
   const pdfReady = !!(res && res.ok && res.pdfExists);
   if (!pdfReady) {
     // No confirmed PDF -> section isn't officially complete (Rule 38). Park the
