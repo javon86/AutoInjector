@@ -2786,6 +2786,14 @@ ipcMain.handle("book:open-pdfs-folder", (_e, id) => {
   try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; const d = require("path").join(p.dir, bookProject.PDF_DIR); try { require("fs").mkdirSync(d, { recursive: true }); } catch (_) {} shell.openPath(d); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
+// BG-007: strict manuscript assembly for a governed book (final Build step).
+ipcMain.handle("book:assemble", (_e, id) => {
+  try { return bookProject.assembleManuscript(id); } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Whether governed (ATELIER v2) mode is available on this machine.
+ipcMain.handle("book:governed-available", () => {
+  try { return { ok: true, available: bookProject.governedAvailable() }; } catch (e) { return { ok: false, error: String(e) }; }
+});
 
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
 // harness (which has no Menu) is unaffected.
@@ -3609,7 +3617,14 @@ app.whenReady().then(() => {
   try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
   try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
-  try { bookProject.init(outputManager.booksDir()); } catch (e) { logEvent("book-init-error", { error: String(e) }); }
+  try {
+    bookProject.init(outputManager.booksDir());
+    // BG-001: make the governed ATELIER project canonical (v2 overrides v1) when
+    // Python 3 is available; New Book then scaffolds the governed tree.
+    const atelierBridge = require("./atelier-bridge");
+    const gov = bookProject.configure({ atelier: atelierBridge });
+    logEvent("book-init", { governed: gov });
+  } catch (e) { logEvent("book-init-error", { error: String(e) }); }
   try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();

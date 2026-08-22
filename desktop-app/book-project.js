@@ -37,8 +37,19 @@ const CHAPTER_STATES = ['NOT STARTED', 'ACTIVE', 'DRAFTING', 'IN REVIEW', 'REOPE
 const RECORD_TYPES = ['REQ', 'CHR', 'PLC', 'ART', 'SEC', 'TWT', 'STP', 'ARC', 'EVT', 'CCR', 'CNF', 'REV'];
 
 let _root = null; // <documents>/AutoInjector/output/books
+let _atelier = null; // injected ATELIER bridge { scaffold, assemble } — enables governed (V2) mode
+
+// The STRICT MANUSCRIPT BOUNDARY (ATELIER): only text between these markers is
+// part of the book. Governed chapters are written with them so the ATELIER
+// assembler can build the final manuscript (BG-007).
+const MANUSCRIPT_START = '}-----< Start >-----{';
+const MANUSCRIPT_FINISH = '}-----< finish >-----{';
 
 function init(booksDir) { _root = booksDir; ensureDir(_root); return _root; }
+// BG-001: main injects the ATELIER bridge so New Book scaffolds the governed
+// tree (v2). Left null in unit tests / when Python is absent → V1 flat mode.
+function configure(opts) { _atelier = (opts && opts.atelier) || null; return governedAvailable(); }
+function governedAvailable() { try { return !!(_atelier && _atelier.scaffold && _atelier.detect && _atelier.detect().available); } catch (_) { return false; } }
 function ensureDir(p) { try { fs.mkdirSync(p, { recursive: true }); } catch (_) {} return p; }
 function _now() { return new Date().toISOString(); }
 
@@ -53,7 +64,14 @@ function pad(n) { return String(n).padStart(3, '0'); }
 function _dirFor(title) { return path.join(_root, safeName(title, 'untitled-book')); }
 function _jsonPath(dir) { return path.join(dir, 'book.json'); }
 function _read(dir) { try { return JSON.parse(fs.readFileSync(_jsonPath(dir), 'utf8')); } catch (_) { return null; } }
-function _write(dir, book) { book.updated = _now(); fs.writeFileSync(_jsonPath(dir), JSON.stringify(book, null, 2)); return book; }
+// BG-010: atomic write — temp sibling then rename, so a crash mid-write can't
+// truncate the control file.
+function _writeJsonAtomic(file, obj) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  fs.renameSync(tmp, file);
+}
+function _write(dir, book) { book.updated = _now(); _writeJsonAtomic(_jsonPath(dir), book); return book; }
 function _dirById(id) {
   for (const d of _projectDirs()) { const b = _read(d); if (b && b.id === id) return d; }
   return null;
@@ -66,22 +84,49 @@ function _projectDirs() {
     .filter((d) => fs.existsSync(_jsonPath(d)));
 }
 
-/** Create a new book project folder + control sheet. */
+// BG-011: monotonic project id independent of folder count, so deleting a book
+// never lets a later one reuse an old PRJ-###.
+function _nextProjectId() {
+  const f = path.join(_root, '.book-counter.json');
+  let n = 0;
+  try { n = JSON.parse(fs.readFileSync(f, 'utf8')).next || 0; } catch (_) { n = 0; }
+  // Never collide with ids already on disk (e.g. counter file lost).
+  let maxSeen = 0;
+  for (const d of _projectDirs()) { const b = _read(d); const m = b && /PRJ-(\d+)/.exec(b.id || ''); if (m) maxSeen = Math.max(maxSeen, parseInt(m[1], 10)); }
+  n = Math.max(n, maxSeen) + 1;
+  try { _writeJsonAtomic(f, { next: n }); } catch (_) {}
+  return `PRJ-${pad(n)}`;
+}
+
+/** Create a new book project. Governed (ATELIER v2) when available, else V1 flat. */
 function create(title) {
   if (!_root) throw new Error('book-project not initialized');
   const clean = String(title || '').trim();
   if (!clean) return { ok: false, error: 'a book needs a title' };
-  const dir = _dirFor(clean);
+  // Duplicate check by title across all existing books (governed dirs are
+  // slugged, so a folder-name check alone is not enough).
+  if (list().some((p) => (p.title || '').trim().toLowerCase() === clean.toLowerCase()))
+    return { ok: false, error: 'a book with that title already exists' };
+
+  let dir = _dirFor(clean);
+  let governed = false, atelierRoot = null;
+  // v2 overrides v1: scaffold the governed tree and make it the book's home.
+  if (governedAvailable()) {
+    const s = _atelier.scaffold(clean, _root, { chapters: 1 });
+    if (s && s.ok && s.dir) { dir = s.dir; governed = true; atelierRoot = s.dir; }
+    else if (s && /already exists/i.test(s.reason || '')) return { ok: false, error: 'a book with that title already exists' };
+    // any other scaffold failure → fall through to V1 so New Book never breaks
+  }
   if (fs.existsSync(_jsonPath(dir))) return { ok: false, error: 'a book with that title already exists' };
   ensureDir(dir); ensureDir(path.join(dir, 'chapters')); ensureDir(path.join(dir, 'records'));
-  const n = _projectDirs().length + 1;
   const book = {
-    id: `PRJ-${pad(n)}`, title: clean, stage: 'setup',
+    id: _nextProjectId(), title: clean, stage: 'setup',
     chapters: [], records: [], counters: {}, log: [], pdfs: [],
     workflow: { status: 'idle', step: 0 },
+    governed, atelierRoot,
     created: _now(), updated: _now(),
   };
-  book.log.push({ ts: _now(), text: `created book "${clean}" (${book.id})` });
+  book.log.push({ ts: _now(), text: `created ${governed ? 'governed (ATELIER v2)' : 'V1'} book "${clean}" (${book.id})` });
   _write(dir, book);
   return { ok: true, project: summary(book, dir) };
 }
@@ -159,8 +204,10 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId })
     if (stepId === 'write' && chapterId) {
       const ch = b.chapters.find((c) => c.id === chapterId);
       if (ch && ch.status !== 'LOCKED' && ch.status !== 'COMPLETE') {
-        fs.writeFileSync(path.join(dir, ch.file),
-          `# ${ch.id}${ch.title ? ' — ' + ch.title : ''}\n\n${body}\n`);
+        ensureDir(path.dirname(path.join(dir, ch.file)));
+        fs.writeFileSync(path.join(dir, ch.file), b.governed
+          ? _governedSceneContent(ch.id, ch.title, body)
+          : `# ${ch.id}${ch.title ? ' — ' + ch.title : ''}\n\n${body}\n`);
         if (ch.status === 'NOT STARTED' || ch.status === 'ACTIVE') ch.status = 'DRAFTING';
         b.log.push({ ts: _now(), text: `${chapterId} manuscript updated from the Write step (${body.length} chars)` });
       }
@@ -333,14 +380,28 @@ function setStage(id, stage) {
   return _mutate(id, (b) => { b.stage = stage; b.log.push({ ts: _now(), text: `stage → ${STAGE_LABELS[stage]}` }); });
 }
 
+// The one authoritative manuscript body for a chapter. Governed books keep it in
+// 04_CHAPTERS/<id>/scenes/s01.md between the strict boundary markers (so the
+// ATELIER assembler builds the book); V1 books keep a flat chapters/<id>.md.
+function _governedSceneContent(chId, title, body) {
+  return `# ${chId}${title ? ' — ' + title : ''}\n\n_Working notes above the line are NOT part of the book._\n\n${MANUSCRIPT_START}\n${body || '(empty draft)'}\n${MANUSCRIPT_FINISH}\n`;
+}
+function _chapterRelFile(governed, chId) {
+  return governed ? path.join('04_CHAPTERS', chId, 'scenes', 's01.md') : path.join('chapters', `${chId}.md`);
+}
+
 function addChapter(id, title) {
   return _mutate(id, (b, dir) => {
     b.counters.CH = (b.counters.CH || 0) + 1;
     const chId = `CH-${pad(b.counters.CH)}`;
-    const file = path.join('chapters', `${chId}.md`);
-    fs.writeFileSync(path.join(dir, file), `# ${chId} ${title ? '— ' + title : ''}\n\n(empty draft)\n`);
+    const governed = !!b.governed;
+    const file = _chapterRelFile(governed, chId);
+    ensureDir(path.dirname(path.join(dir, file)));
+    fs.writeFileSync(path.join(dir, file), governed
+      ? _governedSceneContent(chId, title, '')
+      : `# ${chId} ${title ? '— ' + title : ''}\n\n(empty draft)\n`);
     b.chapters.push({ id: chId, title: String(title || '').trim(), status: 'NOT STARTED', file });
-    b.log.push({ ts: _now(), text: `added chapter ${chId}${title ? ' — ' + title : ''}` });
+    b.log.push({ ts: _now(), text: `added chapter ${chId}${title ? ' — ' + title : ''}${governed ? ' (governed)' : ''}` });
     return { chapterId: chId };
   });
 }
@@ -383,9 +444,20 @@ function appendLog(id, text) {
   return _mutate(id, (b) => { b.log.push({ ts: _now(), text: String(text || '').slice(0, 300) }); });
 }
 
+/** BG-007: strict manuscript assembly for a governed book (07_BUILD/manuscript.md). */
+function assembleManuscript(id) {
+  const dir = _dirById(id); if (!dir) return { ok: false, error: 'no such book' };
+  const b = _read(dir); if (!b) return { ok: false, error: 'unreadable book' };
+  if (!b.governed) return { ok: false, error: 'strict assembly needs a governed (v2) book' };
+  if (!_atelier || !_atelier.assemble) return { ok: false, error: 'the ATELIER assembler is unavailable (Python 3 not found)' };
+  const r = _atelier.assemble(dir);
+  _mutate(id, (bb) => { bb.log.push({ ts: _now(), text: r.ok ? '📖 assembled manuscript → 07_BUILD/manuscript.md' : `⚠ assembly failed: ${String(r.report || '').slice(0, 160)}` }); });
+  return r.ok ? { ok: true, output: '07_BUILD/manuscript.md', report: r.report } : { ok: false, error: r.report || 'assembly failed' };
+}
+
 module.exports = {
-  init, create, list, get, setStage, setWorkflow, recordStepOutput, addChapter, setChapterStatus,
-  addRecord, listRecords, readRecord, appendLog, safeName,
+  init, configure, governedAvailable, create, list, get, setStage, setWorkflow, recordStepOutput, addChapter, setChapterStatus,
+  addRecord, listRecords, readRecord, appendLog, safeName, assembleManuscript,
   generatePdf, generateAllPdfs, importPdf, scanPdfs, listPdfs, pdfGate,
   STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES, PDF_DIR,
 };

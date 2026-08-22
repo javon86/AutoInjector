@@ -1382,7 +1382,7 @@ async function bookAiRefresh() {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
 
 // The PDF completion gate — which deliverables have a downloadable PDF yet.
 async function bookRenderPdfGate() {
@@ -1430,6 +1430,22 @@ if (el("btn-book-find-pdfs")) el("btn-book-find-pdfs").onclick = async () => {
   bookRefresh();
 };
 if (el("btn-book-open-pdfs")) el("btn-book-open-pdfs").onclick = () => { if (bookCurrentId) window.api.bookOpenPdfsFolder(bookCurrentId); };
+if (el("btn-book-assemble")) el("btn-book-assemble").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  setStatus("Building the manuscript (strict ATELIER assembly)…");
+  const r = await window.api.bookAssemble(bookCurrentId);
+  setStatus(r && r.ok ? "Manuscript built → 07_BUILD/manuscript.md" : `Build failed: ${(r && r.error) || "error"}`);
+  bookRefresh();
+};
+// Show whether this book is governed (ATELIER v2) or a V1 flat project, and
+// only offer strict assembly for governed books.
+function bookRenderGovernedBadge() {
+  const badge = el("book-governed-badge"); if (!badge) return;
+  const gov = !!(bookProject && bookProject.governed);
+  badge.textContent = bookProject ? (gov ? "🛡 Governed (ATELIER v2)" : "V1 project — governance off") : "";
+  badge.style.color = gov ? "#7fdca0" : "#9aa1ac";
+  const asm = el("btn-book-assemble"); if (asm) asm.style.display = gov ? "" : "none";
+}
 
 function bookRenderWorkflow() {
   const wf = (bookProject && bookProject.workflow) ? bookProject.workflow : { status: "idle", step: 0 };

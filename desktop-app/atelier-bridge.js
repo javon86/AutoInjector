@@ -24,6 +24,8 @@ const path = require('path');
 const ATELIER_DIR = path.join(__dirname, 'atelier');
 const ADAPTER = 'autoinjector.py';
 const AUTHORITY = 'authority.py';
+const SCAFFOLD = 'init_project.py';
+const ASSEMBLE = 'assemble_manuscript.py';
 const DEFAULT_TIMEOUT_MS = 20000;
 
 // The three web-UI AIs AutoInjector drives map onto ATELIER's write-authority
@@ -170,6 +172,51 @@ function deliver(job) {
   }
 }
 
+/**
+ * Scaffold a governed ATELIER project (BG-001). Runs init_project.py, which
+ * creates <parentDir>/<slug>/ with the full 00_CONTROL … 07_BUILD tree. Returns
+ * the created directory so the caller can make it the canonical book home.
+ * @returns {{available:boolean, ok:boolean, dir:(string|null), reason:string}}
+ */
+function scaffold(title, parentDir, opts) {
+  const d = detect();
+  if (!d.available) return { available: false, ok: false, dir: null, reason: d.reason };
+  if (!title || !parentDir) return { available: true, ok: false, dir: null, reason: 'scaffold requires title and parentDir' };
+  const args = [SCAFFOLD, String(title), '--path', String(parentDir), '--chapters', String((opts && opts.chapters) || 1)];
+  if (opts && opts.force) args.push('--force');
+  try {
+    const out = _run(d.python, args);
+    const m = /Created\s+(.+)/.exec(String(out));
+    const dir = m ? m[1].trim() : null;
+    if (!dir || !fs.existsSync(dir)) return { available: true, ok: false, dir: null, reason: 'scaffold produced no directory' };
+    return { available: true, ok: true, dir, reason: String(out).trim() };
+  } catch (err) {
+    const msg = (err && (err.stderr || err.stdout) ? String(err.stderr || err.stdout) : String(err && err.message)).trim();
+    return { available: true, ok: false, dir: null, reason: msg || 'scaffold failed' };
+  }
+}
+
+/**
+ * Strict manuscript assembly (BG-007). Runs assemble_manuscript.py over the
+ * project's 04_CHAPTERS into 07_BUILD/manuscript.md and returns the report.
+ * @returns {{available:boolean, ok:boolean, output:(string|null), report:string}}
+ */
+function assemble(projectDir) {
+  const d = detect();
+  if (!d.available) return { available: false, ok: false, output: null, report: d.reason };
+  if (!projectDir) return { available: true, ok: false, output: null, report: 'assemble requires projectDir' };
+  const chaptersDir = path.join(projectDir, '04_CHAPTERS');
+  const outFile = path.join(projectDir, '07_BUILD', 'manuscript.md');
+  const reportFile = path.join(projectDir, '07_BUILD', 'build_report.txt');
+  try {
+    const out = _run(d.python, [ASSEMBLE, chaptersDir, '-o', outFile, '--strict', '--report', reportFile]);
+    return { available: true, ok: true, output: outFile, report: String(out).trim() };
+  } catch (err) {
+    const msg = (err && (err.stderr || err.stdout) ? String(err.stderr || err.stdout) : String(err && err.message)).trim();
+    return { available: true, ok: false, output: null, report: msg || 'assembly failed' };
+  }
+}
+
 /** Read pipeline state for a project (00_CONTROL/PIPELINE.json via the adapter). */
 function status(projectDir) {
   const d = detect();
@@ -190,5 +237,7 @@ module.exports = {
   checkAuthority,
   stages,
   deliver,
+  scaffold,
+  assemble,
   status,
 };

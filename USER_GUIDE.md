@@ -370,6 +370,16 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
   downloaded from an AI (it scans your Downloads and output folders for files
   named for this book), **📂 Open folder** to get to them, and **open** on any
   row to view that PDF. This is the form you can download.
+- **🛡 Governed (ATELIER v2) projects.** When **Python 3 is installed**, **New
+  Book** scaffolds the full governed ATELIER structure (`00_CONTROL`, `01_DESIGN`,
+  `02_BIBLE`, `03_MEMORY`, `04_CHAPTERS`, `06_AUDITS`, `07_BUILD`, …) and that
+  becomes the book's **one source of truth** — chapters live in `04_CHAPTERS`
+  between the strict manuscript markers, so there's a single authoritative
+  chapter file. A badge shows **🛡 Governed** vs a plain **V1 project** (used
+  automatically if Python isn't present, so the app always works). For governed
+  books a **📖 Build Manuscript** button runs strict ATELIER assembly into
+  `07_BUILD/manuscript.md` (only the in-book text between the markers is
+  included). *(Python is offered in the Setup Wizard.)*
 - **Records** — create governed records (REQ, CHR, PLC, ART, …) with permanent
   IDs; click any record to **pop it up** and read it.
 - **Activity log** — every action is logged, so you're never left guessing.

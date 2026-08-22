@@ -133,6 +133,8 @@ contextBridge.exposeInMainWorld("api", {
   bookScanPdfs: (id) => ipcRenderer.invoke("book:scan-pdfs", id),
   bookOpenPdf: (id, file) => ipcRenderer.invoke("book:open-pdf", { id, file }),
   bookOpenPdfsFolder: (id) => ipcRenderer.invoke("book:open-pdfs-folder", id),
+  bookAssemble: (id) => ipcRenderer.invoke("book:assemble", id),
+  bookGovernedAvailable: () => ipcRenderer.invoke("book:governed-available"),
   bookAiStatus: () => ipcRenderer.invoke("book:ai-status"),
   bookRunnerStatus: () => ipcRenderer.invoke("book:runner-status"),
   onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload))
