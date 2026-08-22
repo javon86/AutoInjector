@@ -1543,6 +1543,25 @@ if (el("btn-book-pause")) el("btn-book-pause").onclick = async () => { if (bookC
 if (el("btn-book-resume")) el("btn-book-resume").onclick = async () => { if (bookCurrentId) { const r = await window.api.bookWorkflowSetStatus(bookCurrentId, "running"); if (r && r.snapshot) bookRunner = r.snapshot; bookRefresh(); } };
 if (el("btn-book-stop")) el("btn-book-stop").onclick = async () => { if (bookCurrentId) { await window.api.bookWorkflowSetStatus(bookCurrentId, "idle"); bookRunner = null; bookRefresh(); } };
 if (el("btn-book-check-ai")) el("btn-book-check-ai").onclick = () => bookAiRefresh();
+// 🧪 Test AIs — a real round-trip: send a test prompt to all three and confirm
+// the app captures each reply.
+if (el("btn-book-test")) el("btn-book-test").onclick = async () => {
+  const line = el("book-test-status");
+  if (line) { line.textContent = "🧪 Testing… sent a test prompt to ChatGPT / Claude / Gemini — waiting for their replies (reply in each pane if they don't auto-answer)."; line.style.color = "#e0b060"; }
+  setStatus("Testing the AIs — real round-trip in progress…");
+  const btn = el("btn-book-test"); if (btn) btn.disabled = true;
+  try {
+    const r = await window.api.bookTestRun();
+    if (r && r.ok) {
+      const parts = ["chatgpt", "claude", "gemini"].map((s) => {
+        const x = r.results[s] || {};
+        return `${SITE_LABELS[s]} ${x.ok ? "✓" : "✗ (" + (x.reason || "no reply") + ")"}`;
+      });
+      if (line) { line.textContent = (r.results.allOk ? "✅ Round-trip works — all three replied and the app captured it: " : "⚠ Test finished: ") + parts.join(" · "); line.style.color = r.results.allOk ? "#7fdca0" : "#e0b060"; }
+      setStatus(r.results.allOk ? "Test passed — the real send→reply→capture loop works." : "Test finished — see the line under the buttons.");
+    } else { if (line) line.textContent = `Test failed: ${(r && r.error) || "error"}`; }
+  } finally { if (btn) btn.disabled = false; }
+};
 if (el("btn-book-send-rules")) el("btn-book-send-rules").onclick = async () => {
   if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
   setStatus("Sending the Rules of Conduct (their bible) to all three AIs…");

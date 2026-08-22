@@ -2797,6 +2797,37 @@ ipcMain.handle("book:ai-status", async () => {
 ipcMain.handle("book:runner-status", () => {
   try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
+// A REAL round-trip test: send a short "test" prompt to all three panes exactly
+// the way a workflow step does, then confirm the app actually captures each
+// reply. Proves the whole send → reply → capture loop works with the real,
+// signed-in panes before you start a real book.
+ipcMain.handle("book:test-run", async () => {
+  const prompt =
+    "🧪 BOOK WORKFLOW CONNECTION TEST — this is only a test, do no real work. " +
+    "Please reply with one short line beginning \"TEST OK\" followed by a few words of throwaway sample content " +
+    "(this stands in for a real document so we can confirm the app receives your reply).";
+  const sentTs = {}, results = {};
+  for (const site of SITE_IDS) {
+    const view = siteViews[site];
+    if (!view || view.webContents.isDestroyed()) { results[site] = { ok: false, reason: "pane not open" }; continue; }
+    sentTs[site] = Date.now();
+    try { await sendTextTo(site, prompt, null, { raw: true }); }
+    catch (_) { results[site] = { ok: false, reason: "send failed" }; delete sentTs[site]; }
+  }
+  const deadline = Date.now() + 90000;
+  const pending = () => SITE_IDS.filter((s) => sentTs[s] && !results[s]);
+  while (Date.now() < deadline && pending().length) {
+    for (const s of pending()) {
+      const c = state.captured[s];
+      if (c && c.ts >= sentTs[s] && c.text && c.text.trim()) results[s] = { ok: true, chars: c.text.length, snippet: c.text.trim().slice(0, 90) };
+    }
+    if (pending().length) await new Promise((r) => setTimeout(r, 400));
+  }
+  for (const s of SITE_IDS) if (!results[s]) results[s] = { ok: false, reason: "no reply captured (is the pane signed in?)" };
+  results.allOk = SITE_IDS.every((s) => results[s].ok);
+  logEvent("book-test-run", Object.fromEntries(SITE_IDS.map((s) => [s, !!results[s].ok])));
+  return { ok: true, results };
+});
 
 // --- Book PDFs (completion gate, Rules of Conduct §36–39) -------------------
 // The gate: which of a book's deliverables have a downloadable PDF yet.

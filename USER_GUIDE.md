@@ -255,7 +255,11 @@ blue) so it's easy to tell who said what. It shows the recent history when it
 opens and then updates live as replies come in. You can **filter** by AI with the
 chips at the top, toggle **auto‑scroll**, and **open/close/reopen it any time** —
 it's a standalone window you can park on a second monitor while the workflow runs
-itself.
+itself. It also has a **reply box** at the bottom — pick a target (All / ChatGPT
+/ Claude / Gemini), type, and **Send** (or press Enter) — plus **8 preset
+buttons** for prompts you send often: click **✎ Presets**, type your text in the
+box, then click a slot to save it there; turn edit off and clicking that slot
+sends it. Presets are remembered between sessions.
 
 ### 7d. Setup Wizard (optional downloads) ✅ *(early version)*
 
@@ -353,6 +357,11 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
 - **⟳ Check AI** — before (or during) a run, confirm the **ChatGPT / Claude /
   Gemini panes are up and ready** to receive prompts. The readiness line shows a
   ✓ or ✗ (with the reason) for each, so you know the AIs are ready to go.
+- **🧪 Test AIs** — a **real round-trip test**: sends a short "test" prompt to all
+  three panes exactly the way a workflow step does, then confirms the app
+  actually receives each reply — a ✓/✗ per AI. Run it before starting a real
+  book to prove the whole send → reply → capture loop works with your signed-in
+  panes.
 - **📜 Send Rules** — (re)send the **Rules of Conduct bible** to all three AIs.
   It's sent automatically at Start; use this button if a pane forgets it mid‑run.
   The AIs are told to follow it silently (the rules forbid acknowledgment

@@ -52,6 +52,27 @@
     .b-user    { align-self: center; max-width: 90%; border: 1px dashed #3a3f48; background: #14161b; color: var(--muted); font-size: 12px; }
     .b-user .who { color: var(--user); }
     .count { color: var(--muted); font-size: 11px; }
+
+    /* Composer: reply box + preset buttons, pinned to the bottom. */
+    #composer { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; }
+    #preset-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .preset {
+      font-size: 11px; padding: 5px 7px; border-radius: 6px; cursor: pointer; text-align: left;
+      border: 1px solid var(--line); background: #1b1e24; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .preset:hover { background: #262b33; }
+    .preset.empty { color: var(--muted); font-style: italic; border-style: dashed; }
+    #composer.editing .preset { outline: 1px dashed var(--claude); }
+    .send-row { display: flex; gap: 6px; align-items: center; }
+    .send-row select, .send-row input {
+      font-size: 12px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line);
+      background: #14161b; color: var(--text);
+    }
+    .send-row select { flex: 0 0 auto; }
+    .send-row input { flex: 1 1 auto; min-width: 0; }
+    #btn-preset-edit.on { background: var(--claude); border-color: var(--claude); color: #fff; }
+    #composer-hint { font-size: 10px; color: var(--muted); min-height: 12px; }
   </style>
 </head>
 <body>
@@ -68,6 +89,21 @@
     <button class="btn" id="btn-autoscroll" title="Follow new messages">Auto-scroll: on</button>
   </header>
   <div id="feed"><div class="empty" id="empty">Waiting for the AIs… messages will appear here as bubbles, coloured by who's talking.</div></div>
+  <div id="composer">
+    <div id="preset-row"></div>
+    <div class="send-row">
+      <select id="reply-target" title="Who to send to">
+        <option value="all">→ All</option>
+        <option value="chatgpt">→ ChatGPT</option>
+        <option value="claude">→ Claude</option>
+        <option value="gemini">→ Gemini</option>
+      </select>
+      <input id="reply-text" type="text" placeholder="Type a reply and press Enter (or Send)…" />
+      <button class="btn" id="btn-reply-send">Send</button>
+      <button class="btn" id="btn-preset-edit" title="Edit mode: type text above, then click a preset slot to save that text to it (click again to clear).">✎ Presets</button>
+    </div>
+    <div id="composer-hint"></div>
+  </div>
   <script src="feed.js"></script>
 </body>
 </html>
