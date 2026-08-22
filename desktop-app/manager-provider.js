@@ -22,6 +22,7 @@
 // matched to each provider's documented API, but real-world verification
 // has to happen against your actual account/instance.
 
+const client = require("./openai-client");
 const DEFAULT_TIMEOUT_MS = 180000;
 
 // The full action vocabulary the manager is allowed to choose from. Kept
@@ -74,36 +75,12 @@ function buildManagerPrompt(managerState) {
   ];
 }
 
-function extractJsonObject(text) {
-  if (typeof text !== "string") return null;
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // Models occasionally wrap JSON in a code fence or add stray prose
-    // despite instructions -- pull out the first {...} block as a fallback
-    // before giving up, rather than failing on otherwise-recoverable output.
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) return null;
-    try { return JSON.parse(trimmed.slice(start, end + 1)); } catch { return null; }
-  }
-}
-
-function redactSecrets(text, config) {
-  if (typeof text !== "string" || !config || !config.apiKey) return text;
-  return text.split(config.apiKey).join("[REDACTED]");
-}
-
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || DEFAULT_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// AI-006: JSON extraction, secret redaction and the timed fetch are the shared
+// OpenAI-compatible client. These thin wrappers keep this module's existing
+// signatures (redactSecrets takes a config) so every call site is unchanged.
+const extractJsonObject = client.extractJsonObject;
+function redactSecrets(text, config) { return client.redactSecrets(text, config && config.apiKey); }
+function fetchWithTimeout(url, options, timeoutMs) { return client.fetchWithTimeout(url, options, timeoutMs || DEFAULT_TIMEOUT_MS); }
 
 // The one HTTP shape every supported provider speaks: an OpenAI-compatible
 // POST {endpoint} with {model, messages}, Authorization: Bearer <apiKey>.
@@ -119,35 +96,18 @@ async function askManager(managerState, config) {
   if (!config.model) return { ok: false, error: "NO_MODEL" };
 
   const messages = buildManagerPrompt(managerState);
-  let res;
-  try {
-    res = await fetchWithTimeout(config.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {})
-      },
-      body: JSON.stringify({ model: config.model, messages, temperature: 0.2 })
-    }, config.timeoutMs || DEFAULT_TIMEOUT_MS);
-  } catch (e) {
-    const msg = e && e.name === "AbortError" ? "TIMEOUT" : `NETWORK_ERROR: ${redactSecrets(String(e), config)}`;
-    return { ok: false, error: msg };
+  const r = await client.chatCompletion({
+    endpoint: config.endpoint, apiKey: config.apiKey, model: config.model,
+    messages, temperature: 0.2, timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS
+  });
+  if (!r.ok) {
+    if (r.kind === "timeout") return { ok: false, error: "TIMEOUT" };
+    if (r.kind === "network") return { ok: false, error: `NETWORK_ERROR: ${redactSecrets(r.detail, config)}` };
+    if (r.kind === "http") return { ok: false, error: `HTTP_${r.status}`, detail: redactSecrets(r.detail || "", config).slice(0, 500) };
+    return { ok: false, error: "INVALID_RESPONSE_BODY" }; // kind:"bad-body"
   }
 
-  if (!res.ok) {
-    let bodyText = "";
-    try { bodyText = await res.text(); } catch { /* best effort */ }
-    return { ok: false, error: `HTTP_${res.status}`, detail: redactSecrets(bodyText, config).slice(0, 500) };
-  }
-
-  let body;
-  try {
-    body = await res.json();
-  } catch {
-    return { ok: false, error: "INVALID_RESPONSE_BODY" };
-  }
-
-  const content = body?.choices?.[0]?.message?.content;
+  const content = r.content;
   const decision = extractJsonObject(content);
   if (!decision || typeof decision !== "object") return { ok: false, error: "INVALID_JSON", raw: redactSecrets(String(content).slice(0, 500), config) };
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) {

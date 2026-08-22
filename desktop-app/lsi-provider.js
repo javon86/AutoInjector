@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const secretStore = require('./secret-store');
+const client = require('./openai-client'); // AI-006: shared OpenAI-compatible HTTP client
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const LOG_MAX = 200;
@@ -75,26 +76,13 @@ function setSettings(patch) {
 }
 function isEnabled() { return !!(_settings.enabled && _settings.endpoint && _settings.model); }
 
-function redactSecrets(s) { return _settings.apiKey ? String(s).split(_settings.apiKey).join('[REDACTED]') : String(s); }
+// AI-006: redaction just binds the shared helper to this module's current key
+// (String() preserves the old always-returns-a-string behavior).
+function redactSecrets(s) { return client.redactSecrets(String(s), _settings.apiKey); }
 function hashInput(s) { return crypto.createHash('sha256').update(String(s == null ? '' : s)).digest('hex').slice(0, 16); }
 
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || DEFAULT_TIMEOUT_MS);
-  try { return await fetch(url, Object.assign({}, options, { signal: controller.signal })); }
-  finally { clearTimeout(timer); }
-}
-
-// Pull the first {...} JSON object out of a model reply (tolerates code fences / prose).
-function extractJsonObject(text) {
-  if (text == null) return null;
-  const s = String(text);
-  try { return JSON.parse(s); } catch (_) {}
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start >= 0 && end > start) { try { return JSON.parse(s.slice(start, end + 1)); } catch (_) {} }
-  return null;
-}
+// AI-006: JSON extraction is the shared client's (same tolerant behavior).
+const extractJsonObject = client.extractJsonObject;
 
 function _valid(p, opts) {
   return !!p && typeof p.verdict === 'string'
@@ -103,20 +91,18 @@ function _valid(p, opts) {
 }
 
 async function _call(system, check, input) {
-  let res;
-  try {
-    res = await fetchWithTimeout(_settings.endpoint, {
-      method: 'POST',
-      headers: Object.assign({ 'Content-Type': 'application/json' }, _settings.apiKey ? { Authorization: `Bearer ${_settings.apiKey}` } : {}),
-      body: JSON.stringify({ model: _settings.model, temperature: 0, messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `CHECK: ${check}\nINPUT: ${input}` },
-      ] }),
-    }, _settings.timeoutMs || DEFAULT_TIMEOUT_MS);
-  } catch (_) { return null; } // network error / timeout -> unavailable
-  if (!res.ok) return null;
-  let body; try { body = await res.json(); } catch (_) { return null; }
-  return extractJsonObject(body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content);
+  // Any failure (network, timeout, non-2xx, bad body) -> null = "unavailable",
+  // exactly as before; the shared client maps them all to r.ok === false.
+  const r = await client.chatCompletion({
+    endpoint: _settings.endpoint, apiKey: _settings.apiKey, model: _settings.model, temperature: 0,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: `CHECK: ${check}\nINPUT: ${input}` },
+    ],
+    timeoutMs: _settings.timeoutMs || DEFAULT_TIMEOUT_MS,
+  });
+  if (!r.ok) return null;
+  return extractJsonObject(r.content);
 }
 
 function _record(check, input, v, t0) {
@@ -155,18 +141,11 @@ async function ask(check, input, opts = {}) {
 /** Lightweight reachability check for the panel's Test button. */
 async function testConnection() {
   if (!_settings.endpoint) return { ok: false, error: 'NO_ENDPOINT' };
-  try {
-    // OpenAI-compatible servers expose GET /models (or /v1/models). AI-002: a
-    // 404 means the server answered but the model route is wrong — that is
-    // "reachable" but NOT "connected/usable", so ok requires a 2xx. We report
-    // `reachable` separately so the UI can say "server reachable, models route
-    // missing" instead of a misleading green.
-    const base = _settings.endpoint.replace(/\/chat\/completions.*$/, '').replace(/\/$/, '');
-    const res = await fetchWithTimeout(`${base}/models`, { method: 'GET', headers: _settings.apiKey ? { Authorization: `Bearer ${_settings.apiKey}` } : {} }, 6000);
-    return { ok: res.ok, reachable: true, status: res.status };
-  } catch (e) {
-    return { ok: false, reachable: false, error: e && e.name === 'AbortError' ? 'TIMEOUT' : `NETWORK_ERROR: ${redactSecrets(String(e))}` };
-  }
+  // AI-002/AI-006: reachability via the shared /models probe. A 404 is
+  // reachable-but-not-usable (ok requires a 2xx); a network error is redacted.
+  const r = await client.probeModels({ endpoint: _settings.endpoint, apiKey: _settings.apiKey, timeoutMs: 6000 });
+  if (r.reachable) return { ok: r.ok, reachable: true, status: r.status };
+  return { ok: false, reachable: false, error: redactSecrets(r.error) };
 }
 
 /** Recent supervisor-call log (input HASHES only, never the raw input). */
