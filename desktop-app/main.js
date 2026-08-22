@@ -3574,6 +3574,22 @@ ipcMain.handle("manager:configure-provider", (_evt, config) => {
   const allowedProviders = new Set(["runpod-serverless", "runpod-pod", "openai-compatible"]);
   if (config.provider && !allowedProviders.has(config.provider)) return { ok: false, error: "BAD_PROVIDER" };
   if (config.tier != null && (!Number.isInteger(config.tier) || config.tier < 1 || config.tier > 4)) return { ok: false, error: "BAD_TIER" };
+  // AI-003: validate endpoints, timeouts, turn/cost limits, and the adjudicator
+  // BEFORE saving, so bad values can't produce instant timeouts, ineffective
+  // safeguards, or a key sent in the clear to a remote host.
+  if (config.timeoutMs != null && (!Number.isFinite(config.timeoutMs) || config.timeoutMs < 1000 || config.timeoutMs > 600000)) return { ok: false, error: "BAD_TIMEOUT" };
+  if (config.maximumTurns != null && (!Number.isInteger(config.maximumTurns) || config.maximumTurns < 1 || config.maximumTurns > 1000)) return { ok: false, error: "BAD_MAX_TURNS" };
+  if (config.costLimit != null && (!Number.isFinite(config.costLimit) || config.costLimit < 0)) return { ok: false, error: "BAD_COST_LIMIT" };
+  if (config.adjudicatorSite != null && config.adjudicatorSite !== "" && !SITES[config.adjudicatorSite]) return { ok: false, error: "BAD_ADJUDICATOR" };
+  if (config.endpoint != null && config.endpoint !== "") {
+    let url;
+    try { url = new URL(config.endpoint); } catch (_) { return { ok: false, error: "BAD_ENDPOINT" }; }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return { ok: false, error: "BAD_ENDPOINT" };
+    const isLocal = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "::1";
+    // A key going to a non-local host must go over HTTPS (no plaintext secrets).
+    const keyPresent = config.apiKey !== undefined ? !!config.apiKey : !!state.managerConfig.apiKey;
+    if (keyPresent && !isLocal && url.protocol !== "https:") return { ok: false, error: "INSECURE_REMOTE_KEY" };
+  }
   // Only overwrite fields actually present in the payload -- lets the config UI
   // save "just changed the model" without needing to resend the API key.
   const next = { ...state.managerConfig };

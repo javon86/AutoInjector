@@ -156,12 +156,16 @@ async function ask(check, input, opts = {}) {
 async function testConnection() {
   if (!_settings.endpoint) return { ok: false, error: 'NO_ENDPOINT' };
   try {
-    // OpenAI-compatible servers expose GET /models (or /v1/models); accept any response as reachable.
+    // OpenAI-compatible servers expose GET /models (or /v1/models). AI-002: a
+    // 404 means the server answered but the model route is wrong — that is
+    // "reachable" but NOT "connected/usable", so ok requires a 2xx. We report
+    // `reachable` separately so the UI can say "server reachable, models route
+    // missing" instead of a misleading green.
     const base = _settings.endpoint.replace(/\/chat\/completions.*$/, '').replace(/\/$/, '');
     const res = await fetchWithTimeout(`${base}/models`, { method: 'GET', headers: _settings.apiKey ? { Authorization: `Bearer ${_settings.apiKey}` } : {} }, 6000);
-    return { ok: res.ok || res.status === 404, status: res.status };
+    return { ok: res.ok, reachable: true, status: res.status };
   } catch (e) {
-    return { ok: false, error: e && e.name === 'AbortError' ? 'TIMEOUT' : `NETWORK_ERROR: ${redactSecrets(String(e))}` };
+    return { ok: false, reachable: false, error: e && e.name === 'AbortError' ? 'TIMEOUT' : `NETWORK_ERROR: ${redactSecrets(String(e))}` };
   }
 }
 
