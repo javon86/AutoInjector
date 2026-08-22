@@ -392,14 +392,42 @@ function pdfGate(id) {
 function _mutate(id, fn) {
   const dir = _dirById(id); if (!dir) return { ok: false, error: 'no such book' };
   const b = _read(dir); if (!b) return { ok: false, error: 'unreadable book' };
-  const r = fn(b, dir) || {};
+  let r;
+  // A guard (e.g. an invalid stage/status transition) throws to abort the
+  // mutation; report it as { ok:false } and never write a partial state.
+  try { r = fn(b, dir) || {}; } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
   _write(dir, b);
   return { ok: true, ...r };
 }
 
-function setStage(id, stage) {
+// BG-004: allowed chapter-status transitions. A lock can only follow a review
+// (IN REVIEW → LOCKED), a project can't jump straight to COMPLETE, etc. A manual
+// override is allowed but must record a reason.
+const CHAPTER_TRANSITIONS = {
+  'NOT STARTED': ['ACTIVE', 'DRAFTING'],
+  'ACTIVE': ['DRAFTING', 'BLOCKED'],
+  'DRAFTING': ['IN REVIEW', 'ACTIVE', 'BLOCKED'],
+  'IN REVIEW': ['LOCKED', 'REOPENED', 'BLOCKED'],
+  'REOPENED': ['DRAFTING', 'IN REVIEW'],
+  'BLOCKED': ['ACTIVE', 'DRAFTING', 'IN REVIEW'],
+  'LOCKED': ['COMPLETE', 'REOPENED'],
+  'COMPLETE': ['REOPENED'],
+};
+
+// BG-004: stages may move forward one step or back to any earlier stage; a
+// bigger forward jump needs an explicit override + reason.
+function setStage(id, stage, opts) {
   if (!STAGES.includes(stage)) return { ok: false, error: 'unknown stage' };
-  return _mutate(id, (b) => { b.stage = stage; b.log.push({ ts: _now(), text: `stage → ${STAGE_LABELS[stage]}` }); });
+  const o = opts || {};
+  return _mutate(id, (b) => {
+    const cur = STAGES.indexOf(b.stage), tgt = STAGES.indexOf(stage);
+    const forwardOne = tgt === cur + 1, backwardOrSame = tgt <= cur;
+    if (!(forwardOne || backwardOrSame) && !o.override) {
+      throw new Error(`can't skip from ${STAGE_LABELS[b.stage]} to ${STAGE_LABELS[stage]} — advance one stage at a time (or override)`);
+    }
+    b.stage = stage;
+    b.log.push({ ts: _now(), text: `stage → ${STAGE_LABELS[stage]}${o.override && !(forwardOne || backwardOrSame) ? ` (override: ${String(o.reason || 'no reason given')})` : ''}` });
+  });
 }
 
 // The one authoritative manuscript body for a chapter. Governed books keep it in
@@ -440,11 +468,20 @@ function addChapter(id, title) {
   });
 }
 
-function setChapterStatus(id, chId, status) {
+function setChapterStatus(id, chId, status, opts) {
   if (!CHAPTER_STATES.includes(status)) return { ok: false, error: 'unknown status' };
+  const o = opts || {};
   return _mutate(id, (b) => {
     const ch = b.chapters.find((c) => c.id === chId); if (!ch) throw new Error('no such chapter');
-    ch.status = status; b.log.push({ ts: _now(), text: `${chId} → ${status}` });
+    if (ch.status !== status) {
+      const allowed = CHAPTER_TRANSITIONS[ch.status] || [];
+      if (!allowed.includes(status) && !o.override) {
+        throw new Error(`can't move ${chId} from ${ch.status} to ${status} — allowed: ${allowed.join(', ') || 'none'} (or override)`);
+      }
+      const overridden = !allowed.includes(status);
+      ch.status = status;
+      b.log.push({ ts: _now(), text: `${chId} → ${status}${overridden ? ` (override: ${String(o.reason || 'no reason given')})` : ''}` });
+    }
   });
 }
 
@@ -459,6 +496,22 @@ function addRecord(id, type, name, content) {
     b.records.push({ id: recId, type: t, name: String(name || '').trim(), file });
     b.log.push({ ts: _now(), text: `added ${recId}${name ? ' — ' + name : ''}` });
     return { recordId: recId };
+  });
+}
+
+// BG-005: edit a record's content so records aren't permanent empty shells.
+// Works for a record (REQ/CHR/…) or a chapter manuscript, by id.
+function setRecordContent(id, recordId, content) {
+  return _mutate(id, (b, dir) => {
+    const item = [...b.records, ...b.chapters].find((r) => r.id === recordId);
+    if (!item) throw new Error('no such record');
+    const isChapter = !!item.status; // chapters carry a status; records don't
+    const name = item.name || item.title || '';
+    ensureDir(path.dirname(path.join(dir, item.file)));
+    if (isChapter && b.governed) fs.writeFileSync(path.join(dir, item.file), _governedSceneContent(item.id, item.title, String(content || '').trim()));
+    else fs.writeFileSync(path.join(dir, item.file), `# ${item.id}${name ? ' — ' + name : ''}\n\n${String(content || '').trim()}\n`);
+    b.log.push({ ts: _now(), text: `edited ${recordId} (${String(content || '').length} chars)` });
+    return { recordId };
   });
 }
 
@@ -491,7 +544,7 @@ function assembleManuscript(id) {
 
 module.exports = {
   init, configure, governedAvailable, create, list, get, setStage, setWorkflow, recordStepOutput, addChapter, setChapterStatus,
-  addRecord, listRecords, readRecord, appendLog, safeName, assembleManuscript,
+  addRecord, setRecordContent, listRecords, readRecord, appendLog, safeName, assembleManuscript,
   generatePdf, generateAllPdfs, importPdf, scanPdfs, listPdfs, pdfGate,
   STAGES, STAGE_LABELS, CHAPTER_STATES, RECORD_TYPES, PDF_DIR,
 };

@@ -1511,7 +1511,9 @@ async function dispatchBookStep(index) {
   r.status = composed.kind === "ask-user" ? "awaiting-user" : "waiting-reply";
   bookProject.setWorkflow(r.bookId, { status: "running", step: index },
     `▶ step ${index + 1}/${r.total}: ${composed.label} → ${SITES[composed.target] ? SITES[composed.target].label : composed.target}`);
-  bookProject.setStage(r.bookId, composed.stage);
+  // The workflow is the authoritative stage driver (ChatGPT owns stage
+  // progression), so it may set the step's stage directly (BG-004 override).
+  bookProject.setStage(r.bookId, composed.stage, { override: true, reason: "workflow step" });
   broadcastBookRun();
   sendTextTo(composed.target, composed.text, null, { raw: true }).catch((e) => logEvent("book-send-error", { target: composed.target, error: String(e) }));
   return { ok: true, ...composed, status: r.status };
@@ -2703,21 +2705,22 @@ ipcMain.handle("downloads:clear-finished", () => { downloadManager.clearFinished
 ipcMain.handle("book:list", () => { try { return { ok: true, projects: bookProject.list() }; } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:create", (_e, title) => { try { return bookProject.create(title); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:get", (_e, id) => { try { const p = bookProject.get(id); return p ? { ok: true, project: p } : { ok: false, error: "no such book" }; } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-stage", (_e, { id, stage }) => { try { return bookProject.setStage(id, stage); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-stage", (_e, { id, stage, override, reason }) => { try { return bookProject.setStage(id, stage, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:add-chapter", (_e, { id, title }) => { try { return bookProject.addChapter(id, title); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status }) => { try { return bookProject.setChapterStatus(id, chapterId, status); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status, override, reason }) => { try { return bookProject.setChapterStatus(id, chapterId, status, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:add-record", (_e, { id, type, name, content }) => { try { return bookProject.addRecord(id, type, name, content); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:read-record", (_e, { id, recordId }) => { try { return bookProject.readRecord(id, recordId); } catch (e) { return { ok: false, error: String(e) }; } });
+// BG-005: edit/save a record's content (and save a captured reply as a record).
+ipcMain.handle("book:set-record", (_e, { id, recordId, content }) => { try { return bookProject.setRecordContent(id, recordId, content); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:log", (_e, { id, text }) => { try { return bookProject.appendLog(id, text); } catch (e) { return { ok: false, error: String(e) }; } });
 ipcMain.handle("book:open-folder", (_e, id) => { try { const p = bookProject.get(id); if (p && shell) shell.openPath(p.dir); return { ok: !!p }; } catch (e) { return { ok: false, error: String(e) }; } });
 // Compose the role/task prompt for a task (the renderer sends it to the pane).
 ipcMain.handle("book:task", (_e, { id, taskId, chapterId }) => {
   try {
     const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    const d = bookPrompts.digest(p);
     const composed = bookPrompts.composeTask(taskId, {
       title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
-      chapter: chapterId || undefined, recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+      chapter: chapterId || undefined, recordsDigest: _bookContextDigest(p, chapterId),
     });
     return composed ? { ok: true, ...composed } : { ok: false, error: "unknown task" };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -2727,13 +2730,37 @@ ipcMain.handle("book:brief", (_e, id) => {
   try { const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" }; return { ok: true, briefs: bookPrompts.composeBriefAll(p) }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
+// BG-006: build a BOUNDED authoritative context packet — not just record IDs
+// and names, but their actual bodies (capped to a char budget), plus the current
+// chapter's text, so the AI works from real records instead of guessing. This is
+// what "use the authoritative records" is supposed to mean.
+function _bookContextDigest(p, chapterId, budget) {
+  const d = bookPrompts.digest(p);
+  let out = `chapters: ${d.chapters}; records: ${d.records}\n`;
+  let left = budget || 6000;
+  const add = (label, content) => {
+    if (left <= 0 || !content) return;
+    const excerpt = String(content).trim().slice(0, Math.min(left, 1200));
+    out += `\n--- ${label} ---\n${excerpt}${content.length > excerpt.length ? '\n…(truncated)…' : ''}\n`;
+    left -= excerpt.length;
+  };
+  try {
+    const cur = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
+    if (cur) { const r = bookProject.readRecord(p.id, cur); if (r && r.ok) add(`CHAPTER ${cur}${r.name ? ' — ' + r.name : ''}`, r.content); }
+    for (const rec of (p.records || [])) {
+      if (left <= 0) { out += `\n…(more records omitted — context budget reached)…\n`; break; }
+      const r = bookProject.readRecord(p.id, rec.id); if (r && r.ok) add(`${rec.id}${rec.name ? ' — ' + rec.name : ''}`, r.content);
+    }
+  } catch (_) {}
+  return out;
+}
+
 // --- Guided "Make Book" workflow runner (Start / Next / Pause / Resume / Stop) ---
 function _bookCtx(p, chapterId) {
-  const d = bookPrompts.digest(p);
   return {
     title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
     chapter: chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : undefined),
-    recordsDigest: `chapters: ${d.chapters}; records: ${d.records}`,
+    recordsDigest: _bookContextDigest(p, chapterId),
   };
 }
 // The runner now drives itself: Start dispatches step 0 and, from there,

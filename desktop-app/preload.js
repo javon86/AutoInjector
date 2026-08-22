@@ -120,6 +120,7 @@ contextBridge.exposeInMainWorld("api", {
   bookSetChapterStatus: (id, chapterId, status) => ipcRenderer.invoke("book:set-chapter-status", { id, chapterId, status }),
   bookAddRecord: (id, type, name, content) => ipcRenderer.invoke("book:add-record", { id, type, name, content }),
   bookReadRecord: (id, recordId) => ipcRenderer.invoke("book:read-record", { id, recordId }),
+  bookSetRecord: (id, recordId, content) => ipcRenderer.invoke("book:set-record", { id, recordId, content }),
   bookLog: (id, text) => ipcRenderer.invoke("book:log", { id, text }),
   bookOpenFolder: (id) => ipcRenderer.invoke("book:open-folder", id),
   bookTask: (id, taskId, chapterId) => ipcRenderer.invoke("book:task", { id, taskId, chapterId }),
