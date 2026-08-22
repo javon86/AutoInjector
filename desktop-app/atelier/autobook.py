@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-autobook.py — automation phases 2-5: unattended book production.
+autobook.py — validate & assemble drafted chapters (automation phases 2-5).
+
+NOTE (BG-012): this does NOT generate prose. It is a gate/assembly runner: it
+drives every chapter that already has a drafted block through the gates and the
+strict assembler, halting on the first S0/S1. It halts (does not invent) when a
+chapter's draft is missing. "Unattended" means unattended VALIDATION+ASSEMBLY of
+drafted chapters, not autonomous writing.
 
 Phase 1 was manual: a person ran each gate. This drives the whole pipeline
 across every chapter, halting on the first S0/S1 rather than continuing and
@@ -48,7 +54,9 @@ def _now() -> str:
 def run_tool(tool: str, *a, cwd=None, timeout=180) -> tuple[int, str, str]:
     p = HERE / tool
     if not p.exists():
-        return 3, "", f"missing tool: {tool}"
+        # BG-009: a MISSING tool must not masquerade as a gate's own "not
+        # applicable" (exit 3). Use 127 (command-not-found) so run_gates fails.
+        return 127, "", f"missing tool: {tool}"
     try:
         r = subprocess.run([sys.executable, str(p), *a], cwd=cwd,
                            capture_output=True, text=True, timeout=timeout)
@@ -82,10 +90,21 @@ def run_gates(root: Path, chapter: int) -> tuple[bool, list]:
     for name, tool, extra in GATES:
         rc, out, err = run_tool(tool, str(root), *extra)
         line = (out.strip().splitlines() or [""])[-1]
-        # exit 3 means the register is absent — for an in-progress book that is
-        # a not-applicable gate, not a failure. Exit 1 IS a finding.
-        ok = rc in (0, 3)
-        results.append({"gate": name, "exit": rc, "ok": ok,
+        # BG-009: distinguish the outcomes.
+        #   0   -> pass
+        #   3   -> the gate ran and reported "register absent / not applicable"
+        #          (legitimate for an in-progress book) — OK, but LABELLED na
+        #   127 -> the gate tool is MISSING — that is a broken pipeline, FAIL
+        #   else (1, 2, timeout, invalid) -> a real finding/failure, FAIL
+        if rc == 0:
+            status, ok = "pass", True
+        elif rc == 3:
+            status, ok = "na", True
+        elif rc == 127:
+            status, ok = "missing", False
+        else:
+            status, ok = "fail", False
+        results.append({"gate": name, "exit": rc, "ok": ok, "status": status,
                         "detail": (err.strip() or line)[:160]})
         if not ok:
             return False, results
@@ -155,7 +174,7 @@ def do_run(root: Path, first: int | None, last: int | None, dry: bool) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Unattended book production.")
+    ap = argparse.ArgumentParser(description="Validate and assemble drafted chapters (does not generate prose).")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p1 = sub.add_parser("plan"); p1.add_argument("project")
     p1.add_argument("--chapters", type=int, required=True)

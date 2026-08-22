@@ -3,6 +3,18 @@
 // what gets sent next. Exercises the House Rules state machines and routing
 // logic for real; does not (and cannot, without a browser) test the DOM
 // automation itself. Run with: node test/run.js
+// QA-001: run main.js on a fast, internally-consistent clock so the integration
+// suite is quick and deterministic (same logic, smaller timing windows). These
+// MUST be set before main.js is required (it reads them at load).
+process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || "50";
+process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || "80";
+process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || "150";
+process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS || "60";
+// selftest timeout stays at its default: the tuner tests answer every check
+// promptly (so they never idle to it), and shortening it broke the tuner's
+// step-by-step choreography. selftest poll is nudged down to match the fast clock.
+process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_POLL_MS || "100";
+
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -52,6 +64,12 @@ function reg(site) { return mockElectron.__registry[site]; }
 function sentLog(site) { return reg(site).webContents.sentLog; }
 function totalSent() { return SITES.reduce((n, s) => n + sentLog(s).length, 0); }
 
+// A bounded "nothing more happened" margin for NEGATIVE assertions, anchored to
+// the (fast) test clock — comfortably longer than a poll tick, the stability
+// debounce, and a retry backoff, so a delayed send would have fired by now.
+const SETTLE_MS = Number(process.env.AUTOINJECTOR_SETTLE_MS) || 400;
+function settle(ms) { return new Promise((r) => setTimeout(r, ms == null ? SETTLE_MS : ms)); }
+
 async function waitUntil(fn, { timeout = 10000, interval = 150, label = "condition" } = {}) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -78,7 +96,7 @@ async function resetAllParticipants() {
     reg(s).webContents.sentLog = [];
   }
   await call("transcript:clear", {});
-  await new Promise((r) => setTimeout(r, 400)); // let any in-flight poll tick from the prior scenario drain
+  await settle(200); // let any in-flight poll tick from the prior scenario drain
 }
 
 function say(site, text) {
@@ -119,7 +137,7 @@ async function testDebate() {
   // turn 6 (last of round 2) should end the debate — nobody else gets sent anything after
   say(speaker, "stance #6 final");
   await waitUntil(async () => (await call("state:get", {})).houseRule.active === false, { label: "debate to end after final round" });
-  await new Promise((r) => setTimeout(r, 500)); // settle margin to catch any stray extra send
+  await settle(250); // settle margin to catch any stray extra send
   assert(JSON.stringify(counts()) === JSON.stringify(prev), "no further message sent after the configured rounds complete");
 
   assert(order.length === 6, `captured all 6 turns (got ${order.length})`);
@@ -152,7 +170,7 @@ async function testDevilAngel() {
   assert(!sentLog(devil)[0].text.includes(sentLog(angel)[0].text), "devil's message doesn't contain angel's message (they can't see each other)");
 
   say(devil, "This will break under load, no rollback plan.");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
   assert(sentLog(middle).length === 1, "middle hasn't been messaged yet — still waiting on angel too");
 
   say(angel, "The team is ready, customers are asking for this.");
@@ -184,7 +202,7 @@ async function testChargeback() {
   await waitUntil(() => sentLog(d1).length === 1 && sentLog(referee).length === 1, { label: "kickoff sent to debater1 and referee" });
 
   say(referee, "Understood, watching silently.");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
   const state1 = await call("state:get", {});
   assert(state1.houseRule.active === true, "referee's acknowledgment does not end or advance the run");
 
@@ -194,7 +212,7 @@ async function testChargeback() {
   assert(refCopiesAfterD1 === 2, `referee got an informational copy of debater1's statement (sentLog=${refCopiesAfterD1})`);
 
   say(referee, "Noted.");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
 
   say(d2, "But it kills spontaneous collaboration.");
   // Round is configured for 1, so this should trigger the combined final-message + verdict request to referee
@@ -223,7 +241,7 @@ async function testWhoWantsToSpeak() {
   say("gemini", "yes, spaced repetition matters too");
 
   await waitUntil(() => sentLog("chatgpt").length === 2 && sentLog("gemini").length === 2, { label: "opted-in sites get the real follow-up" });
-  await new Promise((r) => setTimeout(r, 2000));
+  await settle();
   assert(sentLog("claude").length === 1, "claude (said NO) never gets a second message");
   assert(sentLog("chatgpt")[1].text.toLowerCase().includes("go ahead"), "follow-up prompt is the real 'give your point' ask");
 }
@@ -284,7 +302,7 @@ async function testRotation() {
   assert(state1.houseRule.nextSpeaker === "claude", "after chatgpt speaks, nextSpeaker is claude");
 
   say("gemini", "UPDATED");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
   const afterUpdateAck = await call("state:get", {});
   assert(afterUpdateAck.transcript.every((t) => t.text !== "UPDATED"), "gemini's 'UPDATED' ack never lands in the transcript");
   assert(sentLog("claude").length === 1 && sentLog("chatgpt").length === 1, "gemini's silent ack doesn't trigger any further sends");
@@ -295,7 +313,7 @@ async function testRotation() {
   assert(sentLog("chatgpt")[1].text.includes("reply with exactly: UPDATED"), "chatgpt gets UPDATEd since it's not its turn");
 
   say("chatgpt", "UPDATED");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
 
   say("gemini", "Gemini's reply, closing the loop");
   await waitUntil(() => sentLog("chatgpt").length === 3 && sentLog("claude").length === 2, { label: "gemini's reply fans out RESPOND to chatgpt, UPDATE to claude" });
@@ -540,7 +558,8 @@ async function testSendAutoRetry() {
   const elapsed = Date.now() - start;
   assert(!failRes.results.gemini.ok && failRes.results.gemini.error === "SEND_NOT_CONFIRMED", "after all 3 attempts fail, it's reported as a real failure, not silently swallowed");
   assert(sentLog("gemini").length === 0, "nothing ever actually landed -- all 3 attempts genuinely failed, not a partial success");
-  assert(elapsed >= 2900, `all 3 attempts actually ran, backing off between each (~3s total for 2 backoffs), not fast-failing after one try (took ${elapsed}ms)`);
+  const twoBackoffs = 2 * Number(process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || 1500);
+  assert(elapsed >= twoBackoffs * 0.9, `all 3 attempts actually ran, backing off between each (~${twoBackoffs}ms for 2 backoffs), not fast-failing after one try (took ${elapsed}ms)`);
 
   s = await call("state:get", {});
   const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview === "Genuinely broken").pop();
@@ -598,12 +617,12 @@ async function testPersistenceSavesToDisk() {
   console.log("\n== Persistence: role/state changes get written to disk (debounced) ==");
   await resetAllParticipants();
   await call("roles:set", { site: "gemini", role: "Fact-checker" });
-  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  await settle(250); // let the debounced save flush
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
   const saved = JSON.parse(raw);
   assert(saved.customRole && saved.customRole.gemini === "Fact-checker", "the file on disk reflects the new role");
   await call("roles:set", { site: "gemini", role: "" }); // leave roles clean for later tests
-  await new Promise((r) => setTimeout(r, 700));
+  await settle(250);
 }
 
 async function testPromptLibrary() {
@@ -641,7 +660,7 @@ async function testPromptLibrary() {
   const delRes = await call("prompts:delete", created.id);
   assert(delRes.ok && !delRes.prompts.some((p) => p.id === created.id), "deleting removes it from the list");
 
-  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  await settle(250); // let the debounced save flush
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
   const saved = JSON.parse(raw);
   assert(Array.isArray(saved.prompts) && !saved.prompts.some((p) => p.id === created.id), "the deletion is reflected in the persisted state file too");
@@ -845,7 +864,7 @@ async function testSequenceBackend() {
 
   // a reply from a site the current step didn't address must NOT advance it
   say("claude", "I wasn't asked anything, ignore me.");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
   s = await call("state:get", {});
   assert(s.sequence.index === 0, "an unaddressed site's reply does not advance the sequence");
 
@@ -949,7 +968,7 @@ async function testSelectorPicker() {
   assert(s.log.some((l) => l.kind === "selector-pick-started" && l.detail.site === "claude" && l.detail.role === "input"), "the Activity Log records that a pick started, not just its eventual result");
   assert(s.log.some((l) => l.kind === "selector-picked" && l.detail.selector === '[data-testid="composer-input"]' && l.detail.tag === "div"), "the Activity Log records the picked selector and tag on success");
 
-  await new Promise((r) => setTimeout(r, 700)); // let the debounced save flush
+  await settle(250); // let the debounced save flush
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
   const saved = JSON.parse(raw);
   assert(saved.selectorOverrides && saved.selectorOverrides.claude && saved.selectorOverrides.claude.input === '[data-testid="composer-input"]', "the override survives to the persisted state file");
@@ -1037,7 +1056,7 @@ async function testSavedLogins() {
   const loginId = listed.logins.claude[0].id;
 
   // persisted to disk -- but only as ciphertext, never the raw password
-  await new Promise((r) => setTimeout(r, 700));
+  await settle(250);
   const raw = fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8");
   assert(!raw.includes("hunter2"), "the raw password never appears anywhere in the persisted state file");
   const savedOnDisk = JSON.parse(raw);
@@ -1590,7 +1609,7 @@ async function testAlwaysOnTagRouting() {
   const transcriptLenBefore = (await call("state:get", {})).transcript.length;
   const totalBefore2 = totalSent();
   say("chatgpt", "[TO: NONE]");
-  await new Promise((r) => setTimeout(r, 3000));
+  await settle();
   s = await call("state:get", {});
   assert(s.transcript.length === transcriptLenBefore, "TO:NONE never appears in the transcript");
   assert(totalSent() === totalBefore2, "TO:NONE triggers zero relays");
@@ -1628,7 +1647,7 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
 
   say("chatgpt", "[TO: CLAUDE]\nOnly claude should get exactly one copy of this.");
   await waitUntil(() => sentLog("claude").length === 1 && sentLog("gemini").length === 1, { label: "claude gets the tag relay, gemini gets the separate (correct) mesh forward" });
-  await new Promise((r) => setTimeout(r, 2000)); // give a would-be second (mesh) send to claude time to land if the bug were still present
+  await settle(); // give a would-be second (mesh) send to claude time to land if the bug were still present
   assert(sentLog("claude").length === 1, `claude (the tag's target) gets exactly ONE copy, not two (got ${sentLog("claude").length})`);
   assert(sentLog("gemini").length === 1, `gemini (not addressed by the tag) still correctly gets its own separate mesh copy, exactly one (got ${sentLog("gemini").length})`);
   assert(!sentLog("claude")[0].text.includes("[TO:"), "claude's one copy is the clean, tag-stripped version (tag routing's copy), never a raw mesh copy with the tag still embedded");
@@ -1643,7 +1662,7 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   await call("routing:auto-all", {});
   say("gemini", "[TO: ALL]\nEveryone gets exactly one copy of this too.");
   await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, { label: "both other sites receive the ALL relay" });
-  await new Promise((r) => setTimeout(r, 2000));
+  await settle();
   assert(sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, `both get exactly one copy each, not two (got chatgpt:${sentLog("chatgpt").length}, claude:${sentLog("claude").length})`);
 
   await call("routing:stop-all", {});
@@ -1683,7 +1702,7 @@ async function testHouseRulesVsMeshDedup() {
   // satisfy "grew by one", so array-order-dependent lookups here would be a
   // coin flip on which real speaker the shuffle picked.
   await waitUntil(() => others.every((s) => sentLog(s).length > beforeCounts[s]), { label: "both the real next speaker and the mesh-only target receive their one message" });
-  await new Promise((r) => setTimeout(r, 1500)); // settle window -- a would-be duplicate has time to land if the bug were still present
+  await settle(); // settle window -- a would-be duplicate has time to land if the bug were still present
 
   for (const s of others) {
     assert(sentLog(s).length === beforeCounts[s] + 1, `${s} gets exactly ONE message for this turn, not a duplicate (got ${sentLog(s).length - beforeCounts[s]})`);
@@ -1740,7 +1759,7 @@ async function testRetryHoldsQueueThroughBackoff() {
 
   // Fire a second, unrelated send to the SAME target while the first is
   // still mid-backoff (well before its ~1.5s backoff elapses).
-  await new Promise((r) => setTimeout(r, 400));
+  await settle(200);
   const pSecond = call("send:compose", { text: "Second (fired during first's backoff)", targets: ["gemini"] });
 
   await Promise.all([pFirst, pSecond]);
@@ -1756,7 +1775,7 @@ async function testRegenerateGoesThroughLedgerQueueRetry() {
 
   const composeRes = await call("send:compose", { text: "Original message", targets: ["claude"] });
   assert(composeRes.ok, "initial compose succeeds");
-  await new Promise((r) => setTimeout(r, 50));
+  await settle(50);
 
   const before = (await call("state:get", {})).ledger.length;
   const regenRes = await call("send:regenerate", "claude");
@@ -1772,7 +1791,7 @@ async function testRegenerateGoesThroughLedgerQueueRetry() {
   // regenerate now also gets the 3-attempt retry it never had before
   await resetAllParticipants();
   await call("send:compose", { text: "Will need a retry to regenerate", targets: ["gemini"] });
-  await new Promise((r) => setTimeout(r, 50));
+  await settle(50);
   reg("gemini").webContents._sendFailQueue = [true, false];
   const beforeRetry = (await call("state:get", {})).ledger.length;
   const regenRetryRes = await call("send:regenerate", "gemini");
@@ -1839,7 +1858,14 @@ async function main() {
   }));
 
   require(path.join(__dirname, "..", "main.js"));
-  await new Promise((r) => setTimeout(r, 100)); // let app.whenReady().then(createWindow) settle
+  // QA-001: wait for the ACTUAL startup work to finish (the routing-explainer
+  // auto-send reaching all three panes) instead of a fixed 100ms guess — this is
+  // the terminal, observable signal that app.whenReady()→createWindow ran.
+  const started = await waitUntil(() => SITES.every((s) => {
+    const r = reg(s); // the registry is populated only once createWindow runs
+    return r && r.webContents && Array.isArray(r.webContents.sentLog) && r.webContents.sentLog.length >= 1;
+  }), { label: "startup routing-explainer sent to all three panes" });
+  assert(!!started, "startup completed (routing-explainer auto-sent to all three panes)");
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -1855,7 +1881,9 @@ async function main() {
   console.log("\n== Startup: the routing-explainer prompt is auto-sent to every site once, before anything else ==");
   for (const s of SITES) {
     assert(sentLog(s).length === 1, `${s} received exactly one send on startup (got ${sentLog(s).length})`);
-    assert(sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
+    // QA-001: never index [0] blindly after a count assertion — guard it so a
+    // miss reports a clean failure instead of crashing the whole runner.
+    assert(sentLog(s)[0] && sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
   }
 
   await testDebate();

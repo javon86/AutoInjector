@@ -126,6 +126,77 @@ async function main() {
       return s && /Step 1\//.test(s.textContent) && pause && pause.style.display !== 'none';
     }, { timeout: 6000 }).then(() => true).catch(() => false);
     assert(running, 'Start Making Book launches the workflow at step 1 (Pause/Continue appear)');
+    // The persistent bottom-bar tally shows where the workflow is, always visible.
+    const tallyShown = await controls.waitForFunction(() => {
+      const t = document.getElementById('book-tally');
+      return t && /Section 1\/\d/.test(t.textContent);
+    }, { timeout: 5000 }).then(() => true).catch(() => false);
+    assert(tallyShown, 'the persistent bottom-bar tally shows "Section 1/N"');
+    // UI-001: the single guided readiness line reflects step + a clear next action.
+    const readiness = await controls.evaluate(() => {
+      const step = document.getElementById('rd-step');
+      const next = document.getElementById('rd-next');
+      return { step: step && step.textContent, next: next && next.textContent };
+    });
+    assert(readiness.step && /1\//.test(readiness.step), `readiness line shows the current step ("${readiness.step}")`);
+    assert(readiness.next && /Continue|answer/i.test(readiness.next), `readiness line names the one next action ("${(readiness.next || '').slice(0, 50)}")`);
+    // Step 1 is the intake questionnaire — an "ask-user" step, so the runner
+    // waits for the human (it must NOT auto-advance). The Continue button says
+    // so, and the status names the intake questions.
+    const asksUser = await controls.evaluate(() => {
+      const c = document.getElementById('btn-book-continue');
+      const s = document.getElementById('book-workflow-status');
+      return !!c && /answered/i.test(c.textContent) && !!s && /intake/i.test(s.textContent);
+    });
+    assert(asksUser, 'the first step waits for you (intake questionnaire, "I\'ve answered — Continue")');
+    // The AI-readiness line reports on the three panes ("make sure AI is up").
+    await controls.click('#btn-book-check-ai');
+    const aiLine = await controls.waitForFunction(() => {
+      const e = document.getElementById('book-ai-status');
+      return e && /ChatGPT/.test(e.textContent) && /Gemini/.test(e.textContent);
+    }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(aiLine, 'the AI-readiness line reports on the ChatGPT / Claude / Gemini panes');
+    // The Rules of Conduct ("bible") button is present and, when pressed, is
+    // logged into the book's activity log (the send itself is best-effort in the
+    // sandbox where panes aren't logged in, but the log entry is local).
+    assert(await controls.$('#btn-book-send-rules'), 'the "Send Rules" (bible) button is present');
+    await controls.click('#btn-book-send-rules');
+    const ruleLogged = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-log');
+      return box && /Rules of Conduct/i.test(box.textContent);
+    }, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(ruleLogged, 'sending the Rules of Conduct is recorded in the activity log');
+
+    // PDF completion gate: the panel is present and lists the chapter as a
+    // deliverable; "Make PDFs" produces a real PDF and the gate flips to ✓.
+    assert(await controls.$('#book-pdf-gate'), 'the PDF completion-gate panel is present');
+    const gateHasChapter = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-pdf-gate');
+      return box && /Chapter/.test(box.textContent) && /⏳/.test(box.textContent);
+    }, { timeout: 4000 }).then(() => true).catch(() => false);
+    assert(gateHasChapter, 'the gate lists the chapter as a deliverable, waiting on its PDF (⏳)');
+    await controls.click('#btn-book-make-pdfs');
+    const gateChecked = await controls.waitForFunction(() => {
+      const box = document.getElementById('book-pdf-gate');
+      const cnt = document.getElementById('book-pdf-count');
+      return box && /✓/.test(box.textContent) && cnt && /have a PDF/.test(cnt.textContent);
+    }, { timeout: 8000 }).then(() => true).catch(() => false);
+    assert(gateChecked, 'Make PDFs creates the PDFs and the gate marks the deliverable complete (✓)');
+    // A real .pdf file exists on disk under some book's pdfs/ folder, and it's a
+    // valid PDF (starts with the header). (docs/fs/pathMod resolved above.)
+    let pdfPath = null;
+    try {
+      const booksRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output', 'books') : null;
+      if (booksRoot && fs.existsSync(booksRoot)) {
+        for (const d of fs.readdirSync(booksRoot)) {
+          const pdir = pathMod.join(booksRoot, d, 'pdfs');
+          if (fs.existsSync(pdir)) { const hit = fs.readdirSync(pdir).find((f) => f.toLowerCase().endsWith('.pdf')); if (hit) { pdfPath = pathMod.join(pdir, hit); break; } }
+        }
+      }
+    } catch (_) {}
+    assert(pdfPath, `a real .pdf file was written into a book's pdfs/ folder (${pdfPath || 'none found'})`);
+    if (pdfPath) assert(fs.readFileSync(pdfPath).slice(0, 5).toString() === '%PDF-', 'that file is a valid PDF (starts with %PDF-)');
+
     // Pause -> Resume controls swap in.
     await controls.click('#btn-book-pause');
     const paused = await controls.waitForFunction(() => {
@@ -134,6 +205,58 @@ async function main() {
     }, { timeout: 5000 }).then(() => true).catch(() => false);
     assert(paused, 'Pause shows the Resume control (workflow is pausable)');
     await shot(controls, 'book-studio');
+
+    console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');
+    assert(await controls.$('#btn-open-feed'), 'the AI Feed button is present in the action bar');
+    await controls.click('#btn-open-feed');
+    const feedWin = await findWindow(app, '#feed', 15000);
+    assert(feedWin, 'the AI Feed window opened');
+    if (feedWin) {
+      const chips = await feedWin.$$eval('.chip[data-site]', (els) => els.map((e) => e.getAttribute('data-site'))).catch(() => []);
+      assert(chips.includes('chatgpt') && chips.includes('claude') && chips.includes('gemini'),
+        'the feed has a colour-coded filter chip for each LLM');
+      // The per-LLM bubble colour rules are defined in the window's own styles.
+      const hasColors = await feedWin.evaluate(() => {
+        const css = Array.from(document.styleSheets).flatMap((s) => { try { return Array.from(s.cssRules).map((r) => r.cssText); } catch (_) { return []; } }).join(' ');
+        return /b-chatgpt/.test(css) && /b-claude/.test(css) && /b-gemini/.test(css);
+      }).catch(() => false);
+      assert(hasColors, 'the feed defines a distinct bubble style per LLM');
+      await shot(feedWin, 'ai-feed');
+    }
+
+    console.log('\n== UI-003: accessibility basics (accessible names, keyboard, zoom) ==');
+    // Every button has an accessible name — visible text, aria-label, or title.
+    const unnamed = await controls.$$eval('button', (btns) => btns
+      .filter((b) => {
+        const txt = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        const named = txt.length >= 2 || b.getAttribute('aria-label') || b.getAttribute('title');
+        return !named;
+      })
+      .map((b) => b.id || b.className || b.outerHTML.slice(0, 40)));
+    assert(unnamed.length === 0, `every button has an accessible name (${unnamed.length} unnamed${unnamed.length ? ': ' + unnamed.join(', ') : ''})`);
+
+    // Keyboard-only: a new book can be created without the mouse.
+    const kbTitle = 'KB Book ' + Date.now();
+    await controls.focus('#book-new-title');
+    await controls.keyboard.type(kbTitle);
+    await controls.focus('#btn-book-new');
+    await controls.keyboard.press('Enter');
+    const kbCreated = await controls.waitForFunction((t) => {
+      const sel = document.getElementById('book-select');
+      return sel && Array.from(sel.options).some((o) => o.textContent.includes(t));
+    }, kbTitle, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(kbCreated, 'a book can be created with the keyboard only (focus + type + Enter)');
+
+    // Reflow at 200% zoom must not make the control column scroll sideways.
+    await controls.evaluate(() => { document.body.style.zoom = '2'; });
+    await controls.waitForTimeout(200);
+    const noHScrollAt200 = await controls.evaluate(() => {
+      const w = document.getElementById('wrap');
+      return w ? w.scrollWidth <= w.clientWidth + 3 : true;
+    });
+    assert(noHScrollAt200, 'the control column reflows without horizontal scroll at 200% zoom');
+    await shot(controls, 'control-panel-200pct');
+    await controls.evaluate(() => { document.body.style.zoom = '1'; });
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
     await app.close();

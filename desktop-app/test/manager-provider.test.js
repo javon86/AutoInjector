@@ -102,14 +102,19 @@ async function testMissingConfig() {
 }
 
 async function testTestConnection() {
-  console.log("\n== testConnection: reachable-but-malformed-reply still counts as reachable; real failures don't ==");
+  console.log("\n== testConnection (AI-004): reachable is distinct from format-valid ==");
   await withFetch(async () => fakeResponse({ jsonBody: { choices: [{ message: { content: "not json" } }] } }), async () => {
     const res = await mp.testConnection(config);
-    assert(res.ok === true && res.warning === "INVALID_JSON", "an unparseable reply still proves the endpoint is reachable -- that's a model/prompt issue, not connectivity");
+    assert(res.reachable === true && res.formatValid === false && res.ok === false && res.warning === "INVALID_JSON",
+      "a malformed reply is reachable but NOT a passing test (won't enable autonomous operation)");
+  });
+  await withFetch(async () => fakeResponse({ jsonBody: { choices: [{ message: { content: JSON.stringify({ action: "WAIT" }) } }] } }), async () => {
+    const res = await mp.testConnection(config);
+    assert(res.ok === true && res.reachable === true && res.formatValid === true, "a valid manager reply passes fully");
   });
   await withFetch(async () => { throw new Error("ECONNREFUSED"); }, async () => {
     const res = await mp.testConnection(config);
-    assert(!res.ok, "a genuine network failure is reported as not connected");
+    assert(!res.ok && res.reachable === false, "a genuine network failure is reported as not reachable");
   });
 }
 

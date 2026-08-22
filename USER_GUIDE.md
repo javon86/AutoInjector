@@ -28,7 +28,8 @@ no prior setup knowledge assumed.
 13. [The System AI / Local Supervisor](#13-the-system-ai--local-supervisor)
 14. [Book Governance (ATELIER) — on hold](#14-book-governance-atelier--on-hold)
 15. [What you need to run each part](#15-what-you-need-to-run-each-part)
-16. [Troubleshooting](#16-troubleshooting)
+16. [Network & connectivity — what to allow](#16-network--connectivity--what-to-allow)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -245,6 +246,17 @@ confused with the previous one. Use it whenever you want a clean slate for all
 three AIs without reloading them one at a time. *(Your logins stay signed in —
 this only opens a new conversation.)*
 
+### 7c‑2. 💬 AI Feed — all the AIs in one window ✅
+
+The **💬 AI Feed** button in the User Panel opens a **separate pop‑up window that
+consolidates every AI's messages in one place**, shown as **chat bubbles
+colour‑coded by which LLM is talking** (ChatGPT green, Claude terracotta, Gemini
+blue) so it's easy to tell who said what. It shows the recent history when it
+opens and then updates live as replies come in. You can **filter** by AI with the
+chips at the top, toggle **auto‑scroll**, and **open/close/reopen it any time** —
+it's a standalone window you can park on a second monitor while the workflow runs
+itself.
+
 ### 7d. Setup Wizard (optional downloads) ✅ *(early version)*
 
 The app itself opens with **nothing extra to download**. Everything heavy — local
@@ -317,16 +329,57 @@ ATELIER "3‑AI" method: **ChatGPT = story**, **Gemini = canon/continuity**,
   **Writing review**, **Revise**, and the quick actions **↻ Redo**, **⟲ Start
   over**, **🔁 Check again**.
 - **▶ Start Making Book** — the one button that **kicks off the whole process**.
-  It begins by having **ChatGPT send you an intake questionnaire** (title, genre,
+  It first sends all three AIs their **Rules of Conduct — the 3‑AI governance
+  "bible"** (authority, voting, communication protocol) so they operate as one
+  governed team (ChatGPT = Story, Gemini = Canon, Claude = Writing) for the whole
+  book. Then it has **ChatGPT send you an intake questionnaire** (title, genre,
   premise, characters, length, tone, must‑haves…). You answer in the ChatGPT
-  pane, then press **Continue ▶** to move to the next step; the runner walks the
-  full sequence (requirements → outline → Book Bible → roadmap → write → the
-  three reviews → revise → lock), sending the right prompt to the right AI and
-  advancing the stage. You can **⏸ Pause** and **▶ Resume any time** — the step
-  is saved with the book, so you can even close the app and pick up later.
+  pane, then press **✓ I've answered — Continue ▶** once. **From there the runner
+  advances itself** — it walks the full sequence (requirements → outline → Book
+  Bible → roadmap → write → the three reviews → revise → lock), sending the right
+  prompt to the right AI. **How it knows a section is done: it saves the reply,
+  turns it into that section's PDF, and confirms the PDF is on file — only then
+  does it move on and send the next section's prompt.** No clicking between
+  steps. Each result is saved into the book (`steps/…`, the Write step also fills
+  the chapter manuscript) and filed as a PDF (see **📄 PDF forms** below). You can
+  **⏸ Pause** and **▶ Resume any time** — the position is saved with the book, so
+  you can even close the app and pick up later. If a pane goes quiet, or a
+  section's PDF can't be filed, the run **parks itself** and tells you. Only the
+  intake step waits for you; everything after it is hands‑off.
+  - **Always know where it's at.** A **persistent tally** in the bottom action
+    bar (`📖 Section 3/11 — Master Outline ▶ running`) shows exactly which
+    section the system is on at all times, no matter which panel you're looking
+    at — so you're never guessing while it runs itself.
+- **⟳ Check AI** — before (or during) a run, confirm the **ChatGPT / Claude /
+  Gemini panes are up and ready** to receive prompts. The readiness line shows a
+  ✓ or ✗ (with the reason) for each, so you know the AIs are ready to go.
+- **📜 Send Rules** — (re)send the **Rules of Conduct bible** to all three AIs.
+  It's sent automatically at Start; use this button if a pane forgets it mid‑run.
+  The AIs are told to follow it silently (the rules forbid acknowledgment
+  chatter), so a repeat send is just a reminder, not a new task.
 - **🧠 Brief the AIs (fill panes)** — catches all three AIs up on the current
   book (its stage, chapters and records) so, when you reopen a book, the panes
   know exactly what they're working on and what to do next.
+- **📄 PDF forms (completion gate)** — the rules say a template or chapter isn't
+  *complete* until it exists as a **downloadable PDF** (Rules 36–39). So every
+  finished step and chapter is **automatically saved as a PDF** in the book's
+  `pdfs/` folder, named the standard way (`[Book] - Chapter 01 - Title.pdf`,
+  `[Book] - Book Bible.pdf`). The gate list shows each deliverable with a **✓
+  (PDF on file)** or **⏳ (waiting)**, so you always know what's truly done. Use
+  **📄 Make PDFs** to (re)create them all, **🔎 Find PDFs** to pull in a PDF you
+  downloaded from an AI (it scans your Downloads and output folders for files
+  named for this book), **📂 Open folder** to get to them, and **open** on any
+  row to view that PDF. This is the form you can download.
+- **🛡 Governed (ATELIER v2) projects.** When **Python 3 is installed**, **New
+  Book** scaffolds the full governed ATELIER structure (`00_CONTROL`, `01_DESIGN`,
+  `02_BIBLE`, `03_MEMORY`, `04_CHAPTERS`, `06_AUDITS`, `07_BUILD`, …) and that
+  becomes the book's **one source of truth** — chapters live in `04_CHAPTERS`
+  between the strict manuscript markers, so there's a single authoritative
+  chapter file. A badge shows **🛡 Governed** vs a plain **V1 project** (used
+  automatically if Python isn't present, so the app always works). For governed
+  books a **📖 Build Manuscript** button runs strict ATELIER assembly into
+  `07_BUILD/manuscript.md` (only the in-book text between the markers is
+  included). *(Python is offered in the Setup Wizard.)*
 - **Records** — create governed records (REQ, CHR, PLC, ART, …) with permanent
   IDs; click any record to **pop it up** and read it.
 - **Activity log** — every action is logged, so you're never left guessing.
@@ -509,7 +562,75 @@ It requires Python 3 when active.
 
 ---
 
-## 16. Troubleshooting
+## 16. Network & connectivity — what to allow
+
+AutoInjector runs on your machine and talks to the internet only where you'd
+expect. Here's exactly what needs network access, so you (or your IT/firewall)
+can allow the right things.
+
+### What the app itself needs
+
+- **The three AI websites.** Each pane is just a logged‑in browser view, so it
+  connects to the normal sites and their sign‑in/CDN domains:
+  - **ChatGPT** — `chatgpt.com`, `*.openai.com`, `auth0.openai.com`
+  - **Claude** — `claude.ai`, `*.anthropic.com`
+  - **Gemini** — `gemini.google.com`, `accounts.google.com`, `*.googleapis.com`,
+    `*.gstatic.com`
+  You log in exactly as you would in a browser; your credentials go straight to
+  those sites, not to AutoInjector.
+- **Nothing else is required.** The app has no telemetry and no "call home." The
+  conversation database, memory, search, System Monitor and the Book Studio all
+  run **fully offline** on your computer.
+
+> **Privacy:** whatever you send in a pane goes to that AI's service (OpenAI,
+> Anthropic, Google) under your own account — the same as using their website.
+> AutoInjector doesn't add any middle‑man server.
+
+### Optional features that need the internet
+
+These only reach out **when you choose to use them** (mostly from the **Setup
+Wizard**):
+
+| Feature | Connects to | Why |
+| --- | --- | --- |
+| **Setup Wizard downloads** | `ollama.com`, `github.com`, `huggingface.co`, `civitai.com`, `python.org` | To download local‑AI runtimes, models and installers you pick. |
+| **System AI / Local models** | `ollama.com` and its model registry | To pull a local model (e.g. Llama, Mistral). |
+| **Image Studio** | your **Forge/Automatic1111** server (local or remote, e.g. RunPod) | To generate images. |
+| **Book PDFs / downloads** | the AI site you download from | When an AI gives you a file, it saves into your output folder. |
+
+Downloads run **in the background** and can be several gigabytes — see the
+Wizard's Downloads tray for progress. Once a local model or engine is installed,
+it runs **offline**; no internet is needed to use it again.
+
+### Local services and ports (only if you enable them)
+
+When you run the optional local engines, they listen on your own machine at:
+
+| Service | Address | Used by |
+| --- | --- | --- |
+| **Ollama** (local models) | `http://localhost:11434` | System AI / Local Supervisor |
+| **Forge / Automatic1111** | `http://localhost:7860` | Image Studio |
+| **ComfyUI** (video, later) | `http://localhost:8188` | Video engine |
+
+These are **local‑only** by default — nothing is exposed to the internet. If you
+point Image Studio at a **remote** GPU (like RunPod), allow that host/port
+instead.
+
+### If you're behind a firewall / proxy or the network is locked down
+
+- **Minimum to use the app:** allow the three AI‑site domain groups above. With
+  just those, everything except the optional downloads works.
+- **To use the Wizard downloads:** also allow the download domains in the table
+  above.
+- **Corporate proxy:** AutoInjector uses your system's normal network settings —
+  if your browser can reach the AI sites, so can the app.
+- **Fully offline:** you can still use the local‑only parts (database, memory,
+  System Monitor, Book Studio records/log, and any local model you already
+  installed). The AI panes need the internet to reach their services.
+
+---
+
+## 17. Troubleshooting
 
 - **A reply isn't being read / nothing happens.** Make sure you're **signed in**
   to that site in its pane, and that the pane isn't collapsed. Use **🎛️ Run
