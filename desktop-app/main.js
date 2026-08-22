@@ -58,8 +58,11 @@ const { MANAGER_ACTIONS } = managerProvider;
 
 const SITE_IDS = Object.keys(SITES);
 const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — not shuffled like the other modes
-const POLL_MS = 1500;
-const STABLE_MS = 1800;
+// Timing is env-overridable so the integration harness can run the exact same
+// logic on a fast, internally-consistent clock (QA-001) — production defaults
+// are unchanged.
+const POLL_MS = Number(process.env.AUTOINJECTOR_POLL_MS) || 1500;
+const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
 const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
@@ -74,15 +77,15 @@ const STAGE_MODES = new Set(HOUSE_RULES);
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "blind-round"]);
 const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
 const MAX_DEBUG_LOG_LINES = 2000;
-const SAVE_DEBOUNCE_MS = 500;
+const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const TEXT_EXTS = new Set([".txt", ".md", ".csv", ".json"]);
 const TEXT_PREVIEW_SIZE_CAP = 500 * 1024; // 500KB
 const SEND_RETRY_ATTEMPTS = 3; // real-world evidence: a cold/still-settling pane's very first send often fails confirmation, then succeeds immediately on retry -- this catches that automatically instead of surfacing a false failure
-const SEND_RETRY_BACKOFF_MS = 1500;
-const SELFTEST_TIMEOUT_MS = 45000;
-const SELFTEST_POLL_MS = 500;
+const SEND_RETRY_BACKOFF_MS = Number(process.env.AUTOINJECTOR_RETRY_BACKOFF_MS) || 1500;
+const SELFTEST_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_SELFTEST_TIMEOUT_MS) || 45000;
+const SELFTEST_POLL_MS = Number(process.env.AUTOINJECTOR_SELFTEST_POLL_MS) || 500;
 
 // Rate-limit/usage-cap replies are short by nature ("You've reached your
 // usage limit...") — gating on length before pattern-matching keeps this

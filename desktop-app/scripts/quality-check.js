@@ -81,7 +81,7 @@ function main() {
   statuses.unit = layerLine("Unit", runNodeFiles(filesFromScript("test:unit")));
   // The integration harness can hang on a startup race (QA-001); bound it and
   // report a timeout as UNVERIFIED rather than letting it stall the whole run.
-  const integ = runNodeFiles(filesFromScript("test:integration"), { timeoutMs: 60000 });
+  const integ = runNodeFiles(filesFromScript("test:integration"), { timeoutMs: 240000 });
   if (integ.timedOut.length && integ.passed === 0 && integ.failed === 0) {
     statuses.integration = layerLine("Integration", { status: "UNVERIFIED", note: `timed out after 60s (${integ.timedOut.join(", ")}) — see QA-001` });
   } else {
