@@ -168,9 +168,13 @@ async function testConnection(config) {
     turnNumber: 0, maximumTurns: 1, status: "testing"
   };
   const res = await askManager(trivialState, config);
-  if (res.ok) return { ok: true };
-  if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") return { ok: true, warning: res.error }; // reachable, model just didn't follow format
-  return { ok: false, error: res.error };
+  // AI-004: "reachable" (the server answered) is NOT the same as "compatible"
+  // (the model followed the manager contract). Report them separately so the UI
+  // shows "Server reachable ✓ / Manager format ✗" and does not enable autonomous
+  // operation on a model that can't follow the format. ok requires BOTH.
+  if (res.ok) return { ok: true, reachable: true, formatValid: true };
+  if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") return { ok: false, reachable: true, formatValid: false, warning: res.error };
+  return { ok: false, reachable: false, error: res.error };
 }
 
 // --- RunPod dedicated-pod lifecycle (provider: "runpod-pod" only) ---------
