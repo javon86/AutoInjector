@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld("api", {
   bookAssemble: (id) => ipcRenderer.invoke("book:assemble", id),
   bookGovernedAvailable: () => ipcRenderer.invoke("book:governed-available"),
   bookAiStatus: () => ipcRenderer.invoke("book:ai-status"),
+  bookTestRun: () => ipcRenderer.invoke("book:test-run"),
   bookRunnerStatus: () => ipcRenderer.invoke("book:runner-status"),
   onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload))
 });

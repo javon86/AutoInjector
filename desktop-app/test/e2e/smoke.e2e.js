@@ -221,8 +221,24 @@ async function main() {
         return /b-chatgpt/.test(css) && /b-claude/.test(css) && /b-gemini/.test(css);
       }).catch(() => false);
       assert(hasColors, 'the feed defines a distinct bubble style per LLM');
+      // Composer: reply box + target picker + 8 savable preset buttons.
+      assert(await feedWin.$('#reply-text') && await feedWin.$('#btn-reply-send') && await feedWin.$('#reply-target'),
+        'the feed has a reply box, target picker and Send button');
+      const presetCount = await feedWin.$$eval('#preset-row .preset', (els) => els.length).catch(() => 0);
+      assert(presetCount === 8, `the feed has 8 preset buttons (${presetCount})`);
+      // Save a preset: type text, turn on edit, click slot 1 — it should persist.
+      await feedWin.fill('#reply-text', 'Please continue where you left off.');
+      await feedWin.click('#btn-preset-edit');
+      await feedWin.$$eval('#preset-row .preset', (els) => els[0] && els[0].click());
+      const saved = await feedWin.waitForFunction(() => {
+        try { const a = JSON.parse(localStorage.getItem('feed-presets-v1') || '[]'); return a[0] && a[0].text === 'Please continue where you left off.'; } catch (_) { return false; }
+      }, { timeout: 4000 }).then(() => true).catch(() => false);
+      assert(saved, 'a preset button saves the typed text (persisted for re-sending)');
       await shot(feedWin, 'ai-feed');
     }
+    // The Book Studio real round-trip Test button is present (not clicked here —
+    // it waits on live replies the sandbox panes can't give).
+    assert(await controls.$('#btn-book-test'), 'the Book Studio "Test AIs" round-trip button is present');
 
     console.log('\n== UI-003: accessibility basics (accessible names, keyboard, zoom) ==');
     // Every button has an accessible name — visible text, aria-label, or title.
