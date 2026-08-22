@@ -1382,7 +1382,52 @@ async function bookAiRefresh() {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+
+// UI-001: the single guided readiness line — current step → waiting for →
+// captured artifact → gate result → the one next safe action. Composed from the
+// live runner snapshot, the book, and the PDF gate.
+async function bookRenderReadiness() {
+  const set = (id, txt) => { const e = el(id); if (e) e.textContent = txt; };
+  if (!bookCurrentId || !bookProject) {
+    set("rd-step", "—"); set("rd-waiting", "—"); set("rd-artifact", "—"); set("rd-gate", "—");
+    set("rd-next", "Pick or create a book, then press ▶ Start.");
+    return;
+  }
+  const wf = bookProject.workflow || { status: "idle", step: 0 };
+  const live = (bookRunner && bookRunner.active && bookRunner.bookId === bookCurrentId) ? bookRunner : null;
+  const status = live ? live.status : (wf.status === "running" ? "paused" : wf.status);
+  const step = live ? live.step : (wf.step || 0);
+  const total = (live && live.total) || BOOK_WORKFLOW.length;
+  const label = BOOK_WORKFLOW[step] || (live && live.label) || "";
+  const target = live && live.target ? (SITE_LABELS[live.target] || live.target) : null;
+
+  set("rd-step", status === "idle" ? "not started" : status === "done" ? `complete (${total}/${total})` : `${step + 1}/${total} — ${label}`);
+  set("rd-waiting",
+    status === "awaiting-user" ? "you — answer in the ChatGPT pane" :
+    status === "waiting-reply" || status === "running" ? (target || "the AI") :
+    status === "stalled" ? `${target || "a pane"} (no reply yet)` : "—");
+
+  // Latest filed artifact + gate summary from the PDF gate.
+  let artifact = "none yet", gate = "—";
+  try {
+    const r = window.api.bookPdfGate && await window.api.bookPdfGate(bookCurrentId);
+    if (r && r.ok) {
+      gate = `${r.gate.present}/${r.gate.total} filed`;
+      const pdfs = (r.pdfs || []).filter((p) => p.exists);
+      if (pdfs.length) artifact = (pdfs[pdfs.length - 1].file || "").split(/[\\/]/).pop();
+    }
+  } catch (_) {}
+  set("rd-artifact", artifact); set("rd-gate", gate);
+
+  set("rd-next",
+    status === "idle" ? "Press ▶ Start Making Book (ChatGPT sends the intake questionnaire)." :
+    status === "done" ? "Done — press ▶ Start to run again, or 📖 Build Manuscript." :
+    status === "awaiting-user" ? "Answer ChatGPT's questions in its pane, then press ✓ I've answered — Continue." :
+    status === "paused" ? "Press ▶ Resume to continue where you left off." :
+    status === "stalled" ? `Check ${target || "the pane"} is signed in (and its PDF filed), then ▶ Resume.` :
+    `Working on its own — advances when ${target || "the AI"} finishes its output. ⏸ Pause anytime.`);
+}
 
 // The PDF completion gate — which deliverables have a downloadable PDF yet.
 async function bookRenderPdfGate() {

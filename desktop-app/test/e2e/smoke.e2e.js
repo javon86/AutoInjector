@@ -132,6 +132,14 @@ async function main() {
       return t && /Section 1\/\d/.test(t.textContent);
     }, { timeout: 5000 }).then(() => true).catch(() => false);
     assert(tallyShown, 'the persistent bottom-bar tally shows "Section 1/N"');
+    // UI-001: the single guided readiness line reflects step + a clear next action.
+    const readiness = await controls.evaluate(() => {
+      const step = document.getElementById('rd-step');
+      const next = document.getElementById('rd-next');
+      return { step: step && step.textContent, next: next && next.textContent };
+    });
+    assert(readiness.step && /1\//.test(readiness.step), `readiness line shows the current step ("${readiness.step}")`);
+    assert(readiness.next && /Continue|answer/i.test(readiness.next), `readiness line names the one next action ("${(readiness.next || '').slice(0, 50)}")`);
     // Step 1 is the intake questionnaire — an "ask-user" step, so the runner
     // waits for the human (it must NOT auto-advance). The Continue button says
     // so, and the status names the intake questions.
@@ -215,6 +223,40 @@ async function main() {
       assert(hasColors, 'the feed defines a distinct bubble style per LLM');
       await shot(feedWin, 'ai-feed');
     }
+
+    console.log('\n== UI-003: accessibility basics (accessible names, keyboard, zoom) ==');
+    // Every button has an accessible name — visible text, aria-label, or title.
+    const unnamed = await controls.$$eval('button', (btns) => btns
+      .filter((b) => {
+        const txt = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        const named = txt.length >= 2 || b.getAttribute('aria-label') || b.getAttribute('title');
+        return !named;
+      })
+      .map((b) => b.id || b.className || b.outerHTML.slice(0, 40)));
+    assert(unnamed.length === 0, `every button has an accessible name (${unnamed.length} unnamed${unnamed.length ? ': ' + unnamed.join(', ') : ''})`);
+
+    // Keyboard-only: a new book can be created without the mouse.
+    const kbTitle = 'KB Book ' + Date.now();
+    await controls.focus('#book-new-title');
+    await controls.keyboard.type(kbTitle);
+    await controls.focus('#btn-book-new');
+    await controls.keyboard.press('Enter');
+    const kbCreated = await controls.waitForFunction((t) => {
+      const sel = document.getElementById('book-select');
+      return sel && Array.from(sel.options).some((o) => o.textContent.includes(t));
+    }, kbTitle, { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(kbCreated, 'a book can be created with the keyboard only (focus + type + Enter)');
+
+    // Reflow at 200% zoom must not make the control column scroll sideways.
+    await controls.evaluate(() => { document.body.style.zoom = '2'; });
+    await controls.waitForTimeout(200);
+    const noHScrollAt200 = await controls.evaluate(() => {
+      const w = document.getElementById('wrap');
+      return w ? w.scrollWidth <= w.clientWidth + 3 : true;
+    });
+    assert(noHScrollAt200, 'the control column reflows without horizontal scroll at 200% zoom');
+    await shot(controls, 'control-panel-200pct');
+    await controls.evaluate(() => { document.body.style.zoom = '1'; });
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
     await app.close();
