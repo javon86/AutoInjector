@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-autobook.py — automation phases 2-5: unattended book production.
+autobook.py — validate & assemble drafted chapters (automation phases 2-5).
+
+NOTE (BG-012): this does NOT generate prose. It is a gate/assembly runner: it
+drives every chapter that already has a drafted block through the gates and the
+strict assembler, halting on the first S0/S1. It halts (does not invent) when a
+chapter's draft is missing. "Unattended" means unattended VALIDATION+ASSEMBLY of
+drafted chapters, not autonomous writing.
 
 Phase 1 was manual: a person ran each gate. This drives the whole pipeline
 across every chapter, halting on the first S0/S1 rather than continuing and
@@ -168,7 +174,7 @@ def do_run(root: Path, first: int | None, last: int | None, dry: bool) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Unattended book production.")
+    ap = argparse.ArgumentParser(description="Validate and assemble drafted chapters (does not generate prose).")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p1 = sub.add_parser("plan"); p1.add_argument("project")
     p1.add_argument("--chapters", type=int, required=True)
