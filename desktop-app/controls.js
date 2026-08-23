@@ -1338,7 +1338,6 @@ const BOOK_WORKFLOW = [
   "Story review (ChatGPT)", "Canon review (Gemini)", "Writing review (Claude)",
   "Consolidated revision", "Verify + lock the chapter",
 ];
-function bookSetStatus(t) { if (el("book-status")) el("book-status").textContent = t || ""; }
 
 async function bookLoadList(selectId) {
   if (!window.api.bookList) return;

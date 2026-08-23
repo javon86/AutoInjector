@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const secretStore = require('./secret-store');
+const client = require('./openai-client'); // shared timed-fetch + redaction (AI-006)
 
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:7860';
 const DEFAULT_TIMEOUT_MS = 180000; // generation can be slow
@@ -96,17 +97,11 @@ function setSettings(patch) {
 function isEnabled() { return !!_settings.enabled; }
 function autoFromAI() { return !!(_settings.enabled && _settings.autoFromAI); }
 
-function redactSecrets(s) {
-  if (!_settings.apiKey) return String(s);
-  return String(s).split(_settings.apiKey).join('[REDACTED]');
-}
-
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || DEFAULT_TIMEOUT_MS);
-  try { return await fetch(url, Object.assign({}, options, { signal: controller.signal })); }
-  finally { clearTimeout(timer); }
-}
+// AI-006: reuse the shared timed-fetch + redaction. The wrapper keeps this
+// provider's own long default timeout (image generation is slow) and its
+// always-returns-a-string redaction, so behavior is unchanged.
+function redactSecrets(s) { return client.redactSecrets(String(s), _settings.apiKey); }
+function fetchWithTimeout(url, options, timeoutMs) { return client.fetchWithTimeout(url, options, timeoutMs || DEFAULT_TIMEOUT_MS); }
 
 function _headers() {
   return Object.assign({ 'Content-Type': 'application/json' },
