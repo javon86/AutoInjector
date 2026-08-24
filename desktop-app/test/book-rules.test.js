@@ -13,7 +13,7 @@ function main() {
   console.log("\n== the rules text carries the whole protocol ==");
   assert(typeof rules.RULES_TEXT === "string" && rules.RULES_TEXT.length > 10000,
     `RULES_TEXT is embedded (${rules.RULES_TEXT.length} chars)`);
-  assert(rules.RULES_VERSION === "v1.0", "a version is declared (for the manual-resend log + rule versioning)");
+  assert(rules.RULES_VERSION === "v1.1", "a version is declared (for the manual-resend log + rule versioning)");
   // Spot-check the key governance pillars survived extraction/cleaning.
   for (const needle of [
     "CORE OPERATING RULE", "USER AUTHORITY", "CHATGPT AUTHORITY", "GEMINI AUTHORITY",
@@ -24,6 +24,14 @@ function main() {
   // Page furniture must be gone (we send the AIs the rules, not PDF cruft).
   assert(!/\bPAGE \d+\b/.test(rules.RULES_TEXT), "PDF page-number furniture was stripped");
   assert(!/TABLE OF CONTENTS/.test(rules.RULES_TEXT), "the table of contents was stripped");
+
+  console.log("\n== the communication envelope (v1.1) is taught ==");
+  assert(rules.RULES_TEXT.includes("COMMUNICATION ENVELOPE"), "the rules teach the mandatory [TO:]/[FROM:] envelope");
+  assert(/\[FROM:/.test(rules.RULES_TEXT) && /\[TO:/.test(rules.RULES_TEXT), "both the routing tag and the closing tag are documented");
+  assert(typeof rules.composeEnvelopeReminder === "function", "a missing-tag reminder composer is exported");
+  const reminder = rules.composeEnvelopeReminder("claude");
+  assert(/\[FROM: CLAUDE\]/.test(reminder), "the reminder fills in the specific AI's own closing tag");
+  assert(/discard|not delivered|resend/i.test(reminder), "the reminder says the message was lost and must be resent");
 
   console.log("\n== the sent message frames it as the bible + no-ack ==");
   const msg = rules.composeRulesMessage();
