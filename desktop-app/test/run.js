@@ -539,7 +539,7 @@ async function testConcurrentSendsToSameTargetAreSerialized() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends landed (got ${log.length})`);
-  assert(log[0].text === "Message A (slow)" && log[1].text === "Message B (fast)", `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text).join(", ")}]`);
+  assert(log[0].text.startsWith("Message A (slow)") && log[1].text.startsWith("Message B (fast)"), `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
   assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
 }
 
@@ -552,13 +552,13 @@ async function testSendAutoRetry() {
   reg("claude").webContents._sendFailQueue = [true, true, false];
   const res = await call("send:compose", { text: "Should self-recover", targets: ["claude"] });
   assert(res.ok && res.results.claude.ok, "the overall call still succeeds -- the caller never sees the two earlier failures");
-  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text === "Should self-recover", "exactly one real send lands (the successful 3rd attempt), not three separate messages");
+  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text.startsWith("Should self-recover"), "exactly one real send lands (the successful 3rd attempt), not three separate messages");
 
   let s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 1) && s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 2), "both earlier failed attempts are logged as retries, individually");
   assert(s.log.some((l) => l.kind === "sent" && l.detail.target === "claude" && l.detail.attempts === 3 && l.detail.selfRecovered === true), "the final success is logged with the real attempt count and flagged as self-recovered, not indistinguishable from a clean first try");
 
-  const ledgerEntry = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Should self-recover").pop();
+  const ledgerEntry = s.ledger.filter((e) => e.target === "claude" && e.textPreview.startsWith("Should self-recover")).pop();
   assert(ledgerEntry && ledgerEntry.status === "delivered" && ledgerEntry.attempts === 3, `the delivery ledger also records the real attempt count for the successful entry (got ${JSON.stringify(ledgerEntry)})`);
 
   // fails all 3 attempts -- genuinely reported as broken, not retried forever
@@ -573,7 +573,7 @@ async function testSendAutoRetry() {
   assert(elapsed >= twoBackoffs * 0.9, `all 3 attempts actually ran, backing off between each (~${twoBackoffs}ms for 2 backoffs), not fast-failing after one try (took ${elapsed}ms)`);
 
   s = await call("state:get", {});
-  const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview === "Genuinely broken").pop();
+  const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview.startsWith("Genuinely broken")).pop();
   assert(failLedgerEntry && failLedgerEntry.status === "failed" && failLedgerEntry.attempts === 3, "the ledger records the real attempt count (3) even for a total failure, not left at 1");
   assert(s.log.some((l) => l.kind === "send-error" && l.detail.target === "gemini" && l.detail.attempts === 3), "the final send-error log entry also carries the real attempt count");
 }
@@ -620,7 +620,7 @@ async function testDeliveryLedger() {
   await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
   await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
   s = await call("state:get", {});
-  const repeats = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Repeat me exactly");
+  const repeats = s.ledger.filter((e) => e.target === "claude" && e.textPreview.startsWith("Repeat me exactly"));
   assert(repeats.length === 2 && repeats[0].duplicate === false && repeats[1].duplicate === true, `the first of two identical sends isn't flagged, the second (within the duplicate window) is (got flags [${repeats.map((e) => e.duplicate).join(", ")}])`);
 }
 
@@ -1780,7 +1780,7 @@ async function testRetryHoldsQueueThroughBackoff() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends eventually land (got ${log.length})`);
-  assert(log[0].text === "First (retries once)" && log[1].text === "Second (fired during first's backoff)", `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text).join(", ")}]`);
+  assert(log[0].text.startsWith("First (retries once)") && log[1].text.startsWith("Second (fired during first's backoff)"), `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
 }
 
 async function testRegenerateGoesThroughLedgerQueueRetry() {
@@ -1977,6 +1977,30 @@ async function testEnvelopeMatcherRobustness() {
   assert(totalSent() === before, "an empty-body envelope relays nothing to another pane");
 }
 
+async function testOutboundTeachesEnvelope() {
+  console.log("\n== Compose & Sequence teach the [FROM:] envelope on every baseline send ==");
+  await resetAllParticipants();
+
+  await call("send:compose", { text: "What's 2+2?", targets: ["chatgpt"] });
+  const sent = sentLog("chatgpt").pop();
+  assert(sent && sent.text.includes("What's 2+2?") && /\[FROM: CHATGPT\]/.test(sent.text),
+    "a compose send appends the envelope instruction naming the target's own [FROM:] tag");
+  // The enveloped reply then captures normally.
+  say("chatgpt", "[TO: USER]\n4"); // say() appends [FROM: CHATGPT]
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.trim() === "4"),
+    { label: "the enveloped compose reply is captured" });
+
+  // Sequence steps carry it too, and advance on the enveloped reply.
+  await resetAllParticipants();
+  await call("sequence:run", { steps: [{ target: "claude", text: "Step one please" }] });
+  const seqSent = sentLog("claude").pop();
+  assert(seqSent && seqSent.text.includes("Step one please") && /\[FROM: CLAUDE\]/.test(seqSent.text),
+    "a sequence step send appends the envelope instruction");
+  say("claude", "Done with step one"); // say() appends [FROM: CLAUDE]
+  await waitUntil(async () => !(await call("state:get", {})).sequence.active,
+    { label: "the sequence finishes once the enveloped step reply lands" });
+}
+
 async function testBookTestRunCapturesBareReplies() {
   console.log("\n== book:test-run is bareMode: a plain 'TEST OK' reply (no envelope) is captured, not nudged ==");
   await resetAllParticipants();
@@ -2098,6 +2122,7 @@ async function main() {
   await testSelftestLeavesNoMissingTagNudge();
   await testBareNoneIsSilentSkip();
   await testEnvelopeMatcherRobustness();
+  await testOutboundTeachesEnvelope();
   await testBookTestRunCapturesBareReplies();
 
   console.log(`\n${passed} passed, ${failed} failed`);

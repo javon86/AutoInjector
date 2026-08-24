@@ -711,7 +711,7 @@ function createWindow() {
   win.on("resize", () => { layout(); syncPaneBounds(); });
   win.on("closed", () => { win = null; });
 
-  setInterval(() => { for (const site of SITE_IDS) pollSite(site); bookRunWatchdog(); }, POLL_MS);
+  setInterval(() => { for (const site of SITE_IDS) pollSite(site); bookRunWatchdog(); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -1406,6 +1406,18 @@ function stripEnvelope(text) {
   return parseEndTag(parseRoundtableTag(String(text || "")).body).body;
 }
 
+// Append a concise envelope instruction to an outbound prompt so the receiving
+// pane wraps its reply per the protocol. Required on the baseline path (Compose,
+// Prompt Sequence, Manager): a reply with no [FROM:] closing tag isn't captured,
+// so an untaught prompt would strand the reply. `target` names the pane so its
+// own [FROM:] tag is spelled out. The book workflow teaches its own envelope
+// (book-prompts.js) and is intentionally left untouched.
+function withEnvelope(text, target) {
+  const tag = String(target || "").toUpperCase() || "YOU";
+  return String(text == null ? "" : text) +
+    `\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: ${tag}] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]`;
+}
+
 // Missing-tag watchdog action (see pollSite()). A baseline pane went quiet with
 // no [FROM:] closing tag, so the message is treated as LOST — never captured or
 // routed. We nudge that AI with the communication protocol and ask it to resend
@@ -1488,20 +1500,37 @@ async function sendSequenceStep() {
   // coming) could get matched against whatever step comes next instead of
   // being recognized as a stale leftover of the step it actually answers.
   seq.generation++;
+  seq.sentTs = Date.now();
   const step = seq.steps[seq.index];
   const targets = step.target === "all" ? SITE_IDS : [step.target];
   for (const t of targets) {
     if (SITES[t]) {
       seq.dispatchGen[t] = seq.generation;
-      await sendTextTo(t, step.text, null);
+      await sendTextTo(t, withEnvelope(step.text, t), null);
     }
   }
   logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation });
   broadcastSequenceState();
 }
 
+// Watchdog (ticked from the poll loop): if the step's target has produced no
+// captured (i.e. properly-enveloped) reply for too long — the baseline missing-
+// tag watchdog nudges up to MAX_NOTAG_REPROMPTS first — park the sequence so the
+// UI stops implying progress rather than waiting on a reply that isn't coming.
+const SEQUENCE_STEP_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_SEQUENCE_TIMEOUT_MS) || 4 * 60 * 1000;
+function sequenceWatchdog() {
+  const seq = state.sequence;
+  if (!seq.active || !seq.sentTs) return;
+  if (Date.now() - seq.sentTs > SEQUENCE_STEP_TIMEOUT_MS) {
+    const step = seq.steps[seq.index];
+    seq.active = false;
+    logEvent("sequence-stalled", { index: seq.index, target: step && step.target });
+    broadcastSequenceState();
+  }
+}
+
 async function startSequence(steps) {
-  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {} };
+  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0 };
   await sendSequenceStep();
 }
 
@@ -1844,12 +1873,28 @@ async function runTierFourAdjudication() {
   m.activeAssignments = [{ target: adjudicator, task: question, sentTs: Date.now() }];
   m.pendingModels = [adjudicator];
   m.status = "waiting";
+  m.waitingSince = Date.now();
   logManagerEvent({ category: "escalation", severity: "warning", summary: `Escalated to Tier 4 cloud adjudication via ${SITES[adjudicator].label}`, target: [adjudicator] });
-  await sendTextTo(adjudicator, question, null);
+  await sendTextTo(adjudicator, withEnvelope(question, adjudicator), null);
   broadcastManagerState();
 }
 
 const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving"]);
+
+// Watchdog (ticked from the poll loop): a delegated pane that never produces a
+// captured (properly-enveloped) reply would otherwise leave the manager stuck in
+// "waiting" forever. The baseline missing-tag watchdog nudges the pane first; if
+// it still never lands, park the task as errored rather than hang.
+const MANAGER_WAIT_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_MANAGER_TIMEOUT_MS) || 5 * 60 * 1000;
+function managerWatchdog() {
+  const m = state.manager;
+  if (!m || m.status !== "waiting" || !m.waitingSince) return;
+  if (Date.now() - m.waitingSince > MANAGER_WAIT_TIMEOUT_MS) {
+    m.waitingSince = null;
+    logManagerEvent({ category: "error", severity: "error", summary: `No reply from delegated model(s) ${JSON.stringify(m.pendingModels)} within timeout — parking task`, details: { pending: m.pendingModels } });
+    finishManagedTask({ ok: false, reason: "DELEGATE_NO_REPLY" }).catch((e) => logEvent("manager-watchdog-error", { error: String(e) }));
+  }
+}
 
 async function runManagerTurn() {
   const m = state.manager;
@@ -1920,9 +1965,10 @@ async function executeManagerAction(decision) {
     m.activeAssignments = decision.assignments.map((a) => ({ target: a.target, task: a.task, sentTs: Date.now() }));
     m.pendingModels = decision.assignments.map((a) => a.target);
     for (const a of decision.assignments) {
-      await sendTextTo(a.target, `[Manager assignment -- task "${m.taskId}"]\n${a.task}`, null);
+      await sendTextTo(a.target, withEnvelope(`[Manager assignment -- task "${m.taskId}"]\n${a.task}`, a.target), null);
     }
     m.status = "waiting"; // paused here until handleManagerCapture() sees every pending target reply
+    m.waitingSince = Date.now();
     broadcastManagerState();
     return;
   }
@@ -1993,6 +2039,7 @@ async function handleManagerCapture(turn) {
     m.activeAssignments = m.activeAssignments.filter((a) => a.target !== turn.site);
   }
   m.pendingModels = m.pendingModels.filter((t) => t !== turn.site);
+  if (m.pendingModels.length === 0) m.waitingSince = null; // all replies in — stop the wait watchdog
   await saveRawResponse(responseEntry);
   if (state.manager.taskId !== myTaskId || ["finished", "error"].includes(state.manager.status)) return; // this task was stopped/replaced while the save was in flight
   logManagerEvent({ category: "response", target: [turn.site], summary: `${SITES[turn.site].label} responded (${turn.text.length} chars)` });
@@ -3115,7 +3162,10 @@ ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   try { dbService.recordUserMessage(text, list); } catch (_) {}
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
-  for (const t of list) results[t] = await sendTextTo(t, text, null);
+  // Teach the envelope per target so the reply comes back with its [FROM:] tag
+  // and is actually captured on the baseline path (the book workflow teaches its
+  // own and is left untouched).
+  for (const t of list) results[t] = await sendTextTo(t, withEnvelope(text, t), null);
   return { ok: true, results };
 });
 
