@@ -175,6 +175,8 @@ const state = {
   ledger: [], // { id, ts, source, target, textPreview, status, error, duplicate } — one entry per sendTextTo() attempt; see recordLedgerEntry(). Program-owned transport record, independent of what any AI believes happened -- never trust an AI's own claim about whether a message arrived.
   meshActive: false, // whether global Auto is currently on
   nextTurnId: 1,
+  nextMsgSeq: 1, // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
+
   nextLedgerId: 1,
   hr: null, // House Rules run state, see resetHouseRule()
   prompts: [], // { id, name, text: { chatgpt, claude, gemini } } — saved, reusable, one-click-send prompts. An empty text field for a site means "don't send to it."
@@ -232,7 +234,7 @@ function defaultTestPrompt() {
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode."`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.`;
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -429,7 +431,7 @@ function logEvent(kind, detail) {
 // pair was already sent within DUPLICATE_WINDOW_MS -- surfaced for
 // visibility, never auto-suppressed, since a legitimate retry can look
 // identical to an accidental double-send.
-function recordLedgerEntry({ source, target, text, ok, error, attempts }) {
+function recordLedgerEntry({ source, target, text, ok, error, attempts, seq }) {
   const recentDuplicate = state.ledger.some(
     (e) => e.target === target && e.textPreview === text.slice(0, 200) && Date.now() - e.ts < DUPLICATE_WINDOW_MS
   );
@@ -438,6 +440,7 @@ function recordLedgerEntry({ source, target, text, ok, error, attempts }) {
     ts: Date.now(),
     source: source || null,
     target,
+    seq: seq || null, // the [MSG #NNNN] number stamped on the actual send (kept out of textPreview)
     textPreview: text.slice(0, 200),
     status: ok ? "delivered" : "failed",
     error: ok ? null : error || "unknown",
@@ -1018,7 +1021,15 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // verbatim -- for callers (Regenerate) whose text is already the exact,
   // fully-framed string that was actually sent last time, so re-framing it
   // here would double it up.
-  const prompt = opts.raw ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
+  const framed = opts.raw ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
+  // Program-kept running message number, stamped on EVERY outgoing send as a
+  // 4-digit [MSG #0001] header (the AIs don't count anything — the app does). It
+  // gives each message a single continuous id across all three panes so a model
+  // can tell which message it's answering and not fall behind. Deliberately NOT
+  // part of state.lastSentTo (below): Regenerate re-sends the stored body and
+  // must get a FRESH number here, never a doubled-up stale one.
+  const seq = String(state.nextMsgSeq++).padStart(4, "0");
+  const prompt = `[MSG #${seq}]\n${framed}`;
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -1051,7 +1062,10 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     return r;
   });
 
-  recordLedgerEntry({ source: fromSite || null, target, text: prompt, ok: res && res.ok, error: res && res.error, attempts });
+  // Record the seq-INDEPENDENT body (framed) as the ledger text, with seq as its
+  // own field: duplicate detection compares message content, so the per-send
+  // [MSG #] header must not make every send look unique.
+  recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown" });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
@@ -1074,12 +1088,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       saveStateDebounced();
     }
   } else {
-    state.lastSentTo[target] = prompt;
+    state.lastSentTo[target] = framed; // stored WITHOUT the [MSG #] header so Regenerate re-stamps a fresh number
     state.waiting[target] = true;
     state.waitingSince[target] = Date.now();
-    broadcast("sent", { target, from: fromSite || null, ts: Date.now() });
+    broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     broadcast("waiting-changed", { site: target, waiting: true });
-    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1 });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq });
   }
   return res;
 }
