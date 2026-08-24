@@ -84,6 +84,17 @@ const TASKS = [
     body: "Re-verify the current chapter against the authoritative records and open conflicts/changes. Report anything that no longer matches, by Record ID." },
 ];
 
+// The mandatory communication envelope (Rules of Conduct §0), targeted to the
+// specific AI so its own [FROM: ...] closing tag is spelled out. Included in
+// every composed task/brief because EVERY reply the app captures is completed by
+// its [FROM: ...] tag — a reply without it is discarded and the AI is asked to
+// resend. Book deliverables address [TO: USER] so they're never swallowed as a
+// "[TO: NONE] — nothing to add" reply.
+function envelopeLine(target) {
+  const tag = String(target || "").toUpperCase();
+  return "MESSAGE FORMAT (MANDATORY): BEGIN every reply with a bracket routing tag — [TO: USER] for a project deliverable or a question to the user, or [TO: CHATGPT]/[TO: GEMINI]/[TO: CLAUDE]/[TO: ALL] to address a teammate — and END every reply with your own closing tag in the same form: [FROM: " + tag + "]. The [FROM: ...] tag is what marks your message complete; a reply without it is discarded and you will be asked to resend the whole thing. Put nothing after the closing tag.";
+}
+
 /**
  * Compose the full prompt text for a task, given optional project/chapter
  * context and a records digest to reference by ID.
@@ -92,7 +103,7 @@ function composeTask(taskId, ctx = {}) {
   const task = TASKS.find((t) => t.id === taskId);
   if (!task) return null;
   const role = ROLES[task.target];
-  const lines = [SHARED_SYSTEM, "", role.prompt, ""];
+  const lines = [SHARED_SYSTEM, "", role.prompt, "", envelopeLine(task.target), ""];
   if (ctx.title) lines.push(`Book: ${ctx.title}`);
   if (ctx.stage) lines.push(`Current stage: ${ctx.stage}`);
   if (ctx.chapter) lines.push(`Current chapter: ${ctx.chapter}`);
@@ -151,7 +162,7 @@ function composeBrief(target, project) {
   const d = digest(project);
   const stageLabel = (project.stageLabels && project.stageLabels[project.stage]) || project.stage;
   const text = [
-    SHARED_SYSTEM, "", role.prompt, "",
+    SHARED_SYSTEM, "", role.prompt, "", envelopeLine(target), "",
     `You are (re)joining work on a book. Get oriented, then wait for the next task.`,
     `Book: ${project.title}  (${project.id})`,
     `Current stage: ${stageLabel}`,

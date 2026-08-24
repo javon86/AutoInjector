@@ -29,7 +29,10 @@ const SITES = ['chatgpt', 'claude', 'gemini'];
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
 function reg(s) { return mock.__registry[s]; }
-function say(s, t) { reg(s).webContents.currentText = t; }
+// End-tag protocol: a book deliverable is captured only once it closes with the
+// AI's [FROM: X] tag. Auto-append it (unless already present) so the mocked
+// replies satisfy the completion gate exactly like a compliant AI would.
+function say(s, t) { reg(s).webContents.currentText = /\[\s*FROM:/i.test(t) ? t : `${t}\n[FROM: ${s.toUpperCase()}]`; }
 function call(ch, p) { const h = mock.__ipcHandlers[ch]; if (!h) throw new Error(`no ipc handler: ${ch}`); return h({}, p); }
 async function waitUntil(fn, { timeout = 8000, interval = 50, label = 'condition' } = {}) {
   const start = Date.now();

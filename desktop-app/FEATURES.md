@@ -43,12 +43,17 @@ would by hand.
 
 How a message decides where it goes next — automatically, by hand, or both.
 
-- **Roundtable v2 — tag-based self-routing** (`[TO: X]`) — the permanent,
-  always-on baseline. Every reply is checked for a routing tag on its own
-  line: `CHATGPT` / `CLAUDE` / `GEMINI` / `ALL` / `USER` / `NONE`. The app
-  strips the tag and routes accordingly; no tag defaults to `USER` rather
-  than vanishing. Explained to every AI automatically, once per launch, the
-  moment its pane first loads.
+- **Roundtable v2 — tag-based self-routing envelope** (`[TO: X]` … `[FROM: X]`)
+  — the permanent, always-on baseline. Every reply is wrapped in a two-tag
+  envelope: it opens with a routing tag on its own line (`CHATGPT` / `CLAUDE` /
+  `GEMINI` / `ALL` / `USER` / `NONE`) and closes with the sender's own tag
+  (`[FROM: CHATGPT]` / `[FROM: CLAUDE]` / `[FROM: GEMINI]`). The **closing tag is
+  the completion signal** — a reply is captured the instant `[FROM: …]` appears,
+  with no stability timer. The app strips both tags and routes accordingly; a
+  missing routing tag defaults to `USER` rather than vanishing. If a reply
+  finishes with no `[FROM: …]` tag, it's treated as lost and the AI is
+  auto-nudged (capped) to resend the whole message with the envelope. Explained
+  to every AI automatically, once per launch, the moment its pane first loads.
 - **Manual Compose & Forward** — type a message and send it to one, some,
   or all participants directly at any point; also how you interject on top
   of anything else running.

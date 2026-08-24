@@ -14,6 +14,10 @@ process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = process.env.AUTOINJECTOR_SAVE_DEBOUN
 // promptly (so they never idle to it), and shortening it broke the tuner's
 // step-by-step choreography. selftest poll is nudged down to match the fast clock.
 process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_POLL_MS || "100";
+// End-tag protocol: shrink the missing-[FROM:]-tag watchdog so the resend-nudge
+// test runs on the fast clock. Baseline replies complete on their tag instantly,
+// so this only affects deliberately-untagged replies (sayRaw).
+process.env.AUTOINJECTOR_NOTAG_QUIET_MS = process.env.AUTOINJECTOR_NOTAG_QUIET_MS || "300";
 
 const path = require("path");
 const fs = require("fs");
@@ -99,9 +103,16 @@ async function resetAllParticipants() {
   await settle(200); // let any in-flight poll tick from the prior scenario drain
 }
 
+// Every baseline reply now completes on its [FROM: X] closing tag (end-tag
+// protocol). say() auto-appends the sender's tag unless the injected text already
+// carries one, so existing scenarios keep working unchanged. Use sayRaw() to
+// inject a deliberately untagged reply (e.g. the missing-tag watchdog test).
+function fromTag(site) { return `[FROM: ${site.toUpperCase()}]`; }
 function say(site, text) {
-  reg(site).webContents.currentText = text;
+  const t = /\[\s*FROM:/i.test(text) ? text : `${text}\n${fromTag(site)}`;
+  reg(site).webContents.currentText = t;
 }
+function sayRaw(site, text) { reg(site).webContents.currentText = text; }
 
 async function testDebate() {
   console.log("\n== Debate: 3 participants, 2 rounds ==");
@@ -668,6 +679,8 @@ async function testPromptLibrary() {
   const explainer = state0.prompts.find((p) => p.name === "System Prompt (How Routing Works)");
   assert(!!explainer, "a second built-in prompt explaining [TO: X] tag routing also exists by default");
   assert(explainer.text.chatgpt.includes("[TO:") && explainer.text.claude.includes("[TO:") && explainer.text.gemini.includes("[TO:"), "every AI's version actually mentions the [TO: X] tag syntax");
+  assert(explainer.text.chatgpt.includes("[FROM: CHATGPT]") && explainer.text.claude.includes("[FROM: CLAUDE]") && explainer.text.gemini.includes("[FROM: GEMINI]"),
+    "each AI's explainer also teaches its own [FROM: X] closing tag (the end-tag completion signal)");
 }
 
 async function testPromptEditorWindow() {
@@ -1167,7 +1180,7 @@ async function testSelfTestConnectivity() {
   await resetAllParticipants();
   const mismatchPromise = call("selftest:run", { site: "gemini" });
   await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
-  say("gemini", "Sure, here's an unrelated reply that doesn't contain any token.");
+  sayRaw("gemini", "Sure, here's an unrelated reply that doesn't contain any token."); // self-test reads the pane raw; no envelope
   const mismatchRes = await mismatchPromise;
   assert(!mismatchRes.ok && mismatchRes.error === "REPLY_MISMATCH", "a reply that arrives but matches neither the original nor reversed token is reported as REPLY_MISMATCH, not a pass");
   assert(mismatchRes.text === "Sure, here's an unrelated reply that doesn't contain any token.", "the mismatch result carries back exactly what WAS captured, so a broken read-selector can actually be diagnosed");
@@ -1836,6 +1849,55 @@ async function testStageOverridesBaseline() {
   assert(turn2 && turn2.roundtableTag === "CLAUDE", "the post-stage turn is tag-parsed again, same as baseline");
 }
 
+async function testEndTagCompletion() {
+  console.log("\n== End-tag protocol: a baseline reply is captured only once it closes with [FROM: X] (no stability timer) ==");
+  await resetAllParticipants();
+
+  // An untagged reply (still 'streaming', or the AI forgot to close it) must
+  // NEVER be captured — the old 'text stopped changing' timer no longer applies.
+  sayRaw("claude", "[TO: USER]\nHere is a draft answer, but I have not closed it yet");
+  await settle(); // longer than the (fast) watchdog window, so we'd see any capture
+  let s = await call("state:get", {});
+  assert(!s.transcript.some((t) => t.text.includes("draft answer, but I have not closed")),
+    "an untagged reply is never captured, no matter how long it sits");
+
+  // The moment the [FROM:] closing tag lands, it's captured — tag(s) stripped.
+  reg("claude").webContents.currentText = "[TO: USER]\nHere is a draft answer, but I have not closed it yet\n[FROM: CLAUDE]";
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("draft answer, but I have not closed")),
+    { label: "the reply captures as soon as [FROM:] appears" });
+  s = await call("state:get", {});
+  const turn = s.transcript.find((t) => t.text.includes("draft answer"));
+  assert(turn && !/\[FROM:/i.test(turn.text) && !/\[TO:/i.test(turn.text), "both envelope tags are stripped from the captured text");
+}
+
+async function testMissingEndTagReprompt() {
+  console.log("\n== Missing end-tag watchdog: an untagged reply is discarded and the AI is re-sent the protocol, capped so it can't loop ==");
+  await resetAllParticipants();
+  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
+
+  sayRaw("gemini", "[TO: USER]\nFirst attempt with no closing tag");
+  await waitUntil(() => sentLog("gemini").some(isNudge), { label: "the AI is nudged to resend with the [FROM:] tag" });
+  let s = await call("state:get", {});
+  assert(!s.transcript.some((t) => t.text.includes("First attempt with no closing tag")), "the untagged reply is never captured (treated as lost)");
+  const nudge = sentLog("gemini").find(isNudge);
+  assert(/\[FROM: GEMINI\]/.test(nudge.text) && /resend/i.test(nudge.text), "the nudge tells gemini to resend with its own closing tag");
+
+  // Recovery: the AI resends the WHOLE message with the tag -> captured normally.
+  reg("gemini").webContents.currentText = "[TO: USER]\nFirst attempt with no closing tag\n[FROM: GEMINI]";
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("First attempt with no closing tag")),
+    { label: "the resent, properly-tagged message is captured" });
+
+  // Cap: chatgpt's counter is fresh (reset by resetAllParticipants). Four distinct
+  // untagged messages must NOT yield four nudges — the watchdog gives up after
+  // MAX_NOTAG_REPROMPTS so a forgetful model can't be nudged forever.
+  const nudges = () => sentLog("chatgpt").filter(isNudge).length;
+  for (let i = 1; i <= 4; i++) {
+    sayRaw("chatgpt", `Untagged try number ${i}, still no closing tag`);
+    await settle(450); // > watchdog window, so each distinct message fires (or gives up)
+  }
+  assert(nudges() >= 1 && nudges() <= 2, `the resend nudge is capped, not fired once per attempt (got ${nudges()} for 4 untagged messages)`);
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -1939,6 +2001,8 @@ async function main() {
   await testRetryHoldsQueueThroughBackoff();
   await testRegenerateGoesThroughLedgerQueueRetry();
   await testStageOverridesBaseline();
+  await testEndTagCompletion();
+  await testMissingEndTagReprompt();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

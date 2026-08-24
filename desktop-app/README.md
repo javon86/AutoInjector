@@ -96,7 +96,7 @@ control strip (and its last captured reply) stays visible and usable.
 1. Sign in to whichever sites you want to include, right in their panes.
 2. The moment each pane finishes loading for the first time, the app
    automatically sends it a short routing-explainer prompt (see "Roundtable
-   v2" below) explaining the `[TO: X]` tag system — this happens once per
+   v2" below) explaining the `[TO: X]` … `[FROM: X]` envelope — this happens once per
    app launch, before you do anything else, with no reply expected. It also
    lives in the **Prompt Library** (as "System Prompt (How Routing Works)")
    so you can resend it manually any time an AI seems to have forgotten it.
@@ -265,10 +265,20 @@ receiving in the background exactly the same as when fully visible.
 ## Roundtable v2: the always-on baseline
 
 This is the program's default, permanent behavior — not a House Rules format
-you start and stop. Every reply any AI gives is checked for a `[TO: X]` tag
-on its own line at the very start: `[TO: CHATGPT]`, `[TO: CLAUDE]`, `[TO:
-GEMINI]`, `[TO: ALL]`, `[TO: USER]`, or `[TO: NONE]`. The app strips that tag
-before showing the message and routes it accordingly:
+you start and stop. Every reply any AI gives is wrapped in a two-tag
+**envelope**: it opens with a `[TO: X]` routing tag on its own line at the very
+start — `[TO: CHATGPT]`, `[TO: CLAUDE]`, `[TO: GEMINI]`, `[TO: ALL]`, `[TO:
+USER]`, or `[TO: NONE]` — and closes with the sender's own `[FROM: X]` tag at the
+very end — `[FROM: CHATGPT]`, `[FROM: CLAUDE]`, or `[FROM: GEMINI]`.
+
+The **`[FROM: X]` closing tag is the completion signal**: the app captures and
+routes a reply the instant that tag appears — it no longer waits for the text to
+merely stop changing. If a reply ever finishes *without* the closing tag, the app
+treats the message as lost, discards it, and automatically re-sends that AI the
+messaging protocol asking it to resend the whole message with the envelope
+(capped, so a forgetful model can't be nudged forever; a book run waiting on that
+pane parks as stalled instead). The app strips **both** tags before showing the
+message and routes it by the `[TO: X]` tag:
 
 - **`[TO: CLAUDE]`/`[TO: CHATGPT]`/`[TO: GEMINI]`** — relayed to just that one
   AI. Still shown to you in the transcript, marked with a small "→ Claude"
@@ -281,9 +291,11 @@ before showing the message and routes it accordingly:
   catch by happening to be watching the Transcript stream.
 - **`[TO: NONE]`** — "I have nothing to add." Fully hidden — never shown,
   never relayed.
-- **No tag at all** — treated as `[TO: USER]` and shown as-is (this is a
-  deliberate fallback, not a silent drop, so a model that forgets the format
-  doesn't just vanish).
+- **No `[TO: …]` routing tag at the start** — treated as `[TO: USER]` and shown
+  as-is (a deliberate fallback for the *routing* tag, not a silent drop). Note
+  this fallback is only for the opening routing tag; the `[FROM: …]` *closing*
+  tag is still required for the message to be captured at all — a reply missing
+  it is re-prompted rather than routed (see above).
 
 This runs unconditionally, on every site, for the entire time the app is
 open — there's no "start" button for it and nothing to configure. The one

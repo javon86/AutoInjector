@@ -63,6 +63,16 @@ const ROTATION_ORDER = ["chatgpt", "claude", "gemini"]; // fixed, per spec — n
 // are unchanged.
 const POLL_MS = Number(process.env.AUTOINJECTOR_POLL_MS) || 1500;
 const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
+// End-tag protocol (v2 completion signal). On the always-on baseline path a
+// reply is COMPLETE the moment it carries a well-formed [FROM: X] closing tag —
+// we no longer wait for the text to merely stop changing. STABLE_MS is kept ONLY
+// for the 7 structured house-rules stage formats, which drive their own turn-
+// taking and don't use the envelope. NOTAG_QUIET_MS is the missing-tag watchdog:
+// if a baseline pane goes quiet this long WITHOUT a closing tag, the message is
+// treated as lost and the messaging protocol is re-sent asking for a full resend.
+// It's deliberately longer than STABLE_MS so a mid-reply pause never trips it.
+const NOTAG_QUIET_MS = Number(process.env.AUTOINJECTOR_NOTAG_QUIET_MS) || 12000;
+const MAX_NOTAG_REPROMPTS = Number(process.env.AUTOINJECTOR_MAX_NOTAG_REPROMPTS) || 2;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
 const MAX_LEDGER = 1000; // oldest-first eviction, same idea as MAX_TRANSCRIPT
@@ -152,7 +162,8 @@ function targetWindow(which) {
 const state = {
   routing: {}, // site -> Set<target site id> to auto-forward new replies to
   captured: {}, // site -> { id, site, label, text, ts, pinned } | null — last stable reply seen
-  pending: {}, // site -> { text, sinceTs } — used to detect when a reply has stopped changing
+  pending: {}, // site -> { text, sinceTs, reprompted } — used to detect a stopped reply / a quiet pane with no end tag
+  noTagReprompts: {}, // site -> count of consecutive "you forgot the [FROM:] tag, resend" nudges (reset when a valid tagged reply lands)
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
   waitingSince: {}, // site -> timestamp | null — when waiting flipped true, so UIs can flag "hasn't replied in a while"
@@ -190,7 +201,8 @@ const state = {
 for (const site of SITE_IDS) {
   state.routing[site] = new Set();
   state.captured[site] = null;
-  state.pending[site] = { text: "", sinceTs: Date.now() };
+  state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
+  state.noTagReprompts[site] = 0;
   state.busy[site] = false;
   state.waiting[site] = false;
   state.waitingSince[site] = null;
@@ -206,7 +218,7 @@ for (const site of SITE_IDS) {
 function defaultTestPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `This is a diagnostic test of the AutoInjector automation system, not a real task. Please: (1) reply here to confirm this message reached you, (2) briefly confirm what you understand your role to be right now, and (3) if messages from ${otherLabels(SITE_IDS, site)} show up afterward, say so — that confirms routing between the three of us is actually working end-to-end. Keep your reply short.`;
+    text[site] = `This is a diagnostic test of the AutoInjector automation system, not a real task. Please: (1) reply here to confirm this message reached you, (2) briefly confirm what you understand your role to be right now, and (3) if messages from ${otherLabels(SITE_IDS, site)} show up afterward, say so — that confirms routing between the three of us is actually working end-to-end. Message format: BEGIN your reply with [TO: USER] and END it with [FROM: ${site.toUpperCase()}] — that closing tag is how this app knows your message is finished; without it the message is discarded and you'll be asked to resend. Keep your reply short.`;
   }
   return { id: 1, name: "System Test", text };
 }
@@ -220,7 +232,7 @@ function defaultTestPrompt() {
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. By default, every reply you send gets read for a tag on its own line at the start — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. If you leave the tag off, it's treated as [TO: USER]. This applies all the time, not just for a specific "mode."`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. This applies all the time, not just for a specific "mode."`;
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -1345,6 +1357,48 @@ function parseRoundtableTag(text) {
   return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
 }
 
+// End-tag protocol: every baseline reply must close with [FROM: <who>]. Its
+// PRESENCE is the completion signal (see pollSite()) — the moment it appears the
+// AI has finished, so there's no waiting on a stability timer. hasEndTag() tests
+// for it (anchored at the end, tolerating trailing whitespace); parseEndTag()
+// also returns the declared sender and the body with the tag stripped, so the
+// envelope marker never reaches the transcript, the routed message, or a PDF.
+const END_TAG_RE = /\[\s*FROM:\s*(GEMINI|CHATGPT|CLAUDE|USER)\s*\]\s*$/i;
+function hasEndTag(text) { return END_TAG_RE.test(String(text || "")); }
+function parseEndTag(text) {
+  const s = String(text || "");
+  const m = END_TAG_RE.exec(s);
+  if (!m) return { from: null, body: s };
+  return { from: m[1].toUpperCase(), body: s.slice(0, m.index).replace(/\s+$/, "") };
+}
+
+// Missing-tag watchdog action (see pollSite()). A baseline pane went quiet with
+// no [FROM:] closing tag, so the message is treated as LOST — never captured or
+// routed. We nudge that AI with the communication protocol and ask it to resend
+// the WHOLE message with the envelope. Capped (MAX_NOTAG_REPROMPTS) so a model
+// that keeps forgetting can't loop forever: past the cap we stop nudging, and if
+// a book run was waiting on this pane we park it as stalled for the user.
+async function missingEndTagReprompt(site, rawText) {
+  const n = (state.noTagReprompts[site] || 0) + 1;
+  state.noTagReprompts[site] = n;
+  logEvent("endtag-missing", { site, attempt: n, chars: (rawText || "").length });
+  const r = state.bookRun;
+  const bookWaiting = !!(r && r.active && r.status === "waiting-reply" && r.target === site);
+  if (n > MAX_NOTAG_REPROMPTS) {
+    logEvent("endtag-missing-giveup", { site, attempts: n });
+    if (bookWaiting) {
+      r.status = "stalled";
+      bookProject.setWorkflow(r.bookId, { status: "paused" },
+        `⚠️ ${SITES[site] ? SITES[site].label : site} kept replying without the required [FROM:] end tag on step ${r.step + 1} — paused (check the pane, then Resume)`);
+      broadcastBookRun();
+    }
+    return;
+  }
+  try {
+    await sendTextTo(site, bookRules.composeEnvelopeReminder(site), null, { raw: true });
+  } catch (e) { logEvent("endtag-reprompt-error", { site, error: String(e) }); }
+}
+
 // Pure target computation, shared by handleRoundtableCapture() and pollSite()'s
 // mesh-forward loop below -- pulled out on its own specifically so pollSite()
 // can dedupe against it BEFORE sending anything, rather than each mechanism
@@ -2239,12 +2293,43 @@ async function pollSite(site) {
     const text = (res && res.text) || "";
     const pend = state.pending[site];
 
-    if (!text) { state.pending[site] = { text: "", sinceTs: Date.now() }; return; }
-    if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now() }; return; }
-    if (Date.now() - pend.sinceTs < STABLE_MS) return;
+    if (!text) { state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false }; return; }
+
+    // Completion gate. On the always-on baseline path a reply is DONE the instant
+    // it carries a [FROM: X] end tag — no stability timer. "Bare mode" pauses the
+    // envelope requirement for this pane: a house-rules stage runs its own
+    // protocol, and a connectivity self-test / the Tuner deliberately ask for a
+    // bare token with no [TO:]/[FROM:]. Those keep the original "text stopped
+    // changing for STABLE_MS" completion and are never nudged for a missing tag.
+    const stageActive = state.hr.active && STAGE_MODES.has(state.hr.mode);
+    const bareMode = stageActive || selftestInFlight.has(site) || tunerInFlight.active;
+    if (bareMode) {
+      if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
+      if (Date.now() - pend.sinceTs < STABLE_MS) return;
+    } else if (!hasEndTag(text)) {
+      // Still streaming, OR finished-but-forgot-the-tag. Track quiet time; only
+      // act once the pane has gone quiet past the watchdog window.
+      if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
+      if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
+      // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
+      // carries our envelope and will never grow one, so let it fall through to
+      // the rate-limit handler below (which captures + auto-pauses) instead of
+      // futilely re-prompting a capped pane. Anything else is a real message the
+      // AI forgot to close: treat it as lost and re-send the protocol asking for
+      // a full resend — never capture an untagged (possibly partial) reply.
+      if (!looksLikeRateLimit(text)) {
+        if (!pend.reprompted) {
+          state.pending[site].reprompted = true;
+          missingEndTagReprompt(site, text);
+        }
+        return;
+      }
+      // rate-limit: fall through to the dedup + rate-limit handling below.
+    }
+    // Baseline with the end tag present falls straight through — capture now.
 
     const already = state.captured[site];
-    if (already && already.text === text) return; // no new stable reply
+    if (already && already.text === text) return; // no new completed reply
 
     // A rate-limit/usage-cap message isn't a real contribution — feeding it
     // into routing/House Rules/Prompt Sequence/the manager loop would relay
@@ -2291,8 +2376,8 @@ async function pollSite(site) {
     // the first thing the AI typed, so it has to be parsed and stripped
     // BEFORE the turn is built below, since that's what gets pushed to the
     // transcript and broadcast live. [TO: NONE] means "nothing to add" and
-    // is swallowed entirely, never reaching the transcript.
-    const stageActive = state.hr.active && STAGE_MODES.has(state.hr.mode);
+    // is swallowed entirely, never reaching the transcript. (stageActive was
+    // already computed for the completion gate above.)
     let roundtableTag = null;
     let displayText = text;
     if (!stageActive) {
@@ -2310,6 +2395,11 @@ async function pollSite(site) {
         return;
       }
     }
+    // Strip the [FROM: X] closing tag so the envelope marker never reaches the
+    // transcript, the routed message, or a saved PDF — the sender is already
+    // shown by the bubble/label. Universal: a stage reply carrying one is cleaned
+    // too. (On the baseline path the tag's presence is what got us here.)
+    displayText = parseEndTag(displayText).body;
 
     const ignoreCount = state.hr.active ? state.hr.ignoreCaptureFrom.get(site) || 0 : 0;
     const silentAckCount = state.hr.active ? state.hr.silentAckFrom.get(site) || 0 : 0;
@@ -2383,7 +2473,12 @@ async function pollSite(site) {
       }
     } catch (_) {}
 
-    state.captured[site] = roundtableTag ? { ...turn, text } : turn;
+    // The dedup key must be the RAW page text (what the next poll will read).
+    // Whenever we stripped an envelope tag ([TO:] at the front and/or [FROM:] at
+    // the end) the display text differs from the page, so store raw text for the
+    // "already captured this" check; otherwise store the turn as-is.
+    state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
+    state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
     logEvent("captured", { site, chars: displayText.length });
@@ -3185,8 +3280,9 @@ ipcMain.handle("site:reload", (_evt, site) => {
   const view = siteViews[site];
   if (!view) return { ok: false, error: "NO_VIEW" };
   view.webContents.loadURL(SITES[site].home);
-  state.pending[site] = { text: "", sinceTs: Date.now() };
+  state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
   state.captured[site] = null;
+  state.noTagReprompts[site] = 0;
   logEvent("reload", { site });
   return { ok: true };
 });
@@ -3210,8 +3306,9 @@ ipcMain.handle("sites:new-chat-all", () => {
     if (!view) { results[site] = false; continue; }
     try {
       view.webContents.loadURL(SITES[site].newChat || SITES[site].home);
-      state.pending[site] = { text: "", sinceTs: Date.now() };
+      state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
       state.captured[site] = null;
+      state.noTagReprompts[site] = 0;
       results[site] = true;
     } catch (e) { results[site] = false; logEvent("new-chat-error", { site, error: String(e) }); }
   }
