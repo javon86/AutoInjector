@@ -218,7 +218,7 @@ for (const site of SITE_IDS) {
 function defaultTestPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `This is a diagnostic test of the AutoInjector automation system, not a real task. Please: (1) reply here to confirm this message reached you, (2) briefly confirm what you understand your role to be right now, and (3) if messages from ${otherLabels(SITE_IDS, site)} show up afterward, say so — that confirms routing between the three of us is actually working end-to-end. Keep your reply short.`;
+    text[site] = `This is a diagnostic test of the AutoInjector automation system, not a real task. Please: (1) reply here to confirm this message reached you, (2) briefly confirm what you understand your role to be right now, and (3) if messages from ${otherLabels(SITE_IDS, site)} show up afterward, say so — that confirms routing between the three of us is actually working end-to-end. Message format: BEGIN your reply with [TO: USER] and END it with [FROM: ${site.toUpperCase()}] — that closing tag is how this app knows your message is finished; without it the message is discarded and you'll be asked to resend. Keep your reply short.`;
   }
   return { id: 1, name: "System Test", text };
 }

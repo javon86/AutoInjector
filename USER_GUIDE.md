@@ -170,15 +170,28 @@ once it arrives**.
 
 This is the heart of the app — making the AIs pass work between themselves.
 
-### a) Roundtable tags — `[TO: X]` ✅ *(always on)*
-Every reply is checked for a tag at the **very start**. If an AI writes
-`[TO: Claude] …`, its answer is automatically sent to Claude. Use:
+### a) Roundtable envelope — `[TO: X]` … `[FROM: X]` ✅ *(always on)*
+Every reply is wrapped in a two‑tag **envelope**: it opens with a routing tag at
+the **very start** and closes with the sender's tag at the **very end**.
+
+**Opening tag — who it's for.** If an AI writes `[TO: Claude] …`, its answer is
+automatically sent to Claude. Use:
 - `[TO: ChatGPT]` / `[TO: Claude]` / `[TO: Gemini]` — send to that AI,
 - `[TO: ALL]` — send to everyone,
 - `[TO: USER]` — "this one's for you" (shows in **Messages to you**).
 
+**Closing tag — the message is finished.** Every reply must **end** with the
+sender's own tag in the same bracket form — `[FROM: ChatGPT]`, `[FROM: Claude]`,
+or `[FROM: Gemini]`. This closing tag is how the app knows a message is *done*:
+the moment it appears, the reply is captured and routed — there's no waiting on a
+timer. If an AI finishes **without** the `[FROM: …]` tag, the app treats the
+message as lost, discards it, and automatically asks that AI to resend the whole
+message with the tag (so nothing gets half‑captured). Both tags are stripped out
+before the message is shown, relayed, or saved to a PDF.
+
 You can tell the AIs to use these tags, and they'll hand off to each other on
-their own.
+their own — the built‑in **System Test** and **How Routing Works** prompts
+already teach the full `[TO: …] … [FROM: …]` envelope.
 
 ### b) Auto / mesh routing ✅
 Turn on **Auto** (per pane, or **Auto (checked participants)** in Global) and
