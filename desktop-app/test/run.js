@@ -1898,6 +1898,21 @@ async function testMissingEndTagReprompt() {
   assert(nudges() >= 1 && nudges() <= 2, `the resend nudge is capped, not fired once per attempt (got ${nudges()} for 4 untagged messages)`);
 }
 
+async function testSelftestLeavesNoMissingTagNudge() {
+  console.log("\n== Regression: a finished self-test's bare-token reply must NOT trip a spurious missing-[FROM:] nudge ==");
+  await resetAllParticipants();
+  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
+  const p = call("selftest:run", { site: "claude" });
+  await waitUntil(() => sentLog("claude").length === 1, { label: "self-test prompt sent" });
+  const token = extractSelftestToken(sentLog("claude")[0].text);
+  sayRaw("claude", reverseStr(token)); // bare reversed token, no envelope — exactly what the test asks for
+  const res = await p;
+  assert(res.ok === true, "the self-test passes on the bare reversed token");
+  // The bare token now lingers in the pane; give the watchdog well past its window.
+  await settle(600);
+  assert(!sentLog("claude").some(isNudge), "no missing-tag nudge is sent for the leftover self-test reply once the test ends");
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2003,6 +2018,7 @@ async function main() {
   await testStageOverridesBaseline();
   await testEndTagCompletion();
   await testMissingEndTagReprompt();
+  await testSelftestLeavesNoMissingTagNudge();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

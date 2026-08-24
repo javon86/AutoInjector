@@ -2307,6 +2307,14 @@ async function pollSite(site) {
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
       if (Date.now() - pend.sinceTs < STABLE_MS) return;
     } else if (!hasEndTag(text)) {
+      // An untagged reply we ALREADY captured is not a new "forgot the tag"
+      // event — most importantly, a connectivity self-test / Tuner reply is a
+      // bare token (no envelope) captured in bare mode; once that mode ends its
+      // leftover text must not trip a spurious "you forgot your [FROM:] tag"
+      // nudge. Baseline never captures untagged text, so this only ever matches
+      // something a bare-mode/stage run already handled.
+      const already = state.captured[site];
+      if (already && already.text === text) return;
       // Still streaming, OR finished-but-forgot-the-tag. Track quiet time; only
       // act once the pane has gone quiet past the watchdog window.
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
