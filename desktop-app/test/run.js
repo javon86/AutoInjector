@@ -2001,6 +2001,48 @@ async function testOutboundTeachesEnvelope() {
     { label: "the sequence finishes once the enveloped step reply lands" });
 }
 
+async function testAddressingAwareRelayFrame() {
+  console.log("\n== Relay frame tells the receiver how it was addressed ([X → you] / [X → everyone]) ==");
+  await resetAllParticipants();
+
+  // Directed [TO: CLAUDE] -> claude sees "[ChatGPT → you]".
+  const beforeClaude = sentLog("claude").length;
+  say("chatgpt", "[TO: CLAUDE]\nplease review this");
+  await waitUntil(() => sentLog("claude").length === beforeClaude + 1, { label: "directed relay reaches claude" });
+  assert(sentLog("claude").pop().text.includes("[ChatGPT → you]"), "a directed [TO: CLAUDE] relay is framed '[ChatGPT → you]'");
+
+  // Broadcast [TO: ALL] -> each other pane sees "[Gemini → everyone]".
+  await resetAllParticipants();
+  const bC = sentLog("chatgpt").length, bK = sentLog("claude").length;
+  say("gemini", "[TO: ALL]\nheads up everyone");
+  await waitUntil(() => sentLog("chatgpt").length === bC + 1 && sentLog("claude").length === bK + 1, { label: "broadcast relays to both others" });
+  assert(sentLog("chatgpt").pop().text.includes("[Gemini → everyone]") && sentLog("claude").pop().text.includes("[Gemini → everyone]"), "a [TO: ALL] relay is framed '[Gemini → everyone]'");
+
+  // A plain mesh/auto forward (not tag-addressed) stays neutral "[X says]".
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  const bG = sentLog("gemini").length;
+  say("chatgpt", "[TO: USER]\njust a note"); // USER => no tag relay; mesh forwards it to the others
+  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the [TO: USER] reply to gemini" });
+  assert(sentLog("gemini").pop().text.includes("[ChatGPT says]"), "a plain mesh forward stays neutral '[ChatGPT says]'");
+}
+
+async function testLoopGuardSuppressesRelay() {
+  console.log("\n== Loop guard: a short reply that keeps ping-ponging is shown but stops being relayed ==");
+  await resetAllParticipants();
+  // Same normalized body, whitespace varied so each is a fresh capture (not deduped).
+  const variants = ["loop msg", "loop  msg", "loop   msg", "loop    msg", "loop     msg"];
+  for (const v of variants) {
+    sayRaw("chatgpt", `[TO: CLAUDE]\n${v}\n[FROM: CHATGPT]`);
+    await settle(200);
+  }
+  const relayed = sentLog("claude").length;
+  assert(relayed === 3, `relaying is capped after LOOP_MAX_REPEATS forwards of the same short body (got ${relayed} for ${variants.length} sends)`);
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "loop-suppressed"), "the loop suppression is logged");
+  assert(s.transcript.filter((t) => /loop\s+msg/.test(t.text)).length >= 4, "every copy is still shown in the transcript — nothing is hidden, only the relay is stopped");
+}
+
 async function testBookTestRunCapturesBareReplies() {
   console.log("\n== book:test-run is bareMode: a plain 'TEST OK' reply (no envelope) is captured, not nudged ==");
   await resetAllParticipants();
@@ -2123,6 +2165,8 @@ async function main() {
   await testBareNoneIsSilentSkip();
   await testEnvelopeMatcherRobustness();
   await testOutboundTeachesEnvelope();
+  await testAddressingAwareRelayFrame();
+  await testLoopGuardSuppressesRelay();
   await testBookTestRunCapturesBareReplies();
 
   console.log(`\n${passed} passed, ${failed} failed`);

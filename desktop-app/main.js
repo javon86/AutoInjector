@@ -1009,11 +1009,16 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   }
   const label = fromSite ? SITES[fromSite]?.label : null;
   const roleClause = state.customRole[target] ? `(You're playing the role of: ${state.customRole[target]}. Keep that in mind in your reply.)\n\n` : "";
+  // Addressing-aware frame: a tag-routed relay tells the receiver whether it was
+  // addressed directly ([label → you]) or in a broadcast ([label → everyone]),
+  // restoring the routing awareness the stripped [TO:] tag would otherwise carry.
+  // A plain mesh/auto forward stays neutral ("[label says]").
+  const frameVerb = opts.addressing === "you" ? "→ you" : opts.addressing === "everyone" ? "→ everyone" : "says";
   // opts.raw skips role-clause/label framing entirely and sends `text`
   // verbatim -- for callers (Regenerate) whose text is already the exact,
   // fully-framed string that was actually sent last time, so re-framing it
   // here would double it up.
-  const prompt = opts.raw ? text : roleClause + (label ? `[${label} says]\n\n${text}` : text);
+  const prompt = opts.raw ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -1466,9 +1471,33 @@ function roundtableTargetsFor(turn) {
 // semantics. No session, no hop limit, no start/stop — this just runs on
 // every capture whenever no stage format has taken over (see pollSite()).
 async function handleRoundtableCapture(turn) {
+  // Tell the receiver how it was addressed: a named [TO: X] tag → "you"; [TO: ALL]
+  // → "everyone". This is the addressing awareness the stripped tag would carry.
+  const addressing = turn.roundtableTag === "ALL" ? "everyone" : "you";
   for (const target of roundtableTargetsFor(turn)) {
-    await sendTextTo(target, turn.text, turn.site);
+    await sendTextTo(target, turn.text, turn.site, { addressing });
   }
+}
+
+// Loop guard: models acking each other produce SHORT, near-identical replies
+// that ping-pong between panes forever. When the same short body has already
+// been relayed several times in a short window, stop relaying further copies —
+// the message is still shown in the transcript, it just isn't forwarded onward,
+// which breaks the loop without hiding anything. Only short messages qualify, so
+// real (substantive) back-and-forth is never suppressed.
+const LOOP_SHORT_CHARS = Number(process.env.AUTOINJECTOR_LOOP_SHORT_CHARS) || 60;
+const LOOP_WINDOW_MS = Number(process.env.AUTOINJECTOR_LOOP_WINDOW_MS) || 60000;
+const LOOP_MAX_REPEATS = Number(process.env.AUTOINJECTOR_LOOP_MAX_REPEATS) || 3;
+function loopSuppressRelay(text) {
+  const body = String(text || "").trim();
+  if (!body || body.length > LOOP_SHORT_CHARS) return false;
+  const sig = body.replace(/\s+/g, " ").toLowerCase();
+  const now = Date.now();
+  state.recentShort = (state.recentShort || []).filter((e) => now - e.ts < LOOP_WINDOW_MS);
+  const priorCount = state.recentShort.filter((e) => e.sig === sig).length;
+  state.recentShort.push({ sig, ts: now });
+  if (state.recentShort.length > 60) state.recentShort = state.recentShort.slice(-60);
+  return priorCount >= LOOP_MAX_REPEATS;
 }
 
 // --- Prompt Sequence: a numbered list of prompts, each targeted at a
@@ -2645,15 +2674,24 @@ async function pollSite(site) {
     if (govHold) {
       logEvent("atelier-held", { site, target: turn.governance && turn.governance.target });
     } else {
+      // Loop guard: a short reply that's already ping-ponged several times is
+      // still shown, but not relayed onward — this breaks a model-acknowledgment
+      // loop without suppressing real content. Applies only to the free AI-to-AI
+      // relay (roundtable + mesh); the bounded, directed paths (House Rules
+      // stages, Prompt Sequence, Manager) always run.
+      const looping = !stageActive && loopSuppressRelay(turn.text);
+      if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
       let hrSentTargets = new Set();
       if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-      else await handleRoundtableCapture(turn);
+      else if (!looping) await handleRoundtableCapture(turn);
       const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-      for (const target of state.routing[site]) {
-        if (target === site || roundtableTargets.has(target)) continue;
-        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-        // relay — never the raw page text, which still carries [TO:]/[FROM:].
-        await sendTextTo(target, turn.text, site);
+      if (!looping) {
+        for (const target of state.routing[site]) {
+          if (target === site || roundtableTargets.has(target)) continue;
+          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+          // relay — never the raw page text, which still carries [TO:]/[FROM:].
+          await sendTextTo(target, turn.text, site);
+        }
       }
       if (state.sequence.active) await handleSequenceCapture(turn);
       if (state.manager.status === "waiting") await handleManagerCapture(turn);
