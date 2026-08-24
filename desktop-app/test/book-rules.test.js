@@ -29,6 +29,7 @@ function main() {
   assert(rules.RULES_TEXT.includes("COMMUNICATION ENVELOPE"), "the rules teach the mandatory [TO:]/[FROM:] envelope");
   assert(/\[FROM:/.test(rules.RULES_TEXT) && /\[TO:/.test(rules.RULES_TEXT), "both the routing tag and the closing tag are documented");
   assert(typeof rules.composeEnvelopeReminder === "function", "a missing-tag reminder composer is exported");
+  assert(/NONE is a complete message/i.test(rules.RULES_TEXT), "the envelope rule documents NONE as the exception that needs no [FROM:] tag");
   const reminder = rules.composeEnvelopeReminder("claude");
   assert(/\[FROM: CLAUDE\]/.test(reminder), "the reminder fills in the specific AI's own closing tag");
   assert(/discard|not delivered|resend/i.test(reminder), "the reminder says the message was lost and must be resent");

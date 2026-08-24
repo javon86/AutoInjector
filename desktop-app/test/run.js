@@ -1913,6 +1913,32 @@ async function testSelftestLeavesNoMissingTagNudge() {
   assert(!sentLog("claude").some(isNudge), "no missing-tag nudge is sent for the leftover self-test reply once the test ends");
 }
 
+async function testBareNoneIsSilentSkip() {
+  console.log("\n== 'NONE' is a complete 'nothing to add' signal: swallowed silently, needs no [FROM:] tag, never nudged ==");
+  await resetAllParticipants();
+  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
+  const beforeLen = (await call("state:get", {})).transcript.length;
+
+  // Bare NONE, no envelope at all.
+  sayRaw("gemini", "NONE");
+  await settle(600); // well past the watchdog window
+  let s = await call("state:get", {});
+  assert(s.transcript.length === beforeLen, "a bare NONE never appears in the transcript");
+  assert(!sentLog("gemini").some(isNudge), "a bare NONE is NOT nudged for a missing [FROM:] tag (NONE is a tag in itself)");
+
+  // [TO: NONE] with no closing tag is also a clean skip.
+  sayRaw("claude", "[TO: NONE]");
+  await settle(600);
+  s = await call("state:get", {});
+  assert(s.transcript.length === beforeLen, "[TO: NONE] with no [FROM:] is also swallowed silently");
+  assert(!sentLog("claude").some(isNudge), "[TO: NONE] is not nudged either");
+
+  // A real message that merely contains the word 'none' is NOT a skip — it posts.
+  say("chatgpt", "None of the earlier options will work here."); // say() appends [FROM: CHATGPT]
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("None of the earlier options")),
+    { label: "a real message that merely contains 'none' still posts normally" });
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2019,6 +2045,7 @@ async function main() {
   await testEndTagCompletion();
   await testMissingEndTagReprompt();
   await testSelftestLeavesNoMissingTagNudge();
+  await testBareNoneIsSilentSkip();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
