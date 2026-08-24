@@ -92,7 +92,7 @@ const TASKS = [
 // "[TO: NONE] — nothing to add" reply.
 function envelopeLine(target) {
   const tag = String(target || "").toUpperCase();
-  return "MESSAGE FORMAT (MANDATORY): BEGIN every reply with a bracket routing tag — [TO: USER] for a project deliverable or a question to the user, or [TO: CHATGPT]/[TO: GEMINI]/[TO: CLAUDE]/[TO: ALL] to address a teammate — and END every reply with your own closing tag in the same form: [FROM: " + tag + "]. The [FROM: ...] tag is what marks your message complete; a reply without it is discarded and you will be asked to resend the whole thing. Put nothing after the closing tag.";
+  return "MESSAGE FORMAT (MANDATORY): BEGIN every reply with a bracket routing tag — [TO: USER] for a project deliverable or a question to the user, or [TO: CHATGPT]/[TO: GEMINI]/[TO: CLAUDE]/[TO: ALL] to address a teammate — and END every reply with your own closing tag in the same form: [FROM: " + tag + "]. The [FROM: ...] tag is what marks your message complete; a reply without it is discarded and you will be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, reply with just NONE (or [TO: NONE]) — NONE is a complete message on its own, needs no [FROM:] tag, and is dropped silently.";
 }
 
 /**

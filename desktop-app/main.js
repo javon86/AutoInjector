@@ -232,7 +232,7 @@ function defaultTestPrompt() {
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. This applies all the time, not just for a specific "mode."`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode."`;
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -1372,6 +1372,18 @@ function parseEndTag(text) {
   return { from: m[1].toUpperCase(), body: s.slice(0, m.index).replace(/\s+$/, "") };
 }
 
+// "NONE" is a complete "nothing to add" signal that stands on its own — it needs
+// no [FROM:] closing tag (NONE is itself the tag). Recognize it whether written
+// bare ("NONE"), bracketed ("[NONE]"), or as the routing tag ("[TO: NONE]"),
+// with or without a stray [FROM:]. Only a reply whose ENTIRE content is NONE
+// counts — "None of this works" is a real message, not a skip.
+function isNoneSkip(text) {
+  const s = String(text || "");
+  if (parseRoundtableTag(s).tag === "NONE") return true;
+  const body = parseEndTag(parseRoundtableTag(s).body).body;
+  return body.replace(/[\s\[\]().!:,-]/g, "").toUpperCase() === "NONE";
+}
+
 // Missing-tag watchdog action (see pollSite()). A baseline pane went quiet with
 // no [FROM:] closing tag, so the message is treated as LOST — never captured or
 // routed. We nudge that AI with the communication protocol and ask it to resend
@@ -2303,6 +2315,28 @@ async function pollSite(site) {
     // changing for STABLE_MS" completion and are never nudged for a missing tag.
     const stageActive = state.hr.active && STAGE_MODES.has(state.hr.mode);
     const bareMode = stageActive || selftestInFlight.has(site) || tunerInFlight.active;
+
+    // "NONE" — nothing to add — is a complete signal on its own and needs no
+    // [FROM:] closing tag. On the baseline path, recognize it once stable and
+    // swallow it silently: it never reaches the transcript, never relays, and is
+    // never nudged for a missing tag. (During a stage/self-test the pane's own
+    // protocol handles its output, so this only applies outside bare mode.)
+    if (!bareMode && isNoneSkip(text)) {
+      if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
+      if (Date.now() - pend.sinceTs < STABLE_MS) return;
+      const seen = state.captured[site];
+      if (seen && seen.text === text) return; // already swallowed this exact NONE
+      state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      state.noTagReprompts[site] = 0;
+      if (state.waiting[site]) {
+        state.waiting[site] = false;
+        state.waitingSince[site] = null;
+        broadcast("waiting-changed", { site, waiting: false });
+      }
+      logEvent("roundtable-skip", { site, none: true });
+      return;
+    }
+
     if (bareMode) {
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
       if (Date.now() - pend.sinceTs < STABLE_MS) return;
