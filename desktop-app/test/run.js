@@ -1664,7 +1664,8 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   assert(sentLog("claude").length === 1, `claude (the tag's target) gets exactly ONE copy, not two (got ${sentLog("claude").length})`);
   assert(sentLog("gemini").length === 1, `gemini (not addressed by the tag) still correctly gets its own separate mesh copy, exactly one (got ${sentLog("gemini").length})`);
   assert(!sentLog("claude")[0].text.includes("[TO:"), "claude's one copy is the clean, tag-stripped version (tag routing's copy), never a raw mesh copy with the tag still embedded");
-  assert(sentLog("gemini")[0].text.includes("[TO: CLAUDE]"), "gemini's mesh copy is untouched raw text, exactly as mesh routing has always forwarded it -- this reply just wasn't addressed to gemini");
+  assert(!sentLog("gemini")[0].text.includes("[TO:") && !sentLog("gemini")[0].text.includes("[FROM:") && sentLog("gemini")[0].text.includes("Only claude should get exactly one copy"),
+    "gemini's mesh copy is now the SAME clean, envelope-stripped body as the tag-routed copy -- mesh no longer leaks the raw [TO:]/[FROM:] tags to a pane the reply wasn't addressed to");
 
   const s = await call("state:get", {});
   const claudeEntries = s.ledger.filter((e) => e.target === "claude" && e.textPreview.includes("Only claude should get exactly one copy"));
@@ -1937,6 +1938,56 @@ async function testBareNoneIsSilentSkip() {
   say("chatgpt", "None of the earlier options will work here."); // say() appends [FROM: CHATGPT]
   await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("None of the earlier options")),
     { label: "a real message that merely contains 'none' still posts normally" });
+
+  // Formatted variants of NONE are also recognized as a skip.
+  await resetAllParticipants();
+  const len2 = (await call("state:get", {})).transcript.length;
+  sayRaw("gemini", "**NONE**");
+  await settle(600);
+  assert((await call("state:get", {})).transcript.length === len2, "a markdown-formatted **NONE** is also swallowed silently");
+}
+
+async function testEnvelopeMatcherRobustness() {
+  console.log("\n== Robustness: loose [FROM:] name + short trailing tail still complete; empty envelope is swallowed ==");
+  await resetAllParticipants();
+
+  // Name drift — a sign-off the strict 4-name matcher would have dropped silently.
+  sayRaw("chatgpt", "[TO: USER]\nHere is my answer.\n[FROM: Assistant]");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("Here is my answer")),
+    { label: "a reply signed [FROM: Assistant] still captures (loose name)" });
+  let s = await call("state:get", {});
+  const turn = s.transcript.find((t) => t.text.includes("Here is my answer"));
+  assert(turn && !/\[FROM:/i.test(turn.text) && !/\[TO:/i.test(turn.text), "the loosely-named [FROM:] tag is still stripped from the body");
+
+  // Short trailing pleasantry after the closing tag.
+  await resetAllParticipants();
+  sayRaw("claude", "[TO: USER]\nDone.\n[FROM: CLAUDE] thanks!");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("Done.")),
+    { label: "a reply with a short tail after [FROM:] still captures" });
+
+  // Empty envelope — only the two tags, nothing between — is swallowed, no relay.
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  const before = totalSent();
+  const tlen = (await call("state:get", {})).transcript.length;
+  sayRaw("chatgpt", "[TO: GEMINI]\n[FROM: CHATGPT]");
+  await settle(600);
+  s = await call("state:get", {});
+  assert(s.transcript.length === tlen, "an empty-body envelope produces no transcript bubble");
+  assert(totalSent() === before, "an empty-body envelope relays nothing to another pane");
+}
+
+async function testBookTestRunCapturesBareReplies() {
+  console.log("\n== book:test-run is bareMode: a plain 'TEST OK' reply (no envelope) is captured, not nudged ==");
+  await resetAllParticipants();
+  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
+  const p = call("book:test-run", {});
+  await waitUntil(() => SITES.every((sname) => sentLog(sname).some((e) => /BOOK WORKFLOW CONNECTION TEST/.test(e.text))),
+    { label: "the test prompt reached all three panes" });
+  for (const sname of SITES) sayRaw(sname, "TEST OK sample throwaway content");
+  const res = await p;
+  assert(res && res.ok && res.results && res.results.allOk, `book:test-run confirms all three bare replies (got ${JSON.stringify(res && res.results)})`);
+  assert(!SITES.some((sname) => sentLog(sname).some(isNudge)), "no missing-tag nudge is sent for the bare test replies");
 }
 
 async function main() {
@@ -2046,6 +2097,8 @@ async function main() {
   await testMissingEndTagReprompt();
   await testSelftestLeavesNoMissingTagNudge();
   await testBareNoneIsSilentSkip();
+  await testEnvelopeMatcherRobustness();
+  await testBookTestRunCapturesBareReplies();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

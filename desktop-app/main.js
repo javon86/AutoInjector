@@ -1109,6 +1109,7 @@ async function hrSendTextTo(target, text, fromSite, sentTargets) {
 //   TIMEOUT            -- nothing came back at all
 const selftestInFlight = new Set();
 const tunerInFlight = { active: false }; // guards against a manual 🧪 Test colliding with a Tuner run touching the same site
+const testRunInFlight = new Set(); // sites currently in a Book Studio "Test AIs" round-trip — bareMode so a plain "TEST OK" reply (no envelope) still captures
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -1359,29 +1360,50 @@ function parseRoundtableTag(text) {
 
 // End-tag protocol: every baseline reply must close with [FROM: <who>]. Its
 // PRESENCE is the completion signal (see pollSite()) — the moment it appears the
-// AI has finished, so there's no waiting on a stability timer. hasEndTag() tests
-// for it (anchored at the end, tolerating trailing whitespace); parseEndTag()
-// also returns the declared sender and the body with the tag stripped, so the
-// envelope marker never reaches the transcript, the routed message, or a PDF.
-const END_TAG_RE = /\[\s*FROM:\s*(GEMINI|CHATGPT|CLAUDE|USER)\s*\]\s*$/i;
-function hasEndTag(text) { return END_TAG_RE.test(String(text || "")); }
+// AI has finished, so there's no waiting on a stability timer. The sender NAME is
+// matched LOOSELY (we already know which pane it is, so any short label counts —
+// "CHATGPT", "Claude 3.5", "gpt", even "Assistant"), and a short trailing tail
+// after the tag (a sign-off "thanks!", a period) is tolerated — otherwise very
+// common real outputs would be silently dropped. We take the LAST such tag whose
+// tail is short, so a [FROM:] quoted MID-reply (with paragraphs after it) does
+// not prematurely complete the message. parseEndTag() strips it from the body so
+// the envelope marker never reaches the transcript, a routed message, or a PDF.
+const END_TAG_RE = /\[\s*FROM:\s*([^\]\r\n]{1,40}?)\s*\]/gi;
+const END_TAG_MAX_TAIL = 40; // chars allowed after the closing tag (a brief sign-off / punctuation), before it's judged "still has content"
+function findEndTag(text) {
+  const s = String(text || "");
+  let last = null, m;
+  END_TAG_RE.lastIndex = 0;
+  while ((m = END_TAG_RE.exec(s))) last = m;
+  if (!last) return null;
+  const tail = s.slice(last.index + last[0].length);
+  if (tail.length > END_TAG_MAX_TAIL || /\n\s*\n/.test(tail)) return null; // real content after the tag → not the close
+  return { index: last.index, from: (last[1] || "").trim().toUpperCase() };
+}
+function hasEndTag(text) { return !!findEndTag(text); }
 function parseEndTag(text) {
   const s = String(text || "");
-  const m = END_TAG_RE.exec(s);
-  if (!m) return { from: null, body: s };
-  return { from: m[1].toUpperCase(), body: s.slice(0, m.index).replace(/\s+$/, "") };
+  const f = findEndTag(s);
+  if (!f) return { from: null, body: s };
+  return { from: f.from, body: s.slice(0, f.index).replace(/\s+$/, "") };
 }
 
 // "NONE" is a complete "nothing to add" signal that stands on its own — it needs
 // no [FROM:] closing tag (NONE is itself the tag). Recognize it whether written
-// bare ("NONE"), bracketed ("[NONE]"), or as the routing tag ("[TO: NONE]"),
-// with or without a stray [FROM:]. Only a reply whose ENTIRE content is NONE
-// counts — "None of this works" is a real message, not a skip.
+// bare ("NONE"), bracketed ("[NONE]"), formatted ("**NONE**", "NONE?"), or as the
+// routing tag ("[TO: NONE]"), with or without a stray [FROM:]. Only a reply whose
+// ENTIRE content is NONE counts — "None of this works" is a real message.
 function isNoneSkip(text) {
   const s = String(text || "");
   if (parseRoundtableTag(s).tag === "NONE") return true;
   const body = parseEndTag(parseRoundtableTag(s).body).body;
-  return body.replace(/[\s\[\]().!:,-]/g, "").toUpperCase() === "NONE";
+  return body.replace(/[^a-z]/gi, "").toUpperCase() === "NONE";
+}
+
+// Strip the [TO:]/[FROM:] envelope from a stored raw reply — for the few places
+// that forward or display state.captured[site] (which keeps RAW text for dedup).
+function stripEnvelope(text) {
+  return parseEndTag(parseRoundtableTag(String(text || "")).body).body;
 }
 
 // Missing-tag watchdog action (see pollSite()). A baseline pane went quiet with
@@ -2183,7 +2205,9 @@ async function handleWhoWantsCapture(turn) {
 
   if (hr.phase === "awaiting-optins" && hr.optinPending.has(turn.site)) {
     hr.optinPending.delete(turn.site);
-    if (turn.text.trim().toUpperCase().startsWith("YES")) hr.optinYes.push(turn.site);
+    // Tolerate a leaked leading [TO: X] tag (a stage doesn't strip it) so an
+    // opt-in like "[TO: ALL] YES" still counts as a YES.
+    if (parseRoundtableTag(turn.text).body.trim().toUpperCase().startsWith("YES")) hr.optinYes.push(turn.site);
     if (hr.optinPending.size > 0) return sentTargets;
 
     if (hr.optinYes.length === 0) { endHouseRule("nobody opted in"); return sentTargets; }
@@ -2314,7 +2338,7 @@ async function pollSite(site) {
     // bare token with no [TO:]/[FROM:]. Those keep the original "text stopped
     // changing for STABLE_MS" completion and are never nudged for a missing tag.
     const stageActive = state.hr.active && STAGE_MODES.has(state.hr.mode);
-    const bareMode = stageActive || selftestInFlight.has(site) || tunerInFlight.active;
+    const bareMode = stageActive || selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site);
 
     // "NONE" — nothing to add — is a complete signal on its own and needs no
     // [FROM:] closing tag. On the baseline path, recognize it once stable and
@@ -2443,6 +2467,22 @@ async function pollSite(site) {
     // too. (On the baseline path the tag's presence is what got us here.)
     displayText = parseEndTag(displayText).body;
 
+    // Empty envelope (e.g. "[TO: GEMINI][FROM: CLAUDE]" with no body between the
+    // tags) — nothing to show or relay. Swallow it rather than pushing an empty
+    // bubble and forwarding an empty, frame-only message into another pane.
+    // Baseline path only; a stage/self-test manages its own (already-bare) output.
+    if (!bareMode && !displayText.trim()) {
+      state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      state.noTagReprompts[site] = 0;
+      if (state.waiting[site]) {
+        state.waiting[site] = false;
+        state.waitingSince[site] = null;
+        broadcast("waiting-changed", { site, waiting: false });
+      }
+      logEvent("roundtable-skip", { site, empty: true });
+      return;
+    }
+
     const ignoreCount = state.hr.active ? state.hr.ignoreCaptureFrom.get(site) || 0 : 0;
     const silentAckCount = state.hr.active ? state.hr.silentAckFrom.get(site) || 0 : 0;
 
@@ -2564,7 +2604,9 @@ async function pollSite(site) {
       const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
       for (const target of state.routing[site]) {
         if (target === site || roundtableTargets.has(target)) continue;
-        await sendTextTo(target, text, site);
+        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+        // relay — never the raw page text, which still carries [TO:]/[FROM:].
+        await sendTextTo(target, turn.text, site);
       }
       if (state.sequence.active) await handleSequenceCapture(turn);
       if (state.manager.status === "waiting") await handleManagerCapture(turn);
@@ -2944,21 +2986,29 @@ ipcMain.handle("book:test-run", async () => {
     "Please reply with one short line beginning \"TEST OK\" followed by a few words of throwaway sample content " +
     "(this stands in for a real document so we can confirm the app receives your reply).";
   const sentTs = {}, results = {};
-  for (const site of SITE_IDS) {
-    const view = siteViews[site];
-    if (!view || view.webContents.isDestroyed()) { results[site] = { ok: false, reason: "pane not open" }; continue; }
-    sentTs[site] = Date.now();
-    try { await sendTextTo(site, prompt, null, { raw: true }); }
-    catch (_) { results[site] = { ok: false, reason: "send failed" }; delete sentTs[site]; }
-  }
-  const deadline = Date.now() + 90000;
-  const pending = () => SITE_IDS.filter((s) => sentTs[s] && !results[s]);
-  while (Date.now() < deadline && pending().length) {
-    for (const s of pending()) {
-      const c = state.captured[s];
-      if (c && c.ts >= sentTs[s] && c.text && c.text.trim()) results[s] = { ok: true, chars: c.text.length, snippet: c.text.trim().slice(0, 90) };
+  // This diagnostic deliberately asks for a bare "TEST OK" with no envelope, so
+  // mark each tested pane bareMode for the duration — otherwise pollSite would
+  // refuse to capture a reply that has no [FROM:] tag and instead nudge it.
+  try {
+    for (const site of SITE_IDS) {
+      const view = siteViews[site];
+      if (!view || view.webContents.isDestroyed()) { results[site] = { ok: false, reason: "pane not open" }; continue; }
+      testRunInFlight.add(site);
+      sentTs[site] = Date.now();
+      try { await sendTextTo(site, prompt, null, { raw: true }); }
+      catch (_) { results[site] = { ok: false, reason: "send failed" }; delete sentTs[site]; testRunInFlight.delete(site); }
     }
-    if (pending().length) await new Promise((r) => setTimeout(r, 400));
+    const deadline = Date.now() + 90000;
+    const pending = () => SITE_IDS.filter((s) => sentTs[s] && !results[s]);
+    while (Date.now() < deadline && pending().length) {
+      for (const s of pending()) {
+        const c = state.captured[s];
+        if (c && c.ts >= sentTs[s] && c.text && c.text.trim()) results[s] = { ok: true, chars: c.text.length, snippet: c.text.trim().slice(0, 90) };
+      }
+      if (pending().length) await new Promise((r) => setTimeout(r, 400));
+    }
+  } finally {
+    for (const s of SITE_IDS) testRunInFlight.delete(s);
   }
   for (const s of SITE_IDS) if (!results[s]) results[s] = { ok: false, reason: "no reply captured (is the pane signed in?)" };
   results.allOk = SITE_IDS.every((s) => results[s].ok);
@@ -3074,8 +3124,11 @@ ipcMain.handle("send:forward", async (_evt, { source, targets }) => {
   if (!cap) return { ok: false, error: "NOTHING_CAPTURED_YET" };
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t] && t !== source) : [];
   if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  // state.captured stores RAW text (for dedup); strip the [TO:]/[FROM:] envelope
+  // before forwarding so the target doesn't receive routing markers.
+  const clean = stripEnvelope(cap.text);
   const results = {};
-  for (const t of list) results[t] = await sendTextTo(t, cap.text, source);
+  for (const t of list) results[t] = await sendTextTo(t, clean, source);
   return { ok: true, results };
 });
 
@@ -3296,7 +3349,10 @@ ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),
   houseRule: houseRuleSnapshot(),
-  captured: state.captured,
+  // Expose the ENVELOPE-STRIPPED text to renderers (state.captured keeps RAW
+  // text internally for dedup) so a restored per-pane preview matches the live
+  // capture broadcast — no [TO:]/[FROM:] tags leak into the UI after a reload.
+  captured: Object.fromEntries(SITE_IDS.map((s) => [s, state.captured[s] ? { ...state.captured[s], text: stripEnvelope(state.captured[s].text) } : null])),
   transcript: state.transcript,
   log: state.log,
   ledger: state.ledger,
