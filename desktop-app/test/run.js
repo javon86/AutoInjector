@@ -539,7 +539,7 @@ async function testConcurrentSendsToSameTargetAreSerialized() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends landed (got ${log.length})`);
-  assert(log[0].text === "Message A (slow)" && log[1].text === "Message B (fast)", `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text).join(", ")}]`);
+  assert(log[0].text.startsWith("Message A (slow)") && log[1].text.startsWith("Message B (fast)"), `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
   assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
 }
 
@@ -552,13 +552,13 @@ async function testSendAutoRetry() {
   reg("claude").webContents._sendFailQueue = [true, true, false];
   const res = await call("send:compose", { text: "Should self-recover", targets: ["claude"] });
   assert(res.ok && res.results.claude.ok, "the overall call still succeeds -- the caller never sees the two earlier failures");
-  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text === "Should self-recover", "exactly one real send lands (the successful 3rd attempt), not three separate messages");
+  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text.startsWith("Should self-recover"), "exactly one real send lands (the successful 3rd attempt), not three separate messages");
 
   let s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 1) && s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 2), "both earlier failed attempts are logged as retries, individually");
   assert(s.log.some((l) => l.kind === "sent" && l.detail.target === "claude" && l.detail.attempts === 3 && l.detail.selfRecovered === true), "the final success is logged with the real attempt count and flagged as self-recovered, not indistinguishable from a clean first try");
 
-  const ledgerEntry = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Should self-recover").pop();
+  const ledgerEntry = s.ledger.filter((e) => e.target === "claude" && e.textPreview.startsWith("Should self-recover")).pop();
   assert(ledgerEntry && ledgerEntry.status === "delivered" && ledgerEntry.attempts === 3, `the delivery ledger also records the real attempt count for the successful entry (got ${JSON.stringify(ledgerEntry)})`);
 
   // fails all 3 attempts -- genuinely reported as broken, not retried forever
@@ -573,7 +573,7 @@ async function testSendAutoRetry() {
   assert(elapsed >= twoBackoffs * 0.9, `all 3 attempts actually ran, backing off between each (~${twoBackoffs}ms for 2 backoffs), not fast-failing after one try (took ${elapsed}ms)`);
 
   s = await call("state:get", {});
-  const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview === "Genuinely broken").pop();
+  const failLedgerEntry = s.ledger.filter((e) => e.target === "gemini" && e.textPreview.startsWith("Genuinely broken")).pop();
   assert(failLedgerEntry && failLedgerEntry.status === "failed" && failLedgerEntry.attempts === 3, "the ledger records the real attempt count (3) even for a total failure, not left at 1");
   assert(s.log.some((l) => l.kind === "send-error" && l.detail.target === "gemini" && l.detail.attempts === 3), "the final send-error log entry also carries the real attempt count");
 }
@@ -620,7 +620,7 @@ async function testDeliveryLedger() {
   await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
   await call("send:compose", { text: "Repeat me exactly", targets: ["claude"] });
   s = await call("state:get", {});
-  const repeats = s.ledger.filter((e) => e.target === "claude" && e.textPreview === "Repeat me exactly");
+  const repeats = s.ledger.filter((e) => e.target === "claude" && e.textPreview.startsWith("Repeat me exactly"));
   assert(repeats.length === 2 && repeats[0].duplicate === false && repeats[1].duplicate === true, `the first of two identical sends isn't flagged, the second (within the duplicate window) is (got flags [${repeats.map((e) => e.duplicate).join(", ")}])`);
 }
 
@@ -1664,7 +1664,8 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   assert(sentLog("claude").length === 1, `claude (the tag's target) gets exactly ONE copy, not two (got ${sentLog("claude").length})`);
   assert(sentLog("gemini").length === 1, `gemini (not addressed by the tag) still correctly gets its own separate mesh copy, exactly one (got ${sentLog("gemini").length})`);
   assert(!sentLog("claude")[0].text.includes("[TO:"), "claude's one copy is the clean, tag-stripped version (tag routing's copy), never a raw mesh copy with the tag still embedded");
-  assert(sentLog("gemini")[0].text.includes("[TO: CLAUDE]"), "gemini's mesh copy is untouched raw text, exactly as mesh routing has always forwarded it -- this reply just wasn't addressed to gemini");
+  assert(!sentLog("gemini")[0].text.includes("[TO:") && !sentLog("gemini")[0].text.includes("[FROM:") && sentLog("gemini")[0].text.includes("Only claude should get exactly one copy"),
+    "gemini's mesh copy is now the SAME clean, envelope-stripped body as the tag-routed copy -- mesh no longer leaks the raw [TO:]/[FROM:] tags to a pane the reply wasn't addressed to");
 
   const s = await call("state:get", {});
   const claudeEntries = s.ledger.filter((e) => e.target === "claude" && e.textPreview.includes("Only claude should get exactly one copy"));
@@ -1779,7 +1780,7 @@ async function testRetryHoldsQueueThroughBackoff() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends eventually land (got ${log.length})`);
-  assert(log[0].text === "First (retries once)" && log[1].text === "Second (fired during first's backoff)", `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text).join(", ")}]`);
+  assert(log[0].text.startsWith("First (retries once)") && log[1].text.startsWith("Second (fired during first's backoff)"), `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
 }
 
 async function testRegenerateGoesThroughLedgerQueueRetry() {
@@ -1937,6 +1938,122 @@ async function testBareNoneIsSilentSkip() {
   say("chatgpt", "None of the earlier options will work here."); // say() appends [FROM: CHATGPT]
   await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("None of the earlier options")),
     { label: "a real message that merely contains 'none' still posts normally" });
+
+  // Formatted variants of NONE are also recognized as a skip.
+  await resetAllParticipants();
+  const len2 = (await call("state:get", {})).transcript.length;
+  sayRaw("gemini", "**NONE**");
+  await settle(600);
+  assert((await call("state:get", {})).transcript.length === len2, "a markdown-formatted **NONE** is also swallowed silently");
+}
+
+async function testEnvelopeMatcherRobustness() {
+  console.log("\n== Robustness: loose [FROM:] name + short trailing tail still complete; empty envelope is swallowed ==");
+  await resetAllParticipants();
+
+  // Name drift — a sign-off the strict 4-name matcher would have dropped silently.
+  sayRaw("chatgpt", "[TO: USER]\nHere is my answer.\n[FROM: Assistant]");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("Here is my answer")),
+    { label: "a reply signed [FROM: Assistant] still captures (loose name)" });
+  let s = await call("state:get", {});
+  const turn = s.transcript.find((t) => t.text.includes("Here is my answer"));
+  assert(turn && !/\[FROM:/i.test(turn.text) && !/\[TO:/i.test(turn.text), "the loosely-named [FROM:] tag is still stripped from the body");
+
+  // Short trailing pleasantry after the closing tag.
+  await resetAllParticipants();
+  sayRaw("claude", "[TO: USER]\nDone.\n[FROM: CLAUDE] thanks!");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.includes("Done.")),
+    { label: "a reply with a short tail after [FROM:] still captures" });
+
+  // Empty envelope — only the two tags, nothing between — is swallowed, no relay.
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  const before = totalSent();
+  const tlen = (await call("state:get", {})).transcript.length;
+  sayRaw("chatgpt", "[TO: GEMINI]\n[FROM: CHATGPT]");
+  await settle(600);
+  s = await call("state:get", {});
+  assert(s.transcript.length === tlen, "an empty-body envelope produces no transcript bubble");
+  assert(totalSent() === before, "an empty-body envelope relays nothing to another pane");
+}
+
+async function testOutboundTeachesEnvelope() {
+  console.log("\n== Compose & Sequence teach the [FROM:] envelope on every baseline send ==");
+  await resetAllParticipants();
+
+  await call("send:compose", { text: "What's 2+2?", targets: ["chatgpt"] });
+  const sent = sentLog("chatgpt").pop();
+  assert(sent && sent.text.includes("What's 2+2?") && /\[FROM: CHATGPT\]/.test(sent.text),
+    "a compose send appends the envelope instruction naming the target's own [FROM:] tag");
+  // The enveloped reply then captures normally.
+  say("chatgpt", "[TO: USER]\n4"); // say() appends [FROM: CHATGPT]
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.text.trim() === "4"),
+    { label: "the enveloped compose reply is captured" });
+
+  // Sequence steps carry it too, and advance on the enveloped reply.
+  await resetAllParticipants();
+  await call("sequence:run", { steps: [{ target: "claude", text: "Step one please" }] });
+  const seqSent = sentLog("claude").pop();
+  assert(seqSent && seqSent.text.includes("Step one please") && /\[FROM: CLAUDE\]/.test(seqSent.text),
+    "a sequence step send appends the envelope instruction");
+  say("claude", "Done with step one"); // say() appends [FROM: CLAUDE]
+  await waitUntil(async () => !(await call("state:get", {})).sequence.active,
+    { label: "the sequence finishes once the enveloped step reply lands" });
+}
+
+async function testAddressingAwareRelayFrame() {
+  console.log("\n== Relay frame tells the receiver how it was addressed ([X → you] / [X → everyone]) ==");
+  await resetAllParticipants();
+
+  // Directed [TO: CLAUDE] -> claude sees "[ChatGPT → you]".
+  const beforeClaude = sentLog("claude").length;
+  say("chatgpt", "[TO: CLAUDE]\nplease review this");
+  await waitUntil(() => sentLog("claude").length === beforeClaude + 1, { label: "directed relay reaches claude" });
+  assert(sentLog("claude").pop().text.includes("[ChatGPT → you]"), "a directed [TO: CLAUDE] relay is framed '[ChatGPT → you]'");
+
+  // Broadcast [TO: ALL] -> each other pane sees "[Gemini → everyone]".
+  await resetAllParticipants();
+  const bC = sentLog("chatgpt").length, bK = sentLog("claude").length;
+  say("gemini", "[TO: ALL]\nheads up everyone");
+  await waitUntil(() => sentLog("chatgpt").length === bC + 1 && sentLog("claude").length === bK + 1, { label: "broadcast relays to both others" });
+  assert(sentLog("chatgpt").pop().text.includes("[Gemini → everyone]") && sentLog("claude").pop().text.includes("[Gemini → everyone]"), "a [TO: ALL] relay is framed '[Gemini → everyone]'");
+
+  // A plain mesh/auto forward (not tag-addressed) stays neutral "[X says]".
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  const bG = sentLog("gemini").length;
+  say("chatgpt", "[TO: USER]\njust a note"); // USER => no tag relay; mesh forwards it to the others
+  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the [TO: USER] reply to gemini" });
+  assert(sentLog("gemini").pop().text.includes("[ChatGPT says]"), "a plain mesh forward stays neutral '[ChatGPT says]'");
+}
+
+async function testLoopGuardSuppressesRelay() {
+  console.log("\n== Loop guard: a short reply that keeps ping-ponging is shown but stops being relayed ==");
+  await resetAllParticipants();
+  // Same normalized body, whitespace varied so each is a fresh capture (not deduped).
+  const variants = ["loop msg", "loop  msg", "loop   msg", "loop    msg", "loop     msg"];
+  for (const v of variants) {
+    sayRaw("chatgpt", `[TO: CLAUDE]\n${v}\n[FROM: CHATGPT]`);
+    await settle(200);
+  }
+  const relayed = sentLog("claude").length;
+  assert(relayed === 3, `relaying is capped after LOOP_MAX_REPEATS forwards of the same short body (got ${relayed} for ${variants.length} sends)`);
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "loop-suppressed"), "the loop suppression is logged");
+  assert(s.transcript.filter((t) => /loop\s+msg/.test(t.text)).length >= 4, "every copy is still shown in the transcript — nothing is hidden, only the relay is stopped");
+}
+
+async function testBookTestRunCapturesBareReplies() {
+  console.log("\n== book:test-run is bareMode: a plain 'TEST OK' reply (no envelope) is captured, not nudged ==");
+  await resetAllParticipants();
+  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
+  const p = call("book:test-run", {});
+  await waitUntil(() => SITES.every((sname) => sentLog(sname).some((e) => /BOOK WORKFLOW CONNECTION TEST/.test(e.text))),
+    { label: "the test prompt reached all three panes" });
+  for (const sname of SITES) sayRaw(sname, "TEST OK sample throwaway content");
+  const res = await p;
+  assert(res && res.ok && res.results && res.results.allOk, `book:test-run confirms all three bare replies (got ${JSON.stringify(res && res.results)})`);
+  assert(!SITES.some((sname) => sentLog(sname).some(isNudge)), "no missing-tag nudge is sent for the bare test replies");
 }
 
 async function main() {
@@ -2046,6 +2163,11 @@ async function main() {
   await testMissingEndTagReprompt();
   await testSelftestLeavesNoMissingTagNudge();
   await testBareNoneIsSilentSkip();
+  await testEnvelopeMatcherRobustness();
+  await testOutboundTeachesEnvelope();
+  await testAddressingAwareRelayFrame();
+  await testLoopGuardSuppressesRelay();
+  await testBookTestRunCapturesBareReplies();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
