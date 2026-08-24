@@ -113,6 +113,9 @@ function say(site, text) {
   reg(site).webContents.currentText = t;
 }
 function sayRaw(site, text) { reg(site).webContents.currentText = text; }
+// Strip the program-stamped "[MSG #0001]" header (added to every outbound send)
+// so exact-text assertions can check the message body itself.
+function body(t) { return String(t == null ? "" : t).replace(/^\[MSG #\d{4,}\]\n/, ""); }
 
 async function testDebate() {
   console.log("\n== Debate: 3 participants, 2 rounds ==");
@@ -299,7 +302,7 @@ async function testRotation() {
   await resetAllParticipants();
   const startRes = await call("houserule:start", { mode: "rotation", topic: "Let's discuss the future of AI", rounds: 0 });
   assert(startRes.ok, "starts successfully");
-  assert(sentLog("chatgpt").length === 1 && sentLog("chatgpt")[0].text === "Let's discuss the future of AI", "ChatGPT (order[0]) gets the raw topic, unwrapped");
+  assert(sentLog("chatgpt").length === 1 && body(sentLog("chatgpt")[0].text) === "Let's discuss the future of AI", "ChatGPT (order[0]) gets the raw topic, unwrapped");
 
   const state0 = await call("state:get", {});
   assert(state0.houseRule.nextSpeaker === "chatgpt", "before any reply, nextSpeaker is chatgpt (awaiting-first)");
@@ -432,7 +435,7 @@ async function testRoleInjection() {
 
   await call("send:compose", { text: "What do you think of this plan?", targets: ["claude"] });
   const sent = sentLog("claude");
-  assert(sent[sent.length - 1].text.startsWith("(You're playing the role of: Skeptical Engineer. Keep that in mind in your reply.)"), "role clause is prepended to a plain compose send");
+  assert(body(sent[sent.length - 1].text).startsWith("(You're playing the role of: Skeptical Engineer. Keep that in mind in your reply.)"), "role clause is prepended to a plain compose send");
   assert(sent[sent.length - 1].text.includes("What do you think of this plan?"), "original message text still follows the role clause");
 
   assert(sentLog("chatgpt").length === 0 || !sentLog("chatgpt").some((s) => s.text.includes("Skeptical Engineer")), "role assignment doesn't leak to a different, unassigned site");
@@ -539,7 +542,7 @@ async function testConcurrentSendsToSameTargetAreSerialized() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends landed (got ${log.length})`);
-  assert(log[0].text.startsWith("Message A (slow)") && log[1].text.startsWith("Message B (fast)"), `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
+  assert(body(log[0].text).startsWith("Message A (slow)") && body(log[1].text).startsWith("Message B (fast)"), `FIFO order is preserved even though B was individually faster than A -- got [${log.map((e) => body(e.text).split("\n")[0]).join(", ")}]`);
   assert(elapsed >= 290, `the two sends actually ran one after another (~300ms+ total), not in parallel (took ${elapsed}ms)`);
 }
 
@@ -552,7 +555,7 @@ async function testSendAutoRetry() {
   reg("claude").webContents._sendFailQueue = [true, true, false];
   const res = await call("send:compose", { text: "Should self-recover", targets: ["claude"] });
   assert(res.ok && res.results.claude.ok, "the overall call still succeeds -- the caller never sees the two earlier failures");
-  assert(sentLog("claude").length === 1 && sentLog("claude")[0].text.startsWith("Should self-recover"), "exactly one real send lands (the successful 3rd attempt), not three separate messages");
+  assert(sentLog("claude").length === 1 && body(sentLog("claude")[0].text).startsWith("Should self-recover"), "exactly one real send lands (the successful 3rd attempt), not three separate messages");
 
   let s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 1) && s.log.some((l) => l.kind === "send-retry" && l.detail.target === "claude" && l.detail.attempt === 2), "both earlier failed attempts are logged as retries, individually");
@@ -658,8 +661,8 @@ async function testPromptLibrary() {
   assert(sendRes.ok, "prompts:send succeeds when at least one field has text");
   await waitUntil(() => sentLog("chatgpt").length > before.chatgpt && sentLog("gemini").length > before.gemini, { label: "chatgpt and gemini both receive their own send" });
   assert(sentLog("claude").length === before.claude, "claude (the blank field) receives nothing at all");
-  assert(sentLog("chatgpt")[sentLog("chatgpt").length - 1].text === "Hello ChatGPT only", "chatgpt gets its own exact text verbatim, no wrapper (this isn't a forward)");
-  assert(sentLog("gemini")[sentLog("gemini").length - 1].text === "Hello Gemini only", "gemini gets its own distinct text in that same send");
+  assert(body(sentLog("chatgpt")[sentLog("chatgpt").length - 1].text) === "Hello ChatGPT only", "chatgpt gets its own exact text verbatim, no wrapper (this isn't a forward)");
+  assert(body(sentLog("gemini")[sentLog("gemini").length - 1].text) === "Hello Gemini only", "gemini gets its own distinct text in that same send");
 
   const emptyRes = await call("prompts:send", { text: { chatgpt: "", claude: "   ", gemini: "" } });
   assert(!emptyRes.ok && emptyRes.error === "NEED_TEXT", "sending with every field blank (or whitespace-only) is rejected, not a silent no-op");
@@ -1780,7 +1783,7 @@ async function testRetryHoldsQueueThroughBackoff() {
 
   const log = sentLog("gemini");
   assert(log.length === 2, `both sends eventually land (got ${log.length})`);
-  assert(log[0].text.startsWith("First (retries once)") && log[1].text.startsWith("Second (fired during first's backoff)"), `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => e.text.split("\n")[0]).join(", ")}]`);
+  assert(body(log[0].text).startsWith("First (retries once)") && body(log[1].text).startsWith("Second (fired during first's backoff)"), `the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [${log.map((e) => body(e.text).split("\n")[0]).join(", ")}]`);
 }
 
 async function testRegenerateGoesThroughLedgerQueueRetry() {
@@ -1794,7 +1797,10 @@ async function testRegenerateGoesThroughLedgerQueueRetry() {
   const before = (await call("state:get", {})).ledger.length;
   const regenRes = await call("send:regenerate", "claude");
   assert(regenRes.ok, "regenerate succeeds");
-  assert(sentLog("claude").length === 2 && sentLog("claude")[1].text === sentLog("claude")[0].text, "regenerate re-sends the exact same text that was actually sent last time, verbatim (not re-wrapped in another layer of framing)");
+  // The message body is re-sent verbatim (not re-wrapped), even though each send
+  // gets its own fresh [MSG #] number — so the bodies match, the headers don't.
+  assert(sentLog("claude").length === 2 && body(sentLog("claude")[1].text) === body(sentLog("claude")[0].text) && sentLog("claude")[1].text !== sentLog("claude")[0].text,
+    "regenerate re-sends the exact same body verbatim (not re-wrapped), under a fresh message number");
 
   const s = await call("state:get", {});
   const entries = s.ledger.slice(before);
@@ -2001,6 +2007,23 @@ async function testOutboundTeachesEnvelope() {
     { label: "the sequence finishes once the enveloped step reply lands" });
 }
 
+async function testMessageSeqNumbering() {
+  console.log("\n== Message numbering: the program stamps every send with a running 4-digit [MSG #] header ==");
+  await resetAllParticipants();
+  await call("send:compose", { text: "first", targets: ["chatgpt"] });
+  await call("send:compose", { text: "second", targets: ["chatgpt"] });
+  const sent = sentLog("chatgpt");
+  const m1 = /^\[MSG #(\d{4,})\]\n/.exec(sent[sent.length - 2].text);
+  const m2 = /^\[MSG #(\d{4,})\]\n/.exec(sent[sent.length - 1].text);
+  assert(m1 && m2, "every send begins with a [MSG #NNNN] header (4-digit, zero-padded)");
+  assert(m1 && m2 && Number(m2[1]) === Number(m1[1]) + 1, `the number increments by one per send (got ${m1 && m1[1]} -> ${m2 && m2[1]})`);
+  // Program-kept: the seq lives in the ledger's own field, not fused into the body.
+  const s = await call("state:get", {});
+  const led = s.ledger.filter((e) => e.target === "chatgpt").pop();
+  assert(led && typeof led.seq === "string" && /^\d{4,}$/.test(led.seq) && !led.textPreview.includes("[MSG #"),
+    "the ledger records the seq in its own field and keeps it out of the message body");
+}
+
 async function testAddressingAwareRelayFrame() {
   console.log("\n== Relay frame tells the receiver how it was addressed ([X → you] / [X → everyone]) ==");
   await resetAllParticipants();
@@ -2165,6 +2188,7 @@ async function main() {
   await testBareNoneIsSilentSkip();
   await testEnvelopeMatcherRobustness();
   await testOutboundTeachesEnvelope();
+  await testMessageSeqNumbering();
   await testAddressingAwareRelayFrame();
   await testLoopGuardSuppressesRelay();
   await testBookTestRunCapturesBareReplies();
