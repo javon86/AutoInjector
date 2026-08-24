@@ -26,6 +26,24 @@ const STEP_LABEL = {
   revise: 'Consolidated Revision', lock: 'Verify and Lock',
 };
 
+// Compiler-Contract "keepers": the logical artifact KIND each workflow step
+// produces, and the ONE role permitted to author it (the authority matrix,
+// enforced at save — the app assigns identity, workers never self-assert it).
+// Book-level artifacts (one per book) key by kind; chapter-scoped ones also key
+// by chapter so each chapter's roadmap/draft/reviews are their own record line.
+const STEP_ARTIFACT = {
+  requirements: { kind: 'REQSET', authority: 'chatgpt', scope: 'book' },
+  outline: { kind: 'MASTER_OUTLINE', authority: 'chatgpt', scope: 'book' },
+  bible: { kind: 'BOOK_BIBLE', authority: 'gemini', scope: 'book' },
+  roadmap: { kind: 'CHAPTER_ROADMAP', authority: 'gemini', scope: 'chapter' },
+  write: { kind: 'CHAPTER_DRAFT', authority: 'claude', scope: 'chapter' },
+  'story-review': { kind: 'STORY_REVIEW', authority: 'chatgpt', scope: 'chapter' },
+  'canon-review': { kind: 'CANON_REVIEW', authority: 'gemini', scope: 'chapter' },
+  'writing-review': { kind: 'WRITING_REVIEW', authority: 'claude', scope: 'chapter' },
+  revise: { kind: 'CHAPTER_DRAFT', authority: 'claude', scope: 'chapter' },
+  lock: { kind: 'LOCK_VERIFY', authority: 'chatgpt', scope: 'chapter' },
+};
+
 // The user-facing production stages (condensed from the V2 14-step flow).
 const STAGES = ['setup', 'planning', 'roadmap', 'drafting', 'review', 'revision', 'locking', 'assembly'];
 const STAGE_LABELS = {
@@ -122,7 +140,7 @@ function create(title) {
   ensureDir(dir); ensureDir(path.join(dir, 'chapters')); ensureDir(path.join(dir, 'records'));
   const book = {
     id: _nextProjectId(), title: clean, stage: 'setup',
-    chapters: [], records: [], counters: {}, log: [], pdfs: [], provenance: [],
+    chapters: [], records: [], counters: {}, log: [], pdfs: [], provenance: [], events: [], artifacts: {},
     workflow: { status: 'idle', step: 0 },
     governed, atelierRoot,
     created: _now(), updated: _now(),
@@ -149,6 +167,8 @@ function get(id) {
   if (!b.workflow) b.workflow = { status: 'idle', step: 0 }; // default for older books
   if (!b.pdfs) b.pdfs = [];
   if (!b.provenance) b.provenance = [];
+  if (!b.events) b.events = [];
+  if (!b.artifacts) b.artifacts = {};
   return { ...b, dir, stages: STAGES, stageLabels: STAGE_LABELS, chapterStates: CHAPTER_STATES, recordTypes: RECORD_TYPES };
 }
 
@@ -172,6 +192,22 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId, s
   return _mutate(id, (b, dir) => {
     const body = String(text || '').trim();
     const sha256 = _sha256(body);
+    // Authority matrix (enforced at save): the deliverable must come from the ONE
+    // role permitted to author this kind. Fail closed on a real mismatch — HOLD
+    // rather than file work from the wrong author. Unknown steps / non-AI targets
+    // fail OPEN (skip the check) so nothing legitimate is ever blocked.
+    const art = STEP_ARTIFACT[stepId];
+    const authorRole = _roleForTarget(target);
+    if (art && (authorRole === 'chatgpt' || authorRole === 'claude' || authorRole === 'gemini') && authorRole !== art.authority) {
+      const reason = `authority: ${art.kind} must be authored by ${art.authority.toUpperCase()}, but this reply came from ${authorRole.toUpperCase()}`;
+      _appendProvenance(b, { step: index, stepId, role: authorRole, sourceTurnId: sourceTurnId || null, sha256, held: true, reason });
+      _appendEvent(b, 'RESPONSE_REJECTED', { stepId, kind: art.kind, expected: art.authority, got: authorRole, reason });
+      b.log.push({ ts: _now(), text: `⛔ ${reason} — held` });
+      return { held: true, reason, sha256 };
+    }
+    // I-1: assign program-owned identity (id + monotonic version + hash) now, so
+    // the record's provenance is the app's, never a string the model typed.
+    const ident = art ? _assignIdentity(b, art, chapterId, body) : null;
     // BG-003/BG-008: a governed book routes its CHAPTER (the core book output)
     // through the ATELIER authority + provenance gateway before it is written.
     // Fail closed — if authority refuses or the toolkit is unavailable, HOLD
@@ -200,6 +236,9 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId, s
     b.workflow.outputs = b.workflow.outputs || {};
     const outKey = stepId || `step-${(index || 0) + 1}`;
     b.workflow.outputs[outKey] = { file: rel, target: target || null, ts: _now(), chars: body.length };
+    if (ident) b.workflow.outputs[outKey].artifactId = ident.artifactId, b.workflow.outputs[outKey].version = ident.version;
+    // Append-only: the deliverable is materialized with program-owned identity.
+    if (ident) _appendEvent(b, 'ARTIFACT_MATERIALIZED', { stepId, kind: art.kind, artifactId: ident.artifactId, version: ident.version, hash: ident.hash, authority: art.authority, chapterId: chapterId || null, chars: body.length, sourceTurnId: sourceTurnId || null });
     b.log.push({ ts: _now(), text: `✓ step ${(index || 0) + 1} (${label || stepId}) output saved from ${target || '?'} → ${rel}` });
     // Rule 36/37 — the filled-out content must ALSO exist as a downloadable PDF,
     // named per the protocol. That PDF is the completion signal: the runner only
@@ -236,6 +275,7 @@ function recordStepOutput(id, { index, stepId, target, label, text, chapterId, s
     }
     // Confirm the PDF is really on disk (the "check from the download" step).
     const pdfExists = !!(pdfRel && fs.existsSync(path.join(dir, pdfRel)));
+    if (pdfExists && ident) _appendEvent(b, 'PDF_FILED', { stepId, artifactId: ident.artifactId, version: ident.version, pdf: pdfRel });
     return { file: rel, pdf: pdfRel, pdfExists };
   });
 }
@@ -450,6 +490,34 @@ function _appendProvenance(b, entry) {
   b.provenance = b.provenance || [];
   b.provenance.push(Object.assign({ ts: _now() }, entry));
   if (b.provenance.length > 500) b.provenance.splice(0, b.provenance.length - 500);
+}
+
+// --- Compiler-Contract keepers: append-only event log + program-assigned
+// identity (I-1). No hash chain / replay / canonicalization here — deliberately
+// deferred; this gives real, program-owned provenance at low cost.
+// Append one immutable event with a monotonic global sequence number. Never
+// mutated or deleted (kept in full — an audit trail, not a rolling buffer).
+function _appendEvent(b, type, data) {
+  b.events = b.events || [];
+  b.counters = b.counters || {};
+  const seq = (b.counters._evseq = (b.counters._evseq || 0) + 1);
+  const ev = Object.assign({ seq, ts: _now(), type }, data || {});
+  b.events.push(ev);
+  return ev;
+}
+
+// I-1: the program assigns each saved deliverable a stable logical id + a
+// monotonic version + the content hash. The AI supplies only the body; identity
+// is never taken from what a model typed. Returns { artifactId, version, hash }.
+function _assignIdentity(b, art, chapterId, body) {
+  b.artifacts = b.artifacts || {};
+  b.counters = b.counters || {};
+  const artifactId = art.scope === 'chapter' && chapterId ? `${art.kind}:${chapterId}` : art.kind;
+  const vkey = `v:${artifactId}`;
+  const version = (b.counters[vkey] = (b.counters[vkey] || 0) + 1);
+  const hash = _sha256(body);
+  b.artifacts[artifactId] = { artifactId, kind: art.kind, authority: art.authority, version, hash, ts: _now() };
+  return { artifactId, version, hash };
 }
 
 function addChapter(id, title) {

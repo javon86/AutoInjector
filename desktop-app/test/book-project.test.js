@@ -120,6 +120,30 @@ function main() {
   const locked = bp.readRecord(id, "CH-001");
   assert(locked.ok && !/OVERWRITE ATTEMPT/.test(locked.content), "a LOCKED chapter is protected from write-step overwrite");
 
+  console.log("\n== Compiler-Contract keepers: program-assigned identity + event log + authority ==");
+  let bk = bp.get(id);
+  // I-1: the outline recorded above carries program-owned identity, not a model string.
+  const outlineArt = bk.artifacts && bk.artifacts["MASTER_OUTLINE"];
+  assert(outlineArt && outlineArt.version === 1 && /^[a-f0-9]{64}$/.test(outlineArt.hash) && outlineArt.authority === "chatgpt",
+    "a saved deliverable gets a program-assigned id + version 1 + content hash + author");
+  assert(bk.events.some((e) => e.type === "ARTIFACT_MATERIALIZED" && e.artifactId === "MASTER_OUTLINE" && e.version === 1),
+    "an append-only ARTIFACT_MATERIALIZED event records the materialization");
+  // Monotonic version: re-recording the same kind bumps the version, never reused.
+  bp.recordStepOutput(id, { index: 2, stepId: "outline", target: "chatgpt", label: "Master chapter outline", text: "1. Arrival\n2. The Letter\n3. The House" });
+  assert(bp.get(id).artifacts["MASTER_OUTLINE"].version === 2, "re-recording the same kind bumps the monotonic version");
+  // Authority matrix: a BOOK_BIBLE (Gemini's kind) submitted from ChatGPT is HELD.
+  const wrongAuthor = bp.recordStepOutput(id, { index: 3, stepId: "bible", target: "chatgpt", label: "Book Bible", text: "canon facts here" });
+  assert(wrongAuthor.held === true && /authored by GEMINI/.test(wrongAuthor.reason || ""), "a deliverable from the wrong author is held, not filed");
+  assert(bp.get(id).events.some((e) => e.type === "RESPONSE_REJECTED" && e.kind === "BOOK_BIBLE"), "the authority rejection is recorded as an event");
+  assert(!bp.get(id).artifacts["BOOK_BIBLE"], "the rejected deliverable never got an identity (nothing was filed)");
+  // The same deliverable from the correct author (Gemini) is accepted and filed.
+  const rightAuthor = bp.recordStepOutput(id, { index: 3, stepId: "bible", target: "gemini", label: "Book Bible", text: "canon facts here" });
+  assert(rightAuthor.ok && bp.get(id).artifacts["BOOK_BIBLE"] && bp.get(id).artifacts["BOOK_BIBLE"].authority === "gemini",
+    "the same deliverable from the correct author (Gemini) is filed with identity");
+  // Append-only: event-log sequence numbers are strictly increasing.
+  const seqs = bp.get(id).events.map((e) => e.seq);
+  assert(seqs.length >= 3 && seqs.every((s, i) => i === 0 || s > seqs[i - 1]), "event-log sequence numbers are strictly increasing (append-only)");
+
   console.log("\n== PDF completion gate (Rules 36–39): filled-out work becomes a downloadable PDF ==");
   // recordStepOutput already produced PDFs above — a step output and a chapter.
   const pdfs = bp.listPdfs(id);
