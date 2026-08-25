@@ -153,7 +153,7 @@
        adding more panels makes the whole #wrap scroll (it is overflow:auto)
        instead of crushing the panes. The floor is lifted when every pane is
        collapsed (see the .all-collapsed rule below) so no dead space is left. */
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:320px; transition: flex-basis .2s ease; }
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:960px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -246,7 +246,7 @@
     .preview .ts { display:block; font-size:11px; opacity:.78; margin-bottom:3px; }
     .row-label { opacity:.8; font-size:11px; margin-right:3px; }
 
-    .pane-slot { flex:1 1 auto; min-height:140px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
+    .pane-slot { flex:1 1 auto; min-height:420px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
