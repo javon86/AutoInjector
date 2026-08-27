@@ -139,5 +139,12 @@ contextBridge.exposeInMainWorld("api", {
   bookAiStatus: () => ipcRenderer.invoke("book:ai-status"),
   bookTestRun: () => ipcRenderer.invoke("book:test-run"),
   bookRunnerStatus: () => ipcRenderer.invoke("book:runner-status"),
-  onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload))
+  onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload)),
+  // ATELIER v3 engine cockpit
+  atelierStart: (id) => ipcRenderer.invoke("atelier-engine:start", id),
+  atelierRequirements: (id, body, mandatory) => ipcRenderer.invoke("atelier-engine:requirements", { id, body, mandatory }),
+  atelierAdvance: (id) => ipcRenderer.invoke("atelier-engine:advance", id),
+  atelierStatus: (id) => ipcRenderer.invoke("atelier-engine:status", id),
+  onAtelierStatus: (cb) => ipcRenderer.on("atelier-status", (_e, payload) => cb(payload)),
+  onAtelierNote: (cb) => ipcRenderer.on("atelier-note", (_e, payload) => cb(payload))
 });

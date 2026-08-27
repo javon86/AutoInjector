@@ -99,6 +99,8 @@ async function main() {
 
     console.log('\n== Book Studio: create a book, stages/tasks/records render ==');
     assert(await controls.$('#col-bookstudio'), 'Book Studio panel is present');
+    assert(await controls.$('#atelier-cockpit') && await controls.$('#btn-ax-start') && await controls.$('#ax-req'),
+      'the ATELIER v3 engine cockpit (Start / Requirements / derived state) is present');
     // Unique title per run — books persist to disk, so a fixed title would clash.
     const bookTitle = 'E2E Book ' + Date.now();
     await controls.fill('#book-new-title', bookTitle);

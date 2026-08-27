@@ -375,7 +375,13 @@ function allChapters(store) { return Array.from({ length: store.chapterCount }, 
 // The panel projection (§10): blockers + the next safe actions, all derived.
 function deriveBook(store) {
   const chapters = {}; for (const k of allChapters(store)) chapters[k] = chapterState(store, k);
-  return { state: bookState(store), chapters, blockers: blockers(store), nextActions: nextActions(store) };
+  return {
+    state: bookState(store), chapterCount: store.chapterCount, chapters,
+    blockers: blockers(store), nextActions: nextActions(store),
+    quarantine: store.responses.filter((r) => r.state === 'REJECTED').slice(-20).map((r) => ({ response_id: r.response_id, job_id: r.job_id, code: r.rejection_code, failed: (r.failed || []).map((f) => f.code) })),
+    events: store.events.slice(-25).map((e) => ({ seq: e.seq, verb: e.verb, subject: e.subject_id })),
+    artifacts: store.artifacts.filter((a) => a.state !== 'SUPERSEDED' && a.state !== 'REJECTED').map((a) => ({ id: a.artifact_id, type: a.type, key: a.key, version: a.version, state: a.state })),
+  };
 }
 function blockers(store) {
   const out = [];

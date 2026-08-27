@@ -40,6 +40,12 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     fireLog: (entry) => logCb && logCb(entry),
     fireTunerState: (payload) => tunerStateCb && tunerStateCb(payload),
     sendCompose: noop, sendForward: noop, regenerate: noop,
+    atelierStart: async (id) => { calls.push({ fn: "atelierStart", id }); return { ok: true, status: null }; },
+    atelierRequirements: async (id, body, mandatory) => { calls.push({ fn: "atelierRequirements", id, body, mandatory }); return { ok: true, status: null }; },
+    atelierAdvance: async (id) => { calls.push({ fn: "atelierAdvance", id }); return { ok: true, status: null }; },
+    atelierStatus: async (id) => { calls.push({ fn: "atelierStatus", id }); return { ok: true, status: null }; },
+    onAtelierStatus: (cb) => { api.fireAtelierStatus = (p) => cb(p); },
+    onAtelierNote: () => {},
     setRouting: async (source, target, on) => {
       calls.push({ fn: "setRouting", source, target, on });
       if (on) { if (!routing[source].includes(target)) routing[source].push(target); }
@@ -959,9 +965,41 @@ async function main() {
   await testPromptLibraryNewAndEditOpenThePopup();
   await testPromptLibraryDelete();
   await testPromptLibraryLiveSync();
+  await testAtelierCockpitRendersDerivedState();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testAtelierCockpitRendersDerivedState() {
+  console.log("\n== ATELIER v3 cockpit projects the derived record set (state/next/blockers/quarantine) ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(doc.getElementById("atelier-cockpit") && doc.getElementById("btn-ax-start") && doc.getElementById("btn-ax-advance") && doc.getElementById("ax-req"),
+    "the cockpit panel and its controls are present");
+
+  // A derived status broadcast from the engine updates the cockpit live (bookId
+  // null matches the default selection so the wiring path is exercised end-to-end).
+  api.fireAtelierStatus({ bookId: null, status: {
+    state: "PRODUCTION",
+    chapters: { "CH-1": "LOCKED", "CH-2": "REVISION" },
+    nextActions: [{ kind: "REVIEW", function: "CANON", key: "CH-2" }, { kind: "LOCK", key: "CH-2" }],
+    blockers: [{ subject: "CH-2", reasons: ["a review FAILed"] }],
+    quarantine: [{ code: "E-CAP-060", job_id: "JOB-7" }],
+  } });
+  assert(doc.getElementById("ax-state").textContent === "PRODUCTION", "the derived book state is shown");
+  const next = doc.getElementById("ax-next-text").textContent;
+  assert(/CANON review of CH-2/.test(next) && /\+1 more/.test(next), "the next safe action (plus a count of the others) is shown");
+  const chips = doc.getElementById("ax-chapters").textContent;
+  assert(/CH-1: LOCKED/.test(chips) && /CH-2: REVISION/.test(chips), "each chapter's derived state is chipped");
+  assert(/a review FAILed/.test(doc.getElementById("ax-blockers").textContent), "blockers show the gate's reasons");
+  assert(/E-CAP-060/.test(doc.getElementById("ax-quarantine").textContent), "the quarantine feed shows rejection codes");
+
+  // With no book selected, Start is a no-op that does not call the engine.
+  click(dom, "btn-ax-start");
+  await new Promise((r) => setTimeout(r, 0));
+  assert(!api.calls.some((c) => c.fn === "atelierStart"), "Start Engine is guarded until a book is selected");
 }
 
 main().catch((e) => {

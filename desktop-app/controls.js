@@ -1381,7 +1381,57 @@ async function bookAiRefresh() {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); axRefresh(); }
+
+// --- ATELIER v3 engine cockpit — a pure projection of the derived record set.
+// axRender fills the DOM from a status object (deriveBook); axRefresh fetches it.
+function axActionLabel(a) {
+  if (!a) return "—";
+  if (a.kind === "REQUEST") return `request ${a.type} for ${a.key}`;
+  if (a.kind === "APPROVE") return `approve ${a.type || a.artifact_id}`;
+  if (a.kind === "REVIEW") return `${a.function} review of ${a.key}`;
+  if (a.kind === "LOCK") return `lock ${a.key}`;
+  if (a.kind === "ASSEMBLE") return "assemble the manuscript";
+  if (a.kind === "SUPPLY_REQUIREMENTS") return "set the requirements";
+  return a.kind;
+}
+function axChip(text, bg) {
+  const c = document.createElement("span");
+  c.textContent = text;
+  c.style.cssText = `display:inline-block; padding:2px 7px; border-radius:10px; font-size:11px; background:${bg}; border:1px solid rgba(255,255,255,.12);`;
+  return c;
+}
+function axRender(status) {
+  const stEl = el("ax-state"); if (!stEl) return;
+  const next = el("ax-next-text"), ch = el("ax-chapters"), bl = el("ax-blockers"), q = el("ax-quarantine");
+  if (!status) {
+    stEl.textContent = "—";
+    if (next) next.textContent = bookCurrentId ? "Press ▶ Start Engine for this book." : "Pick a book, then ▶ Start Engine.";
+    if (ch) ch.innerHTML = ""; if (bl) bl.innerHTML = ""; if (q) q.innerHTML = "";
+    return;
+  }
+  stEl.textContent = status.state || "—";
+  const acts = status.nextActions || [];
+  if (next) next.textContent = acts.length
+    ? axActionLabel(acts[0]) + (acts.length > 1 ? `  (+${acts.length - 1} more)` : "")
+    : (status.state === "COMPLETE" ? "Done — manuscript assembled." : "Waiting on the AIs to reply…");
+  if (ch) {
+    ch.innerHTML = "";
+    for (const [k, s] of Object.entries(status.chapters || {})) {
+      const bg = s === "LOCKED" ? "#173a24" : s === "REVISION" ? "#3a1f1f" : s === "IN_REVIEW" ? "#2a2c17" : "#1c2430";
+      ch.appendChild(axChip(`${k}: ${s}`, bg));
+    }
+  }
+  if (bl) bl.innerHTML = (status.blockers || []).length
+    ? "<b style='color:#ff9a9a;'>Blockers:</b> " + status.blockers.map((b) => `${b.subject} — ${(b.reasons || []).join("; ")}`).join(" · ") : "";
+  if (q) q.innerHTML = (status.quarantine || []).length
+    ? "<b style='color:#ffb36a;'>Quarantine:</b> " + status.quarantine.map((r) => `${r.code} (${r.job_id})`).join(" · ") : "";
+}
+async function axRefresh() {
+  if (!el("ax-state") || !window.api.atelierStatus) return;
+  if (!bookCurrentId) { axRender(null); return; }
+  try { const r = await window.api.atelierStatus(bookCurrentId); axRender(r && r.ok ? r.status : null); } catch (_) { axRender(null); }
+}
 
 // UI-001: the single guided readiness line — current step → waiting for →
 // captured artifact → gate result → the one next safe action. Composed from the
@@ -1574,6 +1624,32 @@ if (window.api.onBookRunner) window.api.onBookRunner((snap) => {
   bookRunner = snap;
   updateBookTally(snap);
   if (snap && snap.bookId === bookCurrentId) bookRefresh();
+});
+
+// --- ATELIER v3 cockpit controls ---
+if (el("btn-ax-start")) el("btn-ax-start").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  const r = await window.api.atelierStart(bookCurrentId);
+  setStatus(r && r.ok ? "ATELIER engine started — set the requirements to begin." : `Couldn't start engine: ${(r && r.error) || "error"}`);
+  axRender(r && r.ok ? r.status : null);
+};
+if (el("btn-ax-req")) el("btn-ax-req").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select a book first."); return; }
+  const body = (el("ax-req") && el("ax-req").value || "").trim();
+  if (!body) { setStatus("Type the book requirements first."); return; }
+  const r = await window.api.atelierRequirements(bookCurrentId, body, []);
+  setStatus(r && r.ok ? "Requirements set — the engine is dispatching the first jobs." : `Couldn't set requirements: ${(r && r.error) || "error"}`);
+  axRender(r && r.ok ? r.status : null);
+};
+if (el("btn-ax-advance")) el("btn-ax-advance").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select a book first."); return; }
+  const r = await window.api.atelierAdvance(bookCurrentId);
+  setStatus(r && r.ok ? "Engine advanced." : `Couldn't advance: ${(r && r.error) || "error"}`);
+  axRender(r && r.ok ? r.status : null);
+};
+// Live cockpit updates broadcast from the engine as jobs capture/lock/assemble.
+if (window.api.onAtelierStatus) window.api.onAtelierStatus((payload) => {
+  if (payload && payload.bookId === bookCurrentId) axRender(payload.status);
 });
 
 // Persistent tally in the bottom action bar — always shows where the book

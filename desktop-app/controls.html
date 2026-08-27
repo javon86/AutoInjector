@@ -633,6 +633,28 @@
           <div id="book-test-status" style="font-size:11px; opacity:.85; margin-top:3px;"></div>
         </div>
 
+        <!-- ATELIER v3 engine cockpit — a pure PROJECTION of the derived record
+             set. State is computed from the records; the buttons only offer what
+             the records currently permit. Nothing here stores a "current step". -->
+        <div id="atelier-cockpit" style="margin:6px 0; padding:8px 10px; background:#0f1a24; border:1px solid #244a5a; border-radius:8px;">
+          <div class="btns" style="align-items:center; margin-bottom:6px;">
+            <span class="row-label" style="color:#7ad0ff;">⚙️ ATELIER Engine (v3, derived)</span>
+            <span id="ax-state" style="font-weight:700; color:#8ef0b0;">—</span>
+            <span class="spacer"></span>
+            <button id="btn-ax-start" class="primary" title="Start the derived-state engine for the selected book" aria-label="Start the derived-state engine for the selected book">▶ Start Engine</button>
+            <button id="btn-ax-advance" title="Advance: dispatch every job the records currently permit" aria-label="Advance: dispatch every job the records currently permit">⏭ Advance</button>
+          </div>
+          <div style="margin:4px 0;">
+            <div class="row-label" style="margin-bottom:2px;">Requirements <span style="opacity:.7;">(USER — the root record)</span></div>
+            <textarea id="ax-req" placeholder="What is the book? premise, genre, length, must-haves, content to avoid…" style="width:100%; min-height:44px; resize:vertical;"></textarea>
+            <div class="btns" style="margin-top:3px;"><button id="btn-ax-req" class="primary" aria-label="Set the book requirements">Set Requirements</button></div>
+          </div>
+          <div id="ax-next" style="font-size:12px; margin-top:4px;"><b style="color:#ffd97a;">Next safe action:</b> <span id="ax-next-text">—</span></div>
+          <div id="ax-chapters" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:5px;"></div>
+          <div id="ax-blockers" style="margin-top:5px; font-size:11.5px;"></div>
+          <div id="ax-quarantine" style="margin-top:5px; font-size:11.5px;"></div>
+        </div>
+
         <div style="margin:5px 0;">
           <div class="row-label" style="margin-bottom:2px;">Stage <span id="book-stage-count" style="opacity:.78;"></span></div>
           <div id="book-stages" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
