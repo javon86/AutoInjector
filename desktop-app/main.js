@@ -37,6 +37,9 @@ const outputManager = require("./output-manager");
 const bookProject = require("./book-project");
 const bookPrompts = require("./book-prompts");
 const bookRules = require("./book-rules");
+const atelierEngine = require("./atelier-engine");
+const atelierStore = require("./atelier-store");
+const { createRunner: createAtelierRunner } = require("./atelier-runner");
 const secretStore = require("./secret-store");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
@@ -2660,6 +2663,9 @@ async function pollSite(site) {
     // workflow step was waiting on, save it and advance. Orthogonal to routing,
     // so it runs regardless of governance holds/tags below.
     try { await handleBookRunCapture(turn); } catch (e) { logEvent("book-run-error", { error: String(e) }); }
+    // ATELIER v3: if this pane owes an engine job, run its reply through the
+    // validator chain. onReply ignores captures from panes it isn't waiting on.
+    try { if (atelierBookId) atelier.onReply(turn.site, turn.text); } catch (e) { logEvent("atelier-error", { error: String(e) }); }
 
     if (state.waiting[site]) {
       state.waiting[site] = false;
@@ -3074,6 +3080,43 @@ ipcMain.handle("book:ai-status", async () => {
 // The live runner snapshot (finer-grained than the persisted book.json status).
 ipcMain.handle("book:runner-status", () => {
   try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// --- ATELIER v3 engine: the derived-state book pipeline --------------------
+// The engine decides what may happen next (from the record set); this runner
+// turns each allowed step into real relay traffic and feeds captured replies
+// back through the engine's validator chain. The prompt gets the messaging
+// envelope appended so the reply is captured by pollSite; the engine's own
+// six-field provenance is built program-side from the pending job (below).
+let atelierBookId = null, atelierDir = null;
+const atelier = createAtelierRunner({
+  send: (site, prompt) => { sendTextTo(site, withEnvelope(prompt, site), null, { raw: true }).catch((e) => logEvent("atelier-send-error", { site, error: String(e) })); },
+  persist: (store) => { try { if (atelierDir) atelierStore.save(atelierDir, store); } catch (_) {} },
+  notify: (kind, data) => { logEvent("atelier-" + kind, data || {}); broadcast("atelier-note", { kind, data }); if (atelierBookId) broadcast("atelier-status", { bookId: atelierBookId, status: atelier.status() }); },
+  roleOf: (site) => ({ chatgpt: "STORY", gemini: "CANON", claude: "WRITING" }[site] || null),
+});
+ipcMain.handle("atelier-engine:start", (_e, id) => {
+  try {
+    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
+    atelierBookId = id; atelierDir = p.dir;
+    const store = atelierStore.load(p.dir, id);
+    atelier.start(id, store);
+    logEvent("atelier-start", { bookId: id });
+    return { ok: true, status: atelier.status() };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("atelier-engine:requirements", (_e, { id, body, mandatory }) => {
+  try { if (atelierBookId !== id) return { ok: false, error: "start the atelier book first" }; atelier.setRequirements(String(body || ""), Array.isArray(mandatory) ? mandatory : []); atelier.advance(); return { ok: true, status: atelier.status() }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("atelier-engine:advance", (_e, id) => {
+  try { if (atelierBookId !== id) return { ok: false, error: "start the atelier book first" }; atelier.advance(); return { ok: true, status: atelier.status() }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+// The panel projection (§10): everything the cockpit shows is derived here.
+ipcMain.handle("atelier-engine:status", (_e, id) => {
+  try { if (id && atelierBookId !== id) { const p = bookProject.get(id); if (p) { const s = atelierStore.load(p.dir, id); return { ok: true, status: atelierEngine.deriveBook(s) }; } } return { ok: true, status: atelier.status() }; }
+  catch (e) { return { ok: false, error: String(e) }; }
 });
 // A REAL round-trip test: send a short "test" prompt to all three panes exactly
 // the way a workflow step does, then confirm the app actually captures each
