@@ -46,6 +46,10 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     atelierStatus: async (id) => { calls.push({ fn: "atelierStatus", id }); return { ok: true, status: null }; },
     onAtelierStatus: (cb) => { api.fireAtelierStatus = (p) => cb(p); },
     onAtelierNote: () => {},
+    bookRecordStart: async (id) => { calls.push({ fn: "bookRecordStart", id }); return { ok: true, file: "conversation-log.txt" }; },
+    bookRecordStop: async () => { calls.push({ fn: "bookRecordStop" }); return { ok: true, active: false, count: 3 }; },
+    bookRecordStatus: async () => ({ ok: true, recording: { active: false, count: 0 } }),
+    onBookRecording: (cb) => { api.fireBookRecording = (p) => cb(p); },
     setRouting: async (source, target, on) => {
       calls.push({ fn: "setRouting", source, target, on });
       if (on) { if (!routing[source].includes(target)) routing[source].push(target); }
@@ -966,6 +970,7 @@ async function main() {
   await testPromptLibraryDelete();
   await testPromptLibraryLiveSync();
   await testAtelierCockpitRendersDerivedState();
+  await testConversationRecorderIndicator();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
@@ -1000,6 +1005,24 @@ async function testAtelierCockpitRendersDerivedState() {
   click(dom, "btn-ax-start");
   await new Promise((r) => setTimeout(r, 0));
   assert(!api.calls.some((c) => c.fn === "atelierStart"), "Start Engine is guarded until a book is selected");
+}
+
+async function testConversationRecorderIndicator() {
+  console.log("\n== Conversation recorder: the Record/Stop indicator reflects live recording state ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(doc.getElementById("btn-book-record") && doc.getElementById("btn-book-record-stop"), "Record and Stop controls are present");
+  // A live broadcast that recording started flips the UI.
+  api.fireBookRecording({ active: true, count: 7, bookId: "b1" });
+  assert(doc.getElementById("btn-book-record").style.display === "none" && doc.getElementById("btn-book-record-stop").style.display !== "none",
+    "while recording, Record hides and Stop shows");
+  assert(/7 messages/.test(doc.getElementById("book-record-status").textContent), "the indicator shows the running message count");
+  // Stopping calls the engine and clears the indicator.
+  click(dom, "btn-book-record-stop");
+  await new Promise((r) => setTimeout(r, 0));
+  assert(api.calls.some((c) => c.fn === "bookRecordStop"), "Stop Recording calls book:record-stop");
+  assert(doc.getElementById("btn-book-record-stop").style.display === "none", "after stopping, the Stop button hides again");
 }
 
 main().catch((e) => {

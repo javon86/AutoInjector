@@ -1700,10 +1700,51 @@ async function sendBookRules(bookId) {
   return { ok: true };
 }
 
+// --- Conversation recorder: from the moment a book run (or the ATELIER engine)
+// starts, every captured AI reply is appended to a text file in the book's own
+// folder, and it keeps recording until Stop is pressed — so the whole AI
+// conversation is saved alongside the book. (The folder layout is being reworked
+// separately; for now the file lives at <book>/conversation-log.txt.)
+const bookRecording = { active: false, bookId: null, file: null, count: 0 };
+function _recTime() { try { return new Date().toLocaleTimeString([], { hour12: false }); } catch (_) { return ""; } }
+function recordingSnapshot() { return { active: bookRecording.active, bookId: bookRecording.bookId, file: bookRecording.file, count: bookRecording.count }; }
+function broadcastRecording() { broadcast("book-recording", recordingSnapshot()); }
+function startBookRecording(bookId) {
+  try {
+    const p = bookProject.get(bookId); if (!p || !p.dir) return { ok: false, error: "no such book" };
+    const file = path.join(p.dir, "conversation-log.txt");
+    fs.appendFileSync(file, `\n===== Recording started ${new Date().toISOString()} — book "${p.title || bookId}" =====\n\n`, "utf8");
+    bookRecording.active = true; bookRecording.bookId = bookId; bookRecording.file = file; bookRecording.count = 0;
+    logEvent("record-start", { bookId, file });
+    broadcastRecording();
+    return { ok: true, file };
+  } catch (e) { return { ok: false, error: String(e) }; }
+}
+function stopBookRecording() {
+  if (!bookRecording.active) return { ok: true, active: false, count: 0 };
+  try { if (bookRecording.file) fs.appendFileSync(bookRecording.file, `\n===== Recording stopped ${new Date().toISOString()} — ${bookRecording.count} messages =====\n`, "utf8"); } catch (_) {}
+  logEvent("record-stop", { bookId: bookRecording.bookId, count: bookRecording.count });
+  const out = { ok: true, active: false, count: bookRecording.count, file: bookRecording.file };
+  bookRecording.active = false; bookRecording.bookId = null; bookRecording.file = null;
+  broadcastRecording();
+  return out;
+}
+// Append one captured reply to the live conversation log (no-op unless recording).
+function recordConversation(turn) {
+  if (!bookRecording.active || !bookRecording.file || !turn) return;
+  const text = String(turn.text || "").trim(); if (!text) return;
+  try {
+    fs.appendFileSync(bookRecording.file, `[${_recTime()}] ${turn.label || turn.site || "AI"}:\n${text}\n\n`, "utf8");
+    bookRecording.count++;
+    if (bookRecording.count % 5 === 0) broadcastRecording();
+  } catch (_) {}
+}
+
 async function bookRunStart(bookId, chapterId) {
   const p = bookProject.get(bookId);
   if (!p) return { ok: false, error: "no such book" };
   resetBookRun();
+  startBookRecording(bookId); // auto-start recording the AI conversation
   const r = state.bookRun;
   r.active = true; r.bookId = bookId;
   r.chapterId = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
@@ -2656,6 +2697,7 @@ async function pollSite(site) {
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
+    recordConversation(turn); // append to the book conversation log while recording
     logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
 
@@ -3081,6 +3123,11 @@ ipcMain.handle("book:ai-status", async () => {
 ipcMain.handle("book:runner-status", () => {
   try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
+// Conversation recorder: start/stop/status. Recording also auto-starts on a book
+// or ATELIER run; Stop is the explicit control the user asked for.
+ipcMain.handle("book:record-start", (_e, id) => startBookRecording(id));
+ipcMain.handle("book:record-stop", () => stopBookRecording());
+ipcMain.handle("book:record-status", () => ({ ok: true, recording: recordingSnapshot() }));
 
 // --- ATELIER v3 engine: the derived-state book pipeline --------------------
 // The engine decides what may happen next (from the record set); this runner
@@ -3101,6 +3148,7 @@ ipcMain.handle("atelier-engine:start", (_e, id) => {
     atelierBookId = id; atelierDir = p.dir;
     const store = atelierStore.load(p.dir, id);
     atelier.start(id, store);
+    startBookRecording(id); // auto-start recording the AI conversation
     logEvent("atelier-start", { bookId: id });
     return { ok: true, status: atelier.status() };
   } catch (e) { return { ok: false, error: String(e) }; }

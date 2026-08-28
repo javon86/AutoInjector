@@ -19,6 +19,7 @@ process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = process.env.AUTOINJECTOR_SAVE_DEBOUN
 process.env.ATELIER_PYTHON = process.env.ATELIER_PYTHON || '/nonexistent-python-for-mock-run';
 
 const path = require('path');
+const fs = require('fs');
 const Module = require('module');
 const mockPath = path.join(__dirname, 'mock-electron.js');
 const origLoad = Module._load;
@@ -93,6 +94,16 @@ async function main() {
   assert(gate.present >= 1 && gate.present === gate.total, `every deliverable has a PDF filed (${gate.present}/${gate.total})`);
   const log = proj.log.map((l) => l.text);
   assert(log.some((t) => /section .* complete .* PDF filed/i.test(t)) || log.some((t) => /output saved/i.test(t)), 'the activity log shows the sections completing');
+
+  console.log('\n== The AI conversation was recorded to a text file alongside the book ==');
+  const convLog = path.join(proj.dir, 'conversation-log.txt');
+  assert(fs.existsSync(convLog), 'conversation-log.txt was written into the book folder');
+  const convText = fs.existsSync(convLog) ? fs.readFileSync(convLog, 'utf8') : '';
+  assert(/Recording started/.test(convText), 'the log opens with a "Recording started" header');
+  assert(/MOCK REPLY for step/.test(convText), 'the log captured the AI replies from the run');
+  const stopped = await call('book:record-stop');
+  assert(stopped && stopped.ok && stopped.count > 0, `Stop closes the recording after ${stopped && stopped.count} captured messages`);
+  assert(/Recording stopped/.test(fs.readFileSync(convLog, 'utf8')), 'the log is footered with "Recording stopped" once Stop is pressed');
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

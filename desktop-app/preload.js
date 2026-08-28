@@ -139,6 +139,10 @@ contextBridge.exposeInMainWorld("api", {
   bookAiStatus: () => ipcRenderer.invoke("book:ai-status"),
   bookTestRun: () => ipcRenderer.invoke("book:test-run"),
   bookRunnerStatus: () => ipcRenderer.invoke("book:runner-status"),
+  bookRecordStart: (id) => ipcRenderer.invoke("book:record-start", id),
+  bookRecordStop: () => ipcRenderer.invoke("book:record-stop"),
+  bookRecordStatus: () => ipcRenderer.invoke("book:record-status"),
+  onBookRecording: (cb) => ipcRenderer.on("book-recording", (_e, payload) => cb(payload)),
   onBookRunner: (cb) => ipcRenderer.on("book-runner", (_e, payload) => cb(payload)),
   // ATELIER v3 engine cockpit
   atelierStart: (id) => ipcRenderer.invoke("atelier-engine:start", id),

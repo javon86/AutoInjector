@@ -1381,7 +1381,20 @@ async function bookAiRefresh() {
 }
 async function bookRefresh() { if (bookCurrentId) { const r = await window.api.bookGet(bookCurrentId); bookProject = r && r.ok ? r.project : bookProject; bookRenderAll(); } }
 
-function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); axRefresh(); }
+function bookRenderAll() { bookRenderWorkflow(); bookRenderReadiness(); bookRenderGovernedBadge(); bookRenderStages(); bookRenderChapters(); bookRenderTasks(); bookRenderRecordTypes(); bookRenderRecords(); bookRenderPdfGate(); bookRenderLog(); axRefresh(); refreshRecording(); }
+
+// --- Conversation recording indicator (the file is saved with the book) ---
+function renderRecording(rec) {
+  const startBtn = el("btn-book-record"), stopBtn = el("btn-book-record-stop"), st = el("book-record-status");
+  const active = !!(rec && rec.active);
+  if (startBtn) startBtn.style.display = active ? "none" : "";
+  if (stopBtn) stopBtn.style.display = active ? "" : "none";
+  if (st) { st.textContent = active ? `⏺ recording the AI conversation… (${rec.count || 0} messages)` : ""; st.style.color = active ? "#ff8a8a" : ""; }
+}
+async function refreshRecording() {
+  if (!el("btn-book-record") || !window.api.bookRecordStatus) return;
+  try { const r = await window.api.bookRecordStatus(); renderRecording(r && r.ok ? r.recording : null); } catch (_) {}
+}
 
 // --- ATELIER v3 engine cockpit — a pure projection of the derived record set.
 // axRender fills the DOM from a status object (deriveBook); axRefresh fetches it.
@@ -1625,6 +1638,20 @@ if (window.api.onBookRunner) window.api.onBookRunner((snap) => {
   updateBookTally(snap);
   if (snap && snap.bookId === bookCurrentId) bookRefresh();
 });
+
+// --- Conversation recorder controls ---
+if (el("btn-book-record")) el("btn-book-record").onclick = async () => {
+  if (!bookCurrentId) { setStatus("Select or create a book first."); return; }
+  const r = await window.api.bookRecordStart(bookCurrentId);
+  if (r && r.ok) { setStatus("Recording the AI conversation → it's saved with the book."); renderRecording({ active: true, count: 0 }); }
+  else setStatus(`Couldn't start recording: ${(r && r.error) || "error"}`);
+};
+if (el("btn-book-record-stop")) el("btn-book-record-stop").onclick = async () => {
+  const r = await window.api.bookRecordStop();
+  setStatus(r && r.ok ? `Recording stopped — ${r.count || 0} messages saved with the book.` : "Couldn't stop recording.");
+  renderRecording({ active: false });
+};
+if (window.api.onBookRecording) window.api.onBookRecording((rec) => renderRecording(rec));
 
 // --- ATELIER v3 cockpit controls ---
 if (el("btn-ax-start")) el("btn-ax-start").onclick = async () => {
