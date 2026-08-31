@@ -2193,8 +2193,23 @@ async function pollSite(site) {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
     const text = (res && res.text) || "";
     const pend = state.pending[site];
+    // The site's own "still generating" signal (its Stop button is showing, or
+    // Send is disabled). This is the reliable "are they done speaking?" answer —
+    // when the Send button comes back, the reply is finished. While generating we
+    // never capture or nudge: it prevents grabbing a half-written reply on a
+    // mid-stream pause, and it means a "done" is only ever a real done. If the
+    // site's stop/send selectors don't match, this is false and completion falls
+    // back to the [FROM:] tag / stability timer, exactly as before.
+    const generating = !!(res && res.generating);
 
     if (!text) { state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false }; return; }
+
+    if (generating) {
+      // Still producing this reply — track the growing text and wait for the
+      // Send button to return. Never complete or re-prompt a turn mid-stream.
+      state.pending[site] = { text, sinceTs: Date.now(), reprompted: false };
+      return;
+    }
 
     // Completion gate. On the always-on baseline path a reply is DONE the instant
     // it carries a [FROM: X] end tag — no stability timer. "Bare mode" pauses the

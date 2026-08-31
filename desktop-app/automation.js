@@ -134,19 +134,52 @@ function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
-    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES
+    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    STOP_CANDIDATES: cfg.STOP_CANDIDATES || []
   });
 
+  // Returns { ok, text, generating, sendReady }. `generating` is the site's own
+  // "still producing this reply" signal: while a reply streams, the Send button
+  // is replaced by a Stop button (or Send is disabled). main.js uses it to avoid
+  // capturing a half-written reply — it only completes a turn once generation has
+  // stopped (the Send button is back / clickable). If the stop/send selectors
+  // don't match (a site changed its DOM), `generating` is false and completion
+  // falls back to the [FROM:] tag / stability timer exactly as before.
   return `
   (() => {
     const CFG = ${payload};
+    function findAny(cands) {
+      for (const sel of (cands || [])) { try { const n = document.querySelector(sel); if (n) return n; } catch (_) {} }
+      return null;
+    }
+    function isVisible(el) {
+      if (!el) return false;
+      try { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch (_) { return false; }
+    }
+    function isDisabled(el) {
+      if (!el) return false;
+      try { return !!el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("disabled") !== null; } catch (_) { return false; }
+    }
+
     const all = [];
     for (const sel of CFG.ASSISTANT_CANDIDATES) {
       document.querySelectorAll(sel).forEach((n) => all.push(n));
     }
-    if (!all.length) return { ok: true, text: "" };
-    const node = all[all.length - 1];
-    return { ok: true, text: node.innerText || node.textContent || "" };
+    const node = all.length ? all[all.length - 1] : null;
+    const text = node ? (node.innerText || node.textContent || "") : "";
+
+    // Generation is in progress if a Stop button is visible, or if the Send
+    // button exists but is disabled (some sites disable Send while streaming).
+    const stopBtn = findAny(CFG.STOP_CANDIDATES);
+    const sendBtn = findAny(CFG.SEND_CANDIDATES);
+    let generating = false;
+    if (stopBtn && isVisible(stopBtn)) generating = true;
+    else if (sendBtn && isDisabled(sendBtn)) generating = true;
+    // The Send button is back and clickable — the model is done speaking.
+    const sendReady = !generating && !!sendBtn && isVisible(sendBtn) && !isDisabled(sendBtn);
+
+    return { ok: true, text, generating, sendReady };
   })();
   `;
 }

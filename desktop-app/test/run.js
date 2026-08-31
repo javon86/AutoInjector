@@ -1955,6 +1955,35 @@ async function testLoopGuardSuppressesRelay() {
   assert(s.transcript.filter((t) => /loop\s+msg/.test(t.text)).length >= 4, "every copy is still shown in the transcript — nothing is hidden, only the relay is stopped");
 }
 
+// Completion signal: pollSite must NOT capture a reply while the site is still
+// generating (its Stop button is up / generating:true), even if the reply text
+// already carries a [FROM:] tag. Only once generation stops (Send button back)
+// does the reply complete and relay — this is the "how do we know they're done
+// speaking" gate.
+async function testGeneratingGatesCapture() {
+  console.log("\n== Completion: a reply is held until the site stops generating (Send button returns) ==");
+  await resetAllParticipants();
+  const g = reg("gemini").webContents;
+  // A fully-formed, tagged reply is already on the page — but the site is still
+  // streaming it (Stop button showing).
+  g.generating = true;
+  say("gemini", "[TO: ALL] here is my finished answer");
+  await settle(300); // several poll ticks pass
+  let st = await call("state:get", {});
+  const capturedEarly = st.transcript.some((t) => t.site === "gemini" && /finished answer/.test(t.text));
+  assert(!capturedEarly, "the reply is held while generating:true, even though its [FROM:] tag is present");
+  assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0, "nothing relayed to the other panes mid-generation");
+  // The Send button comes back — generation is done.
+  g.generating = false;
+  const captured = await waitUntil(
+    async () => (await call("state:get", {})).transcript.some((t) => t.site === "gemini" && /finished answer/.test(t.text)),
+    { label: "gemini reply captured once generating clears" });
+  assert(captured, "the moment the Send button returns (generating:false), the reply is captured");
+  await waitUntil(() => sentLog("chatgpt").length >= 1 && sentLog("claude").length >= 1,
+    { label: "the completed reply relays to both other panes" });
+  assert(sentLog("chatgpt").length >= 1 && sentLog("claude").length >= 1, "and it relays onward exactly as a normal completed reply");
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2019,6 +2048,7 @@ async function main() {
   await testRateLimitAutoPause();
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
+  await testGeneratingGatesCapture();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();
   await testDeliveryLedger();
