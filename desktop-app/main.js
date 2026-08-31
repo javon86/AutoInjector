@@ -25,21 +25,9 @@ const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
 const managerProvider = require("./manager-provider");
-const atelierGov = require("./atelier-governance");
 const dbService = require("./db-service");
-const sdProvider = require("./sd-provider");
-const systemMonitor = require("./system-monitor");
-const lsiProvider = require("./lsi-provider");
 const ollamaManager = require("./ollama-manager");
-const downloadManager = require("./download-manager");
-const fileDownloader = require("./file-downloader");
 const outputManager = require("./output-manager");
-const bookProject = require("./book-project");
-const bookPrompts = require("./book-prompts");
-const bookRules = require("./book-rules");
-const atelierEngine = require("./atelier-engine");
-const atelierStore = require("./atelier-store");
-const { createRunner: createAtelierRunner } = require("./atelier-runner");
 const secretStore = require("./secret-store");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
@@ -717,7 +705,7 @@ function createWindow() {
   win.on("resize", () => { layout(); syncPaneBounds(); });
   win.on("closed", () => { win = null; });
 
-  setInterval(() => { for (const site of SITE_IDS) pollSite(site); bookRunWatchdog(); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
+  setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -855,11 +843,6 @@ function openWizardWindow() {
   wizardWin.on("closed", () => { wizardWin = null; wizardView = null; });
 }
 function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
-// Downloads keep running in the main process even when the wizard is closed;
-// push updates to the wizard window only when it's open.
-function broadcastToWizard(channel, payload) {
-  try { if (wizardView && wizardView.webContents && !wizardView.webContents.isDestroyed()) wizardView.webContents.send(channel, payload); } catch (_) {}
-}
 
 // --- Consolidated AI feed window --------------------------------------------
 // A separate pop-up that shows every AI reply as a colour-coded bubble per LLM.
@@ -1446,24 +1429,28 @@ function withEnvelope(text, target) {
 // the WHOLE message with the envelope. Capped (MAX_NOTAG_REPROMPTS) so a model
 // that keeps forgetting can't loop forever: past the cap we stop nudging, and if
 // a book run was waiting on this pane we park it as stalled for the user.
+function composeEnvelopeReminder(site) {
+  const name = String(site || "").toUpperCase() || "YOU";
+  return (
+    "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
+    "Every message MUST use the communication envelope:\n" +
+    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
+    "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
+    "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
+    "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
+    "Put nothing after the closing tag."
+  );
+}
 async function missingEndTagReprompt(site, rawText) {
   const n = (state.noTagReprompts[site] || 0) + 1;
   state.noTagReprompts[site] = n;
   logEvent("endtag-missing", { site, attempt: n, chars: (rawText || "").length });
-  const r = state.bookRun;
-  const bookWaiting = !!(r && r.active && r.status === "waiting-reply" && r.target === site);
   if (n > MAX_NOTAG_REPROMPTS) {
     logEvent("endtag-missing-giveup", { site, attempts: n });
-    if (bookWaiting) {
-      r.status = "stalled";
-      bookProject.setWorkflow(r.bookId, { status: "paused" },
-        `⚠️ ${SITES[site] ? SITES[site].label : site} kept replying without the required [FROM:] end tag on step ${r.step + 1} — paused (check the pane, then Resume)`);
-      broadcastBookRun();
-    }
     return;
   }
   try {
-    await sendTextTo(site, bookRules.composeEnvelopeReminder(site), null, { raw: true });
+    await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true });
   } catch (e) { logEvent("endtag-reprompt-error", { site, error: String(e) }); }
 }
 
@@ -1596,262 +1583,6 @@ async function handleSequenceCapture(turn) {
   }
   seq.index++;
   await sendSequenceStep();
-}
-
-// --- Book Studio auto-runner ------------------------------------------------
-// Drives the guided ATELIER "Make Book" sequence on its own. It uses the exact
-// completion signal Prompt Sequence uses: a stable capture from a step's target
-// pane means that AI finished its output. The moment that lands, we SAVE the
-// output into the book (a real file — see bookProject.recordStepOutput) and
-// advance to the next step, so the workflow moves forward without a "Continue"
-// click. Two things it deliberately does NOT auto-advance on: a "ask-user" step
-// (the intake questionnaire — its output is questions FOR you, so it waits until
-// you answer and press Continue), and a paused/stopped run. Lives in main (not
-// the renderer) because captured replies and sendTextTo already live here. The
-// live run isn't persisted across a restart — like House Rules and the manager,
-// a relaunch never silently resumes sending; the book's saved step position is
-// restored as paused so you resume deliberately.
-const BOOK_STEP_TIMEOUT_MS = 6 * 60 * 1000; // no reply this long → park the run as "stalled" so you're never left staring at "running"
-function resetBookRun() {
-  state.bookRun = {
-    active: false, bookId: null, chapterId: null,
-    step: -1, stepId: null, label: "", total: bookPrompts.WORKFLOW.length,
-    target: null, kind: null,
-    status: "idle", // idle | awaiting-user | waiting-reply | paused | stalled | done | error
-    sentTs: 0, sentText: "", generation: 0, dispatchGen: {}
-  };
-}
-resetBookRun();
-
-function bookRunSnapshot() {
-  const r = state.bookRun;
-  return {
-    active: r.active, bookId: r.bookId, chapterId: r.chapterId,
-    step: r.step, stepId: r.stepId, label: r.label, total: r.total,
-    target: r.target, kind: r.kind, status: r.status,
-    awaitingUser: r.status === "awaiting-user",
-    sinceMs: r.sentTs ? Date.now() - r.sentTs : 0
-  };
-}
-function broadcastBookRun() { broadcast("book-runner", bookRunSnapshot()); }
-
-// Is a given AI pane actually up and readable (view exists, not destroyed,
-// finished loading, read script runs)? Backs the "Check AI" button and the
-// pre-run readiness line, so you know the panes are ready before anything is
-// sent — the whole point of "make sure the AI stuff is up and running".
-async function bookPaneReady(site) {
-  const view = siteViews[site];
-  if (!view || view.webContents.isDestroyed()) return { ready: false, reason: "pane not open" };
-  try {
-    if (view.webContents.isLoading && view.webContents.isLoading()) return { ready: false, reason: "still loading" };
-    const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
-    return (res && res.ok) ? { ready: true, reason: "ready" } : { ready: false, reason: "not responding" };
-  } catch (_) { return { ready: false, reason: "not responding" }; }
-}
-async function bookAiStatus() {
-  const out = {};
-  for (const site of SITE_IDS) out[site] = await bookPaneReady(site);
-  out.allReady = SITE_IDS.every((s) => out[s] && out[s].ready);
-  return out;
-}
-
-// Compose + dispatch one workflow step. Persists the position into the book,
-// advances its stage, arms the completion watcher, and best-effort sends the
-// prompt to the right pane. A not-ready pane never throws the run — readiness is
-// reported separately; the reply (when it lands) is what advances an ai step.
-async function dispatchBookStep(index) {
-  const r = state.bookRun;
-  const p = bookProject.get(r.bookId);
-  if (!p) { r.status = "error"; r.active = false; broadcastBookRun(); return { ok: false, error: "no such book" }; }
-  const composed = bookPrompts.composeStep(index, _bookCtx(p, r.chapterId));
-  if (!composed) {
-    r.status = "done"; r.active = false; r.step = r.total;
-    bookProject.setWorkflow(r.bookId, { status: "done" }, "✓ Make Book workflow reached the end — every step's output is saved in the book");
-    broadcastBookRun();
-    return { ok: true, done: true, status: "done" };
-  }
-  r.step = index; r.stepId = composed.id; r.label = composed.label;
-  r.target = composed.target; r.kind = composed.kind;
-  r.generation++; r.dispatchGen = { [composed.target]: r.generation };
-  r.sentText = composed.text; r.sentTs = Date.now();
-  r.status = composed.kind === "ask-user" ? "awaiting-user" : "waiting-reply";
-  bookProject.setWorkflow(r.bookId, { status: "running", step: index },
-    `▶ step ${index + 1}/${r.total}: ${composed.label} → ${SITES[composed.target] ? SITES[composed.target].label : composed.target}`);
-  // The workflow is the authoritative stage driver (ChatGPT owns stage
-  // progression), so it may set the step's stage directly (BG-004 override).
-  bookProject.setStage(r.bookId, composed.stage, { override: true, reason: "workflow step" });
-  broadcastBookRun();
-  sendTextTo(composed.target, composed.text, null, { raw: true }).catch((e) => logEvent("book-send-error", { target: composed.target, error: String(e) }));
-  return { ok: true, ...composed, status: r.status };
-}
-
-// Send the 3-AI Rules of Conduct ("their bible") to all three panes. Done once
-// automatically at the start of a run so every AI operates by the same protocol,
-// and available on demand via the "Send Rules" button if a pane forgets it. It's
-// a plain message send (best-effort per pane) and it's logged into the book.
-async function sendBookRules(bookId) {
-  const msg = bookRules.composeRulesMessage();
-  // Log the intent immediately, then fire the three sends in the background —
-  // never block the workflow (or the button) on a slow/not-logged-in pane. Each
-  // send still queues per-pane, so on ChatGPT the rules land before the intake.
-  try { if (bookId) bookProject.appendLog(bookId, `📜 sent the Rules of Conduct (${bookRules.RULES_VERSION}) to all three AIs — their bible for this book`); } catch (_) {}
-  logEvent("book-rules-sent", { bookId: bookId || null, chars: msg.length });
-  for (const t of SITE_IDS) sendTextTo(t, msg, null, { raw: true }).catch((e) => logEvent("book-rules-send-error", { target: t, error: String(e) }));
-  return { ok: true };
-}
-
-// --- Conversation recorder: from the moment a book run (or the ATELIER engine)
-// starts, every captured AI reply is appended to a text file in the book's own
-// folder, and it keeps recording until Stop is pressed — so the whole AI
-// conversation is saved alongside the book. (The folder layout is being reworked
-// separately; for now the file lives at <book>/conversation-log.txt.)
-const bookRecording = { active: false, bookId: null, file: null, count: 0 };
-function _recTime() { try { return new Date().toLocaleTimeString([], { hour12: false }); } catch (_) { return ""; } }
-function recordingSnapshot() { return { active: bookRecording.active, bookId: bookRecording.bookId, file: bookRecording.file, count: bookRecording.count }; }
-function broadcastRecording() { broadcast("book-recording", recordingSnapshot()); }
-function startBookRecording(bookId) {
-  try {
-    const p = bookProject.get(bookId); if (!p || !p.dir) return { ok: false, error: "no such book" };
-    const file = path.join(p.dir, "conversation-log.txt");
-    fs.appendFileSync(file, `\n===== Recording started ${new Date().toISOString()} — book "${p.title || bookId}" =====\n\n`, "utf8");
-    bookRecording.active = true; bookRecording.bookId = bookId; bookRecording.file = file; bookRecording.count = 0;
-    logEvent("record-start", { bookId, file });
-    broadcastRecording();
-    return { ok: true, file };
-  } catch (e) { return { ok: false, error: String(e) }; }
-}
-function stopBookRecording() {
-  if (!bookRecording.active) return { ok: true, active: false, count: 0 };
-  try { if (bookRecording.file) fs.appendFileSync(bookRecording.file, `\n===== Recording stopped ${new Date().toISOString()} — ${bookRecording.count} messages =====\n`, "utf8"); } catch (_) {}
-  logEvent("record-stop", { bookId: bookRecording.bookId, count: bookRecording.count });
-  const out = { ok: true, active: false, count: bookRecording.count, file: bookRecording.file };
-  bookRecording.active = false; bookRecording.bookId = null; bookRecording.file = null;
-  broadcastRecording();
-  return out;
-}
-// Append one captured reply to the live conversation log (no-op unless recording).
-function recordConversation(turn) {
-  if (!bookRecording.active || !bookRecording.file || !turn) return;
-  const text = String(turn.text || "").trim(); if (!text) return;
-  try {
-    fs.appendFileSync(bookRecording.file, `[${_recTime()}] ${turn.label || turn.site || "AI"}:\n${text}\n\n`, "utf8");
-    bookRecording.count++;
-    if (bookRecording.count % 5 === 0) broadcastRecording();
-  } catch (_) {}
-}
-
-async function bookRunStart(bookId, chapterId) {
-  const p = bookProject.get(bookId);
-  if (!p) return { ok: false, error: "no such book" };
-  resetBookRun();
-  startBookRecording(bookId); // auto-start recording the AI conversation
-  const r = state.bookRun;
-  r.active = true; r.bookId = bookId;
-  r.chapterId = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
-  logEvent("book-run-start", { bookId, chapterId: r.chapterId });
-  // The bible goes out first, before the intake questionnaire — so the AIs are
-  // governed by the protocol from the very first step. Sent once per run.
-  await sendBookRules(bookId);
-  r.rulesSent = true;
-  const first = await dispatchBookStep(0);
-  return { ok: true, snapshot: bookRunSnapshot(), first };
-}
-
-// Manual advance — the button for an ask-user step ("I've answered, continue")
-// and a "skip ahead" override on any step. If no live run (e.g. after a
-// restart), pick up from the book's saved position + 1.
-async function bookRunContinue(bookId) {
-  const r = state.bookRun;
-  if (r.active && r.bookId === bookId) return { ok: true, res: await dispatchBookStep(r.step + 1), snapshot: bookRunSnapshot() };
-  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
-  resetBookRun();
-  state.bookRun.active = true; state.bookRun.bookId = bookId;
-  state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
-  const next = ((p.workflow && p.workflow.step) || 0) + 1;
-  return { ok: true, res: await dispatchBookStep(next), snapshot: bookRunSnapshot() };
-}
-
-function bookRunPause(bookId) {
-  const r = state.bookRun;
-  if (r.active && r.bookId === bookId) { r.status = "paused"; broadcastBookRun(); }
-  return bookProject.setWorkflow(bookId, { status: "paused" }, "⏸ workflow paused");
-}
-// Resume: re-arm the step it's on and re-send it (a reply that arrived while
-// paused was ignored, so re-sending gets a fresh one to advance on). Works both
-// for a live paused run and for one restored from disk after a restart.
-async function bookRunResume(bookId) {
-  const p = bookProject.get(bookId); if (!p) return { ok: false, error: "no such book" };
-  const r = state.bookRun;
-  if (!r.active || r.bookId !== bookId) {
-    resetBookRun();
-    state.bookRun.active = true; state.bookRun.bookId = bookId;
-    state.bookRun.chapterId = p.chapters.length ? p.chapters[p.chapters.length - 1].id : null;
-    return { ok: true, res: await dispatchBookStep((p.workflow && p.workflow.step) || 0), snapshot: bookRunSnapshot() };
-  }
-  return { ok: true, res: await dispatchBookStep(r.step), snapshot: bookRunSnapshot() };
-}
-function bookRunStop(bookId) {
-  const r = state.bookRun;
-  if (r.active && r.bookId === bookId) resetBookRun();
-  return bookProject.setWorkflow(bookId, { status: "idle", step: 0 }, "⏹ workflow stopped");
-}
-
-// Called from pollSite on every stable capture. If it's the reply the current
-// ai-step was waiting on, save the output into the book and advance.
-async function handleBookRunCapture(turn) {
-  const r = state.bookRun;
-  if (!r.active || r.status !== "waiting-reply") return;
-  if (turn.site !== r.target) return;
-  if (r.dispatchGen[turn.site] !== r.generation) return; // stale reply from a step we've already moved past
-  if (turn.ts < r.sentTs) return;
-  if (looksLikeEcho(turn.text, r.sentText)) return; // our own prompt echoed back, not a real reply
-  // Save the reply AND generate this section's PDF. The PDF being confirmed on
-  // disk is the "done" signal — only then do we advance and send the next step.
-  let res = null;
-  try {
-    res = bookProject.recordStepOutput(r.bookId, {
-      index: r.step, stepId: r.stepId, target: r.target, label: r.label,
-      text: turn.text, chapterId: r.chapterId, sourceTurnId: turn.id
-    });
-  } catch (e) { logEvent("book-step-save-error", { error: String(e) }); }
-  // BG-003/BG-008: governance held this output (authority refused or the toolkit
-  // went away for a governed book) — fail closed, don't advance.
-  if (res && res.held) {
-    r.status = "stalled";
-    bookProject.setWorkflow(r.bookId, { status: "paused" },
-      `⛔ step ${r.step + 1} held by governance: ${String(res.reason || "unauthorized").slice(0, 120)} — paused`);
-    logEvent("book-step-held", { bookId: r.bookId, step: r.step, reason: res.reason });
-    broadcastBookRun();
-    return;
-  }
-  const pdfReady = !!(res && res.ok && res.pdfExists);
-  if (!pdfReady) {
-    // No confirmed PDF -> section isn't officially complete (Rule 38). Park the
-    // run so the user can see it rather than advancing on an unfiled section.
-    r.status = "stalled";
-    bookProject.setWorkflow(r.bookId, { status: "paused" },
-      `⏳ step ${r.step + 1} replied but its PDF wasn't filed — paused (press Resume to retry)`);
-    logEvent("book-step-no-pdf", { bookId: r.bookId, step: r.step, stepId: r.stepId });
-    broadcastBookRun();
-    return;
-  }
-  bookProject.appendLog(r.bookId, `✅ section ${r.step + 1}/${r.total} complete — PDF filed (${(res.pdf || "").split(/[\\/]/).pop()}). Moving to the next section.`);
-  logEvent("book-step-complete", { bookId: r.bookId, step: r.step, stepId: r.stepId, target: r.target, chars: turn.text.length, pdf: res.pdf });
-  await dispatchBookStep(r.step + 1);
-}
-
-// Watchdog (ticked from the poll loop): if the pane we're waiting on has gone
-// quiet too long, park the run as stalled so the UI stops implying progress.
-function bookRunWatchdog() {
-  const r = state.bookRun;
-  if (!r.active || r.status !== "waiting-reply") return;
-  if (Date.now() - r.sentTs > BOOK_STEP_TIMEOUT_MS) {
-    r.status = "stalled";
-    bookProject.setWorkflow(r.bookId, { status: "paused" },
-      `⏳ no reply from ${SITES[r.target] ? SITES[r.target].label : r.target} for step ${r.step + 1} — paused (check the pane, then Resume/Continue)`);
-    logEvent("book-step-stalled", { bookId: r.bookId, step: r.step, target: r.target });
-    broadcastBookRun();
-  }
 }
 
 // --- Manager/orchestrator: the supervisory loop over a managed task --------
@@ -2646,48 +2377,9 @@ async function pollSite(site) {
     // displayText here instead would make it permanently mismatch the raw
     // DOM text every subsequent poll, causing the exact same roundtable
     // reply to be re-captured and re-relayed forever.
-    // ATELIER governance (opt-in, off by default). When enabled and this pane
-    // is mapped to a target artifact, ask the write-authority gate whether this
-    // reply is a permitted write. A refused reply is HELD: still shown in the
-    // transcript, but not routed on to the other panes. Failing open on any
-    // error preserves the original behaviour — governance never silently eats a
-    // reply.
-    let govHold = false;
-    try {
-      const g = await atelierGov.governTurn(turn);
-      if (g && g.governed) {
-        turn.governance = g;
-        govHold = !!g.held;
-        logEvent("atelier-govern", { site, ok: g.ok, held: g.held, target: g.target, available: g.available });
-      }
-    } catch (e) {
-      logEvent("atelier-govern-error", { site, error: String(e) });
-    }
-
     // Record the captured reply into the shared SQLite message log (guarded;
     // no-ops if the database backend is unavailable).
     try { dbService.recordTurn(turn); } catch (_) {}
-
-    // AI-triggered image generation: if this reply opens with an [IMAGE: ...]
-    // tag and Stable Diffusion auto-mode is on, render it in the background and
-    // push the result to the UI. Never blocks the poll loop.
-    try {
-      if (sdProvider.autoFromAI()) {
-        const imgPrompt = sdProvider.parseImageTag(turn.text);
-        if (imgPrompt) {
-          logEvent("sd-ai-trigger", { site, prompt: imgPrompt.slice(0, 80) });
-          sdProvider.generate({ prompt: imgPrompt, from: site })
-            .then((r) => {
-              if (r && r.ok) {
-                try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
-                saveGeneratedImage(r);
-                broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
-              } else logEvent("sd-ai-error", { site, error: r && r.error });
-            })
-            .catch((e) => logEvent("sd-ai-error", { site, error: String(e) }));
-        }
-      }
-    } catch (_) {}
 
     // The dedup key must be the RAW page text (what the next poll will read).
     // Whenever we stripped an envelope tag ([TO:] at the front and/or [FROM:] at
@@ -2697,17 +2389,8 @@ async function pollSite(site) {
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
-    recordConversation(turn); // append to the book conversation log while recording
     logEvent("captured", { site, chars: displayText.length });
     saveStateDebounced();
-
-    // Book Studio auto-runner: if this reply is the output the current book
-    // workflow step was waiting on, save it and advance. Orthogonal to routing,
-    // so it runs regardless of governance holds/tags below.
-    try { await handleBookRunCapture(turn); } catch (e) { logEvent("book-run-error", { error: String(e) }); }
-    // ATELIER v3: if this pane owes an engine job, run its reply through the
-    // validator chain. onReply ignores captures from panes it isn't waiting on.
-    try { if (atelierBookId) atelier.onReply(turn.site, turn.text); } catch (e) { logEvent("atelier-error", { error: String(e) }); }
 
     if (state.waiting[site]) {
       state.waiting[site] = false;
@@ -2731,33 +2414,27 @@ async function pollSite(site) {
     // real target Set exists before mesh decides what's left over --
     // roundtableTargetsFor() doesn't have this ordering constraint since
     // it's a pure function of the turn, computable at any point.
-    // A governance-held reply is displayed but never propagated: skip every
-    // re-routing path (House Rules, Roundtable tag, mesh, Sequence, manager).
-    if (govHold) {
-      logEvent("atelier-held", { site, target: turn.governance && turn.governance.target });
-    } else {
-      // Loop guard: a short reply that's already ping-ponged several times is
-      // still shown, but not relayed onward — this breaks a model-acknowledgment
-      // loop without suppressing real content. Applies only to the free AI-to-AI
-      // relay (roundtable + mesh); the bounded, directed paths (House Rules
-      // stages, Prompt Sequence, Manager) always run.
-      const looping = !stageActive && loopSuppressRelay(turn.text);
-      if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
-      let hrSentTargets = new Set();
-      if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-      else if (!looping) await handleRoundtableCapture(turn);
-      const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-      if (!looping) {
-        for (const target of state.routing[site]) {
-          if (target === site || roundtableTargets.has(target)) continue;
-          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-          // relay — never the raw page text, which still carries [TO:]/[FROM:].
-          await sendTextTo(target, turn.text, site);
-        }
+    // Loop guard: a short reply that's already ping-ponged several times is
+    // still shown, but not relayed onward — this breaks a model-acknowledgment
+    // loop without suppressing real content. Applies only to the free AI-to-AI
+    // relay (roundtable + mesh); the bounded, directed paths (House Rules
+    // stages, Prompt Sequence, Manager) always run.
+    const looping = !stageActive && loopSuppressRelay(turn.text);
+    if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
+    let hrSentTargets = new Set();
+    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+    else if (!looping) await handleRoundtableCapture(turn);
+    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
+    if (!looping) {
+      for (const target of state.routing[site]) {
+        if (target === site || roundtableTargets.has(target)) continue;
+        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+        // relay — never the raw page text, which still carries [TO:]/[FROM:].
+        await sendTextTo(target, turn.text, site);
       }
-      if (state.sequence.active) await handleSequenceCapture(turn);
-      if (state.manager.status === "waiting") await handleManagerCapture(turn);
     }
+    if (state.sequence.active) await handleSequenceCapture(turn);
+    if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
@@ -2772,53 +2449,10 @@ ipcMain.handle("db:status", async () => {
 ipcMain.handle("db:recent-messages", async (_evt, limit) => {
   try { return dbService.recent(limit || 100); } catch (e) { return []; }
 });
-ipcMain.handle("db:memory-summary", async () => {
-  try { return dbService.memorySummary(); } catch (e) { return { available: false, counts: {}, total: 0 }; }
-});
-ipcMain.handle("db:memory-create", async (_evt, { type, data }) => {
-  try { return dbService.memoryCreate(type, data); } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("db:memory-search", async (_evt, query) => {
-  try { return dbService.memorySearch(query); } catch (e) { return { available: false, results: [] }; }
-});
-ipcMain.handle("db:project-state", async () => {
-  try { return dbService.projectState(); } catch (e) { return { available: false }; }
-});
 
 // --- Stable Diffusion (Image Studio) IPC -----------------------------------
-ipcMain.handle("sd:get-settings", async () => {
-  try { return sdProvider.getSettings(); } catch (e) { return { error: String(e) }; }
-});
-ipcMain.handle("sd:set-settings", async (_evt, patch) => {
-  try { const s = sdProvider.setSettings(patch || {}); logEvent("sd-settings", { enabled: s.enabled, autoFromAI: s.autoFromAI }); return s; }
-  catch (e) { return { error: String(e) }; }
-});
-ipcMain.handle("sd:test", async () => {
-  try { return await sdProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("sd:models", async () => {
-  try { return await sdProvider.listModels(); } catch (e) { return { ok: false, error: String(e), models: [] }; }
-});
-ipcMain.handle("sd:generate", async (_evt, opts) => {
-  try {
-    const r = await sdProvider.generate(opts || {});
-    if (r && r.ok) {
-      try { dbService.recordImage({ prompt: r.prompt, seed: r.seed, path: r.file, from: r.from, sha256: r.sha256 }); } catch (_) {}
-      saveGeneratedImage(r);
-      broadcast("sd-image", { dataUri: r.dataUri, prompt: r.prompt, from: r.from, seed: r.seed });
-    }
-    return r;
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("sd:gallery", async (_evt, limit) => {
-  try { return sdProvider.gallery(limit || 24); } catch (e) { return []; }
-});
 
 // --- System monitor IPC ----------------------------------------------------
-ipcMain.handle("system:info", async () => {
-  try { return await systemMonitor.report(); }
-  catch (e) { return { snapshot: { error: String(e) }, recommendation: null }; }
-});
 
 // Run the system check, post the report into the conversation/message log, and
 // save it. Returns the report text.
@@ -2834,23 +2468,8 @@ function formatSystemReport(rep) {
   if (r.llm) lines.push("", `Can run — local models: ${r.llm.tier} (${r.llm.detail})`, `Can run — Stable Diffusion: ${r.sd.tier} (${r.sd.detail})`);
   return lines.join("\n");
 }
-ipcMain.handle("system:report", async () => {
-  try {
-    const rep = await systemMonitor.report();
-    const text = formatSystemReport(rep);
-    const turn = { id: state.nextTurnId++, site: "system", label: "System Check", text, ts: Date.now(), pinned: false, roundtableTag: "USER" };
-    pushTranscriptTurn(turn);
-    broadcast("capture", turn);
-    try { dbService.recordTurn(turn); } catch (_) {}
-    saveStateDebounced();
-    return { ok: true, text };
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
 
 // --- System AI (Local Supervisor / LSI) IPC --------------------------------
-ipcMain.handle("lsi:get-settings", async () => { try { return lsiProvider.getSettings(); } catch (e) { return { error: String(e) }; } });
-ipcMain.handle("lsi:set-settings", async (_evt, patch) => { try { const s = lsiProvider.setSettings(patch || {}); logEvent("lsi-settings", { enabled: s.enabled }); return s; } catch (e) { return { error: String(e) }; } });
-ipcMain.handle("lsi:test", async () => { try { return await lsiProvider.testConnection(); } catch (e) { return { ok: false, error: String(e) }; } });
 
 // --- Ollama model manager IPC ----------------------------------------------
 ipcMain.handle("ollama:detect", async () => { try { return await ollamaManager.detect(); } catch (e) { return { available: false, reason: String(e) }; } });
@@ -2865,121 +2484,6 @@ ipcMain.handle("ollama:pull", async (_evt, model) => {
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
-// Save a freshly generated image (data URI) into output/images/.
-function saveGeneratedImage(r) {
-  try {
-    if (!r || !r.dataUri) return;
-    const m = /^data:image\/([a-z0-9]+);base64,(.+)$/i.exec(r.dataUri);
-    if (!m) return;
-    const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
-    const buf = Buffer.from(m[2], "base64");
-    const stem = outputManager.safeName(String(r.prompt || "image").slice(0, 40), "image");
-    const name = `${stem}${r.seed != null ? "-" + r.seed : ""}.${ext}`;
-    const dest = outputManager.saveBuffer(outputManager.imagesDir(), name, buf);
-    logEvent("image-saved", { file: dest });
-  } catch (e) { logEvent("image-save-error", { error: String(e) }); }
-}
-
-// --- Setup Wizard + background downloads ------------------------------------
-// Configure the download queue with the runners it knows how to run. The first
-// is Ollama model pulls; more (SD checkpoints, etc.) slot in here later.
-function initDownloadManager() {
-  downloadManager.init({
-    concurrency: 2,
-    onChange: (jobs) => broadcastToWizard("downloads-changed", jobs),
-    runners: {
-      "ollama-model": (job, hooks) => {
-        const { child, done } = ollamaManager.pull(job.model, (line) => {
-          const m = /(\d+(?:\.\d+)?)\s*%/.exec(line);
-          hooks.progress(m ? parseFloat(m[1]) : null, line);
-        });
-        done.then((r) => hooks.done(!!(r && r.ok), r && r.error)).catch((e) => hooks.done(false, String(e)));
-        return { cancel: () => { try { child && child.kill(); } catch (_) {} } };
-      },
-      // Download a file (e.g. a Stable Diffusion checkpoint) into the app's
-      // sd-models folder, with progress and cancel. The URL scheme is gated and
-      // the filename is sanitized to a safe basename (no path traversal) before
-      // it's joined into the models folder.
-      "http-download": (job, hooks) => {
-        let url;
-        try { url = new URL(job.url); } catch (_) { hooks.done(false, "invalid download URL"); return { cancel: () => {} }; }
-        if (url.protocol !== "https:" && url.protocol !== "http:") { hooks.done(false, `unsupported URL scheme: ${url.protocol}`); return { cancel: () => {} }; }
-        const controller = new AbortController();
-        // uniquePath() runs the name through safeName() (strips separators/..) and
-        // never returns a path outside sdModelsDir().
-        const dest = outputManager.uniquePath(sdModelsDir(), job.filename || path.basename(url.pathname) || "download");
-        const mb = (n) => (n / 1e6).toFixed(0);
-        fileDownloader.download(job.url, dest, {
-          signal: controller.signal,
-          onProgress: ({ pct, got, total }) => hooks.progress(pct, total ? `${mb(got)} / ${mb(total)} MB` : `${mb(got)} MB`),
-        }).then(() => hooks.done(true, `saved to ${dest}`)).catch((e) => hooks.done(false, (e && e.message) || String(e)));
-        return { cancel: () => controller.abort() };
-      },
-    },
-  });
-}
-// Where downloaded Stable Diffusion checkpoints land.
-function sdModelsDir() { return path.join(userDataDir(), "sd-models"); }
-
-// The optional Images (Stable Diffusion) add-ons, matched to the machine's VRAM.
-function imagesCatalog(vramGB) {
-  const v = vramGB || 0;
-  const models = [{
-    kind: "http-download", category: "Images", label: "SD 1.5 checkpoint", sizeLabel: "~4 GB",
-    filename: "v1-5-pruned-emaonly.safetensors",
-    url: "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
-    why: "light, runs almost anywhere", ok: true,
-  }];
-  models.push({
-    kind: "http-download", category: "Images", label: "SDXL base 1.0", sizeLabel: "~7 GB",
-    filename: "sd_xl_base_1.0.safetensors",
-    url: "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
-    why: v >= 8 ? "great quality for your GPU" : "needs ~8 GB VRAM — may be slow/tight here", ok: v >= 8,
-  });
-  models.push({
-    kind: "http-download", category: "Images", label: "FLUX.1 schnell", sizeLabel: "~24 GB",
-    filename: "flux1-schnell.safetensors",
-    url: "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
-    why: v >= 16 ? "high-end, top quality" : "high-end only — needs a big GPU", ok: v >= 16,
-  });
-  return {
-    engine: {
-      name: "Forge",
-      note: "Forge is the recommended Stable Diffusion engine (lighter than A1111). It's a separate program that needs Python — install it from its GitHub page, then point Image Studio at its address.",
-      url: "https://github.com/lllyasviel/stable-diffusion-webui-forge",
-    },
-    modelsDir: sdModelsDir(),
-    models,
-  };
-}
-
-// The optional Video (generation) add-ons — heavier, gated to capable GPUs.
-function videoCatalog(vramGB) {
-  const v = vramGB || 0;
-  const models = [
-    {
-      kind: "http-download", category: "Video", label: "LTX-Video 2B", sizeLabel: "~9 GB",
-      filename: "ltx-video-2b-v0.9.safetensors",
-      url: "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors",
-      why: v >= 12 ? "a fast local video model for your GPU" : "needs ~12 GB VRAM — high-end only", ok: v >= 12,
-    },
-    {
-      kind: "http-download", category: "Video", label: "Stable Video Diffusion (XT)", sizeLabel: "~9.5 GB",
-      filename: "svd_xt.safetensors",
-      url: "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors",
-      why: v >= 16 ? "image-to-video, top quality" : "needs a big GPU (~16 GB VRAM)", ok: v >= 16,
-    },
-  ];
-  return {
-    engine: {
-      name: "ComfyUI",
-      note: "ComfyUI is the standard engine for local video generation. It's a separate program that needs Python — install it from its GitHub page, then load a video model below.",
-      url: "https://github.com/comfyanonymous/ComfyUI",
-    },
-    modelsDir: sdModelsDir(),
-    models,
-  };
-}
 
 ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
@@ -2999,248 +2503,22 @@ ipcMain.handle("feed:history", () => {
       .map((t) => ({ id: t.id, site: t.site, label: t.label, text: t.text, ts: t.ts }));
   } catch (_) { return []; }
 });
-// Hardware scan + a machine-matched catalog for the wizard to render.
+// Local-AI catalog for the wizard: detect Ollama and list recommended models,
+// plus a guided installer link. (The bare-bones core carries no hardware scan or
+// in-app model downloader — install models via Ollama directly.)
 ipcMain.handle("wizard:catalog", async () => {
   try {
-    const rep = await systemMonitor.report();
-    const vram = rep && rep.recommendation ? rep.recommendation.vramGB : null;
     let ollama = { available: false };
     try { ollama = await ollamaManager.detect(); } catch (_) {}
     return {
       ok: true,
-      system: rep,
       ollama,
-      models: ollamaManager.recommended(vram).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
-      images: imagesCatalog(vram),
-      video: videoCatalog(vram),
-      // Guided installs — the app can't silently install system programs, so it
-      // points you at the official download and you run it.
+      models: ollamaManager.recommended(null).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
       installers: {
         ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models. Install it, then reopen this wizard." },
-        python: { name: "Python 3", url: "https://www.python.org/downloads/", note: "Needed by the image (Forge) and video (ComfyUI) engines." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("downloads:enqueue", (_evt, spec) => {
-  try { return { ok: true, id: downloadManager.enqueue(spec || {}) }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("downloads:list", () => ({ ok: true, jobs: downloadManager.list() }));
-ipcMain.handle("downloads:cancel", (_evt, id) => ({ ok: downloadManager.cancel(id) }));
-ipcMain.handle("downloads:clear-finished", () => { downloadManager.clearFinished(); return { ok: true }; });
-
-// --- Book Studio (ATELIER V2) IPC ------------------------------------------
-ipcMain.handle("book:list", () => { try { return { ok: true, projects: bookProject.list() }; } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:create", (_e, title) => { try { return bookProject.create(title); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:get", (_e, id) => { try { const p = bookProject.get(id); return p ? { ok: true, project: p } : { ok: false, error: "no such book" }; } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-stage", (_e, { id, stage, override, reason }) => { try { return bookProject.setStage(id, stage, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:add-chapter", (_e, { id, title }) => { try { return bookProject.addChapter(id, title); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:set-chapter-status", (_e, { id, chapterId, status, override, reason }) => { try { return bookProject.setChapterStatus(id, chapterId, status, { override, reason }); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:add-record", (_e, { id, type, name, content }) => { try { return bookProject.addRecord(id, type, name, content); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:read-record", (_e, { id, recordId }) => { try { return bookProject.readRecord(id, recordId); } catch (e) { return { ok: false, error: String(e) }; } });
-// BG-005: edit/save a record's content (and save a captured reply as a record).
-ipcMain.handle("book:set-record", (_e, { id, recordId, content }) => { try { return bookProject.setRecordContent(id, recordId, content); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:log", (_e, { id, text }) => { try { return bookProject.appendLog(id, text); } catch (e) { return { ok: false, error: String(e) }; } });
-ipcMain.handle("book:open-folder", (_e, id) => { try { const p = bookProject.get(id); if (p && shell) shell.openPath(p.dir); return { ok: !!p }; } catch (e) { return { ok: false, error: String(e) }; } });
-// Compose the role/task prompt for a task (the renderer sends it to the pane).
-ipcMain.handle("book:task", (_e, { id, taskId, chapterId }) => {
-  try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    const composed = bookPrompts.composeTask(taskId, {
-      title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
-      chapter: chapterId || undefined, recordsDigest: _bookContextDigest(p, chapterId),
-    });
-    return composed ? { ok: true, ...composed } : { ok: false, error: "unknown task" };
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Catch-up briefs for all three panes (fills the panes on book open/resume).
-ipcMain.handle("book:brief", (_e, id) => {
-  try { const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" }; return { ok: true, briefs: bookPrompts.composeBriefAll(p) }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-// BG-006: build a BOUNDED authoritative context packet — not just record IDs
-// and names, but their actual bodies (capped to a char budget), plus the current
-// chapter's text, so the AI works from real records instead of guessing. This is
-// what "use the authoritative records" is supposed to mean.
-function _bookContextDigest(p, chapterId, budget) {
-  const d = bookPrompts.digest(p);
-  let out = `chapters: ${d.chapters}; records: ${d.records}\n`;
-  let left = budget || 6000;
-  const add = (label, content) => {
-    if (left <= 0 || !content) return;
-    const excerpt = String(content).trim().slice(0, Math.min(left, 1200));
-    out += `\n--- ${label} ---\n${excerpt}${content.length > excerpt.length ? '\n…(truncated)…' : ''}\n`;
-    left -= excerpt.length;
-  };
-  try {
-    const cur = chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : null);
-    if (cur) { const r = bookProject.readRecord(p.id, cur); if (r && r.ok) add(`CHAPTER ${cur}${r.name ? ' — ' + r.name : ''}`, r.content); }
-    for (const rec of (p.records || [])) {
-      if (left <= 0) { out += `\n…(more records omitted — context budget reached)…\n`; break; }
-      const r = bookProject.readRecord(p.id, rec.id); if (r && r.ok) add(`${rec.id}${rec.name ? ' — ' + rec.name : ''}`, r.content);
-    }
-  } catch (_) {}
-  return out;
-}
-
-// --- Guided "Make Book" workflow runner (Start / Next / Pause / Resume / Stop) ---
-function _bookCtx(p, chapterId) {
-  return {
-    title: p.title, stage: (p.stageLabels && p.stageLabels[p.stage]) || p.stage,
-    chapter: chapterId || (p.chapters.length ? p.chapters[p.chapters.length - 1].id : undefined),
-    recordsDigest: _bookContextDigest(p, chapterId),
-  };
-}
-// The runner now drives itself: Start dispatches step 0 and, from there,
-// auto-advances each time a step's target AI produces its output (see
-// handleBookRunCapture). The renderer just reflects the "book-runner" broadcast.
-ipcMain.handle("book:workflow-start", async (_e, { id, chapterId }) => {
-  try { return await bookRunStart(id, chapterId); } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("book:workflow-next", async (_e, { id }) => {
-  try { return await bookRunContinue(id); } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("book:workflow-set-status", async (_e, { id, status }) => {
-  try {
-    if (status === "paused") return bookRunPause(id);
-    if (status === "running") return await bookRunResume(id);
-    if (status === "idle") return bookRunStop(id);
-    return { ok: false, error: "unknown status" };
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Send the Rules of Conduct ("their bible") to all three panes on demand — the
-// "Send Rules" button, for when a pane forgets. (Also sent automatically at the
-// start of every run.)
-ipcMain.handle("book:send-rules", async (_e, { id } = {}) => {
-  try { return await sendBookRules(id); } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Readiness of the three AI panes ("make sure the AI stuff is up and running").
-ipcMain.handle("book:ai-status", async () => {
-  try { return { ok: true, status: await bookAiStatus() }; } catch (e) { return { ok: false, error: String(e) }; }
-});
-// The live runner snapshot (finer-grained than the persisted book.json status).
-ipcMain.handle("book:runner-status", () => {
-  try { return { ok: true, snapshot: bookRunSnapshot() }; } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Conversation recorder: start/stop/status. Recording also auto-starts on a book
-// or ATELIER run; Stop is the explicit control the user asked for.
-ipcMain.handle("book:record-start", (_e, id) => startBookRecording(id));
-ipcMain.handle("book:record-stop", () => stopBookRecording());
-ipcMain.handle("book:record-status", () => ({ ok: true, recording: recordingSnapshot() }));
-
-// --- ATELIER v3 engine: the derived-state book pipeline --------------------
-// The engine decides what may happen next (from the record set); this runner
-// turns each allowed step into real relay traffic and feeds captured replies
-// back through the engine's validator chain. The prompt gets the messaging
-// envelope appended so the reply is captured by pollSite; the engine's own
-// six-field provenance is built program-side from the pending job (below).
-let atelierBookId = null, atelierDir = null;
-const atelier = createAtelierRunner({
-  send: (site, prompt) => { sendTextTo(site, withEnvelope(prompt, site), null, { raw: true }).catch((e) => logEvent("atelier-send-error", { site, error: String(e) })); },
-  persist: (store) => { try { if (atelierDir) atelierStore.save(atelierDir, store); } catch (_) {} },
-  notify: (kind, data) => { logEvent("atelier-" + kind, data || {}); broadcast("atelier-note", { kind, data }); if (atelierBookId) broadcast("atelier-status", { bookId: atelierBookId, status: atelier.status() }); },
-  roleOf: (site) => ({ chatgpt: "STORY", gemini: "CANON", claude: "WRITING" }[site] || null),
-});
-ipcMain.handle("atelier-engine:start", (_e, id) => {
-  try {
-    const p = bookProject.get(id); if (!p) return { ok: false, error: "no such book" };
-    atelierBookId = id; atelierDir = p.dir;
-    const store = atelierStore.load(p.dir, id);
-    atelier.start(id, store);
-    startBookRecording(id); // auto-start recording the AI conversation
-    logEvent("atelier-start", { bookId: id });
-    return { ok: true, status: atelier.status() };
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("atelier-engine:requirements", (_e, { id, body, mandatory }) => {
-  try { if (atelierBookId !== id) return { ok: false, error: "start the atelier book first" }; atelier.setRequirements(String(body || ""), Array.isArray(mandatory) ? mandatory : []); atelier.advance(); return { ok: true, status: atelier.status() }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("atelier-engine:advance", (_e, id) => {
-  try { if (atelierBookId !== id) return { ok: false, error: "start the atelier book first" }; atelier.advance(); return { ok: true, status: atelier.status() }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-// The panel projection (§10): everything the cockpit shows is derived here.
-ipcMain.handle("atelier-engine:status", (_e, id) => {
-  try { if (id && atelierBookId !== id) { const p = bookProject.get(id); if (p) { const s = atelierStore.load(p.dir, id); return { ok: true, status: atelierEngine.deriveBook(s) }; } } return { ok: true, status: atelier.status() }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-// A REAL round-trip test: send a short "test" prompt to all three panes exactly
-// the way a workflow step does, then confirm the app actually captures each
-// reply. Proves the whole send → reply → capture loop works with the real,
-// signed-in panes before you start a real book.
-ipcMain.handle("book:test-run", async () => {
-  const prompt =
-    "🧪 BOOK WORKFLOW CONNECTION TEST — this is only a test, do no real work. " +
-    "Please reply with one short line beginning \"TEST OK\" followed by a few words of throwaway sample content " +
-    "(this stands in for a real document so we can confirm the app receives your reply).";
-  const sentTs = {}, results = {};
-  // This diagnostic deliberately asks for a bare "TEST OK" with no envelope, so
-  // mark each tested pane bareMode for the duration — otherwise pollSite would
-  // refuse to capture a reply that has no [FROM:] tag and instead nudge it.
-  try {
-    for (const site of SITE_IDS) {
-      const view = siteViews[site];
-      if (!view || view.webContents.isDestroyed()) { results[site] = { ok: false, reason: "pane not open" }; continue; }
-      testRunInFlight.add(site);
-      sentTs[site] = Date.now();
-      try { await sendTextTo(site, prompt, null, { raw: true }); }
-      catch (_) { results[site] = { ok: false, reason: "send failed" }; delete sentTs[site]; testRunInFlight.delete(site); }
-    }
-    const deadline = Date.now() + 90000;
-    const pending = () => SITE_IDS.filter((s) => sentTs[s] && !results[s]);
-    while (Date.now() < deadline && pending().length) {
-      for (const s of pending()) {
-        const c = state.captured[s];
-        if (c && c.ts >= sentTs[s] && c.text && c.text.trim()) results[s] = { ok: true, chars: c.text.length, snippet: c.text.trim().slice(0, 90) };
-      }
-      if (pending().length) await new Promise((r) => setTimeout(r, 400));
-    }
-  } finally {
-    for (const s of SITE_IDS) testRunInFlight.delete(s);
-  }
-  for (const s of SITE_IDS) if (!results[s]) results[s] = { ok: false, reason: "no reply captured (is the pane signed in?)" };
-  results.allOk = SITE_IDS.every((s) => results[s].ok);
-  logEvent("book-test-run", Object.fromEntries(SITE_IDS.map((s) => [s, !!results[s].ok])));
-  return { ok: true, results };
-});
-
-// --- Book PDFs (completion gate, Rules of Conduct §36–39) -------------------
-// The gate: which of a book's deliverables have a downloadable PDF yet.
-ipcMain.handle("book:pdf-gate", (_e, id) => {
-  try { return { ok: true, gate: bookProject.pdfGate(id), pdfs: bookProject.listPdfs(id) }; } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Make PDFs for everything the book currently holds (chapters + step outputs).
-ipcMain.handle("book:generate-pdfs", (_e, id) => {
-  try { return bookProject.generateAllPdfs(id); } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Find PDFs the user downloaded (from the AI) and pull this book's into it.
-ipcMain.handle("book:scan-pdfs", (_e, id) => {
-  try {
-    const dirs = [];
-    try { dirs.push(outputManager.uploadsDir()); } catch (_) {}
-    try { const r = outputManager.root(); if (r) dirs.push(require("path").join(r, "aiwork")); } catch (_) {}
-    try { if (app && app.getPath) dirs.push(app.getPath("downloads")); } catch (_) {}
-    return bookProject.scanPdfs(id, dirs);
-  } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Open a specific PDF (relative path within the book) or the book's pdfs/ folder.
-ipcMain.handle("book:open-pdf", (_e, { id, file }) => {
-  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; shell.openPath(require("path").join(p.dir, file)); return { ok: true }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-ipcMain.handle("book:open-pdfs-folder", (_e, id) => {
-  try { const p = bookProject.get(id); if (!p || !shell) return { ok: false }; const d = require("path").join(p.dir, bookProject.PDF_DIR); try { require("fs").mkdirSync(d, { recursive: true }); } catch (_) {} shell.openPath(d); return { ok: true }; }
-  catch (e) { return { ok: false, error: String(e) }; }
-});
-// BG-007: strict manuscript assembly for a governed book (final Build step).
-ipcMain.handle("book:assemble", (_e, id) => {
-  try { return bookProject.assembleManuscript(id); } catch (e) { return { ok: false, error: String(e) }; }
-});
-// Whether governed (ATELIER v2) mode is available on this machine.
-ipcMain.handle("book:governed-available", () => {
-  try { return { ok: true, available: bookProject.governedAvailable() }; } catch (e) { return { ok: false, error: String(e) }; }
 });
 
 // Native top menu bar (File / View / Tools / Help). Guarded so the test
@@ -3260,10 +2538,6 @@ function buildAppMenu() {
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
         { label: "Open Output Folder", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
-        { type: "separator" },
-        { label: "System Monitor", click: () => broadcast("focus-panel", "system") },
-        { label: "Image Studio", click: () => broadcast("focus-panel", "imagestudio") },
-        { label: "Book Studio", click: () => broadcast("focus-panel", "bookstudio") },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
@@ -3275,29 +2549,6 @@ function buildAppMenu() {
 }
 
 // --- ATELIER governance IPC ------------------------------------------------
-ipcMain.handle("atelier:detect", async () => {
-  try { return atelierGov.detect({ force: true }); }
-  catch (e) { return { available: false, reason: String(e) }; }
-});
-ipcMain.handle("atelier:stages", async () => {
-  try { return atelierGov.stages(); } catch (e) { return { available: false, stages: [], reason: String(e) }; }
-});
-ipcMain.handle("atelier:get-settings", async () => {
-  try { return atelierGov.getSettings(); } catch (e) { return { error: String(e) }; }
-});
-ipcMain.handle("atelier:set-settings", async (_evt, patch) => {
-  try { const s = atelierGov.setSettings(patch || {}); logEvent("atelier-settings", { enabled: s.enabled }); return s; }
-  catch (e) { return { error: String(e) }; }
-});
-ipcMain.handle("atelier:check", async (_evt, { role, path: p }) => {
-  try { return atelierGov.checkAuthority(role, p); } catch (e) { return { available: false, ok: false, reason: String(e) }; }
-});
-ipcMain.handle("atelier:status", async (_evt, dir) => {
-  try { return atelierGov.status(dir); } catch (e) { return { available: false, lines: [], reason: String(e) }; }
-});
-ipcMain.handle("atelier:deliver", async (_evt, { turn, jobId }) => {
-  try { return atelierGov.deliverTurn(turn, jobId); } catch (e) { return { available: false, ok: false, message: String(e) }; }
-});
 
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
@@ -3616,63 +2867,9 @@ ipcMain.handle("site:list", () => {
   return { ok: true, sites: out };
 });
 
-ipcMain.handle("document:choose", async () => {
-  if (!win) return { ok: false, error: "NO_WINDOW" };
-  const res = await dialog.showOpenDialog(win, { properties: ["openFile"] });
-  if (res.canceled || !res.filePaths.length) return { ok: false, error: "CANCELLED" };
-  const chosen = res.filePaths[0];
-  openDocumentViewerWindow(chosen);
-  logEvent("document-chosen", { path: chosen });
-  return { ok: true, path: chosen };
-});
 
-ipcMain.handle("document-viewer:close", () => {
-  closeDocumentViewerWindow();
-  return { ok: true };
-});
 
-ipcMain.handle("document:read", async (_evt, filePath) => {
-  if (!filePath || typeof filePath !== "string") return { ok: false, error: "NO_PATH" };
-  let stat;
-  try {
-    stat = await fs.promises.stat(filePath);
-  } catch (e) {
-    return { ok: false, error: "FILE_NOT_FOUND", detail: String(e) };
-  }
-  const ext = path.extname(filePath).toLowerCase();
-  const base = { ok: true, path: filePath, name: path.basename(filePath), size: stat.size, ext };
 
-  if (ext === ".pdf") return { ...base, kind: "pdf", fileUrl: pathToFileURL(filePath).href };
-  if (IMAGE_EXTS.has(ext)) return { ...base, kind: "image", fileUrl: pathToFileURL(filePath).href };
-  if (TEXT_EXTS.has(ext)) {
-    if (stat.size > TEXT_PREVIEW_SIZE_CAP) return { ...base, kind: "text", tooLarge: true, text: "" };
-    try {
-      const text = await fs.promises.readFile(filePath, "utf8");
-      return { ...base, kind: "text", tooLarge: false, text };
-    } catch (e) {
-      return { ok: false, error: "READ_FAILED", detail: String(e) };
-    }
-  }
-  return { ...base, kind: "other" };
-});
-
-ipcMain.handle("document:send", async (_evt, { path: filePath, targets }) => {
-  if (!filePath) return { ok: false, error: "NO_PATH" };
-  try {
-    await fs.promises.access(filePath, fs.constants.R_OK);
-  } catch (e) {
-    return { ok: false, error: "FILE_NOT_FOUND", detail: String(e) };
-  }
-  const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
-  if (!list.length) return { ok: false, error: "NO_TARGETS" };
-  logEvent("document-send", { path: filePath, targets: list });
-  // Keep a local copy of everything uploaded to the AIs in output/uploads/.
-  try { const saved = outputManager.copyInto(outputManager.uploadsDir(), filePath); logEvent("upload-saved", { file: saved }); }
-  catch (e) { logEvent("upload-save-error", { error: String(e) }); }
-  const results = {};
-  for (const t of list) results[t] = await attachFileToSite(t, filePath);
-  return { ok: true, results };
-});
 
 ipcMain.handle("sequence:open", () => {
   openSequenceWindow();
@@ -4086,21 +3283,9 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 
 app.whenReady().then(() => {
   loadPersistedState();
-  try { atelierGov.init(userDataDir()); } catch (e) { logEvent("atelier-init-error", { error: String(e) }); }
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
-  try { sdProvider.init(userDataDir()); } catch (e) { logEvent("sd-init-error", { error: String(e) }); }
-  try { lsiProvider.init(userDataDir()); } catch (e) { logEvent("lsi-init-error", { error: String(e) }); }
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
-  try {
-    bookProject.init(outputManager.booksDir());
-    // BG-001: make the governed ATELIER project canonical (v2 overrides v1) when
-    // Python 3 is available; New Book then scaffolds the governed tree.
-    const atelierBridge = require("./atelier-bridge");
-    const gov = bookProject.configure({ atelier: atelierBridge });
-    logEvent("book-init", { governed: gov });
-  } catch (e) { logEvent("book-init-error", { error: String(e) }); }
-  try { initDownloadManager(); } catch (e) { logEvent("downloads-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
 });
