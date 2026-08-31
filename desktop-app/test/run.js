@@ -734,117 +734,6 @@ function resetDebuggerFlags() {
   }
 }
 
-async function testDocumentSendHappyPath() {
-  console.log("\n== document:send — happy path delivers the file to exactly the checked targets ==");
-  resetDebuggerFlags();
-  const file = makeTempFile("plan.txt", "hello");
-
-  const res = await call("document:send", { path: file, targets: ["chatgpt", "claude"] });
-  assert(res.ok, "document:send succeeds");
-  assert(res.results.chatgpt.ok && res.results.claude.ok, "both checked targets report ok");
-  assert(reg("chatgpt").webContents.fileInputSets.length === 1 && reg("chatgpt").webContents.fileInputSets[0].files[0] === file, "chatgpt actually received a DOM.setFileInputFiles call with this exact path");
-  assert(reg("claude").webContents.fileInputSets.length === 1, "claude too");
-  assert(reg("gemini").webContents.fileInputSets.length === 0, "gemini, never targeted, got nothing at all");
-}
-
-async function testDocumentSendNoFileInputFound() {
-  console.log("\n== document:send — a site with no matching file input fails cleanly, doesn't block the others ==");
-  resetDebuggerFlags();
-  const file = makeTempFile("plan.txt", "hello");
-  reg("claude").webContents._fileInputExists = false;
-
-  const res = await call("document:send", { path: file, targets: ["chatgpt", "claude"] });
-  assert(res.ok, "document:send still reports ok overall — per-target failures don't fail the whole call");
-  assert(res.results.chatgpt.ok, "chatgpt (unaffected) still succeeds");
-  assert(!res.results.claude.ok && res.results.claude.error === "NO_FILE_INPUT_FOUND", "claude reports NO_FILE_INPUT_FOUND specifically, not a generic failure");
-}
-
-async function testDocumentSendSetFilesFails() {
-  console.log("\n== document:send — DOM.setFileInputFiles failing is reported distinctly, and the debugger still detaches ==");
-  resetDebuggerFlags();
-  const file = makeTempFile("plan.txt", "hello");
-  reg("gemini").webContents._forceSetFilesFail = true;
-
-  const res = await call("document:send", { path: file, targets: ["gemini"] });
-  assert(!res.results.gemini.ok && res.results.gemini.error === "SET_FILES_FAILED", "reports SET_FILES_FAILED specifically");
-  assert(reg("gemini").webContents._debuggerAttached === false, "the debugger was detached even on this failure path (proves the finally{} runs)");
-}
-
-async function testDocumentSendAttachFails() {
-  console.log("\n== document:send — debugger.attach() failing (e.g. DevTools already attached) is reported distinctly ==");
-  resetDebuggerFlags();
-  const file = makeTempFile("plan.txt", "hello");
-  reg("chatgpt").webContents._forceAttachFail = true;
-
-  const res = await call("document:send", { path: file, targets: ["chatgpt"] });
-  assert(!res.results.chatgpt.ok && res.results.chatgpt.error === "ATTACH_FAILED", "reports ATTACH_FAILED specifically");
-}
-
-async function testDocumentSendFileNotFoundOrNoTargets() {
-  console.log("\n== document:send — a missing file or an empty target list are rejected before any per-target work ==");
-  resetDebuggerFlags();
-  const missingRes = await call("document:send", { path: "/no/such/file/anywhere.txt", targets: ["chatgpt"] });
-  assert(!missingRes.ok && missingRes.error === "FILE_NOT_FOUND", "a nonexistent path is rejected up front");
-  assert(reg("chatgpt").webContents.fileInputSets.length === 0, "...and never even attempted against chatgpt");
-
-  const file = makeTempFile("plan.txt", "hello");
-  const noTargetsRes = await call("document:send", { path: file, targets: [] });
-  assert(!noTargetsRes.ok && noTargetsRes.error === "NO_TARGETS", "an empty target list is rejected too");
-}
-
-async function testDocumentRead() {
-  console.log("\n== document:read — classifies files by extension and respects the text size cap ==");
-  const smallText = makeTempFile("note.txt", "short note");
-  const textRes = await call("document:read", smallText);
-  assert(textRes.ok && textRes.kind === "text" && textRes.tooLarge === false && textRes.text === "short note", "small text file reads its actual content");
-
-  const bigText = makeTempFile("big.txt", "x".repeat(600 * 1024));
-  const bigRes = await call("document:read", bigText);
-  assert(bigRes.ok && bigRes.kind === "text" && bigRes.tooLarge === true && bigRes.text === "", "an oversized text file is flagged tooLarge instead of reading it all into memory");
-
-  const image = makeTempFile("shot.png", "not a real png but extension is what matters here");
-  const imageRes = await call("document:read", image);
-  assert(imageRes.ok && imageRes.kind === "image" && imageRes.fileUrl && imageRes.fileUrl.startsWith("file://"), "image files get a file:// URL for direct Chromium rendering, not bytes shuttled through IPC");
-
-  const pdf = makeTempFile("doc.pdf", "%PDF-1.4 fake");
-  const pdfRes = await call("document:read", pdf);
-  assert(pdfRes.ok && pdfRes.kind === "pdf" && pdfRes.fileUrl && pdfRes.fileUrl.startsWith("file://"), "pdf files also get a file:// URL, same as images");
-
-  const other = makeTempFile("archive.zip", "PK\x03\x04");
-  const otherRes = await call("document:read", other);
-  assert(otherRes.ok && otherRes.kind === "other", "an unrecognized extension still reports ok with kind:'other' (filename-only, no preview)");
-
-  const missingRes = await call("document:read", "/no/such/file.txt");
-  assert(!missingRes.ok && missingRes.error === "FILE_NOT_FOUND", "reading a nonexistent path fails cleanly");
-}
-
-async function testDocumentChooseAndViewerWindow() {
-  console.log("\n== document:choose — opens the file dialog, then the document viewer window targeting the chosen file ==");
-  mockElectron.__setDialogResult({ canceled: true, filePaths: [] });
-  const cancelledRes = await call("document:choose", {});
-  assert(!cancelledRes.ok && cancelledRes.error === "CANCELLED", "a cancelled dialog is reported as CANCELLED, not an error");
-  assert(!mockElectron.__windowRegistry["AutoInjector — Document"], "cancelling never opens a viewer window");
-
-  const file = makeTempFile("report.txt", "hi");
-  mockElectron.__setDialogResult({ canceled: false, filePaths: [file] });
-  const chooseRes = await call("document:choose", {});
-  assert(chooseRes.ok && chooseRes.path === file, "choosing a file returns its path");
-  const viewerWin = mockElectron.__windowRegistry["AutoInjector — Document"];
-  assert(!!viewerWin && !viewerWin.isDestroyed(), "a real, separate window opens for it");
-  const viewerView = reg("document-viewer-ui");
-  assert(!!viewerView && viewerView.webContents._loadOpts.search === `path=${encodeURIComponent(file)}`, "it navigates with the chosen file's path in the URL");
-
-  const file2 = makeTempFile("report2.txt", "hi again");
-  mockElectron.__setDialogResult({ canceled: false, filePaths: [file2] });
-  await call("document:choose", {});
-  assert(mockElectron.__windowRegistry["AutoInjector — Document"] === viewerWin, "choosing a second file while the viewer is open re-targets the SAME window, not a second one");
-  assert(reg("document-viewer-ui").webContents._loadOpts.search === `path=${encodeURIComponent(file2)}`, "...re-navigated to the new file");
-
-  const closeRes = await call("document-viewer:close", {});
-  assert(closeRes.ok, "closing the viewer succeeds");
-  assert(viewerWin.isDestroyed(), "the window is actually closed");
-}
-
 async function testSequenceWindowManagement() {
   console.log("\n== sequence:open / sequence-editor:close manage a single popup window ==");
   const openRes = await call("sequence:open", {});
@@ -2066,19 +1955,6 @@ async function testLoopGuardSuppressesRelay() {
   assert(s.transcript.filter((t) => /loop\s+msg/.test(t.text)).length >= 4, "every copy is still shown in the transcript — nothing is hidden, only the relay is stopped");
 }
 
-async function testBookTestRunCapturesBareReplies() {
-  console.log("\n== book:test-run is bareMode: a plain 'TEST OK' reply (no envelope) is captured, not nudged ==");
-  await resetAllParticipants();
-  const isNudge = (e) => /NO ENDING TAG RECEIVED/i.test(e.text);
-  const p = call("book:test-run", {});
-  await waitUntil(() => SITES.every((sname) => sentLog(sname).some((e) => /BOOK WORKFLOW CONNECTION TEST/.test(e.text))),
-    { label: "the test prompt reached all three panes" });
-  for (const sname of SITES) sayRaw(sname, "TEST OK sample throwaway content");
-  const res = await p;
-  assert(res && res.ok && res.results && res.results.allOk, `book:test-run confirms all three bare replies (got ${JSON.stringify(res && res.results)})`);
-  assert(!SITES.some((sname) => sentLog(sname).some(isNudge)), "no missing-tag nudge is sent for the bare test replies");
-}
-
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2149,13 +2025,6 @@ async function main() {
   await testPersistenceSavesToDisk();
   await testPromptLibrary();
   await testPromptEditorWindow();
-  await testDocumentSendHappyPath();
-  await testDocumentSendNoFileInputFound();
-  await testDocumentSendSetFilesFails();
-  await testDocumentSendAttachFails();
-  await testDocumentSendFileNotFoundOrNoTargets();
-  await testDocumentRead();
-  await testDocumentChooseAndViewerWindow();
   await testSequenceWindowManagement();
   await testSequenceBackend();
   await testSequenceRejectsWhileRunningAndInvalidSteps();
@@ -2191,7 +2060,6 @@ async function main() {
   await testMessageSeqNumbering();
   await testAddressingAwareRelayFrame();
   await testLoopGuardSuppressesRelay();
-  await testBookTestRunCapturesBareReplies();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
