@@ -6,6 +6,10 @@
 // QA-001: run main.js on a fast, internally-consistent clock so the integration
 // suite is quick and deterministic (same logic, smaller timing windows). These
 // MUST be set before main.js is required (it reads them at load).
+// The integration harness drives main.js under the mock Electron layer; the
+// local service bridge would try to open a real TCP port on app-ready, which is
+// an unrelated side effect here — disable it (service-bridge.test.js covers it).
+process.env.AUTOINJECTOR_BRIDGE = "0";
 process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || "50";
 process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || "80";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || "150";

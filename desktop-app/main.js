@@ -29,6 +29,7 @@ const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
+const { createServiceBridge } = require("./service-bridge");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -157,6 +158,8 @@ const state = {
   noTagReprompts: {}, // site -> count of consecutive "you forgot the [FROM:] tag, resend" nudges (reset when a valid tagged reply lands)
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
+  generating: {}, // site -> bool — the pane is actively producing a reply (its Stop button is showing / Send disabled), from pollSite's read
+
   waitingSince: {}, // site -> timestamp | null — when waiting flipped true, so UIs can flag "hasn't replied in a while"
   lastSentTo: {}, // site -> exact final text last sent to it (for Regenerate)
   enabled: {}, // site -> bool — participant is "in play": counts for Auto/"All" AND shows its pane
@@ -595,10 +598,16 @@ function loadPersistedState() {
   logEvent("state-restored", { transcriptTurns: state.transcript.length, hrMode: state.hr.mode });
 }
 
+// Extra broadcast sinks beyond the UI windows. The local service bridge
+// (service-bridge.js) registers a listener here so an external caller can stream
+// the same live events (captures, generation state, sends, errors, rate limits,
+// Council state) the UI sees, without the bridge reaching into internals.
+const broadcastListeners = new Set();
 function broadcast(channel, payload) {
   for (const view of uiViews) {
     if (view && !view.webContents.isDestroyed()) view.webContents.send(channel, payload);
   }
+  for (const fn of broadcastListeners) { try { fn(channel, payload); } catch (_) {} }
 }
 
 // The control panel always fills the entire Automation window; each AI's live
@@ -2201,6 +2210,12 @@ async function pollSite(site) {
     // site's stop/send selectors don't match, this is false and completion falls
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
+    // Publish generation-state transitions (drives the UI dot and the service
+    // bridge's "generation" event) — the definitive "are they still speaking?".
+    if (state.generating[site] !== generating) {
+      state.generating[site] = generating;
+      broadcast("generation", { site, generating });
+    }
 
     if (!text) { state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false }; return; }
 
@@ -2715,7 +2730,10 @@ ipcMain.handle("roles:set", (_evt, { site, role }) => {
   return { ok: true, global: globalSnapshot() };
 });
 
-ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
+// The Council/roundtable start+stop, extracted so both the IPC handler (the UI)
+// and the local service bridge can drive an identical run — one code path, no
+// divergence between the two callers.
+async function startCouncil({ mode, topic, rounds }) {
   if (!HOUSE_RULES.includes(mode)) return { ok: false, error: "BAD_MODE" };
   if (state.hr.active || state.hr.pausedRouting) return { ok: false, error: "ALREADY_RUNNING" };
   if (!topic || !String(topic).trim()) return { ok: false, error: "NEEDS_TOPIC" };
@@ -2748,9 +2766,10 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
   broadcastHouseRule();
   saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot() };
-});
+}
+ipcMain.handle("houserule:start", (_evt, args) => startCouncil(args || {}));
 
-ipcMain.handle("houserule:stop", () => {
+function stopCouncil() {
   state.hr.active = false;
   // Free-for-All/Brainstorm ride on the generic routing mesh, which the poll
   // loop forwards on regardless of hr.active — clear it here too, or "Stop"
@@ -2763,7 +2782,8 @@ ipcMain.handle("houserule:stop", () => {
   broadcastHouseRule();
   saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
-});
+}
+ipcMain.handle("houserule:stop", () => stopCouncil());
 
 ipcMain.handle("houserule:pause", () => {
   if (!state.hr.mode) return { ok: false, error: "NOT_RUNNING" };
@@ -3296,6 +3316,86 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   return { ok: true, which, collapsed: entry.collapsed };
 });
 
+// --- Local service bridge: AutoInjector as a separately callable service ----
+// A thin transport layer over the SAME machinery the UI drives (sendTextTo,
+// pollSite state, the Council/House-Rules engine). It reaches nothing internal
+// on its own — every capability is handed in as a wrapper below. Localhost-only.
+function paneReady(site) {
+  const v = siteViews[site];
+  if (!v || !v.webContents || v.webContents.isDestroyed()) return false;
+  try { if (v.webContents.isLoading && v.webContents.isLoading()) return false; } catch (_) {}
+  return true;
+}
+function bridgeStatus() {
+  const participants = SITE_IDS.map((s) => ({
+    id: s,
+    label: SITES[s] ? SITES[s].label : s,
+    enabled: !!state.enabled[s],
+    ready: paneReady(s),
+    generating: !!state.generating[s],
+    waiting: !!state.waiting[s],
+    lastResponseId: state.captured[s] ? state.captured[s].id : null,
+    rateLimited: !!(state.captured[s] && state.captured[s].isRateLimited),
+  }));
+  const hr = state.hr;
+  return {
+    service: "autoinjector",
+    participants,
+    council: hr && hr.mode ? houseRuleSnapshot() : { active: false, mode: null },
+    routing: routingSnapshot(),
+    mesh: state.meshActive,
+  };
+}
+function bridgeResponses({ since = 0, limit = 100, site = null } = {}) {
+  let rows = state.transcript;
+  if (site) rows = rows.filter((t) => t.site === site);
+  if (since) rows = rows.filter((t) => t.id > since);
+  return rows.slice(-limit).map((t) => ({
+    id: t.id, site: t.site, label: t.label, text: t.text, ts: t.ts,
+    roundtableTag: t.roundtableTag || null,
+    isRateLimited: !!t.isRateLimited,
+    isVerdict: !!t.isVerdict,
+  }));
+}
+async function bridgeSendTo(site, text) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  try { dbService.recordUserMessage(String(text), [site]); } catch (_) {}
+  // Teach the reply envelope, same as the UI's Compose path, so the reply comes
+  // back with its [FROM:] tag and is captured on the baseline path.
+  return sendTextTo(site, withEnvelope(String(text), site), null);
+}
+async function bridgeSendAll(text, targets) {
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  const list = (Array.isArray(targets) ? targets : SITE_IDS.filter((s) => state.enabled[s])).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  const results = {};
+  for (const s of list) results[s] = await bridgeSendTo(s, text);
+  return { results };
+}
+const serviceBridge = createServiceBridge({
+  version: "1.0.0",
+  log: logEvent,
+  status: bridgeStatus,
+  responses: bridgeResponses,
+  sendTo: bridgeSendTo,
+  sendAll: bridgeSendAll,
+  councilStart: startCouncil,
+  councilStop: async () => stopCouncil(),
+  subscribe: (fn) => { broadcastListeners.add(fn); return () => broadcastListeners.delete(fn); },
+});
+async function startServiceBridge() {
+  if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
+  const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
+  const host = process.env.AUTOINJECTOR_BRIDGE_HOST || "127.0.0.1";
+  const token = process.env.AUTOINJECTOR_BRIDGE_TOKEN || null;
+  try {
+    const r = await serviceBridge.start({ port, host, token });
+    if (r && r.ok) logEvent("bridge-started", { url: r.url, tokenProtected: !!token });
+    else logEvent("bridge-start-failed", { error: r && r.error });
+  } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
+}
+
 app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
@@ -3303,6 +3403,8 @@ app.whenReady().then(() => {
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
+  startServiceBridge();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
+app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} });
