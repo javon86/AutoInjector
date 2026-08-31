@@ -32,6 +32,16 @@ const bridge = createServiceBridge({
   councilStart: async (args) => { calls.councilStart.push(args); return args.mode ? { ok: true, houseRule: { mode: args.mode, active: true } } : { ok: false, error: 'BAD_MODE' }; },
   councilStop: async () => { calls.councilStop++; return { ok: true, houseRule: { active: false } }; },
   subscribe: (fn) => { listener = fn; return () => { listener = null; }; },
+  interpreter: {
+    status: () => ({ configured: true, enabled: true, endpoint: 'http://127.0.0.1:9/run', model: 'local', autoRun: false }),
+    configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:9/run' }),
+    run: async (task, { onEvent }) => {
+      calls.interpreterRun = task;
+      onEvent({ type: 'code', format: 'python', content: 'print(1)' });
+      onEvent({ type: 'output', content: '1' });
+      return { ok: true, message: `ran: ${task}`, events: [{ type: 'code' }, { type: 'output' }] };
+    },
+  },
 });
 
 function req(method, path, { body, token, raw } = {}) {
@@ -113,6 +123,19 @@ async function main() {
     assert(bad.status === 400, 'a bad council start (no mode) surfaces as 400');
     const stop = await req('POST', '/council/stop', { token: TOKEN });
     assert(stop.status === 200 && calls.councilStop === 1, 'POST /council/stop stops the run');
+  }
+
+  console.log('\n== Open Interpreter (code execution) capability ==');
+  {
+    const st = await req('GET', '/interpreter/status', { token: TOKEN });
+    assert(st.status === 200 && st.json.configured === true && st.json.endpoint, 'GET /interpreter/status reports the OI endpoint');
+    const cfg = await req('POST', '/interpreter/settings', { token: TOKEN, body: { enabled: true, endpoint: 'http://127.0.0.1:9/run' } });
+    assert(cfg.status === 200 && cfg.json.ok === true, 'POST /interpreter/settings configures the adapter');
+    const run = await req('POST', '/interpreter/run', { token: TOKEN, body: { task: 'add 2 and 2' } });
+    assert(run.status === 200 && run.json.ok === true && run.json.message === 'ran: add 2 and 2', 'POST /interpreter/run executes and returns the result');
+    assert(calls.interpreterRun === 'add 2 and 2', 'the run reached the interpreter adapter with the task');
+    const noTask = await req('POST', '/interpreter/run', { token: TOKEN, body: {} });
+    assert(noTask.status === 400 && noTask.json.error === 'NEED_TASK', 'a run with no task is rejected');
   }
 
   console.log('\n== unknown route ==');

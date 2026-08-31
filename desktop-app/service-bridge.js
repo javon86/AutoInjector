@@ -40,6 +40,8 @@ function createServiceBridge(deps) {
   const subscribe = d.subscribe || null;
   const log = d.log || (() => {});
   const version = d.version || '1.0.0';
+  // Optional "run code / control computer" capability (Open Interpreter).
+  const interpreter = d.interpreter || null; // { status(), configure(patch), run(task, {onEvent}) }
 
   let server = null;
   let unsub = null;
@@ -138,6 +140,29 @@ function createServiceBridge(deps) {
       if (method === 'POST' && path === '/council/stop') {
         const r = await councilStop();
         return reply(res, 200, Object.assign({ ok: true }, r));
+      }
+      // --- Open Interpreter (code execution / computer control) ---
+      if (interpreter && method === 'GET' && path === '/interpreter/status') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(interpreter.status) || {}));
+      }
+      if (interpreter && method === 'POST' && path === '/interpreter/settings') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const s = interpreter.configure ? interpreter.configure(body || {}) : (safeCall(interpreter.status) || {});
+        return reply(res, 200, Object.assign({ ok: true }, s));
+      }
+      if (interpreter && method === 'POST' && path === '/interpreter/run') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        if (!body.text && !body.task) return reply(res, 400, { ok: false, error: 'NEED_TASK' });
+        // Stream each execution event over SSE as it happens; return the final
+        // result on the HTTP response so a simple caller can just await it.
+        const r = await interpreter.run(String(body.task || body.text), { onEvent: (ev) => emit('interpreter', ev) });
+        emit('interpreter', { type: 'done' });
+        return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
+      }
+      if (!interpreter && (path === '/interpreter/status' || path === '/interpreter/run' || path === '/interpreter/settings')) {
+        return reply(res, 501, { ok: false, error: 'INTERPRETER_NOT_WIRED' });
       }
       if (method === 'GET' && path === '/events') {
         res.writeHead(200, {

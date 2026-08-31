@@ -30,6 +30,7 @@ const ollamaManager = require("./ollama-manager");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
 const { createServiceBridge } = require("./service-bridge");
+const interpreterProvider = require("./interpreter-provider");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -3383,7 +3384,24 @@ const serviceBridge = createServiceBridge({
   councilStart: startCouncil,
   councilStop: async () => stopCouncil(),
   subscribe: (fn) => { broadcastListeners.add(fn); return () => broadcastListeners.delete(fn); },
+  // Open Interpreter "run code / control computer" capability, exposed through
+  // the same local API so the merged system (PersonalJarvis, etc.) can drive it.
+  interpreter: {
+    status: () => interpreterProvider.status(),
+    configure: (patch) => interpreterProvider.setSettings(patch),
+    run: (task, o) => interpreterProvider.run(task, o),
+  },
 });
+// Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.
+if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
+  interpreterProvider.setSettings({
+    enabled: true,
+    endpoint: process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT,
+    model: process.env.AUTOINJECTOR_INTERPRETER_MODEL || "",
+    apiKey: process.env.AUTOINJECTOR_INTERPRETER_TOKEN || "",
+    autoRun: process.env.AUTOINJECTOR_INTERPRETER_AUTORUN === "1",
+  });
+}
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
