@@ -40,16 +40,6 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     fireLog: (entry) => logCb && logCb(entry),
     fireTunerState: (payload) => tunerStateCb && tunerStateCb(payload),
     sendCompose: noop, sendForward: noop, regenerate: noop,
-    atelierStart: async (id) => { calls.push({ fn: "atelierStart", id }); return { ok: true, status: null }; },
-    atelierRequirements: async (id, body, mandatory) => { calls.push({ fn: "atelierRequirements", id, body, mandatory }); return { ok: true, status: null }; },
-    atelierAdvance: async (id) => { calls.push({ fn: "atelierAdvance", id }); return { ok: true, status: null }; },
-    atelierStatus: async (id) => { calls.push({ fn: "atelierStatus", id }); return { ok: true, status: null }; },
-    onAtelierStatus: (cb) => { api.fireAtelierStatus = (p) => cb(p); },
-    onAtelierNote: () => {},
-    bookRecordStart: async (id) => { calls.push({ fn: "bookRecordStart", id }); return { ok: true, file: "conversation-log.txt" }; },
-    bookRecordStop: async () => { calls.push({ fn: "bookRecordStop" }); return { ok: true, active: false, count: 3 }; },
-    bookRecordStatus: async () => ({ ok: true, recording: { active: false, count: 0 } }),
-    onBookRecording: (cb) => { api.fireBookRecording = (p) => cb(p); },
     setRouting: async (source, target, on) => {
       calls.push({ fn: "setRouting", source, target, on });
       if (on) { if (!routing[source].includes(target)) routing[source].push(target); }
@@ -180,14 +170,14 @@ async function testUtilityPanelHeadingCollapses() {
   console.log("\n== Utility panel heading is a clickable collapse target (accessibility) ==");
   const dom = await loadWindow(makeApi());
   const doc = dom.window.document;
-  const panel = doc.getElementById("col-memory");
+  const panel = doc.getElementById("col-systemai");
   const h2 = panel.querySelector(".yc-head h2");
   assert(!!h2, "the panel heading exists");
   assert(h2.getAttribute("role") === "button" && h2.getAttribute("tabindex") === "0", "heading is exposed as a keyboard-focusable button");
   assert(!panel.classList.contains("hidden-collapsed"), "panel starts expanded");
   h2.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   assert(panel.classList.contains("hidden-collapsed"), "clicking the heading collapses the panel");
-  assert(!!doc.getElementById("tab-memory"), "a tab appears in the top strip when collapsed");
+  assert(!!doc.getElementById("tab-systemai"), "a tab appears in the top strip when collapsed");
 }
 
 async function testWindowTitlebarCollapse() {
@@ -632,7 +622,6 @@ async function testUserPanelMergedAndNeverCollapses() {
   assert(!!panel, "the merged User Panel exists");
   assert(panel.contains(doc.getElementById("composer-text")), "Compose lives inside it");
   assert(panel.contains(doc.getElementById("p-chatgpt")) && panel.contains(doc.getElementById("p-claude")) && panel.contains(doc.getElementById("p-gemini")), "the participant checkboxes live inside it too");
-  assert(panel.contains(doc.getElementById("btn-attach-document")), "Attach Document lives inside it");
   assert(panel.contains(doc.getElementById("btn-open-roles")), "the Roles trigger lives inside it");
   assert(panel.contains(doc.getElementById("btn-open-sequence")), "Prompt Sequence's trigger now lives inside it too, not in House Rules");
   assert(!panel.querySelector(".collapse-btn"), "it has no collapse button of its own -- unlike Global/House Rules/Prompt Library, it never minimizes");
@@ -969,60 +958,9 @@ async function main() {
   await testPromptLibraryNewAndEditOpenThePopup();
   await testPromptLibraryDelete();
   await testPromptLibraryLiveSync();
-  await testAtelierCockpitRendersDerivedState();
-  await testConversationRecorderIndicator();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
-}
-
-async function testAtelierCockpitRendersDerivedState() {
-  console.log("\n== ATELIER v3 cockpit projects the derived record set (state/next/blockers/quarantine) ==");
-  const api = makeApi();
-  const dom = await loadWindow(api);
-  const doc = dom.window.document;
-  assert(doc.getElementById("atelier-cockpit") && doc.getElementById("btn-ax-start") && doc.getElementById("btn-ax-advance") && doc.getElementById("ax-req"),
-    "the cockpit panel and its controls are present");
-
-  // A derived status broadcast from the engine updates the cockpit live (bookId
-  // null matches the default selection so the wiring path is exercised end-to-end).
-  api.fireAtelierStatus({ bookId: null, status: {
-    state: "PRODUCTION",
-    chapters: { "CH-1": "LOCKED", "CH-2": "REVISION" },
-    nextActions: [{ kind: "REVIEW", function: "CANON", key: "CH-2" }, { kind: "LOCK", key: "CH-2" }],
-    blockers: [{ subject: "CH-2", reasons: ["a review FAILed"] }],
-    quarantine: [{ code: "E-CAP-060", job_id: "JOB-7" }],
-  } });
-  assert(doc.getElementById("ax-state").textContent === "PRODUCTION", "the derived book state is shown");
-  const next = doc.getElementById("ax-next-text").textContent;
-  assert(/CANON review of CH-2/.test(next) && /\+1 more/.test(next), "the next safe action (plus a count of the others) is shown");
-  const chips = doc.getElementById("ax-chapters").textContent;
-  assert(/CH-1: LOCKED/.test(chips) && /CH-2: REVISION/.test(chips), "each chapter's derived state is chipped");
-  assert(/a review FAILed/.test(doc.getElementById("ax-blockers").textContent), "blockers show the gate's reasons");
-  assert(/E-CAP-060/.test(doc.getElementById("ax-quarantine").textContent), "the quarantine feed shows rejection codes");
-
-  // With no book selected, Start is a no-op that does not call the engine.
-  click(dom, "btn-ax-start");
-  await new Promise((r) => setTimeout(r, 0));
-  assert(!api.calls.some((c) => c.fn === "atelierStart"), "Start Engine is guarded until a book is selected");
-}
-
-async function testConversationRecorderIndicator() {
-  console.log("\n== Conversation recorder: the Record/Stop indicator reflects live recording state ==");
-  const api = makeApi();
-  const dom = await loadWindow(api);
-  const doc = dom.window.document;
-  assert(doc.getElementById("btn-book-record") && doc.getElementById("btn-book-record-stop"), "Record and Stop controls are present");
-  // A live broadcast that recording started flips the UI.
-  api.fireBookRecording({ active: true, count: 7, bookId: "b1" });
-  assert(doc.getElementById("btn-book-record").style.display === "none" && doc.getElementById("btn-book-record-stop").style.display !== "none",
-    "while recording, Record hides and Stop shows");
-  assert(/7 messages/.test(doc.getElementById("book-record-status").textContent), "the indicator shows the running message count");
-  // Stopping calls the engine and clears the indicator.
-  click(dom, "btn-book-record-stop");
-  await new Promise((r) => setTimeout(r, 0));
-  assert(api.calls.some((c) => c.fn === "bookRecordStop"), "Stop Recording calls book:record-stop");
-  assert(doc.getElementById("btn-book-record-stop").style.display === "none", "after stopping, the Stop button hides again");
 }
 
 main().catch((e) => {

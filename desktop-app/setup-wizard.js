@@ -1,15 +1,12 @@
-// setup-wizard.js — renderer for the Setup Wizard window.
-// Reads the hardware scan + machine-matched catalog from the main process,
-// lets the user queue downloads (Ollama models to start), and shows a live
-// Downloads tray. The actual downloads run in the main process, so they keep
-// going even if this window is closed.
+// setup-wizard.js — renderer for the Setup Wizard window. Helps set up a local
+// AI (Ollama) for the optional System AI helper: lists recommended models and
+// pulls them via the main process. Model pulls run in the main process, so they
+// keep going even if this window is closed.
 const el = (id) => document.getElementById(id);
-// Escape any dynamic string before it goes into innerHTML (hardware/model names,
-// job labels). App-controlled today, but cheap defense-in-depth against markup.
+// Escape any dynamic string before it goes into innerHTML (model names, notes).
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 // NOTE: don't name this `api` — Electron's contextBridge already exposes a
-// global `api` in the page, and a top-level `const api` throws "Identifier
-// 'api' has already been declared", which would kill this whole script.
+// global `api`, and a top-level `const api` would throw "already declared".
 const dl = window.api || {};
 
 // ---- Tabs ----
@@ -20,65 +17,18 @@ for (const tab of document.querySelectorAll(".tab")) {
   };
 }
 
-function fmtSystem(rep) {
-  if (!rep) return "Couldn't read your hardware.";
-  const s = rep.snapshot || {}, r = rep.recommendation || null;
-  if (s.error) return s.error;
-  const gpu = (s.gpus && s.gpus[0]) ? `${esc(s.gpus[0].model)}${s.gpus[0].vramGB ? ` · ${s.gpus[0].vramGB} GB VRAM` : ""}` : "no dedicated GPU";
-  const ram = s.mem && s.mem.totalGB ? `${s.mem.totalGB} GB RAM` : "";
-  const line1 = `Your machine: <b>${gpu}</b>${ram ? ` · ${ram}` : ""}`;
-  const line2 = r ? `You can comfortably run — local models: <b>${r.llm.tier}</b>; Stable Diffusion: <b>${r.sd.tier}</b>` : "";
-  return line2 ? `${line1}<br>${line2}` : line1;
-}
-
-// ---- Catalog / model list ----
+// ---- Catalog ----
 let catalog = null;
 async function loadCatalog() {
   if (!dl.wizardCatalog) return;
   const c = await dl.wizardCatalog();
   catalog = c && c.ok ? c : null;
-  el("scan").innerHTML = fmtSystem(catalog && catalog.system);
   renderOllamaState();
   renderModels();
-  renderEngineAndModels(catalog && catalog.images, "sd-engine", "sd-model-list", "sd-modelsdir");
-  renderEngineAndModels(catalog && catalog.video, "video-engine", "video-model-list", "video-modelsdir");
   renderInstallers();
 }
 
-// ---- Shared engine + model-list renderer (Images and Video tabs) ----
-function renderEngineAndModels(cat, engineId, listId, dirId) {
-  const eng = el(engineId), list = el(listId), dir = el(dirId);
-  if (!eng || !list) return;
-  if (!cat) { list.innerHTML = '<div class="muted">Not available.</div>'; return; }
-  // Engine card (guided install — opens the engine's page in the browser).
-  eng.innerHTML = "";
-  const e = document.createElement("div");
-  e.className = "item";
-  e.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(cat.engine.name)} <span class="why">— engine</span></div><div class="why">${esc(cat.engine.note)}</div></div>`;
-  const link = document.createElement("button");
-  link.className = "primary";
-  link.textContent = `Get ${cat.engine.name} ↗`;
-  link.onclick = () => dl.openExternal && dl.openExternal(cat.engine.url);
-  e.appendChild(link);
-  eng.appendChild(e);
-  // Model cards.
-  list.innerHTML = "";
-  for (const m of cat.models || []) {
-    const row = document.createElement("div");
-    row.className = "item";
-    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(m.label)} <span class="why">${esc(m.sizeLabel || "")}</span></div>` +
-      `<div class="${m.ok ? "why" : "warn"}">${esc(m.why || "")}</div></div>`;
-    const btn = document.createElement("button");
-    btn.className = "primary";
-    btn.textContent = "⬇ Download";
-    btn.onclick = () => queue({ kind: m.kind, url: m.url, filename: m.filename, label: m.label, category: m.category }, btn);
-    row.appendChild(btn);
-    list.appendChild(row);
-  }
-  if (dir) dir.textContent = cat.modelsDir ? `Models download to: ${cat.modelsDir} (point the engine's models folder here, or copy them over).` : "";
-}
-
-// ---- Advanced tab: guided installers (Ollama, Python) ----
+// ---- Advanced tab: guided installers (Ollama) ----
 function renderInstallers() {
   const box = el("advanced-installers");
   if (!box) return;
@@ -111,7 +61,7 @@ function renderOllamaState() {
   const ok = catalog && catalog.ollama && catalog.ollama.available;
   box.innerHTML = "";
   if (ok) { box.textContent = "Ollama is installed ✓ — pick models below to download."; return; }
-  box.innerHTML = 'Ollama isn\'t installed yet. Install it, then reopen this wizard. You can still queue models below; they\'ll download once Ollama is available. ';
+  box.innerHTML = 'Ollama isn\'t installed yet. Install it, then reopen this wizard. ';
   const btn = document.createElement("button");
   btn.className = "primary";
   btn.textContent = "Install Ollama ↗";
@@ -130,11 +80,11 @@ function renderModels() {
   for (const m of models) {
     const row = document.createElement("div");
     row.className = "item";
-    row.innerHTML = `<span class="name">${esc(m.model)}</span><span class="why">recommended for your machine</span><span class="spacer"></span>`;
+    row.innerHTML = `<span class="name">${esc(m.model)}</span><span class="why">recommended local model</span><span class="spacer" style="flex:1"></span>`;
     const btn = document.createElement("button");
     btn.className = "primary";
     btn.textContent = "⬇ Download";
-    btn.onclick = () => queue(m, btn);
+    btn.onclick = () => pull(m.model, btn);
     row.appendChild(btn);
     list.appendChild(row);
   }
@@ -143,55 +93,21 @@ for (const r of document.querySelectorAll('input[name="runtime"]')) {
   r.onchange = () => { renderOllamaState(); renderModels(); };
 }
 
-async function queue(spec, btn) {
-  if (!dl.downloadsEnqueue) return;
-  if (btn) { btn.disabled = true; btn.textContent = "Queued ✓"; }
-  await dl.downloadsEnqueue({
-    kind: spec.kind,
-    model: spec.model,
-    url: spec.url,
-    filename: spec.filename,
-    label: spec.label || spec.model,
-    category: spec.category,
+// Pull an Ollama model through the main process (progress streams back).
+async function pull(model, btn) {
+  if (!dl.ollamaPull) return;
+  if (btn) { btn.disabled = true; btn.textContent = "Downloading…"; }
+  try {
+    const r = await dl.ollamaPull(model);
+    if (btn) btn.textContent = r && r.ok ? "Done ✓" : "Failed";
+  } catch (_) { if (btn) btn.textContent = "Failed"; }
+}
+if (dl.onOllamaProgress) {
+  dl.onOllamaProgress(({ model, line, done }) => {
+    const box = el("ollama-progress");
+    if (box) box.textContent = `${model || ""}: ${line || ""}`;
   });
-  refreshTray();
 }
-
-// ---- Downloads tray ----
-const STATUS_LABEL = { queued: "queued", running: "downloading", done: "done ✓", failed: "failed", canceled: "canceled" };
-function renderJobs(jobs) {
-  const list = el("tray-list");
-  if (!list) return;
-  list.innerHTML = "";
-  const active = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
-  el("tray-count").textContent = active ? `(${active} active)` : "";
-  for (const j of jobs) {
-    const box = document.createElement("div");
-    box.className = `job ${j.status}`;
-    const pct = j.status === "done" ? 100 : (j.progress || 0);
-    box.innerHTML =
-      `<div class="top"><span class="jname">${esc(j.label)}</span>` +
-      `<span class="jstatus">${STATUS_LABEL[j.status] || j.status}${j.status === "running" && pct ? ` ${pct}%` : ""}</span>` +
-      `<span class="spacer"></span></div>` +
-      `<div class="bar"><div class="fill" style="width:${pct}%"></div></div>` +
-      `<div class="detail">${esc(j.detail || "")}</div>`;
-    if (j.status === "running" || j.status === "queued") {
-      const x = document.createElement("button");
-      x.className = "x"; x.textContent = "✕"; x.title = "Cancel";
-      x.onclick = () => dl.downloadsCancel && dl.downloadsCancel(j.id).then(refreshTray);
-      box.querySelector(".top").appendChild(x);
-    }
-    list.appendChild(box);
-  }
-}
-async function refreshTray() {
-  if (!dl.downloadsList) return;
-  const r = await dl.downloadsList();
-  if (r && r.ok) renderJobs(r.jobs);
-}
-if (dl.onDownloadsChanged) dl.onDownloadsChanged((jobs) => renderJobs(jobs || []));
-if (el("btn-clear-finished")) el("btn-clear-finished").onclick = () => dl.downloadsClearFinished && dl.downloadsClearFinished().then(refreshTray);
 
 // ---- Boot ----
 loadCatalog();
-refreshTray();
