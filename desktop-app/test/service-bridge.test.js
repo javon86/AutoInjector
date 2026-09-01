@@ -32,6 +32,11 @@ const bridge = createServiceBridge({
   councilStart: async (args) => { calls.councilStart.push(args); return args.mode ? { ok: true, houseRule: { mode: args.mode, active: true } } : { ok: false, error: 'BAD_MODE' }; },
   councilStop: async () => { calls.councilStop++; return { ok: true, houseRule: { active: false } }; },
   subscribe: (fn) => { listener = fn; return () => { listener = null; }; },
+  jarvis: {
+    status: () => ({ manager: { taskId: null, status: 'idle', codeRuns: [] } }),
+    start: async (goal) => { calls.jarvisGoal = goal; return { manager: { taskId: 'T1', status: 'classifying', userRequest: goal } }; },
+    stop: async () => { calls.jarvisStop = true; return { ok: true }; },
+  },
   interpreter: {
     status: () => ({ configured: true, enabled: true, endpoint: 'http://127.0.0.1:9/run', model: 'local', autoRun: false }),
     configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:9/run' }),
@@ -136,6 +141,19 @@ async function main() {
     assert(calls.interpreterRun === 'add 2 and 2', 'the run reached the interpreter adapter with the task');
     const noTask = await req('POST', '/interpreter/run', { token: TOKEN, body: {} });
     assert(noTask.status === 400 && noTask.json.error === 'NEED_TASK', 'a run with no task is rejected');
+  }
+
+  console.log('\n== Jarvis orchestrator (native supervisor) ==');
+  {
+    const st = await req('GET', '/jarvis/status', { token: TOKEN });
+    assert(st.status === 200 && st.json.manager && st.json.manager.status === 'idle', 'GET /jarvis/status returns the supervisor state');
+    const start = await req('POST', '/jarvis/start', { token: TOKEN, body: { goal: 'summarize the news and compute a total' } });
+    assert(start.status === 200 && start.json.manager && start.json.manager.taskId === 'T1', 'POST /jarvis/start kicks off a task');
+    assert(calls.jarvisGoal === 'summarize the news and compute a total', 'the goal reached the orchestrator');
+    const noGoal = await req('POST', '/jarvis/start', { token: TOKEN, body: {} });
+    assert(noGoal.status === 400 && noGoal.json.error === 'NEED_GOAL', 'a start with no goal is rejected');
+    const stop = await req('POST', '/jarvis/stop', { token: TOKEN });
+    assert(stop.status === 200 && calls.jarvisStop === true, 'POST /jarvis/stop stops the task');
   }
 
   console.log('\n== unknown route ==');

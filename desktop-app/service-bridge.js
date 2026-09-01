@@ -27,6 +27,8 @@ const CHANNEL_MAP = {
   generation: 'generation',
   'houserule-state': 'council',
   'waiting-changed': 'status',
+  'manager-state': 'jarvis',
+  'manager-log': 'jarvis-log',
 };
 
 function createServiceBridge(deps) {
@@ -42,6 +44,9 @@ function createServiceBridge(deps) {
   const version = d.version || '1.0.0';
   // Optional "run code / control computer" capability (Open Interpreter).
   const interpreter = d.interpreter || null; // { status(), configure(patch), run(task, {onEvent}) }
+  // Optional native "Jarvis" orchestrator (the System AI supervisor): give it a
+  // goal and it plans, delegates to the Council + runs code, with a critic gate.
+  const jarvis = d.jarvis || null; // { start(goal), stop(), status() }
 
   let server = null;
   let unsub = null;
@@ -163,6 +168,25 @@ function createServiceBridge(deps) {
       }
       if (!interpreter && (path === '/interpreter/status' || path === '/interpreter/run' || path === '/interpreter/settings')) {
         return reply(res, 501, { ok: false, error: 'INTERPRETER_NOT_WIRED' });
+      }
+      // --- Jarvis orchestrator (the native supervisor over the whole system) ---
+      if (jarvis && method === 'GET' && path === '/jarvis/status') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(jarvis.status) || {}));
+      }
+      if (jarvis && method === 'POST' && path === '/jarvis/start') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const goal = body.goal || body.task || body.text;
+        if (!goal) return reply(res, 400, { ok: false, error: 'NEED_GOAL' });
+        const r = await jarvis.start(String(goal));
+        return reply(res, 200, Object.assign({ ok: true }, r && r.manager ? { manager: r.manager } : r));
+      }
+      if (jarvis && method === 'POST' && path === '/jarvis/stop') {
+        const r = await jarvis.stop();
+        return reply(res, 200, Object.assign({ ok: true }, r));
+      }
+      if (!jarvis && (path === '/jarvis/status' || path === '/jarvis/start' || path === '/jarvis/stop')) {
+        return reply(res, 501, { ok: false, error: 'JARVIS_NOT_WIRED' });
       }
       if (method === 'GET' && path === '/events') {
         res.writeHead(200, {

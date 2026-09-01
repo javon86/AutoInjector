@@ -278,6 +278,7 @@ function resetManagerTask() {
     completedAssignments: [], // { target, task, response, ts }
     latestResponses: { chatgpt: null, claude: null, gemini: null },
     allResponses: [], // { id, target, text, ts } — every response ever captured for this task, never overwritten
+    codeRuns: [], // { id, task, ok, message, error, ts } — RUN_CODE results (Open Interpreter), so the manager can build on them
     conflicts: [],
     missingRequirements: [],
     previousManagerActions: [], // the last N validated decisions, for the model's own context
@@ -369,6 +370,10 @@ function validateManagerAction(decision) {
   if (decision.action === "ESCALATE") {
     const tier = Number(decision.toTier);
     if (!Number.isInteger(tier) || tier < 1 || tier > 4) return { ok: false, error: "BAD_TIER" };
+  }
+
+  if (decision.action === "RUN_CODE") {
+    if (typeof decision.task !== "string" || !decision.task.trim()) return { ok: false, error: "MISSING_TASK" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -917,6 +922,7 @@ function managerSnapshot() {
     activeAssignments: m.activeAssignments,
     completedAssignments: m.completedAssignments,
     latestResponses: { ...m.latestResponses },
+    codeRuns: m.codeRuns,
     conflicts: m.conflicts,
     missingRequirements: m.missingRequirements,
     previousManagerActions: m.previousManagerActions,
@@ -1707,7 +1713,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -1844,6 +1850,33 @@ async function executeManagerAction(decision) {
     case "PAUSE":
       m.status = "paused";
       break;
+    case "RUN_CODE": {
+      // The supervisor's non-AI arm: run a coding/computer task through Open
+      // Interpreter (a sandboxed local agent), then fold the result back into
+      // the task so the next turn can use it. This is what makes the native
+      // orchestrator a full "Jarvis" — it can act on the machine, not only
+      // delegate to the three web AIs.
+      m.status = "running-code";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await interpreterProvider.run(decision.task, {
+          onEvent: (ev) => logManagerEvent({ category: "code", summary: `code:${ev.type}${ev.format ? "(" + ev.format + ")" : ""}`, details: ev }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      const entry = { id: m.codeRuns.length + 1, task: decision.task, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.codeRuns.push(entry);
+      if (m.codeRuns.length > 30) m.codeRuns.shift();
+      logManagerEvent({
+        category: "code",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Code run complete (${entry.message.length} chars)` : `Code run unavailable/failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling"; // an active status so the loop continues on the next turn
+      await runManagerTurn();
+      break;
+    }
     case "FINISH":
       await finishManagedTask({ ok: true });
       break;
@@ -3439,6 +3472,13 @@ const serviceBridge = createServiceBridge({
     status: () => interpreterProvider.status(),
     configure: (patch) => interpreterProvider.setSettings(patch),
     run: (task, o) => interpreterProvider.run(task, o),
+  },
+  // The native "Jarvis": AutoInjector's System AI supervisor, which plans and
+  // orchestrates the Council (the 3 web AIs) + Open Interpreter to reach a goal.
+  jarvis: {
+    status: () => ({ manager: managerSnapshot() }),
+    start: async (goal) => startManagedTask(goal),
+    stop: async () => stopManagedTask(),
   },
 });
 // Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.

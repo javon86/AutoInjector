@@ -58,6 +58,13 @@ function queueManagerDecision(decision) { managerAskQueue.push({ ok: true, decis
 function queueManagerDecisionRepeating(decision) { managerAskRepeat = { ok: true, decision }; }
 function resetManagerStub() { managerAskQueue = []; managerAskRepeat = null; managerAskCalls = []; }
 
+// The Open Interpreter capability is stubbed the same way — main.js's
+// `require("./interpreter-provider")` resolves to this exact module, so
+// overriding run() intercepts the manager's RUN_CODE action without a real OI.
+const interpreterProvider = require(path.join(__dirname, "..", "interpreter-provider"));
+let interpreterRunCalls = [];
+interpreterProvider.run = async (task) => { interpreterRunCalls.push(task); return { ok: true, message: `ran: ${task}`, events: [{ type: "output", content: "42" }] }; };
+
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
 let failed = 0;
@@ -2009,6 +2016,39 @@ async function testExtractAllLogs() {
   assert(/[\\/]logs[\\/]/.test(res.file) && /\.txt$/.test(res.file), "it saves into the program's logs/ folder as a .txt");
 }
 
+// Jarvis brought native: the System AI supervisor can now RUN_CODE — delegate a
+// coding/computer task to Open Interpreter and fold the result back into the run.
+async function testManagerRunCodeAction() {
+  console.log("\n== Jarvis: the supervisor's RUN_CODE action executes code via Open Interpreter and continues ==");
+  resetManagerStub();
+  interpreterRunCalls = [];
+  // The manager decides to run code, then finishes once it has the result.
+  queueManagerDecision({ action: "RUN_CODE", task: "compute 6 times 7", reason: "needs a real calculation", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the answer", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "what is 6*7, actually run it" });
+  assert(started && started.ok, "the Jarvis/manager task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.codeRuns && s.manager.codeRuns.length));
+  }, { label: "the manager runs the code step" });
+  const st = await call("manager:get-state", {});
+  assert(interpreterRunCalls.includes("compute 6 times 7"), "RUN_CODE reached Open Interpreter with the task");
+  assert(st.manager.codeRuns && st.manager.codeRuns.length >= 1 && /ran: compute 6 times 7/.test(st.manager.codeRuns[0].message),
+    "the code result is folded back into the task as a codeRuns entry");
+  await call("manager:stop", {});
+
+  // A RUN_CODE with no task must be rejected (invalid action), not executed.
+  resetManagerStub();
+  interpreterRunCalls = [];
+  queueManagerDecisionRepeating({ action: "RUN_CODE", reason: "no task field on purpose", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "malformed run-code" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(interpreterRunCalls.length === 0, "a RUN_CODE decision with no task is rejected and never reaches Open Interpreter");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "RUN_CODE" && a.rejected), "the malformed RUN_CODE is recorded as rejected");
+  await call("manager:stop", {});
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2095,6 +2135,7 @@ async function main() {
   await testTunerDistinguishesForwardFailureFromNoReply();
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
+  await testManagerRunCodeAction();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();
   await testManagerEscalateActionAndTierFourAdjudication();

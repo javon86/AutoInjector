@@ -38,7 +38,20 @@ All responses are JSON with an `ok` boolean. Participant ids are `chatgpt`,
 | `POST /send` | `{ text, targets? }` | send to all enabled participants (or the given `targets`) |
 | `POST /council/start` | `{ mode, topic, rounds? }` | start a Council/roundtable run |
 | `POST /council/stop` | — | stop the current run |
+| `GET /interpreter/status` | — | Open Interpreter capability status |
+| `POST /interpreter/settings` | `{endpoint, model, enabled, autoRun}` | configure Open Interpreter |
+| `POST /interpreter/run` | `{task}` | run a coding/computer task; streams `interpreter` events |
+| `GET /jarvis/status` | — | the native Jarvis supervisor state (`{manager:{…}}`) |
+| `POST /jarvis/start` | `{goal}` | give Jarvis a goal; it plans, delegates to the Council, and runs code to reach it |
+| `POST /jarvis/stop` | — | stop the current Jarvis task |
 | `GET /events` | — | **SSE** live event stream (see below) |
+
+**Jarvis** is AutoInjector's own supervisor (the System AI): given a goal it
+plans, delegates writing/research to the Council (chatgpt/claude/gemini), and
+uses the `RUN_CODE` action to run code / operate the computer through Open
+Interpreter — all with a critic/verify gate. It needs a local supervisor model
+configured (System AI panel) to think, and Open Interpreter configured for the
+code arm. SSE events: `jarvis` (supervisor state) and `jarvis-log`.
 
 A **participant** entry: `{ id, label, enabled, ready, generating, waiting,
 lastResponseId, rateLimited }`. `generating` is the live "is this AI still

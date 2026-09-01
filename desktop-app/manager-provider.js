@@ -31,14 +31,17 @@ const DEFAULT_TIMEOUT_MS = 180000;
 const MANAGER_ACTIONS = [
   "CLASSIFY", "PLAN", "DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE",
   "VERIFY", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE", "SAVE", "EXPORT",
-  "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL"
+  "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL",
+  "RUN_CODE"
 ];
 
 const MANAGER_SYSTEM_PROMPT = `You are the manager/orchestrator for AutoInjector, a program that relays work between three AI assistants (ChatGPT, Claude, Gemini) reachable only through the "target" names chatgpt, claude, and gemini. You are a supervisor, not the primary worker: delegate substantive writing, research, analysis, and problem-solving to them whenever possible. Only do work yourself when delegation is unavailable or unnecessary (e.g. classifying a request, deciding on a plan, or judging whether a result satisfies the user).
 
 You must respond with a single JSON object and nothing else -- no prose, no markdown fences, no commentary before or after it. The object must have an "action" field set to exactly one of: ${MANAGER_ACTIONS.join(", ")}. Include whatever other fields that action needs (for example DELEGATE needs an "assignments" array of {"target": "chatgpt"|"claude"|"gemini", "task": "..."} objects). Always include a short "reason" field explaining the decision, and a "confidence" field from 0 to 1.
 
-You may only target chatgpt, claude, or gemini. Never propose executing arbitrary code, navigating a browser to an arbitrary destination, or accessing credentials, cookies, or browser storage -- those requests will be rejected and logged as violations, not executed.`;
+You also command one non-AI capability: RUN_CODE. When a step needs actual code run or the computer operated (compute something, read/transform a file, run a script, check the system), respond with {"action":"RUN_CODE","task":"<plain-language task>","reason":"..."}. That task is carried out by Open Interpreter, a separate sandboxed local agent with its own confirmation controls -- its result (the assistant summary plus the code it ran and the output) comes back to you as a codeRuns entry on the next turn, and you fold it into the deliverable like any other result. Prefer delegating writing/research/analysis to chatgpt/claude/gemini; use RUN_CODE for genuine execution.
+
+For DELEGATE/SEND/FORWARD/COMPARE/CRITIQUE/VERIFY you may only target chatgpt, claude, or gemini. Never propose running code INSIDE those chat pages, navigating a browser to an arbitrary destination, or accessing their credentials, cookies, or browser storage -- those requests will be rejected and logged as violations. Real code execution goes through the RUN_CODE action only.`;
 
 // Keeps the prompt sent to a (likely smaller, cheaper) manager model bounded
 // -- allResponses in particular can grow large over a long-running task, so
@@ -63,6 +66,9 @@ function buildManagerPrompt(managerState) {
     ),
     conflicts: managerState.conflicts,
     missingRequirements: managerState.missingRequirements,
+    codeRuns: (managerState.codeRuns || []).slice(-6).map((c) => ({
+      id: c.id, task: cap(c.task), ok: c.ok, message: cap(c.message), error: c.error || null,
+    })),
     previousManagerActions: (managerState.previousManagerActions || []).slice(-10),
     currentTier: managerState.currentTier,
     turnNumber: managerState.turnNumber,
