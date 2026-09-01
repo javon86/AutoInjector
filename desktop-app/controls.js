@@ -1261,6 +1261,27 @@ el("btn-clear").onclick = async () => {
   if (res?.ok) renderTranscript([]);
 };
 
+// Extract All: save the whole conversation + the full activity/error log to one
+// text file in the program's logs folder (main writes it; nothing is truncated).
+el("btn-extract-all").onclick = async () => {
+  const status = el("extract-status");
+  const btn = el("btn-extract-all");
+  if (status) status.textContent = "Extracting…";
+  if (btn) btn.disabled = true;
+  try {
+    const res = await window.api.extractAllLogs();
+    if (res && res.ok) {
+      if (status) status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`;
+    } else if (status) {
+      status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
+    }
+  } catch (e) {
+    if (status) status.textContent = `Extract failed: ${e && e.message ? e.message : e}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
 (async () => {
   buildComposerButtons();
   buildRoleAssignment();

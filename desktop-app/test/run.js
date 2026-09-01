@@ -1988,6 +1988,27 @@ async function testGeneratingGatesCapture() {
   assert(sentLog("chatgpt").length >= 1 && sentLog("claude").length >= 1, "and it relays onward exactly as a normal completed reply");
 }
 
+// Extract All: dumps the whole conversation AND the full activity/error log to a
+// text file in the program's logs folder, from in-memory state (so nothing is
+// truncated by a long/streaming on-screen window).
+async function testExtractAllLogs() {
+  console.log("\n== Extract All writes the full conversation + activity/error log to one text file ==");
+  await resetAllParticipants();
+  // Put a real captured reply into the transcript, and a distinctive log line.
+  say("gemini", "[TO: USER] EXTRACT_MARKER_REPLY body that could be very long while streaming");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => /EXTRACT_MARKER_REPLY/.test(t.text)),
+    { label: "a reply is captured into the transcript" });
+  const before = (await call("state:get", {})).log.length;
+  const res = await call("logs:extract-all", {});
+  assert(res && res.ok && res.file, `extract wrote a file (${res && res.file})`);
+  assert(res.messages >= 1 && res.logEntries >= before, `it reports the counts (msgs=${res.messages}, log=${res.logEntries})`);
+  const text = fs.readFileSync(res.file, "utf8");
+  assert(/AI CONVERSATION/.test(text) && /ACTIVITY \/ TROUBLESHOOTING/.test(text), "the file has BOTH sections — the AI conversation and the activity/errors");
+  assert(/EXTRACT_MARKER_REPLY body that could be very long while streaming/.test(text), "the FULL reply text is in the file, not a truncated preview");
+  assert(/extract-all/.test(text) || /\bcaptured\b/.test(text), "activity-log events are included in the dump");
+  assert(/[\\/]logs[\\/]/.test(res.file) && /\.txt$/.test(res.file), "it saves into the program's logs/ folder as a .txt");
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2053,6 +2074,7 @@ async function main() {
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testGeneratingGatesCapture();
+  await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();
   await testDeliveryLedger();

@@ -447,8 +447,13 @@
         <div id="transcript"></div>
       </div>
       <div id="col-log" class="col">
-        <h2>Activity / Troubleshooting</h2>
+        <h2 style="display:flex; align-items:center; gap:6px;">
+          <span>Activity / Troubleshooting</span>
+          <span class="spacer"></span>
+          <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
+        </h2>
         <div id="activity-log"></div>
+        <div id="extract-status" style="font-size:11px; opacity:.8; margin-top:3px;"></div>
       </div>
     </div>
 

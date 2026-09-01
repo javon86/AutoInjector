@@ -2846,6 +2846,55 @@ ipcMain.handle("state:get", () => ({
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
 
+// "Extract All": dump the WHOLE conversation (what the AIs said) AND the full
+// activity/error log into one text file, saved into the program's own logs
+// folder (<Documents>/AutoInjector/output/logs). Pulled from in-memory state,
+// not the on-screen windows, so a long/streaming transcript is captured in full
+// and never cut off by what happens to be scrolled into view.
+function _ts(ms) { try { return new Date(ms).toLocaleString(); } catch (_) { return String(ms); } }
+function buildExtractText() {
+  const now = new Date();
+  const lines = [];
+  lines.push("AutoInjector — Extract All");
+  lines.push(`Generated: ${now.toLocaleString()}`);
+  lines.push(`AI messages: ${state.transcript.length} · Activity/errors: ${state.log.length}`);
+  lines.push("");
+  lines.push("========================================");
+  lines.push("AI CONVERSATION (what the language models said)");
+  lines.push("========================================");
+  if (!state.transcript.length) lines.push("(no messages captured)");
+  for (const t of state.transcript) {
+    const who = t.label || (t.site ? (SITES[t.site] ? SITES[t.site].label : t.site) : "AI");
+    const tags = [];
+    if (t.roundtableTag) tags.push(`TO:${t.roundtableTag}`);
+    if (t.isRateLimited) tags.push("RATE-LIMITED");
+    if (t.isVerdict) tags.push("VERDICT");
+    lines.push(`[${_ts(t.ts)}] ${who}${tags.length ? " (" + tags.join(", ") + ")" : ""}:`);
+    lines.push(String(t.text == null ? "" : t.text));
+    lines.push("");
+  }
+  lines.push("========================================");
+  lines.push("ACTIVITY / TROUBLESHOOTING (errors and events)");
+  lines.push("========================================");
+  if (!state.log.length) lines.push("(no activity logged)");
+  for (const e of state.log) {
+    let detail = "";
+    try { detail = e.detail == null ? "" : (typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)); } catch (_) { detail = String(e.detail); }
+    lines.push(`[${_ts(e.ts)}] ${e.kind}${detail ? " — " + detail : ""}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+ipcMain.handle("logs:extract-all", () => {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+    const file = outputManager.saveBuffer(outputManager.logsDir(), `autoinjector-extract-${stamp}.txt`, buildExtractText());
+    logEvent("extract-all", { file, messages: state.transcript.length, logEntries: state.log.length });
+    try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
+    return { ok: true, file, messages: state.transcript.length, logEntries: state.log.length };
+  } catch (e) { logEvent("extract-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
+
 ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
   const turn = state.transcript.find((t) => t.id === id);
   if (!turn) return { ok: false, error: "NOT_FOUND" };

@@ -60,6 +60,8 @@ function imagesDir() { return dir('images'); }
 function videosDir() { return dir('videos'); }
 function uploadsDir() { return dir('uploads'); }
 function aiWorkDir(site) { return ensureDir(path.join(dir('aiwork'), safeName(site, 'unknown'))); }
+/** The logs folder (output/logs) — where "Extract All" writes its text dumps. */
+function logsDir() { return dir('logs'); }
 
 /** A non-clobbering destination path inside destDir for `filename`. */
 function uniquePath(destDir, filename) {
@@ -90,6 +92,6 @@ function copyInto(destDir, srcPath, filename) {
 
 module.exports = {
   init, root, dir, safeName, uniquePath,
-  booksDir, bookDir, imagesDir, videosDir, uploadsDir, aiWorkDir,
+  booksDir, bookDir, imagesDir, videosDir, uploadsDir, aiWorkDir, logsDir,
   saveBuffer, copyInto,
 };

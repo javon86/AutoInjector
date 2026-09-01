@@ -59,6 +59,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     runTuner: async () => { calls.push({ fn: "runTuner" }); return tunerRunResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
+    extractAllLogs: async () => { calls.push({ fn: "extractAllLogs" }); return { ok: true, file: "/tmp/AutoInjector/output/logs/autoinjector-extract-x.txt", messages: 3, logEntries: 5 }; },
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -959,8 +960,23 @@ async function main() {
   await testPromptLibraryDelete();
   await testPromptLibraryLiveSync();
 
+  await testExtractAllButton();
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testExtractAllButton() {
+  console.log("\n== Extract All: the Activity/Troubleshooting panel has a button that saves everything to a file ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const btn = dom.window.document.getElementById("btn-extract-all");
+  assert(btn, "the '⤓ Extract All' button is present in the Activity / Troubleshooting header");
+  click(dom, "btn-extract-all");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "extractAllLogs"), "clicking Extract All calls extractAllLogs (dumps conversation + errors)");
+  const status = dom.window.document.getElementById("extract-status");
+  assert(status && /Saved 3 messages \+ 5 log entries/.test(status.textContent), "it shows where the file was saved, with the message + log counts");
 }
 
 main().catch((e) => {
