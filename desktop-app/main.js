@@ -2802,6 +2802,7 @@ function buildAppMenu() {
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
+        { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
         { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: "AutoInjector Desktop", detail: "Runs ChatGPT, Claude and Gemini together. See the User Guide (Help menu)." }); } },
       ] },
     ];

@@ -1,5 +1,12 @@
 # AutoInjector Desktop
 
+> 🚧 **Under construction — being updated.** Some sections reference the removed
+> book/ATELIER machinery and predate the System AI / butler, tools, memory,
+> voice, and image-generation capabilities. See
+> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md) for what's parked and
+> [`FEATURES.md`](FEATURES.md) / [`MERGE_ROADMAP.md`](MERGE_ROADMAP.md) for the
+> current inventory. Nothing here affects how the app runs.
+
 One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
 by copy/paste-style DOM automation, no API keys, using your normal logged-in

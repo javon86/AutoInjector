@@ -1,5 +1,9 @@
 # AutoInjector
 
+> 📄 **Status:** parts of the repo are parked / under construction (the ATELIER
+> book-making engine and some older docs). They're not on the app's runtime path
+> and can't affect how it runs — see [`UNDER_CONSTRUCTION.md`](UNDER_CONSTRUCTION.md).
+
 Automates the ChatGPT, Claude and Gemini **web UIs** by copy/paste-style DOM
 injection — no API keys, it drives your already-logged-in browser sessions, so
 you can get two or three AIs working on the same problem together and keep one

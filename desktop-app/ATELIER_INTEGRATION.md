@@ -1,5 +1,11 @@
 # ATELIER governance in AutoInjector Desktop
 
+> 🚧 **Under construction — this describes an UNBUILT integration.** The app does
+> **not** currently run replies through ATELIER; the ATELIER engine is parked (see
+> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md) and
+> [`atelier/_UNDER_CONSTRUCTION.md`](atelier/_UNDER_CONSTRUCTION.md)). This doc is
+> kept as the design for a future integration. It has no effect on the running app.
+
 This app can optionally run each AI reply through **ATELIER**, a book-production
 governance toolkit (vendored under [`atelier/`](atelier/)). It's **off by
 default** — with governance disabled, AutoInjector behaves exactly as it always
