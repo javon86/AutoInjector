@@ -22,6 +22,10 @@ async function main() {
       ['#btn-extract-all', 'Extract All button'],
       ['#jarvis-goal', 'Butler goal box'],
       ['#btn-jarvis-start', 'Start Butler button'],
+      ['#jarvis-tools', 'Tools registry list'],
+      ['#jarvis-awareness', 'Awareness readout'],
+      ['#voice-enabled', 'Voice toggle'],
+      ['#btn-mic', 'Push-to-talk mic button'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }

@@ -31,6 +31,8 @@ const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
 const { createServiceBridge } = require("./service-bridge");
 const interpreterProvider = require("./interpreter-provider");
+const toolProvider = require("./tool-provider");
+const voiceProvider = require("./voice-provider");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -279,6 +281,9 @@ function resetManagerTask() {
     latestResponses: { chatgpt: null, claude: null, gemini: null },
     allResponses: [], // { id, target, text, ts } — every response ever captured for this task, never overwritten
     codeRuns: [], // { id, task, ok, message, error, ts } — RUN_CODE results (Open Interpreter), so the manager can build on them
+    toolCalls: [], // { id, tool, ok, message, error, ts } — USE_TOOL results (tool registry / future MCP), so the manager can build on them
+    memories: [], // { id, type, title, ts } — RECALL results + auto-seeded relevant facts from the shared memory store
+    capabilities: {}, // capability-awareness table: "<target>:<action>" -> { ok, fail, lastTs } learned from executor outcomes
     conflicts: [],
     missingRequirements: [],
     previousManagerActions: [], // the last N validated decisions, for the model's own context
@@ -374,6 +379,21 @@ function validateManagerAction(decision) {
 
   if (decision.action === "RUN_CODE") {
     if (typeof decision.task !== "string" || !decision.task.trim()) return { ok: false, error: "MISSING_TASK" };
+  }
+
+  if (decision.action === "USE_TOOL") {
+    if (typeof decision.tool !== "string" || !decision.tool.trim()) return { ok: false, error: "MISSING_TOOL" };
+    if (!toolProvider.has(decision.tool)) return { ok: false, error: "UNKNOWN_TOOL", detail: decision.tool };
+    if (decision.args != null && (typeof decision.args !== "object" || Array.isArray(decision.args))) return { ok: false, error: "BAD_ARGS" };
+  }
+
+  if (decision.action === "REMEMBER") {
+    const fact = decision.fact != null ? decision.fact : decision.value;
+    if (typeof fact !== "string" || !fact.trim()) return { ok: false, error: "MISSING_FACT" };
+  }
+
+  if (decision.action === "RECALL") {
+    if (typeof decision.query !== "string" || !decision.query.trim()) return { ok: false, error: "MISSING_QUERY" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -923,6 +943,10 @@ function managerSnapshot() {
     completedAssignments: m.completedAssignments,
     latestResponses: { ...m.latestResponses },
     codeRuns: m.codeRuns,
+    toolCalls: m.toolCalls,
+    memories: m.memories,
+    capabilities: m.capabilities,
+    awareness: managerAwareness(),
     conflicts: m.conflicts,
     missingRequirements: m.missingRequirements,
     previousManagerActions: m.previousManagerActions,
@@ -936,6 +960,47 @@ function managerSnapshot() {
     projectDir: m.projectDir,
     pendingApproval: m.pendingApproval
   };
+}
+
+// N4 Awareness: a compact, always-current picture of the panes and orchestrator,
+// composed from signals the app already tracks (bridgeStatus + house-rule state)
+// plus the learned capability table. No new sensing -- pure aggregation. The
+// butler sees this every turn (via buildManagerPrompt) so it stops delegating to
+// a pane that is busy, rate-limited, or known-incapable of an action.
+function managerAwareness() {
+  const m = state.manager;
+  const panes = {};
+  try {
+    for (const site of SITE_IDS) {
+      const enabled = !!state.enabled[site];
+      const ready = paneReady(site);
+      const busy = !!state.generating[site];
+      const waiting = !!state.waiting[site];
+      const rateLimited = !!(state.captured[site] && state.captured[site].isRateLimited);
+      panes[site] = {
+        enabled, ready, busy, waiting, rateLimited,
+        // A pane is a good delegate target only if enabled, ready, and not busy/limited.
+        available: enabled && ready && !busy && !rateLimited
+      };
+    }
+  } catch { /* best effort -- awareness must never throw into the loop */ }
+  return {
+    panes,
+    council: state.hr && state.hr.active ? { mode: state.hr.mode, paused: !!state.hr.paused } : null,
+    capabilities: m.capabilities || {}
+  };
+}
+
+// Records the outcome of an action against a target/tool so a repeatedly-failing
+// route can be avoided. Keyed "<target>:<action>"; awareness surfaces it.
+function recordCapabilityOutcome(target, action, ok) {
+  if (!target || !action) return;
+  const m = state.manager;
+  const key = `${String(target).toLowerCase()}:${String(action).toUpperCase()}`;
+  const c = m.capabilities[key] || { ok: 0, fail: 0, lastTs: 0 };
+  if (ok) c.ok += 1; else c.fail += 1;
+  c.lastTs = Date.now();
+  m.capabilities[key] = c;
 }
 
 function managerConfigSnapshot() {
@@ -1697,7 +1762,11 @@ async function escalateManagerTier(reason, toTier) {
 }
 
 function assembleTaskState() {
-  return { ...state.manager };
+  // Fold in the live awareness picture and the currently-registered tools so the
+  // prompt builder can surface them -- these are derived, not stored on the task.
+  let availableTools = [];
+  try { availableTools = toolProvider.list(); } catch { availableTools = []; }
+  return { ...state.manager, awareness: managerAwareness(), availableTools };
 }
 
 async function runTierFourAdjudication() {
@@ -1713,7 +1782,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -1873,7 +1942,65 @@ async function executeManagerAction(decision) {
         summary: entry.ok ? `Code run complete (${entry.message.length} chars)` : `Code run unavailable/failed: ${entry.error}`,
         details: entry,
       });
+      recordCapabilityOutcome("interpreter", "RUN_CODE", entry.ok);
       m.status = "assembling"; // an active status so the loop continues on the next turn
+      await runManagerTurn();
+      break;
+    }
+    case "USE_TOOL": {
+      // N5: invoke a registered external tool (built-in now; a real MCP server's
+      // tools plug into the same registry later). Result folds back like RUN_CODE.
+      m.status = "using-tool";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await toolProvider.run(decision.tool, decision.args || {}, {
+          onEvent: (ev) => logManagerEvent({ category: "tool", summary: `tool:${ev.type}`, details: ev }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      const entry = { id: m.toolCalls.length + 1, tool: decision.tool, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.toolCalls.push(entry);
+      if (m.toolCalls.length > 30) m.toolCalls.shift();
+      recordCapabilityOutcome(decision.tool, "USE_TOOL", entry.ok);
+      logManagerEvent({
+        category: "tool",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Tool ${entry.tool} ran (${entry.message.length} chars)` : `Tool ${entry.tool} failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "REMEMBER": {
+      // N3: persist a durable fact into the shared memory store.
+      const fact = String(decision.fact != null ? decision.fact : decision.value).trim();
+      const res = dbService.memoryCreate("fact", { statement: fact, source: `manager:${m.taskId}` });
+      logManagerEvent({
+        category: "memory",
+        severity: res && res.ok ? "info" : "warn",
+        summary: res && res.ok ? `Remembered: ${fact.slice(0, 80)}` : `Memory unavailable (${(res && res.error) || "off"})`,
+        details: { fact, result: res },
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "RECALL": {
+      // N3: search the shared memory store; results feed back into the prompt.
+      const q = String(decision.query).trim();
+      const res = dbService.memorySearch(q);
+      const found = (res && res.results) || [];
+      for (const row of found) {
+        m.memories.push({ id: `${row.type}:${row.id}`, type: row.type, title: row.title || "", ts: Date.now() });
+      }
+      if (m.memories.length > 40) m.memories = m.memories.slice(-40);
+      logManagerEvent({
+        category: "memory",
+        summary: (res && res.available) ? `Recalled ${found.length} for "${q.slice(0, 60)}"` : `Memory unavailable for recall`,
+        details: { query: q, count: found.length },
+      });
+      m.status = "assembling";
       await runManagerTurn();
       break;
     }
@@ -1903,6 +2030,7 @@ async function handleManagerCapture(turn) {
   if (m.pendingModels.length === 0) m.waitingSince = null; // all replies in — stop the wait watchdog
   await saveRawResponse(responseEntry);
   if (state.manager.taskId !== myTaskId || ["finished", "error"].includes(state.manager.status)) return; // this task was stopped/replaced while the save was in flight
+  recordCapabilityOutcome(turn.site, "DELEGATE", true); // this pane answered — it can take delegations
   logManagerEvent({ category: "response", target: [turn.site], summary: `${SITES[turn.site].label} responded (${turn.text.length} chars)` });
 
   if (m.pendingModels.length === 0) {
@@ -1933,6 +2061,9 @@ async function startManagedTask(userRequest) {
   m.projectDir = await createProjectDir(m.taskId, m.userRequest);
 
   logManagerEvent({ category: "task", summary: `Managed task started: "${m.userRequest.slice(0, 120)}"` });
+  // N3 auto-context: seed relevant prior facts so the butler starts already
+  // knowing what it may have learned before, without an explicit RECALL turn.
+  seedRelevantMemories(m);
   broadcastManagerState();
   // Ack-Brain: the butler acknowledges INSTANTLY (before the deep brain's first
   // turn), the way PersonalJarvis does — a sub-second "on it" so the user isn't
@@ -1951,6 +2082,30 @@ function emitManagerAck(taskId, goal) {
   const text = short ? `On it — working on: "${short}${g.length > 80 ? "…" : ""}"` : "On it.";
   logManagerEvent({ category: "ack", summary: text });
   broadcast("manager-ack", { taskId, text, ts: Date.now() });
+  speakIfEnabled(text); // N2: say it out loud too, when voice is on
+}
+
+// N2: speak text via the voice provider when voice is enabled + set to speak.
+// Fire-and-forget — never awaited, never throws into the caller.
+function speakIfEnabled(text) {
+  try {
+    const s = voiceProvider.status();
+    if (s && s.enabled && s.speakOnAck) voiceProvider.speak(text).catch(() => {});
+  } catch { /* voice off — silent */ }
+}
+
+// N3: seed the task's memories[] with facts relevant to the request, pulled from
+// the shared store, so turn one already has context. Best-effort and silent when
+// the store is unavailable — never blocks task start.
+function seedRelevantMemories(m) {
+  try {
+    const res = dbService.memorySearch(m.userRequest);
+    const found = (res && res.results) || [];
+    for (const row of found.slice(0, 12)) {
+      m.memories.push({ id: `${row.type}:${row.id}`, type: row.type, title: row.title || "", ts: Date.now() });
+    }
+    if (found.length) logManagerEvent({ category: "memory", summary: `Seeded ${Math.min(found.length, 12)} relevant memory item(s) for this task` });
+  } catch { /* memory off — proceed without seeded context */ }
 }
 
 async function finishManagedTask({ ok, reason }) {
@@ -1959,6 +2114,7 @@ async function finishManagedTask({ ok, reason }) {
   m.finishedTs = Date.now();
   await saveTaskCheckpoint();
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
+  speakIfEnabled(ok ? "Done." : `Stopped: ${reason || "unknown"}`); // N2
   broadcastManagerState();
 }
 
@@ -3390,6 +3546,27 @@ ipcMain.handle("manager:test-connection", async () => {
 
 ipcMain.handle("manager:get-state", () => ({ ok: true, manager: managerSnapshot(), managerConfig: managerConfigSnapshot(), managerLog: state.managerLog }));
 
+// N5 Tools: list the registry and (for the dashboard/manual testing) run a tool.
+ipcMain.handle("tools:list", () => ({ ok: true, tools: toolProvider.list() }));
+ipcMain.handle("tools:run", async (_evt, { tool, args } = {}) => {
+  if (!tool || !toolProvider.has(tool)) return { ok: false, error: "UNKNOWN_TOOL" };
+  return toolProvider.run(tool, args || {});
+});
+
+// N3 Memory: a summary line for the panel, plus a manual search.
+ipcMain.handle("memory:summary", () => ({ ok: true, ...dbService.memorySummary() }));
+ipcMain.handle("memory:search", (_evt, { query } = {}) => ({ ok: true, ...dbService.memorySearch(query || "") }));
+
+// N2 Voice: status/config/test + push-to-talk listen.
+ipcMain.handle("voice:status", () => ({ ok: true, ...voiceProvider.status() }));
+ipcMain.handle("voice:configure", (_evt, patch) => {
+  const s = voiceProvider.setSettings(patch || {});
+  logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
+  return { ok: true, ...voiceProvider.status() };
+});
+ipcMain.handle("voice:speak", async (_evt, { text } = {}) => voiceProvider.speak(text));
+ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
+
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
@@ -3495,6 +3672,19 @@ const serviceBridge = createServiceBridge({
     start: async (goal) => startManagedTask(goal),
     stop: async () => stopManagedTask(),
   },
+  // N5: the butler's external-tool registry, exposed so the merged system can
+  // list and invoke tools (and, later, register MCP servers' tools).
+  tools: {
+    list: () => toolProvider.list(),
+    run: (name, args, o) => toolProvider.run(name, args, o),
+  },
+  // N2: local voice capability (speak/listen through the offline shim).
+  voice: {
+    status: () => voiceProvider.status(),
+    configure: (patch) => voiceProvider.setSettings(patch),
+    speak: (text) => voiceProvider.speak(text),
+    listen: (o) => voiceProvider.listen(o),
+  },
 });
 // Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.
 if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
@@ -3529,6 +3719,28 @@ async function startManagedInterpreter() {
     logEvent(r && r.ok ? "interpreter-managed-started" : "interpreter-managed-failed", r || {});
   } catch (e) { logEvent("interpreter-managed-error", { error: String(e) }); }
 }
+// N2: like the interpreter shim, the app can run the local voice shim itself.
+// AUTOINJECTOR_VOICE_SPAWN is the command (e.g. "python"); the shim path + port
+// follow. Spawned on ready, stopped on quit; a failure never blocks startup.
+async function startManagedVoice() {
+  const command = process.env.AUTOINJECTOR_VOICE_SPAWN;
+  if (!command) return;
+  const shim = process.env.AUTOINJECTOR_VOICE_SHIM || path.join(__dirname, "..", "integrations", "voice", "voice_shim.py");
+  const port = Number(process.env.AUTOINJECTOR_VOICE_PORT) || 8232;
+  try {
+    const r = await voiceProvider.startManaged({
+      command,
+      args: [shim, "--port", String(port)],
+      port,
+      env: {
+        VOICE_TTS_MODEL: process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "",
+        VOICE_STT_MODEL: process.env.AUTOINJECTOR_VOICE_STT_MODEL || "",
+      },
+      onLog: (kind, text) => logEvent("voice-shim", { kind, text: String(text).slice(0, 300) }),
+    });
+    logEvent(r && r.ok ? "voice-managed-started" : "voice-managed-failed", r || {});
+  } catch (e) { logEvent("voice-managed-error", { error: String(e) }); }
+}
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
@@ -3545,12 +3757,13 @@ app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
-  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
+  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
   startServiceBridge();
   startManagedInterpreter();
+  startManagedVoice();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
-app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} });
+app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} });

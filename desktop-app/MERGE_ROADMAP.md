@@ -83,15 +83,31 @@ the merge — provided here as the contract to implement:
 Both go through PJ's normal Critic/Kontrollierer gate — which matches the
 "capture is not completion / validated transition" principle we already use.
 
-## Phase 3+ (later)
+## Phase 3+ — PersonalJarvis capabilities brought native
 
-- Voice: reuse PJ's wake→STT→TTS so the merged system is voice-driven end to end.
-- Memory: PJ's wiki/memory as the shared long-term store.
-- One launcher that brings up PJ + AutoInjector + an OI server together.
+These were the deferred PJ capabilities; they now run inside AutoInjector's own
+butler (the System AI supervisor), each as a butler action + provider, wired to
+the bridge and the System AI panel:
+
+- **Tools (N5) — DONE.** A `USE_TOOL` action + `tool-provider.js` registry with
+  built-in `http-fetch`/`read-file`, an MCP-ready `registerMcpServer` seam, and
+  `/tools/*` bridge routes. Real MCP servers plug into the same registry later.
+- **Awareness (N4) — DONE.** A live per-pane availability picture
+  (`managerAwareness()`) + a learned capability table, fed to the butler every
+  turn so it won't delegate to a busy/rate-limited pane.
+- **Memory (N3) — DONE.** `REMEMBER`/`RECALL` actions over the existing shared
+  SQLite store (`db-service.js` + `shared/memory.js`), with relevant facts
+  auto-seeded at task start. (Semantic/vector search stays deferred.)
+- **Voice (N2) — DONE.** `voice-provider.js` + a local `voice_shim.py`
+  (piper TTS / faster-whisper STT), auto-spawned like the OI shim; the butler
+  speaks its ack/status and you can push-to-talk. Fully offline.
+- Still later: PJ's wake-word, PJ's own wiki as a second shared store, and one
+  launcher that brings up PJ + AutoInjector + an OI server together.
 
 ## Honest status
 
-Phase 1 (Open Interpreter inside AutoInjector, over the bridge) is built, tested,
-and shippable. Phases 2–3 are cross-repo/cross-language integration that continue
-from here — the seams are defined above so the work is incremental, not a rewrite.
+Phase 1 (Open Interpreter inside AutoInjector, over the bridge) and the Phase 3+
+native capabilities above are built, tested (full 360 green), and shippable.
+Phase 2 (the PJ-side tools that call AutoInjector's bridge) remains cross-repo
+integration — the seams are defined so the work is incremental, not a rewrite.
 Nothing was merged into PersonalJarvis; this only makes the pieces interoperable.

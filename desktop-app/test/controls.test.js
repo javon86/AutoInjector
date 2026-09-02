@@ -122,7 +122,16 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     getManagerState: async () => ({ ok: true, manager: { status: "idle" } }),
     onManagerState: (cb) => { api._managerStateCb = cb; },
     onManagerLog: (cb) => { api._managerLogCb = cb; },
-    onManagerAck: (cb) => { api._managerAckCb = cb; }
+    onManagerAck: (cb) => { api._managerAckCb = cb; },
+    // N5 Tools / N3 Memory / N2 Voice
+    toolsList: async () => { calls.push({ fn: "toolsList" }); return { ok: true, tools: [{ name: "http-fetch", description: "GET a URL", risk: "ask" }, { name: "read-file", description: "read a file", risk: "monitor" }] }; },
+    toolsRun: async (tool, args) => { calls.push({ fn: "toolsRun", tool, args }); return { ok: true, message: "ok" }; },
+    memorySummary: async () => { calls.push({ fn: "memorySummary" }); return { ok: true, available: true, total: 3 }; },
+    memorySearch: async (query) => { calls.push({ fn: "memorySearch", query }); return { ok: true, available: true, results: [] }; },
+    voiceStatus: async () => { calls.push({ fn: "voiceStatus" }); return { ok: true, enabled: false }; },
+    configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true, ms: 5 }; },
+    voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; }
   };
   return api;
 }
@@ -971,6 +980,7 @@ async function main() {
 
   await testExtractAllButton();
   await testButlerPanelWired();
+  await testCapabilityPanelsWired();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
@@ -1013,6 +1023,41 @@ async function testButlerPanelWired() {
   click(dom, "btn-jarvis-stop");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "stopManagedTask"), "Stop calls stopManagedTask");
+}
+
+async function testCapabilityPanelsWired() {
+  console.log("\n== Tools/Memory/Awareness/Voice: the System AI panel surfaces and wires the new butler capabilities ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 30)); // let refreshToolsList/refreshMemoryLine settle
+
+  // N5 Tools: the registry is fetched and rendered.
+  assert(api.calls.some((c) => c.fn === "toolsList"), "the panel fetches the tool registry on load");
+  assert(/http-fetch/.test(doc.getElementById("jarvis-tools").textContent), "the registered tools are listed for the user");
+
+  // N3 Memory: the summary line is fetched and rendered.
+  assert(api.calls.some((c) => c.fn === "memorySummary"), "the panel fetches the memory summary on load");
+  assert(/3 item/.test(doc.getElementById("jarvis-memory").textContent), "the memory item count is shown");
+
+  // N4 Awareness: a state push renders per-pane availability.
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 1, maximumTurns: 20, awareness: { panes: { chatgpt: { enabled: true, available: true }, claude: { enabled: true, available: false, busy: true }, gemini: { enabled: false, available: false } } } });
+  assert(/Awareness/.test(doc.getElementById("jarvis-awareness").textContent) && /chatgpt/.test(doc.getElementById("jarvis-awareness").textContent), "the awareness readout renders per-pane status");
+
+  // N2 Voice: Save, Test (speak) and the mic (listen) are wired.
+  assert(doc.getElementById("voice-enabled") && doc.getElementById("btn-mic"), "the Voice controls are present");
+  doc.getElementById("voice-enabled").checked = true;
+  doc.getElementById("voice-endpoint").value = "http://127.0.0.1:8232";
+  click(dom, "btn-voice-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureVoice" && c.patch.enabled === true && /8232/.test(c.patch.endpoint)), "Save wires to configureVoice with the endpoint + enabled");
+  click(dom, "btn-voice-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak"), "Test speaks a line via voiceSpeak");
+  click(dom, "btn-mic");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceListen"), "the mic button calls voiceListen");
+  assert(doc.getElementById("jarvis-goal").value === "hello from mic", "a heard transcript is dropped into the goal box");
 }
 
 async function testExtractAllButton() {

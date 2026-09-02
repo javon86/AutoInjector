@@ -48,6 +48,9 @@ function createServiceBridge(deps) {
   // Optional native "Jarvis" orchestrator (the System AI supervisor): give it a
   // goal and it plans, delegates to the Council + runs code, with a critic gate.
   const jarvis = d.jarvis || null; // { start(goal), stop(), status() }
+  // Optional external-tool registry (N5) and local voice capability (N2).
+  const tools = d.tools || null; // { list(), run(name, args, {onEvent}) }
+  const voice = d.voice || null; // { status(), configure(patch), speak(text), listen(opts) }
 
   let server = null;
   let unsub = null;
@@ -188,6 +191,47 @@ function createServiceBridge(deps) {
       }
       if (!jarvis && (path === '/jarvis/status' || path === '/jarvis/start' || path === '/jarvis/stop')) {
         return reply(res, 501, { ok: false, error: 'JARVIS_NOT_WIRED' });
+      }
+      // --- Tools registry (N5: external tools; MCP-ready) ---
+      if (tools && method === 'GET' && path === '/tools/list') {
+        return reply(res, 200, { ok: true, tools: safeCall(tools.list) || [] });
+      }
+      if (tools && method === 'POST' && path === '/tools/run') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        if (!body.tool) return reply(res, 400, { ok: false, error: 'NEED_TOOL' });
+        const r = await tools.run(String(body.tool), body.args || {}, { onEvent: (ev) => emit('tool', ev) });
+        emit('tool', { type: 'done' });
+        return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
+      }
+      if (!tools && (path === '/tools/list' || path === '/tools/run')) {
+        return reply(res, 501, { ok: false, error: 'TOOLS_NOT_WIRED' });
+      }
+      // --- Voice (N2: local speak/listen) ---
+      if (voice && method === 'GET' && path === '/voice/status') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(voice.status) || {}));
+      }
+      if (voice && method === 'POST' && path === '/voice/settings') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const s = voice.configure ? voice.configure(body || {}) : (safeCall(voice.status) || {});
+        return reply(res, 200, Object.assign({ ok: true }, s));
+      }
+      if (voice && method === 'POST' && path === '/voice/speak') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        if (!body.text) return reply(res, 400, { ok: false, error: 'NEED_TEXT' });
+        const r = await voice.speak(String(body.text));
+        return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
+      }
+      if (voice && method === 'POST' && path === '/voice/listen') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const r = await voice.listen(body || {});
+        return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
+      }
+      if (!voice && (path === '/voice/status' || path === '/voice/settings' || path === '/voice/speak' || path === '/voice/listen')) {
+        return reply(res, 501, { ok: false, error: 'VOICE_NOT_WIRED' });
       }
       if (method === 'GET' && path === '/events') {
         res.writeHead(200, {

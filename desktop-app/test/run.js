@@ -65,6 +65,22 @@ const interpreterProvider = require(path.join(__dirname, "..", "interpreter-prov
 let interpreterRunCalls = [];
 interpreterProvider.run = async (task) => { interpreterRunCalls.push(task); return { ok: true, message: `ran: ${task}`, events: [{ type: "output", content: "42" }] }; };
 
+// N5: the external-tool registry. has()/list() stay real (validation +
+// availableTools depend on them); run() is stubbed so USE_TOOL is intercepted.
+// A known "echo" tool is registered so USE_TOOL validation can pass.
+const toolProvider = require(path.join(__dirname, "..", "tool-provider"));
+let toolRunCalls = [];
+toolProvider.run = async (name, args) => { toolRunCalls.push({ name, args }); return { ok: true, message: `tool ${name} ok`, events: [] }; };
+toolProvider.register({ name: "echo", description: "echo (test)", risk: "monitor", invoke: async () => ({ ok: true, message: "echo" }) });
+
+// N3: the shared memory store. Stubbed so REMEMBER/RECALL and the task-start
+// seed are intercepted deterministically without a real SQLite DB.
+const dbService = require(path.join(__dirname, "..", "db-service"));
+let memoryCreateCalls = [], memorySearchCalls = [];
+dbService.memoryCreate = (type, data) => { memoryCreateCalls.push({ type, data }); return { ok: true, id: `${type}-${memoryCreateCalls.length}` }; };
+dbService.memorySearch = (q) => { memorySearchCalls.push(q); return { available: true, degraded: false, results: [{ type: "fact", id: "f1", title: `match for ${q}` }] }; };
+dbService.memorySummary = () => ({ available: true, counts: { fact: 1 }, total: 1 });
+
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
 let failed = 0;
@@ -2049,6 +2065,86 @@ async function testManagerRunCodeAction() {
   await call("manager:stop", {});
 }
 
+// N5: the supervisor's USE_TOOL action invokes a registered tool and folds the
+// result back like RUN_CODE; an unknown tool is rejected before it ever runs.
+async function testManagerUseToolAction() {
+  console.log("\n== N5 Tools: the butler's USE_TOOL action invokes a registered tool and continues ==");
+  resetManagerStub();
+  toolRunCalls = [];
+  queueManagerDecision({ action: "USE_TOOL", tool: "echo", args: { x: 1 }, reason: "need the echo tool", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the tool result", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "use the echo tool" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.toolCalls && s.manager.toolCalls.length));
+  }, { label: "the manager runs the tool step" });
+  const st = await call("manager:get-state", {});
+  assert(toolRunCalls.some((c) => c.name === "echo" && c.args && c.args.x === 1), "USE_TOOL reached the tool registry with the tool name + args");
+  assert(st.manager.toolCalls && st.manager.toolCalls.length >= 1 && /tool echo ok/.test(st.manager.toolCalls[0].message),
+    "the tool result is folded back into the task as a toolCalls entry");
+  await call("manager:stop", {});
+
+  // An unknown tool must be rejected by validation, never invoked.
+  resetManagerStub();
+  toolRunCalls = [];
+  queueManagerDecisionRepeating({ action: "USE_TOOL", tool: "ghost-tool", args: {}, reason: "not a real tool", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "use a tool that doesn't exist" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(toolRunCalls.length === 0, "a USE_TOOL naming an unregistered tool is rejected and never invoked");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "USE_TOOL" && a.rejected), "the unknown-tool USE_TOOL is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
+// back into the task's memories[]; relevant memories are seeded at task start.
+async function testManagerMemoryActions() {
+  console.log("\n== N3 Memory: the butler REMEMBERs and RECALLs via the shared store ==");
+  resetManagerStub();
+  memoryCreateCalls = []; memorySearchCalls = [];
+  queueManagerDecision({ action: "REMEMBER", fact: "the launch date is May 3", reason: "worth keeping", confidence: 0.9 });
+  queueManagerDecision({ action: "RECALL", query: "launch date", reason: "need to look it up", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have what I need", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "remember and recall the launch date" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && s.manager.status === "finished";
+  }, { label: "the manager runs remember + recall + finish" });
+  const st = await call("manager:get-state", {});
+  assert(memoryCreateCalls.some((c) => c.type === "fact" && /launch date is May 3/.test(c.data.statement)), "REMEMBER wrote the fact to the memory store");
+  assert(memorySearchCalls.includes("launch date"), "RECALL searched the store for the query");
+  assert(st.manager.memories && st.manager.memories.some((mm) => /match for launch date/.test(mm.title)), "the recalled match is folded into the task's memories[]");
+  // The task-start seed also searched the store with the user's request.
+  assert(memorySearchCalls.some((q) => /remember and recall/.test(q)), "relevant memories are seeded from the request at task start");
+  await call("manager:stop", {});
+}
+
+// N4: the awareness object exposes per-pane availability, and a disabled pane is
+// marked unavailable so the butler won't delegate to it. It is present in the
+// state the manager model receives each turn.
+async function testManagerAwareness() {
+  console.log("\n== N4 Awareness: the butler is handed a live pane-availability picture each turn ==");
+  await resetManagerState();
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  await call("participants:set", { site: "gemini", enabled: false }); // gemini is unavailable now
+  resetManagerStub();
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.9 });
+  await call("manager:start-task", { userRequest: "just checking awareness" });
+  await settle(200);
+  const st = await call("manager:get-state", {});
+  const aw = st.manager.awareness;
+  assert(aw && aw.panes && aw.panes.chatgpt && aw.panes.gemini, "the snapshot carries an awareness object with a per-pane picture");
+  assert(aw.panes.gemini.available === false && aw.panes.gemini.enabled === false, "a disabled pane is marked unavailable");
+  // The same awareness object reaches the manager model in its prompt state.
+  const lastState = managerAskCalls.length ? managerAskCalls[managerAskCalls.length - 1].managerState : null;
+  assert(lastState && lastState.awareness && lastState.awareness.panes, "the manager model receives the awareness object in its state");
+  assert(Array.isArray(lastState.availableTools) && lastState.availableTools.some((t) => t.name === "echo"), "the manager model is also told which tools are available");
+  await call("participants:set", { site: "gemini", enabled: true }); // restore
+  await call("manager:stop", {});
+}
+
 // Ack-Brain: the butler acknowledges INSTANTLY when a task starts — an "ack" log
 // entry (and a manager-ack broadcast) is emitted before the first decision.
 async function testManagerAckBrain() {
@@ -2158,6 +2254,9 @@ async function main() {
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
   await testManagerRunCodeAction();
+  await testManagerUseToolAction();
+  await testManagerMemoryActions();
+  await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();

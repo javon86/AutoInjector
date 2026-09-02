@@ -70,6 +70,17 @@ contextBridge.exposeInMainWorld("api", {
   onManagerState: (cb) => ipcRenderer.on("manager-state", (_e, payload) => cb(payload)),
   onManagerLog: (cb) => ipcRenderer.on("manager-log", (_e, payload) => cb(payload)),
   onManagerAck: (cb) => ipcRenderer.on("manager-ack", (_e, payload) => cb(payload)),
+  // N5 Tools
+  toolsList: () => ipcRenderer.invoke("tools:list"),
+  toolsRun: (tool, args) => ipcRenderer.invoke("tools:run", { tool, args }),
+  // N3 Memory
+  memorySummary: () => ipcRenderer.invoke("memory:summary"),
+  memorySearch: (query) => ipcRenderer.invoke("memory:search", { query }),
+  // N2 Voice
+  voiceStatus: () => ipcRenderer.invoke("voice:status"),
+  configureVoice: (patch) => ipcRenderer.invoke("voice:configure", patch),
+  voiceSpeak: (text) => ipcRenderer.invoke("voice:speak", { text }),
+  voiceListen: (opts) => ipcRenderer.invoke("voice:listen", opts || {}),
   dbStatus: () => ipcRenderer.invoke("db:status"),
   dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit),
   ollamaDetect: () => ipcRenderer.invoke("ollama:detect"),
