@@ -51,6 +51,7 @@ function createServiceBridge(deps) {
   // Optional external-tool registry (N5) and local voice capability (N2).
   const tools = d.tools || null; // { list(), run(name, args, {onEvent}) }
   const voice = d.voice || null; // { status(), configure(patch), speak(text), listen(opts) }
+  const image = d.image || null; // { status(), configure(patch), generate(prompt, {onEvent}) }
 
   let server = null;
   let unsub = null;
@@ -232,6 +233,28 @@ function createServiceBridge(deps) {
       }
       if (!voice && (path === '/voice/status' || path === '/voice/settings' || path === '/voice/speak' || path === '/voice/listen')) {
         return reply(res, 501, { ok: false, error: 'VOICE_NOT_WIRED' });
+      }
+      // --- Image generation (Stable Diffusion) ---
+      if (image && method === 'GET' && path === '/image/status') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(image.status) || {}));
+      }
+      if (image && method === 'POST' && path === '/image/settings') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        const s = image.configure ? image.configure(body || {}) : (safeCall(image.status) || {});
+        return reply(res, 200, Object.assign({ ok: true }, s));
+      }
+      if (image && method === 'POST' && path === '/image/generate') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        if (!body.prompt) return reply(res, 400, { ok: false, error: 'NEED_PROMPT' });
+        const r = await image.generate(String(body.prompt), { negativePrompt: body.negativePrompt, onEvent: (ev) => emit('image', ev) });
+        emit('image', { type: 'done' });
+        // Never stream the raw base64 back over the bridge — just the outcome.
+        return reply(res, r && r.ok ? 200 : 400, { ok: !!(r && r.ok), info: (r && r.info) || '', error: (r && r.error) || null, bytes: r && r.imageBase64 ? r.imageBase64.length : 0 });
+      }
+      if (!image && (path === '/image/status' || path === '/image/settings' || path === '/image/generate')) {
+        return reply(res, 501, { ok: false, error: 'IMAGE_NOT_WIRED' });
       }
       if (method === 'GET' && path === '/events') {
         res.writeHead(200, {

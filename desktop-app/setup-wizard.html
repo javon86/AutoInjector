@@ -29,12 +29,14 @@
 <body>
   <header>
     <h1>🧙 Setup Wizard</h1>
-    <div id="intro">Point the panes at ChatGPT, Claude and Gemini and sign in. Optionally set up a local AI for the System AI helper.</div>
+    <div id="intro">Point the panes at ChatGPT, Claude and Gemini and sign in. Optionally set up a local AI for the System AI / butler, image generation, and voice.</div>
   </header>
 
   <div id="tabs">
     <button class="tab active" data-tab="localai">Local AI</button>
-    <button class="tab" data-tab="advanced">Advanced</button>
+    <button class="tab" data-tab="images">Images</button>
+    <button class="tab" data-tab="video">Video</button>
+    <button class="tab" data-tab="advanced">Installs</button>
   </div>
 
   <main>
@@ -51,8 +53,29 @@
       <div id="ollama-progress"></div>
     </div>
 
+    <div class="panel" id="panel-images">
+      <p class="muted">Image generation runs on a local Stable Diffusion server (a GPU app you run yourself). The butler's <span class="name">GENERATE_IMAGE</span> renders into it. Install one from the <span class="name">Installs</span> tab, launch it with its API on, then point the app at it here.</p>
+      <label class="muted">Stable Diffusion endpoint (Automatic1111 txt2img URL)</label>
+      <input type="text" id="sd-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:4px 0; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px;">
+      <div class="runtime-row">
+        <label>Size <input type="number" id="sd-width" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;">×<input type="number" id="sd-height" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
+        <label>Steps <input type="number" id="sd-steps" value="20" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
+        <label><input type="checkbox" id="sd-enabled"> Enable image generation</label>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; margin:4px 0;">
+        <button class="primary" id="btn-sd-save">Save</button>
+        <button class="primary" id="btn-sd-test">Test render</button>
+      </div>
+      <div id="sd-msg" class="muted" style="font-size:11.5px;"></div>
+    </div>
+
+    <div class="panel" id="panel-video">
+      <p class="muted">Video generation is coming next. Local text-to-video backends (e.g. AnimateDiff, Stable Video Diffusion) aren't standardized yet, so this tab is a placeholder — renders will save into the <span class="name">videos/</span> output folder once wired.</p>
+      <div class="item"><div style="flex:1 1 auto;"><div class="name">Video generation</div><div class="why">Planned — endpoint config will appear here. For now, the storage folder and the roadmap are in place.</div></div></div>
+    </div>
+
     <div class="panel" id="panel-advanced">
-      <p class="muted">Supporting programs some features need. The app can't install these silently — click to open the official download, then run it.</p>
+      <p class="muted">Everything the optional features need. The app can't install these silently — click to open the official install page, then follow its steps (most are one <span class="name">pip install</span> or a local app).</p>
       <div id="advanced-installers" style="display:flex; flex-direction:column; gap:8px;"></div>
     </div>
   </main>

@@ -32,7 +32,7 @@ const MANAGER_ACTIONS = [
   "CLASSIFY", "PLAN", "DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE",
   "VERIFY", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE", "SAVE", "EXPORT",
   "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL",
-  "RUN_CODE", "USE_TOOL", "REMEMBER", "RECALL"
+  "RUN_CODE", "USE_TOOL", "REMEMBER", "RECALL", "GENERATE_IMAGE"
 ];
 
 const MANAGER_SYSTEM_PROMPT = `You are the manager/orchestrator for AutoInjector, a program that relays work between three AI assistants (ChatGPT, Claude, Gemini) reachable only through the "target" names chatgpt, claude, and gemini. You are a supervisor, not the primary worker: delegate substantive writing, research, analysis, and problem-solving to them whenever possible. Only do work yourself when delegation is unavailable or unnecessary (e.g. classifying a request, deciding on a plan, or judging whether a result satisfies the user).
@@ -44,6 +44,8 @@ You also command several non-AI capabilities:
 RUN_CODE. When a step needs actual code run or the computer operated (compute something, read/transform a file, run a script, check the system), respond with {"action":"RUN_CODE","task":"<plain-language task>","reason":"..."}. That task is carried out by Open Interpreter, a separate sandboxed local agent with its own confirmation controls -- its result (the assistant summary plus the code it ran and the output) comes back to you as a codeRuns entry on the next turn, and you fold it into the deliverable like any other result. Prefer delegating writing/research/analysis to chatgpt/claude/gemini; use RUN_CODE for genuine execution.
 
 USE_TOOL. To invoke a registered external tool, respond with {"action":"USE_TOOL","tool":"<tool name>","args":{...},"reason":"..."}. Only use a tool named in the availableTools list you are given; its result comes back as a toolCalls entry on the next turn. Use tools for capabilities the chat AIs and RUN_CODE do not cover (e.g. fetching a specific URL, reading a produced file). Do not invent tool names.
+
+GENERATE_IMAGE. To create a picture, respond with {"action":"GENERATE_IMAGE","prompt":"<image description>","reason":"..."}. The prompt is rendered by a local Stable Diffusion endpoint and the saved image path comes back as an images entry on the next turn. The chat AIs can refine the wording of the prompt, but only GENERATE_IMAGE actually renders it. Use it when the deliverable needs an actual image (a cover, an illustration, a diagram mock).
 
 REMEMBER / RECALL. You have a persistent memory store. To save a durable fact for later, respond with {"action":"REMEMBER","fact":"<the fact>","reason":"..."}. To look something up, respond with {"action":"RECALL","query":"<search terms>","reason":"..."} -- matching facts come back as a memories entry on the next turn. Relevant memories are also seeded for you automatically at the start of a task, so check the memories list before re-deriving something you may already know.
 
@@ -82,6 +84,9 @@ function buildManagerPrompt(managerState) {
     })),
     memories: (managerState.memories || []).slice(-12).map((mm) => ({
       id: mm.id, type: mm.type, title: cap(mm.title),
+    })),
+    images: (managerState.images || []).slice(-6).map((im) => ({
+      id: im.id, prompt: cap(im.prompt), path: im.path, ok: im.ok, error: im.error || null,
     })),
     availableTools: (managerState.availableTools || []).map((t) => ({
       name: t.name, description: t.description, risk: t.risk || "monitor",

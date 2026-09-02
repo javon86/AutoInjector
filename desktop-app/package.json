@@ -8,7 +8,7 @@
     "start": "node scripts/ensure-deps.js && electron .",
     "pretest": "node scripts/ensure-deps.js",
     "test": "npm run test:unit",
-    "test:unit": "node test/controls.test.js && node test/prompt-editor.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js && node test/files.test.js && node test/db-service.test.js && node test/ollama-manager.test.js && node test/output-manager.test.js && node test/read-script.test.js && node test/secret-store.test.js && node test/openai-client.test.js && node test/service-bridge.test.js && node test/interpreter-provider.test.js && node test/tool-provider.test.js && node test/voice-provider.test.js",
+    "test:unit": "node test/controls.test.js && node test/prompt-editor.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js && node test/files.test.js && node test/db-service.test.js && node test/ollama-manager.test.js && node test/output-manager.test.js && node test/read-script.test.js && node test/secret-store.test.js && node test/openai-client.test.js && node test/service-bridge.test.js && node test/interpreter-provider.test.js && node test/tool-provider.test.js && node test/voice-provider.test.js && node test/image-provider.test.js",
     "test:integration": "node test/run.js",
     "test:e2e": "node test/e2e/smoke.e2e.js",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",

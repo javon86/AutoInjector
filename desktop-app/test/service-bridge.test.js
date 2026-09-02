@@ -57,6 +57,11 @@ const bridge = createServiceBridge({
     speak: async (text) => { calls.voiceSpeak = text; return { ok: true, ms: 5 }; },
     listen: async (opts) => { calls.voiceListen = opts; return { ok: true, text: 'heard something' }; },
   },
+  image: {
+    status: () => ({ configured: true, enabled: true, endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', steps: 20, width: 512, height: 512 }),
+    configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:7860/sdapi/v1/txt2img' }),
+    generate: async (prompt, { onEvent }) => { calls.imageGen = prompt; onEvent({ type: 'image' }); return { ok: true, imageBase64: 'QUJD', info: 'ok' }; },
+  },
 });
 
 function req(method, path, { body, token, raw } = {}) {
@@ -189,6 +194,19 @@ async function main() {
     assert(noText.status === 400 && noText.json.error === 'NEED_TEXT', 'a speak with no text is rejected');
     const lsn = await req('POST', '/voice/listen', { token: TOKEN, body: { seconds: 4 } });
     assert(lsn.status === 200 && lsn.json.ok === true && lsn.json.text === 'heard something', 'POST /voice/listen returns a transcript');
+  }
+
+  console.log('\n== Image generation (Stable Diffusion) ==');
+  {
+    const st = await req('GET', '/image/status', { token: TOKEN });
+    assert(st.status === 200 && st.json.configured === true && /txt2img/.test(st.json.endpoint), 'GET /image/status reports the SD endpoint');
+    const cfg = await req('POST', '/image/settings', { token: TOKEN, body: { enabled: true } });
+    assert(cfg.status === 200 && cfg.json.ok === true && cfg.json.enabled === true, 'POST /image/settings configures the adapter');
+    const gen = await req('POST', '/image/generate', { token: TOKEN, body: { prompt: 'a red apple' } });
+    assert(gen.status === 200 && gen.json.ok === true && calls.imageGen === 'a red apple', 'POST /image/generate renders the prompt');
+    assert(gen.json.bytes === 4 && gen.json.imageBase64 === undefined, 'the raw base64 is never streamed back — only the outcome + byte count');
+    const noPrompt = await req('POST', '/image/generate', { token: TOKEN, body: {} });
+    assert(noPrompt.status === 400 && noPrompt.json.error === 'NEED_PROMPT', 'a generate with no prompt is rejected');
   }
 
   console.log('\n== unknown route ==');

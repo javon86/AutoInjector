@@ -80,6 +80,16 @@ let memoryCreateCalls = [], memorySearchCalls = [];
 dbService.memoryCreate = (type, data) => { memoryCreateCalls.push({ type, data }); return { ok: true, id: `${type}-${memoryCreateCalls.length}` }; };
 dbService.memorySearch = (q) => { memorySearchCalls.push(q); return { available: true, degraded: false, results: [{ type: "fact", id: "f1", title: `match for ${q}` }] }; };
 dbService.memorySummary = () => ({ available: true, counts: { fact: 1 }, total: 1 });
+let recordImageCalls = [];
+dbService.recordImage = (e) => { recordImageCalls.push(e); return { id: `img-${recordImageCalls.length}` }; };
+
+// Image generation (Stable Diffusion) is stubbed so GENERATE_IMAGE is intercepted
+// without a real SD server; imagesDir is redirected to tmp so the save succeeds.
+const imageProvider = require(path.join(__dirname, "..", "image-provider"));
+let imageGenCalls = [];
+imageProvider.generate = async (prompt) => { imageGenCalls.push(prompt); return { ok: true, imageBase64: Buffer.from("FAKEPNG").toString("base64"), info: "ok" }; };
+const outputManager = require(path.join(__dirname, "..", "output-manager"));
+outputManager.imagesDir = () => os.tmpdir();
 
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
@@ -2097,6 +2107,38 @@ async function testManagerUseToolAction() {
   await call("manager:stop", {});
 }
 
+// Image: the supervisor's GENERATE_IMAGE action renders via Stable Diffusion,
+// saves the PNG + records it, and folds the saved path back as an images entry.
+async function testManagerGenerateImageAction() {
+  console.log("\n== Images: the butler's GENERATE_IMAGE action renders + records an image ==");
+  resetManagerStub();
+  imageGenCalls = []; recordImageCalls = [];
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a red apple on a table", reason: "the deliverable needs a picture", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the image", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "make me a picture of an apple" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.images && s.manager.images.length));
+  }, { label: "the manager runs the image step" });
+  const st = await call("manager:get-state", {});
+  assert(imageGenCalls.includes("a red apple on a table"), "GENERATE_IMAGE reached the image provider with the prompt");
+  assert(st.manager.images && st.manager.images.length >= 1 && st.manager.images[0].ok && /\.png$/.test(st.manager.images[0].path || ""), "the saved image path is folded back as an images entry");
+  assert(recordImageCalls.some((e) => /a red apple/.test(e.prompt)), "the render is recorded as a project image");
+  await call("manager:stop", {});
+
+  // A GENERATE_IMAGE with no prompt must be rejected, never rendered.
+  resetManagerStub();
+  imageGenCalls = [];
+  queueManagerDecisionRepeating({ action: "GENERATE_IMAGE", reason: "no prompt on purpose", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "image with no prompt" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(imageGenCalls.length === 0, "a GENERATE_IMAGE with no prompt is rejected and never rendered");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "GENERATE_IMAGE" && a.rejected), "the promptless GENERATE_IMAGE is recorded as rejected");
+  await call("manager:stop", {});
+}
+
 // N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
 // back into the task's memories[]; relevant memories are seeded at task start.
 async function testManagerMemoryActions() {
@@ -2256,6 +2298,7 @@ async function main() {
   await testManagerRunCodeAction();
   await testManagerUseToolAction();
   await testManagerMemoryActions();
+  await testManagerGenerateImageAction();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();

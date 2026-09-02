@@ -33,6 +33,7 @@ const { createServiceBridge } = require("./service-bridge");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
+const imageProvider = require("./image-provider");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -194,6 +195,7 @@ const state = {
     maximumTurns: 20,
     costLimit: 5
   },
+  imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -283,6 +285,7 @@ function resetManagerTask() {
     codeRuns: [], // { id, task, ok, message, error, ts } — RUN_CODE results (Open Interpreter), so the manager can build on them
     toolCalls: [], // { id, tool, ok, message, error, ts } — USE_TOOL results (tool registry / future MCP), so the manager can build on them
     memories: [], // { id, type, title, ts } — RECALL results + auto-seeded relevant facts from the shared memory store
+    images: [], // { id, prompt, path, ok, error, ts } — GENERATE_IMAGE results (Stable Diffusion), saved + recorded as project images
     capabilities: {}, // capability-awareness table: "<target>:<action>" -> { ok, fail, lastTs } learned from executor outcomes
     conflicts: [],
     missingRequirements: [],
@@ -394,6 +397,10 @@ function validateManagerAction(decision) {
 
   if (decision.action === "RECALL") {
     if (typeof decision.query !== "string" || !decision.query.trim()) return { ok: false, error: "MISSING_QUERY" };
+  }
+
+  if (decision.action === "GENERATE_IMAGE") {
+    if (typeof decision.prompt !== "string" || !decision.prompt.trim()) return { ok: false, error: "MISSING_PROMPT" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -538,6 +545,7 @@ function saveStateDebounced() {
         selectorOverrides: state.selectorOverrides,
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
+        imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -603,6 +611,10 @@ function loadPersistedState() {
       }
     }
     state.nextLoginId = maxId + 1;
+  }
+  if (snap.imageConfig && typeof snap.imageConfig === "object") {
+    imageProvider.setSettings(snap.imageConfig);
+    state.imageConfig = imageProvider.getSettings();
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
@@ -945,6 +957,7 @@ function managerSnapshot() {
     codeRuns: m.codeRuns,
     toolCalls: m.toolCalls,
     memories: m.memories,
+    images: m.images,
     capabilities: m.capabilities,
     awareness: managerAwareness(),
     conflicts: m.conflicts,
@@ -1782,7 +1795,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -1999,6 +2012,43 @@ async function executeManagerAction(decision) {
         category: "memory",
         summary: (res && res.available) ? `Recalled ${found.length} for "${q.slice(0, 60)}"` : `Memory unavailable for recall`,
         details: { query: q, count: found.length },
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "GENERATE_IMAGE": {
+      // Render an image via the local Stable Diffusion endpoint, save the PNG to
+      // the output folder, and record it as a project image so it's tracked like
+      // any other artifact. The saved path folds back as an images entry.
+      m.status = "generating-image";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await imageProvider.generate(decision.prompt, {
+          negativePrompt: decision.negativePrompt || decision.negative_prompt || "",
+          onEvent: (ev) => logManagerEvent({ category: "image", summary: `image:${ev.type}`, details: { type: ev.type } }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      let savedPath = null, sha = "";
+      if (r && r.ok && r.imageBase64) {
+        try {
+          const buf = Buffer.from(r.imageBase64, "base64");
+          sha = require("crypto").createHash("sha256").update(buf).digest("hex");
+          const fname = `img-${Date.now()}.png`;
+          savedPath = outputManager.saveBuffer(outputManager.imagesDir(), fname, buf);
+          try { dbService.recordImage({ path: savedPath, prompt: decision.prompt, model: imageProvider.status().model, from: `manager:${m.taskId}`, sha256: sha }); } catch (_) {}
+        } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; }
+      }
+      const entry = { id: m.images.length + 1, prompt: decision.prompt, path: savedPath, ok: !!(r && r.ok && savedPath), error: (r && r.error) || (savedPath ? null : "no image"), ts: Date.now() };
+      m.images.push(entry);
+      if (m.images.length > 30) m.images.shift();
+      recordCapabilityOutcome("stable-diffusion", "GENERATE_IMAGE", entry.ok);
+      logManagerEvent({
+        category: "image",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${entry.error}`,
+        details: entry,
       });
       m.status = "assembling";
       await runManagerTurn();
@@ -2750,7 +2800,11 @@ ipcMain.handle("wizard:catalog", async () => {
       ollama,
       models: ollamaManager.recommended(null).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
       installers: {
-        ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models. Install it, then reopen this wizard." },
+        ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models — powers the System AI / butler. Install it, then reopen this wizard." },
+        interpreter: { name: "Open Interpreter", url: "https://github.com/OpenInterpreter/open-interpreter#installation", note: "Lets the butler run code & control the computer (RUN_CODE). Install with: pip install open-interpreter" },
+        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice" },
+        stableDiffusion: { name: "Stable Diffusion (Automatic1111)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Local image generation. Run it with --api, then set its URL in the Images tab." },
+        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Optional alternative to Automatic1111." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -3567,6 +3621,28 @@ ipcMain.handle("voice:configure", (_evt, patch) => {
 ipcMain.handle("voice:speak", async (_evt, { text } = {}) => voiceProvider.speak(text));
 ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
 
+// Image generation (Stable Diffusion): status/config + a manual generate for the
+// wizard's "Test" button. Config persists in the app state snapshot.
+ipcMain.handle("image:status", () => ({ ok: true, ...imageProvider.status() }));
+ipcMain.handle("image:configure", (_evt, patch) => {
+  imageProvider.setSettings(patch || {});
+  state.imageConfig = imageProvider.getSettings();
+  saveStateDebounced();
+  logEvent("image-config", { enabled: state.imageConfig.enabled, endpoint: state.imageConfig.endpoint });
+  return { ok: true, ...imageProvider.status() };
+});
+ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) => {
+  const r = await imageProvider.generate(prompt, { negativePrompt });
+  if (!r || !r.ok || !r.imageBase64) return { ok: false, error: (r && r.error) || "FAILED" };
+  try {
+    const buf = Buffer.from(r.imageBase64, "base64");
+    const sha = require("crypto").createHash("sha256").update(buf).digest("hex");
+    const savedPath = outputManager.saveBuffer(outputManager.imagesDir(), `img-${Date.now()}.png`, buf);
+    try { dbService.recordImage({ path: savedPath, prompt, model: imageProvider.status().model, from: "wizard", sha256: sha }); } catch (_) {}
+    return { ok: true, path: savedPath };
+  } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+});
+
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
@@ -3684,6 +3760,12 @@ const serviceBridge = createServiceBridge({
     configure: (patch) => voiceProvider.setSettings(patch),
     speak: (text) => voiceProvider.speak(text),
     listen: (o) => voiceProvider.listen(o),
+  },
+  // Image generation (Stable Diffusion) as a callable capability on the bridge.
+  image: {
+    status: () => imageProvider.status(),
+    configure: (patch) => imageProvider.setSettings(patch),
+    generate: (prompt, o) => imageProvider.generate(prompt, o),
   },
 });
 // Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.

@@ -109,5 +109,42 @@ if (dl.onOllamaProgress) {
   });
 }
 
+// ---- Images tab: Stable Diffusion endpoint config + a test render ----
+async function loadImageConfig() {
+  if (!dl.imageStatus) return;
+  try {
+    const s = await dl.imageStatus();
+    if (!s) return;
+    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
+    if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
+    if (el("sd-steps") && s.steps) el("sd-steps").value = s.steps;
+    if (el("sd-width") && s.width) el("sd-width").value = s.width;
+    if (el("sd-height") && s.height) el("sd-height").value = s.height;
+  } catch (_) {}
+}
+function imageConfigFromUI() {
+  return {
+    enabled: !!(el("sd-enabled") && el("sd-enabled").checked),
+    endpoint: (el("sd-endpoint") && el("sd-endpoint").value || "").trim(),
+    steps: Number(el("sd-steps") && el("sd-steps").value) || 20,
+    width: Number(el("sd-width") && el("sd-width").value) || 512,
+    height: Number(el("sd-height") && el("sd-height").value) || 512,
+  };
+}
+function sdMsg(t) { if (el("sd-msg")) el("sd-msg").textContent = t; }
+if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
+  if (!dl.configureImage) return;
+  const r = await dl.configureImage(imageConfigFromUI());
+  sdMsg(r && r.ok ? (r.enabled ? "Saved — image generation is on." : "Saved — image generation is off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
+  if (!dl.configureImage || !dl.imageGenerate) return;
+  await dl.configureImage(imageConfigFromUI());
+  sdMsg("Rendering a test image…");
+  const r = await dl.imageGenerate("a small red apple on a white table, product photo");
+  sdMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Test failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+};
+
 // ---- Boot ----
 loadCatalog();
+loadImageConfig();
