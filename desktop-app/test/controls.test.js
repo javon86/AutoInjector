@@ -132,7 +132,11 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true, ms: 5 }; },
     voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
-    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; }
+    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
+    // Image generation panel
+    imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
+    configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    imageGenerate: async (prompt) => { calls.push({ fn: "imageGenerate", prompt }); return { ok: true, path: "/out/images/img-1.png" }; }
   };
   return api;
 }
@@ -1068,6 +1072,19 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
+
+  // Image Generation + Video panels exist in the tiled panel grid.
+  assert(doc.getElementById("col-image") && doc.getElementById("col-video"), "the Image Generation and Video panels are present");
+  assert(api.calls.some((c) => c.fn === "imageStatus"), "the Image panel loads the SD config on start");
+  doc.getElementById("img-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  doc.getElementById("img-enabled").checked = true;
+  click(dom, "btn-img-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
+  doc.getElementById("img-prompt").value = "a red apple";
+  click(dom, "btn-img-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "imageGenerate" && c.prompt === "a red apple"), "the Image panel Generate renders the typed prompt");
 }
 
 async function testExtractAllButton() {

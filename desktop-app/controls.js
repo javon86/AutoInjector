@@ -996,6 +996,8 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
+  image: { panelId: "col-image", label: "Image Generation" },
+  video: { panelId: "col-video", label: "Video Generation" },
   systemai: { panelId: "col-systemai", label: "System AI" }
 };
 function collapseYellowPanel(key) {
@@ -1051,6 +1053,35 @@ async function databaseRefresh() {
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
+if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
+if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
+
+// Image Generation panel: load current SD config, Save, and a one-shot Generate.
+async function loadImagePanel() {
+  if (!window.api.imageStatus) return;
+  try {
+    const s = await window.api.imageStatus();
+    if (!s) return;
+    if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
+    if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
+  } catch (_) {}
+}
+function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
+if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
+  if (!window.api.configureImage) return;
+  const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
+  if (!window.api.imageGenerate) return;
+  const prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
+  if (!prompt) { imgMsg("Type a prompt first."); return; }
+  if (window.api.configureImage) await window.api.configureImage({ enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  imgMsg("Rendering…");
+  const r = await window.api.imageGenerate(prompt);
+  imgMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+};
+loadImagePanel();
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
