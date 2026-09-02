@@ -105,6 +105,10 @@
     #row-global-houserules:empty { display:none; }
     #col-global { flex: 0 0 210px; }
     #col-houserules { flex: 1 1 260px; }
+    /* These are forms, not full-width bars — cap them and left-align so they
+       don't stretch edge-to-edge on a wide window. */
+    #col-prompts { align-self: flex-start; width: 100%; max-width: 620px; }
+    #col-systemai { align-self: flex-start; width: 100%; max-width: 760px; }
 
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
     .role-badge { font-size:11px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
