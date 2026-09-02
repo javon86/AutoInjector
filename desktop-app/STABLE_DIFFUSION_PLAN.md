@@ -1,8 +1,12 @@
 # Stable Diffusion integration — design plan
 
-**Status:** design only (nothing built yet). This lays out how image generation
-fits AutoInjector, reusing patterns already in the app so it doesn't become a
-bolt-on.
+**Status:** BUILT (txt2img). `image-provider.js` targets the Automatic1111
+txt2img API; the butler renders via the `GENERATE_IMAGE` action (saved to the
+output `images/` folder and recorded as a project image), it's configurable in
+the Setup Wizard's **Images** tab, and it's callable on the bridge at
+`/image/generate`. Video generation is the next step (a stub **Video** wizard tab
++ the `videos/` output folder are in place). The rest of this doc is the original
+design that guided the build.
 
 ## Why it fits
 

@@ -20,8 +20,14 @@ async function main() {
       ['#col-houserules', 'House Rules panel'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#btn-open-image', 'Image paddle'],
+      ['#btn-open-video', 'Video paddle'],
       ['#jarvis-goal', 'Butler goal box'],
       ['#btn-jarvis-start', 'Start Butler button'],
+      ['#jarvis-tools', 'Tools registry list'],
+      ['#jarvis-awareness', 'Awareness readout'],
+      ['#voice-enabled', 'Voice toggle'],
+      ['#btn-mic', 'Push-to-talk mic button'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }
@@ -83,15 +89,20 @@ async function main() {
       assert(modelsRendered && modelCount > 0, `wizard lists recommended local-AI models (${modelCount} shown)`);
       await shot(wizard, 'setup-wizard');
 
-      // Advanced tab: the guided Ollama installer card.
+      // Installs tab: the guided installers for everything the features need.
       await wizard.click('.tab[data-tab="advanced"]');
       await wizard.waitForFunction(() => document.querySelectorAll('#advanced-installers .item').length > 0, { timeout: 8000 }).catch(() => {});
       const installers = await wizard.$$eval('#advanced-installers .item', (els) => els.length).catch(() => 0);
-      assert(installers >= 1, `Advanced tab shows the guided installer (${installers} shown)`);
-      // The removed Images/Video tabs must be gone (the wizard is now lean).
-      assert(!(await wizard.$('.tab[data-tab="images"]')), 'the Images tab is gone');
-      assert(!(await wizard.$('.tab[data-tab="video"]')), 'the Video tab is gone');
+      assert(installers >= 3, `Installs tab shows the guided installers for all the backends (${installers} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
+
+      // The Images and Video tabs are back; Images carries the SD endpoint config.
+      assert(await wizard.$('.tab[data-tab="images"]'), 'the Images tab is present');
+      assert(await wizard.$('.tab[data-tab="video"]'), 'the Video tab is present');
+      await wizard.click('.tab[data-tab="images"]');
+      await wizard.waitForSelector('#sd-endpoint', { timeout: 6000 }).catch(() => {});
+      assert(await wizard.$('#sd-endpoint') && await wizard.$('#btn-sd-test'), 'the Images tab has the Stable Diffusion endpoint config + a Test render button');
+      await shot(wizard, 'setup-wizard-images');
     }
 
     console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');

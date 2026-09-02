@@ -1135,6 +1135,16 @@ if (el("btn-jarvis-stop")) el("btn-jarvis-stop").onclick = async () => {
   jarvisShowRunning(false); jarvisSetStatus("Stopped.");
 };
 if (window.api.onManagerAck) window.api.onManagerAck((a) => { if (el("jarvis-ack") && a && a.text) el("jarvis-ack").textContent = "🤵 " + a.text; });
+function renderAwareness(a) {
+  const box = el("jarvis-awareness"); if (!box) return;
+  if (!a || !a.panes) { box.textContent = ""; return; }
+  const parts = Object.keys(a.panes).map((site) => {
+    const p = a.panes[site];
+    const mark = !p.enabled ? "○" : p.available ? "🟢" : (p.rateLimited ? "⛔" : (p.busy ? "⏳" : "🟡"));
+    return `${mark} ${site}`;
+  });
+  box.textContent = "Awareness: " + parts.join("  ");
+}
 if (window.api.onManagerState) window.api.onManagerState((m) => {
   if (!m) return;
   const running = m.status && !["idle", "finished", "error"].includes(m.status);
@@ -1142,7 +1152,10 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
   const bits = [`Status: ${m.status || "idle"}`];
   if (m.turnNumber) bits.push(`turn ${m.turnNumber}/${m.maximumTurns}`);
   if (m.codeRuns && m.codeRuns.length) bits.push(`${m.codeRuns.length} code run(s)`);
+  if (m.toolCalls && m.toolCalls.length) bits.push(`${m.toolCalls.length} tool call(s)`);
+  if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
   jarvisSetStatus(bits.join(" · "));
+  renderAwareness(m.awareness);
 });
 if (window.api.onManagerLog) window.api.onManagerLog((e) => {
   const box = el("jarvis-log"); if (!box || !e) return;
@@ -1152,8 +1165,65 @@ if (window.api.onManagerLog) window.api.onManagerLog((e) => {
   while (box.children.length > 100) box.removeChild(box.firstChild);
 });
 
+// N5 Tools: show the registry so the user sees what the butler can call.
+async function refreshToolsList() {
+  const box = el("jarvis-tools"); if (!box || !window.api.toolsList) return;
+  try {
+    const r = await window.api.toolsList();
+    const tools = (r && r.tools) || [];
+    box.textContent = tools.length
+      ? tools.map((t) => `• ${t.name}${t.risk === "ask" ? " (asks first)" : ""} — ${t.description}`).join("\n")
+      : "No tools loaded.";
+    box.style.whiteSpace = "pre-wrap";
+  } catch { /* leave default */ }
+}
+refreshToolsList();
+
+// N3 Memory: a summary line for the panel.
+async function refreshMemoryLine() {
+  const box = el("jarvis-memory"); if (!box || !window.api.memorySummary) return;
+  try {
+    const r = await window.api.memorySummary();
+    if (r && r.available) box.textContent = `Memory: ${r.total || 0} item(s) stored`;
+    else box.textContent = "Memory: off (SQLite unavailable)";
+  } catch { /* leave blank */ }
+}
+refreshMemoryLine();
+
+// N2 Voice: save/test config + push-to-talk.
+function _voiceConfigFromUI() {
+  return { enabled: !!(el("voice-enabled") && el("voice-enabled").checked), speakOnAck: !!(el("voice-enabled") && el("voice-enabled").checked), endpoint: (el("voice-endpoint") && el("voice-endpoint").value || "").trim() };
+}
+function voiceMsg(t) { if (el("voice-msg")) el("voice-msg").textContent = t; }
+if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
+  if (!window.api.configureVoice) return;
+  const r = await window.api.configureVoice(_voiceConfigFromUI());
+  voiceMsg(r && r.ok ? (r.enabled ? "Saved — voice on." : "Saved — voice off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-voice-test")) el("btn-voice-test").onclick = async () => {
+  if (!window.api.configureVoice || !window.api.voiceSpeak) return;
+  await window.api.configureVoice(_voiceConfigFromUI());
+  voiceMsg("Speaking a test line…");
+  const r = await window.api.voiceSpeak("AutoInjector voice is working.");
+  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-mic")) el("btn-mic").onclick = async () => {
+  if (!window.api.voiceListen) return;
+  voiceMsg("Listening…");
+  const r = await window.api.voiceListen({});
+  if (r && r.ok && r.text) {
+    if (el("jarvis-goal")) el("jarvis-goal").value = r.text;
+    voiceMsg(`Heard: "${String(r.text).slice(0, 60)}" — press Start Butler.`);
+  } else {
+    voiceMsg(`Couldn't hear you: ${(r && r.error) || "error"}`);
+  }
+};
+
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
+// Image / Video paddles: open the Setup Wizard straight to their own tab.
+if (el("btn-open-image")) el("btn-open-image").onclick = () => { if (window.api.openWizard) window.api.openWizard("images"); };
+if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.openWizard) window.api.openWizard("video"); };
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
