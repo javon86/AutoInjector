@@ -43,7 +43,71 @@ function setSettings(patch) {
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, autoRun: !!settings.autoRun };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, autoRun: !!settings.autoRun, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null };
+}
+
+// --- Managed mode: AutoInjector runs the Open Interpreter shim itself, so the
+// user doesn't have to start anything. spawn the process, wait for its /health,
+// point the endpoint at it. Opt-in (a command must be given). ------------------
+const { spawn } = require('child_process');
+const managed = { child: null };
+
+function _pingHealth(host, port, cb) {
+  const req = http.request({ hostname: host, port, path: '/health', method: 'GET', timeout: 1500 }, (res) => {
+    res.resume(); cb(res.statusCode && res.statusCode < 500);
+  });
+  req.on('error', () => cb(false));
+  req.on('timeout', () => { try { req.destroy(); } catch (_) {} cb(false); });
+  req.end();
+}
+function _waitForHealth(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const tick = () => _pingHealth(host, port, (ok) => {
+      if (ok) return resolve(true);
+      if (Date.now() > deadline) return resolve(false);
+      setTimeout(tick, 400);
+    });
+    tick();
+  });
+}
+
+// startManaged({ command, args, port, host, cwd, env, readyTimeoutMs, onLog })
+// Spawns the shim and, once its health endpoint answers, enables the adapter
+// pointed at it. Returns { ok, endpoint, pid } or { ok:false, error }.
+async function startManaged(opts = {}) {
+  const command = opts.command;
+  if (!command) return { ok: false, error: 'NO_COMMAND' };
+  const host = opts.host || '127.0.0.1';
+  const port = Number(opts.port) || 8231;
+  const readyTimeoutMs = Number(opts.readyTimeoutMs) || 20000;
+  const onLog = typeof opts.onLog === 'function' ? opts.onLog : () => {};
+  stopManaged();
+  let child;
+  try {
+    child = spawn(command, Array.isArray(opts.args) ? opts.args : [], {
+      cwd: opts.cwd || undefined,
+      env: Object.assign({}, process.env, opts.env || {}),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+  managed.child = child;
+  try {
+    if (child.stdout) child.stdout.on('data', (d) => onLog('stdout', String(d)));
+    if (child.stderr) child.stderr.on('data', (d) => onLog('stderr', String(d)));
+  } catch (_) {}
+  child.on('exit', (code) => { onLog('exit', `interpreter shim exited (${code})`); if (managed.child === child) managed.child = null; });
+  child.on('error', (e) => { onLog('error', String((e && e.message) || e)); if (managed.child === child) managed.child = null; });
+
+  const ready = await _waitForHealth(host, port, readyTimeoutMs);
+  if (!ready || managed.child !== child) { stopManaged(); return { ok: false, error: 'SHIM_NOT_READY' }; }
+  const endpoint = `http://${host}:${port}/run`;
+  setSettings({ enabled: true, endpoint });
+  return { ok: true, endpoint, pid: child.pid };
+}
+function stopManaged() {
+  if (managed.child) { try { managed.child.kill(); } catch (_) {} managed.child = null; return { ok: true, stopped: true }; }
+  return { ok: true, stopped: false };
 }
 
 // Fold one raw event (already JSON-parsed) into a normalized { type, content, format }.
@@ -115,4 +179,4 @@ function run(task, opts = {}) {
   });
 }
 
-module.exports = { getSettings, setSettings, status, run, normalize };
+module.exports = { getSettings, setSettings, status, run, normalize, startManaged, stopManaged };

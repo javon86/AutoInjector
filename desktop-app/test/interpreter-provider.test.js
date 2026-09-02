@@ -67,6 +67,29 @@ async function main() {
   const er = await oi.run('x');
   assert(er.ok === false && /HTTP_500/.test(er.error), 'a 500 from the OI server is reported, not thrown');
 
+  console.log('\n== managed mode: AutoInjector spawns the shim itself, waits for /health, then run() works ==');
+  {
+    const mport = 18000 + Math.floor(Math.random() * 2000);
+    // A stand-in "shim": a Node process that answers /health and streams one /run event.
+    const code = `const http=require('http');http.createServer((q,s)=>{`
+      + `if(q.url==='/health'){s.writeHead(200);s.end('{"ok":true}');return;}`
+      + `if(q.method==='POST'&&q.url==='/run'){s.writeHead(200);`
+      + `s.write(JSON.stringify({role:'assistant',type:'message',content:'managed ok'})+String.fromCharCode(10));`
+      + `s.write(JSON.stringify({type:'done'})+String.fromCharCode(10));s.end();return;}`
+      + `s.writeHead(404);s.end();}).listen(${mport},'127.0.0.1');`;
+    const started = await oi.startManaged({ command: process.execPath, args: ['-e', code], port: mport, readyTimeoutMs: 8000 });
+    assert(started.ok, `startManaged reports ok once /health answers (${started.endpoint || started.error})`);
+    assert(started.ok && started.endpoint.includes(String(mport)), 'the endpoint points at the spawned shim port');
+    assert(oi.status().managed === true && oi.status().managedPid, 'status() reports managed mode + the child pid');
+    const mrun = await oi.run('do the thing');
+    assert(mrun.ok && /managed ok/.test(mrun.message), 'run() works against the auto-spawned shim');
+    const stopped = oi.stopManaged();
+    assert(stopped.stopped === true, 'stopManaged kills the child process');
+    assert(oi.status().managed === false, 'status() reports managed mode is off after stop');
+    const noCmd = await oi.startManaged({});
+    assert(noCmd.ok === false && noCmd.error === 'NO_COMMAND', 'startManaged with no command is rejected');
+  }
+
   await new Promise((r) => server.close(r));
   await new Promise((r) => errServer.close(r));
   console.log(`\n${passed} passed, ${failed} failed`);

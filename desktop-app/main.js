@@ -3491,6 +3491,29 @@ if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
     autoRun: process.env.AUTOINJECTOR_INTERPRETER_AUTORUN === "1",
   });
 }
+// Managed mode: let AutoInjector RUN the Open Interpreter shim itself, so the
+// user doesn't have to start anything. AUTOINJECTOR_INTERPRETER_SPAWN is the
+// command (e.g. "python"); the shim path + port are supplied alongside. It's
+// spawned on app-ready and stopped on quit; a failure never blocks startup.
+async function startManagedInterpreter() {
+  const command = process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
+  if (!command) return;
+  const shim = process.env.AUTOINJECTOR_INTERPRETER_SHIM || path.join(__dirname, "..", "integrations", "open-interpreter", "interpreter_shim.py");
+  const port = Number(process.env.AUTOINJECTOR_INTERPRETER_PORT) || 8231;
+  try {
+    const r = await interpreterProvider.startManaged({
+      command,
+      args: [shim, "--port", String(port)],
+      port,
+      env: {
+        INTERPRETER_MODEL: process.env.AUTOINJECTOR_INTERPRETER_MODEL || "",
+        INTERPRETER_API_BASE: process.env.AUTOINJECTOR_INTERPRETER_API_BASE || "",
+      },
+      onLog: (kind, text) => logEvent("interpreter-shim", { kind, text: String(text).slice(0, 300) }),
+    });
+    logEvent(r && r.ok ? "interpreter-managed-started" : "interpreter-managed-failed", r || {});
+  } catch (e) { logEvent("interpreter-managed-error", { error: String(e) }); }
+}
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
@@ -3511,7 +3534,8 @@ app.whenReady().then(() => {
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
   startServiceBridge();
+  startManagedInterpreter();
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
-app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} });
+app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} });
