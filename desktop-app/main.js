@@ -792,42 +792,6 @@ function closePromptEditorWindow() {
   if (promptEditorWin) promptEditorWin.close();
 }
 
-// A small, on-demand fourth window for previewing a document before sending
-// it to one or more AIs — same single-instance, re-navigate-via-query-string
-// pattern as the prompt editor window above.
-let documentViewerWin = null;
-let documentViewerView = null;
-function openDocumentViewerWindow(filePath) {
-  const search = `path=${encodeURIComponent(filePath)}`;
-  if (documentViewerWin && documentViewerView) {
-    documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
-    documentViewerWin.focus();
-    return;
-  }
-  documentViewerWin = new BaseWindow({ width: 820, height: 700, resizable: true, title: "AutoInjector — Document" });
-  documentViewerView = new WebContentsView({
-    webPreferences: {
-      partition: "document-viewer-ui",
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  documentViewerWin.contentView.addChildView(documentViewerView);
-  documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
-  const layoutViewer = () => {
-    if (!documentViewerWin || !documentViewerView) return;
-    const [w, h] = documentViewerWin.getContentSize();
-    documentViewerView.setBounds({ x: 0, y: 0, width: w, height: h });
-  };
-  layoutViewer();
-  documentViewerWin.on("resize", layoutViewer);
-  documentViewerWin.on("closed", () => { documentViewerWin = null; documentViewerView = null; });
-}
-function closeDocumentViewerWindow() {
-  if (documentViewerWin) documentViewerWin.close();
-}
-
 // A fourth on-demand window: build a numbered list of prompts to fire off
 // one at a time. Same lazy single-instance pattern as the other two popups,
 // but it never needs to be re-targeted at a different id (there's no
@@ -901,7 +865,7 @@ function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
 // --- Consolidated AI feed window --------------------------------------------
 // A separate pop-up that shows every AI reply as a colour-coded bubble per LLM.
 // It registers its view in uiViews so the normal broadcast() (capture / sent /
-// book-runner) fans out to it live; on close we splice it back out.
+// manager events) fans out to it live; on close we splice it back out.
 let feedWin = null;
 let feedView = null;
 function openFeedWindow() {
@@ -1215,7 +1179,7 @@ async function hrSendTextTo(target, text, fromSite, sentTargets) {
 //   TIMEOUT            -- nothing came back at all
 const selftestInFlight = new Set();
 const tunerInFlight = { active: false }; // guards against a manual 🧪 Test colliding with a Tuner run touching the same site
-const testRunInFlight = new Set(); // sites currently in a Book Studio "Test AIs" round-trip — bareMode so a plain "TEST OK" reply (no envelope) still captures
+const testRunInFlight = new Set(); // sites currently in a connectivity "Test" round-trip — bareMode so a plain "TEST OK" reply (no envelope) still captures
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -1516,8 +1480,7 @@ function stripEnvelope(text) {
 // pane wraps its reply per the protocol. Required on the baseline path (Compose,
 // Prompt Sequence, Manager): a reply with no [FROM:] closing tag isn't captured,
 // so an untaught prompt would strand the reply. `target` names the pane so its
-// own [FROM:] tag is spelled out. The book workflow teaches its own envelope
-// (book-prompts.js) and is intentionally left untouched.
+// own [FROM:] tag is spelled out.
 function withEnvelope(text, target) {
   const tag = String(target || "").toUpperCase() || "YOU";
   return String(text == null ? "" : text) +
@@ -1865,10 +1828,14 @@ async function runManagerTurn() {
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 
-  if (state.managerConfig.approvalMode && decision.action !== "REQUEST_APPROVAL") {
+  // Approval gate: the whole-task approval mode, OR a per-tool "ask" risk tier —
+  // a risk:"ask" tool (e.g. http-fetch) is held for the operator even when global
+  // approval mode is off, so an LLM-chosen side effect never fires unattended.
+  const askTool = decision.action === "USE_TOOL" && (() => { const t = toolProvider.get(decision.tool); return !!(t && t.risk === "ask"); })();
+  if ((state.managerConfig.approvalMode || askTool) && decision.action !== "REQUEST_APPROVAL") {
     m.pendingApproval = decision;
     m.status = "paused";
-    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}`, action: decision.action, details: decision });
+    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}${askTool ? ` (${decision.tool})` : ""}`, action: decision.action, details: decision });
     broadcastManagerState();
     return;
   }
@@ -2761,8 +2728,6 @@ function formatSystemReport(rep) {
   return lines.join("\n");
 }
 
-// --- System AI (Local Supervisor / LSI) IPC --------------------------------
-
 // --- Ollama model manager IPC ----------------------------------------------
 ipcMain.handle("ollama:detect", async () => { try { return await ollamaManager.detect(); } catch (e) { return { available: false, reason: String(e) }; } });
 ipcMain.handle("ollama:list", async (_evt, endpoint) => { try { return await ollamaManager.listInstalled(endpoint); } catch (e) { return { ok: false, models: [] }; } });
@@ -2844,7 +2809,7 @@ function buildAppMenu() {
   } catch (e) { logEvent("menu-error", { error: String(e) }); }
 }
 
-// --- ATELIER governance IPC ------------------------------------------------
+// --- Compose / forward / regenerate IPC ------------------------------------
 
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];

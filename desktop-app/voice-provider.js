@@ -13,6 +13,7 @@
 // Both POSTs return a single JSON object (not a stream) -- speech is naturally
 // request/response, unlike Open Interpreter's event stream.
 const http = require('http');
+const https = require('https');
 const { URL } = require('url');
 const { spawn } = require('child_process');
 
@@ -43,9 +44,10 @@ function _postJson(pathName, body) {
   return new Promise((resolve) => {
     if (!settings.endpoint) return resolve({ ok: false, error: 'NO_ENDPOINT' });
     let base; try { base = new URL(settings.endpoint); } catch { return resolve({ ok: false, error: 'BAD_ENDPOINT' }); }
+    const lib = base.protocol === 'https:' ? https : http;
     const payload = JSON.stringify(body || {});
-    const req = http.request(
-      { hostname: base.hostname, port: base.port || 80, path: pathName, method: 'POST', timeout: settings.timeoutMs, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Accept: 'application/json' } },
+    const req = lib.request(
+      { hostname: base.hostname, port: base.port || (base.protocol === 'https:' ? 443 : 80), path: pathName, method: 'POST', timeout: settings.timeoutMs, headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Accept: 'application/json' } },
       (res) => {
         let buf = ''; res.setEncoding('utf8');
         res.on('data', (d) => { buf += d; });

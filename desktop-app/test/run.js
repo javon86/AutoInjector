@@ -72,6 +72,7 @@ const toolProvider = require(path.join(__dirname, "..", "tool-provider"));
 let toolRunCalls = [];
 toolProvider.run = async (name, args) => { toolRunCalls.push({ name, args }); return { ok: true, message: `tool ${name} ok`, events: [] }; };
 toolProvider.register({ name: "echo", description: "echo (test)", risk: "monitor", invoke: async () => ({ ok: true, message: "echo" }) });
+toolProvider.register({ name: "fetch-thing", description: "risky (test)", risk: "ask", invoke: async () => ({ ok: true, message: "fetched" }) });
 
 // N3: the shared memory store. Stubbed so REMEMBER/RECALL and the task-start
 // seed are intercepted deterministically without a real SQLite DB.
@@ -2139,6 +2140,27 @@ async function testManagerGenerateImageAction() {
   await call("manager:stop", {});
 }
 
+// Safeguard: a risk:"ask" tool is held for operator approval even when global
+// approval mode is OFF, and only runs once approved.
+async function testManagerAskToolApprovalGate() {
+  console.log("\n== Safeguard: a risk-\"ask\" tool is held for approval even with approval mode off ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  toolRunCalls = [];
+  resetManagerStub();
+  queueManagerDecision({ action: "USE_TOOL", tool: "fetch-thing", args: {}, reason: "needs the risky tool", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.95 });
+  await call("manager:start-task", { userRequest: "use the risky tool" });
+  await settle(300);
+  let st = await call("manager:get-state", {});
+  assert(st.manager.status === "paused" && st.manager.pendingApproval && st.manager.pendingApproval.tool === "fetch-thing", "the risk-\"ask\" tool is held (paused, pendingApproval set) — not auto-run");
+  assert(toolRunCalls.length === 0, "the tool has NOT run while awaiting approval");
+  await call("manager:approve", {});
+  await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager.status === "finished" || toolRunCalls.length > 0; }, { label: "the approved tool runs" });
+  assert(toolRunCalls.some((c) => c.name === "fetch-thing"), "once approved, the tool runs");
+  await call("manager:stop", {});
+}
+
 // N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
 // back into the task's memories[]; relevant memories are seeded at task start.
 async function testManagerMemoryActions() {
@@ -2297,6 +2319,7 @@ async function main() {
   await testManagerTaskLifecycleHappyPath();
   await testManagerRunCodeAction();
   await testManagerUseToolAction();
+  await testManagerAskToolApprovalGate();
   await testManagerMemoryActions();
   await testManagerGenerateImageAction();
   await testManagerAwareness();

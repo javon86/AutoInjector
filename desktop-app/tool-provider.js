@@ -118,15 +118,18 @@ function _httpFetch({ url } = {}) {
       { hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, method: 'GET', timeout: config.fetchTimeoutMs, headers: { 'User-Agent': 'AutoInjector-tool/1.0', Accept: 'text/*, application/json' } },
       (res) => {
         if (res.statusCode && res.statusCode >= 400) { res.resume(); return resolve({ ok: false, error: `HTTP_${res.statusCode}` }); }
-        let buf = ''; let over = false;
+        let buf = ''; let done = false;
+        const finish = (over) => { if (done) return; done = true; resolve({ ok: true, message: buf, data: { status: res.statusCode, truncated: over, bytes: Buffer.byteLength(buf) } }); };
         res.setEncoding('utf8');
         res.on('data', (d) => {
-          if (over) return;
+          if (done) return;
           buf += d;
-          if (Buffer.byteLength(buf) > config.fetchMaxBytes) { over = true; buf = buf.slice(0, config.fetchMaxBytes); try { req.destroy(); } catch {} }
+          // On overflow, return the truncated body as a success — destroying the
+          // request here would make `end` never fire, so resolve inline instead.
+          if (Buffer.byteLength(buf) > config.fetchMaxBytes) { buf = buf.slice(0, config.fetchMaxBytes); try { res.destroy(); } catch {} finish(true); }
         });
-        res.on('end', () => resolve({ ok: true, message: buf, data: { status: res.statusCode, truncated: over, bytes: Buffer.byteLength(buf) } }));
-        res.on('error', (e) => resolve({ ok: false, error: String((e && e.message) || e) }));
+        res.on('end', () => finish(false));
+        res.on('error', (e) => { if (!done) resolve({ ok: false, error: String((e && e.message) || e) }); });
       }
     );
     req.on('error', (e) => resolve({ ok: false, error: String((e && e.code) || (e && e.message) || e) }));

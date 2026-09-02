@@ -1,8 +1,8 @@
 'use strict';
 /*
- * openai-client.js — the single OpenAI-compatible chat-completions client shared
- * by the manager (manager-provider.js) and the Local Supervisor (lsi-provider.js)
- * (AI-006). It owns the plumbing both had copied separately: request + timeout,
+ * openai-client.js — the single OpenAI-compatible chat-completions client used
+ * by the manager/supervisor (manager-provider.js). It owns the shared plumbing
+ * that used to be copied per-provider (AI-006): request + timeout,
  * error mapping, secret redaction, JSON extraction, and a /models reachability
  * probe. It is deliberately format-agnostic — each provider keeps its OWN prompt
  * building and its own response schema/validation; this module never decides
