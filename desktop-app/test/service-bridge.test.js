@@ -184,6 +184,8 @@ async function main() {
             listener('send-error', { site: 'gemini', error: 'NO_VIEW' });
             listener('capture', { site: 'chatgpt', text: 'rate limited', id: 8, isRateLimited: true });
             listener('houserule-state', { active: true, mode: 'debate' });
+            listener('manager-ack', { taskId: 'T1', text: 'On it — working on: ...' });
+            listener('manager-state', { status: 'delegating' });
             listener('log', { kind: 'poll-error', error: 'boom' });
           }
           // Close only after the LAST-emitted event (the 2nd error, from the
@@ -202,6 +204,8 @@ async function main() {
     assert(events.includes('error'), 'a send-error is delivered as an "error" event');
     assert(events.includes('rate-limit'), 'a rate-limited capture also emits a "rate-limit" event');
     assert(events.includes('council'), 'a House-Rules/Council state change is delivered as "council"');
+    assert(events.includes('jarvis-ack'), 'the butler ack is delivered as a "jarvis-ack" event');
+    assert(events.includes('jarvis'), 'the butler state is delivered as a "jarvis" event');
     assert(events.filter((e) => e === 'error').length >= 2, 'an internal error log (poll-error) is also surfaced as "error"');
   }
 

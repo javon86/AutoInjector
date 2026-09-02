@@ -1093,6 +1093,65 @@ if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
 };
 if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
 
+// --- System AI / Butler (the supervisor) --------------------------------------
+// Save the endpoint + model as the supervisor's provider config, then the butler
+// (manager) can be started with a goal. All of this drives existing IPC.
+function _managerConfigFromUI() {
+  return { provider: "openai-compatible", endpoint: (el("lsi-endpoint") && el("lsi-endpoint").value || "").trim(), model: (el("lsi-model") && el("lsi-model").value) || "" };
+}
+if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
+  if (!window.api.configureManagerProvider) return;
+  const r = await window.api.configureManagerProvider(_managerConfigFromUI());
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "Saved — the butler is configured." : `Save failed: ${(r && r.error) || "error"}`;
+};
+if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
+  if (!window.api.testManagerConnection) return;
+  if (el("lsi-msg")) el("lsi-msg").textContent = "Testing connection…";
+  if (window.api.configureManagerProvider) await window.api.configureManagerProvider(_managerConfigFromUI());
+  const r = await window.api.testManagerConnection();
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "Connection OK ✓" : `Test failed: ${(r && r.error) || "error"}`;
+};
+
+function jarvisSetStatus(t) { if (el("jarvis-status")) el("jarvis-status").textContent = t; }
+function jarvisShowRunning(on) {
+  if (el("btn-jarvis-stop")) el("btn-jarvis-stop").style.display = on ? "" : "none";
+  if (el("btn-jarvis-start")) el("btn-jarvis-start").disabled = !!on;
+}
+if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
+  if (!window.api.startManagedTask) return;
+  const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
+  if (!goal) { jarvisSetStatus("Type a goal first."); return; }
+  if (el("jarvis-ack")) el("jarvis-ack").textContent = "";
+  jarvisSetStatus("Starting…");
+  const r = await window.api.startManagedTask(goal);
+  if (r && r.ok) { jarvisShowRunning(true); jarvisSetStatus("Started."); }
+  else {
+    const hint = r && r.error === "NOT_CONFIGURED" ? " — set an endpoint + model above and press Save." : "";
+    jarvisSetStatus(`Can't start: ${(r && r.error) || "error"}${hint}`);
+  }
+};
+if (el("btn-jarvis-stop")) el("btn-jarvis-stop").onclick = async () => {
+  if (window.api.stopManagedTask) await window.api.stopManagedTask();
+  jarvisShowRunning(false); jarvisSetStatus("Stopped.");
+};
+if (window.api.onManagerAck) window.api.onManagerAck((a) => { if (el("jarvis-ack") && a && a.text) el("jarvis-ack").textContent = "🤵 " + a.text; });
+if (window.api.onManagerState) window.api.onManagerState((m) => {
+  if (!m) return;
+  const running = m.status && !["idle", "finished", "error"].includes(m.status);
+  jarvisShowRunning(running);
+  const bits = [`Status: ${m.status || "idle"}`];
+  if (m.turnNumber) bits.push(`turn ${m.turnNumber}/${m.maximumTurns}`);
+  if (m.codeRuns && m.codeRuns.length) bits.push(`${m.codeRuns.length} code run(s)`);
+  jarvisSetStatus(bits.join(" · "));
+});
+if (window.api.onManagerLog) window.api.onManagerLog((e) => {
+  const box = el("jarvis-log"); if (!box || !e) return;
+  const row = document.createElement("div");
+  row.textContent = `${e.category || ""}: ${e.summary || ""}`.slice(0, 220);
+  box.appendChild(row);
+  while (box.children.length > 100) box.removeChild(box.firstChild);
+});
+
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
 

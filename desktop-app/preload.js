@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld("api", {
   getManagerState: () => ipcRenderer.invoke("manager:get-state"),
   onManagerState: (cb) => ipcRenderer.on("manager-state", (_e, payload) => cb(payload)),
   onManagerLog: (cb) => ipcRenderer.on("manager-log", (_e, payload) => cb(payload)),
+  onManagerAck: (cb) => ipcRenderer.on("manager-ack", (_e, payload) => cb(payload)),
   dbStatus: () => ipcRenderer.invoke("db:status"),
   dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit),
   ollamaDetect: () => ipcRenderer.invoke("ollama:detect"),

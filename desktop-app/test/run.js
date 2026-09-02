@@ -2049,6 +2049,28 @@ async function testManagerRunCodeAction() {
   await call("manager:stop", {});
 }
 
+// Ack-Brain: the butler acknowledges INSTANTLY when a task starts — an "ack" log
+// entry (and a manager-ack broadcast) is emitted before the first decision.
+async function testManagerAckBrain() {
+  console.log("\n== Ack-Brain: the butler emits an instant acknowledgment the moment a task starts ==");
+  await resetManagerState();
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.9 });
+  const started = await call("manager:start-task", { userRequest: "Draft a plan for launch day" });
+  const s = await call("manager:get-state", {});
+  // Scope to THIS task's entries -- earlier manager tests each emit their own ack
+  // (start-task always acks now), and resetManagerState() keeps the running log.
+  const taskLog = s.managerLog.filter((l) => l.taskId === started.taskId);
+  const ack = taskLog.find((l) => l.category === "ack");
+  assert(ack, "an 'ack' entry is logged the instant the task starts");
+  assert(ack && /On it/.test(ack.summary) && /Draft a plan for launch day/.test(ack.summary), "the ack echoes the goal ('On it — working on: ...')");
+  // The ack precedes the first real decision/action in the log.
+  const ackIdx = taskLog.findIndex((l) => l.category === "ack");
+  const firstAction = taskLog.findIndex((l) => l.category === "action" || l.category === "decision");
+  assert(ackIdx >= 0 && (firstAction === -1 || ackIdx < firstAction), "the ack comes before the first decision/action");
+  await call("manager:stop", {});
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -2136,6 +2158,7 @@ async function main() {
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
   await testManagerRunCodeAction();
+  await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();
   await testManagerEscalateActionAndTierFourAdjudication();

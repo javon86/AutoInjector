@@ -113,7 +113,16 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
     onTunerState: (cb) => { tunerStateCb = cb; },
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
-    onPromptsChanged: (cb) => { promptsChangedCb = cb; }
+    onPromptsChanged: (cb) => { promptsChangedCb = cb; },
+    // Butler / System AI supervisor
+    configureManagerProvider: async (config) => { calls.push({ fn: "configureManagerProvider", config }); return { ok: true }; },
+    testManagerConnection: async () => { calls.push({ fn: "testManagerConnection" }); return { ok: true }; },
+    startManagedTask: async (userRequest) => { calls.push({ fn: "startManagedTask", userRequest }); return { ok: true, taskId: "t1" }; },
+    stopManagedTask: async () => { calls.push({ fn: "stopManagedTask" }); return { ok: true }; },
+    getManagerState: async () => ({ ok: true, manager: { status: "idle" } }),
+    onManagerState: (cb) => { api._managerStateCb = cb; },
+    onManagerLog: (cb) => { api._managerLogCb = cb; },
+    onManagerAck: (cb) => { api._managerAckCb = cb; }
   };
   return api;
 }
@@ -961,9 +970,49 @@ async function main() {
   await testPromptLibraryLiveSync();
 
   await testExtractAllButton();
+  await testButlerPanelWired();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testButlerPanelWired() {
+  console.log("\n== Butler: the System AI panel starts/stops a goal, saves config, and shows the ack + status ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(doc.getElementById("jarvis-goal") && doc.getElementById("btn-jarvis-start"), "the butler goal box and Start button are present");
+
+  // Save config wires to configureManagerProvider.
+  doc.getElementById("lsi-endpoint").value = "http://127.0.0.1:11434/v1/chat/completions";
+  click(dom, "btn-lsi-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && /11434/.test(c.config.endpoint)), "Save settings configures the supervisor provider (endpoint)");
+
+  // Start with a goal.
+  doc.getElementById("jarvis-goal").value = "Compare three approaches and total them";
+  click(dom, "btn-jarvis-start");
+  await new Promise((r) => setTimeout(r, 20));
+  const startCall = api.calls.find((c) => c.fn === "startManagedTask");
+  assert(startCall && startCall.userRequest === "Compare three approaches and total them", "Start Butler calls startManagedTask with the typed goal");
+
+  // The instant ack shows up.
+  if (api._managerAckCb) api._managerAckCb({ taskId: "t1", text: 'On it — working on: "Compare three approaches and total them"' });
+  assert(/On it/.test(doc.getElementById("jarvis-ack").textContent), "the sub-second ack is displayed in the panel");
+
+  // A running state reveals Stop and updates the status line.
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 1, maximumTurns: 20, codeRuns: [] });
+  assert(doc.getElementById("btn-jarvis-stop").style.display !== "none", "while running, the Stop button is shown");
+  assert(/delegating/.test(doc.getElementById("jarvis-status").textContent), "the status line reflects the butler's live status");
+
+  // A code run count surfaces (proves the code arm is visible).
+  if (api._managerStateCb) api._managerStateCb({ status: "running-code", turnNumber: 2, maximumTurns: 20, codeRuns: [{ id: 1 }] });
+  assert(/code run/.test(doc.getElementById("jarvis-status").textContent), "a RUN_CODE step is shown in the status");
+
+  // Stop.
+  click(dom, "btn-jarvis-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "stopManagedTask"), "Stop calls stopManagedTask");
 }
 
 async function testExtractAllButton() {

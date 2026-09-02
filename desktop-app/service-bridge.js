@@ -29,6 +29,7 @@ const CHANNEL_MAP = {
   'waiting-changed': 'status',
   'manager-state': 'jarvis',
   'manager-log': 'jarvis-log',
+  'manager-ack': 'jarvis-ack',
 };
 
 function createServiceBridge(deps) {

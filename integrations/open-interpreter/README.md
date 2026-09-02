@@ -55,10 +55,28 @@ INTERPRETER_MODEL=ollama/llama3.1 INTERPRETER_API_BASE=http://localhost:11434 \
 
 ## Verify
 
+### One-command smoke test (no butler, no AutoInjector needed)
+
+The fastest way to confirm Open Interpreter works **on its own**, before the
+butler/manager is ever engaged:
+
+```
+node integrations/open-interpreter/smoke-test.js
+```
+
+It spawns the shim on a free port, checks `GET /health`, asserts the plumbing
+(`POST /run` with an empty task → `400 NEED_TASK`), then tries a real task and
+reports whether Open Interpreter is installed and has a model. No model
+configured is not a failure — it reports "shim OK, OI needs a model". Options:
+`--port <n>`, `--task "<text>"`; set `PYTHON=python3` if `python` isn't on PATH,
+and `INTERPRETER_MODEL` / `INTERPRETER_API_BASE` to point it at a local model.
+
+### By hand (curl)
+
 ```
 curl -s http://127.0.0.1:8231/health
 curl -s -X POST http://127.0.0.1:8231/run -H 'Content-Type: application/json' -d '{"task":"what is 2+2"}'
-# through AutoInjector:
+# through AutoInjector's bridge (also independent of the butler):
 curl -s -X POST http://127.0.0.1:8765/interpreter/run -H 'Content-Type: application/json' -d '{"task":"what is 2+2"}'
 ```
 

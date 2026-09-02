@@ -1934,8 +1934,23 @@ async function startManagedTask(userRequest) {
 
   logManagerEvent({ category: "task", summary: `Managed task started: "${m.userRequest.slice(0, 120)}"` });
   broadcastManagerState();
+  // Ack-Brain: the butler acknowledges INSTANTLY (before the deep brain's first
+  // turn), the way PersonalJarvis does — a sub-second "on it" so the user isn't
+  // left waiting on the model. Emitted synchronously here, ahead of runManagerTurn.
+  emitManagerAck(m.taskId, m.userRequest);
   runManagerTurn(); // fire-and-forget -- progresses asynchronously via capture events, same pattern as startSequence()
   return { ok: true, taskId: m.taskId };
+}
+
+// The instant acknowledgment. Templated from the goal (no model call, so it's
+// truly sub-second and always available); shown in the UI and streamed on the
+// bridge as a "jarvis-ack" event.
+function emitManagerAck(taskId, goal) {
+  const g = String(goal || "").replace(/\s+/g, " ").trim();
+  const short = g.slice(0, 80);
+  const text = short ? `On it — working on: "${short}${g.length > 80 ? "…" : ""}"` : "On it.";
+  logManagerEvent({ category: "ack", summary: text });
+  broadcast("manager-ack", { taskId, text, ts: Date.now() });
 }
 
 async function finishManagedTask({ ok, reason }) {

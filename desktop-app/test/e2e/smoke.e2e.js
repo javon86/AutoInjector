@@ -20,6 +20,8 @@ async function main() {
       ['#col-houserules', 'House Rules panel'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#jarvis-goal', 'Butler goal box'],
+      ['#btn-jarvis-start', 'Start Butler button'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }

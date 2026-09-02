@@ -63,9 +63,15 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def _headers(self, code=200, ctype="application/x-ndjson"):
+        # Close the connection after each response. The /run body is streamed with
+        # no Content-Length, so a strict HTTP/1.1 client (e.g. Node's http) would
+        # otherwise wait forever for more data on a kept-alive socket. Closing
+        # signals end-of-response cleanly to any client.
+        self.close_connection = True
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
         self.end_headers()
 
     def do_GET(self):  # noqa: N802
