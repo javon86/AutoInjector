@@ -867,8 +867,15 @@ function closeSequenceWindow() {
 // --- Setup Wizard window ----------------------------------------------------
 let wizardWin = null;
 let wizardView = null;
-function openWizardWindow() {
-  if (wizardWin && wizardView) { wizardWin.focus(); return; }
+const WIZARD_TABS = new Set(["localai", "images", "video", "advanced"]);
+function openWizardWindow(tab) {
+  const wantTab = WIZARD_TABS.has(tab) ? tab : null;
+  if (wizardWin && wizardView) {
+    wizardWin.focus();
+    // Already open — just switch to the requested tab in place.
+    if (wantTab) try { wizardView.webContents.executeJavaScript(`document.querySelector('.tab[data-tab="${wantTab}"]')?.click();`).catch(() => {}); } catch (_) {}
+    return;
+  }
   wizardWin = new BaseWindow({ width: 900, height: 700, resizable: true, title: "AutoInjector — Setup Wizard" });
   wizardView = new WebContentsView({
     webPreferences: {
@@ -879,7 +886,7 @@ function openWizardWindow() {
     }
   });
   wizardWin.contentView.addChildView(wizardView);
-  wizardView.webContents.loadFile(path.join(__dirname, "setup-wizard.html"));
+  wizardView.webContents.loadFile(path.join(__dirname, "setup-wizard.html"), wantTab ? { query: { tab: wantTab } } : undefined);
   const layoutWizard = () => {
     if (!wizardWin || !wizardView) return;
     const [w, h] = wizardWin.getContentSize();
@@ -2774,7 +2781,7 @@ ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
+ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Consolidated AI feed window: open/close + backfill recent AI messages so the
 // window shows history, not a blank, when reopened.

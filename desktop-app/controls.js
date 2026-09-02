@@ -1221,6 +1221,9 @@ if (el("btn-mic")) el("btn-mic").onclick = async () => {
 
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
+// Image / Video paddles: open the Setup Wizard straight to their own tab.
+if (el("btn-open-image")) el("btn-open-image").onclick = () => { if (window.api.openWizard) window.api.openWizard("images"); };
+if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.openWizard) window.api.openWizard("video"); };
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };

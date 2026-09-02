@@ -92,7 +92,7 @@ contextBridge.exposeInMainWorld("api", {
   ollamaRecommended: (vramGB) => ipcRenderer.invoke("ollama:recommended", vramGB),
   ollamaPull: (model) => ipcRenderer.invoke("ollama:pull", model),
   onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload)),
-  openWizard: () => ipcRenderer.invoke("wizard:open"),
+  openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
   wizardCatalog: () => ipcRenderer.invoke("wizard:catalog")

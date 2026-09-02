@@ -245,6 +245,12 @@
     .preview { height:60px; overflow:auto; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:5px 6px; white-space:pre-wrap; line-height:1.3; opacity:.9; }
     .preview .ts { display:block; font-size:11px; opacity:.78; margin-bottom:3px; }
     .row-label { opacity:.8; font-size:11px; margin-right:3px; }
+    /* Collapsible sub-sections inside the System AI panel — keep it compact. */
+    .sai-sec { margin:5px 0; border-top:1px solid #2a2a2a; padding-top:5px; }
+    .sai-sec > summary { cursor:pointer; font-weight:600; font-size:12px; list-style:none; opacity:.9; user-select:none; }
+    .sai-sec > summary::-webkit-details-marker { display:none; }
+    .sai-sec > summary::before { content:"▸ "; opacity:.6; }
+    .sai-sec[open] > summary::before { content:"▾ "; }
 
     .pane-slot { flex:1 1 auto; min-height:560px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
@@ -323,6 +329,8 @@
           <button id="btn-open-roles">🎭 Roles</button>
           <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another" aria-label="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
           <button id="btn-open-wizard" title="Set up local AI, image generation, voice, and guided installs" aria-label="Set up local AI, image generation, voice, and guided installs">🧙 Setup</button>
+          <button id="btn-open-image" title="Set up image generation (Stable Diffusion)" aria-label="Set up image generation (Stable Diffusion)">🖼️ Image</button>
+          <button id="btn-open-video" title="Set up video generation" aria-label="Set up video generation">🎬 Video</button>
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 Start New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
@@ -409,28 +417,30 @@
       <div id="systemai-body">
         <p style="opacity:.78; margin:4px 0;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). Off unless you switch it on and give it a local model. It never touches the three chat AIs' logins.</p>
         <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="lsi-enabled"> <span>Let the AI help run the system</span></label>
-        <div class="btns" style="margin:4px 0;">
-          <input id="lsi-endpoint" type="text" placeholder="http://127.0.0.1:11434/v1/chat/completions" style="flex:1 1 150px; min-width:0;">
-          <button id="btn-lsi-test">Test</button>
-        </div>
-        <div class="btns" style="margin:4px 0;">
-          <span class="row-label">Model</span>
-          <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
-          <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
-        </div>
-        <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
-        <div class="btns" style="margin:4px 0;">
-          <span class="row-label">Get</span>
-          <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
-          <button id="btn-lsi-download" title="Download &amp; install this model with Ollama" aria-label="Download &amp; install this model with Ollama">⬇ Download</button>
-        </div>
-        <div id="lsi-download-status" style="font-size:11px; opacity:.7; font-family:ui-monospace,monospace; max-height:70px; overflow-y:auto; margin:2px 0;"></div>
-        <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
-        <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
+        <details class="sai-sec">
+          <summary>⚙️ Local model settings</summary>
+          <div class="btns" style="margin:4px 0;">
+            <input id="lsi-endpoint" type="text" placeholder="http://127.0.0.1:11434/v1/chat/completions" style="flex:1 1 150px; min-width:0;">
+            <button id="btn-lsi-test">Test</button>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Model</span>
+            <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
+            <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
+          </div>
+          <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Get</span>
+            <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
+            <button id="btn-lsi-download" title="Download &amp; install this model with Ollama" aria-label="Download &amp; install this model with Ollama">⬇ Download</button>
+          </div>
+          <div id="lsi-download-status" style="font-size:11px; opacity:.7; font-family:ui-monospace,monospace; max-height:70px; overflow-y:auto; margin:2px 0;"></div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
+          <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
 
-        <hr style="border:none; border-top:1px solid #2a2a2a; margin:8px 0;">
-        <div style="font-weight:600; font-size:12px; margin-bottom:3px;">🤵 Butler — give it a goal</div>
-        <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">It plans, delegates to ChatGPT/Claude/Gemini, and runs code (Open Interpreter) to reach the goal. Needs an endpoint + model saved above.</p>
+        <div style="font-weight:600; font-size:12px; margin:6px 0 3px;">🤵 Butler — give it a goal</div>
+        <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">It plans, delegates to ChatGPT/Claude/Gemini, runs code, and can generate images to reach the goal. Needs a local model saved in ⚙️ above.</p>
         <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
         <div class="btns" style="margin:4px 0;">
           <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
@@ -440,26 +450,31 @@
         <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
         <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
         <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-        <div id="jarvis-log" style="max-height:120px; overflow-y:auto; font-size:11px; font-family:ui-monospace,monospace; opacity:.85; display:flex; flex-direction:column-reverse; gap:1px;"></div>
+        <details class="sai-sec">
+          <summary>📜 Activity log</summary>
+          <div id="jarvis-log" style="max-height:120px; overflow-y:auto; font-size:11px; font-family:ui-monospace,monospace; opacity:.85; display:flex; flex-direction:column-reverse; gap:1px;"></div>
+        </details>
 
-        <hr style="border:none; border-top:1px solid #2a2a2a; margin:8px 0;">
-        <div style="font-weight:600; font-size:12px; margin-bottom:3px;">🧰 Tools — what the butler can call</div>
-        <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Registered tools (built-in now; MCP servers plug in later). The butler invokes these via USE_TOOL.</p>
-        <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
+        <details class="sai-sec">
+          <summary>🧰 Tools — what the butler can call</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Registered tools (built-in now; MCP servers plug in later). The butler invokes these via USE_TOOL.</p>
+          <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
+        </details>
 
-        <hr style="border:none; border-top:1px solid #2a2a2a; margin:8px 0;">
-        <div style="font-weight:600; font-size:12px; margin-bottom:3px;">🔊 Voice — speak &amp; listen (local)</div>
-        <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Fully offline via a local voice shim. The butler can say its ack/status aloud, and you can talk to it.</p>
-        <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:2px 0;">
-          <input type="checkbox" id="voice-enabled"> Speak the butler's replies aloud
-        </label>
-        <input type="text" id="voice-endpoint" placeholder="http://127.0.0.1:8232" style="width:100%; box-sizing:border-box; margin:2px 0;">
-        <div class="btns" style="margin:4px 0;">
-          <button id="btn-voice-save">Save</button>
-          <button id="btn-voice-test">Test</button>
-          <button id="btn-mic" title="Push to talk">🎤 Talk</button>
-        </div>
-        <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
+        <details class="sai-sec">
+          <summary>🔊 Voice — speak &amp; listen (local)</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Fully offline via a local voice shim. The butler can say its ack/status aloud, and you can talk to it.</p>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:2px 0;">
+            <input type="checkbox" id="voice-enabled"> Speak the butler's replies aloud
+          </label>
+          <input type="text" id="voice-endpoint" placeholder="http://127.0.0.1:8232" style="width:100%; box-sizing:border-box; margin:2px 0;">
+          <div class="btns" style="margin:4px 0;">
+            <button id="btn-voice-save">Save</button>
+            <button id="btn-voice-test">Test</button>
+            <button id="btn-mic" title="Push to talk">🎤 Talk</button>
+          </div>
+          <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
       </div>
     </div>
 

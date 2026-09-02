@@ -131,7 +131,8 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     voiceStatus: async () => { calls.push({ fn: "voiceStatus" }); return { ok: true, enabled: false }; },
     configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true, ms: 5 }; },
-    voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; }
+    voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
+    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; }
   };
   return api;
 }
@@ -1058,6 +1059,15 @@ async function testCapabilityPanelsWired() {
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "voiceListen"), "the mic button calls voiceListen");
   assert(doc.getElementById("jarvis-goal").value === "hello from mic", "a heard transcript is dropped into the goal box");
+
+  // The Image / Video paddles open the wizard on their own tab.
+  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the Image and Video paddles are present in the action bar");
+  click(dom, "btn-open-image");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images"), "the Image paddle opens the wizard on the Images tab");
+  click(dom, "btn-open-video");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
 }
 
 async function testExtractAllButton() {

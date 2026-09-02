@@ -20,6 +20,8 @@ async function main() {
       ['#col-houserules', 'House Rules panel'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#btn-open-image', 'Image paddle'],
+      ['#btn-open-video', 'Video paddle'],
       ['#jarvis-goal', 'Butler goal box'],
       ['#btn-jarvis-start', 'Start Butler button'],
       ['#jarvis-tools', 'Tools registry list'],

@@ -145,6 +145,18 @@ if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
   sdMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Test failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 
+// Open directly on a requested tab (?tab=images|video|advanced|localai), so the
+// Image/Video paddles in the main menu land the user on the right tab.
+function activateRequestedTab() {
+  try {
+    const want = new URLSearchParams(location.search).get("tab");
+    if (!want) return;
+    const btn = document.querySelector(`.tab[data-tab="${want}"]`);
+    if (btn) btn.click();
+  } catch (_) {}
+}
+
 // ---- Boot ----
 loadCatalog();
 loadImageConfig();
+activateRequestedTab();
