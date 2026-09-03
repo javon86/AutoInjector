@@ -132,7 +132,19 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true, ms: 5 }; },
     voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
-    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; }
+    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
+    // Image generation panel
+    imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
+    configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    imageGenerate: async (prompt) => { calls.push({ fn: "imageGenerate", prompt }); return { ok: true, path: "/out/images/img-1.png" }; },
+    // Local-model browser + operator safeguards
+    ollamaRecommended: async () => { calls.push({ fn: "ollamaRecommended" }); return { models: ["llama3.2:1b", "qwen2.5:0.5b"] }; },
+    ollamaList: async () => { calls.push({ fn: "ollamaList" }); return { ok: true, models: ["llama3.1:8b"] }; },
+    ollamaDetect: async () => { calls.push({ fn: "ollamaDetect" }); return { available: true }; },
+    ollamaPull: async (model) => { calls.push({ fn: "ollamaPull", model }); return { ok: true }; },
+    onOllamaProgress: (cb) => { api._ollamaProgressCb = cb; },
+    approveManagerAction: async () => { calls.push({ fn: "approveManagerAction" }); return { ok: true }; },
+    rejectManagerAction: async (reason) => { calls.push({ fn: "rejectManagerAction", reason }); return { ok: true }; }
   };
   return api;
 }
@@ -1068,6 +1080,41 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-open-video");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
+
+  // Image Generation + Video panels exist in the tiled panel grid.
+  assert(doc.getElementById("col-image") && doc.getElementById("col-video"), "the Image Generation and Video panels are present");
+  assert(api.calls.some((c) => c.fn === "imageStatus"), "the Image panel loads the SD config on start");
+  doc.getElementById("img-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  doc.getElementById("img-enabled").checked = true;
+  click(dom, "btn-img-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
+  doc.getElementById("img-prompt").value = "a red apple";
+  click(dom, "btn-img-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "imageGenerate" && c.prompt === "a red apple"), "the Image panel Generate renders the typed prompt");
+
+  // Model browser: pull ANY model by name.
+  assert(api.calls.some((c) => c.fn === "ollamaRecommended"), "the panel loads recommended models on start");
+  doc.getElementById("lsi-pull-name").value = "mistral:7b";
+  click(dom, "btn-lsi-pull");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "ollamaPull" && c.model === "mistral:7b"), "pulling by name installs the operator's chosen model");
+
+  // Safeguards: approval-mode toggle + approve/reject a held action.
+  assert(doc.getElementById("lsi-approval") && doc.getElementById("btn-approve"), "the Safeguards controls are present");
+  doc.getElementById("lsi-approval").checked = true;
+  doc.getElementById("lsi-approval").dispatchEvent(new dom.window.Event("change"));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && c.config.approvalMode === true), "enabling approval mode saves approvalMode:true");
+  // A pending approval reveals the Approve/Reject box; Approve calls through.
+  if (api._managerStateCb) api._managerStateCb({ status: "paused", pendingApproval: { action: "USE_TOOL", tool: "http-fetch" } });
+  assert(doc.getElementById("lsi-pending").style.display !== "none" && /http-fetch/.test(doc.getElementById("lsi-pending-text").textContent), "a held action shows the approval prompt with what's waiting");
+  click(dom, "btn-approve");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "approveManagerAction"), "Approve calls approveManagerAction");
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", pendingApproval: null });
+  assert(doc.getElementById("lsi-pending").style.display === "none", "the approval prompt clears once nothing is pending");
 }
 
 async function testExtractAllButton() {

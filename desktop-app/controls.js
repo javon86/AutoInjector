@@ -996,6 +996,8 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
+  image: { panelId: "col-image", label: "Image Generation" },
+  video: { panelId: "col-video", label: "Video Generation" },
   systemai: { panelId: "col-systemai", label: "System AI" }
 };
 function collapseYellowPanel(key) {
@@ -1051,6 +1053,35 @@ async function databaseRefresh() {
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
+if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
+if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
+
+// Image Generation panel: load current SD config, Save, and a one-shot Generate.
+async function loadImagePanel() {
+  if (!window.api.imageStatus) return;
+  try {
+    const s = await window.api.imageStatus();
+    if (!s) return;
+    if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
+    if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
+  } catch (_) {}
+}
+function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
+if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
+  if (!window.api.configureImage) return;
+  const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
+  if (!window.api.imageGenerate) return;
+  const prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
+  if (!prompt) { imgMsg("Type a prompt first."); return; }
+  if (window.api.configureImage) await window.api.configureImage({ enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  imgMsg("Rendering…");
+  const r = await window.api.imageGenerate(prompt);
+  imgMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+};
+loadImagePanel();
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
@@ -1092,6 +1123,53 @@ if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
   lsiRefreshModels();
 };
 if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
+// Pull ANY model by name — your choice; the app doesn't decide which model for you.
+if (el("btn-lsi-pull")) el("btn-lsi-pull").onclick = async () => {
+  if (!window.api.ollamaPull) return;
+  const model = (el("lsi-pull-name") && el("lsi-pull-name").value || "").trim();
+  const st = el("lsi-download-status");
+  if (!model) { if (st) st.textContent = "Type a model name (e.g. llama3.1:8b, mistral, qwen2.5:7b)."; return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { if (st) st.textContent = "Ollama isn't installed. Get it from ollama.com, then try again."; return; } }
+  if (st) st.textContent = `Starting download of ${model}…`;
+  const r = await window.api.ollamaPull(model);
+  if (st) st.textContent = r && r.ok ? `✓ ${model} installed.` : `⚠ ${(r && r.error) || "download failed"}`;
+  lsiRefreshModels();
+};
+// Populate the recommended-model picker (neutral, size-keyed suggestions).
+async function lsiLoadRecommended() {
+  const sel = el("lsi-download-model"); if (!sel || !window.api.ollamaRecommended) return;
+  try {
+    const r = await window.api.ollamaRecommended(null);
+    const models = (r && r.models) || [];
+    sel.innerHTML = "";
+    for (const name of models) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
+    if (el("lsi-recommend") && models.length) el("lsi-recommend").textContent = "Suggested local models — or pull any other by name below.";
+  } catch (_) {}
+}
+lsiLoadRecommended();
+lsiRefreshModels();
+
+// --- Safeguards: approval mode + approve/reject a held action ------------------
+if (el("lsi-approval")) el("lsi-approval").onchange = async () => {
+  if (!window.api.configureManagerProvider) return;
+  const on = !!el("lsi-approval").checked;
+  const r = await window.api.configureManagerProvider({ approvalMode: on });
+  if (el("lsi-approval-msg")) el("lsi-approval-msg").textContent = r && r.ok ? (on ? "On — the butler will pause for your OK before acting." : "Off — the butler acts on its own (risk-“ask” tools still pause).") : `Couldn't save: ${(r && r.error) || "error"}`;
+};
+(async () => { if (!window.api.getManagerState || !el("lsi-approval")) return; try { const s = await window.api.getManagerState(); if (s && s.managerConfig) el("lsi-approval").checked = !!s.managerConfig.approvalMode; } catch (_) {} })();
+if (el("btn-approve")) el("btn-approve").onclick = async () => { if (window.api.approveManagerAction) await window.api.approveManagerAction(); };
+if (el("btn-reject")) el("btn-reject").onclick = async () => { if (window.api.rejectManagerAction) await window.api.rejectManagerAction("operator rejected"); };
+function renderPendingApproval(m) {
+  const box = el("lsi-pending"); if (!box) return;
+  const p = m && m.pendingApproval;
+  if (p) {
+    box.style.display = "";
+    const detail = p.action === "USE_TOOL" ? `${p.action}: ${p.tool}` : (p.action === "GENERATE_IMAGE" ? `${p.action}: "${(p.prompt || "").slice(0, 40)}"` : (p.assignments ? `${p.action} → ${p.assignments.map((a) => a.target).join(", ")}` : p.action));
+    if (el("lsi-pending-text")) el("lsi-pending-text").textContent = `⏸ Waiting for your OK: ${detail}`;
+  } else {
+    box.style.display = "none";
+  }
+}
 
 // --- System AI / Butler (the supervisor) --------------------------------------
 // Save the endpoint + model as the supervisor's provider config, then the butler
@@ -1156,6 +1234,7 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
   if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
   jarvisSetStatus(bits.join(" · "));
   renderAwareness(m.awareness);
+  renderPendingApproval(m);
 });
 if (window.api.onManagerLog) window.api.onManagerLog((e) => {
   const box = el("jarvis-log"); if (!box || !e) return;
