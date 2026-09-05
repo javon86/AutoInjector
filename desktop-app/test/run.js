@@ -2025,6 +2025,21 @@ async function testGeneratingGatesCapture() {
 // Extract All: dumps the whole conversation AND the full activity/error log to a
 // text file in the program's logs folder, from in-memory state (so nothing is
 // truncated by a long/streaming on-screen window).
+async function testUiLogRoutesToActivityLog() {
+  console.log("\n== UI activity: a renderer ui:log lands in the one Activity Log (sanitized) ==");
+  const before = (await call("state:get", {})).log.length;
+  await call("ui:log", { action: "click", id: "btn-jarvis-start", msg: "Start Butler" });
+  const s = await call("state:get", {});
+  assert(s.log.length > before, "a ui:log adds an entry to the Activity Log");
+  const entry = s.log[s.log.length - 1];
+  assert(entry.kind === "ui-click" && entry.detail.id === "btn-jarvis-start" && /Start Butler/.test(entry.detail.msg), "the entry carries the action, button id and label");
+  // Oversized/garbage input is bounded, not trusted verbatim.
+  await call("ui:log", { action: "x".repeat(200) + " bad;", msg: "y".repeat(500) });
+  const s2 = await call("state:get", {});
+  const last = s2.log[s2.log.length - 1];
+  assert(last.kind.length <= 43 && (last.detail.msg || "").length <= 160, "action + message are length-capped and sanitized");
+}
+
 async function testExtractAllLogs() {
   console.log("\n== Extract All writes the full conversation + activity/error log to one text file ==");
   await resetAllParticipants();
@@ -2296,6 +2311,7 @@ async function main() {
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testGeneratingGatesCapture();
+  await testUiLogRoutesToActivityLog();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();

@@ -3056,6 +3056,19 @@ ipcMain.handle("houserule:wrap-up-brainstorm", async () => {
   return { ok: true };
 });
 
+// UI activity: the renderer reports every meaningful thing the USER does (button
+// clicks, panel open/close, field changes) so the one Activity Log captures the
+// full story — frontend actions alongside the backend events already logged. The
+// payload is sanitized (short strings only) so a chatty renderer can't bloat the log.
+ipcMain.handle("ui:log", (_evt, payload = {}) => {
+  const action = String(payload.action || "event").slice(0, 40).replace(/[^a-z0-9_-]/gi, "");
+  const detail = {};
+  if (payload.id != null) detail.id = String(payload.id).slice(0, 60);
+  if (payload.msg != null) detail.msg = String(payload.msg).slice(0, 160);
+  logEvent(`ui-${action || "event"}`, detail);
+  return { ok: true };
+});
+
 ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),

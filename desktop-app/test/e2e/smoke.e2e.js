@@ -64,6 +64,13 @@ async function main() {
 
     await shot(controls, 'control-panel');
 
+    console.log('\n== Activity trace: a real button click is logged as ui-click ==');
+    await controls.click('#btn-extract-all');
+    const loggedClick = await controls.waitForFunction(
+      () => { const b = document.getElementById('activity-log'); return !!(b && /ui-click/.test(b.textContent) && /extract/i.test(b.textContent)); },
+      { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(loggedClick, 'clicking a button writes a ui-click line into the Activity Log');
+
     console.log('\n== ⤓ Extract All writes the conversation + activity log to a text file ==');
     await controls.click('#btn-extract-all');
     const wroteLog = await controls.waitForFunction(

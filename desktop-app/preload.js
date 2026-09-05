@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("api", {
   onWaitingChanged: (cb) => ipcRenderer.on("waiting-changed", (_e, payload) => cb(payload)),
   onHouseRuleState: (cb) => ipcRenderer.on("houserule-state", (_e, payload) => cb(payload)),
   onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload)),
+  uiLog: (action, detail) => ipcRenderer.invoke("ui:log", Object.assign({ action }, detail || {})),
   onLedgerEntry: (cb) => ipcRenderer.on("ledger-entry", (_e, payload) => cb(payload)),
   startManagedTask: (userRequest) => ipcRenderer.invoke("manager:start-task", { userRequest }),
   pauseManagedTask: () => ipcRenderer.invoke("manager:pause"),

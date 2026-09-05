@@ -915,6 +915,8 @@ function logLineText(entry) {
   if (entry.detail?.sample) parts.push(`sample=${JSON.stringify(entry.detail.sample)}`);
   if (entry.detail?.capturedText) parts.push(`got=${JSON.stringify(entry.detail.capturedText)}`);
   if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
+  if (entry.detail?.id) parts.push(`#${entry.detail.id}`);
+  if (entry.detail?.msg) parts.push(entry.detail.msg);
   return `${entry.kind} ${parts.join(" ")}`.trim();
 }
 
@@ -964,6 +966,30 @@ window.api.onSendError(({ target, error }) => {
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);
 window.api.onLog(appendLog);
+
+// --- Full activity trace: log EVERY user action into the same Activity Log ------
+// so you can always see what's going on, no matter what you're doing.
+const uiLog = (action, detail) => { try { if (window.api.uiLog) window.api.uiLog(action, detail); } catch (_) {} };
+// Every button click says something (by id + its label).
+document.addEventListener("click", (e) => {
+  const b = e.target && e.target.closest && e.target.closest("button");
+  if (!b) return;
+  const label = (b.textContent || b.title || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40);
+  uiLog("click", { id: b.id || null, msg: label ? `“${label}”` : "(button)" });
+}, true);
+// Every collapsible section (System AI sub-panels, etc.) opening/closing says something.
+for (const d of document.querySelectorAll("details")) {
+  d.addEventListener("toggle", () => {
+    const name = (d.querySelector("summary")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    uiLog("panel", { msg: `${name || "section"} ${d.open ? "opened" : "closed"}` });
+  });
+}
+// Every message the program actually sends (ledger entry) shows up with its ID.
+if (window.api.onLedgerEntry) window.api.onLedgerEntry((led) => {
+  if (!led) return;
+  appendLog({ ts: led.ts || Date.now(), kind: "message", detail: { id: led.id, msg: `${led.source || "you"}→${led.target} ${led.status}${led.error ? " " + led.error : ""}` } });
+});
+
 window.api.onWindowCollapseChanged(({ which, collapsed }) => {
   if (which !== "automation") return;
   el("wrap").classList.toggle("window-collapsed", collapsed);
@@ -1010,10 +1036,12 @@ function collapseYellowPanel(key) {
   tab.innerHTML = `<span class="tab-color"></span>${label}`;
   tab.onclick = () => expandYellowPanel(key);
   el("top-tab-strip").appendChild(tab);
+  uiLog("panel", { msg: `${label} panel minimized` });
 }
 function expandYellowPanel(key) {
   el(COLLAPSIBLE_PANELS[key].panelId).classList.remove("hidden-collapsed");
   el(`tab-${key}`)?.remove();
+  uiLog("panel", { msg: `${COLLAPSIBLE_PANELS[key].label} panel restored` });
 }
 // Make each utility panel's heading a second, larger click target for collapsing
 // it — and keyboard-operable (Enter/Space), with a visible focus ring via CSS.
@@ -1177,17 +1205,29 @@ function renderPendingApproval(m) {
 function _managerConfigFromUI() {
   return { provider: "openai-compatible", endpoint: (el("lsi-endpoint") && el("lsi-endpoint").value || "").trim(), model: (el("lsi-model") && el("lsi-model").value) || "" };
 }
+// Turn cryptic error codes into a plain next step, so it's clear what to do.
+function lsiFriendly(err) {
+  switch (err) {
+    case "NOT_CONFIGURED": return "Pick a model above (download one if the list is empty), then press “Save settings” — after that, Test.";
+    case "BAD_ENDPOINT": return "That endpoint doesn't look like a URL. Use e.g. http://127.0.0.1:11434/v1/chat/completions.";
+    case "TIMEOUT": return "No response — is your local model server (Ollama/LM Studio) actually running?";
+    case "unreachable": return "Couldn't reach that address — start your local model server, then Test again.";
+    default: return err ? `couldn't connect (${err}) — is the model server running?` : "couldn't connect.";
+  }
+}
 if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
   if (!window.api.configureManagerProvider) return;
-  const r = await window.api.configureManagerProvider(_managerConfigFromUI());
-  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "Saved — the butler is configured." : `Save failed: ${(r && r.error) || "error"}`;
+  const cfg = _managerConfigFromUI();
+  if (!cfg.model) { if (el("lsi-msg")) el("lsi-msg").textContent = "Pick a model first (choose one, or download one above), then Save."; return; }
+  const r = await window.api.configureManagerProvider(cfg);
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Saved. Now press “Test” to check the connection, or type a goal for the Butler below." : `Save failed: ${lsiFriendly(r && r.error)}`;
 };
 if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
   if (!window.api.testManagerConnection) return;
   if (el("lsi-msg")) el("lsi-msg").textContent = "Testing connection…";
   if (window.api.configureManagerProvider) await window.api.configureManagerProvider(_managerConfigFromUI());
   const r = await window.api.testManagerConnection();
-  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "Connection OK ✓" : `Test failed: ${(r && r.error) || "error"}`;
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Connection OK — the Butler is ready." : `Test failed: ${lsiFriendly(r && r.error)}`;
 };
 
 function jarvisSetStatus(t) { if (el("jarvis-status")) el("jarvis-status").textContent = t; }

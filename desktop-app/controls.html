@@ -443,6 +443,11 @@
         <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="lsi-enabled"> <span>Let the AI help run the system</span></label>
         <details class="sai-sec">
           <summary>⚙️ Local model settings</summary>
+          <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
+            <li>Install Ollama (link appears below if missing), then <b>Download</b> or <b>Get</b> a model.</li>
+            <li>Pick it in <b>Model</b>, then press <b>Save settings</b>.</li>
+            <li>Press <b>Test</b> to confirm — then give the Butler a goal below.</li>
+          </ol>
           <div class="btns" style="margin:4px 0;">
             <input id="lsi-endpoint" type="text" placeholder="http://127.0.0.1:11434/v1/chat/completions" style="flex:1 1 150px; min-width:0;">
             <button id="btn-lsi-test">Test</button>
