@@ -111,6 +111,8 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
+    uiLog: async (action, detail) => { calls.push({ fn: "uiLog", action, detail }); return { ok: true }; },
+    onLedgerEntry: (cb) => { api._ledgerCb = cb; },
     onTunerState: (cb) => { tunerStateCb = cb; },
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
     onPromptsChanged: (cb) => { promptsChangedCb = cb; },
@@ -994,9 +996,42 @@ async function main() {
   await testExtractAllButton();
   await testButlerPanelWired();
   await testCapabilityPanelsWired();
+  await testActivityLogCapturesEverything();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testActivityLogCapturesEverything() {
+  console.log("\n== Activity trace: every button click, panel toggle, and message (with its ID) is logged ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  // A button click logs a ui-click with the button's id + label.
+  click(dom, "btn-jarvis-start");
+  await new Promise((r) => setTimeout(r, 10));
+  const clickCall = api.calls.find((c) => c.fn === "uiLog" && c.action === "click" && c.detail && c.detail.id === "btn-jarvis-start");
+  assert(clickCall, "clicking a button logs a ui-click with its id");
+  assert(/Start Butler/.test(clickCall.detail.msg || ""), "the click log carries the button's label");
+
+  // Opening/closing a collapsible section logs a ui-panel event.
+  const det = doc.querySelector("details.sai-sec");
+  if (det) { det.open = true; det.dispatchEvent(new dom.window.Event("toggle")); }
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "uiLog" && c.action === "panel" && /opened|closed/.test(c.detail.msg || "")), "opening/closing a panel is logged");
+
+  // A minimized utility panel logs a ui-panel event too.
+  api.calls.length = 0;
+  const h2 = doc.querySelector("#col-prompts .yc-head h2");
+  if (h2) h2.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "uiLog" && c.action === "panel" && /minimized/.test(c.detail.msg || "")), "minimizing a panel is logged");
+
+  // A delivered message shows up in the Activity Log with its program-assigned ID.
+  if (api._ledgerCb) api._ledgerCb({ id: "MSG-42", source: null, target: "claude", status: "delivered", ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 10));
+  assert(/MSG-42/.test(doc.getElementById("activity-log").textContent) && /claude/.test(doc.getElementById("activity-log").textContent), "each message appears in the Activity Log with its ID and target");
 }
 
 async function testButlerPanelWired() {
@@ -1006,11 +1041,13 @@ async function testButlerPanelWired() {
   const doc = dom.window.document;
   assert(doc.getElementById("jarvis-goal") && doc.getElementById("btn-jarvis-start"), "the butler goal box and Start button are present");
 
-  // Save config wires to configureManagerProvider.
+  // Save config wires to configureManagerProvider (needs a model chosen first).
   doc.getElementById("lsi-endpoint").value = "http://127.0.0.1:11434/v1/chat/completions";
+  const modelSel = doc.getElementById("lsi-model");
+  const opt = doc.createElement("option"); opt.value = "llama3.1:8b"; modelSel.appendChild(opt); modelSel.value = "llama3.1:8b";
   click(dom, "btn-lsi-save");
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && /11434/.test(c.config.endpoint)), "Save settings configures the supervisor provider (endpoint)");
+  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && /11434/.test(c.config.endpoint) && c.config.model === "llama3.1:8b"), "Save settings configures the supervisor provider (endpoint + model)");
 
   // Start with a goal.
   doc.getElementById("jarvis-goal").value = "Compare three approaches and total them";
