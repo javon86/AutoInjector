@@ -1177,6 +1177,27 @@ async function lsiLoadRecommended() {
 lsiLoadRecommended();
 lsiRefreshModels();
 
+// Models & assets folder: show where it is, what's in it, and open it.
+async function loadModelsInfo() {
+  if (!window.api.modelsInfo) return;
+  try {
+    const info = await window.api.modelsInfo();
+    if (!info || !info.ok) return;
+    if (el("models-path")) el("models-path").textContent = info.root || "(not ready)";
+    if (el("models-inventory")) {
+      const c = info.categories || {};
+      el("models-inventory").textContent = "Installed: " + ["llm", "image", "loras", "video", "voice", "assets"].map((k) => `${k} ${c[k] || 0}`).join(" · ");
+    }
+    if (el("models-ollama")) {
+      el("models-ollama").textContent = info.ollamaHere
+        ? "✓ Ollama is pointed at this folder — pulls land here."
+        : "Tip: set OLLAMA_MODELS to the llm/ folder so Ollama stores models here.";
+    }
+  } catch (_) {}
+}
+if (el("btn-open-models")) el("btn-open-models").onclick = () => { if (window.api.openModelsFolder) window.api.openModelsFolder(); };
+loadModelsInfo();
+
 // --- Safeguards: approval mode + approve/reject a held action ------------------
 if (el("lsi-approval")) el("lsi-approval").onchange = async () => {
   if (!window.api.configureManagerProvider) return;

@@ -31,6 +31,7 @@ async function main() {
       ['#lsi-pull-name', 'Pull-any-model field'],
       ['#lsi-approval', 'Approval-mode safeguard toggle'],
       ['#btn-approve', 'Approve-action button'],
+      ['#btn-open-models', 'Open-models-folder button'],
       ['#jarvis-tools', 'Tools registry list'],
       ['#jarvis-awareness', 'Awareness readout'],
       ['#voice-enabled', 'Voice toggle'],
@@ -61,6 +62,11 @@ async function main() {
     const fs = require('fs'), pathMod = require('path');
     const outRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output') : null;
     assert(outRoot && fs.existsSync(outRoot), `output folder created on launch (${outRoot})`);
+
+    // The models & assets home folder is laid out (with subfolders + a README) on launch.
+    const modelsRoot = docs ? pathMod.join(docs, 'AutoInjector', 'models') : null;
+    assert(modelsRoot && fs.existsSync(modelsRoot) && fs.existsSync(pathMod.join(modelsRoot, 'llm')) && fs.existsSync(pathMod.join(modelsRoot, 'README.txt')),
+      `models folder created on launch with subfolders + README (${modelsRoot})`);
 
     await shot(controls, 'control-panel');
 

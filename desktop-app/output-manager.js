@@ -19,18 +19,96 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-let _root = null; // <documents>/AutoInjector/output
+let _root = null;       // <documents>/AutoInjector/output
+let _modelsRoot = null; // <documents>/AutoInjector/models
 
 const CATEGORIES = { books: 'books', images: 'images', videos: 'videos', uploads: 'uploads', aiwork: 'ai-work' };
+
+// One findable home for ALL model assets, so a user never has to hunt for where
+// models live: <documents>/AutoInjector/models, split by kind. Each subfolder is
+// seeded with a plain README saying what goes there and how to point the matching
+// backend at it (Ollama / Stable Diffusion / voice).
+const MODEL_CATEGORIES = {
+  llm: 'llm',        // local language models (Ollama)
+  image: 'image',    // Stable Diffusion checkpoints
+  loras: 'loras',    // image LoRAs / embeddings
+  video: 'video',    // text-to-video model files (when supported)
+  voice: 'voice',    // piper (TTS) + whisper (STT) model files
+  assets: 'assets',  // anything else that supports generation
+};
 
 /** Point the output folder at <documentsDir>/AutoInjector/output and create it. */
 function init(documentsDir) {
   const base = documentsDir && String(documentsDir).trim() ? documentsDir : os.homedir();
   _root = path.join(base, 'AutoInjector', 'output');
   ensureDir(_root);
+  _modelsRoot = path.join(base, 'AutoInjector', 'models');
+  ensureDir(_modelsRoot);
+  for (const seg of Object.values(MODEL_CATEGORIES)) ensureDir(path.join(_modelsRoot, seg));
+  seedModelsReadmes();
   return _root;
 }
 function root() { return _root; }
+function modelsRoot() { return _modelsRoot; }
+/** The folder for a model category (llm/image/loras/video/voice/assets), created on demand. */
+function modelsDir(category) {
+  if (!_modelsRoot) throw new Error('output-manager not initialized');
+  const seg = MODEL_CATEGORIES[category] || safeName(category, 'misc');
+  return ensureDir(path.join(_modelsRoot, seg));
+}
+
+// Write a top-level guide plus a per-folder note, once (never clobber edits).
+const MODEL_NOTES = {
+  '': [
+    'AutoInjector — Models & Assets',
+    '==============================',
+    'This is the one place all model assets live. Put files in the matching',
+    'subfolder (or let the app download into it), and point each backend here:',
+    '',
+    '  llm/     Local language models for the System AI / Butler (Ollama).',
+    '           Make Ollama use this folder by setting the environment variable',
+    '           OLLAMA_MODELS to this llm/ path (in the Ollama app settings, or',
+    '           your shell), then `ollama pull <model>` stores here.',
+    '  image/   Stable Diffusion checkpoints (.safetensors). Point Automatic1111',
+    '           at it with:  --ckpt-dir "<this image/ path>"',
+    '  loras/   Image LoRAs / embeddings.  A1111:  --lora-dir "<this loras/ path>"',
+    '  video/   Text-to-video model files (when supported).',
+    '  voice/   piper (TTS .onnx) + whisper (STT) model files. Set the voice',
+    '           shim env VOICE_TTS_MODEL / VOICE_STT_MODEL to files in here.',
+    '  assets/  Anything else that helps generation.',
+    '',
+    'The app reads this folder to show you what you have installed.',
+  ].join('\n'),
+  llm: 'Local language models (Ollama). Set OLLAMA_MODELS to this folder so pulls land here.',
+  image: 'Stable Diffusion checkpoints (.safetensors). Point A1111 here with --ckpt-dir.',
+  loras: 'Image LoRAs / embeddings. Point A1111 here with --lora-dir.',
+  video: 'Text-to-video model files (when video generation is supported).',
+  voice: 'piper (TTS) and whisper (STT) model files. Point VOICE_TTS_MODEL / VOICE_STT_MODEL here.',
+  assets: 'Any other generation assets.',
+};
+function seedModelsReadmes() {
+  try {
+    const top = path.join(_modelsRoot, 'README.txt');
+    if (!fs.existsSync(top)) fs.writeFileSync(top, MODEL_NOTES['']);
+    for (const [key, seg] of Object.entries(MODEL_CATEGORIES)) {
+      const note = path.join(_modelsRoot, seg, 'README.txt');
+      if (!fs.existsSync(note)) fs.writeFileSync(note, MODEL_NOTES[key] || '');
+    }
+  } catch (_) { /* best effort — a missing README never blocks the app */ }
+}
+
+/** A quick inventory of what's in the models tree (for the UI). */
+function modelsInventory() {
+  const out = { root: _modelsRoot, categories: {} };
+  if (!_modelsRoot) return out;
+  for (const [key, seg] of Object.entries(MODEL_CATEGORIES)) {
+    try {
+      const files = fs.readdirSync(path.join(_modelsRoot, seg)).filter((f) => f !== 'README.txt' && !f.startsWith('.'));
+      out.categories[key] = files.length;
+    } catch (_) { out.categories[key] = 0; }
+  }
+  return out;
+}
 
 function ensureDir(p) { try { fs.mkdirSync(p, { recursive: true }); } catch (_) {} return p; }
 
@@ -93,5 +171,6 @@ function copyInto(destDir, srcPath, filename) {
 module.exports = {
   init, root, dir, safeName, uniquePath,
   booksDir, bookDir, imagesDir, videosDir, uploadsDir, aiWorkDir, logsDir,
+  modelsRoot, modelsDir, modelsInventory,
   saveBuffer, copyInto,
 };

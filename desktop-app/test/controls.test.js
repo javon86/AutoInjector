@@ -146,7 +146,10 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     ollamaPull: async (model) => { calls.push({ fn: "ollamaPull", model }); return { ok: true }; },
     onOllamaProgress: (cb) => { api._ollamaProgressCb = cb; },
     approveManagerAction: async () => { calls.push({ fn: "approveManagerAction" }); return { ok: true }; },
-    rejectManagerAction: async (reason) => { calls.push({ fn: "rejectManagerAction", reason }); return { ok: true }; }
+    rejectManagerAction: async (reason) => { calls.push({ fn: "rejectManagerAction", reason }); return { ok: true }; },
+    // Models & assets folder
+    modelsInfo: async () => { calls.push({ fn: "modelsInfo" }); return { ok: true, root: "/home/u/Documents/AutoInjector/models", categories: { llm: 1, image: 2, loras: 0, video: 0, voice: 0, assets: 0 }, ollamaModels: null, ollamaHere: false }; },
+    openModelsFolder: async (category) => { calls.push({ fn: "openModelsFolder", category }); return { ok: true, path: "/home/u/Documents/AutoInjector/models" }; }
   };
   return api;
 }
@@ -1032,6 +1035,13 @@ async function testActivityLogCapturesEverything() {
   if (api._ledgerCb) api._ledgerCb({ id: "MSG-42", source: null, target: "claude", status: "delivered", ts: Date.now() });
   await new Promise((r) => setTimeout(r, 10));
   assert(/MSG-42/.test(doc.getElementById("activity-log").textContent) && /claude/.test(doc.getElementById("activity-log").textContent), "each message appears in the Activity Log with its ID and target");
+
+  // Models & assets folder: shows the path + inventory and opens the folder.
+  assert(/AutoInjector\/models/.test(doc.getElementById("models-path").textContent), "the panel loads + shows the models folder path on start");
+  assert(/llm 1/.test(doc.getElementById("models-inventory").textContent) && /image 2/.test(doc.getElementById("models-inventory").textContent), "the installed-model counts per category are shown");
+  click(dom, "btn-open-models");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openModelsFolder"), "the Open models folder button opens the folder");
 }
 
 async function testButlerPanelWired() {

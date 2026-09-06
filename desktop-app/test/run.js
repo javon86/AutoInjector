@@ -2025,6 +2025,16 @@ async function testGeneratingGatesCapture() {
 // Extract All: dumps the whole conversation AND the full activity/error log to a
 // text file in the program's logs folder, from in-memory state (so nothing is
 // truncated by a long/streaming on-screen window).
+async function testModelsFolderInfo() {
+  console.log("\n== Models folder: the app reports one findable models home + its inventory ==");
+  const info = await call("models:info", {});
+  assert(info && info.ok && info.root && /[\\/]models$/.test(info.root), `models:info returns the models root (${info && info.root})`);
+  assert(info.categories && typeof info.categories.llm === "number" && typeof info.categories.image === "number", "it reports a per-category inventory (llm/image/…)");
+  assert("ollamaHere" in info, "it reports whether Ollama is pointed at the folder");
+  const opened = await call("models:open", {});
+  assert(opened && opened.ok && opened.path, "models:open resolves the folder path to open");
+}
+
 async function testUiLogRoutesToActivityLog() {
   console.log("\n== UI activity: a renderer ui:log lands in the one Activity Log (sanitized) ==");
   const before = (await call("state:get", {})).log.length;
@@ -2312,6 +2322,7 @@ async function main() {
   await testWaitingSinceTracking();
   await testGeneratingGatesCapture();
   await testUiLogRoutesToActivityLog();
+  await testModelsFolderInfo();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();

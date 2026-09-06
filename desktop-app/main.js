@@ -3069,6 +3069,25 @@ ipcMain.handle("ui:log", (_evt, payload = {}) => {
   return { ok: true };
 });
 
+// Models & assets home folder: one findable place for all model files. Reports
+// where it is + what's in it + whether Ollama is pointed at it; opens it in the
+// OS file manager.
+ipcMain.handle("models:info", () => {
+  let inv = { root: null, categories: {} };
+  try { inv = outputManager.modelsInventory(); } catch (_) {}
+  const ollamaModels = process.env.OLLAMA_MODELS || null;
+  let ollamaHere = false;
+  try { ollamaHere = !!(inv.root && ollamaModels && require("path").resolve(ollamaModels) === require("path").resolve(outputManager.modelsDir("llm"))); } catch (_) {}
+  return { ok: true, ...inv, ollamaModels, ollamaHere };
+});
+ipcMain.handle("models:open", (_evt, { category } = {}) => {
+  try {
+    const target = category ? outputManager.modelsDir(category) : outputManager.modelsRoot();
+    if (shell && target) shell.openPath(target);
+    return { ok: true, path: target };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
 ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),
@@ -3825,7 +3844,14 @@ app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
-  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
+  try {
+    const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
+    // Point any Ollama the app itself launches at the shared models/llm folder, so
+    // downloads land in the one findable place. (A separately-run Ollama daemon
+    // uses its own OLLAMA_MODELS; the Models panel shows if they differ.)
+    if (!process.env.OLLAMA_MODELS) { try { process.env.OLLAMA_MODELS = outputManager.modelsDir("llm"); } catch (_) {} }
+    logEvent("models-init", { root: outputManager.modelsRoot() });
+  } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
   startServiceBridge();

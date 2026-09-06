@@ -27,6 +27,19 @@ function main() {
   assert(om.bookDir("My Great Book").endsWith(path.join("books", "My Great Book")), "books/<title>/");
   assert(om.aiWorkDir("claude").endsWith(path.join("ai-work", "claude")), "ai-work/<site>/");
 
+  console.log("\n== models & assets home folder ==");
+  assert(om.modelsRoot() === path.join(docs, "AutoInjector", "models"), "modelsRoot is <documents>/AutoInjector/models");
+  assert(fs.existsSync(om.modelsRoot()), "the models folder is created on init");
+  for (const k of ["llm", "image", "loras", "video", "voice", "assets"]) {
+    assert(fs.existsSync(om.modelsDir(k)) && path.basename(om.modelsDir(k)) === k, `models/${k}/ exists`);
+  }
+  assert(fs.existsSync(path.join(om.modelsRoot(), "README.txt")), "a top-level README explains what goes where");
+  assert(fs.existsSync(path.join(om.modelsDir("llm"), "README.txt")) && /OLLAMA_MODELS/.test(fs.readFileSync(path.join(om.modelsDir("llm"), "README.txt"), "utf8")), "the llm/ README tells you to set OLLAMA_MODELS");
+  // A file dropped into a category is counted by the inventory.
+  fs.writeFileSync(path.join(om.modelsDir("image"), "model.safetensors"), "x");
+  const inv = om.modelsInventory();
+  assert(inv.root === om.modelsRoot() && inv.categories.image === 1 && inv.categories.llm === 0, "modelsInventory counts files per category (ignoring READMEs)");
+
   console.log("\n== name sanitization blocks path traversal and illegal chars ==");
   assert(om.safeName("../../etc/passwd") === "etc passwd", "strips ../ and separators");
   assert(om.safeName("..") === "untitled", "a pure-traversal name falls back");
