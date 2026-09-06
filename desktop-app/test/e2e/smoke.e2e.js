@@ -24,6 +24,7 @@ async function main() {
       ['#panels-grid', 'Tiled panels grid'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#btn-silence', 'Stop AIs Talking button'],
       ['#btn-open-image', 'Image paddle'],
       ['#btn-open-video', 'Video paddle'],
       ['#jarvis-goal', 'Butler goal box'],

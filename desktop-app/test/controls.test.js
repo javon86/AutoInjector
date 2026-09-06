@@ -47,6 +47,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
       return { ok: true, routing: JSON.parse(JSON.stringify(routing)) };
     },
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
+    silenceAll: async () => { calls.push({ fn: "silenceAll" }); return { ok: true, global: { routing: { chatgpt: [], claude: [], gemini: [] }, mesh: false, enabled: { chatgpt: true, claude: true, gemini: true } } }; },
     setParticipant: noop,
     startHouseRule: async (mode, topic, rounds) => { calls.push({ fn: "startHouseRule", mode, topic, rounds }); return { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds, roundNum: 0, roles: {}, nextSpeaker: null } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: {}, waiting: {}, meshActive: false, customRole: {} } }; },
@@ -1042,6 +1043,12 @@ async function testActivityLogCapturesEverything() {
   click(dom, "btn-open-models");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "openModelsFolder"), "the Open models folder button opens the folder");
+
+  // The "Stop AIs Talking" button halts all relay.
+  assert(doc.getElementById("btn-silence"), "the Stop-AIs-Talking button is present");
+  click(dom, "btn-silence");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "silenceAll"), "the Stop-AIs-Talking button calls silenceAll");
 }
 
 async function testButlerPanelWired() {

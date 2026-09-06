@@ -1402,6 +1402,13 @@ el("btn-stop-all").onclick = async () => {
   // if a House Rules run was active, main.js follows up with its own
   // houserule-state broadcast (mode kept, active:false) — nothing to force here
 };
+// The big "stop them talking to each other" button — halts every relay path at
+// once (Auto, House Rules, Sequence, Butler) but keeps your participants checked.
+if (el("btn-silence")) el("btn-silence").onclick = async () => {
+  if (!window.api.silenceAll) return;
+  const res = await window.api.silenceAll();
+  if (res?.ok) { applyGlobal(res.global); setStatus("🛑 Stopped — the AIs are no longer messaging each other."); }
+};
 
 // The Tuner: runs the 🧪 connectivity check on all 3 sites, then a genuine
 // A-to-B relay check on all 6 directed pairs (a few minutes total). Every

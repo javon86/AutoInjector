@@ -741,11 +741,10 @@ function createWindow() {
         } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
       });
     } catch (_) {}
-    // Fires once this site's page has actually finished loading (not on a
-    // fixed delay, which would race against a slow connection) — sending
-    // any earlier would hit a chat UI whose input box doesn't exist yet.
-    // Only ever fires once per app launch, not on a later manual 🔍/⟳ reload.
-    view.webContents.once("did-finish-load", () => sendStartupRoutingPromptOnce(site));
+    // Nothing is sent to the panes on startup anymore — the app stays silent
+    // until the user hits Start (Auto / a House Rule / a Sequence). At that point
+    // ensureProtocolTaught() sends the [TO:]/[FROM:] routing explainer once, so
+    // relay still works, but only on a deliberate user action.
   }
 
   layout();
@@ -1210,22 +1209,11 @@ async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs) {
   return { ok: false, error: "TIMEOUT" };
 }
 
-// The routing-explainer prompt (Prompt Library id 2) gets sent to every
-// site automatically, once, the first time its page loads after app
-// startup — establishing baseline awareness of the [TO: X] tag system
-// without the user having to remember to trigger it. Fire-and-forget, no
-// acknowledgment wait. Pulls from state.prompts (not a fresh-generated
-// copy) so a user edit to that saved prompt is reflected here too; if
-// they've deleted it, this just quietly does nothing.
-const startupPromptSent = new Set();
-async function sendStartupRoutingPromptOnce(site) {
-  if (startupPromptSent.has(site)) return;
-  startupPromptSent.add(site);
-  const prompt = state.prompts.find((p) => p.id === 2);
-  const text = prompt && prompt.text && prompt.text[site];
-  if (!text) return;
-  await sendTextTo(site, text, null);
-}
+// Nothing is auto-sent to the panes anymore — not at startup, not on Start. The
+// [TO: X]/[FROM: X] routing-explainer that used to be pushed automatically stays
+// available in the Prompt Library (id 2) for the user to send with one click when
+// they actually want to teach the AIs to self-address; the app itself stays quiet
+// until the user acts. (Mesh/Auto relay is app-driven, so it works either way.)
 
 // Delivers a real file into a live pane's chat, using the Chrome DevTools
 // Protocol (Puppeteer/Playwright use the same technique under the hood for
@@ -2928,6 +2916,21 @@ ipcMain.handle("routing:stop-all", () => {
   state.meshActive = false;
   if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
   logEvent("stopped", {});
+  syncPaneBounds();
+  return { ok: true, global: globalSnapshot() };
+});
+
+// The big "make them stop talking to each other" button: halts EVERY relay path
+// at once — mesh/Auto routing, any House Rule run, any Prompt Sequence, and any
+// Butler task — without unchecking your participants. Nothing new gets relayed
+// after this (in-flight sends already dispatched will just complete).
+ipcMain.handle("relay:silence", async () => {
+  for (const site of SITE_IDS) state.routing[site].clear();
+  state.meshActive = false;
+  if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
+  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
+  try { await stopManagedTask(); } catch (_) {}
+  logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
 });

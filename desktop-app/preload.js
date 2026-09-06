@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("api", {
   pauseAllRouting: () => ipcRenderer.invoke("routing:pause-all"),
   stopAllRouting: () => ipcRenderer.invoke("routing:stop-all"),
   autoAllRouting: () => ipcRenderer.invoke("routing:auto-all"),
+  silenceAll: () => ipcRenderer.invoke("relay:silence"),
   setParticipant: (site, enabled) => ipcRenderer.invoke("participants:set", { site, enabled }),
   startHouseRule: (mode, topic, rounds) => ipcRenderer.invoke("houserule:start", { mode, topic, rounds }),
   stopHouseRule: () => ipcRenderer.invoke("houserule:stop"),

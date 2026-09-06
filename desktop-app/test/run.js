@@ -2025,6 +2025,34 @@ async function testGeneratingGatesCapture() {
 // Extract All: dumps the whole conversation AND the full activity/error log to a
 // text file in the program's logs folder, from in-memory state (so nothing is
 // truncated by a long/streaming on-screen window).
+async function testSilenceStopsAllRelay() {
+  console.log("\n== Stop AIs Talking: relay:silence halts mesh + House Rule + Sequence + Butler at once ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {});
+  let g = (await call("state:get", {})).global;
+  assert(g.meshActive === true && SITES.every((s) => g.routing[s].length === 2), "mesh/Auto is on as a baseline");
+  await call("houserule:start", { mode: "free-for-all", topic: "keep talking", rounds: 0 });
+  assert((await call("state:get", {})).houseRule.active === true, "a House Rule run is active");
+  // Silence everything.
+  const res = await call("relay:silence", {});
+  assert(res && res.ok, "relay:silence returns ok");
+  const s2 = await call("state:get", {});
+  assert(SITES.every((s) => s2.global.routing[s].length === 0) && s2.global.meshActive === false, "all mesh routing is cleared and Auto is off");
+  assert(s2.houseRule.active === false, "the House Rule run is stopped");
+  // Participants are kept checked (we only stopped the talking, not the setup).
+  assert(SITES.every((s) => s2.global.enabled[s] === true), "participants stay checked — only the messaging stopped");
+  // The Butler/manager is stopped too.
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  resetManagerStub();
+  queueManagerDecisionRepeating({ action: "WAIT", reason: "spin", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "keep going" });
+  await settle(150);
+  await call("relay:silence", {});
+  const s3 = await call("state:get", {});
+  assert(["idle", "finished", "error"].includes(s3.manager.status), `relay:silence also stops the Butler task (status=${s3.manager.status})`);
+}
+
 async function testModelsFolderInfo() {
   console.log("\n== Models folder: the app reports one findable models home + its inventory ==");
   const info = await call("models:info", {});
@@ -2278,14 +2306,14 @@ async function main() {
   }));
 
   require(path.join(__dirname, "..", "main.js"));
-  // QA-001: wait for the ACTUAL startup work to finish (the routing-explainer
-  // auto-send reaching all three panes) instead of a fixed 100ms guess — this is
-  // the terminal, observable signal that app.whenReady()→createWindow ran.
+  // The app no longer auto-sends anything on startup, so the readiness signal is
+  // simply that createWindow ran and registered all three panes (their
+  // webContents exist) — NOT that a message was sent.
   const started = await waitUntil(() => SITES.every((s) => {
     const r = reg(s); // the registry is populated only once createWindow runs
-    return r && r.webContents && Array.isArray(r.webContents.sentLog) && r.webContents.sentLog.length >= 1;
-  }), { label: "startup routing-explainer sent to all three panes" });
-  assert(!!started, "startup completed (routing-explainer auto-sent to all three panes)");
+    return r && r.webContents && Array.isArray(r.webContents.sentLog);
+  }), { label: "createWindow registered all three panes" });
+  assert(!!started, "startup completed (all three panes created)");
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -2298,12 +2326,9 @@ async function main() {
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
   assert(restored.houseRule.nextSpeaker === "claude", "nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex");
 
-  console.log("\n== Startup: the routing-explainer prompt is auto-sent to every site once, before anything else ==");
+  console.log("\n== Startup: NOTHING is sent to any pane on startup — the app stays silent until the user acts ==");
   for (const s of SITES) {
-    assert(sentLog(s).length === 1, `${s} received exactly one send on startup (got ${sentLog(s).length})`);
-    // QA-001: never index [0] blindly after a count assertion — guard it so a
-    // miss reports a clean failure instead of crashing the whole runner.
-    assert(sentLog(s)[0] && sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
+    assert(sentLog(s).length === 0, `${s} received NO send on startup (got ${sentLog(s).length})`);
   }
 
   await testDebate();
@@ -2322,6 +2347,7 @@ async function main() {
   await testWaitingSinceTracking();
   await testGeneratingGatesCapture();
   await testUiLogRoutesToActivityLog();
+  await testSilenceStopsAllRelay();
   await testModelsFolderInfo();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
