@@ -99,5 +99,13 @@ contextBridge.exposeInMainWorld("api", {
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
-  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog")
+  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
+  // Butler self-install: the app installs Open Interpreter / voice / a model, so
+  // nothing has to be entered by hand.
+  setupList: () => ipcRenderer.invoke("setup:list"),
+  setupDetect: () => ipcRenderer.invoke("setup:detect"),
+  setupInstall: (target, model) => ipcRenderer.invoke("setup:install", { target, model }),
+  setupAuto: (opts) => ipcRenderer.invoke("setup:auto", opts || {}),
+  onSetupProgress: (cb) => ipcRenderer.on("setup-progress", (_e, payload) => cb(payload)),
+  onSetupStatus: (cb) => ipcRenderer.on("setup-status", (_e, payload) => cb(payload))
 });

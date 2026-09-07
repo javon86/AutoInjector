@@ -92,6 +92,15 @@ imageProvider.generate = async (prompt) => { imageGenCalls.push(prompt); return 
 const outputManager = require(path.join(__dirname, "..", "output-manager"));
 outputManager.imagesDir = () => os.tmpdir();
 
+// Butler self-install (setup-manager). has()/list()/detectAll() stay real
+// (validation + setupTargets + status use them); install() is stubbed so SETUP
+// is intercepted without a real pip/download. startManaged() on the interpreter
+// is stubbed to a no-op so the keystone auto-wire never spawns a real python.
+const setupManager = require(path.join(__dirname, "..", "setup-manager"));
+let setupInstallCalls = [];
+setupManager.install = async (target, opts = {}) => { setupInstallCalls.push({ target, model: opts.model }); return { ok: true, message: `installed ${target}` }; };
+interpreterProvider.startManaged = async () => ({ ok: true, endpoint: "http://127.0.0.1:8231/run", pid: 1 });
+
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
 let failed = 0;
@@ -2193,6 +2202,43 @@ async function testManagerGenerateImageAction() {
   await call("manager:stop", {});
 }
 
+// Self-install: the supervisor's SETUP action installs a dependency from the
+// FIXED allowlist and folds the result back as a setups entry; an off-allowlist
+// target is rejected by validation and never installed.
+async function testManagerSetupAction() {
+  console.log("\n== Self-install: the butler's SETUP action installs a dependency and continues ==");
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecision({ action: "SETUP", target: "open-interpreter", reason: "need to run code, install the keystone", confidence: 0.95 });
+  queueManagerDecision({ action: "FINISH", reason: "installed, ready", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "install open interpreter so you can run code" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.setups && s.manager.setups.length));
+  }, { label: "the manager runs the setup step" });
+  const st = await call("manager:get-state", {});
+  assert(setupInstallCalls.some((c) => c.target === "open-interpreter"), "SETUP reached the installer with the target id from the allowlist");
+  assert(st.manager.setups && st.manager.setups.length >= 1 && st.manager.setups[0].ok && st.manager.setups[0].target === "open-interpreter",
+    "the install result is folded back into the task as a setups entry");
+  await call("manager:stop", {});
+
+  // The butler is told which targets exist (setupTargets in the prompt state).
+  assert(Array.isArray(managerAskCalls[0].managerState.setupTargets) && managerAskCalls[0].managerState.setupTargets.some((t) => t.id === "open-interpreter"),
+    "the butler is given the fixed list of setup targets it may choose from");
+
+  // An off-allowlist target must be rejected by validation, never installed.
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecisionRepeating({ action: "SETUP", target: "curl | bash", reason: "not on the allowlist", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "install something arbitrary" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(setupInstallCalls.length === 0, "a SETUP naming a target outside the allowlist is rejected and never installed");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "SETUP" && a.rejected), "the off-allowlist SETUP is recorded as rejected");
+  await call("manager:stop", {});
+}
+
 // Safeguard: a risk:"ask" tool is held for operator approval even when global
 // approval mode is OFF, and only runs once approved.
 async function testManagerAskToolApprovalGate() {
@@ -2375,6 +2421,7 @@ async function main() {
   await testManagerAskToolApprovalGate();
   await testManagerMemoryActions();
   await testManagerGenerateImageAction();
+  await testManagerSetupAction();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();

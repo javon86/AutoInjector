@@ -34,6 +34,7 @@ const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
 const imageProvider = require("./image-provider");
+const setupManager = require("./setup-manager");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -196,6 +197,7 @@ const state = {
     costLimit: 5
   },
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
+  setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -286,6 +288,7 @@ function resetManagerTask() {
     toolCalls: [], // { id, tool, ok, message, error, ts } — USE_TOOL results (tool registry / future MCP), so the manager can build on them
     memories: [], // { id, type, title, ts } — RECALL results + auto-seeded relevant facts from the shared memory store
     images: [], // { id, prompt, path, ok, error, ts } — GENERATE_IMAGE results (Stable Diffusion), saved + recorded as project images
+    setups: [], // { id, target, ok, message, error, ts } — SETUP results (setup-manager self-install), so the manager knows what it installed
     capabilities: {}, // capability-awareness table: "<target>:<action>" -> { ok, fail, lastTs } learned from executor outcomes
     conflicts: [],
     missingRequirements: [],
@@ -401,6 +404,11 @@ function validateManagerAction(decision) {
 
   if (decision.action === "GENERATE_IMAGE") {
     if (typeof decision.prompt !== "string" || !decision.prompt.trim()) return { ok: false, error: "MISSING_PROMPT" };
+  }
+
+  if (decision.action === "SETUP") {
+    if (typeof decision.target !== "string" || !setupManager.has(decision.target)) return { ok: false, error: "UNKNOWN_TARGET", detail: decision.target };
+    if (decision.model != null && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,80}$/.test(String(decision.model))) return { ok: false, error: "BAD_MODEL" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -928,6 +936,7 @@ function managerSnapshot() {
     toolCalls: m.toolCalls,
     memories: m.memories,
     images: m.images,
+    setups: m.setups,
     capabilities: m.capabilities,
     awareness: managerAwareness(),
     conflicts: m.conflicts,
@@ -1737,7 +1746,12 @@ function assembleTaskState() {
   // prompt builder can surface them -- these are derived, not stored on the task.
   let availableTools = [];
   try { availableTools = toolProvider.list(); } catch { availableTools = []; }
-  return { ...state.manager, awareness: managerAwareness(), availableTools };
+  // The self-install targets the butler may choose from, each tagged with the
+  // last-known install state (a cheap cached map; refreshed at task start and
+  // after each SETUP, never a per-turn pip probe).
+  let setupTargets = [];
+  try { setupTargets = setupManager.list().map((s) => ({ ...s, installed: state.setupStatus[s.id] == null ? null : state.setupStatus[s.id] })); } catch { setupTargets = []; }
+  return { ...state.manager, awareness: managerAwareness(), availableTools, setupTargets };
 }
 
 async function runTierFourAdjudication() {
@@ -1753,7 +1767,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image", "installing"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -2010,6 +2024,36 @@ async function executeManagerAction(decision) {
         category: "image",
         severity: entry.ok ? "info" : "error",
         summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "SETUP": {
+      // The butler installs its own dependency (fixed allowlist). On success the
+      // capability is wired up right away so it can use it on the next turn —
+      // Open Interpreter is the keystone: installing it starts the code shim,
+      // which is what lets the butler drive the rest of its own downloads.
+      m.status = "installing";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await setupManager.install(decision.target, {
+          model: decision.model,
+          onProgress: (line) => logManagerEvent({ category: "setup", summary: `setup:${decision.target}`, details: { line: String(line).slice(0, 200) } }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok) { try { await autoWireAfterSetup(decision.target); } catch (e) { logEvent("setup-autowire-error", { target: decision.target, error: String(e) }); } }
+      refreshSetupStatus();
+      const entry = { id: m.setups.length + 1, target: decision.target, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.setups.push(entry);
+      if (m.setups.length > 20) m.setups.shift();
+      recordCapabilityOutcome("setup", decision.target, entry.ok);
+      logManagerEvent({
+        category: "setup",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Installed ${entry.target}: ${entry.message}` : `Setup of ${entry.target} failed: ${entry.error}`,
         details: entry,
       });
       m.status = "assembling";
@@ -2733,6 +2777,41 @@ ipcMain.handle("ollama:pull", async (_evt, model) => {
 ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// --- Butler self-install (setup-manager) IPC -------------------------------
+// The one-button path so the user (or the butler) doesn't hand-install anything.
+ipcMain.handle("setup:list", () => { try { return { ok: true, targets: setupManager.list(), status: state.setupStatus }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("setup:detect", async () => {
+  try { const all = await setupManager.detectAll(); for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed; return { ok: true, status: state.setupStatus, detail: all }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:install", async (_evt, { target, model } = {}) => {
+  try {
+    if (!setupManager.has(target)) return { ok: false, error: "UNKNOWN_TARGET" };
+    logEvent("setup-install-start", { target, model: model || null });
+    const r = await setupManager.install(target, { model, onProgress: (line) => broadcast("setup-progress", { target, line }) });
+    if (r && r.ok) { try { await autoWireAfterSetup(target); } catch (e) { logEvent("setup-autowire-error", { target, error: String(e) }); } }
+    refreshSetupStatus();
+    broadcast("setup-progress", { target, line: r && r.ok ? `✓ ${r.message || "done"}` : `⚠ ${r && r.error}`, done: true, ok: !!(r && r.ok) });
+    logEvent(r && r.ok ? "setup-install-ok" : "setup-install-failed", { target, result: r });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:auto", async (_evt, opts = {}) => {
+  try {
+    logEvent("setup-auto-start", {});
+    const r = await setupManager.auto({
+      model: opts.model,
+      order: Array.isArray(opts.order) ? opts.order : undefined,
+      onProgress: (target, line) => broadcast("setup-progress", { target, line }),
+      onStep: (s) => { broadcast("setup-progress", { target: s.target, line: s.phase === "start" ? `▶ ${s.target}…` : (s.ok ? `✓ ${s.target}` : `⚠ ${s.target}: ${s.error}`), step: true, phase: s.phase, ok: s.ok }); if (s.phase === "done" && s.ok) { autoWireAfterSetup(s.target).catch(() => {}); } },
+    });
+    refreshSetupStatus();
+    broadcast("setup-progress", { line: `Auto-setup finished: ${r.installed}/${r.total} installed`, done: true, ok: r.ok, auto: true });
+    logEvent("setup-auto-done", { installed: r.installed, total: r.total });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
 });
 ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
@@ -3791,8 +3870,8 @@ if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
 // user doesn't have to start anything. AUTOINJECTOR_INTERPRETER_SPAWN is the
 // command (e.g. "python"); the shim path + port are supplied alongside. It's
 // spawned on app-ready and stopped on quit; a failure never blocks startup.
-async function startManagedInterpreter() {
-  const command = process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
+async function startManagedInterpreter(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
   if (!command) return;
   const shim = process.env.AUTOINJECTOR_INTERPRETER_SHIM || path.join(__dirname, "..", "integrations", "open-interpreter", "interpreter_shim.py");
   const port = Number(process.env.AUTOINJECTOR_INTERPRETER_PORT) || 8231;
@@ -3813,8 +3892,8 @@ async function startManagedInterpreter() {
 // N2: like the interpreter shim, the app can run the local voice shim itself.
 // AUTOINJECTOR_VOICE_SPAWN is the command (e.g. "python"); the shim path + port
 // follow. Spawned on ready, stopped on quit; a failure never blocks startup.
-async function startManagedVoice() {
-  const command = process.env.AUTOINJECTOR_VOICE_SPAWN;
+async function startManagedVoice(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_VOICE_SPAWN;
   if (!command) return;
   const shim = process.env.AUTOINJECTOR_VOICE_SHIM || path.join(__dirname, "..", "integrations", "voice", "voice_shim.py");
   const port = Number(process.env.AUTOINJECTOR_VOICE_PORT) || 8232;
@@ -3832,6 +3911,53 @@ async function startManagedVoice() {
     logEvent(r && r.ok ? "voice-managed-started" : "voice-managed-failed", r || {});
   } catch (e) { logEvent("voice-managed-error", { error: String(e) }); }
 }
+// --- Butler self-install (setup-manager) --------------------------------------
+// Wire the installer engine to the app's real capabilities: where model files go,
+// how to pull an Ollama model, whether Ollama is present, and how to open a page.
+function configureSetupManager() {
+  try {
+    setupManager.configure({
+      modelsDir: (cat) => outputManager.modelsDir(cat),
+      pullOllamaModel: (model, onProgress) => ollamaManager.pull(model, (line) => { try { onProgress && onProgress(line); } catch (_) {} broadcast("ollama-progress", { model, line }); }),
+      detectOllama: () => ollamaManager.detect(),
+      openExternal: (url) => { try { if (shell && url) shell.openExternal(url); } catch (_) {} },
+    });
+  } catch (e) { logEvent("setup-configure-error", { error: String(e) }); }
+}
+
+// Refresh the cached install-state map (never blocks; best-effort). Broadcasts so
+// any open UI reflects it. Called at startup and after each install.
+function refreshSetupStatus() {
+  setupManager.detectAll().then((all) => {
+    for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed;
+    broadcast("setup-status", { status: state.setupStatus });
+  }).catch(() => {});
+}
+
+// After a target installs, turn the capability on so the butler can use it the
+// very next turn — the point of the whole feature is that the user (and butler)
+// shouldn't have to configure anything by hand.
+async function autoWireAfterSetup(target) {
+  const py = setupManager.pythonBin();
+  if (target === "open-interpreter") {
+    // The keystone: start the code shim so RUN_CODE works immediately.
+    await startManagedInterpreter(py);
+    logEvent("setup-autowire", { target, wired: "interpreter-shim" });
+  } else if (target === "voice" || target === "voice-model") {
+    // (Re)start the voice shim; if a model was just downloaded, point at it.
+    let ttsModel = process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "";
+    try {
+      const voiceDir = outputManager.modelsDir("voice");
+      const onnx = fs.readdirSync(voiceDir).find((f) => f.endsWith(".onnx"));
+      if (onnx) ttsModel = path.join(voiceDir, onnx);
+    } catch (_) {}
+    if (ttsModel) process.env.AUTOINJECTOR_VOICE_TTS_MODEL = ttsModel;
+    await startManagedVoice(py);
+    logEvent("setup-autowire", { target, wired: "voice-shim", ttsModel: ttsModel ? path.basename(ttsModel) : null });
+  }
+  // ollama-model / stability-matrix need no in-app wiring.
+}
+
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
@@ -3855,6 +3981,8 @@ app.whenReady().then(() => {
     // uses its own OLLAMA_MODELS; the Models panel shows if they differ.)
     if (!process.env.OLLAMA_MODELS) { try { process.env.OLLAMA_MODELS = outputManager.modelsDir("llm"); } catch (_) {} }
     logEvent("models-init", { root: outputManager.modelsRoot() });
+    configureSetupManager();
+    refreshSetupStatus();
   } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();

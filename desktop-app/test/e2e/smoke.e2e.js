@@ -115,6 +115,11 @@ async function main() {
       await wizard.waitForFunction(() => document.querySelectorAll('#advanced-installers .item').length > 0, { timeout: 8000 }).catch(() => {});
       const installers = await wizard.$$eval('#advanced-installers .item', (els) => els.length).catch(() => 0);
       assert(installers >= 3, `Installs tab shows the guided installers for all the backends (${installers} shown)`);
+      // Butler self-install: the one-button Auto-setup + the per-target list.
+      assert(await wizard.$('#btn-setup-auto'), 'the Installs tab has the 🚀 Auto-setup button (butler self-install)');
+      const setupTargets = await wizard.waitForFunction(() => document.querySelectorAll('#setup-targets .item').length > 0, { timeout: 8000 }).then(() => true).catch(() => false);
+      const targetCount = await wizard.$$eval('#setup-targets .item', (els) => els.length).catch(() => 0);
+      assert(setupTargets && targetCount >= 3, `the Installs tab lists the self-install targets (${targetCount} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
 
       // The Images and Video tabs are back; Images carries the SD endpoint config.
