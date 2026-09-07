@@ -2762,9 +2762,10 @@ ipcMain.handle("wizard:catalog", async () => {
       installers: {
         ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models — powers the System AI / butler. Install it, then reopen this wizard." },
         interpreter: { name: "Open Interpreter", url: "https://github.com/OpenInterpreter/open-interpreter#installation", note: "Lets the butler run code & control the computer (RUN_CODE). Install with: pip install open-interpreter" },
-        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice" },
-        stableDiffusion: { name: "Stable Diffusion (Automatic1111)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Local image generation. Run it with --api, then set its URL in the Images tab." },
-        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Optional alternative to Automatic1111." },
+        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice — then put a piper voice .onnx in models/voice/." },
+        stabilityMatrix: { name: "Stability Matrix (easy image installer) ⭐", url: "https://github.com/LykosAI/StabilityMatrix", note: "One-click installer + manager for Stable Diffusion (A1111/ComfyUI/Fooocus) with a built-in model downloader. Recommended: install it, launch A1111/Comfy from it with the API on, point its shared Models folder at AutoInjector's models/ (or copy models into models/image), then set the app's Image endpoint." },
+        stableDiffusion: { name: "Stable Diffusion (Automatic1111, manual)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Manual alternative to Stability Matrix. Run it with --api, then set its URL in the Images tab." },
+        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Stability Matrix can install this for you." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }

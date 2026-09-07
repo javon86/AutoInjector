@@ -54,7 +54,7 @@
     </div>
 
     <div class="panel" id="panel-images">
-      <p class="muted">Image generation runs on a local Stable Diffusion server (a GPU app you run yourself). The butler's <span class="name">GENERATE_IMAGE</span> renders into it. Install one from the <span class="name">Installs</span> tab, launch it with its API on, then point the app at it here.</p>
+      <p class="muted">Image generation runs on a local Stable Diffusion server (a GPU app you run yourself). The butler's <span class="name">GENERATE_IMAGE</span> renders into it. <b>Easiest path:</b> install <span class="name">Stability Matrix</span> from the <span class="name">Installs</span> tab — it installs Automatic1111/ComfyUI and downloads models for you. Launch A1111/Comfy from it with the API on, set its shared Models folder to your <span class="name">AutoInjector/models</span> folder, then paste its URL below.</p>
       <label class="muted">Stable Diffusion endpoint (Automatic1111 txt2img URL)</label>
       <input type="text" id="sd-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:4px 0; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px;">
       <div class="runtime-row">
