@@ -279,6 +279,21 @@ function buildComposerButtons() {
   all.textContent = "→ All";
   all.onclick = () => sendCompose(SITES.filter((s) => enabled[s]));
   grid.appendChild(all);
+
+  // The butler is a fourth target: message him alone, or the three AIs + him.
+  const butler = document.createElement("button");
+  butler.textContent = "→ 🤵 Butler";
+  butler.title = "Send this message to the butler (gives him a goal / talks to him)";
+  butler.setAttribute("aria-label", "Send this message to the butler");
+  butler.onclick = () => sendToButler();
+  grid.appendChild(butler);
+
+  const allPlus = document.createElement("button");
+  allPlus.textContent = "→ All + 🤵";
+  allPlus.title = "Send to ChatGPT, Claude, Gemini AND the butler";
+  allPlus.setAttribute("aria-label", "Send to all three AIs and the butler");
+  allPlus.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); sendToButler(); };
+  grid.appendChild(allPlus);
 }
 
 async function sendCompose(targets) {
@@ -288,6 +303,23 @@ async function sendCompose(targets) {
   setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
   const res = await window.api.sendCompose(text, targets);
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
+}
+
+// Send the composer text to the butler — i.e. give him a goal / talk to him.
+// (Starts a butler task with the message; his reply/plan shows in his chat.)
+async function sendToButler() {
+  const text = el("composer-text").value.trim();
+  if (!text) { setStatus("Type a message first."); return; }
+  if (!window.api.startManagedTask) { setStatus("Butler isn't available."); return; }
+  // Mirror it into his goal box so the bar shows what he was asked.
+  if (el("jarvis-goal")) el("jarvis-goal").value = text;
+  setStatus("Sending to the butler…");
+  const r = await window.api.startManagedTask(text);
+  if (r && r.ok) { setStatus("Sent to the butler."); if (typeof jarvisShowRunning === "function") jarvisShowRunning(true); }
+  else {
+    const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : "";
+    setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`);
+  }
 }
 
 // The Prompt Library is just a compact dropdown + a few buttons here —
@@ -1300,10 +1332,12 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
 });
 if (window.api.onManagerLog) window.api.onManagerLog((e) => {
   const box = el("jarvis-log"); if (!box || !e) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const row = document.createElement("div");
   row.textContent = `${e.category || ""}: ${e.summary || ""}`.slice(0, 220);
   box.appendChild(row);
   while (box.children.length > 100) box.removeChild(box.firstChild);
+  if (nearBottom) box.scrollTop = box.scrollHeight; // keep the latest in view (chat feel)
 });
 
 // N5 Tools: show the registry so the user sees what the butler can call.
