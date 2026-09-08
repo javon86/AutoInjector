@@ -1183,7 +1183,8 @@ async function loadModelsInfo() {
   try {
     const info = await window.api.modelsInfo();
     if (!info || !info.ok) return;
-    if (el("models-path")) el("models-path").textContent = info.root || "(not ready)";
+    // Show the one findable folder; note that downloads live in its models/ subfolder.
+    if (el("models-path")) el("models-path").textContent = info.contentRoot || info.root || "(not ready)";
     if (el("models-inventory")) {
       const c = info.categories || {};
       el("models-inventory").textContent = "Installed: " + ["llm", "image", "loras", "video", "voice", "assets"].map((k) => `${k} ${c[k] || 0}`).join(" · ");

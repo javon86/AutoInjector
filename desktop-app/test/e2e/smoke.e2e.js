@@ -58,16 +58,18 @@ async function main() {
       `AI panes are in fixed order (${order.join(', ') || 'not yet built'})`
     );
 
-    // The output folder is laid out under Documents on startup.
-    const docs = await app.evaluate(({ app: a }) => a.getPath('documents')).catch(() => null);
+    // The one "stuff and thing" folder is laid out INSIDE the app folder (one
+    // level above desktop-app), same as main.js's contentBaseFolder().
     const fs = require('fs'), pathMod = require('path');
-    const outRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output') : null;
-    assert(outRoot && fs.existsSync(outRoot), `output folder created on launch (${outRoot})`);
+    const appFolder = pathMod.join(__dirname, '..', '..', '..');
+    const outRoot = pathMod.join(appFolder, 'stuff and thing');
+    assert(fs.existsSync(outRoot) && fs.existsSync(pathMod.join(outRoot, 'README.txt')),
+      `the "stuff and thing" folder is created on launch with a README (${outRoot})`);
 
-    // The models & assets home folder is laid out (with subfolders + a README) on launch.
-    const modelsRoot = docs ? pathMod.join(docs, 'AutoInjector', 'models') : null;
-    assert(modelsRoot && fs.existsSync(modelsRoot) && fs.existsSync(pathMod.join(modelsRoot, 'llm')) && fs.existsSync(pathMod.join(modelsRoot, 'README.txt')),
-      `models folder created on launch with subfolders + README (${modelsRoot})`);
+    // Downloads live in its models/ subfolder (with per-kind subfolders + a README).
+    const modelsRoot = pathMod.join(outRoot, 'models');
+    assert(fs.existsSync(modelsRoot) && fs.existsSync(pathMod.join(modelsRoot, 'llm')) && fs.existsSync(pathMod.join(modelsRoot, 'README.txt')),
+      `models folder created inside it with subfolders + README (${modelsRoot})`);
 
     await shot(controls, 'control-panel');
 

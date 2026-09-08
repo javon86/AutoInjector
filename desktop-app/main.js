@@ -2866,7 +2866,7 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
-        { label: "Open Output Folder", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
+        { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
@@ -3158,14 +3158,18 @@ ipcMain.handle("ui:log", (_evt, payload = {}) => {
 ipcMain.handle("models:info", () => {
   let inv = { root: null, categories: {} };
   try { inv = outputManager.modelsInventory(); } catch (_) {}
+  let contentRoot = null;
+  try { contentRoot = outputManager.root(); } catch (_) {}
   const ollamaModels = process.env.OLLAMA_MODELS || null;
   let ollamaHere = false;
   try { ollamaHere = !!(inv.root && ollamaModels && require("path").resolve(ollamaModels) === require("path").resolve(outputManager.modelsDir("llm"))); } catch (_) {}
-  return { ok: true, ...inv, ollamaModels, ollamaHere };
+  return { ok: true, ...inv, contentRoot, ollamaModels, ollamaHere };
 });
 ipcMain.handle("models:open", (_evt, { category } = {}) => {
   try {
-    const target = category ? outputManager.modelsDir(category) : outputManager.modelsRoot();
+    // No category → open the ONE findable folder ("stuff and thing") that holds
+    // everything; a category → jump straight into that download subfolder.
+    const target = category ? outputManager.modelsDir(category) : outputManager.root();
     if (shell && target) shell.openPath(target);
     return { ok: true, path: target };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -3194,7 +3198,7 @@ ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebou
 
 // "Extract All": dump the WHOLE conversation (what the AIs said) AND the full
 // activity/error log into one text file, saved into the program's own logs
-// folder (<Documents>/AutoInjector/output/logs). Pulled from in-memory state,
+// folder (<AutoInjector app folder>/stuff and thing/logs). Pulled from in-memory state,
 // not the on-screen windows, so a long/streaming transcript is captured in full
 // and never cut off by what happens to be scrolled into view.
 function _ts(ms) { try { return new Date(ms).toLocaleString(); } catch (_) { return String(ms); } }
@@ -3970,12 +3974,28 @@ async function startServiceBridge() {
   } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
 }
 
+// The user wants the one "stuff and thing" folder to live INSIDE the AutoInjector
+// app folder (e.g. …/GitHub/AutoInjector/stuff and thing), next to the program —
+// not under Documents. That's the folder one level above this desktop-app dir.
+// If that location isn't writable (e.g. a packaged app installed read-only), fall
+// back to Documents/AutoInjector so downloads/creations still have a home.
+function contentBaseFolder() {
+  const appFolder = path.join(__dirname, "..");
+  try {
+    fs.mkdirSync(appFolder, { recursive: true });
+    fs.accessSync(appFolder, fs.constants.W_OK);
+    return appFolder;
+  } catch (_) {
+    try { return path.join(app.getPath("documents"), "AutoInjector"); } catch (_) { return appFolder; }
+  }
+}
+
 app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {
-    const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
+    const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
     // Point any Ollama the app itself launches at the shared models/llm folder, so
     // downloads land in the one findable place. (A separately-run Ollama daemon
     // uses its own OLLAMA_MODELS; the Models panel shows if they differ.)

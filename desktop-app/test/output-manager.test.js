@@ -13,12 +13,13 @@ function assert(cond, msg) {
 }
 
 function main() {
-  const docs = fs.mkdtempSync(path.join(os.tmpdir(), "docs-"));
-  const root = om.init(docs);
+  const appFolder = fs.mkdtempSync(path.join(os.tmpdir(), "app-"));
+  const root = om.init(appFolder);
 
-  console.log("\n== init lays out the output folder under Documents/AutoInjector ==");
-  assert(root === path.join(docs, "AutoInjector", "output"), "root is <documents>/AutoInjector/output");
-  assert(fs.existsSync(root), "the output folder is created");
+  console.log("\n== init lays out the one 'stuff and thing' folder inside the app folder ==");
+  assert(root === path.join(appFolder, "stuff and thing"), "root is <app folder>/stuff and thing");
+  assert(fs.existsSync(root), "the folder is created");
+  assert(fs.existsSync(path.join(root, "README.txt")) && /stuff and thing/.test(fs.readFileSync(path.join(root, "README.txt"), "utf8")), "a top-level README explains the whole folder");
 
   console.log("\n== category folders ==");
   assert(path.basename(om.imagesDir()) === "images" && fs.existsSync(om.imagesDir()), "images/ exists");
@@ -27,8 +28,8 @@ function main() {
   assert(om.bookDir("My Great Book").endsWith(path.join("books", "My Great Book")), "books/<title>/");
   assert(om.aiWorkDir("claude").endsWith(path.join("ai-work", "claude")), "ai-work/<site>/");
 
-  console.log("\n== models & assets home folder ==");
-  assert(om.modelsRoot() === path.join(docs, "AutoInjector", "models"), "modelsRoot is <documents>/AutoInjector/models");
+  console.log("\n== models & assets downloads folder (inside stuff and thing) ==");
+  assert(om.modelsRoot() === path.join(root, "models"), "modelsRoot is <stuff and thing>/models");
   assert(fs.existsSync(om.modelsRoot()), "the models folder is created on init");
   for (const k of ["llm", "image", "loras", "video", "voice", "assets"]) {
     assert(fs.existsSync(om.modelsDir(k)) && path.basename(om.modelsDir(k)) === k, `models/${k}/ exists`);
@@ -57,7 +58,7 @@ function main() {
   assert(fs.readFileSync(a).length === 3 && fs.readFileSync(b).length === 3, "contents are independent");
 
   console.log("\n== copyInto copies an existing file in ==");
-  const src = path.join(docs, "some upload.txt");
+  const src = path.join(appFolder, "some upload.txt");
   fs.writeFileSync(src, "hello");
   const dest = om.copyInto(om.uploadsDir(), src);
   assert(fs.existsSync(dest) && dest.endsWith(path.join("uploads", "some upload.txt")), "copied into uploads/ under its name");

@@ -1,15 +1,22 @@
 'use strict';
 /*
- * output-manager.js — one tidy place on disk for everything the program
- * produces or handles: Documents/AutoInjector/output, broken up by what it is.
+ * output-manager.js — ONE findable folder that holds everything the program
+ * downloads or creates, each kind in its own subfolder. It lives right inside
+ * the AutoInjector app folder so it sits next to the program:
  *
- *   output/
+ *   <AutoInjector app folder>/stuff and thing/  <- the one place, easy to spot
  *     books/<book title>/     each bookmaking run gets its own titled folder
  *     images/                 generated images (Stable Diffusion, etc.)
  *     videos/                 generated videos
  *     uploads/                files you attach & send to the AIs
  *     ai-work/                files the AIs make that the app grabs
  *       chatgpt/  claude/  gemini/
+ *     logs/                   Extract-All text dumps
+ *     models/                 EVERYTHING downloaded, split by kind:
+ *       llm/  image/  loras/  video/  voice/  assets/
+ *
+ * So creations sit at the top of "stuff and thing" and downloads sit under its
+ * models/ subfolder — one folder to open, appropriate subfolders inside.
  *
  * Kept Electron-free (the root is passed into init) so it's unit-testable; main
  * passes app.getPath('documents'). All names are sanitized to a single safe
@@ -19,8 +26,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-let _root = null;       // <documents>/AutoInjector/output
-let _modelsRoot = null; // <documents>/AutoInjector/models
+// The single, deliberately-distinctive folder name the user picked so it stands
+// out in their file list. Everything the app touches on disk lives under here.
+const STUFF_FOLDER = 'stuff and thing';
+
+let _root = null;       // <AutoInjector app folder>/stuff and thing  (creations)
+let _modelsRoot = null; // <AutoInjector app folder>/stuff and thing/models (downloads)
 
 const CATEGORIES = { books: 'books', images: 'images', videos: 'videos', uploads: 'uploads', aiwork: 'ai-work' };
 
@@ -37,12 +48,17 @@ const MODEL_CATEGORIES = {
   assets: 'assets',  // anything else that supports generation
 };
 
-/** Point the output folder at <documentsDir>/AutoInjector/output and create it. */
-function init(documentsDir) {
-  const base = documentsDir && String(documentsDir).trim() ? documentsDir : os.homedir();
-  _root = path.join(base, 'AutoInjector', 'output');
+/**
+ * Point everything at <appFolder>/stuff and thing and create it. main.js passes
+ * the AutoInjector app folder (path.join(__dirname, '..')), so the folder sits
+ * right inside the program, e.g. …/GitHub/AutoInjector/stuff and thing.
+ */
+function init(appFolder) {
+  const base = appFolder && String(appFolder).trim() ? appFolder : os.homedir();
+  _root = path.join(base, STUFF_FOLDER);
   ensureDir(_root);
-  _modelsRoot = path.join(base, 'AutoInjector', 'models');
+  // Downloads live in a models/ subfolder INSIDE the one findable folder.
+  _modelsRoot = path.join(_root, 'models');
   ensureDir(_modelsRoot);
   for (const seg of Object.values(MODEL_CATEGORIES)) ensureDir(path.join(_modelsRoot, seg));
   seedModelsReadmes();
@@ -57,12 +73,40 @@ function modelsDir(category) {
   return ensureDir(path.join(_modelsRoot, seg));
 }
 
+// A plain-language guide for the whole "stuff and thing" folder, written once at
+// its root so anyone opening it understands the layout at a glance.
+const STUFF_NOTE = [
+  'AutoInjector — "stuff and thing"',
+  '================================',
+  'This is the ONE folder for everything the app downloads or creates. Open it',
+  'from the app (System AI panel -> Downloads & creations -> Open folder). Layout:',
+  '',
+  '  CREATED BY THE APP (top level):',
+  '    books/    finished books, one titled folder per run',
+  '    images/   generated images (Stable Diffusion, etc.)',
+  '    videos/   generated videos',
+  '    uploads/  files you attached and sent to the AIs',
+  '    ai-work/  files the AIs produced that the app grabbed',
+  '    logs/     "Extract All" text dumps',
+  '',
+  '  DOWNLOADED (inside models/):',
+  '    models/llm/     local language models (Ollama)',
+  '    models/image/   Stable Diffusion checkpoints',
+  '    models/loras/   image LoRAs / embeddings',
+  '    models/video/   text-to-video model files',
+  '    models/voice/   piper (TTS) + whisper (STT) model files',
+  '    models/assets/  anything else that helps generation',
+  '',
+  'See models/README.txt for how to point each backend (Ollama / A1111 /',
+  'Stability Matrix / voice) at these folders.',
+].join('\n');
+
 // Write a top-level guide plus a per-folder note, once (never clobber edits).
 const MODEL_NOTES = {
   '': [
-    'AutoInjector — Models & Assets',
-    '==============================',
-    'This is the one place all model assets live. Put files in the matching',
+    'AutoInjector — Models & downloads',
+    '=================================',
+    'This is the one place all downloaded model assets live. Put files in the',
     'subfolder (or let the app download into it), and point each backend here:',
     '',
     '  llm/     Local language models for the System AI / Butler (Ollama).',
@@ -91,6 +135,10 @@ const MODEL_NOTES = {
 };
 function seedModelsReadmes() {
   try {
+    // A guide for the whole "stuff and thing" folder at its root…
+    const rootReadme = path.join(_root, 'README.txt');
+    if (!fs.existsSync(rootReadme)) fs.writeFileSync(rootReadme, STUFF_NOTE);
+    // …and one for the downloads (models/) subfolder.
     const top = path.join(_modelsRoot, 'README.txt');
     if (!fs.existsSync(top)) fs.writeFileSync(top, MODEL_NOTES['']);
     for (const [key, seg] of Object.entries(MODEL_CATEGORIES)) {
