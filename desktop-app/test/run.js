@@ -92,6 +92,15 @@ imageProvider.generate = async (prompt) => { imageGenCalls.push(prompt); return 
 const outputManager = require(path.join(__dirname, "..", "output-manager"));
 outputManager.imagesDir = () => os.tmpdir();
 
+// Butler self-install (setup-manager). has()/list()/detectAll() stay real
+// (validation + setupTargets + status use them); install() is stubbed so SETUP
+// is intercepted without a real pip/download. startManaged() on the interpreter
+// is stubbed to a no-op so the keystone auto-wire never spawns a real python.
+const setupManager = require(path.join(__dirname, "..", "setup-manager"));
+let setupInstallCalls = [];
+setupManager.install = async (target, opts = {}) => { setupInstallCalls.push({ target, model: opts.model }); return { ok: true, message: `installed ${target}` }; };
+interpreterProvider.startManaged = async () => ({ ok: true, endpoint: "http://127.0.0.1:8231/run", pid: 1 });
+
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
 let failed = 0;
@@ -2025,6 +2034,59 @@ async function testGeneratingGatesCapture() {
 // Extract All: dumps the whole conversation AND the full activity/error log to a
 // text file in the program's logs folder, from in-memory state (so nothing is
 // truncated by a long/streaming on-screen window).
+async function testSilenceStopsAllRelay() {
+  console.log("\n== Stop AIs Talking: relay:silence halts mesh + House Rule + Sequence + Butler at once ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {});
+  let g = (await call("state:get", {})).global;
+  assert(g.meshActive === true && SITES.every((s) => g.routing[s].length === 2), "mesh/Auto is on as a baseline");
+  await call("houserule:start", { mode: "free-for-all", topic: "keep talking", rounds: 0 });
+  assert((await call("state:get", {})).houseRule.active === true, "a House Rule run is active");
+  // Silence everything.
+  const res = await call("relay:silence", {});
+  assert(res && res.ok, "relay:silence returns ok");
+  const s2 = await call("state:get", {});
+  assert(SITES.every((s) => s2.global.routing[s].length === 0) && s2.global.meshActive === false, "all mesh routing is cleared and Auto is off");
+  assert(s2.houseRule.active === false, "the House Rule run is stopped");
+  // Participants are kept checked (we only stopped the talking, not the setup).
+  assert(SITES.every((s) => s2.global.enabled[s] === true), "participants stay checked — only the messaging stopped");
+  // The Butler/manager is stopped too.
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  resetManagerStub();
+  queueManagerDecisionRepeating({ action: "WAIT", reason: "spin", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "keep going" });
+  await settle(150);
+  await call("relay:silence", {});
+  const s3 = await call("state:get", {});
+  assert(["idle", "finished", "error"].includes(s3.manager.status), `relay:silence also stops the Butler task (status=${s3.manager.status})`);
+}
+
+async function testModelsFolderInfo() {
+  console.log("\n== Models folder: the app reports one findable models home + its inventory ==");
+  const info = await call("models:info", {});
+  assert(info && info.ok && info.root && /[\\/]models$/.test(info.root), `models:info returns the models root (${info && info.root})`);
+  assert(info.categories && typeof info.categories.llm === "number" && typeof info.categories.image === "number", "it reports a per-category inventory (llm/image/…)");
+  assert("ollamaHere" in info, "it reports whether Ollama is pointed at the folder");
+  const opened = await call("models:open", {});
+  assert(opened && opened.ok && opened.path, "models:open resolves the folder path to open");
+}
+
+async function testUiLogRoutesToActivityLog() {
+  console.log("\n== UI activity: a renderer ui:log lands in the one Activity Log (sanitized) ==");
+  const before = (await call("state:get", {})).log.length;
+  await call("ui:log", { action: "click", id: "btn-jarvis-start", msg: "Start Butler" });
+  const s = await call("state:get", {});
+  assert(s.log.length > before, "a ui:log adds an entry to the Activity Log");
+  const entry = s.log[s.log.length - 1];
+  assert(entry.kind === "ui-click" && entry.detail.id === "btn-jarvis-start" && /Start Butler/.test(entry.detail.msg), "the entry carries the action, button id and label");
+  // Oversized/garbage input is bounded, not trusted verbatim.
+  await call("ui:log", { action: "x".repeat(200) + " bad;", msg: "y".repeat(500) });
+  const s2 = await call("state:get", {});
+  const last = s2.log[s2.log.length - 1];
+  assert(last.kind.length <= 43 && (last.detail.msg || "").length <= 160, "action + message are length-capped and sanitized");
+}
+
 async function testExtractAllLogs() {
   console.log("\n== Extract All writes the full conversation + activity/error log to one text file ==");
   await resetAllParticipants();
@@ -2137,6 +2199,43 @@ async function testManagerGenerateImageAction() {
   const st2 = await call("manager:get-state", {});
   assert(imageGenCalls.length === 0, "a GENERATE_IMAGE with no prompt is rejected and never rendered");
   assert(st2.manager.previousManagerActions.some((a) => a.action === "GENERATE_IMAGE" && a.rejected), "the promptless GENERATE_IMAGE is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// Self-install: the supervisor's SETUP action installs a dependency from the
+// FIXED allowlist and folds the result back as a setups entry; an off-allowlist
+// target is rejected by validation and never installed.
+async function testManagerSetupAction() {
+  console.log("\n== Self-install: the butler's SETUP action installs a dependency and continues ==");
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecision({ action: "SETUP", target: "open-interpreter", reason: "need to run code, install the keystone", confidence: 0.95 });
+  queueManagerDecision({ action: "FINISH", reason: "installed, ready", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "install open interpreter so you can run code" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.setups && s.manager.setups.length));
+  }, { label: "the manager runs the setup step" });
+  const st = await call("manager:get-state", {});
+  assert(setupInstallCalls.some((c) => c.target === "open-interpreter"), "SETUP reached the installer with the target id from the allowlist");
+  assert(st.manager.setups && st.manager.setups.length >= 1 && st.manager.setups[0].ok && st.manager.setups[0].target === "open-interpreter",
+    "the install result is folded back into the task as a setups entry");
+  await call("manager:stop", {});
+
+  // The butler is told which targets exist (setupTargets in the prompt state).
+  assert(Array.isArray(managerAskCalls[0].managerState.setupTargets) && managerAskCalls[0].managerState.setupTargets.some((t) => t.id === "open-interpreter"),
+    "the butler is given the fixed list of setup targets it may choose from");
+
+  // An off-allowlist target must be rejected by validation, never installed.
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecisionRepeating({ action: "SETUP", target: "curl | bash", reason: "not on the allowlist", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "install something arbitrary" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(setupInstallCalls.length === 0, "a SETUP naming a target outside the allowlist is rejected and never installed");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "SETUP" && a.rejected), "the off-allowlist SETUP is recorded as rejected");
   await call("manager:stop", {});
 }
 
@@ -2253,14 +2352,14 @@ async function main() {
   }));
 
   require(path.join(__dirname, "..", "main.js"));
-  // QA-001: wait for the ACTUAL startup work to finish (the routing-explainer
-  // auto-send reaching all three panes) instead of a fixed 100ms guess — this is
-  // the terminal, observable signal that app.whenReady()→createWindow ran.
+  // The app no longer auto-sends anything on startup, so the readiness signal is
+  // simply that createWindow ran and registered all three panes (their
+  // webContents exist) — NOT that a message was sent.
   const started = await waitUntil(() => SITES.every((s) => {
     const r = reg(s); // the registry is populated only once createWindow runs
-    return r && r.webContents && Array.isArray(r.webContents.sentLog) && r.webContents.sentLog.length >= 1;
-  }), { label: "startup routing-explainer sent to all three panes" });
-  assert(!!started, "startup completed (routing-explainer auto-sent to all three panes)");
+    return r && r.webContents && Array.isArray(r.webContents.sentLog);
+  }), { label: "createWindow registered all three panes" });
+  assert(!!started, "startup completed (all three panes created)");
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -2273,12 +2372,9 @@ async function main() {
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
   assert(restored.houseRule.nextSpeaker === "claude", "nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex");
 
-  console.log("\n== Startup: the routing-explainer prompt is auto-sent to every site once, before anything else ==");
+  console.log("\n== Startup: NOTHING is sent to any pane on startup — the app stays silent until the user acts ==");
   for (const s of SITES) {
-    assert(sentLog(s).length === 1, `${s} received exactly one send on startup (got ${sentLog(s).length})`);
-    // QA-001: never index [0] blindly after a count assertion — guard it so a
-    // miss reports a clean failure instead of crashing the whole runner.
-    assert(sentLog(s)[0] && sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
+    assert(sentLog(s).length === 0, `${s} received NO send on startup (got ${sentLog(s).length})`);
   }
 
   await testDebate();
@@ -2296,6 +2392,9 @@ async function main() {
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
   await testGeneratingGatesCapture();
+  await testUiLogRoutesToActivityLog();
+  await testSilenceStopsAllRelay();
+  await testModelsFolderInfo();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();
@@ -2322,6 +2421,7 @@ async function main() {
   await testManagerAskToolApprovalGate();
   await testManagerMemoryActions();
   await testManagerGenerateImageAction();
+  await testManagerSetupAction();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();

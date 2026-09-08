@@ -1,0 +1,4 @@
+# The app's one findable content folder — models, downloads, generated images/
+# videos, book output, logs. It lives inside the app folder at runtime and must
+# never be committed (user content, can be gigabytes).
+stuff and thing/

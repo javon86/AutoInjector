@@ -24,6 +24,7 @@ async function main() {
       ['#panels-grid', 'Tiled panels grid'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#btn-silence', 'Stop AIs Talking button'],
       ['#btn-open-image', 'Image paddle'],
       ['#btn-open-video', 'Video paddle'],
       ['#jarvis-goal', 'Butler goal box'],
@@ -31,6 +32,7 @@ async function main() {
       ['#lsi-pull-name', 'Pull-any-model field'],
       ['#lsi-approval', 'Approval-mode safeguard toggle'],
       ['#btn-approve', 'Approve-action button'],
+      ['#btn-open-models', 'Open-models-folder button'],
       ['#jarvis-tools', 'Tools registry list'],
       ['#jarvis-awareness', 'Awareness readout'],
       ['#voice-enabled', 'Voice toggle'],
@@ -56,13 +58,27 @@ async function main() {
       `AI panes are in fixed order (${order.join(', ') || 'not yet built'})`
     );
 
-    // The output folder is laid out under Documents on startup.
-    const docs = await app.evaluate(({ app: a }) => a.getPath('documents')).catch(() => null);
+    // The one "stuff and thing" folder is laid out INSIDE the app folder (one
+    // level above desktop-app), same as main.js's contentBaseFolder().
     const fs = require('fs'), pathMod = require('path');
-    const outRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output') : null;
-    assert(outRoot && fs.existsSync(outRoot), `output folder created on launch (${outRoot})`);
+    const appFolder = pathMod.join(__dirname, '..', '..', '..');
+    const outRoot = pathMod.join(appFolder, 'stuff and thing');
+    assert(fs.existsSync(outRoot) && fs.existsSync(pathMod.join(outRoot, 'README.txt')),
+      `the "stuff and thing" folder is created on launch with a README (${outRoot})`);
+
+    // Downloads live in its models/ subfolder (with per-kind subfolders + a README).
+    const modelsRoot = pathMod.join(outRoot, 'models');
+    assert(fs.existsSync(modelsRoot) && fs.existsSync(pathMod.join(modelsRoot, 'llm')) && fs.existsSync(pathMod.join(modelsRoot, 'README.txt')),
+      `models folder created inside it with subfolders + README (${modelsRoot})`);
 
     await shot(controls, 'control-panel');
+
+    console.log('\n== Activity trace: a real button click is logged as ui-click ==');
+    await controls.click('#btn-extract-all');
+    const loggedClick = await controls.waitForFunction(
+      () => { const b = document.getElementById('activity-log'); return !!(b && /ui-click/.test(b.textContent) && /extract/i.test(b.textContent)); },
+      { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(loggedClick, 'clicking a button writes a ui-click line into the Activity Log');
 
     console.log('\n== ⤓ Extract All writes the conversation + activity log to a text file ==');
     await controls.click('#btn-extract-all');
@@ -101,6 +117,11 @@ async function main() {
       await wizard.waitForFunction(() => document.querySelectorAll('#advanced-installers .item').length > 0, { timeout: 8000 }).catch(() => {});
       const installers = await wizard.$$eval('#advanced-installers .item', (els) => els.length).catch(() => 0);
       assert(installers >= 3, `Installs tab shows the guided installers for all the backends (${installers} shown)`);
+      // Butler self-install: the one-button Auto-setup + the per-target list.
+      assert(await wizard.$('#btn-setup-auto'), 'the Installs tab has the 🚀 Auto-setup button (butler self-install)');
+      const setupTargets = await wizard.waitForFunction(() => document.querySelectorAll('#setup-targets .item').length > 0, { timeout: 8000 }).then(() => true).catch(() => false);
+      const targetCount = await wizard.$$eval('#setup-targets .item', (els) => els.length).catch(() => 0);
+      assert(setupTargets && targetCount >= 3, `the Installs tab lists the self-install targets (${targetCount} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
 
       // The Images and Video tabs are back; Images carries the SD endpoint config.

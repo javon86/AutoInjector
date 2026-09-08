@@ -34,6 +34,7 @@ const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
 const imageProvider = require("./image-provider");
+const setupManager = require("./setup-manager");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -196,6 +197,7 @@ const state = {
     costLimit: 5
   },
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
+  setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -286,6 +288,7 @@ function resetManagerTask() {
     toolCalls: [], // { id, tool, ok, message, error, ts } — USE_TOOL results (tool registry / future MCP), so the manager can build on them
     memories: [], // { id, type, title, ts } — RECALL results + auto-seeded relevant facts from the shared memory store
     images: [], // { id, prompt, path, ok, error, ts } — GENERATE_IMAGE results (Stable Diffusion), saved + recorded as project images
+    setups: [], // { id, target, ok, message, error, ts } — SETUP results (setup-manager self-install), so the manager knows what it installed
     capabilities: {}, // capability-awareness table: "<target>:<action>" -> { ok, fail, lastTs } learned from executor outcomes
     conflicts: [],
     missingRequirements: [],
@@ -401,6 +404,11 @@ function validateManagerAction(decision) {
 
   if (decision.action === "GENERATE_IMAGE") {
     if (typeof decision.prompt !== "string" || !decision.prompt.trim()) return { ok: false, error: "MISSING_PROMPT" };
+  }
+
+  if (decision.action === "SETUP") {
+    if (typeof decision.target !== "string" || !setupManager.has(decision.target)) return { ok: false, error: "UNKNOWN_TARGET", detail: decision.target };
+    if (decision.model != null && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,80}$/.test(String(decision.model))) return { ok: false, error: "BAD_MODEL" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -741,11 +749,10 @@ function createWindow() {
         } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
       });
     } catch (_) {}
-    // Fires once this site's page has actually finished loading (not on a
-    // fixed delay, which would race against a slow connection) — sending
-    // any earlier would hit a chat UI whose input box doesn't exist yet.
-    // Only ever fires once per app launch, not on a later manual 🔍/⟳ reload.
-    view.webContents.once("did-finish-load", () => sendStartupRoutingPromptOnce(site));
+    // Nothing is sent to the panes on startup anymore — the app stays silent
+    // until the user hits Start (Auto / a House Rule / a Sequence). At that point
+    // ensureProtocolTaught() sends the [TO:]/[FROM:] routing explainer once, so
+    // relay still works, but only on a deliberate user action.
   }
 
   layout();
@@ -929,6 +936,7 @@ function managerSnapshot() {
     toolCalls: m.toolCalls,
     memories: m.memories,
     images: m.images,
+    setups: m.setups,
     capabilities: m.capabilities,
     awareness: managerAwareness(),
     conflicts: m.conflicts,
@@ -1210,22 +1218,11 @@ async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs) {
   return { ok: false, error: "TIMEOUT" };
 }
 
-// The routing-explainer prompt (Prompt Library id 2) gets sent to every
-// site automatically, once, the first time its page loads after app
-// startup — establishing baseline awareness of the [TO: X] tag system
-// without the user having to remember to trigger it. Fire-and-forget, no
-// acknowledgment wait. Pulls from state.prompts (not a fresh-generated
-// copy) so a user edit to that saved prompt is reflected here too; if
-// they've deleted it, this just quietly does nothing.
-const startupPromptSent = new Set();
-async function sendStartupRoutingPromptOnce(site) {
-  if (startupPromptSent.has(site)) return;
-  startupPromptSent.add(site);
-  const prompt = state.prompts.find((p) => p.id === 2);
-  const text = prompt && prompt.text && prompt.text[site];
-  if (!text) return;
-  await sendTextTo(site, text, null);
-}
+// Nothing is auto-sent to the panes anymore — not at startup, not on Start. The
+// [TO: X]/[FROM: X] routing-explainer that used to be pushed automatically stays
+// available in the Prompt Library (id 2) for the user to send with one click when
+// they actually want to teach the AIs to self-address; the app itself stays quiet
+// until the user acts. (Mesh/Auto relay is app-driven, so it works either way.)
 
 // Delivers a real file into a live pane's chat, using the Chrome DevTools
 // Protocol (Puppeteer/Playwright use the same technique under the hood for
@@ -1749,7 +1746,12 @@ function assembleTaskState() {
   // prompt builder can surface them -- these are derived, not stored on the task.
   let availableTools = [];
   try { availableTools = toolProvider.list(); } catch { availableTools = []; }
-  return { ...state.manager, awareness: managerAwareness(), availableTools };
+  // The self-install targets the butler may choose from, each tagged with the
+  // last-known install state (a cheap cached map; refreshed at task start and
+  // after each SETUP, never a per-turn pip probe).
+  let setupTargets = [];
+  try { setupTargets = setupManager.list().map((s) => ({ ...s, installed: state.setupStatus[s.id] == null ? null : state.setupStatus[s.id] })); } catch { setupTargets = []; }
+  return { ...state.manager, awareness: managerAwareness(), availableTools, setupTargets };
 }
 
 async function runTierFourAdjudication() {
@@ -1765,7 +1767,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image", "installing"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -2022,6 +2024,36 @@ async function executeManagerAction(decision) {
         category: "image",
         severity: entry.ok ? "info" : "error",
         summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "SETUP": {
+      // The butler installs its own dependency (fixed allowlist). On success the
+      // capability is wired up right away so it can use it on the next turn —
+      // Open Interpreter is the keystone: installing it starts the code shim,
+      // which is what lets the butler drive the rest of its own downloads.
+      m.status = "installing";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await setupManager.install(decision.target, {
+          model: decision.model,
+          onProgress: (line) => logManagerEvent({ category: "setup", summary: `setup:${decision.target}`, details: { line: String(line).slice(0, 200) } }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok) { try { await autoWireAfterSetup(decision.target); } catch (e) { logEvent("setup-autowire-error", { target: decision.target, error: String(e) }); } }
+      refreshSetupStatus();
+      const entry = { id: m.setups.length + 1, target: decision.target, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.setups.push(entry);
+      if (m.setups.length > 20) m.setups.shift();
+      recordCapabilityOutcome("setup", decision.target, entry.ok);
+      logManagerEvent({
+        category: "setup",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Installed ${entry.target}: ${entry.message}` : `Setup of ${entry.target} failed: ${entry.error}`,
         details: entry,
       });
       m.status = "assembling";
@@ -2746,6 +2778,41 @@ ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
+
+// --- Butler self-install (setup-manager) IPC -------------------------------
+// The one-button path so the user (or the butler) doesn't hand-install anything.
+ipcMain.handle("setup:list", () => { try { return { ok: true, targets: setupManager.list(), status: state.setupStatus }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("setup:detect", async () => {
+  try { const all = await setupManager.detectAll(); for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed; return { ok: true, status: state.setupStatus, detail: all }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:install", async (_evt, { target, model } = {}) => {
+  try {
+    if (!setupManager.has(target)) return { ok: false, error: "UNKNOWN_TARGET" };
+    logEvent("setup-install-start", { target, model: model || null });
+    const r = await setupManager.install(target, { model, onProgress: (line) => broadcast("setup-progress", { target, line }) });
+    if (r && r.ok) { try { await autoWireAfterSetup(target); } catch (e) { logEvent("setup-autowire-error", { target, error: String(e) }); } }
+    refreshSetupStatus();
+    broadcast("setup-progress", { target, line: r && r.ok ? `✓ ${r.message || "done"}` : `⚠ ${r && r.error}`, done: true, ok: !!(r && r.ok) });
+    logEvent(r && r.ok ? "setup-install-ok" : "setup-install-failed", { target, result: r });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:auto", async (_evt, opts = {}) => {
+  try {
+    logEvent("setup-auto-start", {});
+    const r = await setupManager.auto({
+      model: opts.model,
+      order: Array.isArray(opts.order) ? opts.order : undefined,
+      onProgress: (target, line) => broadcast("setup-progress", { target, line }),
+      onStep: (s) => { broadcast("setup-progress", { target: s.target, line: s.phase === "start" ? `▶ ${s.target}…` : (s.ok ? `✓ ${s.target}` : `⚠ ${s.target}: ${s.error}`), step: true, phase: s.phase, ok: s.ok }); if (s.phase === "done" && s.ok) { autoWireAfterSetup(s.target).catch(() => {}); } },
+    });
+    refreshSetupStatus();
+    broadcast("setup-progress", { line: `Auto-setup finished: ${r.installed}/${r.total} installed`, done: true, ok: r.ok, auto: true });
+    logEvent("setup-auto-done", { installed: r.installed, total: r.total });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
 ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Consolidated AI feed window: open/close + backfill recent AI messages so the
@@ -2774,9 +2841,10 @@ ipcMain.handle("wizard:catalog", async () => {
       installers: {
         ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models — powers the System AI / butler. Install it, then reopen this wizard." },
         interpreter: { name: "Open Interpreter", url: "https://github.com/OpenInterpreter/open-interpreter#installation", note: "Lets the butler run code & control the computer (RUN_CODE). Install with: pip install open-interpreter" },
-        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice" },
-        stableDiffusion: { name: "Stable Diffusion (Automatic1111)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Local image generation. Run it with --api, then set its URL in the Images tab." },
-        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Optional alternative to Automatic1111." },
+        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice — then put a piper voice .onnx in models/voice/." },
+        stabilityMatrix: { name: "Stability Matrix (easy image installer) ⭐", url: "https://github.com/LykosAI/StabilityMatrix", note: "One-click installer + manager for Stable Diffusion (A1111/ComfyUI/Fooocus) with a built-in model downloader. Recommended: install it, launch A1111/Comfy from it with the API on, point its shared Models folder at AutoInjector's models/ (or copy models into models/image), then set the app's Image endpoint." },
+        stableDiffusion: { name: "Stable Diffusion (Automatic1111, manual)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Manual alternative to Stability Matrix. Run it with --api, then set its URL in the Images tab." },
+        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Stability Matrix can install this for you." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -2798,7 +2866,7 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
-        { label: "Open Output Folder", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
+        { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
@@ -2932,6 +3000,21 @@ ipcMain.handle("routing:stop-all", () => {
   return { ok: true, global: globalSnapshot() };
 });
 
+// The big "make them stop talking to each other" button: halts EVERY relay path
+// at once — mesh/Auto routing, any House Rule run, any Prompt Sequence, and any
+// Butler task — without unchecking your participants. Nothing new gets relayed
+// after this (in-flight sends already dispatched will just complete).
+ipcMain.handle("relay:silence", async () => {
+  for (const site of SITE_IDS) state.routing[site].clear();
+  state.meshActive = false;
+  if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
+  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
+  try { await stopManagedTask(); } catch (_) {}
+  logEvent("relay-silenced", {});
+  syncPaneBounds();
+  return { ok: true, global: globalSnapshot() };
+});
+
 ipcMain.handle("routing:auto-all", () => {
   const active = SITE_IDS.filter((s) => state.enabled[s]);
   for (const s of SITE_IDS) {
@@ -3056,6 +3139,42 @@ ipcMain.handle("houserule:wrap-up-brainstorm", async () => {
   return { ok: true };
 });
 
+// UI activity: the renderer reports every meaningful thing the USER does (button
+// clicks, panel open/close, field changes) so the one Activity Log captures the
+// full story — frontend actions alongside the backend events already logged. The
+// payload is sanitized (short strings only) so a chatty renderer can't bloat the log.
+ipcMain.handle("ui:log", (_evt, payload = {}) => {
+  const action = String(payload.action || "event").slice(0, 40).replace(/[^a-z0-9_-]/gi, "");
+  const detail = {};
+  if (payload.id != null) detail.id = String(payload.id).slice(0, 60);
+  if (payload.msg != null) detail.msg = String(payload.msg).slice(0, 160);
+  logEvent(`ui-${action || "event"}`, detail);
+  return { ok: true };
+});
+
+// Models & assets home folder: one findable place for all model files. Reports
+// where it is + what's in it + whether Ollama is pointed at it; opens it in the
+// OS file manager.
+ipcMain.handle("models:info", () => {
+  let inv = { root: null, categories: {} };
+  try { inv = outputManager.modelsInventory(); } catch (_) {}
+  let contentRoot = null;
+  try { contentRoot = outputManager.root(); } catch (_) {}
+  const ollamaModels = process.env.OLLAMA_MODELS || null;
+  let ollamaHere = false;
+  try { ollamaHere = !!(inv.root && ollamaModels && require("path").resolve(ollamaModels) === require("path").resolve(outputManager.modelsDir("llm"))); } catch (_) {}
+  return { ok: true, ...inv, contentRoot, ollamaModels, ollamaHere };
+});
+ipcMain.handle("models:open", (_evt, { category } = {}) => {
+  try {
+    // No category → open the ONE findable folder ("stuff and thing") that holds
+    // everything; a category → jump straight into that download subfolder.
+    const target = category ? outputManager.modelsDir(category) : outputManager.root();
+    if (shell && target) shell.openPath(target);
+    return { ok: true, path: target };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
 ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),
@@ -3079,7 +3198,7 @@ ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebou
 
 // "Extract All": dump the WHOLE conversation (what the AIs said) AND the full
 // activity/error log into one text file, saved into the program's own logs
-// folder (<Documents>/AutoInjector/output/logs). Pulled from in-memory state,
+// folder (<AutoInjector app folder>/stuff and thing/logs). Pulled from in-memory state,
 // not the on-screen windows, so a long/streaming transcript is captured in full
 // and never cut off by what happens to be scrolled into view.
 function _ts(ms) { try { return new Date(ms).toLocaleString(); } catch (_) { return String(ms); } }
@@ -3755,8 +3874,8 @@ if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
 // user doesn't have to start anything. AUTOINJECTOR_INTERPRETER_SPAWN is the
 // command (e.g. "python"); the shim path + port are supplied alongside. It's
 // spawned on app-ready and stopped on quit; a failure never blocks startup.
-async function startManagedInterpreter() {
-  const command = process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
+async function startManagedInterpreter(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
   if (!command) return;
   const shim = process.env.AUTOINJECTOR_INTERPRETER_SHIM || path.join(__dirname, "..", "integrations", "open-interpreter", "interpreter_shim.py");
   const port = Number(process.env.AUTOINJECTOR_INTERPRETER_PORT) || 8231;
@@ -3777,8 +3896,8 @@ async function startManagedInterpreter() {
 // N2: like the interpreter shim, the app can run the local voice shim itself.
 // AUTOINJECTOR_VOICE_SPAWN is the command (e.g. "python"); the shim path + port
 // follow. Spawned on ready, stopped on quit; a failure never blocks startup.
-async function startManagedVoice() {
-  const command = process.env.AUTOINJECTOR_VOICE_SPAWN;
+async function startManagedVoice(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_VOICE_SPAWN;
   if (!command) return;
   const shim = process.env.AUTOINJECTOR_VOICE_SHIM || path.join(__dirname, "..", "integrations", "voice", "voice_shim.py");
   const port = Number(process.env.AUTOINJECTOR_VOICE_PORT) || 8232;
@@ -3796,6 +3915,53 @@ async function startManagedVoice() {
     logEvent(r && r.ok ? "voice-managed-started" : "voice-managed-failed", r || {});
   } catch (e) { logEvent("voice-managed-error", { error: String(e) }); }
 }
+// --- Butler self-install (setup-manager) --------------------------------------
+// Wire the installer engine to the app's real capabilities: where model files go,
+// how to pull an Ollama model, whether Ollama is present, and how to open a page.
+function configureSetupManager() {
+  try {
+    setupManager.configure({
+      modelsDir: (cat) => outputManager.modelsDir(cat),
+      pullOllamaModel: (model, onProgress) => ollamaManager.pull(model, (line) => { try { onProgress && onProgress(line); } catch (_) {} broadcast("ollama-progress", { model, line }); }),
+      detectOllama: () => ollamaManager.detect(),
+      openExternal: (url) => { try { if (shell && url) shell.openExternal(url); } catch (_) {} },
+    });
+  } catch (e) { logEvent("setup-configure-error", { error: String(e) }); }
+}
+
+// Refresh the cached install-state map (never blocks; best-effort). Broadcasts so
+// any open UI reflects it. Called at startup and after each install.
+function refreshSetupStatus() {
+  setupManager.detectAll().then((all) => {
+    for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed;
+    broadcast("setup-status", { status: state.setupStatus });
+  }).catch(() => {});
+}
+
+// After a target installs, turn the capability on so the butler can use it the
+// very next turn — the point of the whole feature is that the user (and butler)
+// shouldn't have to configure anything by hand.
+async function autoWireAfterSetup(target) {
+  const py = setupManager.pythonBin();
+  if (target === "open-interpreter") {
+    // The keystone: start the code shim so RUN_CODE works immediately.
+    await startManagedInterpreter(py);
+    logEvent("setup-autowire", { target, wired: "interpreter-shim" });
+  } else if (target === "voice" || target === "voice-model") {
+    // (Re)start the voice shim; if a model was just downloaded, point at it.
+    let ttsModel = process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "";
+    try {
+      const voiceDir = outputManager.modelsDir("voice");
+      const onnx = fs.readdirSync(voiceDir).find((f) => f.endsWith(".onnx"));
+      if (onnx) ttsModel = path.join(voiceDir, onnx);
+    } catch (_) {}
+    if (ttsModel) process.env.AUTOINJECTOR_VOICE_TTS_MODEL = ttsModel;
+    await startManagedVoice(py);
+    logEvent("setup-autowire", { target, wired: "voice-shim", ttsModel: ttsModel ? path.basename(ttsModel) : null });
+  }
+  // ollama-model / stability-matrix need no in-app wiring.
+}
+
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
@@ -3808,11 +3974,36 @@ async function startServiceBridge() {
   } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
 }
 
+// The user wants the one "stuff and thing" folder to live INSIDE the AutoInjector
+// app folder (e.g. …/GitHub/AutoInjector/stuff and thing), next to the program —
+// not under Documents. That's the folder one level above this desktop-app dir.
+// If that location isn't writable (e.g. a packaged app installed read-only), fall
+// back to Documents/AutoInjector so downloads/creations still have a home.
+function contentBaseFolder() {
+  const appFolder = path.join(__dirname, "..");
+  try {
+    fs.mkdirSync(appFolder, { recursive: true });
+    fs.accessSync(appFolder, fs.constants.W_OK);
+    return appFolder;
+  } catch (_) {
+    try { return path.join(app.getPath("documents"), "AutoInjector"); } catch (_) { return appFolder; }
+  }
+}
+
 app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
-  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
+  try {
+    const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
+    // Point any Ollama the app itself launches at the shared models/llm folder, so
+    // downloads land in the one findable place. (A separately-run Ollama daemon
+    // uses its own OLLAMA_MODELS; the Models panel shows if they differ.)
+    if (!process.env.OLLAMA_MODELS) { try { process.env.OLLAMA_MODELS = outputManager.modelsDir("llm"); } catch (_) {} }
+    logEvent("models-init", { root: outputManager.modelsRoot() });
+    configureSetupManager();
+    refreshSetupStatus();
+  } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
   startServiceBridge();

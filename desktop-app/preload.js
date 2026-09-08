@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("api", {
   pauseAllRouting: () => ipcRenderer.invoke("routing:pause-all"),
   stopAllRouting: () => ipcRenderer.invoke("routing:stop-all"),
   autoAllRouting: () => ipcRenderer.invoke("routing:auto-all"),
+  silenceAll: () => ipcRenderer.invoke("relay:silence"),
   setParticipant: (site, enabled) => ipcRenderer.invoke("participants:set", { site, enabled }),
   startHouseRule: (mode, topic, rounds) => ipcRenderer.invoke("houserule:start", { mode, topic, rounds }),
   stopHouseRule: () => ipcRenderer.invoke("houserule:stop"),
@@ -57,6 +58,9 @@ contextBridge.exposeInMainWorld("api", {
   onWaitingChanged: (cb) => ipcRenderer.on("waiting-changed", (_e, payload) => cb(payload)),
   onHouseRuleState: (cb) => ipcRenderer.on("houserule-state", (_e, payload) => cb(payload)),
   onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload)),
+  uiLog: (action, detail) => ipcRenderer.invoke("ui:log", Object.assign({ action }, detail || {})),
+  modelsInfo: () => ipcRenderer.invoke("models:info"),
+  openModelsFolder: (category) => ipcRenderer.invoke("models:open", { category }),
   onLedgerEntry: (cb) => ipcRenderer.on("ledger-entry", (_e, payload) => cb(payload)),
   startManagedTask: (userRequest) => ipcRenderer.invoke("manager:start-task", { userRequest }),
   pauseManagedTask: () => ipcRenderer.invoke("manager:pause"),
@@ -95,5 +99,13 @@ contextBridge.exposeInMainWorld("api", {
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
-  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog")
+  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
+  // Butler self-install: the app installs Open Interpreter / voice / a model, so
+  // nothing has to be entered by hand.
+  setupList: () => ipcRenderer.invoke("setup:list"),
+  setupDetect: () => ipcRenderer.invoke("setup:detect"),
+  setupInstall: (target, model) => ipcRenderer.invoke("setup:install", { target, model }),
+  setupAuto: (opts) => ipcRenderer.invoke("setup:auto", opts || {}),
+  onSetupProgress: (cb) => ipcRenderer.on("setup-progress", (_e, payload) => cb(payload)),
+  onSetupStatus: (cb) => ipcRenderer.on("setup-status", (_e, payload) => cb(payload))
 });

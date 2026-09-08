@@ -32,7 +32,7 @@ const MANAGER_ACTIONS = [
   "CLASSIFY", "PLAN", "DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE",
   "VERIFY", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE", "SAVE", "EXPORT",
   "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL",
-  "RUN_CODE", "USE_TOOL", "REMEMBER", "RECALL", "GENERATE_IMAGE"
+  "RUN_CODE", "USE_TOOL", "REMEMBER", "RECALL", "GENERATE_IMAGE", "SETUP"
 ];
 
 const MANAGER_SYSTEM_PROMPT = `You are the manager/orchestrator for AutoInjector, a program that relays work between three AI assistants (ChatGPT, Claude, Gemini) reachable only through the "target" names chatgpt, claude, and gemini. You are a supervisor, not the primary worker: delegate substantive writing, research, analysis, and problem-solving to them whenever possible. Only do work yourself when delegation is unavailable or unnecessary (e.g. classifying a request, deciding on a plan, or judging whether a result satisfies the user).
@@ -48,6 +48,8 @@ USE_TOOL. To invoke a registered external tool, respond with {"action":"USE_TOOL
 GENERATE_IMAGE. To create a picture, respond with {"action":"GENERATE_IMAGE","prompt":"<image description>","reason":"..."}. The prompt is rendered by a local Stable Diffusion endpoint and the saved image path comes back as an images entry on the next turn. The chat AIs can refine the wording of the prompt, but only GENERATE_IMAGE actually renders it. Use it when the deliverable needs an actual image (a cover, an illustration, a diagram mock).
 
 REMEMBER / RECALL. You have a persistent memory store. To save a durable fact for later, respond with {"action":"REMEMBER","fact":"<the fact>","reason":"..."}. To look something up, respond with {"action":"RECALL","query":"<search terms>","reason":"..."} -- matching facts come back as a memories entry on the next turn. Relevant memories are also seeded for you automatically at the start of a task, so check the memories list before re-deriving something you may already know.
+
+SETUP. You can install your own dependencies. If a capability you need is missing (RUN_CODE unavailable because Open Interpreter isn't installed, voice off, no local model), respond with {"action":"SETUP","target":"<one of the setupTargets ids>","reason":"..."} -- for a local model you may add {"model":"<ollama model tag>"}. Only use a target id listed in the setupTargets you are given; its result comes back as a setups entry next turn and, on success, the capability is wired up for you automatically. Open Interpreter ("open-interpreter") is the keystone: install it first when you need to run code. Do not invent target ids.
 
 You are given an awareness object each turn describing the panes (which are enabled/ready/busy/rate-limited/available) and what has worked before (capabilities). Do not DELEGATE to a pane whose available flag is false -- pick an available one, or WAIT.
 
@@ -88,8 +90,14 @@ function buildManagerPrompt(managerState) {
     images: (managerState.images || []).slice(-6).map((im) => ({
       id: im.id, prompt: cap(im.prompt), path: im.path, ok: im.ok, error: im.error || null,
     })),
+    setups: (managerState.setups || []).slice(-6).map((sp) => ({
+      id: sp.id, target: sp.target, ok: sp.ok, message: cap(sp.message), error: sp.error || null,
+    })),
     availableTools: (managerState.availableTools || []).map((t) => ({
       name: t.name, description: t.description, risk: t.risk || "monitor",
+    })),
+    setupTargets: (managerState.setupTargets || []).map((s) => ({
+      id: s.id, label: s.label, kind: s.kind, installed: s.installed,
     })),
     awareness: managerState.awareness || null,
     previousManagerActions: (managerState.previousManagerActions || []).slice(-10),

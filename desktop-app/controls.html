@@ -333,6 +333,7 @@
           <button id="btn-open-wizard" title="Set up local AI, image generation, voice, and guided installs" aria-label="Set up local AI, image generation, voice, and guided installs">🧙 Setup</button>
           <button id="btn-open-image" title="Set up image generation (Stable Diffusion)" aria-label="Set up image generation (Stable Diffusion)">🖼️ Image</button>
           <button id="btn-open-video" title="Set up video generation" aria-label="Set up video generation">🎬 Video</button>
+          <button id="btn-silence" class="danger" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 Start New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
@@ -443,6 +444,11 @@
         <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="lsi-enabled"> <span>Let the AI help run the system</span></label>
         <details class="sai-sec">
           <summary>⚙️ Local model settings</summary>
+          <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
+            <li>Install Ollama (link appears below if missing), then <b>Download</b> or <b>Get</b> a model.</li>
+            <li>Pick it in <b>Model</b>, then press <b>Save settings</b>.</li>
+            <li>Press <b>Test</b> to confirm — then give the Butler a goal below.</li>
+          </ol>
           <div class="btns" style="margin:4px 0;">
             <input id="lsi-endpoint" type="text" placeholder="http://127.0.0.1:11434/v1/chat/completions" style="flex:1 1 150px; min-width:0;">
             <button id="btn-lsi-test">Test</button>
@@ -465,6 +471,15 @@
           <div id="lsi-download-status" style="font-size:11px; opacity:.7; font-family:ui-monospace,monospace; max-height:70px; overflow-y:auto; margin:2px 0;"></div>
           <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
           <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
+
+        <details class="sai-sec">
+          <summary>📁 Downloads &amp; creations folder ("stuff and thing")</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One folder inside AutoInjector holds everything — downloaded models/LoRAs/voice under <b>models/</b>, and everything the app makes (images, videos, books) at the top. Open it and drop files into the matching subfolder; each folder's README says how to point its backend here.</p>
+          <div id="models-path" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.85; word-break:break-all; margin:2px 0;"></div>
+          <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-open-models">📂 Open folder</button></div>
         </details>
 
         <details class="sai-sec">
