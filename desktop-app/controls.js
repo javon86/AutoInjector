@@ -21,6 +21,7 @@ const lastReplyBySite = {}; // most recent reply text per AI, for "use as image 
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
+let butlerActive = false; // whether → All also includes the butler (his Active checkbox)
 let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
 
 // Each AI pane has three states, cycled in this order. The button's glyph and
@@ -274,26 +275,30 @@ function buildComposerButtons() {
     };
     grid.appendChild(checkbox);
   }
-  const all = document.createElement("button");
-  all.className = "primary";
-  all.textContent = "→ All";
-  all.onclick = () => sendCompose(SITES.filter((s) => enabled[s]));
-  grid.appendChild(all);
-
-  // The butler is a fourth target: message him alone, or the three AIs + him.
+  // The butler is a fourth participant row — same shape as an AI: a → send
+  // button in the Send column and its own Active checkbox in the Active column.
   const butler = document.createElement("button");
   butler.textContent = "→ 🤵 Butler";
-  butler.title = "Send this message to the butler (gives him a goal / talks to him)";
+  butler.title = "Send this message to the butler (give him a goal / talk to him)";
   butler.setAttribute("aria-label", "Send this message to the butler");
   butler.onclick = () => sendToButler();
   grid.appendChild(butler);
 
-  const allPlus = document.createElement("button");
-  allPlus.textContent = "→ All + 🤵";
-  allPlus.title = "Send to ChatGPT, Claude, Gemini AND the butler";
-  allPlus.setAttribute("aria-label", "Send to all three AIs and the butler");
-  allPlus.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); sendToButler(); };
-  grid.appendChild(allPlus);
+  const butlerChk = document.createElement("input");
+  butlerChk.type = "checkbox";
+  butlerChk.id = "p-butler";
+  butlerChk.checked = butlerActive;
+  butlerChk.title = "Include the butler when you press → All";
+  butlerChk.setAttribute("aria-label", "Butler active");
+  butlerChk.onchange = (e) => { butlerActive = e.target.checked; };
+  grid.appendChild(butlerChk);
+
+  // → All: send to every checked AI, plus the butler when his box is checked.
+  const all = document.createElement("button");
+  all.className = "primary";
+  all.textContent = "→ All";
+  all.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToButler(); };
+  grid.appendChild(all);
 }
 
 async function sendCompose(targets) {

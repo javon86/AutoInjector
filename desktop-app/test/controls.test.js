@@ -672,16 +672,17 @@ async function testUserPanelMergedAndNeverCollapses() {
   assert(JSON.stringify(headers) === JSON.stringify(["Send", "Active"]), `the grid's own Send/Active column headers are present, in order (got ${JSON.stringify(headers)})`);
 
   const children = Array.from(grid.children).filter((c) => c.tagName !== "P");
-  // 3 AI rows (button+checkbox) + → All + → 🤵 Butler + → All + 🤵 = 9 cells.
-  assert(children.length === 9, `3 AI rows (button+checkbox) plus → All, → Butler and → All + 🤵 = 9 grid cells after the two headers (got ${children.length})`);
+  // 4 participant rows (ChatGPT, Claude, Gemini, Butler — each button+checkbox)
+  // then → All spanning the Send column = 9 grid cells.
+  assert(children.length === 9, `4 participant rows (button+checkbox) plus → All = 9 grid cells after the two headers (got ${children.length})`);
   for (let i = 0; i < 6; i += 2) {
     const site = ["chatgpt", "claude", "gemini"][i / 2];
     assert(children[i].tagName === "BUTTON" && children[i].textContent.includes(SITE_LABELS_FOR_TEST[site]), `row ${i / 2}: ${site}'s send button is in the Send column`);
     assert(children[i + 1].id === `p-${site}`, `row ${i / 2}: ${site}'s own checkbox is row-aligned right next to it, in the Active column (got id="${children[i + 1].id}")`);
   }
-  assert(children[6].tagName === "BUTTON" && children[6].textContent.trim() === "→ All", "→ All is its own row, spanning just the Send column (no Active checkbox for it)");
-  assert(children[7].tagName === "BUTTON" && /Butler/.test(children[7].textContent), "→ Butler send target is present (message the butler directly)");
-  assert(children[8].tagName === "BUTTON" && /All \+/.test(children[8].textContent), "→ All + 🤵 sends to the three AIs and the butler at once");
+  assert(children[6].tagName === "BUTTON" && /Butler/.test(children[6].textContent), "the Butler is a 4th participant row: its → send button sits in the Send column");
+  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT", "the Butler has its own Active checkbox in the Active column, like the three AIs");
+  assert(children[8].tagName === "BUTTON" && children[8].textContent.trim() === "→ All", "→ All is the final row, spanning just the Send column (no checkbox of its own)");
 }
 const SITE_LABELS_FOR_TEST = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 
