@@ -108,6 +108,43 @@
     #panels-grid:empty { display:none; }
     #panels-grid > .yc-panel { display:inline-block; width:100%; margin:0 0 8px; break-inside:avoid; vertical-align:top; }
 
+    /* Butler bar: a full-width band that sits directly ON TOP of the three AI
+       panes (it's a sibling right before #ai-row), so the butler visibly
+       oversees them. Chat is full-width on top; his tools sit underneath. */
+    .butler-bar { flex:0 0 auto; margin:0 0 8px; border:1px solid #2f6b45; border-radius:10px; background:#0e140f; box-shadow:0 1px 0 #163a26 inset; }
+    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:5px; margin-bottom:6px; }
+    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; }
+    /* Two-thirds (everything: goal + controls) on the left, one-third (the
+       chat window) on the right. flex:2 vs flex:1 = the 2/3 · 1/3 split. */
+    .butler-body.butler-body { display:flex; flex-direction:row; gap:12px; align-items:stretch; }
+    #butler-main { flex:2 1 0; min-width:0; }
+    #butler-chat { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+    .butler-chat-title { font-size:10.5px; opacity:.6; margin:0 0 4px; text-transform:uppercase; letter-spacing:.06em; }
+    .butler-chat-log { flex:1 1 auto; min-height:220px; overflow-y:auto; font-size:11.5px; line-height:1.45; font-family:ui-monospace,monospace; opacity:.92; background:#0a0a0a; border:1px solid #1e1e1e; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:2px; }
+    .butler-chat-log:empty::before { content:"No butler activity yet — give him a goal on the left."; opacity:.4; }
+    .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
+    .butler-chat-log > div:last-child { border-bottom:none; }
+    /* Controls under the goal box (still on the 2/3 side): a tidy row of cards. */
+    #butler-controls { width:100%; border-top:1px solid #1c3a28; padding-top:9px; margin-top:8px; display:flex; flex-wrap:wrap; gap:8px 12px; align-items:flex-start; }
+    #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
+    #butler-controls > .sai-sec { flex:1 1 240px; min-width:210px; margin:0; background:#0b110d; border:1px solid #1c2a20; border-radius:8px; padding:6px 9px; }
+    #butler-controls > .sai-sec > summary { font-weight:600; }
+    /* When the butler bar is collapsed to a tab, the body hides like any panel. */
+    .butler-bar.hidden-collapsed .butler-body { display:none; }
+    /* Narrow windows: stack the chat under everything else instead of squeezing. */
+    @media (max-width: 900px) { .butler-body.butler-body { flex-direction:column; } }
+
+    /* GPU usage bars. */
+    .gpu-row { margin:5px 0 8px; }
+    .gpu-name { font-size:11px; font-weight:600; opacity:.9; margin-bottom:3px; }
+    .gpu-meter { display:flex; align-items:center; gap:6px; margin:2px 0; font-size:10.5px; opacity:.85; }
+    .gpu-meter .lbl { width:38px; flex:0 0 auto; opacity:.7; }
+    .gpu-meter .val { width:78px; flex:0 0 auto; text-align:right; font-family:ui-monospace,monospace; }
+    .usage-bar { flex:1 1 auto; height:8px; background:#161616; border:1px solid #262626; border-radius:5px; overflow:hidden; }
+    .usage-bar > span { display:block; height:100%; background:linear-gradient(90deg,#2f8f4e,#57c07a); }
+    .usage-bar.warn > span { background:linear-gradient(90deg,#b5892f,#e0b055); }
+    .usage-bar.hot > span { background:linear-gradient(90deg,#a83f3f,#e06868); }
+
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
     .role-badge { font-size:11px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
     .role-badge:empty { display:none; }
@@ -415,13 +452,41 @@
         <h2>Image Generation</h2><span class="spacer"></span>
         <button class="collapse-btn" id="btn-collapse-image" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
       </div>
-      <p style="opacity:.75; font-size:11px; margin:2px 0 5px;">Local Stable Diffusion (run A1111 with <code>--api</code>). The butler renders via GENERATE_IMAGE. Full setup is in 🖼️ Image (Setup Wizard).</p>
-      <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:2px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
-      <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
-      <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button></div>
+      <!-- COMPACT: the everyday fields — positive + negative prompt, LoRAs/weights. -->
+      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
       <textarea id="img-prompt" rows="2" placeholder="Describe an image to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <div class="btns" style="margin:3px 0;"><button id="btn-img-generate" class="primary">🖼️ Generate</button></div>
+      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
+      <textarea id="img-negative" rows="1" placeholder="What to avoid (blurry, extra fingers, text…)" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
+      <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
+      <div class="btns" style="margin:3px 0;">
+        <button id="btn-img-generate" class="primary">🖼️ Generate</button>
+        <button id="btn-img-open-ui" title="Open the Stable Diffusion web UI (A1111/ComfyUI) to tweak everything else">🎛️ Open SD UI ↗</button>
+        <button id="btn-img-expand" title="Show the preview + more options">⤢ More</button>
+      </div>
       <div id="img-msg" style="font-size:11.5px; opacity:.8;"></div>
+
+      <!-- EXPANDED: the preview + more options; hidden until you press ⤢ More. -->
+      <div id="img-advanced" hidden>
+        <div class="btns" style="margin:6px 0 3px; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
+            <input type="number" id="img-width" value="512" min="64" step="64" style="width:60px;">×<input type="number" id="img-height" value="512" min="64" step="64" style="width:60px;"></label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Steps <input type="number" id="img-steps" value="20" min="1" style="width:52px;"></label>
+        </div>
+        <div id="img-preview-wrap" style="margin:4px 0;">
+          <img id="img-preview" alt="Last generated image preview" style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;">
+          <div id="img-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered image previews here.</div>
+        </div>
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
+        <div id="img-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:22px;"></div>
+        <details class="sai-sec" style="margin-top:6px;">
+          <summary>⚙️ Connection</summary>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
+          <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
+          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Local Stable Diffusion (run A1111 with <code>--api</code>). The butler renders via GENERATE_IMAGE. Full setup: 🖼️ Image (Setup Wizard).</p>
+        </details>
+      </div>
     </div>
 
     <div id="col-video" class="col yc-panel">
@@ -433,15 +498,45 @@
       <div id="video-status" style="font-size:11.5px; opacity:.7;">Not configured yet — see 🎬 Video (Setup Wizard).</div>
     </div>
 
-    <div id="col-systemai" class="col yc-panel">
+    <div id="col-gpu" class="col yc-panel">
       <div class="yc-head">
-        <h2>System AI (Supervisor)</h2><span class="spacer"></span>
+        <h2>GPU Usage</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-gpu" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+      </div>
+      <p style="opacity:.7; font-size:11px; margin:2px 0 6px;">How hard the graphics card is working while models / image generation run (NVIDIA).</p>
+      <div id="gpu-body"><div style="font-size:11.5px; opacity:.6;">Reading GPU…</div></div>
+    </div>
+    </div><!-- /panels-grid -->
+
+    <!-- Butler bar: the System AI (Supervisor) as a full-width band that sits
+         ON TOP of the three AI panes, so the butler visibly oversees them. Left
+         = his chat (large), right = his controls. Keeps id col-systemai so the
+         collapse mechanism + tests keep working. -->
+    <div id="col-systemai" class="yc-panel butler-bar">
+      <div class="yc-head">
+        <h2>🤵 Butler — oversees ChatGPT · Claude · Gemini</h2><span class="spacer"></span>
         <span id="lsi-status" style="font-size:11px; opacity:.7;"></span>
         <button class="collapse-btn" id="btn-collapse-systemai" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
       </div>
-      <div id="systemai-body">
-        <p style="opacity:.78; margin:4px 0;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). Off unless you switch it on and give it a local model. It never touches the three chat AIs' logins.</p>
-        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="lsi-enabled"> <span>Let the AI help run the system</span></label>
+      <div id="systemai-body" class="butler-body">
+        <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
+        <div id="butler-main">
+          <label style="display:flex; align-items:center; gap:6px; margin:0 0 4px;"><input type="checkbox" id="lsi-enabled"> <span>Let the butler help run the system</span></label>
+          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Give the butler a goal</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">He plans, delegates to ChatGPT/Claude/Gemini, runs code, and can generate images to reach the goal. Needs a local model saved in ⚙️ (right). You can also message him from the <b>Send</b> box up top.</p>
+          <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
+          <div class="btns" style="margin:4px 0;">
+            <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
+            <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
+          </div>
+          <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
+          <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
+          <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+
+        <!-- his controls, sitting under the goal box on the 2/3 side -->
+        <div id="butler-controls">
+        <p style="opacity:.78; margin:0 0 4px; font-size:11.5px;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). It never touches the three chat AIs' logins.</p>
         <details class="sai-sec">
           <summary>⚙️ Local model settings</summary>
           <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
@@ -496,22 +591,6 @@
           </div>
         </details>
 
-        <div style="font-weight:600; font-size:12px; margin:6px 0 3px;">🤵 Butler — give it a goal</div>
-        <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">It plans, delegates to ChatGPT/Claude/Gemini, runs code, and can generate images to reach the goal. Needs a local model saved in ⚙️ above.</p>
-        <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
-        <div class="btns" style="margin:4px 0;">
-          <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
-          <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
-        </div>
-        <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
-        <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
-        <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-        <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-        <details class="sai-sec">
-          <summary>📜 Activity log</summary>
-          <div id="jarvis-log" style="max-height:120px; overflow-y:auto; font-size:11px; font-family:ui-monospace,monospace; opacity:.85; display:flex; flex-direction:column-reverse; gap:1px;"></div>
-        </details>
-
         <details class="sai-sec">
           <summary>🧰 Tools — what the butler can call</summary>
           <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Registered tools (built-in now; MCP servers plug in later). The butler invokes these via USE_TOOL.</p>
@@ -532,9 +611,16 @@
           </div>
           <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
         </details>
-      </div>
-    </div>
-    </div><!-- /panels-grid -->
+        </div><!-- /butler-controls -->
+        </div><!-- /butler-main (2/3) -->
+
+        <!-- ONE-THIRD: the butler's chat window. -->
+        <div id="butler-chat">
+          <div class="butler-chat-title">📜 Butler chat &amp; activity</div>
+          <div id="jarvis-log" class="butler-chat-log"></div>
+        </div>
+      </div><!-- /systemai-body -->
+    </div><!-- /butler-bar (col-systemai) -->
 
     <div id="collapsed-strip"></div>
 

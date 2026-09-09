@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld("api", {
   imageStatus: () => ipcRenderer.invoke("image:status"),
   configureImage: (patch) => ipcRenderer.invoke("image:configure", patch),
   imageGenerate: (prompt, negativePrompt) => ipcRenderer.invoke("image:generate", { prompt, negativePrompt }),
+  gpuInfo: () => ipcRenderer.invoke("gpu:info"),
   dbStatus: () => ipcRenderer.invoke("db:status"),
   dbRecentMessages: (limit) => ipcRenderer.invoke("db:recent-messages", limit),
   ollamaDetect: () => ipcRenderer.invoke("ollama:detect"),
