@@ -140,7 +140,13 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
     configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     imageGenerate: async (prompt, negative) => { calls.push({ fn: "imageGenerate", prompt, negative }); return { ok: true, path: "/out/images/img-1.png", preview: "data:image/png;base64,AAAA" }; },
+    videoStatus: async () => { calls.push({ fn: "videoStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "", frames: 16, fps: 8 }; },
+    configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
     gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
+    endpointPresets: async (kind) => { calls.push({ fn: "endpointPresets", kind }); return { ok: true, presets: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }, { label: "ComfyUI — 8188", endpoint: "http://127.0.0.1:8188/prompt" }] }; },
+    detectEndpoints: async (kind) => { calls.push({ fn: "detectEndpoints", kind }); return { ok: true, reachable: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }] }; },
+    testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7860" }; },
     openExternal: async (url) => { calls.push({ fn: "openExternal", url }); return { ok: true }; },
     // Local-model browser + operator safeguards
     ollamaRecommended: async () => { calls.push({ fn: "ollamaRecommended" }); return { models: ["llama3.2:1b", "qwen2.5:0.5b"] }; },
@@ -1158,14 +1164,59 @@ async function testCapabilityPanelsWired() {
   const genCall = api.calls.find((c) => c.fn === "imageGenerate");
   assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
   assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
-  // Expanding reveals the preview + more options; the render fills the preview.
-  assert(doc.getElementById("img-advanced").hidden === false, "after a render the panel auto-expands to show the preview");
+  // 3 sizes: the render grows the panel to "large" so the preview shows.
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "after a render the Image panel grows to the large size (shows the preview)");
   assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
   assert(doc.getElementById("img-history").children.length === 1, "the render is added to the recent-renders strip");
+  // The ◱ size button cycles minimal → middle → large → minimal.
+  doc.getElementById("col-image").setAttribute("data-size", "minimal");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "middle", "the size button cycles minimal → middle");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "the size button cycles middle → large");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "minimal", "the size button wraps large → minimal (three states)");
   // The Open SD UI button opens the web UI (base of the endpoint).
   click(dom, "btn-img-open-ui");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "openExternal" && /127\.0\.0\.1:7860$/.test(c.url)), "the Open SD UI button opens the Stable Diffusion web UI (endpoint base)");
+
+  // Video module: same 3-size + generate shape, wired to the video provider.
+  assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video panel loads its config on start");
+  doc.getElementById("vid-prompt").value = "a spinning cube";
+  doc.getElementById("vid-negative").value = "jitter";
+  doc.getElementById("vid-endpoint").value = "http://127.0.0.1:7861/txt2vid";
+  click(dom, "btn-vid-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  const vgen = api.calls.find((c) => c.fn === "videoGenerate");
+  assert(vgen && /a spinning cube/.test(vgen.prompt) && vgen.negative === "jitter", "Video Generate passes the prompt + negative to the video provider");
+  assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
+  assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
+  click(dom, "btn-vid-size");
+  assert(["minimal", "middle", "large"].includes(doc.getElementById("col-video").getAttribute("data-size")), "the Video panel has its own working size button");
+  // Tab collapse: minimizing sends the panel up to a tab; clicking it restores.
+  click(dom, "btn-collapse-video");
+  assert(doc.getElementById("col-video").classList.contains("hidden-collapsed") && !!doc.getElementById("tab-video"), "collapsing the Video panel hides it and adds a tab");
+  doc.getElementById("tab-video").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("col-video").classList.contains("hidden-collapsed") && !doc.getElementById("tab-video"), "clicking the tab brings the Video panel back");
+
+  // Endpoint help: preset dropdown fills the address; Auto-detect + Test are wired.
+  assert(api.calls.some((c) => c.fn === "endpointPresets" && c.kind === "image"), "the Image Connection loads its preset backends into a dropdown");
+  const preset = doc.getElementById("img-preset");
+  assert(preset && preset.querySelectorAll("option").length >= 3, "the preset dropdown is populated (Choose… + backends)");
+  preset.value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "picking a preset fills the endpoint field — no guessing");
+  doc.getElementById("img-endpoint").value = "";
+  click(dom, "btn-img-detect");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "detectEndpoints" && c.kind === "image"), "Auto-detect scans localhost for a running backend");
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "a detected backend is filled into the endpoint field automatically");
+  click(dom, "btn-img-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "testEndpoint"), "the Test button pings the endpoint for reachability");
+  assert(/Reachable/.test(doc.getElementById("img-conn-msg").textContent), "a reachable endpoint is reported clearly");
+  assert(!!doc.getElementById("vid-preset") && !!doc.getElementById("btn-vid-detect") && !!doc.getElementById("btn-vid-test"), "the Video Connection has the same preset + detect + test helpers");
 
   // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
   assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");

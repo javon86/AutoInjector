@@ -134,6 +134,15 @@
     /* Narrow windows: stack the chat under everything else instead of squeezing. */
     @media (max-width: 900px) { .butler-body.butler-body { flex-direction:column; } }
 
+    /* Three content sizes for a panel (minimal → middle → large), driven by a
+       data-size attribute. Sections tagged .when-mid appear at middle+, and
+       .when-large only at large. The ⌄ tab-collapse is separate from this. */
+    .yc-panel[data-size="minimal"] .when-mid,
+    .yc-panel[data-size="minimal"] .when-large,
+    .yc-panel[data-size="middle"] .when-large { display:none; }
+    .size-btn { background:transparent; border:none; color:#cfcfcf; cursor:pointer; font-size:13px; padding:0 4px; opacity:.8; }
+    .size-btn:hover { opacity:1; }
+
     /* GPU usage bars. */
     .gpu-row { margin:5px 0 8px; }
     .gpu-name { font-size:11px; font-weight:600; opacity:.9; margin-bottom:3px; }
@@ -447,32 +456,36 @@
       </div>
     </div>
 
-    <div id="col-image" class="col yc-panel">
+    <!-- Image module: 3 content sizes (minimal → middle → large) via the ◱ button,
+         plus ⌄ collapses the whole panel to a tab. minimal = prompt + negative only;
+         middle adds LoRA + size/steps; large adds the preview + recent + connection. -->
+    <div id="col-image" class="col yc-panel" data-size="minimal">
       <div class="yc-head">
         <h2>Image Generation</h2><span class="spacer"></span>
-        <button class="collapse-btn" id="btn-collapse-image" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+        <button class="size-btn" id="btn-img-size" title="Panel size: minimal → middle → large" aria-label="Cycle image panel size">◱</button>
+        <button class="collapse-btn" id="btn-collapse-image" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
       </div>
-      <!-- COMPACT: the everyday fields — positive + negative prompt, LoRAs/weights. -->
       <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
       <textarea id="img-prompt" rows="2" placeholder="Describe an image to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
       <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
       <textarea id="img-negative" rows="1" placeholder="What to avoid (blurry, extra fingers, text…)" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
-      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
-      <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
       <div class="btns" style="margin:3px 0;">
         <button id="btn-img-generate" class="primary">🖼️ Generate</button>
         <button id="btn-img-open-ui" title="Open the Stable Diffusion web UI (A1111/ComfyUI) to tweak everything else">🎛️ Open SD UI ↗</button>
-        <button id="btn-img-expand" title="Show the preview + more options">⤢ More</button>
       </div>
       <div id="img-msg" style="font-size:11.5px; opacity:.8;"></div>
 
-      <!-- EXPANDED: the preview + more options; hidden until you press ⤢ More. -->
-      <div id="img-advanced" hidden>
-        <div class="btns" style="margin:6px 0 3px; align-items:center;">
+      <div class="when-mid">
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
+        <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
+        <div class="btns" style="margin:3px 0; align-items:center;">
           <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
             <input type="number" id="img-width" value="512" min="64" step="64" style="width:60px;">×<input type="number" id="img-height" value="512" min="64" step="64" style="width:60px;"></label>
           <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Steps <input type="number" id="img-steps" value="20" min="1" style="width:52px;"></label>
         </div>
+      </div>
+
+      <div class="when-large">
         <div id="img-preview-wrap" style="margin:4px 0;">
           <img id="img-preview" alt="Last generated image preview" style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;">
           <div id="img-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered image previews here.</div>
@@ -482,20 +495,66 @@
         <details class="sai-sec" style="margin-top:6px;">
           <summary>⚙️ Connection</summary>
           <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="img-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-img-detect" title="Scan this PC for a running Stable Diffusion server and fill it in">🔍 Auto-detect</button>
+          </div>
           <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
-          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Local Stable Diffusion (run A1111 with <code>--api</code>). The butler renders via GENERATE_IMAGE. Full setup: 🖼️ Image (Setup Wizard).</p>
+          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button><button id="btn-img-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="img-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">The address is just where your local image app serves its API. Easiest: install <b>Stability Matrix</b> (Setup Wizard → Installs) and launch Automatic1111/Forge from it <b>with the API on</b> — it runs at <code>127.0.0.1:7860</code>, so the address is <code>http://127.0.0.1:7860/sdapi/v1/txt2img</code>. Don't know it? Press <b>Auto-detect</b>.</p>
         </details>
       </div>
     </div>
 
-    <div id="col-video" class="col yc-panel">
+    <!-- Video module: same 3-size + tab behaviour as the image module. -->
+    <div id="col-video" class="col yc-panel" data-size="minimal">
       <div class="yc-head">
         <h2>Video Generation</h2><span class="spacer"></span>
-        <button class="collapse-btn" id="btn-collapse-video" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+        <button class="size-btn" id="btn-vid-size" title="Panel size: minimal → middle → large" aria-label="Cycle video panel size">◱</button>
+        <button class="collapse-btn" id="btn-collapse-video" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
       </div>
-      <p style="opacity:.75; font-size:11px; margin:2px 0 5px;">Coming next. Local text-to-video backends (AnimateDiff, Stable Video Diffusion) aren't standardized yet — renders will save to the <code>videos/</code> output folder once wired.</p>
-      <div id="video-status" style="font-size:11.5px; opacity:.7;">Not configured yet — see 🎬 Video (Setup Wizard).</div>
+      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
+      <textarea id="vid-prompt" rows="2" placeholder="Describe a short clip to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
+      <textarea id="vid-negative" rows="1" placeholder="What to avoid" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <div class="btns" style="margin:3px 0;">
+        <button id="btn-vid-generate" class="primary">🎬 Generate</button>
+        <button id="btn-vid-open-ui" title="Open the video backend's web UI to tweak everything else">🎛️ Open UI ↗</button>
+      </div>
+      <div id="vid-msg" style="font-size:11.5px; opacity:.8;"></div>
+
+      <div class="when-mid">
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Motion / LoRAs</label>
+        <input type="text" id="vid-lora" placeholder="motion module / &lt;lora:…&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
+        <div class="btns" style="margin:3px 0; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
+            <input type="number" id="vid-width" value="512" min="64" step="64" style="width:60px;">×<input type="number" id="vid-height" value="512" min="64" step="64" style="width:60px;"></label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Frames <input type="number" id="vid-frames" value="16" min="1" style="width:52px;"></label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">FPS <input type="number" id="vid-fps" value="8" min="1" style="width:46px;"></label>
+        </div>
+      </div>
+
+      <div class="when-large">
+        <div id="vid-preview-wrap" style="margin:4px 0;">
+          <video id="vid-preview" controls loop muted style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;"></video>
+          <div id="vid-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered clip previews here.</div>
+        </div>
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
+        <div id="vid-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:20px;"></div>
+        <details class="sai-sec" style="margin-top:6px;">
+          <summary>⚙️ Connection</summary>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="vid-enabled"> Enable video generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="vid-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-vid-detect" title="Scan this PC for a running video backend and fill it in">🔍 Auto-detect</button>
+          </div>
+          <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / SVD / ComfyUI API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
+          <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API (AnimateDiff / Stable Video Diffusion / a ComfyUI workflow). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
+        </details>
+      </div>
     </div>
 
     <div id="col-gpu" class="col yc-panel">
