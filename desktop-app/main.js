@@ -34,6 +34,7 @@ const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
 const imageProvider = require("./image-provider");
+const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
@@ -198,6 +199,7 @@ const state = {
     costLimit: 5
   },
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
+  videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
@@ -555,6 +557,7 @@ function saveStateDebounced() {
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
+        videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -624,6 +627,10 @@ function loadPersistedState() {
   if (snap.imageConfig && typeof snap.imageConfig === "object") {
     imageProvider.setSettings(snap.imageConfig);
     state.imageConfig = imageProvider.getSettings();
+  }
+  if (snap.videoConfig && typeof snap.videoConfig === "object") {
+    videoProvider.setSettings(snap.videoConfig);
+    state.videoConfig = videoProvider.getSettings();
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
@@ -3735,6 +3742,31 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
     // Also hand back a data URL so the Image panel can preview it inline.
     return { ok: true, path: savedPath, preview: `data:image/png;base64,${r.imageBase64}` };
   } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+});
+
+// Video generation (text-to-video). Same shape as image: a configurable local
+// endpoint; a base64 clip is saved into the videos/ output folder and a data URL
+// is handed back for the panel's inline preview.
+ipcMain.handle("video:status", () => ({ ok: true, ...videoProvider.status() }));
+ipcMain.handle("video:configure", (_evt, patch) => {
+  videoProvider.setSettings(patch || {});
+  state.videoConfig = videoProvider.getSettings();
+  saveStateDebounced();
+  logEvent("video-config", { enabled: state.videoConfig.enabled, endpoint: state.videoConfig.endpoint });
+  return { ok: true, ...videoProvider.status() };
+});
+ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) => {
+  const r = await videoProvider.generate(prompt, { negativePrompt });
+  if (!r || !r.ok) return { ok: false, error: (r && r.error) || "FAILED" };
+  if (r.videoBase64) {
+    try {
+      const buf = Buffer.from(r.videoBase64, "base64");
+      const savedPath = outputManager.saveBuffer(outputManager.videosDir(), `vid-${Date.now()}.mp4`, buf);
+      return { ok: true, path: savedPath, preview: `data:video/mp4;base64,${r.videoBase64}` };
+    } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+  }
+  // A backend that returns a URL (rendered file on its own server) — hand it through.
+  return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
 });
 
 // GPU usage: "how much GPU are we using" for the monitor panel (best-effort).

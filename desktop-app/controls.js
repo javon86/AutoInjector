@@ -1137,11 +1137,26 @@ async function loadImagePanel() {
   } catch (_) {}
 }
 function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
-function imgSetExpanded(on) {
-  if (el("img-advanced")) el("img-advanced").hidden = !on;
-  if (el("btn-img-expand")) el("btn-img-expand").textContent = on ? "⤡ Less" : "⤢ More";
+
+// --- Generic 3-size panel state (minimal → middle → large) -------------------
+// The ◱ button cycles a panel's data-size; CSS shows/hides .when-mid/.when-large.
+// This is separate from the ⌄ tab-collapse (which hides the whole panel to a tab).
+const PANEL_SIZES = ["minimal", "middle", "large"];
+const SIZE_GLYPH = { minimal: "◱", middle: "◲", large: "◼" };
+function setPanelSize(panelId, btnId, size) {
+  const p = el(panelId); if (!p) return;
+  if (!PANEL_SIZES.includes(size)) size = "minimal";
+  p.setAttribute("data-size", size);
+  const b = el(btnId);
+  if (b) { const next = PANEL_SIZES[(PANEL_SIZES.indexOf(size) + 1) % PANEL_SIZES.length]; b.textContent = SIZE_GLYPH[size]; b.title = `Size: ${size} — click for ${next}`; }
+  uiLog("panel", { msg: `${panelId} size → ${size}` });
 }
-if (el("btn-img-expand")) el("btn-img-expand").onclick = () => imgSetExpanded(el("img-advanced") && el("img-advanced").hidden);
+function cyclePanelSize(panelId, btnId) {
+  const cur = (el(panelId) && el(panelId).getAttribute("data-size")) || "minimal";
+  setPanelSize(panelId, btnId, PANEL_SIZES[(PANEL_SIZES.indexOf(cur) + 1) % PANEL_SIZES.length]);
+}
+if (el("btn-img-size")) el("btn-img-size").onclick = () => cyclePanelSize("col-image", "btn-img-size");
+if (el("btn-vid-size")) el("btn-vid-size").onclick = () => cyclePanelSize("col-video", "btn-vid-size");
 if (el("btn-img-open-ui")) el("btn-img-open-ui").onclick = () => {
   const ep = (el("img-endpoint") && el("img-endpoint").value || "").trim() || "http://127.0.0.1:7860";
   let base = ep;
@@ -1159,7 +1174,7 @@ function imgShowPreview(dataUrl, pathText) {
   el("img-preview").src = dataUrl;
   el("img-preview").style.display = "block";
   if (el("img-preview-empty")) el("img-preview-empty").style.display = "none";
-  imgSetExpanded(true);
+  setPanelSize("col-image", "btn-img-size", "large"); // grow to show the render
   imgHistory.unshift({ dataUrl, pathText });
   imgHistory.length = Math.min(imgHistory.length, 8);
   const box = el("img-history");
@@ -1191,6 +1206,75 @@ if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
   else imgMsg(`Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 loadImagePanel();
+
+// Video Generation panel — same shape as Image (3 sizes + tab), wired to a local
+// text-to-video HTTP endpoint. minimal = prompt/negative; middle adds motion/LoRA
+// + frames/fps/size; large adds the clip preview, recent strip, and connection.
+async function loadVideoPanel() {
+  if (!window.api.videoStatus) return;
+  try {
+    const s = await window.api.videoStatus();
+    if (!s) return;
+    if (el("vid-endpoint")) el("vid-endpoint").value = s.endpoint || "";
+    if (el("vid-enabled")) el("vid-enabled").checked = !!s.enabled;
+    if (el("vid-width") && s.width) el("vid-width").value = s.width;
+    if (el("vid-height") && s.height) el("vid-height").value = s.height;
+    if (el("vid-frames") && s.frames) el("vid-frames").value = s.frames;
+    if (el("vid-fps") && s.fps) el("vid-fps").value = s.fps;
+  } catch (_) {}
+}
+function vidMsg(t) { if (el("vid-msg")) el("vid-msg").textContent = t; }
+if (el("btn-vid-open-ui")) el("btn-vid-open-ui").onclick = () => {
+  const ep = (el("vid-endpoint") && el("vid-endpoint").value || "").trim() || "http://127.0.0.1:7860";
+  let base = ep;
+  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/[^/]*$/, ""); }
+  if (window.api.openExternal) window.api.openExternal(base);
+};
+if (el("btn-vid-save")) el("btn-vid-save").onclick = async () => {
+  if (!window.api.configureVideo) return;
+  const r = await window.api.configureVideo({ enabled: !!(el("vid-enabled") && el("vid-enabled").checked), endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() });
+  vidMsg(r && r.ok ? (r.enabled ? "Saved — video generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+const vidHistory = [];
+function vidShowPreview(src, pathText) {
+  if (!src || !el("vid-preview")) return;
+  el("vid-preview").src = src;
+  el("vid-preview").style.display = "block";
+  if (el("vid-preview-empty")) el("vid-preview-empty").style.display = "none";
+  setPanelSize("col-video", "btn-vid-size", "large");
+  vidHistory.unshift({ src, pathText });
+  vidHistory.length = Math.min(vidHistory.length, 8);
+  const box = el("vid-history");
+  if (box) {
+    box.innerHTML = "";
+    vidHistory.forEach((it, i) => {
+      const chip = document.createElement("button");
+      chip.textContent = `▶ clip ${vidHistory.length - i}`;
+      chip.title = it.pathText || "";
+      chip.style.cssText = "font-size:10.5px; padding:2px 6px;";
+      chip.onclick = () => vidShowPreview(it.src, it.pathText);
+      box.appendChild(chip);
+    });
+  }
+}
+if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
+  if (!window.api.videoGenerate) return;
+  let prompt = (el("vid-prompt") && el("vid-prompt").value || "").trim();
+  const lora = (el("vid-lora") && el("vid-lora").value || "").trim();
+  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
+  const negative = (el("vid-negative") && el("vid-negative").value || "").trim();
+  if (!prompt) { vidMsg("Type a prompt first."); return; }
+  const cfg = { enabled: true, endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() };
+  const w = Number(el("vid-width") && el("vid-width").value), h = Number(el("vid-height") && el("vid-height").value);
+  const fr = Number(el("vid-frames") && el("vid-frames").value), fp = Number(el("vid-fps") && el("vid-fps").value);
+  if (w) cfg.width = w; if (h) cfg.height = h; if (fr) cfg.frames = fr; if (fp) cfg.fps = fp;
+  if (window.api.configureVideo) await window.api.configureVideo(cfg);
+  vidMsg("Rendering… (video can take a while)");
+  const r = await window.api.videoGenerate(prompt, negative);
+  if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
+  else vidMsg(`Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
+};
+loadVideoPanel();
 
 // GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
 function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
