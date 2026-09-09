@@ -37,6 +37,7 @@ const imageProvider = require("./image-provider");
 const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
+const endpointDetect = require("./endpoint-detect");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -3768,6 +3769,12 @@ ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) =
   // A backend that returns a URL (rendered file on its own server) — hand it through.
   return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
 });
+
+// Endpoint help: so the user never has to guess the SD/video URL. Presets is a
+// curated dropdown; detect probes localhost for a running backend; test pings one.
+ipcMain.handle("endpoints:presets", (_evt, { kind } = {}) => { try { return { ok: true, presets: endpointDetect.presets(kind) }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("endpoints:detect", async (_evt, { kind } = {}) => { try { return await endpointDetect.detect(kind); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("endpoints:test", async (_evt, { url } = {}) => { try { return await endpointDetect.test(url); } catch (e) { return { reachable: false, error: String(e) }; } });
 
 // GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
 ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });

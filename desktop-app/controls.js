@@ -1276,6 +1276,42 @@ if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
 };
 loadVideoPanel();
 
+// Endpoint helpers (shared by Image + Video) so the user never has to guess a URL:
+// a preset dropdown, an auto-detect that scans localhost, and a reachability test.
+async function loadEndpointPresets(kind, selectId, endpointId, msgId) {
+  const sel = el(selectId);
+  if (!sel || !window.api.endpointPresets) return;
+  try {
+    const r = await window.api.endpointPresets(kind);
+    if (r && r.ok) for (const p of r.presets) { const o = document.createElement("option"); o.value = p.endpoint; o.textContent = p.label; sel.appendChild(o); }
+  } catch (_) {}
+  sel.onchange = () => { if (sel.value && el(endpointId)) { el(endpointId).value = sel.value; if (el(msgId)) el(msgId).textContent = "Filled in — press Save, then ✓ Test."; } };
+}
+async function detectEndpoint(kind, endpointId, selectId, msgId) {
+  if (!window.api.detectEndpoints) return;
+  if (el(msgId)) el(msgId).textContent = "Scanning localhost…";
+  let r; try { r = await window.api.detectEndpoints(kind); } catch (_) { r = null; }
+  const reach = (r && r.reachable) || [];
+  if (!reach.length) { if (el(msgId)) el(msgId).textContent = "Nothing found running. Start your image/video app (with its API on), or pick one above."; return; }
+  if (el(endpointId)) el(endpointId).value = reach[0].endpoint;
+  if (el(selectId)) el(selectId).value = reach[0].endpoint;
+  if (el(msgId)) el(msgId).textContent = `Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ""}`;
+}
+async function testEndpointUi(endpointId, msgId) {
+  if (!window.api.testEndpoint) return;
+  const url = (el(endpointId) && el(endpointId).value || "").trim();
+  if (!url) { if (el(msgId)) el(msgId).textContent = "Enter or pick an address first."; return; }
+  if (el(msgId)) el(msgId).textContent = "Testing…";
+  let r; try { r = await window.api.testEndpoint(url); } catch (_) { r = null; }
+  if (el(msgId)) el(msgId).textContent = r && r.reachable ? "Reachable ✓ — the server answered." : "Not reachable — is the app running with its API enabled?";
+}
+loadEndpointPresets("image", "img-preset", "img-endpoint", "img-conn-msg");
+if (el("btn-img-detect")) el("btn-img-detect").onclick = () => detectEndpoint("image", "img-endpoint", "img-preset", "img-conn-msg");
+if (el("btn-img-test")) el("btn-img-test").onclick = () => testEndpointUi("img-endpoint", "img-conn-msg");
+loadEndpointPresets("video", "vid-preset", "vid-endpoint", "vid-conn-msg");
+if (el("btn-vid-detect")) el("btn-vid-detect").onclick = () => detectEndpoint("video", "vid-endpoint", "vid-preset", "vid-conn-msg");
+if (el("btn-vid-test")) el("btn-vid-test").onclick = () => testEndpointUi("vid-endpoint", "vid-conn-msg");
+
 // GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
 function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function gpuBarClass(p) { return p >= 85 ? "hot" : p >= 60 ? "warn" : ""; }

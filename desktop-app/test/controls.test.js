@@ -144,6 +144,9 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
     gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
+    endpointPresets: async (kind) => { calls.push({ fn: "endpointPresets", kind }); return { ok: true, presets: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }, { label: "ComfyUI — 8188", endpoint: "http://127.0.0.1:8188/prompt" }] }; },
+    detectEndpoints: async (kind) => { calls.push({ fn: "detectEndpoints", kind }); return { ok: true, reachable: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }] }; },
+    testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7860" }; },
     openExternal: async (url) => { calls.push({ fn: "openExternal", url }); return { ok: true }; },
     // Local-model browser + operator safeguards
     ollamaRecommended: async () => { calls.push({ fn: "ollamaRecommended" }); return { models: ["llama3.2:1b", "qwen2.5:0.5b"] }; },
@@ -1196,6 +1199,24 @@ async function testCapabilityPanelsWired() {
   assert(doc.getElementById("col-video").classList.contains("hidden-collapsed") && !!doc.getElementById("tab-video"), "collapsing the Video panel hides it and adds a tab");
   doc.getElementById("tab-video").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   assert(!doc.getElementById("col-video").classList.contains("hidden-collapsed") && !doc.getElementById("tab-video"), "clicking the tab brings the Video panel back");
+
+  // Endpoint help: preset dropdown fills the address; Auto-detect + Test are wired.
+  assert(api.calls.some((c) => c.fn === "endpointPresets" && c.kind === "image"), "the Image Connection loads its preset backends into a dropdown");
+  const preset = doc.getElementById("img-preset");
+  assert(preset && preset.querySelectorAll("option").length >= 3, "the preset dropdown is populated (Choose… + backends)");
+  preset.value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "picking a preset fills the endpoint field — no guessing");
+  doc.getElementById("img-endpoint").value = "";
+  click(dom, "btn-img-detect");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "detectEndpoints" && c.kind === "image"), "Auto-detect scans localhost for a running backend");
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "a detected backend is filled into the endpoint field automatically");
+  click(dom, "btn-img-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "testEndpoint"), "the Test button pings the endpoint for reachability");
+  assert(/Reachable/.test(doc.getElementById("img-conn-msg").textContent), "a reachable endpoint is reported clearly");
+  assert(!!doc.getElementById("vid-preset") && !!doc.getElementById("btn-vid-detect") && !!doc.getElementById("btn-vid-test"), "the Video Connection has the same preset + detect + test helpers");
 
   // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
   assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");

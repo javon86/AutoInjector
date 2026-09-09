@@ -495,9 +495,14 @@
         <details class="sai-sec" style="margin-top:6px;">
           <summary>⚙️ Connection</summary>
           <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="img-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-img-detect" title="Scan this PC for a running Stable Diffusion server and fill it in">🔍 Auto-detect</button>
+          </div>
           <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
-          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Local Stable Diffusion (run A1111 with <code>--api</code>). The butler renders via GENERATE_IMAGE. Full setup: 🖼️ Image (Setup Wizard).</p>
+          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button><button id="btn-img-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="img-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">The address is just where your local image app serves its API. Easiest: install <b>Stability Matrix</b> (Setup Wizard → Installs) and launch Automatic1111/Forge from it <b>with the API on</b> — it runs at <code>127.0.0.1:7860</code>, so the address is <code>http://127.0.0.1:7860/sdapi/v1/txt2img</code>. Don't know it? Press <b>Auto-detect</b>.</p>
         </details>
       </div>
     </div>
@@ -540,9 +545,14 @@
         <details class="sai-sec" style="margin-top:6px;">
           <summary>⚙️ Connection</summary>
           <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="vid-enabled"> Enable video generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="vid-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-vid-detect" title="Scan this PC for a running video backend and fill it in">🔍 Auto-detect</button>
+          </div>
           <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / SVD / ComfyUI API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
-          <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API (AnimateDiff / Stable Video Diffusion / a ComfyUI workflow). Clips save into the <code>videos/</code> output folder.</p>
+          <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API (AnimateDiff / Stable Video Diffusion / a ComfyUI workflow). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
         </details>
       </div>
     </div>
