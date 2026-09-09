@@ -1121,7 +1121,9 @@ if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => col
 if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
 if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
 
-// Image Generation panel: load current SD config, Save, and a one-shot Generate.
+// Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
+// (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
+// connection config. There's also a button that opens the real SD web UI.
 async function loadImagePanel() {
   if (!window.api.imageStatus) return;
   try {
@@ -1129,24 +1131,94 @@ async function loadImagePanel() {
     if (!s) return;
     if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
     if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
+    if (el("img-width") && s.width) el("img-width").value = s.width;
+    if (el("img-height") && s.height) el("img-height").value = s.height;
+    if (el("img-steps") && s.steps) el("img-steps").value = s.steps;
   } catch (_) {}
 }
 function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
+function imgSetExpanded(on) {
+  if (el("img-advanced")) el("img-advanced").hidden = !on;
+  if (el("btn-img-expand")) el("btn-img-expand").textContent = on ? "⤡ Less" : "⤢ More";
+}
+if (el("btn-img-expand")) el("btn-img-expand").onclick = () => imgSetExpanded(el("img-advanced") && el("img-advanced").hidden);
+if (el("btn-img-open-ui")) el("btn-img-open-ui").onclick = () => {
+  const ep = (el("img-endpoint") && el("img-endpoint").value || "").trim() || "http://127.0.0.1:7860";
+  let base = ep;
+  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/sdapi.*$/, ""); }
+  if (window.api.openExternal) window.api.openExternal(base);
+};
 if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
   if (!window.api.configureImage) return;
   const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
   imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
 };
+const imgHistory = [];
+function imgShowPreview(dataUrl, pathText) {
+  if (!dataUrl || !el("img-preview")) return;
+  el("img-preview").src = dataUrl;
+  el("img-preview").style.display = "block";
+  if (el("img-preview-empty")) el("img-preview-empty").style.display = "none";
+  imgSetExpanded(true);
+  imgHistory.unshift({ dataUrl, pathText });
+  imgHistory.length = Math.min(imgHistory.length, 8);
+  const box = el("img-history");
+  if (box) {
+    box.innerHTML = "";
+    for (const it of imgHistory) {
+      const t = document.createElement("img");
+      t.src = it.dataUrl; t.title = it.pathText || "";
+      t.style.cssText = "width:44px;height:44px;object-fit:cover;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer";
+      t.onclick = () => imgShowPreview(it.dataUrl, it.pathText);
+      box.appendChild(t);
+    }
+  }
+}
 if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
   if (!window.api.imageGenerate) return;
-  const prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
+  let prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
+  const lora = (el("img-lora") && el("img-lora").value || "").trim();
+  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
+  const negative = (el("img-negative") && el("img-negative").value || "").trim();
   if (!prompt) { imgMsg("Type a prompt first."); return; }
-  if (window.api.configureImage) await window.api.configureImage({ enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  const cfg = { enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() };
+  const w = Number(el("img-width") && el("img-width").value), h = Number(el("img-height") && el("img-height").value), st = Number(el("img-steps") && el("img-steps").value);
+  if (w) cfg.width = w; if (h) cfg.height = h; if (st) cfg.steps = st;
+  if (window.api.configureImage) await window.api.configureImage(cfg);
   imgMsg("Rendering…");
-  const r = await window.api.imageGenerate(prompt);
-  imgMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+  const r = await window.api.imageGenerate(prompt, negative);
+  if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
+  else imgMsg(`Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 loadImagePanel();
+
+// GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
+function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function gpuBarClass(p) { return p >= 85 ? "hot" : p >= 60 ? "warn" : ""; }
+function renderGpu(info) {
+  const box = el("gpu-body");
+  if (!box) return;
+  if (!info || !info.available) {
+    box.innerHTML = `<div style="font-size:11.5px; opacity:.6;">GPU monitor unavailable${info && info.reason ? " — " + gpuEsc(info.reason) : ""}. (Needs an NVIDIA GPU with nvidia-smi.)</div>`;
+    return;
+  }
+  box.innerHTML = (info.gpus || []).map((g) => {
+    const util = g.util == null ? 0 : g.util;
+    const memPct = g.memPct == null ? 0 : g.memPct;
+    const mem = (g.memUsed != null && g.memTotal != null) ? `${(g.memUsed / 1024).toFixed(1)}/${(g.memTotal / 1024).toFixed(1)} GB` : "—";
+    return `<div class="gpu-row"><div class="gpu-name">${gpuEsc(g.name)}</div>
+      <div class="gpu-meter"><span class="lbl">GPU</span><span class="usage-bar ${gpuBarClass(util)}"><span style="width:${Math.max(0, Math.min(100, util))}%"></span></span><span class="val">${util}%</span></div>
+      <div class="gpu-meter"><span class="lbl">VRAM</span><span class="usage-bar ${gpuBarClass(memPct)}"><span style="width:${Math.max(0, Math.min(100, memPct))}%"></span></span><span class="val">${mem}</span></div></div>`;
+  }).join("");
+}
+async function pollGpu() {
+  if (!window.api.gpuInfo) { renderGpu(null); return; }
+  let info = null;
+  try { info = await window.api.gpuInfo(); } catch (_) { info = null; }
+  renderGpu(info);
+}
+pollGpu();
+setInterval(pollGpu, 2500);
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;

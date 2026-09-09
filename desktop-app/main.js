@@ -35,6 +35,7 @@ const toolProvider = require("./tool-provider");
 const voiceProvider = require("./voice-provider");
 const imageProvider = require("./image-provider");
 const setupManager = require("./setup-manager");
+const gpuMonitor = require("./gpu-monitor");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -3731,9 +3732,13 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
     const sha = require("crypto").createHash("sha256").update(buf).digest("hex");
     const savedPath = outputManager.saveBuffer(outputManager.imagesDir(), `img-${Date.now()}.png`, buf);
     try { dbService.recordImage({ path: savedPath, prompt, model: imageProvider.status().model, from: "wizard", sha256: sha }); } catch (_) {}
-    return { ok: true, path: savedPath };
+    // Also hand back a data URL so the Image panel can preview it inline.
+    return { ok: true, path: savedPath, preview: `data:image/png;base64,${r.imageBase64}` };
   } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
 });
+
+// GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
+ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);

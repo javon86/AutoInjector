@@ -139,7 +139,9 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     // Image generation panel
     imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
     configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
-    imageGenerate: async (prompt) => { calls.push({ fn: "imageGenerate", prompt }); return { ok: true, path: "/out/images/img-1.png" }; },
+    imageGenerate: async (prompt, negative) => { calls.push({ fn: "imageGenerate", prompt, negative }); return { ok: true, path: "/out/images/img-1.png", preview: "data:image/png;base64,AAAA" }; },
+    gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
+    openExternal: async (url) => { calls.push({ fn: "openExternal", url }); return { ok: true }; },
     // Local-model browser + operator safeguards
     ollamaRecommended: async () => { calls.push({ fn: "ollamaRecommended" }); return { models: ["llama3.2:1b", "qwen2.5:0.5b"] }; },
     ollamaList: async () => { calls.push({ fn: "ollamaList" }); return { ok: true, models: ["llama3.1:8b"] }; },
@@ -1147,10 +1149,28 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-img-save");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
+  // Compact fields: prompt, negative prompt, and LoRA/weights (appended to prompt).
   doc.getElementById("img-prompt").value = "a red apple";
+  doc.getElementById("img-negative").value = "blurry, text";
+  doc.getElementById("img-lora").value = "<lora:apple:0.7>";
   click(dom, "btn-img-generate");
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "imageGenerate" && c.prompt === "a red apple"), "the Image panel Generate renders the typed prompt");
+  const genCall = api.calls.find((c) => c.fn === "imageGenerate");
+  assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
+  assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
+  // Expanding reveals the preview + more options; the render fills the preview.
+  assert(doc.getElementById("img-advanced").hidden === false, "after a render the panel auto-expands to show the preview");
+  assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
+  assert(doc.getElementById("img-history").children.length === 1, "the render is added to the recent-renders strip");
+  // The Open SD UI button opens the web UI (base of the endpoint).
+  click(dom, "btn-img-open-ui");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openExternal" && /127\.0\.0\.1:7860$/.test(c.url)), "the Open SD UI button opens the Stable Diffusion web UI (endpoint base)");
+
+  // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
+  assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");
+  assert(api.calls.some((c) => c.fn === "gpuInfo"), "the GPU panel polls gpuInfo on start");
+  assert(/RTX 3090/.test(doc.getElementById("gpu-body").textContent) && /42%/.test(doc.getElementById("gpu-body").textContent), "the GPU panel shows the card name and live utilization");
 
   // Model browser: pull ANY model by name.
   assert(api.calls.some((c) => c.fn === "ollamaRecommended"), "the panel loads recommended models on start");
