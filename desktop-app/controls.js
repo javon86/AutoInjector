@@ -1456,7 +1456,27 @@ if (el("lsi-approval")) el("lsi-approval").onchange = async () => {
   const r = await window.api.configureManagerProvider({ approvalMode: on });
   if (el("lsi-approval-msg")) el("lsi-approval-msg").textContent = r && r.ok ? (on ? "On — the butler will pause for your OK before acting." : "Off — the butler acts on its own (risk-“ask” tools still pause).") : `Couldn't save: ${(r && r.error) || "error"}`;
 };
-(async () => { if (!window.api.getManagerState || !el("lsi-approval")) return; try { const s = await window.api.getManagerState(); if (s && s.managerConfig) el("lsi-approval").checked = !!s.managerConfig.approvalMode; } catch (_) {} })();
+// The local LLM endpoint starts pre-filled with Ollama's fixed local address
+// (Ollama always runs on 127.0.0.1:11434, so nobody should have to type it). It
+// is fully erasable, and a real saved endpoint takes over.
+const DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:11434/v1/chat/completions";
+(async () => {
+  if (el("lsi-endpoint") && !el("lsi-endpoint").value) el("lsi-endpoint").value = DEFAULT_LLM_ENDPOINT;
+  if (!window.api.getManagerState) return;
+  try {
+    const s = await window.api.getManagerState();
+    if (s && s.managerConfig) {
+      if (el("lsi-approval")) el("lsi-approval").checked = !!s.managerConfig.approvalMode;
+      const savedEp = String(s.managerConfig.endpoint || "").trim();
+      if (savedEp && el("lsi-endpoint")) el("lsi-endpoint").value = savedEp; // a saved endpoint wins over the default
+      if (s.managerConfig.model && el("lsi-model")) {
+        const sel = el("lsi-model");
+        if (![...sel.options].some((o) => o.value === s.managerConfig.model)) { const o = document.createElement("option"); o.value = s.managerConfig.model; o.textContent = s.managerConfig.model; sel.appendChild(o); }
+        sel.value = s.managerConfig.model;
+      }
+    }
+  } catch (_) {}
+})();
 if (el("btn-approve")) el("btn-approve").onclick = async () => { if (window.api.approveManagerAction) await window.api.approveManagerAction(); };
 if (el("btn-reject")) el("btn-reject").onclick = async () => { if (window.api.rejectManagerAction) await window.api.rejectManagerAction("operator rejected"); };
 function renderPendingApproval(m) {

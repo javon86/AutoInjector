@@ -1070,6 +1070,11 @@ async function testButlerPanelWired() {
   const doc = dom.window.document;
   assert(doc.getElementById("jarvis-goal") && doc.getElementById("btn-jarvis-start"), "the butler goal box and Start button are present");
 
+  // The local LLM endpoint starts pre-filled with Ollama's default address
+  // (erasable) so nobody has to type it — no saved endpoint in this stub.
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("lsi-endpoint").value === "http://127.0.0.1:11434/v1/chat/completions", "the LLM endpoint defaults to Ollama's local address (erasable)");
+
   // Save config wires to configureManagerProvider (needs a model chosen first).
   doc.getElementById("lsi-endpoint").value = "http://127.0.0.1:11434/v1/chat/completions";
   const modelSel = doc.getElementById("lsi-model");
