@@ -127,7 +127,11 @@
     /* Controls under the goal box (still on the 2/3 side): a tidy row of cards. */
     #butler-controls { width:100%; border-top:1px solid #1c3a28; padding-top:9px; margin-top:8px; display:flex; flex-wrap:wrap; gap:8px 12px; align-items:flex-start; }
     #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
-    #butler-controls > .sai-sec { flex:1 1 240px; min-width:210px; margin:0; background:#0b110d; border:1px solid #1c2a20; border-radius:8px; padding:6px 9px; }
+    #butler-controls > .sai-sec { flex:1 1 240px; min-width:210px; margin:0; background:#0b110d; border:1px solid #1c2a20; border-radius:8px; padding:6px 9px; transition:border-color .12s, background .12s; }
+    /* Collapsed chips share one height so the row lines up even when a label wraps; open sections expand naturally. */
+    #butler-controls > .sai-sec:not([open]) { min-height:2.6em; display:flex; align-items:center; }
+    #butler-controls > .sai-sec:not([open]):hover { border-color:#2f5c3e; background:#0e150f; }
+    #butler-controls > .sai-sec[open] { border-color:#2a4a34; }
     #butler-controls > .sai-sec > summary { font-weight:600; }
     /* When the butler bar is collapsed to a tab, the body hides like any panel. */
     .butler-bar.hidden-collapsed .butler-body { display:none; }
