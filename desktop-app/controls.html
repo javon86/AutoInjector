@@ -143,6 +143,12 @@
     .size-btn { background:transparent; border:none; color:#cfcfcf; cursor:pointer; font-size:13px; padding:0 4px; opacity:.8; }
     .size-btn:hover { opacity:1; }
 
+    /* Generation sliders (image/video main controls). */
+    .slider-row { display:flex; align-items:center; gap:8px; margin:3px 0; font-size:11.5px; }
+    .slider-row > label { width:60px; flex:0 0 auto; opacity:.82; }
+    .slider-row > input[type="range"] { flex:1 1 auto; min-width:0; accent-color:#3aa564; }
+    .slider-row > .sv { width:42px; flex:0 0 auto; text-align:right; font-family:ui-monospace,monospace; opacity:.9; }
+
     /* GPU usage bars. */
     .gpu-row { margin:5px 0 8px; }
     .gpu-name { font-size:11px; font-weight:600; opacity:.9; margin-bottom:3px; }
@@ -477,11 +483,16 @@
 
       <div class="when-mid">
         <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
-        <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
-        <div class="btns" style="margin:3px 0; align-items:center;">
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
-            <input type="number" id="img-width" value="512" min="64" step="64" style="width:60px;">×<input type="number" id="img-height" value="512" min="64" step="64" style="width:60px;"></label>
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Steps <input type="number" id="img-steps" value="20" min="1" style="width:52px;"></label>
+        <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
+        <!-- The 5 main image sliders. -->
+        <div class="slider-row"><label title="How many refinement passes — higher = more detail, slower">Steps</label><input type="range" id="img-steps" min="1" max="150" value="20"><span class="sv" id="img-steps-v">20</span></div>
+        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="img-cfg" min="1" max="30" step="0.5" value="7"><span class="sv" id="img-cfg-v">7</span></div>
+        <div class="slider-row"><label>Width</label><input type="range" id="img-width" min="256" max="1536" step="64" value="512"><span class="sv" id="img-width-v">512</span></div>
+        <div class="slider-row"><label>Height</label><input type="range" id="img-height" min="256" max="1536" step="64" value="512"><span class="sv" id="img-height-v">512</span></div>
+        <div class="slider-row"><label title="How many images per Generate">Batch</label><input type="range" id="img-batch" min="1" max="8" value="1"><span class="sv" id="img-batch-v">1</span></div>
+        <div class="btns" style="margin:4px 0; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="img-seed" value="-1" style="width:96px;"></label>
+          <button id="btn-img-seed-rand" title="Random seed (-1)">🎲</button>
         </div>
       </div>
 
@@ -526,12 +537,18 @@
 
       <div class="when-mid">
         <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Motion / LoRAs</label>
-        <input type="text" id="vid-lora" placeholder="motion module / &lt;lora:…&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 3px;">
-        <div class="btns" style="margin:3px 0; align-items:center;">
+        <input type="text" id="vid-lora" placeholder="motion module / &lt;lora:…&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
+        <!-- The 5 main video sliders. -->
+        <div class="slider-row"><label title="Clip length in frames">Frames</label><input type="range" id="vid-frames" min="8" max="64" value="16"><span class="sv" id="vid-frames-v">16</span></div>
+        <div class="slider-row"><label title="Playback speed (frames per second)">FPS</label><input type="range" id="vid-fps" min="4" max="30" value="8"><span class="sv" id="vid-fps-v">8</span></div>
+        <div class="slider-row"><label title="How many refinement passes per frame">Steps</label><input type="range" id="vid-steps" min="1" max="100" value="20"><span class="sv" id="vid-steps-v">20</span></div>
+        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="vid-cfg" min="1" max="20" step="0.5" value="7"><span class="sv" id="vid-cfg-v">7</span></div>
+        <div class="slider-row"><label title="How much movement in the clip">Motion</label><input type="range" id="vid-motion" min="0" max="2" step="0.1" value="1"><span class="sv" id="vid-motion-v">1</span></div>
+        <div class="btns" style="margin:4px 0; align-items:center;">
           <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
-            <input type="number" id="vid-width" value="512" min="64" step="64" style="width:60px;">×<input type="number" id="vid-height" value="512" min="64" step="64" style="width:60px;"></label>
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Frames <input type="number" id="vid-frames" value="16" min="1" style="width:52px;"></label>
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">FPS <input type="number" id="vid-fps" value="8" min="1" style="width:46px;"></label>
+            <input type="number" id="vid-width" value="512" min="64" step="64" style="width:56px;">×<input type="number" id="vid-height" value="512" min="64" step="64" style="width:56px;"></label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="vid-seed" value="-1" style="width:84px;"></label>
+          <button id="btn-vid-seed-rand" title="Random seed (-1)">🎲</button>
         </div>
       </div>
 

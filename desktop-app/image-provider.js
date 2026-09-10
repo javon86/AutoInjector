@@ -20,9 +20,12 @@ let settings = {
   enabled: false,
   endpoint: '',    // e.g. http://127.0.0.1:7860/sdapi/v1/txt2img  (A1111/Forge)
   model: '',       // informational; the checkpoint is selected on the SD side
-  steps: 20,
-  width: 512,
-  height: 512,
+  steps: 20,       // slider: sampling steps
+  cfgScale: 7,     // slider: CFG scale (prompt adherence)
+  width: 512,      // slider
+  height: 512,     // slider
+  batchCount: 1,   // slider: how many images per Generate (n_iter)
+  seed: -1,        // -1 = random each time
   timeoutMs: 180000,
 };
 
@@ -31,14 +34,16 @@ function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   if ('enabled' in patch) settings.enabled = !!patch.enabled;
   for (const k of ['endpoint', 'model']) if (k in patch) settings[k] = String(patch[k] || '');
-  for (const k of ['steps', 'width', 'height']) {
+  for (const k of ['steps', 'width', 'height', 'batchCount']) {
     if (k in patch) { const n = Number(patch[k]); if (Number.isFinite(n) && n > 0) settings[k] = Math.round(n); }
   }
+  if ('cfgScale' in patch) { const n = Number(patch.cfgScale); if (Number.isFinite(n) && n > 0) settings.cfgScale = n; }
+  if ('seed' in patch) { const n = Number(patch.seed); if (Number.isFinite(n)) settings.seed = Math.round(n); } // -1 allowed (random)
   if ('timeoutMs' in patch) settings.timeoutMs = Math.max(5000, Number(patch.timeoutMs) || settings.timeoutMs);
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, steps: settings.steps, width: settings.width, height: settings.height };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, steps: settings.steps, cfgScale: settings.cfgScale, width: settings.width, height: settings.height, batchCount: settings.batchCount, seed: settings.seed };
 }
 
 // Strip a possible data-URI prefix so callers always get raw base64.
@@ -59,8 +64,11 @@ function generate(prompt, opts = {}) {
       prompt: p,
       negative_prompt: String(opts.negativePrompt || ''),
       steps: settings.steps,
+      cfg_scale: settings.cfgScale,
       width: settings.width,
       height: settings.height,
+      n_iter: settings.batchCount,
+      seed: settings.seed,
     });
     const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Accept: 'application/json' };
     onEvent({ type: 'image-start', content: p });

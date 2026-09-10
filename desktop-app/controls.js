@@ -1124,18 +1124,30 @@ if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseY
 // Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
 // (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
 // connection config. There's also a button that opens the real SD web UI.
+// Wire a range slider to its value display (live) and return a getter.
+function wireSlider(rangeId, spanId) {
+  const r = el(rangeId), sp = el(spanId);
+  if (r) { const upd = () => { if (sp) sp.textContent = r.value; }; r.addEventListener("input", upd); upd(); }
+}
+function setSlider(rangeId, spanId, val) { const r = el(rangeId); if (r && val != null) { r.value = val; const sp = el(spanId); if (sp) sp.textContent = r.value; } }
+
 async function loadImagePanel() {
+  ["img-steps:img-steps-v", "img-cfg:img-cfg-v", "img-width:img-width-v", "img-height:img-height-v", "img-batch:img-batch-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
   if (!window.api.imageStatus) return;
   try {
     const s = await window.api.imageStatus();
     if (!s) return;
     if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
     if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
-    if (el("img-width") && s.width) el("img-width").value = s.width;
-    if (el("img-height") && s.height) el("img-height").value = s.height;
-    if (el("img-steps") && s.steps) el("img-steps").value = s.steps;
+    setSlider("img-steps", "img-steps-v", s.steps);
+    setSlider("img-cfg", "img-cfg-v", s.cfgScale);
+    setSlider("img-width", "img-width-v", s.width);
+    setSlider("img-height", "img-height-v", s.height);
+    setSlider("img-batch", "img-batch-v", s.batchCount);
+    if (el("img-seed") && s.seed != null) el("img-seed").value = s.seed;
   } catch (_) {}
 }
+if (el("btn-img-seed-rand")) el("btn-img-seed-rand").onclick = () => { if (el("img-seed")) el("img-seed").value = "-1"; };
 function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
 
 // --- Generic 3-size panel state (minimal → middle → large) -------------------
@@ -1197,8 +1209,10 @@ if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
   const negative = (el("img-negative") && el("img-negative").value || "").trim();
   if (!prompt) { imgMsg("Type a prompt first."); return; }
   const cfg = { enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() };
-  const w = Number(el("img-width") && el("img-width").value), h = Number(el("img-height") && el("img-height").value), st = Number(el("img-steps") && el("img-steps").value);
+  const num = (id) => Number(el(id) && el(id).value);
+  const w = num("img-width"), h = num("img-height"), st = num("img-steps"), cf = num("img-cfg"), bt = num("img-batch"), sd = num("img-seed");
   if (w) cfg.width = w; if (h) cfg.height = h; if (st) cfg.steps = st;
+  if (cf) cfg.cfgScale = cf; if (bt) cfg.batchCount = bt; if (Number.isFinite(sd)) cfg.seed = sd;
   if (window.api.configureImage) await window.api.configureImage(cfg);
   imgMsg("Rendering…");
   const r = await window.api.imageGenerate(prompt, negative);
@@ -1211,6 +1225,7 @@ loadImagePanel();
 // text-to-video HTTP endpoint. minimal = prompt/negative; middle adds motion/LoRA
 // + frames/fps/size; large adds the clip preview, recent strip, and connection.
 async function loadVideoPanel() {
+  ["vid-frames:vid-frames-v", "vid-fps:vid-fps-v", "vid-steps:vid-steps-v", "vid-cfg:vid-cfg-v", "vid-motion:vid-motion-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
   if (!window.api.videoStatus) return;
   try {
     const s = await window.api.videoStatus();
@@ -1219,10 +1234,15 @@ async function loadVideoPanel() {
     if (el("vid-enabled")) el("vid-enabled").checked = !!s.enabled;
     if (el("vid-width") && s.width) el("vid-width").value = s.width;
     if (el("vid-height") && s.height) el("vid-height").value = s.height;
-    if (el("vid-frames") && s.frames) el("vid-frames").value = s.frames;
-    if (el("vid-fps") && s.fps) el("vid-fps").value = s.fps;
+    if (el("vid-seed") && s.seed != null) el("vid-seed").value = s.seed;
+    setSlider("vid-frames", "vid-frames-v", s.frames);
+    setSlider("vid-fps", "vid-fps-v", s.fps);
+    setSlider("vid-steps", "vid-steps-v", s.steps);
+    setSlider("vid-cfg", "vid-cfg-v", s.cfgScale);
+    setSlider("vid-motion", "vid-motion-v", s.motion);
   } catch (_) {}
 }
+if (el("btn-vid-seed-rand")) el("btn-vid-seed-rand").onclick = () => { if (el("vid-seed")) el("vid-seed").value = "-1"; };
 function vidMsg(t) { if (el("vid-msg")) el("vid-msg").textContent = t; }
 if (el("btn-vid-open-ui")) el("btn-vid-open-ui").onclick = () => {
   const ep = (el("vid-endpoint") && el("vid-endpoint").value || "").trim() || "http://127.0.0.1:7860";
@@ -1265,9 +1285,10 @@ if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
   const negative = (el("vid-negative") && el("vid-negative").value || "").trim();
   if (!prompt) { vidMsg("Type a prompt first."); return; }
   const cfg = { enabled: true, endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() };
-  const w = Number(el("vid-width") && el("vid-width").value), h = Number(el("vid-height") && el("vid-height").value);
-  const fr = Number(el("vid-frames") && el("vid-frames").value), fp = Number(el("vid-fps") && el("vid-fps").value);
+  const num = (id) => Number(el(id) && el(id).value);
+  const w = num("vid-width"), h = num("vid-height"), fr = num("vid-frames"), fp = num("vid-fps"), st = num("vid-steps"), cf = num("vid-cfg"), mo = num("vid-motion"), sd = num("vid-seed");
   if (w) cfg.width = w; if (h) cfg.height = h; if (fr) cfg.frames = fr; if (fp) cfg.fps = fp;
+  if (st) cfg.steps = st; if (cf) cfg.cfgScale = cf; if (Number.isFinite(mo)) cfg.motion = mo; if (Number.isFinite(sd)) cfg.seed = sd;
   if (window.api.configureVideo) await window.api.configureVideo(cfg);
   vidMsg("Rendering… (video can take a while)");
   const r = await window.api.videoGenerate(prompt, negative);

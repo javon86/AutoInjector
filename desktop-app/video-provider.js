@@ -19,11 +19,14 @@ let settings = {
   enabled: false,
   endpoint: '',    // full txt2vid URL, e.g. http://127.0.0.1:7860/... or a ComfyUI/AnimateDiff API
   model: '',       // informational; the checkpoint is selected on the backend side
-  frames: 16,
-  fps: 8,
+  frames: 16,      // slider: clip length in frames
+  fps: 8,          // slider: playback frames per second
+  steps: 20,       // slider: sampling steps
+  cfgScale: 7,     // slider: CFG scale (prompt adherence)
+  motion: 1,       // slider: motion strength (how much movement)
   width: 512,
   height: 512,
-  steps: 20,
+  seed: -1,        // -1 = random
   timeoutMs: 600000, // video renders are slow
 };
 
@@ -35,11 +38,13 @@ function setSettings(patch) {
   for (const k of ['frames', 'fps', 'width', 'height', 'steps']) {
     if (k in patch) { const n = Number(patch[k]); if (Number.isFinite(n) && n > 0) settings[k] = Math.round(n); }
   }
+  for (const k of ['cfgScale', 'motion']) { if (k in patch) { const n = Number(patch[k]); if (Number.isFinite(n) && n >= 0) settings[k] = n; } }
+  if ('seed' in patch) { const n = Number(patch.seed); if (Number.isFinite(n)) settings.seed = Math.round(n); }
   if ('timeoutMs' in patch) settings.timeoutMs = Math.max(5000, Number(patch.timeoutMs) || settings.timeoutMs);
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, frames: settings.frames, fps: settings.fps, width: settings.width, height: settings.height, steps: settings.steps };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, model: settings.model, frames: settings.frames, fps: settings.fps, steps: settings.steps, cfgScale: settings.cfgScale, motion: settings.motion, width: settings.width, height: settings.height, seed: settings.seed };
 }
 
 function _cleanBase64(s) { return String(s || '').replace(/^data:video\/\w+;base64,/, ''); }
@@ -73,9 +78,12 @@ function generate(prompt, opts = {}) {
       negative_prompt: String(opts.negativePrompt || ''),
       frames: settings.frames,
       fps: settings.fps,
+      steps: settings.steps,
+      cfg_scale: settings.cfgScale,
+      motion: settings.motion,
       width: settings.width,
       height: settings.height,
-      steps: settings.steps,
+      seed: settings.seed,
     });
     const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Accept: 'application/json' };
     onEvent({ type: 'video-start', content: p });
