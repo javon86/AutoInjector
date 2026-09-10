@@ -144,6 +144,9 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
     gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
+    butlerSelfCheck: async () => { calls.push({ fn: "butlerSelfCheck" }); return { ok: true, okCount: 2, total: 3, checks: [{ name: "Brain (local model)", ok: true, detail: "llama3.1:8b" }, { name: "Voice (speak & listen)", ok: null, detail: "off" }, { name: "Tools (USE_TOOL)", ok: true, detail: "2: http-fetch, read-file" }] }; },
+    butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
+    voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true }; },
     endpointPresets: async (kind) => { calls.push({ fn: "endpointPresets", kind }); return { ok: true, presets: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }, { label: "ComfyUI — 8188", endpoint: "http://127.0.0.1:8188/prompt" }] }; },
     detectEndpoints: async (kind) => { calls.push({ fn: "detectEndpoints", kind }); return { ok: true, reachable: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }] }; },
     testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7860" }; },
@@ -1250,6 +1253,27 @@ async function testCapabilityPanelsWired() {
   assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");
   assert(api.calls.some((c) => c.fn === "gpuInfo"), "the GPU panel polls gpuInfo on start");
   assert(/RTX 3090/.test(doc.getElementById("gpu-body").textContent) && /42%/.test(doc.getElementById("gpu-body").textContent), "the GPU panel shows the card name and live utilization");
+
+  // Butler Device panel: System Check + Send Intro.
+  assert(!!doc.getElementById("col-device") && !!doc.getElementById("btn-selfcheck") && !!doc.getElementById("btn-send-intro"), "the Butler Device panel with System Check + Send Intro is present");
+  // The composer starts empty (no auto-prompt pre-filled).
+  assert(doc.getElementById("composer-text").value.trim() === "", "the composer starts empty — no initial prompt is pre-filled");
+  // System Check reports each capability with a working/off/failed mark.
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSelfCheck"), "System Check asks the butler to test what he can do");
+  const scText = doc.getElementById("selfcheck-results").textContent;
+  assert(/Working: 2\/3/.test(scText) && /Brain \(local model\)/.test(scText) && /Voice/.test(scText), "the System Check lists each capability and how many are working");
+  // Send Intro messages the AIs with who the butler is + the rules.
+  click(dom, "btn-send-intro");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSendIntro"), "Send Intro tells the language models who the butler is and how it works");
+  assert(/Intro sent to: chatgpt, claude, gemini/.test(doc.getElementById("intro-msg").textContent), "the intro reports which AIs were told");
+  // The 🔊 speak toggle routes the summary through the voice engine.
+  doc.getElementById("device-speak").checked = true;
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak"), "with 🔊 on, the System Check summary is spoken");
 
   // Model browser: pull ANY model by name.
   assert(api.calls.some((c) => c.fn === "ollamaRecommended"), "the panel loads recommended models on start");

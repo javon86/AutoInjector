@@ -2260,6 +2260,26 @@ async function testManagerAskToolApprovalGate() {
   await call("manager:stop", {});
 }
 
+// Butler Device: the System Check reports his capabilities; Send Intro delivers
+// the identity + rules message to every enabled chat AI (nothing auto-sends).
+async function testButlerDevice() {
+  console.log("\n== Butler Device: System Check reports capabilities; Send Intro messages the AIs ==");
+  await resetAllParticipants();
+  const chk = await call("butler:selfcheck", {});
+  assert(chk && chk.ok && Array.isArray(chk.checks) && chk.checks.length >= 5, "System Check returns a list of capability checks");
+  assert(chk.checks.some((c) => /Tools/.test(c.name)) && chk.checks.some((c) => /Chat AIs/.test(c.name)), "the check covers the butler's own capabilities (tools, chat AIs, …)");
+  assert(typeof chk.okCount === "number" && chk.okCount <= chk.total, "it reports how many capabilities are working");
+
+  const before = totalSent();
+  const intro = await call("butler:send-intro", {});
+  assert(intro && intro.ok && intro.targets.length === 3, "Send Intro targets all three enabled AIs");
+  assert(totalSent() > before, "the intro message is actually sent to the panes");
+  for (const s of SITES) {
+    const sent = sentLog(s).map((e) => e.text).join("\n");
+    assert(/Butler/.test(sent) && /\[FROM: /.test(sent) && /routing tag/.test(sent), `${s} received the who-I-am + rules intro (envelope explained)`);
+  }
+}
+
 // N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
 // back into the task's memories[]; relevant memories are seeded at task start.
 async function testManagerMemoryActions() {
@@ -2422,6 +2442,7 @@ async function main() {
   await testManagerMemoryActions();
   await testManagerGenerateImageAction();
   await testManagerSetupAction();
+  await testButlerDevice();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();

@@ -93,6 +93,8 @@ contextBridge.exposeInMainWorld("api", {
   configureVideo: (patch) => ipcRenderer.invoke("video:configure", patch),
   videoGenerate: (prompt, negativePrompt) => ipcRenderer.invoke("video:generate", { prompt, negativePrompt }),
   gpuInfo: () => ipcRenderer.invoke("gpu:info"),
+  butlerSelfCheck: () => ipcRenderer.invoke("butler:selfcheck"),
+  butlerSendIntro: (targets) => ipcRenderer.invoke("butler:send-intro", { targets }),
   endpointPresets: (kind) => ipcRenderer.invoke("endpoints:presets", { kind }),
   detectEndpoints: (kind) => ipcRenderer.invoke("endpoints:detect", { kind }),
   testEndpoint: (url) => ipcRenderer.invoke("endpoints:test", { url }),

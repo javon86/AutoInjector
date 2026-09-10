@@ -1061,6 +1061,8 @@ const COLLAPSIBLE_PANELS = {
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
   image: { panelId: "col-image", label: "Image Generation" },
   video: { panelId: "col-video", label: "Video Generation" },
+  gpu: { panelId: "col-gpu", label: "GPU Usage" },
+  device: { panelId: "col-device", label: "Butler Device" },
   systemai: { panelId: "col-systemai", label: "System AI" }
 };
 function collapseYellowPanel(key) {
@@ -1120,6 +1122,44 @@ async function databaseRefresh() {
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
 if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
 if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
+if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
+if (el("btn-collapse-device")) el("btn-collapse-device").onclick = () => collapseYellowPanel("device");
+
+// Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
+// who he is + the rules). Nothing is sent unless you press a button.
+function deviceSpeak(text) {
+  if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
+}
+if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
+  const box = el("selfcheck-results");
+  if (!window.api.butlerSelfCheck) { if (box) box.textContent = "System check unavailable."; return; }
+  if (box) box.textContent = "Checking…";
+  let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
+  if (!r || !r.ok) { if (box) box.textContent = `Check failed: ${(r && r.error) || "error"}`; return; }
+  if (box) {
+    box.innerHTML = "";
+    const head = document.createElement("div");
+    head.style.cssText = "font-weight:600; margin-bottom:3px;";
+    head.textContent = `Working: ${r.okCount}/${r.total}`;
+    box.appendChild(head);
+    for (const c of r.checks) {
+      const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
+      row.innerHTML = `<span>${mark}</span><span style="flex:0 0 auto; font-weight:500;">${gpuEsc(c.name)}</span><span style="opacity:.65; word-break:break-all;">${gpuEsc(c.detail || "")}</span>`;
+      box.appendChild(row);
+    }
+  }
+  deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working.`);
+};
+if (el("btn-send-intro")) el("btn-send-intro").onclick = async () => {
+  const box = el("intro-msg");
+  if (!window.api.butlerSendIntro) { if (box) box.textContent = "Intro unavailable."; return; }
+  if (box) box.textContent = "Sending the intro to the AIs…";
+  let r; try { r = await window.api.butlerSendIntro(); } catch (_) { r = null; }
+  if (r && r.ok) { if (box) box.textContent = `Intro sent to: ${r.targets.join(", ")}. They now know who the butler is and the rules.`; deviceSpeak("Introduction sent to the assistants."); }
+  else if (box) box.textContent = `Couldn't send: ${(r && r.error === "NO_TARGETS") ? "no AIs are enabled — check ChatGPT/Claude/Gemini up top." : (r && r.error) || "error"}`;
+};
 
 // Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
 // (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
