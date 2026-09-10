@@ -2285,6 +2285,38 @@ async function testButlerDevice() {
   }
 }
 
+// Full capability sweep — one continuous butler task that exercises EVERY action
+// in sequence (delegate → tool → run-code → remember → recall → image → setup →
+// finish) with no stalls, proving the whole loop runs fluidly end to end and the
+// butler can reach all of its capabilities in a single run.
+async function testButlerCapabilitySweep() {
+  console.log("\n== Capability sweep: the butler runs every action in one fluid task ==");
+  await resetAllParticipants();
+  resetManagerStub();
+  toolRunCalls = []; interpreterRunCalls = []; memoryCreateCalls = []; memorySearchCalls = []; imageGenCalls = []; setupInstallCalls = [];
+  queueManagerDecision({ action: "USE_TOOL", tool: "echo", args: { q: 1 }, reason: "need a tool", confidence: 0.9 });
+  queueManagerDecision({ action: "RUN_CODE", task: "compute a number", reason: "need code", confidence: 0.9 });
+  queueManagerDecision({ action: "REMEMBER", fact: "the answer is 42", reason: "keep it", confidence: 0.9 });
+  queueManagerDecision({ action: "RECALL", query: "the answer", reason: "look it up", confidence: 0.9 });
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a summary chart", reason: "illustrate", confidence: 0.9 });
+  queueManagerDecision({ action: "SETUP", target: "open-interpreter", reason: "ensure code-run is installed", confidence: 0.95 });
+  queueManagerDecision({ action: "FINISH", reason: "everything done", confidence: 0.97 });
+  const started = await call("manager:start-task", { userRequest: "do a full pass using every capability" });
+  assert(started && started.ok, "the sweep task started");
+  // Each of these actions auto-advances the loop — it should flow straight to
+  // FINISH with no stalls (that's the "fluid, no gaps" guarantee).
+  const finished = await waitUntil(async () => (await call("manager:get-state", {})).manager.status === "finished", { label: "the sweep finishes", timeout: 15000 });
+  const st = await call("manager:get-state", {});
+  assert(finished, `the whole capability sweep completes without stalling (status: ${st.manager.status})`);
+  assert(toolRunCalls.length >= 1, "USE_TOOL fired during the sweep");
+  assert(interpreterRunCalls.length >= 1, "RUN_CODE fired during the sweep");
+  assert(memoryCreateCalls.length >= 1 && memorySearchCalls.length >= 1, "REMEMBER + RECALL fired during the sweep");
+  assert(imageGenCalls.length >= 1, "GENERATE_IMAGE fired during the sweep");
+  assert(setupInstallCalls.some((c) => c.target === "open-interpreter"), "SETUP installed the code-run keystone during the sweep");
+  assert(st.manager.toolCalls.length && st.manager.codeRuns.length && st.manager.images.length && st.manager.setups.length, "every capability left its result on the task — no gaps");
+  await call("manager:stop", {});
+}
+
 // N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
 // back into the task's memories[]; relevant memories are seeded at task start.
 async function testManagerMemoryActions() {
@@ -2448,6 +2480,7 @@ async function main() {
   await testManagerGenerateImageAction();
   await testManagerSetupAction();
   await testButlerDevice();
+  await testButlerCapabilitySweep();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
