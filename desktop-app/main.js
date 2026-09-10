@@ -2152,10 +2152,20 @@ function emitManagerAck(taskId, goal) {
 
 // N2: speak text via the voice provider when voice is enabled + set to speak.
 // Fire-and-forget — never awaited, never throws into the caller.
-function speakIfEnabled(text) {
+function speakIfEnabled(text) { speakAs("butler", text, { onlyIfSpeakOnAck: true }); }
+
+// Speak as a specific voice (butler/chatgpt/claude/gemini) and light the
+// who's-speaking indicator in the UI while it talks — so voices alternate and
+// each speaker is shown in its own colour. Fire-and-forget; never throws.
+function speakAs(who, text, opts = {}) {
   try {
     const s = voiceProvider.status();
-    if (s && s.enabled && s.speakOnAck) voiceProvider.speak(text).catch(() => {});
+    if (!s || !s.enabled) return;
+    if (opts.onlyIfSpeakOnAck && !s.speakOnAck) return;
+    broadcast("voice-speaking", { who, speaking: true, text: String(text || "").slice(0, 120) });
+    voiceProvider.speak(text, { who })
+      .catch(() => {})
+      .finally(() => broadcast("voice-speaking", { who, speaking: false }));
   } catch { /* voice off — silent */ }
 }
 
@@ -3719,7 +3729,7 @@ ipcMain.handle("voice:configure", (_evt, patch) => {
   logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
   return { ok: true, ...voiceProvider.status() };
 });
-ipcMain.handle("voice:speak", async (_evt, { text } = {}) => voiceProvider.speak(text));
+ipcMain.handle("voice:speak", async (_evt, { text, who, voice } = {}) => voiceProvider.speak(text, { who, voice }));
 ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
 
 // Image generation (Stable Diffusion): status/config + a manual generate for the
@@ -3778,6 +3788,95 @@ ipcMain.handle("endpoints:test", async (_evt, { url } = {}) => { try { return aw
 
 // GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
 ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });
+
+// Butler System Check: the butler reports on everything HE can do, so you can
+// see at a glance what's working and what isn't. ok=true (working) / false
+// (error) / null (available but not turned on / not configured yet).
+async function butlerSelfCheck() {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || "" });
+  try { const mc = managerConfigSnapshot(); const has = !!(mc.endpoint && mc.model); add("Brain (local model)", has ? true : null, has ? `${mc.model} @ ${mc.endpoint}` : "no endpoint/model saved yet — set one in the Butler settings"); } catch (e) { add("Brain (local model)", false, String(e)); }
+  try { const s = interpreterProvider.status(); add("Run code (Open Interpreter)", s.enabled ? true : null, s.enabled ? `endpoint ${s.endpoint}` : "not enabled — install via Setup Wizard → Auto-setup"); } catch (e) { add("Run code (Open Interpreter)", false, String(e)); }
+  try { const t = toolProvider.list(); add("Tools (USE_TOOL)", t.length > 0, t.length ? `${t.length}: ${t.map((x) => x.name).join(", ")}` : "none registered"); } catch (e) { add("Tools (USE_TOOL)", false, String(e)); }
+  try { const d = dbService.status(); add("Memory (remember/recall)", !!d.available, d.available ? `ready (${d.count || 0} messages)` : (d.reason || "off")); } catch (e) { add("Memory (remember/recall)", false, String(e)); }
+  try { const v = voiceProvider.status(); add("Voice (speak & listen)", v.enabled ? true : null, v.enabled ? `endpoint ${v.endpoint}` : "off"); } catch (e) { add("Voice (speak & listen)", false, String(e)); }
+  try { const im = imageProvider.status(); add("Image generation", im.enabled ? true : null, im.enabled ? `endpoint ${im.endpoint}` : (im.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Image generation", false, String(e)); }
+  try { const vi = videoProvider.status(); add("Video generation", vi.enabled ? true : null, vi.enabled ? `endpoint ${vi.endpoint}` : (vi.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Video generation", false, String(e)); }
+  try { const root = outputManager.modelsRoot(); add("Models & content folder", !!root, root || "not ready"); } catch (e) { add("Models & content folder", false, String(e)); }
+  try { const g = await gpuMonitor.read(); add("GPU monitor", g.available ? true : null, g.available ? g.gpus.map((x) => x.name).join(", ") : (g.reason || "n/a")); } catch (e) { add("GPU monitor", false, String(e)); }
+  try { const en = SITE_IDS.filter((s) => state.enabled[s]); add("Chat AIs (ChatGPT/Claude/Gemini)", en.length > 0, en.length ? `enabled: ${en.join(", ")}` : "none enabled"); } catch (e) { add("Chat AIs (ChatGPT/Claude/Gemini)", false, String(e)); }
+  // Detailed install status of each dependency the butler can set up himself, so
+  // the check clearly separates what's INSTALLED from what's NOT — and which ones
+  // he can install for you. Open Interpreter is the keystone (it lets him run
+  // code and drive the rest).
+  const installs = [];
+  let missing = [];
+  try {
+    const all = await setupManager.detectAll();
+    for (const t of setupManager.list()) {
+      const d = all[t.id] || {};
+      installs.push({ id: t.id, label: t.label, installed: d.installed, kind: t.kind, installable: t.kind !== "handoff", detail: d.reason || "" });
+      if (d.installed === false && t.kind !== "handoff") missing.push(t.id);
+    }
+  } catch (e) { logEvent("selfcheck-installs-error", { error: String(e) }); }
+  const okCount = checks.filter((c) => c.ok === true).length;
+  return { ok: true, checks, okCount, total: checks.length, installs, missing, canInstall: missing.length > 0 };
+}
+ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
+
+// Install everything that's missing, keystone-first (Open Interpreter before the
+// rest, so once it's in the butler can drive the remaining installs and CONTROL
+// it via RUN_CODE). Each install auto-wires the capability on success. Progress
+// streams over the existing "setup-progress" channel.
+ipcMain.handle("butler:install-missing", async () => {
+  try {
+    const sc = await butlerSelfCheck();
+    const missing = sc.missing || [];
+    if (!missing.length) { broadcast("setup-progress", { line: "Everything is already installed ✓", done: true, ok: true }); return { ok: true, missing: [], results: [] }; }
+    // Keystone first: Open Interpreter, then the rest in setup-manager's order.
+    const order = setupManager.AUTO_ORDER.filter((id) => missing.includes(id));
+    for (const id of missing) if (!order.includes(id)) order.push(id);
+    logEvent("install-missing-start", { order });
+    const results = [];
+    for (const id of order) {
+      broadcast("setup-progress", { target: id, line: `▶ installing ${id}…`, step: true });
+      let r; try { r = await setupManager.install(id, { onProgress: (line) => broadcast("setup-progress", { target: id, line }) }); } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok) { try { await autoWireAfterSetup(id); } catch (_) {} }
+      results.push({ target: id, ok: !!(r && r.ok), error: (r && r.error) || null });
+      broadcast("setup-progress", { target: id, line: r && r.ok ? `✓ ${id}` : `⚠ ${id}: ${r && r.error}`, step: true, ok: !!(r && r.ok) });
+    }
+    refreshSetupStatus();
+    const okN = results.filter((r) => r.ok).length;
+    broadcast("setup-progress", { line: `Install finished: ${okN}/${results.length} installed`, done: true, ok: okN > 0 });
+    logEvent("install-missing-done", { installed: okN, total: results.length });
+    return { ok: true, missing, results, installed: okN };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// The butler introduces himself + the conversation rules to the chat AIs, so
+// they know who's coordinating them and how the message envelope works. Sent
+// only when you press the button — nothing goes out on its own.
+function butlerIntroMessage(target) {
+  const name = String(target || "").toUpperCase() || "YOU";
+  return (
+    "Quick orientation before we work together.\n\n" +
+    "WHO'S COORDINATING: a local \"Butler\" (a supervisor AI running on this machine) is running this conversation. It plans the work and passes messages between you and the other assistants (ChatGPT, Claude, Gemini). You are one of those assistants — the Butler may ask you to do part of a task and then combine your answer with the others.\n\n" +
+    "HOW MESSAGES WORK (important — or your reply is not delivered):\n" +
+    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / [TO: NONE]\n" +
+    "• END every message with your own closing tag: [FROM: " + name + "]\n" +
+    "The closing [FROM: ...] tag is how the app knows your message is finished — put nothing after it.\n\n" +
+    "Please confirm you understand, using the envelope: start with [TO: USER] and end with [FROM: " + name + "]."
+  );
+}
+async function butlerSendIntro(targets) {
+  const list = (Array.isArray(targets) && targets.length ? targets : SITE_IDS.filter((s) => state.enabled[s])).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  const results = {};
+  for (const t of list) results[t] = await sendTextTo(t, butlerIntroMessage(t), null);
+  logEvent("butler-intro-sent", { targets: list });
+  return { ok: true, targets: list, results };
+}
+ipcMain.handle("butler:send-intro", async (_evt, { targets } = {}) => { try { return await butlerSendIntro(targets); } catch (e) { return { ok: false, error: String(e) }; } });
 
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);

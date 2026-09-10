@@ -22,22 +22,30 @@ let settings = {
   endpoint: '',        // e.g. http://127.0.0.1:8232  (a voice shim base URL; no path)
   speakOnAck: true,    // speak the butler's ack + status updates aloud
   listenSeconds: 6,    // default record window for a push-to-talk listen
+  // A distinct voice per speaker so you can tell who's talking. Values are
+  // piper voice names the shim maps to a model (empty = the shim's default).
+  voices: { butler: '', chatgpt: '', claude: '', gemini: '' },
+  micDevice: '',       // preferred input (microphone) device — passed to the shim
+  speakerDevice: '',   // preferred output (speaker) device — passed to the shim
   timeoutMs: 60000,
 };
 const managed = { child: null };
 
-function getSettings() { return { ...settings }; }
+function getSettings() { return { ...settings, voices: { ...settings.voices } }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   for (const k of ['enabled', 'speakOnAck']) if (k in patch) settings[k] = !!patch[k];
-  if ('endpoint' in patch) settings.endpoint = String(patch.endpoint || '');
+  for (const k of ['endpoint', 'micDevice', 'speakerDevice']) if (k in patch) settings[k] = String(patch[k] || '');
+  if (patch.voices && typeof patch.voices === 'object') { for (const who of Object.keys(settings.voices)) if (who in patch.voices) settings.voices[who] = String(patch.voices[who] || ''); }
   if ('listenSeconds' in patch) { const n = Number(patch.listenSeconds); if (Number.isFinite(n)) settings.listenSeconds = Math.max(1, Math.min(60, n)); }
   if ('timeoutMs' in patch) settings.timeoutMs = Math.max(2000, Number(patch.timeoutMs) || settings.timeoutMs);
   return getSettings();
 }
 function status() {
-  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null };
+  return { configured: !!settings.endpoint, enabled: !!settings.enabled, endpoint: settings.endpoint, speakOnAck: !!settings.speakOnAck, voices: { ...settings.voices }, micDevice: settings.micDevice, speakerDevice: settings.speakerDevice, managed: !!managed.child, managedPid: managed.child ? managed.child.pid : null };
 }
+// Resolve the piper voice for a speaker id (butler/chatgpt/claude/gemini).
+function voiceFor(who) { return (settings.voices && settings.voices[who]) || ''; }
 
 // ---- one JSON request/response --------------------------------------------
 function _postJson(pathName, body) {
@@ -65,18 +73,26 @@ function _postJson(pathName, body) {
   });
 }
 
-// Speak text aloud. Fire-and-forget friendly: never rejects.
-async function speak(text) {
+// Speak text aloud, in a chosen speaker's voice. Fire-and-forget; never rejects.
+// opts.who ('butler'|'chatgpt'|'claude'|'gemini') picks that speaker's voice;
+// opts.voice overrides directly. The output device is passed to the shim.
+async function speak(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return { ok: false, error: 'NEED_TEXT' };
   if (!settings.enabled) return { ok: false, error: 'VOICE_DISABLED' };
-  return _postJson('/speak', { text: t });
+  const voice = opts.voice || voiceFor(opts.who) || '';
+  const body = { text: t };
+  if (voice) body.voice = voice;
+  if (settings.speakerDevice) body.device = settings.speakerDevice;
+  return _postJson('/speak', body);
 }
-// Record + transcribe. Resolves { ok, text }.
+// Record + transcribe. Resolves { ok, text }. The input device is passed along.
 async function listen(opts = {}) {
   if (!settings.enabled) return { ok: false, error: 'VOICE_DISABLED' };
   const seconds = Math.max(1, Math.min(60, Number(opts.seconds) || settings.listenSeconds));
-  return _postJson('/listen', { seconds });
+  const body = { seconds };
+  if (settings.micDevice) body.device = settings.micDevice;
+  return _postJson('/listen', body);
 }
 
 // ---- Managed mode: the app runs the shim itself (same pattern as OI) --------

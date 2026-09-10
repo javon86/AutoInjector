@@ -1061,6 +1061,8 @@ const COLLAPSIBLE_PANELS = {
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
   image: { panelId: "col-image", label: "Image Generation" },
   video: { panelId: "col-video", label: "Video Generation" },
+  gpu: { panelId: "col-gpu", label: "GPU Usage" },
+  device: { panelId: "col-device", label: "Butler Device" },
   systemai: { panelId: "col-systemai", label: "System AI" }
 };
 function collapseYellowPanel(key) {
@@ -1120,6 +1122,121 @@ async function databaseRefresh() {
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
 if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
 if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
+if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
+if (el("btn-collapse-device")) el("btn-collapse-device").onclick = () => collapseYellowPanel("device");
+
+// Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
+// who he is + the rules). Nothing is sent unless you press a button.
+function deviceSpeak(text) {
+  if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
+}
+if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
+  const box = el("selfcheck-results");
+  if (!window.api.butlerSelfCheck) { if (box) box.textContent = "System check unavailable."; return; }
+  if (box) box.textContent = "Checking…";
+  let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
+  if (!r || !r.ok) { if (box) box.textContent = `Check failed: ${(r && r.error) || "error"}`; return; }
+  if (box) {
+    box.innerHTML = "";
+    const head = document.createElement("div");
+    head.style.cssText = "font-weight:600; margin-bottom:3px;";
+    head.textContent = `Working: ${r.okCount}/${r.total}`;
+    box.appendChild(head);
+    for (const c of r.checks) {
+      const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
+      row.innerHTML = `<span>${mark}</span><span style="flex:0 0 auto; font-weight:500;">${gpuEsc(c.name)}</span><span style="opacity:.65; word-break:break-all;">${gpuEsc(c.detail || "")}</span>`;
+      box.appendChild(row);
+    }
+    // Detailed install status: what's installed vs not, and what he can install.
+    if (Array.isArray(r.installs) && r.installs.length) {
+      const h2 = document.createElement("div");
+      h2.style.cssText = "font-weight:600; margin:5px 0 2px;";
+      h2.textContent = `Dependencies (${(r.missing || []).length} not installed)`;
+      box.appendChild(h2);
+      for (const it of r.installs) {
+        const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
+        row.innerHTML = `<span style="flex:0 0 auto; font-weight:500;">${gpuEsc(it.label)}</span><span style="opacity:.7;">${mark}</span>`;
+        box.appendChild(row);
+      }
+    }
+    if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
+  }
+  deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working. ${(r.missing || []).length} dependencies not installed.`);
+};
+// Install everything that's missing (Open Interpreter first, so he controls it).
+if (el("btn-install-missing")) el("btn-install-missing").onclick = async () => {
+  const prog = el("install-progress");
+  if (!window.api.butlerInstallMissing) { if (prog) prog.textContent = "Installer unavailable."; return; }
+  const btn = el("btn-install-missing"); btn.disabled = true; btn.textContent = "⚙️ Installing…";
+  if (prog) prog.textContent = "Starting install of missing dependencies…\n";
+  let r; try { r = await window.api.butlerInstallMissing(); } catch (e) { r = { ok: false, error: String(e) }; }
+  btn.textContent = "⚙️ Install Missing"; btn.disabled = false;
+  if (prog) prog.textContent += (r && r.ok) ? `\nDone: ${r.installed || 0}/${(r.results || []).length} installed.` : `\n⚠ ${(r && r.error) || "failed"}`;
+  if (el("btn-selfcheck")) el("btn-selfcheck").click(); // refresh the status
+};
+if (window.api.onSetupProgress) window.api.onSetupProgress(({ target, line }) => {
+  const prog = el("install-progress"); if (!prog || !line) return;
+  prog.textContent += `${target ? target + ": " : ""}${line}\n`; prog.scrollTop = prog.scrollHeight;
+});
+if (el("btn-send-intro")) el("btn-send-intro").onclick = async () => {
+  const box = el("intro-msg");
+  if (!window.api.butlerSendIntro) { if (box) box.textContent = "Intro unavailable."; return; }
+  if (box) box.textContent = "Sending the intro to the AIs…";
+  let r; try { r = await window.api.butlerSendIntro(); } catch (_) { r = null; }
+  if (r && r.ok) { if (box) box.textContent = `Intro sent to: ${r.targets.join(", ")}. They now know who the butler is and the rules.`; deviceSpeak("Introduction sent to the assistants."); }
+  else if (box) box.textContent = `Couldn't send: ${(r && r.error === "NO_TARGETS") ? "no AIs are enabled — check ChatGPT/Claude/Gemini up top." : (r && r.error) || "error"}`;
+};
+
+// Who's-speaking indicator: light the current speaker's chip in its colour.
+if (window.api.onVoiceSpeaking) window.api.onVoiceSpeaking(({ who, speaking }) => {
+  const chip = document.querySelector(`#speaking-indicator .spk-chip[data-who="${who}"]`);
+  if (chip) chip.classList.toggle("speaking", !!speaking);
+});
+
+// Talk to the butler: type a task, push-to-talk, or open mic (keeps listening).
+async function deviceSendTask(text) {
+  const t = String(text || "").trim();
+  const msg = el("device-say-msg");
+  if (!t) { if (msg) msg.textContent = "Type or say something first."; return; }
+  if (!window.api.startManagedTask) { if (msg) msg.textContent = "Butler unavailable."; return; }
+  if (el("jarvis-goal")) el("jarvis-goal").value = t;
+  if (msg) msg.textContent = "Sent to the butler…";
+  const r = await window.api.startManagedTask(t);
+  if (msg) msg.textContent = r && r.ok ? "On it." : `Can't start: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`;
+}
+if (el("btn-device-send")) el("btn-device-send").onclick = () => { deviceSendTask(el("device-say").value); if (el("device-say")) el("device-say").value = ""; };
+if (el("device-say")) el("device-say").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("btn-device-send").click(); } });
+async function deviceListenOnce() {
+  const msg = el("device-say-msg");
+  if (!window.api.voiceListen) { if (msg) msg.textContent = "Voice engine not available."; return null; }
+  if (msg) msg.textContent = "Listening…";
+  let r; try { r = await window.api.voiceListen({}); } catch (_) { r = null; }
+  if (r && r.ok && r.text && r.text.trim()) return r.text.trim();
+  if (msg) msg.textContent = r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.";
+  return null;
+}
+if (el("btn-device-ptt")) el("btn-device-ptt").onclick = async () => {
+  const t = await deviceListenOnce();
+  if (t) { if (el("device-say")) el("device-say").value = t; deviceSendTask(t); }
+};
+let openMicOn = false;
+async function openMicLoop() {
+  while (openMicOn) {
+    const t = await deviceListenOnce();
+    if (!openMicOn) break;
+    if (t) deviceSendTask(t);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+if (el("device-openmic")) el("device-openmic").onchange = (e) => {
+  openMicOn = !!e.target.checked;
+  if (el("device-say-msg")) el("device-say-msg").textContent = openMicOn ? "Open mic on — talk freely." : "Open mic off.";
+  if (openMicOn) openMicLoop();
+};
 
 // Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
 // (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
@@ -1603,11 +1720,58 @@ async function refreshMemoryLine() {
 }
 refreshMemoryLine();
 
-// N2 Voice: save/test config + push-to-talk.
+// N2 Voice: save/test config + push-to-talk + a distinct voice per speaker.
+const VOICE_WHO = ["butler", "chatgpt", "claude", "gemini"];
 function _voiceConfigFromUI() {
-  return { enabled: !!(el("voice-enabled") && el("voice-enabled").checked), speakOnAck: !!(el("voice-enabled") && el("voice-enabled").checked), endpoint: (el("voice-endpoint") && el("voice-endpoint").value || "").trim() };
+  const voices = {};
+  for (const who of VOICE_WHO) voices[who] = (el(`voice-v-${who}`) && el(`voice-v-${who}`).value || "").trim();
+  return {
+    enabled: !!(el("voice-enabled") && el("voice-enabled").checked),
+    speakOnAck: !!(el("voice-enabled") && el("voice-enabled").checked),
+    endpoint: (el("voice-endpoint") && el("voice-endpoint").value || "").trim(),
+    voices,
+    micDevice: (el("voice-mic") && el("voice-mic").value) || "",
+    speakerDevice: (el("voice-speaker") && el("voice-speaker").value) || "",
+  };
 }
 function voiceMsg(t) { if (el("voice-msg")) el("voice-msg").textContent = t; }
+// Load saved voice config into the fields, and enumerate the machine's mics/speakers.
+async function loadVoicePanel() {
+  if (window.api.voiceStatus) {
+    try {
+      const s = await window.api.voiceStatus();
+      if (s) {
+        if (el("voice-endpoint")) el("voice-endpoint").value = s.endpoint || "";
+        if (el("voice-enabled")) el("voice-enabled").checked = !!s.enabled;
+        for (const who of VOICE_WHO) if (el(`voice-v-${who}`) && s.voices) el(`voice-v-${who}`).value = s.voices[who] || "";
+      }
+    } catch (_) {}
+  }
+  // Populate the mic + speaker dropdowns from the real audio devices on this PC.
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const fill = (selId, kind) => {
+        const sel = el(selId); if (!sel) return;
+        for (const d of devs.filter((x) => x.kind === kind)) { const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || `${kind} ${sel.length}`; sel.appendChild(o); }
+      };
+      fill("voice-mic", "audioinput");
+      fill("voice-speaker", "audiooutput");
+    }
+  } catch (_) {}
+}
+loadVoicePanel();
+// ▶ try-buttons: hear each speaker's assigned voice.
+for (const who of VOICE_WHO) {
+  const b = el(`btn-voice-try-${who}`);
+  if (b) b.onclick = async () => {
+    if (!window.api.configureVoice || !window.api.voiceSpeak) return;
+    await window.api.configureVoice(_voiceConfigFromUI());
+    voiceMsg(`Speaking as ${who}…`);
+    const r = await window.api.voiceSpeak(`This is the ${who} voice.`, who);
+    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${(r && r.error) || "error"}`);
+  };
+}
 if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
   if (!window.api.configureVoice) return;
   const r = await window.api.configureVoice(_voiceConfigFromUI());
