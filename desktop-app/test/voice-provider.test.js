@@ -16,7 +16,7 @@ function makeStub() {
       let j = {}; try { j = JSON.parse(body || '{}'); } catch (_) {}
       const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (req.method === 'GET' && req.url.replace(/\/$/, '') === '/health') return send(200, { ok: true, service: 'voice-shim' });
-      if (req.method === 'POST' && req.url === '/speak') return j.text ? send(200, { ok: true, ms: 12 }) : send(400, { ok: false, error: 'NEED_TEXT' });
+      if (req.method === 'POST' && req.url === '/speak') return j.text ? send(200, { ok: true, ms: 12, voice: j.voice || '', device: j.device || '' }) : send(400, { ok: false, error: 'NEED_TEXT' });
       if (req.method === 'POST' && req.url === '/listen') return send(200, { ok: true, text: `heard ${j.seconds || 6}s` });
       send(404, { ok: false, error: 'NOT_FOUND' });
     });
@@ -48,6 +48,17 @@ async function main() {
   const heard = await vp.listen({ seconds: 5 });
   assert(heard.ok === true && heard.text === 'heard 5s', 'listen posts /listen and returns the transcript');
   assert(vp.status().enabled && vp.status().speakOnAck, 'status shows enabled + speakOnAck after config');
+
+  console.log('\n== a distinct voice per speaker + output device ==');
+  vp.setSettings({ voices: { butler: 'en_US-butler', chatgpt: 'en_US-chatgpt' }, speakerDevice: 'spk-2' });
+  const st = vp.status();
+  assert(st.voices.butler === 'en_US-butler' && st.voices.chatgpt === 'en_US-chatgpt', 'per-speaker voices round-trip through status()');
+  const asButler = await vp.speak('hi', { who: 'butler' });
+  assert(asButler.ok && asButler.voice === 'en_US-butler' && asButler.device === 'spk-2', 'speak({who:"butler"}) sends the butler voice + the chosen output device');
+  const asChat = await vp.speak('hi', { who: 'chatgpt' });
+  assert(asChat.voice === 'en_US-chatgpt', 'speak({who:"chatgpt"}) sends a DIFFERENT voice — each speaker sounds distinct');
+  const override = await vp.speak('hi', { voice: 'custom-voice' });
+  assert(override.voice === 'custom-voice', 'an explicit voice override wins');
   server.close();
 
   console.log('\n== managed mode requires a command ==');

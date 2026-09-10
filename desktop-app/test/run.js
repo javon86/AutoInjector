@@ -2269,6 +2269,11 @@ async function testButlerDevice() {
   assert(chk && chk.ok && Array.isArray(chk.checks) && chk.checks.length >= 5, "System Check returns a list of capability checks");
   assert(chk.checks.some((c) => /Tools/.test(c.name)) && chk.checks.some((c) => /Chat AIs/.test(c.name)), "the check covers the butler's own capabilities (tools, chat AIs, …)");
   assert(typeof chk.okCount === "number" && chk.okCount <= chk.total, "it reports how many capabilities are working");
+  assert(Array.isArray(chk.installs) && chk.installs.some((i) => i.id === "open-interpreter"), "the check reports detailed install status per dependency (installed vs not)");
+  assert(Array.isArray(chk.missing) && typeof chk.canInstall === "boolean", "it lists which dependencies are missing + whether they can be installed");
+
+  const inst = await call("butler:install-missing", {});
+  assert(inst && inst.ok && Array.isArray(inst.results), "Install Missing installs the not-installed dependencies and reports each");
 
   const before = totalSent();
   const intro = await call("butler:send-intro", {});

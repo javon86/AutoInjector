@@ -49,3 +49,4 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 main().catch((e) => { console.error(e); process.exit(1); });
+// (video-provider only — voice per-speaker voices are covered in voice-provider.test.js)

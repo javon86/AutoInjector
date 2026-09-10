@@ -133,7 +133,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     memorySearch: async (query) => { calls.push({ fn: "memorySearch", query }); return { ok: true, available: true, results: [] }; },
     voiceStatus: async () => { calls.push({ fn: "voiceStatus" }); return { ok: true, enabled: false }; },
     configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
-    voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true, ms: 5 }; },
+    voiceSpeak: async (text, who) => { calls.push({ fn: "voiceSpeak", text, who }); return { ok: true, ms: 5 }; },
     voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
     openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
     // Image generation panel
@@ -144,9 +144,10 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
     videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
     gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
-    butlerSelfCheck: async () => { calls.push({ fn: "butlerSelfCheck" }); return { ok: true, okCount: 2, total: 3, checks: [{ name: "Brain (local model)", ok: true, detail: "llama3.1:8b" }, { name: "Voice (speak & listen)", ok: null, detail: "off" }, { name: "Tools (USE_TOOL)", ok: true, detail: "2: http-fetch, read-file" }] }; },
+    butlerSelfCheck: async () => { calls.push({ fn: "butlerSelfCheck" }); return { ok: true, okCount: 2, total: 3, checks: [{ name: "Brain (local model)", ok: true, detail: "llama3.1:8b" }, { name: "Voice (speak & listen)", ok: null, detail: "off" }, { name: "Tools (USE_TOOL)", ok: true, detail: "2: http-fetch, read-file" }], installs: [{ id: "open-interpreter", label: "Open Interpreter", installed: false, kind: "pip", installable: true }, { id: "voice", label: "Voice engine", installed: true, kind: "pip", installable: true }], missing: ["open-interpreter"], canInstall: true }; },
     butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
-    voiceSpeak: async (text) => { calls.push({ fn: "voiceSpeak", text }); return { ok: true }; },
+    butlerInstallMissing: async () => { calls.push({ fn: "butlerInstallMissing" }); return { ok: true, missing: ["open-interpreter"], installed: 1, results: [{ target: "open-interpreter", ok: true }] }; },
+    onVoiceSpeaking: (cb) => { api._voiceSpeakingCb = cb; },
     endpointPresets: async (kind) => { calls.push({ fn: "endpointPresets", kind }); return { ok: true, presets: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }, { label: "ComfyUI — 8188", endpoint: "http://127.0.0.1:8188/prompt" }] }; },
     detectEndpoints: async (kind) => { calls.push({ fn: "detectEndpoints", kind }); return { ok: true, reachable: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }] }; },
     testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7860" }; },
@@ -1264,6 +1265,12 @@ async function testCapabilityPanelsWired() {
   assert(api.calls.some((c) => c.fn === "butlerSelfCheck"), "System Check asks the butler to test what he can do");
   const scText = doc.getElementById("selfcheck-results").textContent;
   assert(/Working: 2\/3/.test(scText) && /Brain \(local model\)/.test(scText) && /Voice/.test(scText), "the System Check lists each capability and how many are working");
+  // Detailed install status: what's installed vs not.
+  assert(/Open Interpreter/.test(scText) && /not installed/.test(scText) && /installed/.test(scText), "the check shows a detailed installed / not-installed status per dependency");
+  // Install Missing installs what's not there (Open Interpreter first).
+  click(dom, "btn-install-missing");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerInstallMissing"), "Install Missing installs the not-installed dependencies");
   // Send Intro messages the AIs with who the butler is + the rules.
   click(dom, "btn-send-intro");
   await new Promise((r) => setTimeout(r, 20));
@@ -1274,6 +1281,31 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "voiceSpeak"), "with 🔊 on, the System Check summary is spoken");
+
+  // Who's-speaking indicator: a voice-speaking event lights that speaker's chip.
+  assert(!!doc.getElementById("speaking-indicator"), "the who's-speaking indicator is present");
+  api._voiceSpeakingCb && api._voiceSpeakingCb({ who: "claude", speaking: true });
+  assert(doc.querySelector('.spk-chip[data-who="claude"]').classList.contains("speaking"), "a speaking event lights that speaker's chip");
+  api._voiceSpeakingCb && api._voiceSpeakingCb({ who: "claude", speaking: false });
+  assert(!doc.querySelector('.spk-chip[data-who="claude"]').classList.contains("speaking"), "the chip dims again when it stops");
+
+  // Talk to the butler: typed task, and push-to-talk (transcribe → send).
+  doc.getElementById("device-say").value = "summarise the news";
+  click(dom, "btn-device-send");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "startManagedTask"), "the typed task is sent to the butler");
+  click(dom, "btn-device-ptt");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceListen"), "push-to-talk records a spoken task via the voice engine");
+
+  // A distinct voice per speaker: the ▶ try button speaks in that voice, and Save carries the map.
+  doc.getElementById("voice-v-claude").value = "en_US-amy";
+  click(dom, "btn-voice-try-claude");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak" && c.who === "claude"), "the ▶ button speaks in that speaker's assigned voice");
+  assert(api.calls.some((c) => c.fn === "configureVoice" && c.patch && c.patch.voices && c.patch.voices.claude === "en_US-amy"), "Voice save carries a distinct voice per speaker");
+  // Mic / speaker device pickers exist.
+  assert(!!doc.getElementById("voice-mic") && !!doc.getElementById("voice-speaker"), "the voice module has microphone + speaker pickers");
 
   // Model browser: pull ANY model by name.
   assert(api.calls.some((c) => c.fn === "ollamaRecommended"), "the panel loads recommended models on start");

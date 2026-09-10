@@ -83,7 +83,7 @@ contextBridge.exposeInMainWorld("api", {
   // N2 Voice
   voiceStatus: () => ipcRenderer.invoke("voice:status"),
   configureVoice: (patch) => ipcRenderer.invoke("voice:configure", patch),
-  voiceSpeak: (text) => ipcRenderer.invoke("voice:speak", { text }),
+  voiceSpeak: (text, who) => ipcRenderer.invoke("voice:speak", { text, who }),
   voiceListen: (opts) => ipcRenderer.invoke("voice:listen", opts || {}),
   // Image generation (Stable Diffusion)
   imageStatus: () => ipcRenderer.invoke("image:status"),
@@ -95,6 +95,8 @@ contextBridge.exposeInMainWorld("api", {
   gpuInfo: () => ipcRenderer.invoke("gpu:info"),
   butlerSelfCheck: () => ipcRenderer.invoke("butler:selfcheck"),
   butlerSendIntro: (targets) => ipcRenderer.invoke("butler:send-intro", { targets }),
+  butlerInstallMissing: () => ipcRenderer.invoke("butler:install-missing"),
+  onVoiceSpeaking: (cb) => ipcRenderer.on("voice-speaking", (_e, payload) => cb(payload)),
   endpointPresets: (kind) => ipcRenderer.invoke("endpoints:presets", { kind }),
   detectEndpoints: (kind) => ipcRenderer.invoke("endpoints:detect", { kind }),
   testEndpoint: (url) => ipcRenderer.invoke("endpoints:test", { url }),
