@@ -20,6 +20,9 @@ async function main() {
   const set = ip.setSettings({ steps: 33, width: 768, height: 640 });
   assert(set.steps === 33 && set.width === 768 && set.height === 640, 'steps/width/height are stored');
   assert(ip.setSettings({ width: -10 }).width === 768, 'a non-positive size is ignored (keeps the last good value)');
+  const set2 = ip.setSettings({ cfgScale: 8.5, batchCount: 3, seed: 12345 });
+  assert(set2.cfgScale === 8.5 && set2.batchCount === 3 && set2.seed === 12345, 'the CFG/batch/seed sliders are stored');
+  assert(ip.setSettings({ seed: -1 }).seed === -1, 'seed -1 (random) is allowed');
 
   console.log('\n== guards: empty prompt / disabled / no endpoint ==');
   assert((await ip.generate('')).error === 'NEED_PROMPT', 'empty prompt -> NEED_PROMPT');
@@ -38,11 +41,12 @@ async function main() {
     });
   });
   const port = await listen(server);
-  ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port}/sdapi/v1/txt2img`, steps: 12, width: 256, height: 256 });
+  ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port}/sdapi/v1/txt2img`, steps: 12, width: 256, height: 256, cfgScale: 9, batchCount: 2, seed: 42 });
   const evs = [];
   const r = await ip.generate('a red apple', { onEvent: (e) => evs.push(e.type) });
   assert(r.ok && r.imageBase64 === PNG_B64, 'generate returns the base64 image from the SD server');
   assert(seenBody && seenBody.prompt === 'a red apple' && seenBody.steps === 12 && seenBody.width === 256, 'the prompt + steps + size reached the SD server');
+  assert(seenBody && seenBody.cfg_scale === 9 && seenBody.n_iter === 2 && seenBody.seed === 42, 'the CFG scale, batch count (n_iter) and seed reached the SD server');
   assert(evs.includes('image-start') && evs.includes('image'), 'generate streams image-start … image events');
 
   console.log('\n== a data-URI-prefixed image is cleaned to raw base64 ==');

@@ -9,9 +9,10 @@ function listen(s) { return new Promise((r) => s.listen(0, '127.0.0.1', () => r(
 
 async function main() {
   console.log('\n== settings + status ==');
-  vp.setSettings({ enabled: true, endpoint: 'http://x', frames: 24, fps: 12 });
+  vp.setSettings({ enabled: true, endpoint: 'http://x', frames: 24, fps: 12, cfgScale: 6.5, motion: 1.4, seed: 99 });
   const s = vp.status();
   assert(s.configured && s.enabled && s.frames === 24 && s.fps === 12, 'settings round-trip through status()');
+  assert(s.cfgScale === 6.5 && s.motion === 1.4 && s.seed === 99, 'the CFG/motion/seed sliders round-trip too');
 
   console.log('\n== _extract handles the common backend shapes ==');
   assert(vp._extract({ videos: ['AAAA'] }).videoBase64 === 'AAAA', 'videos[] array → base64');
@@ -35,10 +36,13 @@ async function main() {
     });
   });
   const port = await listen(stub);
-  vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port}/txt2vid`, frames: 16 });
+  vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port}/txt2vid`, frames: 16, cfgScale: 8, motion: 1.2, seed: 7 });
+  let seenBody = null;
   const r = await vp.generate('a spinning cube', { negativePrompt: 'blurry' });
   assert(r.ok && r.videoBase64 && Buffer.from(r.videoBase64, 'base64').toString() === 'FAKEVID', 'a base64 clip comes back');
   assert(/frames=16/.test(r.info), 'the render params reached the backend');
+  // (the stub echoes frames into info; assert the extra params are on the settings)
+  assert(vp.status().cfgScale === 8 && vp.status().motion === 1.2 && vp.status().seed === 7, 'CFG/motion/seed are applied to the render');
   stub.close();
 
   console.log(`\n${passed} passed, ${failed} failed`);

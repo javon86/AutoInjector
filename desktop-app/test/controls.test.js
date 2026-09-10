@@ -1070,6 +1070,11 @@ async function testButlerPanelWired() {
   const doc = dom.window.document;
   assert(doc.getElementById("jarvis-goal") && doc.getElementById("btn-jarvis-start"), "the butler goal box and Start button are present");
 
+  // The local LLM endpoint starts pre-filled with Ollama's default address
+  // (erasable) so nobody has to type it — no saved endpoint in this stub.
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("lsi-endpoint").value === "http://127.0.0.1:11434/v1/chat/completions", "the LLM endpoint defaults to Ollama's local address (erasable)");
+
   // Save config wires to configureManagerProvider (needs a model chosen first).
   doc.getElementById("lsi-endpoint").value = "http://127.0.0.1:11434/v1/chat/completions";
   const modelSel = doc.getElementById("lsi-model");
@@ -1155,15 +1160,31 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-img-save");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
+  // The 5 main image sliders exist and show a live value.
+  for (const id of ["img-steps", "img-cfg", "img-width", "img-height", "img-batch"]) {
+    const sl = doc.getElementById(id);
+    assert(sl && sl.getAttribute("type") === "range", `image slider ${id} is a range control`);
+  }
+  const stepSlider = doc.getElementById("img-steps");
+  stepSlider.value = "40";
+  stepSlider.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert(doc.getElementById("img-steps-v").textContent === "40", "moving a slider updates its live value readout");
   // Compact fields: prompt, negative prompt, and LoRA/weights (appended to prompt).
   doc.getElementById("img-prompt").value = "a red apple";
   doc.getElementById("img-negative").value = "blurry, text";
   doc.getElementById("img-lora").value = "<lora:apple:0.7>";
+  doc.getElementById("img-cfg").value = "9";
+  doc.getElementById("img-seed").value = "1234";
   click(dom, "btn-img-generate");
   await new Promise((r) => setTimeout(r, 20));
   const genCall = api.calls.find((c) => c.fn === "imageGenerate");
   assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
   assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
+  const imgCfgCall = api.calls.filter((c) => c.fn === "configureImage").pop();
+  assert(imgCfgCall && imgCfgCall.patch.cfgScale === 9 && imgCfgCall.patch.seed === 1234 && imgCfgCall.patch.steps === 40, "the CFG / seed / steps slider values are sent with the render");
+  // 🎲 resets the seed to random (-1).
+  click(dom, "btn-img-seed-rand");
+  assert(doc.getElementById("img-seed").value === "-1", "the 🎲 button resets the seed to random (-1)");
   // 3 sizes: the render grows the panel to "large" so the preview shows.
   assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "after a render the Image panel grows to the large size (shows the preview)");
   assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
@@ -1183,13 +1204,20 @@ async function testCapabilityPanelsWired() {
 
   // Video module: same 3-size + generate shape, wired to the video provider.
   assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video panel loads its config on start");
+  for (const id of ["vid-frames", "vid-fps", "vid-steps", "vid-cfg", "vid-motion"]) {
+    const sl = doc.getElementById(id);
+    assert(sl && sl.getAttribute("type") === "range", `video slider ${id} is a range control`);
+  }
   doc.getElementById("vid-prompt").value = "a spinning cube";
   doc.getElementById("vid-negative").value = "jitter";
   doc.getElementById("vid-endpoint").value = "http://127.0.0.1:7861/txt2vid";
+  doc.getElementById("vid-motion").value = "1.5";
   click(dom, "btn-vid-generate");
   await new Promise((r) => setTimeout(r, 20));
   const vgen = api.calls.find((c) => c.fn === "videoGenerate");
   assert(vgen && /a spinning cube/.test(vgen.prompt) && vgen.negative === "jitter", "Video Generate passes the prompt + negative to the video provider");
+  const vidCfgCall = api.calls.filter((c) => c.fn === "configureVideo").pop();
+  assert(vidCfgCall && vidCfgCall.patch.motion === 1.5, "the video Motion slider value is sent with the render");
   assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
   assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
   click(dom, "btn-vid-size");
