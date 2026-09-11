@@ -1062,7 +1062,6 @@ const COLLAPSIBLE_PANELS = {
   image: { panelId: "col-image", label: "Image Generation" },
   video: { panelId: "col-video", label: "Video Generation" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
-  device: { panelId: "col-device", label: "Butler Device" },
   systemai: { panelId: "col-systemai", label: "System AI" }
 };
 function collapseYellowPanel(key) {
@@ -1123,7 +1122,6 @@ if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => col
 if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
 if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
 if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
-if (el("btn-collapse-device")) el("btn-collapse-device").onclick = () => collapseYellowPanel("device");
 
 // Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
 // who he is + the rules). Nothing is sent unless you press a button.
