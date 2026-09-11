@@ -162,7 +162,9 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     rejectManagerAction: async (reason) => { calls.push({ fn: "rejectManagerAction", reason }); return { ok: true }; },
     // Models & assets folder
     modelsInfo: async () => { calls.push({ fn: "modelsInfo" }); return { ok: true, contentRoot: "/home/u/AutoInjector/stuff and thing", root: "/home/u/AutoInjector/stuff and thing/models", categories: { llm: 1, image: 2, loras: 0, video: 0, voice: 0, assets: 0 }, ollamaModels: null, ollamaHere: false }; },
-    openModelsFolder: async (category) => { calls.push({ fn: "openModelsFolder", category }); return { ok: true, path: "/home/u/AutoInjector/stuff and thing" }; }
+    openModelsFolder: async (category) => { calls.push({ fn: "openModelsFolder", category }); return { ok: true, path: "/home/u/AutoInjector/stuff and thing" }; },
+    ollamaManagedStatus: async () => { calls.push({ fn: "ollamaManagedStatus" }); return { running: true, host: "127.0.0.1:11435", endpoint: "http://127.0.0.1:11435", modelsDir: "/home/u/AutoInjector/stuff and thing/models/llm", targetDir: "/home/u/AutoInjector/stuff and thing/models/llm", defaultStore: "/home/u/.ollama/models" }; },
+    ollamaMigrate: async () => { calls.push({ fn: "ollamaMigrate" }); return { ok: true, moved: 3, skipped: 1, bytes: 123, from: "/home/u/.ollama/models", to: "/home/u/AutoInjector/stuff and thing/models/llm" }; }
   };
   return api;
 }
@@ -1059,6 +1061,14 @@ async function testActivityLogCapturesEverything() {
   click(dom, "btn-open-models");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "openModelsFolder"), "the Open models folder button opens the folder");
+
+  // Language-model storage: the store-status line reflects the app's own Ollama,
+  // and the migrate button moves already-downloaded models into the folder.
+  assert(/New downloads are stored in this folder/.test(doc.getElementById("models-store-status").textContent), "the panel checks storage and confirms new downloads land in 'stuff and thing' when the app's Ollama is running");
+  click(dom, "btn-ollama-migrate");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "ollamaMigrate"), "the 'Move downloaded models here' button runs the migration");
+  assert(/3 moved/.test(doc.getElementById("ollama-migrate-status").textContent), "the migration result (moved/skipped) is reported back");
 
   // The "Stop AIs Talking" button halts all relay.
   assert(doc.getElementById("btn-silence"), "the Stop-AIs-Talking button is present");
