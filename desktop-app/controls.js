@@ -1560,8 +1560,41 @@ async function loadModelsInfo() {
         : "Tip: set OLLAMA_MODELS to the llm/ folder so Ollama stores models here.";
     }
   } catch (_) {}
+  await loadModelsStore();
+}
+
+// Language-model storage: is the app's own Ollama running (so downloads land in
+// "stuff and thing"), and where do already-downloaded models currently live?
+async function loadModelsStore() {
+  const box = el("models-store-status");
+  if (!box || !window.api.ollamaManagedStatus) return;
+  try {
+    const st = await window.api.ollamaManagedStatus();
+    if (st && st.running) {
+      box.innerHTML = `<span style="color:#8ef0b0;">✓ New downloads are stored in this folder</span> — the app runs its own Ollama at <code>${gpuEsc(st.endpoint || "")}</code>.` +
+        (st.defaultStore ? `<br><span style="opacity:.75;">Models downloaded earlier may still be in <code>${gpuEsc(st.defaultStore)}</code> — use “Move downloaded models here”.</span>` : "");
+    } else {
+      box.innerHTML = `<span style="opacity:.8;">The app's own Ollama isn't running (Ollama may not be installed yet). New downloads go to Ollama's default store` +
+        (st && st.defaultStore ? ` <code>${gpuEsc(st.defaultStore)}</code>` : "") + `. Install Ollama, then reopen the app to store here.</span>`;
+    }
+  } catch (_) {}
 }
 if (el("btn-open-models")) el("btn-open-models").onclick = () => { if (window.api.openModelsFolder) window.api.openModelsFolder(); };
+// Move models already downloaded (Ollama's default store) into "stuff and thing".
+if (el("btn-ollama-migrate")) el("btn-ollama-migrate").onclick = async () => {
+  const status = el("ollama-migrate-status");
+  if (!window.api.ollamaMigrate) { if (status) status.textContent = "Migration unavailable."; return; }
+  const btn = el("btn-ollama-migrate");
+  btn.disabled = true; if (status) status.textContent = "Moving…";
+  let r; try { r = await window.api.ollamaMigrate(); } catch (e) { r = { ok: false, error: String(e) }; }
+  if (status) {
+    status.textContent = r && r.ok
+      ? `✓ ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}.`
+      : `⚠ ${(r && r.error) || "error"}`;
+  }
+  btn.disabled = false;
+  loadModelsInfo();
+};
 loadModelsInfo();
 
 // --- Safeguards: approval mode + approve/reject a held action ------------------
@@ -1576,7 +1609,17 @@ if (el("lsi-approval")) el("lsi-approval").onchange = async () => {
 // is fully erasable, and a real saved endpoint takes over.
 const DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:11434/v1/chat/completions";
 (async () => {
-  if (el("lsi-endpoint") && !el("lsi-endpoint").value) el("lsi-endpoint").value = DEFAULT_LLM_ENDPOINT;
+  // Prefer the app's own Ollama (whose store is "stuff and thing") when it's up,
+  // so the butler and its downloads use the same server. Falls back to the
+  // standard local Ollama address otherwise. A saved endpoint still wins below.
+  let defaultEp = DEFAULT_LLM_ENDPOINT;
+  try {
+    if (window.api.ollamaManagedStatus) {
+      const st = await window.api.ollamaManagedStatus();
+      if (st && st.running && st.endpoint) defaultEp = `${st.endpoint}/v1/chat/completions`;
+    }
+  } catch (_) {}
+  if (el("lsi-endpoint") && !el("lsi-endpoint").value) el("lsi-endpoint").value = defaultEp;
   if (!window.api.getManagerState) return;
   try {
     const s = await window.api.getManagerState();

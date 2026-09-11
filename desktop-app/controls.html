@@ -719,7 +719,15 @@
           <div id="models-path" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.85; word-break:break-all; margin:2px 0;"></div>
           <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
           <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <div class="btns" style="margin:4px 0;"><button id="btn-open-models">📂 Open folder</button></div>
+
+          <!-- Language-model storage: where LLMs land now, and a one-click move
+               of any already downloaded into this folder. -->
+          <div id="models-store-status" style="font-size:11px; opacity:.85; margin:5px 0 2px; padding-top:5px; border-top:1px solid #1c2a20;"></div>
+          <div class="btns" style="margin:4px 0;">
+            <button id="btn-open-models">📂 Open folder</button>
+            <button id="btn-ollama-migrate" title="Move models already downloaded (Ollama's default store) into this folder">📦 Move downloaded models here</button>
+          </div>
+          <div id="ollama-migrate-status" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.8; white-space:pre-wrap; max-height:80px; overflow-y:auto; margin:2px 0;"></div>
         </details>
 
         <details class="sai-sec">

@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld("api", {
   ollamaList: (endpoint) => ipcRenderer.invoke("ollama:list", endpoint),
   ollamaRecommended: (vramGB) => ipcRenderer.invoke("ollama:recommended", vramGB),
   ollamaPull: (model) => ipcRenderer.invoke("ollama:pull", model),
+  ollamaManagedStatus: () => ipcRenderer.invoke("ollama:managed-status"),
+  ollamaMigrate: () => ipcRenderer.invoke("ollama:migrate"),
   onOllamaProgress: (cb) => ipcRenderer.on("ollama-progress", (_e, payload) => cb(payload)),
   openWizard: (tab) => ipcRenderer.invoke("wizard:open", { tab }),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),

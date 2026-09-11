@@ -61,6 +61,8 @@ async function main() {
       ['#lsi-approval', 'Approval-mode safeguard toggle'],
       ['#btn-approve', 'Approve-action button'],
       ['#btn-open-models', 'Open-models-folder button'],
+      ['#btn-ollama-migrate', 'Move-downloaded-models button'],
+      ['#models-store-status', 'LLM storage status line'],
       ['#jarvis-tools', 'Tools registry list'],
       ['#jarvis-awareness', 'Awareness readout'],
       ['#voice-enabled', 'Voice toggle'],

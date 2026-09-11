@@ -2785,13 +2785,57 @@ ipcMain.handle("ollama:list", async (_evt, endpoint) => { try { return await oll
 ipcMain.handle("ollama:recommended", async (_evt, vramGB) => { try { return { models: ollamaManager.recommended(vramGB) }; } catch (e) { return { models: [] }; } });
 ipcMain.handle("ollama:pull", async (_evt, model) => {
   try {
-    const { done } = ollamaManager.pull(model, (line) => broadcast("ollama-progress", { model, line }));
+    // Route the download at the app's own Ollama (when it's up) so the blobs
+    // land in "stuff and thing"; otherwise fall back to the default daemon.
+    const host = ollamaManager.managedStatus().running ? ollamaManager.managedStatus().host : undefined;
+    const { done } = ollamaManager.pull(model, (line) => broadcast("ollama-progress", { model, line }), { host });
     const r = await done;
     broadcast("ollama-progress", { model, line: r.ok ? "✓ done" : `⚠ ${r.error}`, done: true, ok: !!r.ok });
     return r;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
+// Where does the app store its language models, and where do the ones already
+// downloaded on this machine currently live? Drives the Models panel's "storing
+// here ✓ / move them here" UI.
+ipcMain.handle("ollama:managed-status", () => {
+  try {
+    const st = ollamaManager.managedStatus();
+    let targetDir = null; try { targetDir = outputManager.modelsDir("llm"); } catch (_) {}
+    return { ...st, targetDir, defaultStore: ollamaManager.defaultStoreDir() };
+  } catch (e) { return { running: false, error: String(e) }; }
+});
+
+// Move the models already downloaded (Ollama's default store) into the shared
+// "stuff and thing" folder, so nothing is left behind. Streams progress.
+ipcMain.handle("ollama:migrate", async () => {
+  try {
+    let to; try { to = outputManager.modelsDir("llm"); } catch (_) { return { ok: false, error: "content folder not ready" }; }
+    const from = ollamaManager.defaultStoreDir();
+    broadcast("ollama-progress", { model: "(migrate)", line: `Moving models from ${from} → ${to}` });
+    const r = ollamaManager.migrateStore({ from, to, onLog: (line) => broadcast("ollama-progress", { model: "(migrate)", line }) });
+    broadcast("ollama-progress", { model: "(migrate)", line: r.ok ? `✓ ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}` : `⚠ ${r.error}`, done: true, ok: !!r.ok });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+
+// Bring up the app-managed Ollama server pointed at models/llm inside the
+// content folder. Only if Ollama is actually installed; never throws, never
+// blocks startup. The renderer reads managed-status to prefer this endpoint.
+async function startManagedOllama() {
+  try {
+    const det = await ollamaManager.detect();
+    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "ollama not installed" }); return; }
+    let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
+    const host = process.env.AUTOINJECTOR_OLLAMA_HOST || ollamaManager.DEFAULT_MANAGED_HOST;
+    const r = ollamaManager.startManaged({ modelsDir, host, onLog: (line) => { if (line) broadcast("ollama-progress", { model: "(server)", line }); } });
+    if (!r.ok) { logEvent("ollama-managed-error", { error: r.error }); return; }
+    const ready = await ollamaManager.waitReady(host, 20000);
+    logEvent("ollama-managed", { host, modelsDir, ready: ready.ok });
+    broadcast("ollama-progress", { model: "(server)", line: ready.ok ? `✓ app Ollama ready at http://${host} → ${modelsDir}` : `⚠ app Ollama started but not answering yet at http://${host}`, done: true, ok: ready.ok });
+  } catch (e) { logEvent("ollama-managed-error", { error: String(e) }); }
+}
 
 ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
@@ -4139,13 +4183,13 @@ app.whenReady().then(() => {
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {
     const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
-    // Point any Ollama the app itself launches at the shared models/llm folder, so
-    // downloads land in the one findable place. (A separately-run Ollama daemon
-    // uses its own OLLAMA_MODELS; the Models panel shows if they differ.)
-    if (!process.env.OLLAMA_MODELS) { try { process.env.OLLAMA_MODELS = outputManager.modelsDir("llm"); } catch (_) {} }
     logEvent("models-init", { root: outputManager.modelsRoot() });
     configureSetupManager();
     refreshSetupStatus();
+    // Run the app's own Ollama, pointed at the shared models/llm folder, so every
+    // model the app downloads lands in "stuff and thing". Best-effort — if Ollama
+    // isn't installed or the port is busy, we log and fall back to the user's own.
+    startManagedOllama().catch((e) => logEvent("ollama-managed-error", { error: String(e) }));
   } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
@@ -4155,4 +4199,4 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
-app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} });
+app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });
