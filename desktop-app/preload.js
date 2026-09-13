@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("api", {
   getState: () => ipcRenderer.invoke("state:get"),
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
   extractAllLogs: () => ipcRenderer.invoke("logs:extract-all"),
+  downloadAllLogs: () => ipcRenderer.invoke("logs:download-all"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
   startNewChatAll: () => ipcRenderer.invoke("sites:new-chat-all"),

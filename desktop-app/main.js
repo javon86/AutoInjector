@@ -38,6 +38,7 @@ const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
 const endpointDetect = require("./endpoint-detect");
+const logBundle = require("./log-bundle");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -3306,6 +3307,76 @@ ipcMain.handle("logs:extract-all", () => {
     try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
     return { ok: true, file, messages: state.transcript.length, logEntries: state.log.length };
   } catch (e) { logEvent("extract-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
+
+// A short guide dropped into the bundle so whoever opens it knows what's what.
+const LOG_BUNDLE_README = [
+  "AutoInjector — all logs bundle",
+  "",
+  "Everything the program logs, gathered in one folder so you can zip it and",
+  "share it for troubleshooting. Contents (whatever existed at the time):",
+  "  autoinjector-debug.log      the rolling on-disk event log (survives crashes)",
+  "  autoinjector-state.json     saved app state (config, transcript, settings)",
+  "  autoinjector-shared.db      the conversation/memory database (SQLite)",
+  "  activity-and-transcript.txt  the in-app Activity log + full transcript",
+  "  events.json                 in-memory event stream (most recent, full detail)",
+  "  manager-events.json         the butler/manager event stream",
+  "  system-info.txt             OS, versions, Python, folders — the environment",
+  "  *.log                       any other log files found next to the app data",
+  "",
+  "Nothing here is uploaded anywhere by the app — it's yours to share as you choose.",
+].join("\n");
+
+function _safeJson(v) { try { return JSON.stringify(v, null, 2); } catch (e) { return `/* could not serialize: ${String(e)} */`; } }
+
+async function buildSystemInfo() {
+  const os = require("os");
+  let py = {}; try { py = await setupManager.pythonStatus(); } catch (_) {}
+  let contentRoot = "?"; try { contentRoot = outputManager.root() || "?"; } catch (_) {}
+  let ollama = "?"; try { const s = ollamaManager.managedStatus(); ollama = s.running ? `${s.endpoint} → ${s.modelsDir}` : "not running"; } catch (_) {}
+  let appVer = "?"; try { appVer = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
+  return [
+    "AutoInjector diagnostics",
+    `Generated:    ${new Date().toISOString()}`,
+    `App version:  ${appVer}`,
+    `Runtime:      Electron ${process.versions.electron} · Node ${process.versions.node} · Chrome ${process.versions.chrome}`,
+    `OS:           ${os.type()} ${os.release()} (${process.platform}/${process.arch})`,
+    `Python:       ${py.invocation || "?"} — ${py.note || "?"}`,
+    `Content root: ${contentRoot}`,
+    `App Ollama:   ${ollama}`,
+    `User data:    ${userDataDir()}`,
+  ].join("\n");
+}
+
+// Download ALL logs: copy every on-disk log/state/db file + the in-memory
+// activity into one timestamped folder under "stuff and thing/logs", then open
+// it so the user can grab or zip the whole lot at once.
+ipcMain.handle("logs:download-all", async () => {
+  try {
+    const ud = userDataDir();
+    const files = [];
+    const addIfExists = (p) => { try { if (p && fs.existsSync(p) && !files.includes(p)) files.push(p); } catch (_) {} };
+    addIfExists(debugLogPath());
+    addIfExists(stateFilePath());
+    addIfExists(path.join(ud, "autoinjector-shared.db"));
+    // Sweep the user-data folder for any other *.log the app (or a subsystem) left.
+    try { for (const n of fs.readdirSync(ud)) if (/\.log$/i.test(n)) addIfExists(path.join(ud, n)); } catch (_) {}
+
+    const blobs = [
+      { name: "activity-and-transcript.txt", content: buildExtractText() },
+      { name: "events.json", content: _safeJson(state.log) },
+      { name: "manager-events.json", content: _safeJson(state.managerLog) },
+      { name: "system-info.txt", content: await buildSystemInfo() },
+      { name: "README.txt", content: LOG_BUNDLE_README },
+    ];
+
+    let logsDir; try { logsDir = outputManager.logsDir(); } catch (_) { return { ok: false, error: "content folder not ready" }; }
+    const r = logBundle.bundle({ logsDir, userDataDir: ud, files, blobs });
+    if (!r.ok) { logEvent("logs-download-all-error", { error: r.error }); return r; }
+    logEvent("logs-download-all", { folder: r.folder, files: r.entries.length, missing: (r.missing || []).length });
+    try { if (shell && shell.openPath) shell.openPath(r.folder); } catch (_) {}
+    return { ok: true, folder: r.folder, count: r.entries.length, entries: r.entries, missing: r.missing || [] };
+  } catch (e) { logEvent("logs-download-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
 });
 
 ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
