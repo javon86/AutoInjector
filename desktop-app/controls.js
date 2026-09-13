@@ -965,14 +965,18 @@ let LOG_TAGS = { TAGS: {}, TAG_IDS: [] };
 // Add one log line to the unified window, with its colour-coded tag chip. Works
 // for both real events (kind+detail) and injected chat lines ({tag, text}), and
 // never throws on an unknown/missing tag (falls back to a neutral chip).
-function appendLogLine({ ts, tag, text, err }) {
+function appendLogLine({ ts, tag, text, err, level }) {
   const box = el("activity-log");
   if (!box) return;
   const id = tag || "system";
   const meta = LOG_TAGS.TAGS[id] || { label: id, color: "#8a94a6" };
+  // Level drives the "⚠ Errors only" view: error/warning stay, everything else
+  // is hidden when it's on. `err` (error only) still drives the red styling.
+  const lvl = level || (err ? "error" : "info");
   const line = document.createElement("div");
-  line.className = `log-line${err ? " err" : ""}`;
+  line.className = `log-line${lvl === "error" ? " err" : ""}${lvl === "warning" ? " warn" : ""}`;
   line.dataset.tag = id;
+  line.dataset.level = lvl;
   const chip = document.createElement("span");
   chip.className = "log-chip";
   chip.textContent = meta.label;
@@ -990,7 +994,8 @@ function appendLogLine({ ts, tag, text, err }) {
 }
 
 function appendLog(entry) {
-  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: String(entry.kind || "").includes("error") });
+  const level = entry.level || (String(entry.kind || "").includes("error") ? "error" : "info");
+  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: level === "error", level });
 }
 
 // The conversation itself, folded into the one log under the Chat tag, so the
@@ -1079,6 +1084,24 @@ if (window.api.logTagsInfo) {
   }).catch(() => {});
 }
 if (el("btn-log-clear")) el("btn-log-clear").onclick = () => { const b = el("activity-log"); if (b) b.textContent = ""; uiLog("click", { id: "btn-log-clear", msg: "cleared the log view" }); };
+
+// "⚠ Errors only": a cross-cutting filter on top of the per-tag checkboxes —
+// when on, only error/warning lines show, whatever their tag. Remembered per
+// viewer (localStorage), same as the tag filters.
+(function initErrorsOnly() {
+  const cb = el("cb-errors-only");
+  const box = el("activity-log");
+  if (!cb || !box) return;
+  let on = false;
+  try { on = localStorage.getItem("logErrorsOnly") === "1"; } catch (_) {}
+  cb.checked = on;
+  box.classList.toggle("errors-only", on);
+  cb.onchange = () => {
+    box.classList.toggle("errors-only", cb.checked);
+    try { localStorage.setItem("logErrorsOnly", cb.checked ? "1" : "0"); } catch (_) {}
+    uiLog("click", { id: "cb-errors-only", msg: `errors-only ${cb.checked ? "on" : "off"}` });
+  };
+})();
 
 // --- Full activity trace: log EVERY user action into the same Activity Log ------
 // so you can always see what's going on, no matter what you're doing.

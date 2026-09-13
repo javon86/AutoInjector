@@ -310,6 +310,7 @@ function resetManagerTask() {
     startedTs: null,
     finishedTs: null,
     noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
+    thinkingStreak: 0, // consecutive "thinking" (PLAN/WAIT/CLASSIFY/…) turns with no real progress, used by detectManagerStall()
     pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
   };
 }
@@ -454,7 +455,15 @@ function pushTranscriptTurn(turn) {
 function logEvent(kind, detail) {
   // Every event carries its tag (one of the 13) so the unified log window can
   // group + show/hide by category. Tagging at the source = nothing untagged.
-  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind) };
+  // It also carries a severity level ("error"/"warning"/"info") so the log's
+  // "⚠ Errors only" toggle has a real signal to filter on: an explicit
+  // severity in the detail wins (manager events pass their own through), else
+  // it's inferred from the kind so plain logEvent("…-error") lines still count.
+  const sev = detail && typeof detail === "object" ? detail.severity : null;
+  const level = (sev === "error" || sev === "warn" || sev === "warning")
+    ? (sev === "warn" ? "warning" : sev)
+    : (/(?:error|fail|exceeded|timeout|giveup|reject|stalled|unreachable)/i.test(kind) ? "error" : "info");
+  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind), level };
   state.log.push(entry);
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
@@ -532,7 +541,7 @@ function logManagerEvent({ category, severity, action, target, summary, details,
     broadcast("manager-log", entry);
   }
   if (visibleInGlobalLog) {
-    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails });
+    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails, severity: entry.severity });
   } else if (visibleInManagerLog) {
     appendDebugLog(entry); // still worth a debug-log trace even when it's not going in the global Activity Log
   }
@@ -1843,6 +1852,20 @@ async function runManagerTurn() {
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 
+  // Stall-break bookkeeping: a pure "thinking" decision bumps the streak; any
+  // decision with a real effect (delegating, running code, a tool, memory,
+  // setup, image, save, finish, escalate) resets it. When the streak crosses
+  // the limit the butler is looping without progress -- stop and ask the user
+  // instead of grinding on to MAX_TURNS_EXCEEDED. A satisfied VALIDATE / a
+  // FINISH ends the task in executeManagerAction() anyway, so the reset here is
+  // just belt-and-braces for the paths that keep the task alive.
+  if (MANAGER_THINKING_ACTIONS.has(decision.action)) {
+    m.thinkingStreak++;
+    if (detectManagerStall()) { await breakManagerStall(decision); return; }
+  } else {
+    m.thinkingStreak = 0;
+  }
+
   // Approval gate: the whole-task approval mode, OR a per-tool "ask" risk tier —
   // a risk:"ask" tool (e.g. http-fetch) is held for the operator even when global
   // approval mode is off, so an LLM-chosen side effect never fires unattended.
@@ -1858,6 +1881,24 @@ async function runManagerTurn() {
 }
 
 const MANAGER_DELEGATING_ACTIONS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+
+// Stall-break: "thinking" actions are the ones that loop straight back into
+// runManagerTurn() without any external effect -- no pane delegated to, no code
+// run, no file written, no memory touched. A healthy task passes through a few
+// of these (CLASSIFY -> PLAN -> ...) and then does something real, which resets
+// the streak. But when the butler is missing information it can't get on its
+// own (the real bug: ~20 turns of PLAN/WAIT/CLASSIFY all saying "user hasn't
+// provided the case details yet"), it spins on these until MAX_TURNS_EXCEEDED.
+// detectManagerStall() catches that run and breakManagerStall() turns it into a
+// question for the user instead of a silent death. VALIDATE is included because
+// an unsatisfied VALIDATE also just loops; a satisfied one finishes the task
+// before the streak is ever checked, so it never counts against this.
+const MANAGER_THINKING_ACTIONS = new Set(["CLASSIFY", "PLAN", "WAIT", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE"]);
+const MANAGER_STALL_LIMIT = Number(process.env.AUTOINJECTOR_MANAGER_STALL_LIMIT) || 5;
+
+function detectManagerStall() {
+  return state.manager.thinkingStreak >= MANAGER_STALL_LIMIT;
+}
 
 async function executeManagerAction(decision) {
   const m = state.manager;
@@ -2105,6 +2146,7 @@ async function handleManagerCapture(turn) {
   if (m.pendingModels.length === 0) {
     m.status = "reviewing";
     m.noProgressStreak = 0;
+    m.thinkingStreak = 0; // a pane answered -- real progress, so the stall counter starts fresh
     if (m.currentTier > (state.managerConfig.tier || 2)) {
       m.currentTier -= 1; // de-escalate back toward the configured baseline now that things are progressing again
       logManagerEvent({ category: "escalation", summary: `De-escalating to tier ${m.currentTier} now that a response landed` });
@@ -2195,6 +2237,26 @@ async function finishManagedTask({ ok, reason }) {
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
   speakIfEnabled(ok ? "Done." : `Stopped: ${reason || "unknown"}`); // N2
   broadcastManagerState();
+}
+
+// The stall-break itself: instead of dying quietly on MAX_TURNS_EXCEEDED after
+// ~20 no-progress "thinking" turns, the butler tells the user it's stuck and
+// asks for what it needs, then parks the task as NEEDS_INPUT so a fresh request
+// (with the missing detail) can start cleanly. The question is derived from the
+// last decision's own reason -- that's where the model already said WHY it
+// couldn't proceed ("user hasn't provided the case details yet"), so we surface
+// that verbatim rather than guessing. Surfaced three ways: the manager-ack line
+// the UI shows above the chat, the manager log, and voice.
+async function breakManagerStall(lastDecision) {
+  const m = state.manager;
+  const why = String((lastDecision && lastDecision.reason) || "").replace(/\s+/g, " ").trim();
+  const ask = why
+    ? `I've gone ${m.thinkingStreak} turns without making progress — I think I'm missing something. ${why.replace(/^i\b/i, "I")} Could you tell me what you'd like me to do, or give me the detail I'm waiting on?`
+    : `I've gone ${m.thinkingStreak} turns without making progress and I think I'm stuck. Could you tell me what you'd like me to do next, or give me any detail I'm waiting on?`;
+  logManagerEvent({ category: "response", severity: "warning", summary: ask, details: { thinkingStreak: m.thinkingStreak, lastAction: lastDecision && lastDecision.action, reason: why || null } });
+  broadcast("manager-ack", { taskId: m.taskId, text: ask, ts: Date.now() });
+  speakAs("butler", ask); // say it out loud regardless of the speak-on-ack setting -- this is a direct question to the user
+  await finishManagedTask({ ok: false, reason: "NEEDS_INPUT" });
 }
 
 function stopManagedTask() {

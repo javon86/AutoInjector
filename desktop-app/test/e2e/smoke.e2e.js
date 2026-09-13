@@ -53,6 +53,7 @@ async function main() {
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
       ['#log-filters', 'Unified-log tag filter bar'],
+      ['#cb-errors-only', 'Errors-only log toggle'],
       ['#activity-log', 'Unified activity log'],
       ['#btn-silence', 'Stop AIs Talking button'],
       ['#btn-open-image', 'Image paddle'],

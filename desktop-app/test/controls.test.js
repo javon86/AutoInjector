@@ -636,6 +636,29 @@ async function testUnifiedLogTagsAndFilters() {
   assert(!box.classList.contains("hide-chat"), "other categories stay visible");
   mgrCb.checked = true; mgrCb.onchange();
   assert(!box.classList.contains("hide-manager"), "re-checking Manager shows it again");
+
+  // "⚠ Errors only": lines carry a data-level, and the toggle hides everything
+  // that isn't an error or a warning, whatever its tag.
+  api.fireLog({ ts: Date.now(), kind: "db-init-error", tag: "memory", detail: { summary: "db failed" } });
+  const errLine = box.lastChild;
+  assert(errLine.dataset.level === "error" && errLine.classList.contains("err"), "an error-kind line is marked data-level=error");
+  api.fireLog({ ts: Date.now(), kind: "manager-escalation", tag: "manager", level: "warning", detail: { summary: "escalating" } });
+  const warnLine = box.lastChild;
+  assert(warnLine.dataset.level === "warning" && warnLine.classList.contains("warn"), "a warning-level line is marked data-level=warning");
+  api.fireLog({ ts: Date.now(), kind: "state-restored", tag: "system", detail: { summary: "ok" } });
+  const infoLine = box.lastChild;
+  assert(infoLine.dataset.level === "info", "an ordinary line is data-level=info");
+
+  const eo = doc.getElementById("cb-errors-only");
+  assert(eo, "the '⚠ Errors only' checkbox exists");
+  eo.checked = true; eo.onchange();
+  assert(box.classList.contains("errors-only"), "checking 'Errors only' puts the log into errors-only mode");
+  // CSS does the hiding (jsdom doesn't compute it), so assert the selector logic:
+  // info lines are the ones the rule targets, error/warning lines are not.
+  assert(infoLine.matches('[data-level="info"]') && !errLine.matches(':not([data-level="error"]):not([data-level="warning"])'),
+    "in errors-only mode the rule hides info lines but keeps errors and warnings");
+  eo.checked = false; eo.onchange();
+  assert(!box.classList.contains("errors-only"), "unchecking restores the full view");
 }
 
 async function testConnectivityTestButtonFailure() {

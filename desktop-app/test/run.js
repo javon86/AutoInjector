@@ -1451,6 +1451,30 @@ async function testManagerValidationEscalationAndMaxTurns() {
   assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "an invalid target never results in an actual send to anyone");
 }
 
+async function testManagerStallBreak() {
+  console.log("\n== Manager: a no-progress 'thinking' loop stops and asks the user instead of grinding to MAX_TURNS ==");
+  await resetManagerState();
+  // A generous turn cap on purpose: this proves the STALL detector ended the
+  // task, not the maximumTurns cap. This is the real user bug -- ~20 turns of
+  // PLAN/WAIT/CLASSIFY, all "user hasn't provided the case details yet", that
+  // used to die on MAX_TURNS_EXCEEDED with nothing asked of the user.
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  queueManagerDecisionRepeating({ action: "PLAN", plan: ["wait for the details"], reason: "user hasn't provided the case details yet", confidence: 0.5 });
+
+  const startRes = await call("manager:start-task", { userRequest: "Handle my thing." });
+  assert(startRes.ok, "the task starts");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the no-progress loop ends the task rather than spinning forever" });
+  const s = await call("state:get", {});
+  const taskId = s.manager.taskId;
+  const mine = s.managerLog.filter((l) => l.taskId === taskId); // scope to THIS task -- managerLog carries entries from earlier tests too
+  assert(mine.some((l) => l.summary.includes("NEEDS_INPUT")), "the task ends with NEEDS_INPUT (the butler is stuck waiting on the user)");
+  assert(!mine.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), "it broke on the stall detector, NOT by exhausting the 20-turn cap");
+  assert(s.manager.turnNumber < 20, `it stopped early (turn ${s.manager.turnNumber}), well before the turn cap`);
+  const question = mine.find((l) => l.category === "response" && /provided the case details/.test(l.summary));
+  assert(question, "the butler surfaced a real question to the user, echoing WHY it was stuck (from its own last reason)");
+}
+
 async function testManagerEscalateActionAndTierFourAdjudication() {
   console.log("\n== Manager: an explicit ESCALATE action jumps straight to the requested tier, Tier 4 routes to a real AI pane instead of the configured provider, and it de-escalates back down afterward ==");
   await resetManagerState();
@@ -2485,6 +2509,7 @@ async function main() {
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();
+  await testManagerStallBreak();
   await testManagerEscalateActionAndTierFourAdjudication();
   await testManagerSaveActionWritesRealFiles();
   await testManagerPauseResumeStop();
