@@ -164,7 +164,8 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     modelsInfo: async () => { calls.push({ fn: "modelsInfo" }); return { ok: true, contentRoot: "/home/u/AutoInjector/stuff and thing", root: "/home/u/AutoInjector/stuff and thing/models", categories: { llm: 1, image: 2, loras: 0, video: 0, voice: 0, assets: 0 }, ollamaModels: null, ollamaHere: false }; },
     openModelsFolder: async (category) => { calls.push({ fn: "openModelsFolder", category }); return { ok: true, path: "/home/u/AutoInjector/stuff and thing" }; },
     ollamaManagedStatus: async () => { calls.push({ fn: "ollamaManagedStatus" }); return { running: true, host: "127.0.0.1:11435", endpoint: "http://127.0.0.1:11435", modelsDir: "/home/u/AutoInjector/stuff and thing/models/llm", targetDir: "/home/u/AutoInjector/stuff and thing/models/llm", defaultStore: "/home/u/.ollama/models" }; },
-    ollamaMigrate: async () => { calls.push({ fn: "ollamaMigrate" }); return { ok: true, moved: 3, skipped: 1, bytes: 123, from: "/home/u/.ollama/models", to: "/home/u/AutoInjector/stuff and thing/models/llm" }; }
+    ollamaMigrate: async () => { calls.push({ fn: "ollamaMigrate" }); return { ok: true, moved: 3, skipped: 1, bytes: 123, from: "/home/u/.ollama/models", to: "/home/u/AutoInjector/stuff and thing/models/llm" }; },
+    downloadAllLogs: async () => { calls.push({ fn: "downloadAllLogs" }); return { ok: true, folder: "/home/u/AutoInjector/stuff and thing/logs/autoinjector-logs-2026-09-13_11-20-05", count: 7, entries: [], missing: [] }; }
   };
   return api;
 }
@@ -1069,6 +1070,12 @@ async function testActivityLogCapturesEverything() {
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "ollamaMigrate"), "the 'Move downloaded models here' button runs the migration");
   assert(/3 moved/.test(doc.getElementById("ollama-migrate-status").textContent), "the migration result (moved/skipped) is reported back");
+
+  // Download all logs: one click bundles every log and reports the folder.
+  click(dom, "btn-download-logs");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "downloadAllLogs"), "the 'Download all logs' button gathers every log");
+  assert(/7 file\(s\) bundled/.test(doc.getElementById("download-logs-status").textContent) && /logs\//.test(doc.getElementById("download-logs-status").textContent), "it reports how many files were bundled and where");
 
   // The "Stop AIs Talking" button halts all relay.
   assert(doc.getElementById("btn-silence"), "the Stop-AIs-Talking button is present");

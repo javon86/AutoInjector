@@ -728,6 +728,11 @@
             <button id="btn-ollama-migrate" title="Move models already downloaded (Ollama's default store) into this folder">📦 Move downloaded models here</button>
           </div>
           <div id="ollama-migrate-status" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.8; white-space:pre-wrap; max-height:80px; overflow-y:auto; margin:2px 0;"></div>
+
+          <!-- Grab every log the program writes, from everywhere, in one go. -->
+          <div style="font-size:11px; opacity:.85; margin:6px 0 2px; padding-top:5px; border-top:1px solid #1c2a20;">Troubleshooting: bundle every log (event log, saved state, database, activity + system info) into one folder to share.</div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-download-logs" title="Collect all logs from everywhere into one folder under stuff and thing/logs and open it">📥 Download all logs</button></div>
+          <div id="download-logs-status" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.8; white-space:pre-wrap; max-height:80px; overflow-y:auto; margin:2px 0;"></div>
         </details>
 
         <details class="sai-sec">

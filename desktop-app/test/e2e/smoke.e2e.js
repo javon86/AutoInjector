@@ -63,6 +63,7 @@ async function main() {
       ['#btn-open-models', 'Open-models-folder button'],
       ['#btn-ollama-migrate', 'Move-downloaded-models button'],
       ['#models-store-status', 'LLM storage status line'],
+      ['#btn-download-logs', 'Download-all-logs button'],
       ['#jarvis-tools', 'Tools registry list'],
       ['#jarvis-awareness', 'Awareness readout'],
       ['#voice-enabled', 'Voice toggle'],

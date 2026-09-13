@@ -1595,6 +1595,20 @@ if (el("btn-ollama-migrate")) el("btn-ollama-migrate").onclick = async () => {
   btn.disabled = false;
   loadModelsInfo();
 };
+// Download all logs: gather every log the program writes into one folder + open it.
+if (el("btn-download-logs")) el("btn-download-logs").onclick = async () => {
+  const status = el("download-logs-status");
+  if (!window.api.downloadAllLogs) { if (status) status.textContent = "Log download unavailable."; return; }
+  const btn = el("btn-download-logs");
+  btn.disabled = true; if (status) status.textContent = "Gathering logs…";
+  let r; try { r = await window.api.downloadAllLogs(); } catch (e) { r = { ok: false, error: String(e) }; }
+  if (status) {
+    status.textContent = r && r.ok
+      ? `✓ ${r.count} file(s) bundled — opened:\n${r.folder}`
+      : `⚠ ${(r && r.error) || "error"}`;
+  }
+  btn.disabled = false;
+};
 loadModelsInfo();
 
 // --- Safeguards: approval mode + approve/reject a held action ------------------
