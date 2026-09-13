@@ -99,6 +99,44 @@ async function main() {
   assert(steps[0] === 'open-interpreter' && steps[steps.length - 1] === 'stability-matrix', 'auto() keeps the keystone-first order');
   assert(res.installed >= 1, 'auto() reports how many succeeded');
 
+  console.log('\n== Python resolution: pick a wheel-compatible interpreter, and guide when it is too new ==');
+  // Simulate a machine that has ONLY Python 3.14 (the version-specific probes
+  // all fail; a bare `python`/`python3` answers 3.14). This is the real user's
+  // case: litellm/tiktoken have no 3.14 wheel, so the install must warn + guide.
+  const cp = require('child_process');
+  const probeStub = (cmd, args, opts, cb) => {
+    const isVersion = Array.isArray(args) && args.includes('-c');
+    if (isVersion && (cmd === 'python' || cmd === 'python3')) { cb(null, '3.14\n', ''); }
+    else if (isVersion) { cb(new Error('not found')); }
+    else { cb(new Error('unexpected execFile in test')); }
+    return { on() {} };
+  };
+  sm._resetPython();
+  sm.configure({ execFile: probeStub });
+  const py = await sm.pythonStatus();
+  assert(py.version === '3.14' && py.compatible === false, 'a machine with only Python 3.14 resolves as incompatible (no wheels)');
+  assert(/3\.12/.test(py.note) && /python\.org/i.test(py.note), 'the status explains the fix: install Python 3.12');
+
+  sm._resetPython();
+  sm.configure({ execFile: probeStub, spawn: () => fakeChild(1, 'error: metadata-generation-failed; Cargo is not installed') });
+  const oiFail = await sm.install('open-interpreter', { onProgress: () => {} });
+  assert(oiFail.ok === false && /no prebuilt package/.test(oiFail.error) && /python\.org/i.test(oiFail.error),
+    'a too-new-Python pip failure explains the cause and points to Python 3.12 (not just "exited 1")');
+
+  // A compatible Python installs via a prebuilt wheel (no source build needed).
+  const spawnSeen = [];
+  sm._resetPython();
+  sm.configure({
+    execFile: (cmd, args, opts, cb) => { if (args.includes('-c')) cb(null, '3.12\n', ''); else cb(new Error('n/a')); return { on() {} }; },
+    spawn: (cmd, args) => { spawnSeen.push({ cmd, args }); return fakeChild(0, 'Successfully installed open-interpreter'); },
+  });
+  const oiOk = await sm.install('open-interpreter', { onProgress: () => {} });
+  assert(oiOk.ok === true, 'a compatible Python (3.12) installs cleanly');
+  assert(spawnSeen[0].args.includes('--prefer-binary'), 'the install prefers a prebuilt wheel over compiling from source (--prefer-binary)');
+  // Restore real process deps + cache so nothing leaks to other runs.
+  sm.configure({ execFile: cp.execFile, spawn: cp.spawn });
+  sm._resetPython();
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

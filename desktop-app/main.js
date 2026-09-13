@@ -3841,6 +3841,7 @@ async function butlerSelfCheck() {
   const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || "" });
   try { const mc = managerConfigSnapshot(); const has = !!(mc.endpoint && mc.model); add("Brain (local model)", has ? true : null, has ? `${mc.model} @ ${mc.endpoint}` : "no endpoint/model saved yet — set one in the Butler settings"); } catch (e) { add("Brain (local model)", false, String(e)); }
   try { const s = interpreterProvider.status(); add("Run code (Open Interpreter)", s.enabled ? true : null, s.enabled ? `endpoint ${s.endpoint}` : "not enabled — install via Setup Wizard → Auto-setup"); } catch (e) { add("Run code (Open Interpreter)", false, String(e)); }
+  try { const py = await setupManager.pythonStatus(); add("Install toolchain (Python)", py.missing ? false : (py.compatible ? true : null), py.note); } catch (e) { add("Install toolchain (Python)", null, String(e)); }
   try { const t = toolProvider.list(); add("Tools (USE_TOOL)", t.length > 0, t.length ? `${t.length}: ${t.map((x) => x.name).join(", ")}` : "none registered"); } catch (e) { add("Tools (USE_TOOL)", false, String(e)); }
   try { const d = dbService.status(); add("Memory (remember/recall)", !!d.available, d.available ? `ready (${d.count || 0} messages)` : (d.reason || "off")); } catch (e) { add("Memory (remember/recall)", false, String(e)); }
   try { const v = voiceProvider.status(); add("Voice (speak & listen)", v.enabled ? true : null, v.enabled ? `endpoint ${v.endpoint}` : "off"); } catch (e) { add("Voice (speak & listen)", false, String(e)); }
