@@ -957,18 +957,49 @@ function logLineText(entry) {
   return `${entry.kind} ${parts.join(" ")}`.trim();
 }
 
-function appendLog(entry) {
+// The 13 tags (single source of truth is log-tags.js in main; fetched over IPC).
+// Starts empty and is filled in on load; appendLogLine tolerates a missing tag,
+// so log lines render correctly even for the first few events before it arrives.
+let LOG_TAGS = { TAGS: {}, TAG_IDS: [] };
+
+// Add one log line to the unified window, with its colour-coded tag chip. Works
+// for both real events (kind+detail) and injected chat lines ({tag, text}), and
+// never throws on an unknown/missing tag (falls back to a neutral chip).
+function appendLogLine({ ts, tag, text, err }) {
   const box = el("activity-log");
+  if (!box) return;
+  const id = tag || "system";
+  const meta = LOG_TAGS.TAGS[id] || { label: id, color: "#8a94a6" };
   const line = document.createElement("div");
-  const isErr = entry.kind.includes("error");
-  line.className = `log-line${isErr ? " err" : ""}`;
+  line.className = `log-line${err ? " err" : ""}`;
+  line.dataset.tag = id;
+  const chip = document.createElement("span");
+  chip.className = "log-chip";
+  chip.textContent = meta.label;
+  chip.style.background = meta.color;
   const t = document.createElement("span");
   t.className = "t";
-  t.textContent = new Date(entry.ts).toLocaleTimeString();
-  line.appendChild(t);
-  line.appendChild(document.createTextNode(logLineText(entry)));
+  t.textContent = new Date(ts || Date.now()).toLocaleTimeString();
+  const msg = document.createElement("span");
+  msg.className = "log-msg";
+  msg.textContent = text || "";
+  line.appendChild(chip); line.appendChild(t); line.appendChild(msg);
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
   box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function appendLog(entry) {
+  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: String(entry.kind || "").includes("error") });
+}
+
+// The conversation itself, folded into the one log under the Chat tag, so the
+// window truly catches everything (the formatted transcript still exists too).
+function appendUnifiedChatTurn(turn) {
+  if (!turn) return;
+  const who = turn.label || turn.site || "AI";
+  const body = String(turn.text || "").replace(/\s+/g, " ").trim();
+  appendLogLine({ ts: turn.ts || Date.now(), tag: "chat", text: `${who}: ${body}` });
 }
 
 async function refreshSites() {
@@ -988,6 +1019,7 @@ function updateCharCount() {
 window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
+  appendUnifiedChatTurn(turn);
   if (turn && turn.site) lastReplyBySite[turn.site] = turn.text || "";
   setStatus(`Captured new reply from ${turn.label}.`);
   beep();
@@ -1003,6 +1035,50 @@ window.api.onSendError(({ target, error }) => {
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);
 window.api.onLog(appendLog);
+
+// --- Unified log: tag filters (checked = show that category) -------------------
+function buildLogFilters() {
+  const bar = el("log-filters");
+  const box = el("activity-log");
+  if (!bar || !box || !LOG_TAGS.TAG_IDS.length) return;
+  bar.textContent = ""; // rebuild if tags arrive/refresh
+  // Inject the hide rules once: #activity-log.hide-<tag> [data-tag=<tag>]{display:none}
+  const style = document.getElementById("log-filter-style") || document.createElement("style");
+  style.id = "log-filter-style";
+  style.textContent = LOG_TAGS.TAG_IDS.map((id) => `#activity-log.hide-${id} .log-line[data-tag="${id}"]{display:none}`).join("\n");
+  if (!style.parentNode) document.head.appendChild(style);
+  // Restore any saved hidden set (per-viewer convenience only).
+  let hidden = {};
+  try { hidden = JSON.parse(localStorage.getItem("logHiddenTags") || "{}") || {}; } catch (_) { hidden = {}; }
+  const save = () => { try { localStorage.setItem("logHiddenTags", JSON.stringify(hidden)); } catch (_) {} };
+  const apply = (id) => box.classList.toggle(`hide-${id}`, !!hidden[id]);
+  for (const id of LOG_TAGS.TAG_IDS) {
+    const tag = LOG_TAGS.TAGS[id];
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !hidden[id]; // checked = visible
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = tag.color;
+    const txt = document.createElement("span");
+    txt.textContent = tag.label;
+    label.appendChild(cb); label.appendChild(sw); label.appendChild(txt);
+    label.title = `Show/hide ${tag.label} lines`;
+    cb.onchange = () => { hidden[id] = !cb.checked; apply(id); save(); uiLog("click", { id: `log-filter-${id}`, msg: `${cb.checked ? "show" : "hide"} ${tag.label}` }); };
+    bar.appendChild(label);
+    apply(id);
+  }
+}
+// Fetch the tag list from main (over IPC, since the sandboxed preload can't
+// require it), then build the filter chips. Log lines already render before
+// this resolves — appendLogLine tolerates a not-yet-known tag.
+if (window.api.logTagsInfo) {
+  window.api.logTagsInfo().then((info) => {
+    if (info && Array.isArray(info.TAG_IDS) && info.TAG_IDS.length) { LOG_TAGS = info; buildLogFilters(); }
+  }).catch(() => {});
+}
+if (el("btn-log-clear")) el("btn-log-clear").onclick = () => { const b = el("activity-log"); if (b) b.textContent = ""; uiLog("click", { id: "btn-log-clear", msg: "cleared the log view" }); };
 
 // --- Full activity trace: log EVERY user action into the same Activity Log ------
 // so you can always see what's going on, no matter what you're doing.
