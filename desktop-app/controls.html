@@ -348,10 +348,23 @@
        internal scroll (the rest of the panels scroll with the whole window). */
     #col-transcript { flex:2 1 0; min-width:0; overflow:auto; min-height:0; }
     #col-log { flex:1 1 0; min-width:0; overflow:auto; min-height:0; }
-    #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11.5px; line-height:1.5; }
-    .log-line { opacity:.85; }
+    #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11.5px; line-height:1.55; flex:1 1 auto; min-height:0; overflow-y:auto; }
+    #col-log { display:flex; flex-direction:column; min-width:0; }
+    .log-line { opacity:.9; display:flex; align-items:baseline; gap:6px; padding:1px 0; }
     .log-line.err { color:#e88; }
-    .log-line .t { opacity:.75; margin-right:4px; }
+    .log-line.err .log-chip { filter:none; }
+    .log-line .t { opacity:.7; flex:0 0 auto; }
+    .log-line .log-msg { min-width:0; word-break:break-word; }
+    /* Tag chip: a small colour-coded label at the head of each line. */
+    .log-chip { flex:0 0 auto; font-family:system-ui,sans-serif; font-size:10px; font-weight:600; letter-spacing:.02em;
+      padding:0 6px; border-radius:9px; line-height:15px; color:#0c120e; text-transform:uppercase; white-space:nowrap; }
+    /* Filter bar: one checkbox chip per tag (checked = visible). */
+    #log-filters { display:flex; flex-wrap:wrap; gap:4px 8px; padding:5px 0 6px; border-bottom:1px solid #242424; margin-bottom:5px; }
+    #log-filters:empty { display:none; }
+    #log-filters label { display:inline-flex; align-items:center; gap:4px; font-size:11px; opacity:.9; cursor:pointer; user-select:none; }
+    #log-filters .swatch { width:9px; height:9px; border-radius:3px; flex:0 0 auto; }
+    #log-filters input { margin:0; }
+    #btn-log-clear { font-size:11px; padding:2px 8px; }
 
     #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
 
@@ -418,6 +431,8 @@
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 Start New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
+          <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
+          <span id="extract-status" style="font-size:11px; opacity:.8;"></span>
         </div>
       </div>
 
@@ -798,23 +813,25 @@
     </div>
 
     <div id="main-row">
-      <div id="col-transcript" class="col">
-        <h2 style="display:flex; align-items:center; gap:6px;">
-          <span>Conversation</span>
-          <span id="database-status" style="font-size:11px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span>
-          <span class="spacer"></span>
-          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Conversation/Log panel" aria-label="Collapse the Conversation/Log panel">⌄</button>
-        </h2>
+      <!-- The one unified log: every event in the program, tagged by type, in a
+           single window. The old separate Conversation transcript is kept in the
+           DOM (hidden) so its formatted turns still feed Copy/Download and tests;
+           the conversation itself now also appears here under the Chat tag. -->
+      <div id="col-transcript" class="col" hidden>
+        <h2><span>Conversation</span><span id="database-status" style="font-size:11px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span></h2>
         <div id="transcript"></div>
       </div>
       <div id="col-log" class="col">
         <h2 style="display:flex; align-items:center; gap:6px;">
-          <span>Activity / Troubleshooting</span>
+          <span>Activity Log</span>
+          <span style="font-size:11px; font-weight:400; opacity:.6; text-transform:none; letter-spacing:0;">— everything the program does, tagged</span>
           <span class="spacer"></span>
-          <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
+          <button id="btn-log-clear" title="Clear the log view (does not touch the saved log file)" aria-label="Clear the log view">Clear view</button>
+          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the log panel" aria-label="Collapse the log panel">⌄</button>
         </h2>
+        <!-- Tag filters: one checkbox per tag, checked = visible. Built in JS. -->
+        <div id="log-filters" title="Check to show a category, uncheck to hide it"></div>
         <div id="activity-log"></div>
-        <div id="extract-status" style="font-size:11px; opacity:.8; margin-top:3px;"></div>
       </div>
     </div>
 

@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld("api", {
   onHouseRuleState: (cb) => ipcRenderer.on("houserule-state", (_e, payload) => cb(payload)),
   onLog: (cb) => ipcRenderer.on("log", (_e, payload) => cb(payload)),
   uiLog: (action, detail) => ipcRenderer.invoke("ui:log", Object.assign({ action }, detail || {})),
+  logTagsInfo: () => ipcRenderer.invoke("logs:tags"),
   modelsInfo: () => ipcRenderer.invoke("models:info"),
   openModelsFolder: (category) => ipcRenderer.invoke("models:open", { category }),
   onLedgerEntry: (cb) => ipcRenderer.on("ledger-entry", (_e, payload) => cb(payload)),

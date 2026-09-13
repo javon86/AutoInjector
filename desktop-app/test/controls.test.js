@@ -112,6 +112,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
+    logTagsInfo: async () => { const lt = require("../log-tags"); return { TAGS: lt.TAGS, TAG_IDS: lt.TAG_IDS }; },
     uiLog: async (action, detail) => { calls.push({ fn: "uiLog", action, detail }); return { ok: true }; },
     onLedgerEntry: (cb) => { api._ledgerCb = cb; },
     onTunerState: (cb) => { tunerStateCb = cb; },
@@ -605,6 +606,38 @@ async function testActivityLogShowsPickAndTestDetail() {
   assert(box.lastChild.className.includes("err"), "an error-kind entry is styled distinctly as an error line");
 }
 
+async function testUnifiedLogTagsAndFilters() {
+  console.log("\n== Unified log: every line is tagged, and the tag checkboxes show/hide categories ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const box = doc.getElementById("activity-log");
+  // The filter bar is built from the tags fetched over IPC (async) — let it settle.
+  await new Promise((r) => setTimeout(r, 20));
+  const filters = doc.getElementById("log-filters");
+  assert(filters && filters.querySelectorAll("label").length === 13, `all 13 tag filters are built (got ${filters ? filters.querySelectorAll("label").length : 0})`);
+  assert(filters.querySelectorAll("input[type=checkbox]").length === 13 && [...filters.querySelectorAll("input")].every((c) => c.checked), "every filter starts checked = visible");
+
+  // A manager event is tagged Manager; a chat send is tagged Chat.
+  api.fireLog({ ts: Date.now(), kind: "manager-decision", tag: "manager", detail: { summary: "picking a plan" } });
+  const mgrLine = box.lastChild;
+  assert(mgrLine.dataset.tag === "manager" && /Manager/.test(mgrLine.querySelector(".log-chip").textContent), "a manager event carries the Manager chip + data-tag");
+  api.fireLog({ ts: Date.now(), kind: "sent", tag: "chat", detail: { target: "claude" } });
+  const chatLine = box.lastChild;
+  assert(chatLine.dataset.tag === "chat" && /Chat/.test(chatLine.querySelector(".log-chip").textContent), "an AI send carries the Chat chip + data-tag");
+  // An unknown/missing tag never crashes — it renders with a neutral fallback chip.
+  api.fireLog({ ts: Date.now(), kind: "totally-new-kind" });
+  assert(box.lastChild && box.lastChild.querySelector(".log-chip"), "an event with no tag still renders (neutral chip), never throws");
+
+  // Unchecking the Manager filter hides manager lines (adds hide-manager); rechecking shows them.
+  const mgrCb = [...filters.querySelectorAll("label")].find((l) => /Manager/.test(l.textContent)).querySelector("input");
+  mgrCb.checked = false; mgrCb.onchange();
+  assert(box.classList.contains("hide-manager"), "unchecking Manager hides that category (hide-manager class applied)");
+  assert(!box.classList.contains("hide-chat"), "other categories stay visible");
+  mgrCb.checked = true; mgrCb.onchange();
+  assert(!box.classList.contains("hide-manager"), "re-checking Manager shows it again");
+}
+
 async function testConnectivityTestButtonFailure() {
   console.log("\n== Connectivity Test: a failure calls out the specific reason and lights the indicator red ==");
   const api = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "REPLY_MISMATCH" } });
@@ -1001,6 +1034,7 @@ async function main() {
   await testConnectivityTestButtonFailure();
   await testConnectivityTestButtonDistinguishesTooBroadAndEcho();
   await testActivityLogShowsPickAndTestDetail();
+  await testUnifiedLogTagsAndFilters();
   await testUserPanelMergedAndNeverCollapses();
   await testMessagesToUserFeed();
   await testCollapsibleYellowPanels();

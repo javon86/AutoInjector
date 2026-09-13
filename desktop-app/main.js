@@ -39,6 +39,7 @@ const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
 const endpointDetect = require("./endpoint-detect");
 const logBundle = require("./log-bundle");
+const logTags = require("./log-tags");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -451,7 +452,9 @@ function pushTranscriptTurn(turn) {
 }
 
 function logEvent(kind, detail) {
-  const entry = { ts: Date.now(), kind, detail };
+  // Every event carries its tag (one of the 13) so the unified log window can
+  // group + show/hide by category. Tagging at the source = nothing untagged.
+  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind) };
   state.log.push(entry);
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
@@ -2795,6 +2798,10 @@ ipcMain.handle("ollama:pull", async (_evt, model) => {
     return r;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
+
+// The 13 log tags (labels + colours) for the renderer's chips + filters. Served
+// over IPC because the sandboxed preload can't require a local module.
+ipcMain.handle("logs:tags", () => ({ TAGS: logTags.TAGS, TAG_IDS: logTags.TAG_IDS }));
 
 // Where does the app store its language models, and where do the ones already
 // downloaded on this machine currently live? Drives the Models panel's "storing
