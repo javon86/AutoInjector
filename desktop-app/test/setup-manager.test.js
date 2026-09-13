@@ -137,6 +137,16 @@ async function main() {
   sm.configure({ execFile: cp.execFile, spawn: cp.spawn });
   sm._resetPython();
 
+  console.log('\n== Windows: find an installed 3.12 via the launcher AND the standard install dirs ==');
+  const winCands = sm._pyCandidates('win32', { LOCALAPPDATA: 'C:\\Users\\javon\\AppData\\Local', ProgramFiles: 'C:\\Program Files' });
+  // Normalize separators so the check holds whether the test host is Windows
+  // (path.join → "\\") or POSIX (path.join → "/").
+  const asStr = winCands.map((c) => `${c.cmd} ${c.pre.join(' ')}`.trim().replace(/\\/g, '/'));
+  assert(asStr.includes('py -3.12'), 'the py launcher (py -3.12) is tried first on Windows');
+  assert(asStr.some((s) => /AppData\/Local\/Programs\/Python\/Python312\/python\.exe$/.test(s)), 'the per-user install dir (…/Programs/Python/Python312/python.exe) is probed directly');
+  assert(asStr.some((s) => /Program Files\/Python312\/python\.exe$/.test(s)), 'the per-machine Program Files/Python312 dir is probed too');
+  assert(asStr.indexOf('py -3.12') < asStr.findIndex((s) => /Python312\/python\.exe/.test(s)), 'the launcher is preferred over a hard-coded path');
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
