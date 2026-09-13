@@ -123,14 +123,27 @@ function pythonBin() {
 const PY_MIN_MINOR = 8;   // 3.8
 const PY_MAX_MINOR = 12;  // 3.12 (inclusive) — has wheels for the pip targets
 
-function _pyCandidates() {
+function _pyCandidates(platform, env) {
+  platform = platform || process.platform;
+  env = env || process.env;
   const list = [];
-  const envPy = process.env.AUTOINJECTOR_PYTHON || process.env.PYTHON;
+  const envPy = env.AUTOINJECTOR_PYTHON || env.PYTHON;
   if (envPy) list.push({ cmd: envPy, pre: [] });
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     // The Windows launcher can select an exact version: `py -3.12 …`.
     for (const v of ['3.12', '3.11', '3.10', '3.9', '3.8']) list.push({ cmd: 'py', pre: [`-${v}`] });
     list.push({ cmd: 'python3.12', pre: [] }, { cmd: 'python3.11', pre: [] }, { cmd: 'python3.10', pre: [] });
+    // Also probe the standard install locations directly, so we still find an
+    // installed 3.12/3.11/3.10 even when the `py` launcher is missing or broken
+    // and python.exe isn't on PATH (a very common Windows setup). Per-user first
+    // (…\AppData\Local\Programs\Python\Python312\python.exe), then per-machine.
+    const roots = [];
+    if (env.LOCALAPPDATA) roots.push(path.join(env.LOCALAPPDATA, 'Programs', 'Python'));
+    if (env.ProgramFiles) roots.push(env.ProgramFiles);
+    if (env['ProgramFiles(x86)']) roots.push(env['ProgramFiles(x86)']);
+    for (const ver of ['312', '311', '310', '39', '38']) {
+      for (const root of roots) list.push({ cmd: path.join(root, `Python${ver}`, 'python.exe'), pre: [] });
+    }
     list.push({ cmd: 'python', pre: [] }, { cmd: 'python3', pre: [] });
   } else {
     for (const v of ['3.12', '3.11', '3.10', '3.9', '3.8']) list.push({ cmd: `python${v}`, pre: [] });
@@ -399,4 +412,4 @@ async function auto(opts = {}) {
   return { ok: okCount > 0, results, installed: okCount, total: results.length };
 }
 
-module.exports = { TARGETS, AUTO_ORDER, configure, pythonBin, resolvePython, pythonStatus, _resetPython, has, get, list, detect, detectAll, install, auto };
+module.exports = { TARGETS, AUTO_ORDER, configure, pythonBin, resolvePython, pythonStatus, _resetPython, _pyCandidates, has, get, list, detect, detectAll, install, auto };
