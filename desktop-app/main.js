@@ -4009,6 +4009,154 @@ async function butlerSelfCheck() {
 }
 ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
 
+// The DEEP capability test: where butlerSelfCheck() only reports what's
+// configured/enabled, this actually EXERCISES each capability once and reports
+// whether the thing genuinely worked -- it really renders a tiny image, makes a
+// short video, runs a line of code, writes+reads a file, remembers+recalls a
+// fact, calls a tool, speaks a phrase, and pings each live AI pane. Anything not
+// set up is reported as "skipped" (⚪), never a failure. Each step is bounded by
+// its own timeout so one dead endpoint can't hang the whole sweep, and every
+// step streams a "capability-test-step" event so the UI fills in live. Same
+// {name, ok, detail} shape as butlerSelfCheck so the panel renders it identically.
+let capabilityTestInFlight = false;
+function _withTimeout(promise, ms, onTimeout) {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(typeof onTimeout === "function" ? onTimeout() : { ok: false, error: "TIMEOUT" }); } }, ms);
+    Promise.resolve(promise).then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+      (e) => { if (!done) { done = true; clearTimeout(t); resolve({ ok: false, error: String((e && e.message) || e) }); } });
+  });
+}
+async function butlerCapabilityTest() {
+  if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
+  capabilityTestInFlight = true;
+  const checks = [];
+  const step = (name, ok, detail) => {
+    const c = { name, ok, detail: detail || "" };
+    checks.push(c);
+    broadcast("capability-test-step", { ...c, index: checks.length });
+    logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), severity: ok === false ? "error" : "info" });
+    return c;
+  };
+  logEvent("capability-test-start", {});
+  try {
+    // 1) Brain — a real round-trip to the configured local model.
+    try {
+      const mc = managerConfigSnapshot();
+      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "no endpoint/model saved yet — set one in the Butler settings");
+      else {
+        const r = await _withTimeout(managerProvider.testConnection(state.managerConfig), 25000);
+        if (r && r.ok) step("Brain (local model)", true, `answered & followed the manager format — ${mc.model}`);
+        else if (r && r.reachable) step("Brain (local model)", false, `reachable but the model didn't follow the format (${r.warning || "bad reply"})`);
+        else step("Brain (local model)", false, `not reachable: ${(r && r.error) || "no answer"}`);
+      }
+    } catch (e) { step("Brain (local model)", false, String(e)); }
+
+    // 2) Run code — actually execute a line via Open Interpreter.
+    try {
+      const s = interpreterProvider.status();
+      if (!s.enabled) step("Run code (Open Interpreter)", null, "not enabled — install via Setup Wizard → Auto-setup");
+      else {
+        const r = await _withTimeout(interpreterProvider.run("Print exactly: CAPTEST-OK", { onEvent: () => {} }), 60000);
+        step("Run code (Open Interpreter)", !!(r && r.ok), r && r.ok ? `ran a line of code (${String(r.message || "").slice(0, 40)})` : `couldn't run: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Run code (Open Interpreter)", false, String(e)); }
+
+    // 3) Open a file — write a real file into the output folder and read it back.
+    let testFileRel = null;
+    try {
+      const marker = `CAPTEST-${Date.now()}`;
+      const dest = outputManager.saveBuffer(outputManager.dir("uploads"), "capability-test.txt", `${marker}\nAutoInjector capability test file.\n`);
+      const back = fs.readFileSync(dest, "utf8");
+      const ok = back.includes(marker);
+      testFileRel = path.relative(outputManager.root(), dest);
+      step("Open a file (read & write)", ok, ok ? `wrote & read back ${path.basename(dest)}` : "wrote a file but couldn't read it back");
+    } catch (e) { step("Open a file (read & write)", false, String(e)); }
+
+    // 4) Tools — actually invoke the built-in read-file tool on that file.
+    try {
+      const tools = toolProvider.list();
+      if (!tools.length) step("Tools (USE_TOOL)", null, "no tools registered");
+      else if (!testFileRel) step("Tools (USE_TOOL)", null, "skipped — no test file to read");
+      else {
+        const r = await _withTimeout(toolProvider.run("read-file", { path: testFileRel }, { onEvent: () => {} }), 10000);
+        step("Tools (USE_TOOL)", !!(r && r.ok), r && r.ok ? `ran read-file (${tools.length} tool(s) available)` : `tool failed: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Tools (USE_TOOL)", false, String(e)); }
+
+    // 5) Memory — remember a marker fact, then recall it.
+    try {
+      const d = dbService.status();
+      if (!d.available) step("Memory (remember & recall)", null, d.reason || "off");
+      else {
+        const marker = `captest recall marker ${Date.now()}`;
+        const cr = dbService.memoryCreate("fact", { statement: marker, source: "capability-test" });
+        const sr = dbService.memorySearch(marker);
+        const found = !!(sr && sr.available && (sr.results || []).some((x) => (x.title || "").includes("captest recall marker")));
+        step("Memory (remember & recall)", !!(cr && cr.ok) && found, (cr && cr.ok) ? (found ? "remembered a fact and recalled it" : "remembered, but recall didn't return it") : `couldn't remember: ${(cr && cr.error) || "failed"}`);
+      }
+    } catch (e) { step("Memory (remember & recall)", false, String(e)); }
+
+    // 6) Image — really render a tiny test image and save it.
+    try {
+      const im = imageProvider.status();
+      if (!im.enabled) step("Image generation", null, im.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
+      }
+    } catch (e) { step("Image generation", false, String(e)); }
+
+    // 7) Video — really make a short test clip and save it.
+    try {
+      const vi = videoProvider.status();
+      if (!vi.enabled) step("Video generation", null, vi.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
+        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && r.error) || "no video"}`);
+      }
+    } catch (e) { step("Video generation", false, String(e)); }
+
+    // 8) Voice — actually speak a short phrase.
+    try {
+      const v = voiceProvider.status();
+      if (!v.enabled) step("Voice (speak)", null, "off");
+      else {
+        const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Voice (speak)", false, String(e)); }
+
+    // 9) Talk to the AIs — a real reverse-a-token ping into each live pane.
+    for (const site of SITE_IDS) {
+      const label = (SITES[site] && SITES[site].label) || site;
+      try {
+        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not enabled as a participant"); continue; }
+        const view = siteViews[site];
+        const url = view ? view.webContents.getURL() : "";
+        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "no page loaded — open/sign in to this AI first"); continue; }
+        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); continue; }
+        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); continue; }
+        const r = await _withTimeout(runConnectivityTest(site), SELFTEST_TIMEOUT_MS + 10000, () => ({ ok: false, error: "TIMEOUT" }));
+        step(`Talk to ${label}`, !!(r && r.ok), r && r.ok ? "sent a message and got the right reply back" : `no good reply: ${(r && (r.error || r.stage)) || "failed"}`);
+      } catch (e) { step(`Talk to ${label}`, false, String(e)); }
+    }
+
+    const okCount = checks.filter((c) => c.ok === true).length;
+    const failCount = checks.filter((c) => c.ok === false).length;
+    logEvent("capability-test-done", { okCount, failCount, total: checks.length });
+    return { ok: true, deep: true, checks, okCount, total: checks.length, failCount };
+  } finally {
+    capabilityTestInFlight = false;
+  }
+}
+ipcMain.handle("butler:capability-test", async () => { try { return await butlerCapabilityTest(); } catch (e) { return { ok: false, error: String(e) }; } });
+
 // Install everything that's missing, keystone-first (Open Interpreter before the
 // rest, so once it's in the butler can drive the remaining installs and CONTROL
 // it via RUN_CODE). Each install auto-wires the capability on success. Progress

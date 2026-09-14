@@ -63,6 +63,7 @@ async function main() {
       ['#lsi-pull-name', 'Pull-any-model field'],
       ['#lsi-approval', 'Approval-mode safeguard toggle'],
       ['#btn-approve', 'Approve-action button'],
+      ['#cb-deep-check', 'Deep capability-test toggle'],
       ['#btn-open-models', 'Open-models-folder button'],
       ['#btn-ollama-migrate', 'Move-downloaded-models button'],
       ['#models-store-status', 'LLM storage status line'],

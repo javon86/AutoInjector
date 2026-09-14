@@ -146,6 +146,18 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
     gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
     butlerSelfCheck: async () => { calls.push({ fn: "butlerSelfCheck" }); return { ok: true, okCount: 2, total: 3, checks: [{ name: "Brain (local model)", ok: true, detail: "llama3.1:8b" }, { name: "Voice (speak & listen)", ok: null, detail: "off" }, { name: "Tools (USE_TOOL)", ok: true, detail: "2: http-fetch, read-file" }], installs: [{ id: "open-interpreter", label: "Open Interpreter", installed: false, kind: "pip", installable: true }, { id: "voice", label: "Voice engine", installed: true, kind: "pip", installable: true }], missing: ["open-interpreter"], canInstall: true }; },
+    butlerCapabilityTest: async () => {
+      calls.push({ fn: "butlerCapabilityTest" });
+      const checks = [
+        { name: "Run code (Open Interpreter)", ok: true, detail: "ran a line" },
+        { name: "Image generation", ok: true, detail: "rendered captest.png" },
+        { name: "Video generation", ok: false, detail: "couldn't make one: TIMEOUT" },
+        { name: "Talk to ChatGPT", ok: null, detail: "no page loaded" },
+      ];
+      if (api._capStepCb) for (const c of checks) api._capStepCb(c); // stream them like the real IPC
+      return { ok: true, deep: true, checks, okCount: 2, failCount: 1, total: checks.length };
+    },
+    onCapabilityTestStep: (cb) => { api._capStepCb = cb; },
     butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
     butlerInstallMissing: async () => { calls.push({ fn: "butlerInstallMissing" }); return { ok: true, missing: ["open-interpreter"], installed: 1, results: [{ target: "open-interpreter", ok: true }] }; },
     onVoiceSpeaking: (cb) => { api._voiceSpeakingCb = cb; },
@@ -1075,11 +1087,36 @@ async function main() {
 
   await testExtractAllButton();
   await testButlerPanelWired();
+  await testDeepCapabilityCheck();
   await testCapabilityPanelsWired();
   await testActivityLogCapturesEverything();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testDeepCapabilityCheck() {
+  console.log("\n== System Check: the 'actually run each capability' toggle runs the deep test and streams live results ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  // Default (unchecked): System Check does the quick readiness check.
+  assert(doc.getElementById("cb-deep-check"), "the 'actually run each capability' toggle is present");
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSelfCheck") && !api.calls.some((c) => c.fn === "butlerCapabilityTest"), "unchecked → the quick readiness check runs, not the deep test");
+
+  // Checked: the same button runs the deep capability test instead.
+  doc.getElementById("cb-deep-check").checked = true;
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 30));
+  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "checked → the deep capability test runs");
+  const box = doc.getElementById("selfcheck-results");
+  // Each streamed step rendered a row with its pass/fail/skip mark.
+  assert(/Run code/.test(box.textContent) && /Image generation/.test(box.textContent) && /Talk to ChatGPT/.test(box.textContent), "the streamed per-capability rows are rendered live");
+  assert(/✅/.test(box.textContent) && /❌/.test(box.textContent) && /⚪/.test(box.textContent), "results show passes, a failure, and a skip distinctly");
+  assert(/2\/4 worked/.test(box.textContent) && /1 failed/.test(box.textContent), "the header summarises how many actually worked vs failed");
 }
 
 async function testActivityLogCapturesEverything() {
