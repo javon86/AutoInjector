@@ -4034,8 +4034,10 @@ async function butlerCapabilityTest() {
   const step = (name, ok, detail) => {
     const c = { name, ok, detail: detail || "" };
     checks.push(c);
-    broadcast("capability-test-step", { ...c, index: checks.length });
-    logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), severity: ok === false ? "error" : "info" });
+    // Each step goes straight to the one Activity Log (via the normal log
+    // broadcast) with a ready-to-read summary — no separate side panel.
+    const mark = ok === true ? "✅" : ok === false ? "❌" : "⚪";
+    logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), summary: `${mark} ${name}${detail ? " — " + detail : ""}`, severity: ok === false ? "error" : "info" });
     return c;
   };
   logEvent("capability-test-start", {});

@@ -154,10 +154,10 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
         { name: "Video generation", ok: false, detail: "couldn't make one: TIMEOUT" },
         { name: "Talk to ChatGPT", ok: null, detail: "no page loaded" },
       ];
-      if (api._capStepCb) for (const c of checks) api._capStepCb(c); // stream them like the real IPC
+      // In the real app each step streams to the center Activity Log via main's
+      // log broadcast; here the renderer just logs a start/finish summary.
       return { ok: true, deep: true, checks, okCount: 2, failCount: 1, total: checks.length };
     },
-    onCapabilityTestStep: (cb) => { api._capStepCb = cb; },
     butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
     butlerInstallMissing: async () => { calls.push({ fn: "butlerInstallMissing" }); return { ok: true, missing: ["open-interpreter"], installed: 1, results: [{ target: "open-interpreter", ok: true }] }; },
     onVoiceSpeaking: (cb) => { api._voiceSpeakingCb = cb; },
@@ -1096,27 +1096,35 @@ async function main() {
 }
 
 async function testDeepCapabilityCheck() {
-  console.log("\n== System Check: the 'actually run each capability' toggle runs the deep test and streams live results ==");
+  console.log("\n== System Check + User Panel: capability test runs and reports into the ONE Activity Log ==");
   const api = makeApi();
   const dom = await loadWindow(api);
   const doc = dom.window.document;
+  const log = doc.getElementById("activity-log");
+  // The old #selfcheck-results side box is gone — everything goes to the center log.
+  assert(!doc.getElementById("selfcheck-results"), "the old System Check side box is gone (consolidated into the Activity Log)");
 
-  // Default (unchecked): System Check does the quick readiness check.
+  // Default (unchecked): System Check does the quick readiness check → center log.
   assert(doc.getElementById("cb-deep-check"), "the 'actually run each capability' toggle is present");
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "butlerSelfCheck") && !api.calls.some((c) => c.fn === "butlerCapabilityTest"), "unchecked → the quick readiness check runs, not the deep test");
+  assert(/System check — 2\/3/.test(log.textContent) && /Brain \(local model\)/.test(log.textContent), "the quick check's results land in the center Activity Log");
 
-  // Checked: the same button runs the deep capability test instead.
+  // The User Panel button runs the deep capability test (results → center log).
+  assert(doc.getElementById("btn-capability-test"), "the User Panel has a 🧪 Capability Test button");
+  click(dom, "btn-capability-test");
+  await new Promise((r) => setTimeout(r, 30));
+  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "the User Panel button runs the deep capability test");
+  assert(/Capability test started/.test(log.textContent) && /Capability test done — 2\/4 worked, 1 failed/.test(log.textContent),
+    "the capability test's start + summary land in the center Activity Log");
+
+  // The Butler-bar System Check, with the toggle checked, runs the same deep test.
   doc.getElementById("cb-deep-check").checked = true;
+  const before = api.calls.filter((c) => c.fn === "butlerCapabilityTest").length;
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 30));
-  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "checked → the deep capability test runs");
-  const box = doc.getElementById("selfcheck-results");
-  // Each streamed step rendered a row with its pass/fail/skip mark.
-  assert(/Run code/.test(box.textContent) && /Image generation/.test(box.textContent) && /Talk to ChatGPT/.test(box.textContent), "the streamed per-capability rows are rendered live");
-  assert(/✅/.test(box.textContent) && /❌/.test(box.textContent) && /⚪/.test(box.textContent), "results show passes, a failure, and a skip distinctly");
-  assert(/2\/4 worked/.test(box.textContent) && /1 failed/.test(box.textContent), "the header summarises how many actually worked vs failed");
+  assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
 }
 
 async function testActivityLogCapturesEverything() {
@@ -1160,16 +1168,17 @@ async function testActivityLogCapturesEverything() {
   // Language-model storage: the store-status line reflects the app's own Ollama,
   // and the migrate button moves already-downloaded models into the folder.
   assert(/New downloads are stored in this folder/.test(doc.getElementById("models-store-status").textContent), "the panel checks storage and confirms new downloads land in 'stuff and thing' when the app's Ollama is running");
+  const log = doc.getElementById("activity-log");
   click(dom, "btn-ollama-migrate");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "ollamaMigrate"), "the 'Move downloaded models here' button runs the migration");
-  assert(/3 moved/.test(doc.getElementById("ollama-migrate-status").textContent), "the migration result (moved/skipped) is reported back");
+  assert(/3 moved/.test(log.textContent), "the migration result (moved/skipped) is reported into the Activity Log");
 
-  // Download all logs: one click bundles every log and reports the folder.
+  // Download all logs: one click bundles every log and reports the folder — to the log.
   click(dom, "btn-download-logs");
   await new Promise((r) => setTimeout(r, 10));
   assert(api.calls.some((c) => c.fn === "downloadAllLogs"), "the 'Download all logs' button gathers every log");
-  assert(/7 file\(s\) bundled/.test(doc.getElementById("download-logs-status").textContent) && /logs\//.test(doc.getElementById("download-logs-status").textContent), "it reports how many files were bundled and where");
+  assert(/7 file\(s\) bundled/.test(log.textContent) && /logs\//.test(log.textContent), "it reports how many files were bundled and where — in the Activity Log");
 
   // The "Stop AIs Talking" button halts all relay.
   assert(doc.getElementById("btn-silence"), "the Stop-AIs-Talking button is present");
@@ -1370,14 +1379,14 @@ async function testCapabilityPanelsWired() {
   assert(!!doc.getElementById("col-device") && !!doc.getElementById("btn-selfcheck") && !!doc.getElementById("btn-send-intro"), "the Butler Device panel with System Check + Send Intro is present");
   // The composer starts empty (no auto-prompt pre-filled).
   assert(doc.getElementById("composer-text").value.trim() === "", "the composer starts empty — no initial prompt is pre-filled");
-  // System Check reports each capability with a working/off/failed mark.
+  // System Check reports each capability into the center Activity Log now.
+  const log = doc.getElementById("activity-log");
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "butlerSelfCheck"), "System Check asks the butler to test what he can do");
-  const scText = doc.getElementById("selfcheck-results").textContent;
-  assert(/Working: 2\/3/.test(scText) && /Brain \(local model\)/.test(scText) && /Voice/.test(scText), "the System Check lists each capability and how many are working");
+  assert(/System check — 2\/3/.test(log.textContent) && /Brain \(local model\)/.test(log.textContent) && /Voice/.test(log.textContent), "the System Check lists each capability and how many are working — in the Activity Log");
   // Detailed install status: what's installed vs not.
-  assert(/Open Interpreter/.test(scText) && /not installed/.test(scText) && /installed/.test(scText), "the check shows a detailed installed / not-installed status per dependency");
+  assert(/Open Interpreter/.test(log.textContent) && /not installed/.test(log.textContent) && /installed/.test(log.textContent), "the check shows a detailed installed / not-installed status per dependency");
   // Install Missing installs what's not there (Open Interpreter first).
   click(dom, "btn-install-missing");
   await new Promise((r) => setTimeout(r, 20));
@@ -1386,7 +1395,7 @@ async function testCapabilityPanelsWired() {
   click(dom, "btn-send-intro");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "butlerSendIntro"), "Send Intro tells the language models who the butler is and how it works");
-  assert(/Intro sent to: chatgpt, claude, gemini/.test(doc.getElementById("intro-msg").textContent), "the intro reports which AIs were told");
+  assert(/Intro sent to: chatgpt, claude, gemini/.test(log.textContent), "the intro reports which AIs were told — in the Activity Log");
   // The 🔊 speak toggle routes the summary through the voice engine.
   doc.getElementById("device-speak").checked = true;
   click(dom, "btn-selfcheck");
