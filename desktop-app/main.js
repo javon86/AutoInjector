@@ -310,6 +310,7 @@ function resetManagerTask() {
     startedTs: null,
     finishedTs: null,
     noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
+    thinkingStreak: 0, // consecutive "thinking" (PLAN/WAIT/CLASSIFY/…) turns with no real progress, used by detectManagerStall()
     pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
   };
 }
@@ -454,7 +455,15 @@ function pushTranscriptTurn(turn) {
 function logEvent(kind, detail) {
   // Every event carries its tag (one of the 13) so the unified log window can
   // group + show/hide by category. Tagging at the source = nothing untagged.
-  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind) };
+  // It also carries a severity level ("error"/"warning"/"info") so the log's
+  // "⚠ Errors only" toggle has a real signal to filter on: an explicit
+  // severity in the detail wins (manager events pass their own through), else
+  // it's inferred from the kind so plain logEvent("…-error") lines still count.
+  const sev = detail && typeof detail === "object" ? detail.severity : null;
+  const level = (sev === "error" || sev === "warn" || sev === "warning")
+    ? (sev === "warn" ? "warning" : sev)
+    : (/(?:error|fail|exceeded|timeout|giveup|reject|stalled|unreachable)/i.test(kind) ? "error" : "info");
+  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind), level };
   state.log.push(entry);
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
@@ -532,7 +541,7 @@ function logManagerEvent({ category, severity, action, target, summary, details,
     broadcast("manager-log", entry);
   }
   if (visibleInGlobalLog) {
-    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails });
+    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails, severity: entry.severity });
   } else if (visibleInManagerLog) {
     appendDebugLog(entry); // still worth a debug-log trace even when it's not going in the global Activity Log
   }
@@ -1843,6 +1852,20 @@ async function runManagerTurn() {
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 
+  // Stall-break bookkeeping: a pure "thinking" decision bumps the streak; any
+  // decision with a real effect (delegating, running code, a tool, memory,
+  // setup, image, save, finish, escalate) resets it. When the streak crosses
+  // the limit the butler is looping without progress -- stop and ask the user
+  // instead of grinding on to MAX_TURNS_EXCEEDED. A satisfied VALIDATE / a
+  // FINISH ends the task in executeManagerAction() anyway, so the reset here is
+  // just belt-and-braces for the paths that keep the task alive.
+  if (MANAGER_THINKING_ACTIONS.has(decision.action)) {
+    m.thinkingStreak++;
+    if (detectManagerStall()) { await breakManagerStall(decision); return; }
+  } else {
+    m.thinkingStreak = 0;
+  }
+
   // Approval gate: the whole-task approval mode, OR a per-tool "ask" risk tier —
   // a risk:"ask" tool (e.g. http-fetch) is held for the operator even when global
   // approval mode is off, so an LLM-chosen side effect never fires unattended.
@@ -1858,6 +1881,24 @@ async function runManagerTurn() {
 }
 
 const MANAGER_DELEGATING_ACTIONS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+
+// Stall-break: "thinking" actions are the ones that loop straight back into
+// runManagerTurn() without any external effect -- no pane delegated to, no code
+// run, no file written, no memory touched. A healthy task passes through a few
+// of these (CLASSIFY -> PLAN -> ...) and then does something real, which resets
+// the streak. But when the butler is missing information it can't get on its
+// own (the real bug: ~20 turns of PLAN/WAIT/CLASSIFY all saying "user hasn't
+// provided the case details yet"), it spins on these until MAX_TURNS_EXCEEDED.
+// detectManagerStall() catches that run and breakManagerStall() turns it into a
+// question for the user instead of a silent death. VALIDATE is included because
+// an unsatisfied VALIDATE also just loops; a satisfied one finishes the task
+// before the streak is ever checked, so it never counts against this.
+const MANAGER_THINKING_ACTIONS = new Set(["CLASSIFY", "PLAN", "WAIT", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE"]);
+const MANAGER_STALL_LIMIT = Number(process.env.AUTOINJECTOR_MANAGER_STALL_LIMIT) || 5;
+
+function detectManagerStall() {
+  return state.manager.thinkingStreak >= MANAGER_STALL_LIMIT;
+}
 
 async function executeManagerAction(decision) {
   const m = state.manager;
@@ -2105,6 +2146,7 @@ async function handleManagerCapture(turn) {
   if (m.pendingModels.length === 0) {
     m.status = "reviewing";
     m.noProgressStreak = 0;
+    m.thinkingStreak = 0; // a pane answered -- real progress, so the stall counter starts fresh
     if (m.currentTier > (state.managerConfig.tier || 2)) {
       m.currentTier -= 1; // de-escalate back toward the configured baseline now that things are progressing again
       logManagerEvent({ category: "escalation", summary: `De-escalating to tier ${m.currentTier} now that a response landed` });
@@ -2195,6 +2237,26 @@ async function finishManagedTask({ ok, reason }) {
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
   speakIfEnabled(ok ? "Done." : `Stopped: ${reason || "unknown"}`); // N2
   broadcastManagerState();
+}
+
+// The stall-break itself: instead of dying quietly on MAX_TURNS_EXCEEDED after
+// ~20 no-progress "thinking" turns, the butler tells the user it's stuck and
+// asks for what it needs, then parks the task as NEEDS_INPUT so a fresh request
+// (with the missing detail) can start cleanly. The question is derived from the
+// last decision's own reason -- that's where the model already said WHY it
+// couldn't proceed ("user hasn't provided the case details yet"), so we surface
+// that verbatim rather than guessing. Surfaced three ways: the manager-ack line
+// the UI shows above the chat, the manager log, and voice.
+async function breakManagerStall(lastDecision) {
+  const m = state.manager;
+  const why = String((lastDecision && lastDecision.reason) || "").replace(/\s+/g, " ").trim();
+  const ask = why
+    ? `I've gone ${m.thinkingStreak} turns without making progress — I think I'm missing something. ${why.replace(/^i\b/i, "I")} Could you tell me what you'd like me to do, or give me the detail I'm waiting on?`
+    : `I've gone ${m.thinkingStreak} turns without making progress and I think I'm stuck. Could you tell me what you'd like me to do next, or give me any detail I'm waiting on?`;
+  logManagerEvent({ category: "response", severity: "warning", summary: ask, details: { thinkingStreak: m.thinkingStreak, lastAction: lastDecision && lastDecision.action, reason: why || null } });
+  broadcast("manager-ack", { taskId: m.taskId, text: ask, ts: Date.now() });
+  speakAs("butler", ask); // say it out loud regardless of the speak-on-ack setting -- this is a direct question to the user
+  await finishManagedTask({ ok: false, reason: "NEEDS_INPUT" });
 }
 
 function stopManagedTask() {
@@ -3946,6 +4008,154 @@ async function butlerSelfCheck() {
   return { ok: true, checks, okCount, total: checks.length, installs, missing, canInstall: missing.length > 0 };
 }
 ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
+
+// The DEEP capability test: where butlerSelfCheck() only reports what's
+// configured/enabled, this actually EXERCISES each capability once and reports
+// whether the thing genuinely worked -- it really renders a tiny image, makes a
+// short video, runs a line of code, writes+reads a file, remembers+recalls a
+// fact, calls a tool, speaks a phrase, and pings each live AI pane. Anything not
+// set up is reported as "skipped" (⚪), never a failure. Each step is bounded by
+// its own timeout so one dead endpoint can't hang the whole sweep, and every
+// step streams a "capability-test-step" event so the UI fills in live. Same
+// {name, ok, detail} shape as butlerSelfCheck so the panel renders it identically.
+let capabilityTestInFlight = false;
+function _withTimeout(promise, ms, onTimeout) {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(typeof onTimeout === "function" ? onTimeout() : { ok: false, error: "TIMEOUT" }); } }, ms);
+    Promise.resolve(promise).then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+      (e) => { if (!done) { done = true; clearTimeout(t); resolve({ ok: false, error: String((e && e.message) || e) }); } });
+  });
+}
+async function butlerCapabilityTest() {
+  if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
+  capabilityTestInFlight = true;
+  const checks = [];
+  const step = (name, ok, detail) => {
+    const c = { name, ok, detail: detail || "" };
+    checks.push(c);
+    broadcast("capability-test-step", { ...c, index: checks.length });
+    logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), severity: ok === false ? "error" : "info" });
+    return c;
+  };
+  logEvent("capability-test-start", {});
+  try {
+    // 1) Brain — a real round-trip to the configured local model.
+    try {
+      const mc = managerConfigSnapshot();
+      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "no endpoint/model saved yet — set one in the Butler settings");
+      else {
+        const r = await _withTimeout(managerProvider.testConnection(state.managerConfig), 25000);
+        if (r && r.ok) step("Brain (local model)", true, `answered & followed the manager format — ${mc.model}`);
+        else if (r && r.reachable) step("Brain (local model)", false, `reachable but the model didn't follow the format (${r.warning || "bad reply"})`);
+        else step("Brain (local model)", false, `not reachable: ${(r && r.error) || "no answer"}`);
+      }
+    } catch (e) { step("Brain (local model)", false, String(e)); }
+
+    // 2) Run code — actually execute a line via Open Interpreter.
+    try {
+      const s = interpreterProvider.status();
+      if (!s.enabled) step("Run code (Open Interpreter)", null, "not enabled — install via Setup Wizard → Auto-setup");
+      else {
+        const r = await _withTimeout(interpreterProvider.run("Print exactly: CAPTEST-OK", { onEvent: () => {} }), 60000);
+        step("Run code (Open Interpreter)", !!(r && r.ok), r && r.ok ? `ran a line of code (${String(r.message || "").slice(0, 40)})` : `couldn't run: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Run code (Open Interpreter)", false, String(e)); }
+
+    // 3) Open a file — write a real file into the output folder and read it back.
+    let testFileRel = null;
+    try {
+      const marker = `CAPTEST-${Date.now()}`;
+      const dest = outputManager.saveBuffer(outputManager.dir("uploads"), "capability-test.txt", `${marker}\nAutoInjector capability test file.\n`);
+      const back = fs.readFileSync(dest, "utf8");
+      const ok = back.includes(marker);
+      testFileRel = path.relative(outputManager.root(), dest);
+      step("Open a file (read & write)", ok, ok ? `wrote & read back ${path.basename(dest)}` : "wrote a file but couldn't read it back");
+    } catch (e) { step("Open a file (read & write)", false, String(e)); }
+
+    // 4) Tools — actually invoke the built-in read-file tool on that file.
+    try {
+      const tools = toolProvider.list();
+      if (!tools.length) step("Tools (USE_TOOL)", null, "no tools registered");
+      else if (!testFileRel) step("Tools (USE_TOOL)", null, "skipped — no test file to read");
+      else {
+        const r = await _withTimeout(toolProvider.run("read-file", { path: testFileRel }, { onEvent: () => {} }), 10000);
+        step("Tools (USE_TOOL)", !!(r && r.ok), r && r.ok ? `ran read-file (${tools.length} tool(s) available)` : `tool failed: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Tools (USE_TOOL)", false, String(e)); }
+
+    // 5) Memory — remember a marker fact, then recall it.
+    try {
+      const d = dbService.status();
+      if (!d.available) step("Memory (remember & recall)", null, d.reason || "off");
+      else {
+        const marker = `captest recall marker ${Date.now()}`;
+        const cr = dbService.memoryCreate("fact", { statement: marker, source: "capability-test" });
+        const sr = dbService.memorySearch(marker);
+        const found = !!(sr && sr.available && (sr.results || []).some((x) => (x.title || "").includes("captest recall marker")));
+        step("Memory (remember & recall)", !!(cr && cr.ok) && found, (cr && cr.ok) ? (found ? "remembered a fact and recalled it" : "remembered, but recall didn't return it") : `couldn't remember: ${(cr && cr.error) || "failed"}`);
+      }
+    } catch (e) { step("Memory (remember & recall)", false, String(e)); }
+
+    // 6) Image — really render a tiny test image and save it.
+    try {
+      const im = imageProvider.status();
+      if (!im.enabled) step("Image generation", null, im.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
+      }
+    } catch (e) { step("Image generation", false, String(e)); }
+
+    // 7) Video — really make a short test clip and save it.
+    try {
+      const vi = videoProvider.status();
+      if (!vi.enabled) step("Video generation", null, vi.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
+        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && r.error) || "no video"}`);
+      }
+    } catch (e) { step("Video generation", false, String(e)); }
+
+    // 8) Voice — actually speak a short phrase.
+    try {
+      const v = voiceProvider.status();
+      if (!v.enabled) step("Voice (speak)", null, "off");
+      else {
+        const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Voice (speak)", false, String(e)); }
+
+    // 9) Talk to the AIs — a real reverse-a-token ping into each live pane.
+    for (const site of SITE_IDS) {
+      const label = (SITES[site] && SITES[site].label) || site;
+      try {
+        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not enabled as a participant"); continue; }
+        const view = siteViews[site];
+        const url = view ? view.webContents.getURL() : "";
+        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "no page loaded — open/sign in to this AI first"); continue; }
+        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); continue; }
+        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); continue; }
+        const r = await _withTimeout(runConnectivityTest(site), SELFTEST_TIMEOUT_MS + 10000, () => ({ ok: false, error: "TIMEOUT" }));
+        step(`Talk to ${label}`, !!(r && r.ok), r && r.ok ? "sent a message and got the right reply back" : `no good reply: ${(r && (r.error || r.stage)) || "failed"}`);
+      } catch (e) { step(`Talk to ${label}`, false, String(e)); }
+    }
+
+    const okCount = checks.filter((c) => c.ok === true).length;
+    const failCount = checks.filter((c) => c.ok === false).length;
+    logEvent("capability-test-done", { okCount, failCount, total: checks.length });
+    return { ok: true, deep: true, checks, okCount, total: checks.length, failCount };
+  } finally {
+    capabilityTestInFlight = false;
+  }
+}
+ipcMain.handle("butler:capability-test", async () => { try { return await butlerCapabilityTest(); } catch (e) { return { ok: false, error: String(e) }; } });
 
 // Install everything that's missing, keystone-first (Open Interpreter before the
 // rest, so once it's in the butler can drive the remaining installs and CONTROL

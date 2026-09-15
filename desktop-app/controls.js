@@ -965,14 +965,18 @@ let LOG_TAGS = { TAGS: {}, TAG_IDS: [] };
 // Add one log line to the unified window, with its colour-coded tag chip. Works
 // for both real events (kind+detail) and injected chat lines ({tag, text}), and
 // never throws on an unknown/missing tag (falls back to a neutral chip).
-function appendLogLine({ ts, tag, text, err }) {
+function appendLogLine({ ts, tag, text, err, level }) {
   const box = el("activity-log");
   if (!box) return;
   const id = tag || "system";
   const meta = LOG_TAGS.TAGS[id] || { label: id, color: "#8a94a6" };
+  // Level drives the "⚠ Errors only" view: error/warning stay, everything else
+  // is hidden when it's on. `err` (error only) still drives the red styling.
+  const lvl = level || (err ? "error" : "info");
   const line = document.createElement("div");
-  line.className = `log-line${err ? " err" : ""}`;
+  line.className = `log-line${lvl === "error" ? " err" : ""}${lvl === "warning" ? " warn" : ""}`;
   line.dataset.tag = id;
+  line.dataset.level = lvl;
   const chip = document.createElement("span");
   chip.className = "log-chip";
   chip.textContent = meta.label;
@@ -990,7 +994,8 @@ function appendLogLine({ ts, tag, text, err }) {
 }
 
 function appendLog(entry) {
-  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: String(entry.kind || "").includes("error") });
+  const level = entry.level || (String(entry.kind || "").includes("error") ? "error" : "info");
+  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: level === "error", level });
 }
 
 // The conversation itself, folded into the one log under the Chat tag, so the
@@ -1079,6 +1084,24 @@ if (window.api.logTagsInfo) {
   }).catch(() => {});
 }
 if (el("btn-log-clear")) el("btn-log-clear").onclick = () => { const b = el("activity-log"); if (b) b.textContent = ""; uiLog("click", { id: "btn-log-clear", msg: "cleared the log view" }); };
+
+// "⚠ Errors only": a cross-cutting filter on top of the per-tag checkboxes —
+// when on, only error/warning lines show, whatever their tag. Remembered per
+// viewer (localStorage), same as the tag filters.
+(function initErrorsOnly() {
+  const cb = el("cb-errors-only");
+  const box = el("activity-log");
+  if (!cb || !box) return;
+  let on = false;
+  try { on = localStorage.getItem("logErrorsOnly") === "1"; } catch (_) {}
+  cb.checked = on;
+  box.classList.toggle("errors-only", on);
+  cb.onchange = () => {
+    box.classList.toggle("errors-only", cb.checked);
+    try { localStorage.setItem("logErrorsOnly", cb.checked ? "1" : "0"); } catch (_) {}
+    uiLog("click", { id: "cb-errors-only", msg: `errors-only ${cb.checked ? "on" : "off"}` });
+  };
+})();
 
 // --- Full activity trace: log EVERY user action into the same Activity Log ------
 // so you can always see what's going on, no matter what you're doing.
@@ -1204,8 +1227,57 @@ if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYello
 function deviceSpeak(text) {
   if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
 }
+// One shared row renderer so the quick check and the deep test look identical.
+function selfCheckRow(c) {
+  const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
+  row.innerHTML = `<span>${mark}</span><span style="flex:0 0 auto; font-weight:500;">${gpuEsc(c.name)}</span><span style="opacity:.65; word-break:break-all;">${gpuEsc(c.detail || "")}</span>`;
+  return row;
+}
+
+// Live streaming for the deep capability test: each step the butler actually
+// performs appends a row as it finishes, so a long sweep (a real image/video
+// render, live AI pings) fills in visibly instead of freezing on "Checking…".
+let deepCheckActive = false;
+if (window.api.onCapabilityTestStep) window.api.onCapabilityTestStep((c) => {
+  if (!deepCheckActive) return;
+  const list = el("deep-check-list");
+  if (list) list.appendChild(selfCheckRow(c));
+});
+
 if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
   const box = el("selfcheck-results");
+  const deep = !!(el("cb-deep-check") && el("cb-deep-check").checked);
+
+  // Deep mode: actually exercise every capability once, streaming each result.
+  if (deep) {
+    if (!window.api.butlerCapabilityTest) { if (box) box.textContent = "Capability test unavailable."; return; }
+    const btn = el("btn-selfcheck"); const prevLabel = btn.textContent;
+    btn.disabled = true; btn.textContent = "🧪 Running…";
+    if (box) {
+      box.innerHTML = "";
+      const head = document.createElement("div");
+      head.id = "deep-check-head";
+      head.style.cssText = "font-weight:600; margin-bottom:3px;";
+      head.textContent = "Running full capability test — really rendering a test image/video, running code, and pinging your AIs…";
+      const list = document.createElement("div"); list.id = "deep-check-list";
+      box.appendChild(head); box.appendChild(list);
+    }
+    deepCheckActive = true;
+    let r; try { r = await window.api.butlerCapabilityTest(); } catch (e) { r = { ok: false, error: String(e) }; }
+    deepCheckActive = false;
+    btn.disabled = false; btn.textContent = prevLabel;
+    const head = el("deep-check-head");
+    if (!r || !r.ok) { if (head) head.textContent = `Capability test failed: ${(r && r.error) || "error"}`; return; }
+    if (head) head.textContent = `Capability test — ${r.okCount}/${r.total} worked${r.failCount ? `, ${r.failCount} failed` : ""} (⚪ = not set up)`;
+    // The list already streamed in; if any step was missed (no stream), backfill.
+    const list = el("deep-check-list");
+    if (list && !list.children.length && Array.isArray(r.checks)) for (const c of r.checks) list.appendChild(selfCheckRow(c));
+    deviceSpeak(`Capability test: ${r.okCount} of ${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} failed` : ""}.`);
+    return;
+  }
+
   if (!window.api.butlerSelfCheck) { if (box) box.textContent = "System check unavailable."; return; }
   if (box) box.textContent = "Checking…";
   let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
@@ -1216,13 +1288,7 @@ if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
     head.style.cssText = "font-weight:600; margin-bottom:3px;";
     head.textContent = `Working: ${r.okCount}/${r.total}`;
     box.appendChild(head);
-    for (const c of r.checks) {
-      const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
-      const row = document.createElement("div");
-      row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
-      row.innerHTML = `<span>${mark}</span><span style="flex:0 0 auto; font-weight:500;">${gpuEsc(c.name)}</span><span style="opacity:.65; word-break:break-all;">${gpuEsc(c.detail || "")}</span>`;
-      box.appendChild(row);
-    }
+    for (const c of r.checks) box.appendChild(selfCheckRow(c));
     // Detailed install status: what's installed vs not, and what he can install.
     if (Array.isArray(r.installs) && r.installs.length) {
       const h2 = document.createElement("div");

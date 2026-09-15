@@ -1451,6 +1451,30 @@ async function testManagerValidationEscalationAndMaxTurns() {
   assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "an invalid target never results in an actual send to anyone");
 }
 
+async function testManagerStallBreak() {
+  console.log("\n== Manager: a no-progress 'thinking' loop stops and asks the user instead of grinding to MAX_TURNS ==");
+  await resetManagerState();
+  // A generous turn cap on purpose: this proves the STALL detector ended the
+  // task, not the maximumTurns cap. This is the real user bug -- ~20 turns of
+  // PLAN/WAIT/CLASSIFY, all "user hasn't provided the case details yet", that
+  // used to die on MAX_TURNS_EXCEEDED with nothing asked of the user.
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  queueManagerDecisionRepeating({ action: "PLAN", plan: ["wait for the details"], reason: "user hasn't provided the case details yet", confidence: 0.5 });
+
+  const startRes = await call("manager:start-task", { userRequest: "Handle my thing." });
+  assert(startRes.ok, "the task starts");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the no-progress loop ends the task rather than spinning forever" });
+  const s = await call("state:get", {});
+  const taskId = s.manager.taskId;
+  const mine = s.managerLog.filter((l) => l.taskId === taskId); // scope to THIS task -- managerLog carries entries from earlier tests too
+  assert(mine.some((l) => l.summary.includes("NEEDS_INPUT")), "the task ends with NEEDS_INPUT (the butler is stuck waiting on the user)");
+  assert(!mine.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), "it broke on the stall detector, NOT by exhausting the 20-turn cap");
+  assert(s.manager.turnNumber < 20, `it stopped early (turn ${s.manager.turnNumber}), well before the turn cap`);
+  const question = mine.find((l) => l.category === "response" && /provided the case details/.test(l.summary));
+  assert(question, "the butler surfaced a real question to the user, echoing WHY it was stuck (from its own last reason)");
+}
+
 async function testManagerEscalateActionAndTierFourAdjudication() {
   console.log("\n== Manager: an explicit ESCALATE action jumps straight to the requested tier, Tier 4 routes to a real AI pane instead of the configured provider, and it de-escalates back down afterward ==");
   await resetManagerState();
@@ -2285,6 +2309,79 @@ async function testButlerDevice() {
   }
 }
 
+// The DEEP capability test (System Check → "Actually run each capability"):
+// unlike the readiness check, this really EXERCISES each capability once. We stub
+// each provider's status() to "on" and its action to succeed, then prove the
+// sweep genuinely drove every one (ran code, called a tool, remembered+recalled,
+// rendered an image, made a video, spoke) and returned a per-capability verdict —
+// with the live AI-pane pings reported as skipped (no real panes in the harness),
+// never a hard failure.
+async function testButlerCapabilityTest() {
+  console.log("\n== Butler capability test: actually exercises every capability and reports what really worked ==");
+  await resetAllParticipants();
+  const videoProvider = require(path.join(__dirname, "..", "video-provider"));
+  const voiceProvider = require(path.join(__dirname, "..", "voice-provider"));
+  const saved = {
+    iStatus: interpreterProvider.status, iRun: interpreterProvider.run,
+    dStatus: dbService.status,
+    imStatus: imageProvider.status,
+    viStatus: videoProvider.status, viGen: videoProvider.generate,
+    voStatus: voiceProvider.status, voSpeak: voiceProvider.speak,
+    oRoot: outputManager.root, oDir: outputManager.dir, oSave: outputManager.saveBuffer,
+    oImg: outputManager.imagesDir, oVid: outputManager.videosDir,
+  };
+  const videoGenCalls = [], voiceSpeakCalls = [];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "captest-"));
+  try {
+    interpreterProvider.status = () => ({ enabled: true, endpoint: "http://127.0.0.1:8231/run" });
+    dbService.status = () => ({ available: true, count: 0 });
+    imageProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://img", timeoutMs: 500 });
+    videoProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://vid", timeoutMs: 500 });
+    videoProvider.generate = async (prompt) => { videoGenCalls.push(prompt); return { ok: true, videoBase64: Buffer.from("FAKEMP4").toString("base64") }; };
+    voiceProvider.status = () => ({ enabled: true, endpoint: "http://voice" });
+    voiceProvider.speak = async (text) => { voiceSpeakCalls.push(text); return { ok: true }; };
+    outputManager.root = () => tmp;
+    outputManager.dir = (c) => { const d = path.join(tmp, c || "misc"); fs.mkdirSync(d, { recursive: true }); return d; };
+    outputManager.imagesDir = () => outputManager.dir("images");
+    outputManager.videosDir = () => outputManager.dir("videos");
+    outputManager.saveBuffer = (destDir, name, data) => { fs.mkdirSync(destDir, { recursive: true }); const p = path.join(destDir, name); fs.writeFileSync(p, data); return p; };
+    interpreterRunCalls = []; toolRunCalls = []; memoryCreateCalls = []; memorySearchCalls = []; imageGenCalls = [];
+
+    const r = await call("butler:capability-test", {});
+    assert(r && r.ok && r.deep === true && Array.isArray(r.checks), "the deep capability test returns a per-capability result list");
+    const byName = (re) => r.checks.find((c) => re.test(c.name));
+    for (const re of [/Run code/, /Open a file/, /Tools/, /Memory/, /Image/, /Video/, /Voice/, /Talk to/]) {
+      assert(!!byName(re), `the test covers "${re}"`);
+    }
+    // It didn't just report config — it actually DID each thing.
+    assert(interpreterRunCalls.length >= 1, "Run code actually executed a line via Open Interpreter");
+    assert(toolRunCalls.some((c) => c.name === "read-file"), "Tools actually invoked the built-in read-file tool");
+    assert(memoryCreateCalls.length >= 1 && memorySearchCalls.length >= 1, "Memory actually remembered a fact and searched it back");
+    assert(imageGenCalls.length >= 1, "Image actually rendered a test image");
+    assert(videoGenCalls.length >= 1, "Video actually rendered a short test clip");
+    assert(voiceSpeakCalls.length >= 1, "Voice actually spoke a phrase");
+    // The exercised capabilities are marked as genuinely working.
+    assert(byName(/Run code/).ok === true && byName(/Open a file/).ok === true && byName(/Tools/).ok === true &&
+      byName(/Memory/).ok === true && byName(/Image/).ok === true && byName(/Video/).ok === true && byName(/Voice/).ok === true,
+      "each exercised capability is marked as actually working (✅), not merely configured");
+    // All three AI panes are represented. With no signed-in panes there's no
+    // real reply, so each is skipped (⚪) or a clean no-reply (❌) — but never a
+    // false ✅ (the sweep must not claim it talked to an AI it didn't).
+    const talk = r.checks.filter((c) => /^Talk to/.test(c.name));
+    assert(talk.length === 3 && talk.every((c) => c.ok !== true), "all three AI panes are represented, and none is a false positive without a real reply");
+    assert(typeof r.okCount === "number" && typeof r.failCount === "number" && r.okCount >= 7, "it tallies how many capabilities really worked (the 7 exercised locally)");
+  } finally {
+    Object.assign(interpreterProvider, { status: saved.iStatus, run: saved.iRun });
+    dbService.status = saved.dStatus;
+    imageProvider.status = saved.imStatus;
+    videoProvider.status = saved.viStatus; videoProvider.generate = saved.viGen;
+    voiceProvider.status = saved.voStatus; voiceProvider.speak = saved.voSpeak;
+    outputManager.root = saved.oRoot; outputManager.dir = saved.oDir; outputManager.saveBuffer = saved.oSave;
+    outputManager.imagesDir = saved.oImg; outputManager.videosDir = saved.oVid;
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
 // Full capability sweep — one continuous butler task that exercises EVERY action
 // in sequence (delegate → tool → run-code → remember → recall → image → setup →
 // finish) with no stalls, proving the whole loop runs fluidly end to end and the
@@ -2480,11 +2577,13 @@ async function main() {
   await testManagerGenerateImageAction();
   await testManagerSetupAction();
   await testButlerDevice();
+  await testButlerCapabilityTest();
   await testButlerCapabilitySweep();
   await testManagerAwareness();
   await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();
+  await testManagerStallBreak();
   await testManagerEscalateActionAndTierFourAdjudication();
   await testManagerSaveActionWritesRealFiles();
   await testManagerPauseResumeStop();
