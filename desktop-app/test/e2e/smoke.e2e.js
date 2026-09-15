@@ -52,6 +52,7 @@ async function main() {
       ['#panels-grid', 'Tiled panels grid'],
       ['#ai-row', 'AI panes row'],
       ['#btn-extract-all', 'Extract All button'],
+      ['#btn-capability-test', 'User-Panel Capability Test button'],
       ['#log-filters', 'Unified-log tag filter bar'],
       ['#cb-errors-only', 'Errors-only log toggle'],
       ['#activity-log', 'Unified activity log'],

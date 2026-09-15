@@ -954,6 +954,9 @@ function logLineText(entry) {
   if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
   if (entry.detail?.id) parts.push(`#${entry.detail.id}`);
   if (entry.detail?.msg) parts.push(entry.detail.msg);
+  // A human-written summary (manager events, the capability test, …) reads far
+  // better than the raw kind — lead with it when present.
+  if (entry.detail?.summary) return `${entry.detail.summary}${parts.length ? " " + parts.join(" ") : ""}`.trim();
   return `${entry.kind} ${parts.join(" ")}`.trim();
 }
 
@@ -996,6 +999,17 @@ function appendLogLine({ ts, tag, text, err, level }) {
 function appendLog(entry) {
   const level = entry.level || (String(entry.kind || "").includes("error") ? "error" : "info");
   appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: level === "error", level });
+}
+
+// Route an operational status/progress line straight into the ONE center
+// Activity Log, instead of a scattered per-control box. Every former side-log
+// (System Check, install progress, model downloads, the migrate, the log
+// bundle, the intro) now funnels through here so there's a single place to
+// read, filter and export — nothing is lost, it's just all in one window.
+function logToCenter(text, opts = {}) {
+  const t = String(text == null ? "" : text).replace(/\s+$/,"");
+  if (!t.trim()) return;
+  appendLogLine({ ts: Date.now(), tag: opts.tag || "system", text: t, err: !!opts.err, level: opts.err ? "error" : (opts.level || "info") });
 }
 
 // The conversation itself, folded into the one log under the Chat tag, so the
@@ -1227,108 +1241,68 @@ if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYello
 function deviceSpeak(text) {
   if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
 }
-// One shared row renderer so the quick check and the deep test look identical.
-function selfCheckRow(c) {
-  const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
-  const row = document.createElement("div");
-  row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
-  row.innerHTML = `<span>${mark}</span><span style="flex:0 0 auto; font-weight:500;">${gpuEsc(c.name)}</span><span style="opacity:.65; word-break:break-all;">${gpuEsc(c.detail || "")}</span>`;
-  return row;
+// Run the deep capability test. Each step streams into the ONE center Activity
+// Log (through the app's normal log broadcast), so there's nothing to render in
+// a side box here — just a start/finish summary line. Shared by the Butler-bar
+// System Check (deep mode) and the User Panel's 🧪 Capability Test button.
+async function runCapabilityTest(triggerBtn) {
+  if (!window.api.butlerCapabilityTest) { logToCenter("Capability test unavailable.", { tag: "setup", err: true }); return; }
+  let prev; if (triggerBtn) { prev = triggerBtn.textContent; triggerBtn.disabled = true; triggerBtn.textContent = "🧪 Running…"; }
+  logToCenter("🧪 Capability test started — really running code, files, tools, memory, image, video, voice, and pinging the AIs…", { tag: "setup" });
+  let r; try { r = await window.api.butlerCapabilityTest(); } catch (e) { r = { ok: false, error: String(e) }; }
+  if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = prev; }
+  if (!r || !r.ok) { logToCenter(`Capability test failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
+  logToCenter(`🧪 Capability test done — ${r.okCount}/${r.total} worked${r.failCount ? `, ${r.failCount} failed` : ""} (⚪ = not set up).`, { tag: "setup" });
+  deviceSpeak(`Capability test: ${r.okCount} of ${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} failed` : ""}.`);
 }
-
-// Live streaming for the deep capability test: each step the butler actually
-// performs appends a row as it finishes, so a long sweep (a real image/video
-// render, live AI pings) fills in visibly instead of freezing on "Checking…".
-let deepCheckActive = false;
-if (window.api.onCapabilityTestStep) window.api.onCapabilityTestStep((c) => {
-  if (!deepCheckActive) return;
-  const list = el("deep-check-list");
-  if (list) list.appendChild(selfCheckRow(c));
-});
+// User Panel button: same deep test, results to the Activity Log.
+if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { uiLog("click", { id: "btn-capability-test", msg: "run capability test" }); runCapabilityTest(el("btn-capability-test")); };
 
 if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
-  const box = el("selfcheck-results");
   const deep = !!(el("cb-deep-check") && el("cb-deep-check").checked);
+  // Deep mode: actually exercise every capability (streams to the Activity Log).
+  if (deep) { await runCapabilityTest(el("btn-selfcheck")); return; }
 
-  // Deep mode: actually exercise every capability once, streaming each result.
-  if (deep) {
-    if (!window.api.butlerCapabilityTest) { if (box) box.textContent = "Capability test unavailable."; return; }
-    const btn = el("btn-selfcheck"); const prevLabel = btn.textContent;
-    btn.disabled = true; btn.textContent = "🧪 Running…";
-    if (box) {
-      box.innerHTML = "";
-      const head = document.createElement("div");
-      head.id = "deep-check-head";
-      head.style.cssText = "font-weight:600; margin-bottom:3px;";
-      head.textContent = "Running full capability test — really rendering a test image/video, running code, and pinging your AIs…";
-      const list = document.createElement("div"); list.id = "deep-check-list";
-      box.appendChild(head); box.appendChild(list);
-    }
-    deepCheckActive = true;
-    let r; try { r = await window.api.butlerCapabilityTest(); } catch (e) { r = { ok: false, error: String(e) }; }
-    deepCheckActive = false;
-    btn.disabled = false; btn.textContent = prevLabel;
-    const head = el("deep-check-head");
-    if (!r || !r.ok) { if (head) head.textContent = `Capability test failed: ${(r && r.error) || "error"}`; return; }
-    if (head) head.textContent = `Capability test — ${r.okCount}/${r.total} worked${r.failCount ? `, ${r.failCount} failed` : ""} (⚪ = not set up)`;
-    // The list already streamed in; if any step was missed (no stream), backfill.
-    const list = el("deep-check-list");
-    if (list && !list.children.length && Array.isArray(r.checks)) for (const c of r.checks) list.appendChild(selfCheckRow(c));
-    deviceSpeak(`Capability test: ${r.okCount} of ${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} failed` : ""}.`);
-    return;
-  }
-
-  if (!window.api.butlerSelfCheck) { if (box) box.textContent = "System check unavailable."; return; }
-  if (box) box.textContent = "Checking…";
+  // Quick readiness check → each capability's status streams into the center log.
+  if (!window.api.butlerSelfCheck) { logToCenter("System check unavailable.", { tag: "setup", err: true }); return; }
+  logToCenter("🩺 System check…", { tag: "setup" });
   let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
-  if (!r || !r.ok) { if (box) box.textContent = `Check failed: ${(r && r.error) || "error"}`; return; }
-  if (box) {
-    box.innerHTML = "";
-    const head = document.createElement("div");
-    head.style.cssText = "font-weight:600; margin-bottom:3px;";
-    head.textContent = `Working: ${r.okCount}/${r.total}`;
-    box.appendChild(head);
-    for (const c of r.checks) box.appendChild(selfCheckRow(c));
-    // Detailed install status: what's installed vs not, and what he can install.
-    if (Array.isArray(r.installs) && r.installs.length) {
-      const h2 = document.createElement("div");
-      h2.style.cssText = "font-weight:600; margin:5px 0 2px;";
-      h2.textContent = `Dependencies (${(r.missing || []).length} not installed)`;
-      box.appendChild(h2);
-      for (const it of r.installs) {
-        const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
-        const row = document.createElement("div");
-        row.style.cssText = "display:flex; gap:6px; align-items:baseline; padding:1px 0;";
-        row.innerHTML = `<span style="flex:0 0 auto; font-weight:500;">${gpuEsc(it.label)}</span><span style="opacity:.7;">${mark}</span>`;
-        box.appendChild(row);
-      }
-    }
-    if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
+  if (!r || !r.ok) { logToCenter(`System check failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
+  logToCenter(`🩺 System check — ${r.okCount}/${r.total} capabilities ready.`, { tag: "setup" });
+  for (const c of r.checks) {
+    const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+    logToCenter(`${mark} ${c.name}${c.detail ? " — " + c.detail : ""}`, { tag: "setup", err: c.ok === false });
   }
+  if (Array.isArray(r.installs) && r.installs.length) {
+    logToCenter(`Dependencies — ${(r.missing || []).length} not installed:`, { tag: "setup" });
+    for (const it of r.installs) {
+      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
+      logToCenter(`   ${it.label}: ${mark}`, { tag: "setup", err: it.installed === false });
+    }
+  }
+  if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
   deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working. ${(r.missing || []).length} dependencies not installed.`);
 };
 // Install everything that's missing (Open Interpreter first, so he controls it).
 if (el("btn-install-missing")) el("btn-install-missing").onclick = async () => {
-  const prog = el("install-progress");
-  if (!window.api.butlerInstallMissing) { if (prog) prog.textContent = "Installer unavailable."; return; }
+  if (!window.api.butlerInstallMissing) { logToCenter("Installer unavailable.", { tag: "setup", err: true }); return; }
   const btn = el("btn-install-missing"); btn.disabled = true; btn.textContent = "⚙️ Installing…";
-  if (prog) prog.textContent = "Starting install of missing dependencies…\n";
+  logToCenter("⚙️ Installing missing dependencies…", { tag: "setup" });
   let r; try { r = await window.api.butlerInstallMissing(); } catch (e) { r = { ok: false, error: String(e) }; }
   btn.textContent = "⚙️ Install Missing"; btn.disabled = false;
-  if (prog) prog.textContent += (r && r.ok) ? `\nDone: ${r.installed || 0}/${(r.results || []).length} installed.` : `\n⚠ ${(r && r.error) || "failed"}`;
+  logToCenter((r && r.ok) ? `Install done: ${r.installed || 0}/${(r.results || []).length} installed.` : `Install failed: ${(r && r.error) || "failed"}`, { tag: "setup", err: !(r && r.ok) });
   if (el("btn-selfcheck")) el("btn-selfcheck").click(); // refresh the status
 };
 if (window.api.onSetupProgress) window.api.onSetupProgress(({ target, line }) => {
-  const prog = el("install-progress"); if (!prog || !line) return;
-  prog.textContent += `${target ? target + ": " : ""}${line}\n`; prog.scrollTop = prog.scrollHeight;
+  if (!line) return;
+  logToCenter(`${target ? target + ": " : ""}${line}`, { tag: "setup" });
 });
 if (el("btn-send-intro")) el("btn-send-intro").onclick = async () => {
-  const box = el("intro-msg");
-  if (!window.api.butlerSendIntro) { if (box) box.textContent = "Intro unavailable."; return; }
-  if (box) box.textContent = "Sending the intro to the AIs…";
+  if (!window.api.butlerSendIntro) { logToCenter("Intro unavailable.", { tag: "manager", err: true }); return; }
+  logToCenter("📣 Sending the intro to the AIs…", { tag: "manager" });
   let r; try { r = await window.api.butlerSendIntro(); } catch (_) { r = null; }
-  if (r && r.ok) { if (box) box.textContent = `Intro sent to: ${r.targets.join(", ")}. They now know who the butler is and the rules.`; deviceSpeak("Introduction sent to the assistants."); }
-  else if (box) box.textContent = `Couldn't send: ${(r && r.error === "NO_TARGETS") ? "no AIs are enabled — check ChatGPT/Claude/Gemini up top." : (r && r.error) || "error"}`;
+  if (r && r.ok) { logToCenter(`Intro sent to: ${r.targets.join(", ")}. They now know who the butler is and the rules.`, { tag: "manager" }); deviceSpeak("Introduction sent to the assistants."); }
+  else logToCenter(`Couldn't send intro: ${(r && r.error === "NO_TARGETS") ? "no AIs are enabled — check ChatGPT/Claude/Gemini up top." : (r && r.error) || "error"}`, { tag: "manager", err: true });
 };
 
 // Who's-speaking indicator: light the current speaker's chip in its colour.
@@ -1649,25 +1623,23 @@ if (el("btn-lsi-models")) el("btn-lsi-models").onclick = lsiRefreshModels;
 if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
   if (!window.api.ollamaPull) return;
   const model = el("lsi-download-model") ? el("lsi-download-model").value : "";
-  const st = el("lsi-download-status");
-  if (!model) { if (st) st.textContent = "Pick a model to download."; return; }
-  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { if (st) st.textContent = "Ollama isn't installed. Get it from ollama.com, then try again."; return; } }
-  if (st) st.textContent = `Starting download of ${model}…`;
+  if (!model) { logToCenter("Pick a model to download.", { tag: "models" }); return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { logToCenter("Ollama isn't installed. Get it from ollama.com, then try again.", { tag: "models", err: true }); return; } }
+  logToCenter(`⬇ Starting download of ${model}…`, { tag: "models" });
   const r = await window.api.ollamaPull(model);
-  if (st) st.textContent = r && r.ok ? `✓ ${model} installed.` : `⚠ ${(r && r.error) || "download failed"}`;
+  logToCenter(r && r.ok ? `✓ ${model} installed.` : `⚠ ${model}: ${(r && r.error) || "download failed"}`, { tag: "models", err: !(r && r.ok) });
   lsiRefreshModels();
 };
-if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
+if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { if (p && p.line) logToCenter(p.line, { tag: "models" }); });
 // Pull ANY model by name — your choice; the app doesn't decide which model for you.
 if (el("btn-lsi-pull")) el("btn-lsi-pull").onclick = async () => {
   if (!window.api.ollamaPull) return;
   const model = (el("lsi-pull-name") && el("lsi-pull-name").value || "").trim();
-  const st = el("lsi-download-status");
-  if (!model) { if (st) st.textContent = "Type a model name (e.g. llama3.1:8b, mistral, qwen2.5:7b)."; return; }
-  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { if (st) st.textContent = "Ollama isn't installed. Get it from ollama.com, then try again."; return; } }
-  if (st) st.textContent = `Starting download of ${model}…`;
+  if (!model) { logToCenter("Type a model name (e.g. llama3.1:8b, mistral, qwen2.5:7b).", { tag: "models" }); return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { logToCenter("Ollama isn't installed. Get it from ollama.com, then try again.", { tag: "models", err: true }); return; } }
+  logToCenter(`⬇ Starting download of ${model}…`, { tag: "models" });
   const r = await window.api.ollamaPull(model);
-  if (st) st.textContent = r && r.ok ? `✓ ${model} installed.` : `⚠ ${(r && r.error) || "download failed"}`;
+  logToCenter(r && r.ok ? `✓ ${model} installed.` : `⚠ ${model}: ${(r && r.error) || "download failed"}`, { tag: "models", err: !(r && r.ok) });
   lsiRefreshModels();
 };
 // Populate the recommended-model picker (neutral, size-keyed suggestions).
@@ -1724,31 +1696,25 @@ async function loadModelsStore() {
 if (el("btn-open-models")) el("btn-open-models").onclick = () => { if (window.api.openModelsFolder) window.api.openModelsFolder(); };
 // Move models already downloaded (Ollama's default store) into "stuff and thing".
 if (el("btn-ollama-migrate")) el("btn-ollama-migrate").onclick = async () => {
-  const status = el("ollama-migrate-status");
-  if (!window.api.ollamaMigrate) { if (status) status.textContent = "Migration unavailable."; return; }
+  if (!window.api.ollamaMigrate) { logToCenter("Migration unavailable.", { tag: "models", err: true }); return; }
   const btn = el("btn-ollama-migrate");
-  btn.disabled = true; if (status) status.textContent = "Moving…";
+  btn.disabled = true; logToCenter("📦 Moving downloaded models here…", { tag: "models" });
   let r; try { r = await window.api.ollamaMigrate(); } catch (e) { r = { ok: false, error: String(e) }; }
-  if (status) {
-    status.textContent = r && r.ok
-      ? `✓ ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}.`
-      : `⚠ ${(r && r.error) || "error"}`;
-  }
+  logToCenter(r && r.ok
+    ? `✓ Models moved: ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}.`
+    : `⚠ Move failed: ${(r && r.error) || "error"}`, { tag: "models", err: !(r && r.ok) });
   btn.disabled = false;
   loadModelsInfo();
 };
 // Download all logs: gather every log the program writes into one folder + open it.
 if (el("btn-download-logs")) el("btn-download-logs").onclick = async () => {
-  const status = el("download-logs-status");
-  if (!window.api.downloadAllLogs) { if (status) status.textContent = "Log download unavailable."; return; }
+  if (!window.api.downloadAllLogs) { logToCenter("Log download unavailable.", { tag: "files", err: true }); return; }
   const btn = el("btn-download-logs");
-  btn.disabled = true; if (status) status.textContent = "Gathering logs…";
+  btn.disabled = true; logToCenter("📥 Gathering every log into one folder…", { tag: "files" });
   let r; try { r = await window.api.downloadAllLogs(); } catch (e) { r = { ok: false, error: String(e) }; }
-  if (status) {
-    status.textContent = r && r.ok
-      ? `✓ ${r.count} file(s) bundled — opened:\n${r.folder}`
-      : `⚠ ${(r && r.error) || "error"}`;
-  }
+  logToCenter(r && r.ok
+    ? `✓ ${r.count} file(s) bundled and opened: ${r.folder}`
+    : `⚠ Log bundle failed: ${(r && r.error) || "error"}`, { tag: "files", err: !(r && r.ok) });
   btn.disabled = false;
 };
 loadModelsInfo();
