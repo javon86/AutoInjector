@@ -24,6 +24,15 @@ function testRecommended() {
   assert(om.recommended(0).length === 3, "always returns a short pick list");
 }
 
+function testRecommendedUncensored() {
+  console.log("\n== recommendedUncensored(): uncensored picks that still follow instructions ==");
+  assert(/dolphin|hermes/i.test(om.recommendedUncensored(8)[0]), "8 GB VRAM -> a Dolphin/Hermes uncensored model");
+  assert(/dolphin|hermes/i.test(om.recommendedUncensored(24).join(",")), "big VRAM -> uncensored options too");
+  assert(om.recommendedUncensored(0).every((m) => /dolphin/i.test(m)), "no GPU -> only tiny uncensored (Dolphin) models");
+  // The whole point: NOT the weak llama2-uncensored that couldn't drive the butler.
+  assert(!om.recommendedUncensored(8).some((m) => /llama2-uncensored/.test(m)), "never suggests the weak llama2-uncensored");
+}
+
 async function testListInstalled() {
   console.log("\n== listInstalled(): reads the installed models from the Ollama API ==");
   await withFetch(async (url) => {
@@ -105,6 +114,7 @@ function testMigrateStore() {
 
 async function main() {
   testRecommended();
+  testRecommendedUncensored();
   await testListInstalled();
   testDefaultStoreDir();
   testManagedServer();

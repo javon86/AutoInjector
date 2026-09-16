@@ -1787,13 +1787,17 @@ if (el("btn-lsi-pull")) el("btn-lsi-pull").onclick = async () => {
 async function lsiLoadRecommended() {
   const sel = el("lsi-download-model"); if (!sel || !window.api.ollamaRecommended) return;
   try {
-    const r = await window.api.ollamaRecommended(null);
+    const uncensored = !!(el("lsi-uncensored") && el("lsi-uncensored").checked);
+    const r = await window.api.ollamaRecommended({ vramGB: null, uncensored });
     const models = (r && r.models) || [];
     sel.innerHTML = "";
     for (const name of models) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
-    if (el("lsi-recommend") && models.length) el("lsi-recommend").textContent = "Suggested local models — or pull any other by name below.";
+    if (el("lsi-recommend") && models.length) el("lsi-recommend").textContent = uncensored
+      ? "Uncensored models that still follow the butler's commands (Dolphin / Hermes) — or pull any other below."
+      : "Suggested local models — or pull any other by name below.";
   } catch (_) {}
 }
+if (el("lsi-uncensored")) el("lsi-uncensored").onchange = () => { uiLog("click", { id: "lsi-uncensored", msg: el("lsi-uncensored").checked ? "prefer uncensored" : "default models" }); lsiLoadRecommended(); };
 lsiLoadRecommended();
 lsiRefreshModels();
 

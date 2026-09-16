@@ -1849,7 +1849,7 @@ async function runManagerTurn() {
     if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") {
       m.formatFailStreak = (m.formatFailStreak || 0) + 1;
       if (m.formatFailStreak >= 2) {
-        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. Pick a model that follows instructions well — e.g. qwen2.5:7b, llama3.1:8b, or mistral — in ⚙️ Local model settings, then try again. (The butler only needs to issue commands; the three chat AIs still do the heavy lifting.)`;
+        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. Pick a model that follows instructions well in ⚙️ Local model settings, then try again — e.g. qwen2.5:7b or llama3.1:8b, or if you want an UNCENSORED one that still follows commands, dolphin3, hermes3, or dolphin-mistral (not llama2-uncensored, which is too weak for this). The butler only issues commands; the three chat AIs still do the heavy lifting.`;
         logManagerEvent({ category: "response", severity: "warning", summary: hint, details: { model: state.managerConfig.model || null } });
         broadcast("manager-ack", { taskId: m.taskId, text: hint, ts: Date.now() });
         speakAs("butler", hint);
@@ -2927,7 +2927,13 @@ function formatSystemReport(rep) {
 // --- Ollama model manager IPC ----------------------------------------------
 ipcMain.handle("ollama:detect", async () => { try { return await ollamaManager.detect(); } catch (e) { return { available: false, reason: String(e) }; } });
 ipcMain.handle("ollama:list", async (_evt, endpoint) => { try { return await ollamaManager.listInstalled(endpoint); } catch (e) { return { ok: false, models: [] }; } });
-ipcMain.handle("ollama:recommended", async (_evt, vramGB) => { try { return { models: ollamaManager.recommended(vramGB) }; } catch (e) { return { models: [] }; } });
+ipcMain.handle("ollama:recommended", async (_evt, arg) => {
+  try {
+    const opts = (arg && typeof arg === "object") ? arg : { vramGB: arg };
+    const list = opts.uncensored ? ollamaManager.recommendedUncensored(opts.vramGB) : ollamaManager.recommended(opts.vramGB);
+    return { models: list, uncensored: !!opts.uncensored };
+  } catch (e) { return { models: [] }; }
+});
 ipcMain.handle("ollama:pull", async (_evt, model) => {
   try {
     // Route the download at the app's own Ollama (when it's up) so the blobs
