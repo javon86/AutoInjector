@@ -1039,6 +1039,18 @@ window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
   appendUnifiedChatTurn(turn);
+  // Also show it in the butler's colour-coded window. An [TO: X] tag of USER (or
+  // none — the default) means it's addressed to ME → bright + 2× via bl-tome;
+  // an AI↔AI message is coloured as the sender.
+  if (turn && turn.site) {
+    const to = String(turn.roundtableTag || "USER").toUpperCase();
+    const tome = to === "USER";
+    appendButlerLine({
+      cls: tome ? "bl-tome" : ("bl-" + turn.site),
+      who: tome ? `${turn.label} → You` : turn.label,
+      text: turn.text,
+    });
+  }
   if (turn && turn.site) lastReplyBySite[turn.site] = turn.text || "";
   setStatus(`Captured new reply from ${turn.label}.`);
   beep();
@@ -1241,21 +1253,105 @@ if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYello
 function deviceSpeak(text) {
   if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
 }
-// Run the deep capability test. Each step streams into the ONE center Activity
-// Log (through the app's normal log broadcast), so there's nothing to render in
-// a side box here — just a start/finish summary line. Shared by the Butler-bar
-// System Check (deep mode) and the User Panel's 🧪 Capability Test button.
+// A fix-it hint for each capability that can fail or be missing — shown next to
+// a red/gray result in the pop-up so you know what to do about it.
+const CAP_TIPS = {
+  "Brain (local model)": "Install Ollama and download a model, then pick it in ⚙️ Local model settings and press Save + Test.",
+  "Run code (Open Interpreter)": "Open the Setup Wizard → Auto-setup (or Install Missing) to install Open Interpreter — it needs Python 3.12.",
+  "Open a file (read & write)": "Check the app can write to its output folder ('stuff and thing') — free disk space and folder permissions.",
+  "Tools (USE_TOOL)": "No tools are registered, or the read-file tool failed — check the output folder exists and is readable.",
+  "Memory (remember & recall)": "The shared database is off or unavailable — reopen the app; if it persists, check disk space where app data lives.",
+  "Image generation": "Turn on Image generation and set a reachable Stable Diffusion endpoint in the Image panel (Auto-detect can find it).",
+  "Video generation": "Turn on Video generation and set a reachable text-to-video endpoint in the Video panel (AnimateDiff / SVD / ComfyUI).",
+  "Voice (speak)": "Enable Voice and set the local voice shim endpoint (install piper/whisper via the Setup Wizard).",
+  "Talk to ChatGPT": "Open the ChatGPT pane and make sure you're signed in, then enable it as a participant up top.",
+  "Talk to Claude": "Open the Claude pane and make sure you're signed in, then enable it as a participant up top.",
+  "Talk to Gemini": "Open the Gemini pane and make sure you're signed in, then enable it as a participant up top.",
+};
+function capTipFor(c) {
+  if (CAP_TIPS[c.name]) return CAP_TIPS[c.name];
+  if (/^Talk to/.test(c.name)) return "Open that AI's pane, sign in, and enable it as a participant up top.";
+  return "Open the Setup Wizard to configure this capability.";
+}
+
+// The live "reel": a chip per capability, added as each finishes, so you watch
+// the sweep go by. A trailing spinner shows it's still working.
+let capReelActive = false;
+function capReelReset() {
+  const reel = el("cap-reel"); if (!reel) return;
+  reel.innerHTML = "";
+  const spin = document.createElement("span"); spin.className = "cap-chip running"; spin.id = "cap-reel-spinner";
+  spin.innerHTML = '<span class="spin"></span><span>testing…</span>';
+  reel.appendChild(spin);
+  reel.classList.add("on");
+}
+function capReelStep(c) {
+  const reel = el("cap-reel"); if (!reel) return;
+  const cls = c.ok === true ? "pass" : c.ok === false ? "fail" : "skip";
+  const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+  const chip = document.createElement("span");
+  chip.className = `cap-chip ${cls}`;
+  chip.textContent = `${mark} ${c.name}`;
+  chip.title = c.detail || "";
+  const spin = el("cap-reel-spinner");
+  if (spin) reel.insertBefore(chip, spin); else reel.appendChild(chip);
+  reel.scrollLeft = reel.scrollWidth;
+}
+if (window.api.onCapabilityTestStep) window.api.onCapabilityTestStep((c) => { if (capReelActive) capReelStep(c); });
+
+// Fill and open the 3-bucket results pop-up.
+function openCapModal(r) {
+  const modal = el("cap-modal"); if (!modal) return;
+  const buckets = { working: [], failed: [], notset: [] };
+  for (const c of (r.checks || [])) (c.ok === true ? buckets.working : c.ok === false ? buckets.failed : buckets.notset).push(c);
+  const fill = (listId, arr, withTip) => {
+    const box = el(listId); if (!box) return;
+    box.innerHTML = "";
+    if (!arr.length) { const d = document.createElement("div"); d.className = "cap-item"; d.style.opacity = ".6"; d.textContent = "—"; box.appendChild(d); return; }
+    for (const c of arr) {
+      const item = document.createElement("div"); item.className = "cap-item";
+      let html = `<span class="nm">${gpuEsc(c.name)}</span>`;
+      if (c.detail) html += `<span class="why">${gpuEsc(c.detail)}</span>`;
+      if (withTip) html += `<span class="tip">💡 ${gpuEsc(capTipFor(c))}</span>`;
+      item.innerHTML = html; box.appendChild(item);
+    }
+  };
+  el("cap-n-working").textContent = buckets.working.length;
+  el("cap-n-failed").textContent = buckets.failed.length;
+  el("cap-n-notset").textContent = buckets.notset.length;
+  fill("cap-list-working", buckets.working, false);
+  fill("cap-list-failed", buckets.failed, true);
+  fill("cap-list-notset", buckets.notset, true);
+  el("cap-modal-sub").textContent = `${r.okCount}/${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} not working` : ""}. ⚪ = not set up yet.`;
+  modal.classList.add("on");
+}
+function closeCapModal() { const m = el("cap-modal"); if (m) m.classList.remove("on"); }
+if (el("btn-cap-modal-close")) el("btn-cap-modal-close").onclick = closeCapModal;
+if (el("cap-modal")) el("cap-modal").addEventListener("click", (e) => { if (e.target === el("cap-modal")) closeCapModal(); });
+
+// Run the deep capability test: live reel while it runs, a 3-bucket pop-up when
+// it's done, and full detail in the Activity Log. Shared by every entry point
+// (butler-panel button, User Panel button, System Check deep toggle).
+let capTestRunning = false;
 async function runCapabilityTest(triggerBtn) {
+  if (capTestRunning) return;
   if (!window.api.butlerCapabilityTest) { logToCenter("Capability test unavailable.", { tag: "setup", err: true }); return; }
-  let prev; if (triggerBtn) { prev = triggerBtn.textContent; triggerBtn.disabled = true; triggerBtn.textContent = "🧪 Running…"; }
+  capTestRunning = true; capReelActive = true; capReelReset();
+  const btns = ["btn-cap-run", "btn-capability-test", "btn-selfcheck"].map(el).filter(Boolean);
+  const prev = btns.map((b) => b.textContent);
+  btns.forEach((b) => { b.disabled = true; }); if (triggerBtn) triggerBtn.textContent = "🧪 Testing…";
   logToCenter("🧪 Capability test started — really running code, files, tools, memory, image, video, voice, and pinging the AIs…", { tag: "setup" });
   let r; try { r = await window.api.butlerCapabilityTest(); } catch (e) { r = { ok: false, error: String(e) }; }
-  if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = prev; }
+  capReelActive = false; capTestRunning = false;
+  const spin = el("cap-reel-spinner"); if (spin) spin.remove();
+  btns.forEach((b, i) => { b.disabled = false; b.textContent = prev[i]; });
   if (!r || !r.ok) { logToCenter(`Capability test failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
   logToCenter(`🧪 Capability test done — ${r.okCount}/${r.total} worked${r.failCount ? `, ${r.failCount} failed` : ""} (⚪ = not set up).`, { tag: "setup" });
+  openCapModal(r);
   deviceSpeak(`Capability test: ${r.okCount} of ${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} failed` : ""}.`);
 }
-// User Panel button: same deep test, results to the Activity Log.
+// Every entry point runs the same test (reel + pop-up).
+if (el("btn-cap-run")) el("btn-cap-run").onclick = () => { uiLog("click", { id: "btn-cap-run", msg: "test all capabilities" }); runCapabilityTest(el("btn-cap-run")); };
 if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { uiLog("click", { id: "btn-capability-test", msg: "run capability test" }); runCapabilityTest(el("btn-capability-test")); };
 
 if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
@@ -1311,31 +1407,27 @@ if (window.api.onVoiceSpeaking) window.api.onVoiceSpeaking(({ who, speaking }) =
   if (chip) chip.classList.toggle("speaking", !!speaking);
 });
 
-// Talk to the butler: type a task, push-to-talk, or open mic (keeps listening).
+// Talk to the butler by voice — fills the one task box (#jarvis-goal) and sends.
+// (The typed path is the Start Butler button below; feedback goes to the log.)
 async function deviceSendTask(text) {
   const t = String(text || "").trim();
-  const msg = el("device-say-msg");
-  if (!t) { if (msg) msg.textContent = "Type or say something first."; return; }
-  if (!window.api.startManagedTask) { if (msg) msg.textContent = "Butler unavailable."; return; }
+  if (!t) { logToCenter("Type or say something for the butler first.", { tag: "manager" }); return; }
+  if (!window.api.startManagedTask) { logToCenter("Butler unavailable.", { tag: "manager", err: true }); return; }
   if (el("jarvis-goal")) el("jarvis-goal").value = t;
-  if (msg) msg.textContent = "Sent to the butler…";
   const r = await window.api.startManagedTask(t);
-  if (msg) msg.textContent = r && r.ok ? "On it." : `Can't start: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`;
+  logToCenter(r && r.ok ? `🤵 Butler: on it — "${t.slice(0, 60)}"` : `Can't start the butler: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`, { tag: "manager", err: !(r && r.ok) });
 }
-if (el("btn-device-send")) el("btn-device-send").onclick = () => { deviceSendTask(el("device-say").value); if (el("device-say")) el("device-say").value = ""; };
-if (el("device-say")) el("device-say").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el("btn-device-send").click(); } });
 async function deviceListenOnce() {
-  const msg = el("device-say-msg");
-  if (!window.api.voiceListen) { if (msg) msg.textContent = "Voice engine not available."; return null; }
-  if (msg) msg.textContent = "Listening…";
+  if (!window.api.voiceListen) { logToCenter("Voice engine not available.", { tag: "voice", err: true }); return null; }
+  logToCenter("🎤 Listening…", { tag: "voice" });
   let r; try { r = await window.api.voiceListen({}); } catch (_) { r = null; }
   if (r && r.ok && r.text && r.text.trim()) return r.text.trim();
-  if (msg) msg.textContent = r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.";
+  logToCenter(r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.", { tag: "voice" });
   return null;
 }
 if (el("btn-device-ptt")) el("btn-device-ptt").onclick = async () => {
   const t = await deviceListenOnce();
-  if (t) { if (el("device-say")) el("device-say").value = t; deviceSendTask(t); }
+  if (t) { if (el("jarvis-goal")) el("jarvis-goal").value = t; deviceSendTask(t); }
 };
 let openMicOn = false;
 async function openMicLoop() {
@@ -1348,7 +1440,7 @@ async function openMicLoop() {
 }
 if (el("device-openmic")) el("device-openmic").onchange = (e) => {
   openMicOn = !!e.target.checked;
-  if (el("device-say-msg")) el("device-say-msg").textContent = openMicOn ? "Open mic on — talk freely." : "Open mic off.";
+  logToCenter(openMicOn ? "🎤 Open mic on — talk freely." : "Open mic off.", { tag: "voice" });
   if (openMicOn) openMicLoop();
 };
 
@@ -1807,6 +1899,20 @@ function jarvisShowRunning(on) {
   if (el("btn-jarvis-stop")) el("btn-jarvis-stop").style.display = on ? "" : "none";
   if (el("btn-jarvis-start")) el("btn-jarvis-start").disabled = !!on;
 }
+// The Butler status light in the User Panel: glows while he's working, shows a
+// one-line "what he's doing", and jumps to his panel on click.
+function setButlerLight(cls, text) {
+  const b = el("btn-butler-status"); if (!b) return;
+  b.classList.remove("working", "needs", "error");
+  if (cls) b.classList.add(cls);
+  const t = b.querySelector(".txt"); if (t && text != null) t.textContent = text;
+}
+if (el("btn-butler-status")) el("btn-butler-status").onclick = () => {
+  uiLog("click", { id: "btn-butler-status", msg: "open butler" });
+  const panel = el("col-systemai");
+  if (panel) { panel.classList.remove("hidden-collapsed"); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  const goal = el("jarvis-goal"); if (goal) try { goal.focus(); } catch (_) {}
+};
 if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
   if (!window.api.startManagedTask) return;
   const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
@@ -1824,7 +1930,12 @@ if (el("btn-jarvis-stop")) el("btn-jarvis-stop").onclick = async () => {
   if (window.api.stopManagedTask) await window.api.stopManagedTask();
   jarvisShowRunning(false); jarvisSetStatus("Stopped.");
 };
-if (window.api.onManagerAck) window.api.onManagerAck((a) => { if (el("jarvis-ack") && a && a.text) el("jarvis-ack").textContent = "🤵 " + a.text; });
+if (window.api.onManagerAck) window.api.onManagerAck((a) => {
+  if (!a || !a.text) return;
+  if (el("jarvis-ack")) el("jarvis-ack").textContent = "🤵 " + a.text;
+  // A stall-break question is the butler asking ME for input — flag it amber.
+  if (/\?\s*$/.test(a.text) || /would you like|tell me|need (more|the)|waiting on/i.test(a.text)) setButlerLight("needs", "Butler needs you");
+});
 function renderAwareness(a) {
   const box = el("jarvis-awareness"); if (!box) return;
   if (!a || !a.panes) { box.textContent = ""; return; }
@@ -1845,17 +1956,46 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
   if (m.toolCalls && m.toolCalls.length) bits.push(`${m.toolCalls.length} tool call(s)`);
   if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
   jarvisSetStatus(bits.join(" · "));
+  // Drive the User Panel status light.
+  if (running) setButlerLight("working", `Butler: ${m.status}${m.turnNumber ? " · turn " + m.turnNumber : ""}`);
+  else if (m.status === "error") setButlerLight("error", "Butler stopped");
+  else setButlerLight("", m.status === "finished" ? "Butler done — idle" : "Butler idle");
   renderAwareness(m.awareness);
   renderPendingApproval(m);
 });
-if (window.api.onManagerLog) window.api.onManagerLog((e) => {
-  const box = el("jarvis-log"); if (!box || !e) return;
+// The butler chat/activity window, colour-coded by WHO is speaking:
+//   • system  — muted grey (infra/config)
+//   • butler  — his own reasoning/actions/status
+//   • chatgpt/claude/gemini — each AI in its own colour (incl. AI↔AI)
+//   • to-ME   — anything addressed to me (an AI's reply, or the butler asking me
+//               something): its own bright colour AND 2× the size.
+function appendButlerLine({ cls, who, text }) {
+  const box = el("jarvis-log"); if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const row = document.createElement("div");
-  row.textContent = `${e.category || ""}: ${e.summary || ""}`.slice(0, 220);
+  row.className = "bl-line " + (cls || "bl-butler");
+  const whoHtml = who ? `<span class="bl-who">${gpuEsc(who)}:</span> ` : "";
+  row.innerHTML = `${whoHtml}${gpuEsc(String(text == null ? "" : text).slice(0, 500))}`;
   box.appendChild(row);
-  while (box.children.length > 100) box.removeChild(box.firstChild);
+  while (box.children.length > 140) box.removeChild(box.firstChild);
   if (nearBottom) box.scrollTop = box.scrollHeight; // keep the latest in view (chat feel)
+}
+// Categories that are really the app/infra talking, not the butler himself.
+const BUTLER_SYSTEM_CATEGORIES = new Set(["config", "error"]);
+if (window.api.onManagerLog) window.api.onManagerLog((e) => {
+  if (!e) return;
+  const targetSite = Array.isArray(e.target) && e.target.length === 1 && SITE_LABELS[e.target[0]] ? e.target[0] : null;
+  if (e.category === "response" && targetSite) {
+    // An AI answered the butler — colour it as that AI.
+    appendButlerLine({ cls: "bl-" + targetSite, who: SITE_LABELS[targetSite], text: e.summary });
+  } else if (e.category === "response") {
+    // The butler delivering to ME (e.g. the stall-break question) — to-me, 2×.
+    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary });
+  } else if (BUTLER_SYSTEM_CATEGORIES.has(e.category)) {
+    appendButlerLine({ cls: "bl-system", who: "System", text: `${e.category}: ${e.summary || ""}` });
+  } else {
+    appendButlerLine({ cls: "bl-butler", who: "🤵 Butler", text: e.summary });
+  }
 });
 
 // N5 Tools: show the registry so the user sees what the butler can call.
