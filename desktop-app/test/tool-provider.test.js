@@ -66,6 +66,60 @@ async function main() {
   tp.configure({ fetchAllowlist: [] }); // reset
   stub.close();
 
+  console.log('\n== write-file + list-dir are sandboxed too ==');
+  const sbox = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-sbox-'));
+  tp.configure({ outputRoot: sbox });
+  assert((await tp.run('write-file', { path: 'sub/hi.txt', content: 'hello' })).ok, 'write-file writes under the sandbox');
+  assert(fs.readFileSync(path.join(sbox, 'sub', 'hi.txt'), 'utf8') === 'hello', 'the file really lands on disk');
+  assert((await tp.run('write-file', { path: '../escape.txt', content: 'x' })).error === 'PATH_ESCAPE', 'write-file refuses to escape the sandbox');
+  const ls = await tp.run('list-dir', { path: 'sub' });
+  assert(ls.ok && /hi\.txt/.test(ls.message), 'list-dir lists a sandbox folder');
+
+  console.log('\n== run-command / install-package spawn a process (stubbed) ==');
+  const { EventEmitter } = require('events');
+  let spawned = [];
+  function fakeSpawn(cmd, args, opts) {
+    spawned.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+    setImmediate(() => { child.stdout.emit('data', Buffer.from('OUT:' + cmd)); child.emit('close', 0); });
+    return child;
+  }
+  tp.configure({ spawn: fakeSpawn });
+  const rc = await tp.run('run-command', { command: 'echo hi' });
+  assert(rc.ok && /OUT:echo hi/.test(rc.message) && spawned[0].opts.shell === true, 'run-command runs via a shell and returns stdout');
+  assert((await tp.run('run-command', {})).error === 'NEED_COMMAND', 'run-command with no command -> NEED_COMMAND');
+  spawned = [];
+  const ip = await tp.run('install-package', { manager: 'pip', name: 'open-interpreter' });
+  assert(ip.ok && spawned[0].cmd === 'pip' && spawned[0].args.join(' ') === 'install open-interpreter' && spawned[0].opts.shell === false, 'install-package runs "<mgr> install <name>" with NO shell (no injection)');
+  assert((await tp.run('install-package', { manager: 'rm', name: 'x' })).error === 'BAD_MANAGER', 'an unknown package manager is refused');
+  assert((await tp.run('install-package', { manager: 'pip', name: 'evil; rm -rf /' })).error === 'BAD_PACKAGE', 'a package name with shell metacharacters is refused');
+
+  console.log('\n== open-path uses the injected OS openers ==');
+  let opened = null;
+  tp.configure({ openExternal: async (u) => { opened = { url: u }; return ''; }, openPath: async (p) => { opened = { path: p }; return ''; } });
+  assert((await tp.run('open-path', { target: 'https://example.com/dl' })).ok && opened.url === 'https://example.com/dl', 'a URL opens via openExternal');
+  assert((await tp.run('open-path', { target: '/some/file' })).ok && opened.path === '/some/file', 'a path opens via openPath');
+
+  console.log('\n== create-tool: the butler makes his own tool — approval-gated, persisted, reloadable ==');
+  const toolsFile = path.join(sbox, 'butler-tools.json');
+  tp.configure({ toolsFile, spawn: fakeSpawn });
+  const ct = await tp.run('create-tool', { name: 'say-hi', description: 'greets', language: 'shell', code: 'echo hi-from-tool' });
+  assert(ct.ok && tp.has('say-hi'), 'create-tool registers a new callable tool');
+  assert(tp.get('say-hi').risk === 'ask', 'a self-made tool is approval-gated (risk "ask")');
+  assert(fs.existsSync(toolsFile) && /say-hi/.test(fs.readFileSync(toolsFile, 'utf8')), 'the tool is persisted to disk');
+  assert((await tp.run('create-tool', { name: 'read-file', language: 'shell', code: 'x' })).error === 'NAME_RESERVED', 'a self-made tool cannot shadow a built-in');
+  assert((await tp.run('create-tool', { name: 'bad name!', language: 'shell', code: 'x' })).error === 'BAD_NAME', 'an invalid tool name is refused');
+  assert((await tp.run('create-tool', { name: 'empty', language: 'shell', code: '' })).error === 'NEED_CODE', 'a tool with no code is refused');
+  spawned = [];
+  const runTool = await tp.run('say-hi', {});
+  assert(runTool.ok && spawned.length === 1 && spawned[0].opts.shell === true, 'running a shell self-made tool spawns it as a separate process');
+  tp.unregister('say-hi');
+  assert(!tp.has('say-hi'), 'the tool is gone after unregister');
+  const lc = tp.loadCreatedTools();
+  assert(lc.loaded >= 1 && tp.has('say-hi'), "loadCreatedTools re-registers the butler's saved tools on startup");
+  try { fs.rmSync(sbox, { recursive: true, force: true }); } catch (_) {}
+
   console.log('\n== the MCP seam is present but not yet implemented ==');
   const mcp = tp.registerMcpServer({ url: 'stdio://whatever' });
   assert(mcp.ok === false && mcp.error === 'MCP_NOT_IMPLEMENTED', 'registerMcpServer() is a documented, unimplemented seam');

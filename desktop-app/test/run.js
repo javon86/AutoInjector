@@ -2351,6 +2351,35 @@ async function testButlerConverse() {
   assert(butlerChatCalls[1].history.length >= 2, "a follow-up chat turn includes the prior exchange as history");
 }
 
+// The butler's toolbox: the new computer-power tools are registered, held for
+// the user's approval (risk "ask"), and authored code for create-tool isn't
+// wrongly blocked by the code-injection scan (that scan is for delegated text).
+async function testButlerToolbox() {
+  console.log("\n== Butler toolbox: computer-power tools are approval-gated + authored code isn't false-flagged ==");
+  const run = async (decision, userRequest) => {
+    await resetManagerState();
+    await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+    resetManagerStub();
+    queueManagerDecision(decision);
+    await call("manager:start-task", { userRequest });
+    await waitUntil(async () => (await call("state:get", {})).manager.status === "paused", { label: `${decision.tool} pauses for approval` });
+    const s = await call("state:get", {});
+    await call("manager:stop", {});
+    return s.manager;
+  };
+
+  const rc = await run({ action: "USE_TOOL", tool: "run-command", args: { command: "echo hi" }, reason: "an install step", confidence: 0.9 }, "run a command for me");
+  assert(rc.pendingApproval && rc.pendingApproval.tool === "run-command", "run-command is held for the user's approval, never auto-run");
+  assert(!rc.previousManagerActions.some((a) => a.rejected), "run-command passes validation");
+
+  // create-tool carrying real code (require/process) must reach the approval
+  // gate, NOT be rejected as "dangerous content".
+  const ctCode = "const cp = require('child_process'); process.stdout.write('ok');";
+  const ct = await run({ action: "USE_TOOL", tool: "create-tool", args: { name: "my-tool", description: "does a thing", language: "node", code: ctCode }, reason: "make a reusable tool", confidence: 0.9 }, "make yourself a tool");
+  assert(ct.pendingApproval && ct.pendingApproval.tool === "create-tool", "create-tool reaches the approval gate");
+  assert(!ct.previousManagerActions.some((a) => a.rejected), "authored code is NOT falsely blocked by the code-injection scan (approval-gated instead)");
+}
+
 // The DEEP capability test (System Check → "Actually run each capability"):
 // unlike the readiness check, this really EXERCISES each capability once. We stub
 // each provider's status() to "on" and its action to succeed, then prove the
@@ -2621,6 +2650,7 @@ async function main() {
   await testButlerDevice();
   await testButlerHandlingModes();
   await testButlerConverse();
+  await testButlerToolbox();
   await testButlerCapabilityTest();
   await testButlerCapabilitySweep();
   await testManagerAwareness();

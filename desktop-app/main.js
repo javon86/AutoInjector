@@ -367,7 +367,13 @@ function validateManagerAction(decision) {
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) return { ok: false, error: "UNKNOWN_ACTION" };
 
   const violations = [];
-  scanForDangerousContent(decision, "decision", violations);
+  // A USE_TOOL's args are the tool's own inputs — a command, a URL, or authored
+  // code for create-tool. Those are legitimately arbitrary and every risk-"ask"
+  // tool is held for the user's explicit approval before it runs, so the
+  // code-injection scan (which exists to stop hidden code in delegated task
+  // text) would only ever produce false positives here. Scan everything else.
+  const scanTarget = decision.action === "USE_TOOL" ? { ...decision, args: undefined } : decision;
+  scanForDangerousContent(scanTarget, "decision", violations);
 
   const NEEDS_ASSIGNMENTS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
   if (NEEDS_ASSIGNMENTS.has(decision.action)) {
@@ -4532,7 +4538,18 @@ app.whenReady().then(() => {
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {
-    const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r }); toolProvider.configure({ outputRoot: r });
+    const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r });
+    // Give the tool registry its output sandbox + the computer-power deps (a
+    // process runner, the OS "open" helpers, and where the butler's self-made
+    // tools persist), then re-register any tools he made in a past session.
+    toolProvider.configure({
+      outputRoot: r,
+      spawn: require("child_process").spawn,
+      openPath: (p) => shell.openPath(p),
+      openExternal: (u) => shell.openExternal(u),
+      toolsFile: path.join(userDataDir(), "autoinjector-butler-tools.json"),
+    });
+    try { const lt = toolProvider.loadCreatedTools(); if (lt && lt.loaded) logEvent("tools-loaded", { count: lt.loaded }); } catch (e) { logEvent("tools-load-error", { error: String(e) }); }
     logEvent("models-init", { root: outputManager.modelsRoot() });
     configureSetupManager();
     refreshSetupStatus();
