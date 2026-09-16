@@ -278,6 +278,7 @@ function buildComposerButtons() {
   // The butler is a fourth participant row — same shape as an AI: a → send
   // button in the Send column and its own Active checkbox in the Active column.
   const butler = document.createElement("button");
+  butler.id = "btn-send-butler";
   butler.textContent = "→ 🤵 Butler";
   butler.title = "Send this message to the butler (give him a goal / talk to him)";
   butler.setAttribute("aria-label", "Send this message to the butler");
@@ -310,21 +311,70 @@ async function sendCompose(targets) {
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
 }
 
-// Send the composer text to the butler — i.e. give him a goal / talk to him.
-// (Starts a butler task with the message; his reply/plan shows in his chat.)
+// Butler handling mode — how the next message you send him is handled:
+//   converse : just talk; he replies in prose and speaks it, no task
+//   auto     : he decides (a computer-task call-sign like "install…" → himself)
+//   self     : he does it locally (code/install/tools), never the AIs
+//   delegate : he routes it to ChatGPT/Claude/Gemini
+const BUTLER_MODES = ["converse", "auto", "self", "delegate"];
+const BUTLER_MODE_META = {
+  converse: { ic: "💬", tx: "Converse", cls: "mode-converse" },
+  auto:     { ic: "🔀", tx: "Auto",     cls: "mode-auto" },
+  self:     { ic: "🤵", tx: "Himself",  cls: "mode-self" },
+  delegate: { ic: "📤", tx: "Delegate", cls: "mode-delegate" },
+};
+let butlerMode = "auto";
+try { const s = localStorage.getItem("butlerMode"); if (BUTLER_MODES.includes(s)) butlerMode = s; } catch (_) {}
+function renderButlerMode() {
+  const b = el("btn-butler-mode"); if (!b) return;
+  const meta = BUTLER_MODE_META[butlerMode] || BUTLER_MODE_META.auto;
+  b.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
+  b.classList.add(meta.cls);
+  const ic = b.querySelector(".mode-ic"); if (ic) ic.textContent = meta.ic;
+  const tx = b.querySelector(".mode-tx"); if (tx) tx.textContent = meta.tx;
+}
+function setButlerMode(mode) {
+  if (!BUTLER_MODES.includes(mode)) return;
+  butlerMode = mode;
+  try { localStorage.setItem("butlerMode", mode); } catch (_) {}
+  renderButlerMode();
+}
+if (el("btn-butler-mode")) {
+  renderButlerMode();
+  el("btn-butler-mode").onclick = () => {
+    const next = BUTLER_MODES[(BUTLER_MODES.indexOf(butlerMode) + 1) % BUTLER_MODES.length];
+    setButlerMode(next);
+    uiLog("click", { id: "btn-butler-mode", msg: `butler mode: ${next}` });
+    setStatus(`Butler mode: ${BUTLER_MODE_META[next].tx} — ${next === "converse" ? "just chatting" : next === "self" ? "he'll do it himself" : next === "delegate" ? "he'll ask the AIs" : "he decides"}.`);
+  };
+}
+// Converse: echo my line into his window, then his reply is shown + spoken by main.
+async function butlerConverse(text) {
+  if (!window.api.butlerChat) { logToCenter("Butler chat unavailable.", { tag: "manager", err: true }); return; }
+  appendButlerLine({ cls: "bl-tome", who: "You → 🤵", text });
+  const r = await window.api.butlerChat(text);
+  if (!r || !r.ok) logToCenter(`Butler couldn't reply: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`, { tag: "manager", err: true });
+}
+// The one place that hands a message to the butler, honouring the current mode.
+async function butlerHandle(text, opts = {}) {
+  const t = String(text || "").trim();
+  if (!t) return { ok: false, error: "EMPTY" };
+  if (butlerMode === "converse") { await butlerConverse(t); return { ok: true, converse: true }; }
+  if (!window.api.startManagedTask) { setStatus("Butler isn't available."); return { ok: false, error: "UNAVAILABLE" }; }
+  if (opts.mirror && el("jarvis-goal")) el("jarvis-goal").value = t;
+  const r = await window.api.startManagedTask(t, butlerMode); // auto | self | delegate
+  if (r && r.ok) { if (typeof jarvisShowRunning === "function") jarvisShowRunning(true); }
+  return r || { ok: false, error: "error" };
+}
+
+// Send the composer text to the butler — honours the handling-mode toggle.
 async function sendToButler() {
   const text = el("composer-text").value.trim();
   if (!text) { setStatus("Type a message first."); return; }
-  if (!window.api.startManagedTask) { setStatus("Butler isn't available."); return; }
-  // Mirror it into his goal box so the bar shows what he was asked.
-  if (el("jarvis-goal")) el("jarvis-goal").value = text;
-  setStatus("Sending to the butler…");
-  const r = await window.api.startManagedTask(text);
-  if (r && r.ok) { setStatus("Sent to the butler."); if (typeof jarvisShowRunning === "function") jarvisShowRunning(true); }
-  else {
-    const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : "";
-    setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`);
-  }
+  setStatus(butlerMode === "converse" ? "Talking to the butler…" : `Sending to the butler (${BUTLER_MODE_META[butlerMode].tx})…`);
+  const r = await butlerHandle(text, { mirror: true });
+  if (r && r.ok) setStatus(butlerMode === "converse" ? "Asked the butler." : "Sent to the butler.");
+  else { const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : ""; setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`); }
 }
 
 // The Prompt Library is just a compact dropdown + a few buttons here —
@@ -1412,9 +1462,8 @@ if (window.api.onVoiceSpeaking) window.api.onVoiceSpeaking(({ who, speaking }) =
 async function deviceSendTask(text) {
   const t = String(text || "").trim();
   if (!t) { logToCenter("Type or say something for the butler first.", { tag: "manager" }); return; }
-  if (!window.api.startManagedTask) { logToCenter("Butler unavailable.", { tag: "manager", err: true }); return; }
-  if (el("jarvis-goal")) el("jarvis-goal").value = t;
-  const r = await window.api.startManagedTask(t);
+  const r = await butlerHandle(t, { mirror: true }); // honours the mode toggle (converse/auto/self/delegate)
+  if (r && r.converse) return; // butlerConverse already reported
   logToCenter(r && r.ok ? `🤵 Butler: on it — "${t.slice(0, 60)}"` : `Can't start the butler: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`, { tag: "manager", err: !(r && r.ok) });
 }
 async function deviceListenOnce() {
@@ -1918,8 +1967,9 @@ if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
   const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
   if (!goal) { jarvisSetStatus("Type a goal first."); return; }
   if (el("jarvis-ack")) el("jarvis-ack").textContent = "";
-  jarvisSetStatus("Starting…");
-  const r = await window.api.startManagedTask(goal);
+  jarvisSetStatus(butlerMode === "converse" ? "Asking…" : "Starting…");
+  const r = await butlerHandle(goal, { mirror: false }); // honours the mode toggle
+  if (r && r.converse) { jarvisSetStatus("Chatting."); return; }
   if (r && r.ok) { jarvisShowRunning(true); jarvisSetStatus("Started."); }
   else {
     const hint = r && r.error === "NOT_CONFIGURED" ? " — set an endpoint + model above and press Save." : "";

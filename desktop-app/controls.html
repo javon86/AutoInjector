@@ -65,6 +65,15 @@
        right of the grid. Sized to content, not a fixed narrow column --
        still just a few rows tall, so the whole User Panel stays shallow. */
     #up-zone-actions { flex:0 0 auto; display:flex; gap:14px; flex-direction:row; }
+    .send-active-col { display:flex; flex-direction:column; gap:6px; }
+    /* The handling-mode toggle: shows how the next message to the butler is handled. */
+    .butler-mode { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; cursor:pointer;
+      border:1px solid #2a2a2a; border-radius:7px; padding:4px 8px; background:#141414; color:inherit; white-space:nowrap; }
+    .butler-mode .mode-ic { font-size:13px; }
+    .butler-mode.mode-converse { border-color:#7c5ce0; background:#171528; }
+    .butler-mode.mode-auto     { border-color:#3a3a3a; }
+    .butler-mode.mode-self     { border-color:#2f8f52; background:#0e1a11; }
+    .butler-mode.mode-delegate { border-color:#4a7de0; background:#0e1522; }
     .send-active-grid { display:grid; grid-template-columns:auto auto; gap:5px 10px; align-items:center; }
     .send-active-grid .zone-label { margin:0 0 2px; }
     .send-active-grid input[type="checkbox"] { justify-self:center; margin:0; }
@@ -504,9 +513,14 @@
       </div>
 
       <div class="up-zone" id="up-zone-actions">
-        <div class="send-active-grid" id="send-active-grid">
-          <p class="zone-label">Send</p>
-          <p class="zone-label">Active</p>
+        <div class="send-active-col">
+          <div class="send-active-grid" id="send-active-grid">
+            <p class="zone-label">Send</p>
+            <p class="zone-label">Active</p>
+          </div>
+          <button id="btn-butler-mode" class="butler-mode mode-auto" title="How the butler handles what you send him — click to change. Converse: just chat & he replies. Auto: he decides (computer tasks like 'install…' auto-go to him). Himself: he does it locally, never the AIs. Delegate: he routes it to ChatGPT/Claude/Gemini. Tip: start a message with ! to force 'himself'.">
+            <span class="mode-ic">🔀</span><span class="mode-tx">Auto</span>
+          </button>
         </div>
         <div class="btns" id="up-actions-extra">
           <button id="btn-butler-status" class="grid-full butler-status" title="The butler's live status — glows while he's working. Click to jump to his panel." aria-label="Butler status — click to open the butler panel">

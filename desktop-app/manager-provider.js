@@ -104,12 +104,45 @@ function buildManagerPrompt(managerState) {
     currentTier: managerState.currentTier,
     turnNumber: managerState.turnNumber,
     maximumTurns: managerState.maximumTurns,
-    status: managerState.status
+    status: managerState.status,
+    handlingMode: managerState.handlingMode || "auto"
   };
-  return [
-    { role: "system", content: MANAGER_SYSTEM_PROMPT },
-    { role: "user", content: JSON.stringify(trimmed) }
-  ];
+  const messages = [{ role: "system", content: MANAGER_SYSTEM_PROMPT }];
+  // Handling mode steers WHO does the work. "self" = do it locally on this
+  // computer; "delegate" = route it to the chat AIs; "auto" = the butler decides.
+  const mode = managerState.handlingMode;
+  if (mode === "self") {
+    messages.push({ role: "system", content: "HANDLING MODE — SELF: The user wants YOU to carry out this task directly on their computer. Strongly prefer RUN_CODE, SETUP, USE_TOOL, SAVE, REMEMBER/RECALL, GENERATE_IMAGE and other local actions. Do NOT DELEGATE / SEND / FORWARD / COMPARE / CRITIQUE to ChatGPT, Claude or Gemini unless it is genuinely impossible to do it locally — and if you must, say why in the reason." });
+  } else if (mode === "delegate") {
+    messages.push({ role: "system", content: "HANDLING MODE — DELEGATE: The user wants you to route this to the chat AIs. Prefer DELEGATE / COMPARE / CRITIQUE to ChatGPT, Claude and Gemini and assemble their answers. Avoid RUN_CODE / SETUP unless the delegated answers make it necessary." });
+  }
+  messages.push({ role: "user", content: JSON.stringify(trimmed) });
+  return messages;
+}
+
+// Converse mode: a plain conversational reply from the local model — no JSON,
+// no actions, no task. Used when the user just wants to talk to the butler and
+// hear back. History is a short array of prior {role, content} turns for context.
+async function chatWithButler(userMessage, config, opts = {}) {
+  if (!config || !config.endpoint) return { ok: false, error: "NO_ENDPOINT" };
+  if (!config.model) return { ok: false, error: "NO_MODEL" };
+  const sys = "You are the user's personal butler — a helpful AI assistant running locally on their computer. You oversee three web AIs (ChatGPT, Claude, Gemini) and can run code, install software, generate images/video and manage files, but right now you are simply having a conversation. Reply directly, warmly and briefly in plain prose — never JSON, never tool syntax. If the user is actually asking you to DO something (install, run code, delegate to the AIs), tell them to send it as a task (or turn off Converse mode) and you'll get right on it.";
+  const messages = [{ role: "system", content: sys }];
+  for (const h of (opts.history || []).slice(-8)) {
+    if (h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string") messages.push({ role: h.role, content: h.content });
+  }
+  messages.push({ role: "user", content: String(userMessage || "").slice(0, 4000) });
+  const r = await client.chatCompletion({
+    endpoint: config.endpoint, apiKey: config.apiKey, model: config.model,
+    messages, temperature: 0.6, timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS
+  });
+  if (!r.ok) {
+    if (r.kind === "timeout") return { ok: false, error: "TIMEOUT" };
+    if (r.kind === "network") return { ok: false, error: `NETWORK_ERROR: ${redactSecrets(r.detail, config)}` };
+    if (r.kind === "http") return { ok: false, error: `HTTP_${r.status}`, detail: redactSecrets(r.detail || "", config).slice(0, 500) };
+    return { ok: false, error: "INVALID_RESPONSE_BODY" };
+  }
+  return { ok: true, text: String(r.content == null ? "" : r.content).trim() };
 }
 
 // AI-006: JSON extraction, secret redaction and the timed fetch are the shared
@@ -232,6 +265,7 @@ module.exports = {
   extractJsonObject,
   redactSecrets,
   askManager,
+  chatWithButler,
   testConnection,
   startPod,
   getPodStatus,

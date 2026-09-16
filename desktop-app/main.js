@@ -284,6 +284,7 @@ function resetManagerTask() {
   state.manager = {
     taskId: null,
     userRequest: "",
+    handlingMode: "auto", // auto | self | delegate — WHO does the task (call-sign/toggle resolves it)
     deliverableSpecification: {},
     plan: [],
     activeAssignments: [], // { target, task, sentTs }
@@ -949,6 +950,7 @@ function managerSnapshot() {
   return {
     taskId: m.taskId,
     userRequest: m.userRequest,
+    handlingMode: m.handlingMode,
     deliverableSpecification: m.deliverableSpecification,
     plan: m.plan,
     activeAssignments: m.activeAssignments,
@@ -2157,21 +2159,48 @@ async function handleManagerCapture(turn) {
   }
 }
 
-async function startManagedTask(userRequest) {
+// The "call-sign": how the butler knows a task is for HIM to do on this computer
+// rather than something to hand to the chat AIs. Two signals:
+//   • a typed marker — a leading "!" or "@me"/"/me", or the message clearly
+//     addresses him ("you ", "yourself", "do it yourself");
+//   • computer-task keywords — install, run, download, set up, open, delete, a
+//     file/folder/terminal/command, "my computer/pc/machine", pip/npm, etc.
+// Returns { self, text } with any leading marker stripped from the text.
+const SELF_TASK_KEYWORDS = /\b(install|uninstall|reinstall|set ?up|download|update|upgrade|run (a |the |this )?(code|command|script|program)|execute|launch|open (the |a |my )?(file|folder|app|program|terminal)|delete|remove|rename|move|copy|create (a |the )?(file|folder)|make (a |the )?(file|folder)|terminal|command ?line|shell|bash|powershell|\bpip\b|\bnpm\b|\bgit\b|python|node|on my (computer|pc|machine|laptop|desktop|system)|my (computer|pc|machine|files|folder|desktop)|generate (an? )?(image|video|picture)|render)/i;
+function detectSelfTask(raw) {
+  let text = String(raw || "").trim();
+  let self = false;
+  const marker = text.match(/^\s*(!+|@me\b|\/me\b)\s*/i);
+  if (marker) { self = true; text = text.slice(marker[0].length).trim(); }
+  if (/\b(yourself|do it yourself|you handle|you do)\b/i.test(text)) self = true;
+  if (SELF_TASK_KEYWORDS.test(text)) self = true;
+  return { self, text };
+}
+
+async function startManagedTask(userRequest, opts = {}) {
   const m0 = state.manager;
   if (m0 && !["idle", "finished", "error"].includes(m0.status)) return { ok: false, error: "ALREADY_RUNNING" };
   if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
   if (!userRequest || !String(userRequest).trim()) return { ok: false, error: "NEEDS_REQUEST" };
 
+  // Resolve WHO does it. An explicit toggle (self/delegate) wins; otherwise
+  // "auto" lets the call-sign (marker/keywords) promote it to a self-task.
+  let request = String(userRequest).trim();
+  let mode = (opts.mode === "self" || opts.mode === "delegate") ? opts.mode : "auto";
+  const sniff = detectSelfTask(request);
+  request = sniff.text || request; // strip a leading "!"/"@me" marker from the actual task text
+  if (mode === "auto" && sniff.self) mode = "self";
+
   resetManagerTask();
   const m = state.manager;
   m.taskId = `task-${Date.now()}`;
-  m.userRequest = String(userRequest).trim();
+  m.userRequest = request;
+  m.handlingMode = mode;
   m.status = "classifying";
   m.startedTs = Date.now();
   m.projectDir = await createProjectDir(m.taskId, m.userRequest);
 
-  logManagerEvent({ category: "task", summary: `Managed task started: "${m.userRequest.slice(0, 120)}"` });
+  logManagerEvent({ category: "task", summary: `Managed task started (${mode === "self" ? "🤵 handling it himself" : mode === "delegate" ? "📤 delegating to the AIs" : "auto"}): "${m.userRequest.slice(0, 120)}"`, details: { handlingMode: mode } });
   // N3 auto-context: seed relevant prior facts so the butler starts already
   // knowing what it may have learned before, without an explicit RECALL turn.
   seedRelevantMemories(m);
@@ -2213,6 +2242,32 @@ function speakAs(who, text, opts = {}) {
       .catch(() => {})
       .finally(() => broadcast("voice-speaking", { who, speaking: false }));
   } catch { /* voice off — silent */ }
+}
+
+// Converse mode: a plain back-and-forth with the butler. No task, no actions —
+// just a spoken/prose reply from the local model. Keeps a short rolling history
+// for context, shows the exchange in his window, and speaks the reply aloud
+// (always, not only when speak-on-ack is on — the user is talking TO him).
+async function butlerChat(message) {
+  const text = String(message || "").trim();
+  if (!text) return { ok: false, error: "NEEDS_MESSAGE" };
+  if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
+  if (!Array.isArray(state.butlerChatHistory)) state.butlerChatHistory = [];
+  let r;
+  try { r = await managerProvider.chatWithButler(text, state.managerConfig, { history: state.butlerChatHistory }); }
+  catch (e) { r = { ok: false, error: String(e) }; }
+  if (!r || !r.ok) {
+    const reason = (r && r.error) || "error";
+    logManagerEvent({ category: "error", severity: "warning", summary: `Butler couldn't reply: ${reason}` });
+    return { ok: false, error: reason };
+  }
+  const reply = r.text || "(no reply)";
+  state.butlerChatHistory.push({ role: "user", content: text }, { role: "assistant", content: reply });
+  if (state.butlerChatHistory.length > 16) state.butlerChatHistory = state.butlerChatHistory.slice(-16);
+  logManagerEvent({ category: "response", summary: reply });   // butler → you, shown in his window
+  broadcast("manager-ack", { taskId: null, text: reply, ts: Date.now() });
+  speakAs("butler", reply);                                    // say it out loud (talking to the user)
+  return { ok: true, text: reply };
 }
 
 // N3: seed the task's memories[] with facts relevant to the request, pulled from
@@ -3846,7 +3901,9 @@ ipcMain.handle("tuner:run", async () => {
   }
 });
 
-ipcMain.handle("manager:start-task", async (_evt, { userRequest }) => startManagedTask(userRequest));
+ipcMain.handle("manager:start-task", async (_evt, { userRequest, mode } = {}) => startManagedTask(userRequest, { mode }));
+// Converse mode: talk to the butler and get a spoken/prose reply, no task run.
+ipcMain.handle("butler:chat", async (_evt, { message } = {}) => butlerChat(message));
 ipcMain.handle("manager:pause", () => pauseManagedTask());
 ipcMain.handle("manager:resume", () => resumeManagedTask());
 ipcMain.handle("manager:stop", () => stopManagedTask());
