@@ -59,6 +59,7 @@ let butlerChatCalls = [];
 managerProvider.chatWithButler = async (message, config, opts = {}) => { butlerChatCalls.push({ message, history: opts.history || [] }); return { ok: true, text: `chat: ${message}` }; };
 function queueManagerDecision(decision) { managerAskQueue.push({ ok: true, decision }); }
 function queueManagerDecisionRepeating(decision) { managerAskRepeat = { ok: true, decision }; }
+function queueManagerErrorRepeating(error) { managerAskRepeat = { ok: false, error }; } // simulate a provider that keeps failing (e.g. INVALID_JSON)
 function resetManagerStub() { managerAskQueue = []; managerAskRepeat = null; managerAskCalls = []; }
 
 // The Open Interpreter capability is stubbed the same way — main.js's
@@ -2351,6 +2352,25 @@ async function testButlerConverse() {
   assert(butlerChatCalls[1].history.length >= 2, "a follow-up chat turn includes the prior exchange as history");
 }
 
+// A local model that can't emit valid commands (INVALID_JSON every turn — the
+// real "butler did nothing" cause) is called out with an actionable message,
+// not spun through the tiers into a timeout.
+async function testModelIncompatible() {
+  console.log("\n== Butler: a model that can't issue valid commands is called out, not spun forever ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerErrorRepeating("INVALID_JSON");
+  await call("manager:start-task", { userRequest: "install stable diffusion for me" });
+  // Wait for the finish line itself (status flips to "error" a beat before it's logged).
+  await waitUntil(async () => { const st = await call("state:get", {}); return st.managerLog.some((l) => l.taskId === st.manager.taskId && l.summary.includes("MODEL_INCOMPATIBLE")); },
+    { label: "the task ends MODEL_INCOMPATIBLE, not a 5-minute delegate timeout" });
+  const s = await call("state:get", {});
+  const mine = s.managerLog.filter((l) => l.taskId === s.manager.taskId);
+  assert(mine.some((l) => /valid command/.test(l.summary) && /Local model settings/.test(l.summary)), "the butler tells the user their model can't issue commands + how to fix it");
+  assert(s.manager.status === "error", "the task is parked (error), not left running");
+}
+
 // The butler's toolbox: the new computer-power tools are registered, held for
 // the user's approval (risk "ask"), and authored code for create-tool isn't
 // wrongly blocked by the code-injection scan (that scan is for delegated text).
@@ -2650,6 +2670,7 @@ async function main() {
   await testButlerDevice();
   await testButlerHandlingModes();
   await testButlerConverse();
+  await testModelIncompatible();
   await testButlerToolbox();
   await testButlerCapabilityTest();
   await testButlerCapabilitySweep();

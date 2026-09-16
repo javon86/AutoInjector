@@ -177,8 +177,25 @@ async function askManager(managerState, config) {
     return { ok: false, error: "INVALID_RESPONSE_BODY" }; // kind:"bad-body"
   }
 
-  const content = r.content;
-  const decision = extractJsonObject(content);
+  let content = r.content;
+  let decision = extractJsonObject(content);
+  const isValid = (d) => d && typeof d === "object" && typeof d.action === "string" && MANAGER_ACTIONS.includes(d.action);
+  // One repair attempt for weaker local models that answered with prose or
+  // malformed JSON: hand their own reply back with a firm "JSON only" nudge and
+  // a concrete example. This rescues the common case where the model *can* do
+  // it but drifted, without masking a model that genuinely can't (it still ends
+  // as INVALID_JSON/UNKNOWN_ACTION after the retry).
+  if (!isValid(decision)) {
+    const repairMessages = messages.concat([
+      { role: "assistant", content: String(content == null ? "" : content).slice(0, 1200) },
+      { role: "user", content: `That was not a valid response. Reply with ONLY a single JSON object and nothing else — no prose, no explanation, no markdown or code fences. The "action" must be exactly one of: ${MANAGER_ACTIONS.join(", ")}. Example: {"action":"PLAN","reason":"outline the steps","confidence":0.8}` },
+    ]);
+    const r2 = await client.chatCompletion({
+      endpoint: config.endpoint, apiKey: config.apiKey, model: config.model,
+      messages: repairMessages, temperature: 0, timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS
+    });
+    if (r2 && r2.ok) { const d2 = extractJsonObject(r2.content); if (d2) { decision = d2; content = r2.content; } }
+  }
   if (!decision || typeof decision !== "object") return { ok: false, error: "INVALID_JSON", raw: redactSecrets(String(content).slice(0, 500), config) };
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) {
     return { ok: false, error: "UNKNOWN_ACTION", raw: decision };

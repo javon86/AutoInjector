@@ -146,6 +146,30 @@ async function testPodLifecycleRequestShape() {
   assert(!noId.ok && noId.error === "NO_POD_ID", "refuses to act without a configured pod id");
 }
 
+function testExtractJsonRobustness() {
+  console.log("\n== extractJsonObject: tolerant of fences, prose, trailing commas, extra objects ==");
+  const ex = mp.extractJsonObject;
+  assert(ex('```json\n{"action":"WAIT","confidence":0.5}\n```').action === "WAIT", "pulls JSON out of a ```json fence");
+  assert(ex('{"action":"PLAN","reason":"go",}').action === "PLAN", "forgives a trailing comma");
+  assert(ex('Here is my decision: {"action":"FINISH","reason":"done"} — let me know!').action === "FINISH", "ignores prose around the object");
+  assert(ex('{"action":"CLASSIFY"} {"action":"PLAN"}').action === "CLASSIFY", "takes the first complete object when several are present");
+  assert(ex('no json here at all') === null, "genuinely non-JSON still returns null");
+}
+
+async function testAskManagerRepairRetry() {
+  console.log("\n== askManager: one repair retry rescues a weak model that first answered with prose ==");
+  let calls = 0;
+  await withFetch(async () => {
+    calls++;
+    if (calls === 1) return fakeResponse({ jsonBody: { choices: [{ message: { content: "Sure! I think we should plan the work first, then delegate." } }] } });
+    return fakeResponse({ jsonBody: { choices: [{ message: { content: JSON.stringify({ action: "PLAN", reason: "outline", confidence: 0.7 }) } }] } });
+  }, async () => {
+    const res = await mp.askManager(trivialState, config);
+    assert(res.ok && res.decision.action === "PLAN", "a prose first answer is repaired into a valid action on the retry");
+  });
+  assert(calls === 2, "the repair costs exactly one extra call, and only when the first was unusable");
+}
+
 async function testHandlingModeDirective() {
   console.log("\n== buildManagerPrompt: the handling mode steers who does the work ==");
   const auto = mp.buildManagerPrompt({ ...trivialState, handlingMode: "auto" });
@@ -185,6 +209,8 @@ async function main() {
   await testTestConnection();
   await testRedactSecretsAndExtractJson();
   await testPodLifecycleRequestShape();
+  testExtractJsonRobustness();
+  await testAskManagerRepairRetry();
   await testHandlingModeDirective();
   await testChatWithButler();
 
