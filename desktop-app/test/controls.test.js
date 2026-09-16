@@ -154,10 +154,11 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
         { name: "Video generation", ok: false, detail: "couldn't make one: TIMEOUT" },
         { name: "Talk to ChatGPT", ok: null, detail: "no page loaded" },
       ];
-      // In the real app each step streams to the center Activity Log via main's
-      // log broadcast; here the renderer just logs a start/finish summary.
+      // Fire per-step events so the live reel fills in, like the real IPC.
+      if (api._capStepCb) for (let i = 0; i < checks.length; i++) api._capStepCb({ ...checks[i], index: i + 1 });
       return { ok: true, deep: true, checks, okCount: 2, failCount: 1, total: checks.length };
     },
+    onCapabilityTestStep: (cb) => { api._capStepCb = cb; },
     butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
     butlerInstallMissing: async () => { calls.push({ fn: "butlerInstallMissing" }); return { ok: true, missing: ["open-interpreter"], installed: 1, results: [{ target: "open-interpreter", ok: true }] }; },
     onVoiceSpeaking: (cb) => { api._voiceSpeakingCb = cb; },
@@ -1088,6 +1089,7 @@ async function main() {
   await testExtractAllButton();
   await testButlerPanelWired();
   await testDeepCapabilityCheck();
+  await testButlerLightAndColoredLog();
   await testCapabilityPanelsWired();
   await testActivityLogCapturesEverything();
 
@@ -1111,20 +1113,67 @@ async function testDeepCapabilityCheck() {
   assert(api.calls.some((c) => c.fn === "butlerSelfCheck") && !api.calls.some((c) => c.fn === "butlerCapabilityTest"), "unchecked → the quick readiness check runs, not the deep test");
   assert(/System check — 2\/3/.test(log.textContent) && /Brain \(local model\)/.test(log.textContent), "the quick check's results land in the center Activity Log");
 
-  // The User Panel button runs the deep capability test (results → center log).
-  assert(doc.getElementById("btn-capability-test"), "the User Panel has a 🧪 Capability Test button");
-  click(dom, "btn-capability-test");
+  // The butler-panel button runs the deep test: live reel fills, pop-up opens.
+  assert(doc.getElementById("btn-cap-run"), "the butler panel has a 🧪 Test-all-capabilities button next to the task box");
+  click(dom, "btn-cap-run");
   await new Promise((r) => setTimeout(r, 30));
-  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "the User Panel button runs the deep capability test");
-  assert(/Capability test started/.test(log.textContent) && /Capability test done — 2\/4 worked, 1 failed/.test(log.textContent),
-    "the capability test's start + summary land in the center Activity Log");
+  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "the button runs the deep capability test");
+  const reel = doc.getElementById("cap-reel");
+  assert(reel.querySelectorAll(".cap-chip.pass").length === 2 && reel.querySelector(".cap-chip.fail") && reel.querySelector(".cap-chip.skip"),
+    "the live reel shows a chip per capability with pass/fail/skip as it goes by");
+  // The results pop-up opens with the three buckets + a fix-it tip on failures.
+  const modal = doc.getElementById("cap-modal");
+  assert(modal.classList.contains("on"), "when it's done, the results pop-up opens");
+  assert(doc.getElementById("cap-n-working").textContent === "2" && doc.getElementById("cap-n-failed").textContent === "1" && doc.getElementById("cap-n-notset").textContent === "1",
+    "the pop-up sorts results into Working / Not-working / Not-set-up buckets");
+  assert(/💡/.test(doc.getElementById("cap-list-failed").textContent) && /AnimateDiff|video/i.test(doc.getElementById("cap-list-failed").textContent),
+    "each failure gets a fix-it tip");
+  assert(/Capability test done — 2\/4 worked, 1 failed/.test(log.textContent), "the summary still lands in the center Activity Log");
+  // Close the pop-up.
+  click(dom, "btn-cap-modal-close");
+  assert(!modal.classList.contains("on"), "the pop-up closes on Close");
 
-  // The Butler-bar System Check, with the toggle checked, runs the same deep test.
+  // The User Panel button and the System-Check deep toggle run the same test.
+  assert(doc.getElementById("btn-capability-test"), "the User Panel also has a 🧪 Capability Test button");
   doc.getElementById("cb-deep-check").checked = true;
   const before = api.calls.filter((c) => c.fn === "butlerCapabilityTest").length;
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 30));
   assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
+}
+
+async function testButlerLightAndColoredLog() {
+  console.log("\n== Butler status light + colour-coded butler log (system / butler / per-AI / to-ME 2×) ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  // The status light lives in the User Panel and reflects the butler's state.
+  const light = doc.getElementById("btn-butler-status");
+  assert(!!light, "the Butler status light is present in the User Panel");
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 2, maximumTurns: 20 });
+  assert(light.classList.contains("working") && /turn 2/.test(light.querySelector(".txt").textContent), "while working, the light glows and shows what he's doing");
+  if (api._managerStateCb) api._managerStateCb({ status: "finished" });
+  assert(!light.classList.contains("working"), "when he finishes, the light stops glowing");
+  // A stall-break question flags it amber ('needs you').
+  if (api._managerAckCb) api._managerAckCb({ text: "I've gone 5 turns without progress. Could you tell me what you'd like me to do?" });
+  assert(light.classList.contains("needs"), "a question to the user turns the light amber (needs you)");
+
+  // The butler log colour-codes by who's speaking.
+  const blog = doc.getElementById("jarvis-log");
+  if (api._managerLogCb) api._managerLogCb({ category: "decision", summary: "Planning the work" });
+  assert(blog.querySelector(".bl-line.bl-butler"), "the butler's own reasoning is in his colour");
+  if (api._managerLogCb) api._managerLogCb({ category: "config", summary: "endpoint saved" });
+  assert(blog.querySelector(".bl-line.bl-system"), "system/config lines are the muted system colour");
+  if (api._managerLogCb) api._managerLogCb({ category: "response", target: ["claude"], summary: "Claude answered" });
+  assert(blog.querySelector(".bl-line.bl-claude"), "an AI answering the butler is in that AI's colour");
+
+  // An AI message addressed to ME is bright + 2× (bl-tome); an AI↔AI message is the sender's colour.
+  api.fireCapture({ id: 1, site: "gemini", label: "Gemini", text: "Here's your answer.", roundtableTag: "USER", ts: Date.now() });
+  const tome = blog.querySelector(".bl-line.bl-tome");
+  assert(tome && /Gemini → You/.test(tome.textContent), "a message addressed to me is the bright, 2× to-me style (.bl-tome)");
+  api.fireCapture({ id: 2, site: "chatgpt", label: "ChatGPT", text: "Over to you, Claude", roundtableTag: "CLAUDE", ts: Date.now() });
+  assert(blog.querySelector(".bl-line.bl-chatgpt"), "an AI-to-AI message is coloured as the sender");
 }
 
 async function testActivityLogCapturesEverything() {
@@ -1409,11 +1458,11 @@ async function testCapabilityPanelsWired() {
   api._voiceSpeakingCb && api._voiceSpeakingCb({ who: "claude", speaking: false });
   assert(!doc.querySelector('.spk-chip[data-who="claude"]').classList.contains("speaking"), "the chip dims again when it stops");
 
-  // Talk to the butler: typed task, and push-to-talk (transcribe → send).
-  doc.getElementById("device-say").value = "summarise the news";
-  click(dom, "btn-device-send");
+  // Talk to the butler: one merged task box (typed → Start), and push-to-talk.
+  doc.getElementById("jarvis-goal").value = "summarise the news";
+  click(dom, "btn-jarvis-start");
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "startManagedTask"), "the typed task is sent to the butler");
+  assert(api.calls.some((c) => c.fn === "startManagedTask"), "the typed task is sent to the butler from the one merged box");
   click(dom, "btn-device-ptt");
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "voiceListen"), "push-to-talk records a spoken task via the voice engine");

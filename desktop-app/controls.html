@@ -68,11 +68,11 @@
     .send-active-grid { display:grid; grid-template-columns:auto auto; gap:5px 10px; align-items:center; }
     .send-active-grid .zone-label { margin:0 0 2px; }
     .send-active-grid input[type="checkbox"] { justify-self:center; margin:0; }
-    /* The user's action buttons as TWO side-by-side columns instead of one tall
-       stack — same buttons, roughly half the height, so the User Panel never
-       grows. A few items (status text, the full-width danger stop) span both. */
-    #up-actions-extra { display:grid; grid-template-columns:1fr 1fr; gap:4px 6px; align-items:stretch; }
-    #up-actions-extra button { text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* The user's action buttons as THREE equal columns — compact and narrow so
+       the User Panel stays short and doesn't hog width. Items marked .grid-full
+       (status text, the full-width danger stop) span all three. */
+    #up-actions-extra { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px 5px; align-items:stretch; }
+    #up-actions-extra button { text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; padding:3px 6px; }
     #up-actions-extra .grid-full { grid-column:1 / -1; }
     #up-zone-messages { flex:1 1 240px; min-width:200px; }
     #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
@@ -95,6 +95,82 @@
     .feed-row.gemini { border-color:#4285f4; }
     .feed-row .meta { opacity:.78; font-size:11px; display:flex; gap:5px; }
     .feed-row .snippet { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    /* ---- Butler status light: a clickable pill in the User Panel that glows
+       while the butler is working and shows a one-line "what he's doing". ---- */
+    .butler-status { display:flex; align-items:center; gap:7px; font-weight:600; font-size:11.5px;
+      background:#0c130e; border:1px solid #26402e; border-radius:7px; padding:4px 9px; cursor:pointer; color:inherit; text-align:left; }
+    .butler-status:hover { border-color:#2f5c3e; }
+    .butler-status .dot { width:9px; height:9px; border-radius:50%; background:#5a6b5f; flex:0 0 auto; }
+    .butler-status .txt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .butler-status.working { border-color:#2f8f52; background:#0e1a11; }
+    .butler-status.working .dot { background:#38e07b; box-shadow:0 0 0 0 rgba(56,224,123,.6); animation:butlerPulse 1.2s ease-out infinite; }
+    .butler-status.needs .dot { background:#f5b642; }
+    .butler-status.error .dot { background:#e5484d; }
+    @keyframes butlerPulse { 0%{box-shadow:0 0 0 0 rgba(56,224,123,.55);} 70%{box-shadow:0 0 0 7px rgba(56,224,123,0);} 100%{box-shadow:0 0 0 0 rgba(56,224,123,0);} }
+
+    /* ---- The User Panel stays put at the top; everything below scrolls past
+       it. (Native AI panes float above HTML, so they're kept inside the fixed
+       butler unit rather than a scroll region.) ---- */
+    #col-userpanel { position:sticky; top:0; z-index:6; }
+
+    /* ---- Butler unit: the butler bar + the three AI panes read as ONE bordered
+       block — he sits on top and controls the three beneath him. ---- */
+    /* Order within #wrap (a flex column): the butler unit sits directly under
+       the sticky User Panel; the other utility panels and the log follow it. */
+    #top-tab-strip { order:-1; }
+    #col-userpanel { order:0; }
+    #butler-unit { order:1; }
+    #panels-grid { order:2; }
+    #main-row { order:3; }
+    #butler-unit { border:1px solid #2a4a34; border-radius:11px; background:#0a0f0b; padding:5px; margin:0 0 12px; display:flex; flex-direction:column; gap:0; }
+    #butler-unit > #col-systemai { margin:0; border-bottom-left-radius:0; border-bottom-right-radius:0; }
+    #butler-unit > #ai-row { margin:0; }
+
+    /* ---- Butler capability reel: a live ticker of each capability as it runs. ---- */
+    #cap-reel { display:none; gap:6px; overflow-x:auto; padding:5px 2px; margin:4px 0 2px; }
+    #cap-reel.on { display:flex; }
+    .cap-chip { flex:0 0 auto; display:flex; align-items:center; gap:5px; font-size:11px; padding:3px 8px; border-radius:12px;
+      background:#141d16; border:1px solid #26402e; white-space:nowrap; opacity:.65; transition:opacity .15s, border-color .15s; }
+    .cap-chip.running { opacity:1; border-color:#4a7de0; }
+    .cap-chip.pass { opacity:1; border-color:#2f8f52; }
+    .cap-chip.fail { opacity:1; border-color:#e5484d; }
+    .cap-chip.skip { opacity:.8; border-color:#6a6a6a; }
+    .cap-chip .spin { width:9px; height:9px; border:2px solid #4a7de0; border-top-color:transparent; border-radius:50%; animation:capSpin .7s linear infinite; }
+    @keyframes capSpin { to { transform:rotate(360deg); } }
+
+    /* ---- Capability results modal: 3 buckets + fix-it tips. ---- */
+    #cap-modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:18px; }
+    #cap-modal.on { display:flex; }
+    #cap-modal .sheet { background:#12161c; border:1px solid #2c3440; border-radius:12px; max-width:900px; width:100%; max-height:86vh; overflow:auto; padding:16px 18px; }
+    #cap-modal h3 { margin:0 0 3px; }
+    #cap-modal .sub { opacity:.7; font-size:12px; margin:0 0 12px; }
+    #cap-cols { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+    @media (max-width:640px){ #cap-cols { grid-template-columns:1fr; } }
+    .cap-bucket { background:#0e1216; border:1px solid #232a33; border-radius:9px; padding:9px 11px; }
+    .cap-bucket h4 { margin:0 0 6px; font-size:13px; }
+    .cap-bucket.working h4 { color:#38e07b; }
+    .cap-bucket.failed h4 { color:#ff7a7f; }
+    .cap-bucket.notset h4 { color:#c7cdd6; }
+    .cap-item { border-top:1px solid #1c222a; padding:6px 0; font-size:12px; }
+    .cap-item:first-of-type { border-top:none; }
+    .cap-item .nm { font-weight:600; }
+    .cap-item .why { opacity:.75; display:block; margin-top:1px; }
+    .cap-item .tip { display:block; margin-top:3px; color:#ffd479; font-size:11.5px; }
+    #cap-modal .foot { display:flex; align-items:center; gap:10px; margin-top:14px; }
+    #cap-modal .foot .spacer { flex:1; }
+
+    /* ---- Butler chat/activity log: system vs butler vs each AI vs to-ME. A
+       message addressed to ME is its own colour AND 2× the size (defaults —
+       tweak freely). ---- */
+    .bl-line { padding:2px 0; line-height:1.34; word-break:break-word; }
+    .bl-line .bl-who { font-weight:700; opacity:.9; }
+    .bl-system { color:#8a94a6; opacity:.82; font-size:11px; }
+    .bl-butler { color:#8ef0b0; }
+    .bl-chatgpt { color:#57c07a; }
+    .bl-claude  { color:#e0a24a; }
+    .bl-gemini  { color:#6ea8ff; }
+    .bl-tome { color:#ffd24a; font-size:2em; font-weight:600; line-height:1.25; margin:3px 0; }
 
     /* ---- collapsible "yellow" panels: Global, House Rules, Prompt
        Library. Each gets a header collapse button; collapsing hides the
@@ -429,6 +505,9 @@
           <p class="zone-label">Active</p>
         </div>
         <div class="btns" id="up-actions-extra">
+          <button id="btn-butler-status" class="grid-full butler-status" title="The butler's live status — glows while he's working. Click to jump to his panel." aria-label="Butler status — click to open the butler panel">
+            <span class="dot"></span><span class="txt">Butler idle</span>
+          </button>
           <button id="btn-open-roles">🎭 Roles</button>
           <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another" aria-label="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
           <button id="btn-open-wizard" title="Set up local AI, image generation, voice, and guided installs" aria-label="Set up local AI, image generation, voice, and guided installs">🧙 Setup</button>
@@ -641,6 +720,11 @@
          now sit inside the Butler bar below (one unified butler surface). -->
     </div><!-- /panels-grid -->
 
+    <!-- Butler unit: the butler bar + the three AI panes wrapped as ONE bordered
+         block — the butler sits on top and controls the three panes beneath him,
+         so they read as a single "he + his three" workspace. Everything else on
+         the page is outside this unit. -->
+    <div id="butler-unit">
     <!-- Butler bar: the System AI (Supervisor) as a full-width band that sits
          ON TOP of the three AI panes, so the butler visibly oversees them. Left
          = his chat (large), right = his controls. Keeps id col-systemai so the
@@ -655,13 +739,18 @@
         <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
         <div id="butler-main">
           <label style="display:flex; align-items:center; gap:6px; margin:0 0 4px;"><input type="checkbox" id="lsi-enabled"> <span>Let the butler help run the system</span></label>
-          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Give the butler a goal</div>
-          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">He plans, delegates to ChatGPT/Claude/Gemini, runs code, and can generate images to reach the goal. Needs a local model saved in ⚙️ (right). You can also message him from the <b>Send</b> box up top.</p>
+          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Tell the butler what to do</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One box — type a goal or a task; he plans, delegates to the three AIs, runs code, and makes images/video to reach it. Needs a local model (⚙️ below).</p>
           <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
-          <div class="btns" style="margin:4px 0;">
+          <div class="btns" style="margin:4px 0; align-items:center;">
             <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
             <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
+            <button id="btn-device-ptt" title="Push to talk — click, speak, it transcribes into the box and sends">🎤 Talk</button>
+            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;" title="Keep listening and act on what you say (needs the voice engine)"><input type="checkbox" id="device-openmic"> open mic</label>
+            <span style="flex:1;"></span>
+            <button id="btn-cap-run" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Watch the reel; a full report pops up when it's done.">🧪 Test all capabilities</button>
           </div>
+          <div id="cap-reel" aria-live="polite"></div>
           <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
           <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
           <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
@@ -673,9 +762,6 @@
         <!-- Run & check him: the former "Butler Device" panel, now folded into
              the one butler surface. Keeps id col-device so wiring + tests hold. -->
         <div id="col-device" class="device-sec">
-          <div class="device-title">🩺 Run &amp; check the butler</div>
-          <p style="opacity:.72; font-size:11.5px; margin:2px 0 7px;">Run him by task or by voice. <b>System Check</b> tests everything he can do; <b>Install Missing</b> sets up what isn't there (Open Interpreter first, so he can control it); <b>Send Intro</b> tells the AIs who he is and the rules.</p>
-
           <!-- Who's speaking: each speaker lights up in its own colour, back and forth. -->
           <div id="speaking-indicator" class="speak-row">
             <span class="spk-chip" data-who="butler">🤵 Butler</span>
@@ -683,15 +769,6 @@
             <span class="spk-chip" data-who="claude">Claude</span>
             <span class="spk-chip" data-who="gemini">Gemini</span>
           </div>
-
-          <!-- Talk to him: type a task, or use the mic (push-to-talk or open mic). -->
-          <div class="btns" style="margin:6px 0;">
-            <input type="text" id="device-say" placeholder="Type a task for the butler…" style="flex:1 1 150px; min-width:0;">
-            <button id="btn-device-send" class="primary">Send</button>
-            <button id="btn-device-ptt" title="Push to talk — click, speak, it transcribes and sends">🎤 Talk</button>
-            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;" title="Keep listening and act on what you say (needs the voice engine)"><input type="checkbox" id="device-openmic"> open mic</label>
-          </div>
-          <div id="device-say-msg" style="font-size:11.5px; opacity:.8; margin:2px 0;"></div>
 
           <div class="btns" style="margin:7px 0 5px;">
             <button id="btn-selfcheck" class="primary">🩺 System Check</button>
@@ -818,6 +895,7 @@
     <div id="ai-row">
       <div id="expanded-strip"></div>
     </div>
+    </div><!-- /butler-unit -->
 
     <div id="main-row">
       <!-- The one unified log: every event in the program, tagged by type, in a
@@ -869,6 +947,25 @@
         <button id="btn-close-roles" title="Close" aria-label="Close roles">✕</button>
       </div>
       <div class="popup-body" id="roles-body"></div>
+    </div>
+  </div>
+
+  <!-- Capability test results: three buckets (Working / Failed / Not set up)
+       with a fix-it tip on every failure. Opened when the test finishes. -->
+  <div id="cap-modal" role="dialog" aria-modal="true" aria-labelledby="cap-modal-title">
+    <div class="sheet">
+      <h3 id="cap-modal-title">🧪 Capability test results</h3>
+      <p class="sub" id="cap-modal-sub"></p>
+      <div id="cap-cols">
+        <div class="cap-bucket working"><h4>✅ Working (<span id="cap-n-working">0</span>)</h4><div id="cap-list-working"></div></div>
+        <div class="cap-bucket failed"><h4>❌ Not working (<span id="cap-n-failed">0</span>)</h4><div id="cap-list-failed"></div></div>
+        <div class="cap-bucket notset"><h4>⚪ Not set up (<span id="cap-n-notset">0</span>)</h4><div id="cap-list-notset"></div></div>
+      </div>
+      <div class="foot">
+        <span style="opacity:.7; font-size:11.5px;">Full detail is in the Activity Log at the bottom.</span>
+        <span class="spacer"></span>
+        <button id="btn-cap-modal-close" class="primary">Close</button>
+      </div>
     </div>
   </div>
 
