@@ -76,6 +76,22 @@ function recommended(vramGB) {
   return ['llama3.2:1b', 'qwen2.5:0.5b', 'qwen2.5:1.5b'];
 }
 
+// UNCENSORED picks that STILL follow instructions/JSON well enough to drive the
+// butler — the important distinction from a weak old model like
+// llama2-uncensored. Dolphin (Llama-3.1/Mistral based) and Nous Hermes 3 are
+// uncensored and good at structured output; ordered by VRAM. The butler only
+// issues commands, so any of these lets it act without refusals getting in the
+// way, while the three chat AIs still do the heavy content work.
+function recommendedUncensored(vramGB) {
+  const v = Number(vramGB) || 0;
+  if (v >= 24) return ['dolphin-mixtral:8x7b', 'hermes3:8b', 'dolphin3:8b'];
+  if (v >= 12) return ['hermes3:8b', 'dolphin3:8b', 'dolphin-llama3:8b'];
+  if (v >= 8) return ['dolphin3:8b', 'hermes3:8b', 'dolphin-mistral:7b'];
+  if (v >= 6) return ['dolphin-mistral:7b', 'dolphin-llama3:8b', 'dolphin-phi'];
+  if (v >= 4) return ['dolphin-phi', 'tinydolphin', 'dolphin-mistral:7b'];
+  return ['tinydolphin', 'dolphin-phi'];
+}
+
 /**
  * Download/install a model with `ollama pull <name>`. Streams progress lines to
  * onProgress(text). Resolves { ok } or { ok:false, error }. Only works if
@@ -233,6 +249,6 @@ function migrateStore(opts = {}) {
 
 module.exports = {
   DEFAULT_ENDPOINT, DEFAULT_MANAGED_HOST,
-  detect, listInstalled, recommended, pull,
+  detect, listInstalled, recommended, recommendedUncensored, pull,
   defaultStoreDir, startManaged, stopManaged, managedStatus, waitReady, migrateStore,
 };

@@ -67,6 +67,7 @@ async function main() {
       ['#jarvis-goal', 'Butler goal box'],
       ['#btn-jarvis-start', 'Start Butler button'],
       ['#lsi-pull-name', 'Pull-any-model field'],
+      ['#lsi-uncensored', 'Prefer-uncensored-models toggle'],
       ['#lsi-approval', 'Approval-mode safeguard toggle'],
       ['#btn-approve', 'Approve-action button'],
       ['#cb-deep-check', 'Deep capability-test toggle'],
