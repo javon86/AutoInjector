@@ -202,7 +202,11 @@
     #butler-main { flex:2 1 0; min-width:0; }
     #butler-chat { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
     .butler-chat-title { font-size:10.5px; opacity:.6; margin:0 0 4px; text-transform:uppercase; letter-spacing:.06em; }
-    .butler-chat-log { flex:1 1 auto; min-height:220px; overflow-y:auto; font-size:11.5px; line-height:1.45; font-family:ui-monospace,monospace; opacity:.92; background:#0a0a0a; border:1px solid #1e1e1e; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:2px; }
+    /* A hard height cap so the log SCROLLS through history instead of growing
+       the whole butler bar taller and taller. min-height keeps it usable; the
+       cap (and overflow-y:auto) is what makes long context scrollable. New
+       messages auto-stick to the bottom (see appendButlerLine). */
+    .butler-chat-log { flex:1 1 auto; min-height:220px; max-height:52vh; overflow-y:auto; overscroll-behavior:contain; font-size:11.5px; line-height:1.45; font-family:ui-monospace,monospace; opacity:.92; background:#0a0a0a; border:1px solid #1e1e1e; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:2px; }
     /* Friendlier idle state: centre a short, welcoming hint instead of a flat line. */
     .butler-chat-log:empty { align-items:center; justify-content:center; text-align:center; }
     .butler-chat-log:empty::before {
