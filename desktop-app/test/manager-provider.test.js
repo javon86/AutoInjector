@@ -146,6 +146,34 @@ async function testPodLifecycleRequestShape() {
   assert(!noId.ok && noId.error === "NO_POD_ID", "refuses to act without a configured pod id");
 }
 
+async function testHandlingModeDirective() {
+  console.log("\n== buildManagerPrompt: the handling mode steers who does the work ==");
+  const auto = mp.buildManagerPrompt({ ...trivialState, handlingMode: "auto" });
+  assert(auto.length === 2, "auto mode adds no extra directive (system + user only)");
+  const self = mp.buildManagerPrompt({ ...trivialState, handlingMode: "self" });
+  assert(self.length === 3 && self[1].role === "system" && /SELF/.test(self[1].content) && /RUN_CODE/.test(self[1].content) && /do NOT DELEGATE/i.test(self[1].content),
+    "self mode injects a 'do it locally, don't delegate' directive");
+  const del = mp.buildManagerPrompt({ ...trivialState, handlingMode: "delegate" });
+  assert(del.length === 3 && /DELEGATE/.test(del[1].content) && /ChatGPT, Claude and Gemini/.test(del[1].content),
+    "delegate mode injects a 'route it to the AIs' directive");
+  // The handling mode is also surfaced in the state JSON the model sees.
+  assert(/"handlingMode":"self"/.test(self[2].content), "the user payload records the handling mode");
+}
+
+async function testChatWithButler() {
+  console.log("\n== chatWithButler: a plain conversational reply, no JSON/actions ==");
+  let seen = null;
+  await withFetch(async (url, opts) => { seen = { url, opts }; return fakeResponse({ jsonBody: { choices: [{ message: { content: "Hello! I'm right here — what do you need?" } }] } }); }, async () => {
+    const r = await mp.chatWithButler("hey, you there?", config, { history: [{ role: "user", content: "earlier" }, { role: "assistant", content: "yes" }] });
+    assert(r.ok && /right here/.test(r.text), "returns the model's prose reply as text");
+  });
+  const body = JSON.parse(seen.opts.body);
+  assert(body.messages[0].role === "system" && /butler/i.test(body.messages[0].content) && /never JSON/i.test(body.messages[0].content), "uses a conversational system prompt (no action JSON)");
+  assert(body.messages.some((m) => m.role === "user" && /you there/.test(m.content)) && body.messages.some((m) => m.content === "earlier"), "includes the new message and prior history");
+  const missing = await mp.chatWithButler("hi", { endpoint: "", model: "" });
+  assert(!missing.ok && missing.error === "NO_ENDPOINT", "reports a missing endpoint cleanly");
+}
+
 async function main() {
   await testAskManagerHappyPath();
   await testAskManagerRejectsUnknownAction();
@@ -157,6 +185,8 @@ async function main() {
   await testTestConnection();
   await testRedactSecretsAndExtractJson();
   await testPodLifecycleRequestShape();
+  await testHandlingModeDirective();
+  await testChatWithButler();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

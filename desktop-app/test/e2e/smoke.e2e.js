@@ -44,6 +44,7 @@ async function main() {
       ['#jarvis-goal', 'Merged butler task box'],
       ['#btn-cap-run', 'Butler-panel Test-all-capabilities button'],
       ['#btn-butler-status', 'Butler status light'],
+      ['#btn-butler-mode', 'Butler handling-mode toggle'],
       ['#cap-reel', 'Capability live reel'],
       ['#cap-modal', 'Capability results modal'],
       ['#btn-device-ptt', 'Push-to-talk button'],

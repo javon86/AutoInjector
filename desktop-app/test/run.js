@@ -54,6 +54,9 @@ managerProvider.askManager = async (managerState, config) => {
   if (managerAskRepeat) return managerAskRepeat;
   return { ok: false, error: "NO_STUB_QUEUED" };
 };
+// Converse mode talks to the model via a separate path — stub it independently.
+let butlerChatCalls = [];
+managerProvider.chatWithButler = async (message, config, opts = {}) => { butlerChatCalls.push({ message, history: opts.history || [] }); return { ok: true, text: `chat: ${message}` }; };
 function queueManagerDecision(decision) { managerAskQueue.push({ ok: true, decision }); }
 function queueManagerDecisionRepeating(decision) { managerAskRepeat = { ok: true, decision }; }
 function resetManagerStub() { managerAskQueue = []; managerAskRepeat = null; managerAskCalls = []; }
@@ -2309,6 +2312,45 @@ async function testButlerDevice() {
   }
 }
 
+// Handling mode: the toggle + the call-sign decide WHO does a task the user
+// sends the butler — himself (local code/install) or the chat AIs.
+async function testButlerHandlingModes() {
+  console.log("\n== Butler handling mode: the toggle + call-sign decide who does the task ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerDecisionRepeating({ action: "WAIT", reason: "hold", confidence: 0.5 });
+
+  const startStop = async (userRequest, mode) => {
+    await call("manager:start-task", { userRequest, mode });
+    const s = await call("state:get", {});
+    await call("manager:stop", {});
+    return s.manager;
+  };
+
+  assert((await startStop("compare three plans", "self")).handlingMode === "self", "an explicit 'himself' mode is stored on the task");
+  assert((await startStop("compare three plans", "delegate")).handlingMode === "delegate", "an explicit 'delegate' mode is stored");
+  assert((await startStop("install open interpreter for me", "auto")).handlingMode === "self", "in auto, a computer-task keyword ('install') makes it his own job (call-sign)");
+  const marked = await startStop("!summarise my day", "auto");
+  assert(marked.handlingMode === "self" && marked.userRequest === "summarise my day", "a leading '!' forces 'himself' AND is stripped from the task text");
+  assert((await startStop("what do you think of our plan", "auto")).handlingMode === "auto", "a plain request with no call-sign stays in auto (the butler decides)");
+}
+
+async function testButlerConverse() {
+  console.log("\n== Butler converse: a plain chat reply, no task started ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG });
+  butlerChatCalls = [];
+  const r = await call("butler:chat", { message: "hey, you around?" });
+  assert(r && r.ok && /chat: hey/.test(r.text), "butler:chat returns a conversational reply from the model");
+  assert(butlerChatCalls.length === 1 && butlerChatCalls[0].message === "hey, you around?", "the message reaches the conversational path (not the action loop)");
+  const s = await call("state:get", {});
+  assert(["idle", "finished", "error"].includes(s.manager.status), "converse does NOT start a managed task");
+  // A second turn carries prior history for context.
+  await call("butler:chat", { message: "and again" });
+  assert(butlerChatCalls[1].history.length >= 2, "a follow-up chat turn includes the prior exchange as history");
+}
+
 // The DEEP capability test (System Check → "Actually run each capability"):
 // unlike the readiness check, this really EXERCISES each capability once. We stub
 // each provider's status() to "on" and its action to succeed, then prove the
@@ -2577,6 +2619,8 @@ async function main() {
   await testManagerGenerateImageAction();
   await testManagerSetupAction();
   await testButlerDevice();
+  await testButlerHandlingModes();
+  await testButlerConverse();
   await testButlerCapabilityTest();
   await testButlerCapabilitySweep();
   await testManagerAwareness();

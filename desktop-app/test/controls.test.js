@@ -121,7 +121,8 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     // Butler / System AI supervisor
     configureManagerProvider: async (config) => { calls.push({ fn: "configureManagerProvider", config }); return { ok: true }; },
     testManagerConnection: async () => { calls.push({ fn: "testManagerConnection" }); return { ok: true }; },
-    startManagedTask: async (userRequest) => { calls.push({ fn: "startManagedTask", userRequest }); return { ok: true, taskId: "t1" }; },
+    startManagedTask: async (userRequest, mode) => { calls.push({ fn: "startManagedTask", userRequest, mode }); return { ok: true, taskId: "t1" }; },
+    butlerChat: async (message) => { calls.push({ fn: "butlerChat", message }); return { ok: true, text: `reply to: ${message}` }; },
     stopManagedTask: async () => { calls.push({ fn: "stopManagedTask" }); return { ok: true }; },
     getManagerState: async () => ({ ok: true, manager: { status: "idle" } }),
     onManagerState: (cb) => { api._managerStateCb = cb; },
@@ -1089,6 +1090,7 @@ async function main() {
   await testExtractAllButton();
   await testButlerPanelWired();
   await testDeepCapabilityCheck();
+  await testButlerModeToggleAndConverse();
   await testButlerLightAndColoredLog();
   await testCapabilityPanelsWired();
   await testActivityLogCapturesEverything();
@@ -1140,6 +1142,46 @@ async function testDeepCapabilityCheck() {
   click(dom, "btn-selfcheck");
   await new Promise((r) => setTimeout(r, 30));
   assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
+}
+
+async function testButlerModeToggleAndConverse() {
+  console.log("\n== Butler handling-mode toggle + converse from the User Panel ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const modeBtn = doc.getElementById("btn-butler-mode");
+  assert(!!modeBtn && /Auto/.test(modeBtn.textContent), "the mode toggle is present and starts on Auto");
+
+  // Type a message and send it to the butler in Auto → startManagedTask with mode "auto".
+  doc.getElementById("composer-text").value = "compare three plans";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  let sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
+  assert(sc && sc.userRequest === "compare three plans" && sc.mode === "auto", "→ Butler sends the composed message with the current mode (auto)");
+
+  // Cycle: Auto → Himself → Delegate. Send in Delegate → mode "delegate".
+  click(dom, "btn-butler-mode"); // → Himself
+  assert(/Himself/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "one click moves to 'Himself'");
+  click(dom, "btn-butler-mode"); // → Delegate
+  assert(/Delegate/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-delegate"), "next click moves to 'Delegate'");
+  doc.getElementById("composer-text").value = "draft a memo";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
+  assert(sc && sc.mode === "delegate", "sending in Delegate passes mode 'delegate' to the butler");
+
+  // Cycle once more → Converse. Now sending goes to butlerChat, not a task.
+  click(dom, "btn-butler-mode"); // → Converse
+  assert(/Converse/.test(modeBtn.textContent), "next click reaches 'Converse'");
+  const beforeStart = api.calls.filter((c) => c.fn === "startManagedTask").length;
+  doc.getElementById("composer-text").value = "how's it going?";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerChat" && c.message === "how's it going?"), "in Converse, the message goes to butler:chat");
+  assert(api.calls.filter((c) => c.fn === "startManagedTask").length === beforeStart, "Converse does NOT start a task");
+  // My own line is echoed into the butler window.
+  assert(/You → 🤵/.test(doc.getElementById("jarvis-log").textContent) && /how's it going\?/.test(doc.getElementById("jarvis-log").textContent),
+    "my converse message is echoed in the butler window");
 }
 
 async function testButlerLightAndColoredLog() {
