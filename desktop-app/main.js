@@ -311,6 +311,7 @@ function resetManagerTask() {
     startedTs: null,
     finishedTs: null,
     noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
+    formatFailStreak: 0, // consecutive INVALID_JSON/UNKNOWN_ACTION provider replies — a "your model can't emit commands" signal
     thinkingStreak: 0, // consecutive "thinking" (PLAN/WAIT/CLASSIFY/…) turns with no real progress, used by detectManagerStall()
     pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
   };
@@ -1840,6 +1841,22 @@ async function runManagerTurn() {
 
   if (!res.ok) {
     logManagerEvent({ category: "error", severity: "error", summary: `Manager call failed: ${res.error}`, details: { error: res.error, detail: res.detail || null } });
+    // A model that keeps replying without a valid command (INVALID_JSON /
+    // UNKNOWN_ACTION) can't drive the butler — no amount of retrying or
+    // escalating fixes a model that can't emit the format. After a couple of
+    // tries, stop and tell the user plainly to switch to a JSON-capable model,
+    // instead of silently spinning up the tiers and timing out on a pane.
+    if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") {
+      m.formatFailStreak = (m.formatFailStreak || 0) + 1;
+      if (m.formatFailStreak >= 2) {
+        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. Pick a model that follows instructions well — e.g. qwen2.5:7b, llama3.1:8b, or mistral — in ⚙️ Local model settings, then try again. (The butler only needs to issue commands; the three chat AIs still do the heavy lifting.)`;
+        logManagerEvent({ category: "response", severity: "warning", summary: hint, details: { model: state.managerConfig.model || null } });
+        broadcast("manager-ack", { taskId: m.taskId, text: hint, ts: Date.now() });
+        speakAs("butler", hint);
+        await finishManagedTask({ ok: false, reason: "MODEL_INCOMPATIBLE" });
+        return;
+      }
+    }
     m.noProgressStreak++;
     if (detectNoProgress()) await escalateManagerTier(`provider error: ${res.error}`);
     else await runManagerTurn();
@@ -1857,6 +1874,7 @@ async function runManagerTurn() {
   }
 
   const decision = validated.decision;
+  m.formatFailStreak = 0; // a valid command came back — the model can drive the butler after all
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 

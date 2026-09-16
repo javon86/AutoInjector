@@ -28,13 +28,43 @@ function redactSecrets(text, apiKey) {
 
 // Pull the first {...} JSON object out of a model reply (tolerates code fences /
 // stray prose). Returns null when there's nothing parseable.
+// Find the FIRST balanced {...} object in a string (respecting quoted strings),
+// so we can pull one clean object out of prose, trailing commentary, or several
+// concatenated objects — the shapes weaker local models tend to emit.
+function _firstBalancedObject(s) {
+  const start = s.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return s.slice(start, i + 1); }
+  }
+  return null;
+}
+function _tryParse(candidate) {
+  if (!candidate) return null;
+  try { return JSON.parse(candidate); } catch (_) {}
+  // Forgive trailing commas (a very common local-model slip).
+  try { return JSON.parse(candidate.replace(/,\s*([}\]])/g, '$1')); } catch (_) {}
+  return null;
+}
 function extractJsonObject(text) {
   if (text == null) return null;
-  const s = String(text).trim();
-  try { return JSON.parse(s); } catch (_) {}
-  const start = s.indexOf('{');
-  const end = s.lastIndexOf('}');
-  if (start >= 0 && end > start) { try { return JSON.parse(s.slice(start, end + 1)); } catch (_) {} }
+  let s = String(text).trim();
+  // Strip a ```json … ``` (or bare ```) code fence if the model wrapped it.
+  const fence = s.match(/```(?:json|javascript|js)?\s*([\s\S]*?)```/i);
+  if (fence && fence[1].trim()) s = fence[1].trim();
+  let obj = _tryParse(s);
+  if (obj && typeof obj === 'object') return obj;
+  // The first complete, balanced object anywhere in the text.
+  obj = _tryParse(_firstBalancedObject(s));
+  if (obj && typeof obj === 'object') return obj;
+  // Last resort: the old first-"{" to last-"}" slice.
+  const start = s.indexOf('{'), end = s.lastIndexOf('}');
+  if (start >= 0 && end > start) { obj = _tryParse(s.slice(start, end + 1)); if (obj && typeof obj === 'object') return obj; }
   return null;
 }
 
