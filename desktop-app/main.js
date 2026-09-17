@@ -363,6 +363,32 @@ function isSafeRelativePath(p) {
   return true;
 }
 
+// Weak local models often get DELEGATE *almost* right — they smuggle a single
+// {target, task} into a `task` string, put the target/task at the top level, or
+// hand `assignments` back as a JSON string instead of an array. Rather than
+// bounce those and stall, coerce the common near-misses into the real
+// assignments array; the per-assignment allowlist check below still guards it.
+function coerceAssignments(decision) {
+  if (Array.isArray(decision.assignments) && decision.assignments.length) return decision;
+  const tryParse = (v) => { try { return JSON.parse(v); } catch (_) { return null; } };
+  // `assignments` given as a JSON string.
+  if (typeof decision.assignments === "string") {
+    const a = tryParse(decision.assignments.trim());
+    if (Array.isArray(a)) decision.assignments = a;
+    else if (a && a.target) decision.assignments = [a];
+  }
+  // A single {target, task} object hidden inside the `task` field.
+  if ((!Array.isArray(decision.assignments) || !decision.assignments.length) && typeof decision.task === "string" && decision.task.trim().startsWith("{")) {
+    const o = tryParse(decision.task.trim());
+    if (o && o.target && o.task != null) decision.assignments = [{ target: o.target, task: String(o.task) }];
+  }
+  // Top-level target + task (no wrapper at all).
+  if ((!Array.isArray(decision.assignments) || !decision.assignments.length) && decision.target && typeof decision.task === "string" && decision.task.trim() && !decision.task.trim().startsWith("{")) {
+    decision.assignments = [{ target: decision.target, task: decision.task }];
+  }
+  return decision;
+}
+
 function validateManagerAction(decision) {
   if (!decision || typeof decision !== "object" || Array.isArray(decision)) return { ok: false, error: "MALFORMED" };
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) return { ok: false, error: "UNKNOWN_ACTION" };
@@ -378,6 +404,7 @@ function validateManagerAction(decision) {
 
   const NEEDS_ASSIGNMENTS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
   if (NEEDS_ASSIGNMENTS.has(decision.action)) {
+    coerceAssignments(decision); // rescue the near-valid shapes weak local models emit
     if (!Array.isArray(decision.assignments) || !decision.assignments.length) {
       return { ok: false, error: "MISSING_ASSIGNMENTS" };
     }
@@ -1849,7 +1876,7 @@ async function runManagerTurn() {
     if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") {
       m.formatFailStreak = (m.formatFailStreak || 0) + 1;
       if (m.formatFailStreak >= 2) {
-        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. Pick a model that follows instructions well in ⚙️ Local model settings, then try again — e.g. qwen2.5:7b or llama3.1:8b, or if you want an UNCENSORED one that still follows commands, dolphin3, hermes3, or dolphin-mistral (not llama2-uncensored, which is too weak for this). The butler only issues commands; the three chat AIs still do the heavy lifting.`;
+        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. It's almost certainly too small — a 1B–3B model (tinydolphin, llama3.2:1b, phi) can't reliably issue the commands I need. Use a 7B–8B model in ⚙️ Local model settings: qwen2.5:7b or llama3.1:8b, or for an UNCENSORED one that still follows commands, dolphin3 or hermes3 (not llama2-uncensored — too weak). The butler only issues commands; the three chat AIs still do the heavy lifting.`;
         logManagerEvent({ category: "response", severity: "warning", summary: hint, details: { model: state.managerConfig.model || null } });
         broadcast("manager-ack", { taskId: m.taskId, text: hint, ts: Date.now() });
         speakAs("butler", hint);

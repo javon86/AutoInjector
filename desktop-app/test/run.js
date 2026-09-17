@@ -2371,6 +2371,24 @@ async function testModelIncompatible() {
   assert(s.manager.status === "error", "the task is parked (error), not left running");
 }
 
+// A near-valid DELEGATE from a weak local model (a {target,task} JSON string
+// smuggled into `task` — the exact llama3.2:1b malformation) is coerced into a
+// real assignment and delegated, instead of being bounced as MISSING_ASSIGNMENTS.
+async function testCoerceMalformedDelegate() {
+  console.log("\n== Butler: a near-valid DELEGATE from a weak model is coerced, not bounced ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerDecision({ action: "DELEGATE", task: '{"target":"chatgpt","task":"draft the summary"}', reason: "delegate it", confidence: 0.6 });
+  await call("manager:start-task", { userRequest: "get chatgpt to draft something" });
+  await waitUntil(async () => { const s = (await call("state:get", {})).manager; return s.status === "waiting" && s.pendingModels.includes("chatgpt"); }, { label: "the coerced DELEGATE actually delegates to chatgpt" });
+  const s = await call("state:get", {});
+  assert(s.manager.activeAssignments.some((a) => a.target === "chatgpt" && /draft the summary/.test(a.task)), "the {target,task} smuggled into `task` becomes a real assignment");
+  assert(sentLog("chatgpt").length >= 1, "the assignment is actually sent to chatgpt");
+  assert(!s.manager.previousManagerActions.some((a) => a.rejected), "it is NOT bounced as MISSING_ASSIGNMENTS");
+  await call("manager:stop", {});
+}
+
 // The butler's toolbox: the new computer-power tools are registered, held for
 // the user's approval (risk "ask"), and authored code for create-tool isn't
 // wrongly blocked by the code-injection scan (that scan is for delegated text).
@@ -2671,6 +2689,7 @@ async function main() {
   await testButlerHandlingModes();
   await testButlerConverse();
   await testModelIncompatible();
+  await testCoerceMalformedDelegate();
   await testButlerToolbox();
   await testButlerCapabilityTest();
   await testButlerCapabilitySweep();
