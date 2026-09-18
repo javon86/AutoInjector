@@ -45,6 +45,14 @@ async function main() {
   assert(vp.status().cfgScale === 8 && vp.status().motion === 1.2 && vp.status().seed === 7, 'CFG/motion/seed are applied to the render');
   stub.close();
 
+  console.log('\n== E09: an HTTP error surfaces the backend reason, not just a code ==');
+  const errStub = http.createServer((req, res) => { req.resume(); res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'CUDA out of memory' })); });
+  const ePort = await listen(errStub);
+  vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${ePort}/txt2vid` });
+  const eR = await vp.generate('a cat');
+  assert(eR.error === 'HTTP_500' && /out of memory/i.test(eR.detail || ''), 'the backend reason is returned in detail');
+  errStub.close();
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

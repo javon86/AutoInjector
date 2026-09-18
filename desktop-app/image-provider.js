@@ -29,11 +29,30 @@ let settings = {
   timeoutMs: 180000,
 };
 
+// E07: a saved endpoint of a bare host (http://127.0.0.1:7860) returns 405 —
+// A1111 needs the full txt2img path. Normalize the common shapes so a reachable
+// host that isn't the generate URL becomes one, instead of failing at render
+// time. A non-A1111 path the user set on purpose (ComfyUI, a custom route) is
+// left alone: we only fill in a MISSING or root path.
+function _normalizeEndpoint(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  let u;
+  try { u = new URL(s); } catch { return s; } // not a URL — hand it back untouched
+  const path = u.pathname.replace(/\/+$/, '');
+  if (path === '' || path === '/api/v1' || path === '/sdapi/v1') {
+    u.pathname = '/sdapi/v1/txt2img';
+    return u.toString();
+  }
+  return s;
+}
+
 function getSettings() { return { ...settings }; }
 function setSettings(patch) {
   if (!patch || typeof patch !== 'object') return getSettings();
   if ('enabled' in patch) settings.enabled = !!patch.enabled;
-  for (const k of ['endpoint', 'model']) if (k in patch) settings[k] = String(patch[k] || '');
+  if ('endpoint' in patch) settings.endpoint = _normalizeEndpoint(patch.endpoint);
+  if ('model' in patch) settings.model = String(patch.model || '');
   for (const k of ['steps', 'width', 'height', 'batchCount']) {
     if (k in patch) { const n = Number(patch[k]); if (Number.isFinite(n) && n > 0) settings[k] = Math.round(n); }
   }
@@ -48,6 +67,21 @@ function status() {
 
 // Strip a possible data-URI prefix so callers always get raw base64.
 function _cleanBase64(s) { return String(s || '').replace(/^data:image\/\w+;base64,/, ''); }
+
+// E09: an HTTP>=400 body carries the REAL reason (e.g. the xFormers
+// NotImplementedError behind a 500). Pull a short, safe message out of it —
+// JSON {error|detail|message} first, else stripped/truncated text — so the
+// caller can show it instead of a bare "HTTP_500".
+function _errDetail(buf) {
+  const s = String(buf || '').slice(0, 4000);
+  if (!s.trim()) return '';
+  try {
+    const j = JSON.parse(s);
+    const m = j.error || j.detail || j.message || j.msg || (j.errors && JSON.stringify(j.errors));
+    if (m) return String(m).replace(/\s+/g, ' ').trim().slice(0, 400);
+  } catch { /* not JSON — fall through to text */ }
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+}
 
 // Generate one image from a prompt. Resolves { ok, imageBase64, info, error }.
 function generate(prompt, opts = {}) {
@@ -78,15 +112,20 @@ function generate(prompt, opts = {}) {
     const req = lib.request(
       { hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'POST', headers, timeout: settings.timeoutMs },
       (res) => {
-        if (res.statusCode && res.statusCode >= 400) { res.resume(); return finish({ ok: false, error: `HTTP_${res.statusCode}` }); }
+        // On an error status, read only a bounded slice of the body (for the
+        // reason); on success, read the whole thing — a base64 image is large.
+        const isErr = !!(res.statusCode && res.statusCode >= 400);
         let buf = ''; res.setEncoding('utf8');
-        res.on('data', (c) => { buf += c; });
+        res.on('data', (c) => { if (!isErr || buf.length < 65536) buf += c; else res.resume(); });
         res.on('end', () => {
+          if (isErr) return finish({ ok: false, error: `HTTP_${res.statusCode}`, detail: _errDetail(buf) });
           let j; try { j = JSON.parse(buf || '{}'); } catch { return finish({ ok: false, error: 'BAD_JSON' }); }
-          const img = Array.isArray(j.images) && j.images.length ? _cleanBase64(j.images[0]) : '';
-          if (!img) return finish({ ok: false, error: 'NO_IMAGE' });
-          onEvent({ type: 'image', content: `${img.length} base64 chars` });
-          finish({ ok: true, imageBase64: img, info: j.info || '' });
+          // E09: keep EVERY image the batch produced, not just the first. imageBase64
+          // stays the first one for back-compat; images[] carries the whole batch.
+          const imgs = Array.isArray(j.images) ? j.images.map(_cleanBase64).filter(Boolean) : [];
+          if (!imgs.length) return finish({ ok: false, error: 'NO_IMAGE' });
+          onEvent({ type: 'image', content: `${imgs.length} image(s), ${imgs[0].length} base64 chars` });
+          finish({ ok: true, imageBase64: imgs[0], images: imgs, info: j.info || '' });
         });
         res.on('error', (e) => finish({ ok: false, error: String((e && e.message) || e) }));
       }

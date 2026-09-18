@@ -4,7 +4,7 @@
 // message back as the reply. Run: node test/read-script.test.js
 const vm = require("vm");
 const { JSDOM } = require("jsdom");
-const { buildReadScript } = require("../automation");
+const { buildReadScript, buildSendScript } = require("../automation");
 
 let passed = 0, failed = 0;
 function assert(cond, msg) {
@@ -119,5 +119,35 @@ console.log("\n== no stop/send buttons matched -> falls back (not generating) ==
   assert(r.sendReady === false, "no Send button -> not send-ready");
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+// E11: a send into a provider-paused conversation (composer gone, a known
+// safeguard marker on the page) reports PROVIDER_PAUSED with a reason, not a
+// bare INPUT_NOT_FOUND. buildSendScript's IIFE is async, so await its promise.
+async function runSend(html, site = "claude") {
+  const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { runScripts: "outside-only" });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () { return { width: 24, height: 24, top: 0, left: 0, right: 24, bottom: 24 }; };
+  // setTimeout is used by the send script's polling; jsdom provides it.
+  return await vm.runInContext(buildSendScript(site, "hello there"), dom.getInternalVMContext());
+}
+
+(async () => {
+  console.log("\n== E11: a paused conversation reports PROVIDER_PAUSED, not INPUT_NOT_FOUND ==");
+  {
+    // No composer on the page + the exact safeguard marker the audit saw.
+    const r = await runSend(`<div>Claude paused: reasoning_extraction was triggered for this conversation.</div>`);
+    assert(r.ok === false && r.error === "PROVIDER_PAUSED", "a missing composer + a pause marker -> PROVIDER_PAUSED");
+    assert(/reasoning_extraction/.test(r.reason || ""), "the pause reason is reported so the user knows why");
+  }
+  {
+    // No composer and NO marker -> still the plain missing-input error (no false pause).
+    const r = await runSend(`<div>just some unrelated page chrome</div>`);
+    assert(r.ok === false && r.error === "INPUT_NOT_FOUND", "a missing composer with no marker stays INPUT_NOT_FOUND (no false positive)");
+  }
+  {
+    // A real composer present -> the pause path never triggers.
+    const r = await runSend(`<div contenteditable="true"></div><div>reasoning_extraction appears here as page text</div>`);
+    assert(r.error !== "PROVIDER_PAUSED", "with a working composer, a stray marker never fabricates a pause");
+  }
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed ? 1 : 0);
+})();

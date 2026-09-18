@@ -49,6 +49,19 @@ function status() {
 
 function _cleanBase64(s) { return String(s || '').replace(/^data:video\/\w+;base64,/, ''); }
 
+// E09: surface the real backend reason from an HTTP>=400 body instead of a bare
+// "HTTP_500". JSON {error|detail|message} first, else stripped/truncated text.
+function _errDetail(buf) {
+  const s = String(buf || '').slice(0, 4000);
+  if (!s.trim()) return '';
+  try {
+    const j = JSON.parse(s);
+    const m = j.error || j.detail || j.message || j.msg || (j.errors && JSON.stringify(j.errors));
+    if (m) return String(m).replace(/\s+/g, ' ').trim().slice(0, 400);
+  } catch { /* not JSON */ }
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+}
+
 // Pull a video out of whatever shape the backend returned.
 function _extract(j) {
   if (!j || typeof j !== 'object') return {};
@@ -93,10 +106,13 @@ function generate(prompt, opts = {}) {
     const req = lib.request(
       { hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'POST', headers, timeout: settings.timeoutMs },
       (res) => {
-        if (res.statusCode && res.statusCode >= 400) { res.resume(); return finish({ ok: false, error: `HTTP_${res.statusCode}` }); }
+        // Bound the buffer only on an error status; a successful clip's base64 is
+        // large and must be read in full.
+        const isErr = !!(res.statusCode && res.statusCode >= 400);
         let buf = ''; res.setEncoding('utf8');
-        res.on('data', (c) => { buf += c; });
+        res.on('data', (c) => { if (!isErr || buf.length < 65536) buf += c; else res.resume(); });
         res.on('end', () => {
+          if (isErr) return finish({ ok: false, error: `HTTP_${res.statusCode}`, detail: _errDetail(buf) });
           let j; try { j = JSON.parse(buf || '{}'); } catch { return finish({ ok: false, error: 'BAD_JSON' }); }
           const got = _extract(j);
           if (!got.videoBase64 && !got.videoUrl) return finish({ ok: false, error: 'NO_VIDEO' });

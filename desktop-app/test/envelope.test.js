@@ -62,6 +62,14 @@ function testQuotedExampleNotTruncated() {
   assert(/```/.test(e.parseEndTag(fenced).body), "the closing code fence is preserved in the body (not truncated away)");
 }
 
+function testWhitespaceTolerance() {
+  console.log("\n== E06: a stray space before the colon still parses ==");
+  assert(e.parseRoundtableTag("[TO : GEMINI] hi").tag === "GEMINI", "[TO : GEMINI] (space before colon) is recognized");
+  assert(e.parseRoundtableTag("[TO : BUTLER] do it").tag === "BUTLER", "[TO : BUTLER] with a space before the colon reaches the butler");
+  assert(e.hasEndTag("done.\n[FROM : CHATGPT]"), "[FROM : X] with a space before the colon still completes the message");
+  assert(e.parseEndTag("body here\n[FROM : CLAUDE]").body === "body here", "the spaced closing tag is stripped from the body");
+}
+
 function testNoneAndStrip() {
   console.log("\n== isNoneSkip + stripEnvelope ==");
   assert(e.isNoneSkip("[TO: NONE]"), "[TO: NONE] is a skip");
@@ -75,6 +83,7 @@ function main() {
   testButlerDestination();
   testEndTagCompletion();
   testQuotedExampleNotTruncated();
+  testWhitespaceTolerance();
   testNoneAndStrip();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

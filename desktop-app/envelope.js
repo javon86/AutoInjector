@@ -10,7 +10,9 @@
 // Recognized [TO:] destinations: the three web AIs, the special ALL/USER/NONE,
 // and BUTLER — the local supervisor (see main.js's [TO: BUTLER] delivery path).
 // A missing/unrecognized tag defaults to USER (Rule 1).
-const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO:\s*(GEMINI|CHATGPT|CLAUDE|BUTLER|ALL|USER|NONE)\s*\]\s*/i;
+// E06: tolerate a stray space before the colon ("[TO : X]") — a real parse-miss
+// the audit hit — as well as the usual bracket/space slack.
+const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO\s*:\s*(GEMINI|CHATGPT|CLAUDE|BUTLER|ALL|USER|NONE)\s*\]\s*/i;
 function parseRoundtableTag(text) {
   const m = ROUNDTABLE_TAG_RE.exec(text);
   if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user
@@ -25,7 +27,7 @@ function parseRoundtableTag(text) {
 // We take the LAST tag that qualifies as the terminator, so a [FROM:] quoted
 // MID-reply doesn't prematurely complete the message. parseEndTag() strips it so
 // the marker never reaches the transcript, a routed message, or a PDF.
-const END_TAG_RE = /\[\s*FROM:\s*([^\]\r\n]{1,40}?)\s*\]/gi;
+const END_TAG_RE = /\[\s*FROM\s*:\s*([^\]\r\n]{1,40}?)\s*\]/gi;
 const END_TAG_MAX_TAIL = 40; // chars allowed after the closing tag (a brief sign-off / punctuation) before it's judged "still has content"
 function findEndTag(text) {
   const s = String(text || "");

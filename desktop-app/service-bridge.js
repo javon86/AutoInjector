@@ -281,7 +281,7 @@ function createServiceBridge(deps) {
         const r = await image.generate(String(body.prompt), { negativePrompt: body.negativePrompt, onEvent: (ev) => emit('image', ev) });
         emit('image', { type: 'done' });
         // Never stream the raw base64 back over the bridge — just the outcome.
-        return reply(res, r && r.ok ? 200 : 400, { ok: !!(r && r.ok), info: (r && r.info) || '', error: (r && r.error) || null, bytes: r && r.imageBase64 ? r.imageBase64.length : 0 });
+        return reply(res, r && r.ok ? 200 : 400, { ok: !!(r && r.ok), info: (r && r.info) || '', error: (r && r.error) || null, detail: (r && r.detail) || null, count: r && Array.isArray(r.images) ? r.images.length : (r && r.imageBase64 ? 1 : 0), bytes: r && r.imageBase64 ? r.imageBase64.length : 0 });
       }
       if (!image && (path === '/image/status' || path === '/image/settings' || path === '/image/generate')) {
         return reply(res, 501, { ok: false, error: 'IMAGE_NOT_WIRED' });
