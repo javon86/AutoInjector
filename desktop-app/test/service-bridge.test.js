@@ -62,6 +62,8 @@ const bridge = createServiceBridge({
     configure: (patch) => ({ configured: true, enabled: !!patch.enabled, endpoint: patch.endpoint || 'http://127.0.0.1:7860/sdapi/v1/txt2img' }),
     generate: async (prompt, { onEvent }) => { calls.imageGen = prompt; onEvent({ type: 'image' }); return { ok: true, imageBase64: 'QUJD', info: 'ok' }; },
   },
+  mobilePage: '<!doctype html><title>AI Phone</title><body>phone shell</body>',
+  silence: async () => { calls.silenced = (calls.silenced || 0) + 1; return { ok: true, global: { relayEnabled: false } }; },
 });
 
 function req(method, path, { body, token, raw, origin } = {}) {
@@ -247,6 +249,32 @@ async function main() {
     assert(gen.json.bytes === 4 && gen.json.imageBase64 === undefined, 'the raw base64 is never streamed back — only the outcome + byte count');
     const noPrompt = await req('POST', '/image/generate', { token: TOKEN, body: {} });
     assert(noPrompt.status === 400 && noPrompt.json.error === 'NEED_PROMPT', 'a generate with no prompt is rejected');
+  }
+
+  console.log('\n== phone companion: the mobile shell + /silence + same-origin ==');
+  {
+    // The phone shell loads with NO token (it carries the token from the URL for
+    // its data calls); only the HTML comes back here.
+    const page = await req('GET', '/m', { raw: true });
+    assert(page.status === 200 && /AI Phone/.test(page.json), 'GET /m serves the phone shell without a token');
+    const page2 = await req('GET', '/mobile', { raw: true });
+    assert(page2.status === 200 && /phone shell/.test(page2.json), 'GET /mobile serves it too');
+    // /silence stops all relay (token required).
+    const noAuth = await req('POST', '/silence', {});
+    assert(noAuth.status === 401, '/silence still requires the token');
+    const stop = await req('POST', '/silence', { token: TOKEN });
+    assert(stop.status === 200 && stop.json.ok === true && calls.silenced >= 1, 'POST /silence halts all relay');
+    // A same-origin POST from the served page over the LAN (Origin host === Host)
+    // is allowed even though the host isn't localhost.
+    const sameOrigin = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({});
+      const rq = http.request({ host: '127.0.0.1', port: PORT, path: '/silence', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}`,
+          Host: '192.168.1.50:' + PORT, Origin: 'http://192.168.1.50:' + PORT } },
+        (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(b) })); });
+      rq.on('error', reject); rq.write(data); rq.end();
+    });
+    assert(sameOrigin.status === 200, 'a same-origin (Origin host === Host) LAN POST from the phone page is allowed');
   }
 
   console.log('\n== unknown route ==');

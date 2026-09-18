@@ -3250,7 +3250,7 @@ ipcMain.handle("routing:stop-all", () => {
 // at once — mesh/Auto routing, any House Rule run, any Prompt Sequence, and any
 // Butler task — without unchecking your participants. Nothing new gets relayed
 // after this (in-flight sends already dispatched will just complete).
-ipcMain.handle("relay:silence", async () => {
+async function silenceAllRelay() {
   for (const site of SITE_IDS) state.routing[site].clear();
   state.meshActive = false;
   state.relayEnabled = false; // halt the always-on baseline [TO:] tag relay too, not just mesh
@@ -3260,7 +3260,8 @@ ipcMain.handle("relay:silence", async () => {
   logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
-});
+}
+ipcMain.handle("relay:silence", async () => silenceAllRelay());
 
 ipcMain.handle("routing:auto-all", () => {
   const active = SITE_IDS.filter((s) => state.enabled[s]);
@@ -4466,6 +4467,11 @@ const serviceBridge = createServiceBridge({
     configure: (patch) => imageProvider.setSettings(patch),
     generate: (prompt, o) => imageProvider.generate(prompt, o),
   },
+  // The minimal phone companion: the bridge serves this static shell at /m and
+  // the page streams the feed + posts sends back. "Stop" on the phone routes to
+  // the same silence-all-relay path as the desktop button.
+  mobilePage: loadMobilePage(),
+  silence: () => silenceAllRelay(),
 });
 // Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.
 if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
@@ -4585,10 +4591,57 @@ function bridgeToken() {
   } catch (_) { return gen(); }
 }
 
+// --- Phone companion -----------------------------------------------------------
+// The bridge serves a minimal phone page (mobile.html). Loaded once at boot.
+function loadMobilePage() {
+  try { return fs.readFileSync(path.join(__dirname, "mobile.html"), "utf8"); }
+  catch (_) { return null; }
+}
+// First non-internal IPv4 — the address a phone on the same Wi-Fi uses to reach
+// the PC. Best-effort; null if it can't be determined.
+function lanAddress() {
+  try {
+    const ifaces = require("os").networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni && ni.family === "IPv4" && !ni.internal && ni.address) return ni.address;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+// LAN access is OFF by default (localhost only): binding to the network is a
+// deliberate opt-in, remembered in a tiny sidecar file so it survives restarts.
+function phoneLanFile() { return path.join(userDataDir(), "autoinjector-phone.json"); }
+function phoneLanEnabled() {
+  if (process.env.AUTOINJECTOR_BRIDGE_HOST === "0.0.0.0") return true;
+  try { return JSON.parse(fs.readFileSync(phoneLanFile(), "utf8")).lan === true; } catch (_) { return false; }
+}
+function setPhoneLanEnabled(on) { try { fs.writeFileSync(phoneLanFile(), JSON.stringify({ lan: !!on })); } catch (_) {} }
+
+let bridgeRuntime = { host: "127.0.0.1", port: 8765, token: null, lan: false };
+function phoneInfo() {
+  const lanEnabled = bridgeRuntime.lan && bridgeRuntime.host === "0.0.0.0";
+  const ip = lanAddress();
+  const reachHost = lanEnabled && ip ? ip : "127.0.0.1";
+  const token = bridgeRuntime.token;
+  const url = token ? `http://${reachHost}:${bridgeRuntime.port}/m?token=${encodeURIComponent(token)}` : null;
+  return { ok: true, url, lanEnabled, lanIp: ip, port: bridgeRuntime.port, hasToken: !!token };
+}
+ipcMain.handle("phone:info", () => phoneInfo());
+ipcMain.handle("phone:set-lan", async (_evt, { enabled } = {}) => {
+  setPhoneLanEnabled(!!enabled);
+  try { await serviceBridge.stop(); } catch (_) {}
+  await startServiceBridge();
+  logEvent("phone-lan-changed", { enabled: !!enabled });
+  return phoneInfo();
+});
+
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
-  const host = process.env.AUTOINJECTOR_BRIDGE_HOST || "127.0.0.1";
+  const lan = phoneLanEnabled();
+  const host = process.env.AUTOINJECTOR_BRIDGE_HOST || (lan ? "0.0.0.0" : "127.0.0.1");
   const token = bridgeToken();
   // Off by default: even an authenticated caller can't run a risk:"ask" tool over
   // the bridge unless the operator explicitly turns this on.
@@ -4596,9 +4649,10 @@ async function startServiceBridge() {
   try {
     const r = await serviceBridge.start({ port, host, token, allowRiskyTools });
     if (r && r.ok) {
+      bridgeRuntime = { host, port: r.port, token, lan };
       let tokenFile = null;
       try { tokenFile = path.join(userDataDir(), "autoinjector-bridge-token.txt"); } catch (_) {}
-      logEvent("bridge-started", { url: r.url, tokenProtected: true, tokenFile, allowRiskyTools });
+      logEvent("bridge-started", { url: r.url, tokenProtected: true, tokenFile, allowRiskyTools, lan });
     } else logEvent("bridge-start-failed", { error: r && r.error });
   } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
 }

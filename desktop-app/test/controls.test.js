@@ -47,6 +47,8 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
       return { ok: true, routing: JSON.parse(JSON.stringify(routing)) };
     },
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
+    phoneInfo: async () => ({ ok: true, url: calls._lan ? "http://192.168.1.9:8765/m?token=abc" : null, lanEnabled: !!calls._lan, lanIp: "192.168.1.9", port: 8765, hasToken: true }),
+    phoneSetLan: async (enabled) => { calls._lan = !!enabled; calls.push({ fn: "phoneSetLan", enabled: !!enabled }); return { ok: true, url: enabled ? "http://192.168.1.9:8765/m?token=abc" : null, lanEnabled: !!enabled, lanIp: "192.168.1.9", port: 8765, hasToken: true }; },
     silenceAll: async () => { calls.push({ fn: "silenceAll" }); return { ok: true, global: { routing: { chatgpt: [], claude: [], gemini: [] }, mesh: false, enabled: { chatgpt: true, claude: true, gemini: true } } }; },
     setParticipant: noop,
     startHouseRule: async (mode, topic, rounds) => { calls.push({ fn: "startHouseRule", mode, topic, rounds }); return { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds, roundNum: 0, roles: {}, nextSpeaker: null } }; },
@@ -355,6 +357,31 @@ async function testAutoBothButton() {
   const offCalls = api.calls.filter((c) => c.fn === "setRouting" && c.source === "claude" && c.on === false);
   assert(offCalls.length === 2, "clicking it again while both are on turns both routes off together");
   assert(!bothBtn.classList.contains("on"), "Both button turns back off");
+}
+
+async function testPhonePanel() {
+  console.log("\n== Phone panel: reveals the connect link and toggles LAN access ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const btn = doc.getElementById("btn-open-phone");
+  const panel = doc.getElementById("phone-panel");
+  const toggle = doc.getElementById("phone-lan-toggle");
+  const urlEl = doc.getElementById("phone-url");
+  assert(!!btn && !!panel && !!toggle && !!urlEl, "the Phone button, panel, LAN toggle and URL field all exist");
+  assert(panel.hidden === true, "the phone panel starts hidden");
+
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(panel.hidden === false, "clicking Phone reveals the panel");
+  assert(!urlEl.value, "no link is shown until LAN access is enabled");
+
+  toggle.checked = true;
+  toggle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "phoneSetLan" && c.enabled === true), "enabling the toggle turns on LAN access via phoneSetLan");
+  assert(/\/m\?token=/.test(urlEl.value), "once LAN is on, the phone link (with its token) is shown to copy");
 }
 
 async function testZoomControls() {
@@ -1057,6 +1084,7 @@ async function main() {
   await testRoundtableBadgeParity();
   await testManualControlsStayVisibleAndClickableAlways();
   await testAutoBothButton();
+  await testPhonePanel();
   await testZoomControls();
   await testSelectorPickMenuToggle();
   await testSelectorPickSuccess();

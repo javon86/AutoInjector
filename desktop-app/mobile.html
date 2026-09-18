@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark light" />
+<title>AutoInjector — Phone</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262d38; --fg: #e6edf3; --dim: #8b98a8;
+    --chatgpt: #10a37f; --claude: #d97757; --gemini: #4285f4; --me: #a371f7; --sys: #6b7684;
+    --accent: #2f81f7;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; height: 100dvh; }
+
+  header { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top));
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  header .title { font-weight: 700; font-size: 15px; }
+  header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--sys); flex: 0 0 auto; }
+  header .dot.on { background: var(--chatgpt); }
+  header .dot.off { background: #d0463b; }
+  header .spacer { flex: 1; }
+  header button.stop { background: #b9352b; color: #fff; border: 0; border-radius: 8px;
+    padding: 7px 12px; font-weight: 600; font-size: 13px; }
+  header button.stop:active { opacity: .7; }
+
+  #feed { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 12px;
+    display: flex; flex-direction: column; gap: 10px; -webkit-overflow-scrolling: touch; }
+  .msg { border: 1px solid var(--line); border-left-width: 3px; border-radius: 10px;
+    padding: 8px 11px; background: var(--panel); max-width: 100%; overflow-wrap: anywhere; }
+  .msg .who { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    margin-bottom: 3px; color: var(--dim); }
+  .msg .body { white-space: pre-wrap; }
+  .msg.chatgpt { border-left-color: var(--chatgpt); } .msg.chatgpt .who { color: var(--chatgpt); }
+  .msg.claude  { border-left-color: var(--claude);  } .msg.claude  .who { color: var(--claude); }
+  .msg.gemini  { border-left-color: var(--gemini);  } .msg.gemini  .who { color: var(--gemini); }
+  .msg.me      { border-left-color: var(--me); background: #1a1526; } .msg.me .who { color: var(--me); }
+  .msg.sys     { border-left-color: var(--sys); background: transparent; color: var(--dim); font-size: 13px; }
+  .empty { color: var(--dim); text-align: center; margin: auto; padding: 24px; font-size: 14px; }
+
+  footer { flex: 0 0 auto; border-top: 1px solid var(--line); background: var(--panel);
+    padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .targets { display: flex; gap: 6px; margin-bottom: 8px; overflow-x: auto; }
+  .targets button { flex: 0 0 auto; background: #1f2630; color: var(--dim); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 600; }
+  .targets button.sel { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .compose { display: flex; gap: 8px; align-items: flex-end; }
+  .compose textarea { flex: 1; resize: none; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; max-height: 40vh; }
+  .compose button.send { flex: 0 0 auto; background: var(--accent); color: #fff; border: 0;
+    border-radius: 10px; padding: 0 16px; height: 42px; font-weight: 700; }
+  .compose button.send:disabled { opacity: .4; }
+  .banner { display: none; background: #3a2417; color: #ffb787; border-bottom: 1px solid #5a3a22;
+    padding: 8px 14px; font-size: 13px; text-align: center; }
+  .banner.show { display: block; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="dot"></span>
+    <span class="title">AutoInjector</span>
+    <span class="spacer"></span>
+    <button class="stop" id="stop">⏹ Stop</button>
+  </header>
+  <div class="banner" id="banner"></div>
+  <div id="feed"><div class="empty" id="empty">Connecting to your PC…</div></div>
+  <footer>
+    <div class="targets" id="targets"></div>
+    <div class="compose">
+      <textarea id="input" rows="1" placeholder="Message… (PC does the work)"></textarea>
+      <button class="send" id="send" disabled>Send</button>
+    </div>
+  </footer>
+
+<script>
+(function () {
+  "use strict";
+  // The PC does all the work. This page is a thin client over the local service
+  // bridge: it streams messages via SSE and posts sends back. It carries the
+  // access token from the pairing URL (?token=…) and remembers it per device.
+  var SITES = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+  var TARGETS = ["all", "chatgpt", "claude", "gemini"];
+  var $ = function (id) { return document.getElementById(id); };
+
+  // Base URL = wherever this page was served from. Token from the URL, then saved.
+  var BASE = location.origin;
+  var token = "";
+  try {
+    var q = new URLSearchParams(location.search).get("token");
+    if (q) { token = q; localStorage.setItem("ai_token", q); }
+    else token = localStorage.getItem("ai_token") || "";
+  } catch (_) {}
+
+  function auth(h) { h = h || {}; if (token) h["Authorization"] = "Bearer " + token; return h; }
+  function withTok(path) { return BASE + path + (path.indexOf("?") < 0 ? "?" : "&") + "token=" + encodeURIComponent(token); }
+
+  var seen = Object.create(null); // de-dupe by response id
+  var feed = $("feed"), emptyEl = $("empty");
+
+  function siteClass(site) { return SITES[site] ? site : (site === "me" || site === "user" ? "me" : "sys"); }
+  function label(site) { return SITES[site] || (site === "me" || site === "user" ? "You" : "System"); }
+
+  function atBottom() { return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60; }
+  function addMsg(site, text) {
+    if (emptyEl) { emptyEl.remove(); emptyEl = null; }
+    var stick = atBottom();
+    var el = document.createElement("div");
+    el.className = "msg " + siteClass(site);
+    var w = document.createElement("div"); w.className = "who"; w.textContent = label(site);
+    var b = document.createElement("div"); b.className = "body"; b.textContent = text || "";
+    el.appendChild(w); el.appendChild(b); feed.appendChild(el);
+    if (stick) feed.scrollTop = feed.scrollHeight;
+  }
+  function pushResponse(r) {
+    if (!r) return;
+    var key = r.id != null ? "r" + r.id : null;
+    if (key) { if (seen[key]) return; seen[key] = 1; }
+    addMsg(r.site, r.text);
+  }
+
+  function setDot(state) { var d = $("dot"); d.className = "dot " + state; }
+  function banner(msg) { var b = $("banner"); if (!msg) { b.className = "banner"; return; } b.textContent = msg; b.className = "banner show"; }
+
+  // ---- targets ----
+  var target = "all";
+  try { target = localStorage.getItem("ai_target") || "all"; } catch (_) {}
+  if (TARGETS.indexOf(target) < 0) target = "all";
+  function renderTargets() {
+    var box = $("targets"); box.innerHTML = "";
+    TARGETS.forEach(function (t) {
+      var btn = document.createElement("button");
+      btn.textContent = t === "all" ? "All" : SITES[t];
+      if (t === target) btn.className = "sel";
+      btn.onclick = function () { target = t; try { localStorage.setItem("ai_target", t); } catch (_) {} renderTargets(); };
+      box.appendChild(btn);
+    });
+  }
+  renderTargets();
+
+  // ---- compose ----
+  var input = $("input"), sendBtn = $("send");
+  function grow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + "px"; }
+  function refreshSend() { sendBtn.disabled = !input.value.trim(); }
+  input.addEventListener("input", function () { grow(); refreshSend(); });
+
+  function send() {
+    var text = input.value.trim(); if (!text) return;
+    var body = { text: text };
+    if (target !== "all") body.targets = [target];
+    sendBtn.disabled = true;
+    fetch(BASE + "/send", { method: "POST", headers: auth({ "Content-Type": "application/json" }), body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function () { addMsg("me", (target === "all" ? "→ all: " : "→ " + SITES[target] + ": ") + text); input.value = ""; grow(); refreshSend(); })
+      .catch(function () { banner("Send failed — is the PC reachable?"); refreshSend(); });
+  }
+  sendBtn.onclick = send;
+  // Enter to send on a phone keyboard that offers it; Shift+Enter = newline.
+  input.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+
+  $("stop").onclick = function () {
+    fetch(BASE + "/silence", { method: "POST", headers: auth({ "Content-Type": "application/json" }), body: "{}" })
+      .then(function () { addMsg("sys", "Stopped all AI messaging."); })
+      .catch(function () { banner("Couldn't reach the PC to stop."); });
+  };
+
+  // ---- history + live stream ----
+  function loadHistory() {
+    fetch(BASE + "/responses?limit=50", { headers: auth() })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (j) { (j.responses || []).forEach(pushResponse); feed.scrollTop = feed.scrollHeight; })
+      .catch(function (e) { if (String(e).indexOf("401") >= 0) banner("Not paired — reopen the link from the PC's Phone panel."); });
+  }
+
+  var es = null, retry = null;
+  function connect() {
+    try { if (es) es.close(); } catch (_) {}
+    es = new EventSource(withTok("/events"));
+    es.addEventListener("hello", function () { setDot("on"); banner(""); });
+    es.addEventListener("response", function (ev) { try { pushResponse(JSON.parse(ev.data)); } catch (_) {} });
+    es.addEventListener("jarvis-ack", function (ev) { try { var d = JSON.parse(ev.data); if (d && d.text) addMsg("sys", "Butler: " + d.text); } catch (_) {} });
+    es.onopen = function () { setDot("on"); banner(""); };
+    es.onerror = function () { setDot("off"); if (retry) return; retry = setTimeout(function () { retry = null; connect(); }, 2500); };
+  }
+
+  if (!token) { banner("No access token — open the link from the PC's Phone panel."); setDot("off"); }
+  loadHistory();
+  connect();
+})();
+</script>
+</body>
+</html>

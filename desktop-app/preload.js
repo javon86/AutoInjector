@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld("api", {
   videoGenerate: (prompt, negativePrompt) => ipcRenderer.invoke("video:generate", { prompt, negativePrompt }),
   gpuInfo: () => ipcRenderer.invoke("gpu:info"),
   butlerSelfCheck: () => ipcRenderer.invoke("butler:selfcheck"),
+  phoneInfo: () => ipcRenderer.invoke("phone:info"),
+  phoneSetLan: (enabled) => ipcRenderer.invoke("phone:set-lan", { enabled }),
   butlerCapabilityTest: () => ipcRenderer.invoke("butler:capability-test"),
   onCapabilityTestStep: (cb) => ipcRenderer.on("capability-test-step", (_e, payload) => cb(payload)),
   butlerSendIntro: (targets) => ipcRenderer.invoke("butler:send-intro", { targets }),
