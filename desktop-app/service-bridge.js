@@ -52,6 +52,10 @@ function createServiceBridge(deps) {
   const tools = d.tools || null; // { list(), run(name, args, {onEvent}) }
   const voice = d.voice || null; // { status(), configure(patch), speak(text), listen(opts) }
   const image = d.image || null; // { status(), configure(patch), generate(prompt, {onEvent}) }
+  // The minimal phone client: the bridge serves this HTML shell (no token needed
+  // to LOAD it — it carries the token from the pairing URL and uses it for data).
+  const mobilePage = d.mobilePage || null; // string of HTML, or null to disable
+  const silence = d.silence || null; // async () => stop all AI messaging (relay:silence)
 
   let server = null;
   let unsub = null;
@@ -75,6 +79,12 @@ function createServiceBridge(deps) {
     if (!origin) return true;
     if (allowedOrigins.includes(origin)) return true;
     return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|\[0:0:0:0:0:0:0:1\])(:\d+)?$/i.test(origin);
+  }
+  // Same-origin: the phone page the bridge itself served (Origin host === the
+  // request's Host, port included) posting back to it. Allowed even over the LAN.
+  function sameOrigin(origin, req) {
+    if (!origin) return false;
+    try { return new URL(origin).host === (req.headers['host'] || ''); } catch (_) { return false; }
   }
 
   function reply(res, code, body, extraHeaders) {
@@ -121,14 +131,24 @@ function createServiceBridge(deps) {
     let url;
     try { url = new URL(req.url, 'http://localhost'); } catch (_) { return reply(res, 400, { ok: false, error: 'BAD_URL' }); }
     if (req.method === 'OPTIONS') return reply(res, 204, '');
+
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+
+    // The phone client shell is static HTML with no data in it, so it loads
+    // WITHOUT a token (it then carries the token from the pairing URL for every
+    // data call). Served before the auth gate for exactly that reason.
+    if (mobilePage && req.method === 'GET' && (path === '/m' || path === '/mobile')) {
+      return reply(res, 200, mobilePage, { 'Content-Type': 'text/html; charset=utf-8' });
+    }
+
     if (!authorized(req, url)) return reply(res, 401, { ok: false, error: 'UNAUTHORIZED' });
     // A cross-site browser page must not be able to drive execution even if a
     // token ever leaked: refuse any state-changing method from a foreign Origin.
-    if (req.method !== 'GET' && !originAllowed(req.headers['origin'])) {
+    // A same-origin request (the served phone page posting back to this bridge)
+    // is fine — its Origin host matches the request Host.
+    if (req.method !== 'GET' && !originAllowed(req.headers['origin']) && !sameOrigin(req.headers['origin'], req)) {
       return reply(res, 403, { ok: false, error: 'FORBIDDEN_ORIGIN' });
     }
-
-    const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method;
     try {
       if (method === 'GET' && (path === '/' || path === '/health')) {
@@ -172,6 +192,12 @@ function createServiceBridge(deps) {
       if (method === 'POST' && path === '/council/stop') {
         const r = await councilStop();
         return reply(res, 200, Object.assign({ ok: true }, r));
+      }
+      // "Stop AIs Talking" from the phone: halt every automatic relay at once.
+      if (method === 'POST' && path === '/silence') {
+        if (!silence) return reply(res, 501, { ok: false, error: 'NOT_WIRED' });
+        const r = await silence();
+        return reply(res, 200, Object.assign({ ok: true }, r || {}));
       }
       // --- Open Interpreter (code execution / computer control) ---
       if (interpreter && method === 'GET' && path === '/interpreter/status') {

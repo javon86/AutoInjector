@@ -2162,6 +2162,46 @@ if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
 
+// --- Phone companion: a minimal page served by the local bridge that a phone on
+// the same Wi-Fi can open to watch the messages and send. The PC does the work.
+async function refreshPhonePanel() {
+  if (!window.api || !window.api.phoneInfo) return;
+  let info = {};
+  try { info = await window.api.phoneInfo(); } catch (_) {}
+  const toggle = el("phone-lan-toggle");
+  const urlEl = el("phone-url");
+  const copyBtn = el("btn-phone-copy");
+  if (toggle) toggle.checked = !!info.lanEnabled;
+  if (urlEl) {
+    if (info.lanEnabled && info.url) urlEl.value = info.url;
+    else if (!info.lanEnabled) urlEl.value = "";
+    urlEl.placeholder = info.lanEnabled ? (info.lanIp ? "" : "No Wi-Fi address found — connect to a network") : "Enable LAN access to get a link";
+  }
+  if (copyBtn) copyBtn.disabled = !(info.lanEnabled && info.url);
+}
+if (el("btn-open-phone")) el("btn-open-phone").onclick = async () => {
+  const panel = el("phone-panel");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) await refreshPhonePanel();
+};
+if (el("phone-lan-toggle")) el("phone-lan-toggle").onchange = async (e) => {
+  const on = !!e.target.checked;
+  const hint = el("phone-hint");
+  if (hint) hint.textContent = on ? "Starting network access…" : "LAN access off — phone can't connect.";
+  try { if (window.api.phoneSetLan) await window.api.phoneSetLan(on); } catch (_) {}
+  await refreshPhonePanel();
+  if (hint) hint.textContent = on
+    ? "Open the link below on your phone (same Wi-Fi). The PC does all the work — the phone just shows messages and lets you send."
+    : "LAN access off — phone can't connect.";
+};
+if (el("btn-phone-copy")) el("btn-phone-copy").onclick = async () => {
+  const urlEl = el("phone-url");
+  if (!urlEl || !urlEl.value) return;
+  try { await navigator.clipboard.writeText(urlEl.value); } catch (_) { try { urlEl.select(); document.execCommand("copy"); } catch (_) {} }
+  const b = el("btn-phone-copy"); if (b) { const t = b.textContent; b.textContent = "✓ Copied"; setTimeout(() => { b.textContent = t; }, 1400); }
+};
+
 // User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
 if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
   if (!window.api.startNewChatAll) return;

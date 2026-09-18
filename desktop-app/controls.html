@@ -105,6 +105,15 @@
     .feed-row .meta { opacity:.78; font-size:11px; display:flex; gap:5px; }
     .feed-row .snippet { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+    /* ---- Phone companion panel (User Panel) ---- */
+    .phone-panel { margin-top:6px; padding:8px 9px; background:#0c1016; border:1px solid #26303c; border-radius:8px; }
+    .phone-lan-row { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; cursor:pointer; }
+    .phone-hint { font-size:11px; opacity:.75; margin:6px 0; }
+    .phone-url { width:100%; box-sizing:border-box; font-size:11px; padding:6px 7px; border-radius:6px;
+      border:1px solid #26303c; background:#070a0e; color:#cfe0f5; }
+    .phone-btns { display:flex; gap:6px; margin-top:6px; }
+    .phone-warn { font-size:10.5px; color:#e0a35a; margin:6px 0 0; }
+
     /* ---- Butler status light: a clickable pill in the User Panel that glows
        while the butler is working and shows a one-line "what he's doing". ---- */
     .butler-status { display:flex; align-items:center; gap:7px; font-weight:600; font-size:11.5px;
@@ -534,10 +543,24 @@
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
+          <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
           <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
           <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
+        </div>
+        <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
+          <p class="zone-label" style="margin:2px 0 6px;">📱 Connect your phone</p>
+          <label class="phone-lan-row">
+            <input type="checkbox" id="phone-lan-toggle" />
+            <span>Allow phone access on this Wi-Fi (LAN)</span>
+          </label>
+          <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
+          <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
+          <div class="phone-btns">
+            <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
+          </div>
+          <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
         </div>
       </div>
 
