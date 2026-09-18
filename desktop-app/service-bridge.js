@@ -56,9 +56,26 @@ function createServiceBridge(deps) {
   let server = null;
   let unsub = null;
   let token = null;
+  // Security posture (see E01): the bridge can run tools and code, so by default
+  // it (a) demands a token, (b) refuses writes from a foreign browser Origin, and
+  // (c) will NOT run a risk:"ask" tool over the wire unless the operator opts in.
+  let allowRiskyTools = false;
+  let allowedOrigins = [];
   const sseClients = new Set();
 
   function safeCall(fn, arg) { try { return fn(arg); } catch (_) { return null; } }
+
+  // Is this Origin a trusted local caller? An ABSENT Origin means a non-browser
+  // process (curl, a local shim, the merged supervisor) — allowed. A browser page
+  // always sends its Origin, and a random site you visit must not be able to POST
+  // to the bridge: only localhost origins (or explicitly configured ones) may do
+  // state-changing calls. A literal "null" Origin (sandboxed iframe / file://) is
+  // treated as foreign and refused. This is the drive-by-RCE guard.
+  function originAllowed(origin) {
+    if (!origin) return true;
+    if (allowedOrigins.includes(origin)) return true;
+    return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|\[0:0:0:0:0:0:0:1\])(:\d+)?$/i.test(origin);
+  }
 
   function reply(res, code, body, extraHeaders) {
     const isText = typeof body === 'string';
@@ -105,6 +122,11 @@ function createServiceBridge(deps) {
     try { url = new URL(req.url, 'http://localhost'); } catch (_) { return reply(res, 400, { ok: false, error: 'BAD_URL' }); }
     if (req.method === 'OPTIONS') return reply(res, 204, '');
     if (!authorized(req, url)) return reply(res, 401, { ok: false, error: 'UNAUTHORIZED' });
+    // A cross-site browser page must not be able to drive execution even if a
+    // token ever leaked: refuse any state-changing method from a foreign Origin.
+    if (req.method !== 'GET' && !originAllowed(req.headers['origin'])) {
+      return reply(res, 403, { ok: false, error: 'FORBIDDEN_ORIGIN' });
+    }
 
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const method = req.method;
@@ -201,7 +223,15 @@ function createServiceBridge(deps) {
         const body = await readJsonBody(req);
         if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
         if (!body.tool) return reply(res, 400, { ok: false, error: 'NEED_TOOL' });
-        const r = await tools.run(String(body.tool), body.args || {}, { onEvent: (ev) => emit('tool', ev) });
+        const name = String(body.tool);
+        // The approval boundary the desktop UI enforces for risk:"ask" tools must
+        // also hold here — a risky tool (run-command, install-package, …) is NOT
+        // runnable over the bridge unless the operator explicitly opted in.
+        if (!allowRiskyTools) {
+          const meta = (safeCall(tools.list) || []).find((t) => t && t.name === name);
+          if (meta && meta.risk === 'ask') return reply(res, 403, { ok: false, error: 'TOOL_NEEDS_APPROVAL' });
+        }
+        const r = await tools.run(name, body.args || {}, { onEvent: (ev) => emit('tool', ev) });
         emit('tool', { type: 'done' });
         return reply(res, r && r.ok ? 200 : 400, Object.assign({ ok: false }, r));
       }
@@ -298,6 +328,8 @@ function createServiceBridge(deps) {
   function start(opts) {
     const o = opts || {};
     token = o.token || null;
+    allowRiskyTools = !!o.allowRiskyTools;
+    allowedOrigins = Array.isArray(o.allowedOrigins) ? o.allowedOrigins.slice() : [];
     const host = o.host || '127.0.0.1';
     const port = o.port == null ? 8765 : o.port;
     return new Promise((resolve) => {

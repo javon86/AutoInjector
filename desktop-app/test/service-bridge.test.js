@@ -64,12 +64,13 @@ const bridge = createServiceBridge({
   },
 });
 
-function req(method, path, { body, token, raw } = {}) {
+function req(method, path, { body, token, raw, origin } = {}) {
   return new Promise((resolve, reject) => {
     const data = body != null ? JSON.stringify(body) : null;
     const headers = {};
     if (data) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = Buffer.byteLength(data); }
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (origin) headers['Origin'] = origin;
     const r = http.request({ host: '127.0.0.1', port: PORT, path, method, headers }, (res) => {
       let buf = '';
       res.on('data', (c) => { buf += c; });
@@ -180,6 +181,45 @@ async function main() {
     assert(calls.toolRun && calls.toolRun.name === 'echo' && calls.toolRun.args.x === 1, 'the tool name + args reached the registry');
     const noTool = await req('POST', '/tools/run', { token: TOKEN, body: {} });
     assert(noTool.status === 400 && noTool.json.error === 'NEED_TOOL', 'a run with no tool is rejected');
+  }
+
+  console.log('\n== security: risky tools + cross-origin writes are refused (E01) ==');
+  {
+    // http-fetch is risk:"ask" in the stub registry; the bridge default-denies it.
+    const risky = await req('POST', '/tools/run', { token: TOKEN, body: { tool: 'http-fetch', args: { url: 'http://x' } } });
+    assert(risky.status === 403 && risky.json.error === 'TOOL_NEEDS_APPROVAL', 'a risk:"ask" tool is refused over the bridge (403 TOOL_NEEDS_APPROVAL)');
+    // A monitor-risk tool is still fine.
+    const safe = await req('POST', '/tools/run', { token: TOKEN, body: { tool: 'echo', args: {} } });
+    assert(safe.status === 200 && safe.json.ok === true, 'a monitor-risk tool still runs');
+    // A foreign browser Origin cannot drive any write, even with a token.
+    const foreign = await req('POST', '/send', { token: TOKEN, origin: 'https://evil.example', body: { text: 'x' } });
+    assert(foreign.status === 403 && foreign.json.error === 'FORBIDDEN_ORIGIN', 'a POST from a foreign Origin is refused (403 FORBIDDEN_ORIGIN)');
+    // A localhost Origin (the app / a local tool page) is allowed.
+    const local = await req('POST', '/send', { token: TOKEN, origin: 'http://localhost:3000', body: { text: 'ok' } });
+    assert(local.status === 200, 'a POST from a localhost Origin is allowed');
+    // Reads are still fine regardless of Origin (they are token-gated already).
+    const readForeign = await req('GET', '/status', { token: TOKEN, origin: 'https://evil.example' });
+    assert(readForeign.status === 200, 'a GET is not origin-gated (token already guards reads)');
+  }
+
+  console.log('\n== security: opting in lets an authenticated caller run a risky tool ==');
+  {
+    const b2 = createServiceBridge({
+      tools: {
+        list: () => [{ name: 'run-command', description: 'shell', risk: 'ask' }],
+        run: async (name) => ({ ok: true, message: `ran ${name}` }),
+      },
+    });
+    const s2 = await b2.start({ port: 0, host: '127.0.0.1', token: TOKEN, allowRiskyTools: true });
+    const r = await new Promise((resolve, reject) => {
+      const data = JSON.stringify({ tool: 'run-command', args: { command: 'echo hi' } });
+      const rq = http.request({ host: '127.0.0.1', port: s2.port, path: '/tools/run', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), Authorization: `Bearer ${TOKEN}` } },
+        (res) => { let buf = ''; res.on('data', (c) => { buf += c; }); res.on('end', () => resolve({ status: res.statusCode, json: safeJson(buf) })); });
+      rq.on('error', reject); rq.write(data); rq.end();
+    });
+    assert(r.status === 200 && r.json.ok === true, 'with allowRiskyTools:true, an authenticated risk:"ask" run succeeds');
+    await b2.stop();
   }
 
   console.log('\n== Voice (N2) ==');

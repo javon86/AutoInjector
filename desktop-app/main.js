@@ -4556,15 +4556,37 @@ async function autoWireAfterSetup(target) {
   // ollama-model / stability-matrix need no in-app wiring.
 }
 
+// The local bridge can run tools and code, so it must never be open: if the
+// operator didn't supply a token we generate one and persist it (0600) so trusted
+// local callers — the merged supervisor, the Python shim — can read it, while a
+// drive-by web page cannot. Returns the token string.
+function bridgeToken() {
+  if (process.env.AUTOINJECTOR_BRIDGE_TOKEN) return process.env.AUTOINJECTOR_BRIDGE_TOKEN;
+  const gen = () => require("crypto").randomBytes(24).toString("hex");
+  try {
+    const f = path.join(userDataDir(), "autoinjector-bridge-token.txt");
+    let t = "";
+    try { t = String(fs.readFileSync(f, "utf8")).trim(); } catch (_) {}
+    if (!t) { t = gen(); fs.writeFileSync(f, t, { mode: 0o600 }); }
+    return t;
+  } catch (_) { return gen(); }
+}
+
 async function startServiceBridge() {
   if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
   const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
   const host = process.env.AUTOINJECTOR_BRIDGE_HOST || "127.0.0.1";
-  const token = process.env.AUTOINJECTOR_BRIDGE_TOKEN || null;
+  const token = bridgeToken();
+  // Off by default: even an authenticated caller can't run a risk:"ask" tool over
+  // the bridge unless the operator explicitly turns this on.
+  const allowRiskyTools = process.env.AUTOINJECTOR_BRIDGE_ALLOW_RISKY === "1";
   try {
-    const r = await serviceBridge.start({ port, host, token });
-    if (r && r.ok) logEvent("bridge-started", { url: r.url, tokenProtected: !!token });
-    else logEvent("bridge-start-failed", { error: r && r.error });
+    const r = await serviceBridge.start({ port, host, token, allowRiskyTools });
+    if (r && r.ok) {
+      let tokenFile = null;
+      try { tokenFile = path.join(userDataDir(), "autoinjector-bridge-token.txt"); } catch (_) {}
+      logEvent("bridge-started", { url: r.url, tokenProtected: true, tokenFile, allowRiskyTools });
+    } else logEvent("bridge-start-failed", { error: r && r.error });
   } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
 }
 
