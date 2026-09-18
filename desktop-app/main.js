@@ -1173,6 +1173,9 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
         r = { ok: false, error: String(e) };
       }
       if (r && r.ok) break;
+      // E11: a provider-paused conversation won't recover by resending — the
+      // composer is gone on purpose. Stop retrying and report it as itself.
+      if (r && r.error === "PROVIDER_PAUSED") break;
       if (attempt < SEND_RETRY_ATTEMPTS) {
         logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown" });
         await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS));
@@ -1186,8 +1189,14 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // [MSG #] header must not make every send look unique.
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
   if (!res || !res.ok) {
-    broadcast("send-error", { target, error: res?.error || "unknown" });
+    broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
+    // E11: give the paused case an actionable, human message instead of a bare
+    // INPUT_NOT_FOUND — the user needs to open that pane and clear the safeguard.
+    if (res && res.error === "PROVIDER_PAUSED") {
+      logEvent("provider-paused", { target, reason: res.reason || null });
+      broadcast("manager-ack", { taskId: null, text: `${SITES[target]?.label || target} paused this conversation behind a safeguard${res.reason ? ` (${res.reason})` : ""}. Open its pane and start a new chat or clear the block, then try again.`, ts: Date.now() });
+    }
     // opts.hr marks a send made on behalf of an active House Rule turn --
     // exhausting every retry used to leave the run silently `active`
     // forever, waiting on a reply that can now never arrive. Park it the
@@ -2068,17 +2077,25 @@ async function executeManagerAction(decision) {
           onEvent: (ev) => logManagerEvent({ category: "image", summary: `image:${ev.type}`, details: { type: ev.type } }),
         });
       } catch (e) { r = { ok: false, error: String(e) }; }
-      let savedPath = null, sha = "";
-      if (r && r.ok && r.imageBase64) {
+      let savedPath = null, sha = "", savedPaths = [];
+      // E09: persist EVERY image the batch returned, not just the first.
+      const batch = (r && r.ok) ? (Array.isArray(r.images) && r.images.length ? r.images : (r.imageBase64 ? [r.imageBase64] : [])) : [];
+      if (batch.length) {
         try {
-          const buf = Buffer.from(r.imageBase64, "base64");
-          sha = require("crypto").createHash("sha256").update(buf).digest("hex");
-          const fname = `img-${Date.now()}.png`;
-          savedPath = outputManager.saveBuffer(outputManager.imagesDir(), fname, buf);
-          try { dbService.recordImage({ path: savedPath, prompt: decision.prompt, model: imageProvider.status().model, from: `manager:${m.taskId}`, sha256: sha }); } catch (_) {}
+          for (let i = 0; i < batch.length; i++) {
+            const buf = Buffer.from(batch[i], "base64");
+            const digest = require("crypto").createHash("sha256").update(buf).digest("hex");
+            const fname = `img-${Date.now()}${batch.length > 1 ? `-${i + 1}` : ""}.png`;
+            const p = outputManager.saveBuffer(outputManager.imagesDir(), fname, buf);
+            savedPaths.push(p);
+            if (i === 0) { savedPath = p; sha = digest; }
+            try { dbService.recordImage({ path: p, prompt: decision.prompt, model: imageProvider.status().model, from: `manager:${m.taskId}`, sha256: digest }); } catch (_) {}
+          }
         } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; }
       }
-      const entry = { id: m.images.length + 1, prompt: decision.prompt, path: savedPath, ok: !!(r && r.ok && savedPath), error: (r && r.error) || (savedPath ? null : "no image"), ts: Date.now() };
+      // E09: surface the backend's real reason (e.g. the xFormers error) not a bare code.
+      const failReason = r && r.error ? (r.detail ? `${r.error}: ${r.detail}` : r.error) : (savedPath ? null : "no image");
+      const entry = { id: m.images.length + 1, prompt: decision.prompt, path: savedPath, paths: savedPaths, count: savedPaths.length, ok: !!(r && r.ok && savedPath), error: failReason, ts: Date.now() };
       m.images.push(entry);
       if (m.images.length > 30) m.images.shift();
       recordCapabilityOutcome("stable-diffusion", "GENERATE_IMAGE", entry.ok);
@@ -4029,14 +4046,22 @@ ipcMain.handle("image:configure", (_evt, patch) => {
 });
 ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) => {
   const r = await imageProvider.generate(prompt, { negativePrompt });
-  if (!r || !r.ok || !r.imageBase64) return { ok: false, error: (r && r.error) || "FAILED" };
+  if (!r || !r.ok || !r.imageBase64) {
+    // E09: pass the backend's real reason through, not just a bare code.
+    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED" };
+  }
   try {
-    const buf = Buffer.from(r.imageBase64, "base64");
-    const sha = require("crypto").createHash("sha256").update(buf).digest("hex");
-    const savedPath = outputManager.saveBuffer(outputManager.imagesDir(), `img-${Date.now()}.png`, buf);
-    try { dbService.recordImage({ path: savedPath, prompt, model: imageProvider.status().model, from: "wizard", sha256: sha }); } catch (_) {}
-    // Also hand back a data URL so the Image panel can preview it inline.
-    return { ok: true, path: savedPath, preview: `data:image/png;base64,${r.imageBase64}` };
+    // E09: save every image the batch produced; preview the first inline.
+    const batch = Array.isArray(r.images) && r.images.length ? r.images : [r.imageBase64];
+    const paths = [];
+    for (let i = 0; i < batch.length; i++) {
+      const buf = Buffer.from(batch[i], "base64");
+      const sha = require("crypto").createHash("sha256").update(buf).digest("hex");
+      const p = outputManager.saveBuffer(outputManager.imagesDir(), `img-${Date.now()}${batch.length > 1 ? `-${i + 1}` : ""}.png`, buf);
+      paths.push(p);
+      try { dbService.recordImage({ path: p, prompt, model: imageProvider.status().model, from: "wizard", sha256: sha }); } catch (_) {}
+    }
+    return { ok: true, path: paths[0], paths, count: paths.length, preview: `data:image/png;base64,${r.imageBase64}` };
   } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
 });
 

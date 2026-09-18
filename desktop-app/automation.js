@@ -16,13 +16,26 @@ function siteConfig(site) {
   return cfg;
 }
 
+// E11: when a provider parks a conversation behind a safeguard (e.g. Claude's
+// "reasoning_extraction" pause), the composer disappears — so a send fails with a
+// bare INPUT_NOT_FOUND that tells the user nothing. These markers, checked ONLY
+// when the input is already missing, let us report PROVIDER_PAUSED with a reason
+// instead. Specific phrases only, so an ordinary reply never trips them.
+const DEFAULT_PAUSE_MARKERS = [
+  "reasoning_extraction",
+  "paused this conversation",
+  "conversation is paused",
+  "unable to continue the conversation",
+];
+
 function buildSendScript(site, text, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
     INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES
+    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS
   });
 
   return `
@@ -123,8 +136,26 @@ function buildSendScript(site, text, overrides) {
       return { ok: false, error: "SEND_NOT_CONFIRMED" };
     }
 
+    // E11: distinguish a provider-paused conversation from a plain missing box.
+    function detectPause() {
+      let body = "";
+      try { body = String((document.body && (document.body.innerText || document.body.textContent)) || "").toLowerCase(); } catch (_) { return null; }
+      if (!body) return null;
+      for (const mk of (CFG.PAUSE_MARKERS || [])) {
+        const needle = String(mk || "").toLowerCase();
+        if (needle && body.indexOf(needle) !== -1) return mk;
+      }
+      return null;
+    }
+
     const inj = await injectText(CFG.text);
-    if (!inj.ok) return inj;
+    if (!inj.ok) {
+      if (inj.error === "INPUT_NOT_FOUND") {
+        const reason = detectPause();
+        if (reason) return { ok: false, error: "PROVIDER_PAUSED", reason };
+      }
+      return inj;
+    }
     return attemptSend();
   })();
   `;

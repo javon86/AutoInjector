@@ -24,6 +24,13 @@ async function main() {
   assert(set2.cfgScale === 8.5 && set2.batchCount === 3 && set2.seed === 12345, 'the CFG/batch/seed sliders are stored');
   assert(ip.setSettings({ seed: -1 }).seed === -1, 'seed -1 (random) is allowed');
 
+  console.log('\n== E07: a bare-host endpoint is normalized to the A1111 txt2img path ==');
+  assert(ip.setSettings({ endpoint: 'http://127.0.0.1:7860' }).endpoint === 'http://127.0.0.1:7860/sdapi/v1/txt2img', 'a bare host gets the /sdapi/v1/txt2img path (the E07 405 case)');
+  assert(ip.setSettings({ endpoint: 'http://127.0.0.1:7860/' }).endpoint === 'http://127.0.0.1:7860/sdapi/v1/txt2img', 'a trailing-slash root is normalized too');
+  assert(ip.setSettings({ endpoint: 'http://127.0.0.1:7860/sdapi/v1' }).endpoint === 'http://127.0.0.1:7860/sdapi/v1/txt2img', 'the /sdapi/v1 base is completed to txt2img');
+  assert(ip.setSettings({ endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img' }).endpoint === 'http://127.0.0.1:7860/sdapi/v1/txt2img', 'an already-correct endpoint is left alone');
+  assert(ip.setSettings({ endpoint: 'http://127.0.0.1:8188/prompt' }).endpoint === 'http://127.0.0.1:8188/prompt', 'a deliberate custom path (ComfyUI) is not rewritten');
+
   console.log('\n== guards: empty prompt / disabled / no endpoint ==');
   assert((await ip.generate('')).error === 'NEED_PROMPT', 'empty prompt -> NEED_PROMPT');
   assert((await ip.generate('a cat')).error === 'IMAGE_DISABLED', 'disabled -> IMAGE_DISABLED');
@@ -66,7 +73,22 @@ async function main() {
   ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port4}/sdapi/v1/txt2img` });
   assert((await ip.generate('x')).error === 'HTTP_500', 'a 5xx from the SD server -> HTTP_500');
 
-  server.close(); server2.close(); server3.close(); server4.close();
+  console.log('\n== E09: the backend error reason is surfaced, not just a bare code ==');
+  const server5 = http.createServer((req, res) => { req.resume(); res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'NotImplementedError', detail: 'no operator for memory_efficient_attention_forward' })); });
+  const port5 = await listen(server5);
+  ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port5}/sdapi/v1/txt2img` });
+  const errR = await ip.generate('x');
+  assert(errR.error === 'HTTP_500' && /NotImplementedError/.test(errR.detail || ''), 'the real backend message (the xFormers error) is returned in detail, not swallowed');
+
+  console.log('\n== E09: every image in a batch is returned, not just the first ==');
+  const server6 = http.createServer((req, res) => { req.resume(); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ images: [PNG_B64, PNG_B64, PNG_B64] })); });
+  const port6 = await listen(server6);
+  ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port6}/sdapi/v1/txt2img` });
+  const batchR = await ip.generate('three please');
+  assert(batchR.ok && Array.isArray(batchR.images) && batchR.images.length === 3, 'all three images come back in images[] (the 2nd/3rd are no longer dropped)');
+  assert(batchR.imageBase64 === PNG_B64, 'imageBase64 still holds the first image for back-compat');
+
+  server.close(); server2.close(); server3.close(); server4.close(); server5.close(); server6.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
