@@ -136,7 +136,8 @@ function buildReadScript(site, overrides) {
   const payload = JSON.stringify({
     ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    STOP_CANDIDATES: cfg.STOP_CANDIDATES || []
+    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    INPUT_CANDIDATES: ov.input ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -169,17 +170,27 @@ function buildReadScript(site, overrides) {
     const node = all.length ? all[all.length - 1] : null;
     const text = node ? (node.innerText || node.textContent || "") : "";
 
-    // Generation is in progress if a Stop button is visible, or if the Send
-    // button exists but is disabled (some sites disable Send while streaming).
+    // Is the composer empty? A Send button is ALSO disabled when there's simply
+    // nothing to send (idle, empty composer) — so an empty composer must NOT be
+    // read as "still generating" (E03: a finished reply left the Send button
+    // disabled and its reply stayed uncaptured until a later send).
+    const inputBox = findAny(CFG.INPUT_CANDIDATES);
+    const composerText = inputBox ? (inputBox.value != null ? inputBox.value : (inputBox.innerText || inputBox.textContent || "")) : "";
+    const composerEmpty = !String(composerText).trim();
+
+    // Generation is in progress if a Stop button is visible (the reliable signal),
+    // or — only for sites with no Stop button that disable Send mid-stream — if
+    // Send is disabled WHILE the composer still holds text. A disabled Send over an
+    // empty composer is the idle state, not streaming.
     const stopBtn = findAny(CFG.STOP_CANDIDATES);
     const sendBtn = findAny(CFG.SEND_CANDIDATES);
     let generating = false;
     if (stopBtn && isVisible(stopBtn)) generating = true;
-    else if (sendBtn && isDisabled(sendBtn)) generating = true;
+    else if (sendBtn && isDisabled(sendBtn) && !composerEmpty) generating = true;
     // The Send button is back and clickable — the model is done speaking.
     const sendReady = !generating && !!sendBtn && isVisible(sendBtn) && !isDisabled(sendBtn);
 
-    return { ok: true, text, generating, sendReady };
+    return { ok: true, text, generating, sendReady, composerEmpty };
   })();
   `;
 }
