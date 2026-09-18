@@ -2079,6 +2079,23 @@ async function testSilenceStopsAllRelay() {
   assert(s2.houseRule.active === false, "the House Rule run is stopped");
   // Participants are kept checked (we only stopped the talking, not the setup).
   assert(SITES.every((s) => s2.global.enabled[s] === true), "participants stay checked — only the messaging stopped");
+  assert(s2.global.relayEnabled === false, "the master relay flag is off after Stop");
+  // E02: the ALWAYS-ON baseline [TO:] tag relay must halt too — not just mesh. A
+  // tagged reply captured after Stop should NOT be forwarded onward.
+  {
+    const before = s2.ledger.length;
+    say("chatgpt", "[TO: GEMINI]\nYou should NOT receive this after Stop.");
+    await settle(400);
+    const after = await call("state:get", {});
+    const leaked = after.ledger.slice(before).some((e) => e.target === "gemini" && e.textPreview.includes("NOT receive this after Stop"));
+    assert(!leaked, "a [TO: GEMINI] reply captured after Stop is NOT relayed (baseline tag relay is halted, not just mesh)");
+  }
+  // And a fresh user send re-engages the conversation: relay comes back on.
+  {
+    await call("send:compose", { text: "back in business", targets: ["claude"] });
+    const back = await call("state:get", {});
+    assert(back.global.relayEnabled === true, "a user send after Stop turns automatic relay back on");
+  }
   // The Butler/manager is stopped too.
   await call("manager:configure-provider", MANAGER_TEST_CONFIG);
   resetManagerStub();
@@ -2088,6 +2105,26 @@ async function testSilenceStopsAllRelay() {
   await call("relay:silence", {});
   const s3 = await call("state:get", {});
   assert(["idle", "finished", "error"].includes(s3.manager.status), `relay:silence also stops the Butler task (status=${s3.manager.status})`);
+}
+
+async function testAiAddressesButler() {
+  console.log("\n== E05: an AI's [TO: BUTLER] reaches the butler and is NOT forwarded to the other AIs ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {}); // mesh ON: without the BUTLER special-case this would forward to the panes
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  butlerChatCalls = [];
+  const before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: BUTLER]\nplease install stable diffusion\n[FROM: CHATGPT]");
+  await waitUntil(async () => butlerChatCalls.length >= 1, { label: "the butler receives the [TO: BUTLER] message" });
+  await settle(250);
+  const s = await call("state:get", {});
+  const forwarded = s.ledger.slice(before).some((e) => (e.target === "gemini" || e.target === "claude") && /install stable diffusion/.test(e.textPreview || ""));
+  assert(!forwarded, "a [TO: BUTLER] reply is NOT mesh-forwarded to the other AI panes");
+  assert(/install stable diffusion/.test(butlerChatCalls[0].message), "the butler got the actual body of the message");
+  assert(/from chatgpt/i.test(butlerChatCalls[0].message), "the butler is told which pane addressed it (provenance)");
+  assert(s.log.some((l) => l.kind === "to-butler" && l.detail.from === "chatgpt"), "the delivery is recorded in the activity log");
+  await call("relay:silence", {});
 }
 
 async function testModelsFolderInfo() {
@@ -2657,6 +2694,7 @@ async function main() {
   await testGeneratingGatesCapture();
   await testUiLogRoutesToActivityLog();
   await testSilenceStopsAllRelay();
+  await testAiAddressesButler();
   await testModelsFolderInfo();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();

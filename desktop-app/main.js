@@ -178,6 +178,7 @@ const state = {
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
   ledger: [], // { id, ts, source, target, textPreview, status, error, duplicate } — one entry per sendTextTo() attempt; see recordLedgerEntry(). Program-owned transport record, independent of what any AI believes happened -- never trust an AI's own claim about whether a message arrived.
   meshActive: false, // whether global Auto is currently on
+  relayEnabled: true, // master switch for AUTOMATIC AI->AI forwarding (baseline [TO:] tag relay + mesh). "Stop AIs Talking" flips this off; the next user send / relay-mode start turns it back on. Direct user sends are never gated by it.
   nextTurnId: 1,
   nextMsgSeq: 1, // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
 
@@ -974,6 +975,7 @@ function globalSnapshot() {
     waiting: { ...state.waiting },
     waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
+    relayEnabled: state.relayEnabled,
     customRole: { ...state.customRole },
     selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
@@ -1476,60 +1478,12 @@ async function startRotation() {
 // what it sends. See pollSite()'s roundtable-specific interception for why
 // that tag has to be parsed and stripped BEFORE a turn is ever pushed to the
 // transcript/broadcast, not in a post-push handler like Rotation uses.
-const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO:\s*(GEMINI|CHATGPT|CLAUDE|ALL|USER|NONE)\s*\]\s*/i;
-function parseRoundtableTag(text) {
-  const m = ROUNDTABLE_TAG_RE.exec(text);
-  if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user
-  return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
-}
-
-// End-tag protocol: every baseline reply must close with [FROM: <who>]. Its
-// PRESENCE is the completion signal (see pollSite()) — the moment it appears the
-// AI has finished, so there's no waiting on a stability timer. The sender NAME is
-// matched LOOSELY (we already know which pane it is, so any short label counts —
-// "CHATGPT", "Claude 3.5", "gpt", even "Assistant"), and a short trailing tail
-// after the tag (a sign-off "thanks!", a period) is tolerated — otherwise very
-// common real outputs would be silently dropped. We take the LAST such tag whose
-// tail is short, so a [FROM:] quoted MID-reply (with paragraphs after it) does
-// not prematurely complete the message. parseEndTag() strips it from the body so
-// the envelope marker never reaches the transcript, a routed message, or a PDF.
-const END_TAG_RE = /\[\s*FROM:\s*([^\]\r\n]{1,40}?)\s*\]/gi;
-const END_TAG_MAX_TAIL = 40; // chars allowed after the closing tag (a brief sign-off / punctuation), before it's judged "still has content"
-function findEndTag(text) {
-  const s = String(text || "");
-  let last = null, m;
-  END_TAG_RE.lastIndex = 0;
-  while ((m = END_TAG_RE.exec(s))) last = m;
-  if (!last) return null;
-  const tail = s.slice(last.index + last[0].length);
-  if (tail.length > END_TAG_MAX_TAIL || /\n\s*\n/.test(tail)) return null; // real content after the tag → not the close
-  return { index: last.index, from: (last[1] || "").trim().toUpperCase() };
-}
-function hasEndTag(text) { return !!findEndTag(text); }
-function parseEndTag(text) {
-  const s = String(text || "");
-  const f = findEndTag(s);
-  if (!f) return { from: null, body: s };
-  return { from: f.from, body: s.slice(0, f.index).replace(/\s+$/, "") };
-}
-
-// "NONE" is a complete "nothing to add" signal that stands on its own — it needs
-// no [FROM:] closing tag (NONE is itself the tag). Recognize it whether written
-// bare ("NONE"), bracketed ("[NONE]"), formatted ("**NONE**", "NONE?"), or as the
-// routing tag ("[TO: NONE]"), with or without a stray [FROM:]. Only a reply whose
-// ENTIRE content is NONE counts — "None of this works" is a real message.
-function isNoneSkip(text) {
-  const s = String(text || "");
-  if (parseRoundtableTag(s).tag === "NONE") return true;
-  const body = parseEndTag(parseRoundtableTag(s).body).body;
-  return body.replace(/[^a-z]/gi, "").toUpperCase() === "NONE";
-}
-
-// Strip the [TO:]/[FROM:] envelope from a stored raw reply — for the few places
-// that forward or display state.captured[site] (which keeps RAW text for dedup).
-function stripEnvelope(text) {
-  return parseEndTag(parseRoundtableTag(String(text || "")).body).body;
-}
+// The [TO:]/[FROM:] envelope parser lives in its own pure module so it can be
+// unit-tested directly (main.js only runs under the Electron harness). It also
+// carries the E04 quoted/fenced-example guard and recognizes [TO: BUTLER] (E05).
+const {
+  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope,
+} = require("./envelope");
 
 // Append a concise envelope instruction to an outbound prompt so the receiving
 // pane wraps its reply per the protocol. Required on the baseline path (Compose,
@@ -1553,7 +1507,7 @@ function composeEnvelopeReminder(site) {
   return (
     "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
     "Every message MUST use the communication envelope:\n" +
-    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
+    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
     "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
     "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
     "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
@@ -1683,6 +1637,7 @@ function sequenceWatchdog() {
 
 async function startSequence(steps) {
   state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0 };
+  state.relayEnabled = true; // a sequence run re-enables forwarding after any prior Stop
   await sendSequenceStep();
 }
 
@@ -2243,6 +2198,7 @@ async function startManagedTask(userRequest, opts = {}) {
   if (mode === "auto" && sniff.self) mode = "self";
 
   resetManagerTask();
+  state.relayEnabled = true; // a butler task is a user-initiated action; re-enable forwarding after any prior Stop
   const m = state.manager;
   m.taskId = `task-${Date.now()}`;
   m.userRequest = request;
@@ -2319,6 +2275,21 @@ async function butlerChat(message) {
   broadcast("manager-ack", { taskId: null, text: reply, ts: Date.now() });
   speakAs("butler", reply);                                    // say it out loud (talking to the user)
   return { ok: true, text: reply };
+}
+
+// E05: a web AI addressed the local butler with [TO: BUTLER]. Deliver it to the
+// butler's CONVERSE path (it replies and speaks) — never straight to autonomous
+// task execution — and stamp the provenance so it's clear which pane asked. If
+// the butler isn't configured, surface that rather than silently dropping it.
+async function deliverToButler(turn) {
+  const who = (SITES[turn.site] && SITES[turn.site].label) || turn.site;
+  logEvent("to-butler", { from: turn.site, chars: String(turn.text || "").length });
+  try {
+    const r = await butlerChat(`[Message from ${who}]: ${turn.text}`);
+    if (!r || !r.ok) logManagerEvent({ category: "error", severity: "warning", summary: `A [TO: BUTLER] message from ${who} couldn't be handled: ${(r && r.error) || "error"}` });
+  } catch (e) {
+    logEvent("to-butler-error", { from: turn.site, error: String(e) });
+  }
 }
 
 // N3: seed the task's memories[] with facts relevant to the request, pulled from
@@ -2903,16 +2874,28 @@ async function pollSite(site) {
     // stages, Prompt Sequence, Manager) always run.
     const looping = !stageActive && loopSuppressRelay(turn.text);
     if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
-    let hrSentTargets = new Set();
-    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-    else if (!looping) await handleRoundtableCapture(turn);
-    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-    if (!looping) {
-      for (const target of state.routing[site]) {
-        if (target === site || roundtableTargets.has(target)) continue;
-        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-        // relay — never the raw page text, which still carries [TO:]/[FROM:].
-        await sendTextTo(target, turn.text, site);
+    // "Stop AIs Talking" (relay:silence) flips relayEnabled off. It must halt
+    // EVERY automatic AI->AI forwarding path, including the always-on baseline
+    // [TO:] tag relay below — not just the mesh routing arrays it also clears.
+    // A stage format (House Rules) is already torn down by the same stop, so its
+    // path is gated by stageActive/hr.active, not this flag.
+    const relayOn = state.relayEnabled;
+    if (!stageActive && turn.roundtableTag === "BUTLER") {
+      // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
+      // butler's converse path and do NOT also mesh-forward it to the other AIs.
+      if (relayOn) await deliverToButler(turn);
+    } else {
+      let hrSentTargets = new Set();
+      if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+      else if (!looping && relayOn) await handleRoundtableCapture(turn);
+      const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
+      if (!looping && relayOn) {
+        for (const target of state.routing[site]) {
+          if (target === site || roundtableTargets.has(target)) continue;
+          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+          // relay — never the raw page text, which still carries [TO:]/[FROM:].
+          await sendTextTo(target, turn.text, site);
+        }
       }
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
@@ -3129,6 +3112,7 @@ ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
   try { dbService.recordUserMessage(text, list); } catch (_) {}
+  state.relayEnabled = true; // a fresh user send re-engages the conversation after a Stop
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   // Teach the envelope per target so the reply comes back with its [FROM:] tag
@@ -3252,6 +3236,7 @@ ipcMain.handle("routing:stop-all", () => {
 ipcMain.handle("relay:silence", async () => {
   for (const site of SITE_IDS) state.routing[site].clear();
   state.meshActive = false;
+  state.relayEnabled = false; // halt the always-on baseline [TO:] tag relay too, not just mesh
   if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
   if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
   try { await stopManagedTask(); } catch (_) {}
@@ -3266,6 +3251,7 @@ ipcMain.handle("routing:auto-all", () => {
     state.routing[s] = state.enabled[s] ? new Set(active.filter((t) => t !== s)) : new Set();
   }
   state.meshActive = active.length >= 2;
+  state.relayEnabled = true; // turning Auto on re-enables automatic forwarding
   logEvent("auto-mesh-enabled", { participants: active });
   return { ok: true, global: globalSnapshot() };
 });
@@ -3305,6 +3291,7 @@ async function startCouncil({ mode, topic, rounds }) {
 
   resetHouseRule(mode, topic, rounds);
   state.hr.active = true;
+  state.relayEnabled = true; // starting a run re-enables forwarding after any prior Stop
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   logEvent("houserule-start", { mode, participants: checked, rounds: state.hr.rounds });
@@ -4397,6 +4384,7 @@ function bridgeResponses({ since = 0, limit = 100, site = null } = {}) {
 async function bridgeSendTo(site, text) {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  state.relayEnabled = true; // a user send over the bridge re-engages forwarding after a Stop
   try { dbService.recordUserMessage(String(text), [site]); } catch (_) {}
   // Teach the reply envelope, same as the UI's Compose path, so the reply comes
   // back with its [FROM:] tag and is captured on the baseline path.

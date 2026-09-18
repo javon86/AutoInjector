@@ -90,12 +90,26 @@ console.log("\n== done: the Send button is back and clickable ==");
   assert(r.sendReady === true, "Send button back and enabled -> sendReady:true");
 }
 
-console.log("\n== a disabled Send button also counts as still generating ==");
+console.log("\n== a disabled Send button counts as generating ONLY when the composer has text ==");
 {
+  // No Stop button, Send disabled, but the composer still holds the in-flight
+  // text — a site that disables Send mid-stream. This is genuinely generating.
   const r = runGen(`<div data-message-author-role="assistant">streaming…</div>
+    <div contenteditable="true">the prompt still sitting in the box</div>
     <button data-testid="send-button" aria-label="Send prompt" disabled>send</button>`);
-  assert(r.generating === true, "disabled Send button -> generating:true");
-  assert(r.sendReady === false, "a disabled Send button is not send-ready");
+  assert(r.composerEmpty === false, "the composer is seen as non-empty");
+  assert(r.generating === true, "disabled Send + text in composer -> generating:true");
+}
+
+console.log("\n== E03 regression: a finished reply with an EMPTY composer is NOT generating ==");
+{
+  // The audit case: the reply is done, but the (empty) composer leaves Send
+  // disabled. This must read as idle, or the completed reply is never captured.
+  const r = runGen(`<div data-message-author-role="assistant">the full, finished reply [FROM: CHATGPT]</div>
+    <div contenteditable="true"></div>
+    <button data-testid="send-button" aria-label="Send prompt" disabled>send</button>`);
+  assert(r.composerEmpty === true, "the empty composer is detected");
+  assert(r.generating === false, "disabled Send over an EMPTY composer -> generating:false (idle, not streaming)");
 }
 
 console.log("\n== no stop/send buttons matched -> falls back (not generating) ==");
