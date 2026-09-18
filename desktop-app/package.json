@@ -38,6 +38,8 @@
       "manager-provider.js",
       "openai-client.js",
       "service-bridge.js",
+      "log-bundle.js",
+      "log-tags.js",
       "interpreter-provider.js",
       "tool-provider.js",
       "voice-provider.js",
