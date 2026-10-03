@@ -40,6 +40,9 @@ const gpuMonitor = require("./gpu-monitor");
 const endpointDetect = require("./endpoint-detect");
 const logBundle = require("./log-bundle");
 const logTags = require("./log-tags");
+const terminalProvider = require("./terminal-provider");
+const aiLockers = require("./ai-lockers");
+const featureTest = require("./feature-test");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -239,10 +242,27 @@ function defaultTestPrompt() {
 // sendStartupRoutingPromptOnce()) and stays here in the Prompt Library so it
 // can be resent manually any time, e.g. if one of them seems to have
 // forgotten how the tagging works mid-conversation.
+// The locker part of the orientation: how each AI uses its own private folder
+// through [TO: TERMINAL]. Shared by the Prompt Library's routing prompt and the
+// Butler intro so both teach the same thing.
+function lockerGuide(site) {
+  const me = String(site || "").toLowerCase();
+  const others = SITE_IDS.filter((s) => s !== me).join(" / ");
+  return "\n\nYOUR LOCKER (your own private folder on this PC):\n" +
+    "• Address it with [TO: TERMINAL] and put commands in a ``` code block, one per line. Everything runs inside YOUR folder only — anything outside it is refused.\n" +
+    "• File commands: dir, type, copy, move, ren, del, md, rd, echo, find, findstr, sort, tree, fc, cd (pipes and > work inside your folder).\n" +
+    "• write <file> — the rest of that code block becomes the file. append <file> — adds the rest of the block to the end.\n" +
+    "• give <file> — the app puts the file into this chat (text is pasted; pictures/PDFs/other files are uploaded so you can see them).\n" +
+    `• send <file> to <ai> — copies it into that AI's inbox (${others}). Files others send you land in inbox\\from-<ai>\\.\n` +
+    "• share with <ai> — lets that AI LOOK at your locker (read and copy out, never change) for its next terminal request only. When someone shares with you, their files are at ..\\<ai>\\.\n" +
+    "• Running a script (python x.py / node x.js) waits for the user's approval. help lists everything.\n" +
+    "Results come back to you as a [FROM: TERMINAL] message.";
+}
+
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], [TO: TERMINAL], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, your own private folder ("locker") on the human's PC, through a command prompt that only works inside it (put commands in a \`\`\` code block — dir, type, copy, del, md, plus write/append/give/send; send \`help\` for the list; results come back as a [FROM: TERMINAL] message; \`send <file> to <ai>\` passes a file to another of us), or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.` + lockerGuide(site);
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -657,6 +677,17 @@ function loadPersistedState() {
   }
   if (Array.isArray(snap.prompts)) {
     state.prompts = snap.prompts;
+    // The built-in routing prompt (id 2) saved by an older build doesn't teach
+    // the locker commands. If it's still the untouched built-in (same name, no
+    // TERMINAL), swap in the current text; a user-edited prompt is left alone.
+    try {
+      const fresh = defaultRoutingExplainerPrompt();
+      const old = state.prompts.find((p) => p && p.id === 2);
+      if (old && old.name === fresh.name && !JSON.stringify(old.text || "").includes("TERMINAL")) {
+        old.text = fresh.text;
+        logEvent("prompt-builtin-refreshed", { id: 2 });
+      }
+    } catch (_) {}
     state.nextPromptId = snap.prompts.reduce((m, p) => Math.max(m, (p.id || 0) + 1), 1);
   }
   if (snap.selectorOverrides) {
@@ -795,6 +826,15 @@ function createWindow() {
     win.contentView.addChildView(view);
     view.webContents.loadURL(SITES[site].home);
     siteViews[site] = view;
+    // Every AI page starts at 60% (DEFAULT_PANE_ZOOM) so more of the chat fits.
+    // Re-applied after each page load, since a navigation can reset zoom; the
+    // pane's own −/+ buttons change paneZoom[site], which then sticks.
+    try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
+    try {
+      if (typeof view.webContents.on === "function") {
+        view.webContents.on("did-finish-load", () => { try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {} });
+      }
+    } catch (_) {}
     // When an AI produces a file you download from its pane, grab it into the
     // output folder under that AI's name (output/ai-work/<site>/) instead of
     // popping a save dialog — a tidy local record of each AI's work.
@@ -1112,6 +1152,10 @@ function broadcastHouseRule() {
 // real contention. Only a genuinely concurrent second call for the same
 // target pays for serialization, by chaining after the first's promise.
 const sendQueues = {};
+// Per-pane zoom for the embedded AI pages. Default 60% (override with the
+// AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
+const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
+const paneZoom = {};
 function withSendQueue(target, fn) {
   const prior = sendQueues[target];
   const run = prior ? prior.then(fn, fn) : fn();
@@ -1516,7 +1560,7 @@ function composeEnvelopeReminder(site) {
   return (
     "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
     "Every message MUST use the communication envelope:\n" +
-    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
+    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: TERMINAL] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
     "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
     "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
     "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
@@ -2309,6 +2353,373 @@ async function deliverToButler(turn) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Command Prompt connection (terminal-provider.js)
+// ---------------------------------------------------------------------------
+// One persistent local shell shared by the user (the ⌨ Terminal zone of the User
+// Panel) and the three web AIs ([TO: TERMINAL]). Flow for an AI request:
+//   pollSite() sees [TO: TERMINAL] -> deliverToTerminal(turn)
+//     -> extractCommands() pulls the command(s) out of the message
+//     -> classifyAll(): "blocked" is refused outright and the AI is told why;
+//        otherwise it's held as a PENDING request for the user's Run/Reject,
+//        unless auto-run is on AND every command is "normal" risk
+//     -> executeTerminalRequest() runs them in order (stops at the first
+//        failure) and sends the captured output back to that AI as a
+//        [FROM: TERMINAL] message.
+// The user's own typed commands are never gated — they're the operator.
+const TERMINAL_REPLY_MAX_CHARS = Number(process.env.AUTOINJECTOR_TERMINAL_REPLY_MAX) || 12000; // web chat inputs choke on huge pastes
+const TERMINAL_MAX_PENDING = 20;
+const terminalState = {
+  autoRunAI: false,          // off by default every launch: AI commands always ask first
+  pending: [],               // [{ id, from, label, commands, risk, reason, ts }]
+  nextRequestId: 1,
+  lastUserResult: null,      // the user's most recent command result, for "Send output to"
+};
+let terminal = null;
+function getTerminal() {
+  if (terminal) return terminal;
+  terminal = terminalProvider.createTerminal({
+    cwd: app.getPath("home"),
+    onData: (chunk, stream) => broadcast("terminal-data", { chunk, stream }),
+    onState: () => broadcastTerminalState(),
+    onLog: (kind, detail) => logEvent(kind, detail),
+  });
+  return terminal;
+}
+function terminalSnapshot() {
+  const t = terminal ? terminal.status() : { alive: false, running: null, queued: [] };
+  return {
+    ...t,
+    autoRunAI: terminalState.autoRunAI,
+    pending: terminalState.pending.map((p) => ({ ...p })),
+    hasLastUserResult: !!terminalState.lastUserResult,
+  };
+}
+function broadcastTerminalState() {
+  try { broadcast("terminal-state", terminalSnapshot()); } catch (_) {}
+}
+
+function siteLabel(site) { return (SITES[site] && SITES[site].label) || site; }
+
+// Tell an AI something from the terminal (a result, a refusal, a rejection).
+// Uses the normal send path (queue, retry, ledger) with no "[X says]" frame —
+// the [FROM: TERMINAL] header IS the frame. Reminds it how to reply.
+async function replyFromTerminal(site, body) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const tag = String(site).toUpperCase();
+  const text = `[FROM: TERMINAL]\n${body}\n\n` +
+    `(To run more commands in your locker, start your reply with [TO: TERMINAL] and put them in a \`\`\` code block — \`help\` lists them. ` +
+    `Any other tag works as usual. End with [FROM: ${tag}].)`;
+  if (ftState.running) { ftState.termReplies.push({ site, text, ts: Date.now() }); if (ftState.termReplies.length > 500) ftState.termReplies.shift(); }
+  try {
+    const r = await sendTextTo(site, text, null);
+    if (!r || !r.ok) logEvent("terminal-reply-error", { to: site, error: (r && r.error) || "unknown" });
+    return r;
+  } catch (e) {
+    logEvent("terminal-reply-error", { to: site, error: String(e) });
+    return { ok: false, error: String(e) };
+  }
+}
+
+// ---- AI lockers: every AI's [TO: TERMINAL] runs ONLY inside its own folder ----
+// (ai-lockers.js does the folder gate; this wires it to the chat panes.)
+let lockers = null;
+function getLockers() {
+  if (lockers) return lockers;
+  let base = "";
+  try { base = outputManager.root(); } catch (_) {}
+  if (!base) base = path.join(contentBaseFolder(), "stuff and thing");
+  lockers = aiLockers.createLockers({
+    root: path.join(base, "ai-lockers"),
+    sites: SITE_IDS,
+    onData: (chunk, stream) => broadcast("terminal-data", { chunk, stream }),
+    onState: () => broadcastTerminalState(),
+    onLog: (kind, detail) => logEvent(kind, detail),
+  });
+  const r = lockers.ensure();
+  logEvent(r.ok ? "locker-ready" : "locker-init-error", r.ok ? { root: r.root } : { error: r.error });
+  return lockers;
+}
+
+// What the approval strip / log shows for one op.
+function describeOp(op) {
+  if (op.type === "write" || op.type === "append") {
+    const lines = String(op.content || "").split("\n").length;
+    return `${op.type} ${op.file}   (${lines} line${lines === 1 ? "" : "s"})`;
+  }
+  return op.command;
+}
+
+// The chat side-effects lockers need: tell a recipient it got a file, and
+// upload a file into an AI's chat.
+const lockerCtx = {
+  sendFile: async (from, to, abs, relPath) => {
+    if (!state.relayEnabled) return { ok: false, error: "AIs are silenced (Stop AIs Talking)" };
+    let size = 0; try { size = fs.statSync(abs).size; } catch (_) {}
+    const preview = getLockers().previewFor(abs);
+    const body = `${siteLabel(from)} sent you a file. It's saved in your locker at: ${relPath} (${size} bytes).` +
+      (preview != null && preview.length <= 6000 ? `\n\n----- ${relPath} -----\n${preview}\n----- end of file -----` : `\nRead it with: type "${relPath}"   (or: give "${relPath}")`);
+    return replyFromTerminal(to, body);
+  },
+  giveFile: async (site, abs) => attachFileToSite(site, abs),
+  notifyShare: async (from, to) => {
+    if (!state.relayEnabled) return { ok: false, error: "AIs are silenced (Stop AIs Talking)" };
+    return replyFromTerminal(to, `${siteLabel(from)} has opened its locker to you — LOOK only (read and copy out, never change), for your NEXT [TO: TERMINAL] message only (expires in 10 minutes).\n` +
+      `Its files are at ..\\${from}\\ — for example:\n  dir ..\\${from}\n  type ..\\${from}\\<file>\n  copy ..\\${from}\\<file> <your-name>\n  give ..\\${from}\\<picture-or-pdf>`);
+  },
+};
+
+function deliverToTerminal(turn) {
+  const from = turn.site;
+  const label = siteLabel(from);
+  const ops = aiLockers.parseRequest(turn.text);
+  logEvent("terminal-request", { from, ops: ops.length });
+  if (!ops.length) {
+    replyFromTerminal(from, "I didn't find a command in your message. Put the command(s) inside a ``` code block, one per line. Send `help` for the list.");
+    return;
+  }
+  const L = getLockers();
+  const checks = ops.map((op) => L.checkOp(from, op));
+  const needsApproval = checks.some((c) => c.ok && c.needsApproval);
+  if (terminalState.pending.length >= TERMINAL_MAX_PENDING) {
+    logEvent("terminal-request-dropped", { from, reason: "too-many-pending" });
+    replyFromTerminal(from, "Not run — there are already too many requests waiting for the user's approval.");
+    return;
+  }
+  const req = {
+    id: terminalState.nextRequestId++, from, label, ops,
+    commands: ops.map(describeOp),
+    risk: needsApproval ? "dangerous" : "normal",
+    reason: needsApproval ? "runs a script — scripts can reach outside the locker" : "",
+    ts: Date.now(),
+  };
+  // Inside its own locker an AI needs no permission. Only scripts ask
+  // (unless the user ticked "Auto-run AI scripts").
+  if (!needsApproval || terminalState.autoRunAI) {
+    executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
+    return;
+  }
+  terminalState.pending.push(req);
+  logEvent("terminal-request-pending", { id: req.id, from, risk: req.risk });
+  broadcastTerminalState();
+}
+
+// Run a request's ops in the AI's locker, in order, stopping at the first
+// failure, then send the combined result back to that AI.
+async function executeTerminalRequest(req) {
+  const L = getLockers();
+  const results = [];
+  for (const op of req.ops) {
+    const r = await L.runOp(req.from, op, lockerCtx);
+    results.push(r);
+    if (!r.ok) break;
+  }
+  const notRun = req.ops.slice(results.length).map(describeOp);
+  const perCmd = Math.max(500, Math.floor(TERMINAL_REPLY_MAX_CHARS / Math.max(1, results.length)));
+  const parts = [`Results from your locker (${req.ops.length} command${req.ops.length === 1 ? "" : "s"}):`];
+  for (const r of results) {
+    let status;
+    if (r.error === "NOT_ALLOWED") status = "refused — not allowed in your locker";
+    else if (r.error === "TIMEOUT") status = "still running — timed out waiting, output so far";
+    else if (r.error && r.error !== "NONZERO_EXIT") status = `failed: ${r.error}`;
+    else status = `exit ${r.exitCode == null ? "?" : r.exitCode}`;
+    const out = terminalProvider.capOutput(r.output || "", perCmd);
+    parts.push(`> ${r.command}\n(${status}${r.durationMs != null ? `, ${r.durationMs} ms` : ""})\n${out || "(no output)"}`);
+  }
+  if (notRun.length) parts.push(`[Stopped at the first failing command. Not run: ${notRun.join(" ; ")}]`);
+  logEvent("terminal-request-done", { id: req.id, from: req.from, ran: results.length, notRun: notRun.length, ok: results.every((r) => r.ok) });
+  // A share someone gave this AI was good for ONE request — this one.
+  try { L.consumeGrants(req.from); } catch (_) {}
+  broadcast("locker-changed", { site: "all" });
+  await replyFromTerminal(req.from, parts.join("\n\n"));
+  return { ok: true, results };
+}
+
+ipcMain.handle("lockers:open", async () => {
+  try {
+    const L = getLockers();
+    const err = await shell.openPath(L.root());
+    return err ? { ok: false, error: err } : { ok: true, path: L.root() };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:list", (_evt, { site } = {}) => {
+  try { return getLockers().listFiles(site); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:read", (_evt, { site, rel } = {}) => {
+  try {
+    const f = getLockers().userFile(site, rel);
+    return f.ok ? { ok: true, kind: f.kind, size: f.size, text: f.text } : f;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Upload a locker file into one or more AI chats (pictures, PDFs, anything).
+ipcMain.handle("lockers:attach", async (_evt, { site, rel, targets } = {}) => {
+  try {
+    const f = getLockers().userFile(site, rel);
+    if (!f.ok) return f;
+    const list = (Array.isArray(targets) ? targets : [targets]).filter((t) => SITES[t]);
+    if (!list.length) return { ok: false, error: "NO_TARGET" };
+    const results = {};
+    for (const t of list) results[t] = await attachFileToSite(t, f.abs);
+    logEvent("locker-user-attach", { site, file: rel, targets: list, ok: list.every((t) => results[t] && results[t].ok) });
+    return { ok: list.every((t) => results[t] && results[t].ok), results };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// ---- 🧪 Feature Test: every AI through every feature, judged by real evidence ----
+const ftState = { running: false, stop: false, rawCaptures: [], termReplies: [] };
+function ftRecordCapture(site, text) {
+  if (!ftState.running) return;
+  ftState.rawCaptures.push({ site, text: String(text || ""), ts: Date.now() });
+  if (ftState.rawCaptures.length > 500) ftState.rawCaptures.shift();
+}
+async function runFeatureTestNow() {
+  if (ftState.running) return { ok: false, error: "ALREADY_RUNNING" };
+  if (state.hr && state.hr.active) return { ok: false, error: "A House Rules format is running — stop it first." };
+  if (state.sequence && state.sequence.active) return { ok: false, error: "A Prompt Sequence is running — stop it first." };
+  const sites = SITE_IDS.filter((s) => state.enabled[s] && siteViews[s] && !siteViews[s].webContents.isDestroyed());
+  if (!sites.length) return { ok: false, error: "No AI is checked Active." };
+  // Quiet the relay for the test: no mesh forwarding (it would spray test
+  // prompts at the other AIs), but tag relay ON so the routing step can work.
+  const saved = { routing: {}, meshActive: state.meshActive, relayEnabled: state.relayEnabled };
+  for (const s of SITE_IDS) { saved.routing[s] = new Set(state.routing[s]); state.routing[s].clear(); }
+  state.meshActive = false;
+  state.relayEnabled = true;
+  Object.assign(ftState, { running: true, stop: false, rawCaptures: [], termReplies: [] });
+  logEvent("featuretest-start", { sites });
+  broadcast("featuretest-progress", { status: "start", sites, total: sites.length * featureTest.STEPS.length });
+  const L = getLockers();
+  let r;
+  try {
+    r = await featureTest.runFeatureTest({
+      sites,
+      label: siteLabel,
+      platform: process.platform,
+      send: (site, text) => sendTextTo(site, text, null),
+      captureSince: (site, ts) => ftState.rawCaptures.filter((c) => c.site === site && c.ts >= ts),
+      terminalRepliesSince: (site, ts) => ftState.termReplies.filter((c) => c.site === site && c.ts >= ts),
+      ledgerSince: (target, ts) => state.ledger.filter((e) => e.target === target && e.ts >= ts).map((e) => ({ text: e.textPreview, ok: e.status === "delivered", ts: e.ts })),
+      fileHas: (site, rel, needle) => { const f = L.userFile(site, rel); return !!(f.ok && f.text != null && f.text.includes(needle)); },
+      grantsFor: (site) => L.grantsFor(site),
+      isBusy: (site) => !!(state.waiting[site] || state.generating[site]),
+      shouldStop: () => ftState.stop,
+      stepTimeoutMs: Number(process.env.AUTOINJECTOR_FT_STEP_MS) || 120000,
+      settleMs: Number(process.env.AUTOINJECTOR_FT_SETTLE_MS) || 2500,
+      onProgress: (p) => { broadcast("featuretest-progress", p); if (p.status !== "running") logEvent("featuretest-step", { site: p.site, step: p.step, status: p.status, detail: p.detail || "" }); },
+    });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    for (const s of SITE_IDS) state.routing[s] = saved.routing[s];
+    state.meshActive = saved.meshActive;
+    state.relayEnabled = saved.relayEnabled;
+    ftState.running = false;
+  }
+  if (!r.ok) { logEvent("featuretest-error", { error: r.error }); broadcast("featuretest-progress", { status: "done", ok: false }); return r; }
+  // Save the full report (including how each AI's replies really ended).
+  let file = null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    file = path.join(outputManager.logsDir(), `feature-test-${stamp}.md`);
+    fs.writeFileSync(file, featureTest.formatReport(r, { label: siteLabel }));
+  } catch (e) { logEvent("featuretest-report-error", { error: String(e) }); file = null; }
+  logEvent("featuretest-done", { ok: r.okCount, failed: r.failCount, total: r.total, stopped: r.stopped, report: file });
+  broadcast("featuretest-progress", { status: "done", ok: true });
+  return {
+    ok: true, stopped: r.stopped, okCount: r.okCount, failCount: r.failCount, total: r.total, report: file,
+    // same shape the capability-test pop-up already shows (ok:true/false/null)
+    checks: r.results.map((x) => ({ name: x.name, ok: x.ok, detail: x.detail, tip: x.tip })),
+  };
+}
+ipcMain.handle("featuretest:run", async () => { try { return await runFeatureTestNow(); } catch (e) { ftState.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("featuretest:stop", () => { ftState.stop = true; logEvent("featuretest-stop-requested", {}); return { ok: true }; });
+ipcMain.handle("featuretest:open-report", async (_evt, { file } = {}) => {
+  try {
+    const f = String(file || "");
+    if (!f || path.dirname(f) !== outputManager.logsDir() || !/^feature-test-.*\.md$/.test(path.basename(f))) return { ok: false, error: "BAD_FILE" };
+    const err = await shell.openPath(f);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:status", () => { try { return { ok: true, ...getLockers().status() }; } catch (e) { return { ok: false, error: String(e) }; } });
+
+function takePending(id) {
+  const i = terminalState.pending.findIndex((p) => p.id === Number(id));
+  if (i < 0) return null;
+  const [req] = terminalState.pending.splice(i, 1);
+  broadcastTerminalState();
+  return req;
+}
+function cancelPendingTerminalRequests(reason) {
+  if (!terminalState.pending.length) return 0;
+  const n = terminalState.pending.length;
+  terminalState.pending = [];
+  logEvent("terminal-pending-cleared", { count: n, reason });
+  broadcastTerminalState();
+  return n;
+}
+
+ipcMain.handle("terminal:state", () => ({ ok: true, state: terminalSnapshot(), scrollback: terminal ? terminal.scrollback() : "" }));
+ipcMain.handle("terminal:start", () => {
+  try { const r = getTerminal().start(); broadcastTerminalState(); return r; }
+  catch (e) { logEvent("terminal-start-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("terminal:run", async (_evt, { command } = {}) => {
+  try {
+    const r = await getTerminal().run(command, { source: "user" });
+    if (r && r.command) terminalState.lastUserResult = r;
+    broadcastTerminalState();
+    return { ok: !!(r && r.ok), result: r };
+  } catch (e) {
+    logEvent("terminal-run-error", { error: String(e) });
+    return { ok: false, error: String(e) };
+  }
+});
+ipcMain.handle("terminal:input", (_evt, { text } = {}) => {
+  if (!terminal) return { ok: false, error: "NOT_RUNNING" };
+  return terminal.sendInput(text);
+});
+ipcMain.handle("terminal:stop", (_evt, { restart } = {}) => {
+  try { const r = getTerminal().stop({ restart: !!restart }); broadcastTerminalState(); return r; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("terminal:clear", () => (terminal ? terminal.clearScrollback() : { ok: true }));
+ipcMain.handle("terminal:settings", (_evt, patch = {}) => {
+  if (patch && "autoRunAI" in patch) {
+    terminalState.autoRunAI = !!patch.autoRunAI;
+    logEvent("terminal-autorun-changed", { autoRunAI: terminalState.autoRunAI });
+  }
+  broadcastTerminalState();
+  return { ok: true, state: terminalSnapshot() };
+});
+ipcMain.handle("terminal:approve", async (_evt, { id } = {}) => {
+  const req = takePending(id);
+  if (!req) return { ok: false, error: "NOT_FOUND" };
+  logEvent("terminal-request-approved", { id: req.id, from: req.from });
+  executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
+  return { ok: true };
+});
+ipcMain.handle("terminal:reject", async (_evt, { id, reason } = {}) => {
+  const req = takePending(id);
+  if (!req) return { ok: false, error: "NOT_FOUND" };
+  const why = String(reason || "").trim().slice(0, 300);
+  logEvent("terminal-request-rejected", { id: req.id, from: req.from });
+  broadcast("terminal-data", { chunk: `[rejected ${req.label}'s request: ${req.commands.join(" ; ")}]\n`, stream: "system" });
+  replyFromTerminal(req.from, `The user rejected your command${req.commands.length === 1 ? "" : "s"} — nothing was run: ${req.commands.join(" ; ")}${why ? `\nReason: ${why}` : ""}`);
+  return { ok: true };
+});
+// Send the user's own last command + output to one or more AIs.
+ipcMain.handle("terminal:send-output", async (_evt, { targets } = {}) => {
+  const r = terminalState.lastUserResult;
+  if (!r) return { ok: false, error: "NO_OUTPUT" };
+  const list = (Array.isArray(targets) ? targets : [targets]).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGET" };
+  const status = r.error && r.error !== "NONZERO_EXIT" ? r.error : `exit ${r.exitCode}`;
+  const body = `The user ran this in the Command Prompt and is sharing the result with you:\n\n> ${r.command}\n(${status})\n${terminalProvider.capOutput(r.output || "", TERMINAL_REPLY_MAX_CHARS) || "(no output)"}`;
+  const out = [];
+  for (const site of list) out.push({ site, ...(await replyFromTerminal(site, body)) });
+  logEvent("terminal-output-shared", { targets: list });
+  return { ok: out.every((o) => o.ok), results: out };
+});
+
 // N3: seed the task's memories[] with facts relevant to the request, pulled from
 // the shared store, so turn one already has context. Best-effort and silent when
 // the store is unavailable — never blocks task start.
@@ -2780,6 +3191,7 @@ async function pollSite(site) {
     // is swallowed entirely, never reaching the transcript. (stageActive was
     // already computed for the completion gate above.)
     let roundtableTag = null;
+    ftRecordCapture(site, text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
     let displayText = text;
     if (!stageActive) {
       const parsed = parseRoundtableTag(text);
@@ -2901,6 +3313,13 @@ async function pollSite(site) {
       // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
       // butler's converse path and do NOT also mesh-forward it to the other AIs.
       if (relayOn) await deliverToButler(turn);
+    } else if (!stageActive && turn.roundtableTag === "TERMINAL") {
+      // Command Prompt connection: the AI wants commands run on this PC. Never
+      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" like every
+      // other automatic path; the run itself is fire-and-forget so a long
+      // command never holds this pane's poll loop.
+      if (relayOn) deliverToTerminal(turn);
+      else logEvent("terminal-request-dropped", { from: site, reason: "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
       if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
@@ -3257,6 +3676,7 @@ async function silenceAllRelay() {
   if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
   if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
   try { await stopManagedTask(); } catch (_) {}
+  try { cancelPendingTerminalRequests("relay-silenced"); } catch (_) {}
   logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
@@ -3660,6 +4080,7 @@ ipcMain.handle("site:zoom", (_evt, { site, factor }) => {
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   const clamped = Math.max(0.4, Math.min(2, Number(factor) || 1));
   view.webContents.setZoomFactor(clamped);
+  paneZoom[site] = clamped;
   logEvent("zoom-changed", { site, factor: clamped });
   return { ok: true, factor: clamped };
 });
@@ -4326,9 +4747,10 @@ function butlerIntroMessage(target) {
     "Quick orientation before we work together.\n\n" +
     "WHO'S COORDINATING: a local \"Butler\" (a supervisor AI running on this machine) is running this conversation. It plans the work and passes messages between you and the other assistants (ChatGPT, Claude, Gemini). You are one of those assistants — the Butler may ask you to do part of a task and then combine your answer with the others.\n\n" +
     "HOW MESSAGES WORK (important — or your reply is not delivered):\n" +
-    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / [TO: NONE]\n" +
+    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / [TO: TERMINAL] (your own private folder on this PC — file commands in a ``` code block, `help` lists them; results come back as [FROM: TERMINAL]) / [TO: NONE]\n" +
     "• END every message with your own closing tag: [FROM: " + name + "]\n" +
-    "The closing [FROM: ...] tag is how the app knows your message is finished — put nothing after it.\n\n" +
+    "The closing [FROM: ...] tag is how the app knows your message is finished — put nothing after it." +
+    lockerGuide(target) + "\n\n" +
     "Please confirm you understand, using the envelope: start with [TO: USER] and end with [FROM: " + name + "]."
   );
 }
@@ -4706,4 +5128,4 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
-app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });
+app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

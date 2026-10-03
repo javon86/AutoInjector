@@ -22,7 +22,9 @@ let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
 let butlerActive = false; // whether → All also includes the butler (his Active checkbox)
-let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
+// Default pane zoom: 60% (main.js applies the same default to the real pages).
+const DEFAULT_PANE_ZOOM = 0.6;
+let zoomLevels = { chatgpt: DEFAULT_PANE_ZOOM, claude: DEFAULT_PANE_ZOOM, gemini: DEFAULT_PANE_ZOOM };
 
 // Each AI pane has three states, cycled in this order. The button's glyph and
 // tooltip always describe what the NEXT click does.
@@ -303,12 +305,147 @@ function buildComposerButtons() {
 }
 
 async function sendCompose(targets) {
-  const text = el("composer-text").value.trim();
-  if (!text) { setStatus("Type a message first."); return; }
+  let text = el("composer-text").value.trim();
+  const atts = composeAttachments.slice();
+  if (!text && !atts.length) { setStatus("Type a message first."); return; }
   if (!targets.length) { setStatus("No enabled participants to send to."); return; }
+  // Locker files (pictures, PDFs, …) go up first as real uploads, so the text
+  // that follows is sent together with them.
+  if (atts.length) {
+    if (typeof window.api.lockersAttach !== "function") { setStatus("Uploading locker files isn't available in this build."); return; }
+    setStatus(`Uploading ${atts.length} file${atts.length === 1 ? "" : "s"} to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
+    const failed = [];
+    for (const a of atts) {
+      let r;
+      try { r = await window.api.lockersAttach(a.site, a.rel, targets); } catch (e) { r = { ok: false, error: String(e) }; }
+      if (!r || !r.ok) failed.push(`${a.rel} (${(r && r.error) || "upload failed"})`);
+    }
+    if (failed.length) { setStatus(`Couldn't upload: ${failed.join(", ")} — nothing was sent. Fix it or remove the file and try again.`); return; }
+    if (!text) text = `(Sent you ${atts.length === 1 ? "a file" : `${atts.length} files`}: ${atts.map((a) => a.rel).join(", ")})`;
+    clearComposeAttachments();
+  }
   setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
   const res = await window.api.sendCompose(text, targets);
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
+}
+
+// ---- 📁 Locker browser: what's in each AI's locker, click to use it ----
+let composeAttachments = []; // [{ site, rel, kind }]
+function renderComposeAttachments() {
+  const box = el("compose-attachments");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const a of composeAttachments) {
+    const chip = document.createElement("span");
+    chip.className = "att-chip";
+    chip.textContent = `${a.kind === "image" ? "🖼️" : "📎"} ${SITE_LABELS[a.site] || a.site}/${a.rel}`;
+    const x = document.createElement("button");
+    x.textContent = "✕";
+    x.title = "Remove";
+    x.setAttribute("aria-label", `Remove ${a.rel}`);
+    x.onclick = () => { composeAttachments = composeAttachments.filter((c) => c !== a); renderComposeAttachments(); };
+    chip.appendChild(x);
+    box.appendChild(chip);
+  }
+}
+function clearComposeAttachments() { composeAttachments = []; renderComposeAttachments(); }
+function fmtDate(ms) {
+  const d = new Date(Number(ms) || 0);
+  if (!ms || isNaN(d.getTime())) return "";
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+function fmtSize(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+async function refreshLocker(site) {
+  const list = el(`locker-list-${site}`);
+  if (!list || typeof window.api.lockersList !== "function") return;
+  let r;
+  try { r = await window.api.lockersList(site); } catch (e) { r = { ok: false, error: String(e) }; }
+  list.innerHTML = "";
+  if (!r || !r.ok) {
+    const err = document.createElement("div");
+    err.className = "lk-row";
+    err.textContent = `Couldn't read the locker: ${(r && r.error) || "error"}`;
+    list.appendChild(err);
+    return;
+  }
+  const tab = el(`locker-tab-${site}`);
+  if (tab) tab.textContent = `📁 Locker (${r.files.length}${r.truncated ? "+" : ""})`;
+  if (r.files.length) {
+    const head = document.createElement("div");
+    head.className = "lk-row lk-head";
+    const hIc = document.createElement("span"); hIc.textContent = " ";
+    const hName = document.createElement("span"); hName.className = "lk-name"; hName.textContent = "Name";
+    const hDate = document.createElement("span"); hDate.className = "lk-date"; hDate.textContent = "Modified";
+    const hSize = document.createElement("span"); hSize.className = "lk-size"; hSize.textContent = "Size";
+    head.append(hIc, hName, hDate, hSize);
+    list.appendChild(head);
+  }
+  for (const f of r.files) {
+    const row = document.createElement("button");
+    row.className = "lk-row";
+    row.title = f.kind === "text" ? "Click: put this file's text into Compose" : "Click: attach this file in Compose — it uploads when you click an AI's name";
+    const ic = document.createElement("span");
+    ic.textContent = f.kind === "image" ? "🖼️" : f.kind === "text" ? "📄" : "📎";
+    // Name first (bold), the folder it's in after it (dim), then date + size.
+    const nm = document.createElement("span");
+    nm.className = "lk-name";
+    const parts = String(f.rel).split(/[\\/]/);
+    const base = document.createElement("b");
+    base.textContent = parts.pop();
+    nm.appendChild(base);
+    if (parts.length) {
+      const dir = document.createElement("span");
+      dir.className = "lk-dir";
+      dir.textContent = parts.join("\\");
+      nm.appendChild(dir);
+    }
+    nm.title = f.rel;
+    const dt = document.createElement("span");
+    dt.className = "lk-date";
+    dt.textContent = fmtDate(f.mtime);
+    const sz = document.createElement("span");
+    sz.className = "lk-size";
+    sz.textContent = fmtSize(f.size);
+    row.append(ic, nm, dt, sz);
+    row.onclick = (e) => { e.stopPropagation(); useLockerFile(site, f); };
+    list.appendChild(row);
+  }
+}
+// Text -> pasted into Compose. Anything else (pictures, PDFs, big files) ->
+// attached in Compose and uploaded to whichever AI you click.
+async function useLockerFile(site, f) {
+  const box = el("composer-text");
+  if (f.kind === "text" && typeof window.api.lockersRead === "function") {
+    let r;
+    try { r = await window.api.lockersRead(site, f.rel); } catch (e) { r = { ok: false, error: String(e) }; }
+    if (r && r.ok && r.text != null) {
+      const block = `----- ${SITE_LABELS[site]}'s locker: ${f.rel} -----\n${r.text}\n----- end of file -----`;
+      const cur = box.value;
+      const at = typeof box.selectionStart === "number" && document.activeElement === box ? box.selectionStart : cur.length;
+      box.value = cur.slice(0, at) + (at && !cur.slice(0, at).endsWith("\n") ? "\n" : "") + block + "\n" + cur.slice(at);
+      try { updateCharCount(); } catch (_) {}
+      box.focus();
+      setStatus(`Put ${f.rel} into Compose — click an AI's name to send it.`);
+      return;
+    }
+    // too big / unreadable as text -> fall through to attaching it
+  }
+  if (composeAttachments.some((a) => a.site === site && a.rel === f.rel)) { setStatus(`${f.rel} is already attached.`); return; }
+  composeAttachments.push({ site, rel: f.rel, kind: f.kind });
+  renderComposeAttachments();
+  setStatus(`Attached ${f.rel} — click an AI's name to upload it to them.`);
+}
+function wireLockers() {
+  if (typeof window.api.lockersList !== "function") return;
+  for (const s of SITES) refreshLocker(s);
+  if (typeof window.api.onLockerChanged === "function") {
+    window.api.onLockerChanged((p) => { for (const s of SITES) if (!p || p.site === "all" || p.site === s) refreshLocker(s); });
+  }
+  // Files you drop into a locker yourself (Explorer) show up within a few seconds.
+  setInterval(() => { for (const s of SITES) { const l = el(`locker-list-${s}`); if (l && !l.hidden) refreshLocker(s); } }, 8000);
 }
 
 // Butler handling mode — how the next message you send him is handled:
@@ -436,7 +573,7 @@ function buildAiColumn(site) {
   const zoomLabel = document.createElement("span");
   zoomLabel.className = "zoom-level";
   zoomLabel.id = `zoom-level-${site}`;
-  zoomLabel.textContent = "100%";
+  zoomLabel.textContent = `${Math.round(DEFAULT_PANE_ZOOM * 100)}%`;
   head.appendChild(zoomLabel);
   const zoomInBtn = document.createElement("button");
   zoomInBtn.className = "zoom-btn";
@@ -545,11 +682,47 @@ function buildAiColumn(site) {
   loginMenu.appendChild(loginStatus);
   strip.appendChild(loginMenu);
 
+  // 📁 Locker (default) / 💬 Last reply. The live pane below already shows the
+  // reply, so this box shows what's in that AI's locker instead; the old reply
+  // preview is one click away (same #preview-<site> element as before).
+  const lockerBox = document.createElement("div");
+  lockerBox.className = "locker-box";
+  const ltabs = document.createElement("div");
+  ltabs.className = "locker-tabs";
+  const lkTab = document.createElement("button");
+  lkTab.className = "active";
+  lkTab.id = `locker-tab-${site}`;
+  lkTab.textContent = "📁 Locker";
+  lkTab.title = `Files in ${SITE_LABELS[site]}'s locker. Click a file to put it in Compose, then click an AI's name to give it to them.`;
+  const rpTab = document.createElement("button");
+  rpTab.id = `reply-tab-${site}`;
+  rpTab.textContent = "💬 Last reply";
+  const lkSpacer = document.createElement("span");
+  lkSpacer.className = "spacer";
+  const lkRefresh = document.createElement("button");
+  lkRefresh.className = "lk-refresh";
+  lkRefresh.textContent = "↻";
+  lkRefresh.title = "Refresh the file list";
+  lkRefresh.setAttribute("aria-label", `Refresh ${SITE_LABELS[site]}'s locker list`);
+  ltabs.append(lkTab, rpTab, lkSpacer, lkRefresh);
+  const lkList = document.createElement("div");
+  lkList.className = "locker-list";
+  lkList.id = `locker-list-${site}`;
   const preview = document.createElement("div");
   preview.className = "preview";
   preview.id = `preview-${site}`;
   preview.textContent = "No reply captured yet.";
-  strip.appendChild(preview);
+  preview.hidden = true;
+  const showLocker = (on) => {
+    lkList.hidden = !on; preview.hidden = on;
+    lkTab.classList.toggle("active", on); rpTab.classList.toggle("active", !on);
+    if (on) refreshLocker(site);
+  };
+  lkTab.onclick = (e) => { e.stopPropagation(); showLocker(true); };
+  rpTab.onclick = (e) => { e.stopPropagation(); showLocker(false); };
+  lkRefresh.onclick = (e) => { e.stopPropagation(); refreshLocker(site); };
+  lockerBox.append(ltabs, lkList, preview);
+  strip.appendChild(lockerBox);
 
   const fwdRow = document.createElement("div");
   fwdRow.className = "btns fwd-row";
@@ -1319,6 +1492,7 @@ const CAP_TIPS = {
   "Talk to Gemini": "Open the Gemini pane and make sure you're signed in, then enable it as a participant up top.",
 };
 function capTipFor(c) {
+  if (c.tip) return c.tip;
   if (CAP_TIPS[c.name]) return CAP_TIPS[c.name];
   if (/^Talk to/.test(c.name)) return "Open that AI's pane, sign in, and enable it as a participant up top.";
   return "Open the Setup Wizard to configure this capability.";
@@ -1373,6 +1547,7 @@ function openCapModal(r) {
   fill("cap-list-failed", buckets.failed, true);
   fill("cap-list-notset", buckets.notset, true);
   el("cap-modal-sub").textContent = `${r.okCount}/${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} not working` : ""}. ⚪ = not set up yet.`;
+  if (el("cap-modal-title")) el("cap-modal-title").textContent = "🧪 Capability test results";
   modal.classList.add("on");
 }
 function closeCapModal() { const m = el("cap-modal"); if (m) m.classList.remove("on"); }
@@ -2416,3 +2591,307 @@ el("btn-extract-all").onclick = async () => {
   }
   databaseRefresh();
 })();
+
+// ---------------------------------------------------------------------------
+// ⌨ Terminal — the Command Prompt connection (third zone of the User Panel).
+// main.js owns the shell (terminal-provider.js); this just renders its output
+// stream, the AI approval strip, and sends what you type. Every call is
+// guarded so an older main process (or the test harness) without the terminal
+// API simply leaves the zone inert instead of breaking the whole panel.
+// ---------------------------------------------------------------------------
+const termUI = {
+  history: [],        // your past commands, newest last (↑/↓ to recall)
+  histPos: -1,
+  running: false,     // something is running right now -> Enter answers it instead
+  maxChars: 120000,   // view cap; the shell keeps its own scrollback in main
+};
+function termApi(name) {
+  return window.api && typeof window.api[name] === "function" ? window.api[name] : null;
+}
+function termAppend(chunk, stream) {
+  const out = el("term-output");
+  if (!out || !chunk) return;
+  const nearBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+  const span = document.createElement("span");
+  if (stream === "stderr") span.className = "t-err";
+  else if (stream === "system") span.className = "t-sys";
+  span.textContent = chunk;
+  out.appendChild(span);
+  // Keep the DOM bounded: drop the oldest spans once the view gets huge.
+  while (out.textContent.length > termUI.maxChars && out.firstChild) out.removeChild(out.firstChild);
+  if (nearBottom) out.scrollTop = out.scrollHeight;
+}
+function renderTermPending(pending) {
+  const box = el("term-pending");
+  const badge = el("term-pending-badge");
+  if (!box) return;
+  box.innerHTML = "";
+  const list = Array.isArray(pending) ? pending : [];
+  if (badge) {
+    badge.textContent = String(list.length);
+    if (list.length) badge.removeAttribute("data-zero"); else badge.setAttribute("data-zero", "");
+  }
+  for (const req of list) {
+    const row = document.createElement("div");
+    row.className = "term-req" + (req.risk === "dangerous" ? " dangerous" : "");
+    const head = document.createElement("div");
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = req.label || req.from;
+    head.appendChild(who);
+    head.appendChild(document.createTextNode(` wants to run${req.commands.length === 1 ? "" : ` ${req.commands.length} commands`}:`));
+    row.appendChild(head);
+    const code = document.createElement("code");
+    code.textContent = req.commands.join("\n");
+    row.appendChild(code);
+    if (req.risk === "dangerous") {
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = `⚠ ${req.reason}`;
+      why.title = `Careful — this ${req.reason}.`;
+      row.appendChild(why);
+    }
+    const acts = document.createElement("div");
+    acts.className = "acts";
+    const run = document.createElement("button");
+    run.className = "primary";
+    run.textContent = "▶ Run";
+    run.onclick = async () => {
+      run.disabled = true; rej.disabled = true;
+      const fn = termApi("terminalApprove");
+      const r = fn ? await fn(req.id).catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) { termAppend(`[couldn't run request: ${(r && r.error) || "error"}]\n`, "stderr"); run.disabled = false; rej.disabled = false; }
+    };
+    const rej = document.createElement("button");
+    rej.textContent = "✕ Reject";
+    rej.onclick = async () => {
+      run.disabled = true; rej.disabled = true;
+      const fn = termApi("terminalReject");
+      const r = fn ? await fn(req.id, "").catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) { termAppend(`[couldn't reject request: ${(r && r.error) || "error"}]\n`, "stderr"); run.disabled = false; rej.disabled = false; }
+    };
+    acts.appendChild(run);
+    acts.appendChild(rej);
+    row.appendChild(acts);
+    box.appendChild(row);
+  }
+}
+function applyTerminalState(st) {
+  if (!st) return;
+  const dot = el("term-dot");
+  termUI.running = !!st.running;
+  if (dot) {
+    dot.className = "term-dot" + (st.running ? " busy" : st.alive ? " alive" : "");
+    dot.title = st.running ? `Running: ${st.running.command}` : st.alive ? "Shell ready" : "Shell not started (starts on your first command)";
+  }
+  const input = el("term-input");
+  if (input) {
+    input.classList.toggle("answering", termUI.running);
+    input.placeholder = termUI.running
+      ? "A command is running — type here to answer its prompt (e.g. y), or ■ Stop"
+      : "Type a command and press Enter…";
+  }
+  const auto = el("cb-term-autorun");
+  if (auto) auto.checked = !!st.autoRunAI;
+  const send = el("btn-term-send");
+  if (send) send.disabled = !st.hasLastUserResult;
+  renderTermPending(st.pending);
+}
+async function termSubmit(fromCompose) {
+  const input = el("term-input");
+  if (!input && fromCompose == null) return;
+  const text = fromCompose != null ? String(fromCompose) : input.value;
+  if (!text.trim() && !termUI.running) return;
+  if (fromCompose == null) input.value = "";
+  termUI.histPos = -1;
+  try {
+    if (termUI.running) {
+      // Something is running: Enter feeds its stdin (answering a y/n prompt).
+      const fn = termApi("terminalInput");
+      const r = fn ? await fn(text) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) termAppend(`[couldn't send input: ${(r && r.error) || "error"}]\n`, "stderr");
+      return;
+    }
+    if (termUI.history[termUI.history.length - 1] !== text) termUI.history.push(text);
+    if (termUI.history.length > 200) termUI.history.shift();
+    const fn = termApi("terminalRun");
+    if (!fn) { termAppend("[terminal not available in this build]\n", "stderr"); return; }
+    const r = await fn(text);
+    const res = r && r.result;
+    if (res && res.error && res.error !== "NONZERO_EXIT") termAppend(`[${res.error}${res.detail ? `: ${res.detail}` : ""}]\n`, res.error === "TIMEOUT" ? "system" : "stderr");
+    else if (res && res.exitCode) termAppend(`[exit ${res.exitCode}]\n`, "system");
+  } catch (e) {
+    termAppend(`[terminal error: ${e && e.message ? e.message : e}]\n`, "stderr");
+  }
+}
+function wireTerminal() {
+  const tabT = el("tab-terminal"), tabM = el("tab-messages");
+  const paneT = el("term-pane"), paneM = el("messages-pane");
+  const show = (which) => {
+    const term = which === "terminal";
+    if (paneT) paneT.hidden = !term;
+    if (paneM) paneM.hidden = term;
+    if (tabT) { tabT.classList.toggle("active", term); tabT.setAttribute("aria-selected", String(term)); }
+    if (tabM) { tabM.classList.toggle("active", !term); tabM.setAttribute("aria-selected", String(!term)); }
+    if (term && el("term-input")) el("term-input").focus();
+  };
+  if (tabT) tabT.onclick = () => show("terminal");
+  if (tabM) tabM.onclick = () => show("messages");
+
+  const input = el("term-input");
+  if (input) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); termSubmit(); return; }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (!termUI.history.length || termUI.running) return;
+        e.preventDefault();
+        if (termUI.histPos === -1) termUI.histPos = termUI.history.length;
+        termUI.histPos = Math.max(0, Math.min(termUI.history.length, termUI.histPos + (e.key === "ArrowUp" ? -1 : 1)));
+        input.value = termUI.history[termUI.histPos] || "";
+      }
+    });
+  }
+  if (el("btn-term-run")) el("btn-term-run").onclick = () => termSubmit();
+  if (el("btn-term-stop")) el("btn-term-stop").onclick = async () => {
+    const fn = termApi("terminalStop");
+    if (fn) { const r = await fn(true).catch((e) => ({ ok: false, error: String(e) })); if (!r || !r.ok) termAppend(`[stop failed: ${(r && r.error) || "error"}]\n`, "stderr"); }
+  };
+  if (el("btn-term-clear")) el("btn-term-clear").onclick = () => {
+    el("term-output").innerHTML = "";
+    const fn = termApi("terminalClear"); if (fn) fn().catch(() => {});
+  };
+  if (el("btn-open-lockers")) el("btn-open-lockers").onclick = async () => {
+    const fn = termApi("openLockers");
+    const r = fn ? await fn().catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+    termAppend(r && r.ok ? `[opened the AI lockers folder: ${r.path}]\n` : `[couldn't open the lockers folder: ${(r && r.error) || "error"}]\n`, r && r.ok ? "system" : "stderr");
+  };
+  if (el("cb-term-autorun")) el("cb-term-autorun").onchange = async (e) => {
+    const on = !!e.target.checked;
+    const fn = termApi("terminalSettings");
+    const r = fn ? await fn({ autoRunAI: on }).catch(() => null) : null;
+    if (!r || !r.ok) e.target.checked = !on;
+    else termAppend(`[AI scripts ${on ? "now run without asking" : "ask before running again"} — file commands inside each AI's own locker never ask]\n`, "system");
+  };
+  if (el("btn-term-send")) el("btn-term-send").onclick = async () => {
+    const t = el("term-send-target").value;
+    const targets = t === "all" ? SITES.filter((s) => s) : [t];
+    const fn = termApi("terminalSendOutput");
+    const r = fn ? await fn(targets).catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+    termAppend(r && r.ok ? `[sent your last output to ${t === "all" ? "all AIs" : t}]\n` : `[send failed: ${(r && r.error) || "error"}]\n`, r && r.ok ? "system" : "stderr");
+  };
+
+  if (termApi("onTerminalData")) window.api.onTerminalData((p) => p && termAppend(p.chunk, p.stream));
+  if (termApi("onTerminalState")) window.api.onTerminalState((st) => applyTerminalState(st));
+  const getSt = termApi("terminalState");
+  if (getSt) {
+    getSt().then((r) => {
+      if (!r || !r.ok) return;
+      if (r.scrollback) termAppend(r.scrollback, "stdout");
+      applyTerminalState(r.state);
+    }).catch(() => {});
+  }
+}
+try { wireTerminal(); } catch (e) { console.error("terminal UI init failed", e); }
+
+// ---------------------------------------------------------------------------
+// Compose box doubles as a command prompt. Nothing about sending to the AIs
+// changes: type, click an AI's name, it goes to that AI. The extra:
+//   Enter        -> run the text as a Command Prompt command (output shows in
+//                   the ⌨ Terminal next to it; the box clears)
+//   Shift+Enter  -> a new line, as before
+//   Ctrl+Enter   -> force-run even if it looks like a sentence
+// Guard: text that reads like a message to an AI (a question, or a long
+// sentence that doesn't start with a known command) is NOT run on plain Enter
+// — you get a hint instead, so a habit-Enter never fires English at cmd.exe.
+// ---------------------------------------------------------------------------
+const KNOWN_COMMANDS = new Set(("dir cd chdir cls copy xcopy robocopy move ren rename del erase md mkdir rd rmdir type echo set where " +
+  "ipconfig ping tracert nslookup netstat tasklist taskkill systeminfo hostname whoami ver tree find findstr sort more attrib " +
+  "start call exit pushd popd path title color date time sc schtasks reg wmic powershell pwsh cmd curl wget tar " +
+  "git npm npx node python py pip pip3 winget choco code dotnet java javac go cargo rustc docker ollama ls pwd cat grep " +
+  "make cmake gcc yarn pnpm deno bun gh az aws gcloud kubectl").split(" "));
+function looksLikeCommand(text) {
+  const t = String(text || "").trim();
+  if (!t || /[\r\n]/.test(t)) return false;            // multi-line = a message
+  const first = t.split(/\s+/)[0].toLowerCase();
+  if (/^[.\\/]|^[a-z]:[\\/]|\.(exe|bat|cmd|ps1|py|js)$/i.test(first)) return true; // a path or script
+  if (KNOWN_COMMANDS.has(first.replace(/\.exe$/, ""))) return true;
+  return false;
+}
+function wireComposeCommands() {
+  const box = el("composer-text");
+  if (!box) return;
+  box.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    const text = box.value.trim();
+    if (!text) return;
+    const force = e.ctrlKey || e.metaKey;
+    e.preventDefault();
+    const answering = termUI.running && text.length <= 20; // e.g. "y" to a running command's prompt
+    if (!force && !answering && !looksLikeCommand(text)) {
+      setStatus("That looks like a message — click an AI's name to send it. (Ctrl+Enter runs it as a command anyway; Shift+Enter = new line.)");
+      return;
+    }
+    if (/[\r\n]/.test(text)) { setStatus("Commands are one line — remove the line breaks, or click an AI's name to send it as a message."); return; }
+    box.value = "";
+    try { updateCharCount(); } catch (_) {}
+    if (el("tab-terminal")) el("tab-terminal").click();   // show where the output lands
+    if (el("term-input")) box.focus();                     // keep typing in Compose
+    setStatus(`Running: ${text}`);
+    if (termUI.history[termUI.history.length - 1] !== text) termUI.history.push(text);
+    termSubmit(text).then(() => setStatus("Ready.")).catch(() => {});
+  });
+}
+try { wireComposeCommands(); } catch (e) { console.error("compose command init failed", e); }
+try { wireLockers(); } catch (e) { console.error("locker browser init failed", e); }
+
+// ---- 🔬 Feature Test button: run / stop, live progress, results pop-up ----
+let featureTestRunning = false;
+function wireFeatureTest() {
+  const btn = el("btn-feature-test");
+  if (!btn || typeof window.api.runFeatureTest !== "function") return;
+  const idleText = btn.textContent;
+  if (typeof window.api.onFeatureTestProgress === "function") {
+    window.api.onFeatureTestProgress((p) => {
+      if (!p || !featureTestRunning) return;
+      if (p.status === "running") {
+        btn.textContent = `■ Stop test ${p.index + 1}/${p.total}`;
+        setStatus(`Feature test ${p.index + 1}/${p.total}: ${SITE_LABELS[p.site] || p.site} — ${p.step}…`);
+      } else if (p.status === "pass" || p.status === "fail" || p.status === "skip") {
+        const icon = p.status === "pass" ? "✅" : p.status === "fail" ? "❌" : "⚪";
+        logToCenter(`🔬 ${icon} ${SITE_LABELS[p.site] || p.site} — ${p.step}${p.detail ? `: ${p.detail}` : ""}`, { tag: "roundtable", err: p.status === "fail" });
+      }
+    });
+  }
+  btn.onclick = async () => {
+    if (featureTestRunning) {
+      btn.textContent = "Stopping…";
+      try { await window.api.stopFeatureTest(); } catch (_) {}
+      return;
+    }
+    if (!window.confirm("Run the Feature Test?\n\nEach Active AI gets about 8 short test messages, one at a time (a few minutes per AI). It writes test files into their lockers and briefly turns off Auto forwarding while it runs (restored after). Click the button again to stop.")) return;
+    featureTestRunning = true;
+    btn.classList.add("danger");
+    btn.textContent = "■ Stop test";
+    logToCenter("🔬 Feature test started — each AI gets one test at a time; results land here and in a pop-up.", { tag: "roundtable" });
+    let r;
+    try { r = await window.api.runFeatureTest(); } catch (e) { r = { ok: false, error: String(e) }; }
+    featureTestRunning = false;
+    btn.classList.remove("danger");
+    btn.textContent = idleText;
+    if (!r || !r.ok) {
+      setStatus(`Feature test couldn't run: ${(r && r.error) || "error"}`);
+      logToCenter(`🔬 Feature test couldn't run: ${(r && r.error) || "error"}`, { tag: "roundtable", err: true });
+      return;
+    }
+    const skipped = r.total - r.okCount - r.failCount;
+    const summary = `🔬 Feature test ${r.stopped ? "stopped" : "done"} — ${r.okCount}/${r.total} passed${r.failCount ? `, ${r.failCount} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}.${r.report ? ` Report: ${r.report}` : ""}`;
+    logToCenter(summary, { tag: "roundtable", err: r.failCount > 0 });
+    setStatus(summary);
+    openCapModal({ checks: r.checks, okCount: r.okCount, failCount: r.failCount, total: r.total });
+    const title = el("cap-modal-title");
+    if (title) title.textContent = "🔬 Feature test results";
+    const sub = el("cap-modal-sub");
+    if (sub) sub.textContent = `${r.okCount}/${r.total} features worked${r.failCount ? `, ${r.failCount} not working` : ""}${skipped ? `, ${skipped} skipped` : ""}. Full report (incl. how each AI's replies really end): ${r.report || "not saved"}`;
+  };
+}
+try { wireFeatureTest(); } catch (e) { console.error("feature test init failed", e); }

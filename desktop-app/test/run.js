@@ -2127,6 +2127,116 @@ async function testAiAddressesButler() {
   await call("relay:silence", {});
 }
 
+async function testAiAddressesTerminal() {
+  console.log("\n== AI lockers: [TO: TERMINAL] runs ONLY inside that AI's own folder; files can be written, given and sent ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {}); // mesh ON: the TERMINAL tag must still never be forwarded to the other panes
+  const ledgerTo = async (site, re, from) => (await call("state:get", {})).ledger.slice(from).some((e) => e.target === site && re.test(e.textPreview || ""));
+  const st0 = await call("lockers:status", {});
+  assert(st0.ok && st0.root && /ai-lockers$/.test(st0.root), `lockers live in .../ai-lockers (${st0.root})`);
+  for (const s of SITES) assert(fs.existsSync(path.join(st0.root, s, "inbox")), `${s} has its own locker with an inbox`);
+
+  let before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\nSaving my notes.\n```\nwrite plan.md\n# Plan\nstep one\n```\n```\ntype plan.md\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("claude", /\[FROM: TERMINAL\][\s\S]*Saved plan\.md/, before), { label: "write runs with no approval and Claude gets the result" });
+  assert(fs.readFileSync(path.join(st0.root, "claude", "plan.md"), "utf8").includes("step one"), "the file really exists in Claude's locker");
+  assert(((await call("terminal:state", {})).state.pending || []).length === 0, "nothing was held for approval (own locker = free)");
+  await settle(200);
+  assert(!(await ledgerTo("chatgpt", /step one/, before)) && !(await ledgerTo("gemini", /step one/, before)), "a [TO: TERMINAL] reply is NOT mesh-forwarded to the other AIs");
+
+  console.log("  -- outside the locker is refused --");
+  before = (await call("state:get", {})).ledger.length;
+  say("gemini", "[TO: TERMINAL]\n```\ncat ../claude/plan.md\n```\n[FROM: GEMINI]");
+  await waitUntil(async () => ledgerTo("gemini", /refused/, before), { label: "Gemini reading Claude's locker is refused and told why" });
+  assert(!(await ledgerTo("gemini", /step one/, before)), "and none of Claude's file leaked to Gemini");
+
+  console.log("  -- send a file to another AI --");
+  before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\n```\nsend plan.md to gemini\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("gemini", /Claude sent you a file/, before), { label: "Gemini is told it got a file" });
+  assert(await ledgerTo("gemini", /step one/, before), "a small text file is pasted right into Gemini's chat");
+  assert(fs.existsSync(path.join(st0.root, "gemini", "inbox", "from-claude", "plan.md")), "the copy is in Gemini's inbox/from-claude");
+  await waitUntil(async () => ledgerTo("claude", /Sent plan\.md to Gemini/, before), { label: "Claude gets the confirmation" });
+
+  console.log("  -- give: pull a file into the chat --");
+  before = (await call("state:get", {})).ledger.length;
+  say("gemini", "[TO: TERMINAL]\n```\ngive inbox/from-claude/plan.md\n```\n[FROM: GEMINI]");
+  await waitUntil(async () => ledgerTo("gemini", /end of file|step one/, before), { label: "give pastes the file into Gemini's chat" });
+
+  console.log("  -- share: one request, look-only --");
+  before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\n```\nshare with chatgpt\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("chatgpt", /opened its locker to you/, before), { label: "ChatGPT is told Claude shared its locker" });
+  before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: TERMINAL]\n```\ncat ../claude/plan.md\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ledgerTo("chatgpt", /step one/, before), { label: "ChatGPT can read Claude's file on its next request" });
+  before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: TERMINAL]\n```\nhead ../claude/plan.md\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ledgerTo("chatgpt", /refused/, before), { label: "the share is closed after that one request" });
+  const lst = await call("lockers:list", { site: "claude" });
+  assert(lst.ok && lst.files.some((f) => f.rel === "plan.md" && f.kind === "text"), "the user's locker browser lists Claude's files");
+  const rd = await call("lockers:read", { site: "claude", rel: "plan.md" });
+  assert(rd.ok && /step one/.test(rd.text), "and can read a text file for Compose");
+  assert(!(await call("lockers:read", { site: "claude", rel: "../gemini/inbox" })).ok, "the browser can't be pointed outside a locker");
+  const routing = (await call("state:get", {})).prompts.find((p) => p.id === 2);
+  assert(routing && /YOUR LOCKER/.test(routing.text.claude) && /share with <ai>/.test(routing.text.claude), "the setup prompt (Prompt Library) teaches the locker commands");
+
+  console.log("  -- scripts ask first; Stop AIs Talking clears them --");
+  fs.writeFileSync(path.join(st0.root, "chatgpt", "tool.js"), "console.log('hi from tool')");
+  say("chatgpt", "[TO: TERMINAL]\n```\nnode tool.js\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ((await call("terminal:state", {})).state.pending || []).length === 1, { label: "a script run is held for approval" });
+  const req = (await call("terminal:state", {})).state.pending[0];
+  assert(req.from === "chatgpt" && req.risk === "dangerous" && /script/.test(req.reason), "the request says why it needs approval");
+  await call("relay:silence", {});
+  assert(((await call("terminal:state", {})).state.pending || []).length === 0, "Stop AIs Talking clears pending requests");
+
+  console.log("  -- user command + share output --");
+  const ur = await call("terminal:run", { command: "echo from-user" });
+  assert(ur.ok && /from-user/.test(ur.result.output), "the user's own command runs and returns its output");
+  await call("routing:auto-all", {});
+  before = (await call("state:get", {})).ledger.length;
+  const shared = await call("terminal:send-output", { targets: ["gemini"] });
+  assert(shared.ok && await ledgerTo("gemini", /from-user/, before), "the user's output is delivered to the chosen AI");
+  await call("terminal:stop", {});
+  await call("relay:silence", {});
+}
+
+async function testFeatureTestButton() {
+  console.log("\n== 🔬 Feature Test: drives a real step through the real capture path, restores routing, can be stopped ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: s === "chatgpt" });
+  await call("routing:auto-all", {});
+  const pick = (g) => JSON.stringify({ r: g.routing, m: g.meshActive, e: g.relayEnabled });
+  const routingBefore = pick((await call("state:get", {})).global);
+  const t0 = Date.now();
+  const running = call("featuretest:run", {});
+  // step 1's prompt goes to ChatGPT; answer it exactly as asked, through the normal capture path
+  let prompt = null;
+  await waitUntil(async () => {
+    const e = (await call("state:get", {})).ledger.find((x) => x.target === "chatgpt" && x.ts >= t0 && /FEATURE TEST/.test(x.textPreview || ""));
+    prompt = e ? e.textPreview : null;
+    return !!prompt;
+  }, { label: "the feature test sends ChatGPT its first test prompt" });
+  const tok = (/FT-[A-Z0-9]+-REPLY/.exec(prompt) || [])[0];
+  assert(!!tok, `the prompt carries a unique token (${tok})`);
+  say("chatgpt", `[TO: USER]\n${tok}\n[FROM: CHATGPT]`);
+  await waitUntil(async () => (await call("state:get", {})).log.some((l) => l.kind === "featuretest-step" && l.detail.step === "reply" && l.detail.status === "pass"), { label: "step 1 (reply) passes from the real capture" });
+  const during = await call("state:get", {});
+  assert(SITES.every((s) => (during.global.routing[s] || []).length === 0), "mesh forwarding is off while the test runs");
+  await call("featuretest:stop", {});
+  const r = await running;
+  assert(r.ok && r.stopped && r.checks.some((c) => /Reply captured/.test(c.name) && c.ok === true), "Stop ends it; the result keeps the passed step");
+  assert(r.report && fs.existsSync(r.report) && /How each AI's replies actually ended/.test(fs.readFileSync(r.report, "utf8")), "a report is saved, with the reply-endings section");
+  assert(/\[FROM: CHATGPT\]/.test(fs.readFileSync(r.report, "utf8")), "the report shows ChatGPT's real raw reply ending");
+  assert(pick((await call("state:get", {})).global) === routingBefore, "routing is restored exactly afterwards");
+  for (const s of SITES) await call("participants:set", { site: s, enabled: false });
+  const none = await call("featuretest:run", {});
+  assert(!none.ok && /Active/.test(none.error), "with no AI checked Active it refuses with a clear message");
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("relay:silence", {});
+}
+
 async function testModelsFolderInfo() {
   console.log("\n== Models folder: the app reports one findable models home + its inventory ==");
   const info = await call("models:info", {});
@@ -2695,6 +2805,8 @@ async function main() {
   await testUiLogRoutesToActivityLog();
   await testSilenceStopsAllRelay();
   await testAiAddressesButler();
+  await testAiAddressesTerminal();
+  await testFeatureTestButton();
   await testModelsFolderInfo();
   await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();

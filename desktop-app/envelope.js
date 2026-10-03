@@ -8,11 +8,12 @@
 // completion signal. This module recognizes, validates and strips both.
 
 // Recognized [TO:] destinations: the three web AIs, the special ALL/USER/NONE,
-// and BUTLER — the local supervisor (see main.js's [TO: BUTLER] delivery path).
+// BUTLER — the local supervisor (see main.js's [TO: BUTLER] delivery path), and
+// TERMINAL — the Command Prompt connection (see main.js's deliverToTerminal()).
 // A missing/unrecognized tag defaults to USER (Rule 1).
 // E06: tolerate a stray space before the colon ("[TO : X]") — a real parse-miss
 // the audit hit — as well as the usual bracket/space slack.
-const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO\s*:\s*(GEMINI|CHATGPT|CLAUDE|BUTLER|ALL|USER|NONE)\s*\]\s*/i;
+const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO\s*:\s*(GEMINI|CHATGPT|CLAUDE|BUTLER|TERMINAL|ALL|USER|NONE)\s*\]\s*/i;
 function parseRoundtableTag(text) {
   const m = ROUNDTABLE_TAG_RE.exec(text);
   if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user

@@ -391,7 +391,7 @@ async function testZoomControls() {
   const doc = dom.window.document;
 
   const zoomLabel = doc.getElementById("zoom-level-gemini");
-  assert(!!zoomLabel && zoomLabel.textContent === "100%", "starts at 100%");
+  assert(!!zoomLabel && zoomLabel.textContent === "60%", "starts at the 60% default");
 
   const buttons = doc.querySelectorAll("#col-gemini .zoom-btn");
   assert(buttons.length === 2, "each column has a zoom-out and a zoom-in button");
@@ -399,14 +399,14 @@ async function testZoomControls() {
 
   zoomOutBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "setZoom" && c.site === "gemini" && c.factor < 1), "zoom-out calls setZoom with a factor below 1");
-  assert(zoomLabel.textContent === "90%", `label reflects the new factor (got "${zoomLabel.textContent}")`);
+  assert(api.calls.some((c) => c.fn === "setZoom" && c.site === "gemini" && c.factor < 0.6), "zoom-out calls setZoom with a factor below 60%");
+  assert(zoomLabel.textContent === "50%", `label reflects the new factor (got "${zoomLabel.textContent}")`);
 
   zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
   zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(zoomLabel.textContent === "110%", `label updates back up (got "${zoomLabel.textContent}")`);
+  assert(zoomLabel.textContent === "70%", `label updates back up (got "${zoomLabel.textContent}")`);
 }
 
 async function testSelectorPickMenuToggle() {
@@ -1075,6 +1075,132 @@ async function testPromptLibraryLiveSync() {
   assert(doc.getElementById("prompt-select").options.length === 2, "a 'prompts-changed' broadcast (from the popup window saving) re-renders the dropdown without needing a manual refresh");
 }
 
+async function testTerminalZone() {
+  console.log("\n== ⌨ Terminal zone: tabs, approval strip, typing a command ==");
+  const api = makeApi();
+  const calls = [];
+  let dataCb = null, stateCb = null;
+  const pendingReq = { id: 7, from: "claude", label: "Claude", commands: ["del old.log"], risk: "dangerous", reason: "deletes files" };
+  Object.assign(api, {
+    terminalState: async () => ({ ok: true, scrollback: "[terminal started]\n", state: { alive: true, running: null, queued: [], autoRunAI: false, pending: [pendingReq], hasLastUserResult: false } }),
+    terminalRun: async (command) => { calls.push({ fn: "terminalRun", command }); return { ok: true, result: { ok: true, exitCode: 0, output: "hi" } }; },
+    terminalApprove: async (id) => { calls.push({ fn: "terminalApprove", id }); return { ok: true }; },
+    terminalReject: async (id) => { calls.push({ fn: "terminalReject", id }); return { ok: true }; },
+    terminalSettings: async (patch) => { calls.push({ fn: "terminalSettings", patch }); return { ok: true }; },
+    terminalStop: async (restart) => { calls.push({ fn: "terminalStop", restart }); return { ok: true }; },
+    terminalSendOutput: async (targets) => { calls.push({ fn: "terminalSendOutput", targets }); return { ok: true }; },
+    terminalClear: async () => ({ ok: true }),
+    onTerminalData: (cb) => { dataCb = cb; },
+    onTerminalState: (cb) => { stateCb = cb; },
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(!doc.getElementById("term-pane").hidden && doc.getElementById("messages-pane").hidden, "the Terminal tab is shown by default; Messages is one tab away");
+  assert(/terminal started/.test(doc.getElementById("term-output").textContent), "existing scrollback is restored on load");
+  const reqs = doc.querySelectorAll("#term-pending .term-req");
+  assert(reqs.length === 1 && /Claude/.test(reqs[0].textContent) && /del old\.log/.test(reqs[0].textContent), "a pending AI request shows who asked and the exact command");
+  assert(reqs[0].classList.contains("dangerous") && /deletes files/.test(reqs[0].textContent), "a dangerous request is flagged with the reason");
+  assert(doc.getElementById("term-pending-badge").textContent === "1", "the tab badge counts pending requests");
+  reqs[0].querySelector("button.primary").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(calls.some((c) => c.fn === "terminalApprove" && c.id === 7), "▶ Run approves that exact request");
+  const input = doc.getElementById("term-input");
+  input.value = "dir";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(calls.some((c) => c.fn === "terminalRun" && c.command === "dir") && input.value === "", "Enter runs the typed command and clears the box");
+  dataCb({ chunk: "boom\n", stream: "stderr" });
+  assert(doc.querySelector("#term-output .t-err") && /boom/.test(doc.getElementById("term-output").textContent), "streamed stderr is shown (styled as an error)");
+  stateCb({ alive: true, running: { id: 1, command: "pause" }, queued: [], autoRunAI: true, pending: [], hasLastUserResult: true });
+  assert(doc.getElementById("term-input").classList.contains("answering"), "while a command runs, the input switches to answering its prompt");
+  assert(doc.getElementById("cb-term-autorun").checked && !doc.getElementById("btn-term-send").disabled, "state updates the auto-run box and enables Send output");
+  assert(doc.querySelectorAll("#term-pending .term-req").length === 0, "the approval strip empties when nothing is pending");
+  click(dom, "tab-messages");
+  assert(doc.getElementById("term-pane").hidden && !doc.getElementById("messages-pane").hidden, "the Messages tab still shows the messages feed");
+}
+
+async function testComposeRunsCommands() {
+  console.log("\n== Compose box doubles as a command prompt (Enter runs a command; AI buttons unchanged) ==");
+  const api = makeApi();
+  const runs = [];
+  Object.assign(api, {
+    terminalState: async () => ({ ok: true, scrollback: "", state: { alive: true, running: null, queued: [], autoRunAI: false, pending: [], hasLastUserResult: false } }),
+    terminalRun: async (command) => { runs.push(command); return { ok: true, result: { ok: true, exitCode: 0, output: "" } }; },
+    onTerminalData: () => {}, onTerminalState: () => {},
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const box = doc.getElementById("composer-text");
+  const enter = (opts = {}) => box.dispatchEvent(new dom.window.KeyboardEvent("keydown", Object.assign({ key: "Enter", bubbles: true, cancelable: true }, opts)));
+  click(dom, "tab-messages");
+  box.value = "git status";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs[0] === "git status", "Enter on a command runs it in the terminal");
+  assert(box.value === "", "the Compose box clears after running");
+  assert(!doc.getElementById("term-pane").hidden, "the Terminal tab is brought up so you see the output");
+  box.value = "what do you think about this plan?";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs.length === 1 && box.value !== "", "a sentence is NOT run on Enter — it stays in the box for an AI");
+  enter({ ctrlKey: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs.length === 2 && runs[1] === "what do you think about this plan?", "Ctrl+Enter force-runs it");
+  box.value = "line one";
+  const ev = new dom.window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });
+  box.dispatchEvent(ev);
+  assert(!ev.defaultPrevented && runs.length === 2, "Shift+Enter is still a plain new line");
+  box.value = "C:\\tools\\build.bat --fast";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs[2] === "C:\\tools\\build.bat --fast", "a path to a script counts as a command");
+}
+
+async function testLockerBrowser() {
+  console.log("\n== 📁 Locker browser: each AI's files, click to put in Compose, upload on send ==");
+  const api = makeApi();
+  const attached = []; const sent = [];
+  const files = {
+    claude: [{ rel: "notes/plan.md", name: "plan.md", size: 40, mtime: 2, kind: "text" }, { rel: "chart.png", name: "chart.png", size: 20480, mtime: 1, kind: "image" }],
+    chatgpt: [], gemini: [],
+  };
+  Object.assign(api, {
+    lockersList: async (site) => ({ ok: true, site, files: files[site] || [] }),
+    lockersRead: async (site, rel) => ({ ok: true, kind: "text", text: "# Plan\nstep one" }),
+    lockersAttach: async (site, rel, targets) => { attached.push({ site, rel, targets }); return { ok: true }; },
+    onLockerChanged: () => {},
+    sendCompose: async (text, targets) => { sent.push({ text, targets }); return { ok: true }; },
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 20));
+  const list = doc.getElementById("locker-list-claude");
+  assert(list && !list.hidden, "each AI column shows its locker by default");
+  assert(doc.getElementById("preview-claude").hidden, "the old reply preview is still there, one tab away");
+  const rows = list.querySelectorAll(".lk-row:not(.lk-head)");
+  const head = list.querySelector(".lk-head");
+  assert(head && /Name/.test(head.textContent) && /Modified/.test(head.textContent) && /Size/.test(head.textContent), "the list has Name / Modified / Size columns");
+  assert(rows.length === 2 && /plan\.md/.test(rows[0].textContent) && /chart\.png/.test(rows[1].textContent), "files are listed with names");
+  assert(rows[0].querySelector(".lk-name b").textContent === "plan.md" && /notes/.test(rows[0].querySelector(".lk-dir").textContent), "the file name is shown first, its folder after it");
+  assert(rows[0].querySelector(".lk-date").textContent.length > 0 && /KB/.test(rows[1].querySelector(".lk-size").textContent), "each row shows modified date and size");
+  assert(/Locker \(2\)/.test(doc.getElementById("locker-tab-claude").textContent), "the tab shows the file count");
+  rows[0].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  const box = doc.getElementById("composer-text");
+  assert(/Claude's locker: notes\/plan\.md/.test(box.value) && /step one/.test(box.value), "clicking a text file puts its contents in Compose");
+  rows[1].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(/chart\.png/.test(doc.getElementById("compose-attachments").textContent), "clicking a picture attaches it in Compose (a chip)");
+  const geminiBtn = Array.from(doc.querySelectorAll("#send-active-grid button")).find((b) => /Gemini/.test(b.textContent));
+  geminiBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(attached.length === 1 && attached[0].rel === "chart.png" && attached[0].targets[0] === "gemini", "sending to Gemini uploads the picture to Gemini first");
+  assert(sent.length === 1 && /step one/.test(sent[0].text), "then the text goes as usual");
+  assert(doc.getElementById("compose-attachments").children.length === 0, "the attachment chip clears after sending");
+  doc.getElementById("reply-tab-claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("preview-claude").hidden && list.hidden, "💬 Last reply tab shows the reply preview again");
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testUtilityPanelHeadingCollapses();
@@ -1122,6 +1248,9 @@ async function main() {
   await testButlerLightAndColoredLog();
   await testCapabilityPanelsWired();
   await testActivityLogCapturesEverything();
+  await testTerminalZone();
+  await testComposeRunsCommands();
+  await testLockerBrowser();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

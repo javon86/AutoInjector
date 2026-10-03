@@ -83,7 +83,56 @@
     #up-actions-extra { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px 5px; align-items:stretch; }
     #up-actions-extra button { text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; padding:3px 6px; }
     #up-actions-extra .grid-full { grid-column:1 / -1; }
-    #up-zone-messages { flex:1 1 240px; min-width:200px; }
+    /* Third zone: SAME size and place as the original "Messages to you" zone.
+       Its contents are pinned inside it (.zone-fill), so the terminal can
+       never make the User Panel taller — the other two zones set the height. */
+    #up-zone-messages { flex:1 1 240px; min-width:200px; position:relative; }
+    #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
+    #up-zone-messages .feed-head .spacer { flex:1; }
+    .zone-fill { position:absolute; inset:7px 9px; display:flex; flex-direction:column; gap:4px; min-height:0; overflow:hidden; }
+    /* ---- Third zone: ⌨ Terminal / 💬 Messages tabs ---- */
+    .zone-tabs { display:flex; align-items:center; gap:4px; }
+    .zone-tabs .spacer { flex:1; }
+    .zone-tab { font-size:11px; padding:2px 8px; border-radius:6px 6px 0 0; border:1px solid #2a2a2a; border-bottom-color:transparent;
+      background:#111; color:inherit; opacity:.7; display:inline-flex; align-items:center; gap:5px; cursor:pointer; }
+    .zone-tab.active { opacity:1; background:#0b0f0c; border-color:#2d4a37; color:#8ef0b0; }
+    .zone-pane { display:flex; flex-direction:column; gap:4px; flex:1 1 auto; min-height:0; }
+    .zone-pane[hidden] { display:none; }
+    .term-dot { width:7px; height:7px; border-radius:50%; background:#5a5a5a; display:inline-block; }
+    .term-dot.alive { background:#38e07b; }
+    .term-dot.busy { background:#f5b642; }
+    .term-badge { background:#e0a24a; }
+    #term-output { margin:0; flex:1 1 auto; min-height:0; overflow:auto; background:#050505; color:#d6dde6;
+      border:1px solid #1f2a22; border-radius:5px; padding:5px 7px; font:11.5px/1.35 ui-monospace,Consolas,"Cascadia Mono",monospace;
+      white-space:pre-wrap; word-break:break-word; }
+    #term-output .t-err { color:#ff8a8a; }
+    #term-output .t-sys { color:#7fd4e0; opacity:.85; }
+    .term-row { display:flex; align-items:center; gap:5px; }
+    .term-prompt { font:12px ui-monospace,Consolas,monospace; color:#8ef0b0; }
+    #term-input { flex:1 1 auto; min-width:0; font:12px ui-monospace,Consolas,monospace; background:#050505; color:#e8e8e8;
+      border:1px solid #2a2a2a; border-radius:5px; padding:4px 6px; }
+    #term-input.answering { border-color:#e0a24a; }
+    .term-tools button, .term-tools select { font-size:11px; padding:1px 6px; }
+    .zone-tabs { flex-wrap:nowrap; white-space:nowrap; flex:0 0 auto; }
+    .term-tools { flex-wrap:nowrap; white-space:nowrap; overflow:hidden; gap:3px; }
+    .term-tools select { width:74px; }
+    .zone-tab { padding:1px 8px; white-space:nowrap; }
+    .term-auto { white-space:nowrap; }
+    #term-pane .term-row { flex:0 0 auto; }
+    .term-auto { font-size:11px; display:inline-flex; align-items:center; gap:4px; cursor:pointer; user-select:none; }
+    #term-pending:empty { display:none; }
+    #term-pending { display:flex; flex-direction:column; gap:2px; max-height:46px; overflow-y:auto; flex:0 0 auto; }
+    /* one line per request: who · command · ⚠ · Run / Reject */
+    .term-req { border:1px solid #6b5420; background:#1a1508; border-radius:6px; padding:1px 6px; font-size:11px; display:flex; flex-wrap:nowrap; align-items:center; gap:6px; white-space:nowrap; min-width:0; }
+    .term-req > div:first-child { flex:0 0 auto; }
+    .term-req code { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap !important; }
+    .term-req .why { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .term-req.dangerous { border-color:#8a2f2f; background:#1d0d0d; }
+    .term-req .who { font-weight:700; }
+    .term-req code { display:inline; font:11px ui-monospace,Consolas,monospace; white-space:pre-wrap; word-break:break-all; margin:0; color:#f2e6c8; }
+    .term-req .why { color:#ff9a7a; font-size:11px; }
+    .term-req .acts { display:flex; gap:5px; }
+    .term-req .acts button { font-size:11px; padding:2px 8px; }
     #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
     #up-zone-messages .feed-head .spacer { flex:1; }
     #up-zone-messages .see-all { font-size:11px; opacity:.8; background:none; border:none; padding:0; text-decoration:underline; }
@@ -338,7 +387,7 @@
        adding more panels makes the whole #wrap scroll (it is overflow:auto)
        instead of crushing the panes. The floor is lifted when every pane is
        collapsed (see the .all-collapsed rule below) so no dead space is left. */
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:854px; transition: flex-basis .2s ease; }
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:427px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -367,6 +416,8 @@
        area fill the space. */
     .ai-col.state-reduced .pane-slot { display:none; }
     .ai-col.state-reduced .preview { flex:1 1 auto; height:auto; max-height:none; }
+    .ai-col.state-reduced .locker-box { flex:1 1 auto; }
+    .ai-col.state-reduced .locker-list { height:auto; max-height:none; flex:1 1 auto; }
 
     /* MIN: a thin vertical provider bar, in the same column position. The
        whole bar is an expand target (see the click handler in controls.js). */
@@ -374,6 +425,7 @@
     .ai-col.state-min:hover { background:#1c1c1c; }
     .ai-col.state-min .pane-slot,
     .ai-col.state-min .preview,
+    .ai-col.state-min .locker-box,
     .ai-col.state-min .btns,
     .ai-col.state-min .pick-menu,
     .ai-col.state-min .login-list,
@@ -429,6 +481,29 @@
 
     .preview { height:66px; overflow:auto; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:7px 9px; white-space:pre-wrap; line-height:1.4; opacity:.9; }
     .preview .ts { display:block; font-size:11px; opacity:.78; margin-bottom:4px; }
+    /* Per-AI box: 📁 that AI's locker (default) or 💬 its last reply. */
+    .locker-box { display:flex; flex-direction:column; gap:3px; min-height:0; }
+    .locker-tabs { display:flex; align-items:center; gap:4px; font-size:11px; }
+    .locker-tabs .spacer { flex:1; }
+    .locker-tabs button { font-size:11px; padding:1px 7px; border-radius:5px; opacity:.7; }
+    .locker-tabs button.active { opacity:1; border-color:#2d4a37; color:#8ef0b0; }
+    .locker-tabs .lk-refresh { padding:1px 5px; }
+    .locker-list { height:96px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
+    .locker-list:empty::after { content:"Empty — files this AI saves (or gets sent) show up here."; opacity:.6; font-size:11px; padding:4px 6px; }
+    .lk-row { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:2px 6px; border-radius:4px; cursor:pointer; border:none; background:none; color:inherit; text-align:left; width:100%; }
+    .lk-row:hover, .lk-row:focus { background:#1a2a1f; outline:none; }
+    .lk-row .lk-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .lk-row .lk-name b { font-weight:600; }
+    .lk-row .lk-dir { opacity:.55; font-size:10.5px; margin-left:4px; }
+    .lk-row .lk-date { opacity:.7; font-size:10.5px; width:108px; text-align:right; white-space:nowrap; }
+    .lk-row .lk-size { opacity:.7; font-size:10.5px; width:56px; text-align:right; white-space:nowrap; }
+    .lk-head { position:sticky; top:0; z-index:1; background:#0e0e0e; cursor:default; opacity:.65; font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
+    .lk-head:hover { background:#0e0e0e; }
+    /* Files waiting in Compose to be uploaded to whichever AI you click. */
+    #compose-attachments { display:flex; flex-wrap:wrap; gap:4px; }
+    #compose-attachments:empty { display:none; }
+    .att-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; padding:2px 4px 2px 7px; border-radius:999px; background:#16231a; border:1px solid #2d4a37; }
+    .att-chip button { font-size:10px; padding:0 5px; border:none; background:none; opacity:.8; cursor:pointer; color:inherit; }
     .row-label { opacity:.8; font-size:11px; margin-right:3px; }
     /* Collapsible sub-sections inside the System AI panel — keep it compact. */
     .sai-sec { margin:5px 0; border-top:1px solid #2a2a2a; padding-top:5px; }
@@ -437,7 +512,7 @@
     .sai-sec > summary::before { content:"▸ "; opacity:.6; }
     .sai-sec[open] > summary::before { content:"▾ "; }
 
-    .pane-slot { flex:1 1 auto; min-height:560px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
+    .pane-slot { flex:1 1 auto; min-height:280px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
@@ -517,7 +592,8 @@
     <div id="col-userpanel" class="col">
       <div class="up-zone" id="up-zone-compose">
         <p class="zone-label">User Panel — Compose</p>
-        <textarea id="composer-text" placeholder="Type a message to kick off or interject…"></textarea>
+        <textarea id="composer-text" placeholder="Type a message and click an AI's name — or type a command and press Enter to run it"></textarea>
+        <div id="compose-attachments" aria-label="Files to upload with your next send"></div>
         <div id="char-count">0 chars</div>
       </div>
 
@@ -545,6 +621,7 @@
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
           <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
           <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
+          <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
           <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
@@ -564,14 +641,48 @@
         </div>
       </div>
 
+      <!-- Third zone: the Command Prompt connection (⌨ Terminal), with the
+           old "Messages to you" feed kept one click away on its own tab.
+           The terminal is a real local shell (cmd.exe on Windows). You type
+           here; an AI can also ask for commands with [TO: TERMINAL] — those
+           wait in the approval strip until you click Run (unless Auto-run is
+           on and the command is low-risk), and the output goes back to it. -->
       <div class="up-zone" id="up-zone-messages">
-        <div class="feed-head">
-          <p class="zone-label" style="margin:0;">💬 Messages to you</p>
-          <span class="msg-badge" id="messages-badge" data-zero>0</span>
+       <div class="zone-fill">
+        <div class="zone-tabs" role="tablist">
+          <button class="zone-tab active" id="tab-terminal" role="tab" aria-selected="true" aria-controls="term-pane">⌨ Terminal <span class="term-dot" id="term-dot" title="Shell not started"></span><span class="msg-badge term-badge" id="term-pending-badge" data-zero>0</span></button>
+          <button class="zone-tab" id="tab-messages" role="tab" aria-selected="false" aria-controls="messages-pane">💬 Messages <span class="msg-badge" id="messages-badge" data-zero>0</span></button>
           <span class="spacer"></span>
           <button class="see-all" id="btn-open-messages">see all →</button>
         </div>
-        <div class="feed-list" id="messages-feed"></div>
+
+        <div id="term-pane" class="zone-pane" role="tabpanel">
+          <div id="term-pending" aria-live="polite"></div>
+          <pre id="term-output" tabindex="0" aria-label="Terminal output"></pre>
+          <div class="term-row">
+            <span class="term-prompt" id="term-prompt">&gt;</span>
+            <input id="term-input" type="text" spellcheck="false" autocomplete="off" placeholder="Type a command and press Enter…" aria-label="Terminal command" />
+            <button id="btn-term-run" title="Run this command (Enter)">Run</button>
+          </div>
+          <div class="term-row term-tools" id="term-tools">
+            <button id="btn-term-stop" class="danger" title="Stop: kill whatever is running (and everything it started), then start a fresh shell" aria-label="Stop the running command">■</button>
+            <button id="btn-term-clear" title="Clear the terminal view">Clear</button>
+            <label class="term-auto" title="Auto-run AI scripts. AIs work freely inside their own locker folders without asking. The one thing that asks is running a script (python/node), because a script can reach outside the locker. Tick this to let scripts run without asking."><input type="checkbox" id="cb-term-autorun" /> Auto</label>
+            <button id="btn-open-lockers" title="Open the AI lockers folder — each AI's private folder (chatgpt / claude / gemini)" aria-label="Open the AI lockers folder">📁</button>
+            <select id="term-send-target" aria-label="Send last output to">
+              <option value="claude">Claude</option>
+              <option value="chatgpt">ChatGPT</option>
+              <option value="gemini">Gemini</option>
+              <option value="all">All</option>
+            </select>
+            <button id="btn-term-send" title="Send your last command and its output to the chosen AI" aria-label="Send your last output to the chosen AI" disabled>📤</button>
+          </div>
+        </div>
+
+        <div id="messages-pane" class="zone-pane" role="tabpanel" hidden>
+          <div class="feed-list" id="messages-feed"></div>
+        </div>
+       </div>
       </div>
     </div>
 
