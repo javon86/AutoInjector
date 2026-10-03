@@ -1,0 +1,22 @@
+# Line endings: the repo always stores LF; Git converts for each machine on
+# checkout (CRLF on Windows). This makes that the same for everyone, instead
+# of depending on each computer's core.autocrlf setting.
+* text=auto
+
+# Windows scripts must stay CRLF; Unix scripts must stay LF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.command text eol=lf
+
+# Never touch binary files.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.sqlite binary
