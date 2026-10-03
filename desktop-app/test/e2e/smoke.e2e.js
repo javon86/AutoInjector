@@ -82,6 +82,11 @@ async function main() {
       ['#jarvis-awareness', 'Awareness readout'],
       ['#voice-enabled', 'Voice toggle'],
       ['#btn-mic', 'Push-to-talk mic button'],
+      ['#btn-feature-test', '🔬 Feature Test button'],
+      ['#term-output', 'Terminal output'],
+      ['#term-input', 'Terminal command box'],
+      ['#locker-list-claude', "Claude's locker file list"],
+      ['#compose-attachments', 'Compose attachment chips'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }
@@ -232,12 +237,33 @@ async function main() {
     await controls.evaluate(() => { document.body.style.zoom = '1'; });
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
-    await app.close();
+    await shutdown(app);
     process.exit(state.failed ? 1 : 0);
   } catch (e) {
     console.error('e2e crashed:', e && e.stack || e);
-    await app.close().catch(() => {});
+    await shutdown(app);
     process.exit(1);
   }
 }
+
+// Close the app, but never wait forever: CI runs used to sit until GitHub's
+// 6-hour limit because app.close() (or a child process the app started) never
+// returned. Give it 15s, then kill the whole Electron process tree.
+async function shutdown(app) {
+  const timedOut = await Promise.race([
+    app.close().then(() => false, () => false),
+    new Promise((r) => setTimeout(() => r(true), 15000)),
+  ]);
+  if (timedOut) console.error('app.close() did not finish in 15s — killing Electron');
+  try {
+    const proc = app.process && app.process();
+    if (proc && proc.pid && proc.exitCode == null) {
+      try { process.kill(-proc.pid, 'SIGKILL'); } catch (_) {}
+      try { proc.kill('SIGKILL'); } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+// Hard backstop: whatever happens, this script ends within 12 minutes.
+setTimeout(() => { console.error('e2e watchdog: still running after 12 minutes — exiting'); process.exit(1); }, 12 * 60 * 1000).unref();
 main();

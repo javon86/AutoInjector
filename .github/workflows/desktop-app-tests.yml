@@ -13,16 +13,22 @@ on:
       - "AutoInjector/extension/selectors.js"
       - ".github/workflows/desktop-app-tests.yml"
 
+# A newer push to the same branch/PR cancels the older run instead of queuing.
+concurrency:
+  group: desktop-app-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Mocked + jsdom suites
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: desktop-app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "npm"
@@ -33,12 +39,13 @@ jobs:
   browser-test:
     name: Real-Chromium selector tests (Playwright)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: desktop-app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "npm"
@@ -54,12 +61,15 @@ jobs:
   e2e-test:
     name: Real Electron GUI end-to-end (Playwright + xvfb)
     runs-on: ubuntu-latest
+    # This job used to sit until GitHub's 6-hour limit (the app never fully
+    # exited). The test now force-closes Electron; these limits are a backstop.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: desktop-app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: "npm"
@@ -74,11 +84,13 @@ jobs:
       - run: npx playwright install-deps chromium
       - run: sudo apt-get install -y xvfb
       # A virtual display so Electron can render; the e2e test launches the real
-      # app, clicks through it, and screenshots it.
-      - run: xvfb-run -a npm run test:e2e
+      # app, clicks through it, and screenshots it. `timeout` + -k guarantee the
+      # step ends even if something the app started refuses to quit.
+      - run: timeout -k 30s 15m xvfb-run -a npm run test:e2e
+        timeout-minutes: 16
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-screenshots
           path: desktop-app/test/e2e/__screenshots__/
