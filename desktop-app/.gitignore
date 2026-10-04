@@ -3,3 +3,5 @@ test/e2e/__screenshots__/
 atelier/**/__pycache__/
 atelier/**/*.pyc
 atelier-governance.json
+# Claude's scratch/output folder (screenshots, test runs, notes) - not part of the app
+Claude outputs/
