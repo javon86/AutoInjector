@@ -1099,6 +1099,51 @@ if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.ap
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
 
+// --- Phone companion: a minimal page served by the local bridge. A phone on the
+// same Wi-Fi (or anywhere via Tailscale) opens it to watch and send. PC does the work.
+async function refreshPhonePanel() {
+  if (!window.api || !window.api.phoneInfo) return;
+  let info = {};
+  try { info = await window.api.phoneInfo(); } catch (_) {}
+  const toggle = el("phone-lan-toggle");
+  const lanEl = el("phone-url-lan");
+  const remoteRow = el("phone-remote-row");
+  const remoteEl = el("phone-url-remote");
+  if (toggle) toggle.checked = !!info.lanEnabled;
+  if (lanEl) {
+    lanEl.value = (info.lanEnabled && info.lanUrl) ? info.lanUrl : "";
+    lanEl.placeholder = info.lanEnabled ? (info.lanIp ? "" : "No Wi-Fi address found — connect to a network") : "Enable access to get a link";
+  }
+  // The from-anywhere (Tailscale) link only appears when LAN access is on AND a
+  // Tailscale address exists on this machine.
+  if (remoteRow) remoteRow.hidden = !(info.lanEnabled && info.remoteUrl);
+  if (remoteEl) remoteEl.value = (info.lanEnabled && info.remoteUrl) ? info.remoteUrl : "";
+  const copyLan = el("btn-phone-copy-lan"); if (copyLan) copyLan.disabled = !(info.lanEnabled && info.lanUrl);
+}
+function copyField(fieldId, btnId) {
+  const f = el(fieldId); if (!f || !f.value) return;
+  const done = () => { const b = el(btnId); if (b) { const t = b.textContent; b.textContent = "✓"; setTimeout(() => { b.textContent = t; }, 1200); } };
+  try { navigator.clipboard.writeText(f.value).then(done, () => { try { f.select(); document.execCommand("copy"); done(); } catch (_) {} }); }
+  catch (_) { try { f.select(); document.execCommand("copy"); done(); } catch (_) {} }
+}
+if (el("btn-open-phone")) el("btn-open-phone").onclick = async () => {
+  const panel = el("phone-panel"); if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) await refreshPhonePanel();
+};
+if (el("phone-lan-toggle")) el("phone-lan-toggle").onchange = async (e) => {
+  const on = !!e.target.checked;
+  const hint = el("phone-hint");
+  if (hint) hint.textContent = on ? "Starting network access…" : "Network access off — phone can't connect.";
+  try { if (window.api.phoneSetLan) await window.api.phoneSetLan(on); } catch (_) {}
+  await refreshPhonePanel();
+  if (hint) hint.textContent = on
+    ? "Open a link below on your phone. The PC does all the work — the phone just shows messages and lets you send."
+    : "Network access off — phone can't connect.";
+};
+if (el("btn-phone-copy-lan")) el("btn-phone-copy-lan").onclick = () => copyField("phone-url-lan", "btn-phone-copy-lan");
+if (el("btn-phone-copy-remote")) el("btn-phone-copy-remote").onclick = () => copyField("phone-url-remote", "btn-phone-copy-remote");
+
 // User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
 if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
   if (!window.api.startNewChatAll) return;

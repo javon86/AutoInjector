@@ -293,6 +293,16 @@
     .badge-verdict { color:#f5b642; }
     .badge-final-plan { color:#8ef0b0; }
     .badge-roundtable { color:#7fd4e0; font-weight:600; }
+
+    /* ---- Phone companion panel ---- */
+    .phone-panel { margin-top:6px; padding:8px 9px; background:#0c1016; border:1px solid #26303c; border-radius:8px; }
+    .phone-lan-row { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; cursor:pointer; }
+    .phone-hint { font-size:11px; opacity:.75; margin:6px 0; }
+    .phone-link-row { display:flex; align-items:center; gap:6px; margin-top:6px; }
+    .phone-link-label { flex:0 0 auto; font-size:10.5px; font-weight:700; opacity:.7; width:92px; }
+    .phone-url { flex:1; min-width:0; font-size:11px; padding:6px 7px; border-radius:6px; border:1px solid #26303c; background:#070a0e; color:#cfe0f5; }
+    .phone-link-row button { flex:0 0 auto; padding:5px 8px; border-radius:6px; }
+    .phone-warn { font-size:10.5px; color:#e0a35a; margin:6px 0 0; }
   </style>
 </head>
 <body>
@@ -326,6 +336,27 @@
           <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 Start New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
+          <button id="btn-open-phone" title="Connect a phone — on your Wi-Fi, or anywhere via Tailscale — to watch the messages and send. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
+        </div>
+        <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
+          <p class="zone-label" style="margin:2px 0 6px;">📱 Connect your phone</p>
+          <label class="phone-lan-row">
+            <input type="checkbox" id="phone-lan-toggle" />
+            <span>Allow phone access on the network</span>
+          </label>
+          <p id="phone-hint" class="phone-hint">Turn this on, then open a link below on your phone. Your PC does all the work — the phone just shows the messages and lets you send.</p>
+          <div class="phone-link-row">
+            <span class="phone-link-label">Same Wi-Fi</span>
+            <input id="phone-url-lan" class="phone-url" type="text" readonly value="" placeholder="Enable access to get a link" />
+            <button id="btn-phone-copy-lan" title="Copy the Wi-Fi link">📋</button>
+          </div>
+          <div class="phone-link-row" id="phone-remote-row" hidden>
+            <span class="phone-link-label">Anywhere (Tailscale)</span>
+            <input id="phone-url-remote" class="phone-url" type="text" readonly value="" />
+            <button id="btn-phone-copy-remote" title="Copy the from-anywhere link">📋</button>
+          </div>
+          <p id="phone-remote-hint" class="phone-hint">Want it from anywhere in the world? Install <b>Tailscale</b> on this PC and your phone (free) — a from-anywhere link then appears here, with nothing exposed to the public internet.</p>
+          <p class="phone-warn">Anyone with a link can read the messages and send. Keep it to your own phone.</p>
         </div>
       </div>
 

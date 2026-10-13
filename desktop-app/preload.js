@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld("api", {
   onSequenceState: (cb) => ipcRenderer.on("sequence-state", (_e, payload) => cb(payload)),
   toggleWindowCollapse: (which) => ipcRenderer.invoke("window:toggle-collapse", { which }),
   openFeed: () => ipcRenderer.invoke("feed:open"),
+  phoneInfo: () => ipcRenderer.invoke("phone:info"),
+  phoneSetLan: (enabled) => ipcRenderer.invoke("phone:set-lan", { enabled }),
   closeFeed: () => ipcRenderer.invoke("feed-window:close"),
   feedHistory: () => ipcRenderer.invoke("feed:history"),
   onCapture: (cb) => ipcRenderer.on("capture", (_e, payload) => cb(payload)),

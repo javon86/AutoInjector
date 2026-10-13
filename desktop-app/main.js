@@ -24,6 +24,7 @@ const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
+const { createServiceBridge } = require("./service-bridge");
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
@@ -595,10 +596,14 @@ function loadPersistedState() {
   logEvent("state-restored", { transcriptTurns: state.transcript.length, hrMode: state.hr.mode });
 }
 
+// Extra non-renderer listeners (the service bridge subscribes here to fan every
+// broadcast out over SSE to the phone). Kept separate from the UI views.
+const broadcastListeners = new Set();
 function broadcast(channel, payload) {
   for (const view of uiViews) {
     if (view && !view.webContents.isDestroyed()) view.webContents.send(channel, payload);
   }
+  for (const fn of broadcastListeners) { try { fn(channel, payload); } catch (_) {} }
 }
 
 // The control panel always fills the entire Automation window; each AI's live
@@ -3281,6 +3286,145 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   return { ok: true, which, collapsed: entry.collapsed };
 });
 
+// --- Phone companion + local service bridge ------------------------------------
+// The PC does all the work; a phone (same Wi-Fi, or anywhere via Tailscale) opens
+// a minimal page that streams the messages and can send. The bridge is a thin
+// HTTP+SSE adapter over the relay below.
+
+// What the phone sees: the participants, routing, and the captured transcript.
+function bridgeStatus() {
+  return {
+    participants: SITE_IDS.map((s) => ({ id: s, label: SITES[s].label, enabled: !!state.enabled[s], waiting: !!state.waiting[s], generating: !!(state.generating && state.generating[s]) })),
+    routing: routingSnapshot(),
+    mesh: state.meshActive,
+  };
+}
+function bridgeResponses({ since, limit, site } = {}) {
+  let rows = state.transcript || [];
+  if (site) rows = rows.filter((t) => t.site === site);
+  if (since) rows = rows.filter((t) => t.id > since);
+  return rows.slice(-(limit || 100)).map((t) => ({ id: t.id, site: t.site, label: t.label, text: stripEnvelope(t.text), ts: t.ts }));
+}
+async function bridgeSendTo(site, text) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  return sendTextTo(site, withEnvelope(String(text), site), null);
+}
+async function bridgeSendAll(text, targets) {
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  const list = (Array.isArray(targets) ? targets : SITE_IDS.filter((s) => state.enabled[s])).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  const results = {};
+  for (const s of list) results[s] = await bridgeSendTo(s, text);
+  return { results };
+}
+// "Stop" from the phone: halt all automatic relay, keep participants checked.
+async function silenceAllRelay() {
+  for (const site of SITE_IDS) state.routing[site].clear();
+  state.meshActive = false;
+  if (state.hr && state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
+  logEvent("relay-silenced", {});
+  try { syncPaneBounds(); } catch (_) {}
+  return { ok: true, global: globalSnapshot() };
+}
+
+const serviceBridge = createServiceBridge({
+  version: "1.0.0",
+  log: logEvent,
+  status: bridgeStatus,
+  responses: bridgeResponses,
+  sendTo: bridgeSendTo,
+  sendAll: bridgeSendAll,
+  silence: () => silenceAllRelay(),
+  subscribe: (fn) => { broadcastListeners.add(fn); return () => broadcastListeners.delete(fn); },
+  mobilePage: loadMobilePage(),
+});
+
+// The bridge can drive the AIs, so it is never open: a token is always required.
+// If none is supplied we generate one and persist it 0600 so the phone link can
+// carry it while a drive-by page cannot read it.
+function bridgeToken() {
+  if (process.env.AUTOINJECTOR_BRIDGE_TOKEN) return process.env.AUTOINJECTOR_BRIDGE_TOKEN;
+  const gen = () => require("crypto").randomBytes(24).toString("hex");
+  try {
+    const f = path.join(userDataDir(), "autoinjector-bridge-token.txt");
+    let t = "";
+    try { t = String(fs.readFileSync(f, "utf8")).trim(); } catch (_) {}
+    if (!t) { t = gen(); fs.writeFileSync(f, t, { mode: 0o600 }); }
+    return t;
+  } catch (_) { return gen(); }
+}
+function loadMobilePage() {
+  try { return fs.readFileSync(path.join(__dirname, "mobile.html"), "utf8"); } catch (_) { return null; }
+}
+// First non-internal IPv4 — the address a phone on the same Wi-Fi uses.
+function lanAddress() {
+  try {
+    const ifaces = require("os").networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni && ni.family === "IPv4" && !ni.internal && ni.address && !/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ni.address)) return ni.address;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+// A Tailscale address (100.64.0.0/10) — if present, the phone can reach the PC
+// from ANYWHERE on the same tailnet, no router config and no public exposure.
+function tailscaleAddress() {
+  try {
+    const ifaces = require("os").networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni && ni.family === "IPv4" && !ni.internal && /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ni.address || "")) return ni.address;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+// Network access is OFF by default (localhost only): binding to the network (so a
+// phone can reach it over Wi-Fi/Tailscale) is a deliberate opt-in, remembered.
+function phoneLanFile() { return path.join(userDataDir(), "autoinjector-phone.json"); }
+function phoneLanEnabled() {
+  if (process.env.AUTOINJECTOR_BRIDGE_HOST === "0.0.0.0") return true;
+  try { return JSON.parse(fs.readFileSync(phoneLanFile(), "utf8")).lan === true; } catch (_) { return false; }
+}
+function setPhoneLanEnabled(on) { try { fs.writeFileSync(phoneLanFile(), JSON.stringify({ lan: !!on })); } catch (_) {} }
+
+let bridgeRuntime = { host: "127.0.0.1", port: 8765, token: null, lan: false };
+function phoneInfo() {
+  const lanEnabled = bridgeRuntime.lan && bridgeRuntime.host === "0.0.0.0";
+  const token = bridgeRuntime.token, port = bridgeRuntime.port;
+  const lanIp = lanAddress(), tsIp = tailscaleAddress();
+  const mk = (host) => (token && host) ? `http://${host}:${port}/m?token=${encodeURIComponent(token)}` : null;
+  return {
+    ok: true, lanEnabled, port, hasToken: !!token,
+    lanIp, lanUrl: lanEnabled ? mk(lanIp) : null,
+    tailscaleIp: tsIp, remoteUrl: lanEnabled ? mk(tsIp) : null,
+  };
+}
+ipcMain.handle("phone:info", () => phoneInfo());
+ipcMain.handle("phone:set-lan", async (_evt, { enabled } = {}) => {
+  setPhoneLanEnabled(!!enabled);
+  try { await serviceBridge.stop(); } catch (_) {}
+  await startServiceBridge();
+  logEvent("phone-lan-changed", { enabled: !!enabled });
+  return phoneInfo();
+});
+
+async function startServiceBridge() {
+  if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
+  const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
+  const lan = phoneLanEnabled();
+  const host = process.env.AUTOINJECTOR_BRIDGE_HOST || (lan ? "0.0.0.0" : "127.0.0.1");
+  const token = bridgeToken();
+  try {
+    const r = await serviceBridge.start({ port, host, token });
+    if (r && r.ok) { bridgeRuntime = { host, port: r.port, token, lan }; logEvent("bridge-started", { url: r.url, lan, tokenProtected: true }); }
+    else logEvent("bridge-start-failed", { error: r && r.error });
+  } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
+}
+
 app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
@@ -3288,6 +3432,8 @@ app.whenReady().then(() => {
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
+  startServiceBridge();
 });
+app.on("before-quit", () => { try { serviceBridge.stop(); } catch (_) {} });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
