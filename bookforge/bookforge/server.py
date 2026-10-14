@@ -103,7 +103,8 @@ class App:
                 "record_kind": rec["record_kind"], "representation": rec["representation"],
                 "lifecycle": rec["lifecycle"], "stale": rec["stale"], "stale_reason": rec["stale_reason"],
                 "approved_version": rec["approved_version"], "latest_version": rec["latest_version"],
-                "created_at": rec["created_at"], "title": (title or rec["record_id"])[:160], "ref": rec["ref"],
+                "created_at": rec["created_at"], "title": (title or rec.get("label") or rec["record_id"])[:160],
+                "ref": rec["ref"], "approved_ref": rec.get("approved_ref"),
                 "mime_type": (rec.get("binary") or {}).get("mime_type")}
 
     # ------------------------------------------------------------------ routes
@@ -130,8 +131,9 @@ class App:
         if len(parts) >= 2 and parts[0] == "projects":
             pid = parts[1]
             if len(parts) == 2 and method == "GET":
-                self._require_access(principal, pid)
-                return 200, self.project_summary(principal, pid)
+                branch = (query.get("branch") or ["main"])[0]
+                self._require_access(principal, pid, branch)
+                return 200, self.project_summary(principal, pid, branch)
             if len(parts) == 3 and parts[2] == "branches" and method == "POST":
                 return 201, self.create_branch(principal, pid, body or {})
             if len(parts) == 3 and parts[2] == "backup" and method == "POST":
@@ -174,19 +176,24 @@ class App:
         if c.operation(op_id) is None:
             raise ApiError(404, "NOT_FOUND", "/op", "unknown operation")
         defs = c.schema(op_id)["$defs"]
+        # UPDATE payload equals OUTPUT, so output_bindings map OUTPUT fields to permitted producers
+        # (pins inside stored data are checked by the same producer rules on validation).
+        out_props = set(defs["OUTPUT"].get("properties", {}))
+        output_bindings = [b for b in c.bindings(op_id) if b["input_path"].split("/")[2] in out_props]
         return {"create_payload": defs["CREATE"]["properties"]["payload"], "output": defs["OUTPUT"],
-                "bindings": c.bindings(op_id), "dependencies": c.dependencies(op_id, "CREATE")}
+                "bindings": c.bindings(op_id), "output_bindings": output_bindings,
+                "dependencies": c.dependencies(op_id, "CREATE")}
 
-    def project_summary(self, principal: str, pid: str) -> dict:
+    def project_summary(self, principal: str, pid: str, branch: str = "main") -> dict:
         p = self.store.project(pid)
         branches = [r["branch_id"] for r in self.store.query(
             "SELECT branch_id FROM branches WHERE project_id=? ORDER BY created_at", (pid,))]
         counts = {r["module_id"]: r["n"] for r in self.store.query(
-            "SELECT module_id, COUNT(*) n FROM heads WHERE project_id=? AND branch_id='main' GROUP BY module_id", (pid,))}
+            "SELECT module_id, COUNT(*) n FROM heads WHERE project_id=? AND branch_id=? GROUP BY module_id", (pid, branch))}
         return {"project_id": pid, "name": p["name"], "owner_id": p["owner_id"], "created_at": p["created_at"],
                 "settings": json.loads(p["settings"]), "story_time_unit": p["story_time_unit"],
                 "currency": p["currency"], "branches": branches, "record_counts": counts,
-                "manifest": self.store.feature_manifest(pid, "main")}
+                "branch_id": branch, "manifest": self.store.feature_manifest(pid, branch)}
 
     def create_project(self, principal: str, body: dict) -> dict:
         name = (body.get("name") or "").strip()
@@ -244,7 +251,24 @@ class App:
         recs = self.store.list_records(pid, branch, module_id=module, record_kind=kind)
         if sets:
             recs = [r for r in recs if r["module_id"][0] == sets]
+        labels = self._upload_labels(pid, branch)
+        for r in recs:
+            r["label"] = labels.get(r["record_id"])
+            if r["approved_version"] and r["approved_version"] != r["version"]:
+                appr = self.store.get_record(pid, branch, r["record_id"], r["approved_version"])
+                r["approved_ref"] = appr["ref"] if appr else None
+            elif r["approved_version"]:
+                r["approved_ref"] = r["ref"]
         return [self.record_summary(r) for r in recs]
+
+    def _upload_labels(self, pid: str, branch: str) -> dict:
+        rows = self.store.query("SELECT payload FROM outbox WHERE project_id=? AND branch_id=? AND "
+                                "event_type='file.imported'", (pid, branch))
+        out = {}
+        for r in rows:
+            p = json.loads(r["payload"])
+            out[p["ref"]["record_id"]] = p.get("label")
+        return out
 
     def record_detail(self, pid: str, branch: str, record_id: str) -> dict:
         hist = self.store.history(pid, branch, record_id)
@@ -273,7 +297,7 @@ class App:
         if not isinstance(body, (bytes, bytearray)) or not body:
             raise ApiError(400, "MISSING_INPUT", "/body", "empty upload")
         mime = (headers.get("Content-Type") or "application/octet-stream").split(";")[0].strip()
-        label = headers.get("X-Filename") or "upload"
+        label = unquote(headers.get("X-Filename") or "upload")[:200]
         if not self.store.has_scope(principal, pid, branch, "I01:create"):
             raise ApiError(403, "PERMISSION_DENIED", "", "missing scope I01:create")
         rid = f"I01-{new_id('import').split('-', 1)[1]}"

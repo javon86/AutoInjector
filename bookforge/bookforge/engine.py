@@ -109,6 +109,9 @@ class Engine:
                                  status="REJECTED")
         errs = self.contracts.check(op_id, action, request)
         if errs:
+            early = self._early_not_applicable(request, op, action, principal_id, attempt_id, errs)
+            if early is not None:
+                return early
             raise BookforgeError(errs[0]["code"], errs[0]["path"], errs[0]["message"], status="REJECTED",
                                  extra_errors=errs[1:])
         if evidence_origin == "FIXTURE":
@@ -187,6 +190,32 @@ class Engine:
                 return rule_id, f"{ctx.op_id} requires {feature}=true in feature manifest revision {manifest['revision']}"
         return handler.applicability(ctx)
 
+    def _early_not_applicable(self, request, op, action, principal_id, attempt_id, errs) -> dict | None:
+        """A disabled feature op answers NOT_APPLICABLE even before its payload is complete.
+
+        Only when the envelope itself is valid (errors are confined to /payload) and the caller
+        is authorized, so the answer never leaks project state to unauthorized principals.
+        """
+        rule = FEATURE_RULES.get(op["id"])
+        if rule is None or action not in ("CREATE", "UPDATE"):
+            return None
+        if any(not e["path"].startswith("/payload") for e in errs):
+            return None
+        if request.get("principal_id") != principal_id:
+            return None
+        try:
+            self._authorize(principal_id, request["project_id"], request["branch_id"],
+                            op["permission_scopes"][action])
+        except BookforgeError:
+            return None
+        manifest = self.store.feature_manifest(request["project_id"], request["branch_id"])
+        feature = rule[1]
+        if manifest is None or manifest.get("features", {}).get(feature) is not False:
+            return None
+        ctx = Context(self, request, principal_id, action=action)
+        return self._not_applicable(ctx, attempt_id, rule[0], f"{op['id']} requires {feature}=true in feature "
+                                    f"manifest revision {manifest['revision']}")
+
     def _not_applicable(self, ctx: Context, attempt_id: str, rule_id: str, reason: str) -> dict:
         finding = ctx.finding("NOT_APPLICABLE", reason, severity="INFO", decision="NOT_APPLICABLE")
         with self.store.transaction() as tx:
@@ -263,9 +292,10 @@ class Engine:
     # ------------------------------------------------------------------ CREATE
     def _create(self, ctx: Context, handler, attempt_id: str, request_hash: str) -> dict:
         if ctx.manual_candidate is not None:
-            errs = self.contracts.check(ctx.op_id, "OUTPUT", ctx.manual_candidate)
+            errs = [dict(e, path="/manual_candidate" + e["path"])
+                    for e in self.contracts.check(ctx.op_id, "OUTPUT", ctx.manual_candidate)]
             if errs:
-                raise BookforgeError(errs[0]["code"], "/manual_candidate" + errs[0]["path"], errs[0]["message"],
+                raise BookforgeError(errs[0]["code"], errs[0]["path"], errs[0]["message"],
                                      status="REJECTED", extra_errors=errs[1:])
         result = handler.create(ctx)
         return self._publish(ctx, result, attempt_id, request_hash, version=1, record_id=result.record_id)

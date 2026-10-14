@@ -158,3 +158,13 @@ def test_locked_record_requires_protected_change(h):
         tx.set_lifecycle(ref, "LOCKED")
     u = h.dispatch("A01", "UPDATE", base_ref=ref, payload=dict(r["result"], concept="changed"))
     assert errors_of(u)[0][0] == "LOCKED_FACT"
+
+
+def test_disabled_feature_not_applicable_before_payload_complete(h):
+    r = h.create("B08", {})
+    assert r["status"] == "NOT_APPLICABLE" and r["selection_rule_id"] == "FEATURE_TRUE:mystery"
+
+
+def test_manual_candidate_errors_all_prefixed(h):
+    r = h.dispatch("B01", "CREATE", payload={"idea": "i", "goals": ["g"]}, manual_candidate={})
+    assert r["errors"] and all(e["path"].startswith("/manual_candidate") for e in r["errors"])
