@@ -1,0 +1,32 @@
+{
+  "project": "Bookforge",
+  "baseline": "BF-IRB-1.0.0",
+  "scope": "11 independently owned modules; 142 operations; blueprint only",
+  "current_stage": "HANDOFF",
+  "ledger_paths": [
+    "Traceability/requirements.json",
+    "Traceability/corrections.json"
+  ],
+  "source_manifest": "Traceability/source_manifest.json",
+  "decisions": "Traceability/decisions.json",
+  "blockers": [],
+  "next_action": "Programmer executes Build/Build_Plan.md; run contract verifier, implement kernel/I/K, then first vertical slice. Runtime tests remain NOT_EXECUTED.",
+  "status": "READY_FOR_IMPLEMENTATION",
+  "deliverable_inventory": "package_manifest.json",
+  "verification_evidence": [
+    "Verification/contract_check.json",
+    "Verification/conditional_check.json",
+    "Verification/manual_review.json",
+    "Verification/pdf_layout_check.json",
+    "Verification/closure_check.json",
+    "Verification/Applied_Fixes.json"
+  ],
+  "current_revision": "BF-CLOSURE-1.1",
+  "processing_stage": "blueprint-closure",
+  "processing_marker": "(XX)",
+  "closure_scorecard": "closure-scorecard.json",
+  "source_package_sha256": "1aa906df7d3d1c7e375960ba9cdd7e95ec4a23b1774a763989e36e613a1fbe02",
+  "deliverable_folder": "(XX) BookForge_(Final)_Build_Plan",
+  "matching_zip": "(XX) BookForge_(Final)_Build_Plan.zip",
+  "open_specification_issues": []
+}
