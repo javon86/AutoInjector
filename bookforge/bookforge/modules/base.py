@@ -37,6 +37,9 @@ class Result:
     unresolved: list = field(default_factory=list)
     resource: dict | None = None
     transform: str = "LOGIC"
+    # CREATE only: pre-allocated record ID (from ctx.allocate_record_id) when the OUTPUT
+    # must cite its own identity, e.g. I01 canon_id.
+    record_id: str | None = None
 
 
 @dataclass
@@ -133,6 +136,10 @@ class Context:
     # ------------------------------------------------------------------ staging writes
     def _new_record_id(self, module_id: str) -> str:
         return f"{module_id}-{uuid.uuid4().hex[:16]}"
+
+    def allocate_record_id(self) -> str:
+        """Pre-allocate this operation's CREATE record ID (return it as Result.record_id)."""
+        return self._new_record_id(self.op_id)
 
     def stage_json(self, module_id: str, data: Any, *, record_kind: str = "OUTPUT",
                    source_refs: list | None = None) -> dict:

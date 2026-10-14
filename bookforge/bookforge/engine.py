@@ -268,7 +268,7 @@ class Engine:
                 raise BookforgeError(errs[0]["code"], "/manual_candidate" + errs[0]["path"], errs[0]["message"],
                                      status="REJECTED", extra_errors=errs[1:])
         result = handler.create(ctx)
-        return self._publish(ctx, result, attempt_id, request_hash, version=1, record_id=None)
+        return self._publish(ctx, result, attempt_id, request_hash, version=1, record_id=result.record_id)
 
     # ------------------------------------------------------------------ UPDATE
     def _update(self, ctx: Context, handler, attempt_id: str, request_hash: str) -> dict:
