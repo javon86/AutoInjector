@@ -93,3 +93,37 @@ request_id returns it) or for at most timeout_ms more, then frees.
   slots are used; otherwise normal cost/load/slot-id order applies.
 * BookForge default port moves 8765 -> **8780** (8765 collides with the extension's
   bridge WebSocket in `AutoInjector/server/fake_api_server.py`).
+
+## Tested so far
+
+* `desktop-app/test/bookforge-bridge.test.js` (85 checks) and `bookforge-main.test.js`
+  (22 checks, real main.js under the mock-Electron harness: bridge-owned replies are not
+  relayed, token never in state/log files).
+* `bookforge/tests/test_autoinjector_adapter.py` (Python adapter vs an in-process fake).
+* `bookforge/tests/test_bridge_cross_process.py`: real Python BookForge -> real Node
+  `bookforge-bridge.js` (via `fake-bridge-host.js`, three fake panes): connect-all-three,
+  health, a creative operation end to end, roles routing, invalid-then-valid re-ask,
+  timeout -> user decision with nothing saved, busy, wrong token.
+* NOT tested: the live ChatGPT/Claude/Gemini websites (needs your logged-in sessions).
+
+## Known limitations
+
+* If a pane is still finishing an earlier reply when BookForge sends, that earlier reply
+  can be captured as the answer. Let panes go idle before using the bridge.
+* Replies the app drops before capture (rate-limit notices, a bare NONE, an empty
+  envelope, an exact duplicate of the previous reply) end as 504 TIMEOUT rather than a
+  specific error.
+* A custom role set on a pane in AutoInjector is still prefixed to BookForge prompts.
+
+## First real run (on your PC)
+
+1. `git pull`, then start AutoInjector desktop (`desktop-app/run-windows.bat`) and log in
+   to ChatGPT, Claude and Gemini in their panes. Turn routing/autopilot OFF.
+2. In AutoInjector controls, open **BookForge bridge (experimental)**, tick Enable,
+   click **Copy token**.
+3. Start BookForge (`bookforge/run-bookforge.bat`, now on port 8780). Settings ->
+   **Connect AutoInjector (all three)**, paste the token, then **Test connection** on each
+   slot: all three should say Ready.
+4. Create a project, open B01 Premise, fill idea/goals and Create. Watch the Claude pane
+   receive the prompt; BookForge should show a DRAFT premise. If it reports TIMEOUT or a
+   JSON error, note which site and what the pane showed.
