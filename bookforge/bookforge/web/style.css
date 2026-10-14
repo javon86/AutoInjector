@@ -322,3 +322,6 @@ details.json summary, details summary { cursor: pointer; font-weight: 600; paddi
 .tabs button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 600; }
 .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* Settings: AutoInjector bridge health list */
+.plain-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }

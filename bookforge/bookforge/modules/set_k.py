@@ -10,11 +10,13 @@ K never edits domain records; completion is taken only from I12 evidence records
 """
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from .. import k_runtime as kr
 from ..canonical import canonical_bytes
 from ..errors import BookforgeError
+from ..providers import role_matches
 from . import register
 from .base import Context, OperationHandler, Result
 from .set_i import completion_operation, registration, registry_revision
@@ -765,6 +767,9 @@ class PauseResume(OperationHandler):
 # ======================================================================================
 # K11 - Model/Tool Selector
 # ======================================================================================
+_JOB_OP_RE = re.compile(r"^([A-K][0-9]{2})(?:$|[^0-9A-Za-z])")
+
+
 def resource_eligible(ctx: Context, r: dict, caps: set, need: int, slots: dict) -> str | None:
     """None when eligible, else the reason. AI entries are checked against the provider slot
     registry exactly like ProviderRegistry.eligible (connected, healthy, capability, project
@@ -797,7 +802,8 @@ def resource_eligible(ctx: Context, r: dict, caps: set, need: int, slots: dict) 
 @register("K11")
 class ResourceSelector(OperationHandler):
     """CODE/TOOL first whenever eligible (deterministic); else among eligible AI slots lowest
-    estimated cost, then active load, then slot ID. Exactly three AI slots exist (AI-1..AI-3);
+    estimated cost, then active load, then slot ID. Slot roles (providers.eligible rule): when an
+    eligible AI slot's roles name the job's operation or its set, only such AI slots remain. Exactly three AI slots exist (AI-1..AI-3);
     CODE/TOOL never occupy a slot. Resource currency must match the reservation quota currency."""
 
     def create(self, ctx: Context) -> Result:
@@ -829,6 +835,12 @@ class ResourceSelector(OperationHandler):
                 eligible.append(r)
             else:
                 reasons[r["resource_id"]] = why
+        operation = self._job_operation(ctx, p["job_id"])
+        if operation and any(r["resource_kind"] == "AI" and role_matches(slots[r["ai_slot"]]["roles"], operation)
+                             for r in eligible):
+            # Same rule as ProviderRegistry.eligible: role-matched AI slots replace the other AI slots.
+            eligible = [r for r in eligible if r["resource_kind"] != "AI"
+                        or role_matches(slots[r["ai_slot"]]["roles"], operation)]
         if not eligible:
             msg = "; ".join(f"{k}: {v}" for k, v in sorted(reasons.items()))
             code = "QUOTA_EXCEEDED" if reasons and all("currency" in v for v in reasons.values()) \
@@ -839,6 +851,20 @@ class ResourceSelector(OperationHandler):
                                      r["estimated_cost_minor_units"], r["active_jobs"],
                                      r["ai_slot"] or "", r["resource_id"]))
         return Result(data=dict(eligible[0]))
+
+    @staticmethod
+    def _job_operation(ctx: Context, job_id: str) -> str | None:
+        """Operation the job runs: the K05 queued job's producer, else a job_id that starts with an
+        operation ID (e.g. "C02" or "C02:ch1")."""
+        idx = ctx.get_state(kr.NS_JOBIDX, job_id)
+        if idx:
+            job = ctx.get_state(kr.NS_JOBS, idx["queue_id"])
+            if job and job.get("operation"):
+                return job["operation"]
+        m = _JOB_OP_RE.match(job_id)
+        if m and ctx.contracts.operation(m.group(1)) is not None:
+            return m.group(1)
+        return None
 
     def _job_reservation_currencies(self, ctx: Context, job_id: str) -> set[str]:
         out = set()

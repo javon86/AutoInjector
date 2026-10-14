@@ -438,6 +438,28 @@ def test_k11_agrees_with_provider_registry(h):
     assert r["result"]["ai_slot"] == expected == "AI-2"
 
 
+def test_k11_and_provider_registry_pick_the_role_matched_slot(h):
+    pr = h.engine.providers
+    pr.configure_slot("AI-1", {"adapter_id": "anthropic", "input_cost_minor_per_mtok": 300})
+    pr.configure_slot("AI-2", {"adapter_id": "anthropic", "input_cost_minor_per_mtok": 600, "roles": ["B"]})
+    pr.configure_slot("AI-3", {"adapter_id": "anthropic", "input_cost_minor_per_mtok": 900, "roles": ["C02"]})
+    need = 50000
+    reg = [res(f"r-{s['slot_id']}", slot=s["slot_id"], cost=need * s["input_cost_minor_per_mtok"] // 1_000_000,
+               adapter=s["adapter_id"]) for s in pr.slots()]
+    enqueue(h, register(h, producer="C02"), job="job-c02")
+    for job_id, op, slot in (("job-c02", "C02", "AI-3"), ("C03:ch1", "C03", "AI-1"), ("B07", "B07", "AI-2"),
+                             ("j", None, "AI-1")):
+        expected = pr.eligible(h.project_id, "text", need, op)[0]["slot_id"]
+        r = h.create("K11", {"job_id": job_id, "capabilities": ["text"], "context_requirement": need,
+                             "resource_registry": reg})
+        assert r["result"]["ai_slot"] == expected == slot, (job_id, r)
+    # CODE/TOOL still win over a role-matched AI slot.
+    code = res("lint", kind="CODE", cost=0, adapter="python")
+    r = h.create("K11", {"job_id": "job-c02", "capabilities": ["text"], "context_requirement": need,
+                         "resource_registry": reg + [code]})
+    assert r["result"]["resource_kind"] == "CODE"
+
+
 def test_k11_currency_must_match_reservation(h):
     h.engine.providers.configure_slot("AI-1", {"adapter_id": "anthropic"})
     kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id="acct", period="2026-10",

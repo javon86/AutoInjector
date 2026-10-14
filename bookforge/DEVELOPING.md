@@ -16,7 +16,8 @@ bookforge/
     store.py               SQLite storage kernel (records, heads, lifecycle, receipts,
                            audit, outbox, provenance, approvals, edges, module_state)
     engine.py              dispatch pipeline for all operations (see module docstring)
-    providers.py           AI-1..AI-3 slots, Anthropic adapter, retry policy
+    providers.py           AI-1..AI-3 slots, Anthropic + AutoInjector bridge adapters, roles,
+                           retry policy
     modules/base.py        OperationHandler / Context / Result (the handler API)
     modules/set_a.py ...   per-set domain handlers (set_a .. set_k)
     exporters/             PDF / EPUB / DOCX writers (pure Python)
@@ -78,6 +79,22 @@ latest_version, ref (canonical Reference), binary (metadata for binaries).
 
 Manual mode: the API accepts `manual_candidate` (a full OUTPUT document) alongside a CREATE
 request; the base handler uses it after the kernel validates it against OUTPUT.
+
+## AI slots, adapters and roles
+
+* Adapters: `none`, `anthropic`, `manual`, `autoinjector` (experimental; local HTTP bridge to the
+  AutoInjector desktop app, contract `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`). Autoinjector
+  slots need `site` (chatgpt|claude|gemini) and `bridge_url` (http://127.0.0.1 or
+  http://localhost only, default `http://127.0.0.1:17891`); the bridge token uses the
+  write-only `api_key` secret. They cost 0 and run one request at a time.
+* `roles` (operation IDs like `C02` or set letters like `B`): when any eligible slot's roles
+  match the operation, only those slots are used (`ProviderRegistry.eligible(...,
+  operation)`); K11 applies the same rule using the K05 job's operation.
+* Adapters that set `accepts_request_context = True` get `request_id`, `attempt`,
+  `deadline` and `call` keywords in `submit()`; plain `submit(slot, system, user, schema)`
+  adapters (and test fakes) keep working.
+* The server listens on port 8780 by default (`--port`, `BOOKFORGE_PORT`).
+  `POST /api/slots/connect-autoinjector` and `GET /api/slots/{id}/health` serve the Settings page.
 
 ## Tests
 

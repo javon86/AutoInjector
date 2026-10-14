@@ -205,7 +205,7 @@ function showAuthProblem(detail) {
     h('p', null, detail || 'This page has no access token.'),
     h('p', null, 'For privacy, the workspace only answers requests that carry the private token created when Bookforge starts. ' +
       'Open the full link printed in the Bookforge console window or launcher (it looks like ',
-    h('code', null, 'http://127.0.0.1:8765/#token=…'), ').'),
+    h('code', null, 'http://127.0.0.1:8780/#token=…'), ').'),
     h('p', null, 'The token is kept only for this browser tab. If you opened a new tab or restarted Bookforge, use the link again.')));
   main.focus();
 }
@@ -2078,6 +2078,10 @@ function eventSummary(e) {
 }
 
 /* ======================================================================= views: settings */
+const AI_SITES = [['claude', 'Claude'], ['chatgpt', 'ChatGPT'], ['gemini', 'Gemini']];
+const BRIDGE_DEFAULT = 'http://127.0.0.1:17891';
+const TOS_CAUTION = 'Experimental: automating the ChatGPT, Claude and Gemini web interfaces may be against those sites’ terms of service. Use it at your own risk.';
+
 async function viewSettings(main) {
   const slots = await api('GET', '/slots');
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Settings: AI slots')));
@@ -2087,9 +2091,62 @@ async function viewSettings(main) {
       h('li', null, 'When a creative operation runs, its context package (only the records that operation needs from the current project) is sent to the one slot selected for that job — never to the other slots, and never with secrets or unrelated projects.'),
       h('li', null, 'Without a connected slot, creative operations answer CAPABILITY_UNAVAILABLE and accept a manual candidate instead: you write the output in the form and Bookforge validates and stores it. Nothing leaves this computer in manual mode.'),
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
-      h('li', null, 'API keys are stored in the local secrets file on this computer, never in project data, exports or logs. The key field is write-only: it is never shown again.'))));
+      h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
+      h('li', null, 'API keys and bridge tokens are stored in the local secrets file on this computer, never in project data, exports or logs. The key field is write-only: it is never shown again.'))));
+  main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
 }
+
+function autoInjectorCard(main) {
+  const p = 'ai-bridge';
+  const out = h('div', { 'aria-live': 'polite' });
+  const url = h('input', { type: 'url', id: `${p}-url`, value: BRIDGE_DEFAULT, spellcheck: 'false', 'aria-describedby': `${p}-url-h` });
+  const token = h('input', { type: 'password', id: `${p}-token`, autocomplete: 'new-password', spellcheck: 'false', 'aria-describedby': `${p}-token-h`, 'aria-required': 'true' });
+  const btn = h('button', { type: 'submit', class: 'primary' }, 'Connect AutoInjector (all three)');
+  return h('form', { class: 'card', 'aria-labelledby': `${p}-h`, novalidate: true, onsubmit: async ev => {
+    ev.preventDefault(); clear(out);
+    if (!token.value.trim()) {
+      token.setAttribute('aria-invalid', 'true');
+      out.appendChild(stateBox('failed', 'Paste the bridge token first', h('p', null, 'Copy it from the AutoInjector desktop app (BookForge bridge controls).')));
+      token.focus(); return;
+    }
+    token.removeAttribute('aria-invalid');
+    btn.disabled = true;
+    try {
+      await api('POST', '/slots/connect-autoinjector', { body: { bridge_url: url.value.trim() || BRIDGE_DEFAULT, token: token.value.trim() } });
+      token.value = '';
+      announce('AutoInjector connected to AI-1, AI-2 and AI-3');
+      toast('AutoInjector connected: AI-1 Claude, AI-2 ChatGPT, AI-3 Gemini');
+      clear(main); await viewSettings(main);
+      return;
+    } catch (e) { out.appendChild(failedState('AutoInjector was not connected', e)); }
+    btn.disabled = false;
+  } },
+  h('h2', { id: `${p}-h` }, 'AutoInjector web sessions (experimental)'),
+  h('p', { class: 'notice', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
+  h('p', null, 'Uses the ChatGPT, Claude and Gemini sessions you are logged in to inside the AutoInjector desktop app — no API keys. Turn on the BookForge bridge in the desktop app, copy its token, then connect. This sets AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini; you can change each slot below.'),
+  h('div', { class: 'grid-2' },
+    h('div', { class: 'field' }, h('label', { for: url.id }, 'Bridge URL'), url,
+      h('span', { class: 'hint', id: `${p}-url-h` }, 'Only http://127.0.0.1 or http://localhost is accepted. Default ' + BRIDGE_DEFAULT + '.')),
+    h('div', { class: 'field' }, h('label', { for: token.id }, 'Bridge token (write-only)'), token,
+      h('span', { class: 'hint', id: `${p}-token-h` }, 'Saved for all three slots in the local secrets file; never shown again.'))),
+  out, h('div', { class: 'form-actions' }, btn));
+}
+
+function healthResult(r) {
+  const sites = r.sites || {};
+  const names = Object.keys(sites);
+  return h('div', null,
+    h('p', null, r.message || (r.ok ? 'Bridge reachable' : 'Bridge not reachable')),
+    names.length ? h('ul', { class: 'plain-list', 'aria-label': 'Sites reported by the bridge' }, names.map(n => {
+      const st = sites[n] || {};
+      return h('li', { class: 'row' }, h('strong', null, n),
+        st.ready ? badge('✔', 'Ready', 'b-ok') : badge('✕', 'Not ready', 'b-bad'),
+        st.busy ? badge('…', 'Busy', 'b-warn') : badge('○', 'Idle', 'b-muted'),
+        n === r.site ? h('span', { class: 'small muted' }, '(this slot)') : null);
+    })) : null);
+}
+
 function slotForm(s) {
   const p = `slot-${s.slot_id}`;
   const out = h('div', { 'aria-live': 'polite' });
@@ -2098,7 +2155,8 @@ function slotForm(s) {
     if (hint) control.setAttribute('aria-describedby', `${p}-${key}-h`);
     return h('div', { class: 'field' }, h('label', { for: control.id }, label), control, hint ? h('span', { class: 'hint', id: `${p}-${key}-h` }, hint) : null);
   };
-  const adapter = h('select', null, [['none', 'None (not connected)'], ['anthropic', 'Anthropic API'], ['manual', 'Manual (author writes candidates)']]
+  const adapter = h('select', null, [['none', 'None (not connected)'], ['anthropic', 'Anthropic API'], ['manual', 'Manual (author writes candidates)'],
+    ['autoinjector', 'autoinjector (experimental, uses your logged-in web sessions)']]
     .map(([v, l]) => h('option', { value: v, selected: s.adapter_id === v }, l)));
   const model = h('input', { type: 'text', value: s.model || 'claude-opus-5-5' });
   const effort = h('select', null, ['low', 'medium', 'high', 'xhigh', 'max'].map(v => h('option', { value: v, selected: s.effort === v }, v)));
@@ -2109,20 +2167,61 @@ function slotForm(s) {
   const inCost = h('input', { type: 'number', min: '0', step: '1', value: String(s.input_cost_minor_per_mtok ?? '') });
   const outCost = h('input', { type: 'number', min: '0', step: '1', value: String(s.output_cost_minor_per_mtok ?? '') });
   const currency = h('input', { type: 'text', value: s.currency || 'USD', maxlength: '3' });
+  const roles = h('input', { type: 'text', value: (s.roles || []).join(', '), spellcheck: 'false' });
+  const bridgeUrl = h('input', { type: 'url', value: s.bridge_url || BRIDGE_DEFAULT, spellcheck: 'false' });
+  const site = h('select', null, h('option', { value: '', selected: !s.site }, 'Choose a site'),
+    AI_SITES.map(([v, l]) => h('option', { value: v, selected: s.site === v }, l)));
   const key = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: s.has_credentials ? 'Stored — leave blank to keep' : 'Not set' });
   const removeKeyBox = h('input', { type: 'checkbox', id: `${p}-rmkey` });
+  const isAuto = () => adapter.value === 'autoinjector';
   const status = h('p', { class: 'row' },
     s.connected ? badge('✔', 'Connected', 'b-ok') : badge('○', 'Not connected', 'b-muted'),
-    s.has_credentials ? badge('⚿︎', 'API key available', 'b-ok') : badge('–', 'No API key', 'b-muted'),
+    s.adapter_id === 'autoinjector'
+      ? (s.has_credentials ? badge('⚿︎', 'Bridge token saved', 'b-ok') : badge('–', 'No bridge token', 'b-muted'))
+      : (s.has_credentials ? badge('⚿︎', 'API key available', 'b-ok') : badge('–', 'No API key', 'b-muted')),
+    s.adapter_id === 'autoinjector' && s.site ? badge('◆', `Web: ${s.site}`, 'b-info') : null,
+    (s.roles || []).length ? badge('→', `Roles: ${s.roles.join(', ')}`, 'b-info') : null,
     s.healthy === false ? badge('⚠︎', 'Unhealthy', 'b-warn') : null,
     badge('…', `${s.active_jobs || 0} active job(s)`, 'b-muted'));
+  const healthOut = h('div', { 'aria-live': 'polite' });
+  const testBtn = h('button', { type: 'button', disabled: s.adapter_id !== 'autoinjector', 'aria-describedby': `${p}-test-h` }, `Test connection (${s.slot_id})`);
+  testBtn.addEventListener('click', async () => {
+    clear(healthOut); healthOut.appendChild(loadingState('Checking the AutoInjector bridge…'));
+    testBtn.disabled = true;
+    try {
+      const r = await api('GET', `/slots/${encodeURIComponent(s.slot_id)}/health`);
+      clear(healthOut);
+      healthOut.appendChild(r.ok ? stateBox('ok', `${s.slot_id}: connection works`, healthResult(r))
+        : stateBox('failed', `${s.slot_id}: connection problem`, r.error ? h('p', null, h('code', null, r.error)) : null, healthResult(r)));
+      announce(r.ok ? `${s.slot_id} connection works` : `${s.slot_id} connection problem: ${r.message || ''}`);
+    } catch (e) { clear(healthOut); healthOut.appendChild(failedState(`${s.slot_id}: test failed`, e)); }
+    testBtn.disabled = false;
+  });
+  const autoGroup = h('fieldset', { class: 'field', hidden: !isAuto() },
+    h('legend', null, 'AutoInjector bridge'),
+    h('p', { class: 'small', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
+    h('div', { class: 'grid-2' },
+      f('bridge', 'Bridge URL', bridgeUrl, 'http://127.0.0.1 or http://localhost only. Default ' + BRIDGE_DEFAULT + '.'),
+      f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.')),
+    h('div', { class: 'row' }, testBtn,
+      h('span', { class: 'hint', id: `${p}-test-h` }, 'Uses the saved settings: save first, then test.')),
+    healthOut);
+  const keyLegend = h('legend', null, isAuto() ? 'Bridge token (write-only)' : 'API key (write-only)');
+  const keyLabelText = () => isAuto() ? 'New bridge token' : 'New API key';
+  const keyField = f('key', keyLabelText(), key, s.has_credentials ? 'A secret is stored for this slot (or ANTHROPIC_API_KEY is set). Leave blank to keep it.' : 'Paste it to store it locally for this slot.');
+  adapter.addEventListener('change', () => {
+    autoGroup.hidden = !isAuto();
+    keyLegend.textContent = isAuto() ? 'Bridge token (write-only)' : 'API key (write-only)';
+    keyField.querySelector('label').textContent = keyLabelText();
+  });
   const btn = h('button', { type: 'submit', class: 'primary' }, `Save ${s.slot_id}`);
   return h('form', { class: 'card', 'aria-labelledby': `${p}-h`, novalidate: true, onsubmit: async ev => {
     ev.preventDefault(); clear(out);
     const ints = { context_limit_tokens: ctxLimit, max_output_tokens: maxOut, max_concurrent: maxConc,
       input_cost_minor_per_mtok: inCost, output_cost_minor_per_mtok: outCost };
     const body = { adapter_id: adapter.value, model: model.value.trim() || 'claude-opus-5-5', effort: effort.value,
-      capabilities: caps.value.split(',').map(x => x.trim()).filter(Boolean), currency: (currency.value.trim() || 'USD').toUpperCase() };
+      capabilities: caps.value.split(',').map(x => x.trim()).filter(Boolean), currency: (currency.value.trim() || 'USD').toUpperCase(),
+      roles: roles.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean) };
     for (const [k, el] of Object.entries(ints)) {
       const v = el.value.trim();
       if (v === '') continue;
@@ -2130,13 +2229,24 @@ function slotForm(s) {
       if (!Number.isInteger(n) || n < 0) { el.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', `${humanize(k)} must be a whole number of 0 or more`)); el.focus(); return; }
       el.removeAttribute('aria-invalid'); body[k] = n;
     }
+    const badRole = body.roles.find(r => !/^[A-K]([0-9]{2})?$/.test(r));
+    if (badRole) { roles.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', `Role “${badRole}” is not an operation ID like C02 or a set letter A–K`)); roles.focus(); return; }
+    roles.removeAttribute('aria-invalid');
+    if (isAuto()) {
+      if (!site.value) { site.setAttribute('aria-invalid', 'true'); out.appendChild(stateBox('failed', 'Choose the web site this slot uses')); site.focus(); return; }
+      site.removeAttribute('aria-invalid');
+      body.site = site.value; body.bridge_url = bridgeUrl.value.trim() || BRIDGE_DEFAULT;
+    }
     if (removeKeyBox.checked) body.api_key = null;
     else if (key.value) body.api_key = key.value;
     btn.disabled = true;
     try {
       const saved = await api('PUT', `/slots/${s.slot_id}`, { body });
       key.value = ''; removeKeyBox.checked = false;
-      out.appendChild(stateBox('ok', `${s.slot_id} saved`, h('p', null, `Adapter ${saved.adapter_id}, model ${saved.model}. API key ${saved.has_credentials ? 'available' : 'not set'}.`)));
+      testBtn.disabled = saved.adapter_id !== 'autoinjector';
+      const secret = saved.adapter_id === 'autoinjector' ? 'Bridge token' : 'API key';
+      const what = saved.adapter_id === 'autoinjector' ? `web site ${saved.site}` : `model ${saved.model}`;
+      out.appendChild(stateBox('ok', `${s.slot_id} saved`, h('p', null, `Adapter ${saved.adapter_id}, ${what}. ${secret} ${saved.has_credentials ? 'available' : 'not set'}.`)));
       announce(`${s.slot_id} saved`);
     } catch (e) { out.appendChild(failedState(`${s.slot_id} was not saved`, e)); }
     btn.disabled = false;
@@ -2144,18 +2254,19 @@ function slotForm(s) {
   h('h2', { id: `${p}-h` }, s.slot_id), status,
   h('div', { class: 'grid-2' },
     f('adapter', 'Adapter', adapter, 'None keeps the slot disconnected; creative work then uses manual candidates.'),
-    f('model', 'Model', model, 'Default claude-opus-5-5.'),
+    f('model', 'Model', model, 'Default claude-opus-5-5. Ignored by autoinjector slots (the web site picks its model).'),
     f('effort', 'Effort', effort, 'Higher effort is slower and uses more tokens.'),
     f('caps', 'Capabilities', caps, 'Comma separated, e.g. text, json.'),
+    f('roles', 'Roles', roles, 'Optional, comma separated operation IDs or set letters, e.g. B, C02. Matching work goes only to slots with that role.'),
     f('ctx', 'Context limit (tokens)', ctxLimit, 'Larger mandatory context is split or blocked with CONTEXT_TOO_LARGE.'),
     f('maxout', 'Max output (tokens)', maxOut),
-    f('conc', 'Max concurrent jobs', maxConc),
+    f('conc', 'Max concurrent jobs', maxConc, 'Autoinjector slots always run one job at a time.'),
     f('cur', 'Currency', currency),
-    f('incost', 'Input cost per million tokens (minor units)', inCost, 'Integer minor units, e.g. cents. Used to rank slots by cost.'),
+    f('incost', 'Input cost per million tokens (minor units)', inCost, 'Integer minor units, e.g. cents. Used to rank slots by cost. Autoinjector slots cost 0.'),
     f('outcost', 'Output cost per million tokens (minor units)', outCost, 'Integer minor units.')),
-  h('fieldset', { class: 'field' }, h('legend', null, 'API key (write-only)'),
-    f('key', 'New API key', key, s.has_credentials ? 'A key is available (stored locally or from the ANTHROPIC_API_KEY environment variable). Leave blank to keep it.' : 'Paste a key to store it locally for this slot.'),
-    h('div', { class: 'check-row' }, removeKeyBox, h('label', { for: removeKeyBox.id }, 'Remove the stored key for this slot'))),
+  autoGroup,
+  h('fieldset', { class: 'field' }, keyLegend, keyField,
+    h('div', { class: 'check-row' }, removeKeyBox, h('label', { for: removeKeyBox.id }, 'Remove the stored secret for this slot'))),
   out, h('div', { class: 'form-actions' }, btn));
 }
 

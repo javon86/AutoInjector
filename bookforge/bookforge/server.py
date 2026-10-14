@@ -30,6 +30,8 @@ from .requests import build_request
 from .store import Store, new_id, utcnow
 
 log = logging.getLogger("bookforge.server")
+# 8765 is taken by AutoInjector's extension bridge (server/fake_api_server.py), so BookForge uses 8780.
+DEFAULT_PORT = 8780
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_BODY = 64 * 1024 * 1024
 
@@ -120,8 +122,13 @@ class App:
             return 200, self.operation_schema(parts[1])
         if parts == ["slots"] and method == "GET":
             return 200, self.engine.providers.slots()
+        if parts == ["slots", "connect-autoinjector"] and method == "POST":
+            body = body if isinstance(body, dict) else {}
+            return 200, self.engine.providers.connect_autoinjector(body.get("token"), body.get("bridge_url"))
         if len(parts) == 2 and parts[0] == "slots" and method == "PUT":
             return 200, self.engine.providers.configure_slot(parts[1], body or {})
+        if len(parts) == 3 and parts[0] == "slots" and parts[2] == "health" and method == "GET":
+            return 200, self.engine.providers.health_check(parts[1])
         if parts == ["projects"] and method == "GET":
             return 200, [self.project_summary(principal, r["project_id"]) for r in self.store.projects_for(principal)]
         if parts == ["projects"] and method == "POST":
@@ -452,7 +459,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="bookforge", description="Bookforge book production workspace")
     ap.add_argument("--data-dir", default=os.environ.get("BOOKFORGE_DATA") or str(default_data_dir()))
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("BOOKFORGE_PORT", "8765")))
+    ap.add_argument("--port", type=int, default=int(os.environ.get("BOOKFORGE_PORT", str(DEFAULT_PORT))))
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -462,7 +469,7 @@ def main(argv=None):
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     except OSError as exc:
-        print(f"Could not start on {args.host}:{args.port}: {exc}. Try --port 8766.", file=sys.stderr)
+        print(f"Could not start on {args.host}:{args.port}: {exc}. Try --port 8781.", file=sys.stderr)
         return 2
     url = f"http://{args.host}:{args.port}/#token={app.token}"
     print(f"Bookforge {__version__} running. Data: {args.data_dir}")

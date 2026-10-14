@@ -33,7 +33,7 @@ module first.
    stop. The console prints the link (with your private access token) if you need to reopen it.
 
 macOS/Linux: `./run-bookforge.sh`. Manual start: `python -m pip install -r requirements.txt`
-then `python -m bookforge` (options: `--port 8765`, `--data-dir PATH`, `--no-browser`).
+then `python -m bookforge` (options: `--port 8780`, `--data-dir PATH`, `--no-browser`).
 
 Your projects are stored privately on this computer (Windows: `%LOCALAPPDATA%\Bookforge`;
 elsewhere `~/.local/share/bookforge`). The server only listens on `127.0.0.1`.
@@ -44,6 +44,18 @@ Bookforge has exactly three AI slots (AI-1, AI-2, AI-3), configured under **Sett
 The bundled adapter uses Anthropic's Claude (default model `claude-opus-5-5`); it needs
 `python -m pip install anthropic` and an API key (entered in Settings - stored in a local
 secret file, never in project data or exports - or set `ANTHROPIC_API_KEY`).
+
+**Experimental: AutoInjector web sessions.** Instead of an API key, a slot can use the
+ChatGPT, Claude or Gemini web session you are already logged in to inside the AutoInjector
+desktop app (adapter `autoinjector`). Enable the BookForge bridge in the desktop app, copy its
+token, then in **Settings** use **Connect AutoInjector (all three)** (AI-1=Claude,
+AI-2=ChatGPT, AI-3=Gemini) and **Test connection**. The bridge only listens on
+`http://127.0.0.1:17891`; the token is stored in the local secret file like an API key. Each slot
+may list `roles` (operation IDs such as `C02` or set letters such as `B`) to route that work to
+it. Automating these sites' web interfaces may be against their terms of service; use at your
+own risk. Contract: `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`.
+
+BookForge's default port is **8780** (8765 is used by AutoInjector's extension bridge).
 
 Slots are optional. Without one, every creative operation offers a **Manual candidate**
 form so you write that content yourself; deterministic operations (validation, state
