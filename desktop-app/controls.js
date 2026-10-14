@@ -996,7 +996,8 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
-  systemai: { panelId: "col-systemai", label: "System AI" }
+  systemai: { panelId: "col-systemai", label: "System AI" },
+  bookforge: { panelId: "col-bookforge", label: "BookForge bridge" }
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
@@ -1256,6 +1257,66 @@ el("btn-download").onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
+// --- BookForge bridge (experimental) panel -----------------------------------
+// Loopback HTTP bridge that lets BookForge drive these panes (main.js +
+// bookforge-bridge.js; contract in docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md).
+// The token is copied to the clipboard by the main process; it only reaches
+// this page when the user explicitly clicks "Show token".
+if (el("btn-collapse-bookforge")) el("btn-collapse-bookforge").onclick = () => collapseYellowPanel("bookforge");
+function bookforgeRender(s) {
+  if (!s || !s.ok) return;
+  if (el("bf-enabled")) el("bf-enabled").checked = !!s.enabled;
+  const st = el("bf-status");
+  if (st) {
+    const on = s.enabled && s.listening;
+    st.textContent = on ? `· listening :${s.port}` : s.enabled ? "· error" : "· off";
+    st.style.color = on ? "#7ad19a" : s.enabled ? "#e0b060" : "#888";
+  }
+  const d = el("bf-detail");
+  if (d) {
+    const sites = Object.keys(s.sites || {}).map((k) => `${k}: ${s.sites[k].ready ? "ready" : "not ready"}${s.sites[k].busy ? ", busy" : ""}`).join(" · ");
+    d.textContent = s.enabled
+      ? (s.listening ? `http://${s.host}:${s.port} — ${sites}` : `not listening (${s.error || "starting"}) on port ${s.port}`)
+      : "Off — nothing is listening.";
+  }
+}
+async function bookforgeRefresh() {
+  if (!window.api.bookforgeStatus) return;
+  try { bookforgeRender(await window.api.bookforgeStatus()); } catch (_) {}
+}
+function bookforgeMsg(text) { if (el("bf-msg")) el("bf-msg").textContent = text; }
+if (el("bf-enabled")) el("bf-enabled").onchange = async () => {
+  if (!window.api.bookforgeSetEnabled) return;
+  const s = await window.api.bookforgeSetEnabled(el("bf-enabled").checked);
+  bookforgeRender(s);
+  bookforgeMsg(s && s.enabled && !s.listening ? `Could not start: ${s.error || "unknown error"}` : "");
+};
+if (el("btn-bf-copy")) el("btn-bf-copy").onclick = async () => {
+  if (!window.api.bookforgeCopyToken) return;
+  const r = await window.api.bookforgeCopyToken();
+  bookforgeMsg(r && r.ok ? "Token copied — paste it into BookForge's AI slot key field." : `Copy failed: ${(r && r.error) || "unknown"}`);
+};
+if (el("btn-bf-reveal")) el("btn-bf-reveal").onclick = async () => {
+  const box = el("bf-token");
+  if (!box || !window.api.bookforgeRevealToken) return;
+  if (box.style.display !== "none") { box.style.display = "none"; box.textContent = ""; el("btn-bf-reveal").textContent = "Show token"; return; }
+  const r = await window.api.bookforgeRevealToken();
+  if (r && r.ok) { box.textContent = r.token; box.style.display = "block"; el("btn-bf-reveal").textContent = "Hide token"; }
+  else bookforgeMsg(`Could not read token: ${(r && r.error) || "unknown"}`);
+};
+if (el("btn-bf-regen")) el("btn-bf-regen").onclick = async () => {
+  if (!window.api.bookforgeRegenerateToken) return;
+  if (!window.confirm("Make a new bridge token? BookForge will need the new one — the old token stops working immediately.")) return;
+  const s = await window.api.bookforgeRegenerateToken();
+  if (s && s.ok) {
+    bookforgeRender(s);
+    const box = el("bf-token");
+    if (box) { box.style.display = "none"; box.textContent = ""; }
+    if (el("btn-bf-reveal")) el("btn-bf-reveal").textContent = "Show token";
+    bookforgeMsg("New token generated — copy it into BookForge again.");
+  } else bookforgeMsg(`Regenerate failed: ${(s && s.error) || "unknown"}`);
+};
+
 el("btn-clear").onclick = async () => {
   const res = await window.api.clearTranscript();
   if (res?.ok) renderTranscript([]);
@@ -1284,4 +1345,6 @@ el("btn-clear").onclick = async () => {
     setStatus("Ready.");
   }
   databaseRefresh();
+  bookforgeRefresh();
+  setInterval(bookforgeRefresh, 4000);
 })();

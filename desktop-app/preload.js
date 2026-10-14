@@ -78,5 +78,11 @@ contextBridge.exposeInMainWorld("api", {
   openWizard: () => ipcRenderer.invoke("wizard:open"),
   openExternal: (url) => ipcRenderer.invoke("external:open", url),
   closeWizard: () => ipcRenderer.invoke("wizard-window:close"),
-  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog")
+  wizardCatalog: () => ipcRenderer.invoke("wizard:catalog"),
+  // BookForge bridge (experimental) — see docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
+  bookforgeStatus: () => ipcRenderer.invoke("bookforge:status"),
+  bookforgeSetEnabled: (enabled) => ipcRenderer.invoke("bookforge:set-enabled", { enabled }),
+  bookforgeCopyToken: () => ipcRenderer.invoke("bookforge:copy-token"),
+  bookforgeRevealToken: () => ipcRenderer.invoke("bookforge:reveal-token"),
+  bookforgeRegenerateToken: () => ipcRenderer.invoke("bookforge:regenerate-token")
 });

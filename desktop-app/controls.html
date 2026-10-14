@@ -430,6 +430,26 @@
       </div>
     </div>
 
+    <div id="col-bookforge" class="col yc-panel">
+      <div class="yc-head">
+        <h2>BookForge bridge (experimental)</h2><span class="spacer"></span>
+        <span id="bf-status" style="font-size:11px; opacity:.7;"></span>
+        <button class="collapse-btn" id="btn-collapse-bookforge" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+      </div>
+      <div id="bookforge-body">
+        <p style="opacity:.78; margin:4px 0;">Lets BookForge (on this computer only) send prompts to these panes and read the replies. <b>Caution:</b> automating these sites' web UIs may be against their terms of service — off by default, use at your own risk.</p>
+        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="bf-enabled"> <span>Enable the BookForge bridge</span></label>
+        <div id="bf-detail" style="font-size:11.5px; opacity:.8; font-family:ui-monospace,monospace; margin:2px 0;"></div>
+        <div class="btns" style="margin:4px 0;">
+          <button id="btn-bf-copy" title="Copy the bridge token to the clipboard (paste it into BookForge's AI slot key field)">Copy token</button>
+          <button id="btn-bf-reveal" title="Show / hide the bridge token">Show token</button>
+          <button id="btn-bf-regen" class="danger" title="Make a new token — the old one stops working immediately">Regenerate token</button>
+        </div>
+        <div id="bf-token" style="font-size:11px; font-family:ui-monospace,monospace; word-break:break-all; display:none;"></div>
+        <div id="bf-msg" style="font-size:11.5px; opacity:.8;"></div>
+      </div>
+    </div>
+
     <div id="collapsed-strip"></div>
 
     <div id="ai-row">

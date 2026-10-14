@@ -506,6 +506,31 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
+## BookForge bridge (experimental, off by default)
+
+Lets BookForge (the book-writing tool in this repo) use the ChatGPT, Claude and
+Gemini panes as its AI slots, with no API keys. **Caution:** automating these
+sites' web UIs may be against their terms of service — use at your own risk.
+The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (normative).
+
+- Turn it on in the **BookForge bridge (experimental)** panel. Off = nothing
+  listens. On = a small HTTP server on `127.0.0.1:17891` only (env
+  `AUTOINJECTOR_BRIDGE_PORT` overrides). The on/off choice is remembered.
+- **Copy token** puts the bearer token on the clipboard — paste it into the
+  BookForge slot's key field. The token lives in the app's userData folder
+  (`bookforge-bridge-token`, mode 0600), never in the state file or logs.
+  **Regenerate token** replaces it; the old one stops working at once.
+- Endpoints: `GET /v1/health`, `POST /v1/complete` (`site`, `prompt`,
+  `request_id`, `timeout_ms`). One request per pane at a time (409 otherwise);
+  repeating a `request_id` within 15 minutes returns the same result instead
+  of sending again.
+- A reply to a bridge request is shown in the Conversation panel but is
+  **not** relayed to the other AIs (no mesh routing, roundtable, House Rules,
+  Prompt Sequence or Manager handling).
+- Code: `bookforge-bridge.js` (pure Node). Tests: `test/bookforge-bridge.test.js`,
+  `test/bookforge-main.test.js`. `test/fixtures/fake-bridge-host.js` runs the
+  real bridge with fake panes for cross-process tests (see its header for the CLI).
+
 ## Picking up where you left off
 
 Your transcript, any custom Role Assignments, and an in-progress House Rules

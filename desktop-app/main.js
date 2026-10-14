@@ -18,7 +18,7 @@
 // reaches the transcript/UI — used for Chargeback's Referee acknowledgments
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
-const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell } = require("electron");
+const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
@@ -29,6 +29,7 @@ const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
+const bookforgeBridgeMod = require("./bookforge-bridge"); // BookForge bridge (pure Node HTTP server, OFF by default) — docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -188,6 +189,7 @@ const state = {
     maximumTurns: 20,
     costLimit: 5
   },
+  bookforge: { enabled: false }, // BookForge bridge (experimental) — persisted; OFF by default. See startBookforgeBridge().
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -509,6 +511,7 @@ function saveStateDebounced() {
         selectorOverrides: state.selectorOverrides,
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
+        bookforge: { enabled: !!state.bookforge.enabled }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -581,6 +584,7 @@ function loadPersistedState() {
     state.manager.maximumTurns = state.managerConfig.maximumTurns;
     state.manager.costLimit = state.managerConfig.costLimit;
   }
+  if (snap.bookforge && typeof snap.bookforge === "object") state.bookforge.enabled = snap.bookforge.enabled === true;
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
     state.hr.roundNum = snap.hr.roundNum || 0;
@@ -2398,6 +2402,17 @@ async function pollSite(site) {
       broadcast("waiting-changed", { site, waiting: false });
     }
 
+    // BookForge bridge: a reply to a bridge request is OWNED by the bridge
+    // (contract v1 rule 3) — it's shown in the transcript above, but none of the
+    // relay machinery below (mesh, roundtable, House Rules, Prompt Sequence,
+    // Manager) ever sees it. onCaptured() returns false when the bridge is off
+    // or has nothing pending for this site, leaving normal handling untouched.
+    if (bookforgeBridge) {
+      let owned = false;
+      try { owned = bookforgeBridge.onCaptured(turn); } catch (e) { logEvent("bookforge-error", { site, error: String(e) }); }
+      if (owned) { logEvent("bookforge-owned-reply", { site, chars: turn.text.length }); return; }
+    }
+
     // Mesh routing (Auto/Auto-Both/manual routing:set) and either tag-based
     // Roundtable relay OR an active House Rules stage can both independently
     // name the SAME target for the SAME captured reply -- e.g. full mesh
@@ -3281,6 +3296,127 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   return { ok: true, which, collapsed: entry.collapsed };
 });
 
+// --- BookForge bridge (experimental, OFF by default) ------------------------
+// docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md is normative. A loopback-only HTTP
+// server (bookforge-bridge.js, pure Node) lets BookForge send one prompt to one
+// pane and get the next captured reply back. Sends go through sendTextTo() —
+// so the per-pane send queue, retries, ledger and [MSG #] numbering all apply —
+// wrapped with withEnvelope() so the reply closes with [FROM: <SITE>]. The
+// matching capture is handed to the bridge from pollSite() and is never relayed.
+// The bearer token lives in userData/bookforge-bridge-token (mode 0600; on
+// Windows chmod is a no-op and the per-user userData ACLs protect it) — never in
+// the state file, never logged, never in a URL.
+let bookforgeBridge = null;
+let bookforgeStartError = null;
+function bookforgeBridgePort() {
+  const p = Number(process.env.AUTOINJECTOR_BRIDGE_PORT);
+  return Number.isInteger(p) && p > 0 && p < 65536 ? p : bookforgeBridgeMod.DEFAULT_PORT;
+}
+function bookforgeSiteReady(site) {
+  const view = siteViews[site];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return false;
+  try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return false; } catch (_) { return false; }
+  return true;
+}
+let bookforgeStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
+function startBookforgeBridge() {
+  if (bookforgeBridge) return Promise.resolve({ ok: true });
+  if (!bookforgeStarting) bookforgeStarting = startBookforgeBridgeNow().finally(() => { bookforgeStarting = null; });
+  return bookforgeStarting;
+}
+async function startBookforgeBridgeNow() {
+  let token;
+  try { token = bookforgeBridgeMod.loadOrCreateToken(userDataDir()); }
+  catch (e) { bookforgeStartError = "TOKEN_WRITE_FAILED"; logEvent("bookforge-error", { error: "token write failed" }); return { ok: false, error: bookforgeStartError }; }
+  let currentToken = token;
+  const bridge = bookforgeBridgeMod.createBridge({
+    port: bookforgeBridgePort(),
+    host: "127.0.0.1",
+    getToken: () => currentToken,
+    siteReady: bookforgeSiteReady,
+    wrapPrompt: (site, text) => withEnvelope(text, site),
+    sendToSite: async (site, text) => {
+      // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
+      // await) once the view exists, so reading it first gives this send's
+      // exact [MSG #] number without changing sendTextTo's return shape.
+      const seq = String(state.nextMsgSeq).padStart(4, "0");
+      const res = await sendTextTo(site, text, null);
+      return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
+    },
+    // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
+    logger: (kind, detail) => logEvent(`bookforge-${kind}`, detail)
+  });
+  bridge.setToken = (t) => { currentToken = t; };
+  try {
+    await bridge.start();
+  } catch (e) {
+    bookforgeStartError = (e && e.code) || String(e);
+    logEvent("bookforge-error", { error: bookforgeStartError, port: bookforgeBridgePort() });
+    return { ok: false, error: bookforgeStartError };
+  }
+  bookforgeStartError = null;
+  if (!state.bookforge.enabled) { await bridge.stop(); return { ok: false, error: "DISABLED" }; } // turned off while we were starting
+  bookforgeBridge = bridge;
+  return { ok: true };
+}
+async function stopBookforgeBridge() {
+  if (bookforgeStarting) { try { await bookforgeStarting; } catch (_) {} }
+  const b = bookforgeBridge;
+  bookforgeBridge = null;
+  if (b) { try { await b.stop(); } catch (_) {} }
+}
+function bookforgeStatusSnapshot() {
+  const st = bookforgeBridge ? bookforgeBridge.status() : null;
+  const sites = {};
+  for (const s of SITE_IDS) sites[s] = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
+  return {
+    ok: true,
+    enabled: !!state.bookforge.enabled,
+    listening: !!(st && st.listening),
+    host: "127.0.0.1",
+    port: st ? st.port : bookforgeBridgePort(),
+    error: bookforgeStartError,
+    tokenPresent: !!bookforgeBridgeMod.readToken(userDataDir()),
+    sites
+  };
+}
+ipcMain.handle("bookforge:status", () => bookforgeStatusSnapshot());
+ipcMain.handle("bookforge:set-enabled", async (_evt, payload) => {
+  const enabled = !!(payload && payload.enabled);
+  state.bookforge.enabled = enabled;
+  saveStateDebounced();
+  if (enabled) {
+    const r = await startBookforgeBridge();
+    logEvent("bookforge-enabled", { ok: r.ok, error: r.error || null, port: bookforgeBridgePort() });
+  } else {
+    await stopBookforgeBridge();
+    logEvent("bookforge-disabled", {});
+  }
+  return bookforgeStatusSnapshot();
+});
+// The token goes to the clipboard from the main process; the renderer only
+// gets it back when the user explicitly asks to reveal it.
+ipcMain.handle("bookforge:copy-token", () => {
+  try {
+    const token = bookforgeBridgeMod.loadOrCreateToken(userDataDir());
+    if (clipboard && typeof clipboard.writeText === "function") clipboard.writeText(token);
+    else return { ok: false, error: "NO_CLIPBOARD" };
+    return { ok: true };
+  } catch (e) { return { ok: false, error: "TOKEN_UNAVAILABLE" }; }
+});
+ipcMain.handle("bookforge:reveal-token", () => {
+  try { return { ok: true, token: bookforgeBridgeMod.loadOrCreateToken(userDataDir()) }; }
+  catch (e) { return { ok: false, error: "TOKEN_UNAVAILABLE" }; }
+});
+ipcMain.handle("bookforge:regenerate-token", () => {
+  try {
+    const t = bookforgeBridgeMod.regenerateToken(userDataDir());
+    if (bookforgeBridge && bookforgeBridge.setToken) bookforgeBridge.setToken(t); // takes effect immediately; the old token stops working
+    logEvent("bookforge-token-regenerated", {});
+    return bookforgeStatusSnapshot();
+  } catch (e) { return { ok: false, error: "TOKEN_WRITE_FAILED" }; }
+});
+
 app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
@@ -3288,6 +3424,9 @@ app.whenReady().then(() => {
   try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
+  // BookForge bridge: listens only if the user turned it on (persisted; default OFF).
+  if (state.bookforge.enabled) startBookforgeBridge().catch((e) => logEvent("bookforge-error", { error: String(e) }));
 });
+app.on("will-quit", () => { stopBookforgeBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
