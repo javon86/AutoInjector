@@ -143,7 +143,7 @@ def test_protected_fact_change_requires_authorization(h):
     assert errors_of(refused)[0] == ("APPROVAL_REQUIRED", "/payload/approval_ref")
     k09 = h.dispatch("K09", "CREATE", payload={
         "action_id": "protected-hair", "base_revision": head["version"],
-        "impact": {"action_hash": "h", "source_versions": [head], "protected": True},
+        "impact": {"action_hash": "h", "source_versions": [cand], "protected": True},
         "policy": {"policy_id": "canon", "authorized_roles": ["author"], "ttl_seconds": 3600}})
     assert k09["status"] == "DRAFT", k09["errors"]
     expiry = (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")

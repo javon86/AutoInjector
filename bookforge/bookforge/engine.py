@@ -631,33 +631,45 @@ class Engine:
         return response
 
     def _check_approval(self, ctx: Context, approval_rec: dict, rec: dict) -> dict:
-        """approval_ref must be an approved, unexpired K09/I10 decision covering this candidate."""
-        data = approval_rec.get("data") or {}
-        decision, expiry, subject = None, None, None
+        """approval_ref must be the CURRENT K09/I10 decision, APPROVED, unexpired, binding this exact candidate."""
+        path = "/payload/approval_ref"
+        latest = self.store.get_record(ctx.project_id, ctx.branch_id, approval_rec["record_id"])
+        if latest is None or latest["version"] != approval_rec["version"]:
+            raise BookforgeError("APPROVAL_REQUIRED", path, "approval has a newer revision (revoked or "
+                                 "superseded); pin the current decision")
         if approval_rec["module_id"] == "K09":
-            decision, expiry = data.get("decision"), data.get("expiry")
-            subject = data.get("subject_ref")
-        elif approval_rec["module_id"] == "I10":
-            body = data.get("approval") or {}
-            decision, expiry, subject = body.get("decision"), body.get("expires_at"), body.get("subject_ref")
-            if body.get("revoked"):
-                decision = "REVOKED"
-        else:
-            approval_ids = approval_rec.get("approval_ids") or []
-            if approval_rec["lifecycle"] in ("APPROVED", "LOCKED") and approval_ids:
-                return {"source": approval_rec["ref"]}
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref",
-                                 "approval_ref must be a K09/I10 approval or an approved authority record")
-        if decision != "APPROVED":
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref", f"approval decision is {decision}")
-        if not expiry or _parse_time(expiry) <= _now():
-            raise BookforgeError("EXPIRED_APPROVAL", "/payload/approval_ref", "approval has expired")
-        if subject is not None and isinstance(subject, dict) and subject.get("record_id") == rec["record_id"]:
-            if subject.get("content_hash") != rec["content_hash"]:
-                raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref",
-                                     "approval covers different content; prior approval cannot authorize "
-                                     "changed output")
-        return {"source": approval_rec["ref"], "decision": decision, "expiry": expiry}
+            from .k_runtime import check_k09_authorization
+            check_k09_authorization(self.store, approval_rec, None, path)  # head, decision, expiry
+            if not self._k09_binds(ctx, approval_rec, rec):
+                raise BookforgeError("APPROVAL_REQUIRED", path, "authorization does not bind this exact "
+                                     "candidate revision; prior approval cannot authorize changed output")
+            data = approval_rec["data"]
+            return {"source": approval_rec["ref"], "decision": data["decision"], "expiry": data["expiry"]}
+        if approval_rec["module_id"] == "I10":
+            body = (approval_rec.get("data") or {}).get("approval") or {}
+            if body.get("revoked") or body.get("decision") != "APPROVED":
+                raise BookforgeError("APPROVAL_REQUIRED", path, f"approval decision is {body.get('decision')}")
+            expiry = body.get("expires_at")
+            if not expiry or _parse_time(expiry) <= _now():
+                raise BookforgeError("EXPIRED_APPROVAL", path, "approval has expired")
+            subject = body.get("subject_ref") or {}
+            if (subject.get("record_id"), subject.get("version"), subject.get("content_hash")) != (
+                    rec["record_id"], rec["version"], rec["content_hash"]):
+                raise BookforgeError("APPROVAL_REQUIRED", path, "approval covers a different revision; prior "
+                                     "approval cannot authorize changed output")
+            return {"source": approval_rec["ref"], "decision": "APPROVED", "expiry": expiry}
+        raise BookforgeError("APPROVAL_REQUIRED", path, "approval_ref must be a K09 or I10 approval decision")
+
+    def _k09_binds(self, ctx: Context, approval_rec: dict, rec: dict) -> bool:
+        """A K09 decision covers the exact pin named in its stored binding or in its request's source pins."""
+        from .k_runtime import k09_checkpoint
+        want = (rec["record_id"], rec["version"], rec["content_hash"])
+        binding = k09_checkpoint(self.store, ctx.project_id, ctx.branch_id, approval_rec["record_id"]) or {}
+        pins = [(r["record_id"], r["version"], r["content_hash"])
+                for r in binding.get("impact", {}).get("source_versions", [])]
+        for version in self.store.history(ctx.project_id, ctx.branch_id, approval_rec["record_id"]):
+            pins += [(r["record_id"], r["version"], r["content_hash"]) for r in version["source_refs"]]
+        return want in pins
 
     def _invalidate_consumers(self, tx, ctx: Context, rec: dict, prev_version: int | None) -> list[dict]:
         """Mark consumers of the previous approved revision stale when read paths changed (section 6)."""
