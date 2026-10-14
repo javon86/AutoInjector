@@ -554,6 +554,11 @@ class Engine:
                                        outcome="SUCCESS" if passed else "REJECTED",
                                        evidence_type="AUDITED_VALIDATION", evidence_origin=ctx.evidence_origin)
             tx.set_lifecycle(rec["ref"], new_state, findings=findings, validation_audit_id=audit_id)
+            if rec["stale"]:
+                # Rechecking a stale approved revision must not clear its stale flag (set_lifecycle resets
+                # stale on APPROVED/LOCKED); only a replacement against current inputs does.
+                tx.mark_stale(ctx.project_id, ctx.branch_id, rec["record_id"], rec["version"],
+                              rec.get("stale_reason") or "an input changed after creation")
             self._store_receipt(tx, ctx, request_hash, response)
         return response
 
@@ -681,6 +686,7 @@ class Engine:
                            "producer_record_id=? AND producer_version<?",
                            (ctx.project_id, ctx.branch_id, rec["record_id"], rec["version"])).fetchall()
         out, visited = [], set()
+        root = f"{rec['module_id']}:{rec['record_id']} changed from v{prev_version} to v{rec['version']}"
         queue = [(e, changed) for e in edges]
         while queue:
             edge, changes = queue.pop(0)
@@ -691,8 +697,12 @@ class Engine:
             if not any(pointers_overlap(c, p) for c in changes for p in paths):
                 continue
             visited.add(key)
-            reason = (f"input {edge['producer_module']}:{edge['producer_record_id']} changed from "
-                      f"v{edge['producer_version']} to v{rec['version']}")
+            if edge["producer_record_id"] == rec["record_id"]:
+                reason = (f"input {edge['producer_module']}:{edge['producer_record_id']} changed from "
+                          f"v{edge['producer_version']} to v{rec['version']}")
+            else:  # transitive: name the stale input and the change that caused it
+                reason = (f"input {edge['producer_module']}:{edge['producer_record_id']} "
+                          f"v{edge['producer_version']} is stale ({root})")
             tx.mark_stale(ctx.project_id, ctx.branch_id, edge["consumer_record_id"], edge["consumer_version"], reason)
             out.append({"record_id": edge["consumer_record_id"], "version": edge["consumer_version"],
                         "operation": edge["consumer_operation"]})

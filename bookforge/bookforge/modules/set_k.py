@@ -710,7 +710,10 @@ class ApprovalCheckpoints(OperationHandler):
             raise _rej("INVALID_INPUT", "/payload/expiry", f"{new} decisions carry expiry=null")
         cp = dict(cp, decisions=cp["decisions"] + [{"decision": new, "by": ctx.principal_id, "at": kr.iso(now)}])
         _put_state(ctx, kr.NS_K09, base["approval_id"], cp, rev)
-        return Result(data=data, transform="MANUAL")
+        # The decision revision pins the exact subject versions it decides on (the checkpoint
+        # binding), so readers of the stored decision (H10 publication/release authorization,
+        # F/J approval checks) see the same subjects the kernel's ACCEPT binding check sees.
+        return Result(data=data, transform="MANUAL", source_refs=list(cp["impact"].get("source_versions") or []))
 
     @staticmethod
     def _authorize(ctx: Context, cp: dict):
