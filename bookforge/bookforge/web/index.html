@@ -1,1 +1,33 @@
-<!doctype html><title>Bookforge</title><p>UI pending</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Bookforge</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="topbar" role="banner">
+  <button type="button" id="nav-toggle" class="nav-toggle" aria-controls="sidenav" aria-expanded="false">
+    <span aria-hidden="true">&#9776;</span> Menu
+  </button>
+  <a class="brand" href="#/">Bookforge</a>
+  <div class="topbar-context" id="context-bar" aria-label="Current project"></div>
+  <nav class="topbar-links" aria-label="Workspace pages" id="top-links"></nav>
+</header>
+<div class="shell">
+  <nav id="sidenav" class="sidenav" aria-label="Operation sets"></nav>
+  <main id="main" tabindex="-1">
+    <noscript><p class="notice">Bookforge needs JavaScript enabled in this browser.</p></noscript>
+    <p class="state-loading">Loading workspace&hellip;</p>
+  </main>
+</div>
+<div id="live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
