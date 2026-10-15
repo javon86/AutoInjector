@@ -21,7 +21,10 @@ const lastReplyBySite = {}; // most recent reply text per AI, for "use as image 
 let currentPrompts = [];
 let routing = { chatgpt: [], claude: [], gemini: [] };
 let enabled = { chatgpt: true, claude: true, gemini: true };
-let zoomLevels = { chatgpt: 1, claude: 1, gemini: 1 };
+let butlerActive = false; // whether → All also includes the butler (his Active checkbox)
+// Default pane zoom: 60% (main.js applies the same default to the real pages).
+const DEFAULT_PANE_ZOOM = 0.6;
+let zoomLevels = { chatgpt: DEFAULT_PANE_ZOOM, claude: DEFAULT_PANE_ZOOM, gemini: DEFAULT_PANE_ZOOM };
 
 // Each AI pane has three states, cycled in this order. The button's glyph and
 // tooltip always describe what the NEXT click does.
@@ -274,20 +277,241 @@ function buildComposerButtons() {
     };
     grid.appendChild(checkbox);
   }
+  // The butler is a fourth participant row — same shape as an AI: a → send
+  // button in the Send column and its own Active checkbox in the Active column.
+  const butler = document.createElement("button");
+  butler.id = "btn-send-butler";
+  butler.textContent = "→ 🤵 Butler";
+  butler.title = "Send this message to the butler (give him a goal / talk to him)";
+  butler.setAttribute("aria-label", "Send this message to the butler");
+  butler.onclick = () => sendToButler();
+  grid.appendChild(butler);
+
+  const butlerChk = document.createElement("input");
+  butlerChk.type = "checkbox";
+  butlerChk.id = "p-butler";
+  butlerChk.checked = butlerActive;
+  butlerChk.title = "Include the butler when you press → All";
+  butlerChk.setAttribute("aria-label", "Butler active");
+  butlerChk.onchange = (e) => { butlerActive = e.target.checked; };
+  grid.appendChild(butlerChk);
+
+  // → All: send to every checked AI, plus the butler when his box is checked.
   const all = document.createElement("button");
   all.className = "primary";
   all.textContent = "→ All";
-  all.onclick = () => sendCompose(SITES.filter((s) => enabled[s]));
+  all.onclick = () => { sendCompose(SITES.filter((s) => enabled[s])); if (butlerActive) sendToButler(); };
   grid.appendChild(all);
 }
 
 async function sendCompose(targets) {
-  const text = el("composer-text").value.trim();
-  if (!text) { setStatus("Type a message first."); return; }
+  let text = el("composer-text").value.trim();
+  const atts = composeAttachments.slice();
+  if (!text && !atts.length) { setStatus("Type a message first."); return; }
   if (!targets.length) { setStatus("No enabled participants to send to."); return; }
+  // Locker files (pictures, PDFs, …) go up first as real uploads, so the text
+  // that follows is sent together with them.
+  if (atts.length) {
+    if (typeof window.api.lockersAttach !== "function") { setStatus("Uploading locker files isn't available in this build."); return; }
+    setStatus(`Uploading ${atts.length} file${atts.length === 1 ? "" : "s"} to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
+    const failed = [];
+    for (const a of atts) {
+      let r;
+      try { r = await window.api.lockersAttach(a.site, a.rel, targets); } catch (e) { r = { ok: false, error: String(e) }; }
+      if (!r || !r.ok) failed.push(`${a.rel} (${(r && r.error) || "upload failed"})`);
+    }
+    if (failed.length) { setStatus(`Couldn't upload: ${failed.join(", ")} — nothing was sent. Fix it or remove the file and try again.`); return; }
+    if (!text) text = `(Sent you ${atts.length === 1 ? "a file" : `${atts.length} files`}: ${atts.map((a) => a.rel).join(", ")})`;
+    clearComposeAttachments();
+  }
   setStatus(`Sending to ${targets.map((t) => SITE_LABELS[t]).join(", ")}…`);
   const res = await window.api.sendCompose(text, targets);
   if (!res?.ok) setStatus(`Send failed: ${res?.error || "unknown error"}`);
+}
+
+// ---- 📁 Locker browser: what's in each AI's locker, click to use it ----
+let composeAttachments = []; // [{ site, rel, kind }]
+function renderComposeAttachments() {
+  const box = el("compose-attachments");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const a of composeAttachments) {
+    const chip = document.createElement("span");
+    chip.className = "att-chip";
+    chip.textContent = `${a.kind === "image" ? "🖼️" : "📎"} ${SITE_LABELS[a.site] || a.site}/${a.rel}`;
+    const x = document.createElement("button");
+    x.textContent = "✕";
+    x.title = "Remove";
+    x.setAttribute("aria-label", `Remove ${a.rel}`);
+    x.onclick = () => { composeAttachments = composeAttachments.filter((c) => c !== a); renderComposeAttachments(); };
+    chip.appendChild(x);
+    box.appendChild(chip);
+  }
+}
+function clearComposeAttachments() { composeAttachments = []; renderComposeAttachments(); }
+function fmtDate(ms) {
+  const d = new Date(Number(ms) || 0);
+  if (!ms || isNaN(d.getTime())) return "";
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+function fmtSize(n) { return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`; }
+async function refreshLocker(site) {
+  const list = el(`locker-list-${site}`);
+  if (!list || typeof window.api.lockersList !== "function") return;
+  let r;
+  try { r = await window.api.lockersList(site); } catch (e) { r = { ok: false, error: String(e) }; }
+  list.innerHTML = "";
+  if (!r || !r.ok) {
+    const err = document.createElement("div");
+    err.className = "lk-row";
+    err.textContent = `Couldn't read the locker: ${(r && r.error) || "error"}`;
+    list.appendChild(err);
+    return;
+  }
+  const tab = el(`locker-tab-${site}`);
+  if (tab) tab.textContent = `📁 Locker (${r.files.length}${r.truncated ? "+" : ""})`;
+  if (r.files.length) {
+    const head = document.createElement("div");
+    head.className = "lk-row lk-head";
+    const hIc = document.createElement("span"); hIc.textContent = " ";
+    const hName = document.createElement("span"); hName.className = "lk-name"; hName.textContent = "Name";
+    const hDate = document.createElement("span"); hDate.className = "lk-date"; hDate.textContent = "Modified";
+    const hSize = document.createElement("span"); hSize.className = "lk-size"; hSize.textContent = "Size";
+    head.append(hIc, hName, hDate, hSize);
+    list.appendChild(head);
+  }
+  for (const f of r.files) {
+    const row = document.createElement("button");
+    row.className = "lk-row";
+    row.title = f.kind === "text" ? "Click: put this file's text into Compose" : "Click: attach this file in Compose — it uploads when you click an AI's name";
+    const ic = document.createElement("span");
+    ic.textContent = f.kind === "image" ? "🖼️" : f.kind === "text" ? "📄" : "📎";
+    // Name first (bold), the folder it's in after it (dim), then date + size.
+    const nm = document.createElement("span");
+    nm.className = "lk-name";
+    const parts = String(f.rel).split(/[\\/]/);
+    const base = document.createElement("b");
+    base.textContent = parts.pop();
+    nm.appendChild(base);
+    if (parts.length) {
+      const dir = document.createElement("span");
+      dir.className = "lk-dir";
+      dir.textContent = parts.join("\\");
+      nm.appendChild(dir);
+    }
+    nm.title = f.rel;
+    const dt = document.createElement("span");
+    dt.className = "lk-date";
+    dt.textContent = fmtDate(f.mtime);
+    const sz = document.createElement("span");
+    sz.className = "lk-size";
+    sz.textContent = fmtSize(f.size);
+    row.append(ic, nm, dt, sz);
+    row.onclick = (e) => { e.stopPropagation(); useLockerFile(site, f); };
+    list.appendChild(row);
+  }
+}
+// Text -> pasted into Compose. Anything else (pictures, PDFs, big files) ->
+// attached in Compose and uploaded to whichever AI you click.
+async function useLockerFile(site, f) {
+  const box = el("composer-text");
+  if (f.kind === "text" && typeof window.api.lockersRead === "function") {
+    let r;
+    try { r = await window.api.lockersRead(site, f.rel); } catch (e) { r = { ok: false, error: String(e) }; }
+    if (r && r.ok && r.text != null) {
+      const block = `----- ${SITE_LABELS[site]}'s locker: ${f.rel} -----\n${r.text}\n----- end of file -----`;
+      const cur = box.value;
+      const at = typeof box.selectionStart === "number" && document.activeElement === box ? box.selectionStart : cur.length;
+      box.value = cur.slice(0, at) + (at && !cur.slice(0, at).endsWith("\n") ? "\n" : "") + block + "\n" + cur.slice(at);
+      try { updateCharCount(); } catch (_) {}
+      box.focus();
+      setStatus(`Put ${f.rel} into Compose — click an AI's name to send it.`);
+      return;
+    }
+    // too big / unreadable as text -> fall through to attaching it
+  }
+  if (composeAttachments.some((a) => a.site === site && a.rel === f.rel)) { setStatus(`${f.rel} is already attached.`); return; }
+  composeAttachments.push({ site, rel: f.rel, kind: f.kind });
+  renderComposeAttachments();
+  setStatus(`Attached ${f.rel} — click an AI's name to upload it to them.`);
+}
+function wireLockers() {
+  if (typeof window.api.lockersList !== "function") return;
+  for (const s of SITES) refreshLocker(s);
+  if (typeof window.api.onLockerChanged === "function") {
+    window.api.onLockerChanged((p) => { for (const s of SITES) if (!p || p.site === "all" || p.site === s) refreshLocker(s); });
+  }
+  // Files you drop into a locker yourself (Explorer) show up within a few seconds.
+  setInterval(() => { for (const s of SITES) { const l = el(`locker-list-${s}`); if (l && !l.hidden) refreshLocker(s); } }, 8000);
+}
+
+// Butler handling mode — how the next message you send him is handled:
+//   converse : just talk; he replies in prose and speaks it, no task
+//   auto     : he decides (a computer-task call-sign like "install…" → himself)
+//   self     : he does it locally (code/install/tools), never the AIs
+//   delegate : he routes it to ChatGPT/Claude/Gemini
+const BUTLER_MODES = ["converse", "auto", "self", "delegate"];
+const BUTLER_MODE_META = {
+  converse: { ic: "💬", tx: "Converse", cls: "mode-converse" },
+  auto:     { ic: "🔀", tx: "Auto",     cls: "mode-auto" },
+  self:     { ic: "🤵", tx: "Himself",  cls: "mode-self" },
+  delegate: { ic: "📤", tx: "Delegate", cls: "mode-delegate" },
+};
+let butlerMode = "auto";
+try { const s = localStorage.getItem("butlerMode"); if (BUTLER_MODES.includes(s)) butlerMode = s; } catch (_) {}
+function renderButlerMode() {
+  const b = el("btn-butler-mode"); if (!b) return;
+  const meta = BUTLER_MODE_META[butlerMode] || BUTLER_MODE_META.auto;
+  b.classList.remove("mode-converse", "mode-auto", "mode-self", "mode-delegate");
+  b.classList.add(meta.cls);
+  const ic = b.querySelector(".mode-ic"); if (ic) ic.textContent = meta.ic;
+  const tx = b.querySelector(".mode-tx"); if (tx) tx.textContent = meta.tx;
+}
+function setButlerMode(mode) {
+  if (!BUTLER_MODES.includes(mode)) return;
+  butlerMode = mode;
+  try { localStorage.setItem("butlerMode", mode); } catch (_) {}
+  renderButlerMode();
+}
+if (el("btn-butler-mode")) {
+  renderButlerMode();
+  el("btn-butler-mode").onclick = () => {
+    const next = BUTLER_MODES[(BUTLER_MODES.indexOf(butlerMode) + 1) % BUTLER_MODES.length];
+    setButlerMode(next);
+    uiLog("click", { id: "btn-butler-mode", msg: `butler mode: ${next}` });
+    setStatus(`Butler mode: ${BUTLER_MODE_META[next].tx} — ${next === "converse" ? "just chatting" : next === "self" ? "he'll do it himself" : next === "delegate" ? "he'll ask the AIs" : "he decides"}.`);
+  };
+}
+// Converse: echo my line into his window, then his reply is shown + spoken by main.
+async function butlerConverse(text) {
+  if (!window.api.butlerChat) { logToCenter("Butler chat unavailable.", { tag: "manager", err: true }); return; }
+  appendButlerLine({ cls: "bl-tome", who: "You → 🤵", text });
+  const r = await window.api.butlerChat(text);
+  if (!r || !r.ok) logToCenter(`Butler couldn't reply: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`, { tag: "manager", err: true });
+}
+// The one place that hands a message to the butler, honouring the current mode.
+async function butlerHandle(text, opts = {}) {
+  const t = String(text || "").trim();
+  if (!t) return { ok: false, error: "EMPTY" };
+  if (butlerMode === "converse") { await butlerConverse(t); return { ok: true, converse: true }; }
+  if (!window.api.startManagedTask) { setStatus("Butler isn't available."); return { ok: false, error: "UNAVAILABLE" }; }
+  if (opts.mirror && el("jarvis-goal")) el("jarvis-goal").value = t;
+  const r = await window.api.startManagedTask(t, butlerMode); // auto | self | delegate
+  if (r && r.ok) { if (typeof jarvisShowRunning === "function") jarvisShowRunning(true); }
+  return r || { ok: false, error: "error" };
+}
+
+// Send the composer text to the butler — honours the handling-mode toggle.
+async function sendToButler() {
+  const text = el("composer-text").value.trim();
+  if (!text) { setStatus("Type a message first."); return; }
+  setStatus(butlerMode === "converse" ? "Talking to the butler…" : `Sending to the butler (${BUTLER_MODE_META[butlerMode].tx})…`);
+  const r = await butlerHandle(text, { mirror: true });
+  if (r && r.ok) setStatus(butlerMode === "converse" ? "Asked the butler." : "Sent to the butler.");
+  else { const hint = r && r.error === "NOT_CONFIGURED" ? " — give him a local model in the Butler bar (⚙️) first." : ""; setStatus(`Butler can't start: ${(r && r.error) || "error"}${hint}`); }
 }
 
 // The Prompt Library is just a compact dropdown + a few buttons here —
@@ -349,7 +573,7 @@ function buildAiColumn(site) {
   const zoomLabel = document.createElement("span");
   zoomLabel.className = "zoom-level";
   zoomLabel.id = `zoom-level-${site}`;
-  zoomLabel.textContent = "100%";
+  zoomLabel.textContent = `${Math.round(DEFAULT_PANE_ZOOM * 100)}%`;
   head.appendChild(zoomLabel);
   const zoomInBtn = document.createElement("button");
   zoomInBtn.className = "zoom-btn";
@@ -458,11 +682,47 @@ function buildAiColumn(site) {
   loginMenu.appendChild(loginStatus);
   strip.appendChild(loginMenu);
 
+  // 📁 Locker (default) / 💬 Last reply. The live pane below already shows the
+  // reply, so this box shows what's in that AI's locker instead; the old reply
+  // preview is one click away (same #preview-<site> element as before).
+  const lockerBox = document.createElement("div");
+  lockerBox.className = "locker-box";
+  const ltabs = document.createElement("div");
+  ltabs.className = "locker-tabs";
+  const lkTab = document.createElement("button");
+  lkTab.className = "active";
+  lkTab.id = `locker-tab-${site}`;
+  lkTab.textContent = "📁 Locker";
+  lkTab.title = `Files in ${SITE_LABELS[site]}'s locker. Click a file to put it in Compose, then click an AI's name to give it to them.`;
+  const rpTab = document.createElement("button");
+  rpTab.id = `reply-tab-${site}`;
+  rpTab.textContent = "💬 Last reply";
+  const lkSpacer = document.createElement("span");
+  lkSpacer.className = "spacer";
+  const lkRefresh = document.createElement("button");
+  lkRefresh.className = "lk-refresh";
+  lkRefresh.textContent = "↻";
+  lkRefresh.title = "Refresh the file list";
+  lkRefresh.setAttribute("aria-label", `Refresh ${SITE_LABELS[site]}'s locker list`);
+  ltabs.append(lkTab, rpTab, lkSpacer, lkRefresh);
+  const lkList = document.createElement("div");
+  lkList.className = "locker-list";
+  lkList.id = `locker-list-${site}`;
   const preview = document.createElement("div");
   preview.className = "preview";
   preview.id = `preview-${site}`;
   preview.textContent = "No reply captured yet.";
-  strip.appendChild(preview);
+  preview.hidden = true;
+  const showLocker = (on) => {
+    lkList.hidden = !on; preview.hidden = on;
+    lkTab.classList.toggle("active", on); rpTab.classList.toggle("active", !on);
+    if (on) refreshLocker(site);
+  };
+  lkTab.onclick = (e) => { e.stopPropagation(); showLocker(true); };
+  rpTab.onclick = (e) => { e.stopPropagation(); showLocker(false); };
+  lkRefresh.onclick = (e) => { e.stopPropagation(); refreshLocker(site); };
+  lockerBox.append(ltabs, lkList, preview);
+  strip.appendChild(lockerBox);
 
   const fwdRow = document.createElement("div");
   fwdRow.className = "btns fwd-row";
@@ -915,21 +1175,73 @@ function logLineText(entry) {
   if (entry.detail?.sample) parts.push(`sample=${JSON.stringify(entry.detail.sample)}`);
   if (entry.detail?.capturedText) parts.push(`got=${JSON.stringify(entry.detail.capturedText)}`);
   if (entry.detail?.error) parts.push(`ERROR: ${entry.detail.error}`);
+  if (entry.detail?.id) parts.push(`#${entry.detail.id}`);
+  if (entry.detail?.msg) parts.push(entry.detail.msg);
+  // A human-written summary (manager events, the capability test, …) reads far
+  // better than the raw kind — lead with it when present.
+  if (entry.detail?.summary) return `${entry.detail.summary}${parts.length ? " " + parts.join(" ") : ""}`.trim();
   return `${entry.kind} ${parts.join(" ")}`.trim();
 }
 
-function appendLog(entry) {
+// The 13 tags (single source of truth is log-tags.js in main; fetched over IPC).
+// Starts empty and is filled in on load; appendLogLine tolerates a missing tag,
+// so log lines render correctly even for the first few events before it arrives.
+let LOG_TAGS = { TAGS: {}, TAG_IDS: [] };
+
+// Add one log line to the unified window, with its colour-coded tag chip. Works
+// for both real events (kind+detail) and injected chat lines ({tag, text}), and
+// never throws on an unknown/missing tag (falls back to a neutral chip).
+function appendLogLine({ ts, tag, text, err, level }) {
   const box = el("activity-log");
+  if (!box) return;
+  const id = tag || "system";
+  const meta = LOG_TAGS.TAGS[id] || { label: id, color: "#8a94a6" };
+  // Level drives the "⚠ Errors only" view: error/warning stay, everything else
+  // is hidden when it's on. `err` (error only) still drives the red styling.
+  const lvl = level || (err ? "error" : "info");
   const line = document.createElement("div");
-  const isErr = entry.kind.includes("error");
-  line.className = `log-line${isErr ? " err" : ""}`;
+  line.className = `log-line${lvl === "error" ? " err" : ""}${lvl === "warning" ? " warn" : ""}`;
+  line.dataset.tag = id;
+  line.dataset.level = lvl;
+  const chip = document.createElement("span");
+  chip.className = "log-chip";
+  chip.textContent = meta.label;
+  chip.style.background = meta.color;
   const t = document.createElement("span");
   t.className = "t";
-  t.textContent = new Date(entry.ts).toLocaleTimeString();
-  line.appendChild(t);
-  line.appendChild(document.createTextNode(logLineText(entry)));
+  t.textContent = new Date(ts || Date.now()).toLocaleTimeString();
+  const msg = document.createElement("span");
+  msg.className = "log-msg";
+  msg.textContent = text || "";
+  line.appendChild(chip); line.appendChild(t); line.appendChild(msg);
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
   box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function appendLog(entry) {
+  const level = entry.level || (String(entry.kind || "").includes("error") ? "error" : "info");
+  appendLogLine({ ts: entry.ts, tag: entry.tag || "system", text: logLineText(entry), err: level === "error", level });
+}
+
+// Route an operational status/progress line straight into the ONE center
+// Activity Log, instead of a scattered per-control box. Every former side-log
+// (System Check, install progress, model downloads, the migrate, the log
+// bundle, the intro) now funnels through here so there's a single place to
+// read, filter and export — nothing is lost, it's just all in one window.
+function logToCenter(text, opts = {}) {
+  const t = String(text == null ? "" : text).replace(/\s+$/,"");
+  if (!t.trim()) return;
+  appendLogLine({ ts: Date.now(), tag: opts.tag || "system", text: t, err: !!opts.err, level: opts.err ? "error" : (opts.level || "info") });
+}
+
+// The conversation itself, folded into the one log under the Chat tag, so the
+// window truly catches everything (the formatted transcript still exists too).
+function appendUnifiedChatTurn(turn) {
+  if (!turn) return;
+  const who = turn.label || turn.site || "AI";
+  const body = String(turn.text || "").replace(/\s+/g, " ").trim();
+  appendLogLine({ ts: turn.ts || Date.now(), tag: "chat", text: `${who}: ${body}` });
 }
 
 async function refreshSites() {
@@ -949,6 +1261,19 @@ function updateCharCount() {
 window.api.onCapture((turn) => {
   renderPreview(turn.site, turn);
   appendTranscriptTurn(turn);
+  appendUnifiedChatTurn(turn);
+  // Also show it in the butler's colour-coded window. An [TO: X] tag of USER (or
+  // none — the default) means it's addressed to ME → bright + 2× via bl-tome;
+  // an AI↔AI message is coloured as the sender.
+  if (turn && turn.site) {
+    const to = String(turn.roundtableTag || "USER").toUpperCase();
+    const tome = to === "USER";
+    appendButlerLine({
+      cls: tome ? "bl-tome" : ("bl-" + turn.site),
+      who: tome ? `${turn.label} → You` : turn.label,
+      text: turn.text,
+    });
+  }
   if (turn && turn.site) lastReplyBySite[turn.site] = turn.text || "";
   setStatus(`Captured new reply from ${turn.label}.`);
   beep();
@@ -964,6 +1289,92 @@ window.api.onSendError(({ target, error }) => {
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);
 window.api.onLog(appendLog);
+
+// --- Unified log: tag filters (checked = show that category) -------------------
+function buildLogFilters() {
+  const bar = el("log-filters");
+  const box = el("activity-log");
+  if (!bar || !box || !LOG_TAGS.TAG_IDS.length) return;
+  bar.textContent = ""; // rebuild if tags arrive/refresh
+  // Inject the hide rules once: #activity-log.hide-<tag> [data-tag=<tag>]{display:none}
+  const style = document.getElementById("log-filter-style") || document.createElement("style");
+  style.id = "log-filter-style";
+  style.textContent = LOG_TAGS.TAG_IDS.map((id) => `#activity-log.hide-${id} .log-line[data-tag="${id}"]{display:none}`).join("\n");
+  if (!style.parentNode) document.head.appendChild(style);
+  // Restore any saved hidden set (per-viewer convenience only).
+  let hidden = {};
+  try { hidden = JSON.parse(localStorage.getItem("logHiddenTags") || "{}") || {}; } catch (_) { hidden = {}; }
+  const save = () => { try { localStorage.setItem("logHiddenTags", JSON.stringify(hidden)); } catch (_) {} };
+  const apply = (id) => box.classList.toggle(`hide-${id}`, !!hidden[id]);
+  for (const id of LOG_TAGS.TAG_IDS) {
+    const tag = LOG_TAGS.TAGS[id];
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !hidden[id]; // checked = visible
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = tag.color;
+    const txt = document.createElement("span");
+    txt.textContent = tag.label;
+    label.appendChild(cb); label.appendChild(sw); label.appendChild(txt);
+    label.title = `Show/hide ${tag.label} lines`;
+    cb.onchange = () => { hidden[id] = !cb.checked; apply(id); save(); uiLog("click", { id: `log-filter-${id}`, msg: `${cb.checked ? "show" : "hide"} ${tag.label}` }); };
+    bar.appendChild(label);
+    apply(id);
+  }
+}
+// Fetch the tag list from main (over IPC, since the sandboxed preload can't
+// require it), then build the filter chips. Log lines already render before
+// this resolves — appendLogLine tolerates a not-yet-known tag.
+if (window.api.logTagsInfo) {
+  window.api.logTagsInfo().then((info) => {
+    if (info && Array.isArray(info.TAG_IDS) && info.TAG_IDS.length) { LOG_TAGS = info; buildLogFilters(); }
+  }).catch(() => {});
+}
+if (el("btn-log-clear")) el("btn-log-clear").onclick = () => { const b = el("activity-log"); if (b) b.textContent = ""; uiLog("click", { id: "btn-log-clear", msg: "cleared the log view" }); };
+
+// "⚠ Errors only": a cross-cutting filter on top of the per-tag checkboxes —
+// when on, only error/warning lines show, whatever their tag. Remembered per
+// viewer (localStorage), same as the tag filters.
+(function initErrorsOnly() {
+  const cb = el("cb-errors-only");
+  const box = el("activity-log");
+  if (!cb || !box) return;
+  let on = false;
+  try { on = localStorage.getItem("logErrorsOnly") === "1"; } catch (_) {}
+  cb.checked = on;
+  box.classList.toggle("errors-only", on);
+  cb.onchange = () => {
+    box.classList.toggle("errors-only", cb.checked);
+    try { localStorage.setItem("logErrorsOnly", cb.checked ? "1" : "0"); } catch (_) {}
+    uiLog("click", { id: "cb-errors-only", msg: `errors-only ${cb.checked ? "on" : "off"}` });
+  };
+})();
+
+// --- Full activity trace: log EVERY user action into the same Activity Log ------
+// so you can always see what's going on, no matter what you're doing.
+const uiLog = (action, detail) => { try { if (window.api.uiLog) window.api.uiLog(action, detail); } catch (_) {} };
+// Every button click says something (by id + its label).
+document.addEventListener("click", (e) => {
+  const b = e.target && e.target.closest && e.target.closest("button");
+  if (!b) return;
+  const label = (b.textContent || b.title || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 40);
+  uiLog("click", { id: b.id || null, msg: label ? `“${label}”` : "(button)" });
+}, true);
+// Every collapsible section (System AI sub-panels, etc.) opening/closing says something.
+for (const d of document.querySelectorAll("details")) {
+  d.addEventListener("toggle", () => {
+    const name = (d.querySelector("summary")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    uiLog("panel", { msg: `${name || "section"} ${d.open ? "opened" : "closed"}` });
+  });
+}
+// Every message the program actually sends (ledger entry) shows up with its ID.
+if (window.api.onLedgerEntry) window.api.onLedgerEntry((led) => {
+  if (!led) return;
+  appendLog({ ts: led.ts || Date.now(), kind: "message", detail: { id: led.id, msg: `${led.source || "you"}→${led.target} ${led.status}${led.error ? " " + led.error : ""}` } });
+});
+
 window.api.onWindowCollapseChanged(({ which, collapsed }) => {
   if (which !== "automation") return;
   el("wrap").classList.toggle("window-collapsed", collapsed);
@@ -996,6 +1407,9 @@ const COLLAPSIBLE_PANELS = {
   global: { panelId: "col-global", label: "Global" },
   houserules: { panelId: "col-houserules", label: "House Rules" },
   prompts: { panelId: "col-prompts", label: "Prompt Library" },
+  image: { panelId: "col-image", label: "Image Generation" },
+  video: { panelId: "col-video", label: "Video Generation" },
+  gpu: { panelId: "col-gpu", label: "GPU Usage" },
   systemai: { panelId: "col-systemai", label: "System AI" },
   bookforge: { panelId: "col-bookforge", label: "BookForge bridge" }
 };
@@ -1009,10 +1423,12 @@ function collapseYellowPanel(key) {
   tab.innerHTML = `<span class="tab-color"></span>${label}`;
   tab.onclick = () => expandYellowPanel(key);
   el("top-tab-strip").appendChild(tab);
+  uiLog("panel", { msg: `${label} panel minimized` });
 }
 function expandYellowPanel(key) {
   el(COLLAPSIBLE_PANELS[key].panelId).classList.remove("hidden-collapsed");
   el(`tab-${key}`)?.remove();
+  uiLog("panel", { msg: `${COLLAPSIBLE_PANELS[key].label} panel restored` });
 }
 // Make each utility panel's heading a second, larger click target for collapsing
 // it — and keyboard-operable (Enter/Space), with a visible focus ring via CSS.
@@ -1052,6 +1468,446 @@ async function databaseRefresh() {
 
 // --- System AI (Local Supervisor) panel + User Panel switch ----------------
 if (el("btn-collapse-systemai")) el("btn-collapse-systemai").onclick = () => collapseYellowPanel("systemai");
+if (el("btn-collapse-image")) el("btn-collapse-image").onclick = () => collapseYellowPanel("image");
+if (el("btn-collapse-video")) el("btn-collapse-video").onclick = () => collapseYellowPanel("video");
+if (el("btn-collapse-gpu")) el("btn-collapse-gpu").onclick = () => collapseYellowPanel("gpu");
+
+// Butler Device panel: System Check (what he can do) + Send Intro (tell the AIs
+// who he is + the rules). Nothing is sent unless you press a button.
+function deviceSpeak(text) {
+  if (el("device-speak") && el("device-speak").checked && window.api.voiceSpeak && text) { try { window.api.voiceSpeak(text); } catch (_) {} }
+}
+// A fix-it hint for each capability that can fail or be missing — shown next to
+// a red/gray result in the pop-up so you know what to do about it.
+const CAP_TIPS = {
+  "Brain (local model)": "Install Ollama and download a model, then pick it in ⚙️ Local model settings and press Save + Test.",
+  "Run code (Open Interpreter)": "Open the Setup Wizard → Auto-setup (or Install Missing) to install Open Interpreter — it needs Python 3.12.",
+  "Open a file (read & write)": "Check the app can write to its output folder ('stuff and thing') — free disk space and folder permissions.",
+  "Tools (USE_TOOL)": "No tools are registered, or the read-file tool failed — check the output folder exists and is readable.",
+  "Memory (remember & recall)": "The shared database is off or unavailable — reopen the app; if it persists, check disk space where app data lives.",
+  "Image generation": "Turn on Image generation and set a reachable Stable Diffusion endpoint in the Image panel (Auto-detect can find it).",
+  "Video generation": "Turn on Video generation and set a reachable text-to-video endpoint in the Video panel (AnimateDiff / SVD / ComfyUI).",
+  "Voice (speak)": "Enable Voice and set the local voice shim endpoint (install piper/whisper via the Setup Wizard).",
+  "Talk to ChatGPT": "Open the ChatGPT pane and make sure you're signed in, then enable it as a participant up top.",
+  "Talk to Claude": "Open the Claude pane and make sure you're signed in, then enable it as a participant up top.",
+  "Talk to Gemini": "Open the Gemini pane and make sure you're signed in, then enable it as a participant up top.",
+};
+function capTipFor(c) {
+  if (c.tip) return c.tip;
+  if (CAP_TIPS[c.name]) return CAP_TIPS[c.name];
+  if (/^Talk to/.test(c.name)) return "Open that AI's pane, sign in, and enable it as a participant up top.";
+  return "Open the Setup Wizard to configure this capability.";
+}
+
+// The live "reel": a chip per capability, added as each finishes, so you watch
+// the sweep go by. A trailing spinner shows it's still working.
+let capReelActive = false;
+function capReelReset() {
+  const reel = el("cap-reel"); if (!reel) return;
+  reel.innerHTML = "";
+  const spin = document.createElement("span"); spin.className = "cap-chip running"; spin.id = "cap-reel-spinner";
+  spin.innerHTML = '<span class="spin"></span><span>testing…</span>';
+  reel.appendChild(spin);
+  reel.classList.add("on");
+}
+function capReelStep(c) {
+  const reel = el("cap-reel"); if (!reel) return;
+  const cls = c.ok === true ? "pass" : c.ok === false ? "fail" : "skip";
+  const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+  const chip = document.createElement("span");
+  chip.className = `cap-chip ${cls}`;
+  chip.textContent = `${mark} ${c.name}`;
+  chip.title = c.detail || "";
+  const spin = el("cap-reel-spinner");
+  if (spin) reel.insertBefore(chip, spin); else reel.appendChild(chip);
+  reel.scrollLeft = reel.scrollWidth;
+}
+if (window.api.onCapabilityTestStep) window.api.onCapabilityTestStep((c) => { if (capReelActive) capReelStep(c); });
+
+// Fill and open the 3-bucket results pop-up.
+function openCapModal(r) {
+  const modal = el("cap-modal"); if (!modal) return;
+  const buckets = { working: [], failed: [], notset: [] };
+  for (const c of (r.checks || [])) (c.ok === true ? buckets.working : c.ok === false ? buckets.failed : buckets.notset).push(c);
+  const fill = (listId, arr, withTip) => {
+    const box = el(listId); if (!box) return;
+    box.innerHTML = "";
+    if (!arr.length) { const d = document.createElement("div"); d.className = "cap-item"; d.style.opacity = ".6"; d.textContent = "—"; box.appendChild(d); return; }
+    for (const c of arr) {
+      const item = document.createElement("div"); item.className = "cap-item";
+      let html = `<span class="nm">${gpuEsc(c.name)}</span>`;
+      if (c.detail) html += `<span class="why">${gpuEsc(c.detail)}</span>`;
+      if (withTip) html += `<span class="tip">💡 ${gpuEsc(capTipFor(c))}</span>`;
+      item.innerHTML = html; box.appendChild(item);
+    }
+  };
+  el("cap-n-working").textContent = buckets.working.length;
+  el("cap-n-failed").textContent = buckets.failed.length;
+  el("cap-n-notset").textContent = buckets.notset.length;
+  fill("cap-list-working", buckets.working, false);
+  fill("cap-list-failed", buckets.failed, true);
+  fill("cap-list-notset", buckets.notset, true);
+  el("cap-modal-sub").textContent = `${r.okCount}/${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} not working` : ""}. ⚪ = not set up yet.`;
+  if (el("cap-modal-title")) el("cap-modal-title").textContent = "🧪 Capability test results";
+  modal.classList.add("on");
+}
+function closeCapModal() { const m = el("cap-modal"); if (m) m.classList.remove("on"); }
+if (el("btn-cap-modal-close")) el("btn-cap-modal-close").onclick = closeCapModal;
+if (el("cap-modal")) el("cap-modal").addEventListener("click", (e) => { if (e.target === el("cap-modal")) closeCapModal(); });
+
+// Run the deep capability test: live reel while it runs, a 3-bucket pop-up when
+// it's done, and full detail in the Activity Log. Shared by every entry point
+// (butler-panel button, User Panel button, System Check deep toggle).
+let capTestRunning = false;
+async function runCapabilityTest(triggerBtn) {
+  if (capTestRunning) return;
+  if (!window.api.butlerCapabilityTest) { logToCenter("Capability test unavailable.", { tag: "setup", err: true }); return; }
+  capTestRunning = true; capReelActive = true; capReelReset();
+  const btns = ["btn-cap-run", "btn-capability-test", "btn-selfcheck"].map(el).filter(Boolean);
+  const prev = btns.map((b) => b.textContent);
+  btns.forEach((b) => { b.disabled = true; }); if (triggerBtn) triggerBtn.textContent = "🧪 Testing…";
+  logToCenter("🧪 Capability test started — really running code, files, tools, memory, image, video, voice, and pinging the AIs…", { tag: "setup" });
+  let r; try { r = await window.api.butlerCapabilityTest(); } catch (e) { r = { ok: false, error: String(e) }; }
+  capReelActive = false; capTestRunning = false;
+  const spin = el("cap-reel-spinner"); if (spin) spin.remove();
+  btns.forEach((b, i) => { b.disabled = false; b.textContent = prev[i]; });
+  if (!r || !r.ok) { logToCenter(`Capability test failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
+  logToCenter(`🧪 Capability test done — ${r.okCount}/${r.total} worked${r.failCount ? `, ${r.failCount} failed` : ""} (⚪ = not set up).`, { tag: "setup" });
+  openCapModal(r);
+  deviceSpeak(`Capability test: ${r.okCount} of ${r.total} capabilities actually worked${r.failCount ? `, ${r.failCount} failed` : ""}.`);
+}
+// Every entry point runs the same test (reel + pop-up).
+if (el("btn-cap-run")) el("btn-cap-run").onclick = () => { uiLog("click", { id: "btn-cap-run", msg: "test all capabilities" }); runCapabilityTest(el("btn-cap-run")); };
+if (el("btn-capability-test")) el("btn-capability-test").onclick = () => { uiLog("click", { id: "btn-capability-test", msg: "run capability test" }); runCapabilityTest(el("btn-capability-test")); };
+
+if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
+  const deep = !!(el("cb-deep-check") && el("cb-deep-check").checked);
+  // Deep mode: actually exercise every capability (streams to the Activity Log).
+  if (deep) { await runCapabilityTest(el("btn-selfcheck")); return; }
+
+  // Quick readiness check → each capability's status streams into the center log.
+  if (!window.api.butlerSelfCheck) { logToCenter("System check unavailable.", { tag: "setup", err: true }); return; }
+  logToCenter("🩺 System check…", { tag: "setup" });
+  let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
+  if (!r || !r.ok) { logToCenter(`System check failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
+  logToCenter(`🩺 System check — ${r.okCount}/${r.total} capabilities ready.`, { tag: "setup" });
+  for (const c of r.checks) {
+    const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
+    logToCenter(`${mark} ${c.name}${c.detail ? " — " + c.detail : ""}`, { tag: "setup", err: c.ok === false });
+  }
+  if (Array.isArray(r.installs) && r.installs.length) {
+    logToCenter(`Dependencies — ${(r.missing || []).length} not installed:`, { tag: "setup" });
+    for (const it of r.installs) {
+      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
+      logToCenter(`   ${it.label}: ${mark}`, { tag: "setup", err: it.installed === false });
+    }
+  }
+  if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
+  deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working. ${(r.missing || []).length} dependencies not installed.`);
+};
+// Install everything that's missing (Open Interpreter first, so he controls it).
+if (el("btn-install-missing")) el("btn-install-missing").onclick = async () => {
+  if (!window.api.butlerInstallMissing) { logToCenter("Installer unavailable.", { tag: "setup", err: true }); return; }
+  const btn = el("btn-install-missing"); btn.disabled = true; btn.textContent = "⚙️ Installing…";
+  logToCenter("⚙️ Installing missing dependencies…", { tag: "setup" });
+  let r; try { r = await window.api.butlerInstallMissing(); } catch (e) { r = { ok: false, error: String(e) }; }
+  btn.textContent = "⚙️ Install Missing"; btn.disabled = false;
+  logToCenter((r && r.ok) ? `Install done: ${r.installed || 0}/${(r.results || []).length} installed.` : `Install failed: ${(r && r.error) || "failed"}`, { tag: "setup", err: !(r && r.ok) });
+  if (el("btn-selfcheck")) el("btn-selfcheck").click(); // refresh the status
+};
+if (window.api.onSetupProgress) window.api.onSetupProgress(({ target, line }) => {
+  if (!line) return;
+  logToCenter(`${target ? target + ": " : ""}${line}`, { tag: "setup" });
+});
+if (el("btn-send-intro")) el("btn-send-intro").onclick = async () => {
+  if (!window.api.butlerSendIntro) { logToCenter("Intro unavailable.", { tag: "manager", err: true }); return; }
+  logToCenter("📣 Sending the intro to the AIs…", { tag: "manager" });
+  let r; try { r = await window.api.butlerSendIntro(); } catch (_) { r = null; }
+  if (r && r.ok) { logToCenter(`Intro sent to: ${r.targets.join(", ")}. They now know who the butler is and the rules.`, { tag: "manager" }); deviceSpeak("Introduction sent to the assistants."); }
+  else logToCenter(`Couldn't send intro: ${(r && r.error === "NO_TARGETS") ? "no AIs are enabled — check ChatGPT/Claude/Gemini up top." : (r && r.error) || "error"}`, { tag: "manager", err: true });
+};
+
+// Who's-speaking indicator: light the current speaker's chip in its colour.
+if (window.api.onVoiceSpeaking) window.api.onVoiceSpeaking(({ who, speaking }) => {
+  const chip = document.querySelector(`#speaking-indicator .spk-chip[data-who="${who}"]`);
+  if (chip) chip.classList.toggle("speaking", !!speaking);
+});
+
+// Talk to the butler by voice — fills the one task box (#jarvis-goal) and sends.
+// (The typed path is the Start Butler button below; feedback goes to the log.)
+async function deviceSendTask(text) {
+  const t = String(text || "").trim();
+  if (!t) { logToCenter("Type or say something for the butler first.", { tag: "manager" }); return; }
+  const r = await butlerHandle(t, { mirror: true }); // honours the mode toggle (converse/auto/self/delegate)
+  if (r && r.converse) return; // butlerConverse already reported
+  logToCenter(r && r.ok ? `🤵 Butler: on it — "${t.slice(0, 60)}"` : `Can't start the butler: ${(r && r.error) || "error"}${r && r.error === "NOT_CONFIGURED" ? " — give him a local model first." : ""}`, { tag: "manager", err: !(r && r.ok) });
+}
+async function deviceListenOnce() {
+  if (!window.api.voiceListen) { logToCenter("Voice engine not available.", { tag: "voice", err: true }); return null; }
+  logToCenter("🎤 Listening…", { tag: "voice" });
+  let r; try { r = await window.api.voiceListen({}); } catch (_) { r = null; }
+  if (r && r.ok && r.text && r.text.trim()) return r.text.trim();
+  logToCenter(r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.", { tag: "voice" });
+  return null;
+}
+if (el("btn-device-ptt")) el("btn-device-ptt").onclick = async () => {
+  const t = await deviceListenOnce();
+  if (t) { if (el("jarvis-goal")) el("jarvis-goal").value = t; deviceSendTask(t); }
+};
+let openMicOn = false;
+async function openMicLoop() {
+  while (openMicOn) {
+    const t = await deviceListenOnce();
+    if (!openMicOn) break;
+    if (t) deviceSendTask(t);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+if (el("device-openmic")) el("device-openmic").onchange = (e) => {
+  openMicOn = !!e.target.checked;
+  logToCenter(openMicOn ? "🎤 Open mic on — talk freely." : "Open mic off.", { tag: "voice" });
+  if (openMicOn) openMicLoop();
+};
+
+// Image Generation panel. Compact = prompt/negative/LoRA + Generate; expanding
+// (⤢ More) reveals a live preview, size/steps, a recent-renders strip, and the
+// connection config. There's also a button that opens the real SD web UI.
+// Wire a range slider to its value display (live) and return a getter.
+function wireSlider(rangeId, spanId) {
+  const r = el(rangeId), sp = el(spanId);
+  if (r) { const upd = () => { if (sp) sp.textContent = r.value; }; r.addEventListener("input", upd); upd(); }
+}
+function setSlider(rangeId, spanId, val) { const r = el(rangeId); if (r && val != null) { r.value = val; const sp = el(spanId); if (sp) sp.textContent = r.value; } }
+
+async function loadImagePanel() {
+  ["img-steps:img-steps-v", "img-cfg:img-cfg-v", "img-width:img-width-v", "img-height:img-height-v", "img-batch:img-batch-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
+  if (!window.api.imageStatus) return;
+  try {
+    const s = await window.api.imageStatus();
+    if (!s) return;
+    if (el("img-endpoint")) el("img-endpoint").value = s.endpoint || "";
+    if (el("img-enabled")) el("img-enabled").checked = !!s.enabled;
+    setSlider("img-steps", "img-steps-v", s.steps);
+    setSlider("img-cfg", "img-cfg-v", s.cfgScale);
+    setSlider("img-width", "img-width-v", s.width);
+    setSlider("img-height", "img-height-v", s.height);
+    setSlider("img-batch", "img-batch-v", s.batchCount);
+    if (el("img-seed") && s.seed != null) el("img-seed").value = s.seed;
+  } catch (_) {}
+}
+if (el("btn-img-seed-rand")) el("btn-img-seed-rand").onclick = () => { if (el("img-seed")) el("img-seed").value = "-1"; };
+function imgMsg(t) { if (el("img-msg")) el("img-msg").textContent = t; }
+
+// --- Generic 3-size panel state (minimal → middle → large) -------------------
+// The ◱ button cycles a panel's data-size; CSS shows/hides .when-mid/.when-large.
+// This is separate from the ⌄ tab-collapse (which hides the whole panel to a tab).
+const PANEL_SIZES = ["minimal", "middle", "large"];
+const SIZE_GLYPH = { minimal: "◱", middle: "◲", large: "◼" };
+function setPanelSize(panelId, btnId, size) {
+  const p = el(panelId); if (!p) return;
+  if (!PANEL_SIZES.includes(size)) size = "minimal";
+  p.setAttribute("data-size", size);
+  const b = el(btnId);
+  if (b) { const next = PANEL_SIZES[(PANEL_SIZES.indexOf(size) + 1) % PANEL_SIZES.length]; b.textContent = SIZE_GLYPH[size]; b.title = `Size: ${size} — click for ${next}`; }
+  uiLog("panel", { msg: `${panelId} size → ${size}` });
+}
+function cyclePanelSize(panelId, btnId) {
+  const cur = (el(panelId) && el(panelId).getAttribute("data-size")) || "minimal";
+  setPanelSize(panelId, btnId, PANEL_SIZES[(PANEL_SIZES.indexOf(cur) + 1) % PANEL_SIZES.length]);
+}
+if (el("btn-img-size")) el("btn-img-size").onclick = () => cyclePanelSize("col-image", "btn-img-size");
+if (el("btn-vid-size")) el("btn-vid-size").onclick = () => cyclePanelSize("col-video", "btn-vid-size");
+if (el("btn-img-open-ui")) el("btn-img-open-ui").onclick = () => {
+  const ep = (el("img-endpoint") && el("img-endpoint").value || "").trim() || "http://127.0.0.1:7860";
+  let base = ep;
+  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/sdapi.*$/, ""); }
+  if (window.api.openExternal) window.api.openExternal(base);
+};
+if (el("btn-img-save")) el("btn-img-save").onclick = async () => {
+  if (!window.api.configureImage) return;
+  const r = await window.api.configureImage({ enabled: !!(el("img-enabled") && el("img-enabled").checked), endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() });
+  imgMsg(r && r.ok ? (r.enabled ? "Saved — image generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+const imgHistory = [];
+function imgShowPreview(dataUrl, pathText) {
+  if (!dataUrl || !el("img-preview")) return;
+  el("img-preview").src = dataUrl;
+  el("img-preview").style.display = "block";
+  if (el("img-preview-empty")) el("img-preview-empty").style.display = "none";
+  setPanelSize("col-image", "btn-img-size", "large"); // grow to show the render
+  imgHistory.unshift({ dataUrl, pathText });
+  imgHistory.length = Math.min(imgHistory.length, 8);
+  const box = el("img-history");
+  if (box) {
+    box.innerHTML = "";
+    for (const it of imgHistory) {
+      const t = document.createElement("img");
+      t.src = it.dataUrl; t.title = it.pathText || "";
+      t.style.cssText = "width:44px;height:44px;object-fit:cover;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer";
+      t.onclick = () => imgShowPreview(it.dataUrl, it.pathText);
+      box.appendChild(t);
+    }
+  }
+}
+if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
+  if (!window.api.imageGenerate) return;
+  let prompt = (el("img-prompt") && el("img-prompt").value || "").trim();
+  const lora = (el("img-lora") && el("img-lora").value || "").trim();
+  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
+  const negative = (el("img-negative") && el("img-negative").value || "").trim();
+  if (!prompt) { imgMsg("Type a prompt first."); return; }
+  const cfg = { enabled: true, endpoint: (el("img-endpoint") && el("img-endpoint").value || "").trim() };
+  const num = (id) => Number(el(id) && el(id).value);
+  const w = num("img-width"), h = num("img-height"), st = num("img-steps"), cf = num("img-cfg"), bt = num("img-batch"), sd = num("img-seed");
+  if (w) cfg.width = w; if (h) cfg.height = h; if (st) cfg.steps = st;
+  if (cf) cfg.cfgScale = cf; if (bt) cfg.batchCount = bt; if (Number.isFinite(sd)) cfg.seed = sd;
+  if (window.api.configureImage) await window.api.configureImage(cfg);
+  imgMsg("Rendering…");
+  const r = await window.api.imageGenerate(prompt, negative);
+  if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
+  else imgMsg(`Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+};
+loadImagePanel();
+
+// Video Generation panel — same shape as Image (3 sizes + tab), wired to a local
+// text-to-video HTTP endpoint. minimal = prompt/negative; middle adds motion/LoRA
+// + frames/fps/size; large adds the clip preview, recent strip, and connection.
+async function loadVideoPanel() {
+  ["vid-frames:vid-frames-v", "vid-fps:vid-fps-v", "vid-steps:vid-steps-v", "vid-cfg:vid-cfg-v", "vid-motion:vid-motion-v"].forEach((p) => { const [r, s] = p.split(":"); wireSlider(r, s); });
+  if (!window.api.videoStatus) return;
+  try {
+    const s = await window.api.videoStatus();
+    if (!s) return;
+    if (el("vid-endpoint")) el("vid-endpoint").value = s.endpoint || "";
+    if (el("vid-enabled")) el("vid-enabled").checked = !!s.enabled;
+    if (el("vid-width") && s.width) el("vid-width").value = s.width;
+    if (el("vid-height") && s.height) el("vid-height").value = s.height;
+    if (el("vid-seed") && s.seed != null) el("vid-seed").value = s.seed;
+    setSlider("vid-frames", "vid-frames-v", s.frames);
+    setSlider("vid-fps", "vid-fps-v", s.fps);
+    setSlider("vid-steps", "vid-steps-v", s.steps);
+    setSlider("vid-cfg", "vid-cfg-v", s.cfgScale);
+    setSlider("vid-motion", "vid-motion-v", s.motion);
+  } catch (_) {}
+}
+if (el("btn-vid-seed-rand")) el("btn-vid-seed-rand").onclick = () => { if (el("vid-seed")) el("vid-seed").value = "-1"; };
+function vidMsg(t) { if (el("vid-msg")) el("vid-msg").textContent = t; }
+if (el("btn-vid-open-ui")) el("btn-vid-open-ui").onclick = () => {
+  const ep = (el("vid-endpoint") && el("vid-endpoint").value || "").trim() || "http://127.0.0.1:7860";
+  let base = ep;
+  try { const u = new URL(ep); base = `${u.protocol}//${u.host}`; } catch (_) { base = ep.replace(/\/[^/]*$/, ""); }
+  if (window.api.openExternal) window.api.openExternal(base);
+};
+if (el("btn-vid-save")) el("btn-vid-save").onclick = async () => {
+  if (!window.api.configureVideo) return;
+  const r = await window.api.configureVideo({ enabled: !!(el("vid-enabled") && el("vid-enabled").checked), endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() });
+  vidMsg(r && r.ok ? (r.enabled ? "Saved — video generation on." : "Saved — off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+const vidHistory = [];
+function vidShowPreview(src, pathText) {
+  if (!src || !el("vid-preview")) return;
+  el("vid-preview").src = src;
+  el("vid-preview").style.display = "block";
+  if (el("vid-preview-empty")) el("vid-preview-empty").style.display = "none";
+  setPanelSize("col-video", "btn-vid-size", "large");
+  vidHistory.unshift({ src, pathText });
+  vidHistory.length = Math.min(vidHistory.length, 8);
+  const box = el("vid-history");
+  if (box) {
+    box.innerHTML = "";
+    vidHistory.forEach((it, i) => {
+      const chip = document.createElement("button");
+      chip.textContent = `▶ clip ${vidHistory.length - i}`;
+      chip.title = it.pathText || "";
+      chip.style.cssText = "font-size:10.5px; padding:2px 6px;";
+      chip.onclick = () => vidShowPreview(it.src, it.pathText);
+      box.appendChild(chip);
+    });
+  }
+}
+if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
+  if (!window.api.videoGenerate) return;
+  let prompt = (el("vid-prompt") && el("vid-prompt").value || "").trim();
+  const lora = (el("vid-lora") && el("vid-lora").value || "").trim();
+  if (lora) prompt = prompt ? `${prompt} ${lora}` : lora;
+  const negative = (el("vid-negative") && el("vid-negative").value || "").trim();
+  if (!prompt) { vidMsg("Type a prompt first."); return; }
+  const cfg = { enabled: true, endpoint: (el("vid-endpoint") && el("vid-endpoint").value || "").trim() };
+  const num = (id) => Number(el(id) && el(id).value);
+  const w = num("vid-width"), h = num("vid-height"), fr = num("vid-frames"), fp = num("vid-fps"), st = num("vid-steps"), cf = num("vid-cfg"), mo = num("vid-motion"), sd = num("vid-seed");
+  if (w) cfg.width = w; if (h) cfg.height = h; if (fr) cfg.frames = fr; if (fp) cfg.fps = fp;
+  if (st) cfg.steps = st; if (cf) cfg.cfgScale = cf; if (Number.isFinite(mo)) cfg.motion = mo; if (Number.isFinite(sd)) cfg.seed = sd;
+  if (window.api.configureVideo) await window.api.configureVideo(cfg);
+  vidMsg("Rendering… (video can take a while)");
+  const r = await window.api.videoGenerate(prompt, negative);
+  if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
+  else vidMsg(`Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
+};
+loadVideoPanel();
+
+// Endpoint helpers (shared by Image + Video) so the user never has to guess a URL:
+// a preset dropdown, an auto-detect that scans localhost, and a reachability test.
+async function loadEndpointPresets(kind, selectId, endpointId, msgId) {
+  const sel = el(selectId);
+  if (!sel || !window.api.endpointPresets) return;
+  try {
+    const r = await window.api.endpointPresets(kind);
+    if (r && r.ok) for (const p of r.presets) { const o = document.createElement("option"); o.value = p.endpoint; o.textContent = p.label; sel.appendChild(o); }
+  } catch (_) {}
+  sel.onchange = () => { if (sel.value && el(endpointId)) { el(endpointId).value = sel.value; if (el(msgId)) el(msgId).textContent = "Filled in — press Save, then ✓ Test."; } };
+}
+async function detectEndpoint(kind, endpointId, selectId, msgId) {
+  if (!window.api.detectEndpoints) return;
+  if (el(msgId)) el(msgId).textContent = "Scanning localhost…";
+  let r; try { r = await window.api.detectEndpoints(kind); } catch (_) { r = null; }
+  const reach = (r && r.reachable) || [];
+  if (!reach.length) { if (el(msgId)) el(msgId).textContent = "Nothing found running. Start your image/video app (with its API on), or pick one above."; return; }
+  if (el(endpointId)) el(endpointId).value = reach[0].endpoint;
+  if (el(selectId)) el(selectId).value = reach[0].endpoint;
+  if (el(msgId)) el(msgId).textContent = `Found: ${reach[0].label} ✓ — press Save.${reach.length > 1 ? ` (+${reach.length - 1} more)` : ""}`;
+}
+async function testEndpointUi(endpointId, msgId) {
+  if (!window.api.testEndpoint) return;
+  const url = (el(endpointId) && el(endpointId).value || "").trim();
+  if (!url) { if (el(msgId)) el(msgId).textContent = "Enter or pick an address first."; return; }
+  if (el(msgId)) el(msgId).textContent = "Testing…";
+  let r; try { r = await window.api.testEndpoint(url); } catch (_) { r = null; }
+  if (el(msgId)) el(msgId).textContent = r && r.reachable ? "Reachable ✓ — the server answered." : "Not reachable — is the app running with its API enabled?";
+}
+loadEndpointPresets("image", "img-preset", "img-endpoint", "img-conn-msg");
+if (el("btn-img-detect")) el("btn-img-detect").onclick = () => detectEndpoint("image", "img-endpoint", "img-preset", "img-conn-msg");
+if (el("btn-img-test")) el("btn-img-test").onclick = () => testEndpointUi("img-endpoint", "img-conn-msg");
+loadEndpointPresets("video", "vid-preset", "vid-endpoint", "vid-conn-msg");
+if (el("btn-vid-detect")) el("btn-vid-detect").onclick = () => detectEndpoint("video", "vid-endpoint", "vid-preset", "vid-conn-msg");
+if (el("btn-vid-test")) el("btn-vid-test").onclick = () => testEndpointUi("vid-endpoint", "vid-conn-msg");
+
+// GPU Usage panel: poll "how much GPU are we using" and draw util + VRAM bars.
+function gpuEsc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function gpuBarClass(p) { return p >= 85 ? "hot" : p >= 60 ? "warn" : ""; }
+function renderGpu(info) {
+  const box = el("gpu-body");
+  if (!box) return;
+  if (!info || !info.available) {
+    box.innerHTML = `<div style="font-size:11.5px; opacity:.6;">GPU monitor unavailable${info && info.reason ? " — " + gpuEsc(info.reason) : ""}. (Needs an NVIDIA GPU with nvidia-smi.)</div>`;
+    return;
+  }
+  box.innerHTML = (info.gpus || []).map((g) => {
+    const util = g.util == null ? 0 : g.util;
+    const memPct = g.memPct == null ? 0 : g.memPct;
+    const mem = (g.memUsed != null && g.memTotal != null) ? `${(g.memUsed / 1024).toFixed(1)}/${(g.memTotal / 1024).toFixed(1)} GB` : "—";
+    return `<div class="gpu-row"><div class="gpu-name">${gpuEsc(g.name)}</div>
+      <div class="gpu-meter"><span class="lbl">GPU</span><span class="usage-bar ${gpuBarClass(util)}"><span style="width:${Math.max(0, Math.min(100, util))}%"></span></span><span class="val">${util}%</span></div>
+      <div class="gpu-meter"><span class="lbl">VRAM</span><span class="usage-bar ${gpuBarClass(memPct)}"><span style="width:${Math.max(0, Math.min(100, memPct))}%"></span></span><span class="val">${mem}</span></div></div>`;
+  }).join("");
+}
+async function pollGpu() {
+  if (!window.api.gpuInfo) { renderGpu(null); return; }
+  let info = null;
+  try { info = await window.api.gpuInfo(); } catch (_) { info = null; }
+  renderGpu(info);
+}
+pollGpu();
+setInterval(pollGpu, 2500);
 
 function lsiReflect(enabled) {
   if (el("lsi-enabled")) el("lsi-enabled").checked = !!enabled;
@@ -1084,21 +1940,443 @@ if (el("btn-lsi-models")) el("btn-lsi-models").onclick = lsiRefreshModels;
 if (el("btn-lsi-download")) el("btn-lsi-download").onclick = async () => {
   if (!window.api.ollamaPull) return;
   const model = el("lsi-download-model") ? el("lsi-download-model").value : "";
-  const st = el("lsi-download-status");
-  if (!model) { if (st) st.textContent = "Pick a model to download."; return; }
-  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { if (st) st.textContent = "Ollama isn't installed. Get it from ollama.com, then try again."; return; } }
-  if (st) st.textContent = `Starting download of ${model}…`;
+  if (!model) { logToCenter("Pick a model to download.", { tag: "models" }); return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { logToCenter("Ollama isn't installed. Get it from ollama.com, then try again.", { tag: "models", err: true }); return; } }
+  logToCenter(`⬇ Starting download of ${model}…`, { tag: "models" });
   const r = await window.api.ollamaPull(model);
-  if (st) st.textContent = r && r.ok ? `✓ ${model} installed.` : `⚠ ${(r && r.error) || "download failed"}`;
+  logToCenter(r && r.ok ? `✓ ${model} installed.` : `⚠ ${model}: ${(r && r.error) || "download failed"}`, { tag: "models", err: !(r && r.ok) });
   lsiRefreshModels();
 };
-if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { const st = el("lsi-download-status"); if (st && p && p.line) st.textContent = p.line; });
+if (window.api.onOllamaProgress) window.api.onOllamaProgress((p) => { if (p && p.line) logToCenter(p.line, { tag: "models" }); });
+// Pull ANY model by name — your choice; the app doesn't decide which model for you.
+if (el("btn-lsi-pull")) el("btn-lsi-pull").onclick = async () => {
+  if (!window.api.ollamaPull) return;
+  const model = (el("lsi-pull-name") && el("lsi-pull-name").value || "").trim();
+  if (!model) { logToCenter("Type a model name (e.g. llama3.1:8b, mistral, qwen2.5:7b).", { tag: "models" }); return; }
+  if (window.api.ollamaDetect) { const d = await window.api.ollamaDetect(); if (!d || !d.available) { logToCenter("Ollama isn't installed. Get it from ollama.com, then try again.", { tag: "models", err: true }); return; } }
+  logToCenter(`⬇ Starting download of ${model}…`, { tag: "models" });
+  const r = await window.api.ollamaPull(model);
+  logToCenter(r && r.ok ? `✓ ${model} installed.` : `⚠ ${model}: ${(r && r.error) || "download failed"}`, { tag: "models", err: !(r && r.ok) });
+  lsiRefreshModels();
+};
+// Populate the recommended-model picker (neutral, size-keyed suggestions).
+async function lsiLoadRecommended() {
+  const sel = el("lsi-download-model"); if (!sel || !window.api.ollamaRecommended) return;
+  try {
+    const uncensored = !!(el("lsi-uncensored") && el("lsi-uncensored").checked);
+    const r = await window.api.ollamaRecommended({ vramGB: null, uncensored });
+    const models = (r && r.models) || [];
+    sel.innerHTML = "";
+    for (const name of models) { const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o); }
+    if (el("lsi-recommend") && models.length) el("lsi-recommend").textContent = uncensored
+      ? "Uncensored models that still follow the butler's commands (Dolphin / Hermes) — or pull any other below."
+      : "Suggested local models — or pull any other by name below.";
+  } catch (_) {}
+}
+if (el("lsi-uncensored")) el("lsi-uncensored").onchange = () => { uiLog("click", { id: "lsi-uncensored", msg: el("lsi-uncensored").checked ? "prefer uncensored" : "default models" }); lsiLoadRecommended(); };
+lsiLoadRecommended();
+lsiRefreshModels();
+
+// Models & assets folder: show where it is, what's in it, and open it.
+async function loadModelsInfo() {
+  if (!window.api.modelsInfo) return;
+  try {
+    const info = await window.api.modelsInfo();
+    if (!info || !info.ok) return;
+    // Show the one findable folder; note that downloads live in its models/ subfolder.
+    if (el("models-path")) el("models-path").textContent = info.contentRoot || info.root || "(not ready)";
+    if (el("models-inventory")) {
+      const c = info.categories || {};
+      el("models-inventory").textContent = "Installed: " + ["llm", "image", "loras", "video", "voice", "assets"].map((k) => `${k} ${c[k] || 0}`).join(" · ");
+    }
+    if (el("models-ollama")) {
+      el("models-ollama").textContent = info.ollamaHere
+        ? "✓ Ollama is pointed at this folder — pulls land here."
+        : "Tip: set OLLAMA_MODELS to the llm/ folder so Ollama stores models here.";
+    }
+  } catch (_) {}
+  await loadModelsStore();
+}
+
+// Language-model storage: is the app's own Ollama running (so downloads land in
+// "stuff and thing"), and where do already-downloaded models currently live?
+async function loadModelsStore() {
+  const box = el("models-store-status");
+  if (!box || !window.api.ollamaManagedStatus) return;
+  try {
+    const st = await window.api.ollamaManagedStatus();
+    if (st && st.running) {
+      box.innerHTML = `<span style="color:#8ef0b0;">✓ New downloads are stored in this folder</span> — the app runs its own Ollama at <code>${gpuEsc(st.endpoint || "")}</code>.` +
+        (st.defaultStore ? `<br><span style="opacity:.75;">Models downloaded earlier may still be in <code>${gpuEsc(st.defaultStore)}</code> — use “Move downloaded models here”.</span>` : "");
+    } else {
+      box.innerHTML = `<span style="opacity:.8;">The app's own Ollama isn't running (Ollama may not be installed yet). New downloads go to Ollama's default store` +
+        (st && st.defaultStore ? ` <code>${gpuEsc(st.defaultStore)}</code>` : "") + `. Install Ollama, then reopen the app to store here.</span>`;
+    }
+  } catch (_) {}
+}
+if (el("btn-open-models")) el("btn-open-models").onclick = () => { if (window.api.openModelsFolder) window.api.openModelsFolder(); };
+// Move models already downloaded (Ollama's default store) into "stuff and thing".
+if (el("btn-ollama-migrate")) el("btn-ollama-migrate").onclick = async () => {
+  if (!window.api.ollamaMigrate) { logToCenter("Migration unavailable.", { tag: "models", err: true }); return; }
+  const btn = el("btn-ollama-migrate");
+  btn.disabled = true; logToCenter("📦 Moving downloaded models here…", { tag: "models" });
+  let r; try { r = await window.api.ollamaMigrate(); } catch (e) { r = { ok: false, error: String(e) }; }
+  logToCenter(r && r.ok
+    ? `✓ Models moved: ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}.`
+    : `⚠ Move failed: ${(r && r.error) || "error"}`, { tag: "models", err: !(r && r.ok) });
+  btn.disabled = false;
+  loadModelsInfo();
+};
+// Download all logs: gather every log the program writes into one folder + open it.
+if (el("btn-download-logs")) el("btn-download-logs").onclick = async () => {
+  if (!window.api.downloadAllLogs) { logToCenter("Log download unavailable.", { tag: "files", err: true }); return; }
+  const btn = el("btn-download-logs");
+  btn.disabled = true; logToCenter("📥 Gathering every log into one folder…", { tag: "files" });
+  let r; try { r = await window.api.downloadAllLogs(); } catch (e) { r = { ok: false, error: String(e) }; }
+  logToCenter(r && r.ok
+    ? `✓ ${r.count} file(s) bundled and opened: ${r.folder}`
+    : `⚠ Log bundle failed: ${(r && r.error) || "error"}`, { tag: "files", err: !(r && r.ok) });
+  btn.disabled = false;
+};
+loadModelsInfo();
+
+// --- Safeguards: approval mode + approve/reject a held action ------------------
+if (el("lsi-approval")) el("lsi-approval").onchange = async () => {
+  if (!window.api.configureManagerProvider) return;
+  const on = !!el("lsi-approval").checked;
+  const r = await window.api.configureManagerProvider({ approvalMode: on });
+  if (el("lsi-approval-msg")) el("lsi-approval-msg").textContent = r && r.ok ? (on ? "On — the butler will pause for your OK before acting." : "Off — the butler acts on its own (risk-“ask” tools still pause).") : `Couldn't save: ${(r && r.error) || "error"}`;
+};
+// The local LLM endpoint starts pre-filled with Ollama's fixed local address
+// (Ollama always runs on 127.0.0.1:11434, so nobody should have to type it). It
+// is fully erasable, and a real saved endpoint takes over.
+const DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:11434/v1/chat/completions";
+(async () => {
+  // Prefer the app's own Ollama (whose store is "stuff and thing") when it's up,
+  // so the butler and its downloads use the same server. Falls back to the
+  // standard local Ollama address otherwise. A saved endpoint still wins below.
+  let defaultEp = DEFAULT_LLM_ENDPOINT;
+  try {
+    if (window.api.ollamaManagedStatus) {
+      const st = await window.api.ollamaManagedStatus();
+      if (st && st.running && st.endpoint) defaultEp = `${st.endpoint}/v1/chat/completions`;
+    }
+  } catch (_) {}
+  if (el("lsi-endpoint") && !el("lsi-endpoint").value) el("lsi-endpoint").value = defaultEp;
+  if (!window.api.getManagerState) return;
+  try {
+    const s = await window.api.getManagerState();
+    if (s && s.managerConfig) {
+      if (el("lsi-approval")) el("lsi-approval").checked = !!s.managerConfig.approvalMode;
+      const savedEp = String(s.managerConfig.endpoint || "").trim();
+      if (savedEp && el("lsi-endpoint")) el("lsi-endpoint").value = savedEp; // a saved endpoint wins over the default
+      if (s.managerConfig.model && el("lsi-model")) {
+        const sel = el("lsi-model");
+        if (![...sel.options].some((o) => o.value === s.managerConfig.model)) { const o = document.createElement("option"); o.value = s.managerConfig.model; o.textContent = s.managerConfig.model; sel.appendChild(o); }
+        sel.value = s.managerConfig.model;
+      }
+    }
+  } catch (_) {}
+})();
+if (el("btn-approve")) el("btn-approve").onclick = async () => { if (window.api.approveManagerAction) await window.api.approveManagerAction(); };
+if (el("btn-reject")) el("btn-reject").onclick = async () => { if (window.api.rejectManagerAction) await window.api.rejectManagerAction("operator rejected"); };
+function renderPendingApproval(m) {
+  const box = el("lsi-pending"); if (!box) return;
+  const p = m && m.pendingApproval;
+  if (p) {
+    box.style.display = "";
+    const detail = p.action === "USE_TOOL" ? `${p.action}: ${p.tool}` : (p.action === "GENERATE_IMAGE" ? `${p.action}: "${(p.prompt || "").slice(0, 40)}"` : (p.assignments ? `${p.action} → ${p.assignments.map((a) => a.target).join(", ")}` : p.action));
+    if (el("lsi-pending-text")) el("lsi-pending-text").textContent = `⏸ Waiting for your OK: ${detail}`;
+  } else {
+    box.style.display = "none";
+  }
+}
+
+// --- System AI / Butler (the supervisor) --------------------------------------
+// Save the endpoint + model as the supervisor's provider config, then the butler
+// (manager) can be started with a goal. All of this drives existing IPC.
+function _managerConfigFromUI() {
+  return { provider: "openai-compatible", endpoint: (el("lsi-endpoint") && el("lsi-endpoint").value || "").trim(), model: (el("lsi-model") && el("lsi-model").value) || "" };
+}
+// Turn cryptic error codes into a plain next step, so it's clear what to do.
+function lsiFriendly(err) {
+  switch (err) {
+    case "NOT_CONFIGURED": return "Pick a model above (download one if the list is empty), then press “Save settings” — after that, Test.";
+    case "BAD_ENDPOINT": return "That endpoint doesn't look like a URL. Use e.g. http://127.0.0.1:11434/v1/chat/completions.";
+    case "TIMEOUT": return "No response — is your local model server (Ollama/LM Studio) actually running?";
+    case "unreachable": return "Couldn't reach that address — start your local model server, then Test again.";
+    default: return err ? `couldn't connect (${err}) — is the model server running?` : "couldn't connect.";
+  }
+}
+if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
+  if (!window.api.configureManagerProvider) return;
+  const cfg = _managerConfigFromUI();
+  if (!cfg.model) { if (el("lsi-msg")) el("lsi-msg").textContent = "Pick a model first (choose one, or download one above), then Save."; return; }
+  const r = await window.api.configureManagerProvider(cfg);
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Saved. Now press “Test” to check the connection, or type a goal for the Butler below." : `Save failed: ${lsiFriendly(r && r.error)}`;
+};
+if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
+  if (!window.api.testManagerConnection) return;
+  if (el("lsi-msg")) el("lsi-msg").textContent = "Testing connection…";
+  if (window.api.configureManagerProvider) await window.api.configureManagerProvider(_managerConfigFromUI());
+  const r = await window.api.testManagerConnection();
+  if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Connection OK — the Butler is ready." : `Test failed: ${lsiFriendly(r && r.error)}`;
+};
+
+function jarvisSetStatus(t) { if (el("jarvis-status")) el("jarvis-status").textContent = t; }
+function jarvisShowRunning(on) {
+  if (el("btn-jarvis-stop")) el("btn-jarvis-stop").style.display = on ? "" : "none";
+  if (el("btn-jarvis-start")) el("btn-jarvis-start").disabled = !!on;
+}
+// The Butler status light in the User Panel: glows while he's working, shows a
+// one-line "what he's doing", and jumps to his panel on click.
+function setButlerLight(cls, text) {
+  const b = el("btn-butler-status"); if (!b) return;
+  b.classList.remove("working", "needs", "error");
+  if (cls) b.classList.add(cls);
+  const t = b.querySelector(".txt"); if (t && text != null) t.textContent = text;
+}
+if (el("btn-butler-status")) el("btn-butler-status").onclick = () => {
+  uiLog("click", { id: "btn-butler-status", msg: "open butler" });
+  const panel = el("col-systemai");
+  if (panel) { panel.classList.remove("hidden-collapsed"); panel.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  const goal = el("jarvis-goal"); if (goal) try { goal.focus(); } catch (_) {}
+};
+if (el("btn-jarvis-start")) el("btn-jarvis-start").onclick = async () => {
+  if (!window.api.startManagedTask) return;
+  const goal = (el("jarvis-goal") && el("jarvis-goal").value || "").trim();
+  if (!goal) { jarvisSetStatus("Type a goal first."); return; }
+  if (el("jarvis-ack")) el("jarvis-ack").textContent = "";
+  jarvisSetStatus(butlerMode === "converse" ? "Asking…" : "Starting…");
+  const r = await butlerHandle(goal, { mirror: false }); // honours the mode toggle
+  if (r && r.converse) { jarvisSetStatus("Chatting."); return; }
+  if (r && r.ok) { jarvisShowRunning(true); jarvisSetStatus("Started."); }
+  else {
+    const hint = r && r.error === "NOT_CONFIGURED" ? " — set an endpoint + model above and press Save." : "";
+    jarvisSetStatus(`Can't start: ${(r && r.error) || "error"}${hint}`);
+  }
+};
+if (el("btn-jarvis-stop")) el("btn-jarvis-stop").onclick = async () => {
+  if (window.api.stopManagedTask) await window.api.stopManagedTask();
+  jarvisShowRunning(false); jarvisSetStatus("Stopped.");
+};
+if (window.api.onManagerAck) window.api.onManagerAck((a) => {
+  if (!a || !a.text) return;
+  if (el("jarvis-ack")) el("jarvis-ack").textContent = "🤵 " + a.text;
+  // A stall-break question is the butler asking ME for input — flag it amber.
+  if (/\?\s*$/.test(a.text) || /would you like|tell me|need (more|the)|waiting on/i.test(a.text)) setButlerLight("needs", "Butler needs you");
+});
+function renderAwareness(a) {
+  const box = el("jarvis-awareness"); if (!box) return;
+  if (!a || !a.panes) { box.textContent = ""; return; }
+  const parts = Object.keys(a.panes).map((site) => {
+    const p = a.panes[site];
+    const mark = !p.enabled ? "○" : p.available ? "🟢" : (p.rateLimited ? "⛔" : (p.busy ? "⏳" : "🟡"));
+    return `${mark} ${site}`;
+  });
+  box.textContent = "Awareness: " + parts.join("  ");
+}
+if (window.api.onManagerState) window.api.onManagerState((m) => {
+  if (!m) return;
+  const running = m.status && !["idle", "finished", "error"].includes(m.status);
+  jarvisShowRunning(running);
+  const bits = [`Status: ${m.status || "idle"}`];
+  if (m.turnNumber) bits.push(`turn ${m.turnNumber}/${m.maximumTurns}`);
+  if (m.codeRuns && m.codeRuns.length) bits.push(`${m.codeRuns.length} code run(s)`);
+  if (m.toolCalls && m.toolCalls.length) bits.push(`${m.toolCalls.length} tool call(s)`);
+  if (m.memories && m.memories.length) bits.push(`${m.memories.length} memory item(s)`);
+  jarvisSetStatus(bits.join(" · "));
+  // Drive the User Panel status light.
+  if (running) setButlerLight("working", `Butler: ${m.status}${m.turnNumber ? " · turn " + m.turnNumber : ""}`);
+  else if (m.status === "error") setButlerLight("error", "Butler stopped");
+  else setButlerLight("", m.status === "finished" ? "Butler done — idle" : "Butler idle");
+  renderAwareness(m.awareness);
+  renderPendingApproval(m);
+});
+// The butler chat/activity window, colour-coded by WHO is speaking:
+//   • system  — muted grey (infra/config)
+//   • butler  — his own reasoning/actions/status
+//   • chatgpt/claude/gemini — each AI in its own colour (incl. AI↔AI)
+//   • to-ME   — anything addressed to me (an AI's reply, or the butler asking me
+//               something): its own bright colour AND 2× the size.
+function appendButlerLine({ cls, who, text }) {
+  const box = el("jarvis-log"); if (!box) return;
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const row = document.createElement("div");
+  row.className = "bl-line " + (cls || "bl-butler");
+  const whoHtml = who ? `<span class="bl-who">${gpuEsc(who)}:</span> ` : "";
+  row.innerHTML = `${whoHtml}${gpuEsc(String(text == null ? "" : text).slice(0, 500))}`;
+  box.appendChild(row);
+  while (box.children.length > 140) box.removeChild(box.firstChild);
+  if (nearBottom) box.scrollTop = box.scrollHeight; // keep the latest in view (chat feel)
+}
+// Categories that are really the app/infra talking, not the butler himself.
+const BUTLER_SYSTEM_CATEGORIES = new Set(["config", "error"]);
+if (window.api.onManagerLog) window.api.onManagerLog((e) => {
+  if (!e) return;
+  const targetSite = Array.isArray(e.target) && e.target.length === 1 && SITE_LABELS[e.target[0]] ? e.target[0] : null;
+  if (e.category === "response" && targetSite) {
+    // An AI answered the butler — colour it as that AI.
+    appendButlerLine({ cls: "bl-" + targetSite, who: SITE_LABELS[targetSite], text: e.summary });
+  } else if (e.category === "response") {
+    // The butler delivering to ME (e.g. the stall-break question) — to-me, 2×.
+    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary });
+  } else if (BUTLER_SYSTEM_CATEGORIES.has(e.category)) {
+    appendButlerLine({ cls: "bl-system", who: "System", text: `${e.category}: ${e.summary || ""}` });
+  } else {
+    appendButlerLine({ cls: "bl-butler", who: "🤵 Butler", text: e.summary });
+  }
+});
+
+// N5 Tools: show the registry so the user sees what the butler can call.
+async function refreshToolsList() {
+  const box = el("jarvis-tools"); if (!box || !window.api.toolsList) return;
+  try {
+    const r = await window.api.toolsList();
+    const tools = (r && r.tools) || [];
+    box.textContent = tools.length
+      ? tools.map((t) => `• ${t.name}${t.risk === "ask" ? " (asks first)" : ""} — ${t.description}`).join("\n")
+      : "No tools loaded.";
+    box.style.whiteSpace = "pre-wrap";
+  } catch { /* leave default */ }
+}
+refreshToolsList();
+
+// N3 Memory: a summary line for the panel.
+async function refreshMemoryLine() {
+  const box = el("jarvis-memory"); if (!box || !window.api.memorySummary) return;
+  try {
+    const r = await window.api.memorySummary();
+    if (r && r.available) box.textContent = `Memory: ${r.total || 0} item(s) stored`;
+    else box.textContent = "Memory: off (SQLite unavailable)";
+  } catch { /* leave blank */ }
+}
+refreshMemoryLine();
+
+// N2 Voice: save/test config + push-to-talk + a distinct voice per speaker.
+const VOICE_WHO = ["butler", "chatgpt", "claude", "gemini"];
+function _voiceConfigFromUI() {
+  const voices = {};
+  for (const who of VOICE_WHO) voices[who] = (el(`voice-v-${who}`) && el(`voice-v-${who}`).value || "").trim();
+  return {
+    enabled: !!(el("voice-enabled") && el("voice-enabled").checked),
+    speakOnAck: !!(el("voice-enabled") && el("voice-enabled").checked),
+    endpoint: (el("voice-endpoint") && el("voice-endpoint").value || "").trim(),
+    voices,
+    micDevice: (el("voice-mic") && el("voice-mic").value) || "",
+    speakerDevice: (el("voice-speaker") && el("voice-speaker").value) || "",
+  };
+}
+function voiceMsg(t) { if (el("voice-msg")) el("voice-msg").textContent = t; }
+// Load saved voice config into the fields, and enumerate the machine's mics/speakers.
+async function loadVoicePanel() {
+  if (window.api.voiceStatus) {
+    try {
+      const s = await window.api.voiceStatus();
+      if (s) {
+        if (el("voice-endpoint")) el("voice-endpoint").value = s.endpoint || "";
+        if (el("voice-enabled")) el("voice-enabled").checked = !!s.enabled;
+        for (const who of VOICE_WHO) if (el(`voice-v-${who}`) && s.voices) el(`voice-v-${who}`).value = s.voices[who] || "";
+      }
+    } catch (_) {}
+  }
+  // Populate the mic + speaker dropdowns from the real audio devices on this PC.
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const fill = (selId, kind) => {
+        const sel = el(selId); if (!sel) return;
+        for (const d of devs.filter((x) => x.kind === kind)) { const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || `${kind} ${sel.length}`; sel.appendChild(o); }
+      };
+      fill("voice-mic", "audioinput");
+      fill("voice-speaker", "audiooutput");
+    }
+  } catch (_) {}
+}
+loadVoicePanel();
+// ▶ try-buttons: hear each speaker's assigned voice.
+for (const who of VOICE_WHO) {
+  const b = el(`btn-voice-try-${who}`);
+  if (b) b.onclick = async () => {
+    if (!window.api.configureVoice || !window.api.voiceSpeak) return;
+    await window.api.configureVoice(_voiceConfigFromUI());
+    voiceMsg(`Speaking as ${who}…`);
+    const r = await window.api.voiceSpeak(`This is the ${who} voice.`, who);
+    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${(r && r.error) || "error"}`);
+  };
+}
+if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
+  if (!window.api.configureVoice) return;
+  const r = await window.api.configureVoice(_voiceConfigFromUI());
+  voiceMsg(r && r.ok ? (r.enabled ? "Saved — voice on." : "Saved — voice off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-voice-test")) el("btn-voice-test").onclick = async () => {
+  if (!window.api.configureVoice || !window.api.voiceSpeak) return;
+  await window.api.configureVoice(_voiceConfigFromUI());
+  voiceMsg("Speaking a test line…");
+  const r = await window.api.voiceSpeak("AutoInjector voice is working.");
+  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-mic")) el("btn-mic").onclick = async () => {
+  if (!window.api.voiceListen) return;
+  voiceMsg("Listening…");
+  const r = await window.api.voiceListen({});
+  if (r && r.ok && r.text) {
+    if (el("jarvis-goal")) el("jarvis-goal").value = r.text;
+    voiceMsg(`Heard: "${String(r.text).slice(0, 60)}" — press Start Butler.`);
+  } else {
+    voiceMsg(`Couldn't hear you: ${(r && r.error) || "error"}`);
+  }
+};
 
 // User Panel: 🧙 Setup -> open the Setup Wizard window (downloads run in bg).
 if (el("btn-open-wizard")) el("btn-open-wizard").onclick = () => { if (window.api.openWizard) window.api.openWizard(); };
+// Image / Video paddles: open the Setup Wizard straight to their own tab.
+if (el("btn-open-image")) el("btn-open-image").onclick = () => { if (window.api.openWizard) window.api.openWizard("images"); };
+if (el("btn-open-video")) el("btn-open-video").onclick = () => { if (window.api.openWizard) window.api.openWizard("video"); };
 
 // Open the consolidated AI feed window.
 if (el("btn-open-feed")) el("btn-open-feed").onclick = () => { if (window.api.openFeed) window.api.openFeed(); };
+
+// --- Phone companion: a minimal page served by the local bridge that a phone on
+// the same Wi-Fi can open to watch the messages and send. The PC does the work.
+async function refreshPhonePanel() {
+  if (!window.api || !window.api.phoneInfo) return;
+  let info = {};
+  try { info = await window.api.phoneInfo(); } catch (_) {}
+  const toggle = el("phone-lan-toggle");
+  const urlEl = el("phone-url");
+  const copyBtn = el("btn-phone-copy");
+  if (toggle) toggle.checked = !!info.lanEnabled;
+  if (urlEl) {
+    if (info.lanEnabled && info.url) urlEl.value = info.url;
+    else if (!info.lanEnabled) urlEl.value = "";
+    urlEl.placeholder = info.lanEnabled ? (info.lanIp ? "" : "No Wi-Fi address found — connect to a network") : "Enable LAN access to get a link";
+  }
+  if (copyBtn) copyBtn.disabled = !(info.lanEnabled && info.url);
+}
+if (el("btn-open-phone")) el("btn-open-phone").onclick = async () => {
+  const panel = el("phone-panel");
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) await refreshPhonePanel();
+};
+if (el("phone-lan-toggle")) el("phone-lan-toggle").onchange = async (e) => {
+  const on = !!e.target.checked;
+  const hint = el("phone-hint");
+  if (hint) hint.textContent = on ? "Starting network access…" : "LAN access off — phone can't connect.";
+  try { if (window.api.phoneSetLan) await window.api.phoneSetLan(on); } catch (_) {}
+  await refreshPhonePanel();
+  if (hint) hint.textContent = on
+    ? "Open the link below on your phone (same Wi-Fi). The PC does all the work — the phone just shows messages and lets you send."
+    : "LAN access off — phone can't connect.";
+};
+if (el("btn-phone-copy")) el("btn-phone-copy").onclick = async () => {
+  const urlEl = el("phone-url");
+  if (!urlEl || !urlEl.value) return;
+  try { await navigator.clipboard.writeText(urlEl.value); } catch (_) { try { urlEl.select(); document.execCommand("copy"); } catch (_) {} }
+  const b = el("btn-phone-copy"); if (b) { const t = b.textContent; b.textContent = "✓ Copied"; setTimeout(() => { b.textContent = t; }, 1400); }
+};
 
 // User Panel: 🆕 Start New Chat -> fresh session in all three AI panes at once.
 if (el("btn-new-chat-all")) el("btn-new-chat-all").onclick = async () => {
@@ -1133,6 +2411,13 @@ el("btn-stop-all").onclick = async () => {
   if (res?.ok) { applyGlobal(res.global); setStatus("Stopped — all participants unchecked."); }
   // if a House Rules run was active, main.js follows up with its own
   // houserule-state broadcast (mode kept, active:false) — nothing to force here
+};
+// The big "stop them talking to each other" button — halts every relay path at
+// once (Auto, House Rules, Sequence, Butler) but keeps your participants checked.
+if (el("btn-silence")) el("btn-silence").onclick = async () => {
+  if (!window.api.silenceAll) return;
+  const res = await window.api.silenceAll();
+  if (res?.ok) { applyGlobal(res.global); setStatus("🛑 Stopped — the AIs are no longer messaging each other."); }
 };
 
 // The Tuner: runs the 🧪 connectivity check on all 3 sites, then a genuine
@@ -1322,6 +2607,27 @@ el("btn-clear").onclick = async () => {
   if (res?.ok) renderTranscript([]);
 };
 
+// Extract All: save the whole conversation + the full activity/error log to one
+// text file in the program's logs folder (main writes it; nothing is truncated).
+el("btn-extract-all").onclick = async () => {
+  const status = el("extract-status");
+  const btn = el("btn-extract-all");
+  if (status) status.textContent = "Extracting…";
+  if (btn) btn.disabled = true;
+  try {
+    const res = await window.api.extractAllLogs();
+    if (res && res.ok) {
+      if (status) status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`;
+    } else if (status) {
+      status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
+    }
+  } catch (e) {
+    if (status) status.textContent = `Extract failed: ${e && e.message ? e.message : e}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
 (async () => {
   buildComposerButtons();
   buildRoleAssignment();
@@ -1348,3 +2654,307 @@ el("btn-clear").onclick = async () => {
   bookforgeRefresh();
   setInterval(bookforgeRefresh, 4000);
 })();
+
+// ---------------------------------------------------------------------------
+// ⌨ Terminal — the Command Prompt connection (third zone of the User Panel).
+// main.js owns the shell (terminal-provider.js); this just renders its output
+// stream, the AI approval strip, and sends what you type. Every call is
+// guarded so an older main process (or the test harness) without the terminal
+// API simply leaves the zone inert instead of breaking the whole panel.
+// ---------------------------------------------------------------------------
+const termUI = {
+  history: [],        // your past commands, newest last (↑/↓ to recall)
+  histPos: -1,
+  running: false,     // something is running right now -> Enter answers it instead
+  maxChars: 120000,   // view cap; the shell keeps its own scrollback in main
+};
+function termApi(name) {
+  return window.api && typeof window.api[name] === "function" ? window.api[name] : null;
+}
+function termAppend(chunk, stream) {
+  const out = el("term-output");
+  if (!out || !chunk) return;
+  const nearBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+  const span = document.createElement("span");
+  if (stream === "stderr") span.className = "t-err";
+  else if (stream === "system") span.className = "t-sys";
+  span.textContent = chunk;
+  out.appendChild(span);
+  // Keep the DOM bounded: drop the oldest spans once the view gets huge.
+  while (out.textContent.length > termUI.maxChars && out.firstChild) out.removeChild(out.firstChild);
+  if (nearBottom) out.scrollTop = out.scrollHeight;
+}
+function renderTermPending(pending) {
+  const box = el("term-pending");
+  const badge = el("term-pending-badge");
+  if (!box) return;
+  box.innerHTML = "";
+  const list = Array.isArray(pending) ? pending : [];
+  if (badge) {
+    badge.textContent = String(list.length);
+    if (list.length) badge.removeAttribute("data-zero"); else badge.setAttribute("data-zero", "");
+  }
+  for (const req of list) {
+    const row = document.createElement("div");
+    row.className = "term-req" + (req.risk === "dangerous" ? " dangerous" : "");
+    const head = document.createElement("div");
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = req.label || req.from;
+    head.appendChild(who);
+    head.appendChild(document.createTextNode(` wants to run${req.commands.length === 1 ? "" : ` ${req.commands.length} commands`}:`));
+    row.appendChild(head);
+    const code = document.createElement("code");
+    code.textContent = req.commands.join("\n");
+    row.appendChild(code);
+    if (req.risk === "dangerous") {
+      const why = document.createElement("div");
+      why.className = "why";
+      why.textContent = `⚠ ${req.reason}`;
+      why.title = `Careful — this ${req.reason}.`;
+      row.appendChild(why);
+    }
+    const acts = document.createElement("div");
+    acts.className = "acts";
+    const run = document.createElement("button");
+    run.className = "primary";
+    run.textContent = "▶ Run";
+    run.onclick = async () => {
+      run.disabled = true; rej.disabled = true;
+      const fn = termApi("terminalApprove");
+      const r = fn ? await fn(req.id).catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) { termAppend(`[couldn't run request: ${(r && r.error) || "error"}]\n`, "stderr"); run.disabled = false; rej.disabled = false; }
+    };
+    const rej = document.createElement("button");
+    rej.textContent = "✕ Reject";
+    rej.onclick = async () => {
+      run.disabled = true; rej.disabled = true;
+      const fn = termApi("terminalReject");
+      const r = fn ? await fn(req.id, "").catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) { termAppend(`[couldn't reject request: ${(r && r.error) || "error"}]\n`, "stderr"); run.disabled = false; rej.disabled = false; }
+    };
+    acts.appendChild(run);
+    acts.appendChild(rej);
+    row.appendChild(acts);
+    box.appendChild(row);
+  }
+}
+function applyTerminalState(st) {
+  if (!st) return;
+  const dot = el("term-dot");
+  termUI.running = !!st.running;
+  if (dot) {
+    dot.className = "term-dot" + (st.running ? " busy" : st.alive ? " alive" : "");
+    dot.title = st.running ? `Running: ${st.running.command}` : st.alive ? "Shell ready" : "Shell not started (starts on your first command)";
+  }
+  const input = el("term-input");
+  if (input) {
+    input.classList.toggle("answering", termUI.running);
+    input.placeholder = termUI.running
+      ? "A command is running — type here to answer its prompt (e.g. y), or ■ Stop"
+      : "Type a command and press Enter…";
+  }
+  const auto = el("cb-term-autorun");
+  if (auto) auto.checked = !!st.autoRunAI;
+  const send = el("btn-term-send");
+  if (send) send.disabled = !st.hasLastUserResult;
+  renderTermPending(st.pending);
+}
+async function termSubmit(fromCompose) {
+  const input = el("term-input");
+  if (!input && fromCompose == null) return;
+  const text = fromCompose != null ? String(fromCompose) : input.value;
+  if (!text.trim() && !termUI.running) return;
+  if (fromCompose == null) input.value = "";
+  termUI.histPos = -1;
+  try {
+    if (termUI.running) {
+      // Something is running: Enter feeds its stdin (answering a y/n prompt).
+      const fn = termApi("terminalInput");
+      const r = fn ? await fn(text) : { ok: false, error: "NO_API" };
+      if (!r || !r.ok) termAppend(`[couldn't send input: ${(r && r.error) || "error"}]\n`, "stderr");
+      return;
+    }
+    if (termUI.history[termUI.history.length - 1] !== text) termUI.history.push(text);
+    if (termUI.history.length > 200) termUI.history.shift();
+    const fn = termApi("terminalRun");
+    if (!fn) { termAppend("[terminal not available in this build]\n", "stderr"); return; }
+    const r = await fn(text);
+    const res = r && r.result;
+    if (res && res.error && res.error !== "NONZERO_EXIT") termAppend(`[${res.error}${res.detail ? `: ${res.detail}` : ""}]\n`, res.error === "TIMEOUT" ? "system" : "stderr");
+    else if (res && res.exitCode) termAppend(`[exit ${res.exitCode}]\n`, "system");
+  } catch (e) {
+    termAppend(`[terminal error: ${e && e.message ? e.message : e}]\n`, "stderr");
+  }
+}
+function wireTerminal() {
+  const tabT = el("tab-terminal"), tabM = el("tab-messages");
+  const paneT = el("term-pane"), paneM = el("messages-pane");
+  const show = (which) => {
+    const term = which === "terminal";
+    if (paneT) paneT.hidden = !term;
+    if (paneM) paneM.hidden = term;
+    if (tabT) { tabT.classList.toggle("active", term); tabT.setAttribute("aria-selected", String(term)); }
+    if (tabM) { tabM.classList.toggle("active", !term); tabM.setAttribute("aria-selected", String(!term)); }
+    if (term && el("term-input")) el("term-input").focus();
+  };
+  if (tabT) tabT.onclick = () => show("terminal");
+  if (tabM) tabM.onclick = () => show("messages");
+
+  const input = el("term-input");
+  if (input) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); termSubmit(); return; }
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        if (!termUI.history.length || termUI.running) return;
+        e.preventDefault();
+        if (termUI.histPos === -1) termUI.histPos = termUI.history.length;
+        termUI.histPos = Math.max(0, Math.min(termUI.history.length, termUI.histPos + (e.key === "ArrowUp" ? -1 : 1)));
+        input.value = termUI.history[termUI.histPos] || "";
+      }
+    });
+  }
+  if (el("btn-term-run")) el("btn-term-run").onclick = () => termSubmit();
+  if (el("btn-term-stop")) el("btn-term-stop").onclick = async () => {
+    const fn = termApi("terminalStop");
+    if (fn) { const r = await fn(true).catch((e) => ({ ok: false, error: String(e) })); if (!r || !r.ok) termAppend(`[stop failed: ${(r && r.error) || "error"}]\n`, "stderr"); }
+  };
+  if (el("btn-term-clear")) el("btn-term-clear").onclick = () => {
+    el("term-output").innerHTML = "";
+    const fn = termApi("terminalClear"); if (fn) fn().catch(() => {});
+  };
+  if (el("btn-open-lockers")) el("btn-open-lockers").onclick = async () => {
+    const fn = termApi("openLockers");
+    const r = fn ? await fn().catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+    termAppend(r && r.ok ? `[opened the AI lockers folder: ${r.path}]\n` : `[couldn't open the lockers folder: ${(r && r.error) || "error"}]\n`, r && r.ok ? "system" : "stderr");
+  };
+  if (el("cb-term-autorun")) el("cb-term-autorun").onchange = async (e) => {
+    const on = !!e.target.checked;
+    const fn = termApi("terminalSettings");
+    const r = fn ? await fn({ autoRunAI: on }).catch(() => null) : null;
+    if (!r || !r.ok) e.target.checked = !on;
+    else termAppend(`[AI scripts ${on ? "now run without asking" : "ask before running again"} — file commands inside each AI's own locker never ask]\n`, "system");
+  };
+  if (el("btn-term-send")) el("btn-term-send").onclick = async () => {
+    const t = el("term-send-target").value;
+    const targets = t === "all" ? SITES.filter((s) => s) : [t];
+    const fn = termApi("terminalSendOutput");
+    const r = fn ? await fn(targets).catch((e) => ({ ok: false, error: String(e) })) : { ok: false, error: "NO_API" };
+    termAppend(r && r.ok ? `[sent your last output to ${t === "all" ? "all AIs" : t}]\n` : `[send failed: ${(r && r.error) || "error"}]\n`, r && r.ok ? "system" : "stderr");
+  };
+
+  if (termApi("onTerminalData")) window.api.onTerminalData((p) => p && termAppend(p.chunk, p.stream));
+  if (termApi("onTerminalState")) window.api.onTerminalState((st) => applyTerminalState(st));
+  const getSt = termApi("terminalState");
+  if (getSt) {
+    getSt().then((r) => {
+      if (!r || !r.ok) return;
+      if (r.scrollback) termAppend(r.scrollback, "stdout");
+      applyTerminalState(r.state);
+    }).catch(() => {});
+  }
+}
+try { wireTerminal(); } catch (e) { console.error("terminal UI init failed", e); }
+
+// ---------------------------------------------------------------------------
+// Compose box doubles as a command prompt. Nothing about sending to the AIs
+// changes: type, click an AI's name, it goes to that AI. The extra:
+//   Enter        -> run the text as a Command Prompt command (output shows in
+//                   the ⌨ Terminal next to it; the box clears)
+//   Shift+Enter  -> a new line, as before
+//   Ctrl+Enter   -> force-run even if it looks like a sentence
+// Guard: text that reads like a message to an AI (a question, or a long
+// sentence that doesn't start with a known command) is NOT run on plain Enter
+// — you get a hint instead, so a habit-Enter never fires English at cmd.exe.
+// ---------------------------------------------------------------------------
+const KNOWN_COMMANDS = new Set(("dir cd chdir cls copy xcopy robocopy move ren rename del erase md mkdir rd rmdir type echo set where " +
+  "ipconfig ping tracert nslookup netstat tasklist taskkill systeminfo hostname whoami ver tree find findstr sort more attrib " +
+  "start call exit pushd popd path title color date time sc schtasks reg wmic powershell pwsh cmd curl wget tar " +
+  "git npm npx node python py pip pip3 winget choco code dotnet java javac go cargo rustc docker ollama ls pwd cat grep " +
+  "make cmake gcc yarn pnpm deno bun gh az aws gcloud kubectl").split(" "));
+function looksLikeCommand(text) {
+  const t = String(text || "").trim();
+  if (!t || /[\r\n]/.test(t)) return false;            // multi-line = a message
+  const first = t.split(/\s+/)[0].toLowerCase();
+  if (/^[.\\/]|^[a-z]:[\\/]|\.(exe|bat|cmd|ps1|py|js)$/i.test(first)) return true; // a path or script
+  if (KNOWN_COMMANDS.has(first.replace(/\.exe$/, ""))) return true;
+  return false;
+}
+function wireComposeCommands() {
+  const box = el("composer-text");
+  if (!box) return;
+  box.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    const text = box.value.trim();
+    if (!text) return;
+    const force = e.ctrlKey || e.metaKey;
+    e.preventDefault();
+    const answering = termUI.running && text.length <= 20; // e.g. "y" to a running command's prompt
+    if (!force && !answering && !looksLikeCommand(text)) {
+      setStatus("That looks like a message — click an AI's name to send it. (Ctrl+Enter runs it as a command anyway; Shift+Enter = new line.)");
+      return;
+    }
+    if (/[\r\n]/.test(text)) { setStatus("Commands are one line — remove the line breaks, or click an AI's name to send it as a message."); return; }
+    box.value = "";
+    try { updateCharCount(); } catch (_) {}
+    if (el("tab-terminal")) el("tab-terminal").click();   // show where the output lands
+    if (el("term-input")) box.focus();                     // keep typing in Compose
+    setStatus(`Running: ${text}`);
+    if (termUI.history[termUI.history.length - 1] !== text) termUI.history.push(text);
+    termSubmit(text).then(() => setStatus("Ready.")).catch(() => {});
+  });
+}
+try { wireComposeCommands(); } catch (e) { console.error("compose command init failed", e); }
+try { wireLockers(); } catch (e) { console.error("locker browser init failed", e); }
+
+// ---- 🔬 Feature Test button: run / stop, live progress, results pop-up ----
+let featureTestRunning = false;
+function wireFeatureTest() {
+  const btn = el("btn-feature-test");
+  if (!btn || typeof window.api.runFeatureTest !== "function") return;
+  const idleText = btn.textContent;
+  if (typeof window.api.onFeatureTestProgress === "function") {
+    window.api.onFeatureTestProgress((p) => {
+      if (!p || !featureTestRunning) return;
+      if (p.status === "running") {
+        btn.textContent = `■ Stop test ${p.index + 1}/${p.total}`;
+        setStatus(`Feature test ${p.index + 1}/${p.total}: ${SITE_LABELS[p.site] || p.site} — ${p.step}…`);
+      } else if (p.status === "pass" || p.status === "fail" || p.status === "skip") {
+        const icon = p.status === "pass" ? "✅" : p.status === "fail" ? "❌" : "⚪";
+        logToCenter(`🔬 ${icon} ${SITE_LABELS[p.site] || p.site} — ${p.step}${p.detail ? `: ${p.detail}` : ""}`, { tag: "roundtable", err: p.status === "fail" });
+      }
+    });
+  }
+  btn.onclick = async () => {
+    if (featureTestRunning) {
+      btn.textContent = "Stopping…";
+      try { await window.api.stopFeatureTest(); } catch (_) {}
+      return;
+    }
+    if (!window.confirm("Run the Feature Test?\n\nEach Active AI gets about 8 short test messages, one at a time (a few minutes per AI). It writes test files into their lockers and briefly turns off Auto forwarding while it runs (restored after). Click the button again to stop.")) return;
+    featureTestRunning = true;
+    btn.classList.add("danger");
+    btn.textContent = "■ Stop test";
+    logToCenter("🔬 Feature test started — each AI gets one test at a time; results land here and in a pop-up.", { tag: "roundtable" });
+    let r;
+    try { r = await window.api.runFeatureTest(); } catch (e) { r = { ok: false, error: String(e) }; }
+    featureTestRunning = false;
+    btn.classList.remove("danger");
+    btn.textContent = idleText;
+    if (!r || !r.ok) {
+      setStatus(`Feature test couldn't run: ${(r && r.error) || "error"}`);
+      logToCenter(`🔬 Feature test couldn't run: ${(r && r.error) || "error"}`, { tag: "roundtable", err: true });
+      return;
+    }
+    const skipped = r.total - r.okCount - r.failCount;
+    const summary = `🔬 Feature test ${r.stopped ? "stopped" : "done"} — ${r.okCount}/${r.total} passed${r.failCount ? `, ${r.failCount} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}.${r.report ? ` Report: ${r.report}` : ""}`;
+    logToCenter(summary, { tag: "roundtable", err: r.failCount > 0 });
+    setStatus(summary);
+    openCapModal({ checks: r.checks, okCount: r.okCount, failCount: r.failCount, total: r.total });
+    const title = el("cap-modal-title");
+    if (title) title.textContent = "🔬 Feature test results";
+    const sub = el("cap-modal-sub");
+    if (sub) sub.textContent = `${r.okCount}/${r.total} features worked${r.failCount ? `, ${r.failCount} not working` : ""}${skipped ? `, ${skipped} skipped` : ""}. Full report (incl. how each AI's replies really end): ${r.report || "not saved"}`;
+  };
+}
+try { wireFeatureTest(); } catch (e) { console.error("feature test init failed", e); }

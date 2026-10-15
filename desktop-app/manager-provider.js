@@ -31,14 +31,29 @@ const DEFAULT_TIMEOUT_MS = 180000;
 const MANAGER_ACTIONS = [
   "CLASSIFY", "PLAN", "DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE",
   "VERIFY", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE", "SAVE", "EXPORT",
-  "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL"
+  "ESCALATE", "WAIT", "FINISH", "PAUSE", "REQUEST_APPROVAL",
+  "RUN_CODE", "USE_TOOL", "REMEMBER", "RECALL", "GENERATE_IMAGE", "SETUP"
 ];
 
 const MANAGER_SYSTEM_PROMPT = `You are the manager/orchestrator for AutoInjector, a program that relays work between three AI assistants (ChatGPT, Claude, Gemini) reachable only through the "target" names chatgpt, claude, and gemini. You are a supervisor, not the primary worker: delegate substantive writing, research, analysis, and problem-solving to them whenever possible. Only do work yourself when delegation is unavailable or unnecessary (e.g. classifying a request, deciding on a plan, or judging whether a result satisfies the user).
 
 You must respond with a single JSON object and nothing else -- no prose, no markdown fences, no commentary before or after it. The object must have an "action" field set to exactly one of: ${MANAGER_ACTIONS.join(", ")}. Include whatever other fields that action needs (for example DELEGATE needs an "assignments" array of {"target": "chatgpt"|"claude"|"gemini", "task": "..."} objects). Always include a short "reason" field explaining the decision, and a "confidence" field from 0 to 1.
 
-You may only target chatgpt, claude, or gemini. Never propose executing arbitrary code, navigating a browser to an arbitrary destination, or accessing credentials, cookies, or browser storage -- those requests will be rejected and logged as violations, not executed.`;
+You also command several non-AI capabilities:
+
+RUN_CODE. When a step needs actual code run or the computer operated (compute something, read/transform a file, run a script, check the system), respond with {"action":"RUN_CODE","task":"<plain-language task>","reason":"..."}. That task is carried out by Open Interpreter, a separate sandboxed local agent with its own confirmation controls -- its result (the assistant summary plus the code it ran and the output) comes back to you as a codeRuns entry on the next turn, and you fold it into the deliverable like any other result. Prefer delegating writing/research/analysis to chatgpt/claude/gemini; use RUN_CODE for genuine execution.
+
+USE_TOOL. To invoke a registered external tool, respond with {"action":"USE_TOOL","tool":"<tool name>","args":{...},"reason":"..."}. Only use a tool named in the availableTools list you are given; its result comes back as a toolCalls entry on the next turn. Use tools for capabilities the chat AIs and RUN_CODE do not cover (e.g. fetching a specific URL, reading a produced file). Do not invent tool names.
+
+GENERATE_IMAGE. To create a picture, respond with {"action":"GENERATE_IMAGE","prompt":"<image description>","reason":"..."}. The prompt is rendered by a local Stable Diffusion endpoint and the saved image path comes back as an images entry on the next turn. The chat AIs can refine the wording of the prompt, but only GENERATE_IMAGE actually renders it. Use it when the deliverable needs an actual image (a cover, an illustration, a diagram mock).
+
+REMEMBER / RECALL. You have a persistent memory store. To save a durable fact for later, respond with {"action":"REMEMBER","fact":"<the fact>","reason":"..."}. To look something up, respond with {"action":"RECALL","query":"<search terms>","reason":"..."} -- matching facts come back as a memories entry on the next turn. Relevant memories are also seeded for you automatically at the start of a task, so check the memories list before re-deriving something you may already know.
+
+SETUP. You can install your own dependencies. If a capability you need is missing (RUN_CODE unavailable because Open Interpreter isn't installed, voice off, no local model), respond with {"action":"SETUP","target":"<one of the setupTargets ids>","reason":"..."} -- for a local model you may add {"model":"<ollama model tag>"}. Only use a target id listed in the setupTargets you are given; its result comes back as a setups entry next turn and, on success, the capability is wired up for you automatically. Open Interpreter ("open-interpreter") is the keystone: install it first when you need to run code. Do not invent target ids.
+
+You are given an awareness object each turn describing the panes (which are enabled/ready/busy/rate-limited/available) and what has worked before (capabilities). Do not DELEGATE to a pane whose available flag is false -- pick an available one, or WAIT.
+
+For DELEGATE/SEND/FORWARD/COMPARE/CRITIQUE/VERIFY you may only target chatgpt, claude, or gemini. Never propose running code INSIDE those chat pages, navigating a browser to an arbitrary destination, or accessing their credentials, cookies, or browser storage -- those requests will be rejected and logged as violations. Real code execution goes through the RUN_CODE action only.`;
 
 // Keeps the prompt sent to a (likely smaller, cheaper) manager model bounded
 // -- allResponses in particular can grow large over a long-running task, so
@@ -63,16 +78,71 @@ function buildManagerPrompt(managerState) {
     ),
     conflicts: managerState.conflicts,
     missingRequirements: managerState.missingRequirements,
+    codeRuns: (managerState.codeRuns || []).slice(-6).map((c) => ({
+      id: c.id, task: cap(c.task), ok: c.ok, message: cap(c.message), error: c.error || null,
+    })),
+    toolCalls: (managerState.toolCalls || []).slice(-6).map((t) => ({
+      id: t.id, tool: t.tool, ok: t.ok, message: cap(t.message), error: t.error || null,
+    })),
+    memories: (managerState.memories || []).slice(-12).map((mm) => ({
+      id: mm.id, type: mm.type, title: cap(mm.title),
+    })),
+    images: (managerState.images || []).slice(-6).map((im) => ({
+      id: im.id, prompt: cap(im.prompt), path: im.path, ok: im.ok, error: im.error || null,
+    })),
+    setups: (managerState.setups || []).slice(-6).map((sp) => ({
+      id: sp.id, target: sp.target, ok: sp.ok, message: cap(sp.message), error: sp.error || null,
+    })),
+    availableTools: (managerState.availableTools || []).map((t) => ({
+      name: t.name, description: t.description, risk: t.risk || "monitor",
+    })),
+    setupTargets: (managerState.setupTargets || []).map((s) => ({
+      id: s.id, label: s.label, kind: s.kind, installed: s.installed,
+    })),
+    awareness: managerState.awareness || null,
     previousManagerActions: (managerState.previousManagerActions || []).slice(-10),
     currentTier: managerState.currentTier,
     turnNumber: managerState.turnNumber,
     maximumTurns: managerState.maximumTurns,
-    status: managerState.status
+    status: managerState.status,
+    handlingMode: managerState.handlingMode || "auto"
   };
-  return [
-    { role: "system", content: MANAGER_SYSTEM_PROMPT },
-    { role: "user", content: JSON.stringify(trimmed) }
-  ];
+  const messages = [{ role: "system", content: MANAGER_SYSTEM_PROMPT }];
+  // Handling mode steers WHO does the work. "self" = do it locally on this
+  // computer; "delegate" = route it to the chat AIs; "auto" = the butler decides.
+  const mode = managerState.handlingMode;
+  if (mode === "self") {
+    messages.push({ role: "system", content: "HANDLING MODE — SELF: The user wants YOU to carry out this task directly on their computer. Strongly prefer RUN_CODE, SETUP, USE_TOOL, SAVE, REMEMBER/RECALL, GENERATE_IMAGE and other local actions. Do NOT DELEGATE / SEND / FORWARD / COMPARE / CRITIQUE to ChatGPT, Claude or Gemini unless it is genuinely impossible to do it locally — and if you must, say why in the reason." });
+  } else if (mode === "delegate") {
+    messages.push({ role: "system", content: "HANDLING MODE — DELEGATE: The user wants you to route this to the chat AIs. Prefer DELEGATE / COMPARE / CRITIQUE to ChatGPT, Claude and Gemini and assemble their answers. Avoid RUN_CODE / SETUP unless the delegated answers make it necessary." });
+  }
+  messages.push({ role: "user", content: JSON.stringify(trimmed) });
+  return messages;
+}
+
+// Converse mode: a plain conversational reply from the local model — no JSON,
+// no actions, no task. Used when the user just wants to talk to the butler and
+// hear back. History is a short array of prior {role, content} turns for context.
+async function chatWithButler(userMessage, config, opts = {}) {
+  if (!config || !config.endpoint) return { ok: false, error: "NO_ENDPOINT" };
+  if (!config.model) return { ok: false, error: "NO_MODEL" };
+  const sys = "You are the user's personal butler — a helpful AI assistant running locally on their computer. You oversee three web AIs (ChatGPT, Claude, Gemini) and can run code, install software, generate images/video and manage files, but right now you are simply having a conversation. Reply directly, warmly and briefly in plain prose — never JSON, never tool syntax. If the user is actually asking you to DO something (install, run code, delegate to the AIs), tell them to send it as a task (or turn off Converse mode) and you'll get right on it.";
+  const messages = [{ role: "system", content: sys }];
+  for (const h of (opts.history || []).slice(-8)) {
+    if (h && (h.role === "user" || h.role === "assistant") && typeof h.content === "string") messages.push({ role: h.role, content: h.content });
+  }
+  messages.push({ role: "user", content: String(userMessage || "").slice(0, 4000) });
+  const r = await client.chatCompletion({
+    endpoint: config.endpoint, apiKey: config.apiKey, model: config.model,
+    messages, temperature: 0.6, timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS
+  });
+  if (!r.ok) {
+    if (r.kind === "timeout") return { ok: false, error: "TIMEOUT" };
+    if (r.kind === "network") return { ok: false, error: `NETWORK_ERROR: ${redactSecrets(r.detail, config)}` };
+    if (r.kind === "http") return { ok: false, error: `HTTP_${r.status}`, detail: redactSecrets(r.detail || "", config).slice(0, 500) };
+    return { ok: false, error: "INVALID_RESPONSE_BODY" };
+  }
+  return { ok: true, text: String(r.content == null ? "" : r.content).trim() };
 }
 
 // AI-006: JSON extraction, secret redaction and the timed fetch are the shared
@@ -107,8 +177,25 @@ async function askManager(managerState, config) {
     return { ok: false, error: "INVALID_RESPONSE_BODY" }; // kind:"bad-body"
   }
 
-  const content = r.content;
-  const decision = extractJsonObject(content);
+  let content = r.content;
+  let decision = extractJsonObject(content);
+  const isValid = (d) => d && typeof d === "object" && typeof d.action === "string" && MANAGER_ACTIONS.includes(d.action);
+  // One repair attempt for weaker local models that answered with prose or
+  // malformed JSON: hand their own reply back with a firm "JSON only" nudge and
+  // a concrete example. This rescues the common case where the model *can* do
+  // it but drifted, without masking a model that genuinely can't (it still ends
+  // as INVALID_JSON/UNKNOWN_ACTION after the retry).
+  if (!isValid(decision)) {
+    const repairMessages = messages.concat([
+      { role: "assistant", content: String(content == null ? "" : content).slice(0, 1200) },
+      { role: "user", content: `That was not a valid response. Reply with ONLY a single JSON object and nothing else — no prose, no explanation, no markdown or code fences. The "action" must be exactly one of: ${MANAGER_ACTIONS.join(", ")}. Example: {"action":"PLAN","reason":"outline the steps","confidence":0.8}` },
+    ]);
+    const r2 = await client.chatCompletion({
+      endpoint: config.endpoint, apiKey: config.apiKey, model: config.model,
+      messages: repairMessages, temperature: 0, timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS
+    });
+    if (r2 && r2.ok) { const d2 = extractJsonObject(r2.content); if (d2) { decision = d2; content = r2.content; } }
+  }
   if (!decision || typeof decision !== "object") return { ok: false, error: "INVALID_JSON", raw: redactSecrets(String(content).slice(0, 500), config) };
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) {
     return { ok: false, error: "UNKNOWN_ACTION", raw: decision };
@@ -195,6 +282,7 @@ module.exports = {
   extractJsonObject,
   redactSecrets,
   askManager,
+  chatWithButler,
   testConnection,
   startPod,
   getPodStatus,

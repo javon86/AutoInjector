@@ -109,5 +109,130 @@ if (dl.onOllamaProgress) {
   });
 }
 
+// ---- Installs tab: butler self-install (Auto-setup) ----
+// The app installs the butler's dependencies itself; the user never types a
+// command or a path. Each target shows an install state and a one-click button.
+let setupTargets = [];
+function setupLog(line) {
+  const box = el("setup-progress");
+  if (!box) return;
+  box.textContent = (box.textContent ? box.textContent + "\n" : "") + line;
+  box.scrollTop = box.scrollHeight;
+}
+function stateBadge(installed) {
+  if (installed === true) return '<span style="color:#5ac37a;">installed ✓</span>';
+  if (installed === false) return '<span style="color:#e0b055;">not installed</span>';
+  return '<span class="muted">—</span>';
+}
+async function loadSetupTargets() {
+  if (!dl.setupList) return;
+  try {
+    const r = await dl.setupList();
+    if (!r || !r.ok) return;
+    setupTargets = (r.targets || []).map((t) => ({ ...t, installed: r.status ? r.status[t.id] : null }));
+    renderSetupTargets();
+  } catch (_) {}
+}
+function renderSetupTargets() {
+  const box = el("setup-targets");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!setupTargets.length) { box.innerHTML = '<div class="muted">Self-install not available.</div>'; return; }
+  for (const t of setupTargets) {
+    const row = document.createElement("div");
+    row.className = "item";
+    row.innerHTML = `<div style="flex:1 1 auto; min-width:0;"><div class="name">${esc(t.label)}</div><div class="why">${esc(t.note)} &nbsp;${stateBadge(t.installed)}</div></div>`;
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = t.kind === "handoff" ? "Open installer ↗" : "Install";
+    btn.dataset.target = t.id;
+    btn.onclick = () => installTarget(t.id, btn);
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+async function installTarget(target, btn) {
+  if (!dl.setupInstall) return;
+  if (btn) { btn.disabled = true; btn.textContent = "Installing…"; }
+  setupLog(`▶ Installing ${target}…`);
+  try {
+    const r = await dl.setupInstall(target);
+    if (btn) { btn.disabled = false; btn.textContent = r && r.ok ? "Done ✓" : "Retry"; }
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = "Retry"; } setupLog(`⚠ ${target}: ${e}`); }
+  loadSetupTargets();
+}
+if (el("btn-setup-auto")) el("btn-setup-auto").onclick = async (e) => {
+  const btn = e.currentTarget;
+  if (!dl.setupAuto) return;
+  btn.disabled = true; btn.textContent = "Setting up…";
+  setupLog("🚀 Auto-setup started — installing everything the butler needs…");
+  try {
+    const r = await dl.setupAuto();
+    setupLog(r && r.ok ? `✓ Auto-setup done: ${r.installed}/${r.total} installed.` : `⚠ Auto-setup: ${(r && r.error) || "nothing installed"}`);
+  } catch (err) { setupLog(`⚠ Auto-setup failed: ${err}`); }
+  btn.disabled = false; btn.textContent = "🚀 Auto-setup everything";
+  loadSetupTargets();
+};
+if (el("btn-setup-refresh")) el("btn-setup-refresh").onclick = async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = "Checking…";
+  if (dl.setupDetect) { try { const r = await dl.setupDetect(); if (r && r.ok) setupTargets = setupTargets.map((t) => ({ ...t, installed: r.status[t.id] })); } catch (_) {} }
+  renderSetupTargets();
+  btn.disabled = false; btn.textContent = "Check what's installed";
+};
+if (dl.onSetupProgress) {
+  dl.onSetupProgress(({ target, line }) => { if (line) setupLog(`${target ? target + ": " : ""}${line}`); });
+}
+
+// ---- Images tab: Stable Diffusion endpoint config + a test render ----
+async function loadImageConfig() {
+  if (!dl.imageStatus) return;
+  try {
+    const s = await dl.imageStatus();
+    if (!s) return;
+    if (el("sd-endpoint")) el("sd-endpoint").value = s.endpoint || "";
+    if (el("sd-enabled")) el("sd-enabled").checked = !!s.enabled;
+    if (el("sd-steps") && s.steps) el("sd-steps").value = s.steps;
+    if (el("sd-width") && s.width) el("sd-width").value = s.width;
+    if (el("sd-height") && s.height) el("sd-height").value = s.height;
+  } catch (_) {}
+}
+function imageConfigFromUI() {
+  return {
+    enabled: !!(el("sd-enabled") && el("sd-enabled").checked),
+    endpoint: (el("sd-endpoint") && el("sd-endpoint").value || "").trim(),
+    steps: Number(el("sd-steps") && el("sd-steps").value) || 20,
+    width: Number(el("sd-width") && el("sd-width").value) || 512,
+    height: Number(el("sd-height") && el("sd-height").value) || 512,
+  };
+}
+function sdMsg(t) { if (el("sd-msg")) el("sd-msg").textContent = t; }
+if (el("btn-sd-save")) el("btn-sd-save").onclick = async () => {
+  if (!dl.configureImage) return;
+  const r = await dl.configureImage(imageConfigFromUI());
+  sdMsg(r && r.ok ? (r.enabled ? "Saved — image generation is on." : "Saved — image generation is off.") : `Save failed: ${(r && r.error) || "error"}`);
+};
+if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
+  if (!dl.configureImage || !dl.imageGenerate) return;
+  await dl.configureImage(imageConfigFromUI());
+  sdMsg("Rendering a test image…");
+  const r = await dl.imageGenerate("a small red apple on a white table, product photo");
+  sdMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Test failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+};
+
+// Open directly on a requested tab (?tab=images|video|advanced|localai), so the
+// Image/Video paddles in the main menu land the user on the right tab.
+function activateRequestedTab() {
+  try {
+    const want = new URLSearchParams(location.search).get("tab");
+    if (!want) return;
+    const btn = document.querySelector(`.tab[data-tab="${want}"]`);
+    if (btn) btn.click();
+  } catch (_) {}
+}
+
 // ---- Boot ----
 loadCatalog();
+loadSetupTargets();
+loadImageConfig();
+activateRequestedTab();

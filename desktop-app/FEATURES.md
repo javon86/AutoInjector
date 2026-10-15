@@ -109,6 +109,18 @@ guessing from the transcript.
   click the real element live in the pane. The app works out a selector and
   validates it against the page in the same click before saving anything.
 
+- **🔬 Feature Test** (User Panel button) — walks every Active AI through every
+  feature, one step at a time: reply captured, locker write, read-back round
+  trip, give, send to the next AI, share, safety refusal, and `[TO: <AI>]`
+  routing. Each step is judged by what the program can see (files on disk,
+  the delivery ledger, the terminal's reply), never by an AI's claim. A dead
+  pane fails step 1 and its other steps are skipped instead of timing out.
+  Mesh forwarding is paused for the run and restored after; click again to
+  stop. Results pop up (worked / failed with fix tips / skipped), and a report
+  is saved to `logs/feature-test-<time>.md` — including the raw last
+  characters of every reply, showing exactly how each AI's messages end
+  (whether `[FROM: NAME]` is really last, or UI text trails it).
+
 ## 5. Saved Logins
 
 Manual, on purpose — never auto-detected or auto-triggered.
@@ -152,6 +164,49 @@ above everything else.
   decision is validated twice before anything executes.
 - **Approval mode** — holds every proposed action for a real yes/no before
   it touches any AI's pane.
+
+## 8b. Command Prompt connection (⌨ Terminal)
+
+The third zone of the User Panel is a real local shell (cmd.exe on Windows,
+`sh`/`bash` elsewhere), shared by you and the three AIs. Code: `terminal-provider.js`.
+
+- **You type, it runs** — one persistent session (`cd` sticks), ↑/↓ history,
+  stderr in red. While a command is running, Enter answers its prompt (y/n).
+  **■ Stop** kills the whole process tree and starts a fresh shell.
+- **Compose doubles as a command prompt** — type a command in Compose and
+  press Enter; it runs here. Sentences don't run on Enter (Ctrl+Enter forces);
+  clicking an AI's name still sends to that AI as before.
+- **AI lockers (`ai-lockers.js`)** — each AI has its own private folder:
+  `stuff and thing/ai-lockers/<chatgpt|claude|gemini>/` (with `inbox/`). An AI's
+  `[TO: TERMINAL]` commands run in ITS OWN shell, in ITS OWN locker, and every
+  command is checked first: file commands only (dir, type, copy, move, del, md,
+  echo, find…), and every path must stay inside that locker (no drive letters,
+  `\\server`, absolute paths, `%VARS%`, or `..` out). Inside its locker it
+  never needs your permission. Scripts (`python x.py` / `node x.js`) ask, since
+  code can reach outside (or tick **Auto-run AI scripts**).
+- **App commands for AIs** — `write <file>` / `append <file>` (rest of the code
+  block is the content), `give <file>` (pasted into its chat if small text,
+  uploaded as an attachment otherwise), `send <file> to <ai>` (copied into
+  that AI's `inbox/from-<sender>/`, never overwriting, and that AI is told —
+  small text files are pasted in), `help`.
+- **Sharing, one request only** — `share with <ai>` lets that AI LOOK at the
+  sharer's locker (`dir/type/find ..\\claude\\…`, copy out, `give`) on its NEXT
+  terminal request; it can never change, delete or write into it. Expires after
+  that request or 10 minutes.
+- **📁 Locker browser** — each AI column's top box now lists that AI's locker
+  (the last-reply preview is one tab away). Click a text file → its contents go
+  into Compose; click a picture/PDF/other → it's attached in Compose and
+  uploaded to whichever AI's name you click.
+- **Setup prompt** — Prompt Library's "System Prompt (How Routing Works)" and the
+  Butler intro both carry the full locker guide (an untouched older saved copy
+  is refreshed automatically).
+- Results go back to the AI as a `[FROM: TERMINAL]` message. Never
+  mesh-forwarded; **🛑 Stop AIs Talking** clears pending requests.
+  **📁 AI Lockers** opens the folder. Your own typed commands are never gated.
+- **📤 Send output** — share your last command + output with any AI.
+- **Limits (v1)** — pipes, not a pseudo-terminal: full-screen programs (vim,
+  htop) and console REPLs don't work. A command still running after 2 min is
+  reported as timed out (the shell keeps it; use ■ Stop).
 
 ## 9. Workspace & Safety
 

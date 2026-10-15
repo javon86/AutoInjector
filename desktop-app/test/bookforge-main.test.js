@@ -6,7 +6,8 @@
 process.env.AUTOINJECTOR_POLL_MS = "50";
 process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = "30";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = "50";
-process.env.AUTOINJECTOR_BRIDGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
+process.env.AUTOINJECTOR_BRIDGE = "0"; // keep main's separate service bridge off in this test
+process.env.AUTOINJECTOR_BOOKFORGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
 
 const path = require("path");
 const fs = require("fs");
@@ -36,7 +37,7 @@ async function waitUntil(fn, timeout = 5000) {
 }
 function call(channel, payload) { return mockElectron.__ipcHandlers[channel]({}, payload); }
 function reg(site) { return mockElectron.__registry[site]; }
-const PORT = Number(process.env.AUTOINJECTOR_BRIDGE_PORT);
+const PORT = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
 
 function request(method, urlPath, token, body) {
   return new Promise((resolve, reject) => {
@@ -69,7 +70,7 @@ async function main() {
   assert(!fs.existsSync(tokenFile), "no token file before first enable");
 
   st = await call("bookforge:set-enabled", { enabled: true });
-  assert(st.enabled === true && st.listening === true && st.port === PORT, "enable starts listening on AUTOINJECTOR_BRIDGE_PORT");
+  assert(st.enabled === true && st.listening === true && st.port === PORT, "enable starts listening on AUTOINJECTOR_BOOKFORGE_PORT");
   assert(fs.existsSync(tokenFile), "token file created on first enable");
   if (process.platform !== "win32") assert((fs.statSync(tokenFile).mode & 0o777) === 0o600, "token file is mode 0600");
   const reveal = await call("bookforge:reveal-token");

@@ -11,8 +11,8 @@
  *
  * CLI (stable — a Python integration test depends on it):
  *   node test/fixtures/fake-bridge-host.js [options]
- *     --port N          port on 127.0.0.1 (default $AUTOINJECTOR_BRIDGE_PORT or 17891; 0 = pick a free port)
- *     --token T         bearer token (default $AUTOINJECTOR_BRIDGE_TOKEN or "fake-bridge-token-0123456789abcdef")
+ *     --port N          port on 127.0.0.1 (default $AUTOINJECTOR_BOOKFORGE_PORT or 17891; 0 = pick a free port)
+ *     --token T         bearer token (default $AUTOINJECTOR_BOOKFORGE_TOKEN or "fake-bridge-token-0123456789abcdef")
  *     --mode M          valid | invalid-then-valid | timeout | busy   (default $FAKE_BRIDGE_MODE or valid)
  *                         valid              every reply is the default schema-satisfying JSON answer
  *                         invalid-then-valid per site, odd-numbered replies (1st, 3rd, ...) are an invalid
@@ -31,7 +31,7 @@
  *     --record-file P   append one JSON line per received prompt: {"site","request_id","prompt"} (the
  *                       prompt as the pane would receive it, i.e. with the envelope instruction)
  *     --verbose         print bridge log events (never prompt/reply text) to stderr
- *   Env equivalents: AUTOINJECTOR_BRIDGE_PORT, AUTOINJECTOR_BRIDGE_TOKEN, FAKE_BRIDGE_MODE,
+ *   Env equivalents: AUTOINJECTOR_BOOKFORGE_PORT, AUTOINJECTOR_BOOKFORGE_TOKEN, FAKE_BRIDGE_MODE,
  *   FAKE_BRIDGE_DELAY_MS, FAKE_BRIDGE_TIME_SCALE. CLI flags win over env.
  *
  *   Prints exactly one line `READY <port>` on stdout once listening (and, in busy mode, once
@@ -288,8 +288,8 @@ async function cli() {
   }
   const env = process.env;
   const opts = {
-    port: args.port != null ? args.port : env.AUTOINJECTOR_BRIDGE_PORT != null && env.AUTOINJECTOR_BRIDGE_PORT !== '' ? Number(env.AUTOINJECTOR_BRIDGE_PORT) : 17891,
-    token: args.token || env.AUTOINJECTOR_BRIDGE_TOKEN || DEFAULT_TOKEN,
+    port: args.port != null ? args.port : env.AUTOINJECTOR_BOOKFORGE_PORT != null && env.AUTOINJECTOR_BOOKFORGE_PORT !== '' ? Number(env.AUTOINJECTOR_BOOKFORGE_PORT) : 17891,
+    token: args.token || env.AUTOINJECTOR_BOOKFORGE_TOKEN || DEFAULT_TOKEN,
     mode: args.mode || env.FAKE_BRIDGE_MODE || 'valid',
     delayMs: args.delayMs != null ? args.delayMs : env.FAKE_BRIDGE_DELAY_MS ? Number(env.FAKE_BRIDGE_DELAY_MS) : 50,
     timeScale: args.timeScale != null ? args.timeScale : env.FAKE_BRIDGE_TIME_SCALE ? Number(env.FAKE_BRIDGE_TIME_SCALE) : 1,

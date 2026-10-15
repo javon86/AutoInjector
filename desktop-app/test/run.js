@@ -6,6 +6,10 @@
 // QA-001: run main.js on a fast, internally-consistent clock so the integration
 // suite is quick and deterministic (same logic, smaller timing windows). These
 // MUST be set before main.js is required (it reads them at load).
+// The integration harness drives main.js under the mock Electron layer; the
+// local service bridge would try to open a real TCP port on app-ready, which is
+// an unrelated side effect here — disable it (service-bridge.test.js covers it).
+process.env.AUTOINJECTOR_BRIDGE = "0";
 process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || "50";
 process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || "80";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || "150";
@@ -50,9 +54,56 @@ managerProvider.askManager = async (managerState, config) => {
   if (managerAskRepeat) return managerAskRepeat;
   return { ok: false, error: "NO_STUB_QUEUED" };
 };
+// Converse mode talks to the model via a separate path — stub it independently.
+let butlerChatCalls = [];
+managerProvider.chatWithButler = async (message, config, opts = {}) => { butlerChatCalls.push({ message, history: opts.history || [] }); return { ok: true, text: `chat: ${message}` }; };
 function queueManagerDecision(decision) { managerAskQueue.push({ ok: true, decision }); }
 function queueManagerDecisionRepeating(decision) { managerAskRepeat = { ok: true, decision }; }
+function queueManagerErrorRepeating(error) { managerAskRepeat = { ok: false, error }; } // simulate a provider that keeps failing (e.g. INVALID_JSON)
 function resetManagerStub() { managerAskQueue = []; managerAskRepeat = null; managerAskCalls = []; }
+
+// The Open Interpreter capability is stubbed the same way — main.js's
+// `require("./interpreter-provider")` resolves to this exact module, so
+// overriding run() intercepts the manager's RUN_CODE action without a real OI.
+const interpreterProvider = require(path.join(__dirname, "..", "interpreter-provider"));
+let interpreterRunCalls = [];
+interpreterProvider.run = async (task) => { interpreterRunCalls.push(task); return { ok: true, message: `ran: ${task}`, events: [{ type: "output", content: "42" }] }; };
+
+// N5: the external-tool registry. has()/list() stay real (validation +
+// availableTools depend on them); run() is stubbed so USE_TOOL is intercepted.
+// A known "echo" tool is registered so USE_TOOL validation can pass.
+const toolProvider = require(path.join(__dirname, "..", "tool-provider"));
+let toolRunCalls = [];
+toolProvider.run = async (name, args) => { toolRunCalls.push({ name, args }); return { ok: true, message: `tool ${name} ok`, events: [] }; };
+toolProvider.register({ name: "echo", description: "echo (test)", risk: "monitor", invoke: async () => ({ ok: true, message: "echo" }) });
+toolProvider.register({ name: "fetch-thing", description: "risky (test)", risk: "ask", invoke: async () => ({ ok: true, message: "fetched" }) });
+
+// N3: the shared memory store. Stubbed so REMEMBER/RECALL and the task-start
+// seed are intercepted deterministically without a real SQLite DB.
+const dbService = require(path.join(__dirname, "..", "db-service"));
+let memoryCreateCalls = [], memorySearchCalls = [];
+dbService.memoryCreate = (type, data) => { memoryCreateCalls.push({ type, data }); return { ok: true, id: `${type}-${memoryCreateCalls.length}` }; };
+dbService.memorySearch = (q) => { memorySearchCalls.push(q); return { available: true, degraded: false, results: [{ type: "fact", id: "f1", title: `match for ${q}` }] }; };
+dbService.memorySummary = () => ({ available: true, counts: { fact: 1 }, total: 1 });
+let recordImageCalls = [];
+dbService.recordImage = (e) => { recordImageCalls.push(e); return { id: `img-${recordImageCalls.length}` }; };
+
+// Image generation (Stable Diffusion) is stubbed so GENERATE_IMAGE is intercepted
+// without a real SD server; imagesDir is redirected to tmp so the save succeeds.
+const imageProvider = require(path.join(__dirname, "..", "image-provider"));
+let imageGenCalls = [];
+imageProvider.generate = async (prompt) => { imageGenCalls.push(prompt); return { ok: true, imageBase64: Buffer.from("FAKEPNG").toString("base64"), info: "ok" }; };
+const outputManager = require(path.join(__dirname, "..", "output-manager"));
+outputManager.imagesDir = () => os.tmpdir();
+
+// Butler self-install (setup-manager). has()/list()/detectAll() stay real
+// (validation + setupTargets + status use them); install() is stubbed so SETUP
+// is intercepted without a real pip/download. startManaged() on the interpreter
+// is stubbed to a no-op so the keystone auto-wire never spawns a real python.
+const setupManager = require(path.join(__dirname, "..", "setup-manager"));
+let setupInstallCalls = [];
+setupManager.install = async (target, opts = {}) => { setupInstallCalls.push({ target, model: opts.model }); return { ok: true, message: `installed ${target}` }; };
+interpreterProvider.startManaged = async () => ({ ok: true, endpoint: "http://127.0.0.1:8231/run", pid: 1 });
 
 const SITES = ["chatgpt", "claude", "gemini"];
 let passed = 0;
@@ -1404,6 +1455,30 @@ async function testManagerValidationEscalationAndMaxTurns() {
   assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "an invalid target never results in an actual send to anyone");
 }
 
+async function testManagerStallBreak() {
+  console.log("\n== Manager: a no-progress 'thinking' loop stops and asks the user instead of grinding to MAX_TURNS ==");
+  await resetManagerState();
+  // A generous turn cap on purpose: this proves the STALL detector ended the
+  // task, not the maximumTurns cap. This is the real user bug -- ~20 turns of
+  // PLAN/WAIT/CLASSIFY, all "user hasn't provided the case details yet", that
+  // used to die on MAX_TURNS_EXCEEDED with nothing asked of the user.
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  queueManagerDecisionRepeating({ action: "PLAN", plan: ["wait for the details"], reason: "user hasn't provided the case details yet", confidence: 0.5 });
+
+  const startRes = await call("manager:start-task", { userRequest: "Handle my thing." });
+  assert(startRes.ok, "the task starts");
+
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the no-progress loop ends the task rather than spinning forever" });
+  const s = await call("state:get", {});
+  const taskId = s.manager.taskId;
+  const mine = s.managerLog.filter((l) => l.taskId === taskId); // scope to THIS task -- managerLog carries entries from earlier tests too
+  assert(mine.some((l) => l.summary.includes("NEEDS_INPUT")), "the task ends with NEEDS_INPUT (the butler is stuck waiting on the user)");
+  assert(!mine.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), "it broke on the stall detector, NOT by exhausting the 20-turn cap");
+  assert(s.manager.turnNumber < 20, `it stopped early (turn ${s.manager.turnNumber}), well before the turn cap`);
+  const question = mine.find((l) => l.category === "response" && /provided the case details/.test(l.summary));
+  assert(question, "the butler surfaced a real question to the user, echoing WHY it was stuck (from its own last reason)");
+}
+
 async function testManagerEscalateActionAndTierFourAdjudication() {
   console.log("\n== Manager: an explicit ESCALATE action jumps straight to the requested tier, Tier 4 routes to a real AI pane instead of the configured provider, and it de-escalates back down afterward ==");
   await resetManagerState();
@@ -1955,6 +2030,716 @@ async function testLoopGuardSuppressesRelay() {
   assert(s.transcript.filter((t) => /loop\s+msg/.test(t.text)).length >= 4, "every copy is still shown in the transcript — nothing is hidden, only the relay is stopped");
 }
 
+// Completion signal: pollSite must NOT capture a reply while the site is still
+// generating (its Stop button is up / generating:true), even if the reply text
+// already carries a [FROM:] tag. Only once generation stops (Send button back)
+// does the reply complete and relay — this is the "how do we know they're done
+// speaking" gate.
+async function testGeneratingGatesCapture() {
+  console.log("\n== Completion: a reply is held until the site stops generating (Send button returns) ==");
+  await resetAllParticipants();
+  const g = reg("gemini").webContents;
+  // A fully-formed, tagged reply is already on the page — but the site is still
+  // streaming it (Stop button showing).
+  g.generating = true;
+  say("gemini", "[TO: ALL] here is my finished answer");
+  await settle(300); // several poll ticks pass
+  let st = await call("state:get", {});
+  const capturedEarly = st.transcript.some((t) => t.site === "gemini" && /finished answer/.test(t.text));
+  assert(!capturedEarly, "the reply is held while generating:true, even though its [FROM:] tag is present");
+  assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0, "nothing relayed to the other panes mid-generation");
+  // The Send button comes back — generation is done.
+  g.generating = false;
+  const captured = await waitUntil(
+    async () => (await call("state:get", {})).transcript.some((t) => t.site === "gemini" && /finished answer/.test(t.text)),
+    { label: "gemini reply captured once generating clears" });
+  assert(captured, "the moment the Send button returns (generating:false), the reply is captured");
+  await waitUntil(() => sentLog("chatgpt").length >= 1 && sentLog("claude").length >= 1,
+    { label: "the completed reply relays to both other panes" });
+  assert(sentLog("chatgpt").length >= 1 && sentLog("claude").length >= 1, "and it relays onward exactly as a normal completed reply");
+}
+
+// Extract All: dumps the whole conversation AND the full activity/error log to a
+// text file in the program's logs folder, from in-memory state (so nothing is
+// truncated by a long/streaming on-screen window).
+async function testSilenceStopsAllRelay() {
+  console.log("\n== Stop AIs Talking: relay:silence halts mesh + House Rule + Sequence + Butler at once ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {});
+  let g = (await call("state:get", {})).global;
+  assert(g.meshActive === true && SITES.every((s) => g.routing[s].length === 2), "mesh/Auto is on as a baseline");
+  await call("houserule:start", { mode: "free-for-all", topic: "keep talking", rounds: 0 });
+  assert((await call("state:get", {})).houseRule.active === true, "a House Rule run is active");
+  // Silence everything.
+  const res = await call("relay:silence", {});
+  assert(res && res.ok, "relay:silence returns ok");
+  const s2 = await call("state:get", {});
+  assert(SITES.every((s) => s2.global.routing[s].length === 0) && s2.global.meshActive === false, "all mesh routing is cleared and Auto is off");
+  assert(s2.houseRule.active === false, "the House Rule run is stopped");
+  // Participants are kept checked (we only stopped the talking, not the setup).
+  assert(SITES.every((s) => s2.global.enabled[s] === true), "participants stay checked — only the messaging stopped");
+  assert(s2.global.relayEnabled === false, "the master relay flag is off after Stop");
+  // E02: the ALWAYS-ON baseline [TO:] tag relay must halt too — not just mesh. A
+  // tagged reply captured after Stop should NOT be forwarded onward.
+  {
+    const before = s2.ledger.length;
+    say("chatgpt", "[TO: GEMINI]\nYou should NOT receive this after Stop.");
+    await settle(400);
+    const after = await call("state:get", {});
+    const leaked = after.ledger.slice(before).some((e) => e.target === "gemini" && e.textPreview.includes("NOT receive this after Stop"));
+    assert(!leaked, "a [TO: GEMINI] reply captured after Stop is NOT relayed (baseline tag relay is halted, not just mesh)");
+  }
+  // And a fresh user send re-engages the conversation: relay comes back on.
+  {
+    await call("send:compose", { text: "back in business", targets: ["claude"] });
+    const back = await call("state:get", {});
+    assert(back.global.relayEnabled === true, "a user send after Stop turns automatic relay back on");
+  }
+  // The Butler/manager is stopped too.
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  resetManagerStub();
+  queueManagerDecisionRepeating({ action: "WAIT", reason: "spin", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "keep going" });
+  await settle(150);
+  await call("relay:silence", {});
+  const s3 = await call("state:get", {});
+  assert(["idle", "finished", "error"].includes(s3.manager.status), `relay:silence also stops the Butler task (status=${s3.manager.status})`);
+}
+
+async function testAiAddressesButler() {
+  console.log("\n== E05: an AI's [TO: BUTLER] reaches the butler and is NOT forwarded to the other AIs ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {}); // mesh ON: without the BUTLER special-case this would forward to the panes
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  butlerChatCalls = [];
+  const before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: BUTLER]\nplease install stable diffusion\n[FROM: CHATGPT]");
+  await waitUntil(async () => butlerChatCalls.length >= 1, { label: "the butler receives the [TO: BUTLER] message" });
+  await settle(250);
+  const s = await call("state:get", {});
+  const forwarded = s.ledger.slice(before).some((e) => (e.target === "gemini" || e.target === "claude") && /install stable diffusion/.test(e.textPreview || ""));
+  assert(!forwarded, "a [TO: BUTLER] reply is NOT mesh-forwarded to the other AI panes");
+  assert(/install stable diffusion/.test(butlerChatCalls[0].message), "the butler got the actual body of the message");
+  assert(/from chatgpt/i.test(butlerChatCalls[0].message), "the butler is told which pane addressed it (provenance)");
+  assert(s.log.some((l) => l.kind === "to-butler" && l.detail.from === "chatgpt"), "the delivery is recorded in the activity log");
+  await call("relay:silence", {});
+}
+
+async function testAiAddressesTerminal() {
+  console.log("\n== AI lockers: [TO: TERMINAL] runs ONLY inside that AI's own folder; files can be written, given and sent ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("routing:auto-all", {}); // mesh ON: the TERMINAL tag must still never be forwarded to the other panes
+  const ledgerTo = async (site, re, from) => (await call("state:get", {})).ledger.slice(from).some((e) => e.target === site && re.test(e.textPreview || ""));
+  const st0 = await call("lockers:status", {});
+  assert(st0.ok && st0.root && /ai-lockers$/.test(st0.root), `lockers live in .../ai-lockers (${st0.root})`);
+  for (const s of SITES) assert(fs.existsSync(path.join(st0.root, s, "inbox")), `${s} has its own locker with an inbox`);
+
+  let before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\nSaving my notes.\n```\nwrite plan.md\n# Plan\nstep one\n```\n```\ntype plan.md\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("claude", /\[FROM: TERMINAL\][\s\S]*Saved plan\.md/, before), { label: "write runs with no approval and Claude gets the result" });
+  assert(fs.readFileSync(path.join(st0.root, "claude", "plan.md"), "utf8").includes("step one"), "the file really exists in Claude's locker");
+  assert(((await call("terminal:state", {})).state.pending || []).length === 0, "nothing was held for approval (own locker = free)");
+  await settle(200);
+  assert(!(await ledgerTo("chatgpt", /step one/, before)) && !(await ledgerTo("gemini", /step one/, before)), "a [TO: TERMINAL] reply is NOT mesh-forwarded to the other AIs");
+
+  console.log("  -- outside the locker is refused --");
+  before = (await call("state:get", {})).ledger.length;
+  say("gemini", "[TO: TERMINAL]\n```\ncat ../claude/plan.md\n```\n[FROM: GEMINI]");
+  await waitUntil(async () => ledgerTo("gemini", /refused/, before), { label: "Gemini reading Claude's locker is refused and told why" });
+  assert(!(await ledgerTo("gemini", /step one/, before)), "and none of Claude's file leaked to Gemini");
+
+  console.log("  -- send a file to another AI --");
+  before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\n```\nsend plan.md to gemini\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("gemini", /Claude sent you a file/, before), { label: "Gemini is told it got a file" });
+  assert(await ledgerTo("gemini", /step one/, before), "a small text file is pasted right into Gemini's chat");
+  assert(fs.existsSync(path.join(st0.root, "gemini", "inbox", "from-claude", "plan.md")), "the copy is in Gemini's inbox/from-claude");
+  await waitUntil(async () => ledgerTo("claude", /Sent plan\.md to Gemini/, before), { label: "Claude gets the confirmation" });
+
+  console.log("  -- give: pull a file into the chat --");
+  before = (await call("state:get", {})).ledger.length;
+  say("gemini", "[TO: TERMINAL]\n```\ngive inbox/from-claude/plan.md\n```\n[FROM: GEMINI]");
+  await waitUntil(async () => ledgerTo("gemini", /end of file|step one/, before), { label: "give pastes the file into Gemini's chat" });
+
+  console.log("  -- share: one request, look-only --");
+  before = (await call("state:get", {})).ledger.length;
+  say("claude", "[TO: TERMINAL]\n```\nshare with chatgpt\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ledgerTo("chatgpt", /opened its locker to you/, before), { label: "ChatGPT is told Claude shared its locker" });
+  before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: TERMINAL]\n```\ncat ../claude/plan.md\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ledgerTo("chatgpt", /step one/, before), { label: "ChatGPT can read Claude's file on its next request" });
+  before = (await call("state:get", {})).ledger.length;
+  say("chatgpt", "[TO: TERMINAL]\n```\nhead ../claude/plan.md\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ledgerTo("chatgpt", /refused/, before), { label: "the share is closed after that one request" });
+  const lst = await call("lockers:list", { site: "claude" });
+  assert(lst.ok && lst.files.some((f) => f.rel === "plan.md" && f.kind === "text"), "the user's locker browser lists Claude's files");
+  const rd = await call("lockers:read", { site: "claude", rel: "plan.md" });
+  assert(rd.ok && /step one/.test(rd.text), "and can read a text file for Compose");
+  assert(!(await call("lockers:read", { site: "claude", rel: "../gemini/inbox" })).ok, "the browser can't be pointed outside a locker");
+  const routing = (await call("state:get", {})).prompts.find((p) => p.id === 2);
+  assert(routing && /YOUR LOCKER/.test(routing.text.claude) && /share with <ai>/.test(routing.text.claude), "the setup prompt (Prompt Library) teaches the locker commands");
+
+  console.log("  -- scripts ask first; Stop AIs Talking clears them --");
+  fs.writeFileSync(path.join(st0.root, "chatgpt", "tool.js"), "console.log('hi from tool')");
+  say("chatgpt", "[TO: TERMINAL]\n```\nnode tool.js\n```\n[FROM: CHATGPT]");
+  await waitUntil(async () => ((await call("terminal:state", {})).state.pending || []).length === 1, { label: "a script run is held for approval" });
+  const req = (await call("terminal:state", {})).state.pending[0];
+  assert(req.from === "chatgpt" && req.risk === "dangerous" && /script/.test(req.reason), "the request says why it needs approval");
+  await call("relay:silence", {});
+  assert(((await call("terminal:state", {})).state.pending || []).length === 0, "Stop AIs Talking clears pending requests");
+
+  console.log("  -- user command + share output --");
+  const ur = await call("terminal:run", { command: "echo from-user" });
+  assert(ur.ok && /from-user/.test(ur.result.output), "the user's own command runs and returns its output");
+  await call("routing:auto-all", {});
+  before = (await call("state:get", {})).ledger.length;
+  const shared = await call("terminal:send-output", { targets: ["gemini"] });
+  assert(shared.ok && await ledgerTo("gemini", /from-user/, before), "the user's output is delivered to the chosen AI");
+  await call("terminal:stop", {});
+  await call("relay:silence", {});
+}
+
+async function testFeatureTestButton() {
+  console.log("\n== 🔬 Feature Test: drives a real step through the real capture path, restores routing, can be stopped ==");
+  await resetAllParticipants();
+  for (const s of SITES) await call("participants:set", { site: s, enabled: s === "chatgpt" });
+  await call("routing:auto-all", {});
+  const pick = (g) => JSON.stringify({ r: g.routing, m: g.meshActive, e: g.relayEnabled });
+  const routingBefore = pick((await call("state:get", {})).global);
+  const t0 = Date.now();
+  const running = call("featuretest:run", {});
+  // step 1's prompt goes to ChatGPT; answer it exactly as asked, through the normal capture path
+  let prompt = null;
+  await waitUntil(async () => {
+    const e = (await call("state:get", {})).ledger.find((x) => x.target === "chatgpt" && x.ts >= t0 && /FEATURE TEST/.test(x.textPreview || ""));
+    prompt = e ? e.textPreview : null;
+    return !!prompt;
+  }, { label: "the feature test sends ChatGPT its first test prompt" });
+  const tok = (/FT-[A-Z0-9]+-REPLY/.exec(prompt) || [])[0];
+  assert(!!tok, `the prompt carries a unique token (${tok})`);
+  say("chatgpt", `[TO: USER]\n${tok}\n[FROM: CHATGPT]`);
+  await waitUntil(async () => (await call("state:get", {})).log.some((l) => l.kind === "featuretest-step" && l.detail.step === "reply" && l.detail.status === "pass"), { label: "step 1 (reply) passes from the real capture" });
+  const during = await call("state:get", {});
+  assert(SITES.every((s) => (during.global.routing[s] || []).length === 0), "mesh forwarding is off while the test runs");
+  await call("featuretest:stop", {});
+  const r = await running;
+  assert(r.ok && r.stopped && r.checks.some((c) => /Reply captured/.test(c.name) && c.ok === true), "Stop ends it; the result keeps the passed step");
+  assert(r.report && fs.existsSync(r.report) && /How each AI's replies actually ended/.test(fs.readFileSync(r.report, "utf8")), "a report is saved, with the reply-endings section");
+  assert(/\[FROM: CHATGPT\]/.test(fs.readFileSync(r.report, "utf8")), "the report shows ChatGPT's real raw reply ending");
+  assert(pick((await call("state:get", {})).global) === routingBefore, "routing is restored exactly afterwards");
+  for (const s of SITES) await call("participants:set", { site: s, enabled: false });
+  const none = await call("featuretest:run", {});
+  assert(!none.ok && /Active/.test(none.error), "with no AI checked Active it refuses with a clear message");
+  for (const s of SITES) await call("participants:set", { site: s, enabled: true });
+  await call("relay:silence", {});
+}
+
+async function testModelsFolderInfo() {
+  console.log("\n== Models folder: the app reports one findable models home + its inventory ==");
+  const info = await call("models:info", {});
+  assert(info && info.ok && info.root && /[\\/]models$/.test(info.root), `models:info returns the models root (${info && info.root})`);
+  assert(info.categories && typeof info.categories.llm === "number" && typeof info.categories.image === "number", "it reports a per-category inventory (llm/image/…)");
+  assert("ollamaHere" in info, "it reports whether Ollama is pointed at the folder");
+  const opened = await call("models:open", {});
+  assert(opened && opened.ok && opened.path, "models:open resolves the folder path to open");
+}
+
+async function testUiLogRoutesToActivityLog() {
+  console.log("\n== UI activity: a renderer ui:log lands in the one Activity Log (sanitized) ==");
+  const before = (await call("state:get", {})).log.length;
+  await call("ui:log", { action: "click", id: "btn-jarvis-start", msg: "Start Butler" });
+  const s = await call("state:get", {});
+  assert(s.log.length > before, "a ui:log adds an entry to the Activity Log");
+  const entry = s.log[s.log.length - 1];
+  assert(entry.kind === "ui-click" && entry.detail.id === "btn-jarvis-start" && /Start Butler/.test(entry.detail.msg), "the entry carries the action, button id and label");
+  // Oversized/garbage input is bounded, not trusted verbatim.
+  await call("ui:log", { action: "x".repeat(200) + " bad;", msg: "y".repeat(500) });
+  const s2 = await call("state:get", {});
+  const last = s2.log[s2.log.length - 1];
+  assert(last.kind.length <= 43 && (last.detail.msg || "").length <= 160, "action + message are length-capped and sanitized");
+}
+
+async function testExtractAllLogs() {
+  console.log("\n== Extract All writes the full conversation + activity/error log to one text file ==");
+  await resetAllParticipants();
+  // Put a real captured reply into the transcript, and a distinctive log line.
+  say("gemini", "[TO: USER] EXTRACT_MARKER_REPLY body that could be very long while streaming");
+  await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => /EXTRACT_MARKER_REPLY/.test(t.text)),
+    { label: "a reply is captured into the transcript" });
+  const before = (await call("state:get", {})).log.length;
+  const res = await call("logs:extract-all", {});
+  assert(res && res.ok && res.file, `extract wrote a file (${res && res.file})`);
+  assert(res.messages >= 1 && res.logEntries >= before, `it reports the counts (msgs=${res.messages}, log=${res.logEntries})`);
+  const text = fs.readFileSync(res.file, "utf8");
+  assert(/AI CONVERSATION/.test(text) && /ACTIVITY \/ TROUBLESHOOTING/.test(text), "the file has BOTH sections — the AI conversation and the activity/errors");
+  assert(/EXTRACT_MARKER_REPLY body that could be very long while streaming/.test(text), "the FULL reply text is in the file, not a truncated preview");
+  assert(/extract-all/.test(text) || /\bcaptured\b/.test(text), "activity-log events are included in the dump");
+  assert(/[\\/]logs[\\/]/.test(res.file) && /\.txt$/.test(res.file), "it saves into the program's logs/ folder as a .txt");
+}
+
+// Jarvis brought native: the System AI supervisor can now RUN_CODE — delegate a
+// coding/computer task to Open Interpreter and fold the result back into the run.
+async function testManagerRunCodeAction() {
+  console.log("\n== Jarvis: the supervisor's RUN_CODE action executes code via Open Interpreter and continues ==");
+  resetManagerStub();
+  interpreterRunCalls = [];
+  // The manager decides to run code, then finishes once it has the result.
+  queueManagerDecision({ action: "RUN_CODE", task: "compute 6 times 7", reason: "needs a real calculation", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the answer", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "what is 6*7, actually run it" });
+  assert(started && started.ok, "the Jarvis/manager task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.codeRuns && s.manager.codeRuns.length));
+  }, { label: "the manager runs the code step" });
+  const st = await call("manager:get-state", {});
+  assert(interpreterRunCalls.includes("compute 6 times 7"), "RUN_CODE reached Open Interpreter with the task");
+  assert(st.manager.codeRuns && st.manager.codeRuns.length >= 1 && /ran: compute 6 times 7/.test(st.manager.codeRuns[0].message),
+    "the code result is folded back into the task as a codeRuns entry");
+  await call("manager:stop", {});
+
+  // A RUN_CODE with no task must be rejected (invalid action), not executed.
+  resetManagerStub();
+  interpreterRunCalls = [];
+  queueManagerDecisionRepeating({ action: "RUN_CODE", reason: "no task field on purpose", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "malformed run-code" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(interpreterRunCalls.length === 0, "a RUN_CODE decision with no task is rejected and never reaches Open Interpreter");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "RUN_CODE" && a.rejected), "the malformed RUN_CODE is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// N5: the supervisor's USE_TOOL action invokes a registered tool and folds the
+// result back like RUN_CODE; an unknown tool is rejected before it ever runs.
+async function testManagerUseToolAction() {
+  console.log("\n== N5 Tools: the butler's USE_TOOL action invokes a registered tool and continues ==");
+  resetManagerStub();
+  toolRunCalls = [];
+  queueManagerDecision({ action: "USE_TOOL", tool: "echo", args: { x: 1 }, reason: "need the echo tool", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the tool result", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "use the echo tool" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.toolCalls && s.manager.toolCalls.length));
+  }, { label: "the manager runs the tool step" });
+  const st = await call("manager:get-state", {});
+  assert(toolRunCalls.some((c) => c.name === "echo" && c.args && c.args.x === 1), "USE_TOOL reached the tool registry with the tool name + args");
+  assert(st.manager.toolCalls && st.manager.toolCalls.length >= 1 && /tool echo ok/.test(st.manager.toolCalls[0].message),
+    "the tool result is folded back into the task as a toolCalls entry");
+  await call("manager:stop", {});
+
+  // An unknown tool must be rejected by validation, never invoked.
+  resetManagerStub();
+  toolRunCalls = [];
+  queueManagerDecisionRepeating({ action: "USE_TOOL", tool: "ghost-tool", args: {}, reason: "not a real tool", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "use a tool that doesn't exist" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(toolRunCalls.length === 0, "a USE_TOOL naming an unregistered tool is rejected and never invoked");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "USE_TOOL" && a.rejected), "the unknown-tool USE_TOOL is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// Image: the supervisor's GENERATE_IMAGE action renders via Stable Diffusion,
+// saves the PNG + records it, and folds the saved path back as an images entry.
+async function testManagerGenerateImageAction() {
+  console.log("\n== Images: the butler's GENERATE_IMAGE action renders + records an image ==");
+  resetManagerStub();
+  imageGenCalls = []; recordImageCalls = [];
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a red apple on a table", reason: "the deliverable needs a picture", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have the image", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "make me a picture of an apple" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.images && s.manager.images.length));
+  }, { label: "the manager runs the image step" });
+  const st = await call("manager:get-state", {});
+  assert(imageGenCalls.includes("a red apple on a table"), "GENERATE_IMAGE reached the image provider with the prompt");
+  assert(st.manager.images && st.manager.images.length >= 1 && st.manager.images[0].ok && /\.png$/.test(st.manager.images[0].path || ""), "the saved image path is folded back as an images entry");
+  assert(recordImageCalls.some((e) => /a red apple/.test(e.prompt)), "the render is recorded as a project image");
+  await call("manager:stop", {});
+
+  // A GENERATE_IMAGE with no prompt must be rejected, never rendered.
+  resetManagerStub();
+  imageGenCalls = [];
+  queueManagerDecisionRepeating({ action: "GENERATE_IMAGE", reason: "no prompt on purpose", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "image with no prompt" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(imageGenCalls.length === 0, "a GENERATE_IMAGE with no prompt is rejected and never rendered");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "GENERATE_IMAGE" && a.rejected), "the promptless GENERATE_IMAGE is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// Self-install: the supervisor's SETUP action installs a dependency from the
+// FIXED allowlist and folds the result back as a setups entry; an off-allowlist
+// target is rejected by validation and never installed.
+async function testManagerSetupAction() {
+  console.log("\n== Self-install: the butler's SETUP action installs a dependency and continues ==");
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecision({ action: "SETUP", target: "open-interpreter", reason: "need to run code, install the keystone", confidence: 0.95 });
+  queueManagerDecision({ action: "FINISH", reason: "installed, ready", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "install open interpreter so you can run code" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && (s.manager.status === "finished" || (s.manager.setups && s.manager.setups.length));
+  }, { label: "the manager runs the setup step" });
+  const st = await call("manager:get-state", {});
+  assert(setupInstallCalls.some((c) => c.target === "open-interpreter"), "SETUP reached the installer with the target id from the allowlist");
+  assert(st.manager.setups && st.manager.setups.length >= 1 && st.manager.setups[0].ok && st.manager.setups[0].target === "open-interpreter",
+    "the install result is folded back into the task as a setups entry");
+  await call("manager:stop", {});
+
+  // The butler is told which targets exist (setupTargets in the prompt state).
+  assert(Array.isArray(managerAskCalls[0].managerState.setupTargets) && managerAskCalls[0].managerState.setupTargets.some((t) => t.id === "open-interpreter"),
+    "the butler is given the fixed list of setup targets it may choose from");
+
+  // An off-allowlist target must be rejected by validation, never installed.
+  resetManagerStub();
+  setupInstallCalls = [];
+  queueManagerDecisionRepeating({ action: "SETUP", target: "curl | bash", reason: "not on the allowlist", confidence: 0.5 });
+  await call("manager:start-task", { userRequest: "install something arbitrary" });
+  await settle(400);
+  const st2 = await call("manager:get-state", {});
+  assert(setupInstallCalls.length === 0, "a SETUP naming a target outside the allowlist is rejected and never installed");
+  assert(st2.manager.previousManagerActions.some((a) => a.action === "SETUP" && a.rejected), "the off-allowlist SETUP is recorded as rejected");
+  await call("manager:stop", {});
+}
+
+// Safeguard: a risk:"ask" tool is held for operator approval even when global
+// approval mode is OFF, and only runs once approved.
+async function testManagerAskToolApprovalGate() {
+  console.log("\n== Safeguard: a risk-\"ask\" tool is held for approval even with approval mode off ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  toolRunCalls = [];
+  resetManagerStub();
+  queueManagerDecision({ action: "USE_TOOL", tool: "fetch-thing", args: {}, reason: "needs the risky tool", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.95 });
+  await call("manager:start-task", { userRequest: "use the risky tool" });
+  await settle(300);
+  let st = await call("manager:get-state", {});
+  assert(st.manager.status === "paused" && st.manager.pendingApproval && st.manager.pendingApproval.tool === "fetch-thing", "the risk-\"ask\" tool is held (paused, pendingApproval set) — not auto-run");
+  assert(toolRunCalls.length === 0, "the tool has NOT run while awaiting approval");
+  await call("manager:approve", {});
+  await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager.status === "finished" || toolRunCalls.length > 0; }, { label: "the approved tool runs" });
+  assert(toolRunCalls.some((c) => c.name === "fetch-thing"), "once approved, the tool runs");
+  await call("manager:stop", {});
+}
+
+// Butler Device: the System Check reports his capabilities; Send Intro delivers
+// the identity + rules message to every enabled chat AI (nothing auto-sends).
+async function testButlerDevice() {
+  console.log("\n== Butler Device: System Check reports capabilities; Send Intro messages the AIs ==");
+  await resetAllParticipants();
+  const chk = await call("butler:selfcheck", {});
+  assert(chk && chk.ok && Array.isArray(chk.checks) && chk.checks.length >= 5, "System Check returns a list of capability checks");
+  assert(chk.checks.some((c) => /Tools/.test(c.name)) && chk.checks.some((c) => /Chat AIs/.test(c.name)), "the check covers the butler's own capabilities (tools, chat AIs, …)");
+  assert(typeof chk.okCount === "number" && chk.okCount <= chk.total, "it reports how many capabilities are working");
+  assert(Array.isArray(chk.installs) && chk.installs.some((i) => i.id === "open-interpreter"), "the check reports detailed install status per dependency (installed vs not)");
+  assert(Array.isArray(chk.missing) && typeof chk.canInstall === "boolean", "it lists which dependencies are missing + whether they can be installed");
+
+  const inst = await call("butler:install-missing", {});
+  assert(inst && inst.ok && Array.isArray(inst.results), "Install Missing installs the not-installed dependencies and reports each");
+
+  const before = totalSent();
+  const intro = await call("butler:send-intro", {});
+  assert(intro && intro.ok && intro.targets.length === 3, "Send Intro targets all three enabled AIs");
+  assert(totalSent() > before, "the intro message is actually sent to the panes");
+  for (const s of SITES) {
+    const sent = sentLog(s).map((e) => e.text).join("\n");
+    assert(/Butler/.test(sent) && /\[FROM: /.test(sent) && /routing tag/.test(sent), `${s} received the who-I-am + rules intro (envelope explained)`);
+  }
+}
+
+// Handling mode: the toggle + the call-sign decide WHO does a task the user
+// sends the butler — himself (local code/install) or the chat AIs.
+async function testButlerHandlingModes() {
+  console.log("\n== Butler handling mode: the toggle + call-sign decide who does the task ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerDecisionRepeating({ action: "WAIT", reason: "hold", confidence: 0.5 });
+
+  const startStop = async (userRequest, mode) => {
+    await call("manager:start-task", { userRequest, mode });
+    const s = await call("state:get", {});
+    await call("manager:stop", {});
+    return s.manager;
+  };
+
+  assert((await startStop("compare three plans", "self")).handlingMode === "self", "an explicit 'himself' mode is stored on the task");
+  assert((await startStop("compare three plans", "delegate")).handlingMode === "delegate", "an explicit 'delegate' mode is stored");
+  assert((await startStop("install open interpreter for me", "auto")).handlingMode === "self", "in auto, a computer-task keyword ('install') makes it his own job (call-sign)");
+  const marked = await startStop("!summarise my day", "auto");
+  assert(marked.handlingMode === "self" && marked.userRequest === "summarise my day", "a leading '!' forces 'himself' AND is stripped from the task text");
+  assert((await startStop("what do you think of our plan", "auto")).handlingMode === "auto", "a plain request with no call-sign stays in auto (the butler decides)");
+}
+
+async function testButlerConverse() {
+  console.log("\n== Butler converse: a plain chat reply, no task started ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG });
+  butlerChatCalls = [];
+  const r = await call("butler:chat", { message: "hey, you around?" });
+  assert(r && r.ok && /chat: hey/.test(r.text), "butler:chat returns a conversational reply from the model");
+  assert(butlerChatCalls.length === 1 && butlerChatCalls[0].message === "hey, you around?", "the message reaches the conversational path (not the action loop)");
+  const s = await call("state:get", {});
+  assert(["idle", "finished", "error"].includes(s.manager.status), "converse does NOT start a managed task");
+  // A second turn carries prior history for context.
+  await call("butler:chat", { message: "and again" });
+  assert(butlerChatCalls[1].history.length >= 2, "a follow-up chat turn includes the prior exchange as history");
+}
+
+// A local model that can't emit valid commands (INVALID_JSON every turn — the
+// real "butler did nothing" cause) is called out with an actionable message,
+// not spun through the tiers into a timeout.
+async function testModelIncompatible() {
+  console.log("\n== Butler: a model that can't issue valid commands is called out, not spun forever ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerErrorRepeating("INVALID_JSON");
+  await call("manager:start-task", { userRequest: "install stable diffusion for me" });
+  // Wait for the finish line itself (status flips to "error" a beat before it's logged).
+  await waitUntil(async () => { const st = await call("state:get", {}); return st.managerLog.some((l) => l.taskId === st.manager.taskId && l.summary.includes("MODEL_INCOMPATIBLE")); },
+    { label: "the task ends MODEL_INCOMPATIBLE, not a 5-minute delegate timeout" });
+  const s = await call("state:get", {});
+  const mine = s.managerLog.filter((l) => l.taskId === s.manager.taskId);
+  assert(mine.some((l) => /valid command/.test(l.summary) && /Local model settings/.test(l.summary)), "the butler tells the user their model can't issue commands + how to fix it");
+  assert(s.manager.status === "error", "the task is parked (error), not left running");
+}
+
+// A near-valid DELEGATE from a weak local model (a {target,task} JSON string
+// smuggled into `task` — the exact llama3.2:1b malformation) is coerced into a
+// real assignment and delegated, instead of being bounced as MISSING_ASSIGNMENTS.
+async function testCoerceMalformedDelegate() {
+  console.log("\n== Butler: a near-valid DELEGATE from a weak model is coerced, not bounced ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+  resetManagerStub();
+  queueManagerDecision({ action: "DELEGATE", task: '{"target":"chatgpt","task":"draft the summary"}', reason: "delegate it", confidence: 0.6 });
+  await call("manager:start-task", { userRequest: "get chatgpt to draft something" });
+  await waitUntil(async () => { const s = (await call("state:get", {})).manager; return s.status === "waiting" && s.pendingModels.includes("chatgpt"); }, { label: "the coerced DELEGATE actually delegates to chatgpt" });
+  const s = await call("state:get", {});
+  assert(s.manager.activeAssignments.some((a) => a.target === "chatgpt" && /draft the summary/.test(a.task)), "the {target,task} smuggled into `task` becomes a real assignment");
+  assert(sentLog("chatgpt").length >= 1, "the assignment is actually sent to chatgpt");
+  assert(!s.manager.previousManagerActions.some((a) => a.rejected), "it is NOT bounced as MISSING_ASSIGNMENTS");
+  await call("manager:stop", {});
+}
+
+// The butler's toolbox: the new computer-power tools are registered, held for
+// the user's approval (risk "ask"), and authored code for create-tool isn't
+// wrongly blocked by the code-injection scan (that scan is for delegated text).
+async function testButlerToolbox() {
+  console.log("\n== Butler toolbox: computer-power tools are approval-gated + authored code isn't false-flagged ==");
+  const run = async (decision, userRequest) => {
+    await resetManagerState();
+    await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, approvalMode: false });
+    resetManagerStub();
+    queueManagerDecision(decision);
+    await call("manager:start-task", { userRequest });
+    await waitUntil(async () => (await call("state:get", {})).manager.status === "paused", { label: `${decision.tool} pauses for approval` });
+    const s = await call("state:get", {});
+    await call("manager:stop", {});
+    return s.manager;
+  };
+
+  const rc = await run({ action: "USE_TOOL", tool: "run-command", args: { command: "echo hi" }, reason: "an install step", confidence: 0.9 }, "run a command for me");
+  assert(rc.pendingApproval && rc.pendingApproval.tool === "run-command", "run-command is held for the user's approval, never auto-run");
+  assert(!rc.previousManagerActions.some((a) => a.rejected), "run-command passes validation");
+
+  // create-tool carrying real code (require/process) must reach the approval
+  // gate, NOT be rejected as "dangerous content".
+  const ctCode = "const cp = require('child_process'); process.stdout.write('ok');";
+  const ct = await run({ action: "USE_TOOL", tool: "create-tool", args: { name: "my-tool", description: "does a thing", language: "node", code: ctCode }, reason: "make a reusable tool", confidence: 0.9 }, "make yourself a tool");
+  assert(ct.pendingApproval && ct.pendingApproval.tool === "create-tool", "create-tool reaches the approval gate");
+  assert(!ct.previousManagerActions.some((a) => a.rejected), "authored code is NOT falsely blocked by the code-injection scan (approval-gated instead)");
+}
+
+// The DEEP capability test (System Check → "Actually run each capability"):
+// unlike the readiness check, this really EXERCISES each capability once. We stub
+// each provider's status() to "on" and its action to succeed, then prove the
+// sweep genuinely drove every one (ran code, called a tool, remembered+recalled,
+// rendered an image, made a video, spoke) and returned a per-capability verdict —
+// with the live AI-pane pings reported as skipped (no real panes in the harness),
+// never a hard failure.
+async function testButlerCapabilityTest() {
+  console.log("\n== Butler capability test: actually exercises every capability and reports what really worked ==");
+  await resetAllParticipants();
+  const videoProvider = require(path.join(__dirname, "..", "video-provider"));
+  const voiceProvider = require(path.join(__dirname, "..", "voice-provider"));
+  const saved = {
+    iStatus: interpreterProvider.status, iRun: interpreterProvider.run,
+    dStatus: dbService.status,
+    imStatus: imageProvider.status,
+    viStatus: videoProvider.status, viGen: videoProvider.generate,
+    voStatus: voiceProvider.status, voSpeak: voiceProvider.speak,
+    oRoot: outputManager.root, oDir: outputManager.dir, oSave: outputManager.saveBuffer,
+    oImg: outputManager.imagesDir, oVid: outputManager.videosDir,
+  };
+  const videoGenCalls = [], voiceSpeakCalls = [];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "captest-"));
+  try {
+    interpreterProvider.status = () => ({ enabled: true, endpoint: "http://127.0.0.1:8231/run" });
+    dbService.status = () => ({ available: true, count: 0 });
+    imageProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://img", timeoutMs: 500 });
+    videoProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://vid", timeoutMs: 500 });
+    videoProvider.generate = async (prompt) => { videoGenCalls.push(prompt); return { ok: true, videoBase64: Buffer.from("FAKEMP4").toString("base64") }; };
+    voiceProvider.status = () => ({ enabled: true, endpoint: "http://voice" });
+    voiceProvider.speak = async (text) => { voiceSpeakCalls.push(text); return { ok: true }; };
+    outputManager.root = () => tmp;
+    outputManager.dir = (c) => { const d = path.join(tmp, c || "misc"); fs.mkdirSync(d, { recursive: true }); return d; };
+    outputManager.imagesDir = () => outputManager.dir("images");
+    outputManager.videosDir = () => outputManager.dir("videos");
+    outputManager.saveBuffer = (destDir, name, data) => { fs.mkdirSync(destDir, { recursive: true }); const p = path.join(destDir, name); fs.writeFileSync(p, data); return p; };
+    interpreterRunCalls = []; toolRunCalls = []; memoryCreateCalls = []; memorySearchCalls = []; imageGenCalls = [];
+
+    const r = await call("butler:capability-test", {});
+    assert(r && r.ok && r.deep === true && Array.isArray(r.checks), "the deep capability test returns a per-capability result list");
+    const byName = (re) => r.checks.find((c) => re.test(c.name));
+    for (const re of [/Run code/, /Open a file/, /Tools/, /Memory/, /Image/, /Video/, /Voice/, /Talk to/]) {
+      assert(!!byName(re), `the test covers "${re}"`);
+    }
+    // It didn't just report config — it actually DID each thing.
+    assert(interpreterRunCalls.length >= 1, "Run code actually executed a line via Open Interpreter");
+    assert(toolRunCalls.some((c) => c.name === "read-file"), "Tools actually invoked the built-in read-file tool");
+    assert(memoryCreateCalls.length >= 1 && memorySearchCalls.length >= 1, "Memory actually remembered a fact and searched it back");
+    assert(imageGenCalls.length >= 1, "Image actually rendered a test image");
+    assert(videoGenCalls.length >= 1, "Video actually rendered a short test clip");
+    assert(voiceSpeakCalls.length >= 1, "Voice actually spoke a phrase");
+    // The exercised capabilities are marked as genuinely working.
+    assert(byName(/Run code/).ok === true && byName(/Open a file/).ok === true && byName(/Tools/).ok === true &&
+      byName(/Memory/).ok === true && byName(/Image/).ok === true && byName(/Video/).ok === true && byName(/Voice/).ok === true,
+      "each exercised capability is marked as actually working (✅), not merely configured");
+    // All three AI panes are represented. With no signed-in panes there's no
+    // real reply, so each is skipped (⚪) or a clean no-reply (❌) — but never a
+    // false ✅ (the sweep must not claim it talked to an AI it didn't).
+    const talk = r.checks.filter((c) => /^Talk to/.test(c.name));
+    assert(talk.length === 3 && talk.every((c) => c.ok !== true), "all three AI panes are represented, and none is a false positive without a real reply");
+    assert(typeof r.okCount === "number" && typeof r.failCount === "number" && r.okCount >= 7, "it tallies how many capabilities really worked (the 7 exercised locally)");
+  } finally {
+    Object.assign(interpreterProvider, { status: saved.iStatus, run: saved.iRun });
+    dbService.status = saved.dStatus;
+    imageProvider.status = saved.imStatus;
+    videoProvider.status = saved.viStatus; videoProvider.generate = saved.viGen;
+    voiceProvider.status = saved.voStatus; voiceProvider.speak = saved.voSpeak;
+    outputManager.root = saved.oRoot; outputManager.dir = saved.oDir; outputManager.saveBuffer = saved.oSave;
+    outputManager.imagesDir = saved.oImg; outputManager.videosDir = saved.oVid;
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+// Full capability sweep — one continuous butler task that exercises EVERY action
+// in sequence (delegate → tool → run-code → remember → recall → image → setup →
+// finish) with no stalls, proving the whole loop runs fluidly end to end and the
+// butler can reach all of its capabilities in a single run.
+async function testButlerCapabilitySweep() {
+  console.log("\n== Capability sweep: the butler runs every action in one fluid task ==");
+  await resetAllParticipants();
+  resetManagerStub();
+  toolRunCalls = []; interpreterRunCalls = []; memoryCreateCalls = []; memorySearchCalls = []; imageGenCalls = []; setupInstallCalls = [];
+  queueManagerDecision({ action: "USE_TOOL", tool: "echo", args: { q: 1 }, reason: "need a tool", confidence: 0.9 });
+  queueManagerDecision({ action: "RUN_CODE", task: "compute a number", reason: "need code", confidence: 0.9 });
+  queueManagerDecision({ action: "REMEMBER", fact: "the answer is 42", reason: "keep it", confidence: 0.9 });
+  queueManagerDecision({ action: "RECALL", query: "the answer", reason: "look it up", confidence: 0.9 });
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a summary chart", reason: "illustrate", confidence: 0.9 });
+  queueManagerDecision({ action: "SETUP", target: "open-interpreter", reason: "ensure code-run is installed", confidence: 0.95 });
+  queueManagerDecision({ action: "FINISH", reason: "everything done", confidence: 0.97 });
+  const started = await call("manager:start-task", { userRequest: "do a full pass using every capability" });
+  assert(started && started.ok, "the sweep task started");
+  // Each of these actions auto-advances the loop — it should flow straight to
+  // FINISH with no stalls (that's the "fluid, no gaps" guarantee).
+  const finished = await waitUntil(async () => (await call("manager:get-state", {})).manager.status === "finished", { label: "the sweep finishes", timeout: 15000 });
+  const st = await call("manager:get-state", {});
+  assert(finished, `the whole capability sweep completes without stalling (status: ${st.manager.status})`);
+  assert(toolRunCalls.length >= 1, "USE_TOOL fired during the sweep");
+  assert(interpreterRunCalls.length >= 1, "RUN_CODE fired during the sweep");
+  assert(memoryCreateCalls.length >= 1 && memorySearchCalls.length >= 1, "REMEMBER + RECALL fired during the sweep");
+  assert(imageGenCalls.length >= 1, "GENERATE_IMAGE fired during the sweep");
+  assert(setupInstallCalls.some((c) => c.target === "open-interpreter"), "SETUP installed the code-run keystone during the sweep");
+  assert(st.manager.toolCalls.length && st.manager.codeRuns.length && st.manager.images.length && st.manager.setups.length, "every capability left its result on the task — no gaps");
+  await call("manager:stop", {});
+}
+
+// N3: REMEMBER writes a fact to the store; RECALL searches it and folds matches
+// back into the task's memories[]; relevant memories are seeded at task start.
+async function testManagerMemoryActions() {
+  console.log("\n== N3 Memory: the butler REMEMBERs and RECALLs via the shared store ==");
+  resetManagerStub();
+  memoryCreateCalls = []; memorySearchCalls = [];
+  queueManagerDecision({ action: "REMEMBER", fact: "the launch date is May 3", reason: "worth keeping", confidence: 0.9 });
+  queueManagerDecision({ action: "RECALL", query: "launch date", reason: "need to look it up", confidence: 0.9 });
+  queueManagerDecision({ action: "FINISH", reason: "have what I need", confidence: 0.95 });
+  const started = await call("manager:start-task", { userRequest: "remember and recall the launch date" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => {
+    const s = await call("manager:get-state", {});
+    return s.manager && s.manager.status === "finished";
+  }, { label: "the manager runs remember + recall + finish" });
+  const st = await call("manager:get-state", {});
+  assert(memoryCreateCalls.some((c) => c.type === "fact" && /launch date is May 3/.test(c.data.statement)), "REMEMBER wrote the fact to the memory store");
+  assert(memorySearchCalls.includes("launch date"), "RECALL searched the store for the query");
+  assert(st.manager.memories && st.manager.memories.some((mm) => /match for launch date/.test(mm.title)), "the recalled match is folded into the task's memories[]");
+  // The task-start seed also searched the store with the user's request.
+  assert(memorySearchCalls.some((q) => /remember and recall/.test(q)), "relevant memories are seeded from the request at task start");
+  await call("manager:stop", {});
+}
+
+// N4: the awareness object exposes per-pane availability, and a disabled pane is
+// marked unavailable so the butler won't delegate to it. It is present in the
+// state the manager model receives each turn.
+async function testManagerAwareness() {
+  console.log("\n== N4 Awareness: the butler is handed a live pane-availability picture each turn ==");
+  await resetManagerState();
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  await call("participants:set", { site: "gemini", enabled: false }); // gemini is unavailable now
+  resetManagerStub();
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.9 });
+  await call("manager:start-task", { userRequest: "just checking awareness" });
+  await settle(200);
+  const st = await call("manager:get-state", {});
+  const aw = st.manager.awareness;
+  assert(aw && aw.panes && aw.panes.chatgpt && aw.panes.gemini, "the snapshot carries an awareness object with a per-pane picture");
+  assert(aw.panes.gemini.available === false && aw.panes.gemini.enabled === false, "a disabled pane is marked unavailable");
+  // The same awareness object reaches the manager model in its prompt state.
+  const lastState = managerAskCalls.length ? managerAskCalls[managerAskCalls.length - 1].managerState : null;
+  assert(lastState && lastState.awareness && lastState.awareness.panes, "the manager model receives the awareness object in its state");
+  assert(Array.isArray(lastState.availableTools) && lastState.availableTools.some((t) => t.name === "echo"), "the manager model is also told which tools are available");
+  await call("participants:set", { site: "gemini", enabled: true }); // restore
+  await call("manager:stop", {});
+}
+
+// Ack-Brain: the butler acknowledges INSTANTLY when a task starts — an "ack" log
+// entry (and a manager-ack broadcast) is emitted before the first decision.
+async function testManagerAckBrain() {
+  console.log("\n== Ack-Brain: the butler emits an instant acknowledgment the moment a task starts ==");
+  await resetManagerState();
+  await call("manager:configure-provider", MANAGER_TEST_CONFIG);
+  queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.9 });
+  const started = await call("manager:start-task", { userRequest: "Draft a plan for launch day" });
+  const s = await call("manager:get-state", {});
+  // Scope to THIS task's entries -- earlier manager tests each emit their own ack
+  // (start-task always acks now), and resetManagerState() keeps the running log.
+  const taskLog = s.managerLog.filter((l) => l.taskId === started.taskId);
+  const ack = taskLog.find((l) => l.category === "ack");
+  assert(ack, "an 'ack' entry is logged the instant the task starts");
+  assert(ack && /On it/.test(ack.summary) && /Draft a plan for launch day/.test(ack.summary), "the ack echoes the goal ('On it — working on: ...')");
+  // The ack precedes the first real decision/action in the log.
+  const ackIdx = taskLog.findIndex((l) => l.category === "ack");
+  const firstAction = taskLog.findIndex((l) => l.category === "action" || l.category === "decision");
+  assert(ackIdx >= 0 && (firstAction === -1 || ackIdx < firstAction), "the ack comes before the first decision/action");
+  await call("manager:stop", {});
+}
+
 async function main() {
   // Seed a plausible saved-state file BEFORE main.js is first required, so its
   // startup loadPersistedState() call actually has something to restore —
@@ -1977,14 +2762,14 @@ async function main() {
   }));
 
   require(path.join(__dirname, "..", "main.js"));
-  // QA-001: wait for the ACTUAL startup work to finish (the routing-explainer
-  // auto-send reaching all three panes) instead of a fixed 100ms guess — this is
-  // the terminal, observable signal that app.whenReady()→createWindow ran.
+  // The app no longer auto-sends anything on startup, so the readiness signal is
+  // simply that createWindow ran and registered all three panes (their
+  // webContents exist) — NOT that a message was sent.
   const started = await waitUntil(() => SITES.every((s) => {
     const r = reg(s); // the registry is populated only once createWindow runs
-    return r && r.webContents && Array.isArray(r.webContents.sentLog) && r.webContents.sentLog.length >= 1;
-  }), { label: "startup routing-explainer sent to all three panes" });
-  assert(!!started, "startup completed (routing-explainer auto-sent to all three panes)");
+    return r && r.webContents && Array.isArray(r.webContents.sentLog);
+  }), { label: "createWindow registered all three panes" });
+  assert(!!started, "startup completed (all three panes created)");
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -1997,12 +2782,9 @@ async function main() {
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
   assert(restored.houseRule.nextSpeaker === "claude", "nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex");
 
-  console.log("\n== Startup: the routing-explainer prompt is auto-sent to every site once, before anything else ==");
+  console.log("\n== Startup: NOTHING is sent to any pane on startup — the app stays silent until the user acts ==");
   for (const s of SITES) {
-    assert(sentLog(s).length === 1, `${s} received exactly one send on startup (got ${sentLog(s).length})`);
-    // QA-001: never index [0] blindly after a count assertion — guard it so a
-    // miss reports a clean failure instead of crashing the whole runner.
-    assert(sentLog(s)[0] && sentLog(s)[0].text.includes("[TO:"), `${s}'s startup send is the [TO: X] routing explainer, not something else`);
+    assert(sentLog(s).length === 0, `${s} received NO send on startup (got ${sentLog(s).length})`);
   }
 
   await testDebate();
@@ -2019,6 +2801,14 @@ async function main() {
   await testRateLimitAutoPause();
   await testRateLimitDetectedOutsideHouseRules();
   await testWaitingSinceTracking();
+  await testGeneratingGatesCapture();
+  await testUiLogRoutesToActivityLog();
+  await testSilenceStopsAllRelay();
+  await testAiAddressesButler();
+  await testAiAddressesTerminal();
+  await testFeatureTestButton();
+  await testModelsFolderInfo();
+  await testExtractAllLogs();
   await testConcurrentSendsToSameTargetAreSerialized();
   await testSendAutoRetry();
   await testDeliveryLedger();
@@ -2039,8 +2829,25 @@ async function main() {
   await testTunerDistinguishesForwardFailureFromNoReply();
   await testManagerConfigureAndConnection();
   await testManagerTaskLifecycleHappyPath();
+  await testManagerRunCodeAction();
+  await testManagerUseToolAction();
+  await testManagerAskToolApprovalGate();
+  await testManagerMemoryActions();
+  await testManagerGenerateImageAction();
+  await testManagerSetupAction();
+  await testButlerDevice();
+  await testButlerHandlingModes();
+  await testButlerConverse();
+  await testModelIncompatible();
+  await testCoerceMalformedDelegate();
+  await testButlerToolbox();
+  await testButlerCapabilityTest();
+  await testButlerCapabilitySweep();
+  await testManagerAwareness();
+  await testManagerAckBrain();
   await testManagerApprovalModeAndRejection();
   await testManagerValidationEscalationAndMaxTurns();
+  await testManagerStallBreak();
   await testManagerEscalateActionAndTierFourAdjudication();
   await testManagerSaveActionWritesRealFiles();
   await testManagerPauseResumeStop();

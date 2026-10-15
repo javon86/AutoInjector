@@ -1,5 +1,12 @@
 # AutoInjector Desktop
 
+> 🚧 **Under construction — being updated.** Some sections reference the removed
+> book/ATELIER machinery and predate the System AI / butler, tools, memory,
+> voice, and image-generation capabilities. See
+> [`../UNDER_CONSTRUCTION.md`](../UNDER_CONSTRUCTION.md) for what's parked and
+> [`FEATURES.md`](FEATURES.md) / [`MERGE_ROADMAP.md`](MERGE_ROADMAP.md) for the
+> current inventory. Nothing here affects how the app runs.
+
 One program, one window: ChatGPT, Claude and Gemini as three real Chromium panes
 side by side, with a control panel that lets you route messages between them —
 by copy/paste-style DOM automation, no API keys, using your normal logged-in
@@ -515,7 +522,7 @@ The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (normative).
 
 - Turn it on in the **BookForge bridge (experimental)** panel. Off = nothing
   listens. On = a small HTTP server on `127.0.0.1:17891` only (env
-  `AUTOINJECTOR_BRIDGE_PORT` overrides). The on/off choice is remembered.
+  `AUTOINJECTOR_BOOKFORGE_PORT` overrides). The on/off choice is remembered.
 - **Copy token** puts the bearer token on the clipboard — paste it into the
   BookForge slot's key field. The token lives in the app's userData folder
   (`bookforge-bridge-token`, mode 0600), never in the state file or logs.

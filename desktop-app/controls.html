@@ -6,7 +6,7 @@
   <style>
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin: 0; background:#111; color:#eee; font-size:13px; overflow:hidden; font-family: system-ui, sans-serif; display:flex; flex-direction:column; }
+    body { margin: 0; background:#111; color:#eee; font-size:13.5px; line-height:1.5; overflow:hidden; font-family: system-ui, sans-serif; display:flex; flex-direction:column; }
 
     #window-titlebar {
       flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
@@ -15,7 +15,7 @@
     }
     #btn-collapse-window { font-size:13px; line-height:1; padding:3px 9px; }
 
-    #wrap { display:flex; flex-direction:column; gap:8px; padding:8px 10px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
+    #wrap { display:flex; flex-direction:column; gap:12px; padding:12px 14px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
     #wrap.window-collapsed { display:none; }
     /* Visible scrollbar so it's obvious the panel scrolls vertically. */
     #wrap::-webkit-scrollbar { width:11px; }
@@ -26,7 +26,7 @@
        column — no per-panel scrollbars. (The Conversation/Activity boxes sit
        in a fixed-height row and keep their own internal scroll; see #main-row
        overrides below.) */
-    .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:7px 9px; overflow:visible; }
+    .col { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 12px; overflow:visible; }
     .col h2 { font-size:11px; margin:0 0 5px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
 
     /* ---- top tab strip: where Global / House Rules / Prompt Library land
@@ -65,12 +65,74 @@
        right of the grid. Sized to content, not a fixed narrow column --
        still just a few rows tall, so the whole User Panel stays shallow. */
     #up-zone-actions { flex:0 0 auto; display:flex; gap:14px; flex-direction:row; }
+    .send-active-col { display:flex; flex-direction:column; gap:6px; }
+    /* The handling-mode toggle: shows how the next message to the butler is handled. */
+    .butler-mode { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; cursor:pointer;
+      border:1px solid #2a2a2a; border-radius:7px; padding:4px 8px; background:#141414; color:inherit; white-space:nowrap; }
+    .butler-mode .mode-ic { font-size:13px; }
+    .butler-mode.mode-converse { border-color:#7c5ce0; background:#171528; }
+    .butler-mode.mode-auto     { border-color:#3a3a3a; }
+    .butler-mode.mode-self     { border-color:#2f8f52; background:#0e1a11; }
+    .butler-mode.mode-delegate { border-color:#4a7de0; background:#0e1522; }
     .send-active-grid { display:grid; grid-template-columns:auto auto; gap:5px 10px; align-items:center; }
     .send-active-grid .zone-label { margin:0 0 2px; }
     .send-active-grid input[type="checkbox"] { justify-self:center; margin:0; }
-    #up-actions-extra { flex-direction:column; align-items:stretch; gap:4px; }
-    #up-actions-extra button { text-align:left; }
-    #up-zone-messages { flex:1 1 240px; min-width:200px; }
+    /* The user's action buttons as THREE equal columns — compact and narrow so
+       the User Panel stays short and doesn't hog width. Items marked .grid-full
+       (status text, the full-width danger stop) span all three. */
+    #up-actions-extra { display:grid; grid-template-columns:repeat(3, 1fr); gap:4px 5px; align-items:stretch; }
+    #up-actions-extra button { text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; padding:3px 6px; }
+    #up-actions-extra .grid-full { grid-column:1 / -1; }
+    /* Third zone: SAME size and place as the original "Messages to you" zone.
+       Its contents are pinned inside it (.zone-fill), so the terminal can
+       never make the User Panel taller — the other two zones set the height. */
+    #up-zone-messages { flex:1 1 240px; min-width:200px; position:relative; }
+    #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
+    #up-zone-messages .feed-head .spacer { flex:1; }
+    .zone-fill { position:absolute; inset:7px 9px; display:flex; flex-direction:column; gap:4px; min-height:0; overflow:hidden; }
+    /* ---- Third zone: ⌨ Terminal / 💬 Messages tabs ---- */
+    .zone-tabs { display:flex; align-items:center; gap:4px; }
+    .zone-tabs .spacer { flex:1; }
+    .zone-tab { font-size:11px; padding:2px 8px; border-radius:6px 6px 0 0; border:1px solid #2a2a2a; border-bottom-color:transparent;
+      background:#111; color:inherit; opacity:.7; display:inline-flex; align-items:center; gap:5px; cursor:pointer; }
+    .zone-tab.active { opacity:1; background:#0b0f0c; border-color:#2d4a37; color:#8ef0b0; }
+    .zone-pane { display:flex; flex-direction:column; gap:4px; flex:1 1 auto; min-height:0; }
+    .zone-pane[hidden] { display:none; }
+    .term-dot { width:7px; height:7px; border-radius:50%; background:#5a5a5a; display:inline-block; }
+    .term-dot.alive { background:#38e07b; }
+    .term-dot.busy { background:#f5b642; }
+    .term-badge { background:#e0a24a; }
+    #term-output { margin:0; flex:1 1 auto; min-height:0; overflow:auto; background:#050505; color:#d6dde6;
+      border:1px solid #1f2a22; border-radius:5px; padding:5px 7px; font:11.5px/1.35 ui-monospace,Consolas,"Cascadia Mono",monospace;
+      white-space:pre-wrap; word-break:break-word; }
+    #term-output .t-err { color:#ff8a8a; }
+    #term-output .t-sys { color:#7fd4e0; opacity:.85; }
+    .term-row { display:flex; align-items:center; gap:5px; }
+    .term-prompt { font:12px ui-monospace,Consolas,monospace; color:#8ef0b0; }
+    #term-input { flex:1 1 auto; min-width:0; font:12px ui-monospace,Consolas,monospace; background:#050505; color:#e8e8e8;
+      border:1px solid #2a2a2a; border-radius:5px; padding:4px 6px; }
+    #term-input.answering { border-color:#e0a24a; }
+    .term-tools button, .term-tools select { font-size:11px; padding:1px 6px; }
+    .zone-tabs { flex-wrap:nowrap; white-space:nowrap; flex:0 0 auto; }
+    .term-tools { flex-wrap:nowrap; white-space:nowrap; overflow:hidden; gap:3px; }
+    .term-tools select { width:74px; }
+    .zone-tab { padding:1px 8px; white-space:nowrap; }
+    .term-auto { white-space:nowrap; }
+    #term-pane .term-row { flex:0 0 auto; }
+    .term-auto { font-size:11px; display:inline-flex; align-items:center; gap:4px; cursor:pointer; user-select:none; }
+    #term-pending:empty { display:none; }
+    #term-pending { display:flex; flex-direction:column; gap:2px; max-height:46px; overflow-y:auto; flex:0 0 auto; }
+    /* one line per request: who · command · ⚠ · Run / Reject */
+    .term-req { border:1px solid #6b5420; background:#1a1508; border-radius:6px; padding:1px 6px; font-size:11px; display:flex; flex-wrap:nowrap; align-items:center; gap:6px; white-space:nowrap; min-width:0; }
+    .term-req > div:first-child { flex:0 0 auto; }
+    .term-req code { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap !important; }
+    .term-req .why { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .term-req.dangerous { border-color:#8a2f2f; background:#1d0d0d; }
+    .term-req .who { font-weight:700; }
+    .term-req code { display:inline; font:11px ui-monospace,Consolas,monospace; white-space:pre-wrap; word-break:break-all; margin:0; color:#f2e6c8; }
+    .term-req .why { color:#ff9a7a; font-size:11px; }
+    .term-req .acts { display:flex; gap:5px; }
+    .term-req .acts button { font-size:11px; padding:2px 8px; }
     #up-zone-messages .feed-head { display:flex; align-items:center; gap:6px; }
     #up-zone-messages .feed-head .spacer { flex:1; }
     #up-zone-messages .see-all { font-size:11px; opacity:.8; background:none; border:none; padding:0; text-decoration:underline; }
@@ -92,6 +154,91 @@
     .feed-row .meta { opacity:.78; font-size:11px; display:flex; gap:5px; }
     .feed-row .snippet { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
+    /* ---- Phone companion panel (User Panel) ---- */
+    .phone-panel { margin-top:6px; padding:8px 9px; background:#0c1016; border:1px solid #26303c; border-radius:8px; }
+    .phone-lan-row { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; cursor:pointer; }
+    .phone-hint { font-size:11px; opacity:.75; margin:6px 0; }
+    .phone-url { width:100%; box-sizing:border-box; font-size:11px; padding:6px 7px; border-radius:6px;
+      border:1px solid #26303c; background:#070a0e; color:#cfe0f5; }
+    .phone-btns { display:flex; gap:6px; margin-top:6px; }
+    .phone-warn { font-size:10.5px; color:#e0a35a; margin:6px 0 0; }
+
+    /* ---- Butler status light: a clickable pill in the User Panel that glows
+       while the butler is working and shows a one-line "what he's doing". ---- */
+    .butler-status { display:flex; align-items:center; gap:7px; font-weight:600; font-size:11.5px;
+      background:#0c130e; border:1px solid #26402e; border-radius:7px; padding:4px 9px; cursor:pointer; color:inherit; text-align:left; }
+    .butler-status:hover { border-color:#2f5c3e; }
+    .butler-status .dot { width:9px; height:9px; border-radius:50%; background:#5a6b5f; flex:0 0 auto; }
+    .butler-status .txt { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .butler-status.working { border-color:#2f8f52; background:#0e1a11; }
+    .butler-status.working .dot { background:#38e07b; box-shadow:0 0 0 0 rgba(56,224,123,.6); animation:butlerPulse 1.2s ease-out infinite; }
+    .butler-status.needs .dot { background:#f5b642; }
+    .butler-status.error .dot { background:#e5484d; }
+    @keyframes butlerPulse { 0%{box-shadow:0 0 0 0 rgba(56,224,123,.55);} 70%{box-shadow:0 0 0 7px rgba(56,224,123,0);} 100%{box-shadow:0 0 0 0 rgba(56,224,123,0);} }
+
+    /* ---- The User Panel stays put at the top; everything below scrolls past
+       it. (Native AI panes float above HTML, so they're kept inside the fixed
+       butler unit rather than a scroll region.) ---- */
+    #col-userpanel { position:sticky; top:0; z-index:6; }
+
+    /* ---- Butler unit: the butler bar + the three AI panes read as ONE bordered
+       block — he sits on top and controls the three beneath him. ---- */
+    /* Order within #wrap (a flex column): the butler unit sits directly under
+       the sticky User Panel; the other utility panels and the log follow it. */
+    #top-tab-strip { order:-1; }
+    #col-userpanel { order:0; }
+    #butler-unit { order:1; }
+    #panels-grid { order:2; }
+    #main-row { order:3; }
+    #butler-unit { border:1px solid #2a4a34; border-radius:11px; background:#0a0f0b; padding:5px; margin:0 0 12px; display:flex; flex-direction:column; gap:0; }
+    #butler-unit > #col-systemai { margin:0; border-bottom-left-radius:0; border-bottom-right-radius:0; }
+    #butler-unit > #ai-row { margin:0; }
+
+    /* ---- Butler capability reel: a live ticker of each capability as it runs. ---- */
+    #cap-reel { display:none; gap:6px; overflow-x:auto; padding:5px 2px; margin:4px 0 2px; }
+    #cap-reel.on { display:flex; }
+    .cap-chip { flex:0 0 auto; display:flex; align-items:center; gap:5px; font-size:11px; padding:3px 8px; border-radius:12px;
+      background:#141d16; border:1px solid #26402e; white-space:nowrap; opacity:.65; transition:opacity .15s, border-color .15s; }
+    .cap-chip.running { opacity:1; border-color:#4a7de0; }
+    .cap-chip.pass { opacity:1; border-color:#2f8f52; }
+    .cap-chip.fail { opacity:1; border-color:#e5484d; }
+    .cap-chip.skip { opacity:.8; border-color:#6a6a6a; }
+    .cap-chip .spin { width:9px; height:9px; border:2px solid #4a7de0; border-top-color:transparent; border-radius:50%; animation:capSpin .7s linear infinite; }
+    @keyframes capSpin { to { transform:rotate(360deg); } }
+
+    /* ---- Capability results modal: 3 buckets + fix-it tips. ---- */
+    #cap-modal { position:fixed; inset:0; z-index:50; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; padding:18px; }
+    #cap-modal.on { display:flex; }
+    #cap-modal .sheet { background:#12161c; border:1px solid #2c3440; border-radius:12px; max-width:900px; width:100%; max-height:86vh; overflow:auto; padding:16px 18px; }
+    #cap-modal h3 { margin:0 0 3px; }
+    #cap-modal .sub { opacity:.7; font-size:12px; margin:0 0 12px; }
+    #cap-cols { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; }
+    @media (max-width:640px){ #cap-cols { grid-template-columns:1fr; } }
+    .cap-bucket { background:#0e1216; border:1px solid #232a33; border-radius:9px; padding:9px 11px; }
+    .cap-bucket h4 { margin:0 0 6px; font-size:13px; }
+    .cap-bucket.working h4 { color:#38e07b; }
+    .cap-bucket.failed h4 { color:#ff7a7f; }
+    .cap-bucket.notset h4 { color:#c7cdd6; }
+    .cap-item { border-top:1px solid #1c222a; padding:6px 0; font-size:12px; }
+    .cap-item:first-of-type { border-top:none; }
+    .cap-item .nm { font-weight:600; }
+    .cap-item .why { opacity:.75; display:block; margin-top:1px; }
+    .cap-item .tip { display:block; margin-top:3px; color:#ffd479; font-size:11.5px; }
+    #cap-modal .foot { display:flex; align-items:center; gap:10px; margin-top:14px; }
+    #cap-modal .foot .spacer { flex:1; }
+
+    /* ---- Butler chat/activity log: system vs butler vs each AI vs to-ME. A
+       message addressed to ME is its own colour AND 2× the size (defaults —
+       tweak freely). ---- */
+    .bl-line { padding:2px 0; line-height:1.34; word-break:break-word; }
+    .bl-line .bl-who { font-weight:700; opacity:.9; }
+    .bl-system { color:#8a94a6; opacity:.82; font-size:11px; }
+    .bl-butler { color:#8ef0b0; }
+    .bl-chatgpt { color:#57c07a; }
+    .bl-claude  { color:#e0a24a; }
+    .bl-gemini  { color:#6ea8ff; }
+    .bl-tome { color:#ffd24a; font-size:2em; font-weight:600; line-height:1.25; margin:3px 0; }
+
     /* ---- collapsible "yellow" panels: Global, House Rules, Prompt
        Library. Each gets a header collapse button; collapsing hides the
        real panel (freeing its row's height for the AI panes below, via
@@ -101,10 +248,97 @@
     .yc-head h2 { margin:0; cursor:pointer; border-radius:5px; padding:2px 4px; }
     .yc-head h2:hover { background:#242424; }
     .yc-head h2:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; }
-    #row-global-houserules { display:flex; gap:8px; flex:0 0 auto; }
-    #row-global-houserules:empty { display:none; }
-    #col-global { flex: 0 0 210px; }
-    #col-houserules { flex: 1 1 260px; }
+    /* All the utility panels tile side by side and pack like Tetris, filling the
+       width instead of stacking full-bleed. CSS columns keep each panel whole
+       (break-inside:avoid) and balance them across as many ~300px columns as fit. */
+    /* Column basis chosen so the utility panels fill the width as whole columns
+       (no lopsided empty column on the right) across the usual window sizes. */
+    #panels-grid { column-width: 440px; column-gap: 12px; flex:0 0 auto; }
+    #panels-grid:empty { display:none; }
+    #panels-grid > .yc-panel { display:inline-block; width:100%; margin:0 0 12px; break-inside:avoid; vertical-align:top; }
+
+    /* Butler bar: a full-width band that sits directly ON TOP of the three AI
+       panes (it's a sibling right before #ai-row), so the butler visibly
+       oversees them. Chat is full-width on top; his tools sit underneath. */
+    .butler-bar { flex:0 0 auto; margin:0 0 8px; border:1px solid #2f6b45; border-radius:10px; background:#0e140f; box-shadow:0 1px 0 #163a26 inset; }
+    .butler-bar > .yc-head { border-bottom:1px solid #1c3a28; padding-bottom:5px; margin-bottom:6px; }
+    .butler-bar > .yc-head h2 { color:#8ef0b0; letter-spacing:.01em; }
+    /* Two-thirds (everything: goal + controls) on the left, one-third (the
+       chat window) on the right. flex:2 vs flex:1 = the 2/3 · 1/3 split. */
+    .butler-body.butler-body { display:flex; flex-direction:row; gap:12px; align-items:stretch; }
+    #butler-main { flex:2 1 0; min-width:0; }
+    #butler-chat { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+    .butler-chat-title { font-size:10.5px; opacity:.6; margin:0 0 4px; text-transform:uppercase; letter-spacing:.06em; }
+    /* A hard height cap so the log SCROLLS through history instead of growing
+       the whole butler bar taller and taller. min-height keeps it usable; the
+       cap (and overflow-y:auto) is what makes long context scrollable. New
+       messages auto-stick to the bottom (see appendButlerLine). */
+    .butler-chat-log { flex:1 1 auto; min-height:220px; max-height:52vh; overflow-y:auto; overscroll-behavior:contain; font-size:11.5px; line-height:1.45; font-family:ui-monospace,monospace; opacity:.92; background:#0a0a0a; border:1px solid #1e1e1e; border-radius:8px; padding:7px 9px; display:flex; flex-direction:column; gap:2px; }
+    /* Friendlier idle state: centre a short, welcoming hint instead of a flat line. */
+    .butler-chat-log:empty { align-items:center; justify-content:center; text-align:center; }
+    .butler-chat-log:empty::before {
+      content:"🤵  Your butler is standing by.\A\AGive him a goal on the left, or press System Check\Ato see what he can do — his thoughts and actions show up here.";
+      white-space:pre-line; opacity:.5; max-width:34ch; font-family:system-ui, sans-serif; font-size:12px; line-height:1.6;
+    }
+    .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
+    .butler-chat-log > div:last-child { border-bottom:none; }
+    /* Controls under the goal box (still on the 2/3 side): a tidy row of cards. */
+    #butler-controls { width:100%; border-top:1px solid #1c3a28; padding-top:10px; margin-top:9px; display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start; }
+    #butler-controls > p { flex:1 1 100%; margin:0 0 2px; }
+    /* The "run & check" block spans the full 2/3 column as the primary surface,
+       sitting above the settings cards. */
+    #butler-controls > #col-device { flex:1 1 100%; background:#0c130e; border:1px solid #26402e; border-radius:9px; padding:9px 11px; }
+    #col-device .device-title { font-weight:700; font-size:13px; color:#8ef0b0; letter-spacing:.01em; margin:0 0 2px; }
+    #butler-controls > .sai-sec { flex:1 1 240px; min-width:210px; margin:0; background:#0b110d; border:1px solid #1c2a20; border-radius:8px; padding:6px 9px; transition:border-color .12s, background .12s; }
+    /* Collapsed chips share one height so the row lines up even when a label wraps; open sections expand naturally. */
+    #butler-controls > .sai-sec:not([open]) { min-height:2.6em; display:flex; align-items:center; }
+    #butler-controls > .sai-sec:not([open]):hover { border-color:#2f5c3e; background:#0e150f; }
+    #butler-controls > .sai-sec[open] { border-color:#2a4a34; }
+    #butler-controls > .sai-sec > summary { font-weight:600; }
+    /* When the butler bar is collapsed to a tab, the body hides like any panel. */
+    .butler-bar.hidden-collapsed .butler-body { display:none; }
+    /* Narrow windows: stack the chat under everything else instead of squeezing. */
+    @media (max-width: 900px) { .butler-body.butler-body { flex-direction:column; } }
+
+    /* Three content sizes for a panel (minimal → middle → large), driven by a
+       data-size attribute. Sections tagged .when-mid appear at middle+, and
+       .when-large only at large. The ⌄ tab-collapse is separate from this. */
+    .yc-panel[data-size="minimal"] .when-mid,
+    .yc-panel[data-size="minimal"] .when-large,
+    .yc-panel[data-size="middle"] .when-large { display:none; }
+    .size-btn { background:transparent; border:none; color:#cfcfcf; cursor:pointer; font-size:13px; padding:0 4px; opacity:.8; }
+    .size-btn:hover { opacity:1; }
+
+    /* Generation sliders (image/video main controls). */
+    .slider-row { display:flex; align-items:center; gap:8px; margin:3px 0; font-size:11.5px; }
+    .slider-row > label { width:60px; flex:0 0 auto; opacity:.82; }
+    .slider-row > input[type="range"] { flex:1 1 auto; min-width:0; accent-color:#3aa564; }
+    .slider-row > .sv { width:42px; flex:0 0 auto; text-align:right; font-family:ui-monospace,monospace; opacity:.9; }
+
+    /* Who's-speaking indicator: dim chips that light in each speaker's colour. */
+    .speak-row { display:flex; gap:5px; flex-wrap:wrap; margin:3px 0 5px; }
+    .spk-chip { font-size:11px; padding:2px 8px; border-radius:11px; border:1px solid #2a2a2a; background:#141414; color:#9a9a9a; opacity:.55; transition:all .12s ease; }
+    .spk-chip.speaking { opacity:1; font-weight:600; color:#fff; box-shadow:0 0 8px currentColor; }
+    .spk-chip[data-who="butler"].speaking { background:#173a29; border-color:#3aa564; color:#8ef0b0; }
+    .spk-chip[data-who="chatgpt"].speaking { background:#123021; border-color:#57c07a; color:#8ff0b0; }
+    .spk-chip[data-who="claude"].speaking { background:#33240f; border-color:#e0a24a; color:#f0c98a; }
+    .spk-chip[data-who="gemini"].speaking { background:#152540; border-color:#6ea8ff; color:#a9ccff; }
+    /* Per-speaker voice assignment rows. */
+    .voice-assign { display:flex; align-items:center; gap:6px; margin:2px 0; font-size:11.5px; }
+    .voice-assign > span { width:66px; flex:0 0 auto; }
+    .voice-assign > input { flex:1 1 auto; min-width:0; }
+    button.mini { padding:1px 6px; font-size:11px; }
+
+    /* GPU usage bars. */
+    .gpu-row { margin:5px 0 8px; }
+    .gpu-name { font-size:11px; font-weight:600; opacity:.9; margin-bottom:3px; }
+    .gpu-meter { display:flex; align-items:center; gap:6px; margin:2px 0; font-size:10.5px; opacity:.85; }
+    .gpu-meter .lbl { width:38px; flex:0 0 auto; opacity:.7; }
+    .gpu-meter .val { width:78px; flex:0 0 auto; text-align:right; font-family:ui-monospace,monospace; }
+    .usage-bar { flex:1 1 auto; height:8px; background:#161616; border:1px solid #262626; border-radius:5px; overflow:hidden; }
+    .usage-bar > span { display:block; height:100%; background:linear-gradient(90deg,#2f8f4e,#57c07a); }
+    .usage-bar.warn > span { background:linear-gradient(90deg,#b5892f,#e0b055); }
+    .usage-bar.hot > span { background:linear-gradient(90deg,#a83f3f,#e06868); }
 
     .participant-row { display:flex; align-items:center; gap:6px; margin:4px 0; }
     .role-badge { font-size:11px; padding:1px 5px; border-radius:4px; background:#2a2440; color:#c9b8ff; letter-spacing:.03em; }
@@ -153,7 +387,7 @@
        adding more panels makes the whole #wrap scroll (it is overflow:auto)
        instead of crushing the panes. The floor is lifted when every pane is
        collapsed (see the .all-collapsed rule below) so no dead space is left. */
-    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:1280px; transition: flex-basis .2s ease; }
+    #ai-row { display:flex; flex-direction:column; gap:8px; flex:1 1 auto; min-height:427px; transition: flex-basis .2s ease; }
     #expanded-strip { display:flex; gap:8px; flex:1 1 auto; min-height:0; }
     /* All three AI panes collapsed = #expanded-strip is empty and would
        otherwise still claim its flex-grow share of #ai-row's height as dead
@@ -182,6 +416,8 @@
        area fill the space. */
     .ai-col.state-reduced .pane-slot { display:none; }
     .ai-col.state-reduced .preview { flex:1 1 auto; height:auto; max-height:none; }
+    .ai-col.state-reduced .locker-box { flex:1 1 auto; }
+    .ai-col.state-reduced .locker-list { height:auto; max-height:none; flex:1 1 auto; }
 
     /* MIN: a thin vertical provider bar, in the same column position. The
        whole bar is an expand target (see the click handler in controls.js). */
@@ -189,6 +425,7 @@
     .ai-col.state-min:hover { background:#1c1c1c; }
     .ai-col.state-min .pane-slot,
     .ai-col.state-min .preview,
+    .ai-col.state-min .locker-box,
     .ai-col.state-min .btns,
     .ai-col.state-min .pick-menu,
     .ai-col.state-min .login-list,
@@ -199,8 +436,8 @@
     .ai-col.state-min .card-head > .collapse-btn { display:block; font-size:15px; opacity:.9; padding:0; }
     .ai-col.state-min .card-head > .pane-name { display:block; writing-mode:vertical-rl; transform:rotate(180deg); font-weight:600; font-size:11.5px; letter-spacing:.06em; white-space:nowrap; }
 
-    .control-strip { padding:7px 9px; flex:0 0 auto; }
-    .card-head { display:flex; align-items:center; gap:6px; font-weight:600; margin-bottom:6px; }
+    .control-strip { padding:9px 11px; flex:0 0 auto; }
+    .card-head { display:flex; align-items:center; gap:7px; font-weight:600; margin-bottom:8px; }
     .collapse-btn { background:none; border:1px solid transparent; border-radius:6px; padding:3px 8px; font-size:16px; line-height:1; opacity:.85; cursor:pointer; color:inherit; min-width:28px; min-height:24px; }
     .collapse-btn:hover { opacity:1; background:#2a2a2a; border-color:#3a3a3a; }
     .collapse-btn:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; opacity:1; }
@@ -242,11 +479,40 @@
     @keyframes pulse { 0%,100% { opacity:.78; } 50% { opacity:1; } }
     .spacer { flex:1; }
 
-    .preview { height:60px; overflow:auto; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:5px 6px; white-space:pre-wrap; line-height:1.3; opacity:.9; }
-    .preview .ts { display:block; font-size:11px; opacity:.78; margin-bottom:3px; }
+    .preview { height:66px; overflow:auto; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:7px 9px; white-space:pre-wrap; line-height:1.4; opacity:.9; }
+    .preview .ts { display:block; font-size:11px; opacity:.78; margin-bottom:4px; }
+    /* Per-AI box: 📁 that AI's locker (default) or 💬 its last reply. */
+    .locker-box { display:flex; flex-direction:column; gap:3px; min-height:0; }
+    .locker-tabs { display:flex; align-items:center; gap:4px; font-size:11px; }
+    .locker-tabs .spacer { flex:1; }
+    .locker-tabs button { font-size:11px; padding:1px 7px; border-radius:5px; opacity:.7; }
+    .locker-tabs button.active { opacity:1; border-color:#2d4a37; color:#8ef0b0; }
+    .locker-tabs .lk-refresh { padding:1px 5px; }
+    .locker-list { height:96px; overflow-y:auto; overflow-x:hidden; background:#0e0e0e; border:1px solid #2a2a2a; border-radius:6px; padding:3px; display:flex; flex-direction:column; gap:1px; }
+    .locker-list:empty::after { content:"Empty — files this AI saves (or gets sent) show up here."; opacity:.6; font-size:11px; padding:4px 6px; }
+    .lk-row { display:flex; align-items:center; gap:6px; font-size:11.5px; padding:2px 6px; border-radius:4px; cursor:pointer; border:none; background:none; color:inherit; text-align:left; width:100%; }
+    .lk-row:hover, .lk-row:focus { background:#1a2a1f; outline:none; }
+    .lk-row .lk-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .lk-row .lk-name b { font-weight:600; }
+    .lk-row .lk-dir { opacity:.55; font-size:10.5px; margin-left:4px; }
+    .lk-row .lk-date { opacity:.7; font-size:10.5px; width:108px; text-align:right; white-space:nowrap; }
+    .lk-row .lk-size { opacity:.7; font-size:10.5px; width:56px; text-align:right; white-space:nowrap; }
+    .lk-head { position:sticky; top:0; z-index:1; background:#0e0e0e; cursor:default; opacity:.65; font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
+    .lk-head:hover { background:#0e0e0e; }
+    /* Files waiting in Compose to be uploaded to whichever AI you click. */
+    #compose-attachments { display:flex; flex-wrap:wrap; gap:4px; }
+    #compose-attachments:empty { display:none; }
+    .att-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; padding:2px 4px 2px 7px; border-radius:999px; background:#16231a; border:1px solid #2d4a37; }
+    .att-chip button { font-size:10px; padding:0 5px; border:none; background:none; opacity:.8; cursor:pointer; color:inherit; }
     .row-label { opacity:.8; font-size:11px; margin-right:3px; }
+    /* Collapsible sub-sections inside the System AI panel — keep it compact. */
+    .sai-sec { margin:5px 0; border-top:1px solid #2a2a2a; padding-top:5px; }
+    .sai-sec > summary { cursor:pointer; font-weight:600; font-size:12px; list-style:none; opacity:.9; user-select:none; }
+    .sai-sec > summary::-webkit-details-marker { display:none; }
+    .sai-sec > summary::before { content:"▸ "; opacity:.6; }
+    .sai-sec[open] > summary::before { content:"▾ "; }
 
-    .pane-slot { flex:1 1 auto; min-height:560px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
+    .pane-slot { flex:1 1 auto; min-height:280px; background:#0b0b0b; border-top:1px solid #2a2a2a; }
     .ai-col.disabled .pane-slot { flex:0 0 0; min-height:0; }
 
     #main-row { display:flex; gap:8px; flex:0 0 220px; min-height:0; transition: flex-basis .2s ease; }
@@ -259,10 +525,26 @@
        internal scroll (the rest of the panels scroll with the whole window). */
     #col-transcript { flex:2 1 0; min-width:0; overflow:auto; min-height:0; }
     #col-log { flex:1 1 0; min-width:0; overflow:auto; min-height:0; }
-    #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11.5px; line-height:1.5; }
-    .log-line { opacity:.85; }
+    #activity-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:11.5px; line-height:1.55; flex:1 1 auto; min-height:0; overflow-y:auto; }
+    #col-log { display:flex; flex-direction:column; min-width:0; }
+    .log-line { opacity:.9; display:flex; align-items:baseline; gap:6px; padding:1px 0; }
     .log-line.err { color:#e88; }
-    .log-line .t { opacity:.75; margin-right:4px; }
+    .log-line.warn { color:#e6c07b; }
+    .log-line.err .log-chip, .log-line.warn .log-chip { filter:none; }
+    /* "⚠ Errors only": hide anything that isn't an error or a warning. */
+    #activity-log.errors-only .log-line:not([data-level="error"]):not([data-level="warning"]) { display:none; }
+    .log-line .t { opacity:.7; flex:0 0 auto; }
+    .log-line .log-msg { min-width:0; word-break:break-word; }
+    /* Tag chip: a small colour-coded label at the head of each line. */
+    .log-chip { flex:0 0 auto; font-family:system-ui,sans-serif; font-size:10px; font-weight:600; letter-spacing:.02em;
+      padding:0 6px; border-radius:9px; line-height:15px; color:#0c120e; text-transform:uppercase; white-space:nowrap; }
+    /* Filter bar: one checkbox chip per tag (checked = visible). */
+    #log-filters { display:flex; flex-wrap:wrap; gap:4px 8px; padding:5px 0 6px; border-bottom:1px solid #242424; margin-bottom:5px; }
+    #log-filters:empty { display:none; }
+    #log-filters label { display:inline-flex; align-items:center; gap:4px; font-size:11px; opacity:.9; cursor:pointer; user-select:none; }
+    #log-filters .swatch { width:9px; height:9px; border-radius:3px; flex:0 0 auto; }
+    #log-filters input { margin:0; }
+    #btn-log-clear { font-size:11px; padding:2px 8px; }
 
     #exportbar { display:flex; gap:8px; align-items:center; flex:0 0 auto; }
 
@@ -310,37 +592,101 @@
     <div id="col-userpanel" class="col">
       <div class="up-zone" id="up-zone-compose">
         <p class="zone-label">User Panel — Compose</p>
-        <textarea id="composer-text" placeholder="Type a message to kick off or interject…">What's the most underrated skill for engineers to learn in the next 5 years?</textarea>
+        <textarea id="composer-text" placeholder="Type a message and click an AI's name — or type a command and press Enter to run it"></textarea>
+        <div id="compose-attachments" aria-label="Files to upload with your next send"></div>
         <div id="char-count">0 chars</div>
       </div>
 
       <div class="up-zone" id="up-zone-actions">
-        <div class="send-active-grid" id="send-active-grid">
-          <p class="zone-label">Send</p>
-          <p class="zone-label">Active</p>
+        <div class="send-active-col">
+          <div class="send-active-grid" id="send-active-grid">
+            <p class="zone-label">Send</p>
+            <p class="zone-label">Active</p>
+          </div>
+          <button id="btn-butler-mode" class="butler-mode mode-auto" title="How the butler handles what you send him — click to change. Converse: just chat & he replies. Auto: he decides (computer tasks like 'install…' auto-go to him). Himself: he does it locally, never the AIs. Delegate: he routes it to ChatGPT/Claude/Gemini. Tip: start a message with ! to force 'himself'.">
+            <span class="mode-ic">🔀</span><span class="mode-tx">Auto</span>
+          </button>
         </div>
         <div class="btns" id="up-actions-extra">
+          <button id="btn-butler-status" class="grid-full butler-status" title="The butler's live status — glows while he's working. Click to jump to his panel." aria-label="Butler status — click to open the butler panel">
+            <span class="dot"></span><span class="txt">Butler idle</span>
+          </button>
           <button id="btn-open-roles">🎭 Roles</button>
           <button id="btn-open-sequence" title="Build a numbered list of prompts to fire off one after another" aria-label="Build a numbered list of prompts to fire off one after another">🧵 Sequence</button>
-          <button id="btn-open-wizard" title="Set up local AI, image and video tools — downloads run in the background" aria-label="Set up local AI, image and video tools — downloads run in the background">🧙 Setup</button>
-          <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 Start New Chat</button>
+          <button id="btn-open-wizard" title="Set up local AI, image generation, voice, and guided installs" aria-label="Set up local AI, image generation, voice, and guided installs">🧙 Setup</button>
+          <button id="btn-open-image" title="Set up image generation (Stable Diffusion)" aria-label="Set up image generation (Stable Diffusion)">🖼️ Image</button>
+          <button id="btn-open-video" title="Set up video generation" aria-label="Set up video generation">🎬 Video</button>
+          <button id="btn-new-chat-all" title="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)" aria-label="Start a fresh chat in all three AIs at once (ChatGPT, Claude and Gemini)">🆕 New Chat</button>
           <button id="btn-ai-toggle" class="auto-toggle" title="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail." aria-label="Turn the System AI (Local Supervisor) on/off. Open the System AI panel for detail.">🤖 System AI: Off</button>
           <button id="btn-open-feed" title="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time" aria-label="Open a separate window that shows every AI's messages as colour-coded bubbles — open/close it any time">💬 AI Feed</button>
+          <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
+          <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
+          <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
+          <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
+          <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
+          <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
+        </div>
+        <div id="phone-panel" class="phone-panel" hidden aria-label="Phone connection">
+          <p class="zone-label" style="margin:2px 0 6px;">📱 Connect your phone</p>
+          <label class="phone-lan-row">
+            <input type="checkbox" id="phone-lan-toggle" />
+            <span>Allow phone access on this Wi-Fi (LAN)</span>
+          </label>
+          <p id="phone-hint" class="phone-hint">Turn this on, then open the link below on your phone (same Wi-Fi). Your PC does all the work — the phone just shows the messages and lets you send.</p>
+          <input id="phone-url" class="phone-url" type="text" readonly value="" placeholder="Enable LAN access to get a link" />
+          <div class="phone-btns">
+            <button id="btn-phone-copy" title="Copy the phone link">📋 Copy link</button>
+          </div>
+          <p class="phone-warn">Anyone with this link on your network can read the messages and send. Keep it to your own phone.</p>
         </div>
       </div>
 
+      <!-- Third zone: the Command Prompt connection (⌨ Terminal), with the
+           old "Messages to you" feed kept one click away on its own tab.
+           The terminal is a real local shell (cmd.exe on Windows). You type
+           here; an AI can also ask for commands with [TO: TERMINAL] — those
+           wait in the approval strip until you click Run (unless Auto-run is
+           on and the command is low-risk), and the output goes back to it. -->
       <div class="up-zone" id="up-zone-messages">
-        <div class="feed-head">
-          <p class="zone-label" style="margin:0;">💬 Messages to you</p>
-          <span class="msg-badge" id="messages-badge" data-zero>0</span>
+       <div class="zone-fill">
+        <div class="zone-tabs" role="tablist">
+          <button class="zone-tab active" id="tab-terminal" role="tab" aria-selected="true" aria-controls="term-pane">⌨ Terminal <span class="term-dot" id="term-dot" title="Shell not started"></span><span class="msg-badge term-badge" id="term-pending-badge" data-zero>0</span></button>
+          <button class="zone-tab" id="tab-messages" role="tab" aria-selected="false" aria-controls="messages-pane">💬 Messages <span class="msg-badge" id="messages-badge" data-zero>0</span></button>
           <span class="spacer"></span>
           <button class="see-all" id="btn-open-messages">see all →</button>
         </div>
-        <div class="feed-list" id="messages-feed"></div>
+
+        <div id="term-pane" class="zone-pane" role="tabpanel">
+          <div id="term-pending" aria-live="polite"></div>
+          <pre id="term-output" tabindex="0" aria-label="Terminal output"></pre>
+          <div class="term-row">
+            <span class="term-prompt" id="term-prompt">&gt;</span>
+            <input id="term-input" type="text" spellcheck="false" autocomplete="off" placeholder="Type a command and press Enter…" aria-label="Terminal command" />
+            <button id="btn-term-run" title="Run this command (Enter)">Run</button>
+          </div>
+          <div class="term-row term-tools" id="term-tools">
+            <button id="btn-term-stop" class="danger" title="Stop: kill whatever is running (and everything it started), then start a fresh shell" aria-label="Stop the running command">■</button>
+            <button id="btn-term-clear" title="Clear the terminal view">Clear</button>
+            <label class="term-auto" title="Auto-run AI scripts. AIs work freely inside their own locker folders without asking. The one thing that asks is running a script (python/node), because a script can reach outside the locker. Tick this to let scripts run without asking."><input type="checkbox" id="cb-term-autorun" /> Auto</label>
+            <button id="btn-open-lockers" title="Open the AI lockers folder — each AI's private folder (chatgpt / claude / gemini)" aria-label="Open the AI lockers folder">📁</button>
+            <select id="term-send-target" aria-label="Send last output to">
+              <option value="claude">Claude</option>
+              <option value="chatgpt">ChatGPT</option>
+              <option value="gemini">Gemini</option>
+              <option value="all">All</option>
+            </select>
+            <button id="btn-term-send" title="Send your last command and its output to the chosen AI" aria-label="Send your last output to the chosen AI" disabled>📤</button>
+          </div>
+        </div>
+
+        <div id="messages-pane" class="zone-pane" role="tabpanel" hidden>
+          <div class="feed-list" id="messages-feed"></div>
+        </div>
+       </div>
       </div>
     </div>
 
-    <div id="row-global-houserules">
+    <div id="panels-grid">
       <div id="col-global" class="col yc-panel">
         <div class="yc-head">
           <h2>Global</h2><span class="spacer"></span>
@@ -384,9 +730,8 @@
         </div>
         <div id="hr-status" style="margin-top:6px;"></div>
       </div>
-    </div>
 
-    <div id="col-prompts" class="col yc-panel">
+      <div id="col-prompts" class="col yc-panel">
       <div class="yc-head">
         <h2>Prompt Library</h2><span class="spacer"></span>
         <button class="collapse-btn" id="btn-collapse-prompts" title="Collapse Prompt Library" aria-label="Collapse Prompt Library">⌄</button>
@@ -400,35 +745,305 @@
       </div>
     </div>
 
-    <div id="col-systemai" class="col yc-panel">
+    <!-- Image module: 3 content sizes (minimal → middle → large) via the ◱ button,
+         plus ⌄ collapses the whole panel to a tab. minimal = prompt + negative only;
+         middle adds LoRA + size/steps; large adds the preview + recent + connection. -->
+    <div id="col-image" class="col yc-panel" data-size="minimal">
       <div class="yc-head">
-        <h2>System AI (Supervisor)</h2><span class="spacer"></span>
+        <h2>Image Generation</h2><span class="spacer"></span>
+        <button class="size-btn" id="btn-img-size" title="Panel size: minimal → middle → large" aria-label="Cycle image panel size">◱</button>
+        <button class="collapse-btn" id="btn-collapse-image" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
+      </div>
+      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
+      <textarea id="img-prompt" rows="2" placeholder="Describe an image to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
+      <textarea id="img-negative" rows="1" placeholder="What to avoid (blurry, extra fingers, text…)" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <div class="btns" style="margin:3px 0;">
+        <button id="btn-img-generate" class="primary">🖼️ Generate</button>
+        <button id="btn-img-open-ui" title="Open the Stable Diffusion web UI (A1111/ComfyUI) to tweak everything else">🎛️ Open SD UI ↗</button>
+      </div>
+      <div id="img-msg" style="font-size:11.5px; opacity:.8;"></div>
+
+      <div class="when-mid">
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">LoRAs / weights</label>
+        <input type="text" id="img-lora" placeholder="&lt;lora:name:0.8&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
+        <!-- The 5 main image sliders. -->
+        <div class="slider-row"><label title="How many refinement passes — higher = more detail, slower">Steps</label><input type="range" id="img-steps" min="1" max="150" value="20"><span class="sv" id="img-steps-v">20</span></div>
+        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="img-cfg" min="1" max="30" step="0.5" value="7"><span class="sv" id="img-cfg-v">7</span></div>
+        <div class="slider-row"><label>Width</label><input type="range" id="img-width" min="256" max="1536" step="64" value="512"><span class="sv" id="img-width-v">512</span></div>
+        <div class="slider-row"><label>Height</label><input type="range" id="img-height" min="256" max="1536" step="64" value="512"><span class="sv" id="img-height-v">512</span></div>
+        <div class="slider-row"><label title="How many images per Generate">Batch</label><input type="range" id="img-batch" min="1" max="8" value="1"><span class="sv" id="img-batch-v">1</span></div>
+        <div class="btns" style="margin:4px 0; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="img-seed" value="-1" style="width:96px;"></label>
+          <button id="btn-img-seed-rand" title="Random seed (-1)">🎲</button>
+        </div>
+      </div>
+
+      <div class="when-large">
+        <div id="img-preview-wrap" style="margin:4px 0;">
+          <img id="img-preview" alt="Last generated image preview" style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;">
+          <div id="img-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered image previews here.</div>
+        </div>
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
+        <div id="img-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:22px;"></div>
+        <details class="sai-sec" style="margin-top:6px;">
+          <summary>⚙️ Connection</summary>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="img-enabled"> Enable image generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="img-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-img-detect" title="Scan this PC for a running Stable Diffusion server and fill it in">🔍 Auto-detect</button>
+          </div>
+          <input type="text" id="img-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img" style="width:100%; box-sizing:border-box; margin:3px 0;">
+          <div class="btns" style="margin:3px 0;"><button id="btn-img-save">Save</button><button id="btn-img-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="img-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">The address is just where your local image app serves its API. Easiest: install <b>Stability Matrix</b> (Setup Wizard → Installs) and launch Automatic1111/Forge from it <b>with the API on</b> — it runs at <code>127.0.0.1:7860</code>, so the address is <code>http://127.0.0.1:7860/sdapi/v1/txt2img</code>. Don't know it? Press <b>Auto-detect</b>.</p>
+        </details>
+      </div>
+    </div>
+
+    <!-- Video module: same 3-size + tab behaviour as the image module. -->
+    <div id="col-video" class="col yc-panel" data-size="minimal">
+      <div class="yc-head">
+        <h2>Video Generation</h2><span class="spacer"></span>
+        <button class="size-btn" id="btn-vid-size" title="Panel size: minimal → middle → large" aria-label="Cycle video panel size">◱</button>
+        <button class="collapse-btn" id="btn-collapse-video" title="Minimize this panel to a tab" aria-label="Minimize this panel to a tab">⌄</button>
+      </div>
+      <label class="row-label" style="display:block; margin:2px 0 1px; opacity:.8;">Prompt</label>
+      <textarea id="vid-prompt" rows="2" placeholder="Describe a short clip to render…" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Negative prompt</label>
+      <textarea id="vid-negative" rows="1" placeholder="What to avoid" style="width:100%; box-sizing:border-box; resize:vertical;"></textarea>
+      <div class="btns" style="margin:3px 0;">
+        <button id="btn-vid-generate" class="primary">🎬 Generate</button>
+        <button id="btn-vid-open-ui" title="Open the video backend's web UI to tweak everything else">🎛️ Open UI ↗</button>
+      </div>
+      <div id="vid-msg" style="font-size:11.5px; opacity:.8;"></div>
+
+      <div class="when-mid">
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Motion / LoRAs</label>
+        <input type="text" id="vid-lora" placeholder="motion module / &lt;lora:…&gt; (added to the prompt)" style="width:100%; box-sizing:border-box; margin:0 0 5px;">
+        <!-- The 5 main video sliders. -->
+        <div class="slider-row"><label title="Clip length in frames">Frames</label><input type="range" id="vid-frames" min="8" max="64" value="16"><span class="sv" id="vid-frames-v">16</span></div>
+        <div class="slider-row"><label title="Playback speed (frames per second)">FPS</label><input type="range" id="vid-fps" min="4" max="30" value="8"><span class="sv" id="vid-fps-v">8</span></div>
+        <div class="slider-row"><label title="How many refinement passes per frame">Steps</label><input type="range" id="vid-steps" min="1" max="100" value="20"><span class="sv" id="vid-steps-v">20</span></div>
+        <div class="slider-row"><label title="How strictly it follows the prompt (guidance)">CFG</label><input type="range" id="vid-cfg" min="1" max="20" step="0.5" value="7"><span class="sv" id="vid-cfg-v">7</span></div>
+        <div class="slider-row"><label title="How much movement in the clip">Motion</label><input type="range" id="vid-motion" min="0" max="2" step="0.1" value="1"><span class="sv" id="vid-motion-v">1</span></div>
+        <div class="btns" style="margin:4px 0; align-items:center;">
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Size
+            <input type="number" id="vid-width" value="512" min="64" step="64" style="width:56px;">×<input type="number" id="vid-height" value="512" min="64" step="64" style="width:56px;"></label>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px;">Seed <input type="number" id="vid-seed" value="-1" style="width:84px;"></label>
+          <button id="btn-vid-seed-rand" title="Random seed (-1)">🎲</button>
+        </div>
+      </div>
+
+      <div class="when-large">
+        <div id="vid-preview-wrap" style="margin:4px 0;">
+          <video id="vid-preview" controls loop muted style="display:none; width:100%; border:1px solid #2a2a2a; border-radius:6px;"></video>
+          <div id="vid-preview-empty" style="font-size:11px; opacity:.5; border:1px dashed #2a2a2a; border-radius:6px; padding:14px; text-align:center;">Your rendered clip previews here.</div>
+        </div>
+        <label class="row-label" style="display:block; margin:4px 0 1px; opacity:.8;">Recent</label>
+        <div id="vid-history" style="display:flex; gap:4px; flex-wrap:wrap; min-height:20px;"></div>
+        <details class="sai-sec" style="margin-top:6px;">
+          <summary>⚙️ Connection</summary>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:3px 0;"><input type="checkbox" id="vid-enabled"> Enable video generation</label>
+          <div class="btns" style="margin:3px 0;">
+            <select id="vid-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
+            <button id="btn-vid-detect" title="Scan this PC for a running video backend and fill it in">🔍 Auto-detect</button>
+          </div>
+          <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / SVD / ComfyUI API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
+          <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
+          <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API (AnimateDiff / Stable Video Diffusion / a ComfyUI workflow). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
+        </details>
+      </div>
+    </div>
+
+    <div id="col-gpu" class="col yc-panel">
+      <div class="yc-head">
+        <h2>GPU Usage</h2><span class="spacer"></span>
+        <button class="collapse-btn" id="btn-collapse-gpu" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+      </div>
+      <p style="opacity:.7; font-size:11px; margin:2px 0 6px;">How hard the graphics card is working while models / image generation run (NVIDIA).</p>
+      <div id="gpu-body"><div style="font-size:11.5px; opacity:.6;">Reading GPU…</div></div>
+    </div>
+
+    <!-- Device panel: run the butler (agent/manager) — a self-check of everything
+         he can do, and a one-press intro that tells the AIs who he is + the rules. -->
+    <!-- The Butler Device controls used to live here as their own panel; they
+         now sit inside the Butler bar below (one unified butler surface). -->
+    </div><!-- /panels-grid -->
+
+    <!-- Butler unit: the butler bar + the three AI panes wrapped as ONE bordered
+         block — the butler sits on top and controls the three panes beneath him,
+         so they read as a single "he + his three" workspace. Everything else on
+         the page is outside this unit. -->
+    <div id="butler-unit">
+    <!-- Butler bar: the System AI (Supervisor) as a full-width band that sits
+         ON TOP of the three AI panes, so the butler visibly oversees them. Left
+         = his chat (large), right = his controls. Keeps id col-systemai so the
+         collapse mechanism + tests keep working. -->
+    <div id="col-systemai" class="yc-panel butler-bar">
+      <div class="yc-head">
+        <h2>🤵 Butler — oversees ChatGPT · Claude · Gemini</h2><span class="spacer"></span>
         <span id="lsi-status" style="font-size:11px; opacity:.7;"></span>
         <button class="collapse-btn" id="btn-collapse-systemai" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
       </div>
-      <div id="systemai-body">
-        <p style="opacity:.78; margin:4px 0;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). Off unless you switch it on and give it a local model. It never touches the three chat AIs' logins.</p>
-        <label style="display:flex; align-items:center; gap:6px; margin:3px 0;"><input type="checkbox" id="lsi-enabled"> <span>Let the AI help run the system</span></label>
-        <div class="btns" style="margin:4px 0;">
-          <input id="lsi-endpoint" type="text" placeholder="http://127.0.0.1:11434/v1/chat/completions" style="flex:1 1 150px; min-width:0;">
-          <button id="btn-lsi-test">Test</button>
+      <div id="systemai-body" class="butler-body">
+        <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
+        <div id="butler-main">
+          <label style="display:flex; align-items:center; gap:6px; margin:0 0 4px;"><input type="checkbox" id="lsi-enabled"> <span>Let the butler help run the system</span></label>
+          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Tell the butler what to do</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One box — type a goal or a task; he plans, delegates to the three AIs, runs code, and makes images/video to reach it. Needs a local model (⚙️ below).</p>
+          <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
+          <div class="btns" style="margin:4px 0; align-items:center;">
+            <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
+            <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
+            <button id="btn-device-ptt" title="Push to talk — click, speak, it transcribes into the box and sends">🎤 Talk</button>
+            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;" title="Keep listening and act on what you say (needs the voice engine)"><input type="checkbox" id="device-openmic"> open mic</label>
+            <span style="flex:1;"></span>
+            <button id="btn-cap-run" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Watch the reel; a full report pops up when it's done.">🧪 Test all capabilities</button>
+          </div>
+          <div id="cap-reel" aria-live="polite"></div>
+          <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
+          <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
+          <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+
+        <!-- his controls, sitting under the goal box on the 2/3 side -->
+        <div id="butler-controls">
+
+        <!-- Run & check him: the former "Butler Device" panel, now folded into
+             the one butler surface. Keeps id col-device so wiring + tests hold. -->
+        <div id="col-device" class="device-sec">
+          <!-- Who's speaking: each speaker lights up in its own colour, back and forth. -->
+          <div id="speaking-indicator" class="speak-row">
+            <span class="spk-chip" data-who="butler">🤵 Butler</span>
+            <span class="spk-chip" data-who="chatgpt">ChatGPT</span>
+            <span class="spk-chip" data-who="claude">Claude</span>
+            <span class="spk-chip" data-who="gemini">Gemini</span>
+          </div>
+
+          <div class="btns" style="margin:7px 0 5px;">
+            <button id="btn-selfcheck" class="primary">🩺 System Check</button>
+            <button id="btn-install-missing">⚙️ Install Missing</button>
+            <button id="btn-send-intro">📣 Send Intro</button>
+            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;"><input type="checkbox" id="device-speak"> 🔊 speak</label>
+          </div>
+          <label id="deep-check-row" style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:0 0 5px; cursor:pointer;" title="Instead of only checking what's configured, actually make the butler do each thing once: render a test image, make a short video, run a line of code, write & read a file, remember & recall, call a tool, speak, and ping each AI. Slower, and it really generates files.">
+            <input type="checkbox" id="cb-deep-check"> <span>🧪 Actually run each capability (slower — really generates a test image/video &amp; pings the AIs)</span>
+          </label>
+          <p style="opacity:.6; font-size:11px; margin:3px 0 0;">Results, install progress and intro output all stream to the <b>Activity Log</b> at the bottom.</p>
         </div>
-        <div class="btns" style="margin:4px 0;">
-          <span class="row-label">Model</span>
-          <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
-          <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
+
+        <p style="opacity:.78; margin:2px 0 4px; font-size:11.5px;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). It never touches the three chat AIs' logins.</p>
+        <details class="sai-sec">
+          <summary>⚙️ Local model settings</summary>
+          <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
+            <li>Install Ollama (link appears below if missing), then <b>Download</b> or <b>Get</b> a model.</li>
+            <li>Pick it in <b>Model</b>, then press <b>Save settings</b>.</li>
+            <li>Press <b>Test</b> to confirm — then give the Butler a goal below.</li>
+          </ol>
+          <div class="btns" style="margin:4px 0;">
+            <input id="lsi-endpoint" type="text" value="http://127.0.0.1:11434/v1/chat/completions" placeholder="http://127.0.0.1:11434/v1/chat/completions" title="Ollama's local address (default). Erase or change it if you use a different backend." style="flex:1 1 150px; min-width:0;">
+            <button id="btn-lsi-test">Test</button>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Model</span>
+            <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
+            <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
+          </div>
+          <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:2px 0;" title="Suggest UNCENSORED models that still follow the butler's command format (Dolphin / Hermes). Avoids refusals without breaking his JSON commands — llama2-uncensored is too weak for that.">
+            <input type="checkbox" id="lsi-uncensored"> 🔓 Prefer uncensored models (that still take commands)
+          </label>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Get</span>
+            <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
+            <button id="btn-lsi-download" title="Download &amp; install this recommended model with Ollama" aria-label="Download &amp; install this recommended model with Ollama">⬇ Download</button>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <input id="lsi-pull-name" type="text" placeholder="…or pull ANY model by name (e.g. llama3.1:8b)" style="flex:1 1 150px; min-width:0;">
+            <button id="btn-lsi-pull" title="Download any Ollama model by name — your choice of model" aria-label="Download any Ollama model by name">⬇ Get</button>
+          </div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
+          <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
+
+        <details class="sai-sec">
+          <summary>📁 Downloads &amp; creations folder ("stuff and thing")</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One folder inside AutoInjector holds everything — downloaded models/LoRAs/voice under <b>models/</b>, and everything the app makes (images, videos, books) at the top. Open it and drop files into the matching subfolder; each folder's README says how to point its backend here.</p>
+          <div id="models-path" style="font-size:11px; font-family:ui-monospace,monospace; opacity:.85; word-break:break-all; margin:2px 0;"></div>
+          <div id="models-inventory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div id="models-ollama" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+
+          <!-- Language-model storage: where LLMs land now, and a one-click move
+               of any already downloaded into this folder. -->
+          <div id="models-store-status" style="font-size:11px; opacity:.85; margin:5px 0 2px; padding-top:5px; border-top:1px solid #1c2a20;"></div>
+          <div class="btns" style="margin:4px 0;">
+            <button id="btn-open-models">📂 Open folder</button>
+            <button id="btn-ollama-migrate" title="Move models already downloaded (Ollama's default store) into this folder">📦 Move downloaded models here</button>
+          </div>
+
+          <!-- Grab every log the program writes, from everywhere, in one go. -->
+          <div style="font-size:11px; opacity:.85; margin:6px 0 2px; padding-top:5px; border-top:1px solid #1c2a20;">Troubleshooting: bundle every log (event log, saved state, database, activity + system info) into one folder to share.</div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-download-logs" title="Collect all logs from everywhere into one folder under stuff and thing/logs and open it">📥 Download all logs</button></div>
+          <p style="opacity:.6; font-size:11px; margin:3px 0 0;">Model downloads, the move, and the bundle all report into the <b>Activity Log</b> at the bottom.</p>
+        </details>
+
+        <details class="sai-sec">
+          <summary>🛡️ Safeguards — operator controls</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Freedom in conversation; you approve real actions. The model can say what it wants; sends, tool calls, and code runs can require your OK before they happen.</p>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:2px 0;"><input type="checkbox" id="lsi-approval"> Require my approval before the butler sends or acts</label>
+          <div id="lsi-approval-msg" style="font-size:11.5px; opacity:.8;"></div>
+          <div id="lsi-pending" style="display:none; margin-top:5px; padding:5px 7px; border:1px solid #3a6b46; border-radius:6px; background:#141d16;">
+            <div id="lsi-pending-text" style="font-size:11.5px;"></div>
+            <div class="btns" style="margin-top:4px;">
+              <button id="btn-approve" class="primary">✔ Approve</button>
+              <button id="btn-reject" class="danger">✖ Reject</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="sai-sec">
+          <summary>🧰 Tools — what the butler can call</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Registered tools (built-in now; MCP servers plug in later). The butler invokes these via USE_TOOL.</p>
+          <div id="jarvis-tools" style="font-size:11px; opacity:.85; margin:2px 0;">No tools loaded.</div>
+        </details>
+
+        <details class="sai-sec">
+          <summary>🔊 Voice — speak &amp; listen (local)</summary>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">Fully offline via a local voice shim. The butler can say its ack/status aloud, and you can talk to it.</p>
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; margin:2px 0;">
+            <input type="checkbox" id="voice-enabled"> Speak the butler's replies aloud
+          </label>
+          <input type="text" id="voice-endpoint" placeholder="http://127.0.0.1:8232" style="width:100%; box-sizing:border-box; margin:2px 0;">
+
+          <div style="font-size:11px; opacity:.8; margin:5px 0 2px;">A different voice per speaker (piper voice name — leave blank for the default):</div>
+          <div class="voice-assign"><span>🤵 Butler</span><input type="text" id="voice-v-butler" placeholder="e.g. en_US-lessac-medium"><button class="mini" id="btn-voice-try-butler" title="Hear this voice">▶</button></div>
+          <div class="voice-assign"><span style="color:#57c07a;">ChatGPT</span><input type="text" id="voice-v-chatgpt" placeholder="voice name"><button class="mini" id="btn-voice-try-chatgpt" title="Hear this voice">▶</button></div>
+          <div class="voice-assign"><span style="color:#e0a24a;">Claude</span><input type="text" id="voice-v-claude" placeholder="voice name"><button class="mini" id="btn-voice-try-claude" title="Hear this voice">▶</button></div>
+          <div class="voice-assign"><span style="color:#6ea8ff;">Gemini</span><input type="text" id="voice-v-gemini" placeholder="voice name"><button class="mini" id="btn-voice-try-gemini" title="Hear this voice">▶</button></div>
+
+          <div class="btns" style="margin:5px 0 2px; align-items:center;">
+            <label style="display:flex; align-items:center; gap:4px; font-size:11px; flex:1 1 130px; min-width:0;">🎤 Mic <select id="voice-mic" style="flex:1 1 80px; min-width:0;"><option value="">Default</option></select></label>
+            <label style="display:flex; align-items:center; gap:4px; font-size:11px; flex:1 1 130px; min-width:0;">🔈 Out <select id="voice-speaker" style="flex:1 1 80px; min-width:0;"><option value="">Default</option></select></label>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <button id="btn-voice-save">Save</button>
+            <button id="btn-voice-test">Test</button>
+            <button id="btn-mic" title="Push to talk">🎤 Talk</button>
+          </div>
+          <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
+        </div><!-- /butler-controls -->
+        </div><!-- /butler-main (2/3) -->
+
+        <!-- ONE-THIRD: the butler's chat window. -->
+        <div id="butler-chat">
+          <div class="butler-chat-title">📜 Butler chat &amp; activity</div>
+          <div id="jarvis-log" class="butler-chat-log"></div>
         </div>
-        <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
-        <div class="btns" style="margin:4px 0;">
-          <span class="row-label">Get</span>
-          <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
-          <button id="btn-lsi-download" title="Download &amp; install this model with Ollama" aria-label="Download &amp; install this model with Ollama">⬇ Download</button>
-        </div>
-        <div id="lsi-download-status" style="font-size:11px; opacity:.7; font-family:ui-monospace,monospace; max-height:70px; overflow-y:auto; margin:2px 0;"></div>
-        <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
-        <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
-      </div>
-    </div>
+      </div><!-- /systemai-body -->
+    </div><!-- /butler-bar (col-systemai) -->
 
     <div id="col-bookforge" class="col yc-panel">
       <div class="yc-head">
@@ -455,19 +1070,30 @@
     <div id="ai-row">
       <div id="expanded-strip"></div>
     </div>
+    </div><!-- /butler-unit -->
 
     <div id="main-row">
-      <div id="col-transcript" class="col">
-        <h2 style="display:flex; align-items:center; gap:6px;">
-          <span>Conversation</span>
-          <span id="database-status" style="font-size:11px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span>
-          <span class="spacer"></span>
-          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the Conversation/Log panel" aria-label="Collapse the Conversation/Log panel">⌄</button>
-        </h2>
+      <!-- The one unified log: every event in the program, tagged by type, in a
+           single window. The old separate Conversation transcript is kept in the
+           DOM (hidden) so its formatted turns still feed Copy/Download and tests;
+           the conversation itself now also appears here under the Chat tag. -->
+      <div id="col-transcript" class="col" hidden>
+        <h2><span>Conversation</span><span id="database-status" style="font-size:11px; font-weight:400; opacity:.7; text-transform:none; letter-spacing:0;"></span></h2>
         <div id="transcript"></div>
       </div>
       <div id="col-log" class="col">
-        <h2>Activity / Troubleshooting</h2>
+        <h2 style="display:flex; align-items:center; gap:6px;">
+          <span>Activity Log</span>
+          <span style="font-size:11px; font-weight:400; opacity:.6; text-transform:none; letter-spacing:0;">— everything the program does, tagged</span>
+          <span class="spacer"></span>
+          <label id="log-errors-only" title="Show only errors and warnings across every tag" style="font-size:11px; font-weight:400; opacity:.9; display:inline-flex; align-items:center; gap:4px; cursor:pointer; user-select:none; text-transform:none; letter-spacing:0;">
+            <input type="checkbox" id="cb-errors-only" style="margin:0;"><span>⚠ Errors only</span>
+          </label>
+          <button id="btn-log-clear" title="Clear the log view (does not touch the saved log file)" aria-label="Clear the log view">Clear view</button>
+          <button id="btn-main-row-collapse" class="collapse-btn" title="Collapse the log panel" aria-label="Collapse the log panel">⌄</button>
+        </h2>
+        <!-- Tag filters: one checkbox per tag, checked = visible. Built in JS. -->
+        <div id="log-filters" title="Check to show a category, uncheck to hide it"></div>
         <div id="activity-log"></div>
       </div>
     </div>
@@ -496,6 +1122,25 @@
         <button id="btn-close-roles" title="Close" aria-label="Close roles">✕</button>
       </div>
       <div class="popup-body" id="roles-body"></div>
+    </div>
+  </div>
+
+  <!-- Capability test results: three buckets (Working / Failed / Not set up)
+       with a fix-it tip on every failure. Opened when the test finishes. -->
+  <div id="cap-modal" role="dialog" aria-modal="true" aria-labelledby="cap-modal-title">
+    <div class="sheet">
+      <h3 id="cap-modal-title">🧪 Capability test results</h3>
+      <p class="sub" id="cap-modal-sub"></p>
+      <div id="cap-cols">
+        <div class="cap-bucket working"><h4>✅ Working (<span id="cap-n-working">0</span>)</h4><div id="cap-list-working"></div></div>
+        <div class="cap-bucket failed"><h4>❌ Not working (<span id="cap-n-failed">0</span>)</h4><div id="cap-list-failed"></div></div>
+        <div class="cap-bucket notset"><h4>⚪ Not set up (<span id="cap-n-notset">0</span>)</h4><div id="cap-list-notset"></div></div>
+      </div>
+      <div class="foot">
+        <span style="opacity:.7; font-size:11.5px;">Full detail is in the Activity Log at the bottom.</span>
+        <span class="spacer"></span>
+        <button id="btn-cap-modal-close" class="primary">Close</button>
+      </div>
     </div>
   </div>
 

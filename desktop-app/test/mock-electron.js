@@ -120,7 +120,11 @@ class FakeWebContents extends EventEmitter {
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
       return { ok: true };
     }
-    return { ok: true, text: this.currentText };
+    // Read script: report the latest reply text plus the site's generating state.
+    // `generating`/`sendReady` default to "done" so existing tests are unaffected;
+    // a test can set webContents.generating = true to simulate an in-progress reply.
+    const generating = !!this.generating;
+    return { ok: true, text: this.currentText, generating, sendReady: !generating };
   }
 }
 

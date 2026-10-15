@@ -47,6 +47,9 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
       return { ok: true, routing: JSON.parse(JSON.stringify(routing)) };
     },
     pauseAllRouting: noop, stopAllRouting: noop, autoAllRouting: noop,
+    phoneInfo: async () => ({ ok: true, url: calls._lan ? "http://192.168.1.9:8765/m?token=abc" : null, lanEnabled: !!calls._lan, lanIp: "192.168.1.9", port: 8765, hasToken: true }),
+    phoneSetLan: async (enabled) => { calls._lan = !!enabled; calls.push({ fn: "phoneSetLan", enabled: !!enabled }); return { ok: true, url: enabled ? "http://192.168.1.9:8765/m?token=abc" : null, lanEnabled: !!enabled, lanIp: "192.168.1.9", port: 8765, hasToken: true }; },
+    silenceAll: async () => { calls.push({ fn: "silenceAll" }); return { ok: true, global: { routing: { chatgpt: [], claude: [], gemini: [] }, mesh: false, enabled: { chatgpt: true, claude: true, gemini: true } } }; },
     setParticipant: noop,
     startHouseRule: async (mode, topic, rounds) => { calls.push({ fn: "startHouseRule", mode, topic, rounds }); return { ok: true, houseRule: { mode, active: true, paused: false, topic, rounds, roundNum: 0, roles: {}, nextSpeaker: null } }; },
     stopHouseRule: async () => { calls.push({ fn: "stopHouseRule" }); return { ok: true, houseRule: { mode: null, active: false, paused: false, topic: "", rounds: 0, roundNum: 0, roles: {}, nextSpeaker: null }, global: { routing: { chatgpt: [], claude: [], gemini: [] }, enabled: {}, waiting: {}, meshActive: false, customRole: {} } }; },
@@ -59,6 +62,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     runTuner: async () => { calls.push({ fn: "runTuner" }); return tunerRunResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
+    extractAllLogs: async () => { calls.push({ fn: "extractAllLogs" }); return { ok: true, file: "/tmp/AutoInjector/output/logs/autoinjector-extract-x.txt", messages: 3, logEntries: 5 }; },
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -110,9 +114,75 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     }),
     onCapture: (cb) => { captureCb = cb; }, onSent: () => {}, onSendError: () => {}, onWaitingChanged: () => {},
     onHouseRuleState: (cb) => { houseRuleCb = cb; }, onLog: (cb) => { logCb = cb; },
+    logTagsInfo: async () => { const lt = require("../log-tags"); return { TAGS: lt.TAGS, TAG_IDS: lt.TAG_IDS }; },
+    uiLog: async (action, detail) => { calls.push({ fn: "uiLog", action, detail }); return { ok: true }; },
+    onLedgerEntry: (cb) => { api._ledgerCb = cb; },
     onTunerState: (cb) => { tunerStateCb = cb; },
     onWindowCollapseChanged: (cb) => { windowCollapseCb = cb; },
-    onPromptsChanged: (cb) => { promptsChangedCb = cb; }
+    onPromptsChanged: (cb) => { promptsChangedCb = cb; },
+    // Butler / System AI supervisor
+    configureManagerProvider: async (config) => { calls.push({ fn: "configureManagerProvider", config }); return { ok: true }; },
+    testManagerConnection: async () => { calls.push({ fn: "testManagerConnection" }); return { ok: true }; },
+    startManagedTask: async (userRequest, mode) => { calls.push({ fn: "startManagedTask", userRequest, mode }); return { ok: true, taskId: "t1" }; },
+    butlerChat: async (message) => { calls.push({ fn: "butlerChat", message }); return { ok: true, text: `reply to: ${message}` }; },
+    stopManagedTask: async () => { calls.push({ fn: "stopManagedTask" }); return { ok: true }; },
+    getManagerState: async () => ({ ok: true, manager: { status: "idle" } }),
+    onManagerState: (cb) => { api._managerStateCb = cb; },
+    onManagerLog: (cb) => { api._managerLogCb = cb; },
+    onManagerAck: (cb) => { api._managerAckCb = cb; },
+    // N5 Tools / N3 Memory / N2 Voice
+    toolsList: async () => { calls.push({ fn: "toolsList" }); return { ok: true, tools: [{ name: "http-fetch", description: "GET a URL", risk: "ask" }, { name: "read-file", description: "read a file", risk: "monitor" }] }; },
+    toolsRun: async (tool, args) => { calls.push({ fn: "toolsRun", tool, args }); return { ok: true, message: "ok" }; },
+    memorySummary: async () => { calls.push({ fn: "memorySummary" }); return { ok: true, available: true, total: 3 }; },
+    memorySearch: async (query) => { calls.push({ fn: "memorySearch", query }); return { ok: true, available: true, results: [] }; },
+    voiceStatus: async () => { calls.push({ fn: "voiceStatus" }); return { ok: true, enabled: false }; },
+    configureVoice: async (patch) => { calls.push({ fn: "configureVoice", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    voiceSpeak: async (text, who) => { calls.push({ fn: "voiceSpeak", text, who }); return { ok: true, ms: 5 }; },
+    voiceListen: async (opts) => { calls.push({ fn: "voiceListen", opts }); return { ok: true, text: "hello from mic" }; },
+    openWizard: async (tab) => { calls.push({ fn: "openWizard", tab }); return { ok: true }; },
+    // Image generation panel
+    imageStatus: async () => { calls.push({ fn: "imageStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "" }; },
+    configureImage: async (patch) => { calls.push({ fn: "configureImage", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    imageGenerate: async (prompt, negative) => { calls.push({ fn: "imageGenerate", prompt, negative }); return { ok: true, path: "/out/images/img-1.png", preview: "data:image/png;base64,AAAA" }; },
+    videoStatus: async () => { calls.push({ fn: "videoStatus" }); return { ok: true, configured: false, enabled: false, endpoint: "", frames: 16, fps: 8 }; },
+    configureVideo: async (patch) => { calls.push({ fn: "configureVideo", patch }); return { ok: true, enabled: !!(patch && patch.enabled) }; },
+    videoGenerate: async (prompt, negative) => { calls.push({ fn: "videoGenerate", prompt, negative }); return { ok: true, path: "/out/videos/vid-1.mp4", preview: "data:video/mp4;base64,BBBB" }; },
+    gpuInfo: async () => { calls.push({ fn: "gpuInfo" }); return { available: true, gpus: [{ name: "RTX 3090", util: 42, memUsed: 6144, memTotal: 24576, memPct: 25 }] }; },
+    butlerSelfCheck: async () => { calls.push({ fn: "butlerSelfCheck" }); return { ok: true, okCount: 2, total: 3, checks: [{ name: "Brain (local model)", ok: true, detail: "llama3.1:8b" }, { name: "Voice (speak & listen)", ok: null, detail: "off" }, { name: "Tools (USE_TOOL)", ok: true, detail: "2: http-fetch, read-file" }], installs: [{ id: "open-interpreter", label: "Open Interpreter", installed: false, kind: "pip", installable: true }, { id: "voice", label: "Voice engine", installed: true, kind: "pip", installable: true }], missing: ["open-interpreter"], canInstall: true }; },
+    butlerCapabilityTest: async () => {
+      calls.push({ fn: "butlerCapabilityTest" });
+      const checks = [
+        { name: "Run code (Open Interpreter)", ok: true, detail: "ran a line" },
+        { name: "Image generation", ok: true, detail: "rendered captest.png" },
+        { name: "Video generation", ok: false, detail: "couldn't make one: TIMEOUT" },
+        { name: "Talk to ChatGPT", ok: null, detail: "no page loaded" },
+      ];
+      // Fire per-step events so the live reel fills in, like the real IPC.
+      if (api._capStepCb) for (let i = 0; i < checks.length; i++) api._capStepCb({ ...checks[i], index: i + 1 });
+      return { ok: true, deep: true, checks, okCount: 2, failCount: 1, total: checks.length };
+    },
+    onCapabilityTestStep: (cb) => { api._capStepCb = cb; },
+    butlerSendIntro: async (targets) => { calls.push({ fn: "butlerSendIntro", targets }); return { ok: true, targets: ["chatgpt", "claude", "gemini"], results: {} }; },
+    butlerInstallMissing: async () => { calls.push({ fn: "butlerInstallMissing" }); return { ok: true, missing: ["open-interpreter"], installed: 1, results: [{ target: "open-interpreter", ok: true }] }; },
+    onVoiceSpeaking: (cb) => { api._voiceSpeakingCb = cb; },
+    endpointPresets: async (kind) => { calls.push({ fn: "endpointPresets", kind }); return { ok: true, presets: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }, { label: "ComfyUI — 8188", endpoint: "http://127.0.0.1:8188/prompt" }] }; },
+    detectEndpoints: async (kind) => { calls.push({ fn: "detectEndpoints", kind }); return { ok: true, reachable: [{ label: "A1111 — 7860", endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" }] }; },
+    testEndpoint: async (url) => { calls.push({ fn: "testEndpoint", url }); return { reachable: true, base: "http://127.0.0.1:7860" }; },
+    openExternal: async (url) => { calls.push({ fn: "openExternal", url }); return { ok: true }; },
+    // Local-model browser + operator safeguards
+    ollamaRecommended: async () => { calls.push({ fn: "ollamaRecommended" }); return { models: ["llama3.2:1b", "qwen2.5:0.5b"] }; },
+    ollamaList: async () => { calls.push({ fn: "ollamaList" }); return { ok: true, models: ["llama3.1:8b"] }; },
+    ollamaDetect: async () => { calls.push({ fn: "ollamaDetect" }); return { available: true }; },
+    ollamaPull: async (model) => { calls.push({ fn: "ollamaPull", model }); return { ok: true }; },
+    onOllamaProgress: (cb) => { api._ollamaProgressCb = cb; },
+    approveManagerAction: async () => { calls.push({ fn: "approveManagerAction" }); return { ok: true }; },
+    rejectManagerAction: async (reason) => { calls.push({ fn: "rejectManagerAction", reason }); return { ok: true }; },
+    // Models & assets folder
+    modelsInfo: async () => { calls.push({ fn: "modelsInfo" }); return { ok: true, contentRoot: "/home/u/AutoInjector/stuff and thing", root: "/home/u/AutoInjector/stuff and thing/models", categories: { llm: 1, image: 2, loras: 0, video: 0, voice: 0, assets: 0 }, ollamaModels: null, ollamaHere: false }; },
+    openModelsFolder: async (category) => { calls.push({ fn: "openModelsFolder", category }); return { ok: true, path: "/home/u/AutoInjector/stuff and thing" }; },
+    ollamaManagedStatus: async () => { calls.push({ fn: "ollamaManagedStatus" }); return { running: true, host: "127.0.0.1:11435", endpoint: "http://127.0.0.1:11435", modelsDir: "/home/u/AutoInjector/stuff and thing/models/llm", targetDir: "/home/u/AutoInjector/stuff and thing/models/llm", defaultStore: "/home/u/.ollama/models" }; },
+    ollamaMigrate: async () => { calls.push({ fn: "ollamaMigrate" }); return { ok: true, moved: 3, skipped: 1, bytes: 123, from: "/home/u/.ollama/models", to: "/home/u/AutoInjector/stuff and thing/models/llm" }; },
+    downloadAllLogs: async () => { calls.push({ fn: "downloadAllLogs" }); return { ok: true, folder: "/home/u/AutoInjector/stuff and thing/logs/autoinjector-logs-2026-09-13_11-20-05", count: 7, entries: [], missing: [] }; }
   };
   return api;
 }
@@ -289,6 +359,31 @@ async function testAutoBothButton() {
   assert(!bothBtn.classList.contains("on"), "Both button turns back off");
 }
 
+async function testPhonePanel() {
+  console.log("\n== Phone panel: reveals the connect link and toggles LAN access ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  const btn = doc.getElementById("btn-open-phone");
+  const panel = doc.getElementById("phone-panel");
+  const toggle = doc.getElementById("phone-lan-toggle");
+  const urlEl = doc.getElementById("phone-url");
+  assert(!!btn && !!panel && !!toggle && !!urlEl, "the Phone button, panel, LAN toggle and URL field all exist");
+  assert(panel.hidden === true, "the phone panel starts hidden");
+
+  btn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(panel.hidden === false, "clicking Phone reveals the panel");
+  assert(!urlEl.value, "no link is shown until LAN access is enabled");
+
+  toggle.checked = true;
+  toggle.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "phoneSetLan" && c.enabled === true), "enabling the toggle turns on LAN access via phoneSetLan");
+  assert(/\/m\?token=/.test(urlEl.value), "once LAN is on, the phone link (with its token) is shown to copy");
+}
+
 async function testZoomControls() {
   console.log("\n== Per-pane zoom buttons call setZoom and update the on-screen percentage label ==");
   const api = makeApi();
@@ -296,7 +391,7 @@ async function testZoomControls() {
   const doc = dom.window.document;
 
   const zoomLabel = doc.getElementById("zoom-level-gemini");
-  assert(!!zoomLabel && zoomLabel.textContent === "100%", "starts at 100%");
+  assert(!!zoomLabel && zoomLabel.textContent === "60%", "starts at the 60% default");
 
   const buttons = doc.querySelectorAll("#col-gemini .zoom-btn");
   assert(buttons.length === 2, "each column has a zoom-out and a zoom-in button");
@@ -304,14 +399,14 @@ async function testZoomControls() {
 
   zoomOutBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "setZoom" && c.site === "gemini" && c.factor < 1), "zoom-out calls setZoom with a factor below 1");
-  assert(zoomLabel.textContent === "90%", `label reflects the new factor (got "${zoomLabel.textContent}")`);
+  assert(api.calls.some((c) => c.fn === "setZoom" && c.site === "gemini" && c.factor < 0.6), "zoom-out calls setZoom with a factor below 60%");
+  assert(zoomLabel.textContent === "50%", `label reflects the new factor (got "${zoomLabel.textContent}")`);
 
   zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
   zoomInBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
-  assert(zoomLabel.textContent === "110%", `label updates back up (got "${zoomLabel.textContent}")`);
+  assert(zoomLabel.textContent === "70%", `label updates back up (got "${zoomLabel.textContent}")`);
 }
 
 async function testSelectorPickMenuToggle() {
@@ -552,6 +647,61 @@ async function testActivityLogShowsPickAndTestDetail() {
   assert(box.lastChild.className.includes("err"), "an error-kind entry is styled distinctly as an error line");
 }
 
+async function testUnifiedLogTagsAndFilters() {
+  console.log("\n== Unified log: every line is tagged, and the tag checkboxes show/hide categories ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const box = doc.getElementById("activity-log");
+  // The filter bar is built from the tags fetched over IPC (async) — let it settle.
+  await new Promise((r) => setTimeout(r, 20));
+  const filters = doc.getElementById("log-filters");
+  assert(filters && filters.querySelectorAll("label").length === 13, `all 13 tag filters are built (got ${filters ? filters.querySelectorAll("label").length : 0})`);
+  assert(filters.querySelectorAll("input[type=checkbox]").length === 13 && [...filters.querySelectorAll("input")].every((c) => c.checked), "every filter starts checked = visible");
+
+  // A manager event is tagged Manager; a chat send is tagged Chat.
+  api.fireLog({ ts: Date.now(), kind: "manager-decision", tag: "manager", detail: { summary: "picking a plan" } });
+  const mgrLine = box.lastChild;
+  assert(mgrLine.dataset.tag === "manager" && /Manager/.test(mgrLine.querySelector(".log-chip").textContent), "a manager event carries the Manager chip + data-tag");
+  api.fireLog({ ts: Date.now(), kind: "sent", tag: "chat", detail: { target: "claude" } });
+  const chatLine = box.lastChild;
+  assert(chatLine.dataset.tag === "chat" && /Chat/.test(chatLine.querySelector(".log-chip").textContent), "an AI send carries the Chat chip + data-tag");
+  // An unknown/missing tag never crashes — it renders with a neutral fallback chip.
+  api.fireLog({ ts: Date.now(), kind: "totally-new-kind" });
+  assert(box.lastChild && box.lastChild.querySelector(".log-chip"), "an event with no tag still renders (neutral chip), never throws");
+
+  // Unchecking the Manager filter hides manager lines (adds hide-manager); rechecking shows them.
+  const mgrCb = [...filters.querySelectorAll("label")].find((l) => /Manager/.test(l.textContent)).querySelector("input");
+  mgrCb.checked = false; mgrCb.onchange();
+  assert(box.classList.contains("hide-manager"), "unchecking Manager hides that category (hide-manager class applied)");
+  assert(!box.classList.contains("hide-chat"), "other categories stay visible");
+  mgrCb.checked = true; mgrCb.onchange();
+  assert(!box.classList.contains("hide-manager"), "re-checking Manager shows it again");
+
+  // "⚠ Errors only": lines carry a data-level, and the toggle hides everything
+  // that isn't an error or a warning, whatever its tag.
+  api.fireLog({ ts: Date.now(), kind: "db-init-error", tag: "memory", detail: { summary: "db failed" } });
+  const errLine = box.lastChild;
+  assert(errLine.dataset.level === "error" && errLine.classList.contains("err"), "an error-kind line is marked data-level=error");
+  api.fireLog({ ts: Date.now(), kind: "manager-escalation", tag: "manager", level: "warning", detail: { summary: "escalating" } });
+  const warnLine = box.lastChild;
+  assert(warnLine.dataset.level === "warning" && warnLine.classList.contains("warn"), "a warning-level line is marked data-level=warning");
+  api.fireLog({ ts: Date.now(), kind: "state-restored", tag: "system", detail: { summary: "ok" } });
+  const infoLine = box.lastChild;
+  assert(infoLine.dataset.level === "info", "an ordinary line is data-level=info");
+
+  const eo = doc.getElementById("cb-errors-only");
+  assert(eo, "the '⚠ Errors only' checkbox exists");
+  eo.checked = true; eo.onchange();
+  assert(box.classList.contains("errors-only"), "checking 'Errors only' puts the log into errors-only mode");
+  // CSS does the hiding (jsdom doesn't compute it), so assert the selector logic:
+  // info lines are the ones the rule targets, error/warning lines are not.
+  assert(infoLine.matches('[data-level="info"]') && !errLine.matches(':not([data-level="error"]):not([data-level="warning"])'),
+    "in errors-only mode the rule hides info lines but keeps errors and warnings");
+  eo.checked = false; eo.onchange();
+  assert(!box.classList.contains("errors-only"), "unchecking restores the full view");
+}
+
 async function testConnectivityTestButtonFailure() {
   console.log("\n== Connectivity Test: a failure calls out the specific reason and lights the indicator red ==");
   const api = makeApi({ selfTestResult: { ok: false, stage: "reply", error: "REPLY_MISMATCH" } });
@@ -634,13 +784,17 @@ async function testUserPanelMergedAndNeverCollapses() {
   assert(JSON.stringify(headers) === JSON.stringify(["Send", "Active"]), `the grid's own Send/Active column headers are present, in order (got ${JSON.stringify(headers)})`);
 
   const children = Array.from(grid.children).filter((c) => c.tagName !== "P");
-  assert(children.length === 7, `3 AI rows (button+checkbox) plus the → All button = 7 grid cells after the two headers (got ${children.length})`);
+  // 4 participant rows (ChatGPT, Claude, Gemini, Butler — each button+checkbox)
+  // then → All spanning the Send column = 9 grid cells.
+  assert(children.length === 9, `4 participant rows (button+checkbox) plus → All = 9 grid cells after the two headers (got ${children.length})`);
   for (let i = 0; i < 6; i += 2) {
     const site = ["chatgpt", "claude", "gemini"][i / 2];
     assert(children[i].tagName === "BUTTON" && children[i].textContent.includes(SITE_LABELS_FOR_TEST[site]), `row ${i / 2}: ${site}'s send button is in the Send column`);
     assert(children[i + 1].id === `p-${site}`, `row ${i / 2}: ${site}'s own checkbox is row-aligned right next to it, in the Active column (got id="${children[i + 1].id}")`);
   }
-  assert(children[6].tagName === "BUTTON" && children[6].textContent.trim() === "→ All", "→ All is its own final row, spanning just the Send column (no Active checkbox for it)");
+  assert(children[6].tagName === "BUTTON" && /Butler/.test(children[6].textContent), "the Butler is a 4th participant row: its → send button sits in the Send column");
+  assert(children[7].id === "p-butler" && children[7].tagName === "INPUT", "the Butler has its own Active checkbox in the Active column, like the three AIs");
+  assert(children[8].tagName === "BUTTON" && children[8].textContent.trim() === "→ All", "→ All is the final row, spanning just the Send column (no checkbox of its own)");
 }
 const SITE_LABELS_FOR_TEST = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 
@@ -921,6 +1075,132 @@ async function testPromptLibraryLiveSync() {
   assert(doc.getElementById("prompt-select").options.length === 2, "a 'prompts-changed' broadcast (from the popup window saving) re-renders the dropdown without needing a manual refresh");
 }
 
+async function testTerminalZone() {
+  console.log("\n== ⌨ Terminal zone: tabs, approval strip, typing a command ==");
+  const api = makeApi();
+  const calls = [];
+  let dataCb = null, stateCb = null;
+  const pendingReq = { id: 7, from: "claude", label: "Claude", commands: ["del old.log"], risk: "dangerous", reason: "deletes files" };
+  Object.assign(api, {
+    terminalState: async () => ({ ok: true, scrollback: "[terminal started]\n", state: { alive: true, running: null, queued: [], autoRunAI: false, pending: [pendingReq], hasLastUserResult: false } }),
+    terminalRun: async (command) => { calls.push({ fn: "terminalRun", command }); return { ok: true, result: { ok: true, exitCode: 0, output: "hi" } }; },
+    terminalApprove: async (id) => { calls.push({ fn: "terminalApprove", id }); return { ok: true }; },
+    terminalReject: async (id) => { calls.push({ fn: "terminalReject", id }); return { ok: true }; },
+    terminalSettings: async (patch) => { calls.push({ fn: "terminalSettings", patch }); return { ok: true }; },
+    terminalStop: async (restart) => { calls.push({ fn: "terminalStop", restart }); return { ok: true }; },
+    terminalSendOutput: async (targets) => { calls.push({ fn: "terminalSendOutput", targets }); return { ok: true }; },
+    terminalClear: async () => ({ ok: true }),
+    onTerminalData: (cb) => { dataCb = cb; },
+    onTerminalState: (cb) => { stateCb = cb; },
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(!doc.getElementById("term-pane").hidden && doc.getElementById("messages-pane").hidden, "the Terminal tab is shown by default; Messages is one tab away");
+  assert(/terminal started/.test(doc.getElementById("term-output").textContent), "existing scrollback is restored on load");
+  const reqs = doc.querySelectorAll("#term-pending .term-req");
+  assert(reqs.length === 1 && /Claude/.test(reqs[0].textContent) && /del old\.log/.test(reqs[0].textContent), "a pending AI request shows who asked and the exact command");
+  assert(reqs[0].classList.contains("dangerous") && /deletes files/.test(reqs[0].textContent), "a dangerous request is flagged with the reason");
+  assert(doc.getElementById("term-pending-badge").textContent === "1", "the tab badge counts pending requests");
+  reqs[0].querySelector("button.primary").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(calls.some((c) => c.fn === "terminalApprove" && c.id === 7), "▶ Run approves that exact request");
+  const input = doc.getElementById("term-input");
+  input.value = "dir";
+  input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(calls.some((c) => c.fn === "terminalRun" && c.command === "dir") && input.value === "", "Enter runs the typed command and clears the box");
+  dataCb({ chunk: "boom\n", stream: "stderr" });
+  assert(doc.querySelector("#term-output .t-err") && /boom/.test(doc.getElementById("term-output").textContent), "streamed stderr is shown (styled as an error)");
+  stateCb({ alive: true, running: { id: 1, command: "pause" }, queued: [], autoRunAI: true, pending: [], hasLastUserResult: true });
+  assert(doc.getElementById("term-input").classList.contains("answering"), "while a command runs, the input switches to answering its prompt");
+  assert(doc.getElementById("cb-term-autorun").checked && !doc.getElementById("btn-term-send").disabled, "state updates the auto-run box and enables Send output");
+  assert(doc.querySelectorAll("#term-pending .term-req").length === 0, "the approval strip empties when nothing is pending");
+  click(dom, "tab-messages");
+  assert(doc.getElementById("term-pane").hidden && !doc.getElementById("messages-pane").hidden, "the Messages tab still shows the messages feed");
+}
+
+async function testComposeRunsCommands() {
+  console.log("\n== Compose box doubles as a command prompt (Enter runs a command; AI buttons unchanged) ==");
+  const api = makeApi();
+  const runs = [];
+  Object.assign(api, {
+    terminalState: async () => ({ ok: true, scrollback: "", state: { alive: true, running: null, queued: [], autoRunAI: false, pending: [], hasLastUserResult: false } }),
+    terminalRun: async (command) => { runs.push(command); return { ok: true, result: { ok: true, exitCode: 0, output: "" } }; },
+    onTerminalData: () => {}, onTerminalState: () => {},
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const box = doc.getElementById("composer-text");
+  const enter = (opts = {}) => box.dispatchEvent(new dom.window.KeyboardEvent("keydown", Object.assign({ key: "Enter", bubbles: true, cancelable: true }, opts)));
+  click(dom, "tab-messages");
+  box.value = "git status";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs[0] === "git status", "Enter on a command runs it in the terminal");
+  assert(box.value === "", "the Compose box clears after running");
+  assert(!doc.getElementById("term-pane").hidden, "the Terminal tab is brought up so you see the output");
+  box.value = "what do you think about this plan?";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs.length === 1 && box.value !== "", "a sentence is NOT run on Enter — it stays in the box for an AI");
+  enter({ ctrlKey: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs.length === 2 && runs[1] === "what do you think about this plan?", "Ctrl+Enter force-runs it");
+  box.value = "line one";
+  const ev = new dom.window.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true });
+  box.dispatchEvent(ev);
+  assert(!ev.defaultPrevented && runs.length === 2, "Shift+Enter is still a plain new line");
+  box.value = "C:\\tools\\build.bat --fast";
+  enter();
+  await new Promise((r) => setTimeout(r, 10));
+  assert(runs[2] === "C:\\tools\\build.bat --fast", "a path to a script counts as a command");
+}
+
+async function testLockerBrowser() {
+  console.log("\n== 📁 Locker browser: each AI's files, click to put in Compose, upload on send ==");
+  const api = makeApi();
+  const attached = []; const sent = [];
+  const files = {
+    claude: [{ rel: "notes/plan.md", name: "plan.md", size: 40, mtime: 2, kind: "text" }, { rel: "chart.png", name: "chart.png", size: 20480, mtime: 1, kind: "image" }],
+    chatgpt: [], gemini: [],
+  };
+  Object.assign(api, {
+    lockersList: async (site) => ({ ok: true, site, files: files[site] || [] }),
+    lockersRead: async (site, rel) => ({ ok: true, kind: "text", text: "# Plan\nstep one" }),
+    lockersAttach: async (site, rel, targets) => { attached.push({ site, rel, targets }); return { ok: true }; },
+    onLockerChanged: () => {},
+    sendCompose: async (text, targets) => { sent.push({ text, targets }); return { ok: true }; },
+  });
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 20));
+  const list = doc.getElementById("locker-list-claude");
+  assert(list && !list.hidden, "each AI column shows its locker by default");
+  assert(doc.getElementById("preview-claude").hidden, "the old reply preview is still there, one tab away");
+  const rows = list.querySelectorAll(".lk-row:not(.lk-head)");
+  const head = list.querySelector(".lk-head");
+  assert(head && /Name/.test(head.textContent) && /Modified/.test(head.textContent) && /Size/.test(head.textContent), "the list has Name / Modified / Size columns");
+  assert(rows.length === 2 && /plan\.md/.test(rows[0].textContent) && /chart\.png/.test(rows[1].textContent), "files are listed with names");
+  assert(rows[0].querySelector(".lk-name b").textContent === "plan.md" && /notes/.test(rows[0].querySelector(".lk-dir").textContent), "the file name is shown first, its folder after it");
+  assert(rows[0].querySelector(".lk-date").textContent.length > 0 && /KB/.test(rows[1].querySelector(".lk-size").textContent), "each row shows modified date and size");
+  assert(/Locker \(2\)/.test(doc.getElementById("locker-tab-claude").textContent), "the tab shows the file count");
+  rows[0].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  const box = doc.getElementById("composer-text");
+  assert(/Claude's locker: notes\/plan\.md/.test(box.value) && /step one/.test(box.value), "clicking a text file puts its contents in Compose");
+  rows[1].dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(/chart\.png/.test(doc.getElementById("compose-attachments").textContent), "clicking a picture attaches it in Compose (a chip)");
+  const geminiBtn = Array.from(doc.querySelectorAll("#send-active-grid button")).find((b) => /Gemini/.test(b.textContent));
+  geminiBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(attached.length === 1 && attached[0].rel === "chart.png" && attached[0].targets[0] === "gemini", "sending to Gemini uploads the picture to Gemini first");
+  assert(sent.length === 1 && /step one/.test(sent[0].text), "then the text goes as usual");
+  assert(doc.getElementById("compose-attachments").children.length === 0, "the attachment chip clears after sending");
+  doc.getElementById("reply-tab-claude").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("preview-claude").hidden && list.hidden, "💬 Last reply tab shows the reply preview again");
+}
+
 async function main() {
   await testPaneCollapseToggle();
   await testUtilityPanelHeadingCollapses();
@@ -930,6 +1210,7 @@ async function main() {
   await testRoundtableBadgeParity();
   await testManualControlsStayVisibleAndClickableAlways();
   await testAutoBothButton();
+  await testPhonePanel();
   await testZoomControls();
   await testSelectorPickMenuToggle();
   await testSelectorPickSuccess();
@@ -944,6 +1225,7 @@ async function main() {
   await testConnectivityTestButtonFailure();
   await testConnectivityTestButtonDistinguishesTooBroadAndEcho();
   await testActivityLogShowsPickAndTestDetail();
+  await testUnifiedLogTagsAndFilters();
   await testUserPanelMergedAndNeverCollapses();
   await testMessagesToUserFeed();
   await testCollapsibleYellowPanels();
@@ -959,8 +1241,474 @@ async function main() {
   await testPromptLibraryDelete();
   await testPromptLibraryLiveSync();
 
+  await testExtractAllButton();
+  await testButlerPanelWired();
+  await testDeepCapabilityCheck();
+  await testButlerModeToggleAndConverse();
+  await testButlerLightAndColoredLog();
+  await testCapabilityPanelsWired();
+  await testActivityLogCapturesEverything();
+  await testTerminalZone();
+  await testComposeRunsCommands();
+  await testLockerBrowser();
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
+}
+
+async function testDeepCapabilityCheck() {
+  console.log("\n== System Check + User Panel: capability test runs and reports into the ONE Activity Log ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const log = doc.getElementById("activity-log");
+  // The old #selfcheck-results side box is gone — everything goes to the center log.
+  assert(!doc.getElementById("selfcheck-results"), "the old System Check side box is gone (consolidated into the Activity Log)");
+
+  // Default (unchecked): System Check does the quick readiness check → center log.
+  assert(doc.getElementById("cb-deep-check"), "the 'actually run each capability' toggle is present");
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSelfCheck") && !api.calls.some((c) => c.fn === "butlerCapabilityTest"), "unchecked → the quick readiness check runs, not the deep test");
+  assert(/System check — 2\/3/.test(log.textContent) && /Brain \(local model\)/.test(log.textContent), "the quick check's results land in the center Activity Log");
+
+  // The butler-panel button runs the deep test: live reel fills, pop-up opens.
+  assert(doc.getElementById("btn-cap-run"), "the butler panel has a 🧪 Test-all-capabilities button next to the task box");
+  click(dom, "btn-cap-run");
+  await new Promise((r) => setTimeout(r, 30));
+  assert(api.calls.some((c) => c.fn === "butlerCapabilityTest"), "the button runs the deep capability test");
+  const reel = doc.getElementById("cap-reel");
+  assert(reel.querySelectorAll(".cap-chip.pass").length === 2 && reel.querySelector(".cap-chip.fail") && reel.querySelector(".cap-chip.skip"),
+    "the live reel shows a chip per capability with pass/fail/skip as it goes by");
+  // The results pop-up opens with the three buckets + a fix-it tip on failures.
+  const modal = doc.getElementById("cap-modal");
+  assert(modal.classList.contains("on"), "when it's done, the results pop-up opens");
+  assert(doc.getElementById("cap-n-working").textContent === "2" && doc.getElementById("cap-n-failed").textContent === "1" && doc.getElementById("cap-n-notset").textContent === "1",
+    "the pop-up sorts results into Working / Not-working / Not-set-up buckets");
+  assert(/💡/.test(doc.getElementById("cap-list-failed").textContent) && /AnimateDiff|video/i.test(doc.getElementById("cap-list-failed").textContent),
+    "each failure gets a fix-it tip");
+  assert(/Capability test done — 2\/4 worked, 1 failed/.test(log.textContent), "the summary still lands in the center Activity Log");
+  // Close the pop-up.
+  click(dom, "btn-cap-modal-close");
+  assert(!modal.classList.contains("on"), "the pop-up closes on Close");
+
+  // The User Panel button and the System-Check deep toggle run the same test.
+  assert(doc.getElementById("btn-capability-test"), "the User Panel also has a 🧪 Capability Test button");
+  doc.getElementById("cb-deep-check").checked = true;
+  const before = api.calls.filter((c) => c.fn === "butlerCapabilityTest").length;
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 30));
+  assert(api.calls.filter((c) => c.fn === "butlerCapabilityTest").length === before + 1, "System Check with the toggle checked also runs the deep test");
+}
+
+async function testButlerModeToggleAndConverse() {
+  console.log("\n== Butler handling-mode toggle + converse from the User Panel ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const modeBtn = doc.getElementById("btn-butler-mode");
+  assert(!!modeBtn && /Auto/.test(modeBtn.textContent), "the mode toggle is present and starts on Auto");
+
+  // Type a message and send it to the butler in Auto → startManagedTask with mode "auto".
+  doc.getElementById("composer-text").value = "compare three plans";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  let sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
+  assert(sc && sc.userRequest === "compare three plans" && sc.mode === "auto", "→ Butler sends the composed message with the current mode (auto)");
+
+  // Cycle: Auto → Himself → Delegate. Send in Delegate → mode "delegate".
+  click(dom, "btn-butler-mode"); // → Himself
+  assert(/Himself/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-self"), "one click moves to 'Himself'");
+  click(dom, "btn-butler-mode"); // → Delegate
+  assert(/Delegate/.test(modeBtn.textContent) && modeBtn.classList.contains("mode-delegate"), "next click moves to 'Delegate'");
+  doc.getElementById("composer-text").value = "draft a memo";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  sc = api.calls.filter((c) => c.fn === "startManagedTask").pop();
+  assert(sc && sc.mode === "delegate", "sending in Delegate passes mode 'delegate' to the butler");
+
+  // Cycle once more → Converse. Now sending goes to butlerChat, not a task.
+  click(dom, "btn-butler-mode"); // → Converse
+  assert(/Converse/.test(modeBtn.textContent), "next click reaches 'Converse'");
+  const beforeStart = api.calls.filter((c) => c.fn === "startManagedTask").length;
+  doc.getElementById("composer-text").value = "how's it going?";
+  click(dom, "btn-send-butler");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerChat" && c.message === "how's it going?"), "in Converse, the message goes to butler:chat");
+  assert(api.calls.filter((c) => c.fn === "startManagedTask").length === beforeStart, "Converse does NOT start a task");
+  // My own line is echoed into the butler window.
+  assert(/You → 🤵/.test(doc.getElementById("jarvis-log").textContent) && /how's it going\?/.test(doc.getElementById("jarvis-log").textContent),
+    "my converse message is echoed in the butler window");
+}
+
+async function testButlerLightAndColoredLog() {
+  console.log("\n== Butler status light + colour-coded butler log (system / butler / per-AI / to-ME 2×) ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  // The status light lives in the User Panel and reflects the butler's state.
+  const light = doc.getElementById("btn-butler-status");
+  assert(!!light, "the Butler status light is present in the User Panel");
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 2, maximumTurns: 20 });
+  assert(light.classList.contains("working") && /turn 2/.test(light.querySelector(".txt").textContent), "while working, the light glows and shows what he's doing");
+  if (api._managerStateCb) api._managerStateCb({ status: "finished" });
+  assert(!light.classList.contains("working"), "when he finishes, the light stops glowing");
+  // A stall-break question flags it amber ('needs you').
+  if (api._managerAckCb) api._managerAckCb({ text: "I've gone 5 turns without progress. Could you tell me what you'd like me to do?" });
+  assert(light.classList.contains("needs"), "a question to the user turns the light amber (needs you)");
+
+  // The butler log colour-codes by who's speaking.
+  const blog = doc.getElementById("jarvis-log");
+  if (api._managerLogCb) api._managerLogCb({ category: "decision", summary: "Planning the work" });
+  assert(blog.querySelector(".bl-line.bl-butler"), "the butler's own reasoning is in his colour");
+  if (api._managerLogCb) api._managerLogCb({ category: "config", summary: "endpoint saved" });
+  assert(blog.querySelector(".bl-line.bl-system"), "system/config lines are the muted system colour");
+  if (api._managerLogCb) api._managerLogCb({ category: "response", target: ["claude"], summary: "Claude answered" });
+  assert(blog.querySelector(".bl-line.bl-claude"), "an AI answering the butler is in that AI's colour");
+
+  // An AI message addressed to ME is bright + 2× (bl-tome); an AI↔AI message is the sender's colour.
+  api.fireCapture({ id: 1, site: "gemini", label: "Gemini", text: "Here's your answer.", roundtableTag: "USER", ts: Date.now() });
+  const tome = blog.querySelector(".bl-line.bl-tome");
+  assert(tome && /Gemini → You/.test(tome.textContent), "a message addressed to me is the bright, 2× to-me style (.bl-tome)");
+  api.fireCapture({ id: 2, site: "chatgpt", label: "ChatGPT", text: "Over to you, Claude", roundtableTag: "CLAUDE", ts: Date.now() });
+  assert(blog.querySelector(".bl-line.bl-chatgpt"), "an AI-to-AI message is coloured as the sender");
+}
+
+async function testActivityLogCapturesEverything() {
+  console.log("\n== Activity trace: every button click, panel toggle, and message (with its ID) is logged ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+
+  // A button click logs a ui-click with the button's id + label.
+  click(dom, "btn-jarvis-start");
+  await new Promise((r) => setTimeout(r, 10));
+  const clickCall = api.calls.find((c) => c.fn === "uiLog" && c.action === "click" && c.detail && c.detail.id === "btn-jarvis-start");
+  assert(clickCall, "clicking a button logs a ui-click with its id");
+  assert(/Start Butler/.test(clickCall.detail.msg || ""), "the click log carries the button's label");
+
+  // Opening/closing a collapsible section logs a ui-panel event.
+  const det = doc.querySelector("details.sai-sec");
+  if (det) { det.open = true; det.dispatchEvent(new dom.window.Event("toggle")); }
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "uiLog" && c.action === "panel" && /opened|closed/.test(c.detail.msg || "")), "opening/closing a panel is logged");
+
+  // A minimized utility panel logs a ui-panel event too.
+  api.calls.length = 0;
+  const h2 = doc.querySelector("#col-prompts .yc-head h2");
+  if (h2) h2.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "uiLog" && c.action === "panel" && /minimized/.test(c.detail.msg || "")), "minimizing a panel is logged");
+
+  // A delivered message shows up in the Activity Log with its program-assigned ID.
+  if (api._ledgerCb) api._ledgerCb({ id: "MSG-42", source: null, target: "claude", status: "delivered", ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 10));
+  assert(/MSG-42/.test(doc.getElementById("activity-log").textContent) && /claude/.test(doc.getElementById("activity-log").textContent), "each message appears in the Activity Log with its ID and target");
+
+  // Downloads & creations folder: shows the one findable folder + inventory and opens it.
+  assert(/stuff and thing/.test(doc.getElementById("models-path").textContent), "the panel loads + shows the 'stuff and thing' folder path on start");
+  assert(/llm 1/.test(doc.getElementById("models-inventory").textContent) && /image 2/.test(doc.getElementById("models-inventory").textContent), "the installed-model counts per category are shown");
+  click(dom, "btn-open-models");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openModelsFolder"), "the Open models folder button opens the folder");
+
+  // Language-model storage: the store-status line reflects the app's own Ollama,
+  // and the migrate button moves already-downloaded models into the folder.
+  assert(/New downloads are stored in this folder/.test(doc.getElementById("models-store-status").textContent), "the panel checks storage and confirms new downloads land in 'stuff and thing' when the app's Ollama is running");
+  const log = doc.getElementById("activity-log");
+  click(dom, "btn-ollama-migrate");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "ollamaMigrate"), "the 'Move downloaded models here' button runs the migration");
+  assert(/3 moved/.test(log.textContent), "the migration result (moved/skipped) is reported into the Activity Log");
+
+  // Download all logs: one click bundles every log and reports the folder — to the log.
+  click(dom, "btn-download-logs");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "downloadAllLogs"), "the 'Download all logs' button gathers every log");
+  assert(/7 file\(s\) bundled/.test(log.textContent) && /logs\//.test(log.textContent), "it reports how many files were bundled and where — in the Activity Log");
+
+  // The "Stop AIs Talking" button halts all relay.
+  assert(doc.getElementById("btn-silence"), "the Stop-AIs-Talking button is present");
+  click(dom, "btn-silence");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "silenceAll"), "the Stop-AIs-Talking button calls silenceAll");
+}
+
+async function testButlerPanelWired() {
+  console.log("\n== Butler: the System AI panel starts/stops a goal, saves config, and shows the ack + status ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  assert(doc.getElementById("jarvis-goal") && doc.getElementById("btn-jarvis-start"), "the butler goal box and Start button are present");
+
+  // The local LLM endpoint starts pre-filled with Ollama's default address
+  // (erasable) so nobody has to type it — no saved endpoint in this stub.
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("lsi-endpoint").value === "http://127.0.0.1:11434/v1/chat/completions", "the LLM endpoint defaults to Ollama's local address (erasable)");
+
+  // Save config wires to configureManagerProvider (needs a model chosen first).
+  doc.getElementById("lsi-endpoint").value = "http://127.0.0.1:11434/v1/chat/completions";
+  const modelSel = doc.getElementById("lsi-model");
+  const opt = doc.createElement("option"); opt.value = "llama3.1:8b"; modelSel.appendChild(opt); modelSel.value = "llama3.1:8b";
+  click(dom, "btn-lsi-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && /11434/.test(c.config.endpoint) && c.config.model === "llama3.1:8b"), "Save settings configures the supervisor provider (endpoint + model)");
+
+  // Start with a goal.
+  doc.getElementById("jarvis-goal").value = "Compare three approaches and total them";
+  click(dom, "btn-jarvis-start");
+  await new Promise((r) => setTimeout(r, 20));
+  const startCall = api.calls.find((c) => c.fn === "startManagedTask");
+  assert(startCall && startCall.userRequest === "Compare three approaches and total them", "Start Butler calls startManagedTask with the typed goal");
+
+  // The instant ack shows up.
+  if (api._managerAckCb) api._managerAckCb({ taskId: "t1", text: 'On it — working on: "Compare three approaches and total them"' });
+  assert(/On it/.test(doc.getElementById("jarvis-ack").textContent), "the sub-second ack is displayed in the panel");
+
+  // A running state reveals Stop and updates the status line.
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 1, maximumTurns: 20, codeRuns: [] });
+  assert(doc.getElementById("btn-jarvis-stop").style.display !== "none", "while running, the Stop button is shown");
+  assert(/delegating/.test(doc.getElementById("jarvis-status").textContent), "the status line reflects the butler's live status");
+
+  // A code run count surfaces (proves the code arm is visible).
+  if (api._managerStateCb) api._managerStateCb({ status: "running-code", turnNumber: 2, maximumTurns: 20, codeRuns: [{ id: 1 }] });
+  assert(/code run/.test(doc.getElementById("jarvis-status").textContent), "a RUN_CODE step is shown in the status");
+
+  // Stop.
+  click(dom, "btn-jarvis-stop");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "stopManagedTask"), "Stop calls stopManagedTask");
+}
+
+async function testCapabilityPanelsWired() {
+  console.log("\n== Tools/Memory/Awareness/Voice: the System AI panel surfaces and wires the new butler capabilities ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  await new Promise((r) => setTimeout(r, 30)); // let refreshToolsList/refreshMemoryLine settle
+
+  // N5 Tools: the registry is fetched and rendered.
+  assert(api.calls.some((c) => c.fn === "toolsList"), "the panel fetches the tool registry on load");
+  assert(/http-fetch/.test(doc.getElementById("jarvis-tools").textContent), "the registered tools are listed for the user");
+
+  // N3 Memory: the summary line is fetched and rendered.
+  assert(api.calls.some((c) => c.fn === "memorySummary"), "the panel fetches the memory summary on load");
+  assert(/3 item/.test(doc.getElementById("jarvis-memory").textContent), "the memory item count is shown");
+
+  // N4 Awareness: a state push renders per-pane availability.
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", turnNumber: 1, maximumTurns: 20, awareness: { panes: { chatgpt: { enabled: true, available: true }, claude: { enabled: true, available: false, busy: true }, gemini: { enabled: false, available: false } } } });
+  assert(/Awareness/.test(doc.getElementById("jarvis-awareness").textContent) && /chatgpt/.test(doc.getElementById("jarvis-awareness").textContent), "the awareness readout renders per-pane status");
+
+  // N2 Voice: Save, Test (speak) and the mic (listen) are wired.
+  assert(doc.getElementById("voice-enabled") && doc.getElementById("btn-mic"), "the Voice controls are present");
+  doc.getElementById("voice-enabled").checked = true;
+  doc.getElementById("voice-endpoint").value = "http://127.0.0.1:8232";
+  click(dom, "btn-voice-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureVoice" && c.patch.enabled === true && /8232/.test(c.patch.endpoint)), "Save wires to configureVoice with the endpoint + enabled");
+  click(dom, "btn-voice-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak"), "Test speaks a line via voiceSpeak");
+  click(dom, "btn-mic");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceListen"), "the mic button calls voiceListen");
+  assert(doc.getElementById("jarvis-goal").value === "hello from mic", "a heard transcript is dropped into the goal box");
+
+  // The Image / Video paddles open the wizard on their own tab.
+  assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the Image and Video paddles are present in the action bar");
+  click(dom, "btn-open-image");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "images"), "the Image paddle opens the wizard on the Images tab");
+  click(dom, "btn-open-video");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openWizard" && c.tab === "video"), "the Video paddle opens the wizard on the Video tab");
+
+  // Image Generation + Video panels exist in the tiled panel grid.
+  assert(doc.getElementById("col-image") && doc.getElementById("col-video"), "the Image Generation and Video panels are present");
+  assert(api.calls.some((c) => c.fn === "imageStatus"), "the Image panel loads the SD config on start");
+  doc.getElementById("img-endpoint").value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  doc.getElementById("img-enabled").checked = true;
+  click(dom, "btn-img-save");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureImage" && c.patch.enabled === true && /7860/.test(c.patch.endpoint)), "the Image panel Save wires to configureImage");
+  // The 5 main image sliders exist and show a live value.
+  for (const id of ["img-steps", "img-cfg", "img-width", "img-height", "img-batch"]) {
+    const sl = doc.getElementById(id);
+    assert(sl && sl.getAttribute("type") === "range", `image slider ${id} is a range control`);
+  }
+  const stepSlider = doc.getElementById("img-steps");
+  stepSlider.value = "40";
+  stepSlider.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert(doc.getElementById("img-steps-v").textContent === "40", "moving a slider updates its live value readout");
+  // Compact fields: prompt, negative prompt, and LoRA/weights (appended to prompt).
+  doc.getElementById("img-prompt").value = "a red apple";
+  doc.getElementById("img-negative").value = "blurry, text";
+  doc.getElementById("img-lora").value = "<lora:apple:0.7>";
+  doc.getElementById("img-cfg").value = "9";
+  doc.getElementById("img-seed").value = "1234";
+  click(dom, "btn-img-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  const genCall = api.calls.find((c) => c.fn === "imageGenerate");
+  assert(genCall && /a red apple/.test(genCall.prompt) && /<lora:apple:0\.7>/.test(genCall.prompt), "Generate appends the LoRA/weights to the prompt");
+  assert(genCall && genCall.negative === "blurry, text", "the negative prompt is passed through");
+  const imgCfgCall = api.calls.filter((c) => c.fn === "configureImage").pop();
+  assert(imgCfgCall && imgCfgCall.patch.cfgScale === 9 && imgCfgCall.patch.seed === 1234 && imgCfgCall.patch.steps === 40, "the CFG / seed / steps slider values are sent with the render");
+  // 🎲 resets the seed to random (-1).
+  click(dom, "btn-img-seed-rand");
+  assert(doc.getElementById("img-seed").value === "-1", "the 🎲 button resets the seed to random (-1)");
+  // 3 sizes: the render grows the panel to "large" so the preview shows.
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "after a render the Image panel grows to the large size (shows the preview)");
+  assert(doc.getElementById("img-preview").getAttribute("src") === "data:image/png;base64,AAAA", "the rendered image is shown in the inline preview");
+  assert(doc.getElementById("img-history").children.length === 1, "the render is added to the recent-renders strip");
+  // The ◱ size button cycles minimal → middle → large → minimal.
+  doc.getElementById("col-image").setAttribute("data-size", "minimal");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "middle", "the size button cycles minimal → middle");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "large", "the size button cycles middle → large");
+  click(dom, "btn-img-size");
+  assert(doc.getElementById("col-image").getAttribute("data-size") === "minimal", "the size button wraps large → minimal (three states)");
+  // The Open SD UI button opens the web UI (base of the endpoint).
+  click(dom, "btn-img-open-ui");
+  await new Promise((r) => setTimeout(r, 10));
+  assert(api.calls.some((c) => c.fn === "openExternal" && /127\.0\.0\.1:7860$/.test(c.url)), "the Open SD UI button opens the Stable Diffusion web UI (endpoint base)");
+
+  // Video module: same 3-size + generate shape, wired to the video provider.
+  assert(api.calls.some((c) => c.fn === "videoStatus"), "the Video panel loads its config on start");
+  for (const id of ["vid-frames", "vid-fps", "vid-steps", "vid-cfg", "vid-motion"]) {
+    const sl = doc.getElementById(id);
+    assert(sl && sl.getAttribute("type") === "range", `video slider ${id} is a range control`);
+  }
+  doc.getElementById("vid-prompt").value = "a spinning cube";
+  doc.getElementById("vid-negative").value = "jitter";
+  doc.getElementById("vid-endpoint").value = "http://127.0.0.1:7861/txt2vid";
+  doc.getElementById("vid-motion").value = "1.5";
+  click(dom, "btn-vid-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  const vgen = api.calls.find((c) => c.fn === "videoGenerate");
+  assert(vgen && /a spinning cube/.test(vgen.prompt) && vgen.negative === "jitter", "Video Generate passes the prompt + negative to the video provider");
+  const vidCfgCall = api.calls.filter((c) => c.fn === "configureVideo").pop();
+  assert(vidCfgCall && vidCfgCall.patch.motion === 1.5, "the video Motion slider value is sent with the render");
+  assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
+  assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
+  click(dom, "btn-vid-size");
+  assert(["minimal", "middle", "large"].includes(doc.getElementById("col-video").getAttribute("data-size")), "the Video panel has its own working size button");
+  // Tab collapse: minimizing sends the panel up to a tab; clicking it restores.
+  click(dom, "btn-collapse-video");
+  assert(doc.getElementById("col-video").classList.contains("hidden-collapsed") && !!doc.getElementById("tab-video"), "collapsing the Video panel hides it and adds a tab");
+  doc.getElementById("tab-video").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+  assert(!doc.getElementById("col-video").classList.contains("hidden-collapsed") && !doc.getElementById("tab-video"), "clicking the tab brings the Video panel back");
+
+  // Endpoint help: preset dropdown fills the address; Auto-detect + Test are wired.
+  assert(api.calls.some((c) => c.fn === "endpointPresets" && c.kind === "image"), "the Image Connection loads its preset backends into a dropdown");
+  const preset = doc.getElementById("img-preset");
+  assert(preset && preset.querySelectorAll("option").length >= 3, "the preset dropdown is populated (Choose… + backends)");
+  preset.value = "http://127.0.0.1:7860/sdapi/v1/txt2img";
+  preset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "picking a preset fills the endpoint field — no guessing");
+  doc.getElementById("img-endpoint").value = "";
+  click(dom, "btn-img-detect");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "detectEndpoints" && c.kind === "image"), "Auto-detect scans localhost for a running backend");
+  assert(doc.getElementById("img-endpoint").value === "http://127.0.0.1:7860/sdapi/v1/txt2img", "a detected backend is filled into the endpoint field automatically");
+  click(dom, "btn-img-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "testEndpoint"), "the Test button pings the endpoint for reachability");
+  assert(/Reachable/.test(doc.getElementById("img-conn-msg").textContent), "a reachable endpoint is reported clearly");
+  assert(!!doc.getElementById("vid-preset") && !!doc.getElementById("btn-vid-detect") && !!doc.getElementById("btn-vid-test"), "the Video Connection has the same preset + detect + test helpers");
+
+  // GPU Usage panel: polls gpuInfo and draws the util + VRAM meters.
+  assert(!!doc.getElementById("col-gpu"), "the GPU Usage panel is present");
+  assert(api.calls.some((c) => c.fn === "gpuInfo"), "the GPU panel polls gpuInfo on start");
+  assert(/RTX 3090/.test(doc.getElementById("gpu-body").textContent) && /42%/.test(doc.getElementById("gpu-body").textContent), "the GPU panel shows the card name and live utilization");
+
+  // Butler Device panel: System Check + Send Intro.
+  assert(!!doc.getElementById("col-device") && !!doc.getElementById("btn-selfcheck") && !!doc.getElementById("btn-send-intro"), "the Butler Device panel with System Check + Send Intro is present");
+  // The composer starts empty (no auto-prompt pre-filled).
+  assert(doc.getElementById("composer-text").value.trim() === "", "the composer starts empty — no initial prompt is pre-filled");
+  // System Check reports each capability into the center Activity Log now.
+  const log = doc.getElementById("activity-log");
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSelfCheck"), "System Check asks the butler to test what he can do");
+  assert(/System check — 2\/3/.test(log.textContent) && /Brain \(local model\)/.test(log.textContent) && /Voice/.test(log.textContent), "the System Check lists each capability and how many are working — in the Activity Log");
+  // Detailed install status: what's installed vs not.
+  assert(/Open Interpreter/.test(log.textContent) && /not installed/.test(log.textContent) && /installed/.test(log.textContent), "the check shows a detailed installed / not-installed status per dependency");
+  // Install Missing installs what's not there (Open Interpreter first).
+  click(dom, "btn-install-missing");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerInstallMissing"), "Install Missing installs the not-installed dependencies");
+  // Send Intro messages the AIs with who the butler is + the rules.
+  click(dom, "btn-send-intro");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "butlerSendIntro"), "Send Intro tells the language models who the butler is and how it works");
+  assert(/Intro sent to: chatgpt, claude, gemini/.test(log.textContent), "the intro reports which AIs were told — in the Activity Log");
+  // The 🔊 speak toggle routes the summary through the voice engine.
+  doc.getElementById("device-speak").checked = true;
+  click(dom, "btn-selfcheck");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak"), "with 🔊 on, the System Check summary is spoken");
+
+  // Who's-speaking indicator: a voice-speaking event lights that speaker's chip.
+  assert(!!doc.getElementById("speaking-indicator"), "the who's-speaking indicator is present");
+  api._voiceSpeakingCb && api._voiceSpeakingCb({ who: "claude", speaking: true });
+  assert(doc.querySelector('.spk-chip[data-who="claude"]').classList.contains("speaking"), "a speaking event lights that speaker's chip");
+  api._voiceSpeakingCb && api._voiceSpeakingCb({ who: "claude", speaking: false });
+  assert(!doc.querySelector('.spk-chip[data-who="claude"]').classList.contains("speaking"), "the chip dims again when it stops");
+
+  // Talk to the butler: one merged task box (typed → Start), and push-to-talk.
+  doc.getElementById("jarvis-goal").value = "summarise the news";
+  click(dom, "btn-jarvis-start");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "startManagedTask"), "the typed task is sent to the butler from the one merged box");
+  click(dom, "btn-device-ptt");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceListen"), "push-to-talk records a spoken task via the voice engine");
+
+  // A distinct voice per speaker: the ▶ try button speaks in that voice, and Save carries the map.
+  doc.getElementById("voice-v-claude").value = "en_US-amy";
+  click(dom, "btn-voice-try-claude");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceSpeak" && c.who === "claude"), "the ▶ button speaks in that speaker's assigned voice");
+  assert(api.calls.some((c) => c.fn === "configureVoice" && c.patch && c.patch.voices && c.patch.voices.claude === "en_US-amy"), "Voice save carries a distinct voice per speaker");
+  // Mic / speaker device pickers exist.
+  assert(!!doc.getElementById("voice-mic") && !!doc.getElementById("voice-speaker"), "the voice module has microphone + speaker pickers");
+
+  // Model browser: pull ANY model by name.
+  assert(api.calls.some((c) => c.fn === "ollamaRecommended"), "the panel loads recommended models on start");
+  doc.getElementById("lsi-pull-name").value = "mistral:7b";
+  click(dom, "btn-lsi-pull");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "ollamaPull" && c.model === "mistral:7b"), "pulling by name installs the operator's chosen model");
+
+  // Safeguards: approval-mode toggle + approve/reject a held action.
+  assert(doc.getElementById("lsi-approval") && doc.getElementById("btn-approve"), "the Safeguards controls are present");
+  doc.getElementById("lsi-approval").checked = true;
+  doc.getElementById("lsi-approval").dispatchEvent(new dom.window.Event("change"));
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "configureManagerProvider" && c.config.approvalMode === true), "enabling approval mode saves approvalMode:true");
+  // A pending approval reveals the Approve/Reject box; Approve calls through.
+  if (api._managerStateCb) api._managerStateCb({ status: "paused", pendingApproval: { action: "USE_TOOL", tool: "http-fetch" } });
+  assert(doc.getElementById("lsi-pending").style.display !== "none" && /http-fetch/.test(doc.getElementById("lsi-pending-text").textContent), "a held action shows the approval prompt with what's waiting");
+  click(dom, "btn-approve");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "approveManagerAction"), "Approve calls approveManagerAction");
+  if (api._managerStateCb) api._managerStateCb({ status: "delegating", pendingApproval: null });
+  assert(doc.getElementById("lsi-pending").style.display === "none", "the approval prompt clears once nothing is pending");
+}
+
+async function testExtractAllButton() {
+  console.log("\n== Extract All: the Activity/Troubleshooting panel has a button that saves everything to a file ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const btn = dom.window.document.getElementById("btn-extract-all");
+  assert(btn, "the '⤓ Extract All' button is present in the Activity / Troubleshooting header");
+  click(dom, "btn-extract-all");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "extractAllLogs"), "clicking Extract All calls extractAllLogs (dumps conversation + errors)");
+  const status = dom.window.document.getElementById("extract-status");
+  assert(status && /Saved 3 messages \+ 5 log entries/.test(status.textContent), "it shows where the file was saved, with the message + log counts");
 }
 
 main().catch((e) => {

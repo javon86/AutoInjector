@@ -1,5 +1,11 @@
 # AutoInjector — User Guide
 
+> 🚧 **Under construction — parts of this guide are being updated.** Some sections
+> describe an earlier build (the book/ATELIER workflow, since parked — see
+> [`../UNDER_CONSTRUCTION.md`](UNDER_CONSTRUCTION.md)) and don't yet cover the
+> newer System AI / butler, tools, memory, voice, and image-generation features.
+> The relay basics below are still accurate. Nothing here affects how the app runs.
+
 Everything this program does, and how to use it. Written for a brand‑new user —
 no prior setup knowledge assumed.
 

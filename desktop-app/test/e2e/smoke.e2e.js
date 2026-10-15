@@ -18,7 +18,75 @@ async function main() {
       ['#btn-ai-toggle', 'System AI toggle'],
       ['#col-systemai', 'System AI panel'],
       ['#col-houserules', 'House Rules panel'],
+      ['#col-image', 'Image Generation panel'],
+      ['#img-negative', 'Negative prompt field'],
+      ['#img-lora', 'LoRA / weights field'],
+      ['#btn-img-open-ui', 'Open Stable Diffusion UI button'],
+      ['#btn-img-size', 'Image panel size cycle button'],
+      ['#col-video', 'Video Generation panel'],
+      ['#vid-prompt', 'Video prompt field'],
+      ['#vid-negative', 'Video negative prompt field'],
+      ['#btn-vid-generate', 'Video Generate button'],
+      ['#btn-vid-size', 'Video panel size cycle button'],
+      ['#vid-preview', 'Video clip preview'],
+      ['#img-preset', 'Image endpoint preset dropdown'],
+      ['#btn-img-detect', 'Image endpoint auto-detect button'],
+      ['#btn-img-test', 'Image endpoint test button'],
+      ['#vid-preset', 'Video endpoint preset dropdown'],
+      ['#btn-vid-detect', 'Video endpoint auto-detect button'],
+      ['#col-gpu', 'GPU Usage panel'],
+      ['#gpu-body', 'GPU readout'],
+      ['#col-device', 'Butler Device panel'],
+      ['#btn-selfcheck', 'System Check button'],
+      ['#btn-install-missing', 'Install Missing button'],
+      ['#btn-send-intro', 'Send Intro button'],
+      ['#speaking-indicator', 'Who\'s-speaking indicator'],
+      ['#jarvis-goal', 'Merged butler task box'],
+      ['#btn-cap-run', 'Butler-panel Test-all-capabilities button'],
+      ['#btn-butler-status', 'Butler status light'],
+      ['#btn-butler-mode', 'Butler handling-mode toggle'],
+      ['#cap-reel', 'Capability live reel'],
+      ['#cap-modal', 'Capability results modal'],
+      ['#btn-device-ptt', 'Push-to-talk button'],
+      ['#device-openmic', 'Open-mic toggle'],
+      ['#voice-v-butler', 'Per-speaker voice (butler)'],
+      ['#voice-mic', 'Microphone picker'],
+      ['#voice-speaker', 'Speaker picker'],
+      ['#col-video', 'Video Generation panel'],
+      ['#btn-img-generate', 'Image Generate button'],
+      ['#panels-grid', 'Tiled panels grid'],
       ['#ai-row', 'AI panes row'],
+      ['#btn-extract-all', 'Extract All button'],
+      ['#btn-capability-test', 'User-Panel Capability Test button'],
+      ['#log-filters', 'Unified-log tag filter bar'],
+      ['#cb-errors-only', 'Errors-only log toggle'],
+      ['#activity-log', 'Unified activity log'],
+      ['#btn-silence', 'Stop AIs Talking button'],
+      ['#btn-open-phone', 'Phone companion button'],
+      ['#phone-panel', 'Phone connect panel'],
+      ['#phone-lan-toggle', 'Phone LAN-access toggle'],
+      ['#btn-open-image', 'Image paddle'],
+      ['#btn-open-video', 'Video paddle'],
+      ['#jarvis-goal', 'Butler goal box'],
+      ['#btn-jarvis-start', 'Start Butler button'],
+      ['#lsi-pull-name', 'Pull-any-model field'],
+      ['#lsi-uncensored', 'Prefer-uncensored-models toggle'],
+      ['#lsi-approval', 'Approval-mode safeguard toggle'],
+      ['#btn-approve', 'Approve-action button'],
+      ['#cb-deep-check', 'Deep capability-test toggle'],
+      ['#btn-open-models', 'Open-models-folder button'],
+      ['#btn-ollama-migrate', 'Move-downloaded-models button'],
+      ['#models-store-status', 'LLM storage status line'],
+      ['#btn-download-logs', 'Download-all-logs button'],
+      ['#jarvis-tools', 'Tools registry list'],
+      ['#jarvis-awareness', 'Awareness readout'],
+      ['#voice-enabled', 'Voice toggle'],
+      ['#btn-mic', 'Push-to-talk mic button'],
+      ['#btn-feature-test', '🔬 Feature Test button'],
+      ['#term-output', 'Terminal output'],
+      ['#term-input', 'Terminal command box'],
+      ['#locker-list-claude', "Claude's locker file list"],
+      ['#compose-attachments', 'Compose attachment chips'],
     ]) {
       assert(await controls.$(sel), `${label} is present (${sel})`);
     }
@@ -40,13 +108,44 @@ async function main() {
       `AI panes are in fixed order (${order.join(', ') || 'not yet built'})`
     );
 
-    // The output folder is laid out under Documents on startup.
-    const docs = await app.evaluate(({ app: a }) => a.getPath('documents')).catch(() => null);
+    // The one "stuff and thing" folder is laid out INSIDE the app folder (one
+    // level above desktop-app), same as main.js's contentBaseFolder().
     const fs = require('fs'), pathMod = require('path');
-    const outRoot = docs ? pathMod.join(docs, 'AutoInjector', 'output') : null;
-    assert(outRoot && fs.existsSync(outRoot), `output folder created on launch (${outRoot})`);
+    const appFolder = pathMod.join(__dirname, '..', '..', '..');
+    const outRoot = pathMod.join(appFolder, 'stuff and thing');
+    assert(fs.existsSync(outRoot) && fs.existsSync(pathMod.join(outRoot, 'README.txt')),
+      `the "stuff and thing" folder is created on launch with a README (${outRoot})`);
+
+    // Downloads live in its models/ subfolder (with per-kind subfolders + a README).
+    const modelsRoot = pathMod.join(outRoot, 'models');
+    assert(fs.existsSync(modelsRoot) && fs.existsSync(pathMod.join(modelsRoot, 'llm')) && fs.existsSync(pathMod.join(modelsRoot, 'README.txt')),
+      `models folder created inside it with subfolders + README (${modelsRoot})`);
 
     await shot(controls, 'control-panel');
+
+    console.log('\n== Activity trace: a real button click is logged as ui-click ==');
+    await controls.click('#btn-extract-all');
+    const loggedClick = await controls.waitForFunction(
+      () => { const b = document.getElementById('activity-log'); return !!(b && /ui-click/.test(b.textContent) && /extract/i.test(b.textContent)); },
+      { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(loggedClick, 'clicking a button writes a ui-click line into the Activity Log');
+
+    console.log('\n== ⤓ Extract All writes the conversation + activity log to a text file ==');
+    await controls.click('#btn-extract-all');
+    const wroteLog = await controls.waitForFunction(
+      () => { const s = document.getElementById('extract-status'); return !!(s && /Saved/.test(s.textContent)); },
+      { timeout: 8000 }).then(() => true).catch(() => false);
+    assert(wroteLog, 'clicking Extract All reports the saved file in the status line');
+    if (outRoot) {
+      const logsDir = pathMod.join(outRoot, 'logs');
+      const files = fs.existsSync(logsDir) ? fs.readdirSync(logsDir).filter((f) => f.endsWith('.txt')) : [];
+      assert(files.length >= 1, `a .txt extract was written into output/logs (${files.length})`);
+      if (files.length) {
+        const body = fs.readFileSync(pathMod.join(logsDir, files[0]), 'utf8');
+        assert(/AI CONVERSATION/.test(body) && /ACTIVITY \/ TROUBLESHOOTING/.test(body), 'the extract file contains BOTH the conversation and the activity/error sections');
+      }
+    }
+    await shot(controls, 'control-panel-extracted');
 
     console.log('\n== 🧙 Setup opens the lean wizard (Local AI + Advanced) ==');
     await controls.click('#btn-open-wizard');
@@ -63,15 +162,25 @@ async function main() {
       assert(modelsRendered && modelCount > 0, `wizard lists recommended local-AI models (${modelCount} shown)`);
       await shot(wizard, 'setup-wizard');
 
-      // Advanced tab: the guided Ollama installer card.
+      // Installs tab: the guided installers for everything the features need.
       await wizard.click('.tab[data-tab="advanced"]');
       await wizard.waitForFunction(() => document.querySelectorAll('#advanced-installers .item').length > 0, { timeout: 8000 }).catch(() => {});
       const installers = await wizard.$$eval('#advanced-installers .item', (els) => els.length).catch(() => 0);
-      assert(installers >= 1, `Advanced tab shows the guided installer (${installers} shown)`);
-      // The removed Images/Video tabs must be gone (the wizard is now lean).
-      assert(!(await wizard.$('.tab[data-tab="images"]')), 'the Images tab is gone');
-      assert(!(await wizard.$('.tab[data-tab="video"]')), 'the Video tab is gone');
+      assert(installers >= 3, `Installs tab shows the guided installers for all the backends (${installers} shown)`);
+      // Butler self-install: the one-button Auto-setup + the per-target list.
+      assert(await wizard.$('#btn-setup-auto'), 'the Installs tab has the 🚀 Auto-setup button (butler self-install)');
+      const setupTargets = await wizard.waitForFunction(() => document.querySelectorAll('#setup-targets .item').length > 0, { timeout: 8000 }).then(() => true).catch(() => false);
+      const targetCount = await wizard.$$eval('#setup-targets .item', (els) => els.length).catch(() => 0);
+      assert(setupTargets && targetCount >= 3, `the Installs tab lists the self-install targets (${targetCount} shown)`);
       await shot(wizard, 'setup-wizard-advanced');
+
+      // The Images and Video tabs are back; Images carries the SD endpoint config.
+      assert(await wizard.$('.tab[data-tab="images"]'), 'the Images tab is present');
+      assert(await wizard.$('.tab[data-tab="video"]'), 'the Video tab is present');
+      await wizard.click('.tab[data-tab="images"]');
+      await wizard.waitForSelector('#sd-endpoint', { timeout: 6000 }).catch(() => {});
+      assert(await wizard.$('#sd-endpoint') && await wizard.$('#btn-sd-test'), 'the Images tab has the Stable Diffusion endpoint config + a Test render button');
+      await shot(wizard, 'setup-wizard-images');
     }
 
     console.log('\n== 💬 AI Feed: the consolidated pop-up window opens with per-LLM bubbles ==');
@@ -128,12 +237,33 @@ async function main() {
     await controls.evaluate(() => { document.body.style.zoom = '1'; });
 
     console.log(`\n${state.passed} passed, ${state.failed} failed`);
-    await app.close();
+    await shutdown(app);
     process.exit(state.failed ? 1 : 0);
   } catch (e) {
     console.error('e2e crashed:', e && e.stack || e);
-    await app.close().catch(() => {});
+    await shutdown(app);
     process.exit(1);
   }
 }
+
+// Close the app, but never wait forever: CI runs used to sit until GitHub's
+// 6-hour limit because app.close() (or a child process the app started) never
+// returned. Give it 15s, then kill the whole Electron process tree.
+async function shutdown(app) {
+  const timedOut = await Promise.race([
+    app.close().then(() => false, () => false),
+    new Promise((r) => setTimeout(() => r(true), 15000)),
+  ]);
+  if (timedOut) console.error('app.close() did not finish in 15s — killing Electron');
+  try {
+    const proc = app.process && app.process();
+    if (proc && proc.pid && proc.exitCode == null) {
+      try { process.kill(-proc.pid, 'SIGKILL'); } catch (_) {}
+      try { proc.kill('SIGKILL'); } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+// Hard backstop: whatever happens, this script ends within 12 minutes.
+setTimeout(() => { console.error('e2e watchdog: still running after 12 minutes — exiting'); process.exit(1); }, 12 * 60 * 1000).unref();
 main();

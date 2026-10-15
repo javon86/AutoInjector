@@ -30,6 +30,20 @@ const ollamaManager = require("./ollama-manager");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
 const bookforgeBridgeMod = require("./bookforge-bridge"); // BookForge bridge (pure Node HTTP server, OFF by default) — docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
+const { createServiceBridge } = require("./service-bridge");
+const interpreterProvider = require("./interpreter-provider");
+const toolProvider = require("./tool-provider");
+const voiceProvider = require("./voice-provider");
+const imageProvider = require("./image-provider");
+const videoProvider = require("./video-provider");
+const setupManager = require("./setup-manager");
+const gpuMonitor = require("./gpu-monitor");
+const endpointDetect = require("./endpoint-detect");
+const logBundle = require("./log-bundle");
+const logTags = require("./log-tags");
+const terminalProvider = require("./terminal-provider");
+const aiLockers = require("./ai-lockers");
+const featureTest = require("./feature-test");
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -158,6 +172,8 @@ const state = {
   noTagReprompts: {}, // site -> count of consecutive "you forgot the [FROM:] tag, resend" nudges (reset when a valid tagged reply lands)
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
+  generating: {}, // site -> bool — the pane is actively producing a reply (its Stop button is showing / Send disabled), from pollSite's read
+
   waitingSince: {}, // site -> timestamp | null — when waiting flipped true, so UIs can flag "hasn't replied in a while"
   lastSentTo: {}, // site -> exact final text last sent to it (for Regenerate)
   enabled: {}, // site -> bool — participant is "in play": counts for Auto/"All" AND shows its pane
@@ -166,6 +182,7 @@ const state = {
   log: [], // { ts, kind, detail } — internal activity, for the troubleshooting panel
   ledger: [], // { id, ts, source, target, textPreview, status, error, duplicate } — one entry per sendTextTo() attempt; see recordLedgerEntry(). Program-owned transport record, independent of what any AI believes happened -- never trust an AI's own claim about whether a message arrived.
   meshActive: false, // whether global Auto is currently on
+  relayEnabled: true, // master switch for AUTOMATIC AI->AI forwarding (baseline [TO:] tag relay + mesh). "Stop AIs Talking" flips this off; the next user send / relay-mode start turns it back on. Direct user sends are never gated by it.
   nextTurnId: 1,
   nextMsgSeq: 1, // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
 
@@ -189,6 +206,9 @@ const state = {
     maximumTurns: 20,
     costLimit: 5
   },
+  imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
+  videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
+  setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   bookforge: { enabled: false }, // BookForge bridge (experimental) — persisted; OFF by default. See startBookforgeBridge().
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
@@ -224,10 +244,27 @@ function defaultTestPrompt() {
 // sendStartupRoutingPromptOnce()) and stays here in the Prompt Library so it
 // can be resent manually any time, e.g. if one of them seems to have
 // forgotten how the tagging works mid-conversation.
+// The locker part of the orientation: how each AI uses its own private folder
+// through [TO: TERMINAL]. Shared by the Prompt Library's routing prompt and the
+// Butler intro so both teach the same thing.
+function lockerGuide(site) {
+  const me = String(site || "").toLowerCase();
+  const others = SITE_IDS.filter((s) => s !== me).join(" / ");
+  return "\n\nYOUR LOCKER (your own private folder on this PC):\n" +
+    "• Address it with [TO: TERMINAL] and put commands in a ``` code block, one per line. Everything runs inside YOUR folder only — anything outside it is refused.\n" +
+    "• File commands: dir, type, copy, move, ren, del, md, rd, echo, find, findstr, sort, tree, fc, cd (pipes and > work inside your folder).\n" +
+    "• write <file> — the rest of that code block becomes the file. append <file> — adds the rest of the block to the end.\n" +
+    "• give <file> — the app puts the file into this chat (text is pasted; pictures/PDFs/other files are uploaded so you can see them).\n" +
+    `• send <file> to <ai> — copies it into that AI's inbox (${others}). Files others send you land in inbox\\from-<ai>\\.\n` +
+    "• share with <ai> — lets that AI LOOK at your locker (read and copy out, never change) for its next terminal request only. When someone shares with you, their files are at ..\\<ai>\\.\n" +
+    "• Running a script (python x.py / node x.js) waits for the user's approval. help lists everything.\n" +
+    "Results come back to you as a [FROM: TERMINAL] message.";
+}
+
 function defaultRoutingExplainerPrompt() {
   const text = {};
   for (const site of SITE_IDS) {
-    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.`;
+    text[site] = `Quick reference, not a task — no need to reply unless you want to. This app relays messages between the three of us (ChatGPT, Claude, Gemini); we're not talking to each other directly, everything is routed on this end. Wrap EVERY message in a two-tag envelope. START with a tag on its own line — [TO: CHATGPT], [TO: CLAUDE], [TO: GEMINI], [TO: ALL], [TO: USER], [TO: TERMINAL], or [TO: NONE] — to control who sees it next: a specific one of us, everyone, just the human running this, your own private folder ("locker") on the human's PC, through a command prompt that only works inside it (put commands in a \`\`\` code block — dir, type, copy, del, md, plus write/append/give/send; send \`help\` for the list; results come back as a [FROM: TERMINAL] message; \`send <file> to <ai>\` passes a file to another of us), or nobody if you have nothing to add. END with your own closing tag in the same bracket form: [FROM: ${site.toUpperCase()}]. The [FROM: ...] tag is how this end knows your message is finished — until it's there, nothing you wrote is delivered; if you stop without it the message is discarded and you'll be asked to resend the whole thing. Put nothing after the closing tag. The one exception: if you have nothing to add, just reply NONE (or [TO: NONE]) — that's a complete message on its own, it needs no [FROM:] tag, and it's dropped silently. This applies all the time, not just for a specific "mode." Also: the app stamps every message it hands you with a running number at the very top, like [MSG #0007] — you don't generate these, but you can refer to that number to say which message you're answering so nobody falls out of sync.` + lockerGuide(site);
   }
   return { id: 2, name: "System Prompt (How Routing Works)", text };
 }
@@ -270,12 +307,19 @@ function resetManagerTask() {
   state.manager = {
     taskId: null,
     userRequest: "",
+    handlingMode: "auto", // auto | self | delegate — WHO does the task (call-sign/toggle resolves it)
     deliverableSpecification: {},
     plan: [],
     activeAssignments: [], // { target, task, sentTs }
     completedAssignments: [], // { target, task, response, ts }
     latestResponses: { chatgpt: null, claude: null, gemini: null },
     allResponses: [], // { id, target, text, ts } — every response ever captured for this task, never overwritten
+    codeRuns: [], // { id, task, ok, message, error, ts } — RUN_CODE results (Open Interpreter), so the manager can build on them
+    toolCalls: [], // { id, tool, ok, message, error, ts } — USE_TOOL results (tool registry / future MCP), so the manager can build on them
+    memories: [], // { id, type, title, ts } — RECALL results + auto-seeded relevant facts from the shared memory store
+    images: [], // { id, prompt, path, ok, error, ts } — GENERATE_IMAGE results (Stable Diffusion), saved + recorded as project images
+    setups: [], // { id, target, ok, message, error, ts } — SETUP results (setup-manager self-install), so the manager knows what it installed
+    capabilities: {}, // capability-awareness table: "<target>:<action>" -> { ok, fail, lastTs } learned from executor outcomes
     conflicts: [],
     missingRequirements: [],
     previousManagerActions: [], // the last N validated decisions, for the model's own context
@@ -290,6 +334,8 @@ function resetManagerTask() {
     startedTs: null,
     finishedTs: null,
     noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
+    formatFailStreak: 0, // consecutive INVALID_JSON/UNKNOWN_ACTION provider replies — a "your model can't emit commands" signal
+    thinkingStreak: 0, // consecutive "thinking" (PLAN/WAIT/CLASSIFY/…) turns with no real progress, used by detectManagerStall()
     pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
   };
 }
@@ -340,15 +386,48 @@ function isSafeRelativePath(p) {
   return true;
 }
 
+// Weak local models often get DELEGATE *almost* right — they smuggle a single
+// {target, task} into a `task` string, put the target/task at the top level, or
+// hand `assignments` back as a JSON string instead of an array. Rather than
+// bounce those and stall, coerce the common near-misses into the real
+// assignments array; the per-assignment allowlist check below still guards it.
+function coerceAssignments(decision) {
+  if (Array.isArray(decision.assignments) && decision.assignments.length) return decision;
+  const tryParse = (v) => { try { return JSON.parse(v); } catch (_) { return null; } };
+  // `assignments` given as a JSON string.
+  if (typeof decision.assignments === "string") {
+    const a = tryParse(decision.assignments.trim());
+    if (Array.isArray(a)) decision.assignments = a;
+    else if (a && a.target) decision.assignments = [a];
+  }
+  // A single {target, task} object hidden inside the `task` field.
+  if ((!Array.isArray(decision.assignments) || !decision.assignments.length) && typeof decision.task === "string" && decision.task.trim().startsWith("{")) {
+    const o = tryParse(decision.task.trim());
+    if (o && o.target && o.task != null) decision.assignments = [{ target: o.target, task: String(o.task) }];
+  }
+  // Top-level target + task (no wrapper at all).
+  if ((!Array.isArray(decision.assignments) || !decision.assignments.length) && decision.target && typeof decision.task === "string" && decision.task.trim() && !decision.task.trim().startsWith("{")) {
+    decision.assignments = [{ target: decision.target, task: decision.task }];
+  }
+  return decision;
+}
+
 function validateManagerAction(decision) {
   if (!decision || typeof decision !== "object" || Array.isArray(decision)) return { ok: false, error: "MALFORMED" };
   if (typeof decision.action !== "string" || !MANAGER_ACTIONS.includes(decision.action)) return { ok: false, error: "UNKNOWN_ACTION" };
 
   const violations = [];
-  scanForDangerousContent(decision, "decision", violations);
+  // A USE_TOOL's args are the tool's own inputs — a command, a URL, or authored
+  // code for create-tool. Those are legitimately arbitrary and every risk-"ask"
+  // tool is held for the user's explicit approval before it runs, so the
+  // code-injection scan (which exists to stop hidden code in delegated task
+  // text) would only ever produce false positives here. Scan everything else.
+  const scanTarget = decision.action === "USE_TOOL" ? { ...decision, args: undefined } : decision;
+  scanForDangerousContent(scanTarget, "decision", violations);
 
   const NEEDS_ASSIGNMENTS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
   if (NEEDS_ASSIGNMENTS.has(decision.action)) {
+    coerceAssignments(decision); // rescue the near-valid shapes weak local models emit
     if (!Array.isArray(decision.assignments) || !decision.assignments.length) {
       return { ok: false, error: "MISSING_ASSIGNMENTS" };
     }
@@ -367,6 +446,34 @@ function validateManagerAction(decision) {
   if (decision.action === "ESCALATE") {
     const tier = Number(decision.toTier);
     if (!Number.isInteger(tier) || tier < 1 || tier > 4) return { ok: false, error: "BAD_TIER" };
+  }
+
+  if (decision.action === "RUN_CODE") {
+    if (typeof decision.task !== "string" || !decision.task.trim()) return { ok: false, error: "MISSING_TASK" };
+  }
+
+  if (decision.action === "USE_TOOL") {
+    if (typeof decision.tool !== "string" || !decision.tool.trim()) return { ok: false, error: "MISSING_TOOL" };
+    if (!toolProvider.has(decision.tool)) return { ok: false, error: "UNKNOWN_TOOL", detail: decision.tool };
+    if (decision.args != null && (typeof decision.args !== "object" || Array.isArray(decision.args))) return { ok: false, error: "BAD_ARGS" };
+  }
+
+  if (decision.action === "REMEMBER") {
+    const fact = decision.fact != null ? decision.fact : decision.value;
+    if (typeof fact !== "string" || !fact.trim()) return { ok: false, error: "MISSING_FACT" };
+  }
+
+  if (decision.action === "RECALL") {
+    if (typeof decision.query !== "string" || !decision.query.trim()) return { ok: false, error: "MISSING_QUERY" };
+  }
+
+  if (decision.action === "GENERATE_IMAGE") {
+    if (typeof decision.prompt !== "string" || !decision.prompt.trim()) return { ok: false, error: "MISSING_PROMPT" };
+  }
+
+  if (decision.action === "SETUP") {
+    if (typeof decision.target !== "string" || !setupManager.has(decision.target)) return { ok: false, error: "UNKNOWN_TARGET", detail: decision.target };
+    if (decision.model != null && !/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,80}$/.test(String(decision.model))) return { ok: false, error: "BAD_MODEL" };
   }
 
   if (violations.length) return { ok: false, error: "DANGEROUS_CONTENT", violations };
@@ -404,7 +511,17 @@ function pushTranscriptTurn(turn) {
 }
 
 function logEvent(kind, detail) {
-  const entry = { ts: Date.now(), kind, detail };
+  // Every event carries its tag (one of the 13) so the unified log window can
+  // group + show/hide by category. Tagging at the source = nothing untagged.
+  // It also carries a severity level ("error"/"warning"/"info") so the log's
+  // "⚠ Errors only" toggle has a real signal to filter on: an explicit
+  // severity in the detail wins (manager events pass their own through), else
+  // it's inferred from the kind so plain logEvent("…-error") lines still count.
+  const sev = detail && typeof detail === "object" ? detail.severity : null;
+  const level = (sev === "error" || sev === "warn" || sev === "warning")
+    ? (sev === "warn" ? "warning" : sev)
+    : (/(?:error|fail|exceeded|timeout|giveup|reject|stalled|unreachable)/i.test(kind) ? "error" : "info");
+  const entry = { ts: Date.now(), kind, detail, tag: logTags.tagFor(kind), level };
   state.log.push(entry);
   if (state.log.length > MAX_LOG) state.log.shift();
   broadcast("log", entry);
@@ -482,7 +599,7 @@ function logManagerEvent({ category, severity, action, target, summary, details,
     broadcast("manager-log", entry);
   }
   if (visibleInGlobalLog) {
-    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails });
+    logEvent(`manager-${entry.category}`, { summary: entry.summary, taskId: entry.taskId, ...safeDetails, severity: entry.severity });
   } else if (visibleInManagerLog) {
     appendDebugLog(entry); // still worth a debug-log trace even when it's not going in the global Activity Log
   }
@@ -511,6 +628,8 @@ function saveStateDebounced() {
         selectorOverrides: state.selectorOverrides,
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
+        imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
+        videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         bookforge: { enabled: !!state.bookforge.enabled }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
           mode: hr.mode,
@@ -561,6 +680,17 @@ function loadPersistedState() {
   }
   if (Array.isArray(snap.prompts)) {
     state.prompts = snap.prompts;
+    // The built-in routing prompt (id 2) saved by an older build doesn't teach
+    // the locker commands. If it's still the untouched built-in (same name, no
+    // TERMINAL), swap in the current text; a user-edited prompt is left alone.
+    try {
+      const fresh = defaultRoutingExplainerPrompt();
+      const old = state.prompts.find((p) => p && p.id === 2);
+      if (old && old.name === fresh.name && !JSON.stringify(old.text || "").includes("TERMINAL")) {
+        old.text = fresh.text;
+        logEvent("prompt-builtin-refreshed", { id: 2 });
+      }
+    } catch (_) {}
     state.nextPromptId = snap.prompts.reduce((m, p) => Math.max(m, (p.id || 0) + 1), 1);
   }
   if (snap.selectorOverrides) {
@@ -577,6 +707,14 @@ function loadPersistedState() {
       }
     }
     state.nextLoginId = maxId + 1;
+  }
+  if (snap.imageConfig && typeof snap.imageConfig === "object") {
+    imageProvider.setSettings(snap.imageConfig);
+    state.imageConfig = imageProvider.getSettings();
+  }
+  if (snap.videoConfig && typeof snap.videoConfig === "object") {
+    videoProvider.setSettings(snap.videoConfig);
+    state.videoConfig = videoProvider.getSettings();
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
@@ -599,10 +737,16 @@ function loadPersistedState() {
   logEvent("state-restored", { transcriptTurns: state.transcript.length, hrMode: state.hr.mode });
 }
 
+// Extra broadcast sinks beyond the UI windows. The local service bridge
+// (service-bridge.js) registers a listener here so an external caller can stream
+// the same live events (captures, generation state, sends, errors, rate limits,
+// Council state) the UI sees, without the bridge reaching into internals.
+const broadcastListeners = new Set();
 function broadcast(channel, payload) {
   for (const view of uiViews) {
     if (view && !view.webContents.isDestroyed()) view.webContents.send(channel, payload);
   }
+  for (const fn of broadcastListeners) { try { fn(channel, payload); } catch (_) {} }
 }
 
 // The control panel always fills the entire Automation window; each AI's live
@@ -686,6 +830,15 @@ function createWindow() {
     win.contentView.addChildView(view);
     view.webContents.loadURL(SITES[site].home);
     siteViews[site] = view;
+    // Every AI page starts at 60% (DEFAULT_PANE_ZOOM) so more of the chat fits.
+    // Re-applied after each page load, since a navigation can reset zoom; the
+    // pane's own −/+ buttons change paneZoom[site], which then sticks.
+    try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
+    try {
+      if (typeof view.webContents.on === "function") {
+        view.webContents.on("did-finish-load", () => { try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {} });
+      }
+    } catch (_) {}
     // When an AI produces a file you download from its pane, grab it into the
     // output folder under that AI's name (output/ai-work/<site>/) instead of
     // popping a save dialog — a tidy local record of each AI's work.
@@ -698,11 +851,10 @@ function createWindow() {
         } catch (e) { logEvent("ai-download-error", { site, error: String(e) }); }
       });
     } catch (_) {}
-    // Fires once this site's page has actually finished loading (not on a
-    // fixed delay, which would race against a slow connection) — sending
-    // any earlier would hit a chat UI whose input box doesn't exist yet.
-    // Only ever fires once per app launch, not on a later manual 🔍/⟳ reload.
-    view.webContents.once("did-finish-load", () => sendStartupRoutingPromptOnce(site));
+    // Nothing is sent to the panes on startup anymore — the app stays silent
+    // until the user hits Start (Auto / a House Rule / a Sequence). At that point
+    // ensureProtocolTaught() sends the [TO:]/[FROM:] routing explainer once, so
+    // relay still works, but only on a deliberate user action.
   }
 
   layout();
@@ -749,42 +901,6 @@ function closePromptEditorWindow() {
   if (promptEditorWin) promptEditorWin.close();
 }
 
-// A small, on-demand fourth window for previewing a document before sending
-// it to one or more AIs — same single-instance, re-navigate-via-query-string
-// pattern as the prompt editor window above.
-let documentViewerWin = null;
-let documentViewerView = null;
-function openDocumentViewerWindow(filePath) {
-  const search = `path=${encodeURIComponent(filePath)}`;
-  if (documentViewerWin && documentViewerView) {
-    documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
-    documentViewerWin.focus();
-    return;
-  }
-  documentViewerWin = new BaseWindow({ width: 820, height: 700, resizable: true, title: "AutoInjector — Document" });
-  documentViewerView = new WebContentsView({
-    webPreferences: {
-      partition: "document-viewer-ui",
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  documentViewerWin.contentView.addChildView(documentViewerView);
-  documentViewerView.webContents.loadFile(path.join(__dirname, "document-viewer.html"), { search });
-  const layoutViewer = () => {
-    if (!documentViewerWin || !documentViewerView) return;
-    const [w, h] = documentViewerWin.getContentSize();
-    documentViewerView.setBounds({ x: 0, y: 0, width: w, height: h });
-  };
-  layoutViewer();
-  documentViewerWin.on("resize", layoutViewer);
-  documentViewerWin.on("closed", () => { documentViewerWin = null; documentViewerView = null; });
-}
-function closeDocumentViewerWindow() {
-  if (documentViewerWin) documentViewerWin.close();
-}
-
 // A fourth on-demand window: build a numbered list of prompts to fire off
 // one at a time. Same lazy single-instance pattern as the other two popups,
 // but it never needs to be re-targeted at a different id (there's no
@@ -824,8 +940,15 @@ function closeSequenceWindow() {
 // --- Setup Wizard window ----------------------------------------------------
 let wizardWin = null;
 let wizardView = null;
-function openWizardWindow() {
-  if (wizardWin && wizardView) { wizardWin.focus(); return; }
+const WIZARD_TABS = new Set(["localai", "images", "video", "advanced"]);
+function openWizardWindow(tab) {
+  const wantTab = WIZARD_TABS.has(tab) ? tab : null;
+  if (wizardWin && wizardView) {
+    wizardWin.focus();
+    // Already open — just switch to the requested tab in place.
+    if (wantTab) try { wizardView.webContents.executeJavaScript(`document.querySelector('.tab[data-tab="${wantTab}"]')?.click();`).catch(() => {}); } catch (_) {}
+    return;
+  }
   wizardWin = new BaseWindow({ width: 900, height: 700, resizable: true, title: "AutoInjector — Setup Wizard" });
   wizardView = new WebContentsView({
     webPreferences: {
@@ -836,7 +959,7 @@ function openWizardWindow() {
     }
   });
   wizardWin.contentView.addChildView(wizardView);
-  wizardView.webContents.loadFile(path.join(__dirname, "setup-wizard.html"));
+  wizardView.webContents.loadFile(path.join(__dirname, "setup-wizard.html"), wantTab ? { query: { tab: wantTab } } : undefined);
   const layoutWizard = () => {
     if (!wizardWin || !wizardView) return;
     const [w, h] = wizardWin.getContentSize();
@@ -851,7 +974,7 @@ function closeWizardWindow() { if (wizardWin) wizardWin.close(); }
 // --- Consolidated AI feed window --------------------------------------------
 // A separate pop-up that shows every AI reply as a colour-coded bubble per LLM.
 // It registers its view in uiViews so the normal broadcast() (capture / sent /
-// book-runner) fans out to it live; on close we splice it back out.
+// manager events) fans out to it live; on close we splice it back out.
 let feedWin = null;
 let feedView = null;
 function openFeedWindow() {
@@ -896,6 +1019,7 @@ function globalSnapshot() {
     waiting: { ...state.waiting },
     waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
+    relayEnabled: state.relayEnabled,
     customRole: { ...state.customRole },
     selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
@@ -906,11 +1030,19 @@ function managerSnapshot() {
   return {
     taskId: m.taskId,
     userRequest: m.userRequest,
+    handlingMode: m.handlingMode,
     deliverableSpecification: m.deliverableSpecification,
     plan: m.plan,
     activeAssignments: m.activeAssignments,
     completedAssignments: m.completedAssignments,
     latestResponses: { ...m.latestResponses },
+    codeRuns: m.codeRuns,
+    toolCalls: m.toolCalls,
+    memories: m.memories,
+    images: m.images,
+    setups: m.setups,
+    capabilities: m.capabilities,
+    awareness: managerAwareness(),
     conflicts: m.conflicts,
     missingRequirements: m.missingRequirements,
     previousManagerActions: m.previousManagerActions,
@@ -924,6 +1056,47 @@ function managerSnapshot() {
     projectDir: m.projectDir,
     pendingApproval: m.pendingApproval
   };
+}
+
+// N4 Awareness: a compact, always-current picture of the panes and orchestrator,
+// composed from signals the app already tracks (bridgeStatus + house-rule state)
+// plus the learned capability table. No new sensing -- pure aggregation. The
+// butler sees this every turn (via buildManagerPrompt) so it stops delegating to
+// a pane that is busy, rate-limited, or known-incapable of an action.
+function managerAwareness() {
+  const m = state.manager;
+  const panes = {};
+  try {
+    for (const site of SITE_IDS) {
+      const enabled = !!state.enabled[site];
+      const ready = paneReady(site);
+      const busy = !!state.generating[site];
+      const waiting = !!state.waiting[site];
+      const rateLimited = !!(state.captured[site] && state.captured[site].isRateLimited);
+      panes[site] = {
+        enabled, ready, busy, waiting, rateLimited,
+        // A pane is a good delegate target only if enabled, ready, and not busy/limited.
+        available: enabled && ready && !busy && !rateLimited
+      };
+    }
+  } catch { /* best effort -- awareness must never throw into the loop */ }
+  return {
+    panes,
+    council: state.hr && state.hr.active ? { mode: state.hr.mode, paused: !!state.hr.paused } : null,
+    capabilities: m.capabilities || {}
+  };
+}
+
+// Records the outcome of an action against a target/tool so a repeatedly-failing
+// route can be avoided. Keyed "<target>:<action>"; awareness surfaces it.
+function recordCapabilityOutcome(target, action, ok) {
+  if (!target || !action) return;
+  const m = state.manager;
+  const key = `${String(target).toLowerCase()}:${String(action).toUpperCase()}`;
+  const c = m.capabilities[key] || { ok: 0, fail: 0, lastTs: 0 };
+  if (ok) c.ok += 1; else c.fail += 1;
+  c.lastTs = Date.now();
+  m.capabilities[key] = c;
 }
 
 function managerConfigSnapshot() {
@@ -983,6 +1156,10 @@ function broadcastHouseRule() {
 // real contention. Only a genuinely concurrent second call for the same
 // target pays for serialization, by chaining after the first's promise.
 const sendQueues = {};
+// Per-pane zoom for the embedded AI pages. Default 60% (override with the
+// AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
+const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
+const paneZoom = {};
 function withSendQueue(target, fn) {
   const prior = sendQueues[target];
   const run = prior ? prior.then(fn, fn) : fn();
@@ -1044,6 +1221,9 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
         r = { ok: false, error: String(e) };
       }
       if (r && r.ok) break;
+      // E11: a provider-paused conversation won't recover by resending — the
+      // composer is gone on purpose. Stop retrying and report it as itself.
+      if (r && r.error === "PROVIDER_PAUSED") break;
       if (attempt < SEND_RETRY_ATTEMPTS) {
         logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown" });
         await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS));
@@ -1057,8 +1237,14 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // [MSG #] header must not make every send look unique.
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
   if (!res || !res.ok) {
-    broadcast("send-error", { target, error: res?.error || "unknown" });
+    broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
+    // E11: give the paused case an actionable, human message instead of a bare
+    // INPUT_NOT_FOUND — the user needs to open that pane and clear the safeguard.
+    if (res && res.error === "PROVIDER_PAUSED") {
+      logEvent("provider-paused", { target, reason: res.reason || null });
+      broadcast("manager-ack", { taskId: null, text: `${SITES[target]?.label || target} paused this conversation behind a safeguard${res.reason ? ` (${res.reason})` : ""}. Open its pane and start a new chat or clear the block, then try again.`, ts: Date.now() });
+    }
     // opts.hr marks a send made on behalf of an active House Rule turn --
     // exhausting every retry used to leave the run silently `active`
     // forever, waiting on a reply that can now never arrive. Park it the
@@ -1118,7 +1304,7 @@ async function hrSendTextTo(target, text, fromSite, sentTargets) {
 //   TIMEOUT            -- nothing came back at all
 const selftestInFlight = new Set();
 const tunerInFlight = { active: false }; // guards against a manual 🧪 Test colliding with a Tuner run touching the same site
-const testRunInFlight = new Set(); // sites currently in a Book Studio "Test AIs" round-trip — bareMode so a plain "TEST OK" reply (no envelope) still captures
+const testRunInFlight = new Set(); // sites currently in a connectivity "Test" round-trip — bareMode so a plain "TEST OK" reply (no envelope) still captures
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
@@ -1149,22 +1335,11 @@ async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs) {
   return { ok: false, error: "TIMEOUT" };
 }
 
-// The routing-explainer prompt (Prompt Library id 2) gets sent to every
-// site automatically, once, the first time its page loads after app
-// startup — establishing baseline awareness of the [TO: X] tag system
-// without the user having to remember to trigger it. Fire-and-forget, no
-// acknowledgment wait. Pulls from state.prompts (not a fresh-generated
-// copy) so a user edit to that saved prompt is reflected here too; if
-// they've deleted it, this just quietly does nothing.
-const startupPromptSent = new Set();
-async function sendStartupRoutingPromptOnce(site) {
-  if (startupPromptSent.has(site)) return;
-  startupPromptSent.add(site);
-  const prompt = state.prompts.find((p) => p.id === 2);
-  const text = prompt && prompt.text && prompt.text[site];
-  if (!text) return;
-  await sendTextTo(site, text, null);
-}
+// Nothing is auto-sent to the panes anymore — not at startup, not on Start. The
+// [TO: X]/[FROM: X] routing-explainer that used to be pushed automatically stays
+// available in the Prompt Library (id 2) for the user to send with one click when
+// they actually want to teach the AIs to self-address; the app itself stays quiet
+// until the user acts. (Mesh/Auto relay is app-driven, so it works either way.)
 
 // Delivers a real file into a live pane's chat, using the Chrome DevTools
 // Protocol (Puppeteer/Playwright use the same technique under the hood for
@@ -1360,67 +1535,18 @@ async function startRotation() {
 // what it sends. See pollSite()'s roundtable-specific interception for why
 // that tag has to be parsed and stripped BEFORE a turn is ever pushed to the
 // transcript/broadcast, not in a post-push handler like Rotation uses.
-const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO:\s*(GEMINI|CHATGPT|CLAUDE|ALL|USER|NONE)\s*\]\s*/i;
-function parseRoundtableTag(text) {
-  const m = ROUNDTABLE_TAG_RE.exec(text);
-  if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user
-  return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
-}
-
-// End-tag protocol: every baseline reply must close with [FROM: <who>]. Its
-// PRESENCE is the completion signal (see pollSite()) — the moment it appears the
-// AI has finished, so there's no waiting on a stability timer. The sender NAME is
-// matched LOOSELY (we already know which pane it is, so any short label counts —
-// "CHATGPT", "Claude 3.5", "gpt", even "Assistant"), and a short trailing tail
-// after the tag (a sign-off "thanks!", a period) is tolerated — otherwise very
-// common real outputs would be silently dropped. We take the LAST such tag whose
-// tail is short, so a [FROM:] quoted MID-reply (with paragraphs after it) does
-// not prematurely complete the message. parseEndTag() strips it from the body so
-// the envelope marker never reaches the transcript, a routed message, or a PDF.
-const END_TAG_RE = /\[\s*FROM:\s*([^\]\r\n]{1,40}?)\s*\]/gi;
-const END_TAG_MAX_TAIL = 40; // chars allowed after the closing tag (a brief sign-off / punctuation), before it's judged "still has content"
-function findEndTag(text) {
-  const s = String(text || "");
-  let last = null, m;
-  END_TAG_RE.lastIndex = 0;
-  while ((m = END_TAG_RE.exec(s))) last = m;
-  if (!last) return null;
-  const tail = s.slice(last.index + last[0].length);
-  if (tail.length > END_TAG_MAX_TAIL || /\n\s*\n/.test(tail)) return null; // real content after the tag → not the close
-  return { index: last.index, from: (last[1] || "").trim().toUpperCase() };
-}
-function hasEndTag(text) { return !!findEndTag(text); }
-function parseEndTag(text) {
-  const s = String(text || "");
-  const f = findEndTag(s);
-  if (!f) return { from: null, body: s };
-  return { from: f.from, body: s.slice(0, f.index).replace(/\s+$/, "") };
-}
-
-// "NONE" is a complete "nothing to add" signal that stands on its own — it needs
-// no [FROM:] closing tag (NONE is itself the tag). Recognize it whether written
-// bare ("NONE"), bracketed ("[NONE]"), formatted ("**NONE**", "NONE?"), or as the
-// routing tag ("[TO: NONE]"), with or without a stray [FROM:]. Only a reply whose
-// ENTIRE content is NONE counts — "None of this works" is a real message.
-function isNoneSkip(text) {
-  const s = String(text || "");
-  if (parseRoundtableTag(s).tag === "NONE") return true;
-  const body = parseEndTag(parseRoundtableTag(s).body).body;
-  return body.replace(/[^a-z]/gi, "").toUpperCase() === "NONE";
-}
-
-// Strip the [TO:]/[FROM:] envelope from a stored raw reply — for the few places
-// that forward or display state.captured[site] (which keeps RAW text for dedup).
-function stripEnvelope(text) {
-  return parseEndTag(parseRoundtableTag(String(text || "")).body).body;
-}
+// The [TO:]/[FROM:] envelope parser lives in its own pure module so it can be
+// unit-tested directly (main.js only runs under the Electron harness). It also
+// carries the E04 quoted/fenced-example guard and recognizes [TO: BUTLER] (E05).
+const {
+  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope,
+} = require("./envelope");
 
 // Append a concise envelope instruction to an outbound prompt so the receiving
 // pane wraps its reply per the protocol. Required on the baseline path (Compose,
 // Prompt Sequence, Manager): a reply with no [FROM:] closing tag isn't captured,
 // so an untaught prompt would strand the reply. `target` names the pane so its
-// own [FROM:] tag is spelled out. The book workflow teaches its own envelope
-// (book-prompts.js) and is intentionally left untouched.
+// own [FROM:] tag is spelled out.
 function withEnvelope(text, target) {
   const tag = String(target || "").toUpperCase() || "YOU";
   return String(text == null ? "" : text) +
@@ -1438,7 +1564,7 @@ function composeEnvelopeReminder(site) {
   return (
     "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
     "Every message MUST use the communication envelope:\n" +
-    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
+    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: TERMINAL] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
     "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
     "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
     "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
@@ -1568,6 +1694,7 @@ function sequenceWatchdog() {
 
 async function startSequence(steps) {
   state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0 };
+  state.relayEnabled = true; // a sequence run re-enables forwarding after any prior Stop
   await sendSequenceStep();
 }
 
@@ -1685,7 +1812,16 @@ async function escalateManagerTier(reason, toTier) {
 }
 
 function assembleTaskState() {
-  return { ...state.manager };
+  // Fold in the live awareness picture and the currently-registered tools so the
+  // prompt builder can surface them -- these are derived, not stored on the task.
+  let availableTools = [];
+  try { availableTools = toolProvider.list(); } catch { availableTools = []; }
+  // The self-install targets the butler may choose from, each tagged with the
+  // last-known install state (a cheap cached map; refreshed at task start and
+  // after each SETUP, never a per-turn pip probe).
+  let setupTargets = [];
+  try { setupTargets = setupManager.list().map((s) => ({ ...s, installed: state.setupStatus[s.id] == null ? null : state.setupStatus[s.id] })); } catch { setupTargets = []; }
+  return { ...state.manager, awareness: managerAwareness(), availableTools, setupTargets };
 }
 
 async function runTierFourAdjudication() {
@@ -1701,7 +1837,7 @@ async function runTierFourAdjudication() {
   broadcastManagerState();
 }
 
-const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving"]);
+const MANAGER_ACTIVE_STATUSES = new Set(["classifying", "planning", "delegating", "reviewing", "comparing", "validating", "assembling", "saving", "running-code", "using-tool", "generating-image", "installing"]);
 
 // Watchdog (ticked from the poll loop): a delegated pane that never produces a
 // captured (properly-enveloped) reply would otherwise leave the manager stuck in
@@ -1744,6 +1880,22 @@ async function runManagerTurn() {
 
   if (!res.ok) {
     logManagerEvent({ category: "error", severity: "error", summary: `Manager call failed: ${res.error}`, details: { error: res.error, detail: res.detail || null } });
+    // A model that keeps replying without a valid command (INVALID_JSON /
+    // UNKNOWN_ACTION) can't drive the butler — no amount of retrying or
+    // escalating fixes a model that can't emit the format. After a couple of
+    // tries, stop and tell the user plainly to switch to a JSON-capable model,
+    // instead of silently spinning up the tiers and timing out on a pane.
+    if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") {
+      m.formatFailStreak = (m.formatFailStreak || 0) + 1;
+      if (m.formatFailStreak >= 2) {
+        const hint = `Your butler's local model (${state.managerConfig.model || "unset"}) keeps replying without a valid command, so I can't act on this. It's almost certainly too small — a 1B–3B model (tinydolphin, llama3.2:1b, phi) can't reliably issue the commands I need. Use a 7B–8B model in ⚙️ Local model settings: qwen2.5:7b or llama3.1:8b, or for an UNCENSORED one that still follows commands, dolphin3 or hermes3 (not llama2-uncensored — too weak). The butler only issues commands; the three chat AIs still do the heavy lifting.`;
+        logManagerEvent({ category: "response", severity: "warning", summary: hint, details: { model: state.managerConfig.model || null } });
+        broadcast("manager-ack", { taskId: m.taskId, text: hint, ts: Date.now() });
+        speakAs("butler", hint);
+        await finishManagedTask({ ok: false, reason: "MODEL_INCOMPATIBLE" });
+        return;
+      }
+    }
     m.noProgressStreak++;
     if (detectNoProgress()) await escalateManagerTier(`provider error: ${res.error}`);
     else await runManagerTurn();
@@ -1761,13 +1913,32 @@ async function runManagerTurn() {
   }
 
   const decision = validated.decision;
+  m.formatFailStreak = 0; // a valid command came back — the model can drive the butler after all
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 
-  if (state.managerConfig.approvalMode && decision.action !== "REQUEST_APPROVAL") {
+  // Stall-break bookkeeping: a pure "thinking" decision bumps the streak; any
+  // decision with a real effect (delegating, running code, a tool, memory,
+  // setup, image, save, finish, escalate) resets it. When the streak crosses
+  // the limit the butler is looping without progress -- stop and ask the user
+  // instead of grinding on to MAX_TURNS_EXCEEDED. A satisfied VALIDATE / a
+  // FINISH ends the task in executeManagerAction() anyway, so the reset here is
+  // just belt-and-braces for the paths that keep the task alive.
+  if (MANAGER_THINKING_ACTIONS.has(decision.action)) {
+    m.thinkingStreak++;
+    if (detectManagerStall()) { await breakManagerStall(decision); return; }
+  } else {
+    m.thinkingStreak = 0;
+  }
+
+  // Approval gate: the whole-task approval mode, OR a per-tool "ask" risk tier —
+  // a risk:"ask" tool (e.g. http-fetch) is held for the operator even when global
+  // approval mode is off, so an LLM-chosen side effect never fires unattended.
+  const askTool = decision.action === "USE_TOOL" && (() => { const t = toolProvider.get(decision.tool); return !!(t && t.risk === "ask"); })();
+  if ((state.managerConfig.approvalMode || askTool) && decision.action !== "REQUEST_APPROVAL") {
     m.pendingApproval = decision;
     m.status = "paused";
-    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}`, action: decision.action, details: decision });
+    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}${askTool ? ` (${decision.tool})` : ""}`, action: decision.action, details: decision });
     broadcastManagerState();
     return;
   }
@@ -1775,6 +1946,24 @@ async function runManagerTurn() {
 }
 
 const MANAGER_DELEGATING_ACTIONS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+
+// Stall-break: "thinking" actions are the ones that loop straight back into
+// runManagerTurn() without any external effect -- no pane delegated to, no code
+// run, no file written, no memory touched. A healthy task passes through a few
+// of these (CLASSIFY -> PLAN -> ...) and then does something real, which resets
+// the streak. But when the butler is missing information it can't get on its
+// own (the real bug: ~20 turns of PLAN/WAIT/CLASSIFY all saying "user hasn't
+// provided the case details yet"), it spins on these until MAX_TURNS_EXCEEDED.
+// detectManagerStall() catches that run and breakManagerStall() turns it into a
+// question for the user instead of a silent death. VALIDATE is included because
+// an unsatisfied VALIDATE also just loops; a satisfied one finishes the task
+// before the streak is ever checked, so it never counts against this.
+const MANAGER_THINKING_ACTIONS = new Set(["CLASSIFY", "PLAN", "WAIT", "EXTRACT", "ASSEMBLE", "REVISE", "VALIDATE"]);
+const MANAGER_STALL_LIMIT = Number(process.env.AUTOINJECTOR_MANAGER_STALL_LIMIT) || 5;
+
+function detectManagerStall() {
+  return state.manager.thinkingStreak >= MANAGER_STALL_LIMIT;
+}
 
 async function executeManagerAction(decision) {
   const m = state.manager;
@@ -1838,6 +2027,166 @@ async function executeManagerAction(decision) {
     case "PAUSE":
       m.status = "paused";
       break;
+    case "RUN_CODE": {
+      // The supervisor's non-AI arm: run a coding/computer task through Open
+      // Interpreter (a sandboxed local agent), then fold the result back into
+      // the task so the next turn can use it. This is what makes the native
+      // orchestrator a full "Jarvis" — it can act on the machine, not only
+      // delegate to the three web AIs.
+      m.status = "running-code";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await interpreterProvider.run(decision.task, {
+          onEvent: (ev) => logManagerEvent({ category: "code", summary: `code:${ev.type}${ev.format ? "(" + ev.format + ")" : ""}`, details: ev }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      const entry = { id: m.codeRuns.length + 1, task: decision.task, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.codeRuns.push(entry);
+      if (m.codeRuns.length > 30) m.codeRuns.shift();
+      logManagerEvent({
+        category: "code",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Code run complete (${entry.message.length} chars)` : `Code run unavailable/failed: ${entry.error}`,
+        details: entry,
+      });
+      recordCapabilityOutcome("interpreter", "RUN_CODE", entry.ok);
+      m.status = "assembling"; // an active status so the loop continues on the next turn
+      await runManagerTurn();
+      break;
+    }
+    case "USE_TOOL": {
+      // N5: invoke a registered external tool (built-in now; a real MCP server's
+      // tools plug into the same registry later). Result folds back like RUN_CODE.
+      m.status = "using-tool";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await toolProvider.run(decision.tool, decision.args || {}, {
+          onEvent: (ev) => logManagerEvent({ category: "tool", summary: `tool:${ev.type}`, details: ev }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      const entry = { id: m.toolCalls.length + 1, tool: decision.tool, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.toolCalls.push(entry);
+      if (m.toolCalls.length > 30) m.toolCalls.shift();
+      recordCapabilityOutcome(decision.tool, "USE_TOOL", entry.ok);
+      logManagerEvent({
+        category: "tool",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Tool ${entry.tool} ran (${entry.message.length} chars)` : `Tool ${entry.tool} failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "REMEMBER": {
+      // N3: persist a durable fact into the shared memory store.
+      const fact = String(decision.fact != null ? decision.fact : decision.value).trim();
+      const res = dbService.memoryCreate("fact", { statement: fact, source: `manager:${m.taskId}` });
+      logManagerEvent({
+        category: "memory",
+        severity: res && res.ok ? "info" : "warn",
+        summary: res && res.ok ? `Remembered: ${fact.slice(0, 80)}` : `Memory unavailable (${(res && res.error) || "off"})`,
+        details: { fact, result: res },
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "RECALL": {
+      // N3: search the shared memory store; results feed back into the prompt.
+      const q = String(decision.query).trim();
+      const res = dbService.memorySearch(q);
+      const found = (res && res.results) || [];
+      for (const row of found) {
+        m.memories.push({ id: `${row.type}:${row.id}`, type: row.type, title: row.title || "", ts: Date.now() });
+      }
+      if (m.memories.length > 40) m.memories = m.memories.slice(-40);
+      logManagerEvent({
+        category: "memory",
+        summary: (res && res.available) ? `Recalled ${found.length} for "${q.slice(0, 60)}"` : `Memory unavailable for recall`,
+        details: { query: q, count: found.length },
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "GENERATE_IMAGE": {
+      // Render an image via the local Stable Diffusion endpoint, save the PNG to
+      // the output folder, and record it as a project image so it's tracked like
+      // any other artifact. The saved path folds back as an images entry.
+      m.status = "generating-image";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await imageProvider.generate(decision.prompt, {
+          negativePrompt: decision.negativePrompt || decision.negative_prompt || "",
+          onEvent: (ev) => logManagerEvent({ category: "image", summary: `image:${ev.type}`, details: { type: ev.type } }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      let savedPath = null, sha = "", savedPaths = [];
+      // E09: persist EVERY image the batch returned, not just the first.
+      const batch = (r && r.ok) ? (Array.isArray(r.images) && r.images.length ? r.images : (r.imageBase64 ? [r.imageBase64] : [])) : [];
+      if (batch.length) {
+        try {
+          for (let i = 0; i < batch.length; i++) {
+            const buf = Buffer.from(batch[i], "base64");
+            const digest = require("crypto").createHash("sha256").update(buf).digest("hex");
+            const fname = `img-${Date.now()}${batch.length > 1 ? `-${i + 1}` : ""}.png`;
+            const p = outputManager.saveBuffer(outputManager.imagesDir(), fname, buf);
+            savedPaths.push(p);
+            if (i === 0) { savedPath = p; sha = digest; }
+            try { dbService.recordImage({ path: p, prompt: decision.prompt, model: imageProvider.status().model, from: `manager:${m.taskId}`, sha256: digest }); } catch (_) {}
+          }
+        } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; }
+      }
+      // E09: surface the backend's real reason (e.g. the xFormers error) not a bare code.
+      const failReason = r && r.error ? (r.detail ? `${r.error}: ${r.detail}` : r.error) : (savedPath ? null : "no image");
+      const entry = { id: m.images.length + 1, prompt: decision.prompt, path: savedPath, paths: savedPaths, count: savedPaths.length, ok: !!(r && r.ok && savedPath), error: failReason, ts: Date.now() };
+      m.images.push(entry);
+      if (m.images.length > 30) m.images.shift();
+      recordCapabilityOutcome("stable-diffusion", "GENERATE_IMAGE", entry.ok);
+      logManagerEvent({
+        category: "image",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
+    case "SETUP": {
+      // The butler installs its own dependency (fixed allowlist). On success the
+      // capability is wired up right away so it can use it on the next turn —
+      // Open Interpreter is the keystone: installing it starts the code shim,
+      // which is what lets the butler drive the rest of its own downloads.
+      m.status = "installing";
+      broadcastManagerState();
+      let r;
+      try {
+        r = await setupManager.install(decision.target, {
+          model: decision.model,
+          onProgress: (line) => logManagerEvent({ category: "setup", summary: `setup:${decision.target}`, details: { line: String(line).slice(0, 200) } }),
+        });
+      } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok) { try { await autoWireAfterSetup(decision.target); } catch (e) { logEvent("setup-autowire-error", { target: decision.target, error: String(e) }); } }
+      refreshSetupStatus();
+      const entry = { id: m.setups.length + 1, target: decision.target, ok: !!(r && r.ok), message: (r && r.message) || "", error: (r && r.error) || null, ts: Date.now() };
+      m.setups.push(entry);
+      if (m.setups.length > 20) m.setups.shift();
+      recordCapabilityOutcome("setup", decision.target, entry.ok);
+      logManagerEvent({
+        category: "setup",
+        severity: entry.ok ? "info" : "error",
+        summary: entry.ok ? `Installed ${entry.target}: ${entry.message}` : `Setup of ${entry.target} failed: ${entry.error}`,
+        details: entry,
+      });
+      m.status = "assembling";
+      await runManagerTurn();
+      break;
+    }
     case "FINISH":
       await finishManagedTask({ ok: true });
       break;
@@ -1864,11 +2213,13 @@ async function handleManagerCapture(turn) {
   if (m.pendingModels.length === 0) m.waitingSince = null; // all replies in — stop the wait watchdog
   await saveRawResponse(responseEntry);
   if (state.manager.taskId !== myTaskId || ["finished", "error"].includes(state.manager.status)) return; // this task was stopped/replaced while the save was in flight
+  recordCapabilityOutcome(turn.site, "DELEGATE", true); // this pane answered — it can take delegations
   logManagerEvent({ category: "response", target: [turn.site], summary: `${SITES[turn.site].label} responded (${turn.text.length} chars)` });
 
   if (m.pendingModels.length === 0) {
     m.status = "reviewing";
     m.noProgressStreak = 0;
+    m.thinkingStreak = 0; // a pane answered -- real progress, so the stall counter starts fresh
     if (m.currentTier > (state.managerConfig.tier || 2)) {
       m.currentTier -= 1; // de-escalate back toward the configured baseline now that things are progressing again
       logManagerEvent({ category: "escalation", summary: `De-escalating to tier ${m.currentTier} now that a response landed` });
@@ -1879,24 +2230,512 @@ async function handleManagerCapture(turn) {
   }
 }
 
-async function startManagedTask(userRequest) {
+// The "call-sign": how the butler knows a task is for HIM to do on this computer
+// rather than something to hand to the chat AIs. Two signals:
+//   • a typed marker — a leading "!" or "@me"/"/me", or the message clearly
+//     addresses him ("you ", "yourself", "do it yourself");
+//   • computer-task keywords — install, run, download, set up, open, delete, a
+//     file/folder/terminal/command, "my computer/pc/machine", pip/npm, etc.
+// Returns { self, text } with any leading marker stripped from the text.
+const SELF_TASK_KEYWORDS = /\b(install|uninstall|reinstall|set ?up|download|update|upgrade|run (a |the |this )?(code|command|script|program)|execute|launch|open (the |a |my )?(file|folder|app|program|terminal)|delete|remove|rename|move|copy|create (a |the )?(file|folder)|make (a |the )?(file|folder)|terminal|command ?line|shell|bash|powershell|\bpip\b|\bnpm\b|\bgit\b|python|node|on my (computer|pc|machine|laptop|desktop|system)|my (computer|pc|machine|files|folder|desktop)|generate (an? )?(image|video|picture)|render)/i;
+function detectSelfTask(raw) {
+  let text = String(raw || "").trim();
+  let self = false;
+  const marker = text.match(/^\s*(!+|@me\b|\/me\b)\s*/i);
+  if (marker) { self = true; text = text.slice(marker[0].length).trim(); }
+  if (/\b(yourself|do it yourself|you handle|you do)\b/i.test(text)) self = true;
+  if (SELF_TASK_KEYWORDS.test(text)) self = true;
+  return { self, text };
+}
+
+async function startManagedTask(userRequest, opts = {}) {
   const m0 = state.manager;
   if (m0 && !["idle", "finished", "error"].includes(m0.status)) return { ok: false, error: "ALREADY_RUNNING" };
   if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
   if (!userRequest || !String(userRequest).trim()) return { ok: false, error: "NEEDS_REQUEST" };
 
+  // Resolve WHO does it. An explicit toggle (self/delegate) wins; otherwise
+  // "auto" lets the call-sign (marker/keywords) promote it to a self-task.
+  let request = String(userRequest).trim();
+  let mode = (opts.mode === "self" || opts.mode === "delegate") ? opts.mode : "auto";
+  const sniff = detectSelfTask(request);
+  request = sniff.text || request; // strip a leading "!"/"@me" marker from the actual task text
+  if (mode === "auto" && sniff.self) mode = "self";
+
   resetManagerTask();
+  state.relayEnabled = true; // a butler task is a user-initiated action; re-enable forwarding after any prior Stop
   const m = state.manager;
   m.taskId = `task-${Date.now()}`;
-  m.userRequest = String(userRequest).trim();
+  m.userRequest = request;
+  m.handlingMode = mode;
   m.status = "classifying";
   m.startedTs = Date.now();
   m.projectDir = await createProjectDir(m.taskId, m.userRequest);
 
-  logManagerEvent({ category: "task", summary: `Managed task started: "${m.userRequest.slice(0, 120)}"` });
+  logManagerEvent({ category: "task", summary: `Managed task started (${mode === "self" ? "🤵 handling it himself" : mode === "delegate" ? "📤 delegating to the AIs" : "auto"}): "${m.userRequest.slice(0, 120)}"`, details: { handlingMode: mode } });
+  // N3 auto-context: seed relevant prior facts so the butler starts already
+  // knowing what it may have learned before, without an explicit RECALL turn.
+  seedRelevantMemories(m);
   broadcastManagerState();
+  // Ack-Brain: the butler acknowledges INSTANTLY (before the deep brain's first
+  // turn), the way PersonalJarvis does — a sub-second "on it" so the user isn't
+  // left waiting on the model. Emitted synchronously here, ahead of runManagerTurn.
+  emitManagerAck(m.taskId, m.userRequest);
   runManagerTurn(); // fire-and-forget -- progresses asynchronously via capture events, same pattern as startSequence()
   return { ok: true, taskId: m.taskId };
+}
+
+// The instant acknowledgment. Templated from the goal (no model call, so it's
+// truly sub-second and always available); shown in the UI and streamed on the
+// bridge as a "jarvis-ack" event.
+function emitManagerAck(taskId, goal) {
+  const g = String(goal || "").replace(/\s+/g, " ").trim();
+  const short = g.slice(0, 80);
+  const text = short ? `On it — working on: "${short}${g.length > 80 ? "…" : ""}"` : "On it.";
+  logManagerEvent({ category: "ack", summary: text });
+  broadcast("manager-ack", { taskId, text, ts: Date.now() });
+  speakIfEnabled(text); // N2: say it out loud too, when voice is on
+}
+
+// N2: speak text via the voice provider when voice is enabled + set to speak.
+// Fire-and-forget — never awaited, never throws into the caller.
+function speakIfEnabled(text) { speakAs("butler", text, { onlyIfSpeakOnAck: true }); }
+
+// Speak as a specific voice (butler/chatgpt/claude/gemini) and light the
+// who's-speaking indicator in the UI while it talks — so voices alternate and
+// each speaker is shown in its own colour. Fire-and-forget; never throws.
+function speakAs(who, text, opts = {}) {
+  try {
+    const s = voiceProvider.status();
+    if (!s || !s.enabled) return;
+    if (opts.onlyIfSpeakOnAck && !s.speakOnAck) return;
+    broadcast("voice-speaking", { who, speaking: true, text: String(text || "").slice(0, 120) });
+    voiceProvider.speak(text, { who })
+      .catch(() => {})
+      .finally(() => broadcast("voice-speaking", { who, speaking: false }));
+  } catch { /* voice off — silent */ }
+}
+
+// Converse mode: a plain back-and-forth with the butler. No task, no actions —
+// just a spoken/prose reply from the local model. Keeps a short rolling history
+// for context, shows the exchange in his window, and speaks the reply aloud
+// (always, not only when speak-on-ack is on — the user is talking TO him).
+async function butlerChat(message) {
+  const text = String(message || "").trim();
+  if (!text) return { ok: false, error: "NEEDS_MESSAGE" };
+  if (!state.managerConfig.endpoint || !state.managerConfig.model) return { ok: false, error: "NOT_CONFIGURED" };
+  if (!Array.isArray(state.butlerChatHistory)) state.butlerChatHistory = [];
+  let r;
+  try { r = await managerProvider.chatWithButler(text, state.managerConfig, { history: state.butlerChatHistory }); }
+  catch (e) { r = { ok: false, error: String(e) }; }
+  if (!r || !r.ok) {
+    const reason = (r && r.error) || "error";
+    logManagerEvent({ category: "error", severity: "warning", summary: `Butler couldn't reply: ${reason}` });
+    return { ok: false, error: reason };
+  }
+  const reply = r.text || "(no reply)";
+  state.butlerChatHistory.push({ role: "user", content: text }, { role: "assistant", content: reply });
+  if (state.butlerChatHistory.length > 16) state.butlerChatHistory = state.butlerChatHistory.slice(-16);
+  logManagerEvent({ category: "response", summary: reply });   // butler → you, shown in his window
+  broadcast("manager-ack", { taskId: null, text: reply, ts: Date.now() });
+  speakAs("butler", reply);                                    // say it out loud (talking to the user)
+  return { ok: true, text: reply };
+}
+
+// E05: a web AI addressed the local butler with [TO: BUTLER]. Deliver it to the
+// butler's CONVERSE path (it replies and speaks) — never straight to autonomous
+// task execution — and stamp the provenance so it's clear which pane asked. If
+// the butler isn't configured, surface that rather than silently dropping it.
+async function deliverToButler(turn) {
+  const who = (SITES[turn.site] && SITES[turn.site].label) || turn.site;
+  logEvent("to-butler", { from: turn.site, chars: String(turn.text || "").length });
+  try {
+    const r = await butlerChat(`[Message from ${who}]: ${turn.text}`);
+    if (!r || !r.ok) logManagerEvent({ category: "error", severity: "warning", summary: `A [TO: BUTLER] message from ${who} couldn't be handled: ${(r && r.error) || "error"}` });
+  } catch (e) {
+    logEvent("to-butler-error", { from: turn.site, error: String(e) });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command Prompt connection (terminal-provider.js)
+// ---------------------------------------------------------------------------
+// One persistent local shell shared by the user (the ⌨ Terminal zone of the User
+// Panel) and the three web AIs ([TO: TERMINAL]). Flow for an AI request:
+//   pollSite() sees [TO: TERMINAL] -> deliverToTerminal(turn)
+//     -> extractCommands() pulls the command(s) out of the message
+//     -> classifyAll(): "blocked" is refused outright and the AI is told why;
+//        otherwise it's held as a PENDING request for the user's Run/Reject,
+//        unless auto-run is on AND every command is "normal" risk
+//     -> executeTerminalRequest() runs them in order (stops at the first
+//        failure) and sends the captured output back to that AI as a
+//        [FROM: TERMINAL] message.
+// The user's own typed commands are never gated — they're the operator.
+const TERMINAL_REPLY_MAX_CHARS = Number(process.env.AUTOINJECTOR_TERMINAL_REPLY_MAX) || 12000; // web chat inputs choke on huge pastes
+const TERMINAL_MAX_PENDING = 20;
+const terminalState = {
+  autoRunAI: false,          // off by default every launch: AI commands always ask first
+  pending: [],               // [{ id, from, label, commands, risk, reason, ts }]
+  nextRequestId: 1,
+  lastUserResult: null,      // the user's most recent command result, for "Send output to"
+};
+let terminal = null;
+function getTerminal() {
+  if (terminal) return terminal;
+  terminal = terminalProvider.createTerminal({
+    cwd: app.getPath("home"),
+    onData: (chunk, stream) => broadcast("terminal-data", { chunk, stream }),
+    onState: () => broadcastTerminalState(),
+    onLog: (kind, detail) => logEvent(kind, detail),
+  });
+  return terminal;
+}
+function terminalSnapshot() {
+  const t = terminal ? terminal.status() : { alive: false, running: null, queued: [] };
+  return {
+    ...t,
+    autoRunAI: terminalState.autoRunAI,
+    pending: terminalState.pending.map((p) => ({ ...p })),
+    hasLastUserResult: !!terminalState.lastUserResult,
+  };
+}
+function broadcastTerminalState() {
+  try { broadcast("terminal-state", terminalSnapshot()); } catch (_) {}
+}
+
+function siteLabel(site) { return (SITES[site] && SITES[site].label) || site; }
+
+// Tell an AI something from the terminal (a result, a refusal, a rejection).
+// Uses the normal send path (queue, retry, ledger) with no "[X says]" frame —
+// the [FROM: TERMINAL] header IS the frame. Reminds it how to reply.
+async function replyFromTerminal(site, body) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const tag = String(site).toUpperCase();
+  const text = `[FROM: TERMINAL]\n${body}\n\n` +
+    `(To run more commands in your locker, start your reply with [TO: TERMINAL] and put them in a \`\`\` code block — \`help\` lists them. ` +
+    `Any other tag works as usual. End with [FROM: ${tag}].)`;
+  if (ftState.running) { ftState.termReplies.push({ site, text, ts: Date.now() }); if (ftState.termReplies.length > 500) ftState.termReplies.shift(); }
+  try {
+    const r = await sendTextTo(site, text, null);
+    if (!r || !r.ok) logEvent("terminal-reply-error", { to: site, error: (r && r.error) || "unknown" });
+    return r;
+  } catch (e) {
+    logEvent("terminal-reply-error", { to: site, error: String(e) });
+    return { ok: false, error: String(e) };
+  }
+}
+
+// ---- AI lockers: every AI's [TO: TERMINAL] runs ONLY inside its own folder ----
+// (ai-lockers.js does the folder gate; this wires it to the chat panes.)
+let lockers = null;
+function getLockers() {
+  if (lockers) return lockers;
+  let base = "";
+  try { base = outputManager.root(); } catch (_) {}
+  if (!base) base = path.join(contentBaseFolder(), "stuff and thing");
+  lockers = aiLockers.createLockers({
+    root: path.join(base, "ai-lockers"),
+    sites: SITE_IDS,
+    onData: (chunk, stream) => broadcast("terminal-data", { chunk, stream }),
+    onState: () => broadcastTerminalState(),
+    onLog: (kind, detail) => logEvent(kind, detail),
+  });
+  const r = lockers.ensure();
+  logEvent(r.ok ? "locker-ready" : "locker-init-error", r.ok ? { root: r.root } : { error: r.error });
+  return lockers;
+}
+
+// What the approval strip / log shows for one op.
+function describeOp(op) {
+  if (op.type === "write" || op.type === "append") {
+    const lines = String(op.content || "").split("\n").length;
+    return `${op.type} ${op.file}   (${lines} line${lines === 1 ? "" : "s"})`;
+  }
+  return op.command;
+}
+
+// The chat side-effects lockers need: tell a recipient it got a file, and
+// upload a file into an AI's chat.
+const lockerCtx = {
+  sendFile: async (from, to, abs, relPath) => {
+    if (!state.relayEnabled) return { ok: false, error: "AIs are silenced (Stop AIs Talking)" };
+    let size = 0; try { size = fs.statSync(abs).size; } catch (_) {}
+    const preview = getLockers().previewFor(abs);
+    const body = `${siteLabel(from)} sent you a file. It's saved in your locker at: ${relPath} (${size} bytes).` +
+      (preview != null && preview.length <= 6000 ? `\n\n----- ${relPath} -----\n${preview}\n----- end of file -----` : `\nRead it with: type "${relPath}"   (or: give "${relPath}")`);
+    return replyFromTerminal(to, body);
+  },
+  giveFile: async (site, abs) => attachFileToSite(site, abs),
+  notifyShare: async (from, to) => {
+    if (!state.relayEnabled) return { ok: false, error: "AIs are silenced (Stop AIs Talking)" };
+    return replyFromTerminal(to, `${siteLabel(from)} has opened its locker to you — LOOK only (read and copy out, never change), for your NEXT [TO: TERMINAL] message only (expires in 10 minutes).\n` +
+      `Its files are at ..\\${from}\\ — for example:\n  dir ..\\${from}\n  type ..\\${from}\\<file>\n  copy ..\\${from}\\<file> <your-name>\n  give ..\\${from}\\<picture-or-pdf>`);
+  },
+};
+
+function deliverToTerminal(turn) {
+  const from = turn.site;
+  const label = siteLabel(from);
+  const ops = aiLockers.parseRequest(turn.text);
+  logEvent("terminal-request", { from, ops: ops.length });
+  if (!ops.length) {
+    replyFromTerminal(from, "I didn't find a command in your message. Put the command(s) inside a ``` code block, one per line. Send `help` for the list.");
+    return;
+  }
+  const L = getLockers();
+  const checks = ops.map((op) => L.checkOp(from, op));
+  const needsApproval = checks.some((c) => c.ok && c.needsApproval);
+  if (terminalState.pending.length >= TERMINAL_MAX_PENDING) {
+    logEvent("terminal-request-dropped", { from, reason: "too-many-pending" });
+    replyFromTerminal(from, "Not run — there are already too many requests waiting for the user's approval.");
+    return;
+  }
+  const req = {
+    id: terminalState.nextRequestId++, from, label, ops,
+    commands: ops.map(describeOp),
+    risk: needsApproval ? "dangerous" : "normal",
+    reason: needsApproval ? "runs a script — scripts can reach outside the locker" : "",
+    ts: Date.now(),
+  };
+  // Inside its own locker an AI needs no permission. Only scripts ask
+  // (unless the user ticked "Auto-run AI scripts").
+  if (!needsApproval || terminalState.autoRunAI) {
+    executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
+    return;
+  }
+  terminalState.pending.push(req);
+  logEvent("terminal-request-pending", { id: req.id, from, risk: req.risk });
+  broadcastTerminalState();
+}
+
+// Run a request's ops in the AI's locker, in order, stopping at the first
+// failure, then send the combined result back to that AI.
+async function executeTerminalRequest(req) {
+  const L = getLockers();
+  const results = [];
+  for (const op of req.ops) {
+    const r = await L.runOp(req.from, op, lockerCtx);
+    results.push(r);
+    if (!r.ok) break;
+  }
+  const notRun = req.ops.slice(results.length).map(describeOp);
+  const perCmd = Math.max(500, Math.floor(TERMINAL_REPLY_MAX_CHARS / Math.max(1, results.length)));
+  const parts = [`Results from your locker (${req.ops.length} command${req.ops.length === 1 ? "" : "s"}):`];
+  for (const r of results) {
+    let status;
+    if (r.error === "NOT_ALLOWED") status = "refused — not allowed in your locker";
+    else if (r.error === "TIMEOUT") status = "still running — timed out waiting, output so far";
+    else if (r.error && r.error !== "NONZERO_EXIT") status = `failed: ${r.error}`;
+    else status = `exit ${r.exitCode == null ? "?" : r.exitCode}`;
+    const out = terminalProvider.capOutput(r.output || "", perCmd);
+    parts.push(`> ${r.command}\n(${status}${r.durationMs != null ? `, ${r.durationMs} ms` : ""})\n${out || "(no output)"}`);
+  }
+  if (notRun.length) parts.push(`[Stopped at the first failing command. Not run: ${notRun.join(" ; ")}]`);
+  logEvent("terminal-request-done", { id: req.id, from: req.from, ran: results.length, notRun: notRun.length, ok: results.every((r) => r.ok) });
+  // A share someone gave this AI was good for ONE request — this one.
+  try { L.consumeGrants(req.from); } catch (_) {}
+  broadcast("locker-changed", { site: "all" });
+  await replyFromTerminal(req.from, parts.join("\n\n"));
+  return { ok: true, results };
+}
+
+ipcMain.handle("lockers:open", async () => {
+  try {
+    const L = getLockers();
+    const err = await shell.openPath(L.root());
+    return err ? { ok: false, error: err } : { ok: true, path: L.root() };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:list", (_evt, { site } = {}) => {
+  try { return getLockers().listFiles(site); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:read", (_evt, { site, rel } = {}) => {
+  try {
+    const f = getLockers().userFile(site, rel);
+    return f.ok ? { ok: true, kind: f.kind, size: f.size, text: f.text } : f;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// Upload a locker file into one or more AI chats (pictures, PDFs, anything).
+ipcMain.handle("lockers:attach", async (_evt, { site, rel, targets } = {}) => {
+  try {
+    const f = getLockers().userFile(site, rel);
+    if (!f.ok) return f;
+    const list = (Array.isArray(targets) ? targets : [targets]).filter((t) => SITES[t]);
+    if (!list.length) return { ok: false, error: "NO_TARGET" };
+    const results = {};
+    for (const t of list) results[t] = await attachFileToSite(t, f.abs);
+    logEvent("locker-user-attach", { site, file: rel, targets: list, ok: list.every((t) => results[t] && results[t].ok) });
+    return { ok: list.every((t) => results[t] && results[t].ok), results };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+// ---- 🧪 Feature Test: every AI through every feature, judged by real evidence ----
+const ftState = { running: false, stop: false, rawCaptures: [], termReplies: [] };
+function ftRecordCapture(site, text) {
+  if (!ftState.running) return;
+  ftState.rawCaptures.push({ site, text: String(text || ""), ts: Date.now() });
+  if (ftState.rawCaptures.length > 500) ftState.rawCaptures.shift();
+}
+async function runFeatureTestNow() {
+  if (ftState.running) return { ok: false, error: "ALREADY_RUNNING" };
+  if (state.hr && state.hr.active) return { ok: false, error: "A House Rules format is running — stop it first." };
+  if (state.sequence && state.sequence.active) return { ok: false, error: "A Prompt Sequence is running — stop it first." };
+  const sites = SITE_IDS.filter((s) => state.enabled[s] && siteViews[s] && !siteViews[s].webContents.isDestroyed());
+  if (!sites.length) return { ok: false, error: "No AI is checked Active." };
+  // Quiet the relay for the test: no mesh forwarding (it would spray test
+  // prompts at the other AIs), but tag relay ON so the routing step can work.
+  const saved = { routing: {}, meshActive: state.meshActive, relayEnabled: state.relayEnabled };
+  for (const s of SITE_IDS) { saved.routing[s] = new Set(state.routing[s]); state.routing[s].clear(); }
+  state.meshActive = false;
+  state.relayEnabled = true;
+  Object.assign(ftState, { running: true, stop: false, rawCaptures: [], termReplies: [] });
+  logEvent("featuretest-start", { sites });
+  broadcast("featuretest-progress", { status: "start", sites, total: sites.length * featureTest.STEPS.length });
+  const L = getLockers();
+  let r;
+  try {
+    r = await featureTest.runFeatureTest({
+      sites,
+      label: siteLabel,
+      platform: process.platform,
+      send: (site, text) => sendTextTo(site, text, null),
+      captureSince: (site, ts) => ftState.rawCaptures.filter((c) => c.site === site && c.ts >= ts),
+      terminalRepliesSince: (site, ts) => ftState.termReplies.filter((c) => c.site === site && c.ts >= ts),
+      ledgerSince: (target, ts) => state.ledger.filter((e) => e.target === target && e.ts >= ts).map((e) => ({ text: e.textPreview, ok: e.status === "delivered", ts: e.ts })),
+      fileHas: (site, rel, needle) => { const f = L.userFile(site, rel); return !!(f.ok && f.text != null && f.text.includes(needle)); },
+      grantsFor: (site) => L.grantsFor(site),
+      isBusy: (site) => !!(state.waiting[site] || state.generating[site]),
+      shouldStop: () => ftState.stop,
+      stepTimeoutMs: Number(process.env.AUTOINJECTOR_FT_STEP_MS) || 120000,
+      settleMs: Number(process.env.AUTOINJECTOR_FT_SETTLE_MS) || 2500,
+      onProgress: (p) => { broadcast("featuretest-progress", p); if (p.status !== "running") logEvent("featuretest-step", { site: p.site, step: p.step, status: p.status, detail: p.detail || "" }); },
+    });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    for (const s of SITE_IDS) state.routing[s] = saved.routing[s];
+    state.meshActive = saved.meshActive;
+    state.relayEnabled = saved.relayEnabled;
+    ftState.running = false;
+  }
+  if (!r.ok) { logEvent("featuretest-error", { error: r.error }); broadcast("featuretest-progress", { status: "done", ok: false }); return r; }
+  // Save the full report (including how each AI's replies really ended).
+  let file = null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    file = path.join(outputManager.logsDir(), `feature-test-${stamp}.md`);
+    fs.writeFileSync(file, featureTest.formatReport(r, { label: siteLabel }));
+  } catch (e) { logEvent("featuretest-report-error", { error: String(e) }); file = null; }
+  logEvent("featuretest-done", { ok: r.okCount, failed: r.failCount, total: r.total, stopped: r.stopped, report: file });
+  broadcast("featuretest-progress", { status: "done", ok: true });
+  return {
+    ok: true, stopped: r.stopped, okCount: r.okCount, failCount: r.failCount, total: r.total, report: file,
+    // same shape the capability-test pop-up already shows (ok:true/false/null)
+    checks: r.results.map((x) => ({ name: x.name, ok: x.ok, detail: x.detail, tip: x.tip })),
+  };
+}
+ipcMain.handle("featuretest:run", async () => { try { return await runFeatureTestNow(); } catch (e) { ftState.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("featuretest:stop", () => { ftState.stop = true; logEvent("featuretest-stop-requested", {}); return { ok: true }; });
+ipcMain.handle("featuretest:open-report", async (_evt, { file } = {}) => {
+  try {
+    const f = String(file || "");
+    if (!f || path.dirname(f) !== outputManager.logsDir() || !/^feature-test-.*\.md$/.test(path.basename(f))) return { ok: false, error: "BAD_FILE" };
+    const err = await shell.openPath(f);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("lockers:status", () => { try { return { ok: true, ...getLockers().status() }; } catch (e) { return { ok: false, error: String(e) }; } });
+
+function takePending(id) {
+  const i = terminalState.pending.findIndex((p) => p.id === Number(id));
+  if (i < 0) return null;
+  const [req] = terminalState.pending.splice(i, 1);
+  broadcastTerminalState();
+  return req;
+}
+function cancelPendingTerminalRequests(reason) {
+  if (!terminalState.pending.length) return 0;
+  const n = terminalState.pending.length;
+  terminalState.pending = [];
+  logEvent("terminal-pending-cleared", { count: n, reason });
+  broadcastTerminalState();
+  return n;
+}
+
+ipcMain.handle("terminal:state", () => ({ ok: true, state: terminalSnapshot(), scrollback: terminal ? terminal.scrollback() : "" }));
+ipcMain.handle("terminal:start", () => {
+  try { const r = getTerminal().start(); broadcastTerminalState(); return r; }
+  catch (e) { logEvent("terminal-start-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("terminal:run", async (_evt, { command } = {}) => {
+  try {
+    const r = await getTerminal().run(command, { source: "user" });
+    if (r && r.command) terminalState.lastUserResult = r;
+    broadcastTerminalState();
+    return { ok: !!(r && r.ok), result: r };
+  } catch (e) {
+    logEvent("terminal-run-error", { error: String(e) });
+    return { ok: false, error: String(e) };
+  }
+});
+ipcMain.handle("terminal:input", (_evt, { text } = {}) => {
+  if (!terminal) return { ok: false, error: "NOT_RUNNING" };
+  return terminal.sendInput(text);
+});
+ipcMain.handle("terminal:stop", (_evt, { restart } = {}) => {
+  try { const r = getTerminal().stop({ restart: !!restart }); broadcastTerminalState(); return r; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("terminal:clear", () => (terminal ? terminal.clearScrollback() : { ok: true }));
+ipcMain.handle("terminal:settings", (_evt, patch = {}) => {
+  if (patch && "autoRunAI" in patch) {
+    terminalState.autoRunAI = !!patch.autoRunAI;
+    logEvent("terminal-autorun-changed", { autoRunAI: terminalState.autoRunAI });
+  }
+  broadcastTerminalState();
+  return { ok: true, state: terminalSnapshot() };
+});
+ipcMain.handle("terminal:approve", async (_evt, { id } = {}) => {
+  const req = takePending(id);
+  if (!req) return { ok: false, error: "NOT_FOUND" };
+  logEvent("terminal-request-approved", { id: req.id, from: req.from });
+  executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
+  return { ok: true };
+});
+ipcMain.handle("terminal:reject", async (_evt, { id, reason } = {}) => {
+  const req = takePending(id);
+  if (!req) return { ok: false, error: "NOT_FOUND" };
+  const why = String(reason || "").trim().slice(0, 300);
+  logEvent("terminal-request-rejected", { id: req.id, from: req.from });
+  broadcast("terminal-data", { chunk: `[rejected ${req.label}'s request: ${req.commands.join(" ; ")}]\n`, stream: "system" });
+  replyFromTerminal(req.from, `The user rejected your command${req.commands.length === 1 ? "" : "s"} — nothing was run: ${req.commands.join(" ; ")}${why ? `\nReason: ${why}` : ""}`);
+  return { ok: true };
+});
+// Send the user's own last command + output to one or more AIs.
+ipcMain.handle("terminal:send-output", async (_evt, { targets } = {}) => {
+  const r = terminalState.lastUserResult;
+  if (!r) return { ok: false, error: "NO_OUTPUT" };
+  const list = (Array.isArray(targets) ? targets : [targets]).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGET" };
+  const status = r.error && r.error !== "NONZERO_EXIT" ? r.error : `exit ${r.exitCode}`;
+  const body = `The user ran this in the Command Prompt and is sharing the result with you:\n\n> ${r.command}\n(${status})\n${terminalProvider.capOutput(r.output || "", TERMINAL_REPLY_MAX_CHARS) || "(no output)"}`;
+  const out = [];
+  for (const site of list) out.push({ site, ...(await replyFromTerminal(site, body)) });
+  logEvent("terminal-output-shared", { targets: list });
+  return { ok: out.every((o) => o.ok), results: out };
+});
+
+// N3: seed the task's memories[] with facts relevant to the request, pulled from
+// the shared store, so turn one already has context. Best-effort and silent when
+// the store is unavailable — never blocks task start.
+function seedRelevantMemories(m) {
+  try {
+    const res = dbService.memorySearch(m.userRequest);
+    const found = (res && res.results) || [];
+    for (const row of found.slice(0, 12)) {
+      m.memories.push({ id: `${row.type}:${row.id}`, type: row.type, title: row.title || "", ts: Date.now() });
+    }
+    if (found.length) logManagerEvent({ category: "memory", summary: `Seeded ${Math.min(found.length, 12)} relevant memory item(s) for this task` });
+  } catch { /* memory off — proceed without seeded context */ }
 }
 
 async function finishManagedTask({ ok, reason }) {
@@ -1905,7 +2744,28 @@ async function finishManagedTask({ ok, reason }) {
   m.finishedTs = Date.now();
   await saveTaskCheckpoint();
   logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
+  speakIfEnabled(ok ? "Done." : `Stopped: ${reason || "unknown"}`); // N2
   broadcastManagerState();
+}
+
+// The stall-break itself: instead of dying quietly on MAX_TURNS_EXCEEDED after
+// ~20 no-progress "thinking" turns, the butler tells the user it's stuck and
+// asks for what it needs, then parks the task as NEEDS_INPUT so a fresh request
+// (with the missing detail) can start cleanly. The question is derived from the
+// last decision's own reason -- that's where the model already said WHY it
+// couldn't proceed ("user hasn't provided the case details yet"), so we surface
+// that verbatim rather than guessing. Surfaced three ways: the manager-ack line
+// the UI shows above the chat, the manager log, and voice.
+async function breakManagerStall(lastDecision) {
+  const m = state.manager;
+  const why = String((lastDecision && lastDecision.reason) || "").replace(/\s+/g, " ").trim();
+  const ask = why
+    ? `I've gone ${m.thinkingStreak} turns without making progress — I think I'm missing something. ${why.replace(/^i\b/i, "I")} Could you tell me what you'd like me to do, or give me the detail I'm waiting on?`
+    : `I've gone ${m.thinkingStreak} turns without making progress and I think I'm stuck. Could you tell me what you'd like me to do next, or give me any detail I'm waiting on?`;
+  logManagerEvent({ category: "response", severity: "warning", summary: ask, details: { thinkingStreak: m.thinkingStreak, lastAction: lastDecision && lastDecision.action, reason: why || null } });
+  broadcast("manager-ack", { taskId: m.taskId, text: ask, ts: Date.now() });
+  speakAs("butler", ask); // say it out loud regardless of the speak-on-ack setting -- this is a direct question to the user
+  await finishManagedTask({ ok: false, reason: "NEEDS_INPUT" });
 }
 
 function stopManagedTask() {
@@ -2197,8 +3057,29 @@ async function pollSite(site) {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
     const text = (res && res.text) || "";
     const pend = state.pending[site];
+    // The site's own "still generating" signal (its Stop button is showing, or
+    // Send is disabled). This is the reliable "are they done speaking?" answer —
+    // when the Send button comes back, the reply is finished. While generating we
+    // never capture or nudge: it prevents grabbing a half-written reply on a
+    // mid-stream pause, and it means a "done" is only ever a real done. If the
+    // site's stop/send selectors don't match, this is false and completion falls
+    // back to the [FROM:] tag / stability timer, exactly as before.
+    const generating = !!(res && res.generating);
+    // Publish generation-state transitions (drives the UI dot and the service
+    // bridge's "generation" event) — the definitive "are they still speaking?".
+    if (state.generating[site] !== generating) {
+      state.generating[site] = generating;
+      broadcast("generation", { site, generating });
+    }
 
     if (!text) { state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false }; return; }
+
+    if (generating) {
+      // Still producing this reply — track the growing text and wait for the
+      // Send button to return. Never complete or re-prompt a turn mid-stream.
+      state.pending[site] = { text, sinceTs: Date.now(), reprompted: false };
+      return;
+    }
 
     // Completion gate. On the always-on baseline path a reply is DONE the instant
     // it carries a [FROM: X] end tag — no stability timer. "Bare mode" pauses the
@@ -2314,6 +3195,7 @@ async function pollSite(site) {
     // is swallowed entirely, never reaching the transcript. (stageActive was
     // already computed for the completion gate above.)
     let roundtableTag = null;
+    ftRecordCapture(site, text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
     let displayText = text;
     if (!stageActive) {
       const parsed = parseRoundtableTag(text);
@@ -2436,16 +3318,35 @@ async function pollSite(site) {
     // stages, Prompt Sequence, Manager) always run.
     const looping = !stageActive && loopSuppressRelay(turn.text);
     if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
-    let hrSentTargets = new Set();
-    if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-    else if (!looping) await handleRoundtableCapture(turn);
-    const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
-    if (!looping) {
-      for (const target of state.routing[site]) {
-        if (target === site || roundtableTargets.has(target)) continue;
-        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-        // relay — never the raw page text, which still carries [TO:]/[FROM:].
-        await sendTextTo(target, turn.text, site);
+    // "Stop AIs Talking" (relay:silence) flips relayEnabled off. It must halt
+    // EVERY automatic AI->AI forwarding path, including the always-on baseline
+    // [TO:] tag relay below — not just the mesh routing arrays it also clears.
+    // A stage format (House Rules) is already torn down by the same stop, so its
+    // path is gated by stageActive/hr.active, not this flag.
+    const relayOn = state.relayEnabled;
+    if (!stageActive && turn.roundtableTag === "BUTLER") {
+      // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
+      // butler's converse path and do NOT also mesh-forward it to the other AIs.
+      if (relayOn) await deliverToButler(turn);
+    } else if (!stageActive && turn.roundtableTag === "TERMINAL") {
+      // Command Prompt connection: the AI wants commands run on this PC. Never
+      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" like every
+      // other automatic path; the run itself is fire-and-forget so a long
+      // command never holds this pane's poll loop.
+      if (relayOn) deliverToTerminal(turn);
+      else logEvent("terminal-request-dropped", { from: site, reason: "relay-silenced" });
+    } else {
+      let hrSentTargets = new Set();
+      if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
+      else if (!looping && relayOn) await handleRoundtableCapture(turn);
+      const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
+      if (!looping && relayOn) {
+        for (const target of state.routing[site]) {
+          if (target === site || roundtableTargets.has(target)) continue;
+          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+          // relay — never the raw page text, which still carries [TO:]/[FROM:].
+          await sendTextTo(target, turn.text, site);
+        }
       }
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
@@ -2484,27 +3385,114 @@ function formatSystemReport(rep) {
   return lines.join("\n");
 }
 
-// --- System AI (Local Supervisor / LSI) IPC --------------------------------
-
 // --- Ollama model manager IPC ----------------------------------------------
 ipcMain.handle("ollama:detect", async () => { try { return await ollamaManager.detect(); } catch (e) { return { available: false, reason: String(e) }; } });
 ipcMain.handle("ollama:list", async (_evt, endpoint) => { try { return await ollamaManager.listInstalled(endpoint); } catch (e) { return { ok: false, models: [] }; } });
-ipcMain.handle("ollama:recommended", async (_evt, vramGB) => { try { return { models: ollamaManager.recommended(vramGB) }; } catch (e) { return { models: [] }; } });
+ipcMain.handle("ollama:recommended", async (_evt, arg) => {
+  try {
+    const opts = (arg && typeof arg === "object") ? arg : { vramGB: arg };
+    const list = opts.uncensored ? ollamaManager.recommendedUncensored(opts.vramGB) : ollamaManager.recommended(opts.vramGB);
+    return { models: list, uncensored: !!opts.uncensored };
+  } catch (e) { return { models: [] }; }
+});
 ipcMain.handle("ollama:pull", async (_evt, model) => {
   try {
-    const { done } = ollamaManager.pull(model, (line) => broadcast("ollama-progress", { model, line }));
+    // Route the download at the app's own Ollama (when it's up) so the blobs
+    // land in "stuff and thing"; otherwise fall back to the default daemon.
+    const host = ollamaManager.managedStatus().running ? ollamaManager.managedStatus().host : undefined;
+    const { done } = ollamaManager.pull(model, (line) => broadcast("ollama-progress", { model, line }), { host });
     const r = await done;
     broadcast("ollama-progress", { model, line: r.ok ? "✓ done" : `⚠ ${r.error}`, done: true, ok: !!r.ok });
     return r;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
+// The 13 log tags (labels + colours) for the renderer's chips + filters. Served
+// over IPC because the sandboxed preload can't require a local module.
+ipcMain.handle("logs:tags", () => ({ TAGS: logTags.TAGS, TAG_IDS: logTags.TAG_IDS }));
+
+// Where does the app store its language models, and where do the ones already
+// downloaded on this machine currently live? Drives the Models panel's "storing
+// here ✓ / move them here" UI.
+ipcMain.handle("ollama:managed-status", () => {
+  try {
+    const st = ollamaManager.managedStatus();
+    let targetDir = null; try { targetDir = outputManager.modelsDir("llm"); } catch (_) {}
+    return { ...st, targetDir, defaultStore: ollamaManager.defaultStoreDir() };
+  } catch (e) { return { running: false, error: String(e) }; }
+});
+
+// Move the models already downloaded (Ollama's default store) into the shared
+// "stuff and thing" folder, so nothing is left behind. Streams progress.
+ipcMain.handle("ollama:migrate", async () => {
+  try {
+    let to; try { to = outputManager.modelsDir("llm"); } catch (_) { return { ok: false, error: "content folder not ready" }; }
+    const from = ollamaManager.defaultStoreDir();
+    broadcast("ollama-progress", { model: "(migrate)", line: `Moving models from ${from} → ${to}` });
+    const r = ollamaManager.migrateStore({ from, to, onLog: (line) => broadcast("ollama-progress", { model: "(migrate)", line }) });
+    broadcast("ollama-progress", { model: "(migrate)", line: r.ok ? `✓ ${r.moved} moved, ${r.skipped} already there${r.note ? " — " + r.note : ""}` : `⚠ ${r.error}`, done: true, ok: !!r.ok });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+
+// Bring up the app-managed Ollama server pointed at models/llm inside the
+// content folder. Only if Ollama is actually installed; never throws, never
+// blocks startup. The renderer reads managed-status to prefer this endpoint.
+async function startManagedOllama() {
+  try {
+    const det = await ollamaManager.detect();
+    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "ollama not installed" }); return; }
+    let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
+    const host = process.env.AUTOINJECTOR_OLLAMA_HOST || ollamaManager.DEFAULT_MANAGED_HOST;
+    const r = ollamaManager.startManaged({ modelsDir, host, onLog: (line) => { if (line) broadcast("ollama-progress", { model: "(server)", line }); } });
+    if (!r.ok) { logEvent("ollama-managed-error", { error: r.error }); return; }
+    const ready = await ollamaManager.waitReady(host, 20000);
+    logEvent("ollama-managed", { host, modelsDir, ready: ready.ok });
+    broadcast("ollama-progress", { model: "(server)", line: ready.ok ? `✓ app Ollama ready at http://${host} → ${modelsDir}` : `⚠ app Ollama started but not answering yet at http://${host}`, done: true, ok: ready.ok });
+  } catch (e) { logEvent("ollama-managed-error", { error: String(e) }); }
+}
 
 ipcMain.handle("external:open", (_evt, url) => {
   try { if (shell && typeof url === "string" && /^https?:\/\//.test(url)) shell.openExternal(url); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("wizard:open", () => { openWizardWindow(); return { ok: true }; });
+
+// --- Butler self-install (setup-manager) IPC -------------------------------
+// The one-button path so the user (or the butler) doesn't hand-install anything.
+ipcMain.handle("setup:list", () => { try { return { ok: true, targets: setupManager.list(), status: state.setupStatus }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("setup:detect", async () => {
+  try { const all = await setupManager.detectAll(); for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed; return { ok: true, status: state.setupStatus, detail: all }; }
+  catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:install", async (_evt, { target, model } = {}) => {
+  try {
+    if (!setupManager.has(target)) return { ok: false, error: "UNKNOWN_TARGET" };
+    logEvent("setup-install-start", { target, model: model || null });
+    const r = await setupManager.install(target, { model, onProgress: (line) => broadcast("setup-progress", { target, line }) });
+    if (r && r.ok) { try { await autoWireAfterSetup(target); } catch (e) { logEvent("setup-autowire-error", { target, error: String(e) }); } }
+    refreshSetupStatus();
+    broadcast("setup-progress", { target, line: r && r.ok ? `✓ ${r.message || "done"}` : `⚠ ${r && r.error}`, done: true, ok: !!(r && r.ok) });
+    logEvent(r && r.ok ? "setup-install-ok" : "setup-install-failed", { target, result: r });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("setup:auto", async (_evt, opts = {}) => {
+  try {
+    logEvent("setup-auto-start", {});
+    const r = await setupManager.auto({
+      model: opts.model,
+      order: Array.isArray(opts.order) ? opts.order : undefined,
+      onProgress: (target, line) => broadcast("setup-progress", { target, line }),
+      onStep: (s) => { broadcast("setup-progress", { target: s.target, line: s.phase === "start" ? `▶ ${s.target}…` : (s.ok ? `✓ ${s.target}` : `⚠ ${s.target}: ${s.error}`), step: true, phase: s.phase, ok: s.ok }); if (s.phase === "done" && s.ok) { autoWireAfterSetup(s.target).catch(() => {}); } },
+    });
+    refreshSetupStatus();
+    broadcast("setup-progress", { line: `Auto-setup finished: ${r.installed}/${r.total} installed`, done: true, ok: r.ok, auto: true });
+    logEvent("setup-auto-done", { installed: r.installed, total: r.total });
+    return r;
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("wizard:open", (_evt, { tab } = {}) => { openWizardWindow(tab); return { ok: true }; });
 ipcMain.handle("wizard-window:close", () => { closeWizardWindow(); return { ok: true }; });
 // Consolidated AI feed window: open/close + backfill recent AI messages so the
 // window shows history, not a blank, when reopened.
@@ -2530,7 +3518,12 @@ ipcMain.handle("wizard:catalog", async () => {
       ollama,
       models: ollamaManager.recommended(null).map((name) => ({ kind: "ollama-model", model: name, category: "Local AI" })),
       installers: {
-        ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models. Install it, then reopen this wizard." },
+        ollama: { name: "Ollama", url: "https://ollama.com/download", note: "Runs local AI models — powers the System AI / butler. Install it, then reopen this wizard." },
+        interpreter: { name: "Open Interpreter", url: "https://github.com/OpenInterpreter/open-interpreter#installation", note: "Lets the butler run code & control the computer (RUN_CODE). Install with: pip install open-interpreter" },
+        voice: { name: "Voice (piper + whisper)", url: "https://github.com/OHF-Voice/piper1-gpl", note: "Offline speak & listen for the butler. Install with: pip install piper-tts faster-whisper sounddevice — then put a piper voice .onnx in models/voice/." },
+        stabilityMatrix: { name: "Stability Matrix (easy image installer) ⭐", url: "https://github.com/LykosAI/StabilityMatrix", note: "One-click installer + manager for Stable Diffusion (A1111/ComfyUI/Fooocus) with a built-in model downloader. Recommended: install it, launch A1111/Comfy from it with the API on, point its shared Models folder at AutoInjector's models/ (or copy models into models/image), then set the app's Image endpoint." },
+        stableDiffusion: { name: "Stable Diffusion (Automatic1111, manual)", url: "https://github.com/AUTOMATIC1111/stable-diffusion-webui#installation-and-running", note: "Manual alternative to Stability Matrix. Run it with --api, then set its URL in the Images tab." },
+        comfyui: { name: "ComfyUI (alt. image backend)", url: "https://github.com/comfyanonymous/ComfyUI#installing", note: "A more powerful node-based image backend. Stability Matrix can install this for you." },
       },
     };
   } catch (e) { return { ok: false, error: String(e) }; }
@@ -2552,10 +3545,11 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
-        { label: "Open Output Folder", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
+        { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
+        { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
         { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: "AutoInjector Desktop", detail: "Runs ChatGPT, Claude and Gemini together. See the User Guide (Help menu)." }); } },
       ] },
     ];
@@ -2563,12 +3557,13 @@ function buildAppMenu() {
   } catch (e) { logEvent("menu-error", { error: String(e) }); }
 }
 
-// --- ATELIER governance IPC ------------------------------------------------
+// --- Compose / forward / regenerate IPC ------------------------------------
 
 ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   const list = Array.isArray(targets) ? targets.filter((t) => SITES[t]) : [];
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
   try { dbService.recordUserMessage(text, list); } catch (_) {}
+  state.relayEnabled = true; // a fresh user send re-engages the conversation after a Stop
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   // Teach the envelope per target so the reply comes back with its [FROM:] tag
@@ -2685,12 +3680,31 @@ ipcMain.handle("routing:stop-all", () => {
   return { ok: true, global: globalSnapshot() };
 });
 
+// The big "make them stop talking to each other" button: halts EVERY relay path
+// at once — mesh/Auto routing, any House Rule run, any Prompt Sequence, and any
+// Butler task — without unchecking your participants. Nothing new gets relayed
+// after this (in-flight sends already dispatched will just complete).
+async function silenceAllRelay() {
+  for (const site of SITE_IDS) state.routing[site].clear();
+  state.meshActive = false;
+  state.relayEnabled = false; // halt the always-on baseline [TO:] tag relay too, not just mesh
+  if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
+  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
+  try { await stopManagedTask(); } catch (_) {}
+  try { cancelPendingTerminalRequests("relay-silenced"); } catch (_) {}
+  logEvent("relay-silenced", {});
+  syncPaneBounds();
+  return { ok: true, global: globalSnapshot() };
+}
+ipcMain.handle("relay:silence", async () => silenceAllRelay());
+
 ipcMain.handle("routing:auto-all", () => {
   const active = SITE_IDS.filter((s) => state.enabled[s]);
   for (const s of SITE_IDS) {
     state.routing[s] = state.enabled[s] ? new Set(active.filter((t) => t !== s)) : new Set();
   }
   state.meshActive = active.length >= 2;
+  state.relayEnabled = true; // turning Auto on re-enables automatic forwarding
   logEvent("auto-mesh-enabled", { participants: active });
   return { ok: true, global: globalSnapshot() };
 });
@@ -2715,7 +3729,10 @@ ipcMain.handle("roles:set", (_evt, { site, role }) => {
   return { ok: true, global: globalSnapshot() };
 });
 
-ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
+// The Council/roundtable start+stop, extracted so both the IPC handler (the UI)
+// and the local service bridge can drive an identical run — one code path, no
+// divergence between the two callers.
+async function startCouncil({ mode, topic, rounds }) {
   if (!HOUSE_RULES.includes(mode)) return { ok: false, error: "BAD_MODE" };
   if (state.hr.active || state.hr.pausedRouting) return { ok: false, error: "ALREADY_RUNNING" };
   if (!topic || !String(topic).trim()) return { ok: false, error: "NEEDS_TOPIC" };
@@ -2727,6 +3744,7 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
 
   resetHouseRule(mode, topic, rounds);
   state.hr.active = true;
+  state.relayEnabled = true; // starting a run re-enables forwarding after any prior Stop
   for (const s of SITE_IDS) state.routing[s].clear();
   state.meshActive = false;
   logEvent("houserule-start", { mode, participants: checked, rounds: state.hr.rounds });
@@ -2748,9 +3766,10 @@ ipcMain.handle("houserule:start", async (_evt, { mode, topic, rounds }) => {
   broadcastHouseRule();
   saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot() };
-});
+}
+ipcMain.handle("houserule:start", (_evt, args) => startCouncil(args || {}));
 
-ipcMain.handle("houserule:stop", () => {
+function stopCouncil() {
   state.hr.active = false;
   // Free-for-All/Brainstorm ride on the generic routing mesh, which the poll
   // loop forwards on regardless of hr.active — clear it here too, or "Stop"
@@ -2763,7 +3782,8 @@ ipcMain.handle("houserule:stop", () => {
   broadcastHouseRule();
   saveStateDebounced();
   return { ok: true, houseRule: houseRuleSnapshot(), global: globalSnapshot() };
-});
+}
+ipcMain.handle("houserule:stop", () => stopCouncil());
 
 ipcMain.handle("houserule:pause", () => {
   if (!state.hr.mode) return { ok: false, error: "NOT_RUNNING" };
@@ -2804,6 +3824,42 @@ ipcMain.handle("houserule:wrap-up-brainstorm", async () => {
   return { ok: true };
 });
 
+// UI activity: the renderer reports every meaningful thing the USER does (button
+// clicks, panel open/close, field changes) so the one Activity Log captures the
+// full story — frontend actions alongside the backend events already logged. The
+// payload is sanitized (short strings only) so a chatty renderer can't bloat the log.
+ipcMain.handle("ui:log", (_evt, payload = {}) => {
+  const action = String(payload.action || "event").slice(0, 40).replace(/[^a-z0-9_-]/gi, "");
+  const detail = {};
+  if (payload.id != null) detail.id = String(payload.id).slice(0, 60);
+  if (payload.msg != null) detail.msg = String(payload.msg).slice(0, 160);
+  logEvent(`ui-${action || "event"}`, detail);
+  return { ok: true };
+});
+
+// Models & assets home folder: one findable place for all model files. Reports
+// where it is + what's in it + whether Ollama is pointed at it; opens it in the
+// OS file manager.
+ipcMain.handle("models:info", () => {
+  let inv = { root: null, categories: {} };
+  try { inv = outputManager.modelsInventory(); } catch (_) {}
+  let contentRoot = null;
+  try { contentRoot = outputManager.root(); } catch (_) {}
+  const ollamaModels = process.env.OLLAMA_MODELS || null;
+  let ollamaHere = false;
+  try { ollamaHere = !!(inv.root && ollamaModels && require("path").resolve(ollamaModels) === require("path").resolve(outputManager.modelsDir("llm"))); } catch (_) {}
+  return { ok: true, ...inv, contentRoot, ollamaModels, ollamaHere };
+});
+ipcMain.handle("models:open", (_evt, { category } = {}) => {
+  try {
+    // No category → open the ONE findable folder ("stuff and thing") that holds
+    // everything; a category → jump straight into that download subfolder.
+    const target = category ? outputManager.modelsDir(category) : outputManager.root();
+    if (shell && target) shell.openPath(target);
+    return { ok: true, path: target };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
 ipcMain.handle("state:get", () => ({
   ok: true,
   global: globalSnapshot(),
@@ -2824,6 +3880,125 @@ ipcMain.handle("state:get", () => ({
 }));
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
+
+// "Extract All": dump the WHOLE conversation (what the AIs said) AND the full
+// activity/error log into one text file, saved into the program's own logs
+// folder (<AutoInjector app folder>/stuff and thing/logs). Pulled from in-memory state,
+// not the on-screen windows, so a long/streaming transcript is captured in full
+// and never cut off by what happens to be scrolled into view.
+function _ts(ms) { try { return new Date(ms).toLocaleString(); } catch (_) { return String(ms); } }
+function buildExtractText() {
+  const now = new Date();
+  const lines = [];
+  lines.push("AutoInjector — Extract All");
+  lines.push(`Generated: ${now.toLocaleString()}`);
+  lines.push(`AI messages: ${state.transcript.length} · Activity/errors: ${state.log.length}`);
+  lines.push("");
+  lines.push("========================================");
+  lines.push("AI CONVERSATION (what the language models said)");
+  lines.push("========================================");
+  if (!state.transcript.length) lines.push("(no messages captured)");
+  for (const t of state.transcript) {
+    const who = t.label || (t.site ? (SITES[t.site] ? SITES[t.site].label : t.site) : "AI");
+    const tags = [];
+    if (t.roundtableTag) tags.push(`TO:${t.roundtableTag}`);
+    if (t.isRateLimited) tags.push("RATE-LIMITED");
+    if (t.isVerdict) tags.push("VERDICT");
+    lines.push(`[${_ts(t.ts)}] ${who}${tags.length ? " (" + tags.join(", ") + ")" : ""}:`);
+    lines.push(String(t.text == null ? "" : t.text));
+    lines.push("");
+  }
+  lines.push("========================================");
+  lines.push("ACTIVITY / TROUBLESHOOTING (errors and events)");
+  lines.push("========================================");
+  if (!state.log.length) lines.push("(no activity logged)");
+  for (const e of state.log) {
+    let detail = "";
+    try { detail = e.detail == null ? "" : (typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)); } catch (_) { detail = String(e.detail); }
+    lines.push(`[${_ts(e.ts)}] ${e.kind}${detail ? " — " + detail : ""}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+ipcMain.handle("logs:extract-all", () => {
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+    const file = outputManager.saveBuffer(outputManager.logsDir(), `autoinjector-extract-${stamp}.txt`, buildExtractText());
+    logEvent("extract-all", { file, messages: state.transcript.length, logEntries: state.log.length });
+    try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
+    return { ok: true, file, messages: state.transcript.length, logEntries: state.log.length };
+  } catch (e) { logEvent("extract-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
+
+// A short guide dropped into the bundle so whoever opens it knows what's what.
+const LOG_BUNDLE_README = [
+  "AutoInjector — all logs bundle",
+  "",
+  "Everything the program logs, gathered in one folder so you can zip it and",
+  "share it for troubleshooting. Contents (whatever existed at the time):",
+  "  autoinjector-debug.log      the rolling on-disk event log (survives crashes)",
+  "  autoinjector-state.json     saved app state (config, transcript, settings)",
+  "  autoinjector-shared.db      the conversation/memory database (SQLite)",
+  "  activity-and-transcript.txt  the in-app Activity log + full transcript",
+  "  events.json                 in-memory event stream (most recent, full detail)",
+  "  manager-events.json         the butler/manager event stream",
+  "  system-info.txt             OS, versions, Python, folders — the environment",
+  "  *.log                       any other log files found next to the app data",
+  "",
+  "Nothing here is uploaded anywhere by the app — it's yours to share as you choose.",
+].join("\n");
+
+function _safeJson(v) { try { return JSON.stringify(v, null, 2); } catch (e) { return `/* could not serialize: ${String(e)} */`; } }
+
+async function buildSystemInfo() {
+  const os = require("os");
+  let py = {}; try { py = await setupManager.pythonStatus(); } catch (_) {}
+  let contentRoot = "?"; try { contentRoot = outputManager.root() || "?"; } catch (_) {}
+  let ollama = "?"; try { const s = ollamaManager.managedStatus(); ollama = s.running ? `${s.endpoint} → ${s.modelsDir}` : "not running"; } catch (_) {}
+  let appVer = "?"; try { appVer = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
+  return [
+    "AutoInjector diagnostics",
+    `Generated:    ${new Date().toISOString()}`,
+    `App version:  ${appVer}`,
+    `Runtime:      Electron ${process.versions.electron} · Node ${process.versions.node} · Chrome ${process.versions.chrome}`,
+    `OS:           ${os.type()} ${os.release()} (${process.platform}/${process.arch})`,
+    `Python:       ${py.invocation || "?"} — ${py.note || "?"}`,
+    `Content root: ${contentRoot}`,
+    `App Ollama:   ${ollama}`,
+    `User data:    ${userDataDir()}`,
+  ].join("\n");
+}
+
+// Download ALL logs: copy every on-disk log/state/db file + the in-memory
+// activity into one timestamped folder under "stuff and thing/logs", then open
+// it so the user can grab or zip the whole lot at once.
+ipcMain.handle("logs:download-all", async () => {
+  try {
+    const ud = userDataDir();
+    const files = [];
+    const addIfExists = (p) => { try { if (p && fs.existsSync(p) && !files.includes(p)) files.push(p); } catch (_) {} };
+    addIfExists(debugLogPath());
+    addIfExists(stateFilePath());
+    addIfExists(path.join(ud, "autoinjector-shared.db"));
+    // Sweep the user-data folder for any other *.log the app (or a subsystem) left.
+    try { for (const n of fs.readdirSync(ud)) if (/\.log$/i.test(n)) addIfExists(path.join(ud, n)); } catch (_) {}
+
+    const blobs = [
+      { name: "activity-and-transcript.txt", content: buildExtractText() },
+      { name: "events.json", content: _safeJson(state.log) },
+      { name: "manager-events.json", content: _safeJson(state.managerLog) },
+      { name: "system-info.txt", content: await buildSystemInfo() },
+      { name: "README.txt", content: LOG_BUNDLE_README },
+    ];
+
+    let logsDir; try { logsDir = outputManager.logsDir(); } catch (_) { return { ok: false, error: "content folder not ready" }; }
+    const r = logBundle.bundle({ logsDir, userDataDir: ud, files, blobs });
+    if (!r.ok) { logEvent("logs-download-all-error", { error: r.error }); return r; }
+    logEvent("logs-download-all", { folder: r.folder, files: r.entries.length, missing: (r.missing || []).length });
+    try { if (shell && shell.openPath) shell.openPath(r.folder); } catch (_) {}
+    return { ok: true, folder: r.folder, count: r.entries.length, entries: r.entries, missing: r.missing || [] };
+  } catch (e) { logEvent("logs-download-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
+});
 
 ipcMain.handle("transcript:toggle-pin", (_evt, id) => {
   const turn = state.transcript.find((t) => t.id === id);
@@ -2920,6 +4095,7 @@ ipcMain.handle("site:zoom", (_evt, { site, factor }) => {
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   const clamped = Math.max(0.4, Math.min(2, Number(factor) || 1));
   view.webContents.setZoomFactor(clamped);
+  paneZoom[site] = clamped;
   logEvent("zoom-changed", { site, factor: clamped });
   return { ok: true, factor: clamped };
 });
@@ -3223,7 +4399,9 @@ ipcMain.handle("tuner:run", async () => {
   }
 });
 
-ipcMain.handle("manager:start-task", async (_evt, { userRequest }) => startManagedTask(userRequest));
+ipcMain.handle("manager:start-task", async (_evt, { userRequest, mode } = {}) => startManagedTask(userRequest, { mode }));
+// Converse mode: talk to the butler and get a spoken/prose reply, no task run.
+ipcMain.handle("butler:chat", async (_evt, { message } = {}) => butlerChat(message));
 ipcMain.handle("manager:pause", () => pauseManagedTask());
 ipcMain.handle("manager:resume", () => resumeManagedTask());
 ipcMain.handle("manager:stop", () => stopManagedTask());
@@ -3272,6 +4450,335 @@ ipcMain.handle("manager:test-connection", async () => {
 
 ipcMain.handle("manager:get-state", () => ({ ok: true, manager: managerSnapshot(), managerConfig: managerConfigSnapshot(), managerLog: state.managerLog }));
 
+// N5 Tools: list the registry and (for the dashboard/manual testing) run a tool.
+ipcMain.handle("tools:list", () => ({ ok: true, tools: toolProvider.list() }));
+ipcMain.handle("tools:run", async (_evt, { tool, args } = {}) => {
+  if (!tool || !toolProvider.has(tool)) return { ok: false, error: "UNKNOWN_TOOL" };
+  return toolProvider.run(tool, args || {});
+});
+
+// N3 Memory: a summary line for the panel, plus a manual search.
+ipcMain.handle("memory:summary", () => ({ ok: true, ...dbService.memorySummary() }));
+ipcMain.handle("memory:search", (_evt, { query } = {}) => ({ ok: true, ...dbService.memorySearch(query || "") }));
+
+// N2 Voice: status/config/test + push-to-talk listen.
+ipcMain.handle("voice:status", () => ({ ok: true, ...voiceProvider.status() }));
+ipcMain.handle("voice:configure", (_evt, patch) => {
+  const s = voiceProvider.setSettings(patch || {});
+  logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
+  return { ok: true, ...voiceProvider.status() };
+});
+ipcMain.handle("voice:speak", async (_evt, { text, who, voice } = {}) => voiceProvider.speak(text, { who, voice }));
+ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
+
+// Image generation (Stable Diffusion): status/config + a manual generate for the
+// wizard's "Test" button. Config persists in the app state snapshot.
+ipcMain.handle("image:status", () => ({ ok: true, ...imageProvider.status() }));
+ipcMain.handle("image:configure", (_evt, patch) => {
+  imageProvider.setSettings(patch || {});
+  state.imageConfig = imageProvider.getSettings();
+  saveStateDebounced();
+  logEvent("image-config", { enabled: state.imageConfig.enabled, endpoint: state.imageConfig.endpoint });
+  return { ok: true, ...imageProvider.status() };
+});
+ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) => {
+  const r = await imageProvider.generate(prompt, { negativePrompt });
+  if (!r || !r.ok || !r.imageBase64) {
+    // E09: pass the backend's real reason through, not just a bare code.
+    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED" };
+  }
+  try {
+    // E09: save every image the batch produced; preview the first inline.
+    const batch = Array.isArray(r.images) && r.images.length ? r.images : [r.imageBase64];
+    const paths = [];
+    for (let i = 0; i < batch.length; i++) {
+      const buf = Buffer.from(batch[i], "base64");
+      const sha = require("crypto").createHash("sha256").update(buf).digest("hex");
+      const p = outputManager.saveBuffer(outputManager.imagesDir(), `img-${Date.now()}${batch.length > 1 ? `-${i + 1}` : ""}.png`, buf);
+      paths.push(p);
+      try { dbService.recordImage({ path: p, prompt, model: imageProvider.status().model, from: "wizard", sha256: sha }); } catch (_) {}
+    }
+    return { ok: true, path: paths[0], paths, count: paths.length, preview: `data:image/png;base64,${r.imageBase64}` };
+  } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+});
+
+// Video generation (text-to-video). Same shape as image: a configurable local
+// endpoint; a base64 clip is saved into the videos/ output folder and a data URL
+// is handed back for the panel's inline preview.
+ipcMain.handle("video:status", () => ({ ok: true, ...videoProvider.status() }));
+ipcMain.handle("video:configure", (_evt, patch) => {
+  videoProvider.setSettings(patch || {});
+  state.videoConfig = videoProvider.getSettings();
+  saveStateDebounced();
+  logEvent("video-config", { enabled: state.videoConfig.enabled, endpoint: state.videoConfig.endpoint });
+  return { ok: true, ...videoProvider.status() };
+});
+ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) => {
+  const r = await videoProvider.generate(prompt, { negativePrompt });
+  if (!r || !r.ok) return { ok: false, error: (r && r.error) || "FAILED" };
+  if (r.videoBase64) {
+    try {
+      const buf = Buffer.from(r.videoBase64, "base64");
+      const savedPath = outputManager.saveBuffer(outputManager.videosDir(), `vid-${Date.now()}.mp4`, buf);
+      return { ok: true, path: savedPath, preview: `data:video/mp4;base64,${r.videoBase64}` };
+    } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+  }
+  // A backend that returns a URL (rendered file on its own server) — hand it through.
+  return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
+});
+
+// Endpoint help: so the user never has to guess the SD/video URL. Presets is a
+// curated dropdown; detect probes localhost for a running backend; test pings one.
+ipcMain.handle("endpoints:presets", (_evt, { kind } = {}) => { try { return { ok: true, presets: endpointDetect.presets(kind) }; } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("endpoints:detect", async (_evt, { kind } = {}) => { try { return await endpointDetect.detect(kind); } catch (e) { return { ok: false, error: String(e) }; } });
+ipcMain.handle("endpoints:test", async (_evt, { url } = {}) => { try { return await endpointDetect.test(url); } catch (e) { return { reachable: false, error: String(e) }; } });
+
+// GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
+ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });
+
+// Butler System Check: the butler reports on everything HE can do, so you can
+// see at a glance what's working and what isn't. ok=true (working) / false
+// (error) / null (available but not turned on / not configured yet).
+async function butlerSelfCheck() {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || "" });
+  try { const mc = managerConfigSnapshot(); const has = !!(mc.endpoint && mc.model); add("Brain (local model)", has ? true : null, has ? `${mc.model} @ ${mc.endpoint}` : "no endpoint/model saved yet — set one in the Butler settings"); } catch (e) { add("Brain (local model)", false, String(e)); }
+  try { const s = interpreterProvider.status(); add("Run code (Open Interpreter)", s.enabled ? true : null, s.enabled ? `endpoint ${s.endpoint}` : "not enabled — install via Setup Wizard → Auto-setup"); } catch (e) { add("Run code (Open Interpreter)", false, String(e)); }
+  try { const py = await setupManager.pythonStatus(); add("Install toolchain (Python)", py.missing ? false : (py.compatible ? true : null), py.note); } catch (e) { add("Install toolchain (Python)", null, String(e)); }
+  try { const t = toolProvider.list(); add("Tools (USE_TOOL)", t.length > 0, t.length ? `${t.length}: ${t.map((x) => x.name).join(", ")}` : "none registered"); } catch (e) { add("Tools (USE_TOOL)", false, String(e)); }
+  try { const d = dbService.status(); add("Memory (remember/recall)", !!d.available, d.available ? `ready (${d.count || 0} messages)` : (d.reason || "off")); } catch (e) { add("Memory (remember/recall)", false, String(e)); }
+  try { const v = voiceProvider.status(); add("Voice (speak & listen)", v.enabled ? true : null, v.enabled ? `endpoint ${v.endpoint}` : "off"); } catch (e) { add("Voice (speak & listen)", false, String(e)); }
+  try { const im = imageProvider.status(); add("Image generation", im.enabled ? true : null, im.enabled ? `endpoint ${im.endpoint}` : (im.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Image generation", false, String(e)); }
+  try { const vi = videoProvider.status(); add("Video generation", vi.enabled ? true : null, vi.enabled ? `endpoint ${vi.endpoint}` : (vi.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Video generation", false, String(e)); }
+  try { const root = outputManager.modelsRoot(); add("Models & content folder", !!root, root || "not ready"); } catch (e) { add("Models & content folder", false, String(e)); }
+  try { const g = await gpuMonitor.read(); add("GPU monitor", g.available ? true : null, g.available ? g.gpus.map((x) => x.name).join(", ") : (g.reason || "n/a")); } catch (e) { add("GPU monitor", false, String(e)); }
+  try { const en = SITE_IDS.filter((s) => state.enabled[s]); add("Chat AIs (ChatGPT/Claude/Gemini)", en.length > 0, en.length ? `enabled: ${en.join(", ")}` : "none enabled"); } catch (e) { add("Chat AIs (ChatGPT/Claude/Gemini)", false, String(e)); }
+  // Detailed install status of each dependency the butler can set up himself, so
+  // the check clearly separates what's INSTALLED from what's NOT — and which ones
+  // he can install for you. Open Interpreter is the keystone (it lets him run
+  // code and drive the rest).
+  const installs = [];
+  let missing = [];
+  try {
+    const all = await setupManager.detectAll();
+    for (const t of setupManager.list()) {
+      const d = all[t.id] || {};
+      installs.push({ id: t.id, label: t.label, installed: d.installed, kind: t.kind, installable: t.kind !== "handoff", detail: d.reason || "" });
+      if (d.installed === false && t.kind !== "handoff") missing.push(t.id);
+    }
+  } catch (e) { logEvent("selfcheck-installs-error", { error: String(e) }); }
+  const okCount = checks.filter((c) => c.ok === true).length;
+  return { ok: true, checks, okCount, total: checks.length, installs, missing, canInstall: missing.length > 0 };
+}
+ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
+
+// The DEEP capability test: where butlerSelfCheck() only reports what's
+// configured/enabled, this actually EXERCISES each capability once and reports
+// whether the thing genuinely worked -- it really renders a tiny image, makes a
+// short video, runs a line of code, writes+reads a file, remembers+recalls a
+// fact, calls a tool, speaks a phrase, and pings each live AI pane. Anything not
+// set up is reported as "skipped" (⚪), never a failure. Each step is bounded by
+// its own timeout so one dead endpoint can't hang the whole sweep, and every
+// step streams a "capability-test-step" event so the UI fills in live. Same
+// {name, ok, detail} shape as butlerSelfCheck so the panel renders it identically.
+let capabilityTestInFlight = false;
+function _withTimeout(promise, ms, onTimeout) {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(typeof onTimeout === "function" ? onTimeout() : { ok: false, error: "TIMEOUT" }); } }, ms);
+    Promise.resolve(promise).then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+      (e) => { if (!done) { done = true; clearTimeout(t); resolve({ ok: false, error: String((e && e.message) || e) }); } });
+  });
+}
+async function butlerCapabilityTest() {
+  if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
+  capabilityTestInFlight = true;
+  const checks = [];
+  const step = (name, ok, detail) => {
+    const c = { name, ok, detail: detail || "" };
+    checks.push(c);
+    // Full detail goes to the one Activity Log (via the normal log broadcast)
+    // with a ready-to-read summary; a lightweight per-step event also drives the
+    // live "reel" of chips in the butler panel while the sweep runs.
+    const mark = ok === true ? "✅" : ok === false ? "❌" : "⚪";
+    broadcast("capability-test-step", { name, ok, detail: c.detail, index: checks.length });
+    logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), summary: `${mark} ${name}${detail ? " — " + detail : ""}`, severity: ok === false ? "error" : "info" });
+    return c;
+  };
+  logEvent("capability-test-start", {});
+  try {
+    // 1) Brain — a real round-trip to the configured local model.
+    try {
+      const mc = managerConfigSnapshot();
+      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "no endpoint/model saved yet — set one in the Butler settings");
+      else {
+        const r = await _withTimeout(managerProvider.testConnection(state.managerConfig), 25000);
+        if (r && r.ok) step("Brain (local model)", true, `answered & followed the manager format — ${mc.model}`);
+        else if (r && r.reachable) step("Brain (local model)", false, `reachable but the model didn't follow the format (${r.warning || "bad reply"})`);
+        else step("Brain (local model)", false, `not reachable: ${(r && r.error) || "no answer"}`);
+      }
+    } catch (e) { step("Brain (local model)", false, String(e)); }
+
+    // 2) Run code — actually execute a line via Open Interpreter.
+    try {
+      const s = interpreterProvider.status();
+      if (!s.enabled) step("Run code (Open Interpreter)", null, "not enabled — install via Setup Wizard → Auto-setup");
+      else {
+        const r = await _withTimeout(interpreterProvider.run("Print exactly: CAPTEST-OK", { onEvent: () => {} }), 60000);
+        step("Run code (Open Interpreter)", !!(r && r.ok), r && r.ok ? `ran a line of code (${String(r.message || "").slice(0, 40)})` : `couldn't run: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Run code (Open Interpreter)", false, String(e)); }
+
+    // 3) Open a file — write a real file into the output folder and read it back.
+    let testFileRel = null;
+    try {
+      const marker = `CAPTEST-${Date.now()}`;
+      const dest = outputManager.saveBuffer(outputManager.dir("uploads"), "capability-test.txt", `${marker}\nAutoInjector capability test file.\n`);
+      const back = fs.readFileSync(dest, "utf8");
+      const ok = back.includes(marker);
+      testFileRel = path.relative(outputManager.root(), dest);
+      step("Open a file (read & write)", ok, ok ? `wrote & read back ${path.basename(dest)}` : "wrote a file but couldn't read it back");
+    } catch (e) { step("Open a file (read & write)", false, String(e)); }
+
+    // 4) Tools — actually invoke the built-in read-file tool on that file.
+    try {
+      const tools = toolProvider.list();
+      if (!tools.length) step("Tools (USE_TOOL)", null, "no tools registered");
+      else if (!testFileRel) step("Tools (USE_TOOL)", null, "skipped — no test file to read");
+      else {
+        const r = await _withTimeout(toolProvider.run("read-file", { path: testFileRel }, { onEvent: () => {} }), 10000);
+        step("Tools (USE_TOOL)", !!(r && r.ok), r && r.ok ? `ran read-file (${tools.length} tool(s) available)` : `tool failed: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Tools (USE_TOOL)", false, String(e)); }
+
+    // 5) Memory — remember a marker fact, then recall it.
+    try {
+      const d = dbService.status();
+      if (!d.available) step("Memory (remember & recall)", null, d.reason || "off");
+      else {
+        const marker = `captest recall marker ${Date.now()}`;
+        const cr = dbService.memoryCreate("fact", { statement: marker, source: "capability-test" });
+        const sr = dbService.memorySearch(marker);
+        const found = !!(sr && sr.available && (sr.results || []).some((x) => (x.title || "").includes("captest recall marker")));
+        step("Memory (remember & recall)", !!(cr && cr.ok) && found, (cr && cr.ok) ? (found ? "remembered a fact and recalled it" : "remembered, but recall didn't return it") : `couldn't remember: ${(cr && cr.error) || "failed"}`);
+      }
+    } catch (e) { step("Memory (remember & recall)", false, String(e)); }
+
+    // 6) Image — really render a tiny test image and save it.
+    try {
+      const im = imageProvider.status();
+      if (!im.enabled) step("Image generation", null, im.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
+      }
+    } catch (e) { step("Image generation", false, String(e)); }
+
+    // 7) Video — really make a short test clip and save it.
+    try {
+      const vi = videoProvider.status();
+      if (!vi.enabled) step("Video generation", null, vi.configured ? "configured, turned off" : "no endpoint set");
+      else {
+        const r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
+        let saved = null;
+        if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
+        else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
+        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && r.error) || "no video"}`);
+      }
+    } catch (e) { step("Video generation", false, String(e)); }
+
+    // 8) Voice — actually speak a short phrase.
+    try {
+      const v = voiceProvider.status();
+      if (!v.enabled) step("Voice (speak)", null, "off");
+      else {
+        const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && r.error) || "failed"}`);
+      }
+    } catch (e) { step("Voice (speak)", false, String(e)); }
+
+    // 9) Talk to the AIs — a real reverse-a-token ping into each live pane.
+    for (const site of SITE_IDS) {
+      const label = (SITES[site] && SITES[site].label) || site;
+      try {
+        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not enabled as a participant"); continue; }
+        const view = siteViews[site];
+        const url = view ? view.webContents.getURL() : "";
+        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "no page loaded — open/sign in to this AI first"); continue; }
+        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); continue; }
+        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); continue; }
+        const r = await _withTimeout(runConnectivityTest(site), SELFTEST_TIMEOUT_MS + 10000, () => ({ ok: false, error: "TIMEOUT" }));
+        step(`Talk to ${label}`, !!(r && r.ok), r && r.ok ? "sent a message and got the right reply back" : `no good reply: ${(r && (r.error || r.stage)) || "failed"}`);
+      } catch (e) { step(`Talk to ${label}`, false, String(e)); }
+    }
+
+    const okCount = checks.filter((c) => c.ok === true).length;
+    const failCount = checks.filter((c) => c.ok === false).length;
+    logEvent("capability-test-done", { okCount, failCount, total: checks.length });
+    return { ok: true, deep: true, checks, okCount, total: checks.length, failCount };
+  } finally {
+    capabilityTestInFlight = false;
+  }
+}
+ipcMain.handle("butler:capability-test", async () => { try { return await butlerCapabilityTest(); } catch (e) { return { ok: false, error: String(e) }; } });
+
+// Install everything that's missing, keystone-first (Open Interpreter before the
+// rest, so once it's in the butler can drive the remaining installs and CONTROL
+// it via RUN_CODE). Each install auto-wires the capability on success. Progress
+// streams over the existing "setup-progress" channel.
+ipcMain.handle("butler:install-missing", async () => {
+  try {
+    const sc = await butlerSelfCheck();
+    const missing = sc.missing || [];
+    if (!missing.length) { broadcast("setup-progress", { line: "Everything is already installed ✓", done: true, ok: true }); return { ok: true, missing: [], results: [] }; }
+    // Keystone first: Open Interpreter, then the rest in setup-manager's order.
+    const order = setupManager.AUTO_ORDER.filter((id) => missing.includes(id));
+    for (const id of missing) if (!order.includes(id)) order.push(id);
+    logEvent("install-missing-start", { order });
+    const results = [];
+    for (const id of order) {
+      broadcast("setup-progress", { target: id, line: `▶ installing ${id}…`, step: true });
+      let r; try { r = await setupManager.install(id, { onProgress: (line) => broadcast("setup-progress", { target: id, line }) }); } catch (e) { r = { ok: false, error: String(e) }; }
+      if (r && r.ok) { try { await autoWireAfterSetup(id); } catch (_) {} }
+      results.push({ target: id, ok: !!(r && r.ok), error: (r && r.error) || null });
+      broadcast("setup-progress", { target: id, line: r && r.ok ? `✓ ${id}` : `⚠ ${id}: ${r && r.error}`, step: true, ok: !!(r && r.ok) });
+    }
+    refreshSetupStatus();
+    const okN = results.filter((r) => r.ok).length;
+    broadcast("setup-progress", { line: `Install finished: ${okN}/${results.length} installed`, done: true, ok: okN > 0 });
+    logEvent("install-missing-done", { installed: okN, total: results.length });
+    return { ok: true, missing, results, installed: okN };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// The butler introduces himself + the conversation rules to the chat AIs, so
+// they know who's coordinating them and how the message envelope works. Sent
+// only when you press the button — nothing goes out on its own.
+function butlerIntroMessage(target) {
+  const name = String(target || "").toUpperCase() || "YOU";
+  return (
+    "Quick orientation before we work together.\n\n" +
+    "WHO'S COORDINATING: a local \"Butler\" (a supervisor AI running on this machine) is running this conversation. It plans the work and passes messages between you and the other assistants (ChatGPT, Claude, Gemini). You are one of those assistants — the Butler may ask you to do part of a task and then combine your answer with the others.\n\n" +
+    "HOW MESSAGES WORK (important — or your reply is not delivered):\n" +
+    "• START every message with a routing tag: [TO: USER] (answer the person) / [TO: CHATGPT] / [TO: CLAUDE] / [TO: GEMINI] / [TO: ALL] / [TO: TERMINAL] (your own private folder on this PC — file commands in a ``` code block, `help` lists them; results come back as [FROM: TERMINAL]) / [TO: NONE]\n" +
+    "• END every message with your own closing tag: [FROM: " + name + "]\n" +
+    "The closing [FROM: ...] tag is how the app knows your message is finished — put nothing after it." +
+    lockerGuide(target) + "\n\n" +
+    "Please confirm you understand, using the envelope: start with [TO: USER] and end with [FROM: " + name + "]."
+  );
+}
+async function butlerSendIntro(targets) {
+  const list = (Array.isArray(targets) && targets.length ? targets : SITE_IDS.filter((s) => state.enabled[s])).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  const results = {};
+  for (const t of list) results[t] = await sendTextTo(t, butlerIntroMessage(t), null);
+  logEvent("butler-intro-sent", { targets: list });
+  return { ok: true, targets: list, results };
+}
+ipcMain.handle("butler:send-intro", async (_evt, { targets } = {}) => { try { return await butlerSendIntro(targets); } catch (e) { return { ok: false, error: String(e) }; } });
+
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
@@ -3296,6 +4803,313 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   return { ok: true, which, collapsed: entry.collapsed };
 });
 
+// --- Local service bridge: AutoInjector as a separately callable service ----
+// A thin transport layer over the SAME machinery the UI drives (sendTextTo,
+// pollSite state, the Council/House-Rules engine). It reaches nothing internal
+// on its own — every capability is handed in as a wrapper below. Localhost-only.
+function paneReady(site) {
+  const v = siteViews[site];
+  if (!v || !v.webContents || v.webContents.isDestroyed()) return false;
+  try { if (v.webContents.isLoading && v.webContents.isLoading()) return false; } catch (_) {}
+  return true;
+}
+function bridgeStatus() {
+  const participants = SITE_IDS.map((s) => ({
+    id: s,
+    label: SITES[s] ? SITES[s].label : s,
+    enabled: !!state.enabled[s],
+    ready: paneReady(s),
+    generating: !!state.generating[s],
+    waiting: !!state.waiting[s],
+    lastResponseId: state.captured[s] ? state.captured[s].id : null,
+    rateLimited: !!(state.captured[s] && state.captured[s].isRateLimited),
+  }));
+  const hr = state.hr;
+  return {
+    service: "autoinjector",
+    participants,
+    council: hr && hr.mode ? houseRuleSnapshot() : { active: false, mode: null },
+    routing: routingSnapshot(),
+    mesh: state.meshActive,
+  };
+}
+function bridgeResponses({ since = 0, limit = 100, site = null } = {}) {
+  let rows = state.transcript;
+  if (site) rows = rows.filter((t) => t.site === site);
+  if (since) rows = rows.filter((t) => t.id > since);
+  return rows.slice(-limit).map((t) => ({
+    id: t.id, site: t.site, label: t.label, text: t.text, ts: t.ts,
+    roundtableTag: t.roundtableTag || null,
+    isRateLimited: !!t.isRateLimited,
+    isVerdict: !!t.isVerdict,
+  }));
+}
+async function bridgeSendTo(site, text) {
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  state.relayEnabled = true; // a user send over the bridge re-engages forwarding after a Stop
+  try { dbService.recordUserMessage(String(text), [site]); } catch (_) {}
+  // Teach the reply envelope, same as the UI's Compose path, so the reply comes
+  // back with its [FROM:] tag and is captured on the baseline path.
+  return sendTextTo(site, withEnvelope(String(text), site), null);
+}
+async function bridgeSendAll(text, targets) {
+  if (!text || !String(text).trim()) return { ok: false, error: "NEED_TEXT" };
+  const list = (Array.isArray(targets) ? targets : SITE_IDS.filter((s) => state.enabled[s])).filter((s) => SITES[s]);
+  if (!list.length) return { ok: false, error: "NO_TARGETS" };
+  const results = {};
+  for (const s of list) results[s] = await bridgeSendTo(s, text);
+  return { results };
+}
+const serviceBridge = createServiceBridge({
+  version: "1.0.0",
+  log: logEvent,
+  status: bridgeStatus,
+  responses: bridgeResponses,
+  sendTo: bridgeSendTo,
+  sendAll: bridgeSendAll,
+  councilStart: startCouncil,
+  councilStop: async () => stopCouncil(),
+  subscribe: (fn) => { broadcastListeners.add(fn); return () => broadcastListeners.delete(fn); },
+  // Open Interpreter "run code / control computer" capability, exposed through
+  // the same local API so the merged system (PersonalJarvis, etc.) can drive it.
+  interpreter: {
+    status: () => interpreterProvider.status(),
+    configure: (patch) => interpreterProvider.setSettings(patch),
+    run: (task, o) => interpreterProvider.run(task, o),
+  },
+  // The native "Jarvis": AutoInjector's System AI supervisor, which plans and
+  // orchestrates the Council (the 3 web AIs) + Open Interpreter to reach a goal.
+  jarvis: {
+    status: () => ({ manager: managerSnapshot() }),
+    start: async (goal) => startManagedTask(goal),
+    stop: async () => stopManagedTask(),
+  },
+  // N5: the butler's external-tool registry, exposed so the merged system can
+  // list and invoke tools (and, later, register MCP servers' tools).
+  tools: {
+    list: () => toolProvider.list(),
+    run: (name, args, o) => toolProvider.run(name, args, o),
+  },
+  // N2: local voice capability (speak/listen through the offline shim).
+  voice: {
+    status: () => voiceProvider.status(),
+    configure: (patch) => voiceProvider.setSettings(patch),
+    speak: (text) => voiceProvider.speak(text),
+    listen: (o) => voiceProvider.listen(o),
+  },
+  // Image generation (Stable Diffusion) as a callable capability on the bridge.
+  image: {
+    status: () => imageProvider.status(),
+    configure: (patch) => imageProvider.setSettings(patch),
+    generate: (prompt, o) => imageProvider.generate(prompt, o),
+  },
+  // The minimal phone companion: the bridge serves this static shell at /m and
+  // the page streams the feed + posts sends back. "Stop" on the phone routes to
+  // the same silence-all-relay path as the desktop button.
+  mobilePage: loadMobilePage(),
+  silence: () => silenceAllRelay(),
+});
+// Configure Open Interpreter from env at boot (endpoint/model/auto-run), if set.
+if (process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT) {
+  interpreterProvider.setSettings({
+    enabled: true,
+    endpoint: process.env.AUTOINJECTOR_INTERPRETER_ENDPOINT,
+    model: process.env.AUTOINJECTOR_INTERPRETER_MODEL || "",
+    apiKey: process.env.AUTOINJECTOR_INTERPRETER_TOKEN || "",
+    autoRun: process.env.AUTOINJECTOR_INTERPRETER_AUTORUN === "1",
+  });
+}
+// Managed mode: let AutoInjector RUN the Open Interpreter shim itself, so the
+// user doesn't have to start anything. AUTOINJECTOR_INTERPRETER_SPAWN is the
+// command (e.g. "python"); the shim path + port are supplied alongside. It's
+// spawned on app-ready and stopped on quit; a failure never blocks startup.
+async function startManagedInterpreter(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_INTERPRETER_SPAWN;
+  if (!command) return;
+  const shim = process.env.AUTOINJECTOR_INTERPRETER_SHIM || path.join(__dirname, "..", "integrations", "open-interpreter", "interpreter_shim.py");
+  const port = Number(process.env.AUTOINJECTOR_INTERPRETER_PORT) || 8231;
+  try {
+    const r = await interpreterProvider.startManaged({
+      command,
+      args: [shim, "--port", String(port)],
+      port,
+      env: {
+        INTERPRETER_MODEL: process.env.AUTOINJECTOR_INTERPRETER_MODEL || "",
+        INTERPRETER_API_BASE: process.env.AUTOINJECTOR_INTERPRETER_API_BASE || "",
+      },
+      onLog: (kind, text) => logEvent("interpreter-shim", { kind, text: String(text).slice(0, 300) }),
+    });
+    logEvent(r && r.ok ? "interpreter-managed-started" : "interpreter-managed-failed", r || {});
+  } catch (e) { logEvent("interpreter-managed-error", { error: String(e) }); }
+}
+// N2: like the interpreter shim, the app can run the local voice shim itself.
+// AUTOINJECTOR_VOICE_SPAWN is the command (e.g. "python"); the shim path + port
+// follow. Spawned on ready, stopped on quit; a failure never blocks startup.
+async function startManagedVoice(explicitCommand) {
+  const command = explicitCommand || process.env.AUTOINJECTOR_VOICE_SPAWN;
+  if (!command) return;
+  const shim = process.env.AUTOINJECTOR_VOICE_SHIM || path.join(__dirname, "..", "integrations", "voice", "voice_shim.py");
+  const port = Number(process.env.AUTOINJECTOR_VOICE_PORT) || 8232;
+  try {
+    const r = await voiceProvider.startManaged({
+      command,
+      args: [shim, "--port", String(port)],
+      port,
+      env: {
+        VOICE_TTS_MODEL: process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "",
+        VOICE_STT_MODEL: process.env.AUTOINJECTOR_VOICE_STT_MODEL || "",
+      },
+      onLog: (kind, text) => logEvent("voice-shim", { kind, text: String(text).slice(0, 300) }),
+    });
+    logEvent(r && r.ok ? "voice-managed-started" : "voice-managed-failed", r || {});
+  } catch (e) { logEvent("voice-managed-error", { error: String(e) }); }
+}
+// --- Butler self-install (setup-manager) --------------------------------------
+// Wire the installer engine to the app's real capabilities: where model files go,
+// how to pull an Ollama model, whether Ollama is present, and how to open a page.
+function configureSetupManager() {
+  try {
+    setupManager.configure({
+      modelsDir: (cat) => outputManager.modelsDir(cat),
+      pullOllamaModel: (model, onProgress) => ollamaManager.pull(model, (line) => { try { onProgress && onProgress(line); } catch (_) {} broadcast("ollama-progress", { model, line }); }),
+      detectOllama: () => ollamaManager.detect(),
+      openExternal: (url) => { try { if (shell && url) shell.openExternal(url); } catch (_) {} },
+    });
+  } catch (e) { logEvent("setup-configure-error", { error: String(e) }); }
+}
+
+// Refresh the cached install-state map (never blocks; best-effort). Broadcasts so
+// any open UI reflects it. Called at startup and after each install.
+function refreshSetupStatus() {
+  setupManager.detectAll().then((all) => {
+    for (const [id, v] of Object.entries(all)) state.setupStatus[id] = v && v.installed;
+    broadcast("setup-status", { status: state.setupStatus });
+  }).catch(() => {});
+}
+
+// After a target installs, turn the capability on so the butler can use it the
+// very next turn — the point of the whole feature is that the user (and butler)
+// shouldn't have to configure anything by hand.
+async function autoWireAfterSetup(target) {
+  const py = setupManager.pythonBin();
+  if (target === "open-interpreter") {
+    // The keystone: start the code shim so RUN_CODE works immediately.
+    await startManagedInterpreter(py);
+    logEvent("setup-autowire", { target, wired: "interpreter-shim" });
+  } else if (target === "voice" || target === "voice-model") {
+    // (Re)start the voice shim; if a model was just downloaded, point at it.
+    let ttsModel = process.env.AUTOINJECTOR_VOICE_TTS_MODEL || "";
+    try {
+      const voiceDir = outputManager.modelsDir("voice");
+      const onnx = fs.readdirSync(voiceDir).find((f) => f.endsWith(".onnx"));
+      if (onnx) ttsModel = path.join(voiceDir, onnx);
+    } catch (_) {}
+    if (ttsModel) process.env.AUTOINJECTOR_VOICE_TTS_MODEL = ttsModel;
+    await startManagedVoice(py);
+    logEvent("setup-autowire", { target, wired: "voice-shim", ttsModel: ttsModel ? path.basename(ttsModel) : null });
+  }
+  // ollama-model / stability-matrix need no in-app wiring.
+}
+
+// The local bridge can run tools and code, so it must never be open: if the
+// operator didn't supply a token we generate one and persist it (0600) so trusted
+// local callers — the merged supervisor, the Python shim — can read it, while a
+// drive-by web page cannot. Returns the token string.
+function bridgeToken() {
+  if (process.env.AUTOINJECTOR_BRIDGE_TOKEN) return process.env.AUTOINJECTOR_BRIDGE_TOKEN;
+  const gen = () => require("crypto").randomBytes(24).toString("hex");
+  try {
+    const f = path.join(userDataDir(), "autoinjector-bridge-token.txt");
+    let t = "";
+    try { t = String(fs.readFileSync(f, "utf8")).trim(); } catch (_) {}
+    if (!t) { t = gen(); fs.writeFileSync(f, t, { mode: 0o600 }); }
+    return t;
+  } catch (_) { return gen(); }
+}
+
+// --- Phone companion -----------------------------------------------------------
+// The bridge serves a minimal phone page (mobile.html). Loaded once at boot.
+function loadMobilePage() {
+  try { return fs.readFileSync(path.join(__dirname, "mobile.html"), "utf8"); }
+  catch (_) { return null; }
+}
+// First non-internal IPv4 — the address a phone on the same Wi-Fi uses to reach
+// the PC. Best-effort; null if it can't be determined.
+function lanAddress() {
+  try {
+    const ifaces = require("os").networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of ifaces[name] || []) {
+        if (ni && ni.family === "IPv4" && !ni.internal && ni.address) return ni.address;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+// LAN access is OFF by default (localhost only): binding to the network is a
+// deliberate opt-in, remembered in a tiny sidecar file so it survives restarts.
+function phoneLanFile() { return path.join(userDataDir(), "autoinjector-phone.json"); }
+function phoneLanEnabled() {
+  if (process.env.AUTOINJECTOR_BRIDGE_HOST === "0.0.0.0") return true;
+  try { return JSON.parse(fs.readFileSync(phoneLanFile(), "utf8")).lan === true; } catch (_) { return false; }
+}
+function setPhoneLanEnabled(on) { try { fs.writeFileSync(phoneLanFile(), JSON.stringify({ lan: !!on })); } catch (_) {} }
+
+let bridgeRuntime = { host: "127.0.0.1", port: 8765, token: null, lan: false };
+function phoneInfo() {
+  const lanEnabled = bridgeRuntime.lan && bridgeRuntime.host === "0.0.0.0";
+  const ip = lanAddress();
+  const reachHost = lanEnabled && ip ? ip : "127.0.0.1";
+  const token = bridgeRuntime.token;
+  const url = token ? `http://${reachHost}:${bridgeRuntime.port}/m?token=${encodeURIComponent(token)}` : null;
+  return { ok: true, url, lanEnabled, lanIp: ip, port: bridgeRuntime.port, hasToken: !!token };
+}
+ipcMain.handle("phone:info", () => phoneInfo());
+ipcMain.handle("phone:set-lan", async (_evt, { enabled } = {}) => {
+  setPhoneLanEnabled(!!enabled);
+  try { await serviceBridge.stop(); } catch (_) {}
+  await startServiceBridge();
+  logEvent("phone-lan-changed", { enabled: !!enabled });
+  return phoneInfo();
+});
+
+async function startServiceBridge() {
+  if (process.env.AUTOINJECTOR_BRIDGE === "0") return; // opt-out (tests set this)
+  const port = Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
+  const lan = phoneLanEnabled();
+  const host = process.env.AUTOINJECTOR_BRIDGE_HOST || (lan ? "0.0.0.0" : "127.0.0.1");
+  const token = bridgeToken();
+  // Off by default: even an authenticated caller can't run a risk:"ask" tool over
+  // the bridge unless the operator explicitly turns this on.
+  const allowRiskyTools = process.env.AUTOINJECTOR_BRIDGE_ALLOW_RISKY === "1";
+  try {
+    const r = await serviceBridge.start({ port, host, token, allowRiskyTools });
+    if (r && r.ok) {
+      bridgeRuntime = { host, port: r.port, token, lan };
+      let tokenFile = null;
+      try { tokenFile = path.join(userDataDir(), "autoinjector-bridge-token.txt"); } catch (_) {}
+      logEvent("bridge-started", { url: r.url, tokenProtected: true, tokenFile, allowRiskyTools, lan });
+    } else logEvent("bridge-start-failed", { error: r && r.error });
+  } catch (e) { logEvent("bridge-start-error", { error: String(e) }); }
+}
+
+// The user wants the one "stuff and thing" folder to live INSIDE the AutoInjector
+// app folder (e.g. …/GitHub/AutoInjector/stuff and thing), next to the program —
+// not under Documents. That's the folder one level above this desktop-app dir.
+// If that location isn't writable (e.g. a packaged app installed read-only), fall
+// back to Documents/AutoInjector so downloads/creations still have a home.
+function contentBaseFolder() {
+  const appFolder = path.join(__dirname, "..");
+  try {
+    fs.mkdirSync(appFolder, { recursive: true });
+    fs.accessSync(appFolder, fs.constants.W_OK);
+    return appFolder;
+  } catch (_) {
+    try { return path.join(app.getPath("documents"), "AutoInjector"); } catch (_) { return appFolder; }
+  }
+}
+
 // --- BookForge bridge (experimental, OFF by default) ------------------------
 // docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md is normative. A loopback-only HTTP
 // server (bookforge-bridge.js, pure Node) lets BookForge send one prompt to one
@@ -3309,7 +5123,7 @@ ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
 let bookforgeBridge = null;
 let bookforgeStartError = null;
 function bookforgeBridgePort() {
-  const p = Number(process.env.AUTOINJECTOR_BRIDGE_PORT);
+  const p = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
   return Number.isInteger(p) && p > 0 && p < 65536 ? p : bookforgeBridgeMod.DEFAULT_PORT;
 }
 function bookforgeSiteReady(site) {
@@ -3421,12 +5235,36 @@ app.whenReady().then(() => {
   loadPersistedState();
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
-  try { const r = outputManager.init(app.getPath("documents")); logEvent("output-init", { root: r }); } catch (e) { logEvent("output-init-error", { error: String(e) }); }
+  try {
+    const r = outputManager.init(contentBaseFolder()); logEvent("output-init", { root: r });
+    // Give the tool registry its output sandbox + the computer-power deps (a
+    // process runner, the OS "open" helpers, and where the butler's self-made
+    // tools persist), then re-register any tools he made in a past session.
+    toolProvider.configure({
+      outputRoot: r,
+      spawn: require("child_process").spawn,
+      openPath: (p) => shell.openPath(p),
+      openExternal: (u) => shell.openExternal(u),
+      toolsFile: path.join(userDataDir(), "autoinjector-butler-tools.json"),
+    });
+    try { const lt = toolProvider.loadCreatedTools(); if (lt && lt.loaded) logEvent("tools-loaded", { count: lt.loaded }); } catch (e) { logEvent("tools-load-error", { error: String(e) }); }
+    logEvent("models-init", { root: outputManager.modelsRoot() });
+    configureSetupManager();
+    refreshSetupStatus();
+    // Run the app's own Ollama, pointed at the shared models/llm folder, so every
+    // model the app downloads lands in "stuff and thing". Best-effort — if Ollama
+    // isn't installed or the port is busy, we log and fall back to the user's own.
+    startManagedOllama().catch((e) => logEvent("ollama-managed-error", { error: String(e) }));
+  } catch (e) { logEvent("output-init-error", { error: String(e) }); }
   try { buildAppMenu(); } catch (e) { logEvent("menu-init-error", { error: String(e) }); }
   createWindow();
+  startServiceBridge();
+  startManagedInterpreter();
+  startManagedVoice();
   // BookForge bridge: listens only if the user turned it on (persisted; default OFF).
   if (state.bookforge.enabled) startBookforgeBridge().catch((e) => logEvent("bookforge-error", { error: String(e) }));
 });
 app.on("will-quit", () => { stopBookforgeBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
+app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

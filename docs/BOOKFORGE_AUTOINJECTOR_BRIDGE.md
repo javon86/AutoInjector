@@ -14,7 +14,7 @@ BookForge (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0
 ## Transport and security
 
 * HTTP/1.1 on `127.0.0.1` only (never 0.0.0.0). Default port **17891**
-  (env `AUTOINJECTOR_BRIDGE_PORT` overrides). JSON bodies, UTF-8.
+  (env `AUTOINJECTOR_BOOKFORGE_PORT` overrides). JSON bodies, UTF-8.
 * Every request needs `Authorization: Bearer <token>`. The token is a random
   >=24-byte URL-safe string generated on first enable, stored in the app's userData
   directory (`bookforge-bridge-token`, mode 0600), shown/copyable in the desktop app's

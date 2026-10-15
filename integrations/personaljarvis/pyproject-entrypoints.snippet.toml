@@ -1,0 +1,9 @@
+# Add these two lines under PersonalJarvis's existing
+# [project.entry-points."jarvis.tool"] table in its pyproject.toml, then run
+#   pip install -e . --no-deps
+# from the PersonalJarvis repo root so the plugin registry picks them up.
+
+[project.entry-points."jarvis.tool"]
+# ... keep the existing entries above ...
+council-ask = "jarvis.plugins.tool.council_ask:CouncilAskTool"
+run-code    = "jarvis.plugins.tool.interpreter_run:RunCodeTool"

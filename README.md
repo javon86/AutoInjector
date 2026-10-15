@@ -1,5 +1,9 @@
 # AutoInjector
 
+> 📄 **Status:** parts of the repo are parked / under construction (the ATELIER
+> book-making engine and some older docs). They're not on the app's runtime path
+> and can't affect how it runs — see [`UNDER_CONSTRUCTION.md`](UNDER_CONSTRUCTION.md).
+
 Automates the ChatGPT, Claude and Gemini **web UIs** by copy/paste-style DOM
 injection — no API keys, it drives your already-logged-in browser sessions, so
 you can get two or three AIs working on the same problem together and keep one
@@ -42,7 +46,7 @@ and opens one window with ChatGPT, Claude and Gemini as three live panes plus a
 control panel for routing messages between them. No Chrome/extension needed, only
 [Node.js](https://nodejs.org/) as a one-time prerequisite. Full walkthrough,
 Linux instructions, and how to build a real `.exe`/`.dmg` installer are in
-[`desktop-app/README.md`](C:\Users\javon\Documents\GitHub\AutoInjector\desktop-app\README.md).
+[`desktop-app/README.md`](desktop-app/README.md).
 
 ## Install the extension
 

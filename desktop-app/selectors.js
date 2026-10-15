@@ -21,6 +21,15 @@ module.exports = {
       'button[aria-label*="Send"]',
       'form button[type="submit"]'
     ],
+    // While a reply is streaming, the Send button is replaced by a Stop button.
+    // A visible Stop button is the site's own "still generating" signal — when it
+    // disappears (Send returns), the model is done speaking. Best-effort/fallback
+    // like every list here: if none match, completion falls back to the tag/timer.
+    STOP_CANDIDATES: [
+      'button[data-testid="stop-button"]',
+      'button[aria-label*="Stop"]',
+      'button[aria-label*="stop"]'
+    ],
     ASSISTANT_CANDIDATES: [
       '[data-testid="assistant-message"]',
       'div[data-message-author-role="assistant"]',
@@ -75,6 +84,11 @@ module.exports = {
       'button[data-testid="send-message-button"]',
       'form button[type="submit"]'
     ],
+    STOP_CANDIDATES: [
+      'button[aria-label*="Stop"]',
+      'button[aria-label*="stop"]',
+      'button[data-testid="stop-button"]'
+    ],
     ASSISTANT_CANDIDATES: [
       '[data-testid="chat-message"]',
       "div.font-claude-message",
@@ -120,6 +134,12 @@ module.exports = {
       'button[aria-label="Send message"]',
       "button.send-button",
       'form button[type="submit"]'
+    ],
+    STOP_CANDIDATES: [
+      'button[aria-label*="Stop"]',
+      'button[aria-label*="stop"]',
+      "button.stop",
+      'button.send-button.stop'
     ],
     ASSISTANT_CANDIDATES: [
       "message-content .markdown",

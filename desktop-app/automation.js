@@ -16,13 +16,26 @@ function siteConfig(site) {
   return cfg;
 }
 
+// E11: when a provider parks a conversation behind a safeguard (e.g. Claude's
+// "reasoning_extraction" pause), the composer disappears — so a send fails with a
+// bare INPUT_NOT_FOUND that tells the user nothing. These markers, checked ONLY
+// when the input is already missing, let us report PROVIDER_PAUSED with a reason
+// instead. Specific phrases only, so an ordinary reply never trips them.
+const DEFAULT_PAUSE_MARKERS = [
+  "reasoning_extraction",
+  "paused this conversation",
+  "conversation is paused",
+  "unable to continue the conversation",
+];
+
 function buildSendScript(site, text, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
     INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES
+    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS
   });
 
   return `
@@ -123,8 +136,26 @@ function buildSendScript(site, text, overrides) {
       return { ok: false, error: "SEND_NOT_CONFIRMED" };
     }
 
+    // E11: distinguish a provider-paused conversation from a plain missing box.
+    function detectPause() {
+      let body = "";
+      try { body = String((document.body && (document.body.innerText || document.body.textContent)) || "").toLowerCase(); } catch (_) { return null; }
+      if (!body) return null;
+      for (const mk of (CFG.PAUSE_MARKERS || [])) {
+        const needle = String(mk || "").toLowerCase();
+        if (needle && body.indexOf(needle) !== -1) return mk;
+      }
+      return null;
+    }
+
     const inj = await injectText(CFG.text);
-    if (!inj.ok) return inj;
+    if (!inj.ok) {
+      if (inj.error === "INPUT_NOT_FOUND") {
+        const reason = detectPause();
+        if (reason) return { ok: false, error: "PROVIDER_PAUSED", reason };
+      }
+      return inj;
+    }
     return attemptSend();
   })();
   `;
@@ -134,19 +165,63 @@ function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
-    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES
+    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    INPUT_CANDIDATES: ov.input ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
   });
 
+  // Returns { ok, text, generating, sendReady }. `generating` is the site's own
+  // "still producing this reply" signal: while a reply streams, the Send button
+  // is replaced by a Stop button (or Send is disabled). main.js uses it to avoid
+  // capturing a half-written reply — it only completes a turn once generation has
+  // stopped (the Send button is back / clickable). If the stop/send selectors
+  // don't match (a site changed its DOM), `generating` is false and completion
+  // falls back to the [FROM:] tag / stability timer exactly as before.
   return `
   (() => {
     const CFG = ${payload};
+    function findAny(cands) {
+      for (const sel of (cands || [])) { try { const n = document.querySelector(sel); if (n) return n; } catch (_) {} }
+      return null;
+    }
+    function isVisible(el) {
+      if (!el) return false;
+      try { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch (_) { return false; }
+    }
+    function isDisabled(el) {
+      if (!el) return false;
+      try { return !!el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("disabled") !== null; } catch (_) { return false; }
+    }
+
     const all = [];
     for (const sel of CFG.ASSISTANT_CANDIDATES) {
       document.querySelectorAll(sel).forEach((n) => all.push(n));
     }
-    if (!all.length) return { ok: true, text: "" };
-    const node = all[all.length - 1];
-    return { ok: true, text: node.innerText || node.textContent || "" };
+    const node = all.length ? all[all.length - 1] : null;
+    const text = node ? (node.innerText || node.textContent || "") : "";
+
+    // Is the composer empty? A Send button is ALSO disabled when there's simply
+    // nothing to send (idle, empty composer) — so an empty composer must NOT be
+    // read as "still generating" (E03: a finished reply left the Send button
+    // disabled and its reply stayed uncaptured until a later send).
+    const inputBox = findAny(CFG.INPUT_CANDIDATES);
+    const composerText = inputBox ? (inputBox.value != null ? inputBox.value : (inputBox.innerText || inputBox.textContent || "")) : "";
+    const composerEmpty = !String(composerText).trim();
+
+    // Generation is in progress if a Stop button is visible (the reliable signal),
+    // or — only for sites with no Stop button that disable Send mid-stream — if
+    // Send is disabled WHILE the composer still holds text. A disabled Send over an
+    // empty composer is the idle state, not streaming.
+    const stopBtn = findAny(CFG.STOP_CANDIDATES);
+    const sendBtn = findAny(CFG.SEND_CANDIDATES);
+    let generating = false;
+    if (stopBtn && isVisible(stopBtn)) generating = true;
+    else if (sendBtn && isDisabled(sendBtn) && !composerEmpty) generating = true;
+    // The Send button is back and clickable — the model is done speaking.
+    const sendReady = !generating && !!sendBtn && isVisible(sendBtn) && !isDisabled(sendBtn);
+
+    return { ok: true, text, generating, sendReady, composerEmpty };
   })();
   `;
 }
