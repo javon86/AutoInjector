@@ -29,6 +29,8 @@ from .engine import Engine
 from .errors import BookforgeError, error
 from .requests import build_request
 from .selftest import SelfTestRunner
+from .sets_guide import sets_overview
+from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .store import Store, new_id, utcnow
 
 log = logging.getLogger("bookforge.server")
@@ -127,6 +129,8 @@ class App:
                          "package_sha256": self.engine.contracts.package_sha256}
         if parts == ["operations"] and method == "GET":
             return 200, self.operations()
+        if parts == ["sets"] and method == "GET":
+            return 200, self.sets(principal, query)
         if len(parts) == 3 and parts[0] == "operations" and parts[2] == "schema" and method == "GET":
             return 200, self.operation_schema(parts[1])
         if parts == ["slots"] and method == "GET":
@@ -178,6 +182,11 @@ class App:
                 return 201, self.create_branch(principal, pid, body or {})
             if len(parts) == 3 and parts[2] == "backup" and method == "POST":
                 return 200, self.backup(principal, pid)
+            if len(parts) == 3 and parts[2] == "profile" and method in ("GET", "PUT"):
+                self._require_access(principal, pid)
+                if method == "GET":
+                    return 200, get_profile(self.store, pid)
+                return 200, save_profile(self.store, pid, body if isinstance(body, dict) else None)
             if len(parts) >= 4 and parts[2] == "branches":
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
@@ -200,6 +209,10 @@ class App:
                     return 200, self.export(pid, branch)
                 if rest == ["progress"] and method == "GET":
                     return 200, self.progress(pid, branch)
+                if rest == ["book"] and method == "GET":
+                    return 200, BookPath(self.engine, principal, pid, branch).status()
+                if len(rest) == 2 and rest[0] == "book" and method == "POST":
+                    return 200, BookPath(self.engine, principal, pid, branch).act(rest[1], body if isinstance(body, dict) else {})
         raise ApiError(404, "NOT_FOUND", path, "no such endpoint")
 
     def route_ai(self, method: str, parts: list, query: dict, body, principal: str) -> tuple[int, object]:
@@ -261,6 +274,18 @@ class App:
                        | {"set": op_id[0], "assist": assist_supports(self.engine.contracts, op_id)})
         return out
 
+    def sets(self, principal: str, query: dict) -> dict:
+        """The 11 module sets with plain-language guide data; counts and "what's next" for a project."""
+        pid = (query.get("project_id") or [None])[0]
+        if not pid:
+            return sets_overview(self.engine.contracts)
+        branch = (query.get("branch_id") or ["main"])[0]
+        self._require_access(principal, pid, branch)
+        out = sets_overview(self.engine.contracts, self.store.list_records(pid, branch),
+                            self.store.feature_manifest(pid, branch))
+        out.update(project_id=pid, branch_id=branch)
+        return out
+
     def operation_schema(self, op_id: str) -> dict:
         c = self.engine.contracts
         if c.operation(op_id) is None:
@@ -283,6 +308,7 @@ class App:
         return {"project_id": pid, "name": p["name"], "owner_id": p["owner_id"], "created_at": p["created_at"],
                 "settings": json.loads(p["settings"]), "story_time_unit": p["story_time_unit"],
                 "currency": p["currency"], "branches": branches, "record_counts": counts,
+                "profile": get_profile(self.store, pid),
                 "branch_id": branch, "manifest": self.store.feature_manifest(pid, branch)}
 
     def create_project(self, principal: str, body: dict) -> dict:
@@ -292,10 +318,14 @@ class App:
         features = body.get("features") or {}
         if not isinstance(features, dict) or any(not isinstance(v, bool) for v in features.values()):
             raise ApiError(400, "INVALID_INPUT", "/features", "features must be booleans")
+        if body.get("profile") is not None:
+            clean_profile(body.get("profile"))  # refuse a bad profile before anything is created
         pid = self.engine.bootstrap_project(principal, name, settings=body.get("settings") or {},
                                             features=features, release_profiles=body.get("release_profiles"),
                                             story_time_unit=body.get("story_time_unit") or "seconds",
                                             currency=body.get("currency") or "USD")
+        if body.get("profile") is not None:
+            save_profile(self.store, pid, body.get("profile"))
         return self.project_summary(principal, pid)
 
     def create_branch(self, principal: str, pid: str, body: dict) -> dict:
@@ -536,6 +566,20 @@ def make_handler(app: App):
     return Handler
 
 
+def already_running(host: str, port: int, token: str) -> bool:
+    """True when a Bookforge with this data folder (same access token) already answers on host:port."""
+    import http.client  # noqa: PLC0415
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=1.5)
+        conn.request("GET", "/api/session", headers={"Authorization": f"Bearer {token}"})
+        resp = conn.getresponse()
+        body = resp.read()
+        conn.close()
+        return resp.status == 200 and b"contract_version" in body
+    except (OSError, http.client.HTTPException):
+        return False
+
+
 def default_data_dir() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
@@ -554,11 +598,30 @@ def main(argv=None):
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         log.warning("Binding to %s exposes the workspace beyond this computer; keep the token private.", args.host)
     app = App(args.data_dir)
-    try:
-        httpd = ThreadingHTTPServer((args.host, args.port), make_handler(app))
-    except OSError as exc:
-        print(f"Could not start on {args.host}:{args.port}: {exc}. Try --port 8781.", file=sys.stderr)
+    port_given = any(a == "--port" or a.startswith("--port=") for a in (argv if argv is not None else sys.argv[1:])) \
+        or bool(os.environ.get("BOOKFORGE_PORT"))
+    if not port_given and already_running(args.host, args.port, app.token):
+        url = f"http://{args.host}:{args.port}/#token={app.token}"
+        print(f"Bookforge is already running. Opening it: {url}")
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
+    httpd = None
+    ports = [args.port] if port_given else [args.port] + [p for p in range(args.port + 1, args.port + 20)]
+    last_exc = None
+    for port in ports:
+        try:
+            httpd = ThreadingHTTPServer((args.host, port), make_handler(app))
+            break
+        except OSError as exc:
+            last_exc = exc
+    if httpd is None:
+        print(f"Could not start on {args.host}:{args.port}: {last_exc}. Close the program using that port, or "
+              f"start with --port 8790.", file=sys.stderr)
         return 2
+    if httpd.server_address[1] != args.port:
+        print(f"Port {args.port} is busy, so Bookforge uses port {httpd.server_address[1]} instead.")
+    args.port = httpd.server_address[1]
     url = f"http://{args.host}:{args.port}/#token={app.token}"
     print(f"Bookforge {__version__} running. Data: {args.data_dir}")
     print(f"Open: {url}")

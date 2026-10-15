@@ -64,6 +64,7 @@ SLOT_WAIT_S = 600
 AI_DEADLINE_S = 900
 MAX_SECTION_COUNT = 12
 MAX_RUN_ITEMS = 40
+MAX_GUIDANCE = 2000
 
 FIX = {
     "CAPABILITY_UNAVAILABLE": "Connect AutoInjector in Settings, or add an API key.",
@@ -169,10 +170,17 @@ def fillable_fields(contracts, op_id: str) -> list[str]:
     return [k for k, v in props.items() if k not in AUTHOR_ONLY and not _is_ref_field(v)]
 
 
+# Sets whose creative CREATE inputs (ideas, briefs, instructions, goals) an AI may propose for review.
+# E (state from accepted evidence), H/J (evidence-bound findings) and I/K (infrastructure) never are,
+# nor are LOGIC operations; G10's inputs are computed geometry, not prose.
+ASSIST_SETS = "ABCDFG"
+ASSIST_EXCLUDED = {"G10"}
+
+
 def supports(contracts, op_id: str) -> bool:
-    """Set A always; other sets where the CREATE payload has fields an AI can safely propose."""
+    """Set A always; AI/HYBRID operations of B, C, D, F, G whose CREATE payload has fields an AI can propose."""
     op = contracts.operation(op_id)
-    if op is None or op_id[0] not in "AB":
+    if op is None or op_id[0] not in ASSIST_SETS or op_id in ASSIST_EXCLUDED:
         return False
     if op_id[0] == "A":
         return True
@@ -211,6 +219,17 @@ def ai_schema(contracts, op_id: str) -> dict:
 
 
 # ====================================================================== context helpers
+def book_profile_brief(store, pid: str) -> dict:
+    """The author's book profile (title, genre, audience, length, tone, idea) for AI context; never logged."""
+    from .book_path import get_profile  # noqa: PLC0415
+    try:
+        prof = get_profile(store, pid)
+    except Exception:  # noqa: BLE001 - context is best effort
+        return {}
+    return {k: prof[k] for k in ("title", "genre", "audience", "length", "tone", "idea") if prof.get(k)}
+
+
+
 def _fact_line(f: dict) -> str:
     v = f.get("value")
     v = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
@@ -509,6 +528,9 @@ class AssistService:
                    "canon": {"approved_records": approved, "draft_records": drafts},
                    "context_records": ctx_records,
                    "predicate_conventions": pr.registry_brief(self.contracts.predicate_registry)}
+        profile = book_profile_brief(self.store, pid)
+        if profile:
+            context["book_profile"] = profile
         if extra_context:
             context.update(extra_context)
         schema = ai_schema(self.contracts, op_id)
@@ -836,8 +858,21 @@ class AssistService:
             sess = BibleSession(self, principal, pid, branch, idea.strip(), slot)
             self._sessions[sess.id] = sess
         if counts:
-            sess.enqueue(self._parse_counts(sess, counts), slot)
+            sess.enqueue(self._parse_counts(sess, counts), slot, self._guidance(body))
         return sess.public()
+
+    @staticmethod
+    def _guidance(body: dict) -> str | None:
+        """Optional author guidance for one run (roles/types to cover, tone...). Never logged or reported."""
+        g = body.get("guidance")
+        if g is None:
+            return None
+        if not isinstance(g, str):
+            raise BookforgeError("INVALID_INPUT", "/guidance", "guidance must be text", status="REJECTED")
+        if len(g) > MAX_GUIDANCE:
+            raise BookforgeError("INVALID_INPUT", "/guidance", f"guidance is limited to {MAX_GUIDANCE} characters",
+                                 status="REJECTED")
+        return g.strip() or None
 
     def _parse_counts(self, sess: "BibleSession", counts) -> dict:
         if not isinstance(counts, dict):
@@ -891,7 +926,7 @@ class AssistService:
         if not counts:
             raise BookforgeError("MISSING_INPUT", "/sections", "tick at least one section with a number above 0",
                                  status="REJECTED")
-        sess.enqueue(counts, slot)
+        sess.enqueue(counts, slot, self._guidance(body))
         return sess.public()
 
     def regenerate_bible_item(self, principal: str, sid: str, body: dict) -> dict:
@@ -1006,13 +1041,13 @@ class BibleSession:
         return {"markdown": self.report_paths[0].name, "json": self.report_paths[1].name}
 
     # ------------------------------------------------------------------ queue
-    def enqueue(self, counts: dict, slot):
+    def enqueue(self, counts: dict, slot, guidance: str | None = None):
         with self._lock:
             run_no = len(self.runs) + len(self.queue) + (1 if self.current else 0) + 1
             for op_id, n in counts.items():
                 sec = self._section(op_id)
                 sec.update(status="queued", message="Queued", requested=n, error=None)
-            self.queue.append({"run": run_no, "sections": dict(counts), "slot": slot})
+            self.queue.append({"run": run_no, "sections": dict(counts), "slot": slot, "guidance": guidance})
             self.cancelled = False
             self._start()
 
@@ -1082,6 +1117,7 @@ class BibleSession:
         t0 = time.time()
         run = {"run": task["run"], "kind": "sections", "sections": dict(counts), "started_at": _iso(),
                "finished_at": None, "slot": None, "model": None, "sketch": "pending", "sketch_ms": 0,
+               "guided": bool(task.get("guidance")),
                "elapsed_ms": 0, "items": []}
         self.runs.append(run)
         for op_id in counts:
@@ -1092,7 +1128,7 @@ class BibleSession:
         try:
             self._phase("Asking for a world sketch (names and roles)")
             ts = time.time()
-            sketch = self._sketch(job, counts)
+            sketch = self._sketch(job, counts, task.get("guidance"))
             run["sketch"], run["sketch_ms"] = "ok", int((time.time() - ts) * 1000)
             run["slot"], run["model"] = job.slot, job.model
         except (Cancelled, BookforgeError, Exception) as exc:  # noqa: BLE001
@@ -1118,7 +1154,7 @@ class BibleSession:
                 it.update(status="cancelled", message="Cancelled")
                 continue
             sec["message"] = f"Generating “{it['name']}” ({sec['done'] + sec['failed'] + 1} of {sec['total']})"
-            self._generate_item(it, task["slot"], None)
+            self._generate_item(it, task["slot"], task.get("guidance"))
             if it["status"] == "done":
                 sec["done"] += 1
             else:
@@ -1155,7 +1191,7 @@ class BibleSession:
                  "subject_id": self.items[k]["subject_id"], "role": self.items[k]["role"][:200],
                  "status": self.items[k]["status"]} for k in self.order]
 
-    def _sketch(self, job: Job, counts: dict) -> list[dict]:
+    def _sketch(self, job: Job, counts: dict, guidance: str | None = None) -> list[dict]:
         svc = self.svc
         sections = {op: svc.contracts.operation(op)["name"] for op in counts}
         schema = {"type": "object", "additionalProperties": False,
@@ -1175,12 +1211,19 @@ class BibleSession:
                 "context.existing_items / context.canon) it is tied to - e.g. a character's home location, a faction's "
                 "members, a relationship's two characters. Fit the world summary and existing entries; never reuse an "
                 "existing name for a different thing. world_summary: two or three sentences describing the world. "
-                "Return only the JSON object.")
+                "Return only the JSON object."
+                + (" Follow context.author_guidance for this run (for example cover the listed roles or types, one "
+                   "item per listed role where the counts allow)." if guidance else ""))
         context = {"book_idea": self.idea, "requested": counts, "sections": sections,
                    "world_summary_so_far": self.world_summary, "existing_items": self._known_items(),
                    "canon": {"approved_records": [{k: a[k] for k in ("module_id", "kind", "record_id", "names",
                                                                         "concept", "subject_ids")} for a in approved],
                              "draft_records": drafts}}
+        if guidance:
+            context["author_guidance"] = guidance
+        profile = book_profile_brief(svc.store, self.project_id)
+        if profile:
+            context["book_profile"] = profile
         data = svc._call_ai(job, op_for_roles="A", task=task, schema=schema, context=context, protected=protected)
         self._phase("World sketch ready", job)
         if isinstance(data.get("world_summary"), str) and data["world_summary"].strip() and not self.world_summary:

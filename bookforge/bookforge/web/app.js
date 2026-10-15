@@ -1,19 +1,21 @@
 // Bookforge browser workspace. Vanilla ES module, no network access beyond this local server.
 // All data is rendered with DOM APIs (never innerHTML with server data).
+import { configureClipboard, copyText, readText } from './clipboard.js';
 
 /* ======================================================================= constants */
+// Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
 const SETS = {
-  A: ['Universe', 'Foundational canon: characters, worlds, cultures, systems and their facts.'],
-  B: ['Planning', 'Premise, plot, structure, outlines and scene plans.'],
-  C: ['Writing', 'Canonical manuscript prose: chapters, scenes and passages.'],
-  D: ['Art', 'Visual style, character references, illustrations, covers and maps.'],
-  E: ['State', 'Accepted story events and temporal state tracking.'],
-  F: ['Editing', 'Editing proposals and review evidence that feed prose changes back to Writing.'],
-  G: ['Assembly/Export', 'Compiling, layout, typography and PDF/EPUB/DOCX exports.'],
-  H: ['Quality', 'Quality-control reports and readiness checks.'],
-  I: ['Storage/Context', 'Imports, schemas, provenance, approvals, locks and context packages.'],
-  J: ['Reconciliation', 'Contradiction detection, repair proposals and decision records.'],
-  K: ['Orchestration', 'Projects, scheduling, queue attempts, approvals and resources.'],
+  A: ['Universe & Characters', 'Your story bible: characters, places, worlds, cultures and the rules of your world.', '🌍'],
+  B: ['Story Planning', 'Premise, genre and tone, main plot, character arcs, structure and the chapter outline.', '🗺️'],
+  C: ['Writing', 'Turns the outline into chapter and scene prose — written by your AI or by you.', '✍️'],
+  D: ['Art & Maps', 'Visual style, character references, illustrations, cover art and maps.', '🎨'],
+  E: ['Story State & Continuity', 'What is true at each point of the story: places, knowledge, injuries, items, threads.', '🧭'],
+  F: ['Editing', 'Reviews and suggested edits; changes reach the manuscript only through Writing.', '✂️'],
+  G: ['Assemble & Export', 'Orders the approved chapters, lays out the book and exports PDF, EPUB and DOCX.', '📚'],
+  H: ['Quality Checks', 'Checks the finished book and its files and says whether it is ready to release.', '✅'],
+  I: ['Storage & Context', 'Behind the scenes: imports, schemas, search, context packages, approvals and history.', '🗄️'],
+  J: ['Fix Contradictions', 'Finds facts that disagree and helps you fix them with the smallest change.', '⚖️'],
+  K: ['Project Control', 'Scheduling, the job queue, approvals, pause/resume, AI selection and cost control.', '⚙️'],
 };
 const FEATURES = [
   ['artwork', 'Artwork', 'Enables set D (art) and artwork checks.'],
@@ -63,6 +65,9 @@ const S = {
   navOpen: loadJSON('bf:navOpen', {}),
   assistForms: {}, skipSaveKeys: new Set(), slotCache: null,
   authFailed: false,
+  guide: null,             // GET /api/sets for the open project (sets, counts, "what's next")
+  prefill: new Map(),      // draft key -> form values handed to the next render (copy, paste, AI)
+  pendingFocus: null,      // 'new': focus the New form after the next route
 };
 
 /* ======================================================================= small utils */
@@ -249,7 +254,32 @@ async function refreshRecords() {
     } catch { /* labels are cosmetic */ }
   }
   renderNav();
+  if (S.guide && S.guide.project_id === S.pid) loadGuide().then(() => { if (S.onGuideChanged) { try { S.onGuideChanged(); } catch { /* cosmetic */ } } });
   if (S.onRecordsChanged) { try { S.onRecordsChanged(); } catch { /* view-local refresh */ } }
+}
+/** Set guide for the open project: names, purposes, op order, featured actions, "what's next". */
+async function loadGuide() {
+  if (!S.pid) { S.guide = null; return null; }
+  try {
+    S.guide = await api('GET', `/sets?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
+  } catch (e) {
+    if (!(S.guide && S.guide.project_id === S.pid && S.guide.branch_id === S.branch)) S.guide = null;
+  }
+  return S.guide;
+}
+function guideSet(letter) {
+  return S.guide && S.guide.sets ? S.guide.sets.find(x => x.set_id === letter) || null : null;
+}
+function setInfo(letter) {
+  const g = guideSet(letter);
+  const f = SETS[letter] || [letter, '', '🧩'];
+  return { id: letter, name: g ? g.name : f[0], purpose: g ? g.purpose : f[1], icon: g ? g.icon : f[2], guide: g };
+}
+/** Operations of a set in the order they are normally worked through (spec stage order). */
+function opOrder(letter) {
+  const g = guideSet(letter);
+  if (g) return g.operations.map(o => o.op_id).filter(id => S.opsById[id]);
+  return S.ops.filter(o => o.set === letter).map(o => o.id);
 }
 function recordTitle(r) {
   if (r.module_id === 'I01' && S.uploadLabels[r.record_id]) return S.uploadLabels[r.record_id];
@@ -310,6 +340,8 @@ async function route() {
   for (const fn of S.leaveHooks.splice(0)) { try { fn(); } catch { /* keep going */ } }
   for (const u of S.blobUrls.splice(0)) URL.revokeObjectURL(u);
   closeNav();
+  closePops();
+  closeJump();
   const seq = ++routeSeq;
   const parts = parseRoute();
   const main = $('#main');
@@ -317,6 +349,7 @@ async function route() {
     await loadOps();
     if (parts[0] === 'p' && parts.length >= 3) {
       await ensureProject(parts[1], parts[2]);
+      await loadGuide();
     } else if (parts[0] !== 'settings') {
       // Home: keep the context of the last project only for the top bar.
     }
@@ -338,12 +371,20 @@ async function route() {
     document.title = h1 ? `${h1.textContent} – Bookforge` : 'Bookforge';
     if (!main.contains(document.activeElement) || document.activeElement === document.body) main.focus({ preventScroll: true });
     window.scrollTo(0, 0);
-  }
+    if (S.pendingFocus === 'new') {
+      S.pendingFocus = null;
+      setTimeout(() => {
+        const hd = $('#new-h');
+        if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus({ preventScroll: true }); hd.scrollIntoView({ block: 'start' }); }
+      }, 60);
+    }
+  } else if (seq === routeSeq) S.pendingFocus = null;
 }
 
 async function pickView(parts) {
   if (!parts.length) return viewHome;
   if (parts[0] === 'settings') return viewSettings;
+  if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
     if (!rest.length) return viewOverview;
@@ -354,6 +395,7 @@ async function pickView(parts) {
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
+    if (rest[0] === 'book') return viewBook;
   }
   return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to projects'))); };
 }
@@ -384,14 +426,23 @@ function renderTop(parts) {
   }
   const links = clear($('#top-links'));
   const here = location.hash || '#/';
-  const add = (href, text) => links.appendChild(h('a', { href, 'aria-current': here === href ? 'page' : null }, text));
-  add('#/', 'Projects');
+  const add = (el, href, text) => el.appendChild(h('a', { href, 'aria-current': here === href ? 'page' : null }, text));
+  links.appendChild(h('a', { href: '#/start', class: 'tb-new', 'aria-current': here === '#/start' ? 'page' : null, title: 'Start a new book (step by step)' }, '🚀 New book'));
+  add(links, '#/', 'Books');
   if (inProject) {
-    add(link('p', S.pid, S.branch), 'Overview');
-    add(link('p', S.pid, S.branch, 'progress'), 'Progress');
-    add(link('p', S.pid, S.branch, 'activity'), 'Activity');
+    add(links, link('p', S.pid, S.branch), 'Overview');
+    links.appendChild(h('a', { href: link('p', S.pid, S.branch, 'book'), 'aria-current': here === link('p', S.pid, S.branch, 'book') ? 'page' : null }, '📘 Make my book'));
   }
-  add('#/settings', 'Settings');
+  add(links, '#/settings', 'Settings');
+  // Less frequent pages live in the "More" menu so the bar stays on one line.
+  const more = clear($('#more-links'));
+  if (inProject) {
+    add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
+    add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
+    add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
+  } else {
+    more.appendChild(h('p', { class: 'small muted more-note' }, 'Open a project for Progress, Activity and the feature manifest.'));
+  }
 }
 
 function renderNav() {
@@ -465,7 +516,9 @@ function loadingState(text) { return stateBox('loading', h('span', null, h('span
 async function viewHome(main) {
   await loadProjects();
   renderTop([]);
-  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Projects')));
+  if (!S.projects.length) { await viewStart(main); return; }
+  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Your books'),
+    h('a', { class: 'btn primary big', href: '#/start' }, '🚀 Start a new book')));
   const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Your projects'));
   if (!S.projects.length) {
     listCard.appendChild(stateBox('empty', 'No projects yet',
@@ -482,7 +535,7 @@ async function viewHome(main) {
     listCard.appendChild(ul);
   }
   main.appendChild(listCard);
-  main.appendChild(projectCreateForm());
+  main.appendChild(h('details', { class: 'card' }, h('summary', null, 'Advanced: create an empty project with chosen features'), projectCreateForm()));
 }
 
 function projectCreateForm() {
@@ -534,11 +587,31 @@ async function viewOverview(main) {
   const p = S.project;
   const totals = S.records.length;
   main.appendChild(h('div', { class: 'page-head' },
-    h('div', null, h('div', { class: 'crumbs' }, h('a', { href: '#/' }, 'Projects'), ' › ', p.name),
-      h('h1', null, p.name)),
-    h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('manifest') }, 'Edit feature manifest'),
+    h('div', null, crumbs(['Your books', '#/'], p.name), h('h1', null, p.name)),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openJump(ev.currentTarget) }, '🔍 Jump to…'),
+      h('a', { class: 'btn', href: plink('manifest'), title: 'The feature manifest: which parts of BookForge this book uses' }, '🎛️ Book features'),
       h('a', { class: 'btn', href: plink('progress') }, 'Progress'))));
-  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'ov-h' }, h('h2', { id: 'ov-h' }, 'Project'),
+  const next = h('div');
+  const drawNext = () => clear(next).appendChild(whatsNextCard(null));
+  drawNext();
+  S.onGuideChanged = drawNext;
+  S.leaveHooks.push(() => { S.onGuideChanged = null; });
+  main.appendChild(next);
+  main.appendChild(h('section', { class: 'card book-cta' },
+    h('div', null, h('h2', null, '📘 Make my book'), h('p', { class: 'small' }, 'One guided checklist from characters to a downloadable PDF, EPUB and Word file. It shows what is done, what needs you and what your AI can do.')),
+    h('a', { class: 'btn primary big', href: plink('book') }, '▶ Open Make my book')));
+  main.appendChild(profileCard());
+  if (!totals) {
+    main.appendChild(stateBox('empty', 'This branch has no records yet',
+      h('p', null, 'Start with Set A: open “Universe & Characters” below and press “Make up characters for me”, or ',
+        h('button', { type: 'button', class: 'link', onclick: ev => openBible(ev.currentTarget) }, 'build a starter story bible'),
+        '. You can also write a premise yourself in ', h('a', { href: plink('op', 'B01') }, 'B01 Premise/Concept Builder'), '.')));
+  }
+  main.appendChild(h('section', { class: 'launcher', 'aria-labelledby': 'sets-h' },
+    h('div', { class: 'launcher-head' }, h('h2', { id: 'sets-h' }, '🧩 Module sets'),
+      h('p', { class: 'small muted' }, 'Each set is one part of making the book. Open a set for what it does, its steps and quick actions. Main path: A → B → C → E → F → G → H.')),
+    setTiles('tile')));
+  main.appendChild(h('details', { class: 'card', 'aria-labelledby': 'ov-h' }, h('summary', { id: 'ov-h' }, 'Project details'),
     h('dl', { class: 'kv' },
       h('dt', null, 'Project ID'), h('dd', null, h('code', null, p.project_id)),
       h('dt', null, 'Branch'), h('dd', null, S.branch),
@@ -550,28 +623,6 @@ async function viewOverview(main) {
         `${l}: ${S.manifest.features[k] ? 'on' : 'off'}`).join(' · ') : 'no manifest'),
       h('dt', null, 'Release profiles'), h('dd', null, S.manifest ? S.manifest.release_profiles.join(', ') : '—'),
       h('dt', null, 'Required operations'), h('dd', null, S.manifest ? String(S.manifest.required_operations.length) : '—'))));
-  if (!totals) {
-    main.appendChild(stateBox('empty', 'This branch has no records yet',
-      h('p', null, 'A good first step is a premise or a piece of canon:'),
-      h('ul', null,
-        h('li', null, h('a', { href: plink('op', 'B01') }, 'B01 Premise/Concept Builder'), ' — needs an idea and goals (an AI slot or a manual candidate writes the premise).'),
-        h('li', null, h('a', { href: plink('op', 'A01') }, 'A01 Character Builder'), ' — needs only a concept.'),
-        h('li', null, h('a', { href: plink('op', 'A03') }, 'A03 World/Planet Builder'), ' — needs only a concept.'))));
-  }
-  const sets = h('div', { class: 'op-cards' });
-  for (const [letter, [name, desc]] of Object.entries(SETS)) {
-    const ops = S.ops.filter(o => o.set === letter);
-    const recs = S.records.filter(r => r.module_id[0] === letter);
-    const withApproved = ops.filter(o => opStats(o.id).approved > 0).length;
-    const stale = recs.filter(r => r.stale).length;
-    sets.appendChild(h('a', { class: 'op-card', href: plink('set', letter) },
-      h('h3', null, `${letter} · ${name}`), h('p', null, desc),
-      h('div', { class: 'row' }, badge('▤', `${recs.length} records`, 'b-muted'),
-        badge('✔', `${withApproved}/${ops.length} ops with approved`, withApproved ? 'b-ok' : 'b-muted'),
-        stale ? badge('⚠︎', `${stale} stale`, 'b-warn') : null)));
-  }
-  main.appendChild(h('section', { 'aria-labelledby': 'sets-h' }, h('h2', { id: 'sets-h' }, 'Set workspaces'), sets));
-  main.appendChild(h('div', { style: 'height:16px' }));
   main.appendChild(branchForm());
 }
 
@@ -603,12 +654,20 @@ function branchForm() {
 
 /* ======================================================================= views: set workspace */
 function viewSet(main, letter) {
-  const [name, desc] = SETS[letter];
+  const info = setInfo(letter);
+  const g = info.guide;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › ', `Set ${letter}`),
-    h('h1', null, `${letter} · ${name} workspace`), h('p', { class: 'muted' }, desc))));
+    crumbs(['Your books', '#/'], [S.project.name, plink()], `${letter} · ${info.name}`),
+    h('h1', null, h('span', { 'aria-hidden': 'true' }, `${info.icon} `), `${letter} · ${info.name}`), h('p', { class: 'muted' }, info.purpose)),
+  h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openSetPanel(letter, ev.currentTarget) }, '🧩 Open the set panel'))));
+  if (g) {
+    main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'set-about' }, h('h2', { id: 'set-about' }, 'What this set is for'),
+      h('p', null, g.about), h('p', { class: 'small' }, h('strong', null, 'Where it fits: '), g.stage),
+      g.featured_actions.length ? h('div', { class: 'featured-row' }, g.featured_actions.map(f => featuredButton(letter, f, false))) : null));
+  }
   const cards = h('div', { class: 'op-cards' });
-  for (const o of S.ops.filter(x => x.set === letter)) {
+  for (const id of opOrder(letter)) {
+    const o = S.opsById[id];
     const st = opStats(o.id);
     cards.appendChild(h('a', { class: 'op-card', href: plink('op', o.id) },
       h('h3', null, `${o.id} ${o.name}`),
@@ -624,7 +683,7 @@ function viewSet(main, letter) {
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openBible(ev.currentTarget) }, '📖 Open the Bible Builder'),
         infoTip('What is the Bible Builder?', ...TIP_BIBLE()))));
   }
-  main.appendChild(h('section', { 'aria-label': `${name} operations` }, cards));
+  main.appendChild(h('section', { 'aria-label': `${info.name} operations` }, h('h2', null, 'Steps in this set'), cards));
 }
 
 /* ======================================================================= views: operation */
@@ -633,13 +692,19 @@ function isCreative(op) { return /AI|HYBRID/.test(op.execution); }
 async function viewOperation(main, opId) {
   const op = S.opsById[opId];
   const schema = await getSchema(opId);
-  const [setName] = SETS[op.set];
+  const sInfo = setInfo(op.set);
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › ',
-      h('a', { href: plink('set', op.set) }, `${op.set} ${setName}`), ' › ', op.id),
+    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${sInfo.name}`, plink('set', op.set)], `${op.id} ${op.name}`),
     h('h1', null, `${op.id} ${op.name}`)),
   h('div', { class: 'row' }, opStateBadge(opId), badge(isCreative(op) ? '✦' : '⚙︎', op.execution, 'b-muted'),
     badge('▦', op.ui_type, 'b-muted'))));
+  main.appendChild(stepNav(opId));
+  const nextBox = h('div');
+  const drawNext = () => clear(nextBox).appendChild(whatsNextCard(opId));
+  drawNext();
+  S.onGuideChanged = drawNext;
+  S.leaveHooks.push(() => { S.onGuideChanged = null; });
+  main.appendChild(nextBox);
 
   const notRequired = S.manifest && !isRequired(opId);
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'op-about' }, h('h2', { id: 'op-about' }, 'About this operation'),
@@ -704,18 +769,45 @@ function recordList(recs) {
 /* ----------------------------------------------------------------------- create section */
 async function createSection(op, schema) {
   const draftKey = `bf:draft:${S.pid}:${S.branch}:${op.id}:new`;
-  const draft = loadJSON(draftKey, null);
+  const draft = takePrefill(draftKey) || loadJSON(draftKey, null);
   if (S.skipSaveKeys) S.skipSaveKeys.delete(draftKey);
   const card = h('section', { class: 'card', 'aria-labelledby': 'new-h' });
   let payloadNode = null;
   const aiBtn = op.assist ? h('button', { type: 'button', class: 'ai-btn', 'aria-haspopup': 'dialog',
     'aria-describedby': 'ai-btn-h', onclick: ev => openAssistPanel(op.id, ev.currentTarget) },
   h('span', { 'aria-hidden': 'true' }, '✨'), ' Fill with AI') : null;
-  card.appendChild(h('div', { class: 'new-head' }, h('h2', { id: 'new-h' }, `New ${op.id} record`), aiBtn,
+  const pasteBtn = h('button', { type: 'button', class: 'paste-btn', title: 'Paste JSON (fills matching fields) or text (goes into the main text field)',
+    onclick: () => pasteIntoForm({
+      op, props: (schema.create_payload && schema.create_payload.properties) || {},
+      current: () => (payloadNode ? payloadNode.get(null) : {}) || {},
+      apply: (values, info) => {
+        S.skipSaveKeys.add(draftKey);
+        const d = { payload: values, manualOn: !!(manualToggle && manualToggle.checked), manual: manualNode ? manualNode.get(null) : undefined,
+          pending: {}, saved_at: new Date().toISOString(), from_paste: info };
+        S.prefill.set(draftKey, d); saveJSON(draftKey, d); route();
+      },
+      onGuidance: op.assist ? text => { openAssistPanel(op.id, pasteBtn); const p = AP.panels.get(`${S.pid}|${S.branch}|${op.id}`); if (p && p.setPrompt) p.setPrompt(text); } : null,
+    }) }, h('span', { 'aria-hidden': 'true' }, '📥'), ' Paste');
+  card.appendChild(h('div', { class: 'new-head' }, h('h2', { id: 'new-h' }, `New ${op.id} record`), pasteBtn, aiBtn,
     aiBtn ? infoTip('What does Fill with AI do?', ...TIP_ASSIST(op)) : null));
   if (aiBtn) card.appendChild(h('p', { class: 'small muted', id: 'ai-btn-h' }, 'Fill with AI: type what you want and one of your AIs fills this form for you to review. Nothing is saved until you press Create.'));
   card.appendChild(h('p', { class: 'muted small' }, 'Fields marked Required must be filled. Optional fields left empty are not sent (absent means “not supplied”).'));
-  if (draft && draft.from_ai) {
+  if (draft && draft.from_book) {
+    card.appendChild(stateBox('draft', 'Prepared by “Make my book” — write it, then press Create',
+      h('p', null, draft.from_book.message || '', ' The links to earlier steps are already filled in. ',
+        h('a', { href: plink('book') }, 'Back to Make my book'))));
+  } else if (draft && (draft.from_copy || draft.from_paste)) {
+    const c = draft.from_copy; const pz = draft.from_paste || {};
+    const skipped = (c ? c.skipped : pz.skipped) || [];
+    card.appendChild(stateBox('draft', c ? `Copied from ${c.record_id} v${c.version}${c.title ? ` “${c.title}”` : ''} — please review`
+      : `Pasted into the form${(pz.filled || []).length ? `: ${pz.filled.map(humanize).join(', ')}` : ''} — please review`,
+    h('p', null, 'Nothing has been saved yet. Check the fields, change anything you like, then press Create. ',
+      c && c.manual ? 'The complete copied record is also in “Manual candidate” below (tick it to use it as-is). ' : '',
+      skipped.length ? `Skipped (not fields of this form): ${skipped.join(', ')}. ` : '',
+      h('button', { type: 'button', class: 'link', onclick: () => {
+        if (confirm('Clear the form?')) { removeKey(draftKey); route(); }
+      } }, 'Clear the form'))));
+  } else if (draft && draft.from_ai) {
     card.appendChild(stateBox('draft', `Filled by AI (${draft.from_ai.label || draft.from_ai.slot || 'AI'}) — please review`,
       h('p', null, 'Check every field below and change anything you like, then press Create. Nothing has been saved yet. ',
         h('button', { type: 'button', class: 'link', onclick: () => {
@@ -1668,10 +1760,10 @@ async function viewRecord(main, rid, ver) {
   const latest = versions[versions.length - 1];
   const cur = versions.find(v => v.version === ver) || latest;
   const op = S.opsById[cur.module_id] || { id: cur.module_id, name: '', set: cur.module_id[0], execution: '' };
-  const [setName] = SETS[op.set] || [''];
+  const setName = SETS[op.set] ? setInfo(op.set).name : '';
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › ',
-      h('a', { href: plink('set', op.set) }, `${op.set} ${setName}`), ' › ', h('a', { href: plink('op', op.id) }, `${op.id} ${op.name}`), ' › ', rid),
+    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${setName}`, plink('set', op.set)],
+      [`${op.id} ${op.name}`, plink('op', op.id)], `${rid} v${cur.version}`),
     h('h1', { class: 'wrap-anywhere' }, recordTitle(cur))),
   h('div', { class: 'row' }, lifecycleBadge(cur.lifecycle), cur.stale ? staleBadge(cur.stale_reason) : null, badge('#', `v${cur.version} of ${latest.version}`, 'b-muted'))));
 
@@ -1726,6 +1818,14 @@ async function viewRecord(main, rid, ver) {
     row.appendChild(rBtn);
   }
   actions.appendChild(row);
+  const isJson = !(cur.representation === 'BINARY_ARTIFACT' || cur.binary);
+  actions.appendChild(h('div', { class: 'row copy-row', role: 'group', 'aria-label': 'Copy and duplicate' },
+    isJson ? h('button', { type: 'button', onclick: () => copyText(recordText(cur, op), 'Copied the record as text') }, '📋 Copy text') : null,
+    isJson ? h('button', { type: 'button', onclick: () => copyText(JSON.stringify(cur.data, null, 2), 'Copied the record data as JSON') }, '📋 Copy JSON') : null,
+    h('button', { type: 'button', onclick: () => copyText(`${cur.record_id} v${cur.version} ${cur.ref.content_hash}`, 'Copied the record ID') }, '📋 Copy ID'),
+    isJson && S.opsById[op.id] && cur.record_kind === 'OUTPUT'
+      ? h('button', { type: 'button', title: 'Opens the New form for this module filled with this record’s data; you review it and press Create.',
+        onclick: () => duplicateRecord(cur, op).catch(e => toast(`Could not duplicate: ${(e && e.message) || e}`)) }, '⧉ Duplicate as new draft') : null));
   if (isLatest && S.opsById[op.id] && !['APPROVED', 'LOCKED', 'SUPERSEDED', 'REJECTED'].includes(cur.lifecycle)) {
     const actx = new FormCtx('accept', [{ input_path: '/payload/approval_ref', allowed_producers: ['K09', 'I10'] }]);
     const apNode = buildRefField({ properties: Object.fromEntries(REF_KEYS.map(k => [k, {}])) }, undefined, '/payload/approval_ref', 'Approval record (optional)', false, actx, false);
@@ -1884,8 +1984,8 @@ async function viewEdit(main, rid) {
   const op = S.opsById[latest.module_id];
   const schema = await getSchema(op.id);
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › ', h('a', { href: plink('op', op.id) }, `${op.id} ${op.name}`),
-      ' › ', h('a', { href: plink('rec', rid) }, rid), ' › Edit'),
+    crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${setInfo(op.set).name}`, plink('set', op.set)],
+      [`${op.id} ${op.name}`, plink('op', op.id)], [rid, plink('rec', rid)], 'Edit'),
     h('h1', { class: 'wrap-anywhere' }, `Edit ${recordTitle(latest)}`)),
   h('div', { class: 'row' }, lifecycleBadge(latest.lifecycle), badge('#', `based on v${latest.version}`, 'b-muted'))));
   if (latest.record_kind !== 'OUTPUT') {
@@ -1898,7 +1998,13 @@ async function viewEdit(main, rid) {
   if (latest.lifecycle === 'LOCKED') card.appendChild(stateBox('blocked', 'This record is LOCKED',
     h('p', null, 'An UPDATE needs a protected-change authorization (an I10 or K09 approval with scope ', h('code', null, `${op.id}:protected_change`), ').')));
   const draftKey = `bf:draft:${S.pid}:${S.branch}:${op.id}:edit:${rid}`;
-  const draft = loadJSON(draftKey, null);
+  const draft = takePrefill(draftKey) || loadJSON(draftKey, null);
+  if (S.skipSaveKeys) S.skipSaveKeys.delete(draftKey);
+  if (draft && draft.from_paste) {
+    const pz = draft.from_paste;
+    card.appendChild(stateBox('draft', `Pasted into the form${(pz.filled || []).length ? `: ${pz.filled.map(humanize).join(', ')}` : ''} — please review`,
+      h('p', null, 'Nothing has been saved yet. ', (pz.skipped || []).length ? `Skipped (not fields of this record): ${pz.skipped.join(', ')}.` : '')));
+  }
   if (draft) {
     card.appendChild(stateBox(draft.base_version === latest.version ? 'draft' : 'stale',
       draft.base_version === latest.version ? `Restored your unsaved edits from ${fmtTime(draft.saved_at)}` : `Your saved edits were based on v${draft.base_version}; the record is now v${latest.version}`,
@@ -1913,6 +2019,14 @@ async function viewEdit(main, rid) {
   const btn = h('button', { type: 'submit', class: 'primary' }, `Save as v${latest.version + 1}`);
   const panel = h('div');
   const keyStore = (draft && draft.pending) || {};
+  const pasteBtn = h('button', { type: 'button', class: 'paste-btn', onclick: () => pasteIntoForm({
+    op, props: (schema.output && schema.output.properties) || {}, current: () => node.get(null) || {},
+    apply: (values, info) => {
+      S.skipSaveKeys.add(draftKey);
+      const d = { payload: values, base_version: latest.version, pending: keyStore, saved_at: new Date().toISOString(), from_paste: info };
+      S.prefill.set(draftKey, d); saveJSON(draftKey, d); route();
+    } }) }, h('span', { 'aria-hidden': 'true' }, '📥'), ' Paste');
+  card.appendChild(h('div', { class: 'row' }, pasteBtn, h('span', { class: 'small muted' }, 'Paste JSON to replace matching fields, or text for the main text field.')));
   const form = h('form', { novalidate: true }, summary, node.el, h('div', { class: 'form-actions' }, btn,
     h('a', { class: 'btn', href: plink('rec', rid) }, 'Back to record'), status), panel);
   const autosave = attachAutosave(form, draftKey, () => ({ payload: node.get(null), base_version: latest.version, pending: keyStore, saved_at: new Date().toISOString() }), status);
@@ -1936,8 +2050,8 @@ async function viewEdit(main, rid) {
 async function viewManifest(main) {
   const m = await api('GET', bpath('/manifest'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › Feature manifest'),
-    h('h1', null, `Feature manifest — ${S.branch}`))));
+    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Feature manifest'),
+    h('h1', null, `Book features (feature manifest) — ${S.branch}`))));
   if (!m) { main.appendChild(stateBox('empty', 'This branch has no feature manifest yet', h('p', null, 'Fill the form below to create one.'))); }
   const cur = m || { phase: 'PLANNING', features: { artwork: false, magic: false, mystery: false, foreshadowing: false, character_arcs: true },
     release_profiles: ['MANUSCRIPT_PDF'], required_operations: [], required_output_refs: [], allow_empty_phase: false };
@@ -2002,7 +2116,7 @@ async function viewManifest(main) {
 async function viewProgress(main) {
   const pr = await api('GET', bpath('/progress'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › Progress'),
+    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Progress'),
     h('h1', null, `Progress — ${S.branch}`))));
   main.appendChild(h('p', { class: 'notice' }, 'These are record counts, not approval evidence. Approval is decided per record revision; open a record to see its exact approved revision.'));
   const blockers = [];
@@ -2068,7 +2182,7 @@ async function viewProgress(main) {
 async function viewActivity(main) {
   const act = await api('GET', bpath('/activity'));
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
-    h('div', { class: 'crumbs' }, h('a', { href: plink() }, S.project.name), ' › Activity'),
+    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Activity'),
     h('h1', null, `Activity — ${S.branch}`)),
   h('button', { type: 'button', onclick: () => route() }, 'Refresh')));
   const audit = h('section', { class: 'card', 'aria-labelledby': 'ac-a' }, h('h2', { id: 'ac-a' }, `Audit log (${act.audit.length})`));
@@ -2313,7 +2427,7 @@ function fmtMs(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} 
 
 async function openSelfTest() {
   const d = $('#selftest-dialog');
-  ST.dialog = d; ST.opener = document.activeElement; ST.view = null; ST.prog = null;
+  ST.dialog = d; ST.opener = visibleOpener(document.activeElement); ST.view = null; ST.prog = null;
   let st = null;
   try { st = await api('GET', '/selftest'); } catch (e) { if (S.authFailed) return; }
   if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
@@ -2484,6 +2598,7 @@ async function refreshSelfTestButton() {
   try {
     const st = await api('GET', '/selftest');
     el.textContent = st.running && st.progress ? ` (${st.progress.done}/${st.progress.total})` : '';
+    const dot = $('#more-dot'); if (dot) dot.hidden = !st.running;
     if (st.running && !(ST.dialog && ST.dialog.open)) setTimeout(refreshSelfTestButton, 2000);
   } catch { el.textContent = ''; }
 }
@@ -2749,6 +2864,12 @@ function buildAssistPanel(opId, pid, branch, projectName) {
   body.appendChild(h('div', { class: 'form-actions' }, genBtn));
   }
   body0.appendChild(out);
+  p.setPrompt = text => {
+    if (p.job && ['queued', 'running'].includes(p.job.status)) { toast('This panel is still working; wait for it, then paste again.'); return; }
+    formPart.hidden = false; reqLine.hidden = true;
+    prompt.value = String(text).slice(0, 8000); prompt.focus();
+    toast('Pasted as the request — press Generate');
+  };
   p.focusFirst = () => { if (!p.min) (p.job && p.job.status === 'done' ? (out.querySelector('button') || prompt) : prompt).focus(); };
 
   const pickedRefs = () => Array.from(ctxBox.querySelectorAll('input:checked')).map(i => recordById(i.dataset.rid)).filter(Boolean).map(r => r.ref).slice(0, 20);
@@ -2826,10 +2947,7 @@ function buildAssistPanel(opId, pid, branch, projectName) {
     p.setState('✔', 'Proposal ready', 'b-ok');
     const preview = h('div', { class: 'data-view ap-preview' }, renderData(j.proposal, ''));
     const useBtn = h('button', { type: 'button', class: 'primary', onclick: () => useProposal(p, j) }, 'Use this in the form');
-    const copyBtn = h('button', { type: 'button', onclick: async () => {
-      try { await navigator.clipboard.writeText(JSON.stringify(j.proposal, null, 2)); toast('Proposal copied as JSON'); }
-      catch { toast('Copy is not available in this browser; open “JSON” below and copy from there'); }
-    } }, 'Copy');
+    const copyBtn = h('button', { type: 'button', onclick: () => copyText(JSON.stringify(j.proposal, null, 2), 'Proposal copied as JSON') }, '📋 Copy');
     const regen = h('button', { type: 'button', onclick: start }, 'Regenerate');
     clear(out).appendChild(h('div', { class: 'ap-done' },
       stateBox('ok', `Proposal ready from ${j.slot || 'AI'}${j.slot_label ? ' · ' + j.slot_label : ''} in ${fmtClock(j.elapsed_ms || 0)}`,
@@ -2850,17 +2968,33 @@ function buildAssistPanel(opId, pid, branch, projectName) {
 }
 
 function useProposal(p, j) {
-  const draftKey = `bf:draft:${p.pid}:${p.branch}:${p.op}:new`;
-  S.skipSaveKeys.add(draftKey);
-  const ok = saveJSON(draftKey, { payload: j.proposal, manualOn: false, pending: {}, saved_at: new Date().toISOString(),
-    from_ai: { slot: j.slot, label: `${j.slot || ''}${j.slot_label ? ' · ' + j.slot_label : ''}`, job_id: j.job_id } });
-  if (!ok) { toast('Browser storage is unavailable, so the form cannot be filled automatically. Use Copy instead.'); S.skipSaveKeys.delete(draftKey); return; }
-  const target = link('p', p.pid, p.branch, 'op', p.op);
   p.setMin(true);
+  fillNewForm(p.pid, p.branch, p.op, j.proposal,
+    { from_ai: { slot: j.slot, label: `${j.slot || ''}${j.slot_label ? ' · ' + j.slot_label : ''}`, job_id: j.job_id } },
+    `${p.op} form filled from the AI proposal — review it and press Create`);
+}
+
+/**
+ * Open the New form of an operation pre-filled with `payload` (nothing is submitted).
+ * extra: {from_ai|from_copy|from_paste: {...}, manual, manualOn} shown as a notice above the form.
+ */
+function fillNewForm(pid, branch, opId, payload, extra = {}, message = null) {
+  const draftKey = `bf:draft:${pid}:${branch}:${opId}:new`;
+  const draft = Object.assign({ payload: payload || {}, manualOn: false, pending: {}, saved_at: new Date().toISOString() }, extra);
+  S.skipSaveKeys.add(draftKey);         // the view being left must not overwrite this draft
+  S.prefill.set(draftKey, draft);       // works even when browser storage is unavailable
+  saveJSON(draftKey, draft);            // best effort: survives a reload
+  S.pendingFocus = 'new';
+  const target = link('p', pid, branch, 'op', opId);
   if (location.hash === target) route(); else location.hash = target;
-  toast(`${p.op} form filled from the AI proposal — review it and press Create`);
-  announce(`${p.op} form filled from the AI proposal. Review every field, then press Create.`);
-  setTimeout(() => { const hd = $('#new-h'); if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus(); hd.scrollIntoView({ block: 'start' }); } }, 400);
+  const msg = message || `${opId} form filled — review it and press Create`;
+  toast(msg);
+  announce(`${msg}. Nothing has been saved yet.`);
+}
+function takePrefill(key) {
+  if (!S.prefill.has(key)) return null;
+  const d = S.prefill.get(key); S.prefill.delete(key);
+  return d;
 }
 
 /* ======================================================================= Bible Builder */
@@ -2875,7 +3009,7 @@ function initBibleButton() {
 }
 async function openBible(opener) {
   const d = $('#bible-dialog');
-  BB.dialog = d; BB.opener = opener || document.activeElement;
+  BB.dialog = d; BB.opener = visibleOpener(opener || document.activeElement);
   if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
   clear(d);
   if (!S.pid || parseRoute()[0] !== 'p') {
@@ -3118,6 +3252,7 @@ function bbCard(it, byKey) {
     it.created_ref ? h('p', { class: 'small' }, h('a', { href: recLink(it.created_ref), onclick: closeBible }, `Open draft ${it.created_ref.record_id}`)) : null,
     h('div', { class: 'row' },
       it.proposal && !it.created_ref ? h('button', { type: 'button', class: 'small', onclick: () => bbEdit(it, editBox) }, 'Edit') : null,
+      it.proposal ? h('button', { type: 'button', class: 'small', onclick: () => copyText(JSON.stringify(prop, null, 2), 'Proposal copied as JSON') }, '📋 Copy') : null,
       !it.created_ref && ['done', 'error', 'cancelled'].includes(it.status) ? h('button', { type: 'button', class: 'small', onclick: () => bbRegenerate(it) }, 'Regenerate this one') : null,
       it.proposal ? h('details', { class: 'bb-json' }, h('summary', { class: 'small' }, 'Details'), h('div', { class: 'data-view small' }, renderData(prop, ''))) : null),
     editBox);
@@ -3209,11 +3344,1114 @@ const TIP_BIBLE = () => [
   h('p', null, 'Run one section or many, as often as you like; later runs build on earlier ones. You keep only what you tick, and it is saved as drafts for you to validate and accept.'),
   h('p', null, 'A report of every run (which AI, what was made, what was kept) is saved in your BookForge reports folder.')];
 
+/* ======================================================================= navigation helpers */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** Breadcrumb trail: items are [label, href] (clickable) or a plain label (the current page). */
+function crumbs(...items) {
+  const ol = h('ol', { class: 'crumbs-list' });
+  items.forEach((it, i) => {
+    const last = i === items.length - 1;
+    const [label, href] = Array.isArray(it) ? it : [it, null];
+    ol.appendChild(h('li', null, href && !last ? h('a', { href }, label) : h('span', { 'aria-current': last ? 'page' : null }, label)));
+  });
+  return h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, ol);
+}
+
+/** ◀ Previous / Next ▶ through a set's steps (crossing into the neighbouring set at the ends). */
+function stepNav(opId) {
+  const letters = Object.keys(SETS);
+  const order = opOrder(opId[0]);
+  const i = order.indexOf(opId);
+  let prev = order[i - 1]; let next = order[i + 1];
+  const li = letters.indexOf(opId[0]);
+  if (!prev && li > 0) { const o = opOrder(letters[li - 1]); prev = o[o.length - 1]; }
+  if (!next && li < letters.length - 1) next = opOrder(letters[li + 1])[0];
+  const lab = id => `${id} ${(S.opsById[id] || {}).name || ''}`;
+  return h('nav', { class: 'step-nav', 'aria-label': 'Previous and next step' },
+    prev ? h('a', { class: 'btn small', href: plink('op', prev), rel: 'prev', title: lab(prev) }, '◀ ', h('span', { class: 'step-lab' }, `Previous: ${lab(prev)}`)) : h('span'),
+    h('span', { class: 'small muted step-pos' }, `Step ${i + 1} of ${order.length} in ${opId[0]} · ${setInfo(opId[0]).name}`),
+    next ? h('a', { class: 'btn small', href: plink('op', next), rel: 'next', title: lab(next) }, h('span', { class: 'step-lab' }, `Next: ${lab(next)}`), ' ▶') : h('span'));
+}
+
+/** "What's next" along the main path A→B→C→E→F→G→H (from GET /api/sets). */
+function whatsNextCard(currentOp) {
+  const g = S.guide;
+  if (!g || g.project_id !== S.pid) return h('div');
+  const n = g.next_step;
+  if (!n) {
+    return h('section', { class: 'card next-card done', 'aria-label': 'What’s next' },
+      h('p', null, h('strong', null, '🎉 Every step of the main path has an approved record. '),
+        'See ', h('a', { href: plink('progress') }, 'Progress'), ' for the remaining required steps, or ',
+        h('a', { href: plink('book') }, 'Make my book'), ' to export it.'));
+  }
+  const op = S.opsById[n.op_id] || { assist: false, name: n.title };
+  const here = currentOp === n.op_id;
+  return h('section', { class: 'card next-card', 'aria-label': 'What’s next' },
+    h('div', { class: 'next-row' },
+      h('div', null, h('strong', null, here ? '👉 This is your next step: ' : '👉 What’s next: '),
+        here ? `${n.op_id} ${n.title}` : h('a', { href: plink('op', n.op_id) }, `${n.op_id} ${n.title}`),
+        h('span', { class: 'muted' }, ` — ${n.reason}`)),
+      h('div', { class: 'row' },
+        here ? null : h('a', { class: 'btn small', href: plink('op', n.op_id) }, 'Open'),
+        h('button', { type: 'button', class: 'small', onclick: () => goNew(n.op_id) }, 'New'),
+        op.assist ? h('button', { type: 'button', class: 'small ai-btn', onclick: ev => openMakeDialog(n.op_id, null, ev.currentTarget) }, '✨ Make some for me') : null,
+        h('a', { class: 'btn small', href: plink('book') }, '📘 Make my book'))));
+}
+
+function goNew(opId) {
+  S.pendingFocus = 'new';
+  const target = plink('op', opId);
+  if (location.hash === target) route(); else location.hash = target;
+}
+
+/** Tiles for the 11 sets: 'tile' (big, overview) or 'mini' (Sets popover). Clicking opens the set panel. */
+function setTiles(kind) {
+  const grid = h('div', { class: kind === 'tile' ? 'set-tiles' : 'set-minis' });
+  for (const letter of Object.keys(SETS)) {
+    const info = setInfo(letter);
+    const ops = opOrder(letter);
+    const recs = S.records.filter(r => r.module_id[0] === letter);
+    const approvedOps = ops.filter(id => opStats(id).approved > 0).length;
+    const g = info.guide;
+    grid.appendChild(h('button', { type: 'button', class: kind === 'tile' ? 'set-tile' : 'set-mini', 'aria-haspopup': 'dialog',
+      'data-set': letter, onclick: ev => { closePops(); openSetPanel(letter, ev.currentTarget); } },
+    h('span', { class: 'st-icon', 'aria-hidden': 'true' }, info.icon),
+    h('span', { class: 'st-text' },
+      h('span', { class: 'st-name' }, h('span', { class: 'st-letter' }, letter), ' ', info.name),
+      kind === 'tile' ? h('span', { class: 'st-purpose' }, info.purpose) : null,
+      h('span', { class: 'st-prog' }, `${recs.length} record${recs.length === 1 ? '' : 's'} · ${approvedOps}/${ops.length} steps approved`),
+      kind === 'tile' && g ? h('span', { class: 'st-stage' }, g.stage) : null)));
+  }
+  return grid;
+}
+
+/** One featured action button for a set (types from GET /api/sets). */
+function featuredButton(letter, f, inPanel) {
+  const label = h('span', null, h('span', { 'aria-hidden': 'true' }, `${f.icon || '•'} `), f.label);
+  const act = ev => {
+    const opener = ev.currentTarget;
+    if (f.type === 'make') { openMakeDialog(f.op, f, opener); return; }
+    if (inPanel) closeSetPanel(false);
+    if (f.type === 'bible') openBible(opener);
+    else if (f.type === 'new') goNew(f.op);
+    else if (f.type === 'open') go(plink('op', f.op));
+    else if (f.type === 'page') go(plink(f.page));
+  };
+  return h('button', { type: 'button', class: `featured-btn${f.type === 'make' ? ' make' : ''}`, onclick: act, title: f.description || '' },
+    label, f.description ? h('span', { class: 'fb-desc' }, f.description) : null);
+}
+
+/* ======================================================================= top-bar popovers */
+const POPS = [];
+function popMenu(btn, pop, onOpen) {
+  const close = (focusBtn) => {
+    if (pop.hidden) return;
+    pop.hidden = true; btn.setAttribute('aria-expanded', 'false');
+    if (focusBtn) btn.focus();
+  };
+  btn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const show = pop.hidden;
+    closePops();
+    if (show) {
+      try { if (onOpen) onOpen(); } catch (e) { toast(`Could not open this menu: ${(e && e.message) || e}`); }
+      pop.hidden = false; btn.setAttribute('aria-expanded', 'true');
+      const f = pop.querySelector('a, button'); if (f) f.focus();
+    }
+  });
+  pop.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(true); } });
+  pop.addEventListener('click', ev => { if (ev.target.closest('a, button') && !ev.target.closest('.no-close')) close(false); });
+  POPS.push(close);
+}
+function closePops() { for (const c of POPS) c(false); }
+document.addEventListener('click', ev => { if (!ev.target.closest('.tb-menu')) closePops(); });
+
+function renderSetsPop() {
+  const pop = clear($('#sets-pop'));
+  if (!S.project || parseRoute()[0] !== 'p') {
+    pop.appendChild(h('p', { class: 'small' }, 'Open or create a book first, then each module set opens here.'));
+    pop.appendChild(h('div', { class: 'row' }, h('a', { class: 'btn small', href: '#/' }, 'Your books'), h('a', { class: 'btn small primary', href: '#/start' }, '🚀 Start a new book')));
+    return;
+  }
+  pop.appendChild(h('p', { class: 'small muted pop-title' }, 'Module sets — open one for its options'));
+  pop.appendChild(setTiles('mini'));
+  pop.appendChild(h('div', { class: 'row pop-foot' }, h('a', { class: 'btn small', href: plink() }, 'Overview'), h('a', { class: 'btn small', href: plink('book') }, '📘 Make my book')));
+}
+
+/* ======================================================================= set panel */
+const SP = { opener: null, letter: null };
+function openSetPanel(letter, opener) {
+  if (!S.project || !SETS[letter]) { toast('Open a book first'); return; }
+  const d = $('#set-dialog');
+  SP.opener = opener && document.contains(opener) ? opener : document.activeElement;
+  SP.letter = letter;
+  try {
+    renderSetPanel(letter);
+    if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+    const f = d.querySelector('.featured-btn, .sp-op a, button'); if (f) f.focus();
+  } catch (e) { toast(`Could not open the set panel: ${(e && e.message) || e}`); }
+}
+function closeSetPanel(restoreFocus = true) {
+  const d = $('#set-dialog');
+  if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
+  if (restoreFocus && SP.opener && document.contains(SP.opener) && SP.opener.offsetParent !== null) SP.opener.focus();
+}
+function renderSetPanel(letter) {
+  const d = clear($('#set-dialog'));
+  const info = setInfo(letter);
+  const g = info.guide;
+  const usedBy = Object.keys(SETS).filter(x => { const gx = guideSet(x); return gx && gx.depends_on.includes(letter); });
+  d.appendChild(h('div', { class: 'sp-head' },
+    h('h2', { id: 'set-panel-title' }, h('span', { 'aria-hidden': 'true' }, `${info.icon} `), `${letter} · ${info.name}`),
+    h('button', { type: 'button', class: 'small', 'aria-label': `Close the ${info.name} panel`, onclick: () => closeSetPanel() }, '✕ Close')));
+  d.appendChild(h('p', { class: 'sp-lead' }, info.purpose));
+  if (g && g.featured_actions.length) {
+    d.appendChild(h('section', { class: 'sp-featured', 'aria-label': 'Quick actions' },
+      g.featured_actions.map(f => featuredButton(letter, f, true))));
+  }
+  const body = h('div', { class: 'sp-body' });
+  if (g) {
+    body.appendChild(h('section', { class: 'sp-about', 'aria-labelledby': 'sp-about-h' }, h('h3', { id: 'sp-about-h' }, 'What it’s for'),
+      h('p', null, g.about),
+      h('p', { class: 'small' }, h('strong', null, 'Where it fits: '), g.stage),
+      h('p', { class: 'small row' }, h('strong', null, 'Needs: '), g.depends_on.length ? g.depends_on.map(x => h('button', { type: 'button', class: 'chip', onclick: () => renderSetPanel(x) }, `${setInfo(x).icon} ${x} · ${setInfo(x).name}`)) : 'nothing — you can start here'),
+      usedBy.length ? h('p', { class: 'small row' }, h('strong', null, 'Used by: '), usedBy.map(x => h('button', { type: 'button', class: 'chip', onclick: () => renderSetPanel(x) }, `${setInfo(x).icon} ${x} · ${setInfo(x).name}`))) : null));
+  }
+  // operations
+  const ops = h('ul', { class: 'sp-ops' });
+  for (const id of opOrder(letter)) {
+    const o = S.opsById[id];
+    const st = opStats(id);
+    const gop = g ? g.operations.find(x => x.op_id === id) : null;
+    const latest = S.records.filter(r => r.module_id === id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    ops.appendChild(h('li', { class: 'sp-op' },
+      h('div', { class: 'sp-op-main' },
+        h('a', { href: plink('op', id), onclick: () => closeSetPanel(false) }, h('span', { class: 'op-id' }, id), ' ', o.name),
+        h('div', { class: 'small muted sp-op-purpose' }, o.purpose.length > 140 ? o.purpose.slice(0, 137) + '…' : o.purpose),
+        h('div', { class: 'row small' }, badge('▤', `${st.count} record${st.count === 1 ? '' : 's'}`, 'b-muted'),
+          latest ? lifecycleBadge(latest.lifecycle) : null, st.stale ? staleBadge() : null,
+          gop && gop.required === false ? badge('–', 'not needed for this book', 'b-muted') : null,
+          badge(isCreative(o) ? '✦' : '⚙︎', isCreative(o) ? 'AI or you' : 'automatic', 'b-muted'))),
+      h('div', { class: 'sp-op-actions' },
+        h('a', { class: 'btn small', href: plink('op', id), onclick: () => closeSetPanel(false) }, 'Open'),
+        h('button', { type: 'button', class: 'small', onclick: () => { closeSetPanel(false); goNew(id); } }, 'New'),
+        o.assist ? h('button', { type: 'button', class: 'small ai-btn', onclick: ev => openMakeDialog(id, null, ev.currentTarget) }, '✨ Make some for me') : null)));
+  }
+  body.appendChild(h('section', { 'aria-labelledby': 'sp-ops-h' }, h('h3', { id: 'sp-ops-h' }, `Steps (${opOrder(letter).length})`), ops));
+  // recent records
+  const recent = S.records.filter(r => r.module_id[0] === letter).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 8);
+  body.appendChild(h('section', { 'aria-labelledby': 'sp-rec-h' }, h('h3', { id: 'sp-rec-h' }, 'Recent records'),
+    recent.length ? h('ul', { class: 'record-list' }, recent.map(r => h('li', { class: 'record-item' },
+      h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: plink('rec', r.record_id), onclick: () => closeSetPanel(false) }, recordTitle(r)),
+        h('div', { class: 'r-meta' }, `${r.module_id} · v${r.version} · ${fmtTime(r.created_at)}`)),
+      h('div', { class: 'r-badges' }, lifecycleBadge(r.lifecycle),
+        h('button', { type: 'button', class: 'small', onclick: () => copyRecord(r, 'text') }, '📋 Copy'),
+        h('a', { class: 'btn small', href: plink('rec', r.record_id), onclick: () => closeSetPanel(false) }, 'Open')))))
+      : h('p', { class: 'muted small' }, 'Nothing here yet. Use a quick action above or “New” on a step.')));
+  d.appendChild(body);
+  d.appendChild(h('div', { class: 'sp-foot row' }, h('a', { class: 'btn', href: plink('set', letter), onclick: () => closeSetPanel(false) }, `Open the full ${letter} page`),
+    h('button', { type: 'button', onclick: () => closeSetPanel() }, 'Close')));
+}
+
+/* ======================================================================= "Make some for me" */
+const MK = { states: new Map(), cur: null, opener: null };
+function makeNoun(opId) {
+  const op = S.opsById[opId];
+  if (SECTION_LABEL[opId]) return SECTION_LABEL[opId].toLowerCase();
+  return op ? `${op.name.toLowerCase()} options` : 'entries';
+}
+function profileOf() { return (S.project && S.project.profile) || {}; }
+
+function openMakeDialog(opId, feature, opener) {
+  const op = S.opsById[opId];
+  if (!S.pid || !op) { toast('Open a book first'); return; }
+  if (!op.assist) { toast(`${opId} is not something an AI proposes; open it and use the form.`); return; }
+  const key = `${S.pid}|${S.branch}|${opId}`;
+  let st = MK.states.get(key);
+  if (!st) {
+    const gs = guideSet(opId[0]);
+    const f = feature || (gs ? gs.featured_actions.find(x => x.type === 'make' && x.op === opId) : null);
+    st = { key, op: opId, pid: S.pid, branch: S.branch, mode: opId[0] === 'A' ? 'bible' : 'assist', feature: f || null,
+      jobs: [], items: [], before: null, running: false, created: null, sid: null, cancelled: false,
+      form: { count: (f && f.count) || (opId[0] === 'A' ? 3 : 2), hints: '', guidance: '', idea: '' } };
+    MK.states.set(key, st);
+  } else if (feature) st.feature = feature;
+  const d = $('#make-dialog');
+  MK.opener = opener && document.contains(opener) ? opener : document.activeElement;
+  MK.cur = st;
+  try {
+    renderMake(st);
+    if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+    const first = d.querySelector('textarea, input, select'); if (first) first.focus();
+  } catch (e) { toast(`Could not open: ${(e && e.message) || e}`); }
+}
+function closeMake() {
+  const d = $('#make-dialog');
+  if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
+  MK.cur = null;
+  if (MK.opener && document.contains(MK.opener) && MK.opener.offsetParent !== null) MK.opener.focus();
+}
+
+function renderMake(st) {
+  const d = clear($('#make-dialog'));
+  const op = S.opsById[st.op];
+  const f = st.feature;
+  const title = f ? f.label : `Make some ${makeNoun(st.op)} for me`;
+  const prof = profileOf();
+  d.appendChild(h('div', { class: 'st-head' },
+    h('h2', { id: 'make-title' }, h('span', { 'aria-hidden': 'true' }, '✨ '), title, h('span', { class: 'small muted' }, ` · ${st.op} ${op.name}`)),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close (running work continues)', onclick: closeMake }, '✕ Close')));
+  d.appendChild(h('p', null, (f && f.description) || `Your AI proposes ${makeNoun(st.op)} for this book. You review each one; nothing is saved until you choose to.`));
+  const ids = { idea: uid('mk'), count: uid('mk'), hints: uid('mk'), guide: uid('mk') };
+  const idea = h('textarea', { id: ids.idea, rows: '3', placeholder: 'e.g. A lighthouse keeper’s apprentice searches a stormy archipelago for her missing master.' });
+  idea.value = st.form.idea || (BB.session && BB.session.project_id === st.pid ? BB.session.idea : '') || loadJSON(`bf:bb-idea:${st.pid}`, '') || prof.idea || '';
+  const count = h('select', { id: ids.count }, Array.from({ length: 10 }, (_, i) => h('option', { value: String(i + 1), selected: st.form.count === i + 1 }, String(i + 1))));
+  const hints = h('input', { id: ids.hints, type: 'text', value: st.form.hints, placeholder: f && f.hints ? f.hints.slice(0, 3).join(', ') : '', autocomplete: 'off' });
+  const guide = h('textarea', { id: ids.guide, rows: st.mode === 'assist' ? '3' : '2' });
+  guide.value = st.form.guidance || (st.mode === 'assist' && st.op === 'B01' ? (prof.idea || '') : '');
+  const chips = f && f.hints ? h('div', { class: 'chips', role: 'group', 'aria-label': 'Quick picks' }, f.hints.map(x => {
+    const b = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false' }, x);
+    const sync = () => { const cur = hints.value.split(',').map(s => s.trim()).filter(Boolean); b.setAttribute('aria-pressed', String(cur.includes(x))); };
+    b.addEventListener('click', () => {
+      let cur = hints.value.split(',').map(s => s.trim()).filter(Boolean);
+      cur = cur.includes(x) ? cur.filter(y => y !== x) : cur.concat(x);
+      hints.value = cur.join(', '); sync(); hints.dispatchEvent(new Event('input'));
+    });
+    hints.addEventListener('input', sync); sync();
+    return b;
+  })) : null;
+  const pickSlot = ['AI-1', 'AI-2', 'AI-3'].includes(prof.ai_slot) ? prof.ai_slot : (st.form.slot || null);
+  const picker = aiPicker(uid('mk-slot'), pickSlot);
+  const err = h('div', { 'aria-live': 'polite' });
+  const genBtn = h('button', { type: 'button', class: 'primary' }, '✨ Generate');
+  const cancelBtn = h('button', { type: 'button', hidden: !st.running }, 'Stop');
+  const readVals = () => ({ idea: idea.value.trim(), count: parseInt(count.value, 10) || 1, hints: hints.value.trim(), guidance: guide.value.trim(), slot: picker.value() });
+  const persist = () => { const v = readVals(); Object.assign(st.form, { idea: v.idea, count: v.count, hints: v.hints, guidance: v.guidance, slot: v.slot }); };
+  [idea, count, hints, guide].forEach(el => el.addEventListener('input', persist));
+  genBtn.addEventListener('click', async () => {
+    clear(err); persist();
+    const v = readVals();
+    genBtn.disabled = true;
+    try {
+      if (st.mode === 'bible') await mkStartBible(st, v, err);
+      else await mkStartAssist(st, v, err);
+    } catch (e) { err.appendChild(errorWithFix('Could not start', apiErrInfo(e))); }
+    finally { genBtn.disabled = false; }
+  });
+  cancelBtn.addEventListener('click', () => mkCancel(st));
+  const form = h('div', { class: 'mk-form' },
+    st.mode === 'bible' ? h('div', { class: 'field' }, h('label', { for: ids.idea }, 'Your book idea'), idea,
+      h('span', { class: 'hint' }, 'A sentence or two. Everything is made to fit it (and your book profile).')) : null,
+    h('div', { class: 'grid-2' },
+      h('div', { class: 'field' }, h('label', { for: ids.count }, `How many ${st.mode === 'assist' ? 'options' : makeNoun(st.op)}?`), count,
+        h('span', { class: 'hint' }, st.mode === 'assist' ? 'Each option is a separate proposal to choose from.' : 'Made together so names and links stay consistent.')),
+      picker.field),
+    f && f.hints ? h('div', { class: 'field' }, h('label', { for: ids.hints }, st.op === 'A01' ? 'Roles to include (optional)' : 'Kinds to include (optional)'), chips, hints) : null,
+    h('div', { class: 'field' }, h('label', { for: ids.guide }, st.mode === 'assist' ? 'What do you want?' : 'Anything else the AI should know? (optional)'), guide,
+      h('span', { class: 'hint' }, st.mode === 'assist' ? `For example: “${PLACEHOLDER[st.op] || 'a short description of what you want'}”.` : 'For example: “one of them secretly works for the villain”.')),
+    err,
+    h('div', { class: 'form-actions' }, genBtn, cancelBtn,
+      st.mode === 'bible' ? h('button', { type: 'button', class: 'link', onclick: ev => { closeMake(); openBible(ev.currentTarget); } }, 'Open the full Bible Builder') : null));
+  d.appendChild(form);
+  st.cancelBtn = cancelBtn;
+  st.resultsEl = h('div', { class: 'mk-results', 'aria-live': 'polite' });
+  d.appendChild(st.resultsEl);
+  renderMakeResults(st);
+}
+
+async function mkStartBible(st, v, err) {
+  const guidance = [v.hints ? `Roles or kinds to cover: ${v.hints}.` : '', v.guidance].filter(Boolean).join(' ');
+  const idea = v.idea || v.guidance || v.hints;
+  if (!idea) { err.appendChild(stateBox('failed', 'Describe your book idea first', h('p', null, 'Everything is made to fit it.'))); return; }
+  if (v.idea) saveJSON(`bf:bb-idea:${st.pid}`, v.idea);
+  const counts = { [st.op]: v.count };
+  const sameSession = BB.session && BB.session.project_id === st.pid && BB.session.branch_id === st.branch;
+  st.before = new Set(sameSession ? (BB.session.items || []).map(i => i.key) : []);
+  st.created = null; st.cancelled = false;
+  let r = null;
+  if (sameSession) {
+    try {
+      r = await api('POST', `/bible-builder/${encodeURIComponent(BB.session.session_id)}/run`,
+        { body: { sections: counts, slot_id: v.slot, idea: v.idea || undefined, guidance: guidance || undefined } });
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) throw e;
+      BB.session = null; st.before = new Set();
+    }
+  }
+  if (!r) r = await api('POST', '/bible-builder', { body: { project_id: st.pid, branch_id: st.branch, idea, counts, slot_id: v.slot, guidance: guidance || undefined } });
+  BB.session = r; st.sid = r.session_id; st.running = true;
+  announce(`Making ${v.count} ${makeNoun(st.op)}…`);
+  renderMakeResults(st);
+  mkPollBible(st);
+}
+async function mkPollBible(st) {
+  clearTimeout(st.poll);
+  if (!st.sid) return;
+  let s;
+  try { s = await api('GET', `/bible-builder/${encodeURIComponent(st.sid)}`); }
+  catch (e) {
+    if (e instanceof ApiError && e.status === 404) { st.running = false; st.sid = null; st.lost = true; renderMakeResults(st); return; }
+    st.poll = setTimeout(() => mkPollBible(st), 2500); return;
+  }
+  if (BB.session && BB.session.session_id === s.session_id) BB.session = s; else if (!BB.session) BB.session = s;
+  st.items = (s.items || []).filter(i => i.op === st.op && !(st.before && st.before.has(i.key)));
+  st.section = (s.sections || []).find(x => x.op === st.op) || null;
+  st.current = s.current; st.running = !!s.busy;
+  renderMakeResults(st);
+  if (s.busy) st.poll = setTimeout(() => mkPollBible(st), 1000);
+  else announce(`${makeNoun(st.op)}: ready to review.`);
+}
+
+async function mkStartAssist(st, v, err) {
+  const text = [v.guidance, v.hints ? `Kinds to cover: ${v.hints}.` : ''].filter(Boolean).join('\n');
+  if (!text) { err.appendChild(stateBox('failed', 'Type what you want first', h('p', null, `For example: “${PLACEHOLDER[st.op] || 'a short description'}”.`))); return; }
+  if (st.running) { err.appendChild(stateBox('blocked', 'Still working', h('p', null, 'Wait for the current proposals, or press Stop.'))); return; }
+  const n = v.count;
+  st.cancelled = false; st.running = true;
+  st.jobs = Array.from({ length: n }, (_, i) => ({ i, status: 'queued', job: null, error: null, startedAt: 0 }));
+  renderMakeResults(st);
+  const prompt = i => (n > 1 ? `${text}\n\n(Option ${i + 1} of ${n}: make this option clearly different from the others.)` : text);
+  let next = 0;
+  const worker = async () => {
+    while (next < n && !st.cancelled) { const j = st.jobs[next++]; await mkRunJob(st, j, prompt(j.i), v.slot); }
+  };
+  try { await Promise.all([worker(), worker()]); }
+  finally {
+    for (const j of st.jobs) if (j.status === 'queued') j.status = 'cancelled';
+    st.running = false; renderMakeResults(st);
+    announce(`${st.op}: proposals ready to review.`);
+  }
+}
+async function mkRunJob(st, j, prompt, slot) {
+  for (let tries = 0; ; tries++) {
+    try {
+      j.job = await api('POST', '/assist', { body: { project_id: st.pid, branch_id: st.branch, target_operation: st.op, prompt,
+        slot_id: slot, context_refs: [], current_values: {}, keep_values: true } });
+      break;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 429 && tries < 60 && !st.cancelled) { await sleep(3000); continue; }
+      j.status = 'error'; j.error = apiErrInfo(e); renderMakeResults(st); return;
+    }
+  }
+  j.status = 'running'; j.startedAt = Date.now(); renderMakeResults(st);
+  let misses = 0;
+  while (['queued', 'running'].includes(j.job.status)) {
+    await sleep(1000);
+    if (st.cancelled && !j.cancelSent) { j.cancelSent = true; api('POST', `/assist/${encodeURIComponent(j.job.job_id)}/cancel`).catch(() => {}); }
+    try { j.job = await api('GET', `/assist/${encodeURIComponent(j.job.job_id)}`); misses = 0; }
+    catch (e) {
+      if (++misses > 20 || (e instanceof ApiError && e.status === 404)) { j.status = 'error'; j.error = apiErrInfo(e); renderMakeResults(st); return; }
+    }
+    renderMakeResults(st);
+  }
+  j.status = j.job.status === 'done' ? 'done' : j.job.status === 'cancelled' ? 'cancelled' : 'error';
+  j.error = j.job.error;
+  renderMakeResults(st);
+}
+async function mkCancel(st) {
+  st.cancelled = true;
+  if (st.mode === 'bible' && st.sid) {
+    try { BB.session = await api('POST', `/bible-builder/${encodeURIComponent(st.sid)}/cancel`); toast('Stopping after the current item'); }
+    catch (e) { toast(`Could not stop: ${apiErrInfo(e).message}`); }
+  } else toast('Stopping…');
+}
+
+function proposalTitle(p) {
+  if (!p || typeof p !== 'object') return 'Proposal';
+  for (const k of ['concept', 'premise', 'idea', 'title', 'style_name', 'scene_description', 'instruction', 'story_goal', 'cover_brief', 'panel_brief']) {
+    if (typeof p[k] === 'string' && p[k].trim()) return p[k].length > 120 ? p[k].slice(0, 117) + '…' : p[k];
+  }
+  const s = Object.values(p).find(x => typeof x === 'string' && x.trim());
+  return s ? (s.length > 120 ? s.slice(0, 117) + '…' : s) : 'Proposal';
+}
+function slotLine(slot, label, model) {
+  if (!slot && !label) return null;
+  return h('span', { class: 'small muted by-ai' }, `by ${[slot, label].filter(Boolean).join(' · ')}${model ? ` (${model})` : ''}`);
+}
+
+function renderMakeResults(st) {
+  if (MK.cur !== st || !st.resultsEl || !document.contains(st.resultsEl)) return;
+  const box = clear(st.resultsEl);
+  if (st.cancelBtn) st.cancelBtn.hidden = !st.running;
+  if (st.lost) box.appendChild(stateBox('stale', 'The previous run expired', h('p', null, 'Press Generate to start again.')));
+  if (st.mode === 'bible') {
+    if (st.running) {
+      const sec = st.section; const cur = st.current;
+      box.appendChild(h('div', { class: 'state loading', role: 'status' },
+        h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('strong', null, (cur && cur.phase) || (sec && sec.message) || 'Working…'),
+          cur ? h('span', { class: 'mono' }, fmtClock(cur.elapsed_ms || 0)) : null, cur && cur.slot ? slotLine(cur.slot, cur.slot_label) : null),
+        h('p', { class: 'small' }, 'Web AIs can take a few minutes per entry. You can close this window; the work continues.')));
+    } else if (st.section && ['error', 'partial'].includes(st.section.status) && st.section.error) {
+      box.appendChild(errorWithFix(st.section.message || 'The AI could not finish', st.section.error));
+    }
+    if (!st.items.length) return;
+    const ready = st.items.filter(i => i.status === 'done' && !i.created_ref);
+    const keep = st.keep || (st.keep = {});
+    const grid = h('ul', { class: 'mk-cards' });
+    for (const it of st.items) {
+      const cb = h('input', { type: 'checkbox', id: `mk-${it.key}`, checked: keep[it.key] !== false && it.status === 'done' && !it.created_ref, disabled: it.status !== 'done' || !!it.created_ref });
+      cb.addEventListener('change', () => { keep[it.key] = cb.checked; });
+      const sum = it.summary || {};
+      grid.appendChild(h('li', { class: `mk-card st-${it.status}` },
+        h('div', { class: 'check-row' }, cb, h('label', { for: cb.id }, h('strong', null, (it.proposal && it.proposal.concept) || it.name))),
+        h('div', { class: 'row small' }, badge(it.status === 'done' ? '✔' : it.status === 'error' ? '✕' : '…', it.status === 'done' ? 'Ready' : it.status === 'error' ? 'Failed' : 'Working', it.status === 'done' ? 'b-ok' : it.status === 'error' ? 'b-bad' : 'b-info'),
+          it.created_ref ? badge('✎', 'Saved as draft', 'b-info') : null, slotLine(it.slot, null, it.model)),
+        it.role ? h('p', { class: 'small' }, it.role) : null,
+        sum.summary ? h('p', { class: 'small mk-sum' }, sum.summary.length > 240 ? sum.summary.slice(0, 237) + '…' : sum.summary) : null,
+        it.error ? h('p', { class: 'small' }, h('strong', null, 'Why: '), it.error.message, it.error.fix ? ` — ${it.error.fix}` : '') : null,
+        h('div', { class: 'row' },
+          it.proposal ? h('button', { type: 'button', class: 'small', onclick: () => copyText(JSON.stringify(it.proposal, null, 2), 'Proposal copied as JSON') }, '📋 Copy') : null,
+          it.proposal && !it.created_ref ? h('button', { type: 'button', class: 'small', onclick: () => { closeMake(); closeSetPanel(false); fillNewForm(st.pid, st.branch, st.op, it.proposal, { from_ai: { slot: it.slot, label: `${it.slot || 'AI'}${it.model ? ' · ' + it.model : ''}` } }); } }, 'Use in the form') : null,
+          it.created_ref ? h('a', { class: 'btn small', href: recLink(it.created_ref), onclick: () => { closeMake(); closeSetPanel(false); } }, 'Open draft') : null)));
+    }
+    box.appendChild(h('h3', null, `Proposals (${st.items.length})`));
+    box.appendChild(grid);
+    const out = h('div', { 'aria-live': 'polite' });
+    const createBtn = h('button', { type: 'button', class: 'primary', disabled: st.running || !ready.length }, 'Save the ticked ones as drafts');
+    createBtn.addEventListener('click', async () => {
+      const keys = ready.filter(i => keep[i.key] !== false).map(i => i.key);
+      if (!keys.length) { clear(out).appendChild(stateBox('failed', 'Nothing ticked', h('p', null, 'Tick at least one to keep.'))); return; }
+      createBtn.disabled = true; clear(out).appendChild(loadingState(`Saving ${keys.length} draft(s)…`));
+      try {
+        const r = await api('POST', `/bible-builder/${encodeURIComponent(st.sid)}/create`, { body: { items: keys } });
+        BB.session = r.session;
+        st.items = (r.session.items || []).filter(i => i.op === st.op && !(st.before && st.before.has(i.key)));
+        try { await refreshRecords(); } catch { /* best effort */ }
+        await loadGuide();
+        toast(`${r.created.length} draft(s) saved${r.errors.length ? `, ${r.errors.length} failed` : ''}`);
+        renderMakeResults(st);
+      } catch (e) { createBtn.disabled = false; clear(out).appendChild(errorWithFix('Nothing was saved', apiErrInfo(e))); }
+    });
+    box.appendChild(h('div', { class: 'form-actions' }, createBtn, h('span', { class: 'small muted' }, 'Drafts are not approved: open each one, read it, then Validate and Accept it.')));
+    box.appendChild(out);
+    return;
+  }
+  // assist mode
+  if (!st.jobs.length) return;
+  box.appendChild(h('h3', null, `Proposals (${st.jobs.length})`));
+  const list = h('ul', { class: 'mk-cards' });
+  for (const j of st.jobs) {
+    const job = j.job || {};
+    const head = h('div', { class: 'row' }, h('strong', null, `Option ${j.i + 1}`),
+      j.status === 'done' ? badge('✔', 'Ready', 'b-ok') : j.status === 'error' ? badge('✕', 'Failed', 'b-bad')
+        : j.status === 'cancelled' ? badge('–', 'Stopped', 'b-muted') : badge('◔', j.status === 'queued' ? 'Waiting' : 'Working', 'b-info'),
+      slotLine(job.slot, job.slot_label, job.model));
+    const li = h('li', { class: `mk-card st-${j.status}` }, head);
+    if (j.status === 'running' || j.status === 'queued') {
+      li.appendChild(h('p', { class: 'small row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), `${job.phase || 'Waiting'}… ${j.startedAt ? fmtClock(Date.now() - j.startedAt) : ''}`));
+    } else if (j.status === 'done' && job.proposal) {
+      const blocking = (job.findings || []).filter(f => f.severity === 'BLOCKING' && f.decision !== 'PASS').length;
+      li.appendChild(h('p', { class: 'mk-sum' }, proposalTitle(job.proposal)));
+      if (blocking) li.appendChild(h('p', { class: 'small' }, badge('⚠︎', `${blocking} thing(s) to fix in the form`, 'b-warn')));
+      li.appendChild(h('details', null, h('summary', { class: 'small' }, 'Show everything'), h('div', { class: 'data-view small' }, renderData(job.proposal, ''))));
+      li.appendChild(h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'small primary', onclick: () => { closeMake(); closeSetPanel(false); fillNewForm(st.pid, st.branch, st.op, job.proposal, { from_ai: { slot: job.slot, label: `${job.slot || ''}${job.slot_label ? ' · ' + job.slot_label : ''}`, job_id: job.job_id } }); } }, 'Use this in the form'),
+        h('button', { type: 'button', class: 'small', onclick: () => copyText(JSON.stringify(job.proposal, null, 2), 'Proposal copied as JSON') }, '📋 Copy')));
+    } else if (j.status === 'error') {
+      const e = j.error || {};
+      li.appendChild(h('p', { class: 'small' }, e.message || 'Failed', e.fix ? h('span', null, h('br'), h('strong', null, 'What to do: '), e.fix) : null));
+      if (['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE', 'TIMEOUT'].includes(e.code)) li.appendChild(h('a', { class: 'btn small', href: '#/settings', onclick: closeMake }, 'Open Settings'));
+    }
+    list.appendChild(li);
+  }
+  box.appendChild(list);
+}
+
+/* ======================================================================= quick jump (Ctrl+K or /) */
+const JP = { opener: null, items: [], shown: [], idx: 0 };
+function jumpEntries() {
+  const out = [];
+  const inP = !!(S.project && parseRoute()[0] === 'p');
+  out.push({ label: 'Your books', sub: 'Projects', href: '#/', kind: 'page' });
+  out.push({ label: '🚀 Start a new book', sub: 'Step-by-step', href: '#/start', kind: 'page' });
+  out.push({ label: 'Settings', sub: 'AI slots', href: '#/settings', kind: 'page' });
+  if (!inP) return out;
+  out.push({ label: 'Overview', sub: S.project.name, href: plink(), kind: 'page' });
+  out.push({ label: '📘 Make my book', sub: 'Guided path', href: plink('book'), kind: 'page' });
+  out.push({ label: 'Progress', sub: 'Page', href: plink('progress'), kind: 'page' });
+  out.push({ label: 'Activity', sub: 'Page', href: plink('activity'), kind: 'page' });
+  out.push({ label: 'Book features', sub: 'Feature manifest', href: plink('manifest'), kind: 'page' });
+  for (const letter of Object.keys(SETS)) {
+    const info = setInfo(letter);
+    out.push({ label: `${info.icon} ${letter} · ${info.name}`, sub: 'Open the set panel', set: letter, kind: 'set', key: `set ${letter} ${info.name}` });
+  }
+  for (const o of S.ops) out.push({ label: `${o.id} ${o.name}`, sub: setInfo(o.set).name, href: plink('op', o.id), kind: 'op', key: `${o.id} ${o.name} ${setInfo(o.set).name}`, id: o.id });
+  for (const r of S.records.slice(-300)) out.push({ label: recordTitle(r), sub: `${r.module_id} record · ${r.record_id}`, href: plink('rec', r.record_id), kind: 'rec', key: `${recordTitle(r)} ${r.record_id} ${r.module_id}` });
+  return out;
+}
+function jumpFilter(q) {
+  const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!toks.length) return JP.items.filter(x => x.kind !== 'rec' && x.kind !== 'op').concat(JP.items.filter(x => x.kind === 'op').slice(0, 10));
+  const scored = [];
+  for (const it of JP.items) {
+    const hay = `${it.key || it.label} ${it.sub || ''}`.toLowerCase();
+    if (!toks.every(t => hay.includes(t))) continue;
+    let s = 0;
+    if (it.id && it.id.toLowerCase() === toks[0]) s -= 100;
+    else if (it.id && it.id.toLowerCase().startsWith(toks[0])) s -= 50;
+    if (it.label.toLowerCase().startsWith(toks[0])) s -= 20;
+    s += { page: 0, set: 1, op: 2, rec: 5 }[it.kind] || 0;
+    scored.push([s, it]);
+  }
+  return scored.sort((a, b) => a[0] - b[0]).slice(0, 40).map(x => x[1]);
+}
+function openJump(opener) {
+  const d = $('#jump-dialog');
+  JP.opener = opener && document.contains(opener) ? opener : document.activeElement;
+  JP.items = jumpEntries();
+  clear(d);
+  const input = h('input', { id: 'jump-input', type: 'search', role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'jump-list',
+    'aria-autocomplete': 'list', autocomplete: 'off', spellcheck: 'false', placeholder: 'Type a step (A01, characters, premise…), a set, a page or a record' });
+  const list = h('ul', { id: 'jump-list', role: 'listbox', class: 'jump-list', 'aria-label': 'Matches' });
+  const draw = () => {
+    JP.shown = jumpFilter(input.value);
+    JP.idx = Math.min(JP.idx, Math.max(0, JP.shown.length - 1));
+    clear(list);
+    if (!JP.shown.length) list.appendChild(h('li', { class: 'muted small jump-empty' }, 'No matches.'));
+    JP.shown.forEach((it, i) => list.appendChild(h('li', { id: `jump-opt-${i}`, role: 'option', 'aria-selected': String(i === JP.idx), class: 'jump-opt',
+      onclick: () => jumpTo(it), onmousemove: () => { if (JP.idx !== i) { JP.idx = i; mark(); } } },
+    h('span', { class: 'jo-label' }, it.label), h('span', { class: 'jo-sub small muted' }, it.sub || ''))));
+    mark();
+  };
+  const mark = () => {
+    list.querySelectorAll('[role=option]').forEach((el, i) => el.setAttribute('aria-selected', String(i === JP.idx)));
+    const cur = list.querySelector(`#jump-opt-${JP.idx}`);
+    if (cur) { input.setAttribute('aria-activedescendant', cur.id); cur.scrollIntoView({ block: 'nearest' }); } else input.removeAttribute('aria-activedescendant');
+  };
+  input.addEventListener('input', () => { JP.idx = 0; draw(); });
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); JP.idx = Math.min(JP.idx + 1, JP.shown.length - 1); mark(); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); JP.idx = Math.max(JP.idx - 1, 0); mark(); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); const it = JP.shown[JP.idx]; if (it) jumpTo(it); }
+  });
+  d.appendChild(h('div', { class: 'jump-head' }, h('h2', { id: 'jump-title', class: 'visually-hidden' }, 'Jump to'),
+    h('label', { for: 'jump-input', class: 'visually-hidden' }, 'Jump to'), input,
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close', onclick: () => closeJump(true) }, 'Esc')));
+  d.appendChild(list);
+  d.appendChild(h('p', { class: 'small muted jump-help' }, '↑ ↓ to move · Enter to open · Esc to close. Shortcut: Ctrl+K or /'));
+  if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  JP.idx = 0; draw(); input.focus();
+}
+function closeJump(restore) {
+  const d = $('#jump-dialog');
+  if (!d || !d.open) return;
+  if (d.close) d.close(); else d.removeAttribute('open');
+  if (restore && JP.opener && document.contains(JP.opener) && JP.opener.offsetParent !== null) JP.opener.focus();
+}
+function jumpTo(it) {
+  closeJump(false);
+  if (it.kind === 'set') { openSetPanel(it.set, $('#sets-btn')); return; }
+  if (it.href) go(it.href);
+}
+
+/* ======================================================================= copy, duplicate, paste */
+function refText(v) {
+  const rec = recordById(v.record_id);
+  return `${v.module_id} ${rec ? recordTitle(rec) : v.record_id} (${v.record_id} v${v.version})`;
+}
+function dataText(v, indent = '') {
+  if (v === null || v === undefined) return 'unknown';
+  if (typeof v !== 'object') return String(v);
+  if (isRefValue(v)) return refText(v);
+  const pad = indent + '  ';
+  if (Array.isArray(v)) {
+    if (!v.length) return '(none)';
+    return '\n' + v.map(x => {
+      if (x && typeof x === 'object' && 'subject_id' in x && 'predicate' in x) {
+        const val = Array.isArray(x.value) ? x.value.join(', ') : x.value === null ? 'unknown' : String(x.value);
+        return `${pad}- ${x.subject_id} · ${x.predicate} = ${val}${x.assertion_type && x.assertion_type !== 'FACT' ? ` [${x.assertion_type}]` : ''}`;
+      }
+      const t = dataText(x, pad);
+      return `${pad}- ${t.startsWith('\n') ? t.trimStart() : t}`;
+    }).join('\n');
+  }
+  const keys = Object.keys(v);
+  if (!keys.length) return '(empty)';
+  return '\n' + keys.map(k => {
+    const t = dataText(v[k], pad);
+    return `${pad}${humanize(k)}: ${t.includes('\n') && !t.startsWith('\n') ? '\n' + pad + '  ' + t.split('\n').join('\n' + pad + '  ') : t}`;
+  }).join('\n');
+}
+/** Human-readable summary of one record revision (Copy text). */
+function recordText(cur, op) {
+  const title = recordTitle(cur);
+  const lc = LIFECYCLE[cur.lifecycle] ? LIFECYCLE[cur.lifecycle][1] : cur.lifecycle;
+  return `${title}\n${op.id} ${op.name || ''} · ${cur.record_id} v${cur.version} · ${lc}\n${dataText(cur.data, '').replace(/^\n/, '')}\n`;
+}
+async function copyRecord(r, how) {
+  try {
+    const d = await recordDetail(r.record_id);
+    const v = d.versions.find(x => x.version === r.version) || d.versions[d.versions.length - 1];
+    const op = S.opsById[v.module_id] || { id: v.module_id, name: '' };
+    if (how === 'json') await copyText(JSON.stringify(v.data, null, 2), 'Copied as JSON');
+    else await copyText(recordText(v, op), 'Copied as text');
+  } catch (e) { toast(`Could not copy: ${apiErrInfo(e).message}`); }
+}
+/** ⧉ Duplicate as new draft: the New form of the same step, filled from this record (nothing is created). */
+async function duplicateRecord(cur, op) {
+  const schema = await getSchema(op.id);
+  const props = (schema.create_payload && schema.create_payload.properties) || {};
+  const data = cur.data && typeof cur.data === 'object' ? cur.data : {};
+  const payload = {}; const skipped = [];
+  for (const [k, v] of Object.entries(data)) { if (k in props) payload[k] = v; else skipped.push(k); }
+  const manual = isCreative(op) ? data : undefined;
+  fillNewForm(S.pid, S.branch, op.id, payload,
+    { manual, manualOn: false, from_copy: { record_id: cur.record_id, version: cur.version, title: recordTitle(cur), skipped: manual ? [] : skipped, manual: !!manual } },
+    `${op.id} form filled from ${cur.record_id} — review it and press Create`);
+}
+function mainTextField(props) {
+  const entries = Object.entries(props || {});
+  const isStr = s => s && (s.type === 'string' || (Array.isArray(s.type) && s.type.includes('string')));
+  const hit = entries.find(([k, s]) => isStr(s) && LONG_TEXT.test(k) && !/_id$/.test(k));
+  if (hit) return hit[0];
+  const any = entries.find(([k, s]) => isStr(s) && !/_id$/.test(k) && !s.enum);
+  return any ? any[0] : null;
+}
+/** Small modal with buttons; resolves to the chosen id, or null. */
+function choiceDialog(title, message, choices) {
+  return new Promise(resolve => {
+    const prev = document.activeElement;
+    const d = h('dialog', { class: 'selftest-dialog choice-dialog', 'aria-labelledby': 'choice-title' });
+    let done = false;
+    const finish = v => { if (done) return; done = true; try { if (d.open) d.close(); } catch { /* ignore */ } d.remove(); if (prev && prev.focus) { try { prev.focus(); } catch { /* ignore */ } } resolve(v); };
+    d.appendChild(h('h2', { id: 'choice-title' }, title));
+    if (message) d.appendChild(typeof message === 'string' ? h('p', null, message) : message);
+    d.appendChild(h('div', { class: 'form-actions' }, choices.map((c, i) => h('button', { type: 'button', class: i === 0 ? 'primary' : null, onclick: () => finish(c.id) }, c.label)),
+      h('button', { type: 'button', onclick: () => finish(null) }, 'Cancel')));
+    d.addEventListener('cancel', ev => { ev.preventDefault(); finish(null); });
+    document.body.appendChild(d);
+    try { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); } catch { d.setAttribute('open', ''); }
+    const b = d.querySelector('button'); if (b) b.focus();
+  });
+}
+/**
+ * 📥 Paste: JSON whose fields match the form fills them (others are skipped and listed); plain text goes
+ * into the main text field, or becomes the request for ✨ Fill with AI. Nothing is submitted.
+ */
+async function pasteIntoForm({ op, props, current, apply, onGuidance }) {
+  let text;
+  try { text = await readText('Text or JSON to paste into this form'); } catch { text = null; }
+  if (text === null || text === undefined) return;
+  const trimmed = String(text).trim();
+  if (!trimmed) { toast('Nothing to paste'); return; }
+  let obj = null;
+  if (/^[[{]/.test(trimmed)) { try { obj = JSON.parse(trimmed); } catch { obj = null; } }
+  let cur = {};
+  try { cur = current() || {}; } catch { cur = {}; }
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+    if (obj.data && typeof obj.data === 'object' && obj.module_id) obj = obj.data;
+    else if (obj.proposal && typeof obj.proposal === 'object') obj = obj.proposal;
+    const filled = []; const skipped = [];
+    const merged = Object.assign({}, cur);
+    for (const [k, v] of Object.entries(obj)) { if (k in props) { merged[k] = v; filled.push(k); } else skipped.push(k); }
+    if (!filled.length) {
+      toast(`None of the pasted fields belong to this form${skipped.length ? ` (skipped: ${skipped.slice(0, 6).join(', ')})` : ''}.`);
+      return;
+    }
+    apply(merged, { filled, skipped });
+    toast(`Pasted ${filled.length} field(s)${skipped.length ? `; skipped ${skipped.length}` : ''}`);
+    return;
+  }
+  const field = mainTextField(props);
+  const choices = [];
+  if (field) choices.push({ id: 'field', label: `Put it into “${humanize(field)}”` });
+  if (onGuidance) choices.push({ id: 'ai', label: '✨ Use it as the request for Fill with AI' });
+  if (!choices.length) { toast('This form has no text field for plain text; paste JSON instead.'); return; }
+  const preview = trimmed.length > 160 ? trimmed.slice(0, 157) + '…' : trimmed;
+  const pick = choices.length === 1 && field ? 'field' : await choiceDialog('Paste text', h('p', null, 'Where should this text go?', h('br'), h('q', { class: 'small' }, preview)), choices);
+  if (pick === 'field') apply(Object.assign({}, cur, { [field]: trimmed }), { filled: [field], skipped: [] });
+  else if (pick === 'ai' && onGuidance) onGuidance(trimmed);
+}
+
+/* ======================================================================= generic modal */
+function modal(title, build, { wide = false } = {}) {
+  const prev = document.activeElement;
+  const id = uid('modal');
+  const d = h('dialog', { class: `selftest-dialog${wide ? ' wide-dialog' : ''}`, 'aria-labelledby': `${id}-t` });
+  const close = () => { try { if (d.open) d.close(); } catch { /* ignore */ } d.remove(); if (prev && document.contains(prev) && prev.focus) { try { prev.focus(); } catch { /* ignore */ } } };
+  d.appendChild(h('div', { class: 'st-head' }, h('h2', { id: `${id}-t` }, title), h('button', { type: 'button', class: 'small', 'aria-label': 'Close', onclick: close }, '✕ Close')));
+  d.addEventListener('cancel', ev => { ev.preventDefault(); close(); });
+  document.body.appendChild(d);
+  append(d, [build(close)]);
+  try { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); } catch { d.setAttribute('open', ''); }
+  const f = d.querySelector('input, textarea, select'); if (f) f.focus();
+  return { d, close };
+}
+
+/* ======================================================================= book profile */
+const AUDIENCES = ['Children (5-8)', 'Middle grade (8-12)', 'Young adult (12-18)', 'Adult', 'Everyone'];
+const GENRES = ['Fantasy', 'Science fiction', 'Mystery', 'Thriller', 'Romance', 'Horror', 'Historical', 'Literary', 'Adventure', 'Comedy', 'Children’s picture book'];
+const TONES = ['Cozy and warm', 'Dark and tense', 'Funny', 'Epic', 'Hopeful', 'Bittersweet', 'Spooky'];
+const LENGTH_INFO = { short_story: ['Short story', 'about 1-3 chapters'], novella: ['Novella', 'about 6-10 chapters'], novel: ['Novel', 'about 20-30 chapters'] };
+const PROFILE_HELP = {
+  title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page.',
+  genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
+  length: 'How long the book should be; it sets how many chapters are planned.', tone: 'How it should feel to read.',
+  idea: 'Your story in a few sentences: who, where, and what goes wrong. Everything is built to fit this.',
+};
+
+/** The profile fields as a form; returns {el, get()} */
+function profileFields(prof, prefix) {
+  const f = {};
+  const field = (key, label, control, extra) => {
+    control.id = `${prefix}-${key}`;
+    control.setAttribute('aria-describedby', `${prefix}-${key}-h`);
+    f[key] = control;
+    return h('div', { class: 'field' + (key === 'idea' ? ' wide' : '') }, h('label', { for: control.id }, label), control, extra || null,
+      h('span', { class: 'hint', id: `${prefix}-${key}-h` }, PROFILE_HELP[key] || ''));
+  };
+  const dl = (id, vals) => h('datalist', { id }, vals.map(v => h('option', { value: v })));
+  const lengthSel = h('select', null, h('option', { value: '' }, '— choose —'), Object.entries(LENGTH_INFO).map(([k, [l, d]]) => h('option', { value: k, selected: prof.length === k }, `${l} (${d})`)));
+  const aud = h('select', null, h('option', { value: '' }, '— choose —'), AUDIENCES.map(a => h('option', { value: a, selected: prof.audience === a }, a)));
+  if (prof.audience && !AUDIENCES.includes(prof.audience)) aud.appendChild(h('option', { value: prof.audience, selected: true }, prof.audience));
+  const el = h('div', { class: 'grid-2 profile-grid' },
+    field('title', 'Book title', h('input', { type: 'text', value: prof.title || '', maxlength: '200', autocomplete: 'off' })),
+    field('author', 'Author or pen name', h('input', { type: 'text', value: prof.author || '', maxlength: '200' })),
+    field('genre', 'Genre', h('input', { type: 'text', value: prof.genre || '', list: `${prefix}-genres`, maxlength: '120' }), dl(`${prefix}-genres`, GENRES)),
+    field('audience', 'Who is it for?', aud),
+    field('length', 'Length', lengthSel),
+    field('tone', 'Tone', h('input', { type: 'text', value: prof.tone || '', list: `${prefix}-tones`, maxlength: '200' }), dl(`${prefix}-tones`, TONES)),
+    field('idea', 'Your idea in a paragraph', h('textarea', { rows: '4', maxlength: '4000' }, prof.idea || '')));
+  f.idea.value = prof.idea || '';
+  return { el, get: () => Object.fromEntries(Object.entries(f).map(([k, c]) => [k, c.value.trim()])), f };
+}
+function openProfileDialog(onSaved) {
+  if (!S.project) return;
+  const prof = profileOf();
+  modal('📝 Book profile', close => {
+    const pf = profileFields(prof, uid('pf'));
+    const out = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'submit', class: 'primary' }, 'Save profile');
+    return h('form', { novalidate: true, onsubmit: async ev => {
+      ev.preventDefault(); clear(out); save.disabled = true;
+      try {
+        const saved = await api('PUT', `/projects/${encodeURIComponent(S.pid)}/profile`, { body: pf.get() });
+        S.project.profile = saved;
+        toast('Book profile saved'); close();
+        if (onSaved) onSaved(saved); else route();
+      } catch (e) { out.appendChild(failedState('The profile was not saved', e)); save.disabled = false; }
+    } }, h('p', { class: 'small muted' }, 'This is what your book is. The AI reads it every time it helps, and the title and author go on the title page and into the exported files.'),
+    pf.el, out, h('div', { class: 'form-actions' }, save));
+  }, { wide: true });
+}
+function profileCard() {
+  const prof = profileOf();
+  const row = (label, v) => [h('dt', null, label), h('dd', null, v || h('span', { class: 'muted' }, 'not set'))];
+  return h('section', { class: 'card profile-card', 'aria-labelledby': 'prof-h' },
+    h('div', { class: 'row space' }, h('h2', { id: 'prof-h' }, '📝 Book profile'),
+      h('button', { type: 'button', onclick: () => openProfileDialog() }, 'Edit')),
+    h('p', { class: 'small muted' }, 'What your book is. The AI reads this every time it helps; the title and author go on the title page and into the files.'),
+    h('dl', { class: 'kv' },
+      row('Title', prof.title), row('Author', prof.author), row('Genre', prof.genre), row('For', prof.audience),
+      row('Length', prof.length ? `${LENGTH_INFO[prof.length][0]} (${LENGTH_INFO[prof.length][1]})` : ''),
+      row('Tone', prof.tone), row('Idea', prof.idea),
+      row('AI', prof.ai_slot === 'manual' ? 'I write it myself (no AI)' : prof.ai_slot ? prof.ai_slot : 'Automatic — the best ready AI')));
+}
+
+/* ======================================================================= start wizard */
+const WZ_KEY = 'bf:wizard';
+function wizardState() {
+  const w = loadJSON(WZ_KEY, null);
+  return w && typeof w === 'object' ? w : { step: 1, profile: { length: 'novella' }, ai: '', make: { A01: 4, A04: 2, A03: 1, premise: true, outline: true } };
+}
+async function viewStart(main) {
+  const w = wizardState();
+  const save = () => saveJSON(WZ_KEY, w);
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'Start a new book'), h('h1', null, '🚀 Start a new book'))));
+  const steps = ['Your book', 'Your AI', 'What to make', 'Review and go'];
+  main.appendChild(h('ol', { class: 'wz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => h('li', { class: i + 1 === w.step ? 'cur' : i + 1 < w.step ? 'done' : null, 'aria-current': i + 1 === w.step ? 'step' : null }, h('span', { class: 'wz-n' }, String(i + 1)), s))));
+  const card = h('section', { class: 'card wz-card', 'aria-labelledby': 'wz-h' });
+  main.appendChild(card);
+  const err = h('div', { 'aria-live': 'polite' });
+  const nav = (back, next, nextLabel = 'Next ▶') => h('div', { class: 'form-actions' },
+    back ? h('button', { type: 'button', onclick: back }, '◀ Back') : null,
+    h('button', { type: 'button', class: 'primary', onclick: next }, nextLabel));
+  const goStep = n => { w.step = n; save(); route(); };
+  if (w.step === 1) {
+    const pf = profileFields(w.profile, 'wz');
+    const keep = () => { w.profile = Object.assign(w.profile, pf.get()); save(); };
+    pf.el.addEventListener('input', keep); pf.el.addEventListener('change', keep);
+    card.append(h('h2', { id: 'wz-h' }, '1. Tell me about your book'),
+      h('p', { class: 'muted' }, 'Only the title is needed now; everything can be changed later.'), pf.el, err,
+      nav(null, () => {
+        keep(); clear(err);
+        if (!w.profile.title) { err.appendChild(stateBox('failed', 'Give your book a title (a working title is fine)')); pf.f.title.focus(); return; }
+        goStep(2);
+      }));
+    pf.f.title.focus();
+  } else if (w.step === 2) {
+    const list = h('div', { class: 'wz-ai', role: 'radiogroup', 'aria-labelledby': 'wz-h' });
+    const opt = (value, label, detail, disabled) => {
+      const id = uid('wzai');
+      return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'radio', name: 'wz-ai', id, value, checked: (w.ai || '') === value, disabled, onchange: () => { w.ai = value; save(); } }),
+        h('label', { for: id }, h('strong', null, label), detail ? h('span', { class: 'hint' }, detail) : null));
+    };
+    list.appendChild(opt('', 'Automatic', 'Use the best AI that is ready each time.'));
+    list.appendChild(h('p', { class: 'small muted' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Checking your AI slots…'));
+    card.append(h('h2', { id: 'wz-h' }, '2. Which AI should help?'),
+      h('p', { class: 'muted' }, 'BookForge can use up to three AIs (set them up in Settings). You can also write everything yourself.'), list,
+      h('p', { class: 'small' }, 'No AI yet? ', h('a', { href: '#/settings' }, 'Open Settings'), ' to connect AutoInjector or add an API key — your answers here are kept.'), err,
+      nav(() => goStep(1), () => goStep(3)));
+    try {
+      const slots = await loadSlotChoices(true);
+      list.lastChild.remove();
+      let ready = 0;
+      for (const { s, health } of slots) {
+        const st = slotStage(s, health);
+        const usable = !['none', 'manual'].includes(s.adapter_id);
+        if (usable && st.cls !== 'b-bad') ready++;
+        list.appendChild(opt(s.slot_id, `${s.slot_id} · ${slotName(s)}`, `${st.icon} ${st.word} — ${st.now}`, !usable));
+      }
+      if (!ready) list.appendChild(h('p', { class: 'notice small' }, 'No AI is ready right now. You can still start: the book path will fill in forms for you to write, and you can connect an AI later.'));
+    } catch (e) { list.lastChild.replaceWith(h('p', { class: 'small' }, 'Could not check the AI slots (they can be set up later).')); }
+    list.appendChild(opt('manual', 'Manual — I’ll write it myself', 'No AI is used; BookForge prepares each form for you to fill in.'));
+  } else if (w.step === 3) {
+    const ai = w.ai !== 'manual';
+    const num = (key, label, max, hint) => {
+      const id = uid('wzn');
+      const inp = h('input', { type: 'number', id, min: '0', max: String(max), step: '1', value: String(w.make[key] ?? 0), class: 'wz-num', onchange: () => { w.make[key] = Math.max(0, Math.min(max, parseInt(inp.value, 10) || 0)); save(); } });
+      return h('div', { class: 'wz-make-row' }, h('label', { for: id }, h('strong', null, label), h('span', { class: 'hint' }, hint)), inp);
+    };
+    const tick = (key, label, hint) => {
+      const id = uid('wzt');
+      return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'checkbox', id, checked: !!w.make[key], onchange: ev => { w.make[key] = ev.target.checked; save(); } }),
+        h('label', { for: id }, h('strong', null, label), h('span', { class: 'hint' }, hint)));
+    };
+    card.append(h('h2', { id: 'wz-h' }, '3. What do you want me to make?'),
+      h('p', { class: 'muted' }, ai ? 'Your AI drafts these; you read and approve each one. Nothing becomes part of the book until you approve it.'
+        : 'You chose to write it yourself, so these become ready-to-fill forms in “Make my book”.'),
+      num('A01', 'Characters', 10, 'Main cast, made to fit your idea (0 = none now).'),
+      num('A04', 'Places', 10, 'Towns, rooms, landmarks.'),
+      num('A03', 'World', 1, 'The world or setting as a whole (0 or 1).'),
+      tick('premise', 'Premise', 'What the book is about, from your idea.'),
+      tick('outline', 'Plot and chapter outline', 'The main plot and a chapter-by-chapter plan.'),
+      h('p', { class: 'small muted' }, 'Chapters are written one at a time in “📘 Make my book”, after you approve the outline.'), err,
+      nav(() => goStep(2), () => goStep(4)));
+  } else {
+    const p = w.profile;
+    const aiLabel = w.ai === 'manual' ? 'I write it myself (no AI)' : w.ai || 'Automatic';
+    const makeList = [w.make.A01 ? `${w.make.A01} character(s)` : null, w.make.A04 ? `${w.make.A04} place(s)` : null, w.make.A03 ? 'the world' : null,
+      w.make.premise ? 'a premise' : null, w.make.outline ? 'the plot and chapter outline' : null].filter(Boolean);
+    const go4 = h('button', { type: 'button', class: 'primary big' }, '🚀 Create my book');
+    card.append(h('h2', { id: 'wz-h' }, '4. Ready?'),
+      h('dl', { class: 'kv' }, h('dt', null, 'Title'), h('dd', null, p.title || '—'), h('dt', null, 'Author'), h('dd', null, p.author || '—'),
+        h('dt', null, 'Genre / for'), h('dd', null, [p.genre, p.audience].filter(Boolean).join(' · ') || '—'),
+        h('dt', null, 'Length'), h('dd', null, p.length ? LENGTH_INFO[p.length][0] : '—'), h('dt', null, 'Tone'), h('dd', null, p.tone || '—'),
+        h('dt', null, 'Idea'), h('dd', null, p.idea || '—'), h('dt', null, 'AI'), h('dd', null, aiLabel),
+        h('dt', null, 'To make'), h('dd', null, makeList.join(', ') || 'nothing yet')),
+      h('p', { class: 'small muted' }, 'This creates the book with PDF, EPUB and Word (DOCX) output, then opens “📘 Make my book”, which walks you through every step.'),
+      err, h('div', { class: 'form-actions' }, h('button', { type: 'button', onclick: () => goStep(3) }, '◀ Back'), go4));
+    go4.addEventListener('click', async () => {
+      clear(err); go4.disabled = true;
+      err.appendChild(loadingState('Creating your book…'));
+      try {
+        const profile = Object.assign({}, p, { ai_slot: w.ai || '' });
+        const proj = await api('POST', '/projects', { body: { name: p.title, profile, features: { character_arcs: true },
+          release_profiles: ['MANUSCRIPT_PDF', 'EPUB_REFLOWABLE', 'EDITABLE_DOCX'] } });
+        const counts = {};
+        for (const k of ['A01', 'A04', 'A03']) if (w.make[k] > 0) counts[k] = w.make[k];
+        if (w.ai !== 'manual' && Object.keys(counts).length && (p.idea || p.title)) {
+          try {
+            BB.session = await api('POST', '/bible-builder', { body: { project_id: proj.project_id, branch_id: 'main', idea: p.idea || p.title, counts,
+              slot_id: ['AI-1', 'AI-2', 'AI-3'].includes(w.ai) ? w.ai : null } });
+            toast('Book created — your AI is drafting the characters and places now');
+          } catch (e) { toast(`Book created. The AI could not start yet: ${apiErrInfo(e).message}`); }
+        } else toast('Book created');
+        saveJSON(`bf:want:${proj.project_id}`, w.make);
+        if (p.idea) saveJSON(`bf:bb-idea:${proj.project_id}`, p.idea);
+        removeKey(WZ_KEY);
+        await loadProjects();
+        go(link('p', proj.project_id, 'main', 'book'));
+      } catch (e) { clear(err).appendChild(failedState('The book was not created', e)); go4.disabled = false; }
+    });
+  }
+}
+
+/* ======================================================================= Make my book */
+const BOOK_STATE = {
+  done: ['✔', 'Done', 'b-ok'], needs_you: ['👋', 'Needs you', 'b-warn'], ai_can: ['✨', 'AI can do it', 'b-info'],
+  ready: ['▶', 'Ready', 'b-info'], blocked: ['⏳', 'Waiting', 'b-muted'],
+};
+const STEP_WAIT = { B01: 'the premise', B03: 'the main plot', B11: 'the chapter outline', profile: 'the book profile', chapters: 'all chapters approved', format: 'the book format', assemble: 'the assembled book' };
+async function viewBook(main) {
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], 'Make my book'), h('h1', null, '📘 Make my book')),
+  h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'))));
+  const holder = h('div', null, loadingState('Checking where your book is…'));
+  main.appendChild(holder);
+  let book = null;
+  const drawBook = async () => {
+    try { book = await api('GET', bpath('/book')); }
+    catch (e) { clear(holder).appendChild(failedState('Could not load the book path', e, h('p', null, h('button', { type: 'button', onclick: drawBook }, 'Try again')))); return; }
+    renderBook(holder, book, drawBook);
+  };
+  await drawBook();
+  S.onRecordsChanged = null;
+}
+
+function renderBook(holder, book, redraw) {
+  clear(holder);
+  const pct = Math.round((book.done_count / book.total) * 100);
+  const msg = h('div', { 'aria-live': 'polite', class: 'book-msg' });
+  const run = async (fn, busyText) => {
+    clear(msg).appendChild(loadingState(busyText || 'Working…'));
+    try {
+      const out = await fn();
+      clear(msg);
+      if (out && out.needs_manual) {
+        fillNewForm(S.pid, S.branch, out.op, out.payload, { manualOn: true, from_book: { message: out.message } }, 'The form is ready — write it, then press Create');
+        return;
+      }
+      const note = out ? stateBox(out.ok ? 'ok' : 'failed', out.message || (out.ok ? 'Done' : 'Not done'),
+        (out.problems || []).length ? h('ul', null, out.problems.map(p => h('li', null, p))) : null,
+        (out.results || []).filter(r => !r.ok).length ? h('ul', null, out.results.filter(r => !r.ok).map(r => h('li', null, `${r.record_id}: ${(r.problems || []).join('; ')}`))) : null) : null;
+      try { await refreshRecords(); } catch { /* best effort */ }
+      if (out && out.book) renderBook(holder, out.book, redraw); else await redraw();
+      // the message goes into the freshly drawn page, after the steps are up to date
+      const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(out.message || ''); }
+    } catch (e) {
+      clear(msg).appendChild(errorWithFix('That step did not work', apiErrInfo(e)));
+    }
+  };
+  const post = (action, body) => api('POST', bpath(`/book/${action}`), { body: body || {} });
+  const approve = async (items, what) => {
+    if (!items.length) return;
+    const names = items.map(i => `• ${i.module_id} ${i.title}`).join('\n');
+    const ok = await choiceDialog('Approve as the author?', h('div', null,
+      h('p', null, `You are approving ${what}. Approving makes it part of the book; later steps build on it. If you change it later, the steps built on it are marked to redo.`),
+      h('pre', { class: 'small' }, names),
+      h('p', { class: 'small muted' }, 'Some steps need an explicit approval record; BookForge records one for exactly these versions because you confirm here.')),
+    [{ id: 'yes', label: '✔ Yes, I approve' }]);
+    if (ok !== 'yes') return;
+    await run(() => post('approve', { record_ids: items.map(i => i.record_id), author_confirms: true }), 'Approving…');
+  };
+  const doStep = async s => {
+    if (!s) return;
+    if (s.id === 'profile') { openProfileDialog(() => redraw()); return; }
+    if (s.approve && s.approve.length) { await approve(s.approve, s.title.toLowerCase()); return; }
+    if (s.state === 'blocked') { toast(`Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}`); return; }
+    if (s.id === 'canon') { if (book.ai_ready) openMakeDialog('A01', null, null); else goNew('A01'); return; }
+    if (['premise', 'plot', 'outline'].includes(s.id)) { await run(() => post('create', { op: s.op }), book.ai_ready ? 'Your AI is writing… (web AIs can take a few minutes)' : 'Preparing the form…'); return; }
+    if (s.id === 'chapters') {
+      const c = (s.chapters || []).find(x => x.state !== 'done' && !(x.prose && ['DRAFT', 'VALIDATED'].includes(x.prose.lifecycle)));
+      if (c) await run(() => post('write_chapter', { chapter_id: c.chapter_id }), book.ai_ready ? `Your AI is writing chapter ${c.chapter_id}…` : 'Preparing the chapter form…');
+      return;
+    }
+    if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…');
+  };
+  const nextStep = book.steps.find(s => s.id === book.next);
+  holder.appendChild(h('section', { class: 'card book-top' },
+    h('div', { class: 'row space' }, h('div', null, h('strong', null, `${book.done_count} of ${book.total} steps done`),
+      h('div', { class: 'small muted' }, book.ai_ready ? '✨ Your AI is connected: steps marked “AI can do it” are drafted for you.'
+        : 'No AI connected (or you chose to write it yourself): creative steps open a ready-made form for you. ', book.ai_ready ? null : h('a', { href: '#/settings' }, 'Connect an AI in Settings'))),
+    nextStep ? h('button', { type: 'button', class: 'primary big', onclick: () => doStep(nextStep) }, `▶ Do the next step: ${nextStep.title}`)
+      : h('span', { class: 'badge b-ok' }, '🎉 Your book is made')),
+    h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), msg));
+  const ol = h('ol', { class: 'book-steps' });
+  for (const s of book.steps) {
+    const b = BOOK_STATE[s.state] || ['?', s.state, 'b-muted'];
+    const li = h('li', { class: `book-step bs-${s.state}${s.id === book.next ? ' current' : ''}` },
+      h('div', { class: 'row space' }, h('h3', null, s.title), badge(b[0], b[1], b[2])),
+      h('p', { class: 'small' }, s.about));
+    if (s.state === 'blocked' && s.waiting_for) li.appendChild(h('p', { class: 'small muted' }, `Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}.`));
+    if (s.approve && s.approve.length) {
+      li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: plink('rec', i.record_id) }, `${i.module_id} · ${i.title}`), ' ', lifecycleBadge(i.lifecycle),
+        h('button', { type: 'button', class: 'small', onclick: () => approve([i], `“${i.title}”`) }, '✔ Approve')))));
+    }
+    const acts = h('div', { class: 'row' });
+    if (s.id === 'profile') acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => openProfileDialog(() => redraw()) }, s.state === 'done' ? 'Edit' : 'Fill in'));
+    if (s.id === 'canon') {
+      acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', disabled: !book.ai_ready, onclick: ev => openMakeDialog('A01', null, ev.currentTarget) }, '✨ Make up characters'));
+      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write one myself'));
+      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: ev => openBible(ev.currentTarget) }, '📖 Bible Builder'));
+    }
+    if (['premise', 'plot', 'outline'].includes(s.id) && s.state !== 'done' && s.state !== 'blocked') {
+      if (book.ai_ready) acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('create', { op: s.op }), 'Your AI is writing…') }, '✨ Let my AI draft it'));
+      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => run(() => post('create', { op: s.op, manual: true }), 'Preparing the form…') }, '✍️ Write it myself'));
+      acts.appendChild(h('a', { class: 'btn small', href: plink('op', s.op) }, `Open ${s.op}`));
+    }
+    if (s.id === 'chapters' && (s.chapters || []).length) {
+      li.appendChild(h('ul', { class: 'book-items' }, s.chapters.map(c => {
+        const cb = BOOK_STATE[c.state] || BOOK_STATE.blocked;
+        return h('li', null, h('strong', null, c.chapter_id), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]), ' ',
+          c.prose ? h('a', { class: 'btn small', href: plink('rec', c.prose.record_id) }, 'Read') : null,
+          c.state !== 'done' && !(c.prose && ['DRAFT', 'VALIDATED'].includes(c.prose.lifecycle))
+            ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id }), `Your AI is writing ${c.chapter_id}… (web AIs can take a few minutes)`) }, '✨ Write it with AI') : null,
+              h('button', { type: 'button', class: 'small', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id, manual: true }), 'Preparing the chapter form…') }, '✍️ Write it myself')] : null);
+      })));
+    }
+    if (['setup_format', 'assemble', 'export', 'check'].includes(s.action)) {
+      const label = { setup_format: '⚙️ Set up the book format', assemble: '🧩 Put the book together', export: '📦 Export my book', check: '🔎 Check the book' }[s.action];
+      acts.appendChild(h('button', { type: 'button', class: 'small primary', onclick: () => run(() => post(s.action), 'Working…') }, label));
+    }
+    if (s.approve && s.approve.length > 1) acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, `${s.approve.length} items`) }, `✔ Approve all ${s.approve.length}`));
+    if (s.id === 'check' && s.result) li.appendChild(h('p', { class: 'small' }, 'Result: ', badge(s.result === 'PASS' ? '✔' : '✕', s.result, s.result === 'PASS' ? 'b-ok' : 'b-bad')));
+    if (s.id === 'export' && (s.files || []).length) {
+      li.appendChild(h('div', { class: 'downloads' }, h('strong', null, '⬇ Download my book: '),
+        s.files.map(f => h('button', { type: 'button', class: 'primary small', onclick: () => downloadAsset(f) }, f.format))));
+    }
+    if (acts.childNodes.length) li.appendChild(acts);
+    ol.appendChild(li);
+  }
+  holder.appendChild(ol);
+  holder.appendChild(h('p', { class: 'small muted' }, 'Behind the scenes this uses the real steps: A01 → B01 → B03 → B11 → C01/C02 → book format (I01) → G02/G01/G05/G04/G07 → G11/G12/G13 → H05. Full release readiness (H10) is in the Quality Checks set.'));
+}
+
+async function downloadAsset(f) {
+  try {
+    const blob = await api('GET', bpath(`/assets/${encodeURIComponent(f.record_id)}/${f.version}`), { blob: true });
+    const ext = { PDF: 'pdf', EPUB: 'epub', DOCX: 'docx' }[f.format] || 'bin';
+    const name = `${(profileOf().title || S.project.name || 'book').replace(/[^\w\- ]+/g, '').trim() || 'book'}.${ext}`;
+    const url = URL.createObjectURL(blob);
+    const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(`Downloading ${name}`);
+  } catch (e) { toast(`Download failed: ${apiErrInfo(e).message}`); }
+}
+
 /* ======================================================================= boot */
+/** Focus target after a dialog closes: items inside a closed top-bar menu fall back to the menu button. */
+function visibleOpener(el) {
+  const pop = el && el.closest && el.closest('.tb-pop');
+  if (pop) { const btn = pop.parentElement && pop.parentElement.querySelector('.tb-btn'); if (btn) return btn; }
+  return el;
+}
+function initNavigation() {
+  configureClipboard({ toast });
+  popMenu($('#sets-btn'), $('#sets-pop'), renderSetsPop);
+  popMenu($('#more-btn'), $('#more-pop'));
+  $('#jump-btn').addEventListener('click', ev => openJump(ev.currentTarget));
+  const sd = $('#set-dialog');
+  sd.addEventListener('cancel', ev => { ev.preventDefault(); closeSetPanel(); });
+  sd.addEventListener('click', ev => { if (ev.target === sd) closeSetPanel(); });  // backdrop click
+  const md = $('#make-dialog');
+  md.addEventListener('cancel', ev => { ev.preventDefault(); if (!ev.target.closest || !ev.target.closest('.info-wrap')) closeMake(); });
+  const jd = $('#jump-dialog');
+  jd.addEventListener('cancel', ev => { ev.preventDefault(); closeJump(true); });
+  jd.addEventListener('click', ev => { if (ev.target === jd) closeJump(true); });
+  document.addEventListener('keydown', ev => {
+    if (S.authFailed) return;
+    const typing = ev.target && (ev.target.closest && ev.target.closest('input, textarea, select, [contenteditable="true"]'));
+    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'k' || ev.key === 'K')) { ev.preventDefault(); openJump(document.activeElement); return; }
+    if (ev.key === '/' && !typing && !ev.ctrlKey && !ev.metaKey && !ev.altKey && !document.querySelector('dialog[open]')) { ev.preventDefault(); openJump(document.activeElement); }
+  });
+  // Safety net: any promise nobody handled becomes a friendly message instead of a silent failure.
+  window.addEventListener('unhandledrejection', ev => {
+    ev.preventDefault();
+    const r = ev.reason;
+    if (r && r.name === 'AbortError') return;
+    const msg = r instanceof ApiError ? apiErrInfo(r).message : (r && r.message) || String(r);
+    toast(`Something went wrong: ${msg}`);
+    try { console.warn('Bookforge: unhandled problem', r); } catch { /* ignore */ }
+  });
+}
+
 function boot() {
   initToken();
   initSelfTestButton();
   initBibleButton();
+  initNavigation();
   const toggle = $('#nav-toggle');
   toggle.addEventListener('click', () => {
     const nav = $('#sidenav'); const open = !nav.classList.contains('open');

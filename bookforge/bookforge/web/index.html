@@ -18,13 +18,30 @@
   </button>
   <a class="brand" href="#/">Bookforge</a>
   <div class="topbar-context" id="context-bar" aria-label="Current project"></div>
+  <button type="button" id="jump-btn" class="tb-btn jump-btn" aria-haspopup="dialog" aria-keyshortcuts="Control+K /" title="Jump to any module, set or page (Ctrl+K or /)">
+    <span aria-hidden="true">&#128269;</span> <span class="tb-label">Jump</span><kbd class="tb-kbd">Ctrl K</kbd>
+  </button>
+  <div class="tb-menu" id="sets-menu">
+    <button type="button" id="sets-btn" class="tb-btn sets-btn" aria-haspopup="true" aria-expanded="false" aria-controls="sets-pop">
+      <span aria-hidden="true">&#129513;</span> Sets
+    </button>
+    <div id="sets-pop" class="tb-pop sets-pop" hidden></div>
+  </div>
   <nav class="topbar-links" aria-label="Workspace pages" id="top-links"></nav>
-  <button type="button" id="bible-btn" class="bible-btn" aria-haspopup="dialog">
-    <span aria-hidden="true">&#128214;</span> Bible Builder
-  </button>
-  <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
-    <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
-  </button>
+  <div class="tb-menu" id="more-menu">
+    <button type="button" id="more-btn" class="tb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="more-pop">
+      More <span aria-hidden="true">&#9662;</span><span id="more-dot" class="more-dot" hidden></span>
+    </button>
+    <div id="more-pop" class="tb-pop more-pop" hidden>
+      <div id="more-links" class="more-links"></div>
+      <button type="button" id="bible-btn" class="bible-btn" aria-haspopup="dialog">
+        <span aria-hidden="true">&#128214;</span> Bible Builder
+      </button>
+      <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
+        <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
+      </button>
+    </div>
+  </div>
 </header>
 <div class="shell">
   <nav id="sidenav" class="sidenav" aria-label="Operation sets"></nav>
@@ -37,6 +54,9 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <dialog id="selftest-dialog" class="selftest-dialog" aria-labelledby="selftest-title"></dialog>
 <dialog id="bible-dialog" class="selftest-dialog bible-dialog" aria-labelledby="bible-title"></dialog>
+<dialog id="set-dialog" class="set-panel" aria-labelledby="set-panel-title"></dialog>
+<dialog id="make-dialog" class="selftest-dialog make-dialog" aria-labelledby="make-title"></dialog>
+<dialog id="jump-dialog" class="jump-dialog" aria-labelledby="jump-title"></dialog>
 <aside id="ai-dock" class="ai-dock" aria-label="Fill with AI panels"></aside>
 </body>
 </html>

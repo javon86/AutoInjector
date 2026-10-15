@@ -244,7 +244,10 @@ def test_concurrent_jobs(h, svc):
 def test_refusals_and_supported_ops(h, svc):
     c = h.engine.contracts
     assert all(supports(c, f"A{i:02d}") for i in range(1, 19)) and supports(c, "B01")
-    assert not supports(c, "B04") and not supports(c, "C02") and not supports(c, "B09")
+    assert not supports(c, "B04") and not supports(c, "B09")  # no AI-fillable fields
+    assert supports(c, "C02") and supports(c, "F01") and supports(c, "D07") and supports(c, "G08")
+    for op in ("C01", "E11", "E12", "H01", "J04", "I09", "K01", "G10", "G11", "F07"):  # never AI-proposed
+        assert not supports(c, op), op
     base = {"project_id": h.project_id, "branch_id": "main", "prompt": "x"}
     with pytest.raises(Exception) as e:
         svc.start_assist(h.principal, dict(base, target_operation="B04"))
@@ -450,7 +453,7 @@ def test_endpoints_need_auth_and_work_over_http(server, caplog):
     assert "feature manifest" in err["errors"][0]["fix"]
     assert call(port, "GET", "/api/assist/assist-unknown")[0] == 404
     ops = {o["id"]: o for o in call(port, "GET", "/api/operations")[1]}
-    assert ops["A01"]["assist"] and ops["B01"]["assist"] and not ops["C02"]["assist"]
+    assert ops["A01"]["assist"] and ops["B01"]["assist"] and ops["C02"]["assist"] and not ops["C01"]["assist"]
     # bible builder over HTTP
     st, s = call(port, "POST", "/api/bible-builder", {"project_id": pid, "branch_id": "main",
                                                       "idea": "ZZIDEA lighthouse", "counts": {"A04": 1}})

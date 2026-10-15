@@ -26,11 +26,15 @@ module first.
 
 ## Run it (Windows)
 
-1. Install **Python 3.10 or newer** from python.org (tick "Add python.exe to PATH").
-2. Double-click **`run-bookforge.bat`** in this folder. The first run installs the one
-   dependency (`jsonschema`).
-3. Your browser opens the workspace. Keep the console window open while you work; close it to
-   stop. The console prints the link (with your private access token) if you need to reopen it.
+1. Double-click **`run-bookforge.bat`** in this folder. If Python 3.10+ is missing, the window says
+   so and opens python.org: install it, tick **"Add python.exe to PATH"**, then double-click again.
+2. The first start makes BookForge's own Python environment (`%LOCALAPPDATA%\Bookforge\venv`) and
+   installs the one dependency quietly (needs the internet once).
+3. Your browser opens the workspace. If port 8780 is busy, BookForge picks the next free port; if
+   BookForge is already running, it just opens it again. Keep the window open while you work; close
+   it to stop. On a problem the window stays open with a plain explanation.
+4. Optional: double-click **`create-shortcut.bat`** once to put a **BookForge** shortcut on your
+   Desktop.
 
 macOS/Linux: `./run-bookforge.sh`. Manual start: `python -m pip install -r requirements.txt`
 then `python -m bookforge` (options: `--port 8780`, `--data-dir PATH`, `--no-browser`).
@@ -38,9 +42,60 @@ then `python -m bookforge` (options: `--port 8780`, `--data-dir PATH`, `--no-bro
 Your projects are stored privately on this computer (Windows: `%LOCALAPPDATA%\Bookforge`;
 elsewhere `~/.local/share/bookforge`). The server only listens on `127.0.0.1`.
 
+## Getting started: Start a new book and Make my book
+
+The first time you open BookForge (and any time from **🚀 New book** in the top bar) a short
+**Start a new book** wizard asks, in plain words: 1) your **book profile** — title, author or pen
+name, genre, who it is for, length (short story / novella / novel), tone and your idea in a
+paragraph; 2) which **AI** to use (each slot with its current status, Automatic, or *Manual — I'll
+write it myself*); 3) **what to make** (characters, places, the world, premise, plot and outline);
+4) review and **Create my book**. With an AI it starts drafting the characters and places right away.
+
+The **book profile** is shown (and editable) on the Overview. The AI reads it every time it helps,
+and the title and author go on the title page and into the exported files. It is stored with the
+project (API: `GET/PUT /api/projects/{id}/profile`).
+
+**📘 Make my book** is one checklist for the whole book, in order: book profile → characters and
+places → premise → main plot → chapter outline → write each chapter → book format → put the book
+together → export (PDF, EPUB, DOCX for the release profiles you chose) → a content check. Each step
+says **Done**, **Needs you**, **AI can do it**, **Ready** or **Waiting**, and the big **▶ Do the
+next step** button does the next one. Creative steps are written by your AI (or, with no AI, open a
+ready-made form for you to write); BookForge never approves anything for you — every approval asks
+*"Approve as the author?"*, and when a step needs an explicit approval record (for example a chapter
+without an objective review) one is recorded for exactly that version because you confirmed. At the
+end **⬇ Download my book** gives you the files. Full release readiness (H10) stays in Quality Checks.
+API: `GET /api/projects/{id}/branches/{b}/book`, `POST .../book/{create|write_chapter|approve|setup_format|assemble|export|check}`.
+
+## How to get around
+
+* **🧩 Sets** (top bar) opens a launcher of the 11 module sets; the Overview shows the same sets as
+  big tiles. Each tile shows its records and how many steps have an approved record.
+* Click a set to open its **panel**: what the set is for in plain words, where it fits in the build
+  order and which sets it needs or feeds, **quick actions** written from the set's specification
+  (for example **Make up characters for me** in Universe & Characters, **Draft a premise for me** in
+  Story Planning, **Export a PDF** in Assemble & Export), every step with its status and **Open**,
+  **New** and **✨ Make some for me**, and the recent records with Copy/Open. Esc or ✕ closes it.
+* **✨ Make some for me** asks your AI for 1–10 proposals (pick the AI per request, add roles or
+  anything it should know). Every proposal shows which AI made it; you **Use it in the form**,
+  **📋 Copy** it, or (for universe entries) save the ticked ones as drafts. Nothing is saved or
+  approved on its own.
+* **Breadcrumbs** at the top of every page (Your books › Book › Set › Step › Record) are clickable.
+  Step pages have **◀ Previous / Next ▶** buttons in the set's working order (crossing into the next
+  set at the end) and a **👉 What's next** hint along the main path A → B → C → E → F → G → H.
+* **🔍 Jump** (or **Ctrl+K**, or **/**) finds any step by ID or name (`A01`, `premise`), a set, a page
+  or a record; ↑ ↓ and Enter to go. The browser's Back and Forward buttons work everywhere.
+* **More ▾** holds Progress, Activity, Book features, the 📖 Bible Builder and 🧪 Test everything.
+
+**Copy and paste.** On a record: **📋 Copy text** (a readable summary), **📋 Copy JSON** (its data),
+**📋 Copy ID** and **⧉ Duplicate as new draft** (opens the New form filled with this record; you
+review it and press Create). On New and Edit forms, **📥 Paste** reads the clipboard: JSON fills the
+matching fields (unknown fields are skipped and listed); plain text goes into the main text field or
+becomes the request for ✨ Fill with AI. If the browser does not allow reading the clipboard, a paste
+box opens instead (press Ctrl+V there).
+
 ## Test everything
 
-Press **🧪 Test everything** in the top bar (or run `python -m bookforge selftest`) to check that
+Press **🧪 Test everything** (top bar → **More**) (or run `python -m bookforge selftest`) to check that
 the whole program really works on this computer. It is a real test, not a simulation:
 
 1. It creates a new, separate project named **"Self-test <date time>"** (your projects are not
@@ -107,8 +162,10 @@ and paid generation is never silently retried after an ambiguous timeout.
 
 ## Fill with AI
 
-On every Universe page (A01-A18) and on the creative planning pages that have free-text inputs
-(B01, B02, B03, B05, B06, B08, B11, B13, B14) there is a **✨ Fill with AI** button next to the New form.
+On every Universe page (A01-A18) and on every AI or hybrid step of Planning, Writing, Art, Editing and
+front/back matter (B, C, D, F, G08/G09) whose form has fields an AI can propose, there is a **✨ Fill
+with AI** button next to the New form. Story state (E), quality checks (H), reconciliation (J),
+storage (I), orchestration (K) and every deterministic step never take AI proposals.
 It opens that module's own panel (several can be open and running at once). Type what you want
 (for example "a grumpy lighthouse keeper who hides a secret"), pick an AI (Auto, or AI-1/AI-2/AI-3
 with each slot's current status), optionally tick existing records to use as context, and press
@@ -120,7 +177,7 @@ until you press Create.
 How it stays consistent: the AI gets the module's purpose and form schema, what you already typed
 (kept unless you untick "Keep what I already typed"), a short summary of the project's approved
 Set A canon (names, IDs, key facts, protected facts word for word), the names of draft canon, and
-the predicate conventions. The answer is checked without saving anything: the form's schema
+the predicate conventions, and the book profile (title, genre, audience, length, tone, idea). The answer is checked without saving anything: the form's schema
 validator, every link resolved against this project and branch (made-up links are removed and
 listed), and the module's own fact and canon checks. Protected-fact flags are always yours.
 With no AI ready you get "Connect AutoInjector in Settings, or add an API key".

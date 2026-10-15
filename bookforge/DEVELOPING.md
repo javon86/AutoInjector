@@ -22,9 +22,19 @@ bookforge/
     modules/set_a.py ...   per-set domain handlers (set_a .. set_k)
     exporters/             PDF / EPUB / DOCX writers (pure Python)
     assist.py              "Fill with AI" proposals (never committed) and the Bible Builder
+                           (supports(): A + AI/HYBRID ops of B/C/D/F/G with fillable fields;
+                           Bible runs accept optional per-run `guidance`)
+    sets_guide.py          SET_GUIDE: plain-language data per set (name, icon, purpose, build order,
+                           depends_on, op order, featured actions) -> GET /api/sets[?project_id&branch_id]
+                           with per-op counts and "what's next" along the build-plan vertical slice
+    book_path.py           book profile (GET/PUT /api/projects/{id}/profile, settings key
+                           book_profile:<pid>) and "Make my book" (GET/POST .../branches/{b}/book[/action]);
+                           every step is a normal engine.dispatch; approvals only with author_confirms
     selftest.py            "Test everything": real end-to-end self-test through engine.dispatch,
                            writes reports/selftest-<stamp>.md/.json (CLI: python -m bookforge selftest)
-    server.py, web/        local HTTP API + browser workspace
+    server.py, web/        local HTTP API + browser workspace (web/app.js, web/clipboard.js = the one
+                           clipboard helper with execCommand/paste-box fallbacks, hash routes #/p/<pid>/<branch>/...,
+                           incl. #/start wizard and .../book)
   tests/                   pytest suite (conftest.py has the Harness fixture `h`)
 ```
 
@@ -96,7 +106,8 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * Adapters that set `accepts_request_context = True` get `request_id`, `attempt`,
   `deadline` and `call` keywords in `submit()`; plain `submit(slot, system, user, schema)`
   adapters (and test fakes) keep working.
-* The server listens on port 8780 by default (`--port`, `BOOKFORGE_PORT`).
+* The server listens on port 8780 by default (`--port`, `BOOKFORGE_PORT`). Without an explicit port it
+  reuses an already running BookForge on the same data folder, or moves to the next free port.
   `POST /api/slots/connect-autoinjector` and `GET /api/slots/{id}/health` serve the Settings page.
 
 ## Tests
