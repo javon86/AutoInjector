@@ -1,0 +1,18 @@
+# Local working files that should never show up as changes.
+
+# AutoInjector desktop: downloads/creations folder ("stuff and thing") and its
+# ai-lockers, logs and models, wherever it is placed inside the repo.
+stuff and thing/
+**/stuff and thing/
+
+# Screenshots, notes and scratch output saved by local Claude sessions.
+**/Claude outputs/
+
+# Python / Node / OS clutter
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini
