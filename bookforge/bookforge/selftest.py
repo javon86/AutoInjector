@@ -343,6 +343,9 @@ class SelfTest:
             s("S2", "Create the world: places (A04) and a character (A01)", self.s_canon, ["P0"]),
             s("A1", "AI writes the premise (B01) with your AI slot", self.ai_premise, ["S2"], ai=True,
               about="Sends one small prompt to your AI slot and stores its answer as a draft."),
+            s("A3", "AI fills a character form (A01) with your AI slot", self.ai_fill_form, ["S2"], ai=True,
+              about="'Fill with AI' for the Character Builder: one prompt to your AI slot; the proposal is checked "
+                    "against the form's schema and is never saved."),
             s("S3", "Premise approved (B01)", self.s_premise, ["S2"]),
             s("S4", "Plan: main plot (B03) and two-chapter outline (B11)", self.s_plan, ["S3"]),
             s("A2", "AI drafts chapter 2 (C02) with your AI slot", self.ai_chapter, ["S4"], ai=True,
@@ -578,6 +581,32 @@ class SelfTest:
         return (f"{res['ai_slot']} ({res.get('adapter_id')}, {res.get('model')}) answered in "
                 f"{time.monotonic() - t0:.1f}s; premise {len(premise)} chars, sha256 {sha256_text(premise)[:16]}; "
                 f"stored and approved as {ref['record_id']} and used by the book slice")
+
+    def ai_fill_form(self):
+        from .assist import AssistService  # noqa: PLC0415
+        self._ai_gate()
+        before = self._count()
+        svc = AssistService(self.engine, self.principal, reports_dir=self.reports_dir)
+        t0 = time.monotonic()
+        job = svc.run_assist_sync(self.principal, self.project_id, self.branch, "A01",
+                                  "a grumpy lighthouse keeper who hides a secret (BookForge self-test)",
+                                  current_values={"attributes": {"role": "keeper of the harbor light"}})
+        self.providers.ai_on = False
+        if job["status"] != "done":
+            err = job.get("error") or {}
+            self._ai_failed("the AI did not fill the character form", {"errors": [err], "status": job["status"]})
+        prop = job["proposal"]
+        schema_bad = [f["message"] for f in job["findings"] if f["rule_id"] == "SCHEMA"]
+        expect(job["valid"] and not schema_bad, "the AI proposal does not fit the A01 form: " + "; ".join(schema_bad)[:400],
+               "Press Regenerate in the Fill-with-AI panel, or try another AI slot. Nothing was saved.")
+        expect(prop["attributes"].get("role") == "keeper of the harbor light",
+               "the value already typed in the form was not kept", BUG_FIX)
+        expect(self._count() == before, "the AI proposal was saved as a record; it must only fill the form", BUG_FIX)
+        text = json.dumps(prop, ensure_ascii=False)
+        return (f"{job['slot']} ({job.get('slot_label')}, {job.get('model')}) answered in "
+                f"{time.monotonic() - t0:.1f}s; proposal {len(text)} chars (sha256 {sha256_text(text)[:16]}), "
+                f"{len(prop.get('facts') or [])} fact(s), filled {', '.join(job['filled_fields']) or 'nothing'}; "
+                f"the typed role was kept; it validates against the A01 form schema and nothing was saved")
 
     def ai_chapter(self):
         self._ai_gate()

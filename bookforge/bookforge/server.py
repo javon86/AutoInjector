@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import CLOSURE_REVISION, CONTRACT_VERSION, __version__
+from .assist import AssistService, supports as assist_supports
 from .canonical import sha256_bytes
 from .engine import Engine
 from .errors import BookforgeError, error
@@ -55,6 +56,7 @@ class App:
         with self.store.transaction() as tx:
             tx.ensure_principal(principal_id, "Author", sha256_bytes(self.token.encode()))
         self.selftest = SelfTestRunner(self.store, self.engine.providers, principal_id)
+        self.assist = AssistService(self.engine, principal_id)
 
     @staticmethod
     def ping() -> dict:
@@ -158,6 +160,8 @@ class App:
             mime = "text/markdown; charset=utf-8" if fmt == "md" else "application/json; charset=utf-8"
             disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
             return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
+        if parts and parts[0] in ("assist", "bible-builder"):
+            return self.route_ai(method, parts, query, body, principal)
         if parts == ["projects"] and method == "GET":
             return 200, [self.project_summary(principal, r["project_id"]) for r in self.store.projects_for(principal)]
         if parts == ["projects"] and method == "POST":
@@ -198,13 +202,63 @@ class App:
                     return 200, self.progress(pid, branch)
         raise ApiError(404, "NOT_FOUND", path, "no such endpoint")
 
+    def route_ai(self, method: str, parts: list, query: dict, body, principal: str) -> tuple[int, object]:
+        """AI assist ("Fill with AI") and Bible Builder endpoints (proposals; see assist.py)."""
+        try:
+            return self._route_ai(method, parts, query, body, principal)
+        except BookforgeError as exc:
+            from .assist import FIX  # noqa: PLC0415
+            for e in exc.errors:  # every refusal carries a plain-English fix for the panel
+                code = "NOT_APPLICABLE" if str(e.get("path") or "").startswith("/feature_manifest") else e.get("code")
+                e.setdefault("fix", FIX.get(code, FIX["INTERNAL_ERROR"]))
+            raise
+
+    def _route_ai(self, method: str, parts: list, query: dict, body, principal: str) -> tuple[int, object]:
+        a = self.assist
+        body = body if isinstance(body, dict) else {}
+        if parts == ["assist"] and method == "POST":
+            return 202, a.start_assist(principal, body)
+        if len(parts) == 2 and parts[0] == "assist" and method == "GET":
+            return 200, a.get_assist(principal, parts[1])
+        if len(parts) == 3 and parts[0] == "assist" and parts[2] == "cancel" and method == "POST":
+            return 200, a.cancel_assist(principal, parts[1])
+        if parts == ["bible-builder"] and method == "POST":
+            return 202, a.create_bible(principal, body)
+        if parts == ["bible-builder"] and method == "GET":
+            pid = (query.get("project_id") or [None])[0]
+            branch = (query.get("branch_id") or ["main"])[0]
+            return 200, {"session": a.latest_bible(principal, pid, branch),
+                         "sections": a.bible_sections(pid, branch)}
+        if len(parts) == 2 and parts[0] == "bible-builder" and method == "GET":
+            return 200, a.get_bible(principal, parts[1])
+        if len(parts) == 3 and parts[0] == "bible-builder" and method == "POST":
+            sid, act = parts[1], parts[2]
+            if act == "run":
+                return 202, a.run_bible(principal, sid, body)
+            if act == "regenerate":
+                return 202, a.regenerate_bible_item(principal, sid, body)
+            if act == "cancel":
+                return 200, a.cancel_bible(principal, sid)
+            if act == "create":
+                return 200, a.create_bible_items(principal, sid, body)
+        if len(parts) == 3 and parts[0] == "bible-builder" and parts[2] == "report" and method == "GET":
+            fmt = (query.get("format") or ["md"])[0]
+            if fmt not in ("md", "json"):
+                raise ApiError(400, "INVALID_INPUT", "/format", "format must be md or json")
+            md, js = a.bible_report(principal, parts[1])
+            path = md if fmt == "md" else js
+            mime = "text/markdown; charset=utf-8" if fmt == "md" else "application/json; charset=utf-8"
+            disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+            return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
+        raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
+
     def operations(self) -> list[dict]:
         out = []
         for op_id in self.engine.contracts.operation_ids:
             o = self.engine.contracts.operation(op_id)
             out.append({k: o.get(k) for k in ("id", "name", "purpose", "execution", "ai", "routes", "ui_type",
                                                "modes", "create_requires", "legacy_inputs", "specification")}
-                       | {"set": op_id[0]})
+                       | {"set": op_id[0], "assist": assist_supports(self.engine.contracts, op_id)})
         return out
 
     def operation_schema(self, op_id: str) -> dict:
@@ -463,7 +517,8 @@ def make_handler(app: App):
                 self._send(exc.status, exc.body)
             except BookforgeError as exc:
                 code = exc.code
-                status = {"NOT_FOUND": 404, "PERMISSION_DENIED": 403, "VERSION_CONFLICT": 409}.get(code, 400)
+                status = {"NOT_FOUND": 404, "PERMISSION_DENIED": 403, "VERSION_CONFLICT": 409,
+                          "RATE_LIMITED": 429}.get(code, 400)
                 self._send(status, {"errors": exc.errors})
             except Exception as exc:  # noqa: BLE001
                 log.error("unhandled error: %s\n%s", exc, traceback.format_exc())

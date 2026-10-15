@@ -216,6 +216,7 @@ fieldset fieldset { background: var(--surface-2); }
 .draft-state { font-size: .875rem; color: var(--text-muted); }
 .draft-state.error { color: var(--bad); font-weight: 600; }
 .check-row { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+.check-row > input[type="checkbox"] { flex: 0 0 auto; }
 .check-row label { font-weight: 400; }
 .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 12px; }
 .error-summary { border: 2px solid var(--bad); background: var(--bad-soft); border-radius: var(--radius);
@@ -367,3 +368,67 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .slot-strip .row { gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .slot-next { margin: 4px 0 0; }
 @media (max-width: 800px) { .selftest-btn { padding: 6px 8px; } }
+
+/* ---------------------------------------------------------------- Fill with AI + Bible Builder */
+.new-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 4px; }
+.new-head h2 { margin: 0; flex: 1 1 auto; }
+.ai-btn, .bible-btn { font-weight: 600; border-color: var(--accent); color: var(--accent); background: var(--surface);
+  white-space: nowrap; }
+.ai-btn:hover, .bible-btn:hover { background: var(--accent-soft); }
+.bible-btn { flex: 0 0 auto; }
+.bible-cta { border-left: 5px solid var(--accent); }
+
+.ai-dock { position: fixed; right: 12px; bottom: 12px; z-index: 40; width: min(440px, calc(100vw - 24px));
+  max-height: min(78vh, calc(100vh - 120px)); overflow-y: auto; display: none; flex-direction: column; gap: 10px;
+  overscroll-behavior: contain; }
+.ai-dock.has-panels { display: flex; }
+.ap { background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--accent);
+  border-radius: var(--radius); box-shadow: 0 4px 18px rgba(0, 0, 0, .18); padding: 10px 14px 12px; min-width: 0; }
+.ap-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.ap-head h2 { font-size: 1rem; margin: 0; flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.ap-tools { display: flex; gap: 6px; }
+.ap.min { padding-bottom: 10px; }
+.ap-body { margin-top: 8px; }
+.ap-ctx { margin: 0 0 10px; }
+.ap-ctx-list { max-height: 11rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 8px; background: var(--surface-2); }
+.ap-out .state { margin: 10px 0 8px; }
+.ap-preview { max-height: 22rem; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 4px 10px 10px; margin-bottom: 8px; }
+.ap-done h3 { margin-top: 12px; }
+
+.bible-dialog { width: min(980px, calc(100vw - 32px)); }
+.bb-sections { list-style: none; margin: 8px 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); }
+.bb-row { display: grid; grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1.6fr); gap: 4px 12px; align-items: center;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.bb-row:last-child { border-bottom: 0; }
+.bb-row.off { color: var(--text-muted); background: var(--surface-2); }
+.bb-name label { overflow-wrap: anywhere; }
+.bb-ctl { display: flex; align-items: center; gap: 6px; }
+.bb-count { width: 4.5rem !important; }
+.bb-status { overflow-wrap: anywhere; }
+.bb-fix { color: var(--text); }
+.bb-actions { position: sticky; bottom: -20px; background: var(--surface); z-index: 2; padding-bottom: 8px; }
+.bb-now .state { margin-top: 12px; }
+.bb-group h4 { margin: 14px 0 6px; }
+.bb-cards { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.bb-card { border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); padding: 8px 10px;
+  background: var(--surface); min-width: 0; }
+.bb-card.st-done { border-left-color: var(--ok); }
+.bb-card.st-error { border-left-color: var(--bad); background: var(--bad-soft); }
+.bb-card.st-running { border-left-color: var(--info); }
+.bb-card-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bb-card-head .check-row { flex: 1 1 160px; min-width: 0; }
+.bb-card p { margin: 4px 0; }
+.bb-summary { font-family: var(--font-prose); }
+.bb-facts { margin: 4px 0; padding-left: 1.2em; color: var(--text-muted); overflow-wrap: anywhere; }
+.bb-json summary { font-weight: 400; }
+.bb-edit-form { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.bb-created { margin-top: 12px; }
+@media (max-width: 640px) {
+  .bb-row { grid-template-columns: minmax(0, 1fr); }
+  .ai-dock { right: 8px; left: 8px; bottom: 8px; width: auto; max-height: 75vh; }
+  .bible-btn, .ai-btn { padding: 6px 8px; }
+}
+.ap-req { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin: 4px 0 0; }
+.ap-req q { overflow-wrap: anywhere; font-style: italic; }

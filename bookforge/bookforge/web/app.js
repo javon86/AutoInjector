@@ -61,6 +61,7 @@ const S = {
   records: [], uploadLabels: {},
   leaveHooks: [], blobUrls: [],
   navOpen: loadJSON('bf:navOpen', {}),
+  assistForms: {}, skipSaveKeys: new Set(), slotCache: null,
   authFailed: false,
 };
 
@@ -616,6 +617,13 @@ function viewSet(main, letter) {
         badge(o.execution.includes('AI') || o.execution.includes('HYBRID') ? '✦' : '⚙︎', o.execution, 'b-muted'),
         isRequired(o.id) ? null : badge('–', 'not in manifest', 'b-muted'))));
   }
+  if (letter === 'A') {
+    main.appendChild(h('section', { class: 'card bible-cta', 'aria-labelledby': 'bb-cta-h' },
+      h('h2', { id: 'bb-cta-h' }, h('span', { 'aria-hidden': 'true' }, '📖 '), 'Start your story bible with AI'),
+      h('p', null, 'The Bible Builder drafts the starter set you need to begin the book — characters, places, the world, a culture, a government or faction and a magic or technology system — from your book idea. You pick which sections and how many, run them one by one or all together, then keep the ones you like as drafts.'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openBible(ev.currentTarget) }, '📖 Open the Bible Builder'),
+        infoTip('What is the Bible Builder?', ...TIP_BIBLE()))));
+  }
   main.appendChild(h('section', { 'aria-label': `${name} operations` }, cards));
 }
 
@@ -697,10 +705,23 @@ function recordList(recs) {
 async function createSection(op, schema) {
   const draftKey = `bf:draft:${S.pid}:${S.branch}:${op.id}:new`;
   const draft = loadJSON(draftKey, null);
+  if (S.skipSaveKeys) S.skipSaveKeys.delete(draftKey);
   const card = h('section', { class: 'card', 'aria-labelledby': 'new-h' });
-  card.appendChild(h('h2', { id: 'new-h' }, `New ${op.id} record`));
+  let payloadNode = null;
+  const aiBtn = op.assist ? h('button', { type: 'button', class: 'ai-btn', 'aria-haspopup': 'dialog',
+    'aria-describedby': 'ai-btn-h', onclick: ev => openAssistPanel(op.id, ev.currentTarget) },
+  h('span', { 'aria-hidden': 'true' }, '✨'), ' Fill with AI') : null;
+  card.appendChild(h('div', { class: 'new-head' }, h('h2', { id: 'new-h' }, `New ${op.id} record`), aiBtn,
+    aiBtn ? infoTip('What does Fill with AI do?', ...TIP_ASSIST(op)) : null));
+  if (aiBtn) card.appendChild(h('p', { class: 'small muted', id: 'ai-btn-h' }, 'Fill with AI: type what you want and one of your AIs fills this form for you to review. Nothing is saved until you press Create.'));
   card.appendChild(h('p', { class: 'muted small' }, 'Fields marked Required must be filled. Optional fields left empty are not sent (absent means “not supplied”).'));
-  if (draft) {
+  if (draft && draft.from_ai) {
+    card.appendChild(stateBox('draft', `Filled by AI (${draft.from_ai.label || draft.from_ai.slot || 'AI'}) — please review`,
+      h('p', null, 'Check every field below and change anything you like, then press Create. Nothing has been saved yet. ',
+        h('button', { type: 'button', class: 'link', onclick: () => {
+          if (confirm('Clear the AI proposal from this form?')) { removeKey(draftKey); route(); }
+        } }, 'Clear the form'))));
+  } else if (draft) {
     card.appendChild(stateBox('draft', `Restored your unsaved draft from ${fmtTime(draft.saved_at)}`,
       h('p', null, 'Nothing has been submitted yet. ', h('button', { type: 'button', class: 'link', onclick: () => {
         if (confirm('Discard this unsaved draft? This cannot be undone.')) { removeKey(draftKey); route(); }
@@ -710,8 +731,11 @@ async function createSection(op, schema) {
   const formEl = h('form', { novalidate: true });
   const summary = h('div');
   formEl.appendChild(summary);
-  const payloadNode = buildNode(schema.create_payload, draft ? draft.payload : undefined, '/payload', '', true, ctx, 0, { root: true });
+  payloadNode = buildNode(schema.create_payload, draft ? draft.payload : undefined, '/payload', '', true, ctx, 0, { root: true });
   formEl.appendChild(payloadNode.el);
+  // The Fill-with-AI panel reads what is already typed ("Keep what I already typed").
+  S.assistForms[`${S.pid}|${S.branch}|${op.id}`] = () => payloadNode.get(null) || {};
+  S.leaveHooks.push(() => { delete S.assistForms[`${S.pid}|${S.branch}|${op.id}`]; });
 
   // Manual candidate (AI / HYBRID operations)
   let manualNode = null; let manualToggle = null; const manualWrap = h('div');
@@ -932,6 +956,7 @@ function attachAutosave(container, key, collect, statusEl) {
   let timer = null; let dirty = false;
   const save = () => {
     clearTimeout(timer); timer = null;
+    if (S.skipSaveKeys && S.skipSaveKeys.has(key)) { dirty = false; return; }  // an AI proposal replaces this draft
     if (!dirty) return;
     const ok = saveJSON(key, collect());
     statusEl.classList.toggle('error', !ok);
@@ -2547,10 +2572,648 @@ function slotStatusStrip(s) {
   return box;
 }
 
+/* ======================================================================= AI pickers (shared) */
+const SITE_NAME = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+const PLACEHOLDER = {
+  A01: 'a grumpy lighthouse keeper who hides a secret', A02: 'a tide-dwelling species that sings to navigate',
+  A03: 'a storm-wrapped archipelago world with two moons', A04: 'a fog-bound harbor town built on stilts',
+  A05: 'a council of harbor masters that rules by tide law', A06: 'a smugglers’ guild hiding in plain sight',
+  A07: 'a fishing culture that names its boats after the dead', A08: 'a faith that worships the lighthouse flame',
+  A09: 'magic paid for with memories, limited by moonlight', A10: 'clockwork lanterns that store sunlight',
+  A11: 'harpoon duelling with strict honour rules', A12: 'a brass key that opens any lock exactly once',
+  A13: 'the night the great lighthouse went dark', A14: 'the order of the founding events',
+  A15: 'naming rules for island families', A16: 'an economy built on salt and lamp oil',
+  A17: 'laws about salvage from shipwrecks', A18: 'two rival keepers who were once best friends',
+  B01: 'a lighthouse keeper’s apprentice searches for her missing master',
+};
+const SECTION_LABEL = {
+  A01: 'Characters', A02: 'Species', A03: 'Worlds', A04: 'Locations', A05: 'Governments', A06: 'Factions & organizations',
+  A07: 'Cultures', A08: 'Religions', A09: 'Magic / power systems', A10: 'Technology', A11: 'Weapons & combat',
+  A12: 'Items & artifacts', A13: 'History & events', A14: 'Timeline', A15: 'Languages & names', A16: 'Economy',
+  A17: 'Laws', A18: 'Relationships',
+};
+const BIBLE_STARTER = { A01: 4, A04: 3, A03: 1, A07: 1, A05: 1, A09: 1, A10: 1 };
+
+function slotName(s) {
+  if (s.adapter_id === 'autoinjector') return `${SITE_NAME[s.site] || s.site || 'web'} (AutoInjector)`;
+  if (s.adapter_id === 'anthropic') return 'Claude (Anthropic API)';
+  if (s.adapter_id === 'manual') return 'Manual (no AI)';
+  return 'not set up';
+}
+async function loadSlotChoices(force) {
+  if (!force && S.slotCache && Date.now() - S.slotCache.at < 30000) return S.slotCache.list;
+  const slots = await api('GET', '/slots');
+  const list = slots.map(s => ({ s, health: null }));
+  await Promise.all(list.map(async x => {
+    if (x.s.adapter_id !== 'autoinjector' || !x.s.has_credentials) return;
+    try { x.health = await api('GET', `/slots/${encodeURIComponent(x.s.slot_id)}/health`); }
+    catch (e) { x.health = { ok: false, error: 'CHECK_FAILED', message: (e && e.message) || 'check failed' }; }
+  }));
+  S.slotCache = { at: Date.now(), list };
+  return list;
+}
+/** "Which AI" select: Auto + AI-1..AI-3 with each slot's current state in words. */
+function aiPicker(id, initial) {
+  const sel = h('select', { id, 'aria-describedby': `${id}-h` }, h('option', { value: '' }, 'Auto — the best ready AI'));
+  const hint = h('span', { class: 'hint', id: `${id}-h` }, 'Checking your AI slots…');
+  const field = h('div', { class: 'field' },
+    h('span', { class: 'label-row' }, h('label', { for: id }, 'Which AI'), infoTip('Which AI should I pick?', ...TIP_PICKER())),
+    sel, hint);
+  (async () => {
+    try {
+      const list = await loadSlotChoices();
+      let ready = 0;
+      for (const { s, health } of list) {
+        const st = slotStage(s, health);
+        const usable = !['none', 'manual'].includes(s.adapter_id);
+        if (usable && st.cls !== 'b-bad') ready++;
+        sel.appendChild(h('option', { value: s.slot_id, disabled: !usable, selected: initial === s.slot_id },
+          `${s.slot_id} · ${slotName(s)} — ${st.icon} ${st.word}`));
+      }
+      hint.textContent = ready
+        ? 'Auto uses the cheapest ready slot (and any slot whose roles name this module). Web AIs answer one request at a time.'
+        : 'No AI is ready yet. Open Settings to connect AutoInjector or add an API key — or write the entry yourself.';
+      if (!ready) hint.appendChild(h('span', null, ' ', h('a', { href: '#/settings' }, 'Open Settings')));
+    } catch (e) { hint.textContent = 'Could not read your AI slots; Auto will still try.'; }
+  })();
+  return { field, sel, value: () => sel.value || null };
+}
+function fmtClock(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function errorWithFix(title, err, retry) {
+  err = err || {};
+  return stateBox('failed', title,
+    h('p', null, err.message || 'Something went wrong.'),
+    err.fix ? h('p', null, h('strong', null, 'What to do: '), err.fix) : null,
+    h('div', { class: 'row' },
+      retry ? h('button', { type: 'button', class: 'primary small', onclick: retry }, 'Try again') : null,
+      ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE', 'TIMEOUT'].includes(err.code) || !err.code
+        ? h('a', { class: 'btn small', href: '#/settings' }, 'Open Settings') : null,
+      err.code ? h('code', { class: 'small muted' }, err.code) : null));
+}
+function apiErrInfo(e) {
+  const x = (e instanceof ApiError && e.errors[0]) || {};
+  return { code: x.code || 'NETWORK', message: x.message || (e && e.message) || String(e), fix: x.fix || (e instanceof NetworkError ? 'Check that BookForge is still running, then try again.' : '') };
+}
+
+/* ======================================================================= Fill with AI panels */
+const AP = { panels: new Map() };
+
+function openAssistPanel(opId, opener) {
+  const key = `${S.pid}|${S.branch}|${opId}`;
+  let p = AP.panels.get(key);
+  if (!p) { p = buildAssistPanel(opId, S.pid, S.branch, S.project ? S.project.name : ''); AP.panels.set(key, p); $('#ai-dock').appendChild(p.el); }
+  p.opener = opener || null;
+  p.setMin(false);
+  $('#ai-dock').classList.add('has-panels');
+  p.focusFirst();
+}
+
+function buildAssistPanel(opId, pid, branch, projectName) {
+  const op = S.opsById[opId];
+  const id = uid('ap');
+  const p = { op: opId, pid, branch, job: null, timer: null, poll: null, startedAt: 0, opener: null, last: null, min: false };
+  const statusBadge = h('span', { class: 'ap-state' }, badge('○', 'Ready', 'b-muted'));
+  const body = h('div', { class: 'ap-body', id: `${id}-body` });
+  const minBtn = h('button', { type: 'button', class: 'small', 'aria-expanded': 'true', 'aria-controls': `${id}-body`,
+    onclick: () => p.setMin(!p.min) }, 'Minimize');
+  const closeBtn = h('button', { type: 'button', class: 'small', 'aria-label': `Close Fill with AI for ${opId}`, onclick: () => p.close() }, '✕');
+  const el = h('section', { class: 'ap', role: 'region', 'aria-labelledby': `${id}-t` },
+    h('header', { class: 'ap-head' },
+      h('h2', { id: `${id}-t` }, h('span', { 'aria-hidden': 'true' }, '✨ '), `${opId} ${op ? op.name : ''}`,
+        h('span', { class: 'small muted ap-proj' }, ` · ${projectName}${branch !== 'main' ? ' / ' + branch : ''}`)),
+      statusBadge, h('div', { class: 'ap-tools' }, minBtn, closeBtn)),
+    body);
+  el.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !ev.target.closest('.info-wrap')) { ev.stopPropagation(); p.setMin(true); if (p.opener && document.contains(p.opener)) p.opener.focus(); }
+  });
+  p.el = el;
+  p.setMin = min => {
+    p.min = min; body.hidden = min; el.classList.toggle('min', min);
+    minBtn.textContent = min ? 'Show' : 'Minimize'; minBtn.setAttribute('aria-expanded', String(!min));
+  };
+  p.close = () => {
+    if (p.job && ['queued', 'running'].includes(p.job.status) && !confirm('The AI is still working on this. Stop it and close the panel?')) return;
+    if (p.job && ['queued', 'running'].includes(p.job.status)) api('POST', `/assist/${encodeURIComponent(p.job.job_id)}/cancel`).catch(() => {});
+    clearInterval(p.timer); clearTimeout(p.poll);
+    el.remove(); AP.panels.delete(`${pid}|${branch}|${opId}`);
+    if (!AP.panels.size) $('#ai-dock').classList.remove('has-panels');
+    if (p.opener && document.contains(p.opener)) p.opener.focus();
+  };
+  p.setState = (icon, word, cls) => clear(statusBadge).appendChild(badge(icon, word, cls));
+
+  // ---- form
+  const prompt = h('textarea', { id: `${id}-prompt`, rows: '3', placeholder: `e.g. ${PLACEHOLDER[opId] || 'describe what you want'}`, 'aria-describedby': `${id}-prompt-h` });
+  const picker = aiPicker(`${id}-slot`);
+  const keep = h('input', { type: 'checkbox', id: `${id}-keep`, checked: true, 'aria-describedby': `${id}-keep-h` });
+  const ctxBox = h('div', { class: 'ap-ctx-list' });
+  const ctxSummary = h('summary', null, 'Use existing records as context (optional)');
+  const ctxDetails = h('details', { class: 'ap-ctx' }, ctxSummary,
+    h('p', { class: 'hint' }, 'Approved Set A records are always sent as a short summary so the new entry fits your world. Tick records here to send them in full (up to 20).'), ctxBox);
+  const fillCtx = () => {
+    clear(ctxBox);
+    const recs = (S.pid === pid && S.branch === branch ? S.records : []).filter(r => r.record_kind === 'OUTPUT' && (r.module_id[0] === 'A' || r.module_id === 'B01'));
+    if (!recs.length) { ctxBox.appendChild(h('p', { class: 'small muted' }, 'No universe records on this branch yet.')); return; }
+    for (const r of recs.slice(0, 200)) {
+      const cid = uid('ctx');
+      ctxBox.appendChild(h('div', { class: 'check-row' }, h('input', { type: 'checkbox', id: cid, 'data-rid': r.record_id }),
+        h('label', { for: cid }, `${r.module_id} · ${recordTitle(r)}`, h('span', { class: 'small muted' }, ` (${LIFECYCLE[r.lifecycle] ? LIFECYCLE[r.lifecycle][1] : r.lifecycle})`))));
+    }
+  };
+  ctxDetails.addEventListener('toggle', () => { if (ctxDetails.open) fillCtx(); });
+  ctxBox.addEventListener('change', () => {
+    const n = ctxBox.querySelectorAll('input:checked').length;
+    ctxSummary.textContent = `Use existing records as context (optional)${n ? ` — ${n} picked` : ''}`;
+  });
+  const genBtn = h('button', { type: 'button', class: 'primary' }, '✨ Generate');
+  const out = h('div', { class: 'ap-out', 'aria-live': 'polite' });
+  const formErr = h('div');
+  const formPart = h('div', { class: 'ap-form' });
+  const reqText = h('q');
+  const reqLine = h('p', { class: 'ap-req small', hidden: true }, h('strong', null, 'Your request:'), reqText,
+    h('button', { type: 'button', class: 'link', onclick: () => { formPart.hidden = false; reqLine.hidden = true; prompt.focus(); } }, 'Change request'));
+  body.appendChild(reqLine);
+  body.appendChild(formPart);
+  const body0 = body;
+  { const body = formPart;
+  body.appendChild(h('p', { class: 'small' }, `Describe the ${op ? op.name.toLowerCase() : 'entry'} you want. The AI fills the ${opId} form; you review it and press Create yourself. Nothing is saved before that.`));
+  body.appendChild(h('div', { class: 'field' }, h('label', { for: prompt.id }, 'What should the AI create?'), prompt,
+    h('span', { class: 'hint', id: `${id}-prompt-h` }, 'A sentence or two is enough. Name anything that must be true.')));
+  body.appendChild(picker.field);
+  body.appendChild(ctxDetails);
+  body.appendChild(h('div', { class: 'check-row' }, keep, h('label', { for: keep.id }, 'Keep what I already typed in the form')));
+  body.appendChild(h('p', { class: 'hint', id: `${id}-keep-h` }, 'On: the AI only fills the empty fields. Off: it may rewrite the text fields (your links and protected-fact choices are always kept).'));
+  body.appendChild(formErr);
+  body.appendChild(h('div', { class: 'form-actions' }, genBtn));
+  }
+  body0.appendChild(out);
+  p.focusFirst = () => { if (!p.min) (p.job && p.job.status === 'done' ? (out.querySelector('button') || prompt) : prompt).focus(); };
+
+  const pickedRefs = () => Array.from(ctxBox.querySelectorAll('input:checked')).map(i => recordById(i.dataset.rid)).filter(Boolean).map(r => r.ref).slice(0, 20);
+  const currentValues = () => { const f = S.assistForms[`${pid}|${branch}|${opId}`]; try { return f ? f() : {}; } catch { return {}; } };
+
+  const start = async () => {
+    clear(formErr);
+    if (!prompt.value.trim()) {
+      prompt.setAttribute('aria-invalid', 'true');
+      formErr.appendChild(stateBox('failed', 'Type what you want first', h('p', null, `For example: “${PLACEHOLDER[opId] || 'a short description'}”.`)));
+      prompt.focus(); return;
+    }
+    prompt.removeAttribute('aria-invalid');
+    genBtn.disabled = true;
+    const cv = currentValues();
+    try {
+      p.job = await api('POST', '/assist', { body: { project_id: pid, branch_id: branch, target_operation: opId, prompt: prompt.value.trim(),
+        slot_id: picker.value(), context_refs: pickedRefs(), current_values: cv, keep_values: keep.checked } });
+      p.startedAt = Date.now();
+      reqText.textContent = prompt.value.trim().length > 140 ? prompt.value.trim().slice(0, 137) + '…' : prompt.value.trim();
+      formPart.hidden = true; reqLine.hidden = false;
+      renderRunning();
+      announce(`${opId}: asking the AI`);
+      pollJob();
+    } catch (e) {
+      genBtn.disabled = false;
+      clear(out).appendChild(errorWithFix('The AI was not asked', apiErrInfo(e), start));
+      p.setState('✕', 'Error', 'b-bad');
+    }
+  };
+  genBtn.addEventListener('click', start);
+  prompt.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) start(); });
+
+  const runLine = h('strong'); const clock = h('span', { class: 'mono' });
+  const renderRunning = () => {
+    p.setState('◔', 'Working', 'b-info');
+    clear(out).appendChild(h('div', { class: 'state loading', role: 'status' },
+      h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), runLine, clock),
+      h('p', { class: 'small' }, 'Web AIs (ChatGPT, Claude, Gemini through AutoInjector) can take a few minutes. You can keep working or open other panels — this one keeps running.'),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'small', onclick: cancel }, 'Cancel'))));
+    tick();
+    clearInterval(p.timer); p.timer = setInterval(tick, 1000);
+  };
+  const tick = () => {
+    const j = p.job || {};
+    const phase = j.phase && j.phase !== 'Waiting to start' ? j.phase : 'Starting';
+    runLine.textContent = `${phase}… `;
+    clock.textContent = fmtClock(Date.now() - p.startedAt);
+  };
+  const cancel = async () => {
+    if (!p.job) return;
+    try { p.job = await api('POST', `/assist/${encodeURIComponent(p.job.job_id)}/cancel`); } catch { /* the poll shows the outcome */ }
+    runLine.textContent = 'Cancelling… ';
+  };
+  const pollJob = async () => {
+    clearTimeout(p.poll);
+    if (!p.job) return;
+    try { p.job = await api('GET', `/assist/${encodeURIComponent(p.job.job_id)}`); }
+    catch (e) { p.poll = setTimeout(pollJob, 2500); return; }
+    if (['queued', 'running'].includes(p.job.status)) { tick(); p.poll = setTimeout(pollJob, 1000); return; }
+    clearInterval(p.timer); genBtn.disabled = false;
+    if (p.job.status === 'done') renderDone(p.job);
+    else if (p.job.status === 'cancelled') {
+      p.setState('–', 'Cancelled', 'b-muted');
+      clear(out).appendChild(stateBox('empty', 'Cancelled', h('p', null, 'Nothing was saved. Press Generate to try again.')));
+      announce(`${opId}: cancelled`);
+    } else {
+      p.setState('✕', 'Error', 'b-bad');
+      clear(out).appendChild(errorWithFix('The AI could not fill the form', p.job.error, start));
+      announce(`${opId}: the AI could not fill the form. ${(p.job.error || {}).fix || ''}`);
+    }
+  };
+  const renderDone = j => {
+    const blocking = (j.findings || []).filter(f => f.severity === 'BLOCKING' && f.decision !== 'PASS');
+    p.setState('✔', 'Proposal ready', 'b-ok');
+    const preview = h('div', { class: 'data-view ap-preview' }, renderData(j.proposal, ''));
+    const useBtn = h('button', { type: 'button', class: 'primary', onclick: () => useProposal(p, j) }, 'Use this in the form');
+    const copyBtn = h('button', { type: 'button', onclick: async () => {
+      try { await navigator.clipboard.writeText(JSON.stringify(j.proposal, null, 2)); toast('Proposal copied as JSON'); }
+      catch { toast('Copy is not available in this browser; open “JSON” below and copy from there'); }
+    } }, 'Copy');
+    const regen = h('button', { type: 'button', onclick: start }, 'Regenerate');
+    clear(out).appendChild(h('div', { class: 'ap-done' },
+      stateBox('ok', `Proposal ready from ${j.slot || 'AI'}${j.slot_label ? ' · ' + j.slot_label : ''} in ${fmtClock(j.elapsed_ms || 0)}`,
+        h('p', null, 'Not saved yet. ', (j.filled_fields || []).length ? `AI filled: ${j.filled_fields.map(humanize).join(', ')}. ` : '',
+          (j.kept_fields || []).length ? `Kept yours: ${j.kept_fields.map(humanize).join(', ')}.` : ''),
+        blocking.length ? h('p', null, h('strong', null, `${blocking.length} problem(s) to fix before approval — see Checks below. `), 'You can still use it in the form and fix them there.') : null),
+      h('div', { class: 'row' }, useBtn, regen, copyBtn),
+      (j.removed_refs || []).length ? stateBox('stale', `Removed ${j.removed_refs.length} link(s) the AI made up`,
+        h('ul', null, j.removed_refs.map(r => h('li', null, `${r.module_id || '?'} ${r.record_id || ''} at ${r.path}: ${r.reason}`))),
+        h('p', { class: 'small' }, 'Links are only kept when they point to real records in this project. Add the right ones in the form.')) : null,
+      h('h3', null, 'Preview'), preview,
+      (j.findings || []).length ? h('details', { open: blocking.length > 0 }, h('summary', null, `Checks (${j.findings.length})`), findingList(j.findings)) : h('p', { class: 'small muted' }, '✔ No problems found by the checks.'),
+      h('details', null, h('summary', null, 'JSON'), h('pre', null, JSON.stringify(j.proposal, null, 2)))));
+    announce(`${opId}: proposal ready. Use this in the form, Regenerate or Copy.`);
+    if (!p.min && el.contains(document.activeElement)) useBtn.focus();
+  };
+  return p;
+}
+
+function useProposal(p, j) {
+  const draftKey = `bf:draft:${p.pid}:${p.branch}:${p.op}:new`;
+  S.skipSaveKeys.add(draftKey);
+  const ok = saveJSON(draftKey, { payload: j.proposal, manualOn: false, pending: {}, saved_at: new Date().toISOString(),
+    from_ai: { slot: j.slot, label: `${j.slot || ''}${j.slot_label ? ' · ' + j.slot_label : ''}`, job_id: j.job_id } });
+  if (!ok) { toast('Browser storage is unavailable, so the form cannot be filled automatically. Use Copy instead.'); S.skipSaveKeys.delete(draftKey); return; }
+  const target = link('p', p.pid, p.branch, 'op', p.op);
+  p.setMin(true);
+  if (location.hash === target) route(); else location.hash = target;
+  toast(`${p.op} form filled from the AI proposal — review it and press Create`);
+  announce(`${p.op} form filled from the AI proposal. Review every field, then press Create.`);
+  setTimeout(() => { const hd = $('#new-h'); if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus(); hd.scrollIntoView({ block: 'start' }); } }, 400);
+}
+
+/* ======================================================================= Bible Builder */
+const BB = { dialog: null, opener: null, session: null, poll: null, keep: {}, edits: {}, editing: null, sig: '', rows: {}, sectionsInfo: null, created: null, idea: null, picker: null, view: null };
+
+function initBibleButton() {
+  const btn = $('#bible-btn'); if (!btn) return;
+  btn.addEventListener('click', ev => openBible(ev.currentTarget));
+  const d = $('#bible-dialog');
+  d.addEventListener('cancel', ev => { ev.preventDefault(); if (!ev.target.closest || !ev.target.closest('.info-wrap')) closeBible(); });
+  d.addEventListener('close', () => { clearTimeout(BB.poll); });
+}
+async function openBible(opener) {
+  const d = $('#bible-dialog');
+  BB.dialog = d; BB.opener = opener || document.activeElement;
+  if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  clear(d);
+  if (!S.pid || parseRoute()[0] !== 'p') {
+    bbShell(h('p', null, 'Open a project first: the Bible Builder adds drafts to the project and branch you are working in.'),
+      h('div', { class: 'form-actions' }, h('a', { class: 'btn primary', href: '#/', onclick: closeBible }, 'Go to projects')));
+    return;
+  }
+  bbShell(loadingState('Loading the Bible Builder…'));
+  try {
+    const r = await api('GET', `/bible-builder?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
+    BB.sectionsInfo = r.sections;
+    if (!BB.session || BB.session.project_id !== S.pid || BB.session.branch_id !== S.branch) {
+      BB.session = r.session; BB.keep = {}; BB.edits = {}; BB.created = null; BB.sig = '';
+    } else if (r.session && r.session.session_id === BB.session.session_id) BB.session = r.session;
+    renderBible();
+    if (BB.session && BB.session.busy) bbPoll();
+  } catch (e) { bbShell(failedState('The Bible Builder could not open', e)); }
+}
+function closeBible() {
+  const d = BB.dialog; if (!d) return;
+  clearTimeout(BB.poll);
+  if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
+  if (BB.opener && document.contains(BB.opener)) BB.opener.focus();
+}
+function bbShell(...body) {
+  const d = clear(BB.dialog);
+  d.appendChild(h('div', { class: 'st-head' },
+    h('h2', { id: 'bible-title' }, h('span', { 'aria-hidden': 'true' }, '📖 '), 'Bible Builder', h('span', { class: 'small muted' }, S.project ? ` · ${S.project.name}${S.branch !== 'main' ? ' / ' + S.branch : ''}` : '')),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close the Bible Builder (running work continues)', onclick: closeBible }, '✕ Close')));
+  append(d, body);
+  return d;
+}
+function bbItems() { return (BB.session && BB.session.items) || []; }
+function bbSig(s) { return s ? JSON.stringify([s.items.map(i => [i.key, i.status, i.name, !!i.created_ref, i.elapsed_ms]), (s.report || {}).markdown]) : ''; }
+
+function renderBible() {
+  const s = BB.session;
+  const sections = (s && s.available_sections) || BB.sectionsInfo || [];
+  const ideaId = 'bb-idea';
+  const idea = h('textarea', { id: ideaId, rows: '3', placeholder: 'e.g. A lighthouse keeper’s apprentice searches a stormy archipelago for her missing master, and finds the islands’ magic is fading.', 'aria-describedby': `${ideaId}-h` });
+  idea.value = (s && s.idea) || BB.idea || loadJSON(`bf:bb-idea:${S.pid}`, '') || '';
+  idea.addEventListener('input', () => { BB.idea = idea.value; saveJSON(`bf:bb-idea:${S.pid}`, idea.value); });
+  BB.ideaEl = idea;
+  BB.picker = aiPicker('bb-slot', s && s.slot_pref);
+  const err = h('div', { 'aria-live': 'polite' });
+  BB.err = err;
+  // sections list
+  const list = h('ul', { class: 'bb-sections', 'aria-label': 'Bible sections' });
+  BB.rows = {};
+  const secState = {};
+  for (const x of (s && s.sections) || []) secState[x.op] = x;
+  for (const sec of sections) {
+    const rid = `bb-${sec.op}`;
+    const tick = h('input', { type: 'checkbox', id: `${rid}-on`, disabled: !sec.enabled });
+    const count = h('input', { type: 'number', id: `${rid}-n`, min: '0', max: '12', step: '1', value: String(BIBLE_STARTER[sec.op] && sec.enabled ? BIBLE_STARTER[sec.op] : 1), disabled: !sec.enabled, 'aria-label': `How many ${SECTION_LABEL[sec.op] || sec.name} to generate (0 = skip)`, class: 'bb-count' });
+    const status = h('span', { class: 'bb-status small', id: `${rid}-st` });
+    const go = h('button', { type: 'button', class: 'small', disabled: !sec.enabled, 'aria-describedby': `${rid}-st`, onclick: () => bbRun({ [sec.op]: parseInt(count.value, 10) || 0 }, tick) }, 'Generate');
+    count.addEventListener('input', () => { if ((parseInt(count.value, 10) || 0) > 0 && !tick.checked && document.activeElement === count) tick.checked = true; });
+    BB.rows[sec.op] = { tick, count, status, go };
+    list.appendChild(h('li', { class: `bb-row${sec.enabled ? '' : ' off'}` },
+      h('div', { class: 'check-row bb-name' }, tick, h('label', { for: tick.id }, h('strong', null, SECTION_LABEL[sec.op] || sec.name), h('span', { class: 'small muted' }, ` ${sec.op} ${sec.name}`))),
+      h('div', { class: 'bb-ctl' }, h('label', { for: count.id, class: 'small muted' }, 'How many'), count, go),
+      sec.enabled ? status : h('span', { class: 'bb-status small' }, '– Off: ', sec.reason || 'disabled', ' · ', h('a', { href: plink('manifest'), onclick: closeBible }, 'turn magic on'))));
+    bbSectionStatus(sec.op, secState[sec.op]);
+  }
+  const allBtn = h('button', { type: 'button', class: 'primary', onclick: () => {
+    const counts = {};
+    for (const [op, r] of Object.entries(BB.rows)) if (r.tick.checked && !r.tick.disabled) counts[op] = parseInt(r.count.value, 10) || 0;
+    bbRun(counts);
+  } }, 'Generate all ticked');
+  const starter = h('button', { type: 'button', onclick: () => {
+    const magic = BB.rows.A09 && !BB.rows.A09.tick.disabled;
+    for (const [op, r] of Object.entries(BB.rows)) {
+      const want = op === 'A09' ? magic : op === 'A10' ? !magic : op in BIBLE_STARTER;
+      if (!r.tick.disabled) { r.tick.checked = want; if (want) r.count.value = String(BIBLE_STARTER[op]); }
+    }
+    announce('Starter set ticked: 4 characters, 3 places, a world, a culture, a government and a magic or technology system. Change anything, then Generate all ticked.');
+  } }, 'Tick the starter set');
+  const cancelBtn = h('button', { type: 'button', onclick: async () => {
+    if (!BB.session) return;
+    try { BB.session = await api('POST', `/bible-builder/${encodeURIComponent(BB.session.session_id)}/cancel`); bbUpdate(); } catch (e) { clear(err).appendChild(failedState('Could not cancel', e)); }
+  } }, 'Stop after the current item');
+  BB.cancelBtn = cancelBtn;
+  BB.now = h('div', { class: 'bb-now', role: 'status' });
+  BB.results = h('div', { class: 'bb-results' });
+  BB.report = h('div', { class: 'bb-report' });
+  bbShell(
+    h('p', null, 'Have your AI draft the story bible: tick the sections you want and how many of each, then generate them one section at a time or all together. Later sections use the earlier ones (for example, characters made after places can live in them). You choose which entries to keep; they are saved as ', h('strong', null, 'drafts'), ' only when you press “Create selected as drafts”.'),
+    h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: ideaId }, 'Your book idea'), infoTip('Why the idea?', ...TIP_BIBLE())), idea,
+      h('span', { class: 'hint', id: `${ideaId}-h` }, 'A few sentences: who, where, what goes wrong. Every section is built to fit it.')),
+    BB.picker.field,
+    h('h3', null, 'Sections'),
+    h('p', { class: 'small muted' }, 'Nothing is generated unless you tick it (or press its own Generate). 0 = skip.'),
+    h('div', { class: 'row' }, starter, h('button', { type: 'button', onclick: () => { for (const r of Object.values(BB.rows)) r.tick.checked = false; } }, 'Untick all')),
+    list, err,
+    h('div', { class: 'form-actions bb-actions' }, allBtn, cancelBtn),
+    BB.now, BB.results, BB.report);
+  BB.sig = '';
+  bbUpdate();
+  if (!s || !s.items.length) idea.focus();
+}
+
+function bbSectionStatus(op, x) {
+  const r = BB.rows[op]; if (!r) return;
+  const st = x ? x.status : 'idle';
+  const map = { idle: ['', '', ''], queued: ['…', 'Queued', 'b-muted'], running: ['◔', 'Working', 'b-info'], done: ['✔', 'Done', 'b-ok'],
+    partial: ['◑', 'Partly done', 'b-warn'], error: ['✕', 'Error', 'b-bad'], cancelled: ['–', 'Stopped', 'b-muted'], skipped: ['–', 'Skipped', 'b-muted'] };
+  const b = map[st] || ['?', st, 'b-muted'];
+  clear(r.status);
+  if (!x || st === 'idle') return;
+  r.status.appendChild(badge(b[0], b[1], b[2]));
+  r.status.appendChild(document.createTextNode(' ' + (x.message || '')));
+  if (x.error && (st === 'error' || st === 'partial')) {
+    r.status.appendChild(h('span', { class: 'bb-fix' }, ' What to do: ', x.error.fix || '', ' ',
+      ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE', 'TIMEOUT'].includes(x.error.code) ? h('a', { href: '#/settings', onclick: closeBible }, 'Open Settings') : null));
+  }
+  r.go.disabled = r.tick.disabled || st === 'queued' || st === 'running';
+}
+
+async function bbRun(counts, tickEl) {
+  const err = BB.err; clear(err);
+  const idea = (BB.ideaEl.value || '').trim();
+  if (!idea) {
+    BB.ideaEl.setAttribute('aria-invalid', 'true');
+    err.appendChild(stateBox('failed', 'Describe your book idea first', h('p', null, 'Every section is generated to fit it.'))); BB.ideaEl.focus(); return;
+  }
+  BB.ideaEl.removeAttribute('aria-invalid');
+  const picked = Object.fromEntries(Object.entries(counts).filter(([, n]) => n > 0));
+  if (!Object.keys(picked).length) {
+    err.appendChild(stateBox('failed', 'Nothing to generate', h('p', null, 'Tick at least one section and set “How many” to 1 or more.'))); return;
+  }
+  try {
+    const slot = BB.picker.value();
+    if (!BB.session || BB.session.project_id !== S.pid || BB.session.branch_id !== S.branch) {
+      BB.session = await api('POST', '/bible-builder', { body: { project_id: S.pid, branch_id: S.branch, idea, counts: picked, slot_id: slot } });
+    } else {
+      BB.session = await api('POST', `/bible-builder/${encodeURIComponent(BB.session.session_id)}/run`, { body: { sections: picked, slot_id: slot, idea } });
+    }
+    BB.startedAt = Date.now();
+    for (const op of Object.keys(picked)) if (BB.rows[op]) BB.rows[op].tick.checked = false;  // started: not re-run by "all ticked"
+    announce(`Generating ${Object.entries(picked).map(([op, n]) => `${n} ${SECTION_LABEL[op] || op}`).join(', ')}`);
+    bbUpdate(); bbPoll();
+  } catch (e) { err.appendChild(errorWithFix('Could not start', apiErrInfo(e))); }
+}
+
+async function bbPoll() {
+  clearTimeout(BB.poll);
+  if (!BB.session || !BB.dialog || !BB.dialog.open) return;
+  try { BB.session = await api('GET', `/bible-builder/${encodeURIComponent(BB.session.session_id)}`); }
+  catch (e) { if (e instanceof ApiError && e.status === 404) { BB.session = null; renderBible(); return; } BB.poll = setTimeout(bbPoll, 2500); return; }
+  const wasBusy = BB.wasBusy; BB.wasBusy = BB.session.busy;
+  bbUpdate();
+  if (BB.session.busy) BB.poll = setTimeout(bbPoll, 1000);
+  else if (wasBusy) announce('Bible Builder: generation finished. Review the entries and choose which to create.');
+}
+
+function bbUpdate() {
+  const s = BB.session;
+  for (const x of (s && s.sections) || []) bbSectionStatus(x.op, x);
+  if (BB.cancelBtn) BB.cancelBtn.hidden = !(s && s.busy);
+  // live line
+  clear(BB.now);
+  if (s && s.busy && s.current) {
+    BB.now.appendChild(h('div', { class: 'state loading' },
+      h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('strong', null, `${s.current.phase || 'Working'}…`),
+        h('span', { class: 'mono' }, fmtClock(s.current.elapsed_ms || 0)),
+        s.current.slot_label ? h('span', { class: 'small muted' }, `(${s.current.slot} · ${s.current.slot_label})`) : null),
+      h('p', { class: 'small' }, 'Web AIs can take a few minutes per entry. You can close this window — the work continues; open the Bible Builder again to see it.'),
+      s.queued_runs.length ? h('p', { class: 'small muted' }, `${s.queued_runs.length} more run(s) waiting.`) : null));
+  }
+  const sig = bbSig(s);
+  if (sig !== BB.sig && !BB.editing) { BB.sig = sig; bbRenderResults(); bbRenderReport(); }
+}
+
+function bbRenderResults() {
+  const box = clear(BB.results);
+  const items = bbItems();
+  if (!items.length) return;
+  box.appendChild(h('h3', null, 'Generated entries'));
+  box.appendChild(h('p', { class: 'small muted' }, 'Tick the entries to keep. Edit changes the proposal before it is saved. Links to other entries become real links when both are created.'));
+  const byKey = Object.fromEntries(items.map(i => [i.key, i]));
+  const order = Object.keys(SECTION_LABEL);
+  for (const op of order) {
+    const its = items.filter(i => i.op === op);
+    if (!its.length) continue;
+    const grid = h('ul', { class: 'bb-cards' });
+    for (const it of its) grid.appendChild(bbCard(it, byKey));
+    box.appendChild(h('section', { class: 'bb-group', 'aria-label': SECTION_LABEL[op] }, h('h4', null, `${SECTION_LABEL[op]} (${op})`), grid));
+  }
+  const selectable = items.filter(i => i.status === 'done' && !i.created_ref);
+  const createBtn = h('button', { type: 'button', class: 'primary', disabled: !selectable.length || (BB.session && BB.session.busy) }, `Create selected as drafts`);
+  const createOut = h('div', { 'aria-live': 'polite' });
+  createBtn.addEventListener('click', async () => {
+    const keys = selectable.filter(i => BB.keep[i.key] !== false).map(i => i.key);
+    if (!keys.length) { clear(createOut).appendChild(stateBox('failed', 'Nothing selected', h('p', null, 'Tick at least one entry to keep.'))); return; }
+    createBtn.disabled = true; clear(createOut).appendChild(loadingState(`Creating ${keys.length} draft(s)…`));
+    try {
+      const edits = Object.fromEntries(Object.entries(BB.edits).filter(([k]) => keys.includes(k)));
+      const r = await api('POST', `/bible-builder/${encodeURIComponent(BB.session.session_id)}/create`, { body: { items: keys, edits } });
+      BB.session = r.session; BB.created = r;
+      try { await refreshRecords(); } catch { /* best effort */ }
+      BB.sig = ''; bbUpdate();
+      announce(`${r.created.length} draft(s) created${r.errors.length ? `, ${r.errors.length} failed` : ''}`);
+      const h3 = BB.results.querySelector('.bb-created h3'); if (h3) { h3.setAttribute('tabindex', '-1'); h3.focus(); }
+    } catch (e) { createBtn.disabled = false; clear(createOut).appendChild(errorWithFix('Nothing was created', apiErrInfo(e))); }
+  });
+  const nSel = selectable.filter(i => BB.keep[i.key] !== false).length;
+  box.appendChild(h('div', { class: 'form-actions' }, createBtn,
+    h('span', { class: 'small muted', id: 'bb-sel-count' }, `${nSel} of ${selectable.length} ready entr${selectable.length === 1 ? 'y' : 'ies'} selected`)));
+  box.appendChild(createOut);
+  if (BB.created) box.appendChild(bbCreatedSummary(BB.created));
+}
+
+function bbCard(it, byKey) {
+  const cb = h('input', { type: 'checkbox', id: `bb-keep-${it.key}`, checked: BB.keep[it.key] !== false && it.status === 'done', disabled: it.status !== 'done' || !!it.created_ref });
+  cb.addEventListener('change', () => {
+    BB.keep[it.key] = cb.checked;
+    const all = bbItems().filter(i => i.status === 'done' && !i.created_ref);
+    const el = $('#bb-sel-count'); if (el) el.textContent = `${all.filter(i => BB.keep[i.key] !== false).length} of ${all.length} ready entr${all.length === 1 ? 'y' : 'ies'} selected`;
+  });
+  const st = { done: ['✔', 'Ready', 'b-ok'], running: ['◔', 'Generating', 'b-info'], pending: ['…', 'Waiting', 'b-muted'], queued: ['…', 'Queued', 'b-muted'],
+    error: ['✕', 'Failed', 'b-bad'], cancelled: ['–', 'Stopped', 'b-muted'] }[it.status] || ['?', it.status, 'b-muted'];
+  const prop = BB.edits[it.key] || it.proposal;
+  const sum = it.summary || {};
+  const blocking = (it.findings || []).filter(f => f.severity === 'BLOCKING' && f.decision !== 'PASS').length;
+  const editBox = h('div', { class: 'bb-edit' });
+  const links = (it.links || []).map(k => byKey[k]).filter(Boolean);
+  const li = h('li', { class: `bb-card st-${it.status}` },
+    h('div', { class: 'bb-card-head' },
+      h('div', { class: 'check-row' }, cb, h('label', { for: cb.id }, h('strong', null, (prop && prop.concept) || it.name))),
+      badge(st[0], st[1], st[2]), it.created_ref ? badge('✎', 'Draft created', 'b-info') : null, BB.edits[it.key] ? badge('✎', 'Edited', 'b-muted') : null),
+    h('p', { class: 'small muted' }, `${it.key} · subject “${it.subject_id}”${it.elapsed_ms ? ` · ${fmtClock(it.elapsed_ms)}` : ''}${it.slot ? ` · ${it.slot}` : ''}`),
+    it.role ? h('p', { class: 'small' }, it.role) : null,
+    sum.summary ? h('p', { class: 'bb-summary' }, sum.summary.length > 220 ? sum.summary.slice(0, 217) + '…' : sum.summary) : null,
+    (sum.key_facts || []).length ? h('ul', { class: 'bb-facts small' }, sum.key_facts.slice(0, 4).map(f => h('li', null, f))) : null,
+    links.length ? h('p', { class: 'small' }, '↔ Links: ', links.map((l, i) => [i ? ', ' : '', `${l.name} (${l.key})`])) : null,
+    blocking ? h('p', { class: 'small' }, badge('⚠︎', `${blocking} check(s) to fix before approval`, 'b-warn')) : null,
+    (it.removed_refs || []).length ? h('p', { class: 'small' }, `⚠︎ Removed ${it.removed_refs.length} made-up link(s).`) : null,
+    it.error ? h('p', { class: 'small bb-fix' }, h('strong', null, 'Why: '), it.error.message, it.error.fix ? [' — ', it.error.fix] : '') : null,
+    it.created_ref ? h('p', { class: 'small' }, h('a', { href: recLink(it.created_ref), onclick: closeBible }, `Open draft ${it.created_ref.record_id}`)) : null,
+    h('div', { class: 'row' },
+      it.proposal && !it.created_ref ? h('button', { type: 'button', class: 'small', onclick: () => bbEdit(it, editBox) }, 'Edit') : null,
+      !it.created_ref && ['done', 'error', 'cancelled'].includes(it.status) ? h('button', { type: 'button', class: 'small', onclick: () => bbRegenerate(it) }, 'Regenerate this one') : null,
+      it.proposal ? h('details', { class: 'bb-json' }, h('summary', { class: 'small' }, 'Details'), h('div', { class: 'data-view small' }, renderData(prop, ''))) : null),
+    editBox);
+  return li;
+}
+
+async function bbEdit(it, box) {
+  if (BB.editing && BB.editing !== it.key) { toast('Save or cancel the other edit first'); return; }
+  BB.editing = it.key;
+  const schema = await getSchema(it.op);
+  const ctx = new FormCtx(`bbe-${it.key}`, schema.bindings);
+  const node = buildNode(schema.create_payload, BB.edits[it.key] || it.proposal, '/payload', '', true, ctx, 0, { root: true });
+  const summary = h('div');
+  const done = () => { BB.editing = null; BB.sig = ''; bbUpdate(); const b = $(`#bb-keep-${it.key}`); if (b) b.focus(); };
+  clear(box).appendChild(h('form', { class: 'bb-edit-form', novalidate: true, onsubmit: ev => {
+    ev.preventDefault();
+    const errs = []; const v = node.get(errs) || {};
+    ctx.clearErrors(); clear(summary);
+    if (errs.length) { showFormErrors(errs, [ctx], summary); return; }
+    BB.edits[it.key] = v; announce(`${it.key} edits kept; they are used when you create the draft`); done();
+  } }, h('h5', null, `Edit ${it.key}`), summary, node.el,
+  h('div', { class: 'form-actions' }, h('button', { type: 'submit', class: 'primary small' }, 'Keep these edits'),
+    h('button', { type: 'button', class: 'small', onclick: done }, 'Cancel'),
+    BB.edits[it.key] ? h('button', { type: 'button', class: 'small', onclick: () => { delete BB.edits[it.key]; done(); } }, 'Undo my edits') : null)));
+  const f = firstFocusable(box); if (f) f.focus();
+}
+
+async function bbRegenerate(it) {
+  const note = window.prompt(`Regenerate “${it.name}”. Optional: what should change? (leave empty to just try again)`, '');
+  if (note === null) return;
+  try {
+    delete BB.edits[it.key];
+    BB.session = await api('POST', `/bible-builder/${encodeURIComponent(BB.session.session_id)}/regenerate`, { body: { item: it.key, prompt: note || undefined, slot_id: BB.picker.value() } });
+    announce(`Regenerating ${it.key}`); bbUpdate(); bbPoll();
+  } catch (e) { clear(BB.err).appendChild(errorWithFix('Could not regenerate', apiErrInfo(e))); }
+}
+
+function bbCreatedSummary(r) {
+  return h('section', { class: 'bb-created' },
+    stateBox(r.errors.length ? 'stale' : 'ok', `${r.created.length} draft(s) created${r.errors.length ? `, ${r.errors.length} failed` : ''}`,
+      r.created.length ? h('ul', null, r.created.map(c => h('li', null, h('a', { href: recLink(c.ref), onclick: closeBible }, `${c.op} · ${c.name}`), ` (${c.ref.record_id})`,
+        c.links_made.length ? h('span', { class: 'small muted' }, ` — linked to ${c.links_made.map(l => l.name).join(', ')}`) : null,
+        c.removed_refs.length ? h('span', { class: 'small muted' }, ` — ${c.removed_refs.length} made-up link(s) removed`) : null))) : null,
+      r.errors.length ? h('ul', { class: 'error-list' }, r.errors.map(e => h('li', null, h('code', null, e.key), ' — ', e.message, e.fix ? ` What to do: ${e.fix}` : ''))) : null),
+    h('h3', null, 'Next steps'),
+    h('ol', { class: 'steps-list' },
+      h('li', null, 'Open each new draft, read it, and press ', h('strong', null, 'Validate'), ' then ', h('strong', null, 'Accept'), ' to make it canon. Drafts are not approved yet.'),
+      h('li', null, 'Then plan the book: ', h('a', { href: plink('op', 'B01'), onclick: closeBible }, 'B01 Premise/Concept Builder'), ' (it can use these records as canon references).')));
+}
+
+function bbRenderReport() {
+  const box = clear(BB.report);
+  const s = BB.session;
+  if (!s || !s.report) return;
+  const counts = { gen: 0, fail: 0, made: 0 };
+  for (const i of s.items) { if (i.status === 'done') counts.gen++; if (i.status === 'error') counts.fail++; if (i.created_ref) counts.made++; }
+  const out = h('div', { 'aria-live': 'polite' });
+  box.appendChild(h('h3', null, 'Report'));
+  box.appendChild(h('p', { class: 'small' }, `${s.runs.length} run(s): ${counts.gen} generated, ${counts.fail} failed, ${counts.made} created as drafts, ${counts.gen - counts.made} not created. Saved as ${s.report.markdown} in the “reports” folder of your BookForge data (no prompts, replies or keys).`));
+  box.appendChild(h('div', { class: 'row' },
+    h('button', { type: 'button', class: 'small', onclick: async () => {
+      clear(out).appendChild(loadingState('Loading the report…'));
+      try {
+        const blob = await api('GET', `/bible-builder/${encodeURIComponent(s.session_id)}/report?format=md`, { blob: true });
+        clear(out).appendChild(h('pre', { class: 'st-report', tabindex: '0', 'aria-label': 'Bible Builder report' }, await blob.text()));
+        out.querySelector('pre').focus();
+      } catch (e) { clear(out).appendChild(failedState('The report could not be loaded', e)); }
+    } }, 'View report'),
+    h('button', { type: 'button', class: 'small', onclick: async () => {
+      try {
+        const blob = await api('GET', `/bible-builder/${encodeURIComponent(s.session_id)}/report?format=md&download=1`, { blob: true });
+        const url = URL.createObjectURL(blob);
+        const a = h('a', { href: url, download: s.report.markdown }); document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000); announce('Report downloaded');
+      } catch (e) { clear(out).appendChild(failedState('The report could not be downloaded', e)); }
+    } }, 'Download report (.md)')));
+  box.appendChild(out);
+}
+
+const TIP_ASSIST = op => [
+  h('p', null, `Type a short description and one of your AIs fills the ${op.id} form: every field, plus facts that fit your existing world.`),
+  h('p', null, 'It opens in its own panel, so you can run several at once (for example a character and a place) while you keep working.'),
+  h('p', null, 'Nothing is saved until you press “Use this in the form” and then Create. Links the AI makes up are removed; only real records stay linked.')];
+const TIP_PICKER = () => [
+  h('p', null, 'Auto picks the cheapest ready AI slot. Or pick one: AI-1, AI-2 and AI-3 are set up in Settings (for example Claude, ChatGPT and Gemini through AutoInjector, or the Anthropic API).'),
+  h('p', null, 'The word after each slot says where it’s at right now — Ready, Busy, Not set up or Error.')];
+const TIP_BIBLE = () => [
+  h('p', null, 'The Bible Builder drafts your story bible from a book idea: first a short “world sketch” with names and roles, then each entry in full, so names stay consistent and entries link to each other.'),
+  h('p', null, 'Run one section or many, as often as you like; later runs build on earlier ones. You keep only what you tick, and it is saved as drafts for you to validate and accept.'),
+  h('p', null, 'A report of every run (which AI, what was made, what was kept) is saved in your BookForge reports folder.')];
+
 /* ======================================================================= boot */
 function boot() {
   initToken();
   initSelfTestButton();
+  initBibleButton();
   const toggle = $('#nav-toggle');
   toggle.addEventListener('click', () => {
     const nav = $('#sidenav'); const open = !nav.classList.contains('open');

@@ -49,7 +49,7 @@ the whole program really works on this computer. It is a real test, not a simula
    rejected, a repeated request is replayed instead of duplicated, an outsider is refused, and an
    out-of-date edit is rejected.
 3. A two-chapter book goes through the real operations, in order: profiles (I01), places and a
-   character (A04/A01), premise (B01), plot and outline (B03/B11), chapter context and prose
+   character (A04/A01), an AI fill of the character form (A01, AI mode only; never saved), premise (B01), plot and outline (B03/B11), chapter context and prose
    with story events (C01/C02), story state (E01/E02), an edit pass whose anchored F01 patch is
    applied through C11 (old work is marked stale and replayed), assembly (G02/G01/G05/G04/G07),
    PDF/EPUB/DOCX exports (G11/G12/G13, each file re-read by the independent H09 parsers), quality
@@ -104,6 +104,54 @@ Slots are optional. Without one, every creative operation offers a **Manual cand
 form so you write that content yourself; deterministic operations (validation, state
 tracking, exports, checks) never need AI. Only the selected slot receives a context package,
 and paid generation is never silently retried after an ambiguous timeout.
+
+## Fill with AI
+
+On every Universe page (A01-A18) and on the creative planning pages that have free-text inputs
+(B01, B02, B03, B05, B06, B08, B11, B13, B14) there is a **✨ Fill with AI** button next to the New form.
+It opens that module's own panel (several can be open and running at once). Type what you want
+(for example "a grumpy lighthouse keeper who hides a secret"), pick an AI (Auto, or AI-1/AI-2/AI-3
+with each slot's current status), optionally tick existing records to use as context, and press
+**Generate**. While it runs the panel shows what it is doing and for how long (web AIs can take a
+few minutes). When it is done you see a readable preview, the checks, and any links the AI made up
+that were removed. **Use this in the form** fills the New form for you to review. Nothing is saved
+until you press Create.
+
+How it stays consistent: the AI gets the module's purpose and form schema, what you already typed
+(kept unless you untick "Keep what I already typed"), a short summary of the project's approved
+Set A canon (names, IDs, key facts, protected facts word for word), the names of draft canon, and
+the predicate conventions. The answer is checked without saving anything: the form's schema
+validator, every link resolved against this project and branch (made-up links are removed and
+listed), and the module's own fact and canon checks. Protected-fact flags are always yours.
+With no AI ready you get "Connect AutoInjector in Settings, or add an API key".
+
+API: `POST /api/assist {project_id, branch_id, target_operation, prompt, slot_id?, context_refs?,
+current_values?, keep_values?}` -> `{job_id}`; `GET /api/assist/{job_id}` -> status, slot, model,
+elapsed_ms, proposal, findings, removed_refs, error {code, message, fix}; `POST /api/assist/{job_id}/cancel`.
+
+## Bible Builder
+
+**📖 Bible Builder** (top bar, and on the Universe workspace) drafts the story bible from your book
+idea. Every section (characters, species, worlds, locations, governments, factions, cultures,
+religions, magic - only when the magic feature is on - technology, weapons, items, history, timeline,
+languages, economy, laws, relationships) has a checkbox, a "how many" number (0 = skip) and its own
+**Generate** button with a live status line; **Generate all ticked** runs several together, and
+**Tick the starter set** suggests 4 characters, 3 places, a world, a culture, a government and a
+magic or technology system. Each run first asks for a short world sketch (names, roles, links) and
+then generates every entry, so names stay consistent; later runs build on earlier entries.
+Pick the entries to keep (Edit or Regenerate any of them), then **Create selected as drafts**: they
+are created as DRAFT records in dependency order, so sketch links (a character's home location, for
+example) become real links to the records just created. Nothing is validated or accepted for you.
+
+After every run and every create a report is written to `reports/bible-builder-<stamp>.md` and
+`.json` in your BookForge data folder (View/Download in the panel): sections requested, AI slot and
+model, each entry's outcome and timing, created record IDs versus discarded ones, links made and
+made-up links removed. It never contains keys, prompts, AI replies or your idea text.
+
+API: `POST /api/bible-builder {project_id, branch_id, idea, counts?, slot_id?}`,
+`POST /api/bible-builder/{id}/run {sections: {A01: 4, ...}}`, `.../regenerate {item, prompt?}`,
+`.../create {items, edits?}`, `.../cancel`, `GET /api/bible-builder/{id}`,
+`GET /api/bible-builder/{id}/report?format=md|json`.
 
 ## How work flows
 

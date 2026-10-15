@@ -18,9 +18,14 @@ from bookforge.store import Store
 
 BRIDGE_KEY = "connection-key-SECRET-abcdefghijklmnop"
 APP_TOKEN = "app-token-selftest-xyz"
-AI_STEPS = {"A0", "A1", "A2"}
+AI_STEPS = {"A0", "A1", "A2", "A3"}
 PREMISE = {"premise": "A keeper hears the drowned bell.", "dramatic_question": "Will she answer it?",
            "concept_summary": "A short sea mystery."}
+CHARACTER = {"concept": "Old Tom Gale", "attributes": {
+    k: f"{k} of the grumpy keeper" for k in ("identity", "role", "traits", "appearance", "background", "goals",
+                                           "constraints")},
+    "facts": [{"subject_id": "tom-gale", "predicate": "entity.name", "value": "Tom Gale", "assertion_type": "FACT",
+               "effective_from": None, "effective_to": None, "source_refs": []}]}
 PROSE = "Mara climbed the stairs at dawn and found the brass key glinting on the lamp room floor."
 
 
@@ -70,6 +75,8 @@ class ScriptedBridge:
                 elif "objective_assessments" in schema:
                     reply = {"text": PROSE, "objective_assessments": [
                         {"item_id": "ch2", "decision": "PASS", "message": "key found"}]}
+                elif '"traits"' in schema:
+                    reply = CHARACTER
                 else:
                     reply = PREMISE
                 self._send(200, {"ok": True, "site": body["site"], "request_id": body["request_id"],
@@ -149,11 +156,13 @@ def test_ai_mode_through_fake_autoinjector_bridge(app):
     assert "AI-1" in steps["A1"]["detail"] and "used by the book slice" in steps["A1"]["detail"]
     assert "1 candidate event" in steps["A2"]["detail"]
     assert steps["S3"]["detail"].startswith("using the AI premise")
-    # exactly the AI steps reached the bridge: B01 premise, C02 prose, C02 event extraction
-    assert len(bridge.prompts) == 3
+    assert "nothing was saved" in steps["A3"]["detail"] and "typed role was kept" in steps["A3"]["detail"]
+    # exactly the AI steps reached the bridge: B01 premise, A01 form fill, C02 prose, C02 event extraction
+    assert len(bridge.prompts) == 4
     assert rep["mode"] == "AI" and {s["state"] for s in rep["ai_slots"]} == {"READY"}
     # never the key, prompts or replies in the report
-    assert_no_secrets(rep, BRIDGE_KEY, APP_TOKEN, PREMISE["premise"], PROSE, bridge.prompts[0][:60])
+    assert_no_secrets(rep, BRIDGE_KEY, APP_TOKEN, PREMISE["premise"], PROSE, bridge.prompts[0][:60],
+                      CHARACTER["attributes"]["traits"])
 
 
 def test_ai_mode_without_slots_skips_ai_steps_with_reason(app):
@@ -240,7 +249,7 @@ def test_selftest_endpoints(server, monkeypatch):
     monkeypatch.setattr(SelfTest, "k_contracts", slow)
     assert call(port, "POST", "/api/selftest", {"use_ai": "yes"})[0] == 400
     status, started, _ = call(port, "POST", "/api/selftest", {"use_ai": False})
-    assert status == 202 and started["running"] is True and started["progress"]["total"] == 22
+    assert status == 202 and started["running"] is True and started["progress"]["total"] == 23
     assert call(port, "POST", "/api/selftest", {"use_ai": False})[0] == 409  # one at a time
     status, live, _ = call(port, "GET", "/api/selftest")
     assert status == 200 and live["running"] and live["progress"]["current_step"].startswith("K1")
@@ -251,9 +260,9 @@ def test_selftest_endpoints(server, monkeypatch):
         if not live["running"] and live["last_report"]:
             break
         time.sleep(0.1)
-    assert live["progress"]["done"] == live["progress"]["total"] == 22
+    assert live["progress"]["done"] == live["progress"]["total"] == 23
     last = live["last_report"]
-    assert last["verdict"] == "PASS" and last["counts"]["FAIL"] == 0 and len(last["steps"]) == 22
+    assert last["verdict"] == "PASS" and last["counts"]["FAIL"] == 0 and len(last["steps"]) == 23
     assert last["project"]["name"].startswith("Self-test ")
     # report download requires auth
     assert call(port, "GET", "/api/selftest/report?format=md", token=None)[0] == 401

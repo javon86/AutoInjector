@@ -628,7 +628,9 @@ class ProviderRegistry:
 
     # ------------------------------------------------------------------ generation
     def generate(self, ctx, *, task: str, output_schema: dict, context: dict, capability: str,
-                 protected_facts: list) -> tuple[dict, dict]:
+                 protected_facts: list, slot_id: str | None = None) -> tuple[dict, dict]:
+        """Run one generation on the best eligible slot, or on slot_id when the author picked one
+        explicitly (an explicit pick ignores role routing but never an ineligible slot)."""
         system = (
             "You are a module worker inside Bookforge, a book production system. "
             f"{task}\nRules: keep every protected fact exactly as given; never invent references, record IDs or "
@@ -638,7 +640,15 @@ class ProviderRegistry:
         user = "Project context package (JSON):\n" + json.dumps(package, ensure_ascii=False, sort_keys=True)
         needed = estimate_tokens(system + user)
         operation = getattr(ctx, "op_id", None)
-        candidates = self.eligible(ctx.project_id, capability, needed, operation)
+        if slot_id is not None:
+            if slot_id not in SLOT_IDS:
+                raise BookforgeError("NOT_FOUND", "/slot_id", "slots are AI-1, AI-2 and AI-3 only", status="REJECTED")
+            candidates = [s for s in self.eligible(ctx.project_id, capability, needed, None) if s["slot_id"] == slot_id]
+            if not candidates:
+                raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", f"{slot_id} is not available right now "
+                                     "(not set up, busy, unhealthy or its context limit is too small)")
+        else:
+            candidates = self.eligible(ctx.project_id, capability, needed, operation)
         if not candidates:
             any_connected = any(s["connected"] for s in self.slots())
             if any_connected and all(needed > s["context_limit_tokens"] for s in self.slots() if s["connected"]):
