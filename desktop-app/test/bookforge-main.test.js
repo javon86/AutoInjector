@@ -8,6 +8,9 @@ process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = "30";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = "50";
 process.env.AUTOINJECTOR_BRIDGE = "0"; // keep main's separate service bridge off in this test
 process.env.AUTOINJECTOR_BOOKFORGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
+process.env.AUTOINJECTOR_BF_LINKTEST_MS = "15000"; // link-test reply limit (contract min is 10000)
+// Point the link test's "is BookForge running?" check at a port nothing listens on.
+process.env.AUTOINJECTOR_BOOKFORGE_APP_URL = `http://127.0.0.1:${Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT) + 1}/api/ping`;
 
 const path = require("path");
 const fs = require("fs");
@@ -62,8 +65,17 @@ async function main() {
   const userData = mockElectron.app.getPath("userData");
   const tokenFile = path.join(userData, "bookforge-bridge-token");
 
+  const activity = []; // every "bookforge-activity" broadcast the panel would get
+  const ltProgress = [];
+  reg("controls-ui").webContents.on("ipc-send", (channel, payload) => {
+    if (channel === "bookforge-activity") activity.push(payload);
+    if (channel === "bookforge-linktest-progress") ltProgress.push(payload);
+  });
+
   let st = await call("bookforge:status");
   assert(st.ok && st.enabled === false && st.listening === false, "bridge is OFF by default");
+  assert(st.lastContactAt === null && st.lastExternalContactAt === null && Array.isArray(st.activity) && st.linkTest && st.linkTest.running === false, "status snapshot carries lastContact / activity / linkTest fields");
+  assert(st.sites.claude && st.sites.claude.label === "Claude" && typeof st.sites.claude.active === "boolean" && "last" in st.sites.claude, "per-AI snapshot: label, Active-in-app, last result");
   let refused = false;
   try { await request("GET", "/v1/health"); } catch (e) { refused = e.code === "ECONNREFUSED"; }
   assert(refused, "disabled bridge -> connection refused");
@@ -77,8 +89,18 @@ async function main() {
   const token = reveal.token;
   assert(reveal.ok && token.length >= 32, "reveal-token returns the token");
 
-  let r = await request("GET", "/v1/health", token);
+  assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "listening")), "turning the bridge on broadcasts a 'bookforge-activity' event");
+  const onEv = activity.find((a) => a.event && a.event.kind === "listening");
+  assert(onEv && /Bridge turned on/.test(onEv.event.say) && onEv.status && onEv.status.ok === true, "activity events carry a plain-English line + a fresh status snapshot");
+
+  let r = await request("GET", "/v1/health", "a-wrong-key-from-somewhere-1234567890");
+  assert(r.status === 401, "wrong key -> 401");
+  assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "unauthorized")), "a wrong-key attempt is broadcast as activity");
+  r = await request("GET", "/v1/health", token);
   assert(r.status === 200 && r.json.sites.claude.ready === true, "health through main.js reports ready panes");
+  assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "connected" && a.event.say === "BookForge connected")), "first authenticated request -> 'BookForge connected' activity");
+  st = await call("bookforge:status");
+  assert(typeof st.lastExternalContactAt === "number" && typeof st.lastContactAt === "number", "status snapshot reports last contact");
 
   // Mesh routing claude -> gemini is ON: a bridge-owned claude reply must NOT be relayed.
   await call("routing:set", { source: "claude", target: "gemini", enabled: true });
@@ -103,11 +125,58 @@ async function main() {
   const relayed = await waitUntil(() => reg("gemini").webContents.sentLog[0]);
   assert(relayed && relayed.text.includes("A normal follow-up."), "a non-bridge reply is still relayed normally");
   await call("routing:set", { source: "claude", target: "gemini", enabled: false });
+  assert(activity.some((a) => a.event && a.event.kind === "outcome" && a.event.outcome === "OK" && a.event.site === "claude" && /Claude answered in/.test(a.event.say)), "the answered request shows up as 'Claude answered in …'");
+  st = await call("bookforge:status");
+  assert(st.sites.claude.last && st.sites.claude.last.outcome === "OK", "per-AI last result is in the snapshot");
+  const actDump = JSON.stringify(activity) + JSON.stringify(st);
+  assert(!actDump.includes("Write the outline.") && !actDump.includes("Here is the outline.") && !actDump.includes(token) && !actDump.includes("a-wrong-key-from-somewhere"), "activity + snapshot never carry prompt/reply text or any key");
+
+  // 🧪 Test BookForge link: a REAL run through main.js -> bridge HTTP -> panes.
+  const answered = new Set();
+  const responder = setInterval(() => {
+    for (const site of ["chatgpt", "claude", "gemini"]) {
+      const v = reg(site);
+      if (!v || !v.webContents.sentLog) continue;
+      v.webContents.sentLog.forEach((e, i) => {
+        const key = `${site}:${i}`;
+        if (answered.has(key) || !e.text.includes("AutoInjector link test")) return;
+        answered.add(key);
+        const word = /"word": "([a-z]+)"/.exec(e.text)[1];
+        v.webContents.currentText = `[TO: USER]\n{"ok": true, "site": "${site}", "word": "${word}"}\n[FROM: ${site.toUpperCase()}]`;
+      });
+    }
+  }, 30);
+  const lt = await call("bookforge:linktest-run");
+  clearInterval(responder);
+  const activeSites = ["chatgpt", "claude", "gemini"].filter((s) => st.sites[s].active);
+  assert(lt.ok && lt.failCount === 0, `link test ran with no failures (${lt.passCount} passed, ${lt.failCount} failed, ${lt.skipCount} skipped: ${(lt.steps || []).filter((x) => x.status !== "pass").map((x) => x.id + "=" + x.detail).join(" | ")})`);
+  assert(lt.steps.filter((x) => x.id.startsWith("roundtrip:") && x.status === "pass").length === activeSites.length && activeSites.length > 0, `a real round trip passed for every Active AI (${activeSites.join(", ")})`);
+  const bfStep = lt.steps.find((x) => x.id === "bookforge_running");
+  assert(bfStep && bfStep.status === "skip" && /isn't running/.test(bfStep.detail), "BookForge not running -> SKIPPED with instructions");
+  assert(lt.report && fs.existsSync(lt.report) && /bookforge-link-test-[0-9-]+\.md$/.test(lt.report) && lt.reportJson && fs.existsSync(lt.reportJson), "Markdown + JSON reports written to the logs folder");
+  const md = fs.readFileSync(lt.report, "utf8");
+  const js = JSON.parse(fs.readFileSync(lt.reportJson, "utf8"));
+  assert(!md.includes(token) && !JSON.stringify(js).includes(token) && !md.includes("JSON_SCHEMA") && !JSON.stringify(js).includes("JSON_SCHEMA"), "reports contain neither the key nor the prompt text");
+  assert(/## Environment/.test(md) && /## Recent bridge activity/.test(md) && js.steps.length === lt.total, "report documents environment, every step and recent activity");
+  assert(ltProgress.some((p) => p.status === "start") && ltProgress.some((p) => p.status === "pass") && ltProgress.some((p) => p.status === "done"), "live progress is broadcast (start, per step, done)");
+  st = await call("bookforge:status");
+  assert(st.linkTest.lastReport === lt.report && st.linkTest.lastSummary && st.linkTest.lastSummary.failCount === 0, "status remembers the last link-test report + summary");
+  assert(st.activity.some((a) => /Link test finished/.test(a.say || "")), "the activity feed notes the finished link test");
+  const debugNow = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
+  assert(/bookforge-linktest-done/.test(debugNow), "link test logged via logEvent");
+  let open = await call("bookforge:linktest-open-report", { file: path.join(path.dirname(lt.report), "feature-test-x.md") });
+  assert(open.ok === false && open.error === "BAD_FILE", "open-report refuses other file names");
+  open = await call("bookforge:linktest-open-report", { file: "/etc/passwd" });
+  assert(open.ok === false && open.error === "BAD_FILE", "open-report refuses files outside the logs folder");
+  open = await call("bookforge:linktest-open-report", { file: lt.report });
+  assert(open.error !== "BAD_FILE", "open-report accepts the real report (passes the name/folder check)");
+  assert((await call("bookforge:linktest-stop")).ok === true, "linktest-stop is wired");
 
   const before = token;
   st = await call("bookforge:regenerate-token");
   const after = (await call("bookforge:reveal-token")).token;
   assert(st.ok && after !== before, "regenerate-token makes a new token");
+  assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "key_changed")), "making a new key is broadcast as activity");
   r = await request("GET", "/v1/health", before);
   assert(r.status === 401, "old token rejected immediately after regenerate");
   r = await request("GET", "/v1/health", after);

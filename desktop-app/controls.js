@@ -2545,61 +2545,418 @@ el("btn-download").onclick = () => {
 // --- BookForge bridge (experimental) panel -----------------------------------
 // Loopback HTTP bridge that lets BookForge drive these panes (main.js +
 // bookforge-bridge.js; contract in docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md).
-// The token is copied to the clipboard by the main process; it only reaches
-// this page when the user explicitly clicks "Show token".
+// The user-facing word for the bearer token is "connection key" (BookForge
+// uses the same words). The key is copied to the clipboard by the main
+// process; it only reaches this page when the user explicitly clicks "Show".
+// The panel always says, in plain words: where things are (status hero), what
+// to do now (Next step), how far setup got (4-step checklist), each AI's state,
+// and a live, text-free activity feed. ⓘ buttons open short explanations.
 if (el("btn-collapse-bookforge")) el("btn-collapse-bookforge").onclick = () => collapseYellowPanel("bookforge");
+const BF_SITES = ["chatgpt", "claude", "gemini"];
+const BF_LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+const bfStore = {
+  get(k) { try { return window.localStorage.getItem(k); } catch (_) { return null; } },
+  set(k, v) { try { if (v == null) window.localStorage.removeItem(k); else window.localStorage.setItem(k, v); } catch (_) {} }
+};
+const bf = { snap: null, at: 0, starting: false, test: { running: false, rows: new Map(), report: null } };
+function bfLabel(site, s) { return (s && s.sites && s.sites[site] && s.sites[site].label) || BF_LABEL[site] || site; }
+function bfClock(ms) { const t = Math.max(0, Math.round((ms || 0) / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; }
+function bfDur(ms) { const t = Math.max(0, Math.round((ms || 0) / 1000)); return t < 60 ? `${t}s` : bfClock(ms); }
+// "now" on the main process's clock, so ages/elapsed are right even if the snapshot is a few seconds old.
+function bfNow() { const s = bf.snap; return s && s.now ? s.now + (Date.now() - bf.at) : Date.now(); }
+function bfAgo(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Math.round((bfNow() - ts) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  return `${Math.floor(s / 3600)} h ago`;
+}
+function bfTime(ts) { try { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch (_) { return ""; } }
+function bfMsg(text, tone) { const m = el("bf-msg"); if (m) { m.textContent = text || ""; if (tone) m.dataset.tone = tone; else delete m.dataset.tone; } }
+
+// Plain-English explanations behind every ⓘ.
+const BF_INFO = {
+  what: ["What is the BookForge bridge?", [
+    "BookForge is the book-writing app on this computer. The bridge is a private doorway that lets BookForge hand a question to ChatGPT, Claude or Gemini in the windows of this app and get the answer back — using your normal logins, so there are no API keys and no extra bills.",
+    "It only works on this computer (nothing on the internet can reach it), and only while it is turned on."]],
+  key: ["What is the connection key?", [
+    "It's like a password that lets only your BookForge talk to this app. You copy it here and paste it into BookForge once.",
+    "It never leaves your computer and is never shown in logs or reports. If anything tries to connect without it, it's refused — you'll see that in Activity."]],
+  buttons: ["Copy, Show, and Make a new key", [
+    "📋 Copy connection key — puts the key on your clipboard. Then in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).",
+    "Show key — shows the key on screen, in case you'd rather type it. Click Hide key when you're done.",
+    "Make a new key — throws the old key away and makes a new one. BookForge is disconnected until you paste the new key into it. Only do this if you think someone else has seen your key. You'll be asked to confirm first."]],
+  ais: ["What do the AI statuses mean?", [
+    "Ready — the window is loaded; BookForge can use it.",
+    "Not loaded — the window is missing or still loading. Open it, log in, and wait until the page has finished loading.",
+    "Busy with BookForge — it's answering a BookForge question right now. Leave that window alone until it finishes.",
+    "Not active in the app — tick that AI as Active in this app if you want BookForge to use it.",
+    "Below each status you see the result of its last request and when it happened."]],
+  test: ["What does the link test do?", [
+    "It checks the whole path for real, the same way BookForge uses it: is the bridge on, does the connection key exist, does the bridge refuse a wrong key and accept the right one, then it sends a tiny test question to each Active AI through the bridge and checks the answer (a small JSON reply with a random word). Finally it checks whether BookForge itself is running.",
+    "Every step says PASS, FAIL or SKIPPED, how long it took, and how to fix a failure. A report (Markdown + JSON) is saved in the logs folder — it never contains your key or the question text.",
+    "Heads-up: it really types a short test message into each Active AI's chat. It can take a minute or two; you can stop it any time."]],
+  activity: ["Activity", [
+    "A live diary of what happened between BookForge and this app, newest first — when BookForge connected, which AI it asked, how long the answer took, time-outs and refused connections.",
+    "It never shows what was asked or answered, and never shows your connection key."]],
+  tos: ["Is this allowed?", [
+    "This app works by typing into the ChatGPT, Claude and Gemini websites for you. Those websites' terms of service may not allow automated use, and an account could be limited if they object.",
+    "That's why the bridge is off until you turn it on. Use it at your own risk, at a gentle pace."]],
+  routing: ["Why keep routing / autopilot off?", [
+    "While BookForge is using an AI, the answer must go straight back to BookForge. If routing, autopilot, House Rules or a Prompt Sequence is also running, other messages can land in the same chat window at the same time and mix up the answers.",
+    "The bridge never forwards BookForge's answers to the other AIs — but it can't stop other features typing into that window. So turn those off while BookForge works."]],
+  step1: ["Step 1 — Turn the bridge on", [
+    "Tick “Turn the bridge on” at the top. This opens a private doorway on this computer only (address 127.0.0.1) that BookForge can knock on.",
+    "When it's on, the status at the top says “On — waiting for BookForge to connect”."]],
+  step2: ["Step 2 — Copy the connection key", [
+    "Click 📋 Copy connection key. The key goes onto your clipboard — you won't see it, and that's fine. It's what proves to this app that it's really your BookForge knocking."]],
+  step3: ["Step 3 — Paste it in BookForge", [
+    "In BookForge, open Settings → Connect AutoInjector, paste the key (Ctrl+V) and save. Then click Test connection there.",
+    "This step ticks as soon as BookForge reaches this app with the right key. If BookForge uses an old or wrong key, this step turns yellow and tells you."]],
+  step4: ["Step 4 — BookForge has connected", [
+    "Ticks the moment BookForge talks to this app with the right key. From then on the status shows when it last made contact, and Activity lists what it asked.",
+    "Tip: 🧪 Test BookForge link checks the whole path any time."]]
+};
+function bfOpenInfo(btn) {
+  const pop = el("bf-pop");
+  const panel = el("col-bookforge");
+  if (!pop || !panel || !btn) return;
+  const info = BF_INFO[btn.dataset.info];
+  if (!info) return;
+  const wasOpen = !pop.hidden && pop._owner === btn;
+  bfCloseInfo(false);
+  if (wasOpen) return;
+  el("bf-pop-title").textContent = info[0];
+  const body = el("bf-pop-body");
+  body.textContent = "";
+  for (const para of info[1]) { const p = document.createElement("p"); p.textContent = para; body.appendChild(p); }
+  pop.hidden = false;
+  pop._owner = btn;
+  btn.setAttribute("aria-expanded", "true");
+  // Place it under the ⓘ, kept inside the panel.
+  try {
+    const pr = panel.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    const w = pop.offsetWidth || 340;
+    let left = br.left - pr.left - 8;
+    left = Math.max(8, Math.min(left, pr.width - w - 8));
+    pop.style.left = `${left}px`;
+    pop.style.top = `${br.bottom - pr.top + 6}px`;
+  } catch (_) {}
+  try { pop.focus(); } catch (_) {}
+}
+function bfCloseInfo(returnFocus) {
+  const pop = el("bf-pop");
+  if (!pop || pop.hidden) return;
+  const owner = pop._owner;
+  pop.hidden = true;
+  pop._owner = null;
+  if (owner) { owner.setAttribute("aria-expanded", "false"); if (returnFocus) { try { owner.focus(); } catch (_) {} } }
+}
+if (el("col-bookforge")) {
+  el("col-bookforge").addEventListener("click", (e) => {
+    const b = e.target && e.target.closest && e.target.closest(".bf-info");
+    if (b) { e.preventDefault(); bfOpenInfo(b); }
+  });
+  const closeBtn = el("bf-pop") && el("bf-pop").querySelector(".bf-pop-close");
+  if (closeBtn) closeBtn.onclick = () => bfCloseInfo(true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && el("bf-pop") && !el("bf-pop").hidden) { e.preventDefault(); bfCloseInfo(true); } });
+  document.addEventListener("click", (e) => {
+    const pop = el("bf-pop");
+    if (!pop || pop.hidden) return;
+    if (pop.contains(e.target) || (e.target.closest && e.target.closest(".bf-info"))) return;
+    bfCloseInfo(false);
+  });
+}
+
+// --- derive "where it's at" from a status snapshot ---------------------------
+function bfErrorText(err, port) {
+  if (err === "EADDRINUSE") return { title: `Couldn't start — port ${port} is already in use`, sub: "Another program (often a second copy of AutoInjector) is already using the bridge's address.", next: `Close the other program using port ${port} (often a second AutoInjector window), then untick and tick “Turn the bridge on”.` };
+  if (err === "EACCES") return { title: `Couldn't start — this computer blocked port ${port}`, sub: "Your system refused to let the bridge open its address.", next: "Restart AutoInjector and try again. If it keeps happening, ask for help choosing another port (AUTOINJECTOR_BOOKFORGE_PORT)." };
+  if (err === "TOKEN_WRITE_FAILED") return { title: "Couldn't save the connection key", sub: "The app couldn't write the key file in its settings folder.", next: "Make sure your disk isn't full, then untick and tick “Turn the bridge on”." };
+  return { title: "The bridge couldn't start", sub: `Error: ${err || "unknown"}.`, next: "Untick and tick “Turn the bridge on”. If it keeps failing, restart AutoInjector and check the Activity Log for “bookforge-error”." };
+}
+function bfDerive(s) {
+  const port = s.port || 17891;
+  const act = Array.isArray(s.activity) ? s.activity : [];
+  const badKey = act.some((a) => a.kind === "unauthorized" && !a.selftest && a.at > (s.lastExternalContactAt || 0));
+  const keyChangedAfterContact = act.some((a) => a.kind === "key_changed" && a.at > (s.lastExternalContactAt || 0));
+  // "Connected" = BookForge reached THIS run of the bridge with the CURRENT key.
+  const lastOn = act.filter((a) => a.kind === "listening").reduce((m, a) => Math.max(m, a.at || 0), 0);
+  const connected = !!(s.enabled && s.listening && s.lastExternalContactAt) && s.lastExternalContactAt >= lastOn && !keyChangedAfterContact;
+  const copied = bfStore.get("bf-key-copied") === "1";
+  const activeSites = BF_SITES.filter((k) => s.sites && s.sites[k] && s.sites[k].active);
+  const notReady = activeSites.filter((k) => !s.sites[k].ready);
+  const working = BF_SITES.map((k) => [k, s.sites && s.sites[k] && s.sites[k].inFlight]).find(([, f]) => f && !f.selftest);
+  const steps = { 1: s.enabled && s.listening, 2: copied || connected, 3: connected, 4: connected };
+  const d = { steps, badKey };
+  if (!s.enabled) return Object.assign(d, { key: "off", icon: "⏻", pill: "⏻ Off", tone: "off", title: "Bridge is off — BookForge can't use your AIs", sub: "Nothing is shared with BookForge until you turn the bridge on.", next: "Tick “Turn the bridge on” above. Nothing is shared until you do." });
+  if (bf.starting || (!s.listening && (s.starting || !s.error))) return Object.assign(d, { key: "starting", icon: "⏳", pill: "⏳ Starting", tone: "info", title: "Starting the bridge…", sub: `Opening a private doorway on this computer (127.0.0.1:${port}).`, next: "Wait a moment while the bridge starts…" });
+  if (!s.listening) { const e = bfErrorText(s.error, port); return Object.assign(d, { key: "error", icon: "⚠️", pill: "⚠ Problem", tone: "err", title: e.title, sub: e.sub, next: e.next }); }
+  let next;
+  if (bf.test.running) next = "The link test is running — watch its steps below. You can stop it any time.";
+  else if (badKey) next = "BookForge (or something else) tried an old or wrong connection key. Click “📋 Copy connection key” and paste it into BookForge again (Settings → Connect AutoInjector).";
+  else if (!steps[3] && !copied) next = "Click “📋 Copy connection key”, then in BookForge open Settings → Connect AutoInjector and paste it.";
+  else if (!steps[3]) next = keyChangedAfterContact
+    ? "You made a new key — paste it into BookForge (Settings → Connect AutoInjector). Step 4 ticks when BookForge reaches this app again."
+    : "Now in BookForge open Settings → Connect AutoInjector, paste the key and click Test connection. Step 4 ticks when BookForge reaches this app.";
+  else if (!activeSites.length) next = "Tick at least one AI (ChatGPT, Claude or Gemini) as Active in this app so BookForge has someone to ask.";
+  else if (notReady.length) next = `Open ${notReady.map((k) => bfLabel(k, s)).join(" and ")} and log in, so BookForge can use ${notReady.length > 1 ? "them" : "it"}.`;
+  else next = "All set. Use BookForge as normal and keep routing/autopilot off while it works. Click 🧪 Test BookForge link any time to check everything.";
+  if (working) {
+    const [site, f] = working;
+    const L = bfLabel(site, s);
+    const el2 = (f.elapsed_ms || 0) + (Date.now() - bf.at);
+    const late = f.phase === "late";
+    return Object.assign(d, { key: "working", icon: "✍️", pill: "✍ Working", tone: "work",
+      title: `BookForge asked ${L} for an answer… ${bfClock(el2)}`,
+      sub: late ? `${L} is taking longer than BookForge waited. If it still answers, the answer is saved for BookForge.` : `Request ${f.request_id}. The answer goes straight back to BookForge.`,
+      next: `Leave the ${L} window alone until it finishes answering — BookForge is waiting for it.` });
+  }
+  if (connected) return Object.assign(d, { key: "connected", icon: "🔗", pill: "✓ Connected", tone: "ok", title: "BookForge is connected", sub: `Last contact ${bfAgo(s.lastExternalContactAt)} · listening on 127.0.0.1:${port} (this computer only).`, next });
+  return Object.assign(d, { key: "waiting", icon: "📡", pill: "📡 Waiting", tone: "wait", title: "On — waiting for BookForge to connect", sub: `Listening on 127.0.0.1:${port} (this computer only). BookForge hasn't connected yet.`, next });
+}
+
+const BF_OUTCOME = {
+  OK: (l) => `Answered in ${bfDur(l.elapsed_ms)}`,
+  LATE_REPLY_STORED: (l) => `Answered late (${bfDur(l.elapsed_ms)})`,
+  TIMEOUT: (l) => `Timed out after ${bfDur(l.elapsed_ms)}`,
+  LATE_EXPIRED: () => "Never answered",
+  SEND_FAILED: () => "Couldn't type the prompt",
+  SITE_NOT_READY: () => "Window wasn't loaded",
+  SITE_BUSY: () => "Was busy — told BookForge to wait"
+};
+function bfRenderAis(s) {
+  const box = el("bf-ais");
+  if (!box) return;
+  box.textContent = "";
+  for (const site of BF_SITES) {
+    const x = (s.sites && s.sites[site]) || {};
+    let pill = ["Not loaded", "err", "✕"];
+    if (!x.active) pill = ["Not active in the app", "off", "–"];
+    else if (x.inFlight) pill = [x.inFlight.selftest ? "Busy with the link test" : "Busy with BookForge", "work", "✍"];
+    else if (x.ready) pill = ["Ready", "ok", "✓"];
+    const card = document.createElement("div");
+    card.className = "bf-ai";
+    card.dataset.site = site;
+    const nm = document.createElement("div"); nm.className = "bf-ai-name"; nm.textContent = bfLabel(site, s);
+    const p = document.createElement("span"); p.className = "bf-pill"; p.dataset.tone = pill[1]; p.textContent = `${pill[2]} ${pill[0]}`;
+    const last = document.createElement("div"); last.className = "bf-ai-last";
+    if (x.inFlight) last.textContent = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
+    else if (x.last) { const f = BF_OUTCOME[x.last.outcome]; last.textContent = `Last: ${f ? f(x.last) : x.last.outcome}${x.last.selftest ? " (link test)" : ""} · ${bfAgo(x.last.at)}`; }
+    else last.textContent = "No requests yet";
+    card.append(nm, p, last);
+    box.appendChild(card);
+  }
+}
+function bfRenderActivity(s) {
+  const list = el("bf-activity");
+  if (!list) return;
+  const items = (Array.isArray(s.activity) ? s.activity : []).slice(-20).reverse();
+  list.textContent = "";
+  if (!items.length) { const li = document.createElement("li"); li.className = "empty"; li.textContent = "Nothing yet — events appear here as they happen."; list.appendChild(li); return; }
+  const ICON = { ok: "✓", warn: "!", error: "✕", info: "•" };
+  for (const a of items) {
+    const li = document.createElement("li");
+    li.dataset.tone = a.tone || "info";
+    const t = document.createElement("span"); t.className = "t"; t.textContent = bfTime(a.at); t.title = bfAgo(a.at);
+    const i = document.createElement("span"); i.className = "i"; i.setAttribute("aria-hidden", "true"); i.textContent = ICON[a.tone] || "•";
+    const m = document.createElement("span"); m.textContent = a.say || a.kind;
+    li.append(t, i, m);
+    list.appendChild(li);
+  }
+}
+function bfRenderSteps(d) {
+  const ol = el("bf-steps");
+  if (!ol) return;
+  let currentSet = false;
+  for (const li of ol.querySelectorAll("li[data-step]")) {
+    const n = Number(li.dataset.step);
+    const done = !!d.steps[n];
+    const warn = n === 3 && d.badKey && !done;
+    li.classList.toggle("done", done);
+    li.classList.toggle("warn", warn);
+    const cur = !done && !currentSet;
+    if (cur) currentSet = true;
+    li.classList.toggle("current", cur && !warn);
+    const chk = li.querySelector(".bf-check");
+    if (chk) chk.textContent = done ? "✓" : warn ? "!" : String(n);
+    const stEl = li.querySelector(".bf-step-state");
+    if (stEl) stEl.textContent = done ? "Done" : warn ? "Wrong key used" : cur ? "Do this now" : "";
+  }
+}
 function bookforgeRender(s) {
   if (!s || !s.ok) return;
-  if (el("bf-enabled")) el("bf-enabled").checked = !!s.enabled;
+  bf.snap = s;
+  bf.at = Date.now();
+  bfRenderNow();
+}
+function bfRenderNow() {
+  const s = bf.snap;
+  if (!s) return;
+  if (el("bf-enabled") && !bf.starting) el("bf-enabled").checked = !!s.enabled;
+  const d = bfDerive(s);
+  const panel = el("col-bookforge");
+  if (panel) panel.dataset.bfState = d.key;
   const st = el("bf-status");
-  if (st) {
-    const on = s.enabled && s.listening;
-    st.textContent = on ? `· listening :${s.port}` : s.enabled ? "· error" : "· off";
-    st.style.color = on ? "#7ad19a" : s.enabled ? "#e0b060" : "#888";
+  if (st) { st.textContent = d.pill; st.dataset.tone = d.tone; }
+  if (el("bf-hero-icon")) el("bf-hero-icon").textContent = d.icon;
+  if (el("bf-hero-title") && el("bf-hero-title").textContent !== d.title) el("bf-hero-title").textContent = d.title;
+  if (el("bf-hero-sub") && el("bf-hero-sub").textContent !== d.sub) el("bf-hero-sub").textContent = d.sub;
+  if (el("bf-next") && el("bf-next").textContent !== d.next) el("bf-next").textContent = d.next;
+  bfRenderSteps(d);
+  bfRenderAis(s);
+  bfRenderActivity(s);
+  const det = el("bf-detail");
+  if (det) {
+    const c = s.counters;
+    det.textContent = s.enabled && s.listening
+      ? `Technical: http://${s.host}:${s.port}${c ? ` · ${c.requests} request${c.requests === 1 ? "" : "s"} · ${c.answered} answered · ${c.timeouts} timed out · ${c.unauthorized} refused (wrong key)` : ""}`
+      : `Technical: port ${s.port} · ${s.enabled ? `not listening (${s.error || "starting"})` : "off — nothing is listening"}`;
   }
-  const d = el("bf-detail");
-  if (d) {
-    const sites = Object.keys(s.sites || {}).map((k) => `${k}: ${s.sites[k].ready ? "ready" : "not ready"}${s.sites[k].busy ? ", busy" : ""}`).join(" · ");
-    d.textContent = s.enabled
-      ? (s.listening ? `http://${s.host}:${s.port} — ${sites}` : `not listening (${s.error || "starting"}) on port ${s.port}`)
-      : "Off — nothing is listening.";
+  if (!bf.test.running && s.linkTest && s.linkTest.lastReport && !bf.test.report) {
+    bf.test.report = s.linkTest.lastReport;
+    bfShowReportButton();
+    const sum = el("bf-test-summary");
+    if (sum && !sum.textContent && s.linkTest.lastSummary) {
+      const ls = s.linkTest.lastSummary;
+      sum.textContent = `Last test (${bfAgo(ls.at)}): ${ls.headline} ${ls.passCount} passed · ${ls.failCount} failed · ${ls.skipCount} skipped.`;
+      sum.dataset.tone = ls.failCount ? "err" : "ok";
+    }
   }
 }
 async function bookforgeRefresh() {
   if (!window.api.bookforgeStatus) return;
   try { bookforgeRender(await window.api.bookforgeStatus()); } catch (_) {}
 }
-function bookforgeMsg(text) { if (el("bf-msg")) el("bf-msg").textContent = text; }
+// Live: every bridge event arrives with a fresh snapshot; the 4 s refresh stays as a fallback.
+if (window.api.onBookforgeActivity) window.api.onBookforgeActivity((p) => { if (p && p.status) bookforgeRender(p.status); });
+// Tick clocks ("0:42", "12s ago") once a second without asking main.
+setInterval(() => { if (bf.snap && el("col-bookforge") && !el("col-bookforge").classList.contains("hidden-collapsed")) bfRenderNow(); }, 1000);
+
 if (el("bf-enabled")) el("bf-enabled").onchange = async () => {
   if (!window.api.bookforgeSetEnabled) return;
-  const s = await window.api.bookforgeSetEnabled(el("bf-enabled").checked);
+  const want = el("bf-enabled").checked;
+  bf.starting = want;
+  if (bf.snap) { bf.snap.enabled = want; bfRenderNow(); }
+  bfMsg("");
+  let s = null;
+  try { s = await window.api.bookforgeSetEnabled(want); } catch (_) {}
+  bf.starting = false;
   bookforgeRender(s);
-  bookforgeMsg(s && s.enabled && !s.listening ? `Could not start: ${s.error || "unknown error"}` : "");
+  if (s && s.enabled && !s.listening) bfMsg(`Could not start: ${bfErrorText(s.error, s.port).title}.`, "err");
 };
 if (el("btn-bf-copy")) el("btn-bf-copy").onclick = async () => {
   if (!window.api.bookforgeCopyToken) return;
   const r = await window.api.bookforgeCopyToken();
-  bookforgeMsg(r && r.ok ? "Token copied — paste it into BookForge's AI slot key field." : `Copy failed: ${(r && r.error) || "unknown"}`);
+  if (r && r.ok) {
+    bfStore.set("bf-key-copied", "1");
+    bfMsg("✓ Connection key copied. Now in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).");
+    bfRenderNow();
+  } else bfMsg(`Copy failed (${(r && r.error) || "unknown"}). Try “Show key” and copy it by hand.`, "err");
 };
 if (el("btn-bf-reveal")) el("btn-bf-reveal").onclick = async () => {
   const box = el("bf-token");
   if (!box || !window.api.bookforgeRevealToken) return;
-  if (box.style.display !== "none") { box.style.display = "none"; box.textContent = ""; el("btn-bf-reveal").textContent = "Show token"; return; }
+  if (box.style.display !== "none") { box.style.display = "none"; box.textContent = ""; el("btn-bf-reveal").textContent = "Show key"; return; }
   const r = await window.api.bookforgeRevealToken();
-  if (r && r.ok) { box.textContent = r.token; box.style.display = "block"; el("btn-bf-reveal").textContent = "Hide token"; }
-  else bookforgeMsg(`Could not read token: ${(r && r.error) || "unknown"}`);
+  if (r && r.ok) {
+    box.textContent = r.token; box.style.display = "block"; el("btn-bf-reveal").textContent = "Hide key";
+    bfStore.set("bf-key-copied", "1");
+    bfMsg("This is your connection key. Keep it private — click Hide key when you're done.");
+    bfRenderNow();
+  } else bfMsg(`Could not read the connection key (${(r && r.error) || "unknown"}).`, "err");
 };
 if (el("btn-bf-regen")) el("btn-bf-regen").onclick = async () => {
   if (!window.api.bookforgeRegenerateToken) return;
-  if (!window.confirm("Make a new bridge token? BookForge will need the new one — the old token stops working immediately.")) return;
+  if (!window.confirm("Make a new connection key?\n\nThe old key stops working right away, so BookForge is disconnected until you paste the new key into it (Settings → Connect AutoInjector).\n\nOnly do this if you think someone else has seen your key.")) return;
   const s = await window.api.bookforgeRegenerateToken();
   if (s && s.ok) {
-    bookforgeRender(s);
+    bfStore.set("bf-key-copied", null);
     const box = el("bf-token");
     if (box) { box.style.display = "none"; box.textContent = ""; }
-    if (el("btn-bf-reveal")) el("btn-bf-reveal").textContent = "Show token";
-    bookforgeMsg("New token generated — copy it into BookForge again.");
-  } else bookforgeMsg(`Regenerate failed: ${(s && s.error) || "unknown"}`);
+    if (el("btn-bf-reveal")) el("btn-bf-reveal").textContent = "Show key";
+    bookforgeRender(s);
+    bfMsg("New connection key made. Click “📋 Copy connection key” and paste it into BookForge again.");
+  } else bfMsg(`Couldn't make a new key (${(s && s.error) || "unknown"}).`, "err");
+};
+
+// --- 🧪 Test BookForge link ---------------------------------------------------
+const BF_STEP_ICON = { pass: "✅", fail: "❌", skip: "⚪" };
+const BF_STEP_WORD = { pass: "PASS", fail: "FAIL", skip: "SKIPPED" };
+function bfShowReportButton() { const b = el("btn-bf-test-report"); if (b) b.style.display = bf.test.report ? "" : "none"; }
+function bfTestButtons(running) {
+  for (const id of ["btn-bf-test", "btn-bf-test-head"]) {
+    const b = el(id);
+    if (!b) continue;
+    b.disabled = running;
+    b.textContent = running ? "🧪 Testing…" : "🧪 Test BookForge link";
+  }
+  if (el("btn-bf-test-stop")) el("btn-bf-test-stop").style.display = running ? "" : "none";
+}
+function bfTestRow(p) {
+  const ol = el("bf-test-steps");
+  if (!ol || !p || !p.id) return;
+  let li = bf.test.rows.get(p.id);
+  if (!li) {
+    li = document.createElement("li");
+    li.innerHTML = '<span class="ic"></span><span class="nm"></span><span class="ms"></span><span class="dt"></span>';
+    bf.test.rows.set(p.id, li);
+    ol.appendChild(li);
+  }
+  li.dataset.status = p.status;
+  const ic = li.querySelector(".ic");
+  if (p.status === "running") { ic.innerHTML = '<span class="bf-spin" aria-hidden="true"></span>'; }
+  else ic.textContent = BF_STEP_ICON[p.status] || "•";
+  li.querySelector(".nm").textContent = `${p.name || p.id}${p.status === "running" ? " — checking…" : ` — ${BF_STEP_WORD[p.status] || p.status}`}`;
+  li.querySelector(".ms").textContent = p.ms != null && p.status !== "running" ? `${(p.ms / 1000).toFixed(1)}s` : "";
+  li.querySelector(".dt").textContent = p.detail || "";
+  let tip = li.querySelector(".tip");
+  if (p.tip) { if (!tip) { tip = document.createElement("span"); tip.className = "tip"; li.appendChild(tip); } tip.textContent = `How to fix: ${p.tip}`; }
+  else if (tip) tip.remove();
+  if (p.total && el("bf-test-summary") && bf.test.running) el("bf-test-summary").textContent = `Running… ${Math.min(p.index + (p.status === "running" ? 1 : 0), p.total)} of ${p.total} steps`;
+}
+if (window.api.onBookforgeLinkTestProgress) window.api.onBookforgeLinkTestProgress((p) => {
+  if (!p) return;
+  if (p.status === "start" || p.status === "done") return; // handled by the run() call itself
+  bfTestRow(p);
+});
+async function bfRunLinkTest() {
+  if (!window.api.bookforgeLinkTestRun || bf.test.running) return;
+  bf.test.running = true;
+  bf.test.rows.clear();
+  bf.test.report = null;
+  bfShowReportButton();
+  if (el("bf-test-steps")) el("bf-test-steps").textContent = "";
+  const sum = el("bf-test-summary");
+  if (sum) { sum.textContent = "Starting the link test…"; delete sum.dataset.tone; }
+  bfTestButtons(true);
+  bfRenderNow();
+  try { el("bf-test-card").scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch (_) {}
+  let r = null;
+  try { r = await window.api.bookforgeLinkTestRun(); } catch (e) { r = { ok: false, error: String(e) }; }
+  bf.test.running = false;
+  bfTestButtons(false);
+  if (r && r.ok) {
+    for (const st of r.steps || []) if (!bf.test.rows.has(st.id)) bfTestRow(Object.assign({}, st));
+    if (sum) { sum.textContent = `${r.headline} ${r.passCount} passed · ${r.failCount} failed · ${r.skipCount} skipped.${r.report ? " Report saved." : ""}`; sum.dataset.tone = r.failCount ? "err" : "ok"; }
+    bf.test.report = r.report || null;
+    bfShowReportButton();
+  } else if (sum) { sum.textContent = `The test couldn't run: ${(r && r.error) === "ALREADY_RUNNING" ? "a link test is already running." : (r && r.error) || "unknown error"}`; sum.dataset.tone = "err"; }
+  bookforgeRefresh();
+}
+if (el("btn-bf-test")) el("btn-bf-test").onclick = () => bfRunLinkTest();
+if (el("btn-bf-test-head")) el("btn-bf-test-head").onclick = (e) => { e.stopPropagation(); bfRunLinkTest(); };
+if (el("btn-bf-test-stop")) el("btn-bf-test-stop").onclick = async () => {
+  if (!window.api.bookforgeLinkTestStop) return;
+  await window.api.bookforgeLinkTestStop();
+  if (el("bf-test-summary")) el("bf-test-summary").textContent = "Stopping… (finishing the current step)";
+};
+if (el("btn-bf-test-report")) el("btn-bf-test-report").onclick = async () => {
+  if (!bf.test.report || !window.api.bookforgeOpenLinkTestReport) return;
+  const r = await window.api.bookforgeOpenLinkTestReport(bf.test.report);
+  if (!r || !r.ok) bfMsg(`Couldn't open the report (${(r && r.error) || "unknown"}). It's in the logs folder: ${bf.test.report}`, "err");
 };
 
 el("btn-clear").onclick = async () => {

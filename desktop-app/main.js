@@ -44,6 +44,7 @@ const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
+const bookforgeLinkTest = require("./bookforge-link-test"); // 🧪 Test BookForge link (real round trips through the bridge's own HTTP API)
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -5122,6 +5123,22 @@ function contentBaseFolder() {
 // the state file, never logged, never in a URL.
 let bookforgeBridge = null;
 let bookforgeStartError = null;
+// Session activity feed for the panel: every text-free bridge event (see
+// bookforge-bridge.js recordEvent) plus a few app-side ones (key changed,
+// start failed, link test), each with a plain-English "say" line. Kept here
+// (not only in the bridge) so it survives turning the bridge off and on.
+const BOOKFORGE_ACTIVITY_MAX = 50;
+const bookforgeActivity = [];
+function bookforgeNoteActivity(ev) {
+  const e = Object.assign({}, ev);
+  if (!e.at) e.at = Date.now();
+  if (!e.say) { const d = bookforgeBridgeMod.describeEvent(e, siteLabel); e.say = d.say; e.tone = e.tone || d.tone; }
+  bookforgeActivity.push(e);
+  if (bookforgeActivity.length > BOOKFORGE_ACTIVITY_MAX) bookforgeActivity.shift();
+  // Deferred so a snapshot taken during start()/stop() sees the settled state.
+  setImmediate(() => { try { broadcast("bookforge-activity", { event: e, status: bookforgeStatusSnapshot() }); } catch (_) {} });
+  return e;
+}
 function bookforgeBridgePort() {
   const p = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
   return Number.isInteger(p) && p > 0 && p < 65536 ? p : bookforgeBridgeMod.DEFAULT_PORT;
@@ -5141,7 +5158,7 @@ function startBookforgeBridge() {
 async function startBookforgeBridgeNow() {
   let token;
   try { token = bookforgeBridgeMod.loadOrCreateToken(userDataDir()); }
-  catch (e) { bookforgeStartError = "TOKEN_WRITE_FAILED"; logEvent("bookforge-error", { error: "token write failed" }); return { ok: false, error: bookforgeStartError }; }
+  catch (e) { bookforgeStartError = "TOKEN_WRITE_FAILED"; logEvent("bookforge-error", { error: "token write failed" }); bookforgeNoteActivity({ kind: "start_failed", error: bookforgeStartError }); return { ok: false, error: bookforgeStartError }; }
   let currentToken = token;
   const bridge = bookforgeBridgeMod.createBridge({
     port: bookforgeBridgePort(),
@@ -5158,7 +5175,9 @@ async function startBookforgeBridgeNow() {
       return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
     },
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
-    logger: (kind, detail) => logEvent(`bookforge-${kind}`, detail)
+    logger: (kind, detail) => logEvent(`bookforge-${kind}`, detail),
+    // Text-free activity events -> the panel's live feed (+ "bookforge-activity" broadcast).
+    onEvent: (ev) => bookforgeNoteActivity(ev)
   });
   bridge.setToken = (t) => { currentToken = t; };
   try {
@@ -5166,6 +5185,7 @@ async function startBookforgeBridgeNow() {
   } catch (e) {
     bookforgeStartError = (e && e.code) || String(e);
     logEvent("bookforge-error", { error: bookforgeStartError, port: bookforgeBridgePort() });
+    bookforgeNoteActivity({ kind: "start_failed", error: String(bookforgeStartError).slice(0, 60), port: bookforgeBridgePort() });
     return { ok: false, error: bookforgeStartError };
   }
   bookforgeStartError = null;
@@ -5179,18 +5199,41 @@ async function stopBookforgeBridge() {
   bookforgeBridge = null;
   if (b) { try { await b.stop(); } catch (_) {} }
 }
+// Last contact / counters / per-site last result outlive a bridge restart
+// within this session (the bridge object is recreated on every enable).
+const bookforgeCarry = { lastContactAt: null, lastExternalContactAt: null, siteLast: {} };
 function bookforgeStatusSnapshot() {
   const st = bookforgeBridge ? bookforgeBridge.status() : null;
+  if (st) {
+    if (st.lastContactAt) bookforgeCarry.lastContactAt = st.lastContactAt;
+    if (st.lastExternalContactAt) bookforgeCarry.lastExternalContactAt = st.lastExternalContactAt;
+    Object.assign(bookforgeCarry.siteLast, st.siteLast || {});
+  }
   const sites = {};
-  for (const s of SITE_IDS) sites[s] = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
+  for (const s of SITE_IDS) {
+    const base = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
+    sites[s] = Object.assign({}, base, {
+      label: siteLabel(s),
+      active: !!(state.enabled && state.enabled[s]), // "Active" (checked) in the app
+      last: bookforgeCarry.siteLast[s] || null,
+      inFlight: st && st.active && st.active[s] ? st.active[s] : null
+    });
+  }
   return {
     ok: true,
     enabled: !!state.bookforge.enabled,
     listening: !!(st && st.listening),
+    starting: !!bookforgeStarting,
     host: "127.0.0.1",
     port: st ? st.port : bookforgeBridgePort(),
     error: bookforgeStartError,
     tokenPresent: !!bookforgeBridgeMod.readToken(userDataDir()),
+    now: Date.now(),
+    lastContactAt: bookforgeCarry.lastContactAt,
+    lastExternalContactAt: bookforgeCarry.lastExternalContactAt,
+    counters: st ? st.counters : null,
+    activity: bookforgeActivity.slice(-30),
+    linkTest: { running: bfLinkTest.running, lastReport: bfLinkTest.lastReport, lastSummary: bfLinkTest.lastSummary },
     sites
   };
 }
@@ -5227,8 +5270,96 @@ ipcMain.handle("bookforge:regenerate-token", () => {
     const t = bookforgeBridgeMod.regenerateToken(userDataDir());
     if (bookforgeBridge && bookforgeBridge.setToken) bookforgeBridge.setToken(t); // takes effect immediately; the old token stops working
     logEvent("bookforge-token-regenerated", {});
+    bookforgeNoteActivity({ kind: "key_changed" });
     return bookforgeStatusSnapshot();
   } catch (e) { return { ok: false, error: "TOKEN_WRITE_FAILED" }; }
+});
+
+// ---- 🧪 Test BookForge link: a REAL, documented end-to-end check -------------
+// Orchestration lives in bookforge-link-test.js (pure, unit-tested). Here we
+// give it the real pieces: the bridge status, the key file, pane readiness and
+// Node's http client — so the round trips go through the bridge's own HTTP API
+// exactly like BookForge's do. Reports go to the logs folder as
+// bookforge-link-test-<stamp>.md / .json (no key, no prompt text).
+const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null };
+function bookforgeAppUrl() {
+  const u = String(process.env.AUTOINJECTOR_BOOKFORGE_APP_URL || "").trim();
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u) ? u : bookforgeLinkTest.DEFAULT_BOOKFORGE_URL;
+}
+async function runBookforgeLinkTestNow() {
+  if (bfLinkTest.running) return { ok: false, error: "ALREADY_RUNNING" };
+  const sites = SITE_IDS.filter((s) => state.enabled && state.enabled[s]);
+  Object.assign(bfLinkTest, { running: true, stop: false });
+  const stamp = bookforgeLinkTest.stampNow();
+  logEvent("bookforge-linktest-start", { sites });
+  bookforgeNoteActivity({ kind: "linktest", say: "Link test started", tone: "info" });
+  broadcast("bookforge-linktest-progress", { status: "start", sites, stamp });
+  let r;
+  try {
+    r = await bookforgeLinkTest.runLinkTest({
+      sites,
+      stamp,
+      label: siteLabel,
+      getStatus: () => bookforgeStatusSnapshot(),
+      keyFileExists: () => fs.existsSync(bookforgeBridgeMod.tokenPath(userDataDir())),
+      readKey: () => bookforgeBridgeMod.readToken(userDataDir()),
+      siteReady: bookforgeSiteReady,
+      bookforgeUrl: bookforgeAppUrl(),
+      replyTimeoutMs: Number(process.env.AUTOINJECTOR_BF_LINKTEST_MS) || bookforgeLinkTest.DEFAULT_REPLY_TIMEOUT_MS,
+      shouldStop: () => bfLinkTest.stop,
+      onProgress: (p) => {
+        broadcast("bookforge-linktest-progress", p);
+        if (p.status !== "running") logEvent(p.status === "fail" ? "bookforge-linktest-step-fail" : "bookforge-linktest-step", { step: p.id, status: p.status, detail: p.detail });
+      }
+    });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    bfLinkTest.running = false;
+  }
+  if (!r.ok) {
+    logEvent("bookforge-linktest-error", { error: r.error });
+    broadcast("bookforge-linktest-progress", { status: "done", ok: false, error: r.error });
+    return r;
+  }
+  let appVersion = "?"; try { appVersion = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
+  const meta = {
+    appVersion,
+    bookforgeUrl: bookforgeAppUrl(),
+    env: { os: `${process.platform} ${require("os").release()}`, arch: process.arch, node: process.versions.node, electron: process.versions.electron || null },
+    activity: bookforgeActivity.slice(-30).map((a) => ({ at: a.at, kind: a.kind, site: a.site, outcome: a.outcome, http_status: a.http_status, say: a.say }))
+  };
+  let file = null;
+  let jsonFile = null;
+  try {
+    const dir = outputManager.logsDir();
+    file = path.join(dir, `bookforge-link-test-${stamp}.md`);
+    jsonFile = path.join(dir, `bookforge-link-test-${stamp}.json`);
+    fs.writeFileSync(file, bookforgeLinkTest.formatReport(r, meta));
+    fs.writeFileSync(jsonFile, JSON.stringify(bookforgeLinkTest.reportJson(r, meta), null, 2));
+  } catch (e) { logEvent("bookforge-linktest-report-error", { error: String(e) }); file = null; jsonFile = null; }
+  const summary = { headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total, stopped: r.stopped, at: Date.now() };
+  bfLinkTest.lastReport = file;
+  bfLinkTest.lastSummary = summary;
+  logEvent(r.failCount ? "bookforge-linktest-done-with-failures" : "bookforge-linktest-done", { passed: r.passCount, failed: r.failCount, skipped: r.skipCount, stopped: r.stopped, report: file });
+  bookforgeNoteActivity({ kind: "linktest", say: `Link test finished: ${r.passCount} passed, ${r.failCount} failed, ${r.skipCount} skipped`, tone: r.failCount ? "error" : "ok" });
+  const out = {
+    ok: true, stopped: r.stopped, headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total,
+    report: file, reportJson: jsonFile,
+    steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms }))
+  };
+  broadcast("bookforge-linktest-progress", { status: "done", ok: true, summary: out });
+  return out;
+}
+ipcMain.handle("bookforge:linktest-run", async () => { try { return await runBookforgeLinkTestNow(); } catch (e) { bfLinkTest.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("bookforge:linktest-stop", () => { bfLinkTest.stop = true; logEvent("bookforge-linktest-stop-requested", {}); return { ok: true }; });
+ipcMain.handle("bookforge:linktest-open-report", async (_evt, { file } = {}) => {
+  try {
+    const f = String(file || "");
+    if (!f || path.dirname(f) !== outputManager.logsDir() || !bookforgeLinkTest.REPORT_NAME_RE.test(path.basename(f))) return { ok: false, error: "BAD_FILE" };
+    const err = await shell.openPath(f);
+    return err ? { ok: false, error: err } : { ok: true };
+  } catch (e) { return { ok: false, error: String(e) }; }
 });
 
 app.whenReady().then(() => {

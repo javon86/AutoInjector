@@ -15,10 +15,12 @@ BookForge (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0
 
 * HTTP/1.1 on `127.0.0.1` only (never 0.0.0.0). Default port **17891**
   (env `AUTOINJECTOR_BOOKFORGE_PORT` overrides). JSON bodies, UTF-8.
-* Every request needs `Authorization: Bearer <token>`. The token is a random
+* Every request needs `Authorization: Bearer <token>`. In both apps' UIs the token is
+  called the **connection key** ("like a password that lets only your BookForge talk to
+  this app; it never leaves your computer"). The token is a random
   >=24-byte URL-safe string generated on first enable, stored in the app's userData
   directory (`bookforge-bridge-token`, mode 0600), shown/copyable in the desktop app's
-  controls UI, and regenerable there. Compare in constant time.
+  controls UI, and replaceable there ("Make a new key"). Compare in constant time.
 * Bridge disabled -> server not listening (connection refused).
 * Reject request bodies over 1 MiB (413). Reject non-JSON (400).
 * Never log prompt or reply text; log only site, request_id, chars, outcome, elapsed.
@@ -71,6 +73,25 @@ On 504 the site may still be answering; the site stays `busy` until that reply i
 captured (it is then stored under the request_id, so a later retry with the same
 request_id returns it) or for at most timeout_ms more, then frees.
 
+## Status, activity and the link test (desktop side, informative)
+
+* `status()` (bookforge-bridge.js) additionally reports `lastContactAt` (any authenticated
+  request), `lastExternalContactAt` (same, excluding the app's own link test), `counters`,
+  the request in flight per site, each site's last result, and a ring buffer of the last 50
+  events `{kind, site, request_id, outcome, elapsed_ms, http_status, at, selftest}` — never
+  prompt/reply text, never the real or a presented key (fields are whitelisted). Wrong-key
+  attempts are recorded as `unauthorized` events. main.js broadcasts each event to the
+  panel as `bookforge-activity` (with a fresh status snapshot); the 4 s refresh remains.
+* The app's own link test marks itself with header `X-AutoInjector-Selftest: 1` and
+  request_ids `selftest-<stamp>-<site>`, so it never counts as "BookForge connected".
+  BookForge must not use that header or prefix.
+* **🧪 Test BookForge link** (bookforge-link-test.js): bridge listening; key file present;
+  wrong key -> 401; right key -> `/v1/health` 200; per Active AI: pane ready, then a real
+  `POST /v1/complete` with a JSON_SCHEMA prompt whose reply must be one JSON object echoing
+  a random word; then `GET http://127.0.0.1:8780/api/ping` (`{"app":"bookforge",...}`;
+  SKIPPED with instructions when unreachable). Reports: `<logs>/bookforge-link-test-<stamp>.md`
+  and `.json` (no key, no prompt text; last 80 chars of each reply).
+
 ## BookForge side
 
 * Slot `adapter_id: "autoinjector"`, extra slot fields `bridge_url`
@@ -96,9 +117,13 @@ request_id returns it) or for at most timeout_ms more, then frees.
 
 ## Tested so far
 
-* `desktop-app/test/bookforge-bridge.test.js` (85 checks) and `bookforge-main.test.js`
-  (22 checks, real main.js under the mock-Electron harness: bridge-owned replies are not
-  relayed, token never in state/log files).
+* `desktop-app/test/bookforge-bridge.test.js` (110 checks, incl. activity/last-contact with
+  no text leakage) and `bookforge-main.test.js` (48 checks, real main.js under the
+  mock-Electron harness: bridge-owned replies are not relayed, token never in state/log
+  files, activity broadcasts, a full link-test run with its reports).
+* `desktop-app/test/bookforge-link-test.test.js` (59 checks): the link test against the real
+  bridge with fake panes — pass, wrong key accepted, pane not ready, timeout, bad JSON,
+  BookForge not running, busy site, stop mid-run, reports contain no key/prompt.
 * `bookforge/tests/test_autoinjector_adapter.py` (Python adapter vs an in-process fake).
 * `bookforge/tests/test_bridge_cross_process.py`: real Python BookForge -> real Node
   `bookforge-bridge.js` (via `fake-bridge-host.js`, three fake panes): connect-all-three,
@@ -119,11 +144,13 @@ request_id returns it) or for at most timeout_ms more, then frees.
 
 1. `git pull`, then start AutoInjector desktop (`desktop-app/run-windows.bat`) and log in
    to ChatGPT, Claude and Gemini in their panes. Turn routing/autopilot OFF.
-2. In AutoInjector controls, open **BookForge bridge (experimental)**, tick Enable,
-   click **Copy token**.
+2. In AutoInjector controls, open **BookForge bridge (experimental)**, tick **Turn the
+   bridge on**, click **📋 Copy connection key**, then **🧪 Test BookForge link** (every
+   Active AI should PASS; "BookForge is running?" is SKIPPED until step 3).
 3. Start BookForge (`bookforge/run-bookforge.bat`, now on port 8780). Settings ->
-   **Connect AutoInjector (all three)**, paste the token, then **Test connection** on each
-   slot: all three should say Ready.
+   **Connect AutoInjector (all three)**, paste the connection key, then **Test connection**
+   on each slot: all three should say Ready. The AutoInjector panel's step 4 ticks and the
+   status turns to "BookForge is connected".
 4. Create a project, open B01 Premise, fill idea/goals and Create. Watch the Claude pane
    receive the prompt; BookForge should show a DRAFT premise. If it reports TIMEOUT or a
    JSON error, note which site and what the pane showed.

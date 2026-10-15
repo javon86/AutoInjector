@@ -265,6 +265,61 @@ async function main() {
   assert(!allLogs.includes(SECRET_REPLY), "no reply text in logger output");
   assert(!allLogs.includes(TOKEN), "no token in logger output");
 
+  console.log("activity: status() ring buffer, counters, last contact (text-free)");
+  {
+    const st = H.bridge.status();
+    const dump = JSON.stringify(st);
+    assert(Array.isArray(st.events) && st.events.length > 0 && st.events.length <= bridgeMod.EVENT_RING_SIZE, "status().events is a bounded ring of recent events");
+    assert(!dump.includes(SECRET_PROMPT) && !dump.includes(SECRET_REPLY), "status() (events included) never carries prompt/reply text");
+    assert(!dump.includes(TOKEN) && !dump.includes("wrong-token"), "status() never carries the real key or a presented wrong key");
+    assert(st.events.some((e) => e.kind === "unauthorized" && e.http_status === 401), "a wrong-key attempt is recorded as an 'unauthorized' event");
+    assert(st.counters.unauthorized >= 4, `unauthorized attempts are counted (${st.counters.unauthorized})`);
+    assert(st.events.some((e) => e.kind === "outcome" && e.outcome === "OK" && e.site === "claude" && e.http_status === 200 && typeof e.elapsed_ms === "number"), "a completed request is an OK outcome event with site/http_status/elapsed_ms");
+    assert(st.events.some((e) => e.kind === "outcome" && e.outcome === "BAD_REQUEST" && e.http_status === 400), "refused (400) requests are recorded");
+    assert(st.events.every((e) => Object.keys(e).every((k) => ["kind", "at", "site", "request_id", "outcome", "elapsed_ms", "http_status", "port", "error", "selftest"].includes(k))), "events only ever carry whitelisted fields");
+    assert(typeof st.lastContactAt === "number" && typeof st.lastExternalContactAt === "number", "lastContactAt / lastExternalContactAt are set after authenticated requests");
+    assert(st.counters.requests >= 1 && st.counters.answered >= 1 && st.counters.timeouts >= 1, "counters track requests / answered / timeouts");
+    assert(st.siteLast.claude && typeof st.siteLast.claude.outcome === "string", "siteLast reports each site's last result");
+    assert(st.active && typeof st.active === "object", "status().active lists in-flight requests per site");
+  }
+  {
+    let t = 1000000;
+    const seen = [];
+    const A = makeHarness({ now: () => t, onEvent: (e) => seen.push(e) });
+    await A.bridge.start();
+    let st = A.bridge.status();
+    assert(st.lastContactAt === null && st.lastExternalContactAt === null, "no contact recorded before any request");
+    assert(seen.some((e) => e.kind === "listening" && e.port === A.port), "onEvent fires for 'listening' (with the port)");
+    await request(A.port, "GET", "/v1/health", { token: "presented-wrong-KEY-123456789" });
+    st = A.bridge.status();
+    assert(st.lastContactAt === null, "an unauthenticated attempt does not count as contact");
+    assert(!JSON.stringify(seen).includes("presented-wrong-KEY-123456789"), "the presented wrong key never reaches onEvent");
+    await request(A.port, "GET", "/v1/health", { headers: { "X-AutoInjector-Selftest": "1" } });
+    st = A.bridge.status();
+    assert(st.lastContactAt === t && st.lastExternalContactAt === null, "a self-test health check updates lastContactAt only");
+    assert(!seen.some((e) => e.kind === "connected"), "the app's own link test never produces 'BookForge connected'");
+    t += 1000;
+    await request(A.port, "GET", "/v1/health");
+    st = A.bridge.status();
+    assert(st.lastExternalContactAt === t && seen.filter((e) => e.kind === "connected").length === 1, "first real authenticated request -> lastExternalContactAt + one 'connected' event");
+    t += 1000;
+    await request(A.port, "GET", "/v1/health");
+    assert(seen.filter((e) => e.kind === "connected").length === 1, "repeated contact within the gap doesn't spam 'connected'");
+    A.setSend(async (site) => { setTimeout(() => A.bridge.onCaptured({ site, text: `${SECRET_REPLY} [FROM: ${site.toUpperCase()}]` }), 5); return { ok: true, seq: "0001" }; });
+    await request(A.port, "POST", "/v1/complete", { body: completeBody({ site: "gemini", request_id: "selftest-1-gemini", timeout_ms: 60000 }) });
+    const self = seen.filter((e) => e.request_id === "selftest-1-gemini");
+    assert(self.length >= 2 && self.every((e) => e.selftest === true), "selftest-* request events are flagged selftest");
+    st = A.bridge.status();
+    assert(st.siteLast.gemini && st.siteLast.gemini.selftest === true && st.siteLast.gemini.outcome === "OK", "siteLast keeps the selftest flag");
+    // ring buffer bound
+    for (let i = 0; i < bridgeMod.EVENT_RING_SIZE + 10; i++) A.bridge.recordEvent("key_changed", { prompt: SECRET_PROMPT, text: SECRET_REPLY, token: TOKEN });
+    st = A.bridge.status();
+    assert(st.events.length === bridgeMod.EVENT_RING_SIZE, `ring buffer capped at ${bridgeMod.EVENT_RING_SIZE}`);
+    assert(!JSON.stringify(st).includes(SECRET_PROMPT) && !JSON.stringify(st).includes(TOKEN) && !JSON.stringify(seen).includes(SECRET_REPLY), "recordEvent drops non-whitelisted fields (text/key can't leak even if passed)");
+    await A.bridge.stop();
+    assert(seen.some((e) => e.kind === "stopped"), "onEvent fires for 'stopped'");
+  }
+
   console.log("stop");
   await H.bridge.stop();
   assert(H.bridge.status().listening === false, "status() not listening after stop");

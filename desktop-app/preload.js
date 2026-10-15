@@ -156,5 +156,11 @@ contextBridge.exposeInMainWorld("api", {
   bookforgeSetEnabled: (enabled) => ipcRenderer.invoke("bookforge:set-enabled", { enabled }),
   bookforgeCopyToken: () => ipcRenderer.invoke("bookforge:copy-token"),
   bookforgeRevealToken: () => ipcRenderer.invoke("bookforge:reveal-token"),
-  bookforgeRegenerateToken: () => ipcRenderer.invoke("bookforge:regenerate-token")
+  bookforgeRegenerateToken: () => ipcRenderer.invoke("bookforge:regenerate-token"),
+  // Live activity (text-free events + a fresh status snapshot) and the 🧪 link test.
+  onBookforgeActivity: (cb) => ipcRenderer.on("bookforge-activity", (_e, payload) => cb(payload)),
+  bookforgeLinkTestRun: () => ipcRenderer.invoke("bookforge:linktest-run"),
+  bookforgeLinkTestStop: () => ipcRenderer.invoke("bookforge:linktest-stop"),
+  bookforgeOpenLinkTestReport: (file) => ipcRenderer.invoke("bookforge:linktest-open-report", { file }),
+  onBookforgeLinkTestProgress: (cb) => ipcRenderer.on("bookforge-linktest-progress", (_e, payload) => cb(payload))
 });

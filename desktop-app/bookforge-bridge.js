@@ -13,8 +13,9 @@
  *     sendToSite(site, text, meta)       -> Promise<{ ok, error?, seq? }>   (meta = { request_id })
  *     siteReady(site)                    -> bool   (pane exists and is loaded)
  *     wrapPrompt(site, text)?            -> text   (adds the [FROM: <SITE>] reply-envelope instruction)
- *     now()?, logger(kind, detail)?, sites?, timeScale?
- *   }) -> { start(), stop(), onCaptured(turn) -> bool, status() }
+ *     now()?, logger(kind, detail)?, sites?, timeScale?,
+ *     onEvent(event)?                    -> called for every activity event (see below)
+ *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields) }
  *
  * onCaptured(turn) is called by main.js for every captured reply ({ site, text }).
  * It returns true when the reply belonged to a bridge request (main.js must then
@@ -22,6 +23,16 @@
  *
  * Logging: only site, request_id, chars, outcome/status and elapsed_ms are ever
  * logged — never prompt/reply text and never the token.
+ *
+ * Activity (for the desktop panel): status() also reports lastContactAt (any
+ * authenticated request), lastExternalContactAt (same, minus the app's own
+ * link test), counters, the request in flight per site, each site's last
+ * result, and a ring buffer of the most recent EVENT_RING_SIZE events. An event
+ * is ONLY { kind, site, request_id, outcome, elapsed_ms, http_status, at,
+ * selftest } — never prompt/reply text and never a presented or real key. The
+ * app's own link test marks itself with the header `X-AutoInjector-Selftest: 1`
+ * (health checks) and request_ids starting with "selftest-" (completions), so
+ * it never counts as "BookForge connected".
  *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
@@ -45,6 +56,16 @@ const MAX_TIMEOUT_MS = 900000;
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const TOKEN_FILE = 'bookforge-bridge-token';
+const EVENT_RING_SIZE = 50;
+const RECONNECT_GAP_MS = 5 * 60 * 1000; // silence longer than this, then a request = a new "connected" event
+const SELFTEST_ID_PREFIX = 'selftest-';
+// outcome -> the HTTP status BookForge saw (or would see) for it.
+const OUTCOME_HTTP = {
+  OK: 200, CACHED: 200, LATE_REPLY_STORED: 200, TIMEOUT: 504, LATE_EXPIRED: 504,
+  SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409,
+  BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401
+};
+const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error'];
 
 // --- envelope helpers ---------------------------------------------------------
 // Mirrors main.js's withEnvelope() text; main.js passes its own wrapper anyway.
@@ -115,7 +136,58 @@ function createBridge(opts) {
   const timeScale = Number(o.timeScale) > 0 ? Number(o.timeScale) : 1;
   if (typeof sendToSite !== 'function') throw new Error('bookforge-bridge: sendToSite is required');
 
+  // --- activity: counters, last contact, per-site last result, event ring ----
+  // Text-free by construction: recordEvent() copies only whitelisted scalar
+  // fields (EVENT_FIELDS), so no caller can leak prompt/reply text or a key.
+  const events = [];
+  const counters = { requests: 0, answered: 0, timeouts: 0, failed: 0, busy: 0, rejected: 0, unauthorized: 0, health_checks: 0 };
+  const siteLast = {};
+  let lastContactAt = null;
+  let lastExternalContactAt = null;
+  function recordEvent(kind, fields) {
+    const f = fields || {};
+    const ev = { kind: String(kind), at: now() };
+    for (const k of EVENT_FIELDS) {
+      const v = f[k];
+      if (v === undefined || v === null) continue;
+      if (typeof v === 'number' && Number.isFinite(v)) ev[k] = v;
+      else if (typeof v === 'string') ev[k] = v.slice(0, 128);
+    }
+    if (ev.outcome && ev.http_status == null && OUTCOME_HTTP[ev.outcome]) ev.http_status = OUTCOME_HTTP[ev.outcome];
+    const selftest = f.selftest === true || (typeof ev.request_id === 'string' && ev.request_id.startsWith(SELFTEST_ID_PREFIX));
+    if (selftest) ev.selftest = true;
+    events.push(ev);
+    if (events.length > EVENT_RING_SIZE) events.shift();
+    if (ev.kind === 'outcome' && ev.site && sites.includes(ev.site) && ev.outcome !== 'CACHED') {
+      siteLast[ev.site] = { outcome: ev.outcome, http_status: ev.http_status, elapsed_ms: ev.elapsed_ms, request_id: ev.request_id, at: ev.at, selftest: !!ev.selftest };
+    }
+    if (typeof o.onEvent === 'function') { try { o.onEvent(Object.assign({}, ev)); } catch (_) {} }
+    return ev;
+  }
+  function countOutcome(outcome) {
+    if (outcome === 'OK' || outcome === 'LATE_REPLY_STORED') counters.answered++;
+    else if (outcome === 'TIMEOUT') counters.timeouts++;
+    else if (outcome === 'SEND_FAILED' || outcome === 'SITE_NOT_READY') counters.failed++;
+    else if (outcome === 'SITE_BUSY') counters.busy++;
+    else if (outcome === 'BAD_REQUEST' || outcome === 'TOO_LARGE' || outcome === 'UNKNOWN_SITE' || outcome === 'NOT_FOUND') counters.rejected++;
+  }
+  // Called for every authenticated request.
+  function noteContact(selftest) {
+    const t = now();
+    lastContactAt = t;
+    if (selftest) return;
+    const gap = lastExternalContactAt == null || t - lastExternalContactAt > RECONNECT_GAP_MS;
+    lastExternalContactAt = t;
+    if (gap) recordEvent('connected', {});
+  }
+
   function log(kind, detail) {
+    // Mirror the request lifecycle into the activity ring (text-free).
+    if (detail && (kind === 'request' || kind === 'outcome' || kind === 'join')) {
+      if (kind === 'request') counters.requests++;
+      if (kind === 'outcome') countOutcome(detail.outcome);
+      recordEvent(kind, detail);
+    } else if (kind === 'listening' || kind === 'stopped') recordEvent(kind, detail || {});
     if (typeof o.logger !== 'function') return;
     try { o.logger(kind, detail); } catch (_) {}
   }
@@ -235,8 +307,26 @@ function createBridge(opts) {
     return out;
   }
 
+  function activeRequests() {
+    const out = {};
+    const t = now();
+    for (const [s, e] of active) {
+      if (e.done) continue;
+      out[s] = { request_id: e.requestId, started_at: e.startedAt, elapsed_ms: t - e.startedAt, phase: e.phase, selftest: e.requestId.startsWith(SELFTEST_ID_PREFIX) };
+    }
+    return out;
+  }
+
   function status() {
-    return { listening: !!server && listeningPort != null, host, port: listeningPort != null ? listeningPort : port, error: lastError, bridge_version: BRIDGE_VERSION, sites: siteStatus() };
+    return {
+      listening: !!server && listeningPort != null, host, port: listeningPort != null ? listeningPort : port, error: lastError, bridge_version: BRIDGE_VERSION, sites: siteStatus(),
+      now: now(),
+      lastContactAt, lastExternalContactAt,
+      counters: Object.assign({}, counters),
+      active: activeRequests(),
+      siteLast: JSON.parse(JSON.stringify(siteLast)),
+      events: events.map((e) => Object.assign({}, e))
+    };
   }
 
   function authorized(req) {
@@ -258,41 +348,48 @@ function createBridge(opts) {
     res.end(data);
   }
 
+  // A request refused before it reached a pane (400/404/409): record it too.
+  function refuse(res, status, code, message, site, requestId) {
+    countOutcome(code);
+    recordEvent('outcome', { site: typeof site === 'string' && sites.includes(site) ? site : undefined, request_id: typeof requestId === 'string' && REQUEST_ID_RE.test(requestId) ? requestId : undefined, outcome: code, http_status: status });
+    return send(res, status, errBody(code, message, false));
+  }
+
   async function handleComplete(raw, res) {
     let body;
     try { body = JSON.parse(raw.toString('utf8')); } catch (_) {
-      return send(res, 400, errBody('BAD_REQUEST', 'body must be JSON', false));
+      return refuse(res, 400, 'BAD_REQUEST', 'body must be JSON');
     }
-    if (!body || typeof body !== 'object' || Array.isArray(body)) return send(res, 400, errBody('BAD_REQUEST', 'body must be a JSON object', false));
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse(res, 400, 'BAD_REQUEST', 'body must be a JSON object');
     const { site, prompt, request_id: requestId } = body;
-    if (typeof site !== 'string' || !site) return send(res, 400, errBody('BAD_REQUEST', 'site is required', false));
-    if (typeof prompt !== 'string' || !prompt.trim()) return send(res, 400, errBody('BAD_REQUEST', 'prompt must be a non-empty string', false));
-    if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) return send(res, 400, errBody('BAD_REQUEST', 'request_id must be 1..128 chars of [A-Za-z0-9._:-]', false));
+    if (typeof site !== 'string' || !site) return refuse(res, 400, 'BAD_REQUEST', 'site is required', site, requestId);
+    if (typeof prompt !== 'string' || !prompt.trim()) return refuse(res, 400, 'BAD_REQUEST', 'prompt must be a non-empty string', site, requestId);
+    if (typeof requestId !== 'string' || !REQUEST_ID_RE.test(requestId)) return refuse(res, 400, 'BAD_REQUEST', 'request_id must be 1..128 chars of [A-Za-z0-9._:-]', site);
     let timeoutMs = DEFAULT_TIMEOUT_MS;
     if (body.timeout_ms !== undefined) {
       if (!Number.isInteger(body.timeout_ms) || body.timeout_ms < MIN_TIMEOUT_MS || body.timeout_ms > MAX_TIMEOUT_MS) {
-        return send(res, 400, errBody('BAD_REQUEST', `timeout_ms must be an integer ${MIN_TIMEOUT_MS}..${MAX_TIMEOUT_MS}`, false));
+        return refuse(res, 400, 'BAD_REQUEST', `timeout_ms must be an integer ${MIN_TIMEOUT_MS}..${MAX_TIMEOUT_MS}`, site, requestId);
       }
       timeoutMs = body.timeout_ms;
     }
-    if (!sites.includes(site)) return send(res, 404, errBody('UNKNOWN_SITE', `unknown site; expected one of ${sites.join('|')}`, false));
+    if (!sites.includes(site)) return refuse(res, 404, 'UNKNOWN_SITE', `unknown site; expected one of ${sites.join('|')}`, undefined, requestId);
 
     pruneCache();
     const cached = cache.get(requestId);
     if (cached) {
-      if (cached.site !== site) return send(res, 400, errBody('BAD_REQUEST', 'request_id was already used for a different site', false));
+      if (cached.site !== site) return refuse(res, 400, 'BAD_REQUEST', 'request_id was already used for a different site', site, requestId);
       log('outcome', { site, request_id: requestId, outcome: 'CACHED' });
       return send(res, 200, cached.body);
     }
     const existing = inflight.get(requestId);
     if (existing && !existing.done) {
-      if (existing.site !== site) return send(res, 400, errBody('BAD_REQUEST', 'request_id is in flight for a different site', false));
+      if (existing.site !== site) return refuse(res, 400, 'BAD_REQUEST', 'request_id is in flight for a different site', site, requestId);
       log('join', { site, request_id: requestId });
       const out = await awaitEntry(existing, timeoutMs);
       return send(res, out.status, out.body);
     }
     const busy = active.get(site);
-    if (busy && !busy.done) return send(res, 409, errBody('SITE_BUSY', `another bridge request is in flight for ${site}`, false));
+    if (busy && !busy.done) return refuse(res, 409, 'SITE_BUSY', `another bridge request is in flight for ${site}`, site, requestId);
     let ready = false;
     try { ready = !!siteReady(site); } catch (_) { ready = false; }
     if (!ready) {
@@ -319,9 +416,16 @@ function createBridge(opts) {
     req.on('error', () => {});
     req.on('end', () => {
       Promise.resolve().then(async () => {
-        if (!authorized(req)) return send(res, 401, errBody('UNAUTHORIZED', 'missing or wrong bearer token', false));
         const url = String(req.url || '').split('?')[0];
+        if (!authorized(req)) {
+          // Never record the presented key — only that an attempt was refused.
+          counters.unauthorized++;
+          recordEvent('unauthorized', { http_status: 401, selftest: req.headers['x-autoinjector-selftest'] === '1' });
+          return send(res, 401, errBody('UNAUTHORIZED', 'missing or wrong bearer token', false));
+        }
+        noteContact(req.headers['x-autoinjector-selftest'] === '1');
         if (url === '/v1/health' && req.method === 'GET') {
+          counters.health_checks++;
           return send(res, 200, { ok: true, bridge_version: BRIDGE_VERSION, sites: siteStatus() });
         }
         if (url === '/v1/complete' && req.method === 'POST') {
@@ -331,7 +435,7 @@ function createBridge(opts) {
           }
           return handleComplete(Buffer.concat(chunks), res);
         }
-        return send(res, 404, errBody('NOT_FOUND', 'no such endpoint', false));
+        return refuse(res, 404, 'NOT_FOUND', 'no such endpoint');
       }).catch(() => send(res, 500, errBody('INTERNAL', 'internal bridge error', false)));
     });
   }
@@ -371,11 +475,55 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, status, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, status, recordEvent, address: () => (server ? server.address() : null) };
+}
+
+// --- plain-English activity lines (for the desktop panel + link-test report) ---
+// Pure: turns one text-free activity event into a sentence a non-technical
+// person understands, plus a tone (ok | warn | error | info) for styling.
+function formatDuration(ms) {
+  const s = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function describeEvent(ev, label) {
+  const e = ev || {};
+  const L = e.site ? (typeof label === 'function' ? label(e.site) : e.site) : 'the AI';
+  const who = e.selftest ? 'The link test' : 'BookForge';
+  const id = e.request_id ? ` (request ${e.request_id})` : '';
+  const dur = formatDuration(e.elapsed_ms);
+  switch (e.kind) {
+    case 'connected': return { say: 'BookForge connected', tone: 'ok' };
+    case 'request': return { say: `${who} asked ${L}${id}`, tone: 'info' };
+    case 'join': return { say: `${who} checked back on a request that is still running for ${L}${id}`, tone: 'info' };
+    case 'unauthorized': return e.selftest
+      ? { say: 'The link test checked that a wrong connection key is refused', tone: 'info' }
+      : { say: 'Something tried to connect with a wrong or missing connection key — it was refused', tone: 'warn' };
+    case 'listening': return { say: `Bridge turned on — listening on 127.0.0.1:${e.port != null ? e.port : '?'}`, tone: 'ok' };
+    case 'stopped': return { say: 'Bridge turned off', tone: 'info' };
+    case 'key_changed': return { say: 'A new connection key was made — BookForge needs the new one before it can connect again', tone: 'warn' };
+    case 'start_failed': return { say: `The bridge couldn't start (${e.error || 'unknown error'})`, tone: 'error' };
+    case 'outcome': break;
+    default: return { say: String(e.kind || 'event'), tone: 'info' };
+  }
+  switch (e.outcome) {
+    case 'OK': return { say: `${L} answered in ${dur}${e.selftest ? ' (link test)' : ''}`, tone: 'ok' };
+    case 'LATE_REPLY_STORED': return { say: `${L} answered late (after ${dur}) — saved so ${who} gets it if it asks again`, tone: 'warn' };
+    case 'TIMEOUT': return { say: `${L} hadn't answered after ${dur} — timed out${e.selftest ? '' : '. BookForge will ask you before retrying'}`, tone: 'error' };
+    case 'LATE_EXPIRED': return { say: `${L} never answered${id}; ${L} is free again`, tone: 'warn' };
+    case 'CACHED': return { say: `${who} collected ${L}'s earlier answer again (nothing re-sent)`, tone: 'info' };
+    case 'SITE_NOT_READY': return { say: `${L}'s window isn't loaded, so the request was turned away`, tone: 'error' };
+    case 'SEND_FAILED': return { say: `Couldn't type the prompt into ${L}'s window`, tone: 'error' };
+    case 'SITE_BUSY': return { say: `${L} was still busy with another request — ${who} was told to wait`, tone: 'warn' };
+    case 'TOO_LARGE': return { say: 'Refused a request that was too big (over 1 MB)', tone: 'warn' };
+    default: return { say: `Refused a request this app couldn't use (${e.outcome || 'error'})`, tone: 'warn' };
+  }
 }
 
 module.exports = {
   createBridge,
+  describeEvent,
+  formatDuration,
   stripEnvelope,
   defaultWrapPrompt,
   generateToken,
@@ -387,5 +535,7 @@ module.exports = {
   BRIDGE_VERSION,
   DEFAULT_PORT,
   MAX_BODY_BYTES,
-  CACHE_TTL_MS
+  CACHE_TTL_MS,
+  EVENT_RING_SIZE,
+  SELFTEST_ID_PREFIX
 };
