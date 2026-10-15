@@ -325,3 +325,45 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 
 /* Settings: AutoInjector bridge health list */
 .plain-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+
+/* ---------------------------------------------------------------- Test everything (self-test) */
+.selftest-btn { font-weight: 600; border-color: var(--accent); color: var(--accent); background: var(--accent-soft);
+  white-space: nowrap; flex: 0 0 auto; }
+.selftest-btn:hover { background: var(--accent-soft); filter: brightness(1.04); }
+.selftest-btn-state { font-weight: 400; }
+.selftest-dialog { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 20px; box-shadow: var(--shadow); }
+.selftest-dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.st-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.st-head h2 { margin: 0; }
+.st-ai { margin-top: 12px; font-weight: 600; }
+.selftest-dialog progress { width: 100%; height: 12px; margin: 4px 0 8px; accent-color: var(--accent); }
+.st-steps { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; }
+.st-step { border: 1px solid var(--border); border-left-width: 4px; border-radius: var(--radius); padding: 6px 10px;
+  background: var(--surface); }
+.st-step.st-pass { border-left-color: var(--ok); }
+.st-step.st-fail { border-left-color: var(--bad); background: var(--bad-soft); }
+.st-step.st-skipped { border-left-color: var(--border); }
+.st-step .row { gap: 8px; flex-wrap: wrap; align-items: center; }
+.st-detail { margin: 2px 0 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.st-fix { margin: 2px 0 0; }
+.st-report { max-height: 24rem; margin-top: 8px; }
+
+/* ---------------------------------------------------------------- info pop-ups + slot status */
+.info-wrap { position: relative; display: inline-block; vertical-align: middle; }
+.info-btn { min-height: 0; padding: 0 6px; border-radius: 999px; font-size: .95rem; line-height: 1.4;
+  color: var(--accent); border-color: var(--accent); background: var(--surface); font-weight: 400; }
+.info-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: min(22rem, 80vw);
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 10px 12px; font-size: .9rem; font-weight: 400; text-align: left; }
+.info-pop .info-title { display: block; margin-bottom: 4px; }
+.info-pop p { margin: 0 0 6px; }
+.label-row { display: inline-flex; gap: 6px; align-items: center; }
+.steps-list { padding-left: 1.4em; }
+.steps-list li { margin-bottom: 4px; }
+.slot-strip { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+  padding: 8px 12px; margin: 0 0 10px; }
+.slot-strip .row { gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.slot-next { margin: 4px 0 0; }
+@media (max-width: 800px) { .selftest-btn { padding: 6px 8px; } }

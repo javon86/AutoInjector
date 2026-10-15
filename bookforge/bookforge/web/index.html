@@ -19,6 +19,9 @@
   <a class="brand" href="#/">Bookforge</a>
   <div class="topbar-context" id="context-bar" aria-label="Current project"></div>
   <nav class="topbar-links" aria-label="Workspace pages" id="top-links"></nav>
+  <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
+    <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
+  </button>
 </header>
 <div class="shell">
   <nav id="sidenav" class="sidenav" aria-label="Operation sets"></nav>
@@ -29,5 +32,6 @@
 </div>
 <div id="live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="selftest-dialog" class="selftest-dialog" aria-labelledby="selftest-title"></dialog>
 </body>
 </html>

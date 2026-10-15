@@ -21,6 +21,8 @@ bookforge/
     modules/base.py        OperationHandler / Context / Result (the handler API)
     modules/set_a.py ...   per-set domain handlers (set_a .. set_k)
     exporters/             PDF / EPUB / DOCX writers (pure Python)
+    selftest.py            "Test everything": real end-to-end self-test through engine.dispatch,
+                           writes reports/selftest-<stamp>.md/.json (CLI: python -m bookforge selftest)
     server.py, web/        local HTTP API + browser workspace
   tests/                   pytest suite (conftest.py has the Harness fixture `h`)
 ```

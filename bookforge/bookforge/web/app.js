@@ -2092,7 +2092,8 @@ async function viewSettings(main) {
       h('li', null, 'Without a connected slot, creative operations answer CAPABILITY_UNAVAILABLE and accept a manual candidate instead: you write the output in the form and Bookforge validates and stores it. Nothing leaves this computer in manual mode.'),
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
       h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
-      h('li', null, 'API keys and bridge tokens are stored in the local secrets file on this computer, never in project data, exports or logs. The key field is write-only: it is never shown again.'))));
+      h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
+      h('li', null, 'Not sure everything works? Press “🧪 Test everything” at the top: it builds a small test book in a separate project and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
 }
@@ -2102,12 +2103,12 @@ function autoInjectorCard(main) {
   const out = h('div', { 'aria-live': 'polite' });
   const url = h('input', { type: 'url', id: `${p}-url`, value: BRIDGE_DEFAULT, spellcheck: 'false', 'aria-describedby': `${p}-url-h` });
   const token = h('input', { type: 'password', id: `${p}-token`, autocomplete: 'new-password', spellcheck: 'false', 'aria-describedby': `${p}-token-h`, 'aria-required': 'true' });
-  const btn = h('button', { type: 'submit', class: 'primary' }, 'Connect AutoInjector (all three)');
+  const btn = h('button', { type: 'submit', class: 'primary' }, 'Connect AutoInjector (all three slots)');
   return h('form', { class: 'card', 'aria-labelledby': `${p}-h`, novalidate: true, onsubmit: async ev => {
     ev.preventDefault(); clear(out);
     if (!token.value.trim()) {
       token.setAttribute('aria-invalid', 'true');
-      out.appendChild(stateBox('failed', 'Paste the bridge token first', h('p', null, 'Copy it from the AutoInjector desktop app (BookForge bridge controls).')));
+      out.appendChild(stateBox('failed', 'Paste the connection key first', h('p', null, 'In AutoInjector: BookForge bridge panel → Copy connection key. Then paste it here.')));
       token.focus(); return;
     }
     token.removeAttribute('aria-invalid');
@@ -2115,21 +2116,26 @@ function autoInjectorCard(main) {
     try {
       await api('POST', '/slots/connect-autoinjector', { body: { bridge_url: url.value.trim() || BRIDGE_DEFAULT, token: token.value.trim() } });
       token.value = '';
-      announce('AutoInjector connected to AI-1, AI-2 and AI-3');
-      toast('AutoInjector connected: AI-1 Claude, AI-2 ChatGPT, AI-3 Gemini');
+      announce('Connection key saved for AI-1, AI-2 and AI-3. Checking the connection now.');
+      toast('Connection key saved: AI-1 Claude, AI-2 ChatGPT, AI-3 Gemini — see each slot’s status below');
       clear(main); await viewSettings(main);
       return;
     } catch (e) { out.appendChild(failedState('AutoInjector was not connected', e)); }
     btn.disabled = false;
   } },
-  h('h2', { id: `${p}-h` }, 'AutoInjector web sessions (experimental)'),
+  h('h2', { id: `${p}-h` }, 'Connect AutoInjector (experimental) ', infoTip('What is AutoInjector?', ...TIP_AUTOINJECTOR())),
   h('p', { class: 'notice', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
-  h('p', null, 'Uses the ChatGPT, Claude and Gemini sessions you are logged in to inside the AutoInjector desktop app — no API keys. Turn on the BookForge bridge in the desktop app, copy its token, then connect. This sets AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini; you can change each slot below.'),
+  h('p', null, 'Use the ChatGPT, Claude and Gemini sessions you are logged in to inside the AutoInjector desktop app — no API keys needed.'),
+  h('ol', { class: 'steps-list' },
+    h('li', null, 'Start the AutoInjector desktop app and log in to ChatGPT, Claude and/or Gemini there.'),
+    h('li', null, 'In AutoInjector: BookForge bridge panel → switch the bridge on → ', h('strong', null, 'Copy connection key'), '.'),
+    h('li', null, 'Paste the key below and press ', h('strong', null, 'Connect AutoInjector'), '. This sets AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini (you can change each slot below).'),
+    h('li', null, 'Each slot below then shows where it’s at and the next step. Press ', h('strong', null, 'Test connection'), ' on a slot any time.')),
   h('div', { class: 'grid-2' },
-    h('div', { class: 'field' }, h('label', { for: url.id }, 'Bridge URL'), url,
-      h('span', { class: 'hint', id: `${p}-url-h` }, 'Only http://127.0.0.1 or http://localhost is accepted. Default ' + BRIDGE_DEFAULT + '.')),
-    h('div', { class: 'field' }, h('label', { for: token.id }, 'Bridge token (write-only)'), token,
-      h('span', { class: 'hint', id: `${p}-token-h` }, 'Saved for all three slots in the local secrets file; never shown again.'))),
+    h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: token.id }, 'Connection key'), infoTip('What is the connection key?', ...TIP_KEY())), token,
+      h('span', { class: 'hint', id: `${p}-token-h` }, 'From AutoInjector: BookForge bridge panel → Copy connection key. Saved privately on this computer for all three slots; never shown again.')),
+    h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: url.id }, 'AutoInjector address'), infoTip('What is the AutoInjector address?', ...TIP_URL())), url,
+      h('span', { class: 'hint', id: `${p}-url-h` }, 'Only http://127.0.0.1 or http://localhost is accepted. Default ' + BRIDGE_DEFAULT + '.'))),
   out, h('div', { class: 'form-actions' }, btn));
 }
 
@@ -2174,10 +2180,11 @@ function slotForm(s) {
   const key = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', placeholder: s.has_credentials ? 'Stored — leave blank to keep' : 'Not set' });
   const removeKeyBox = h('input', { type: 'checkbox', id: `${p}-rmkey` });
   const isAuto = () => adapter.value === 'autoinjector';
+  const strip = slotStatusStrip(s);
   const status = h('p', { class: 'row' },
-    s.connected ? badge('✔', 'Connected', 'b-ok') : badge('○', 'Not connected', 'b-muted'),
+    s.connected ? badge('✔', 'Adapter set', 'b-ok') : badge('○', 'Not set up', 'b-muted'),
     s.adapter_id === 'autoinjector'
-      ? (s.has_credentials ? badge('⚿︎', 'Bridge token saved', 'b-ok') : badge('–', 'No bridge token', 'b-muted'))
+      ? (s.has_credentials ? badge('⚿︎', 'Connection key saved', 'b-ok') : badge('–', 'No connection key', 'b-muted'))
       : (s.has_credentials ? badge('⚿︎', 'API key available', 'b-ok') : badge('–', 'No API key', 'b-muted')),
     s.adapter_id === 'autoinjector' && s.site ? badge('◆', `Web: ${s.site}`, 'b-info') : null,
     (s.roles || []).length ? badge('→', `Roles: ${s.roles.join(', ')}`, 'b-info') : null,
@@ -2190,6 +2197,7 @@ function slotForm(s) {
     testBtn.disabled = true;
     try {
       const r = await api('GET', `/slots/${encodeURIComponent(s.slot_id)}/health`);
+      strip.redraw(r);
       clear(healthOut);
       healthOut.appendChild(r.ok ? stateBox('ok', `${s.slot_id}: connection works`, healthResult(r))
         : stateBox('failed', `${s.slot_id}: connection problem`, r.error ? h('p', null, h('code', null, r.error)) : null, healthResult(r)));
@@ -2198,20 +2206,20 @@ function slotForm(s) {
     testBtn.disabled = false;
   });
   const autoGroup = h('fieldset', { class: 'field', hidden: !isAuto() },
-    h('legend', null, 'AutoInjector bridge'),
+    h('legend', null, 'AutoInjector connection'),
     h('p', { class: 'small', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠︎ '), TOS_CAUTION),
     h('div', { class: 'grid-2' },
-      f('bridge', 'Bridge URL', bridgeUrl, 'http://127.0.0.1 or http://localhost only. Default ' + BRIDGE_DEFAULT + '.'),
+      f('bridge', 'AutoInjector address', bridgeUrl, 'http://127.0.0.1 or http://localhost only. Default ' + BRIDGE_DEFAULT + '.'),
       f('site', 'Web site', site, 'Which logged-in AutoInjector pane this slot uses.')),
-    h('div', { class: 'row' }, testBtn,
-      h('span', { class: 'hint', id: `${p}-test-h` }, 'Uses the saved settings: save first, then test.')),
+    h('div', { class: 'row' }, testBtn, infoTip('What does Test connection do?', ...TIP_TEST()),
+      h('span', { class: 'hint', id: `${p}-test-h` }, 'Checks the saved settings (save first). Sends no book content.')),
     healthOut);
-  const keyLegend = h('legend', null, isAuto() ? 'Bridge token (write-only)' : 'API key (write-only)');
-  const keyLabelText = () => isAuto() ? 'New bridge token' : 'New API key';
+  const keyLegend = h('legend', null, isAuto() ? 'Connection key (write-only)' : 'API key (write-only)');
+  const keyLabelText = () => isAuto() ? 'New connection key' : 'New API key';
   const keyField = f('key', keyLabelText(), key, s.has_credentials ? 'A secret is stored for this slot (or ANTHROPIC_API_KEY is set). Leave blank to keep it.' : 'Paste it to store it locally for this slot.');
   adapter.addEventListener('change', () => {
     autoGroup.hidden = !isAuto();
-    keyLegend.textContent = isAuto() ? 'Bridge token (write-only)' : 'API key (write-only)';
+    keyLegend.textContent = isAuto() ? 'Connection key (write-only)' : 'API key (write-only)';
     keyField.querySelector('label').textContent = keyLabelText();
   });
   const btn = h('button', { type: 'submit', class: 'primary' }, `Save ${s.slot_id}`);
@@ -2244,14 +2252,15 @@ function slotForm(s) {
       const saved = await api('PUT', `/slots/${s.slot_id}`, { body });
       key.value = ''; removeKeyBox.checked = false;
       testBtn.disabled = saved.adapter_id !== 'autoinjector';
-      const secret = saved.adapter_id === 'autoinjector' ? 'Bridge token' : 'API key';
+      const secret = saved.adapter_id === 'autoinjector' ? 'Connection key' : 'API key';
       const what = saved.adapter_id === 'autoinjector' ? `web site ${saved.site}` : `model ${saved.model}`;
       out.appendChild(stateBox('ok', `${s.slot_id} saved`, h('p', null, `Adapter ${saved.adapter_id}, ${what}. ${secret} ${saved.has_credentials ? 'available' : 'not set'}.`)));
+      Object.assign(s, saved); strip.recheck();
       announce(`${s.slot_id} saved`);
     } catch (e) { out.appendChild(failedState(`${s.slot_id} was not saved`, e)); }
     btn.disabled = false;
   } },
-  h('h2', { id: `${p}-h` }, s.slot_id), status,
+  h('h2', { id: `${p}-h` }, s.slot_id), strip, status,
   h('div', { class: 'grid-2' },
     f('adapter', 'Adapter', adapter, 'None keeps the slot disconnected; creative work then uses manual candidates.'),
     f('model', 'Model', model, 'Default claude-opus-5-5. Ignored by autoinjector slots (the web site picks its model).'),
@@ -2270,9 +2279,278 @@ function slotForm(s) {
   out, h('div', { class: 'form-actions' }, btn));
 }
 
+/* ======================================================================= Test everything (self-test) */
+const ST_ICON = { PASS: ['✔', 'Passed', 'b-ok'], FAIL: ['✕', 'Failed', 'b-bad'], SKIPPED: ['–', 'Skipped', 'b-muted'] };
+const ST = { dialog: null, timer: null, view: 'intro', startedAt: null, opener: null, prog: null };
+
+function stBadge(status) { const b = ST_ICON[status] || ['…', 'Running', 'b-info']; return badge(b[0], b[1], b[2]); }
+function fmtMs(ms) { return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`; }
+
+async function openSelfTest() {
+  const d = $('#selftest-dialog');
+  ST.dialog = d; ST.opener = document.activeElement; ST.view = null; ST.prog = null;
+  let st = null;
+  try { st = await api('GET', '/selftest'); } catch (e) { if (S.authFailed) return; }
+  if (!d.open) { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); }
+  if (st && st.running) renderSelfTestProgress(st); else renderSelfTestIntro(st);
+}
+function closeSelfTest() {
+  const d = ST.dialog; if (!d) return;
+  stopSelfTestPolling();
+  if (d.open) { if (d.close) d.close(); else d.removeAttribute('open'); }
+  if (ST.opener && ST.opener.focus) ST.opener.focus();
+}
+function stopSelfTestPolling() { clearTimeout(ST.timer); ST.timer = null; }
+
+function stShell(title, ...body) {
+  const d = clear(ST.dialog);
+  if (title !== 'Testing everything…') ST.prog = null;
+  d.appendChild(h('div', { class: 'st-head' },
+    h('h2', { id: 'selftest-title' }, h('span', { 'aria-hidden': 'true' }, '🧪 '), title),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close the test window', onclick: closeSelfTest }, '✕ Close')));
+  append(d, body);
+  return d;
+}
+
+function renderSelfTestIntro(st) {
+  ST.view = 'intro';
+  const aiBox = h('input', { type: 'checkbox', id: 'st-use-ai', 'aria-describedby': 'st-use-ai-h' });
+  const out = h('div', { 'aria-live': 'polite' });
+  const start = h('button', { type: 'button', class: 'primary', onclick: async () => {
+    start.disabled = true; clear(out);
+    try {
+      const s = await api('POST', '/selftest', { body: { use_ai: aiBox.checked } });
+      ST.startedAt = Date.now();
+      announce('Test started');
+      renderSelfTestProgress(s);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) { const s = await api('GET', '/selftest'); renderSelfTestProgress(s); return; }
+      out.appendChild(failedState('The test could not start', e)); start.disabled = false;
+    }
+  } }, 'Start the test');
+  const last = st && st.last_report;
+  const d = stShell('Test everything',
+    h('p', null, 'BookForge will make a small two-chapter book from start to finish, exactly the way you would: create a character and a place, plan the story, write two chapters, track what happens, fix a typo through an edit pass, lay out the book, export a PDF, EPUB and Word file, re-read those files, run the quality checks and approve the release.'),
+    h('ul', null,
+      h('li', null, h('strong', null, 'Your projects are not touched. '), 'Everything goes into a new, separate project called “Self-test <date time>”. You can open it afterwards and look at every record it made, or ignore it.'),
+      h('li', null, h('strong', null, 'It takes about 5 seconds '), 'without AI. Each step is shown as it finishes, with ✔ Passed, ✕ Failed or – Skipped and what to do if something fails.'),
+      h('li', null, h('strong', null, 'You get a written report '), '(Markdown and JSON) saved in the “reports” folder next to your BookForge data. It never contains keys, passwords or AI conversations.')),
+    h('div', { class: 'check-row st-ai' }, aiBox,
+      h('label', { for: 'st-use-ai' }, 'Use my AI slots too')),
+    h('p', { class: 'hint', id: 'st-use-ai-h' }, 'Off: nothing is sent anywhere — the creative steps use fixed text (“MANUAL (no AI)”). On: BookForge first checks each connected AI slot, then really sends two small prompts (a story premise and a short chapter, plus one “find the events” request) to your connected AI — for example ChatGPT, Claude or Gemini through AutoInjector, or the Anthropic API. Web sessions can take a minute or more per prompt. If no AI is ready, those steps are skipped with the reason and the rest still runs.'),
+    last ? h('p', { class: 'small muted' }, 'Last test: ', stBadge(last.verdict === 'PASS' ? 'PASS' : 'FAIL'), ` ${last.counts.PASS} passed, ${last.counts.FAIL} failed, ${last.counts.SKIPPED} skipped · ${fmtTime(last.finished_at)} `,
+      h('button', { type: 'button', class: 'link', onclick: () => renderSelfTestDone({ last_report: last, progress: null }) }, 'Show last result')) : null,
+    out,
+    h('div', { class: 'form-actions' }, start, h('button', { type: 'button', onclick: closeSelfTest }, 'Cancel')));
+  aiBox.focus();
+  return d;
+}
+
+function stStepItem(s) {
+  return h('li', { class: `st-step st-${(s.status || 'run').toLowerCase()}` },
+    h('div', { class: 'row' }, stBadge(s.status), h('strong', null, s.id), h('span', null, s.title),
+      s.elapsed_ms != null ? h('span', { class: 'small muted' }, fmtMs(s.elapsed_ms)) : null,
+      s.records != null && (Array.isArray(s.records) ? s.records.length : s.records) ?
+        h('span', { class: 'small muted' }, `${Array.isArray(s.records) ? s.records.length : s.records} record(s)`) : null),
+    h('p', { class: 'small st-detail' }, s.detail || ''),
+    s.fix && s.status !== 'PASS' ? h('p', { class: 'small st-fix' }, h('strong', null, s.status === 'FAIL' ? 'What to do: ' : 'Tip: '), s.fix) : null);
+}
+
+function renderSelfTestProgress(st) {
+  const p = st.progress || { steps: [], pending: [], done: 0, total: 0 };
+  if (!ST.startedAt) ST.startedAt = p.started_at ? Date.parse(p.started_at) : Date.now();
+  if (ST.view !== 'progress' || !ST.prog) {
+    // Build once; later polls only update the parts, so keyboard focus is never lost.
+    ST.view = 'progress';
+    const P = ST.prog = {
+      count: h('strong'), elapsed: h('span', { class: 'muted' }), mode: h('span'),
+      bar: h('progress', { max: '1', value: '0', 'aria-label': 'Test progress' }),
+      now: h('strong'), project: h('p', { class: 'small muted' }),
+      list: h('ol', { class: 'st-steps', 'aria-label': 'Finished steps' }),
+      pendingSummary: h('summary'), pendingList: h('ul', { class: 'small' }), shown: 0,
+    };
+    P.pending = h('details', null, P.pendingSummary, P.pendingList);
+    stShell('Testing everything…',
+      h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), P.count, P.elapsed, P.mode),
+      P.bar, h('p', null, 'Now: ', P.now), P.project, P.list, P.pending,
+      h('div', { class: 'form-actions' }, h('button', { type: 'button', onclick: closeSelfTest }, 'Hide (the test keeps running)')));
+    ST.dialog.querySelector('.form-actions button').focus();
+  }
+  const P = ST.prog;
+  P.count.textContent = `${p.done} of ${p.total} steps done`;
+  P.elapsed.textContent = `· ${Math.max(0, Math.round((Date.now() - ST.startedAt) / 1000))} s`;
+  clear(P.mode).appendChild(p.use_ai ? badge('◆', 'Using your AI slots', 'b-info') : badge('✎', 'MANUAL (no AI)', 'b-muted'));
+  P.bar.max = p.total || 1; P.bar.value = p.done || 0;
+  P.now.textContent = p.current_step || 'finishing…';
+  P.project.textContent = p.project_name ? `Working in the project “${p.project_name}”.` : '';
+  const steps = p.steps || [];
+  for (const sItem of steps.slice(P.shown)) P.list.appendChild(stStepItem(sItem));
+  if (steps.length > P.shown) {
+    const last = steps[steps.length - 1];
+    announce(`Step ${last.id} ${(ST_ICON[last.status] || [])[1] || last.status}: ${last.title}`);
+  }
+  P.shown = Math.max(P.shown, steps.length);
+  const pend = p.pending || [];
+  P.pending.hidden = !pend.length;
+  P.pendingSummary.textContent = `${pend.length} step(s) still to run`;
+  clear(P.pendingList); for (const x of pend) P.pendingList.appendChild(h('li', null, `${x.id} ${x.title}`));
+  stopSelfTestPolling();
+  ST.timer = setTimeout(pollSelfTest, 700);
+}
+
+async function pollSelfTest() {
+  if (!ST.dialog || !ST.dialog.open) return;
+  let st;
+  try { st = await api('GET', '/selftest'); } catch (e) { ST.timer = setTimeout(pollSelfTest, 2000); return; }
+  if (st.running) renderSelfTestProgress(st);
+  else { ST.startedAt = null; renderSelfTestDone(st); }
+}
+
+function renderSelfTestDone(st) {
+  ST.view = 'done'; stopSelfTestPolling();
+  const rep = st.last_report;
+  if (!rep) {
+    const err = st.progress && st.progress.error;
+    return stShell('The test stopped', stateBox('failed', 'The test did not finish', h('p', null, err || 'No report was written. Run it again; if it keeps happening, check the BookForge console window.')),
+      h('div', { class: 'form-actions' }, h('button', { type: 'button', class: 'primary', onclick: () => renderSelfTestIntro(null) }, 'Try again')));
+  }
+  const ok = rep.verdict === 'PASS';
+  const failed = rep.steps.filter(s => s.status === 'FAIL');
+  const viewOut = h('div', { 'aria-live': 'polite' });
+  const pid = rep.project && rep.project.project_id;
+  const d = stShell(ok ? 'Everything works' : 'Some steps failed',
+    stateBox(ok ? 'ok' : 'failed', ok ? `All ${rep.counts.PASS} checked steps passed` : `${failed.length} step(s) failed`,
+      h('p', null, `${rep.counts.PASS} passed, ${rep.counts.FAIL} failed, ${rep.counts.SKIPPED} skipped in ${fmtMs(rep.elapsed_ms || 0)} · ${rep.mode === 'AI' ? 'with your AI slots' : 'MANUAL (no AI): nothing was sent to any AI'}.`),
+      failed.length ? h('p', null, 'Each failed step below says what to do. Steps that needed a failed step were skipped.') : null),
+    h('div', { class: 'form-actions' },
+      pid ? h('a', { class: 'btn primary', href: link('p', pid, 'main'), onclick: () => closeSelfTest() }, 'Open the Self-test project') : null,
+      h('button', { type: 'button', onclick: async () => {
+        clear(viewOut).appendChild(loadingState('Loading the report…'));
+        try {
+          const blob = await api('GET', '/selftest/report?format=md', { blob: true });
+          const text = await blob.text();
+          clear(viewOut).appendChild(h('section', { 'aria-label': 'Self-test report' }, h('pre', { class: 'st-report', tabindex: '0' }, text)));
+          viewOut.querySelector('pre').focus();
+        } catch (e) { clear(viewOut).appendChild(failedState('The report could not be loaded', e)); }
+      } }, 'View report'),
+      h('button', { type: 'button', onclick: async () => {
+        try {
+          const blob = await api('GET', '/selftest/report?format=md&download=1', { blob: true });
+          const url = URL.createObjectURL(blob);
+          const a = h('a', { href: url, download: (rep.files && rep.files.markdown) || 'bookforge-selftest.md' });
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+          announce('Report downloaded');
+        } catch (e) { clear(viewOut).appendChild(failedState('The report could not be downloaded', e)); }
+      } }, 'Download report (.md)'),
+      h('button', { type: 'button', onclick: () => renderSelfTestIntro(st) }, 'Run again')),
+    rep.files && rep.files.markdown ? h('p', { class: 'small muted' }, `Saved as ${rep.files.markdown} and ${rep.files.json} in the “reports” folder of your BookForge data.`) : null,
+    viewOut,
+    h('h3', null, 'Steps'),
+    h('ol', { class: 'st-steps' }, rep.steps.map(stStepItem)));
+  announce(ok ? 'Test finished: everything passed' : `Test finished: ${failed.length} step(s) failed`);
+  const first = d.querySelector('.form-actions a, .form-actions button');
+  if (first) first.focus();
+  return d;
+}
+
+async function refreshSelfTestButton() {
+  const el = $('#selftest-btn-state'); if (!el) return;
+  try {
+    const st = await api('GET', '/selftest');
+    el.textContent = st.running && st.progress ? ` (${st.progress.done}/${st.progress.total})` : '';
+    if (st.running && !(ST.dialog && ST.dialog.open)) setTimeout(refreshSelfTestButton, 2000);
+  } catch { el.textContent = ''; }
+}
+
+function initSelfTestButton() {
+  const btn = $('#selftest-btn'); if (!btn) return;
+  btn.addEventListener('click', openSelfTest);
+  const d = $('#selftest-dialog');
+  d.addEventListener('cancel', ev => { ev.preventDefault(); closeSelfTest(); });  // Esc
+  d.addEventListener('close', () => { stopSelfTestPolling(); refreshSelfTestButton(); });
+}
+
+/* ======================================================================= info pop-ups */
+let openTip = null;
+function infoTip(label, ...content) {
+  const id = uid('tip');
+  const pop = h('div', { class: 'info-pop', id, role: 'note', hidden: true }, h('strong', { class: 'info-title' }, label), ...content);
+  const btn = h('button', { type: 'button', class: 'info-btn', 'aria-expanded': 'false', 'aria-controls': id, 'aria-label': `What is this: ${label}` }, 'ⓘ');
+  const close = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); if (openTip === close) openTip = null; };
+  btn.addEventListener('click', ev => {
+    ev.preventDefault(); ev.stopPropagation();
+    const show = pop.hidden;
+    if (openTip) openTip();
+    if (show) { pop.hidden = false; btn.setAttribute('aria-expanded', 'true'); openTip = close; }
+  });
+  pop.addEventListener('keydown', ev => { if (ev.key === 'Escape') { close(); btn.focus(); } });
+  btn.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !pop.hidden) { ev.stopPropagation(); close(); } });
+  return h('span', { class: 'info-wrap' }, btn, pop);
+}
+document.addEventListener('click', ev => { if (openTip && !ev.target.closest('.info-wrap')) openTip(); });
+document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && openTip) openTip(); });
+
+const TIP_AUTOINJECTOR = () => [
+  h('p', null, 'AutoInjector is a separate desktop app on this computer. You log in to ChatGPT, Claude and Gemini inside it, the same way you would in a browser.'),
+  h('p', null, 'When its “BookForge bridge” is switched on, BookForge can hand it a writing job; AutoInjector types it into the logged-in site and passes the answer back. No API key or extra subscription is needed.'),
+  h('p', null, 'Both apps talk only on this computer (127.0.0.1); nothing is opened to the internet.')];
+const TIP_KEY = () => [
+  h('p', null, 'The connection key is a private password that AutoInjector makes so that only your BookForge can use it. It is not your ChatGPT, Claude or Gemini password.'),
+  h('p', null, h('strong', null, 'Where to find it: '), 'In AutoInjector: BookForge bridge panel → Copy connection key. Then paste it here and press Connect.'),
+  h('p', null, 'BookForge saves it in a private file on this computer (never in your projects, exports or reports) and never shows it again. If AutoInjector makes a new key, paste the new one here.')];
+const TIP_TEST = () => [
+  h('p', null, 'Test connection asks AutoInjector “are you there, and is this site logged in and free?”. It sends no book content and costs nothing.'),
+  h('p', null, 'It tells you where things stand — not set up, ready, busy, or the exact problem — and what to do next.')];
+const TIP_URL = () => [
+  h('p', null, 'The address where AutoInjector listens on this computer. Leave it at ' + BRIDGE_DEFAULT + ' unless AutoInjector shows a different one.')];
+
+/* slot status strip: where it's at -> what to do next */
+function slotStage(s, health) {
+  const site = s.site ? (AI_SITES.find(x => x[0] === s.site) || [s.site, s.site])[1] : 'the site';
+  if (s.adapter_id === 'none') return { icon: '○', word: 'Not set up', cls: 'b-muted', now: 'This slot is off. Creative steps use text you write yourself.', next: 'To use AI here: press “Connect AutoInjector” above (with the connection key), or choose an adapter below and save.' };
+  if (s.adapter_id === 'manual') return { icon: '✎', word: 'Manual', cls: 'b-muted', now: 'You write the candidates yourself; no AI is used.', next: 'Nothing to do. Choose another adapter if you want AI help.' };
+  if (s.adapter_id === 'anthropic') {
+    return s.has_credentials
+      ? { icon: '✔', word: 'Ready', cls: 'b-ok', now: `Uses the Anthropic API (model ${s.model}). An API key is available.`, next: 'Nothing to do. Use “Test everything” with “Use my AI slots too” for a real end-to-end check.' }
+      : { icon: '⚠︎', word: 'Needs API key', cls: 'b-warn', now: 'Set to the Anthropic API, but no API key is saved.', next: 'Paste an API key in “New API key” below and save.' };
+  }
+  if (!s.has_credentials) return { icon: '⚠︎', word: 'Needs connection key', cls: 'b-warn', now: `Set to use ${site} through AutoInjector, but no connection key is saved.`, next: 'In AutoInjector: BookForge bridge panel → Copy connection key, then paste it into “Connect AutoInjector” above.' };
+  if (!health) return { icon: '…', word: 'Checking', cls: 'b-info', now: 'Asking AutoInjector whether it is running…', next: 'Wait a moment.' };
+  if (health.ok && (health.site_busy || s.active_jobs > 0)) return { icon: '◔', word: 'Busy', cls: 'b-warn', now: `Connected. ${site} is working on another request right now.`, next: 'Nothing to fix — wait for it to finish. BookForge sends one request at a time per site.' };
+  if (health.ok) return { icon: '✔', word: 'Connected · Ready', cls: 'b-ok', now: `Connected to AutoInjector. ${site} is logged in and free.`, next: 'Ready to use. Try “Test everything” with “Use my AI slots too”.' };
+  const err = health.error;
+  let next = 'Press Test connection again. If it keeps failing, restart the AutoInjector desktop app.';
+  let now = health.message || 'The connection check failed.';
+  if (err === 'UPSTREAM_UNAVAILABLE') { now = `AutoInjector is not answering at ${s.bridge_url}.`; next = 'Start the AutoInjector desktop app and switch on its BookForge bridge, then press Test connection.'; }
+  else if (err === 'CAPABILITY_UNAVAILABLE') { now = 'AutoInjector did not accept the saved connection key (or does not offer this site).'; next = 'In AutoInjector: BookForge bridge panel → Copy connection key, paste it into “Connect AutoInjector” above, then Test connection.'; }
+  else if (err === 'TIMEOUT') { now = 'AutoInjector did not answer in time.'; next = 'Check that the AutoInjector desktop app is running and not stuck, then Test connection.'; }
+  else if (health.site_ready === false) { now = `AutoInjector is running, but the ${site} pane is not ready.`; next = `In AutoInjector, open the ${site} pane and log in, then Test connection.`; }
+  return { icon: '✕', word: 'Error', cls: 'b-bad', now, next };
+}
+function slotStatusStrip(s) {
+  const box = h('div', { class: 'slot-strip', role: 'status', 'aria-live': 'polite' });
+  const draw = health => {
+    const st = slotStage(s, health);
+    clear(box).appendChild(h('div', { class: 'row' }, badge(st.icon, st.word, st.cls), h('span', null, h('strong', null, 'Where it’s at: '), st.now)));
+    box.appendChild(h('p', { class: 'small slot-next' }, h('strong', null, 'Next step: '), st.next));
+  };
+  const check = async () => {
+    if (s.adapter_id !== 'autoinjector' || !s.has_credentials) { draw(null); return; }
+    draw(null);
+    try { draw(await api('GET', `/slots/${encodeURIComponent(s.slot_id)}/health`)); }
+    catch (e) { draw({ ok: false, error: 'CHECK_FAILED', message: (e && e.message) || 'check failed' }); }
+  };
+  box.recheck = check;
+  box.redraw = draw;
+  check();
+  return box;
+}
+
 /* ======================================================================= boot */
 function boot() {
   initToken();
+  initSelfTestButton();
   const toggle = $('#nav-toggle');
   toggle.addEventListener('click', () => {
     const nav = $('#sidenav'); const open = !nav.classList.contains('open');

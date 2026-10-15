@@ -304,8 +304,9 @@ class AutoInjectorAdapter:
     # ------------------------------------------------------------------ transport
     def _call(self, method: str, path: str, body: dict | None, timeout_s: float) -> dict:
         if not self.token:
-            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "no AutoInjector bridge token is saved for this "
-                                 "slot; copy it from the AutoInjector desktop app into Settings")
+            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "no AutoInjector connection key is saved for this "
+                                 "slot; in AutoInjector: BookForge bridge panel -> Copy connection key, then paste it "
+                                 "into Settings -> Connect AutoInjector")
         data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
         req = urllib.request.Request(self.bridge_url + path, data=data, method=method)
         req.add_header("Authorization", f"Bearer {self.token}")
@@ -349,8 +350,9 @@ class AutoInjectorAdapter:
         if code == 409:
             return BookforgeError("RATE_LIMITED", "", "the web site is busy with another bridge request" + detail)
         if code == 401:
-            return BookforgeError("CAPABILITY_UNAVAILABLE", "", "the AutoInjector bridge rejected the token; copy "
-                                  "the current token from the desktop app into Settings" + detail)
+            return BookforgeError("CAPABILITY_UNAVAILABLE", "", "AutoInjector did not accept the connection key; "
+                                  "in AutoInjector: BookForge bridge panel -> Copy connection key, then paste it into "
+                                  "Settings -> Connect AutoInjector" + detail)
         if code in (400, 413):
             return BookforgeError("INVALID_INPUT", "", f"the AutoInjector bridge rejected the request "
                                   f"(HTTP {code}){detail}", status="REJECTED")
@@ -539,7 +541,8 @@ class ProviderRegistry:
     def connect_autoinjector(self, token: str, bridge_url: str | None = None) -> list[dict]:
         """Configure AI-1=claude, AI-2=chatgpt, AI-3=gemini as autoinjector slots in one step."""
         if not isinstance(token, str) or not token.strip():
-            raise BookforgeError("MISSING_INPUT", "/token", "paste the bridge token from the AutoInjector desktop app",
+            raise BookforgeError("MISSING_INPUT", "/token", "paste the connection key (in AutoInjector: BookForge bridge "
+                                 "panel -> Copy connection key)",
                                  status="REJECTED")
         url = validate_bridge_url(bridge_url if bridge_url not in (None, "") else DEFAULT_BRIDGE_URL)
         for sid, site in AUTOINJECTOR_DEFAULT_SITES.items():

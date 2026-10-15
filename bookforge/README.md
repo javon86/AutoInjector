@@ -38,6 +38,46 @@ then `python -m bookforge` (options: `--port 8780`, `--data-dir PATH`, `--no-bro
 Your projects are stored privately on this computer (Windows: `%LOCALAPPDATA%\Bookforge`;
 elsewhere `~/.local/share/bookforge`). The server only listens on `127.0.0.1`.
 
+## Test everything
+
+Press **🧪 Test everything** in the top bar (or run `python -m bookforge selftest`) to check that
+the whole program really works on this computer. It is a real test, not a simulation:
+
+1. It creates a new, separate project named **"Self-test <date time>"** (your projects are not
+   touched; open it afterwards to inspect every record, or ignore it).
+2. Kernel checks: the contract package loads (and its SHA-256 is recorded), bad input is
+   rejected, a repeated request is replayed instead of duplicated, an outsider is refused, and an
+   out-of-date edit is rejected.
+3. A two-chapter book goes through the real operations, in order: profiles (I01), places and a
+   character (A04/A01), premise (B01), plot and outline (B03/B11), chapter context and prose
+   with story events (C01/C02), story state (E01/E02), an edit pass whose anchored F01 patch is
+   applied through C11 (old work is marked stale and replayed), assembly (G02/G01/G05/G04/G07),
+   PDF/EPUB/DOCX exports (G11/G12/G13, each file re-read by the independent H09 parsers), quality
+   checks (H02/H03/H05/H07/H08/H09), final readiness H10 and the release approval with a K09
+   approval of that exact candidate.
+4. Each step shows **PASS ✔ / FAIL ✕ / SKIPPED –** with what happened, how long it took, the
+   records it made and, when something fails, what to do. One failure never stops the steps
+   that do not depend on it; dependent steps say "needs step X".
+
+By default creative steps use fixed text, labelled **MANUAL (no AI)**: nothing is sent anywhere
+and the run takes a few seconds. Tick **Use my AI slots too** (CLI: `--ai`) to first health-check
+each connected AI slot and then really send the premise (B01) and one chapter draft (C02, plus
+its event extraction) to your AI. A slot that is not set up or not reachable makes those steps
+SKIPPED with the exact reason and fix; the rest of the book still runs manually.
+
+The report is saved as `reports/selftest-<stamp>.md` and `.json` in your BookForge data folder
+(the dialog offers **View report**, **Download report (.md)** and **Open the Self-test project**).
+It lists the date, BookForge and contract versions, package hash, Python/OS, the AI slots
+(without keys), a summary table, every step with details and timings, the exported files' sizes
+and hashes, and environment notes. It never contains API keys, connection keys, access tokens or
+AI prompts/replies (only their lengths and hashes).
+
+API: `POST /api/selftest {"use_ai": false}` starts a run (409 while one is running),
+`GET /api/selftest` returns live progress and the last summary, `GET /api/selftest/report?format=md|json`
+returns the latest report (all need the access token). `GET /api/ping` needs no token and only
+answers `{"app": "bookforge", "version": ..., "contract_version": ...}` so AutoInjector can see that
+BookForge is running.
+
 ## Using AI (optional)
 
 Bookforge has exactly three AI slots (AI-1, AI-2, AI-3), configured under **Settings**.
@@ -47,10 +87,13 @@ secret file, never in project data or exports - or set `ANTHROPIC_API_KEY`).
 
 **Experimental: AutoInjector web sessions.** Instead of an API key, a slot can use the
 ChatGPT, Claude or Gemini web session you are already logged in to inside the AutoInjector
-desktop app (adapter `autoinjector`). Enable the BookForge bridge in the desktop app, copy its
-token, then in **Settings** use **Connect AutoInjector (all three)** (AI-1=Claude,
-AI-2=ChatGPT, AI-3=Gemini) and **Test connection**. The bridge only listens on
-`http://127.0.0.1:17891`; the token is stored in the local secret file like an API key. Each slot
+desktop app (adapter `autoinjector`). In AutoInjector open the **BookForge bridge panel**, switch
+the bridge on and press **Copy connection key**; then in BookForge **Settings** paste it into
+**Connect AutoInjector** (AI-1=Claude, AI-2=ChatGPT, AI-3=Gemini). Each slot shows a status
+strip — where it's at (Not set up, Needs connection key, Connected · Ready, Busy, Error) and the
+next step in plain words — and the ⓘ buttons explain AutoInjector, the connection key and
+**Test connection**. The bridge only listens on `http://127.0.0.1:17891`; the connection key is
+stored in the local secret file like an API key and is never shown again. Each slot
 may list `roles` (operation IDs such as `C02` or set letters such as `B`) to route that work to
 it. Automating these sites' web interfaces may be against their terms of service; use at your
 own risk. Contract: `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`.

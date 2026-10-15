@@ -27,6 +27,7 @@ from .canonical import sha256_bytes
 from .engine import Engine
 from .errors import BookforgeError, error
 from .requests import build_request
+from .selftest import SelfTestRunner
 from .store import Store, new_id, utcnow
 
 log = logging.getLogger("bookforge.server")
@@ -53,6 +54,12 @@ class App:
         self.token = token or self._load_or_create_token(Path(data_dir))
         with self.store.transaction() as tx:
             tx.ensure_principal(principal_id, "Author", sha256_bytes(self.token.encode()))
+        self.selftest = SelfTestRunner(self.store, self.engine.providers, principal_id)
+
+    @staticmethod
+    def ping() -> dict:
+        """Unauthenticated liveness answer for AutoInjector: identity and versions only, no project data."""
+        return {"app": "bookforge", "version": __version__, "contract_version": CONTRACT_VERSION}
 
     @staticmethod
     def _load_or_create_token(data_dir: Path) -> str:
@@ -129,6 +136,28 @@ class App:
             return 200, self.engine.providers.configure_slot(parts[1], body or {})
         if len(parts) == 3 and parts[0] == "slots" and parts[2] == "health" and method == "GET":
             return 200, self.engine.providers.health_check(parts[1])
+        if parts == ["selftest"] and method == "POST":
+            use_ai = (body or {}).get("use_ai", False) if isinstance(body, dict) else False
+            if not isinstance(use_ai, bool):
+                raise ApiError(400, "INVALID_INPUT", "/use_ai", "use_ai must be true or false")
+            started = self.selftest.start(use_ai)
+            if started is None:
+                raise ApiError(409, "VERSION_CONFLICT", "/selftest", "a self-test is already running; wait for it "
+                               "to finish")
+            return 202, started
+        if parts == ["selftest"] and method == "GET":
+            return 200, self.selftest.status()
+        if parts == ["selftest", "report"] and method == "GET":
+            fmt = (query.get("format") or ["md"])[0]
+            if fmt not in ("md", "json"):
+                raise ApiError(400, "INVALID_INPUT", "/format", "format must be md or json")
+            paths = self.selftest.latest_paths()
+            if not paths:
+                raise ApiError(404, "NOT_FOUND", "/selftest/report", "no self-test report yet; run Test everything")
+            path = paths[0] if fmt == "md" else paths[1]
+            mime = "text/markdown; charset=utf-8" if fmt == "md" else "application/json; charset=utf-8"
+            disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+            return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
         if parts == ["projects"] and method == "GET":
             return 200, [self.project_summary(principal, r["project_id"]) for r in self.store.projects_for(principal)]
         if parts == ["projects"] and method == "POST":
@@ -405,6 +434,9 @@ def make_handler(app: App):
                 if method == "GET":
                     return self._static(url.path)
                 return self._send(405, {"errors": [error("INVALID_INPUT", url.path, "method not allowed")]})
+            if url.path == "/api/ping" and method == "GET":
+                # No auth and no project data: lets AutoInjector see that BookForge is running.
+                return self._send(200, app.ping())
             try:
                 principal = app.authenticate(self.headers.get("Authorization"))
                 length = int(self.headers.get("Content-Length") or 0)
@@ -423,8 +455,9 @@ def make_handler(app: App):
                         body = raw
                 status, payload = app.route(method, url.path, parse_qs(url.query), body, principal, self.headers)
                 if isinstance(payload, tuple) and payload and payload[0] == "__binary__":
-                    _, mime, data, name = payload
-                    return self._send(200, data, mime, {"Content-Disposition": f'inline; filename="{name}"'})
+                    _, mime, data, name = payload[:4]
+                    disposition = payload[4] if len(payload) > 4 else "inline"
+                    return self._send(200, data, mime, {"Content-Disposition": f'{disposition}; filename="{name}"'})
                 self._send(status, payload)
             except ApiError as exc:
                 self._send(exc.status, exc.body)
