@@ -2,3 +2,16 @@
 # videos, book output, logs. It lives inside the app folder at runtime and must
 # never be committed (user content, can be gigabytes).
 stuff and thing/
+**/stuff and thing/
+
+# Screenshots, notes and scratch output saved by local Claude sessions.
+**/Claude outputs/
+
+# Python / Node / OS clutter
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini

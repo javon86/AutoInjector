@@ -1410,7 +1410,8 @@ const COLLAPSIBLE_PANELS = {
   image: { panelId: "col-image", label: "Image Generation" },
   video: { panelId: "col-video", label: "Video Generation" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
-  systemai: { panelId: "col-systemai", label: "System AI" }
+  systemai: { panelId: "col-systemai", label: "System AI" },
+  bookforge: { panelId: "col-bookforge", label: "BookForge bridge" }
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
@@ -1434,7 +1435,7 @@ function expandYellowPanel(key) {
 for (const key of Object.keys(COLLAPSIBLE_PANELS)) {
   const panel = el(COLLAPSIBLE_PANELS[key].panelId);
   const h2 = panel && panel.querySelector(".yc-head h2");
-  if (!h2) continue;
+  if (!h2 || key === "bookforge") continue; // BookForge's heading folds it to its slim status bar instead (see bfSetCollapsed)
   h2.setAttribute("role", "button");
   h2.setAttribute("tabindex", "0");
   h2.title = "Minimize this panel to the top tab strip";
@@ -2541,6 +2542,1297 @@ el("btn-download").onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
+// --- BookForge panel ----------------------------------------------------------
+// Loopback HTTP bridge that lets BookForge drive these panes (main.js +
+// bookforge-bridge.js; contract v1.1 in docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md).
+// Compact layout, top to bottom:
+//   header  — health dot · state pill · one-line "where it's at" · 🔗 Connect ·
+//             Bridge switch · 📋 Copy diagnostics · ⓘ · ▾/▸ (collapse to a slim bar)
+//   line    — what Connect is doing + the next step
+//   strip   — the three AIs side by side | the connection check as status chips
+//             (the full list opens on click, or by itself when something fails;
+//             🧪 Test the connection — the real link test — ticks the same rows)
+//   pair    — "Now working on" (step, state, approvals) | "Book checklist"
+//             (k/n bar + a stepper of chips with module-set letter badges)
+//   footer  — activity log, other ways to connect (key by hand), cautions — folded
+// Problems are shown WHERE they are: a ⚠️ marker on the exact element; clicking
+// it explains where / what / how to fix and offers 🔁 Try again when possible.
+// All codes map to plain words in BF_CODES (one table). The key is copied by the
+// main process; it only reaches this page when the user explicitly clicks "Show".
+const BF_SITES = ["chatgpt", "claude", "gemini"];
+const BF_LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
+const BF_STALE_MS = 90000;
+// Module-set letter badges (BookForge sets A–K). 11 hues picked to stay apart from
+// each other and readable with dark text (#0b0b10, contrast ≥ 4.5:1 on every one).
+// BookForge can reuse exactly these so a letter has the same colour in both apps:
+//   A #f87171 coral   B #fb923c orange  C #fbbf24 amber   D #a3e635 lime
+//   E #34d399 emerald F #22d3ee cyan    G #60a5fa blue    H #818cf8 indigo
+//   I #c084fc violet  J #f472b6 pink    K #a8a29e stone   (anything else: K's stone)
+const BF_SET_COLORS = { A: "#f87171", B: "#fb923c", C: "#fbbf24", D: "#a3e635", E: "#34d399", F: "#22d3ee", G: "#60a5fa", H: "#818cf8", I: "#c084fc", J: "#f472b6", K: "#a8a29e" };
+function bfSetColor(set) { const k = String(set || "").trim().replace(/^set\s*/i, "").charAt(0).toUpperCase(); return BF_SET_COLORS[k] || BF_SET_COLORS.K; }
+function bfSetLetter(set) { const k = String(set || "").trim().replace(/^set\s*/i, ""); return (k.charAt(0) || "?").toUpperCase(); }
+const bfStore = {
+  get(k) { try { return window.localStorage.getItem(k); } catch (_) { return null; } },
+  set(k, v) { try { if (v == null) window.localStorage.removeItem(k); else window.localStorage.setItem(k, v); } catch (_) {} }
+};
+const bf = { snap: null, at: 0, starting: false, connecting: false, startingApp: false, localMsg: null,
+  test: { running: false, results: new Map(), report: null },
+  actionProblems: new Map(), // action id -> { code, opts } from a failed button / IPC call (cleared when it works)
+  uiError: null,             // last unexpected error inside this panel (global handler)
+  problems: [], checksOpen: null, checksSig: "", bookOpen: false, collapsed: false };
+const BF_EMPTY_SNAP = { ok: true, enabled: false, listening: false, sites: {}, activity: [], port: 17891 };
+function bfLabel(site, s) { return (s && s.sites && s.sites[site] && s.sites[site].label) || BF_LABEL[site] || site; }
+function bfClock(ms) { const t = Math.max(0, Math.round((ms || 0) / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; }
+function bfDur(ms) { const t = Math.max(0, Math.round((ms || 0) / 1000)); return t < 60 ? `${t}s` : bfClock(ms); }
+// "now" on the main process's clock, so ages/elapsed are right even if the snapshot is a few seconds old.
+function bfNow() { const s = bf.snap; return s && s.now ? s.now + (Date.now() - bf.at) : Date.now(); }
+function bfAgo(ts) {
+  if (!ts) return "";
+  const s = Math.max(0, Math.round((bfNow() - ts) / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  return `${Math.floor(s / 3600)} h ago`;
+}
+function bfTime(ts) { try { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); } catch (_) { return ""; } }
+function bfMsg(text, tone) { const m = el("bf-msg"); if (m) { m.textContent = text || ""; if (tone) m.dataset.tone = tone; else delete m.dataset.tone; } }
+function bfShow(id, on) { const n = el(id); if (n) n.hidden = !on; }
+function bfText(id, t) { const n = el(id); if (n && n.textContent !== t) n.textContent = t; }
+function bfNode(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+function bfSetText(n, t) { if (n && n.textContent !== t) n.textContent = t; }
+// Keyed list update: keeps each child element (and the ⚠️ marker / focus inside it)
+// instead of rebuilding the list every second.
+function bfKeyed(box, items, keyOf, create, update) {
+  if (!box) return;
+  const old = new Map();
+  for (const c of Array.from(box.children)) { if (c.dataset && c.dataset.key != null) old.set(c.dataset.key, c); else c.remove(); }
+  let i = 0;
+  for (const it of items) {
+    const k = String(keyOf(it));
+    let n = old.get(k);
+    if (n) old.delete(k); else { n = create(it); n.dataset.key = k; }
+    update(n, it);
+    if (box.children[i] !== n) box.insertBefore(n, box.children[i] || null);
+    i++;
+  }
+  for (const n of old.values()) n.remove();
+}
+
+// Plain-English explanations behind every ⓘ.
+const BF_INFO = {
+  what: ["BookForge & your AIs", [
+    "BookForge is the book-writing app on this computer. This panel lets BookForge hand questions to ChatGPT, Claude or Gemini in the windows of this app and get the answers back — using your normal logins, so there are no API keys and no extra bills.",
+    "🔗 Connect BookForge does everything in one click: it turns the bridge on, checks BookForge is running, opens BookForge in your browser and hands it the connection key privately. You don't copy or paste anything.",
+    "The coloured dot is the overall health: green = all good, amber = not connected yet / waiting, ⚠️ = something needs fixing (look for the ⚠️ marker), grey = bridge off. ▾ folds the panel into a slim one-line bar. 📋 copies a safe summary for asking for help.",
+    "It only works on this computer (nothing on the internet can reach it), and only while the bridge is on."]],
+  key: ["What is the connection key?", [
+    "It's like a password that lets only your BookForge talk to this app. Connect BookForge hands it over for you, so normally you never see it.",
+    "It never leaves your computer and is never shown in logs, reports or diagnostics, and it is never put in a web address. If anything tries to connect without it, it's refused — you'll see that in the Activity log."]],
+  buttons: ["Copy, Show, and Make a new key", [
+    "📋 Copy connection key — puts the key on your clipboard. Then in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).",
+    "Show key — shows the key on screen, in case you'd rather type it. Click Hide key when you're done.",
+    "Make a new key — throws the old key away and makes a new one. BookForge is disconnected until it gets the new key (press Connect BookForge again). Only do this if you think someone else has seen your key."]],
+  ais: ["What do the AI statuses mean?", [
+    "Ready — the window is loaded; BookForge can use it.",
+    "Not loaded — the window is missing or still loading. Open it, log in, and wait until the page has finished loading. A ⚠️ marker offers 🔁 Reload.",
+    "Busy — it's answering a BookForge question right now. Leave that window alone until it finishes.",
+    "Not active — tick that AI as Active in this app if you want BookForge to use it.",
+    "Under each status you see the result of its last request and when it happened."]],
+  test: ["The connection check", [
+    "Each chip is one thing that has to work for BookForge to use your AIs: ✔ works, … waiting, ○ not done yet, ✕ problem (with a ⚠️ marker — click it). The chips update by themselves.",
+    "Details ▸ opens the full list. It opens by itself when something fails.",
+    "🧪 Test the connection checks every line for real, the same way BookForge works: the bridge, the key (a wrong key must be refused), each AI window, a tiny test question to each Active AI (it must answer with a small JSON reply), whether BookForge is running and whether it is connected.",
+    "A report is saved in the logs folder (📄 Last report) — it never contains your key or the question text. Heads-up: the test really types a short test message into each Active AI's chat."]],
+  now: ["Now working on", [
+    "What BookForge is doing right now: the step of your book it's on (for example “Set B · B03 Main plot”), whether it's working or waiting for you, and a short note in plain words.",
+    "If something needs your OK — like a draft to approve — it shows here with a ✅ Review & approve button that opens the right page in BookForge.",
+    "BookForge sends this update by itself every few seconds while it's connected. If updates stop, a ⚠️ note says when the last one came."]],
+  book: ["Book checklist", [
+    "The big picture of your book: every part BookForge works through. The coloured letter is the module set (A, B, C…); ✓ done, ▶ in progress, ! waiting for your OK, ○ to do.",
+    "The bar shows how many parts are done out of the total. List ▸ shows every part with its name. 📚 Open BookForge takes you to the book in your browser."]],
+  activity: ["Activity log", [
+    "A live diary of what happened between BookForge and this app, newest first — when BookForge connected, which AI it asked, how long the answer took, time-outs and refused connections.",
+    "It never shows what was asked or answered, and never shows your connection key."]],
+  tos: ["Is this allowed?", [
+    "This app works by typing into the ChatGPT, Claude and Gemini websites for you. Those websites' terms of service may not allow automated use, and an account could be limited if they object.",
+    "That's why the bridge is off until you turn it on (Connect BookForge turns it on for you). Use it at your own risk, at a gentle pace."]],
+  routing: ["Why keep routing / autopilot off?", [
+    "While BookForge is using an AI, the answer must go straight back to BookForge. If routing, autopilot, House Rules or a Prompt Sequence is also running, other messages can land in the same chat window at the same time and mix up the answers.",
+    "The bridge never forwards BookForge's answers to the other AIs — but it can't stop other features typing into that window. So turn those off while BookForge works."]]
+};
+
+// --- ⚠️ problems: every code in plain words, in ONE table ------------------------
+// Bridge HTTP errors (contract), pairing errors (v1.1), per-request outcomes, the
+// bridge's start errors, Connect steps, link-test failures and the panel's own IPC
+// failures. Each: title, what happened (plain), how to fix (steps), and the retry
+// action (a key of BF_RETRY) when there is one. `c` = { port, L (AI name), site, msg }.
+const BF_CODES = {
+  // the bridge itself
+  EADDRINUSE: { sev: "err", title: "The bridge couldn't start — its address is taken",
+    what: (c) => `Another program is already using port ${c.port} on this computer — usually a second copy of AutoInjector.`,
+    fix: () => ["Close any other AutoInjector window (check the taskbar).", "Press 🔁 Try again — or turn the Bridge switch off and on.", "Still stuck? Restart the computer."], retry: "restartBridge" },
+  EACCES: { sev: "err", title: "This computer blocked the bridge",
+    what: (c) => `Your system refused to let the bridge open its private address (port ${c.port}).`,
+    fix: () => ["Restart AutoInjector and press 🔁 Try again.", "If it keeps happening, security software may be blocking it — ask for help choosing another port (AUTOINJECTOR_BOOKFORGE_PORT)."], retry: "restartBridge" },
+  TOKEN_WRITE_FAILED: { sev: "err", title: "Couldn't save the connection key",
+    what: () => "The app couldn't write the key file in its settings folder.",
+    fix: () => ["Make sure your disk isn't full.", "Press 🔁 Try again."], retry: "restartBridge" },
+  BRIDGE_START_FAILED: { sev: "err", title: "The bridge couldn't start",
+    what: () => "The bridge was switched on but isn't listening.",
+    fix: () => ["Press 🔁 Try again.", "If it keeps failing, restart AutoInjector, then 📋 copy the diagnostics and ask for help."], retry: "restartBridge" },
+  NOT_READY: { sev: "err", title: "The bridge has no connection key yet",
+    what: () => "BookForge tried to connect, but this app hasn't made its connection key.",
+    fix: () => ["Press 🔁 Try again — the key is made automatically."], retry: "reconnect" },
+  // Connect steps
+  CONNECT_BRIDGE: { sev: "err", title: "Connecting stopped — the bridge went off",
+    what: (c) => c.msg || "The bridge was turned off while connecting.",
+    fix: () => ["Leave the Bridge switch on.", "Press 🔁 Try again."], retry: "reconnect" },
+  CONNECT_BROWSER: { sev: "err", title: "Couldn't open your web browser",
+    what: (c) => c.msg || "Connect couldn't open BookForge in your browser.",
+    fix: () => ["Open BookForge in your browser yourself (📚 Open BookForge), then press 🔁 Try again.", "Or use “Other ways to connect” → 📋 Copy connection key and paste it in BookForge (Settings → Connect AutoInjector)."], retry: "reconnect" },
+  CONNECT_EXPIRED: { sev: "warn", title: "BookForge didn't pick up the connection in time",
+    what: () => "The one-time connection code lasts 2 minutes and BookForge didn't use it.",
+    fix: () => ["Press 🔁 Try again — a BookForge page opens in your browser.", "If BookForge asks, click Connect there and keep that page open."], retry: "reconnect" },
+  CONNECT_FAILED: { sev: "err", title: "Connecting didn't finish",
+    what: (c) => c.msg || "Something went wrong while connecting.",
+    fix: () => ["Press 🔁 Try again.", "If it keeps failing, 📋 copy the diagnostics and ask for help."], retry: "reconnect" },
+  BOOKFORGE_NOT_RUNNING: { sev: "warn", title: "BookForge isn't running",
+    what: (c) => c.msg || "This app can't find BookForge on this computer.",
+    fix: () => ["Start BookForge: double-click run-bookforge.bat (Windows) or run-bookforge.sh (Mac/Linux) in the BookForge folder — or press 🔁 “Start BookForge for me”.", "Wait until its window says it is running.", "Press 🔗 Connect BookForge."], retry: "startApp" },
+  NO_STATUS: { sev: "warn", title: "BookForge hasn't reported back yet",
+    what: () => "BookForge has the connection key, but hasn't sent what it's working on.",
+    fix: () => ["Keep the BookForge page open in your browser.", "If this stays, update BookForge — the AIs still work either way."], retry: "openBookforge" },
+  STATUS_STALE: { sev: "warn", title: "BookForge stopped sending updates",
+    what: (c) => `The last update from BookForge came ${c.ago || "a while ago"}. What you see is the last thing it reported.`,
+    fix: () => ["Check that BookForge's page is still open in your browser (📚 Open BookForge).", "If you restarted BookForge, press 🔗 Connect BookForge again."], retry: "openBookforge" },
+  // keys & pairing
+  UNAUTHORIZED: { sev: "warn", title: "Something used an old or wrong connection key",
+    what: () => "A connection attempt with an old or wrong key was refused. Usually BookForge still has a key from before a new one was made.",
+    fix: () => ["Press 🔁 Try again (Connect) to hand BookForge the right key."], retry: "reconnect" },
+  PAIRING_CODE_INVALID: { sev: "warn", title: "An unknown or used-up connection code was refused",
+    what: () => "Something tried a one-time connection code that isn't valid any more (each code works once).",
+    fix: () => ["Press 🔁 Try again for a fresh code."], retry: "reconnect" },
+  PAIRING_CODE_EXPIRED: { sev: "warn", title: "The connection code was used too late",
+    what: () => "One-time connection codes last 2 minutes.",
+    fix: () => ["Press 🔁 Try again and finish in the BookForge page within 2 minutes."], retry: "reconnect" },
+  TOO_MANY_ATTEMPTS: { sev: "warn", title: "Too many wrong connection codes",
+    what: () => "After several wrong codes, connecting is paused for a minute (a safety lock).",
+    fix: () => ["Wait one minute.", "Then press 🔁 Try again."], retry: "reconnect" },
+  // the AIs
+  SITE_NOT_READY: { sev: "err", title: (c) => `${c.L}'s window isn't ready`,
+    what: (c) => `${c.L}'s window is missing or still loading, so BookForge can't use it.`,
+    fix: (c) => [`Look at ${c.L}'s window in this app — log in if it asks.`, "Wait until the page has finished loading.", `Or press 🔁 Reload ${c.L}.`], retry: "reloadPane" },
+  NO_ACTIVE_AI: { sev: "warn", title: "No AI is switched on for BookForge",
+    what: () => "None of ChatGPT, Claude or Gemini is ticked as Active in this app, so BookForge has nobody to ask.",
+    fix: () => ["Tick at least one AI as Active (the Active checkboxes in the User Panel).", "Press 🔁 Try again."], retry: "recheck" },
+  TIMEOUT: { sev: "warn", title: (c) => `${c.L} took too long to answer`,
+    what: (c) => `${c.L} hadn't finished answering before BookForge stopped waiting.`,
+    fix: (c) => [`Look at ${c.L}'s window: is it still writing, logged out, or showing a pop-up/captcha?`, `Fix what it shows, or press 🔁 Reload ${c.L}.`, "BookForge asks you before it retries."], retry: "reloadPane" },
+  LATE_EXPIRED: { sev: "warn", title: (c) => `${c.L} never answered`,
+    what: (c) => `${c.L} never finished the answer; it is free again.`,
+    fix: (c) => [`Check ${c.L}'s window (logged out? pop-up?).`, `Press 🔁 Reload ${c.L} if it looks stuck.`], retry: "reloadPane" },
+  SEND_FAILED: { sev: "err", title: (c) => `Couldn't type into ${c.L}'s window`,
+    what: (c) => `The question couldn't be typed into ${c.L}'s chat box.`,
+    fix: (c) => [`Look at ${c.L}'s window — close any pop-up and make sure you're logged in.`, `Press 🔁 Reload ${c.L}, then try again in BookForge.`], retry: "reloadPane" },
+  SITE_BUSY: { sev: "warn", title: (c) => `${c.L} was busy`,
+    what: (c) => `${c.L} was still answering an earlier request, so BookForge was told to wait.`,
+    fix: () => ["Nothing to do — BookForge tries again by itself.", "Keep routing/autopilot off while BookForge works."], retry: null },
+  TOO_LARGE: { sev: "warn", title: "A request was too big", what: () => "BookForge sent a request over 1 MB, so it was refused.", fix: () => ["Update BookForge and AutoInjector.", "📋 Copy the diagnostics and ask for help if it repeats."], retry: null },
+  BAD_REQUEST: { sev: "warn", title: "A request this app couldn't use", what: () => "BookForge sent something this app couldn't understand.", fix: () => ["Update BookForge and AutoInjector so they match.", "Run 🧪 Test the connection."], retry: "linktest" },
+  UNKNOWN_SITE: { sev: "warn", title: "A request named an unknown AI", what: () => "BookForge asked for an AI this app doesn't have.", fix: () => ["Update BookForge and AutoInjector so they match."], retry: "linktest" },
+  NOT_FOUND: { sev: "warn", title: "A request went to the wrong address", what: () => "Something asked the bridge for a page that doesn't exist.", fix: () => ["Update BookForge and AutoInjector so they match."], retry: "linktest" },
+  // 🧪 link test
+  LINKTEST_FAIL: { sev: "err", title: (c) => `Test failed: ${c.step || "a check"}`,
+    what: (c) => c.msg || "This check failed during the connection test.",
+    fix: (c) => (c.tip ? [c.tip, "Then press 🔁 Try again to run the test again."] : ["Press 🔁 Try again to run the test again."]), retry: "linktest" },
+  ALREADY_RUNNING: { sev: "warn", title: "A test is already running", what: () => "Only one connection test can run at a time.", fix: () => ["Wait for it to finish (or press ■ Stop)."], retry: null },
+  LINKTEST_COULDNT_RUN: { sev: "err", title: "The connection test couldn't run", what: (c) => c.msg || "The test stopped before it started.", fix: () => ["Press 🔁 Try again.", "If it keeps failing, 📋 copy the diagnostics and ask for help."], retry: "linktest" },
+  BAD_FILE: { sev: "warn", title: "Couldn't open the report", what: () => "The saved test report couldn't be found or opened.", fix: () => ["Run 🧪 Test the connection again to make a new report.", "Reports are in the app's logs folder."], retry: "linktest" },
+  // Start BookForge for me / open pages / clipboard
+  NO_LAUNCHER: { sev: "warn", title: "Couldn't find BookForge next to this app", what: (c) => c.msg || "The run-bookforge launcher isn't in the BookForge folder next to AutoInjector.", fix: () => ["Start BookForge yourself with run-bookforge.bat (or .sh).", "Then press 🔗 Connect BookForge."], retry: "reconnect" },
+  SPAWN_FAILED: { sev: "err", title: "Couldn't start BookForge", what: (c) => c.msg || "Starting the BookForge launcher failed.", fix: () => ["Start BookForge yourself with run-bookforge.bat (or .sh).", "Then press 🔗 Connect BookForge."], retry: "startApp" },
+  ALREADY_STARTING: { sev: "warn", title: "BookForge is already starting", what: () => "Give it a moment — the first start can take a few minutes.", fix: () => ["Wait until BookForge's window says it is running, then press 🔗 Connect BookForge."], retry: "reconnect" },
+  STILL_STARTING: { sev: "warn", title: "BookForge is still starting", what: (c) => c.msg || "BookForge didn't answer yet.", fix: () => ["Wait until BookForge's window says it is running.", "Press 🔁 Try again."], retry: "reconnect" },
+  OPEN_FAILED: { sev: "err", title: "Couldn't open your web browser", what: (c) => c.msg || "The page couldn't be opened.", fix: () => ["Open your browser and go to BookForge's address yourself (usually http://127.0.0.1:8780/).", "Press 🔁 Try again."], retry: "openBookforge" },
+  NO_CLIPBOARD: { sev: "warn", title: "Couldn't use the clipboard", what: () => "Copying didn't work on this computer.", fix: () => ["Use “Show key” and copy it by hand (or select the text shown).", "Press 🔁 Try again."], retry: null },
+  TOKEN_UNAVAILABLE: { sev: "err", title: "Couldn't read the connection key", what: () => "The key file couldn't be read or made.", fix: () => ["Press 🔁 Try again.", "If it repeats, press 🔗 Connect BookForge — it makes the key for you."], retry: null },
+  DIAGNOSTICS_FAILED: { sev: "warn", title: "Couldn't put the diagnostics together", what: () => "The app couldn't build the summary.", fix: () => ["Press 🔁 Try again."], retry: null },
+  // the panel itself
+  IPC_FAILED: { sev: "err", title: "The app didn't answer", what: (c) => `${c.where || "This action"} didn't get an answer from the main app.`, fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: null },
+  IPC_MISSING: { sev: "err", title: "This part of the app isn't available", what: (c) => `${c.where || "This action"} isn't available in this version of the app.`, fix: () => ["Restart AutoInjector. If it still happens, update AutoInjector."], retry: null },
+  STATUS_UNAVAILABLE: { sev: "err", title: "The panel can't get the latest status", what: () => "Asking the main app for the BookForge status failed, so what you see may be out of date.", fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: "recheck" },
+  UI_ERROR: { sev: "err", title: "The BookForge panel hit a snag", what: () => "Something unexpected went wrong while showing this panel. The rest of the app is fine.", fix: () => ["Press 🔁 Try again.", "If it repeats, 📋 copy the diagnostics and ask for help."], retry: "recheck" }
+};
+function bfCodeInfo(code) { return BF_CODES[code] || BF_CODES[String(code || "").toUpperCase()] || null; }
+const BF_START_ERRORS = ["EADDRINUSE", "EACCES", "TOKEN_WRITE_FAILED"];
+
+// --- derive "where it's at" from a status snapshot ---------------------------
+function bfErrorText(err, port) {
+  const code = BF_START_ERRORS.includes(err) ? err : "BRIDGE_START_FAILED";
+  const i = BF_CODES[code];
+  const c = { port };
+  return { code, title: i.title, sub: i.what(c) + (code === "BRIDGE_START_FAILED" && err ? ` (${err})` : ""), next: i.fix(c).join(" ") };
+}
+function bfIsConnected(s) {
+  if (s.connection) return !!s.connection.connected;
+  // older main.js without a "connection" block
+  const act = Array.isArray(s.activity) ? s.activity : [];
+  const keyChanged = act.some((a) => a.kind === "key_changed" && a.at > (s.lastExternalContactAt || 0));
+  return !!(s.enabled && s.listening && s.lastExternalContactAt) && !keyChanged;
+}
+function bfDerive(s) {
+  const port = s.port || 17891;
+  const act = Array.isArray(s.activity) ? s.activity : [];
+  const badKey = act.some((a) => a.kind === "unauthorized" && !a.selftest && a.at > (s.lastExternalContactAt || 0));
+  const connected = bfIsConnected(s);
+  const activeSites = BF_SITES.filter((k) => s.sites && s.sites[k] && s.sites[k].active);
+  const notReady = activeSites.filter((k) => !s.sites[k].ready && !s.sites[k].inFlight);
+  const working = BF_SITES.map((k) => [k, s.sites && s.sites[k] && s.sites[k].inFlight]).find(([, f]) => f && !f.selftest);
+  const phase = (s.connect && s.connect.phase) || "idle";
+  const d = { badKey, connected, phase, activeSites, notReady };
+  if (!s.enabled && !bf.connecting) return Object.assign(d, { key: "off", pill: "⏻ Off", tone: "off", title: "BookForge isn't connected", sub: "The bridge is off — nothing is shared until you connect.", next: "Press “🔗 Connect BookForge”. It turns the bridge on and connects BookForge in one click." });
+  if (s.enabled && (bf.starting || (!s.listening && (s.starting || !s.error)))) return Object.assign(d, { key: "starting", pill: "⏳ Starting", tone: "info", title: "Starting the bridge…", sub: `Opening a private doorway on this computer (127.0.0.1:${port}).`, next: "Wait a moment while the bridge starts…" });
+  if (s.enabled && !s.listening) { const e = bfErrorText(s.error, port); return Object.assign(d, { key: "error", pill: "⚠️ Problem", tone: "err", title: e.title, sub: e.sub, next: "Click the ⚠️ next to the Bridge switch for how to fix it." }); }
+  let next;
+  if (bf.test.running) next = "The connection test is running — watch the chips. You can stop it any time.";
+  else if (badKey && !connected) next = "BookForge (or something else) tried an old or wrong key. Press “🔗 Connect BookForge” to hand BookForge the right one.";
+  else if (!connected && (phase === "waiting" || phase === "paired")) next = "Finish in the BookForge page that opened in your browser. This panel ticks by itself when it's done.";
+  else if (!connected && phase === "not_running") next = "Start BookForge, then press Connect BookForge again.";
+  else if (!connected) next = "Press “🔗 Connect BookForge”. It opens BookForge in your browser and connects it — nothing to copy or paste.";
+  else if (!activeSites.length) next = "Tick at least one AI (ChatGPT, Claude or Gemini) as Active in this app so BookForge has someone to ask.";
+  else if (notReady.length) next = `Open ${notReady.map((k) => bfLabel(k, s)).join(" and ")} and log in, so BookForge can use ${notReady.length > 1 ? "them" : "it"}.`;
+  else if (s.bookforge && s.bookforge.approvals && s.bookforge.approvals.count > 0) next = "BookForge is waiting for your OK — press ✅ Review & approve.";
+  else next = "All set. Use BookForge as normal and keep routing/autopilot off while it works.";
+  if (working) {
+    const [site, f] = working;
+    const L = bfLabel(site, s);
+    const el2 = (f.elapsed_ms || 0) + (Date.now() - bf.at);
+    const late = f.phase === "late";
+    return Object.assign(d, { key: "working", pill: "✍️ Working", tone: "work",
+      title: `BookForge asked ${L} for an answer… ${bfClock(el2)}`,
+      sub: late ? `${L} is taking longer than BookForge waited; a late answer is still saved for BookForge.` : "The answer goes straight back to BookForge.",
+      next: `Leave the ${L} window alone until it finishes answering — BookForge is waiting for it.` });
+  }
+  if (connected) {
+    const b = s.bookforge;
+    const when = b && !b.stale ? `last update ${bfAgo(b.receivedAt)}` : `last contact ${bfAgo(s.lastExternalContactAt || (b && b.receivedAt))}`;
+    return Object.assign(d, { key: "connected", pill: "✔ Connected", tone: "ok", title: "BookForge is connected", sub: `can use your AIs · ${when}`, next });
+  }
+  if (phase === "waiting" || phase === "paired") return Object.assign(d, { key: "waiting", pill: "📡 Connecting", tone: "wait", title: "Connecting to BookForge…", sub: "finish in the BookForge page in your browser", next });
+  return Object.assign(d, { key: "waiting", pill: "📡 Not connected", tone: "wait", title: "Bridge is on — BookForge isn't connected yet", sub: `listening on 127.0.0.1:${port} (this computer only)`, next });
+}
+
+// --- 🔗 Connect: the message on the status line --------------------------------
+function bfConnectView(s, d) {
+  const c = s.connect || {};
+  if (bf.startingApp) return { tone: "work", text: "Starting BookForge for you… the first start can take a minute or two." };
+  if (bf.localMsg) return bf.localMsg;
+  if (bf.connecting || c.phase === "starting_bridge" || c.phase === "checking") return { tone: "work", text: c.phase === "checking" ? "Looking for BookForge…" : "Turning the bridge on…" };
+  if (d.connected && (c.phase === "connected" || c.phase === "idle" || !c.phase || c.phase === "no_status" || c.phase === "expired" || c.phase === "error" || c.phase === "not_running")) {
+    if (c.phase === "no_status" || !s.bookforge) return { tone: "ok", text: "Connected ✔ (BookForge hasn't said what it's working on yet.)" };
+    return { tone: "ok", text: "" }; // the pill already says "Connected"
+  }
+  switch (c.phase) {
+    case "waiting": {
+      const left = c.expiresAt ? Math.max(0, c.expiresAt - bfNow()) : 0;
+      return { tone: "work", text: `BookForge opened in your browser — click Connect there if it asks (${bfClock(left)} left).` };
+    }
+    case "paired": return { tone: "work", text: "BookForge has the key ✔ — waiting for its first update…" };
+    case "connected": // connected earlier, but not any more (no contact / updates stopped)
+      return s.bookforge && s.bookforge.stale
+        ? { tone: "warn", text: `BookForge stopped sending updates ${bfAgo(s.bookforge.receivedAt)}.` }
+        : { tone: "warn", text: "BookForge isn't connected any more." };
+    case "no_status": return { tone: "warn", text: "BookForge has the key, but hasn't reported back yet." };
+    case "not_running": return { tone: "warn", text: "BookForge isn't running.", start: !!c.canStartApp };
+    case "expired": case "error": return { tone: "err", text: "Connecting didn't finish." };
+    default: return { tone: "", text: "One click: turns the bridge on, opens BookForge in your browser and hands it the key." };
+  }
+}
+function bfRenderConnect(s, d) {
+  const v = bfConnectView(s, d);
+  const box = el("bf-connect-msg");
+  if (box) { const t = v.tone || (d.tone === "off" ? "" : d.tone === "wait" ? "warn" : d.tone); if (t) box.dataset.tone = t; else delete box.dataset.tone; }
+  bfText("bf-connect-text", v.text);
+  const start = el("btn-bf-start-app");
+  if (start) { start.style.display = v.start && !bf.startingApp ? "" : "none"; start.disabled = bf.startingApp; }
+  const btn = el("btn-bf-connect");
+  if (btn) {
+    const c = s.connect || {};
+    const busy = bf.connecting || bf.startingApp || c.phase === "starting_bridge" || c.phase === "checking";
+    btn.disabled = busy;
+    let label = "🔗 Connect BookForge";
+    if (busy) label = "⏳ Connecting…";
+    else if (c.phase === "waiting" || c.phase === "paired") label = "🔗 Connect again";
+    else if (d.connected) label = "✔ Connected";
+    bfSetText(btn, label);
+    btn.dataset.state = d.connected && !busy ? "connected" : "";
+    btn.title = d.connected ? "BookForge is connected. Click to connect again (for example after restarting BookForge)." : "Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste";
+  }
+}
+
+// --- AIs (compact strip) ---------------------------------------------------------
+const BF_OUTCOME = {
+  OK: (l) => `Answered in ${bfDur(l.elapsed_ms)}`,
+  LATE_REPLY_STORED: (l) => `Answered late (${bfDur(l.elapsed_ms)})`,
+  TIMEOUT: (l) => `Timed out after ${bfDur(l.elapsed_ms)}`,
+  LATE_EXPIRED: () => "Never answered",
+  SEND_FAILED: () => "Couldn't type the prompt",
+  SITE_NOT_READY: () => "Window wasn't loaded",
+  SITE_BUSY: () => "Was busy — told BookForge to wait",
+  CACHED: () => "Gave an earlier answer again"
+};
+function bfAiView(s, site) {
+  const x = (s.sites && s.sites[site]) || {};
+  let pill = ["Not loaded", "err", "✕", "bad"];
+  if (!x.active) pill = ["Not active", "off", "–", "off"];
+  else if (x.inFlight) pill = [x.inFlight.selftest ? "Testing" : "Busy", "work", "✍️", "work"];
+  else if (x.ready) pill = ["Ready", "ok", "✔", "ok"];
+  let last;
+  if (x.inFlight) last = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
+  else if (x.last) { const f = BF_OUTCOME[x.last.outcome]; last = `${f ? f(x.last) : x.last.outcome}${x.last.selftest ? " (test)" : ""} · ${bfAgo(x.last.at)}`; }
+  else last = "No requests yet";
+  return { x, pill, last };
+}
+function bfRenderAis(s) {
+  bfKeyed(el("bf-ais"), BF_SITES, (k) => k, (site) => {
+    const card = bfNode("div", "bf-ai");
+    card.dataset.site = site;
+    const top = bfNode("div", "bf-ai-top");
+    top.append(bfNode("span", "bf-ai-name"), bfNode("span", "bf-pill"));
+    card.append(top, bfNode("div", "bf-ai-last"));
+    return card;
+  }, (card, site) => {
+    const v = bfAiView(s, site);
+    card.dataset.st = v.pill[3];
+    bfSetText(card.querySelector(".bf-ai-name"), bfLabel(site, s));
+    const p = card.querySelector(".bf-pill"); p.dataset.tone = v.pill[1]; bfSetText(p, `${v.pill[2]} ${v.pill[0]}`);
+    const last = card.querySelector(".bf-ai-last"); bfSetText(last, v.last); last.title = v.last;
+  });
+}
+
+// --- the connection check (live state + the link test's results) ---------------
+// Link-test step id -> row id.
+function bfRowForStep(id) {
+  if (id === "bridge_on") return "bridge";
+  if (id === "key_file" || id === "wrong_key" || id === "right_key") return "key";
+  if (id === "bookforge_running") return "app";
+  if (id === "bookforge_connected") return "paired";
+  const [k, site] = String(id).split(":");
+  if (k === "pane") return `ready:${site}`;
+  if (k === "roundtrip") return `trip:${site}`;
+  return null;
+}
+// Combine the test steps that feed one row: running > fail > skip > pass.
+function bfTestForRow(rowId) {
+  let out = null;
+  const rank = { running: 4, fail: 3, skip: 2, pass: 1 };
+  for (const [id, p] of bf.test.results) {
+    if (bfRowForStep(id) !== rowId) continue;
+    if (!out || (rank[p.status] || 0) > (rank[out.status] || 0)) out = p;
+  }
+  return out;
+}
+function bfConnRows(s, d) {
+  const rows = [];
+  const c = s.connect || {};
+  const on = s.enabled && s.listening;
+  rows.push({ id: "bridge", label: "The bridge is on", short: "Bridge",
+    st: on ? "ok" : s.enabled && s.error ? "bad" : s.enabled ? "wait" : "todo",
+    state: on ? "On" : s.enabled && s.error ? "Problem" : s.enabled ? "Starting…" : "Off",
+    detail: on ? `Listening on 127.0.0.1:${s.port} — this computer only.` : s.enabled && s.error ? bfErrorText(s.error, s.port).title : "Connect BookForge turns it on for you." });
+  rows.push({ id: "key", label: "The connection key is ready", short: "Key",
+    st: s.tokenPresent ? "ok" : "todo", state: s.tokenPresent ? "Ready" : "Not yet",
+    detail: s.tokenPresent ? "BookForge gets it privately when you connect — never in a web address." : "Made automatically when you connect." });
+  const app = s.app || {};
+  const bfFresh = !!(s.bookforge && !s.bookforge.stale);
+  const appOk = app.running === true || bfFresh;
+  rows.push({ id: "app", label: "BookForge is running", short: "BookForge running",
+    st: appOk ? "ok" : app.running === false ? (c.phase === "not_running" ? "bad" : "todo") : "wait",
+    state: appOk ? "Running" : app.running === false ? "Not running" : "Checking…",
+    detail: appOk ? `${app.base ? `At ${app.base.replace(/\/$/, "")}` : "Running"}${app.version ? ` · version ${app.version}` : ""}` : app.running === false ? "Start BookForge with run-bookforge.bat (or press Connect and choose “Start BookForge for me”)." : "" });
+  const waiting = c.phase === "waiting" || c.phase === "paired";
+  const stale = !!(s.bookforge && s.bookforge.stale);
+  rows.push({ id: "paired", label: "BookForge is connected to this app", short: "Connected",
+    st: d.connected ? (stale ? "warn" : "ok") : waiting ? "wait" : d.badKey || c.phase === "no_status" || (c.phase === "connected" && stale) ? "warn" : "todo",
+    state: d.connected ? (stale ? "Updates stopped" : "Connected") : waiting ? "Connecting…" : d.badKey ? "Wrong key used" : c.phase === "no_status" ? "No update yet" : "Not yet",
+    detail: d.connected ? (s.bookforge && !stale ? `Last update ${bfAgo(s.bookforge.receivedAt)}.` : `Last contact ${bfAgo(s.lastExternalContactAt || (s.bookforge && s.bookforge.receivedAt))}.`) : waiting ? "Finish in the BookForge page in your browser." : "Press 🔗 Connect BookForge." });
+  for (const site of BF_SITES) {
+    const x = (s.sites && s.sites[site]) || {};
+    const L = bfLabel(site, s);
+    if (!x.active) { rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} (not used)`, st: "na", state: "Not used", detail: `Not Active in this app — tick ${L} as Active to use it.` }); continue; }
+    rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} window`,
+      st: x.inFlight ? "ok" : x.ready ? "ok" : "bad",
+      state: x.inFlight ? "Busy" : x.ready ? "Ready" : "Not loaded",
+      detail: x.inFlight ? "Answering right now." : x.ready ? "" : "Open its window, log in and wait until it has loaded." });
+    const lastTest = x.last && x.last.selftest ? x.last : null;
+    rows.push({ id: `trip:${site}`, site, label: `${L} answers through the bridge`, short: `${L} test`,
+      st: lastTest ? (lastTest.outcome === "OK" ? "ok" : "bad") : "na",
+      state: lastTest ? (lastTest.outcome === "OK" ? "Works" : "Failed") : "Not tested",
+      outcome: lastTest && lastTest.outcome !== "OK" ? lastTest.outcome : null,
+      detail: lastTest ? `Last test ${bfAgo(lastTest.at)}.` : "Press 🧪 Test the connection to send it a tiny test question." });
+  }
+  // the live rows + the link test's results for each row
+  for (const r of rows) {
+    const t = bfTestForRow(r.id);
+    r.tip = null; r.test = t;
+    if (t && t.status === "running") { r.st = "run"; r.state = "Checking…"; }
+    else if (t && r.id.startsWith("trip:")) {
+      r.st = t.status === "pass" ? "ok" : t.status === "fail" ? "bad" : "na";
+      r.state = t.status === "pass" ? "Works" : t.status === "fail" ? "Failed" : "Skipped";
+      r.detail = t.detail || r.detail; r.tip = t.status === "fail" ? t.tip : null;
+    } else if (t && t.status === "fail") {
+      r.st = r.st === "ok" ? "warn" : "bad"; // works now, but the last test failed -> "!"; otherwise a real problem
+      r.detail = `Last test: ${t.detail}`; r.tip = t.tip;
+    }
+  }
+  return rows;
+}
+const BF_ROW_ICON = { ok: "✔", bad: "✕", warn: "!", wait: "…", todo: "○", na: "–", run: "" };
+function bfRenderChecks(s, d, rows) {
+  // chips (inactive AIs: one chip, not two)
+  const chipRows = rows.filter((r) => !(r.st === "na" && r.id.startsWith("trip:") && !(s.sites && s.sites[r.site] && s.sites[r.site].active)));
+  bfKeyed(el("bf-chips"), chipRows, (r) => r.id, (r) => {
+    const c = bfNode("span", "bf-chip");
+    c.append(bfNode("span", "ic"), bfNode("span", "lb"));
+    c.setAttribute("role", "img");
+    if (r.site) c.dataset.ai = r.site;
+    return c;
+  }, (c, r) => {
+    c.dataset.st = r.st;
+    const ic = c.querySelector(".ic");
+    if (r.st === "run") { if (!ic.querySelector(".bf-spin")) { ic.textContent = ""; ic.appendChild(bfNode("span", "bf-spin")); } }
+    else bfSetText(ic, BF_ROW_ICON[r.st] || "•");
+    bfSetText(c.querySelector(".lb"), r.short);
+    const tip = `${r.label}: ${r.state}${r.detail ? ` — ${r.detail}` : ""}`;
+    if (c.title !== tip) { c.title = tip; c.setAttribute("aria-label", tip); }
+  });
+  // full list: opens by itself when something fails, otherwise on click
+  const failing = rows.filter((r) => r.st === "bad" || (r.test && r.test.status === "fail")).map((r) => r.id).join(",");
+  if (failing !== bf.checksSig) { bf.checksSig = failing; bf.checksOpen = null; }
+  const open = bf.checksOpen == null ? !!failing : bf.checksOpen;
+  const ol = el("bf-conn-steps");
+  if (ol && ol.hidden === open) ol.hidden = !open;
+  const more = el("btn-bf-checks-more");
+  if (more) { more.setAttribute("aria-expanded", String(open)); bfSetText(more, open ? "Details ▾" : "Details ▸"); }
+  if (!open || !ol) return;
+  let currentSet = false;
+  bfKeyed(ol, rows, (r) => r.id, () => {
+    const li = bfNode("li");
+    const chk = bfNode("span", "bf-check"); chk.setAttribute("aria-hidden", "true");
+    const main = bfNode("div", "bf-step-main");
+    main.append(bfNode("span", "bf-step-text"), bfNode("span", "bf-step-detail"), bfNode("span", "tip"));
+    li.append(chk, main, bfNode("span", "bf-step-state"));
+    return li;
+  }, (li, r) => {
+    li.dataset.row = r.id;
+    li.dataset.st = r.st;
+    if (r.st === "todo" && !currentSet) { currentSet = true; li.dataset.current = "1"; } else delete li.dataset.current; // only the next thing to do is highlighted
+    const chk = li.querySelector(".bf-check");
+    if (r.st === "run") { if (!chk.querySelector(".bf-spin")) { chk.textContent = ""; chk.appendChild(bfNode("span", "bf-spin")); } }
+    else bfSetText(chk, BF_ROW_ICON[r.st] || "•");
+    bfSetText(li.querySelector(".bf-step-text"), r.label);
+    bfSetText(li.querySelector(".bf-step-detail"), r.detail || "");
+    const tp = li.querySelector(".tip"); tp.hidden = !r.tip; bfSetText(tp, r.tip ? `How to fix: ${r.tip}` : "");
+    bfSetText(li.querySelector(".bf-step-state"), r.state);
+  });
+}
+
+// --- Now working on -------------------------------------------------------------
+const BF_TASK_STATE = [
+  [/^(running|working|in[_ -]?progress|active|busy|generating|writing)$/i, "Working", "work"],
+  [/^(needs?[_ -]?approval|review|awaiting[_ -]?(approval|review)|waiting[_ -]?for[_ -]?you|paused)$/i, "Needs your OK", "warn"],
+  [/^(waiting|queued|pending)$/i, "Waiting", "info"],
+  [/^(done|complete(d)?|approved|finished)$/i, "Done", "ok"],
+  [/^(error|failed|blocked|problem|timeout)$/i, "Problem", "err"],
+  [/^(idle|ready|todo|not[_ -]?started|draft)$/i, "Ready to start", "info"]
+];
+function bfStateWord(state) {
+  const sv = String(state || "");
+  for (const [re, word, tone] of BF_TASK_STATE) if (re.test(sv)) return { word, tone };
+  return { word: sv ? sv.replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase()) : "", tone: "info" };
+}
+function bfStepLabel(t) {
+  if (!t) return "";
+  const parts = [];
+  if (t.set) parts.push(/^set\b/i.test(t.set) ? t.set : `Set ${t.set}`);
+  const name = [t.op, t.title].filter(Boolean).join(" ");
+  if (name) parts.push(name);
+  return parts.join(" · ");
+}
+function bfOpenFor(s) { const b = s && s.bookforge; return (b && b.bookforge_url) || (s && s.app && s.app.base) || null; }
+function bfStaleNote(b) {
+  if (!b || !b.stale) return "";
+  return `Last update from BookForge ${bfAgo(b.receivedAt)} — it may be closed or busy. This shows the last thing it reported.`;
+}
+function bfRenderNow(s, d) {
+  const b = s.bookforge;
+  bfShow("bf-now", !!b);
+  bfShow("bf-now-empty", !!(!b));
+  const card = el("bf-now-card");
+  if (!b) {
+    if (card) card.dataset.tone = "off";
+    bfText("bf-now-empty", d.connected ? "Connected — BookForge hasn't said what it's working on yet." : "Connect BookForge to see what's happening.");
+    bfShow("bf-now-stale", false);
+    return;
+  }
+  const t = b.current_task;
+  bfText("bf-now-step", t ? (bfStepLabel(t) || "Current step") : "Nothing in progress");
+  const sw = bfStateWord(t && t.state);
+  const pill = el("bf-now-state");
+  if (pill) { pill.hidden = !sw.word; bfSetText(pill, sw.word); pill.dataset.tone = sw.tone; }
+  bfText("bf-now-msg", (t && t.message) || (t ? "" : "BookForge isn't working on a step right now."));
+  const w = b.working_on;
+  const wEl = el("bf-now-working");
+  if (wEl) {
+    if (w && (w.op || w.title)) {
+      wEl.hidden = false;
+      const since = w.started_at ? ` ${bfClock(Date.now() - w.started_at)}` : "";
+      bfText("bf-now-working", `✍️ ${[w.op, w.title].filter(Boolean).join(" ")}${since}`);
+    } else wEl.hidden = true;
+  }
+  const ap = b.approvals || { count: 0, items: [] };
+  const n = Number(ap.count) || 0;
+  const box = el("bf-approvals");
+  if (box) box.dataset.tone = n > 0 ? "warn" : "ok";
+  if (card) card.dataset.tone = b.stale ? "warn" : n > 0 ? "warn" : sw.tone === "work" ? "work" : sw.tone === "err" ? "err" : "ok";
+  bfText("bf-approvals-title", n > 0 ? `✅ ${n} need${n === 1 ? "s" : ""} your OK:` : "✓ Nothing needs your approval right now");
+  const items = (ap.items || []).slice(0, 3).map((it) => [it.set && !it.op ? `Set ${it.set}` : null, it.op, it.title].filter(Boolean).join(" ") || "Untitled");
+  const more = n - items.length;
+  bfText("bf-approvals-list", n > 0 ? items.join(", ") + (more > 0 ? ` …and ${more} more` : "") : "");
+  const appr = el("btn-bf-approve");
+  if (appr) appr.style.display = n > 0 ? "" : "none";
+  const go = el("btn-bf-goto-task");
+  if (go) go.style.display = t && (t.url || bfOpenFor(s)) ? "" : "none";
+  const stale = bfStaleNote(b);
+  bfShow("bf-now-stale", !!stale);
+  bfText("bf-now-stale-text", stale);
+}
+
+// --- Book checklist: k/n bar + stepper chips; full list on demand ----------------
+const BF_CHECK_STATE = [
+  [/^(done|complete(d)?|approved|finished|ok)$/i, "✓", "Done", "ok"],
+  [/^(current|running|working|in[_ -]?progress|active|now)$/i, "▶", "In progress", "work"],
+  [/^(needs?[_ -]?approval|review|awaiting[_ -]?(approval|review)|waiting[_ -]?for[_ -]?you)$/i, "!", "Needs your OK", "warn"],
+  [/^(error|failed|blocked|problem)$/i, "✕", "Problem", "err"],
+  [/^(skipped|not[_ -]?needed|n\/?a)$/i, "–", "Skipped", "off"],
+  [/^(todo|pending|not[_ -]?started|waiting|queued|locked|)$/i, "○", "To do", "off"]
+];
+function bfCheckState(state) {
+  const sv = String(state || "");
+  for (const [re, ic, word, tone] of BF_CHECK_STATE) if (re.test(sv)) return { ic, word, tone };
+  return { ic: "○", word: sv.replace(/[_-]+/g, " "), tone: "off" };
+}
+function bfShortLabel(r) {
+  const op = String(r.op || r.id || "");
+  const set = String(r.set || "");
+  const title = String(r.title || "");
+  // "B03" with set "B" -> "03"; an op that IS the set ("A") -> its title
+  let lbl = op && set && op.toUpperCase().startsWith(set.toUpperCase()) && op.length > set.length ? op.slice(set.length) : (op && op !== set ? op : title);
+  if (!lbl) lbl = title || op || "?";
+  return lbl.length > 14 ? `${lbl.slice(0, 13)}…` : lbl;
+}
+function bfSetBadge(set) {
+  const b = bfNode("span", "bf-set", bfSetLetter(set));
+  b.style.setProperty("--set", bfSetColor(set));
+  b.title = `Module set ${bfSetLetter(set)}`;
+  return b;
+}
+function bfRenderBook(s, d) {
+  const b = s.bookforge;
+  const rows = b && Array.isArray(b.checklist) ? b.checklist.filter((r) => r && typeof r === "object") : [];
+  const has = !!(b && (rows.length || b.total || (b.project && b.project.title)));
+  bfShow("bf-book", has);
+  bfShow("bf-book-empty", !has);
+  if (!has) bfText("bf-book-empty", d.connected ? "Connected — open a book in BookForge and its progress shows here." : "When BookForge is connected, your book's progress shows here.");
+  if (has) {
+    bfText("bf-book-title", (b.project && b.project.title) ? `“${b.project.title}”` : "Your book");
+    const doneCount = rows.filter((r) => bfCheckState(r.state).tone === "ok").length;
+    const total = Number.isFinite(b.total) && b.total > 0 ? b.total : rows.length;
+    const done = Math.min(total, Number.isFinite(b.done) ? b.done : doneCount);
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const bar = el("bf-progress-bar");
+    if (bar) bar.style.width = `${pct}%`;
+    const pb = el("bf-progress");
+    if (pb) { pb.setAttribute("aria-valuemax", String(total)); pb.setAttribute("aria-valuenow", String(done)); pb.title = `${done} of ${total} done (${pct}%)`; }
+    bfText("bf-progress-text", total ? `${done}/${total}` : "–");
+    const stepper = el("bf-stepper");
+    bfKeyed(stepper, rows, (r) => r.id || r.op || r.title, (r) => {
+      const li = bfNode("li");
+      li.append(bfSetBadge(r.set || r.id), bfNode("span", "lbl"), bfNode("span", "ic"));
+      return li;
+    }, (li, r) => {
+      const cs = bfCheckState(r.state);
+      li.dataset.tone = cs.tone;
+      bfSetText(li.querySelector(".lbl"), cs.tone === "work" ? (r.title || bfShortLabel(r)) : bfShortLabel(r));
+      bfSetText(li.querySelector(".ic"), cs.ic);
+      li.title = `${[r.op || r.id, r.title].filter(Boolean).join(" ")} — ${cs.word}`;
+    });
+    const more = el("btn-bf-book-more");
+    if (more) { more.setAttribute("aria-expanded", String(bf.bookOpen)); bfSetText(more, bf.bookOpen ? "List ▾" : "List ▸"); more.hidden = !rows.length; }
+    const ol = el("bf-checklist");
+    if (ol) {
+      ol.hidden = !bf.bookOpen;
+      if (bf.bookOpen) bfKeyed(ol, rows, (r) => r.id || r.op || r.title, (r) => {
+        const li = bfNode("li");
+        const ic = bfNode("span", "ic"); ic.setAttribute("aria-hidden", "true");
+        const tt = bfNode("span", "tt");
+        tt.append(bfSetBadge(r.set || r.id), document.createTextNode(" "), bfNode("span", "nm"));
+        li.append(ic, tt, bfNode("span", "st"));
+        return li;
+      }, (li, r) => {
+        const cs = bfCheckState(r.state);
+        li.dataset.tone = cs.tone;
+        bfSetText(li.querySelector(".ic"), cs.ic);
+        bfSetText(li.querySelector(".nm"), [r.op && r.op !== r.set ? r.op : null, r.title || (r.op ? null : r.id) || "Untitled"].filter(Boolean).join(" "));
+        bfSetText(li.querySelector(".st"), cs.word);
+      });
+    }
+  }
+  bfShow("bf-book-stale", false); // the stale note lives on "Now working on" (one ⚠️, not two)
+  const open = el("btn-bf-open");
+  if (open) open.style.display = bfOpenFor(s) ? "" : "none";
+}
+
+function bfRenderActivity(s) {
+  const list = el("bf-activity");
+  if (!list) return;
+  const act = el("bf-act-card");
+  if (act && !act.open) return; // folded: nothing to draw
+  const items = (Array.isArray(s.activity) ? s.activity : []).slice(-20).reverse();
+  list.textContent = "";
+  if (!items.length) { const li = bfNode("li", "empty", "Nothing yet — events appear here as they happen."); list.appendChild(li); return; }
+  const ICON = { ok: "✓", warn: "!", error: "✕", info: "•" };
+  for (const a of items) {
+    const li = bfNode("li");
+    li.dataset.tone = a.tone || "info";
+    const t = bfNode("span", "t", bfTime(a.at)); t.title = bfAgo(a.at);
+    const i = bfNode("span", "i", ICON[a.tone] || "•"); i.setAttribute("aria-hidden", "true");
+    li.append(t, i, bfNode("span", null, a.say || a.kind));
+    list.appendChild(li);
+  }
+}
+
+// --- ⚠️ problems: computed from the snapshot + failed actions, shown where they are ---
+// Each problem: { id, code, sev, where, anchors: [element ids / chip keys], ctx, msg?, tech? }.
+function bfProblemsFor(s, d, rows) {
+  const out = [];
+  const add = (id, code, where, anchors, ctx, extra) => {
+    const info = bfCodeInfo(code) || BF_CODES.UI_ERROR;
+    out.push(Object.assign({ id, code, sev: info.sev, where, anchors, ctx: Object.assign({ port: s.port }, ctx || {}) }, extra || {}));
+  };
+  const c = s.connect || {};
+  const anchored = new Set();
+  const mark = (...ids) => ids.forEach((x) => anchored.add(x));
+  // the bridge couldn't start
+  if (s.enabled && !s.listening && s.error && !bf.starting && !s.starting) {
+    const e = bfErrorText(s.error, s.port);
+    add("bridge", e.code, "The Bridge switch (top right)", ["#bf-switch-anchor", "chip:bridge", "row:bridge"], {}, { tech: `bridge start error: ${s.error} · port ${s.port}` });
+    mark("bridge");
+  }
+  // Connect steps that failed
+  if (!d.connected && !bf.connecting) {
+    if (c.phase === "error" && !(c.step === "bridge" && anchored.has("bridge"))) { // (a bridge start error already has its own ⚠️)
+      const code = c.step === "bridge" ? "CONNECT_BRIDGE" : c.step === "browser" ? "CONNECT_BROWSER" : "CONNECT_FAILED";
+      add("connect", code, `🔗 Connect BookForge — step “${c.step === "bridge" ? "turn the bridge on" : c.step === "browser" ? "open BookForge in your browser" : "connect"}”`, ["#bf-connect-anchor"], { msg: c.message }, { tech: `connect phase=error step=${c.step || "?"}` });
+    } else if (c.phase === "expired") {
+      add("connect", "CONNECT_EXPIRED", "🔗 Connect BookForge — step “BookForge picks up the connection”", ["#bf-connect-anchor", "chip:paired", "row:paired"], {}, { tech: "connect phase=expired (pairing code unused after 120 s)" });
+      mark("paired");
+    } else if (c.phase === "not_running") {
+      add("connect", "BOOKFORGE_NOT_RUNNING", "🔗 Connect BookForge — step “is BookForge running?”", ["#bf-connect-anchor", "chip:app", "row:app"], { msg: c.message }, { tech: `connect phase=not_running · ping ${(s.app && s.app.base) || "?"}api/ping`, retryOverride: c.canStartApp ? "startApp" : "reconnect" });
+      mark("app");
+    } else if (c.phase === "no_status") {
+      add("nostatus", "NO_STATUS", "“Connected” check — BookForge's first update", ["chip:paired", "row:paired"], {}, { tech: "connect phase=no_status (paired, no POST /v1/status within 30 s)" });
+      mark("paired");
+    }
+  }
+  // stale status
+  if (s.bookforge && s.bookforge.stale) {
+    add("stale", "STATUS_STALE", "“Now working on” — BookForge's last update", ["#bf-now-stale", "chip:paired"], { ago: bfAgo(s.bookforge.receivedAt) }, { tech: `status age ${Math.round((s.bookforge.age_ms || 0) / 1000)} s (stale after ${BF_STALE_MS / 1000} s)` });
+    mark("paired");
+  }
+  // a wrong key was seen and BookForge isn't connected
+  if (d.badKey && !d.connected && !anchored.has("paired")) { add("badkey", "UNAUTHORIZED", "“Connected” check", ["chip:paired", "row:paired"], {}, { tech: "HTTP 401 UNAUTHORIZED seen after the last good contact" }); mark("paired"); }
+  // pairing refusals in the last 2 minutes
+  const act = Array.isArray(s.activity) ? s.activity : [];
+  const pr = act.filter((a) => a.kind === "pair" && a.outcome && a.outcome !== "PAIRED" && bfNow() - a.at < 120000).pop();
+  if (pr && !d.connected && !anchored.has("paired") && BF_CODES[pr.outcome]) { add("pair", pr.outcome, "“Connected” check — pairing", ["chip:paired", "row:paired"], {}, { tech: `POST /v1/pair -> ${pr.outcome}${pr.http_status ? ` (HTTP ${pr.http_status})` : ""}` }); mark("paired"); }
+  // AIs
+  if (s.enabled && s.listening && !d.activeSites.length) add("noai", "NO_ACTIVE_AI", "Your AIs", ["#bf-ais-h"], {});
+  for (const site of BF_SITES) {
+    const x = (s.sites && s.sites[site]) || {};
+    if (!x.active) continue;
+    const L = bfLabel(site, s);
+    if (!x.ready && !x.inFlight) { add(`pane:${site}`, "SITE_NOT_READY", `Your AIs → ${L}`, [`ai:${site}`, `chip:ready:${site}`, `row:ready:${site}`], { L, site }, { tech: `pane ${site}: ready=false` }); mark(`ready:${site}`); continue; }
+    const l = x.last;
+    if (l && !l.selftest && ["TIMEOUT", "SEND_FAILED", "SITE_NOT_READY", "LATE_EXPIRED"].includes(l.outcome) && bfNow() - l.at < 10 * 60000 && !x.inFlight)
+      add(`last:${site}`, l.outcome, `Your AIs → ${L} (last request)`, [`ai:${site}`], { L, site }, { tech: `last outcome ${l.outcome} after ${Math.round((l.elapsed_ms || 0) / 1000)} s` });
+  }
+  // the link test's failed rows (and live rows that are bad with no problem yet)
+  for (const r of rows) {
+    const t = r.test && r.test.status === "fail" ? r.test : null;
+    if (anchored.has(r.id) || (r.st !== "bad" && !t)) continue;
+    if (t) add(`lt:${r.id}`, "LINKTEST_FAIL", `Connection check → “${r.label}”`, [`chip:${r.id}`, `row:${r.id}`], { step: r.label, msg: t.detail, tip: t.tip, L: r.site ? bfLabel(r.site, s) : "", site: r.site }, { tech: `link test step ${t.id}: fail${t.http_status ? ` (HTTP ${t.http_status})` : ""}`, extraRetry: r.site ? "reloadPane" : null });
+    else if (r.outcome && bfCodeInfo(r.outcome)) add(`trip:${r.id}`, r.outcome, `Connection check → “${r.label}”`, [`chip:${r.id}`, `row:${r.id}`], { L: bfLabel(r.site, s), site: r.site }, { tech: `last link-test round trip: ${r.outcome}`, retryOverride: "linktest" });
+  }
+  // failed actions (buttons / IPC) and the panel's own errors
+  for (const [action, p] of bf.actionProblems) {
+    add(`act:${action}`, p.code, p.opts.where || "This panel", [p.opts.anchor || "#bf-status-anchor"], Object.assign({ where: p.opts.where, msg: p.opts.msg }, p.opts.ctx || {}), { tech: p.opts.tech || `action ${action}: ${p.code}`, transient: action, retryRun: p.opts.retryRun, retryLabel: p.opts.retryLabel });
+  }
+  if (bf.uiError) add("ui", "UI_ERROR", "This panel", ["#bf-status-anchor"], {}, { tech: bf.uiError, transient: "__ui" });
+  return out;
+}
+function bfAnchorEl(a) {
+  if (a.startsWith("#")) return el(a.slice(1));
+  const [kind, ...rest] = a.split(":");
+  const key = rest.join(":");
+  if (kind === "ai") return el("bf-ais") && el("bf-ais").querySelector(`.bf-ai[data-key="${key}"] .bf-ai-top`);
+  if (kind === "chip") return el("bf-chips") && el("bf-chips").querySelector(`.bf-chip[data-key="${key}"]`);
+  if (kind === "row") { const ol = el("bf-conn-steps"); return ol && !ol.hidden ? ol.querySelector(`li[data-key="${key}"] .bf-step-text`) : null; }
+  return null;
+}
+// Put exactly one ⚠️ on each anchor that has a problem; leave unchanged markers alone (keeps focus).
+function bfSyncMarkers(problems) {
+  const panel = el("col-bookforge");
+  if (!panel) return;
+  const want = new Map();
+  for (const p of problems) for (const a of p.anchors) { const n = bfAnchorEl(a); if (n && !want.has(n)) want.set(n, p); }
+  for (const m of Array.from(panel.querySelectorAll(".bf-hz"))) {
+    const p = want.get(m.parentElement);
+    if (!p || m.dataset.pid !== p.id) m.remove();
+  }
+  for (const [n, p] of want) {
+    let m = Array.from(n.children).find((c) => c.classList && c.classList.contains("bf-hz"));
+    if (!m) {
+      m = bfNode("button", "bf-hz", "⚠️");
+      m.type = "button";
+      m.dataset.pid = p.id;
+      m.setAttribute("aria-haspopup", "dialog");
+      m.setAttribute("aria-controls", "bf-pop");
+      m.setAttribute("aria-expanded", "false");
+      n.appendChild(m);
+    }
+    m.dataset.sev = p.sev;
+    const t = bfProblemTitle(p);
+    const lbl = `Problem: ${t} — click for where, what and how to fix`;
+    if (m.title !== lbl) { m.title = lbl; m.setAttribute("aria-label", lbl); }
+  }
+}
+function bfProblemTitle(p) { const i = bfCodeInfo(p.code) || BF_CODES.UI_ERROR; return typeof i.title === "function" ? i.title(p.ctx) : i.title; }
+
+// --- 🔁 Try again ------------------------------------------------------------------
+const BF_RETRY = {
+  recheck: { label: "Check again", run: () => bookforgeRefresh() },
+  reconnect: { label: "Connect again", run: () => bfConnect() },
+  restartBridge: { label: "Restart the bridge", run: () => bfRestartBridge() },
+  linktest: { label: "Run the test again", run: () => bfRunLinkTest() },
+  reloadPane: { label: (c) => `Reload ${c.L || "the window"}`, run: (c) => bfReloadPane(c.site, c.L) },
+  openBookforge: { label: "Open BookForge", run: () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open") },
+  startApp: { label: "Start BookForge for me", run: () => bfStartApp() }
+};
+function bfRetryFor(p) {
+  if (p.retryRun) return { label: p.retryLabel || "Try again", run: p.retryRun };
+  const info = bfCodeInfo(p.code) || {};
+  const key = p.retryOverride || info.retry;
+  const r = key && BF_RETRY[key];
+  if (!r) return null;
+  return { label: typeof r.label === "function" ? r.label(p.ctx) : r.label, run: () => r.run(p.ctx) };
+}
+
+// --- pop-over: ⓘ explanations, ⚠️ problems, health, diagnostics fallback -----------
+function bfOpenPop(owner, kind, fill) {
+  const pop = el("bf-pop");
+  const panel = el("col-bookforge");
+  if (!pop || !panel || !owner) return;
+  const wasOpen = !pop.hidden && pop._owner === owner;
+  bfCloseInfo(false);
+  if (wasOpen) return;
+  pop.dataset.kind = kind;
+  delete pop.dataset.sev;
+  el("bf-pop-title").textContent = "";
+  const body = el("bf-pop-body");
+  body.textContent = "";
+  fill(el("bf-pop-title"), body, pop);
+  pop.hidden = false;
+  pop._owner = owner;
+  owner.setAttribute("aria-expanded", "true");
+  bfPlacePop();
+  try { pop.focus(); } catch (_) {}
+}
+function bfPlacePop() {
+  const pop = el("bf-pop");
+  const panel = el("col-bookforge");
+  const owner = pop && pop._owner;
+  if (!pop || pop.hidden || !owner || !panel) return;
+  try {
+    const pr = panel.getBoundingClientRect();
+    const br = owner.getBoundingClientRect();
+    if (!br.width && !br.height) return;
+    const w = pop.offsetWidth || 360;
+    let left = br.left - pr.left - 8;
+    left = Math.max(8, Math.min(left, pr.width - w - 8));
+    pop.style.left = `${left}px`;
+    pop.style.top = `${br.bottom - pr.top + 6}px`;
+  } catch (_) {}
+}
+function bfOpenInfo(btn) {
+  const info = BF_INFO[btn.dataset.info];
+  if (!info) return;
+  bfOpenPop(btn, "info", (title, body) => {
+    title.textContent = info[0];
+    for (const para of info[1]) body.appendChild(bfNode("p", null, para));
+  });
+}
+function bfSec(label, content) {
+  const d = bfNode("div", "bf-pop-sec");
+  d.appendChild(bfNode("b", null, label));
+  if (typeof content === "string") d.appendChild(bfNode("div", null, content)); else d.appendChild(content);
+  return d;
+}
+function bfOpenProblem(marker) {
+  const p = bf.problems.find((x) => x.id === marker.dataset.pid);
+  if (!p) return;
+  const info = bfCodeInfo(p.code) || BF_CODES.UI_ERROR;
+  bfOpenPop(marker, "problem", (title, body, pop) => {
+    pop.dataset.sev = p.sev;
+    title.textContent = `⚠️ ${bfProblemTitle(p)}`;
+    body.appendChild(bfSec("Where", p.where));
+    body.appendChild(bfSec("What happened", info.what ? info.what(p.ctx) : (p.ctx.msg || "")));
+    const steps = info.fix ? info.fix(p.ctx) : [];
+    if (steps.length) { const ol = bfNode("ol"); for (const s of steps) ol.appendChild(bfNode("li", null, s)); body.appendChild(bfSec("How to fix", ol)); }
+    const det = bfNode("details");
+    det.appendChild(bfNode("summary", null, "Technical details"));
+    det.appendChild(bfNode("code", null, `${p.code}${p.tech ? ` · ${p.tech}` : ""}`));
+    body.appendChild(det);
+    const acts = bfNode("div", "bf-pop-actions");
+    const retry = bfRetryFor(p);
+    if (retry) {
+      const b = bfNode("button", "bf-primary", `🔁 Try again — ${retry.label}`);
+      b.type = "button";
+      b.onclick = bfSafe(async () => { bfCloseInfo(false); if (p.transient) { bf.actionProblems.delete(p.transient); if (p.transient === "__ui") bf.uiError = null; } await retry.run(); }, "retry");
+      acts.appendChild(b);
+    }
+    if (p.extraRetry && BF_RETRY[p.extraRetry] && (!retry || p.extraRetry !== (p.retryOverride || info.retry))) {
+      const r2 = BF_RETRY[p.extraRetry];
+      const b2 = bfNode("button", null, `🔁 ${typeof r2.label === "function" ? r2.label(p.ctx) : r2.label}`);
+      b2.type = "button";
+      b2.onclick = bfSafe(async () => { bfCloseInfo(false); await r2.run(p.ctx); }, "retry");
+      acts.appendChild(b2);
+    }
+    if (p.transient) {
+      const x = bfNode("button", null, "Dismiss");
+      x.type = "button";
+      x.onclick = () => { bf.actionProblems.delete(p.transient); if (p.transient === "__ui") bf.uiError = null; bfCloseInfo(false); bfRenderAll(); };
+      acts.appendChild(x);
+    }
+    const diag = bfNode("button", null, "📋 Copy diagnostics");
+    diag.type = "button";
+    diag.onclick = bfSafe(() => bfCopyDiagnostics(), "diagnostics");
+    acts.appendChild(diag);
+    body.appendChild(acts);
+  });
+}
+const BF_HEALTH_NAMES = { bridge: "Bridge listening", key: "Connection key", bookforge_reachable: "BookForge reachable", status_fresh: "BookForge updates are fresh", panes: "An AI is Active" };
+function bfHealthOf(s) {
+  if (s.health && s.health.level) return s.health;
+  // older main.js: a rough local version
+  if (!s.enabled) return { level: "off", checks: [] };
+  return { level: s.listening ? (bfIsConnected(s) ? "ok" : "warn") : "bad", checks: [] };
+}
+function bfOpenHealth(btn) {
+  const s = bf.snap || BF_EMPTY_SNAP;
+  const h = bfHealthOf(s);
+  bfOpenPop(btn, "info", (title, body) => {
+    title.textContent = { ok: "🟢 All good", warn: "🟠 Not fully connected yet", bad: "⚠️ Something needs fixing", off: "⚪ Bridge is off" }[h.level] || "Health";
+    const ul = bfNode("ul", "bf-health-list");
+    for (const c of h.checks || []) {
+      if (c.level === "off") continue;
+      const nm = c.id.startsWith("pane:") ? `${bfLabel(c.id.slice(5), s)} window ready` : (BF_HEALTH_NAMES[c.id] || c.id);
+      const li = bfNode("li");
+      li.append(bfNode("span", null, c.level === "ok" ? "✔" : c.level === "bad" ? "⚠️" : "…"), bfNode("span", null, `${nm} — ${c.why}`));
+      ul.appendChild(li);
+    }
+    if (!ul.children.length) body.appendChild(bfNode("p", null, h.level === "off" ? "Press 🔗 Connect BookForge to start." : "No details from this version of the app."));
+    else body.appendChild(ul);
+    body.appendChild(bfNode("p", null, "Checked every few seconds; BookForge itself is pinged at most every 30 seconds. Problems show a ⚠️ marker on the exact spot — click it for how to fix."));
+  });
+}
+function bfCloseInfo(returnFocus) {
+  const pop = el("bf-pop");
+  if (!pop || pop.hidden) return;
+  const owner = pop._owner;
+  pop.hidden = true;
+  pop._owner = null;
+  if (owner) { owner.setAttribute("aria-expanded", "false"); if (returnFocus && owner.isConnected) { try { owner.focus(); } catch (_) {} } }
+}
+if (el("col-bookforge")) {
+  el("col-bookforge").addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const info = t.closest(".bf-info");
+    if (info) { e.preventDefault(); e.stopPropagation(); bfOpenInfo(info); return; } // preventDefault: an ⓘ inside a <summary> must not fold it
+    const hz = t.closest(".bf-hz");
+    if (hz) { e.preventDefault(); e.stopPropagation(); bfOpenProblem(hz); return; }
+    if (t.closest("#bf-health")) { e.preventDefault(); e.stopPropagation(); bfOpenHealth(el("bf-health")); }
+  });
+  const closeBtn = el("bf-pop") && el("bf-pop").querySelector(".bf-pop-close");
+  if (closeBtn) closeBtn.onclick = () => bfCloseInfo(true);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && el("bf-pop") && !el("bf-pop").hidden) { e.preventDefault(); bfCloseInfo(true); } });
+  document.addEventListener("click", (e) => {
+    const pop = el("bf-pop");
+    if (!pop || pop.hidden) return;
+    if (pop.contains(e.target) || (e.target.closest && e.target.closest(".bf-info, .bf-hz, #bf-health, #bf-slim-problems"))) return;
+    bfCloseInfo(false);
+  });
+}
+
+// --- no silent failures: every IPC call / action goes through these ----------------
+function bfActionProblem(action, code, opts) {
+  bf.actionProblems.set(action, { code: bfCodeInfo(code) ? code : "IPC_FAILED", opts: Object.assign({ tech: bfCodeInfo(code) ? undefined : `error ${code}` }, opts || {}) });
+  bfRenderAll();
+}
+function bfActionOk(action) { if (bf.actionProblems.delete(action)) bfRenderAll(); }
+// Call window.api[method]; a missing method or a thrown error becomes a ⚠️ on `opts.anchor`.
+async function bfCall(action, method, args, opts) {
+  const fn = window.api && window.api[method];
+  if (typeof fn !== "function") { bfActionProblem(action, "IPC_MISSING", Object.assign({ tech: `window.api.${method} is missing` }, opts)); return null; }
+  try { return await fn.apply(window.api, args || []); }
+  catch (e) { bfActionProblem(action, "IPC_FAILED", Object.assign({ tech: `${method}: ${String((e && e.message) || e).slice(0, 160)}` }, opts)); return null; }
+}
+// Wrap a click handler: an unexpected throw shows ⚠️ on the panel instead of vanishing.
+function bfSafe(fn, where) {
+  return async function (...a) {
+    try { return await fn.apply(this, a); }
+    catch (e) { bfReportUiError(e, where); }
+  };
+}
+function bfReportUiError(e, where) {
+  bf.uiError = `${where || "panel"}: ${String((e && e.message) || e).slice(0, 160)}`;
+  try { bfRenderAll(); } catch (_) {}
+}
+// Global safety net: an error thrown from BookForge panel code anywhere (timers,
+// IPC callbacks) shows the ⚠️ instead of silently breaking the panel.
+function bfIsPanelError(stack, file) { return /\b(bf[A-Z]\w*|bookforge\w*)\b/.test(String(stack || "")) && (!file || /controls\.js/.test(String(file))); }
+window.addEventListener("error", (ev) => { try { const st = ev && ev.error && ev.error.stack; if (bfIsPanelError(st || ev.message, ev.filename)) bfReportUiError(ev.error || ev.message, "panel"); } catch (_) {} });
+window.addEventListener("unhandledrejection", (ev) => { try { const r = ev && ev.reason; if (bfIsPanelError(r && r.stack)) bfReportUiError(r, "panel"); } catch (_) {} });
+
+// --- render ------------------------------------------------------------------------
+function bookforgeRender(s) {
+  if (!s || !s.ok) return;
+  bf.snap = s;
+  bf.at = Date.now();
+  bf.actionProblems.delete("status");
+  bfRenderAll();
+}
+function bfRenderAll() {
+  const s = bf.snap || BF_EMPTY_SNAP;
+  try {
+    if (el("bf-enabled") && !bf.starting) el("bf-enabled").checked = !!s.enabled;
+    const d = bfDerive(s);
+    const panel = el("col-bookforge");
+    if (panel) { panel.dataset.bfState = d.key; panel.dataset.collapsed = bf.collapsed ? "1" : "0"; }
+    const st = el("bf-status");
+    if (st) { bfSetText(st, d.pill); st.dataset.tone = d.tone; }
+    const ht = el("bf-head-text");
+    if (ht) {
+      const want = `${d.title}${d.sub ? ` · ${d.sub}` : ""}`;
+      if (ht.dataset.v !== want) { ht.dataset.v = want; ht.textContent = d.title; if (d.sub) ht.appendChild(bfNode("span", "sub", ` · ${d.sub}`)); ht.title = want; }
+    }
+    bfText("bf-next", d.next);
+    bfRenderConnect(s, d);
+    bfRenderAis(s);
+    const rows = bfConnRows(s, d);
+    bfRenderChecks(s, d, rows);
+    bfRenderNow(s, d);
+    bfRenderBook(s, d);
+    bfRenderActivity(s);
+    // health dot (R12): bridge, key, BookForge reachable, status fresh, each pane
+    const h = bfHealthOf(s);
+    const dot = el("bf-health");
+    if (dot) {
+      dot.dataset.level = h.level;
+      const words = { ok: "all good", warn: "not fully connected yet", bad: "something needs fixing", off: "bridge off" }[h.level] || h.level;
+      const lbl = `Overall health: ${words} — click for details`;
+      if (dot.title !== lbl) { dot.title = lbl; dot.setAttribute("aria-label", lbl); }
+    }
+    // problems + markers
+    bf.problems = bfProblemsFor(s, d, rows);
+    bfSyncMarkers(bf.problems);
+    bfRenderSlim(s, d);
+    const det = el("bf-detail");
+    if (det) {
+      const c = s.counters;
+      bfSetText(det, s.enabled && s.listening
+        ? `Technical: bridge http://127.0.0.1:${s.port}${c ? ` · ${c.requests} request${c.requests === 1 ? "" : "s"} · ${c.answered} answered · ${c.timeouts} timed out · ${c.unauthorized} refused (wrong key)` : ""}`
+        : `Technical: bridge port ${s.port || "?"} · ${s.enabled ? `not listening (${s.error || "starting"})` : "off — nothing is listening"}`);
+    }
+    if (!bf.test.running && s.linkTest && s.linkTest.lastReport && !bf.test.report) {
+      bf.test.report = s.linkTest.lastReport;
+      bfShowReportButton();
+      const sum = el("bf-test-summary");
+      if (sum && !sum.textContent && s.linkTest.lastSummary) {
+        const ls = s.linkTest.lastSummary;
+        sum.textContent = `Last test ${bfAgo(ls.at)}: ${ls.passCount} passed · ${ls.failCount} failed · ${ls.skipCount} skipped`;
+        sum.dataset.tone = ls.failCount ? "err" : "ok";
+      }
+    }
+    bfPlacePop();
+  } catch (e) {
+    // Never let a bad snapshot break the rest of the controls window.
+    if (!bf.uiError) bf.uiError = `render: ${String((e && e.message) || e).slice(0, 160)}`;
+    try { bf.problems = [{ id: "ui", code: "UI_ERROR", sev: "err", where: "This panel", anchors: ["#bf-status-anchor"], ctx: {}, tech: bf.uiError, transient: "__ui" }]; bfSyncMarkers(bf.problems); } catch (_) {}
+    bfMsg("The BookForge panel couldn't update — click the ⚠️ for help.", "err");
+  }
+}
+// The slim bar (collapsed): state pill · current step · approvals · ⚠️ count · Open BookForge.
+function bfRenderSlim(s, d) {
+  const b = s.bookforge;
+  const t = b && b.current_task;
+  const step = t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
+  bfText("bf-slim-step", step);
+  const st = el("bf-slim-step"); if (st) st.title = step;
+  const n = Number((b && b.approvals && b.approvals.count) || 0);
+  const ap = el("bf-slim-approvals");
+  if (ap) { ap.hidden = !(n > 0); bfSetText(ap, `✅ ${n}`); ap.setAttribute("aria-label", `${n} thing${n === 1 ? "" : "s"} waiting for your OK — open the approvals page`); }
+  const pc = bf.problems.length;
+  const pb = el("bf-slim-problems");
+  if (pb) { pb.hidden = !pc; bfSetText(pb, `⚠️ ${pc}`); pb.setAttribute("aria-label", `${pc} problem${pc === 1 ? "" : "s"} — show the first one`); }
+  const op = el("btn-bf-slim-open");
+  if (op) op.style.display = bfOpenFor(s) ? "" : "none";
+}
+async function bookforgeRefresh() {
+  if (!window.api || typeof window.api.bookforgeStatus !== "function") { bfActionProblem("status", "IPC_MISSING", { where: "The BookForge status", tech: "window.api.bookforgeStatus is missing" }); return; }
+  let s = null;
+  try { s = await window.api.bookforgeStatus(); }
+  catch (e) { bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus: ${String((e && e.message) || e).slice(0, 160)}` }); return; }
+  if (s && s.ok) bookforgeRender(s);
+  else bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus returned ${s ? JSON.stringify(Object.keys(s)).slice(0, 80) : "nothing"}` });
+}
+// Live: every bridge event arrives with a fresh snapshot; the 4 s refresh stays as a fallback.
+if (window.api && window.api.onBookforgeActivity) window.api.onBookforgeActivity((p) => { try { if (p && p.status) bookforgeRender(p.status); } catch (e) { bfReportUiError(e, "live update"); } });
+// Tick clocks ("0:42", "12s ago") once a second without asking main.
+setInterval(() => { if (bf.snap && el("col-bookforge") && !el("col-bookforge").classList.contains("hidden-collapsed")) bfRenderAll(); }, 1000);
+
+// --- ▾/▸ collapse to a slim status bar (remembered) ---------------------------------
+function bfSetCollapsed(on, save) {
+  bf.collapsed = !!on;
+  const btn = el("btn-collapse-bookforge");
+  if (btn) {
+    btn.textContent = on ? "▸" : "▾";
+    btn.setAttribute("aria-expanded", String(!on));
+    const t = on ? "Expand the BookForge panel" : "Collapse to a slim status bar";
+    btn.title = t; btn.setAttribute("aria-label", t);
+  }
+  if (on) bfCloseInfo(false);
+  if (save) bfStore.set("bf-collapsed", on ? "1" : null);
+  bfRenderAll();
+}
+bf.collapsed = bfStore.get("bf-collapsed") === "1";
+if (el("btn-collapse-bookforge")) el("btn-collapse-bookforge").onclick = () => bfSetCollapsed(!bf.collapsed, true);
+if (el("bf-title")) {
+  const h2 = el("bf-title");
+  h2.setAttribute("role", "button");
+  h2.setAttribute("tabindex", "0");
+  h2.addEventListener("click", () => bfSetCollapsed(!bf.collapsed, true));
+  h2.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); bfSetCollapsed(!bf.collapsed, true); } });
+}
+bfSetCollapsed(bf.collapsed, false);
+if (el("bf-slim-problems")) el("bf-slim-problems").onclick = bfSafe(() => {
+  const first = bf.problems[0];
+  bfSetCollapsed(false, true);
+  if (!first) return;
+  const m = el("col-bookforge").querySelector(`.bf-hz[data-pid="${CSS.escape(first.id)}"]`);
+  if (m) { try { m.scrollIntoView({ block: "nearest" }); } catch (_) {} bfOpenProblem(m); }
+}, "slim bar");
+if (el("bf-slim-approvals")) el("bf-slim-approvals").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
+if (el("btn-bf-slim-open")) el("btn-bf-slim-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open");
+if (el("btn-bf-checks-more")) el("btn-bf-checks-more").onclick = () => { const ol = el("bf-conn-steps"); bf.checksOpen = !!(ol && ol.hidden); bfRenderAll(); };
+if (el("btn-bf-book-more")) el("btn-bf-book-more").onclick = () => { bf.bookOpen = !bf.bookOpen; bfRenderAll(); };
+if (el("bf-act-card")) el("bf-act-card").addEventListener("toggle", () => bfRenderAll());
+
+// --- Bridge switch -----------------------------------------------------------------
+async function bfSetEnabled(want) {
+  bf.starting = want;
+  if (bf.snap) { bf.snap.enabled = want; }
+  bfMsg("");
+  bfRenderAll();
+  const s = await bfCall("bridge", "bookforgeSetEnabled", [want], { where: "The Bridge switch", anchor: "#bf-switch-anchor", retryRun: () => bfSetEnabled(want), retryLabel: want ? "Turn the bridge on" : "Turn the bridge off" });
+  bf.starting = false;
+  if (s && s.ok) { bfActionOk("bridge"); bookforgeRender(s); }
+  else { if (s) bfActionProblem("bridge", "IPC_FAILED", { where: "The Bridge switch", anchor: "#bf-switch-anchor", tech: `setEnabled -> ${String(s.error || "no ok")}`, retryRun: () => bfSetEnabled(want) }); await bookforgeRefresh(); }
+}
+async function bfRestartBridge() {
+  const s0 = bf.snap || {};
+  if (s0.enabled) { await bfSetEnabled(false); }
+  await bfSetEnabled(true);
+}
+if (el("bf-enabled")) el("bf-enabled").onchange = bfSafe(() => bfSetEnabled(el("bf-enabled").checked), "the Bridge switch");
+
+// --- 🔗 Connect BookForge -------------------------------------------------------
+async function bfConnect() {
+  if (bf.connecting) return;
+  bf.connecting = true;
+  bf.localMsg = null;
+  bfMsg("");
+  bfRenderAll();
+  const s = await bfCall("connect", "bookforgeConnect", [], { where: "🔗 Connect BookForge", anchor: "#bf-connect-anchor", retryRun: () => bfConnect(), retryLabel: "Connect again" });
+  bf.connecting = false;
+  if (s && s.ok) { bfActionOk("connect"); bookforgeRender(s); }
+  else { if (s) bfActionProblem("connect", "CONNECT_FAILED", { where: "🔗 Connect BookForge", anchor: "#bf-connect-anchor", tech: "connect returned no snapshot", retryRun: () => bfConnect() }); bfRenderAll(); }
+}
+if (el("btn-bf-connect")) el("btn-bf-connect").onclick = bfSafe(() => bfConnect(), "Connect");
+async function bfStartApp() {
+  if (bf.startingApp) return;
+  bf.startingApp = true;
+  bf.localMsg = null;
+  bfRenderAll();
+  const r = await bfCall("startapp", "bookforgeStartApp", [], { where: "▶ Start BookForge for me", anchor: "#bf-connect-anchor", retryRun: () => bfStartApp() });
+  bf.startingApp = false;
+  if (r && r.ok && r.running) { bfActionOk("startapp"); await bfConnect(); return; } // it's up — finish connecting by itself
+  if (r) bfActionProblem("startapp", r.ok ? "STILL_STARTING" : (r.error || "SPAWN_FAILED"), { where: "▶ Start BookForge for me", anchor: "#bf-connect-anchor", msg: r.message, tech: `start-app -> ${r.ok ? "started, not answering yet" : r.error || "error"}` });
+  bfRenderAll();
+}
+if (el("btn-bf-start-app")) el("btn-bf-start-app").onclick = bfSafe(() => bfStartApp(), "Start BookForge");
+// Open a BookForge page; `action` names the button that gets the ⚠️ if it fails.
+const BF_OPEN_ANCHOR = { open: "#bf-open-anchor", approve: "#bf-approve-anchor", goto: "#bf-goto-anchor" };
+async function bfOpen(url, what, action) {
+  const key = `open-${action || "open"}`;
+  const opts = { where: `Opening ${what}`, anchor: BF_OPEN_ANCHOR[action] || "#bf-open-anchor", retryRun: () => bfOpen(url, what, action), retryLabel: `Open ${what}` };
+  const r = await bfCall(key, "bookforgeOpenUrl", [url || ""], opts);
+  if (r && r.ok) { bfActionOk(key); bfMsg(""); }
+  else if (r) bfActionProblem(key, r.error || "OPEN_FAILED", Object.assign({ msg: r.message }, opts));
+}
+if (el("btn-bf-approve")) el("btn-bf-approve").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
+if (el("btn-bf-goto-task")) el("btn-bf-goto-task").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the current task", "goto"); };
+if (el("btn-bf-open")) el("btn-bf-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open");
+// 🔁 Reload an AI's window (the app's own reload).
+async function bfReloadPane(site, L) {
+  if (!site) return;
+  const r = await bfCall(`reload-${site}`, "reloadSite", [site], { where: `Reloading ${L || site}`, anchor: `ai:${site}`, retryRun: () => bfReloadPane(site, L), retryLabel: `Reload ${L || site}` });
+  if (r && r.ok === false) bfActionProblem(`reload-${site}`, "IPC_FAILED", { where: `Reloading ${L || site}`, anchor: `ai:${site}`, tech: `reloadSite -> ${r.error || "failed"}` });
+  else if (r) { bfActionOk(`reload-${site}`); bfMsg(`Reloading ${L || site}… give it a few seconds to load.`); }
+  setTimeout(() => { bookforgeRefresh(); }, 3000);
+}
+
+// --- 📋 Copy diagnostics (safe: no key, codes, prompts or replies) ---------------
+async function bfCopyDiagnostics() {
+  const extra = { panelProblems: bf.problems.map((p) => p.code) };
+  const opts = { where: "📋 Copy diagnostics", anchor: "#bf-diag-anchor", retryRun: () => bfCopyDiagnostics(), retryLabel: "Copy diagnostics" };
+  const r = await bfCall("diag", "bookforgeCopyDiagnostics", [extra], opts);
+  if (r && r.ok) { bfActionOk("diag"); bfMsg("✓ Diagnostics copied — paste them into your message. They never contain your key, codes, prompts or replies."); return; }
+  if (r && r.text) { // no clipboard: show the text to copy by hand
+    bfActionOk("diag");
+    bfOpenPop(el("btn-bf-diag"), "info", (title, body) => {
+      title.textContent = "📋 Diagnostics";
+      body.appendChild(bfNode("p", null, "Copying didn't work here — select all of this text (Ctrl+A) and copy it (Ctrl+C). It contains no key, codes, prompts or replies."));
+      const ta = bfNode("textarea"); ta.readOnly = true; ta.value = r.text; body.appendChild(ta);
+      setTimeout(() => { try { ta.focus(); ta.select(); } catch (_) {} }, 0);
+    });
+    return;
+  }
+  if (r) bfActionProblem("diag", r.error || "DIAGNOSTICS_FAILED", opts);
+}
+if (el("btn-bf-diag")) el("btn-bf-diag").onclick = bfSafe(() => bfCopyDiagnostics(), "Copy diagnostics");
+
+// --- Other ways: the key by hand ---------------------------------------------------
+async function bfCopyKey() {
+  const opts = { where: "📋 Copy connection key", anchor: "#bf-copy-anchor", retryRun: () => bfCopyKey(), retryLabel: "Copy the key" };
+  const r = await bfCall("copykey", "bookforgeCopyToken", [], opts);
+  if (r && r.ok) {
+    bfActionOk("copykey");
+    bfStore.set("bf-key-copied", "1");
+    bfMsg("✓ Connection key copied. Now in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).");
+  } else if (r) bfActionProblem("copykey", r.error || "NO_CLIPBOARD", opts);
+}
+if (el("btn-bf-copy")) el("btn-bf-copy").onclick = bfSafe(() => bfCopyKey(), "Copy connection key");
+async function bfRevealKey() {
+  const box = el("bf-token");
+  if (!box) return;
+  if (box.style.display !== "none") { box.style.display = "none"; box.textContent = ""; el("btn-bf-reveal").textContent = "Show key"; return; }
+  const opts = { where: "Show key", anchor: "#bf-reveal-anchor", retryRun: () => bfRevealKey(), retryLabel: "Show the key" };
+  const r = await bfCall("reveal", "bookforgeRevealToken", [], opts);
+  if (r && r.ok) {
+    bfActionOk("reveal");
+    box.textContent = r.token; box.style.display = "block"; el("btn-bf-reveal").textContent = "Hide key";
+    bfMsg("This is your connection key. Keep it private — click Hide key when you're done.");
+  } else if (r) bfActionProblem("reveal", r.error || "TOKEN_UNAVAILABLE", opts);
+}
+if (el("btn-bf-reveal")) el("btn-bf-reveal").onclick = bfSafe(() => bfRevealKey(), "Show key");
+async function bfRegenKey() {
+  if (!window.confirm("Make a new connection key?\n\nThe old key stops working right away, so BookForge is disconnected until it gets the new key (press Connect BookForge again).\n\nOnly do this if you think someone else has seen your key.")) return;
+  const opts = { where: "Make a new key", anchor: "#bf-regen-anchor" };
+  const s = await bfCall("regen", "bookforgeRegenerateToken", [], opts);
+  if (s && s.ok) {
+    bfActionOk("regen");
+    bfStore.set("bf-key-copied", null);
+    const box = el("bf-token");
+    if (box) { box.style.display = "none"; box.textContent = ""; }
+    if (el("btn-bf-reveal")) el("btn-bf-reveal").textContent = "Show key";
+    bookforgeRender(s);
+    bfMsg("New connection key made. Press “🔗 Connect BookForge” to hand it to BookForge.");
+  } else if (s) bfActionProblem("regen", s.error || "TOKEN_WRITE_FAILED", opts);
+}
+if (el("btn-bf-regen")) el("btn-bf-regen").onclick = bfSafe(() => bfRegenKey(), "Make a new key");
+
+// --- 🧪 Test the connection (the real link test, ticking the same chips/rows) --------
+function bfShowReportButton() { const b = el("btn-bf-test-report"); if (b) b.style.display = bf.test.report ? "" : "none"; }
+function bfTestButtons(running) {
+  const b = el("btn-bf-test");
+  if (b) { b.disabled = running; b.textContent = running ? "🧪 Testing…" : "🧪 Test the connection"; }
+  if (el("btn-bf-test-stop")) el("btn-bf-test-stop").style.display = running ? "" : "none";
+}
+function bfTestStep(p) {
+  if (!p || !p.id) return;
+  bf.test.results.set(p.id, Object.assign({}, bf.test.results.get(p.id) || {}, p));
+  if (p.total && el("bf-test-summary") && bf.test.running) el("bf-test-summary").textContent = `Testing… ${Math.min(p.index + (p.status === "running" ? 1 : 0), p.total)} of ${p.total}`;
+  bfRenderAll();
+}
+if (window.api && window.api.onBookforgeLinkTestProgress) window.api.onBookforgeLinkTestProgress((p) => {
+  try {
+    if (!p) return;
+    if (p.status === "start" || p.status === "done") return; // handled by the run() call itself
+    bfTestStep(p);
+  } catch (e) { bfReportUiError(e, "link test progress"); }
+});
+async function bfRunLinkTest() {
+  if (bf.test.running) return;
+  bf.test.running = true;
+  bf.test.results.clear();
+  bf.test.report = null;
+  bfShowReportButton();
+  const sum = el("bf-test-summary");
+  if (sum) { sum.textContent = "Starting the test…"; delete sum.dataset.tone; }
+  bfTestButtons(true);
+  bfRenderAll();
+  const opts = { where: "🧪 Test the connection", anchor: "#bf-test-anchor", retryRun: () => bfRunLinkTest(), retryLabel: "Run the test again" };
+  let r = null;
+  try { r = await bfCall("linktest", "bookforgeLinkTestRun", [], opts); }
+  finally { bf.test.running = false; bfTestButtons(false); }
+  if (r && r.ok) {
+    bfActionOk("linktest");
+    for (const st of r.steps || []) bf.test.results.set(st.id, Object.assign({}, st));
+    if (sum) { sum.textContent = `${r.failCount ? `${r.failCount} problem${r.failCount === 1 ? "" : "s"} — click the ⚠️` : "All good ✔"} · ${r.passCount} passed · ${r.failCount} failed · ${r.skipCount} skipped${r.report ? " · report saved" : ""}`; sum.dataset.tone = r.failCount ? "err" : "ok"; }
+    bf.test.report = r.report || null;
+    bfShowReportButton();
+  } else if (r) {
+    if (sum) { sum.textContent = "The test couldn't run — click the ⚠️."; sum.dataset.tone = "err"; }
+    bfActionProblem("linktest", r.error === "ALREADY_RUNNING" ? "ALREADY_RUNNING" : "LINKTEST_COULDNT_RUN", Object.assign({ tech: `linktest-run -> ${String(r.error || "error").slice(0, 120)}` }, opts));
+  } else if (sum) { sum.textContent = ""; }
+  bfRenderAll();
+  bookforgeRefresh();
+}
+if (el("btn-bf-test")) el("btn-bf-test").onclick = bfSafe(() => bfRunLinkTest(), "Test the connection");
+if (el("btn-bf-test-stop")) el("btn-bf-test-stop").onclick = bfSafe(async () => {
+  const r = await bfCall("linkstop", "bookforgeLinkTestStop", [], { where: "■ Stop test", anchor: "#bf-test-anchor" });
+  if (r && el("bf-test-summary")) el("bf-test-summary").textContent = "Stopping… (finishing the current check)";
+}, "Stop test");
+if (el("btn-bf-test-report")) el("btn-bf-test-report").onclick = bfSafe(async () => {
+  if (!bf.test.report) return;
+  const opts = { where: "📄 Last report", anchor: "#bf-report-anchor", tech: "report file in the logs folder" };
+  const r = await bfCall("report", "bookforgeOpenLinkTestReport", [bf.test.report], opts);
+  if (r && r.ok) bfActionOk("report");
+  else if (r) bfActionProblem("report", r.error === "BAD_FILE" ? "BAD_FILE" : "BAD_FILE", Object.assign({}, opts, { tech: `open-report -> ${String(r.error || "error").slice(0, 80)}` }));
+}, "Open report");
+
 el("btn-clear").onclick = async () => {
   const res = await window.api.clearTranscript();
   if (res?.ok) renderTranscript([]);
@@ -2590,6 +3882,8 @@ el("btn-extract-all").onclick = async () => {
     setStatus("Ready.");
   }
   databaseRefresh();
+  bookforgeRefresh();
+  setInterval(bookforgeRefresh, 4000);
 })();
 
 // ---------------------------------------------------------------------------
