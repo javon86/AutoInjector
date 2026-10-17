@@ -45,6 +45,7 @@ from . import CONTRACT_VERSION, __version__
 from . import plan_rules as pr
 from .canonical import json_pointer
 from .errors import BookforgeError
+from .jobs import RetryPolicy, slot_word, wait_and_retry
 from .modules import get_handler
 from .modules.base import Context
 from .requests import build_request
@@ -315,6 +316,8 @@ class Job:
         self.result: dict | None = None
         self.error: dict | None = None
         self.calls = 0
+        self.waiting: dict | None = None   # {"code", "attempt", "retry_in_s", "retry_at", "message"} while waiting
+        self.retry_busy: bool | None = None  # None: the service default (AssistService.retry_busy)
 
     def check(self):
         if self.cancelled:
@@ -328,7 +331,7 @@ class Job:
                "created_at": _iso(datetime.fromtimestamp(self.created, timezone.utc)),
                "elapsed_ms": int((now - (self.started or self.created)) * 1000) if self.started else 0,
                "proposal": None, "findings": [], "removed_refs": [], "filled_fields": [], "kept_fields": [],
-               "valid": None, "error": self.error}
+               "valid": None, "error": self.error, "waiting": self.waiting}
         if self.result:
             out.update({k: self.result[k] for k in ("proposal", "findings", "removed_refs", "filled_fields",
                                                      "kept_fields", "valid", "summary") if k in self.result})
@@ -336,8 +339,13 @@ class Job:
 
 
 class AssistService:
-    def __init__(self, engine, principal_id: str = "author", reports_dir=None):
+    def __init__(self, engine, principal_id: str = "author", reports_dir=None, retry_busy: bool = False,
+                 jobstore=None):
         self.engine = engine
+        # S10: wait and retry busy/unreachable AI answers (the App turns this on; library callers opt in).
+        self.retry_busy = retry_busy
+        self.retry_policy: RetryPolicy | None = None  # None: read the ai_retry setting at each call
+        self.jobstore = jobstore
         self.store = engine.store
         self.contracts = engine.contracts
         self.principal_id = principal_id
@@ -346,6 +354,28 @@ class AssistService:
         self._jobs: dict[str, Job] = {}
         self._sessions: dict[str, "BibleSession"] = {}
         self._slot_sems: dict[str, threading.Semaphore] = {}
+
+    # ------------------------------------------------------------------ persistence (S11)
+    def persist(self, job: "Job", kind: str | None = None, resume: dict | None = None, **extra):
+        """Save a small summary of a job so a restart can show it (never keys or AI replies)."""
+        if self.jobstore is None:
+            return
+        try:
+            cur = self.jobstore.get(job.id) or {}
+            rec = {"id": job.id, "kind": kind or job.kind, "status": job.status, "phase": job.phase,
+                   "project_id": job.project_id, "branch_id": job.branch_id, "op": job.op_id,
+                   "slot": job.slot, "slot_label": job.slot_label, "model": job.model,
+                   "created_at": _iso(datetime.fromtimestamp(job.created, timezone.utc)),
+                   "finished_at": _iso(datetime.fromtimestamp(job.finished, timezone.utc)) if job.finished else None,
+                   "error": job.error, "principal": job.principal}
+            if resume is not None:
+                rec["resume"] = resume
+            elif cur.get("resume"):
+                rec["resume"] = cur["resume"]
+            rec.update(extra)
+            self.jobstore.save(rec)
+        except Exception:  # noqa: BLE001 - never break the job
+            log.exception("could not persist job %s", job.id)
 
     # ------------------------------------------------------------------ shared checks
     def _access(self, principal: str, pid, branch, op_id: str | None = None):
@@ -443,6 +473,35 @@ class AssistService:
 
     def _call_ai(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
                  protected: list) -> dict:
+        """One AI answer for a job; busy/unreachable answers wait and retry (S10) when retry is on."""
+        def once():
+            return self._call_ai_once(job, op_for_roles=op_for_roles, task=task, schema=schema, context=context,
+                                      protected=protected)
+        retry = job.retry_busy if getattr(job, "retry_busy", None) is not None else self.retry_busy
+        if not retry:
+            return once()
+        policy = self.retry_policy or RetryPolicy.from_store(self.store)
+
+        def on_wait(info):
+            job.waiting = info
+            if info:
+                job.phase = info["message"]
+            else:
+                job.phase = f"Asking {job.slot_label or 'the AI'} again"
+            cb = getattr(job, "on_wait", None)
+            if cb:
+                try:
+                    cb(info)
+                except Exception:  # noqa: BLE001 - progress display only
+                    pass
+        try:
+            return wait_and_retry(once, policy=policy, check=job.check, on_wait=on_wait,
+                                  who=lambda: slot_word(job.slot_label))
+        finally:
+            job.waiting = None
+
+    def _call_ai_once(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
+                      protected: list) -> dict:
         prov = self.engine.providers
         needed = len(json.dumps(context, ensure_ascii=False)) // 3 + 2000
         for _ in range(3):
@@ -775,6 +834,8 @@ class AssistService:
                                      "for one to finish", status="REJECTED")
             job = Job("assist", principal, pid, branch, op_id, slot)
             self._jobs[job.id] = job
+        self.persist(job, resume={"project_id": pid, "branch_id": branch, "target_operation": op_id, "prompt": prompt,
+                                  "slot_id": slot, "current_values": cur, "keep_values": keep, "context_refs": refs})
         threading.Thread(target=self._run_assist, args=(job, prompt, cur, keep, refs), daemon=True,
                          name=f"assist-{job.id}").start()
         return job.public()
@@ -802,6 +863,7 @@ class AssistService:
             job.status, job.phase = "error", "Stopped"
             job.error = _err("INTERNAL_ERROR", f"{type(exc).__name__} while preparing the proposal")
         job.finished = time.time()
+        self.persist(job, title=(job.result or {}).get("summary", {}).get("title") if job.result else None)
         log.info("assist job=%s op=%s status=%s slot=%s calls=%s elapsed=%.1fs", job.id, job.op_id, job.status,
                  job.slot, job.calls, job.finished - job.started)
 
@@ -814,7 +876,23 @@ class AssistService:
         return job
 
     def get_assist(self, principal: str, job_id: str) -> dict:
-        return self._job(principal, job_id).public()
+        try:
+            return self._job(principal, job_id).public()
+        except BookforgeError:
+            saved = self.jobstore.get(job_id) if self.jobstore is not None else None
+            if saved and saved.get("kind") == "assist" and saved.get("principal") in (None, principal):
+                return {"job_id": job_id, "status": saved.get("status"), "phase": saved.get("phase"),
+                        "target_operation": saved.get("op"), "project_id": saved.get("project_id"),
+                        "branch_id": saved.get("branch_id"), "slot": saved.get("slot"),
+                        "slot_label": saved.get("slot_label"), "model": saved.get("model"),
+                        "created_at": saved.get("created_at"), "elapsed_ms": 0, "proposal": None, "findings": [],
+                        "removed_refs": [], "filled_fields": [], "kept_fields": [], "valid": None,
+                        "error": saved.get("error") or ({"code": "INTERRUPTED", "message": "BookForge was restarted "
+                                                         "while this was running; press Resume to run it again.",
+                                                         "fix": "Press Resume.", "path": ""}
+                                                        if saved.get("status") == "interrupted" else None),
+                        "waiting": None, "persisted": True}
+            raise
 
     def cancel_assist(self, principal: str, job_id: str) -> dict:
         job = self._job(principal, job_id)
@@ -1075,14 +1153,38 @@ class BibleSession:
             self._worker = threading.Thread(target=self._work, daemon=True, name=f"bible-{self.id}")
             self._worker.start()
 
+    def persist(self, status: str):
+        """S11: a small summary of this session so a restart can show (and re-run) unfinished sections."""
+        js = self.svc.jobstore
+        if js is None:
+            return
+        try:
+            unfinished = {k: v["requested"] for k, v in self.sections.items()
+                          if v.get("status") in ("queued", "running", "error", "partial", "cancelled") and v.get("requested")}
+            for q in self.queue:
+                for k, n in (q.get("sections") or {}).items():
+                    unfinished[k] = n
+            js.save({"id": self.id, "kind": "bible", "status": status,
+                     "phase": (self.current or {}).get("phase") or ("Finished" if status == "done" else status),
+                     "project_id": self.project_id, "branch_id": self.branch_id, "principal": self.principal,
+                     "created_at": _iso(datetime.fromtimestamp(self.created, timezone.utc)),
+                     "sections": {k: {"status": v.get("status"), "done": v.get("done"), "failed": v.get("failed"),
+                                      "total": v.get("total")} for k, v in self.sections.items()},
+                     "items": len(self.items), "created": sum(1 for i in self.items.values() if i.get("created_ref")),
+                     "resume": {"idea": self.idea, "counts": unfinished, "slot_id": self.slot_pref} if unfinished else None})
+        except Exception:  # noqa: BLE001
+            log.exception("could not persist bible session %s", self.id)
+
     def _work(self):
         while True:
             with self._lock:
                 if not self.queue:
                     self.current = None
+                    self.persist("done")
                     return
                 task = self.queue.pop(0)
                 self.current = dict(task, t0=time.time(), started_at=_iso(), phase="Starting")
+            self.persist("running")
             try:
                 if task.get("item"):
                     self._run_regenerate(task)

@@ -9,7 +9,7 @@ summary of where the most recently opened book stands to ``POST <bridge_url>/v1/
      "current_task": {"set", "op", "title", "state", "message", "url"},
      "working_on": {"op", "title", "started_at"} | null,
      "approvals": {"count", "items": [{"op", "set", "title"}] (max 20), "url"},
-     "checklist": [{"id", "title", "set", "state"}], "done", "total", "updated_at"}
+     "checklist": [{"id", "title", "set", "state"}], "done", "total", "words": {"total", "target"}, "updated_at"}
 
 Titles only - never chapter text, prompts or keys (canon entries are named by their concept, every other draft by
 its step name). Sent on change (at most every 5 s) and as a heartbeat every 30 s; the body stays below 32 KiB.
@@ -78,7 +78,9 @@ def build_summary(app, base_url: str) -> dict:
                                 for i in q["items"][:20]], "url": review_url},
         "checklist": [{"id": s["id"], "title": s["title"], "set": STEP_SET.get(s["id"]),
                        "state": CHECK_STATE.get(s["state"], s["state"])} for s in status["steps"]],
-        "done": status.get("done_count") or 0, "total": status.get("total") or 0})
+        "done": status.get("done_count") or 0, "total": status.get("total") or 0,
+        "words": {"total": (status.get("words") or {}).get("words", 0),
+                  "target": (status.get("words") or {}).get("target_words", 0)}})
     if body["current_task"]["state"] in ("ai_can", "needs_you") and body["working_on"]:
         body["current_task"]["state"] = "working"
     return body

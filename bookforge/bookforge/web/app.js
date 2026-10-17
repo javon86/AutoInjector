@@ -1,6 +1,7 @@
 // Bookforge browser workspace. Vanilla ES module, no network access beyond this local server.
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
+import { problemFor } from './problems.js';
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -176,6 +177,7 @@ async function api(method, path, opts = {}) {
       credentials: 'same-origin' });
   } catch (e) {
     if (e && e.name === 'AbortError') throw e;
+    noteClientError('NETWORK', `${method} ${path.split('?')[0]}`, 'BookForge did not answer');
     throw new NetworkError('Could not reach the Bookforge server. Check that it is still running, then retry.');
   }
   if (res.status === 401) { showAuthProblem('The access token was missing or not accepted.'); throw new ApiError(401, null); }
@@ -186,7 +188,11 @@ async function api(method, path, opts = {}) {
   const txt = await res.text();
   let data = null;
   try { data = txt ? JSON.parse(txt) : null; } catch { data = null; }
-  if (!res.ok) throw new ApiError(res.status, data);
+  if (!res.ok) {
+    const x = (data && Array.isArray(data.errors) && data.errors[0]) || {};
+    noteClientError(x.code || `HTTP_${res.status}`, `${method} ${path.split('?')[0]}${x.path ? ` ${x.path}` : ''}`, x.message || `HTTP ${res.status}`);
+    throw new ApiError(res.status, data);
+  }
   return data;
 }
 const bpath = (rest = '') => `/projects/${encodeURIComponent(S.pid)}/branches/${encodeURIComponent(S.branch)}${rest}`;
@@ -409,6 +415,7 @@ async function pickView(parts) {
   if (parts[0] === 'settings') return viewSettings;
   if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'pair') return viewPair;
+  if (parts[0] === 'shelf') return viewShelf;
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
     if (!rest.length) return viewOverview;
@@ -420,6 +427,7 @@ async function pickView(parts) {
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
     if (rest[0] === 'book') return viewBook;
+    if (rest[0] === 'journal' || (rest[0] || '').startsWith('journal?')) return viewJournal;
     if (rest[0] === 'review') return m => viewReview(m, rest[1] === 'step', rest[2] || null);
   }
   return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to projects'))); };
@@ -453,15 +461,18 @@ function renderTop(parts) {
   const here = location.hash || '#/';
   const add = (el, href, text) => el.appendChild(h('a', { href, 'aria-current': here === href ? 'page' : null }, text));
   links.appendChild(h('a', { href: '#/start', class: 'tb-new', 'aria-current': here === '#/start' ? 'page' : null, title: 'Start a new book (step by step)' }, '🚀 New book'));
-  add(links, '#/', 'Books');
+  links.appendChild(h('a', { href: '#/', class: inProject ? 'tb-books in-project' : 'tb-books', 'aria-current': here === '#/' ? 'page' : null }, 'Books'));
   if (inProject) {
     add(links, link('p', S.pid, S.branch), 'Overview');
     links.appendChild(h('a', { href: link('p', S.pid, S.branch, 'book'), 'aria-current': here === link('p', S.pid, S.branch, 'book') ? 'page' : null }, '📘 Make my book'));
   }
-  add(links, '#/settings', 'Settings');
+  links.appendChild(h('a', { href: '#/settings', class: 'tb-settings', title: 'Settings', 'aria-current': here === '#/settings' ? 'page' : null },
+    h('span', { class: 'tb-set-ico', 'aria-hidden': 'true' }, '⚙️ '), h('span', { class: 'tb-label' }, 'Settings')));
   // Less frequent pages live in the "More" menu so the bar stays on one line.
   const more = clear($('#more-links'));
+  add(more, '#/shelf', '📚 My finished books');
   if (inProject) {
+    add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -477,8 +488,8 @@ function renderNav() {
     nav.appendChild(h('p', { class: 'muted small', style: 'padding: 0 8px' },
       'Open or create a project to work in the 11 operation sets.'));
     for (const [letter, [name]] of Object.entries(SETS)) {
-      nav.appendChild(h('div', { class: 'set-toggle', 'aria-disabled': 'true' },
-        h('span', { class: 'set-letter' }, letter), h('span', { class: 'set-name' }, name)));
+      nav.appendChild(h('div', { class: `set-toggle set-${letter}`, 'aria-disabled': 'true' },
+        h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name)));
     }
     return;
   }
@@ -495,11 +506,16 @@ function renderNav() {
     const ul = h('ul', { class: 'set-links', id: listId, hidden: !open });
     ul.appendChild(h('li', null, h('a', { href: link('p', S.pid, S.branch, 'set', letter), class: 'set-overview-link',
       'aria-current': parts[3] === 'set' && parts[4] === letter ? 'page' : null }, `${name} workspace`)));
+    let staleSet = 0;
     for (const o of ops) {
-      ul.appendChild(h('li', null, h('a', { href: link('p', S.pid, S.branch, 'op', o.id),
+      const st = opStats(o.id);
+      staleSet += st.stale;
+      ul.appendChild(h('li', { class: st.stale ? 'has-hazard' : null }, h('a', { href: link('p', S.pid, S.branch, 'op', o.id),
         'aria-current': curOp === o.id ? 'page' : null },
       h('span', { class: 'op-id' }, o.id), h('span', { class: 'op-name' }, o.name),
-      h('span', { class: 'op-meta' }, opStateText(o.id)))));
+      h('span', { class: 'op-meta' }, opStateText(o.id))),
+      st.stale ? hazard({ code: 'STALE', message: `${st.stale} record(s) of this step are out of date.`, where: { book: profileOf().title || S.project.name, set: letter, step: o.name, op: o.id } },
+        { open: link('p', S.pid, S.branch, 'op', o.id), openLabel: 'Open the step' }, { small: true }) : null));
     }
     const btn = h('button', { type: 'button', class: 'set-toggle', 'aria-expanded': String(!!open), 'aria-controls': listId,
       onclick: () => {
@@ -508,9 +524,10 @@ function renderNav() {
         S.navOpen[letter] = now; saveJSON('bf:navOpen', S.navOpen);
       } },
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'),
-    h('span', { class: 'set-letter' }, letter), h('span', { class: 'set-name' }, name),
+    h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name),
+    staleSet ? h('span', { class: 'set-warn', title: `${staleSet} out-of-date record(s)` }, '⚠️') : null,
     h('span', { class: 'set-count' }, `${total} rec`));
-    nav.appendChild(h('div', { class: 'set-group' }, btn, ul));
+    nav.appendChild(h('div', { class: `set-group set-${letter}${letter === curSet ? ' here' : ''}` }, btn, ul));
   }
 }
 function closeNav() {
@@ -531,9 +548,11 @@ function errorItems(errs) {
     h('code', null, e.code), e.path ? [' at ', h('code', null, e.path)] : '', ' — ', e.message || '')));
 }
 function failedState(title, e, ...extra) {
-  const body = [];
-  if (e instanceof ApiError && e.errors.length) body.push(errorItems(e.errors));
-  else body.push(h('p', null, (e && e.message) || String(e)));
+  const p = toProblem(e);
+  const body = [h('p', { class: 'fs-plain' }, hazard(p, { retry: p.action === 'reload' ? () => route() : null, retryLabel: '🔁 Reload' }), ' ', h('strong', null, p.title), ' — ', p.what),
+    h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), p.fix)];
+  if (e instanceof ApiError && e.errors.length) body.push(h('details', { class: 'hz-tech small' }, h('summary', null, 'Technical details'), errorItems(e.errors)));
+  else body.push(h('p', { class: 'small muted' }, (e && e.message) || String(e)));
   return stateBox('failed', title, ...body, ...extra);
 }
 function loadingState(text) { return stateBox('loading', h('span', null, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' ', text)); }
@@ -544,7 +563,8 @@ async function viewHome(main) {
   renderTop([]);
   if (!S.projects.length) { await viewStart(main); return; }
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Your books'),
-    h('a', { class: 'btn primary big', href: '#/start' }, '🚀 Start a new book')));
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me'),
+      h('a', { class: 'btn big', href: '#/start' }, '🚀 Start a new book'), h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'))));
   const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Your projects'));
   if (!S.projects.length) {
     listCard.appendChild(stateBox('empty', 'No projects yet',
@@ -631,9 +651,15 @@ async function viewOverview(main) {
   S.onGuideChanged = drawNext;
   S.leaveHooks.push(() => { S.onGuideChanged = null; });
   main.appendChild(next);
+  const t0 = myTask();
   main.appendChild(h('section', { class: 'card book-cta' },
-    h('div', null, h('h2', null, '📘 Make my book'), h('p', { class: 'small' }, 'One guided checklist from characters to a downloadable PDF, EPUB and Word file. It shows what is done, what needs you and what your AI can do.')),
-    h('a', { class: 'btn primary big', href: plink('book') }, '▶ Open Make my book')));
+    h('div', { class: 'bc-text' }, h('h2', null, '📘 Make my book'), h('p', { class: 'small' }, 'One guided checklist from characters to a downloadable PDF, EPUB and Word file. It shows what is done, what needs you and what your AI can do.'),
+      h('div', { class: 'ov-words' }, t0 && t0.book ? wordsLine(t0.book.words) : null)),
+    h('div', { class: 'row' }, h('a', { class: 'btn primary big', href: plink('book') }, '▶ Open Make my book'),
+      h('a', { class: 'btn', href: plink('journal') }, '📜 Book journal'), h('a', { class: 'btn', href: '#/shelf' }, '📚 Finished books'))));
+  main.appendChild(h('section', { class: 'card mab-card' },
+    h('div', null, h('h2', null, '⚡ Make a book for me'), h('p', { class: 'small' }, 'Let your AI make a whole NEW book in one go — you watch every step, can pause or cancel, and get PDF, EPUB and Word at the end. This book is not touched.')),
+    h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me')));
   main.appendChild(profileCard());
   if (!totals) {
     main.appendChild(stateBox('empty', 'This branch has no records yet',
@@ -1152,7 +1178,10 @@ class FormCtx {
   }
   markError(f, msg) {
     if (!f.errEl) return;
-    f.errEl.hidden = false; f.errEl.appendChild(h('span', { style: 'display:block' }, msg));
+    const code = (/\(([A-Z_]+)\)\s*$/.exec(msg) || [])[1] || 'INVALID_INPUT';
+    const where = { book: (profileOf().title || (S.project || {}).name), field: f.label || f.ptr };
+    f.errEl.hidden = false;
+    f.errEl.appendChild(h('span', { style: 'display:block' }, hazard({ code, message: msg.replace(/\s*\([A-Z_]+\)\s*$/, ''), path: f.ptr, where }, { form: () => focusField(f) }, { small: true }), ' ', msg));
     f.wrap.classList.add('has-error');
     if (f.control) {
       f.control.setAttribute('aria-invalid', 'true');
@@ -2272,6 +2301,9 @@ async function viewSettings(main) {
       h('li', null, 'Not sure everything works? Press “🧪 Test everything” at the top: it builds a small test book in a separate project and writes a report.'))));
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
+  main.appendChild(retryCard());
+  main.appendChild(backupsCard());
+  main.appendChild(helpCard());
 }
 
 function autoInjectorCard(main) {
@@ -2709,7 +2741,9 @@ function slotStatusStrip(s) {
   const box = h('div', { class: 'slot-strip', role: 'status', 'aria-live': 'polite' });
   const draw = health => {
     const st = slotStage(s, health);
-    clear(box).appendChild(h('div', { class: 'row' }, badge(st.icon, st.word, st.cls), h('span', null, h('strong', null, 'Where it’s at: '), st.now)));
+    clear(box).appendChild(h('div', { class: 'row' }, badge(st.icon, st.word, st.cls),
+      ['b-bad', 'b-warn'].includes(st.cls) ? hazard({ code: (health && health.error) || 'CAPABILITY_UNAVAILABLE', message: st.now, fix: st.next, where: { step: `Settings › AI slot ${s.slot_id}` } }, { retry: () => check(), retryLabel: '🔁 Test connection', settings: false }) : null,
+      h('span', null, h('strong', null, 'Where it’s at: '), st.now)));
     box.appendChild(h('p', { class: 'small slot-next' }, h('strong', null, 'Next step: '), st.next));
   };
   const check = async () => {
@@ -2796,8 +2830,9 @@ function fmtClock(ms) {
 }
 function errorWithFix(title, err, retry) {
   err = err || {};
+  const pr = toProblem({ code: err.code, message: err.message, fix: err.fix, path: err.path });
   return stateBox('failed', title,
-    h('p', null, err.message || 'Something went wrong.'),
+    h('p', null, hazard(pr, { retry: retry || null }), ' ', h('strong', null, pr.title), ' — ', err.message || 'Something went wrong.'),
     err.fix ? h('p', null, h('strong', null, 'What to do: '), err.fix) : null,
     h('div', { class: 'row' },
       retry ? h('button', { type: 'button', class: 'primary small', onclick: retry }, 'Try again') : null,
@@ -3390,7 +3425,9 @@ function crumbs(...items) {
   items.forEach((it, i) => {
     const last = i === items.length - 1;
     const [label, href] = Array.isArray(it) ? it : [it, null];
-    ol.appendChild(h('li', null, href && !last ? h('a', { href }, label) : h('span', { 'aria-current': last ? 'page' : null }, label)));
+    const m = typeof label === 'string' ? /^([A-K]) · /.exec(label) : null;
+    const cls = m ? `crumb-set set-${m[1]}` : null;
+    ol.appendChild(h('li', null, href && !last ? h('a', { href, class: cls }, label) : h('span', { 'aria-current': last ? 'page' : null, class: cls }, label)));
   });
   return h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' }, ol);
 }
@@ -3451,7 +3488,14 @@ function setTiles(kind) {
     const recs = S.records.filter(r => r.module_id[0] === letter);
     const approvedOps = ops.filter(id => opStats(id).approved > 0).length;
     const g = info.guide;
-    grid.appendChild(h('button', { type: 'button', class: kind === 'tile' ? 'set-tile' : 'set-mini', 'aria-haspopup': 'dialog',
+    const stale = recs.filter(r => r.stale).length;
+    const wrap = h('div', { class: `tile-wrap set-${letter}` });
+    grid.appendChild(wrap);
+    if (stale) {
+      wrap.appendChild(hazard({ code: 'STALE', message: `${stale} record(s) in this set are out of date.`, where: { book: profileOf().title || (S.project || {}).name, set: letter } },
+        { extra: [{ label: '🧩 Open the set', fn: () => openSetPanel(letter, null) }] }, { small: true }));
+    }
+    wrap.appendChild(h('button', { type: 'button', class: `${kind === 'tile' ? 'set-tile' : 'set-mini'} set-${letter}`, 'aria-haspopup': 'dialog',
       'data-set': letter, onclick: ev => { closePops(); openSetPanel(letter, ev.currentTarget); } },
     h('span', { class: 'st-icon', 'aria-hidden': 'true' }, info.icon),
     h('span', { class: 'st-text' },
@@ -4167,7 +4211,12 @@ function openProfileDialog(onSaved) {
         S.project.profile = saved;
         toast('Book profile saved'); close();
         if (onSaved) onSaved(saved); else route();
-      } catch (e) { out.appendChild(failedState('The profile was not saved', e)); save.disabled = false; }
+      } catch (e) {
+        clearFieldProblems(pf.el);
+        const rest = showFieldErrors(e, pf.f, { book: prof.title || S.project.name, step: 'Book profile' });
+        if (rest.length || !(e instanceof ApiError)) out.appendChild(failedState('The profile was not saved', e));
+        save.disabled = false;
+      }
     } }, h('p', { class: 'small muted' }, 'This is what your book is. The AI reads it every time it helps, and the title and author go on the title page and into the exported files.'),
     pf.el, out, h('div', { class: 'form-actions' }, save));
   }, { wide: true });
@@ -4197,7 +4246,8 @@ async function viewStart(main) {
   const save = () => saveJSON(WZ_KEY, w);
   main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'Start a new book'), h('h1', null, '🚀 Start a new book'))));
   const steps = ['Your book', 'Your AI', 'What to make', 'Review and go'];
-  main.appendChild(h('ol', { class: 'wz-steps', 'aria-label': 'Steps' }, steps.map((s, i) => h('li', { class: i + 1 === w.step ? 'cur' : i + 1 < w.step ? 'done' : null, 'aria-current': i + 1 === w.step ? 'step' : null }, h('span', { class: 'wz-n' }, String(i + 1)), s))));
+  main.appendChild(h('ol', { class: 'wz-steps step-rail', 'aria-label': 'Steps' }, steps.map((s, i) => h('li', { class: i + 1 === w.step ? 'cur here rail-needs_you' : i + 1 < w.step ? 'done rail-done' : 'rail-blocked', 'aria-current': i + 1 === w.step ? 'step' : null },
+    h('span', { class: 'rail-in' }, h('span', { class: 'wz-n rail-dot' }, i + 1 < w.step ? '✔' : String(i + 1)), h('span', { class: 'rail-lab' }, s))))));
   const card = h('section', { class: 'card wz-card', 'aria-labelledby': 'wz-h' });
   main.appendChild(card);
   const err = h('div', { 'aria-live': 'polite' });
@@ -4314,7 +4364,9 @@ const STEP_WAIT = { B01: 'the premise', B03: 'the main plot', B11: 'the chapter 
 async function viewBook(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['Your books', '#/'], [S.project.name, plink()], 'Make my book'), h('h1', null, '📘 Make my book')),
-  h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'))));
+  h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
+    h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
+    h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, '⚡ Make a book for me'))));
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -4327,11 +4379,16 @@ async function viewBook(main) {
   S.onRecordsChanged = null;
 }
 
+const BOOK_ERR = {};   // step id -> the problem of the last attempt on this page (shown as ⚠️ on that step)
+const RAIL_WORD = { done: 'done', needs_you: 'needs you', ai_can: 'AI can do it', ready: 'ready', blocked: 'waiting', problem: 'problem' };
 function renderBook(holder, book, redraw) {
   clear(holder);
   const pct = Math.round((book.done_count / book.total) * 100);
   const msg = h('div', { 'aria-live': 'polite', class: 'book-msg' });
-  const run = async (fn, busyText) => {
+  let curStep = null;
+  const run = async (fn, busyText, stepId) => {
+    curStep = stepId || null;
+    if (stepId) delete BOOK_ERR[`${S.pid}:${stepId}`];
     clear(msg).appendChild(loadingState(busyText || 'Working…'));
     try {
       const out = await fn();
@@ -4340,6 +4397,7 @@ function renderBook(holder, book, redraw) {
         fillNewForm(S.pid, S.branch, out.op, out.payload, { manualOn: true, from_book: { message: out.message } }, 'The form is ready — write it, then press Create');
         return;
       }
+      if (out && !out.ok && curStep) BOOK_ERR[`${S.pid}:${curStep}`] = { code: out.code || 'FAILED', message: out.message, details: out.problems || null };
       const note = out ? stateBox(out.ok ? 'ok' : 'failed', out.message || (out.ok ? 'Done' : 'Not done'),
         (out.problems || []).length ? h('ul', null, out.problems.map(p => h('li', null, p))) : null,
         (out.results || []).filter(r => !r.ok).length ? h('ul', null, out.results.filter(r => !r.ok).map(r => h('li', null, `${r.record_id}: ${(r.problems || []).join('; ')}`))) : null) : null;
@@ -4348,7 +4406,12 @@ function renderBook(holder, book, redraw) {
       // the message goes into the freshly drawn page, after the steps are up to date
       const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(out.message || ''); }
     } catch (e) {
-      clear(msg).appendChild(errorWithFix('That step did not work', apiErrInfo(e)));
+      const st = book.steps.find(x => x.id === curStep);
+      const p = toProblem(e, { book: profileOf().title || S.project.name, step: st ? st.title : 'Make my book', set: st && st.op ? st.op[0] : null, op: st ? st.op : null });
+      if (curStep) BOOK_ERR[`${S.pid}:${curStep}`] = p;
+      clear(msg).appendChild(problemBox(p, { retry: st ? () => doStep(st) : null }, 'That step did not work'));
+      const li = holder.querySelector(`[data-book-step="${curStep}"] .bs-head`);
+      if (li && !li.querySelector('.hazard')) li.appendChild(hazard(p, { retry: st ? () => doStep(st) : null }));
     }
   };
   const post = (action, body) => api('POST', bpath(`/book/${action}`), { body: body || {} });
@@ -4361,7 +4424,7 @@ function renderBook(holder, book, redraw) {
       h('p', { class: 'small muted' }, 'Some steps need an explicit approval record; BookForge records one for exactly these versions because you confirm here.')),
     [{ id: 'yes', label: '✔ Yes, I approve' }]);
     if (ok !== 'yes') return;
-    await run(() => post('approve', { record_ids: items.map(i => i.record_id), author_confirms: true }), 'Approving…');
+    await run(() => post('approve', { record_ids: items.map(i => i.record_id), author_confirms: true }), 'Approving…', (book.steps.find(s => (s.approve || []).some(a => items.some(i => i.record_id === a.record_id))) || {}).id);
   };
   const doStep = async s => {
     if (!s) return;
@@ -4369,13 +4432,13 @@ function renderBook(holder, book, redraw) {
     if (s.approve && s.approve.length) { await approve(s.approve, s.title.toLowerCase()); return; }
     if (s.state === 'blocked') { toast(`Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}`); return; }
     if (s.id === 'canon') { if (book.ai_ready) openMakeDialog('A01', null, null); else goNew('A01'); return; }
-    if (['premise', 'plot', 'outline'].includes(s.id)) { await run(() => post('create', { op: s.op }), book.ai_ready ? 'Your AI is writing… (web AIs can take a few minutes)' : 'Preparing the form…'); return; }
+    if (['premise', 'plot', 'outline'].includes(s.id)) { await run(() => post('create', { op: s.op }), book.ai_ready ? 'Your AI is writing… (web AIs can take a few minutes)' : 'Preparing the form…', s.id); return; }
     if (s.id === 'chapters') {
       const c = (s.chapters || []).find(x => x.state !== 'done' && !(x.prose && ['DRAFT', 'VALIDATED'].includes(x.prose.lifecycle)));
-      if (c) await run(() => post('write_chapter', { chapter_id: c.chapter_id }), book.ai_ready ? `Your AI is writing chapter ${c.chapter_id}…` : 'Preparing the chapter form…');
+      if (c) await run(() => post('write_chapter', { chapter_id: c.chapter_id }), book.ai_ready ? `Your AI is writing chapter ${c.chapter_id}…` : 'Preparing the chapter form…', s.id);
       return;
     }
-    if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…');
+    if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…', s.id);
   };
   const nextStep = book.steps.find(s => s.id === book.next);
   holder.appendChild(h('section', { class: 'card book-top' },
@@ -4384,12 +4447,19 @@ function renderBook(holder, book, redraw) {
         : 'No AI connected (or you chose to write it yourself): creative steps open a ready-made form for you. ', book.ai_ready ? null : h('a', { href: '#/settings' }, 'Connect an AI in Settings'))),
     nextStep ? h('button', { type: 'button', class: 'primary big', onclick: () => doStep(nextStep) }, `▶ Do the next step: ${nextStep.title}`)
       : h('span', { class: 'badge b-ok' }, '🎉 Your book is made')),
-    h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), msg));
+    h('progress', { max: '100', value: String(pct), 'aria-label': `${pct}% done` }), wordsLine(book.words), msg));
+  holder.appendChild(stepRail(book.steps.map(s => ({ id: s.id, title: s.title, state: BOOK_ERR[`${S.pid}:${s.id}`] ? 'problem' : s.state, word: RAIL_WORD[s.state] })),
+    { label: 'Make my book: all steps', current: book.next }));
   const ol = h('ol', { class: 'book-steps' });
+  const wordsBy = {};
+  for (const c of ((book.words || {}).chapters || [])) wordsBy[c.chapter_id] = c;
   for (const s of book.steps) {
     const b = BOOK_STATE[s.state] || ['?', s.state, 'b-muted'];
-    const li = h('li', { class: `book-step bs-${s.state}${s.id === book.next ? ' current' : ''}` },
-      h('div', { class: 'row space' }, h('h3', null, s.title), badge(b[0], b[1], b[2])),
+    const err = BOOK_ERR[`${S.pid}:${s.id}`];
+    const li = h('li', { class: `book-step bs-${s.state}${s.id === book.next ? ' current' : ''}${err ? ' bs-problem' : ''}`, id: `step-${s.id}`, tabindex: '-1', 'data-book-step': s.id },
+      h('div', { class: 'row space bs-head' }, h('h3', null, s.title, s.id === book.next ? h('span', { class: 'here-tag' }, '👉 You are here') : null),
+        h('span', { class: 'row' }, s.op ? setChip(s.op[0], s.op) : null, badge(b[0], b[1], b[2]),
+          err ? hazard(Object.assign({}, toProblem(err), { where: { book: profileOf().title || S.project.name, step: s.title, set: s.op ? s.op[0] : null, op: s.op } }), { retry: () => doStep(s) }) : null)),
       h('p', { class: 'small' }, s.about));
     if (s.state === 'blocked' && s.waiting_for) li.appendChild(h('p', { class: 'small muted' }, `Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}.`));
     if (s.approve && s.approve.length) {
@@ -4411,16 +4481,25 @@ function renderBook(holder, book, redraw) {
     if (s.id === 'chapters' && (s.chapters || []).length) {
       li.appendChild(h('ul', { class: 'book-items' }, s.chapters.map(c => {
         const cb = BOOK_STATE[c.state] || BOOK_STATE.blocked;
-        return h('li', null, h('strong', null, c.chapter_id), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]), ' ',
+        const wc = wordsBy[c.chapter_id];
+        return h('li', null, h('strong', null, c.chapter_id), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]),
+          wc && (wc.approved_words || wc.draft_words) ? h('span', { class: 'small muted' }, ` ${Math.max(wc.approved_words, wc.draft_words)} words `) : ' ',
           c.prose ? h('a', { class: 'btn small', href: plink('rec', c.prose.record_id) }, 'Read') : null,
           c.state !== 'done' && !(c.prose && ['DRAFT', 'VALIDATED'].includes(c.prose.lifecycle))
             ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id }), `Your AI is writing ${c.chapter_id}… (web AIs can take a few minutes)`) }, '✨ Write it with AI') : null,
               h('button', { type: 'button', class: 'small', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id, manual: true }), 'Preparing the chapter form…') }, '✍️ Write it myself')] : null);
       })));
     }
+    if (s.id === 'chapters' && book.ai_ready && (s.chapters || []).some(c => c.state !== 'done' && !c.prose)) {
+      const wa = writeAllBox(book, redraw);
+      acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', 'data-testid': 'write-all', onclick: () => wa.start() }, '✍ Write all chapters'));
+      li.appendChild(wa);
+    } else if (s.id === 'chapters' && (s.chapters || []).length) {
+      li.appendChild(writeAllBox(book, redraw));
+    }
     if (['setup_format', 'assemble', 'export', 'check'].includes(s.action)) {
       const label = { setup_format: '⚙️ Set up the book format', assemble: '🧩 Put the book together', export: '📦 Export my book', check: '🔎 Check the book' }[s.action];
-      acts.appendChild(h('button', { type: 'button', class: 'small primary', onclick: () => run(() => post(s.action), 'Working…') }, label));
+      acts.appendChild(h('button', { type: 'button', class: 'small primary', onclick: () => run(() => post(s.action), 'Working…', s.id) }, label));
     }
     if (s.approve && s.approve.length > 1) acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, `${s.approve.length} items`) }, `✔ Approve all ${s.approve.length}`));
     if (s.id === 'check' && s.result) li.appendChild(h('p', { class: 'small' }, 'Result: ', badge(s.result === 'PASS' ? '✔' : '✕', s.result, s.result === 'PASS' ? 'b-ok' : 'b-bad')));
@@ -4471,6 +4550,11 @@ function taskCard(where) {
     onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), ct.title || 'Open Make my book'));
   if (ct.message) box.appendChild(h('p', { class: 'small task-msg' }, ct.message));
   if (t.working_on) box.appendChild(h('p', { class: 'small task-working' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` ${t.working_on.title}…`));
+  if (t.book && t.book.words && t.book.words.words) {
+    const w = t.book.words;
+    box.appendChild(h('div', { class: 'task-words small' }, `📝 ${w.words.toLocaleString()} / ~${w.target_words.toLocaleString()} words`,
+      h('progress', { max: '100', value: String(w.percent || 0), 'aria-label': `${w.percent || 0}% of the word target` })));
+  }
   box.appendChild(h('p', { class: 'small muted task-ref' }, taskRef(ct)));
   return box;
 }
@@ -4996,6 +5080,7 @@ function wfRender() {
     const x = wfRowEl(r);
     const b = WF_BADGE[r.status] || ['?', r.status, 'b-muted'];
     clear(x.badge).appendChild(r.status === 'running' ? h('span', { class: 'badge b-info' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Running') : badge(b[0], b[1], b[2]));
+    if (r.status === 'FAIL') x.badge.appendChild(hazard({ code: 'FAILED', message: r.detail || 'This test row failed.', fix: r.fix, where: { step: `Test workflow › ${r.title}` } }, { retry: () => wfStart({ rows: [r.id] }), retryLabel: '🔁 Re-run this row' }, { small: true }));
     x.time.textContent = r.elapsed_ms != null ? fmtMs(r.elapsed_ms) : '';
     x.last.textContent = r.last_run_at ? `Last run ${fmtTime(r.last_run_at)}` : 'Not run yet';
     x.btn.textContent = r.last_run_at ? '🔁 Re-run' : '▶ Run';
@@ -5039,6 +5124,769 @@ async function wfReport() {
   } catch (e) { toast(`The report could not be opened: ${apiErrInfo(e).message}`); }
 }
 
+/* ======================================================================= ⚠️ problems where they are (R1-R3, S20) */
+// Every problem is shown ON the element that has it: a yellow ⚠️ button that opens a small popover with
+// WHERE (book › set › step › field), WHAT (plain words, technical code folded away), HOW TO FIX, and a
+// 🔁 "Try again" / "Open the form" / "Open Settings" button plus 📋 Copy diagnostics.
+/** el.append() that skips null/false children (h()-style). */
+function put(el, ...kids) { return append(el, kids); }
+const CLIENT_ERRORS = [];   // recent problems this page saw (codes, paths, short messages) for 📋 Copy diagnostics
+function noteClientError(code, where, message) {
+  CLIENT_ERRORS.push({ at: new Date().toISOString(), code: String(code || ''), where: String(where || '').slice(0, 120), message: String(message || '').slice(0, 200) });
+  if (CLIENT_ERRORS.length > 30) CLIENT_ERRORS.shift();
+}
+/** A problem object from anything that went wrong: ApiError, NetworkError, a job/run error {code, message, fix}, or an Error. */
+function toProblem(e, where) {
+  if (e && e.__problem) return where ? Object.assign({}, e, { where: Object.assign({}, e.where || {}, where) }) : e;
+  let code; let message; let path = ''; let fix = null; let status = null;
+  if (e instanceof ApiError) {
+    const x = e.errors[0] || {};
+    code = x.code || `HTTP_${e.status}`; message = x.message || `HTTP ${e.status}`; path = x.path || ''; fix = x.fix || null; status = e.status;
+  } else if (e instanceof NetworkError) { code = 'NETWORK'; message = e.message; }
+  else if (e && typeof e === 'object' && !(e instanceof Error) && (e.code || e.message)) { code = e.code; message = e.message; path = e.path || ''; fix = e.fix || null; }
+  else { code = 'BROWSER'; message = (e && e.message) || String(e); }
+  const p = problemFor(code, status);
+  return { __problem: true, code: code || 'UNKNOWN', status, message: message || '', path, title: p.title, what: p.what,
+    fix: fix || p.fix, action: p.action, where: Object.assign({}, (e && e.where) || {}, where || {}),
+    options: (e && e.options) || null, details: (e && e.details) || null, raw: e };
+}
+function whereText(w, { book = true } = {}) {
+  w = w || {};
+  const parts = [];
+  if (w.book && book) parts.push(w.book);
+  if (w.set) parts.push(`${w.set} · ${w.set_name || setInfo(w.set).name}`);
+  if (w.step) parts.push(w.step + (w.op && !String(w.step).includes(w.op) ? ` (${w.op})` : ''));
+  else if (w.op) parts.push(opLabel(w.op));
+  if (w.chapter) parts.push(`Chapter ${w.chapter}`);
+  if (w.field) parts.push(`field “${w.field}”`);
+  return parts.join(' › ') || 'This page';
+}
+let HZ = null;
+function closeHazard(restore = true) {
+  if (!HZ) return;
+  const { pop, anchor, onDoc, onKey } = HZ; HZ = null;
+  document.removeEventListener('mousedown', onDoc, true); document.removeEventListener('keydown', onKey, true);
+  pop.remove();
+  if (restore && anchor && document.contains(anchor)) { try { anchor.focus(); } catch { /* ignore */ } }
+}
+/** actions: {retry: fn, retryLabel, form: fn, open: href, openLabel, settings: true, extra: [{label, fn, cls}]} */
+function openHazard(anchor, prob, actions = {}) {
+  closeHazard(false);
+  const p = toProblem(prob);
+  const busy = h('span', { class: 'small muted', 'aria-live': 'polite' });
+  const act = (label, fn, cls) => h('button', { type: 'button', class: `small ${cls || ''}`, onclick: async ev => {
+    const b = ev.currentTarget; b.disabled = true; put(clear(busy), 'Working…');
+    try { await fn(); closeHazard(false); } catch (e) { put(clear(busy), `Did not work: ${toProblem(e).title}`); b.disabled = false; }
+  } }, label);
+  const buttons = [];
+  if (actions.retry) buttons.push(act(actions.retryLabel || '🔁 Try again', actions.retry, 'primary'));
+  for (const x of actions.extra || []) buttons.push(act(x.label, x.fn, x.cls));
+  if (actions.form) buttons.push(act('✏️ Open the form', actions.form));
+  if (actions.open) buttons.push(h('a', { class: 'btn small', href: actions.open, onclick: () => closeHazard(false) }, actions.openLabel || 'Open it'));
+  if (actions.settings || (p.action === 'settings' && actions.settings !== false)) buttons.push(h('a', { class: 'btn small', href: '#/settings', onclick: () => closeHazard(false) }, '⚙️ Open Settings'));
+  buttons.push(h('button', { type: 'button', class: 'small', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'));
+  const id = uid('hz');
+  const pop = h('div', { class: 'hz-pop', role: 'dialog', 'aria-labelledby': `${id}-t`, tabindex: '-1' },
+    h('div', { class: 'hz-head' }, h('strong', { id: `${id}-t` }, h('span', { 'aria-hidden': 'true' }, '⚠️ '), p.title),
+      h('button', { type: 'button', class: 'small', 'aria-label': 'Close', onclick: () => closeHazard() }, '✕')),
+    h('dl', { class: 'hz-dl' },
+      h('dt', null, 'Where'), h('dd', null, whereText(p.where)),
+      h('dt', null, 'What happened'), h('dd', null, p.what, p.message && p.message !== p.what ? h('span', { class: 'hz-msg' }, ` ${p.message}`) : null,
+        (p.details || []).length ? h('ul', { class: 'small' }, p.details.slice(0, 6).map(d => h('li', null, String(d)))) : null),
+      h('dt', null, 'How to fix it'), h('dd', null, p.fix)),
+    h('details', { class: 'hz-tech' }, h('summary', null, 'Technical details'),
+      h('p', { class: 'small' }, h('code', null, p.code), p.path ? [' at ', h('code', null, p.path)] : null, p.status ? ` · HTTP ${p.status}` : null)),
+    h('div', { class: 'row hz-actions' }, buttons), busy);
+  // Inside a modal dialog only the dialog is interactive (top layer), so the popover goes into it.
+  (anchor.closest('dialog[open]') || document.body).appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  const w = Math.min(440, window.innerWidth - 16);
+  pop.style.width = `${w}px`;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+  let top = r.bottom + 6;
+  const ph = pop.offsetHeight;
+  if (top + ph > window.innerHeight - 8) top = r.top - ph - 6 > 8 ? r.top - ph - 6 : window.innerHeight - ph - 8;
+  pop.style.left = `${left}px`; pop.style.top = `${Math.max(8, top)}px`;
+  const onDoc = ev => { if (!pop.contains(ev.target) && ev.target !== anchor && !anchor.contains(ev.target)) closeHazard(false); };
+  const onKey = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); ev.preventDefault(); closeHazard(); } };
+  document.addEventListener('mousedown', onDoc, true); document.addEventListener('keydown', onKey, true);
+  HZ = { pop, anchor, onDoc, onKey };
+  const first = pop.querySelector('.hz-actions button, .hz-actions a'); (first || pop).focus();
+  noteClientError(p.code, whereText(p.where, { book: false }), p.message);
+}
+/** The ⚠️ marker: put it on the exact element that has the problem. */
+function hazard(prob, actions = {}, { label = null, small = false } = {}) {
+  const p = toProblem(prob);
+  return h('button', { type: 'button', class: `hazard${small ? ' hz-small' : ''}`, 'aria-haspopup': 'dialog', title: `${p.title} — click for details`,
+    'aria-label': `Problem: ${p.title}. Show where, what and how to fix it`, 'data-code': p.code,
+    onclick: ev => { ev.preventDefault(); ev.stopPropagation(); openHazard(ev.currentTarget, p, actions); } },
+  h('span', { 'aria-hidden': 'true' }, '⚠️'), label ? h('span', { class: 'hz-label' }, label) : null);
+}
+/** A plain-language problem box (big) with the ⚠️ marker, the fix and the right buttons. */
+function problemBox(prob, actions = {}, title = null) {
+  const p = toProblem(prob);
+  const buttons = [];
+  if (actions.retry) buttons.push(h('button', { type: 'button', class: 'primary small', onclick: actions.retry }, actions.retryLabel || '🔁 Try again'));
+  for (const x of actions.extra || []) buttons.push(h('button', { type: 'button', class: `small ${x.cls || ''}`, onclick: x.fn }, x.label));
+  if (actions.form) buttons.push(h('button', { type: 'button', class: 'small', onclick: actions.form }, '✏️ Open the form'));
+  if (actions.open) buttons.push(h('a', { class: 'btn small', href: actions.open }, actions.openLabel || 'Open it'));
+  if (actions.settings || p.action === 'settings') buttons.push(h('a', { class: 'btn small', href: '#/settings' }, '⚙️ Open Settings'));
+  buttons.push(h('button', { type: 'button', class: 'small', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'));
+  return h('section', { class: 'state problem', role: 'alert' },
+    h('h3', null, hazard(p, actions), h('span', null, title || p.title)),
+    h('p', null, p.what, p.message && p.message !== p.what ? h('span', { class: 'muted' }, ` (${p.message})`) : null),
+    (p.details || []).length ? h('ul', { class: 'small' }, p.details.slice(0, 6).map(d => h('li', null, String(d)))) : null,
+    h('p', null, h('strong', null, 'How to fix it: '), p.fix),
+    h('details', { class: 'hz-tech small' }, h('summary', null, 'Technical details'), h('code', null, p.code), p.path ? [' at ', h('code', null, p.path)] : null),
+    h('div', { class: 'row' }, buttons));
+}
+/** Field-level problem for forms outside the schema form engine (profile, ⚡ settings, backups…). */
+function markFieldProblem(control, prob, where) {
+  if (!control) return;
+  const wrap = control.closest('.field') || control.parentElement;
+  const p = toProblem(prob, where);
+  let err = wrap.querySelector(':scope > .field-error');
+  if (!err) { err = h('span', { class: 'field-error', id: uid('ferr') }); wrap.appendChild(err); }
+  put(clear(err), hazard(p, { form: () => { control.focus(); } }, { small: true }), ' ', p.message || p.title);
+  err.hidden = false;
+  wrap.classList.add('has-error');
+  control.setAttribute('aria-invalid', 'true');
+  const d = (control.getAttribute('aria-describedby') || '').split(' ').filter(Boolean);
+  if (!d.includes(err.id)) d.push(err.id);
+  control.setAttribute('aria-describedby', d.join(' '));
+}
+function clearFieldProblems(root) {
+  for (const w of root.querySelectorAll('.has-error')) w.classList.remove('has-error');
+  for (const e of root.querySelectorAll('.field-error')) { clear(e); e.hidden = true; }
+  for (const c of root.querySelectorAll('[aria-invalid="true"]')) c.removeAttribute('aria-invalid');
+}
+/** Server errors (JSON pointers) → the matching controls; returns the errors that had no field. */
+function showFieldErrors(e, fields, where) {
+  const errs = e instanceof ApiError ? e.errors : [];
+  const rest = [];
+  for (const x of errs) {
+    const key = String(x.path || '').replace(/^\/(payload|profile)?\/?/, '').split('/')[0];
+    const ctl = fields[key];
+    if (ctl) markFieldProblem(ctl, x, Object.assign({}, where, { field: (ctl.labels && ctl.labels[0] ? ctl.labels[0].textContent : key) }));
+    else rest.push(x);
+  }
+  return rest;
+}
+
+/** 📋 Copy diagnostics: a safe report (no keys, prompts or book text) from the server, plus this page's recent problems. */
+async function copyDiagnostics({ download = false } = {}) {
+  const client = { user_agent: navigator.userAgent, screen: `${window.innerWidth}x${window.innerHeight}`,
+    page: (location.hash || '#/').split('/').slice(0, 2).join('/'), errors: CLIENT_ERRORS.slice(-15) };
+  let text;
+  try {
+    const rep = await api('POST', '/diagnostics', { body: { client } });
+    const full = Object.assign({}, rep); delete full.text;
+    text = `${rep.text}\n${JSON.stringify(full, null, 2)}`;
+  } catch (e) {
+    text = ['BookForge diagnostics (the BookForge program did not answer, so only this page\'s view is included)',
+      `Generated: ${new Date().toISOString()}`, `Browser: ${client.user_agent}`, `Screen: ${client.screen}`,
+      `Problem reaching BookForge: ${toProblem(e).code}`, 'Recent problems on this page:',
+      ...CLIENT_ERRORS.slice(-15).map(x => `  ${x.at} ${x.code} ${x.where} ${x.message}`)].join('\n');
+  }
+  if (download) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const a = h('a', { href: url, download: 'bookforge-diagnostics.txt' }); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast('Diagnostics downloaded (no keys, prompts or book text)');
+    return text;
+  }
+  await copyText(text, 'Diagnostics copied (no keys, prompts or book text) — paste it into your message');
+  return text;
+}
+/** The global safety net: anything unexpected becomes a ⚠️ bar with details and Copy diagnostics (never silent). */
+function showGlobalProblem(prob) {
+  const p = toProblem(prob, { step: (document.querySelector('main h1') || {}).textContent || 'This page' });
+  noteClientError(p.code, whereText(p.where, { book: false }), p.message);
+  let bar = document.getElementById('global-problem');
+  if (!bar) bar = h('div', { id: 'global-problem', class: 'global-problem', role: 'alert' });
+  const host = [...document.querySelectorAll('dialog[open]')].pop() || document.body;  // stay visible above an open dialog
+  if (bar.parentElement !== host) host.appendChild(bar);
+  put(clear(bar), hazard(p, { retry: p.action === 'reload' ? () => location.reload() : null, retryLabel: '🔁 Reload the page' }),
+    h('span', { class: 'gp-text' }, h('strong', null, p.title), ' — ', p.message.length > 140 ? p.message.slice(0, 137) + '…' : p.message),
+    h('button', { type: 'button', class: 'small', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Dismiss', onclick: () => bar.remove() }, '✕'));
+}
+
+/* ======================================================================= shared: downloads, set chips, clocks */
+async function downloadFile(pid, branch, f, title) {
+  try {
+    const blob = await api('GET', `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch)}/assets/${encodeURIComponent(f.record_id)}/${f.version}`, { blob: true });
+    const ext = { PDF: 'pdf', EPUB: 'epub', DOCX: 'docx' }[f.format] || 'bin';
+    const name = `${(title || 'book').replace(/[^\w\- ]+/g, '').trim() || 'book'}.${ext}`;
+    const url = URL.createObjectURL(blob);
+    const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(`Downloading ${name}`);
+  } catch (e) { showGlobalProblem(toProblem(e, { step: `Download ${f.format}` })); }
+}
+function setChip(letter, op) {
+  if (!letter) return null;
+  return h('span', { class: `set-chip set-${letter}`, title: `Set ${letter} · ${setInfo(letter).name}${op ? ` · ${opLabel(op)}` : ''}` },
+    h('span', { class: 'sc-l' }, letter), op ? h('span', { class: 'sc-op' }, op) : null);
+}
+function fmtElapsed(ms) {
+  if (!ms || ms < 0) return '0 s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m} min ${s % 60} s` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+function sinceMs(iso, endIso) {
+  if (!iso) return 0;
+  const a = Date.parse(iso); const b = endIso ? Date.parse(endIso) : Date.now();
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, b - a) : 0;
+}
+function wordsLine(w) {
+  if (!w || !w.target_words) return null;
+  const pct = Math.max(0, Math.min(100, w.percent || 0));
+  return h('div', { class: 'words-line' },
+    h('div', { class: 'row space' }, h('span', null, h('span', { 'aria-hidden': 'true' }, '📝 '), h('strong', null, `${(w.words || 0).toLocaleString()} words`),
+      h('span', { class: 'muted' }, ` of about ${w.target_words.toLocaleString()}`)),
+    h('span', { class: 'small muted' }, `${(w.approved_words || 0).toLocaleString()} approved · ${(w.draft_words || 0).toLocaleString()} in drafts`)),
+    h('progress', { class: 'words-bar', max: '100', value: String(pct), 'aria-label': `Words: ${pct}% of the target` }));
+}
+
+/* ======================================================================= ⚡ Make a book for me (R14, S21) */
+const MB = { dialog: null, run: null, poll: null, tick: null, opener: null, latest: null, view: 'setup', sig: '' };
+const RUN_WORD = { queued: ['…', 'Starting', 'b-info'], running: ['⏳', 'Working', 'b-ai'], waiting: ['⏳', 'Waiting for the AI', 'b-warn'],
+  pausing: ['⏸', 'Pausing…', 'b-warn'], paused: ['⏸', 'Paused', 'b-warn'], done: ['✔', 'Done', 'b-ok'], cancelled: ['✖', 'Cancelled', 'b-muted'],
+  interrupted: ['⚠️', 'Interrupted', 'b-warn'] };
+const STEP_ICON = { pending: '○', running: '⏳', waiting: '⏳', done: '✔', failed: '⚠️', paused: '⏸', cancelled: '✖', skipped: '–' };
+function initMakeBook() {
+  const btn = $('#mab-btn');
+  if (btn) btn.addEventListener('click', ev => openMakeBook(ev.currentTarget));
+  const d = $('#mab-dialog');
+  d.addEventListener('cancel', ev => { ev.preventDefault(); if (!HZ) closeMakeBook(); });
+  refreshRunChip();
+  setInterval(() => { if (document.visibilityState === 'visible' && !S.authFailed) refreshRunChip(); }, 5000);
+}
+async function refreshRunChip() {
+  if (!S.token || S.authFailed) return;
+  let out;
+  try { out = await api('GET', '/autobook'); } catch { return; }
+  const live = (out.active || [])[0];
+  const pend = (out.runs || []).find(r => ['paused', 'interrupted', 'pausing'].includes(r.status));
+  MB.latest = live || pend || null;
+  const btn = $('#mab-btn'); if (!btn) return;
+  const lab = btn.querySelector('.tb-label');
+  btn.classList.toggle('running', !!live);
+  btn.classList.toggle('needs-you', !live && !!pend);
+  if (live) {
+    const done = live.steps.filter(s => s.state === 'done').length;
+    lab.textContent = live.status === 'waiting' ? `Waiting… ${done}/${live.steps.length}` : `Making… ${done}/${live.steps.length}`;
+    btn.setAttribute('aria-label', `Make a book for me: working, ${done} of ${live.steps.length} steps done. Open the progress window`);
+  } else if (pend) {
+    lab.textContent = pend.status === 'interrupted' ? 'Interrupted' : 'Paused';
+    btn.setAttribute('aria-label', 'Make a book for me: paused, needs you. Open the progress window');
+  } else { lab.textContent = 'Make a book'; btn.setAttribute('aria-label', 'Make a book for me'); }
+}
+async function openMakeBook(opener, { runId = null, fresh = false } = {}) {
+  MB.opener = opener || null;
+  const d = $('#mab-dialog'); MB.dialog = d;
+  if (!d.open) { try { d.showModal(); } catch { d.setAttribute('open', ''); } }
+  let run = null;
+  try {
+    if (runId) run = await api('GET', `/autobook/${encodeURIComponent(runId)}`);
+    else if (!fresh) { await refreshRunChip(); if (MB.latest) run = await api('GET', `/autobook/${encodeURIComponent(MB.latest.id)}`); }
+  } catch (e) { run = null; }
+  if (run) { MB.run = run; MB.view = 'progress'; renderRun(); startRunPolling(); }
+  else { MB.view = 'setup'; renderMakeSetup(); }
+}
+function closeMakeBook() {
+  stopRunPolling();
+  const d = MB.dialog || $('#mab-dialog');
+  try { if (d.open) d.close(); } catch { /* ignore */ }
+  const o = MB.opener && document.contains(MB.opener) ? visibleOpener(MB.opener) : $('#mab-btn');
+  if (o && o.focus) { try { o.focus(); } catch { /* ignore */ } }
+  refreshRunChip();
+}
+function mbShell(title, ...body) {
+  const d = MB.dialog;
+  put(clear(d), h('div', { class: 'st-head' }, h('h2', { id: 'mab-title' }, title),
+    h('button', { type: 'button', class: 'small', onclick: closeMakeBook, 'aria-label': 'Close (the run keeps going in the background)' }, '✕ Close')), ...body);
+}
+async function renderMakeSetup() {
+  const fields = {};
+  const err = h('div', { 'aria-live': 'polite' });
+  const genre = h('input', { type: 'text', id: 'mb-genre', list: 'mb-genres', maxlength: '120', placeholder: 'Let the AI choose', autocomplete: 'off' });
+  const idea = h('textarea', { id: 'mb-idea', rows: '3', maxlength: '2000', placeholder: 'Let the AI choose (or write one sentence: who, where, what goes wrong)' });
+  const lengths = Object.entries(LENGTH_INFO).map(([k, [l, dsc]]) => {
+    const id = `mb-len-${k}`;
+    return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'radio', name: 'mb-len', id, value: k, checked: k === 'short_story' }),
+      h('label', { for: id }, h('strong', null, l), h('span', { class: 'hint' }, dsc + (k === 'short_story' ? ' — quickest (recommended for a first try)' : ''))));
+  });
+  const slot = h('select', { id: 'mb-slot' }, h('option', { value: '' }, 'Automatic — the best ready AI'));
+  fields.genre = genre; fields.idea = idea; fields.slot_id = slot;
+  const lengthBox = h('fieldset', { class: 'field', id: 'mb-length' }, h('legend', null, 'Length'), lengths);
+  fields.length = lengthBox.querySelector('input');
+  const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
+  const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
+  const form = h('form', { novalidate: true, class: 'mb-setup', onsubmit: ev => { ev.preventDefault(); go(false); } },
+    h('p', { class: 'lead' }, 'BookForge makes a whole new book for you with your AI — characters, plot, every chapter — and gives you a PDF, EPUB and Word file at the end. You can watch every step, pause or cancel any time.'),
+    h('div', { class: 'consent-box', role: 'note' }, h('strong', null, '✋ Your consent for this run: '),
+      'pressing Start lets the AI reviewer approve the drafts it checks and passes — for this one new book, in this run only. Drafts it does not pass are fixed by the AI (up to twice) or wait for your decision. Your other books are never touched. A backup is made first.'),
+    h('details', { class: 'mb-quick', open: true }, h('summary', null, 'Quick settings (all optional)'),
+      h('div', { class: 'grid-2' },
+        h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
+        h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
+      lengthBox,
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea)),
+    err, h('div', { class: 'form-actions' }, startAll, startSet));
+  mbShell('⚡ Make a book for me', form);
+  startAll.addEventListener('click', () => go(true));
+  try {
+    for (const { s, health } of await loadSlotChoices(false)) {
+      if (['none', 'manual'].includes(s.adapter_id)) continue;
+      const st = slotStage(s, health);
+      slot.appendChild(h('option', { value: s.slot_id }, `${s.slot_id} · ${slotName(s)} — ${st.word}`));
+    }
+  } catch { /* automatic still works */ }
+  async function go(auto) {
+    clear(err); clearFieldProblems(form);
+    const body = { author_confirms: true };
+    if (!auto) {
+      body.genre = genre.value.trim(); body.idea = idea.value.trim(); body.slot_id = slot.value || null;
+      const l = form.querySelector('input[name="mb-len"]:checked'); body.length = l ? l.value : 'short_story';
+    }
+    startAll.disabled = startSet.disabled = true;
+    err.appendChild(loadingState('Starting…'));
+    try {
+      const run = await api('POST', '/autobook', { body });
+      MB.run = run; MB.view = 'progress'; renderRun(); startRunPolling(); refreshRunChip();
+      announce('Make a book for me started');
+    } catch (e) {
+      clear(err);
+      const rest = showFieldErrors(e, fields, { book: 'New book', step: 'Make a book for me' });
+      if (rest.length || !(e instanceof ApiError)) err.appendChild(problemBox(toProblem(rest[0] ? new ApiError(e.status, { errors: rest }) : e, { step: 'Make a book for me' }), { retry: () => go(auto) }));
+      startAll.disabled = startSet.disabled = false;
+    }
+  }
+}
+function startRunPolling() {
+  stopRunPolling();
+  const tick = async () => {
+    if (!MB.run || !MB.dialog || !MB.dialog.open) return;
+    try {
+      const r = await api('GET', `/autobook/${encodeURIComponent(MB.run.id)}`);
+      const was = MB.run.status;
+      MB.run = r; renderRun();
+      if (r.status !== was && ['done', 'paused', 'cancelled'].includes(r.status)) { refreshRunChip(); if (S.pid === r.project_id) refreshRecords().catch(() => {}); }
+    } catch (e) { noteClientError(toProblem(e).code, 'Make a book progress', toProblem(e).message); }
+    if (MB.run && (MB.run.alive || ['running', 'waiting', 'queued', 'pausing'].includes(MB.run.status))) MB.poll = setTimeout(tick, 1200);
+  };
+  MB.poll = setTimeout(tick, 600);
+  MB.tick = setInterval(() => { if (MB.dialog && MB.dialog.open) updateRunClocks(); }, 1000);
+}
+function stopRunPolling() { clearTimeout(MB.poll); MB.poll = null; clearInterval(MB.tick); MB.tick = null; }
+function updateRunClocks() {
+  const r = MB.run; if (!r || !MB.dialog) return;
+  const el = MB.dialog.querySelector('.mb-elapsed');
+  if (el) el.textContent = fmtElapsed(sinceMs(r.started_at, r.finished_at));
+  for (const s of r.steps) {
+    const t = MB.dialog.querySelector(`[data-step="${s.id}"] .mb-time`);
+    if (t && s.started_at) t.textContent = fmtElapsed(sinceMs(s.started_at, s.finished_at));
+  }
+  const w = MB.dialog.querySelector('.mb-wait-in');
+  if (w && r.waiting && r.waiting.retry_at) {
+    const left = Math.max(0, Math.round((Date.parse(r.waiting.retry_at) - Date.now()) / 1000));
+    w.textContent = `retrying in ${left} s`;
+  }
+}
+async function runAction(path, body, label) {
+  try {
+    const r = await api('POST', `/autobook/${encodeURIComponent(MB.run.id)}/${path}`, { body: body || {} });
+    MB.run = r; renderRun(); startRunPolling(); refreshRunChip();
+    if (label) announce(label);
+  } catch (e) { const box = MB.dialog.querySelector('.mb-msg'); if (box) clear(box).appendChild(problemBox(toProblem(e, { step: 'Make a book for me' }))); }
+}
+function runDecision(prob) {
+  const r = MB.run;
+  const extra = [];
+  const opts = prob.options || [];
+  if (opts.includes('approve_anyway')) {
+    extra.push({ label: '✔ Approve anyway', cls: 'primary', fn: async () => {
+      const ok = await choiceDialog('Approve as the author?', h('div', null,
+        h('p', null, 'The AI reviewer did not pass this draft. Approving it anyway is YOUR approval (it is logged as yours), and the run continues.'),
+        prob.reasons && prob.reasons.length ? h('ul', null, prob.reasons.map(x => h('li', null, x))) : null), [{ id: 'yes', label: '✔ Yes, I approve it' }]);
+      if (ok === 'yes') await runAction('decide', { action: 'approve_anyway', author_confirms: true }, 'Approved; continuing');
+    } });
+  }
+  if (opts.includes('edit') && prob.record_id) {
+    extra.push({ label: '✏️ Edit it myself', fn: () => { closeMakeBook(); go(link('p', r.project_id, r.branch_id || 'main', 'edit', prob.record_id)); toast('Edit and save it, then open ⚡ and press “I edited it — continue”'); } });
+    extra.push({ label: '▶ I edited it — continue', fn: () => runAction('decide', { action: 'edited' }, 'Continuing') });
+  }
+  return extra;
+}
+function renderRun() {
+  const r = MB.run; if (!r || !MB.dialog) return;
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, (s.items || []).map(i => i.state)]), (r.files || []).length]);
+  if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
+  MB.sig = sig;
+  const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
+  const done = r.steps.filter(s => s.state === 'done').length;
+  const head = h('div', { class: 'mb-head' },
+    h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),
+      h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, r.finished_at)))))),
+    h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
+  const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
+    ['running', 'queued'].includes(r.status) ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, ' ',
+    r.waiting ? [h('strong', null, r.waiting.message.replace(/ — retrying in \d+ s$/, '')), ' — ', h('span', { class: 'mb-wait-in' }, `retrying in ${r.waiting.retry_in_s} s`)] : r.phase);
+  const ol = h('ol', { class: 'mb-steps', 'aria-label': 'Steps of this run' });
+  for (const s of r.steps) {
+    const icon = (s.state === 'running' && r.status === 'waiting') ? '⏳' : (STEP_ICON[s.state] || '○');
+    const li = h('li', { class: `mb-step st-${s.state}${s.id === r.current && !['done', 'cancelled'].includes(r.status) ? ' current' : ''}`, 'data-step': s.id, 'aria-current': s.id === r.current && r.status !== 'done' ? 'step' : null },
+      h('span', { class: 'mb-ico', 'aria-hidden': 'true' }, s.state === 'running' && r.status === 'running' ? h('span', { class: 'spinner' }) : icon),
+      h('div', { class: 'mb-main' },
+        h('div', { class: 'row mb-title-row' }, h('strong', null, s.title), setChip(s.set, s.op),
+          h('span', { class: 'small muted mb-time' }, s.started_at ? fmtElapsed(sinceMs(s.started_at, s.finished_at)) : ''),
+          s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: '🔁 Try again', extra: runDecision(s.problem),
+            settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
+        h('p', { class: 'small mb-msg-line' }, s.message || s.about),
+        (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
+          h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null))) : null));
+    ol.appendChild(li);
+  }
+  const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
+  if (r.problem && r.status === 'paused') {
+    msg.appendChild(problemBox(r.problem, { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: r.problem.code === 'REVIEW_NOT_PASSED' ? '🔁 Try again (2 more AI fixes)' : '🔁 Try again',
+      extra: runDecision(r.problem), settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(r.problem.code) },
+    `${r.problem.where ? r.problem.where.step : 'A step'} needs you`));
+    if (r.problem.code === 'REVIEW_NOT_PASSED' && r.problem.reasons && r.problem.reasons.length) {
+      msg.appendChild(h('div', { class: 'small rv-why' }, h('strong', null, 'What the AI reviewer said: '), h('ul', null, r.problem.reasons.map(x => h('li', null, x)))));
+    }
+  } else if (r.status === 'interrupted') {
+    msg.appendChild(problemBox({ code: 'INTERRUPTED', message: r.phase }, { retry: () => runAction('resume', {}, 'Resumed'), retryLabel: '▶ Resume' }));
+  }
+  const ctl = h('div', { class: 'form-actions mb-controls' });
+  if (['running', 'waiting', 'queued'].includes(r.status)) ctl.appendChild(h('button', { type: 'button', class: 'big', 'data-testid': 'mb-pause', onclick: () => runAction('pause', {}, 'Pausing') }, '⏸ Pause'));
+  if (['paused', 'interrupted'].includes(r.status) || (r.status === 'pausing' && !r.alive)) ctl.appendChild(h('button', { type: 'button', class: 'primary big', 'data-testid': 'mb-resume', onclick: () => runAction('resume', {}, 'Resumed') }, '▶ Resume'));
+  if (!['done', 'cancelled'].includes(r.status)) {
+    ctl.appendChild(h('button', { type: 'button', class: 'danger', 'data-testid': 'mb-cancel', onclick: async () => {
+      const ok = await choiceDialog('Cancel this run?', 'The book made so far stays in Your books (you can finish it by hand in Make my book). This cannot be resumed.', [{ id: 'yes', label: '✖ Yes, cancel it' }]);
+      if (ok === 'yes') runAction('cancel', {}, 'Cancelled');
+    } }, '✖ Cancel'));
+  }
+  if (['done', 'cancelled'].includes(r.status)) ctl.appendChild(h('button', { type: 'button', onclick: () => { MB.run = null; MB.view = 'setup'; stopRunPolling(); renderMakeSetup(); } }, '⚡ Make another book'));
+  let doneBox = null;
+  if (r.status === 'done') {
+    doneBox = h('section', { class: 'mb-done state ok' }, h('h3', null, '🎉 Your book is made'),
+      h('p', null, 'Every step is done: written, reviewed, put together and checked.'),
+      h('div', { class: 'downloads' }, h('strong', null, '⬇ Download: '), (r.files || []).map(f => h('button', { type: 'button', class: 'primary', 'data-format': f.format, onclick: () => downloadFile(r.project_id, r.branch_id || 'main', f, r.title) }, `${f.format}`))),
+      h('div', { class: 'row' }, h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, '📘 Open the book'),
+        h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'journal'), onclick: () => closeMakeBook() }, '📜 Book journal'),
+        h('a', { class: 'btn', href: '#/shelf', onclick: () => closeMakeBook() }, '📚 My finished books')));
+  }
+  const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
+  mbShell('⚡ Make a book for me', head, phase, doneBox, msg, ol, ctl, consent,
+    r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
+  updateRunClocks();
+}
+
+/* ======================================================================= ✍ Write all chapters (S2) */
+const WA = { job: null, poll: null };
+function writeAllBox(book, redraw) {
+  const box = h('div', { class: 'wa-box', 'aria-live': 'polite' });
+  const draw = () => {
+    const j = WA.job;
+    clear(box);
+    if (!j || j.project_id !== S.pid) return;
+    const running = j.alive || j.status === 'running';
+    put(box, h('div', { class: 'row space' }, h('strong', null, running ? '✍ Writing all chapters…' : j.status === 'done' ? '✍ All chapters are written' : j.status === 'error' ? '✍ Writing stopped' : '✍ Write all chapters: stopped'),
+      h('span', { class: 'small muted' }, `${j.done} of ${j.total} · ${fmtElapsed(j.elapsed_ms)}`)),
+    h('progress', { max: String(j.total || 1), value: String(j.done || 0), 'aria-label': `${j.done} of ${j.total} chapters written` }),
+    j.waiting ? h('p', { class: 'small' }, '⏳ ', j.waiting.message) : h('p', { class: 'small muted' }, j.phase || ''),
+    h('ul', { class: 'mb-items' }, j.items.map(i => h('li', { class: `st-${i.state}` }, h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label,
+      i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null, i.note ? h('span', { class: 'muted small' }, ` — ${i.note}`) : null,
+      i.state === 'failed' && j.problem ? [' ', hazard(Object.assign({}, j.problem, { where: Object.assign({ book: profileOf().title || S.project.name }, j.problem.where || {}) }), { retry: () => waAct('resume') })] : null))),
+    j.status === 'error' && j.problem ? problemBox(j.problem, { retry: () => waAct('resume') }) : null,
+    h('div', { class: 'row' }, running ? h('button', { type: 'button', class: 'small danger', onclick: () => waAct('cancel') }, '✖ Stop after this chapter') : null,
+      j.status === 'done' ? h('a', { class: 'btn small primary', href: plink('review') }, '📝 Read and approve them') : null));
+  };
+  const poll = async () => {
+    clearTimeout(WA.poll);
+    if (!WA.job) return;
+    try { WA.job = await api('GET', bpath(`/book/write-all/${encodeURIComponent(WA.job.id)}`)); } catch (e) { noteClientError(toProblem(e).code, 'Write all chapters', toProblem(e).message); }
+    if (!document.contains(box)) return;
+    draw();
+    if (WA.job.alive || WA.job.status === 'running') WA.poll = setTimeout(poll, 1500);
+    else { try { await refreshRecords(); } catch { /* ignore */ } redraw(); }
+  };
+  const waAct = async what => {
+    try { WA.job = await api('POST', bpath(`/book/write-all/${encodeURIComponent(WA.job.id)}/${what}`)); draw(); poll(); }
+    catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Write all chapters', set: 'C', op: 'C02' }))); }
+  };
+  box.start = async () => {
+    try { WA.job = await api('POST', bpath('/book/write-all')); draw(); poll(); }
+    catch (e) { clear(box).appendChild(problemBox(toProblem(e, { book: profileOf().title || S.project.name, set: 'C', step: 'Write all chapters', op: 'C02' }), { settings: true })); }
+  };
+  (async () => {
+    if (!WA.job || WA.job.project_id !== S.pid) {
+      try { const out = await api('GET', bpath('/book/write-all')); WA.job = out.job; } catch { WA.job = null; }
+    }
+    if (WA.job && WA.job.project_id === S.pid && (WA.job.alive || ['running', 'error'].includes(WA.job.status))) { draw(); if (WA.job.alive) poll(); }
+  })();
+  return box;
+}
+
+/* ======================================================================= ❤️ health (R12) + background work (S11) */
+const HL = { last: null, open: false };
+function initHealth() {
+  const btn = $('#health-btn');
+  if (!btn) return;
+  btn.addEventListener('click', ev => openHealth(ev.currentTarget));
+  const d = $('#health-dialog');
+  d.addEventListener('cancel', ev => { ev.preventDefault(); if (!HZ) closeHealth(); });
+  setTimeout(() => refreshHealth(false), 1500);
+  setInterval(() => { if (document.visibilityState === 'visible' && !S.authFailed) refreshHealth(false); }, 60000);
+}
+async function refreshHealth(force) {
+  if (!S.token || S.authFailed) return HL.last;
+  try { HL.last = await api('GET', `/health${force ? '?force=1' : ''}`); }
+  catch (e) {
+    const p = toProblem(e);
+    HL.last = { overall: 'problem', checked_at: new Date().toISOString(), checks: [{ id: 'server', title: 'The BookForge program', status: 'problem', code: p.code, detail: p.what, fix: p.fix }] };
+  }
+  updateHealthBtn();
+  if (HL.open) renderHealth();
+  return HL.last;
+}
+function updateHealthBtn() {
+  const btn = $('#health-btn'); if (!btn || !HL.last) return;
+  const o = HL.last.overall;
+  btn.dataset.state = o;
+  const n = (HL.last.checks || []).filter(c => ['warn', 'problem'].includes(c.status)).length;
+  btn.querySelector('.hb-ico').textContent = o === 'ok' ? '❤️' : o === 'warn' ? '💛' : '⚠️';
+  btn.setAttribute('aria-label', o === 'ok' ? 'Health: everything is fine. Open the health panel' : `Health: ${n} thing(s) need attention. Open the health panel`);
+  btn.title = o === 'ok' ? 'Health: everything is fine' : `Health: ${n} thing(s) need attention`;
+}
+function openHealth(opener) {
+  HL.opener = opener; HL.open = true;
+  const d = $('#health-dialog');
+  if (!d.open) { try { d.showModal(); } catch { d.setAttribute('open', ''); } }
+  renderHealth(); refreshHealth(true); loadJobs();
+}
+function closeHealth() {
+  HL.open = false;
+  const d = $('#health-dialog'); try { if (d.open) d.close(); } catch { /* ignore */ }
+  if (HL.opener && HL.opener.focus) { try { HL.opener.focus(); } catch { /* ignore */ } }
+}
+function healthAction(c) {
+  if (c.action === 'settings') return { settings: true };
+  if (c.action === 'backup') return { retry: async () => { await api('POST', '/backups'); toast('Backup saved'); await refreshHealth(true); }, retryLabel: '💾 Back up now' };
+  if (c.action === 'book' && c.project_id) return { open: link('p', c.project_id, 'main', 'book'), openLabel: '📘 Open the book' };
+  if (c.action === 'jobs') return { extra: [{ label: '⬇ Show background work', fn: () => { const el = document.getElementById('jobs-h'); if (el) el.scrollIntoView({ block: 'start' }); } }] };
+  return { retry: () => refreshHealth(true), retryLabel: '🔁 Check again' };
+}
+function renderHealth() {
+  const d = $('#health-dialog'); const res = HL.last;
+  const jobsBox = d.querySelector('#jobs-box') || h('div', { id: 'jobs-box' });
+  put(clear(d), h('div', { class: 'st-head' }, h('h2', { id: 'health-title' }, '❤️ Health'), h('button', { type: 'button', class: 'small', onclick: closeHealth }, '✕ Close')));
+  if (!res) { d.appendChild(loadingState('Checking…')); d.appendChild(jobsBox); return; }
+  const word = { ok: 'Everything looks fine.', warn: 'Mostly fine — something needs a look.', problem: 'Something needs fixing.' }[res.overall] || '';
+  put(d, h('p', { class: `hl-sum hl-${res.overall}` }, h('strong', null, word), h('span', { class: 'small muted' }, ` Checked ${fmtTime(res.checked_at)}. BookForge checks again every minute while this page is open.`)),
+    h('ul', { class: 'hl-list' }, (res.checks || []).map(c => h('li', { class: `hl-row hl-${c.status}`, 'data-check': c.id },
+      h('span', { class: 'hl-ico', 'aria-hidden': 'true' }, { ok: '✔', info: 'ℹ', warn: '⚠️', problem: '⚠️' }[c.status] || '•'),
+      h('div', { class: 'hl-main' }, h('div', { class: 'row' }, h('strong', null, c.title),
+        ['warn', 'problem'].includes(c.status) ? hazard({ code: c.code || (c.status === 'problem' ? 'FAILED' : 'BLOCKED'), message: c.detail, fix: c.fix, where: { step: `Health › ${c.title}` } }, healthAction(c)) : null),
+      h('p', { class: 'small' }, c.detail), c.fix ? h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), c.fix) : null)))),
+    h('div', { class: 'row form-actions' }, h('button', { type: 'button', class: 'primary', onclick: () => refreshHealth(true) }, '🔁 Run checks now'),
+      h('button', { type: 'button', 'data-testid': 'copy-diag', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'),
+      h('button', { type: 'button', onclick: () => copyDiagnostics({ download: true }) }, '⬇ Download diagnostics')),
+    h('p', { class: 'small muted' }, 'Diagnostics never contain your keys, prompts or book text — safe to send when asking for help.'),
+    jobsBox);
+}
+const JOB_KIND = { autobook: '⚡ Make a book for me', write_all: '✍ Write all chapters', assist: '✨ Fill with AI', review_review: '🧐 AI review', review_fix: '🛠 AI fix', bible: '📖 Bible Builder' };
+async function loadJobs() {
+  const box = document.getElementById('jobs-box') || h('div', { id: 'jobs-box' });
+  let out;
+  try { out = await api('GET', '/jobs'); } catch (e) { clear(box).appendChild(problemBox(toProblem(e, { step: 'Background work' }), { retry: loadJobs })); return; }
+  const items = out.jobs.slice(0, 15);
+  put(clear(box), h('h3', { id: 'jobs-h' }, '🧵 Background work'),
+    items.length ? h('ul', { class: 'hl-list' }, items.map(j => h('li', { class: `hl-row hl-${['interrupted', 'error'].includes(j.status) ? 'warn' : j.status === 'done' ? 'ok' : 'info'}` },
+      h('span', { class: 'hl-ico', 'aria-hidden': 'true' }, ['interrupted', 'error', 'paused'].includes(j.status) ? '⚠️' : j.status === 'done' ? '✔' : '⏳'),
+      h('div', { class: 'hl-main' }, h('div', { class: 'row' }, h('strong', null, JOB_KIND[j.kind] || j.kind), badge('•', j.status, j.status === 'done' ? 'b-ok' : ['interrupted', 'error', 'paused'].includes(j.status) ? 'b-warn' : 'b-info'),
+        j.op ? setChip(j.op[0], j.op) : null, j.steps_total ? h('span', { class: 'small muted' }, `${j.steps_done}/${j.steps_total} steps`) : null,
+        j.total ? h('span', { class: 'small muted' }, `${j.done}/${j.total}`) : null),
+      h('p', { class: 'small' }, j.phase || ''),
+      h('div', { class: 'row' },
+        j.kind === 'autobook' ? h('button', { type: 'button', class: 'small', onclick: () => { closeHealth(); openMakeBook(null, { runId: j.id }); } }, 'Open') : null,
+        j.resumable ? h('button', { type: 'button', class: 'small primary', onclick: async ev => {
+          ev.currentTarget.disabled = true;
+          try { const r = await api('POST', `/jobs/${encodeURIComponent(j.id)}/resume`); toast(`${JOB_KIND[j.kind] || 'Job'} resumed`); if (j.kind === 'autobook') { closeHealth(); openMakeBook(null, { runId: j.id }); } else loadJobs(); return r; }
+          catch (e) { showGlobalProblem(toProblem(e, { step: 'Resume background work' })); ev.currentTarget.disabled = false; }
+        } }, '▶ Resume') : null,
+        ['interrupted', 'error', 'cancelled', 'done', 'paused'].includes(j.status) && j.kind !== 'autobook' ? h('button', { type: 'button', class: 'small', onclick: async () => { try { await api('POST', `/jobs/${encodeURIComponent(j.id)}/dismiss`); loadJobs(); } catch (e) { showGlobalProblem(e); } } }, 'Dismiss') : null))))) :
+      h('p', { class: 'small muted' }, 'No background work yet.'));
+}
+
+/* ======================================================================= 📜 book journal (R11) */
+const JR_ICON = { ai: '🤖', ai_review: '🧐', ai_fix: '🛠', approval: '✅', problem: '⚠️', retry: '⏳', pause: '⏸', resume: '▶', backup: '💾', export: '📦', run: '⚡', step: '•', setting: '⚙️', import: '📥', cancel: '✖', note: 'ℹ' };
+const APPROVAL_LABEL = { author: 'by you', standing_auto_approve: 'auto-approve (your setting)', run_consent: 'Make-a-book consent', workflow_test: 'workflow test' };
+async function viewJournal(main) {
+  const q = new URLSearchParams((location.hash.split('?')[1]) || '');
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], [S.project.name, plink()], 'Book journal'), h('h1', null, '📜 Book journal')),
+    h('div', { class: 'row' }, h('a', { class: 'btn', href: plink('book') }, '📘 Make my book'))));
+  main.appendChild(h('p', { class: 'muted' }, 'Everything that happened to this book, in order: who did what, which AI, approvals and their kind, retries, pauses, problems and exports. It never shows keys, prompts or your text.'));
+  const step = h('select', { id: 'jr-step' }, h('option', { value: '' }, 'All steps'), Object.keys(SETS).map(l => h('option', { value: l }, `Set ${l} · ${setInfo(l).name}`)));
+  const probs = h('input', { type: 'checkbox', id: 'jr-probs' });
+  const list = h('div', null, loadingState('Reading the journal…'));
+  const dl = h('button', { type: 'button', onclick: async () => {
+    try {
+      const qs = new URLSearchParams({ format: 'md', download: '1' }); if (step.value) qs.set('step', step.value); if (probs.checked) qs.set('problems', '1');
+      const blob = await api('GET', bpath(`/journal?${qs}`), { blob: true });
+      const url = URL.createObjectURL(blob); const a = h('a', { href: url, download: `book-journal-${(profileOf().title || S.project.name).replace(/[^\w\- ]+/g, '').trim() || 'book'}.md` });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); toast('Journal downloaded');
+    } catch (e) { showGlobalProblem(toProblem(e, { step: 'Book journal' })); }
+  } }, '⬇ Download (.md)');
+  main.appendChild(h('div', { class: 'card row jr-filters' }, h('label', { for: 'jr-step' }, 'Show'), step, h('span', { class: 'check-row' }, probs, h('label', { for: 'jr-probs' }, '⚠️ Problems only')), dl));
+  main.appendChild(list);
+  const load = async () => {
+    clear(list).appendChild(loadingState('Reading the journal…'));
+    const qs = new URLSearchParams(); if (step.value) qs.set('step', step.value); if (probs.checked) qs.set('problems', '1');
+    let j;
+    try { j = await api('GET', bpath(`/journal?${qs}`)); } catch (e) { clear(list).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Book journal' }), { retry: load })); return; }
+    clear(list);
+    if (!j.entries.length) { list.appendChild(stateBox('empty', probs.checked ? 'No problems recorded — good news.' : 'Nothing recorded yet for this filter.')); return; }
+    const ol = h('ol', { class: 'journal' });
+    for (const e of j.entries.slice().reverse()) {
+      const st = e.step || {};
+      ol.appendChild(h('li', { class: `jr-item jr-${e.kind}${e.problem ? ' has-problem' : ''}` },
+        h('span', { class: 'jr-ico', 'aria-hidden': 'true' }, JR_ICON[e.kind] || '•'),
+        h('div', { class: 'jr-main' }, h('div', { class: 'row' }, h('span', null, e.what),
+          e.problem ? hazard({ code: e.problem.code || 'FAILED', message: e.problem.message || e.what, where: { book: j.title, set: st.set, step: st.name, op: st.op } }, { open: st.op ? plink('op', st.op) : null, openLabel: 'Open the step' }, { small: true }) : null),
+        h('div', { class: 'row small muted' }, h('time', { datetime: e.at }, fmtTime(e.at)), setChip(st.set, st.op), h('span', null, e.who || ''),
+          e.ai && e.ai.slot ? h('span', null, `AI ${e.ai.slot}${e.ai.model ? ` · ${e.ai.model}` : ''}`) : null,
+          e.approval ? badge('✔', APPROVAL_LABEL[e.approval] || e.approval, 'b-ok') : null,
+          e.outcome && !['SUCCESS'].includes(e.outcome) && !e.approval ? badge('•', e.outcome, /APPROVE|done/.test(e.outcome) ? 'b-ok' : /REVISE|REJECT|PROBLEM|REJECTED|error/.test(e.outcome) ? 'b-warn' : 'b-muted') : null))));
+    }
+    put(list, h('p', { class: 'small muted' }, `${j.count} entr${j.count === 1 ? 'y' : 'ies'}, newest first.`), ol);
+  };
+  step.addEventListener('change', load); probs.addEventListener('change', load);
+  if (q.get('problems') === '1') probs.checked = true;
+  await load();
+}
+
+/* ======================================================================= 📚 my finished books (S22) */
+async function viewShelf(main) {
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'My finished books'), h('h1', null, '📚 My finished books')),
+    h('button', { type: 'button', class: 'primary', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me')));
+  main.appendChild(h('p', { class: 'muted' }, 'Every book you exported, newest first. Each file is checked against its fingerprint before you download it.'));
+  const holder = h('div', null, loadingState('Checking your finished books…'));
+  main.appendChild(holder);
+  let out;
+  try { out = await api('GET', '/shelf'); } catch (e) { clear(holder).appendChild(problemBox(toProblem(e, { step: 'My finished books' }), { retry: () => route() })); return; }
+  clear(holder);
+  if (!out.books.length) {
+    holder.appendChild(stateBox('empty', 'No finished book yet', h('p', null, 'Export a book from 📘 Make my book, or press ⚡ Make a book for me and let the AI make one.')));
+    return;
+  }
+  const grid = h('ul', { class: 'shelf' });
+  for (const b of out.books) {
+    grid.appendChild(h('li', { class: `shelf-book${b.all_verified ? '' : ' damaged'}` },
+      h('div', { class: 'sb-cover', 'aria-hidden': 'true' }, h('span', null, (b.title || '?').slice(0, 1))),
+      h('div', { class: 'sb-main' }, h('h2', null, b.title), h('p', { class: 'small muted' }, [b.author, b.genre].filter(Boolean).join(' · ') || ' '),
+        h('p', { class: 'small' }, `Exported ${fmtTime(b.exported_at)}`, b.made_by_run ? h('span', { class: 'muted' }, ' · made with ⚡') : null),
+        h('div', { class: 'downloads' }, b.files.map(f => f.verified
+          ? h('button', { type: 'button', class: 'primary small', 'data-format': f.format, onclick: () => downloadFile(b.project_id, b.branch_id, f, b.title) }, `⬇ ${f.format}`, h('span', { class: 'sr-ok', title: 'Fingerprint checked' }, ' ✔'))
+          : h('span', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: true }, f.format), hazard({ code: 'HASH_MISMATCH', message: `The ${f.format} file is missing or changed.`, where: { book: b.title, set: 'G', step: 'Export my book', op: f.op } }, { open: link('p', b.project_id, b.branch_id, 'book'), openLabel: '📘 Export again' }, { small: true })))),
+        h('a', { class: 'small', href: link('p', b.project_id, b.branch_id, 'book') }, 'Open the book'))));
+  }
+  holder.appendChild(grid);
+}
+
+/* ======================================================================= Settings: backups (S9), AI retry (S10), diagnostics (S8) */
+function backupsCard() {
+  const box = h('div', { 'aria-live': 'polite' });
+  const card = h('section', { class: 'card', 'aria-labelledby': 'bk-h' }, h('h2', { id: 'bk-h' }, '💾 Backups'),
+    h('p', { class: 'small' }, 'BookForge backs up all your books automatically: once a day, before ⚡ Make a book for me, before putting a book together and before exporting. Only the newest ones are kept. Keys are never part of a backup.'), box);
+  const load = async () => {
+    let out;
+    try { out = await api('GET', '/backups'); } catch (e) { clear(box).appendChild(problemBox(toProblem(e, { step: 'Settings › Backups' }), { retry: load })); return; }
+    const keep = h('input', { type: 'number', id: 'bk-keep', min: '1', max: '100', value: String(out.keep), class: 'wz-num' });
+    const now = h('button', { type: 'button', class: 'primary', onclick: async ev => {
+      ev.currentTarget.disabled = true;
+      try { await api('POST', '/backups'); toast('Backup saved and verified'); load(); refreshHealth(true); } catch (e) { box.prepend(problemBox(toProblem(e, { step: 'Settings › Backups' }))); ev.currentTarget.disabled = false; }
+    } }, '💾 Back up now');
+    const saveKeep = h('button', { type: 'button', class: 'small', onclick: async () => {
+      clearFieldProblems(card);
+      try { await api('PUT', '/backups/settings', { body: { keep: parseInt(keep.value, 10) } }); toast('Saved'); load(); }
+      catch (e) { showFieldErrors(e, { keep }, { step: 'Settings › Backups' }); }
+    } }, 'Save');
+    put(clear(box), h('div', { class: 'row' }, now, h('div', { class: 'field row bk-keep' }, h('label', { for: 'bk-keep' }, 'Keep the newest'), keep, saveKeep)),
+      out.last_error ? problemBox({ code: 'INTERNAL_ERROR', message: 'The last automatic backup failed.', fix: 'Press 💾 Back up now; if it fails, check the free disk space.' }) : null,
+      out.backups.length ? h('ul', { class: 'record-list bk-list' }, out.backups.map(b => h('li', { class: 'record-item' },
+        h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, fmtTime(b.created_at)), h('div', { class: 'r-meta' }, `${b.label || b.reason || 'Backup'} · ${(b.bytes / 1024 / 1024).toFixed(1)} MB`)),
+        h('div', { class: 'r-badges' }, b.verified ? badge('✔', 'Verified', 'b-ok') : hazard({ code: 'HASH_MISMATCH', message: 'This backup did not verify.', where: { step: 'Settings › Backups' } }, {}, { small: true }),
+          h('button', { type: 'button', class: 'small danger', onclick: () => restoreBackup(b, load) }, '↩ Restore'))))) : stateBox('empty', 'No backup yet'));
+  };
+  load();
+  return card;
+}
+function restoreBackup(b, reload) {
+  modal('↩ Restore a backup', close => {
+    const word = h('input', { type: 'text', id: uid('rs'), autocomplete: 'off', spellcheck: 'false', 'aria-describedby': 'rs-h' });
+    const tick = h('input', { type: 'checkbox', id: uid('rs-ok') });
+    const out = h('div', { 'aria-live': 'polite' });
+    const go2 = h('button', { type: 'submit', class: 'danger' }, '↩ Restore this backup');
+    return h('form', { novalidate: true, onsubmit: async ev => {
+      ev.preventDefault(); clear(out); clearFieldProblems(ev.currentTarget);
+      if (!tick.checked) { markFieldProblem(tick, { code: 'APPROVAL_REQUIRED', message: 'Tick the box to confirm.' }, { step: 'Restore a backup' }); return; }
+      if (word.value.trim().toUpperCase() !== 'RESTORE') { markFieldProblem(word, { code: 'MISSING_INPUT', message: 'Type the word RESTORE.' }, { step: 'Restore a backup', field: 'Type RESTORE' }); word.focus(); return; }
+      go2.disabled = true; out.appendChild(loadingState('Restoring… (a safety backup is made first)'));
+      try {
+        const r = await api('POST', `/backups/${encodeURIComponent(b.name)}/restore`, { body: { author_confirms: true, confirm: word.value.trim() } });
+        close(); toast(r.message); S.project = null; await loadProjects(); reload(); route();
+      } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Restore a backup' }))); go2.disabled = false; }
+    } },
+    h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. BookForge first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
+    h('div', { class: 'check-row field' }, tick, h('label', { for: tick.id }, 'I understand that all my books go back to this backup.')),
+    h('div', { class: 'field' }, h('label', { for: word.id }, 'Type RESTORE to confirm'), word, h('span', { class: 'hint', id: 'rs-h' }, 'This extra step prevents accidents.')),
+    out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
+  });
+}
+function retryCard() {
+  const box = h('div');
+  const card = h('section', { class: 'card', 'aria-labelledby': 'rt-h' }, h('h2', { id: 'rt-h' }, '⏳ When the AI is busy'),
+    h('p', { class: 'small' }, 'If the AI is busy or cannot be reached, BookForge waits and tries again on its own, and shows “waiting for Claude (busy) — retrying in 30 s”. A slow answer (time-out) is never retried automatically, because the first answer may still arrive; you press 🔁 Try again.'), box);
+  (async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/ai-retry'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › When the AI is busy' }))); return; }
+    const on = h('input', { type: 'checkbox', id: 'rt-on', checked: cur.enabled });
+    const delays = h('input', { type: 'text', id: 'rt-delays', value: cur.delays_s.join(', '), 'aria-describedby': 'rt-d-h' });
+    const total = h('input', { type: 'number', id: 'rt-total', min: '10', max: '3600', value: String(cur.max_total_s), class: 'wz-num' });
+    const save = h('button', { type: 'button', class: 'small primary', onclick: async () => {
+      clearFieldProblems(card);
+      const ds = delays.value.split(/[,\s]+/).filter(Boolean).map(x => parseInt(x, 10));
+      if (ds.some(x => !Number.isFinite(x))) { markFieldProblem(delays, { code: 'INVALID_INPUT', message: 'Whole numbers of seconds, separated by commas.' }, { step: 'Settings › When the AI is busy', field: 'Waiting times' }); return; }
+      try { await api('PUT', '/settings/ai-retry', { body: { enabled: on.checked, delays_s: ds, max_total_s: parseInt(total.value, 10) } }); toast('Saved'); }
+      catch (e) { const rest = showFieldErrors(e, { delays_s: delays, max_total_s: total, enabled: on }, { step: 'Settings › When the AI is busy' }); if (rest.length) box.appendChild(problemBox(e)); }
+    } }, 'Save');
+    put(box, h('div', { class: 'check-row field' }, on, h('label', { for: 'rt-on' }, 'Wait and retry when the AI is busy')),
+      h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'rt-delays' }, 'Waiting times (seconds)'), delays, h('span', { class: 'hint', id: 'rt-d-h' }, 'For example 15, 30, 60, 120 — the last one repeats.')),
+        h('div', { class: 'field' }, h('label', { for: 'rt-total' }, 'Give up after (seconds)'), total)), h('div', { class: 'row' }, save));
+  })();
+  return card;
+}
+function helpCard() {
+  return h('section', { class: 'card', 'aria-labelledby': 'hp-h' }, h('h2', { id: 'hp-h' }, '🩺 Help and diagnostics'),
+    h('p', { class: 'small' }, 'When something does not work, 📋 Copy diagnostics and paste it into your message. It contains versions, health results, recent error codes and job states — never your keys, prompts or book text.'),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'),
+      h('button', { type: 'button', onclick: () => copyDiagnostics({ download: true }) }, '⬇ Download diagnostics'),
+      h('button', { type: 'button', onclick: ev => openHealth(ev.currentTarget) }, '❤️ Open the health panel')));
+}
+/** Book-path step rail: the whole flow at a glance (done / needs you / AI can / working / waiting / problem). */
+function stepRail(items, { label = 'Progress', current = null } = {}) {
+  return h('ol', { class: 'step-rail', 'aria-label': label }, items.map((it, i) => h('li', { class: `rail-${it.state}${it.id === current ? ' here' : ''}`, 'aria-current': it.id === current ? 'step' : null },
+    h('a', { href: it.href || `#rail-${it.id}`, onclick: it.href ? null : ev => { ev.preventDefault(); const t = document.getElementById(`step-${it.id}`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.focus({ preventScroll: true }); } } },
+      h('span', { class: 'rail-dot', 'aria-hidden': 'true' }, it.state === 'done' ? '✔' : it.state === 'problem' ? '!' : String(i + 1)),
+      h('span', { class: 'rail-lab' }, it.title, h('span', { class: 'visually-hidden' }, ` — ${it.word || it.state}${it.id === current ? ' (you are here)' : ''}`))))));
+}
+
 /* ======================================================================= boot */
 /** Focus target after a dialog closes: items inside a closed top-bar menu fall back to the menu button. */
 function visibleOpener(el) {
@@ -5070,9 +5918,13 @@ function initNavigation() {
     ev.preventDefault();
     const r = ev.reason;
     if (r && r.name === 'AbortError') return;
-    const msg = r instanceof ApiError ? apiErrInfo(r).message : (r && r.message) || String(r);
-    toast(`Something went wrong: ${msg}`);
+    if (r instanceof ApiError && r.status === 401) return;  // the "open from the start link" page explains it
+    showGlobalProblem(r);
     try { console.warn('Bookforge: unhandled problem', r); } catch { /* ignore */ }
+  });
+  window.addEventListener('error', ev => {
+    if (!ev || (!ev.error && !ev.message)) return;
+    showGlobalProblem({ code: 'BROWSER', message: (ev.error && ev.error.message) || ev.message });
   });
 }
 
@@ -5084,6 +5936,8 @@ function boot() {
   initTaskTimer();
   initBibleButton();
   initNavigation();
+  initMakeBook();
+  initHealth();
   const toggle = $('#nav-toggle');
   toggle.addEventListener('click', () => {
     const nav = $('#sidenav'); const open = !nav.classList.contains('open');

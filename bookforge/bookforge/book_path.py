@@ -36,6 +36,8 @@ LENGTHS = {"short_story": ("Short story", 1, 3), "novella": ("Novella", 6, 10), 
 AI_SLOT_CHOICES = ("", "AI-1", "AI-2", "AI-3", "manual")
 FORMAT_KEYS = ("font_file", "font", "page", "pdf_profile", "epub_profile", "docx_profile", "metadata", "toc_style")
 ASSEMBLY = ("G02", "G01", "G05", "G04", "G07")
+# Rough word targets for the profile length (used for the progress bar only).
+WORD_TARGETS = {"short_story": 5000, "novella": 25000, "novel": 80000}
 EXPORT_FOR = {"MANUSCRIPT_PDF": ("G11", "PDF", "application/pdf"),
               "EPUB_REFLOWABLE": ("G12", "EPUB", "application/epub+zip"),
               "EDITABLE_DOCX": ("G13", "DOCX",
@@ -371,8 +373,12 @@ class BookPath:
              action="check" if asm_done and not h05_rec else None, waiting_for=None if asm_done else "assemble",
              result=(h05_rec["data"].get("status") if h05_rec else None))
         nxt = next((s for s in steps if s["state"] != "done"), None)
+        try:
+            words = self.word_stats(chapters)
+        except Exception:  # noqa: BLE001 - a progress number must never break the checklist
+            words = None
         return {"project_id": self.pid, "branch_id": self.branch, "ai_ready": ai, "profile": prof,
-                "steps": steps, "next": nxt["id"] if nxt else None,
+                "steps": steps, "next": nxt["id"] if nxt else None, "words": words,
                 "done_count": sum(1 for s in steps if s["state"] == "done"), "total": len(steps)}
 
     def release_profiles(self):
@@ -417,8 +423,8 @@ class BookPath:
             return m
         raise StepError(op, r)
 
-    def a_create(self, body):
-        op = body.get("op")
+    def payload_for(self, op: str) -> dict:
+        """The CREATE payload of a planning step (B01/B03/B11), built from the profile and approved records."""
         prof = self.profile
         if op == "B01":
             idea = (prof.get("idea") or "").strip() or prof.get("title") or ""
@@ -429,14 +435,13 @@ class BookPath:
                                  f"for {prof['audience']}" if prof.get("audience") else None,
                                  f"tone: {prof['tone']}" if prof.get("tone") else None) if g]
             canon = [r["ref"] for r in (self.approved("A01") + self.approved("A04") + self.approved("A03"))[:20]]
-            return self._ai_or_manual("B01", {"idea": idea, "goals": goals, "canon_refs": canon}, "premise", manual=body.get("manual") is True)
+            return {"idea": idea, "goals": goals, "canon_refs": canon}
         if op == "B03":
             b01 = self.approved("B01")
             if not b01:
                 raise StepError.msg("Approve a premise first.")
             canon = [r["ref"] for r in (self.approved("A01") + self.approved("A04") + self.approved("A03"))[:20]]
-            return self._ai_or_manual("B03", {"premise_ref": b01[0]["ref"], "canon_refs": canon, "constraints": []},
-                                      "main plot", manual=body.get("manual") is True)
+            return {"premise_ref": b01[0]["ref"], "canon_refs": canon, "constraints": []}
         if op == "B11":
             b03 = self.approved("B03")
             if not b03:
@@ -449,19 +454,26 @@ class BookPath:
                         if e["path"].startswith("/payload/target_length")]
                 if errs:
                     payload.pop("target_length")
-            return self._ai_or_manual("B11", payload, "chapter outline", manual=body.get("manual") is True)
+            return payload
         raise _err("INVALID_INPUT", "/op", "this step creates B01, B03 or B11")
+
+    def a_create(self, body):
+        op = body.get("op")
+        if op not in ("B01", "B03", "B11"):
+            raise _err("INVALID_INPUT", "/op", "this step creates B01, B03 or B11")
+        what = {"B01": "premise", "B03": "main plot", "B11": "chapter outline"}[op]
+        return self._ai_or_manual(op, self.payload_for(op), what, manual=body.get("manual") is True)
 
     def _req_for(self, op, payload):
         return build_request(project_id=self.pid, branch_id=self.branch, op_id=op, action="CREATE",
                              principal_id=self.principal, payload=payload)
 
-    def a_write_chapter(self, body):
+    def prepare_chapter(self, cid) -> dict:
+        """C02 CREATE payload for one outline chapter; makes its C01 context first when needed."""
         outline = self.outline()
         if not outline:
             raise StepError.msg("Approve the chapter outline first.")
         chapters = {c["chapter_id"]: c for c in self.outline_chapters(outline)}
-        cid = body.get("chapter_id")
         if cid not in chapters:
             raise _err("INVALID_INPUT", "/chapter_id", "that chapter is not in the approved outline")
         ctx, latest, appr = self.chapter_prose(outline, cid)
@@ -477,12 +489,46 @@ class BookPath:
         instruction = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
                        + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
                        + (f". Audience: {prof['audience']}" if prof.get("audience") else ""))[:2000]
-        payload = {"chapter_id": cid, "outline_ref": outline["ref"], "context_ref": ctx["ref"],
-                   "instruction": instruction}
+        return {"chapter_id": cid, "outline_ref": outline["ref"], "context_ref": ctx["ref"], "instruction": instruction}
+
+    def a_write_chapter(self, body):
+        cid = body.get("chapter_id")
+        payload = self.prepare_chapter(cid)
         out = self._ai_or_manual("C02", payload, f"chapter “{cid}”", manual=body.get("manual") is True)
         if out.get("needs_manual"):
             out["manual_on"] = True
         return out
+
+    # ----------------------------------------------------------------- word count (S5)
+    def word_stats(self, chapters: list | None = None) -> dict:
+        """Words per chapter (newest draft and approved text) and in total, with a target from the profile length."""
+        if chapters is None:
+            outline = self.outline()
+            chapters = []
+            if outline:
+                for ch in self.outline_chapters(outline):
+                    _ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
+                    chapters.append({"chapter_id": ch["chapter_id"],
+                                     "prose": {"record_id": latest["record_id"], "version": latest["version"]}
+                                     if latest else None,
+                                     "approved": {"record_id": appr["record_id"], "version": appr["version"]}
+                                     if appr else None})
+        rows, draft_total, approved_total = [], 0, 0
+        for c in chapters:
+            d = a = 0
+            if c.get("prose"):
+                r = self.rec(c["prose"]["record_id"], c["prose"]["version"])
+                d = count_words((r or {}).get("data", {}).get("text") if r else "")
+            if c.get("approved"):
+                r = self.rec(c["approved"]["record_id"], c["approved"]["version"])
+                a = count_words((r or {}).get("data", {}).get("text") if r else "")
+            rows.append({"chapter_id": c["chapter_id"], "draft_words": d, "approved_words": a})
+            draft_total += d
+            approved_total += a
+        target = WORD_TARGETS.get(self.profile.get("length") or "", WORD_TARGETS["short_story"])
+        best = sum(max(r["draft_words"], r["approved_words"]) for r in rows)
+        return {"chapters": rows, "draft_words": draft_total, "approved_words": approved_total, "words": best,
+                "target_words": target, "percent": min(100, int(round(100 * best / target))) if target else 0}
 
     def a_approve(self, body):
         if body.get("author_confirms") is not True:
@@ -642,6 +688,10 @@ class StepError(Exception):
     @classmethod
     def msg(cls, text):
         return cls(text, None, text)
+
+
+def count_words(text) -> int:
+    return len(text.split()) if isinstance(text, str) else 0
 
 
 def problems(resp: dict) -> list[str]:

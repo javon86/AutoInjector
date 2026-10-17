@@ -60,11 +60,99 @@ places → premise → main plot → chapter outline → write each chapter → 
 together → export (PDF, EPUB, DOCX for the release profiles you chose) → a content check. Each step
 says **Done**, **Needs you**, **AI can do it**, **Ready** or **Waiting**, and the big **▶ Do the
 next step** button does the next one. Creative steps are written by your AI (or, with no AI, open a
-ready-made form for you to write); BookForge never approves anything for you — every approval asks
+ready-made form for you to write); BookForge never approves anything for you (the only exception is a ⚡ Make a book for me run you start, see below) — every approval asks
 *"Approve as the author?"*, and when a step needs an explicit approval record (for example a chapter
 without an objective review) one is recorded for exactly that version because you confirmed. At the
 end **⬇ Download my book** gives you the files. Full release readiness (H10) stays in Quality Checks.
 API: `GET /api/projects/{id}/branches/{b}/book`, `POST .../book/{create|write_chapter|approve|setup_format|assemble|export|check}`.
+
+## ⚡ Make a book for me
+
+The yellow **⚡ Make a book** button (top bar, Your books, the Overview and Make my book) lets your AI make a
+whole **new** book in one go. Quick settings are optional — genre, length (default **short story**), which AI
+(or Automatic) and an idea — or press **⚡ Start — let the AI choose everything**. BookForge first saves a backup,
+creates a separate new book (your other books are never touched), and then walks every step of Make my book: the
+AI invents the book (title, pen name, genre, readers, tone, idea), drafts the characters and places (Bible
+Builder), writes the premise, main plot, chapter outline and every chapter, then BookForge sets up the book
+format, puts the book together, exports **PDF, EPUB and Word** and runs the content check.
+
+**Your consent.** Pressing Start is your consent for *this run only*: each draft is checked by the AI reviewer;
+when it says *approve*, the draft is approved and logged as *“approved under your Make-a-book-for-me consent, run
+<id>”*. When it asks for changes the AI fixes the draft (at most twice) and it is reviewed again. If it still does
+not pass, the run **pauses with a ⚠️** on that step and you decide: **✔ Approve anyway** (your own approval),
+**✏️ Edit it myself** then **▶ I edited it — continue**, or **🔁 Try again** (two more AI fixes). Nothing is ever
+approved outside a run you started.
+
+**The progress window** shows every step (waiting, working, done, ⏸ paused, ⚠️ problem) with its set and step
+code, how long it took and a plain message; chapters and characters are listed one by one. **⏸ Pause**,
+**▶ Resume** (continues exactly where it stopped) and **✖ Cancel** are always there. You can close the window — the
+run keeps going, and the ⚡ button shows *Making… 4/11*. When it is done you get the download buttons and links to
+the book, its journal and your finished books. Runs survive reloading the page and even a BookForge restart (they
+then show *Interrupted — ▶ Resume*).
+
+**When the AI is busy.** If the AI is busy or cannot be reached, BookForge waits and tries again by itself (15 s,
+30 s, 60 s, 120 s … up to about 10 minutes; change it in Settings → *When the AI is busy*) and shows *“Waiting for
+Claude (busy) — retrying in 30 s”*. A slow answer (time-out) is never retried automatically, because the first
+answer may still arrive: the step pauses with a ⚠️ and **🔁 Try again**.
+
+## ✍ Write all chapters
+
+On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after
+another (context + prose) with a progress list and **✖ Stop after this chapter**. The chapters land in **📝 Needs
+your approval** — nothing is approved for you (unless you turned on auto-approve after AI review).
+
+## ⚠️ Problems are shown where they are
+
+Whenever something goes wrong, a yellow **⚠️** appears on the exact thing that has the problem — a step, a set
+tile, a step in the side bar, a form field, an AI slot, a test row, a run step or the ❤️ health icon. Click it to
+see **Where** (book › set › step › field), **What happened** in plain words (the technical code is folded away),
+**How to fix it**, and a button that does it: **🔁 Try again**, **✏️ Open the form** or **⚙️ Open Settings**, plus
+**📋 Copy diagnostics**. Form fields the server refuses are highlighted with their own ⚠️ and message. If the page
+hits something unexpected (or BookForge stops answering) a ⚠️ bar appears at the bottom instead of failing silently.
+
+## ❤️ Health, 📋 diagnostics and background work
+
+The **❤️** in the top bar turns **💛** or **⚠️** when something needs attention. BookForge checks about once a minute
+while the page is open: the database (read and write), free disk space, recent backups, each AI slot, the
+AutoInjector link and status updates, your exported files (still present and unchanged) and stuck background
+work. Click it for the **Health** panel: each check with ✔ or ⚠️, details and how to fix it, **🔁 Run checks now**,
+and **🧵 Background work** — runs, Write-all-chapters, Fill with AI, AI reviews and Bible Builder runs, including
+ones *interrupted* by a restart, with **▶ Resume** or **Dismiss**.
+
+**📋 Copy diagnostics** (Health panel, every ⚠️, Settings) copies a report you can paste into a message: versions,
+system, port, health results, recent error codes, job states and AI slot types. It never contains your keys,
+tokens, prompts, AI replies, book titles or book text. **⬇ Download diagnostics** saves it as a file.
+
+## 📜 Book journal
+
+**📜 Book journal** (More menu, Overview, Make my book) is a readable timeline of everything that happened to a
+book: who did what, which AI and model, every approval and its kind (*by you*, *auto-approve*, *Make-a-book
+consent*), AI reviews and fixes, waits and retries, pauses, problems, backups and exports. Filter by set and show
+*⚠️ Problems only*; **⬇ Download (.md)** saves it. It never contains keys, prompts or your text.
+
+## 💾 Automatic backups
+
+BookForge backs up all your books automatically: once a day (first start), before ⚡ Make a book for me, before
+putting a book together and before exporting. Each backup is verified; the newest 10 are kept (change it in
+Settings → Backups). **💾 Back up now** makes one any time. **↩ Restore** puts *all* your books back to that backup —
+it asks you to tick a box and type **RESTORE**, first saves a safety backup of how things are now (so you can undo
+it), and refuses while a run is working. Keys are never part of a backup.
+
+## 📝 Word count and 📚 My finished books
+
+Make my book, the Overview and the Current task card show how many words the book has (approved and in drafts)
+against a target from its length (short story ~5,000, novella ~25,000, novel ~80,000), with a progress bar; each
+chapter shows its own count. **📚 My finished books** (More menu, Your books, Overview) lists every exported book
+across your projects, newest first, with its formats and download buttons; each file is checked against its
+fingerprint first (a damaged one shows a ⚠️ with *Export again*).
+
+## A clearer look
+
+The top bar is a dark band, the side bar its own tinted area, and the work area light. Colors mean the same
+everywhere: **green = done**, **amber = needs you**, **purple = AI can do it**, **blue = working** (animated),
+**grey = waiting**, **yellow ⚠️ = problem**. Every module set A–K has its own color on tiles, the side bar,
+breadcrumbs and step chips. The page you are on is highlighted (“👉 You are here”), and the New book wizard and
+Make my book show a step rail of the whole flow. It works on phones (390 px) and desktops without sideways scrolling.
 
 ## ▶ Current task and 📝 Needs your approval
 

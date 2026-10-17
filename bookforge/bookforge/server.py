@@ -15,6 +15,7 @@ import re
 import secrets
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from http import HTTPStatus
@@ -23,15 +24,21 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import CLOSURE_REVISION, CONTRACT_VERSION, __version__
+from . import diagnostics, journal
 from .assist import AssistService, supports as assist_supports
+from .autobook import AutoBookService, WriteAllService
+from .backups import BackupManager
 from .canonical import sha256_bytes
 from .engine import Engine
 from .errors import BookforgeError, error
+from .health import HealthService
+from .jobs import JobStore, clean_retry_settings, DEFAULT_RETRY
 from .requests import build_request
 from .selftest import SelfTestRunner
 from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
+from .shelf import finished_books
 from .status_push import StatusPusher
 from .store import Store, new_id, utcnow
 from .workflow_test import WorkflowTestRunner
@@ -60,13 +67,22 @@ class App:
         self.token = token or self._load_or_create_token(Path(data_dir))
         with self.store.transaction() as tx:
             tx.ensure_principal(principal_id, "Author", sha256_bytes(self.token.encode()))
+        self.started = time.monotonic()
         self.selftest = SelfTestRunner(self.store, self.engine.providers, principal_id)
-        self.assist = AssistService(self.engine, principal_id)
+        # S11: background work survives restarts; anything that was running is now "interrupted - Resume".
+        self.jobstore = JobStore(self.store)
+        self.interrupted = self.jobstore.mark_interrupted()
+        self.errors = diagnostics.ErrorLog()
+        self.assist = AssistService(self.engine, principal_id, retry_busy=True, jobstore=self.jobstore)
         self.work = WorkTracker()
         self.review = ReviewService(self.engine, self.assist, principal_id, work=self.work, on_change=self.changed)
         self.workflow = WorkflowTestRunner(self.store, self.engine.providers, principal_id)
         self.pusher = StatusPusher(self)
         self.work.on_change = self.changed
+        self.backups = BackupManager(self.store, busy=self._restore_busy)
+        self.autobook = AutoBookService(self)
+        self.write_all = WriteAllService(self)
+        self.health = HealthService(self)
         self.port: int | None = None
         self._last_project: dict | None = None
 
@@ -109,6 +125,17 @@ class App:
             return cur
         rows = [r for r in self.store.projects_for(self.principal_id) if not self.is_test_project(r["project_id"])]
         return {"project_id": rows[-1]["project_id"], "branch_id": "main"} if rows else None
+
+    def _restore_busy(self) -> str | None:
+        if self.autobook.active():
+            return "the Make-a-book run"
+        if self.write_all.active():
+            return "Write all chapters"
+        if self.selftest.running:
+            return "Test everything"
+        if self.workflow.running:
+            return "the workflow test"
+        return None
 
     @staticmethod
     def ping() -> dict:
@@ -220,6 +247,8 @@ class App:
             return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
         if parts and parts[0] == "workflow-test":
             return self.route_workflow(method, parts, query, body)
+        if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings"):
+            return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
         if parts == ["projects"] and method == "GET":
@@ -259,7 +288,13 @@ class App:
                 if len(rest) == 2 and rest[0] == "records" and method == "GET":
                     return 200, self.record_detail(pid, branch, rest[1])
                 if len(rest) == 3 and rest[0] == "assets" and method == "GET":
+                    if not rest[2].isdigit():
+                        raise ApiError(400, "INVALID_INPUT", "/version", "the version must be a whole number")
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
+                if rest == ["journal"] and method == "GET":
+                    return self.journal(pid, branch, query)
+                if rest and rest[0] == "book" and len(rest) >= 2 and rest[1] == "write-all":
+                    return self.route_write_all(method, rest[2:], principal, pid, branch)
                 if rest == ["uploads"] and method == "POST":
                     return 201, self.upload(principal, pid, branch, body, headers)
                 if rest == ["activity"] and method == "GET":
@@ -287,11 +322,156 @@ class App:
             title = {"B01": "Writing the premise", "B03": "Writing the main plot", "B11": "Planning the chapters"}[body["op"]]
         if action == "write_chapter" and isinstance(body.get("chapter_id"), str):
             title = f"Writing chapter {body['chapter_id'][:30]}"
+        if action in ("assemble", "export"):
+            self.backups.try_backup(f"before-{action}")  # S9: automatic backup before big steps
         tok = self.work.begin(pid, op, title)
         try:
             return BookPath(self.engine, principal, pid, branch).act(action, body)
         finally:
             self.work.end(tok)
+
+    # ------------------------------------------------------------------ S2 write all chapters
+    def route_write_all(self, method, rest, principal, pid, branch):
+        wa = self.write_all
+        if rest == [] and method == "POST":
+            return 202, wa.start(principal, pid, branch)
+        if rest == [] and method == "GET":
+            return 200, {"job": wa.latest(principal, pid, branch)}
+        if len(rest) == 1 and method == "GET":
+            return 200, wa.public(wa.owned(principal, rest[0]))
+        if len(rest) == 2 and rest[1] == "cancel" and method == "POST":
+            return 200, wa.cancel(principal, rest[0])
+        if len(rest) == 2 and rest[1] == "resume" and method == "POST":
+            return 200, wa.resume(principal, rest[0])
+        raise ApiError(404, "NOT_FOUND", "/book/write-all", "no such endpoint")
+
+    # ------------------------------------------------------------------ journal (R11)
+    def journal(self, pid, branch, query):
+        step = (query.get("step") or [None])[0] or None
+        if step is not None and not re.fullmatch(r"[A-Ka-k](?:[0-9]{2})?", step):
+            raise ApiError(400, "INVALID_INPUT", "/step", "step: an operation ID like C02 or a set letter like C")
+        probs = (query.get("problems") or ["0"])[0] in ("1", "true", "yes")
+        j = journal.build(self, pid, branch, step=step, problems_only=probs)
+        if (query.get("format") or ["json"])[0] == "md":
+            disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+            name = f"book-journal-{pid}.md"
+            return 200, ("__binary__", "text/markdown; charset=utf-8", journal.render_markdown(j).encode("utf-8"),
+                         name, disposition)
+        return 200, j
+
+    # ------------------------------------------------------------------ R14/S21 runs, S11 jobs, R12, S8, S9, S22
+    def route_ops(self, method, parts, query, body, principal):
+        body = body if isinstance(body, dict) else {}
+        head = parts[0]
+        if head == "autobook":
+            ab = self.autobook
+            if parts == ["autobook"] and method == "GET":
+                return 200, {"runs": ab.list(principal), "active": [ab.public(r) for r in ab.active()]}
+            if parts == ["autobook"] and method == "POST":
+                return 202, ab.start(principal, body)
+            if len(parts) == 2 and method == "GET":
+                return 200, ab.public(ab.owned(principal, parts[1]))
+            if len(parts) == 3 and method == "POST":
+                act = {"pause": ab.pause, "resume": ab.resume, "cancel": ab.cancel}.get(parts[2])
+                if act:
+                    return 200, act(principal, parts[1])
+                if parts[2] == "decide":
+                    return 200, ab.decide(principal, parts[1], body)
+        if head == "jobs":
+            if parts == ["jobs"] and method == "GET":
+                pid = (query.get("project_id") or [None])[0]
+                items = [j for j in self.jobstore.list(project_id=pid, limit=60) if j.get("principal") in (None, principal)
+                         and j.get("status") != "dismissed"]
+                return 200, {"jobs": [self.job_summary(j) for j in items],
+                             "interrupted": sum(1 for j in items if j.get("status") == "interrupted")}
+            if len(parts) == 3 and parts[2] == "resume" and method == "POST":
+                return 200, self.resume_job(principal, parts[1])
+            if len(parts) == 3 and parts[2] == "dismiss" and method == "POST":
+                j = self.jobstore.get(parts[1])
+                if not j or j.get("principal") not in (None, principal):
+                    raise ApiError(404, "NOT_FOUND", "/job_id", "this job is not known")
+                if j.get("status") in ("running", "waiting", "queued", "pausing"):
+                    raise ApiError(409, "VERSION_CONFLICT", "/job_id", "it is still running; cancel it first")
+                j["status"] = "dismissed"
+                self.jobstore.save(j)
+                return 200, {"ok": True}
+        if parts == ["health"] and method == "GET":
+            return 200, self.health.run(force=(query.get("force") or ["0"])[0] == "1")
+        if parts == ["diagnostics"] and method in ("GET", "POST"):
+            rep = diagnostics.build(self, body.get("client") if method == "POST" else None)
+            fmt = (query.get("format") or ["json"])[0]
+            if fmt == "text" or (query.get("download") or ["0"])[0] == "1":
+                text = diagnostics.render_text(rep) + "\n" + json.dumps(rep, indent=2, ensure_ascii=False)
+                disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+                return 200, ("__binary__", "text/plain; charset=utf-8", text.encode("utf-8"),
+                             "bookforge-diagnostics.txt", disposition)
+            return 200, dict(rep, text=diagnostics.render_text(rep))
+        if head == "backups":
+            bm = self.backups
+            if parts == ["backups"] and method == "GET":
+                return 200, {"backups": bm.list(), "keep": bm.keep(), "last_error": bm.last_error}
+            if parts == ["backups"] and method == "POST":
+                return 201, bm.backup("manual")
+            if parts == ["backups", "settings"] and method == "PUT":
+                return 200, {"keep": bm.set_keep(body.get("keep")), "backups": bm.list()}
+            if len(parts) == 3 and parts[2] == "restore" and method == "POST":
+                out = bm.restore(parts[1], body)
+                self.changed()
+                return 200, out
+        if parts == ["shelf"] and method == "GET":
+            return 200, {"books": finished_books(self, verify=True, principal=principal)}
+        if parts == ["settings", "ai-retry"]:
+            if method == "GET":
+                cur = self.store.get_setting("ai_retry") or {}
+                return 200, dict(DEFAULT_RETRY, **(cur if isinstance(cur, dict) else {}))
+            if method == "PUT":
+                val = clean_retry_settings(body)
+                self.store.set_setting("ai_retry", val)
+                return 200, val
+        raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
+
+    def job_summary(self, j: dict) -> dict:
+        keep = ("id", "kind", "status", "phase", "project_id", "branch_id", "op", "slot", "slot_label", "created_at",
+                "updated_at", "finished_at", "error", "problem", "title", "done", "total", "current", "resumed_as")
+        out = {k: j.get(k) for k in keep if j.get(k) is not None}
+        out["resumable"] = j.get("status") in ("interrupted", "paused", "error") and (
+            j.get("kind") in ("autobook", "write_all") or bool(j.get("resume")))
+        if j.get("kind") == "autobook":
+            out["steps_done"] = sum(1 for s in j.get("steps") or [] if s.get("state") == "done")
+            out["steps_total"] = len(j.get("steps") or [])
+        if j.get("kind") == "write_all":
+            out["done"] = sum(1 for i in j.get("items") or [] if i.get("state") == "done")
+            out["total"] = len(j.get("items") or [])
+        return out
+
+    def resume_job(self, principal: str, job_id: str) -> dict:
+        j = self.jobstore.get(job_id)
+        if not j or j.get("principal") not in (None, principal):
+            raise ApiError(404, "NOT_FOUND", "/job_id", "this job is not known")
+        kind = j.get("kind")
+        if kind == "autobook":
+            return {"kind": kind, "run": self.autobook.resume(principal, job_id)}
+        if kind == "write_all":
+            return {"kind": kind, "job": self.write_all.resume(principal, job_id)}
+        r = j.get("resume")
+        if not r:
+            raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
+        if kind == "assist":
+            new = self.assist.start_assist(principal, dict(r))
+        elif kind in ("review_review", "review_fix"):
+            fn = self.review.start_review if r.get("kind") == "review" else self.review.start_fix
+            b = {"record_ids": r.get("record_ids"), "slot_id": r.get("slot_id")} if r.get("kind") == "review" else \
+                {"record_id": (r.get("record_ids") or [None])[0], "slot_id": r.get("slot_id")}
+            new = fn(principal, r["project_id"], r["branch_id"], b)
+        elif kind == "bible":
+            new = self.assist.create_bible(principal, {"project_id": j.get("project_id"), "branch_id": j.get("branch_id"),
+                                                       "idea": r.get("idea"), "counts": r.get("counts"),
+                                                       "slot_id": r.get("slot_id")})
+        else:
+            raise ApiError(400, "INVALID_INPUT", "/job_id", "this kind of job cannot be resumed")
+        j["status"], j["resumed_as"] = "resumed", new.get("job_id") or new.get("session_id")
+        self.jobstore.save(j)
+        return {"kind": kind, "job": new}
 
     def pair_autoinjector(self, body: dict) -> dict:
         """One-button pairing (#/pair): code -> connection key at the bridge -> all three slots -> health.
@@ -699,15 +879,20 @@ def make_handler(app: App):
                     return self._send(200, data, mime, {"Content-Disposition": f'{disposition}; filename="{name}"'})
                 self._send(status, payload)
             except ApiError as exc:
+                app.errors.add(exc.status, method, url.path, exc.body.get("errors"))
                 self._send(exc.status, exc.body)
             except BookforgeError as exc:
                 code = exc.code
                 status = {"NOT_FOUND": 404, "PERMISSION_DENIED": 403, "VERSION_CONFLICT": 409,
-                          "RATE_LIMITED": 429}.get(code, 400)
+                          "RATE_LIMITED": 429, "CAPABILITY_UNAVAILABLE": 400}.get(code, 400)
+                app.errors.add(status, method, url.path, exc.errors)
                 self._send(status, {"errors": exc.errors})
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - structured answer for the client, details in the log only
                 log.error("unhandled error: %s\n%s", exc, traceback.format_exc())
-                self._send(500, {"errors": [error("INTERNAL_ERROR", "", "internal error; see server log")]})
+                errs = [error("INTERNAL_ERROR", "", "BookForge hit an unexpected problem; details are in the "
+                              "BookForge window/log")]
+                app.errors.add(500, method, url.path, errs)
+                self._send(500, {"errors": errs})
 
         def do_GET(self):
             self._handle("GET")
@@ -779,6 +964,8 @@ def main(argv=None):
     args.port = httpd.server_address[1]
     app.port = args.port
     app.pusher.start()  # sends status to AutoInjector only when a slot is connected to it
+    # S9: one automatic backup per day, on the first start of the day (in the background).
+    threading.Thread(target=app.backups.daily_if_needed, name="bookforge-daily-backup", daemon=True).start()
     url = f"http://{args.host}:{args.port}/#token={app.token}"
     print(f"Bookforge {__version__} running. Data: {args.data_dir}")
     print(f"Open: {url}")

@@ -35,12 +35,21 @@ bookforge/
                            jobs through AssistService._call_ai, opt-in auto-approve (settings review_settings:<pid>),
                            WorkTracker ("working on")
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
-    status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status)
+    status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
+    jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
+                           RetryPolicy + wait_and_retry (S10 busy/unreachable backoff; TIMEOUT never retried)
+    autobook.py            ⚡ Make a book for me (AutoBookService, R14/S21) and ✍ Write all chapters (WriteAllService, S2)
+    backups.py             BackupManager: automatic/daily backups, rotation (backup_keep), guarded live restore (S9)
+    health.py              HealthService: ❤️ checks (db, disk, backups, AI slots, bridge/status push, exports, stuck jobs)
+    diagnostics.py         📋 safe diagnostics report + ErrorLog (recent API errors); guard() strips secrets/titles
+    journal.py             📜 per-book journal built from audit + provenance + outbox + job events (+ markdown)
+    shelf.py               📚 finished books across projects (exports re-read and hash-checked)
     selftest.py            "Test everything": real end-to-end self-test through engine.dispatch,
                            writes reports/selftest-<stamp>.md/.json (CLI: python -m bookforge selftest)
     server.py, web/        local HTTP API + browser workspace (web/app.js, web/clipboard.js = the one
                            clipboard helper with execCommand/paste-box fallbacks, hash routes #/p/<pid>/<branch>/...,
-                           incl. #/start wizard and .../book)
+                           incl. #/start wizard, .../book, .../journal, #/shelf); web/problems.js = the ONE
+                           code -> plain words table (every errors.py code, provider/HTTP/network codes)
   tests/                   pytest suite (conftest.py has the Harness fixture `h`)
 ```
 
@@ -173,6 +182,51 @@ SKIPPED and a manual candidate keeps dependent rows going. Projects with `workfl
   updated_at`). Titles only (canon by concept name, other drafts by step name). On change at most every 5 s plus a
   30 s heartbeat; body < 32 KiB; refused/timeouts back off quietly up to 60 s; 401 stops pushing with that key until a
   new key is saved. The project is the most recently opened real book (`App.touch_project`, setting `last_project`).
+
+## Make a book for me, background work, health (autobook.py, jobs.py, health.py, backups.py ...)
+
+* **Runs** (`AutoBookService`, kind `autobook`): `POST /api/autobook {author_confirms: true, genre?, length?,
+  slot_id?, idea?}` -> 202 run (409 while another run works; 400 `CAPABILITY_UNAVAILABLE` without an AI);
+  `GET /api/autobook` -> `{runs, active}`; `GET /api/autobook/{id}`; `POST .../{pause|resume|cancel}`;
+  `POST .../decide {action: approve_anyway (needs author_confirms) | retry | edited}`. A run is one daemon thread;
+  its whole state (steps with state/message/problem/items, consent `{by, at, run_id, scope}`, fix counts, files,
+  events) is saved to the JobStore after every change. Steps: backup, profile (new project, AI-invented profile via
+  `AssistService._call_ai`), canon (programmatic `BibleSession._run_sections` + `create`), premise/plot/outline
+  (`BookPath.payload_for` + dispatch), chapters (`BookPath.prepare_chapter` + dispatch), format, assemble,
+  export (all three release profiles), check. Each step is an idempotent "ensure" over BookPath state, so resume
+  (also after a restart) continues where it stopped.
+* **Consent:** `_approve()` refuses unless called from the live thread of that run, while it is running, for its
+  own project (`PERMISSION_DENIED` otherwise). APPROVE verdict -> `BookPath.approve_ref` + outbox
+  `autobook.approved_under_consent` (label with run id); REVISE/REJECT -> `ReviewService._run_fix` (max 2,
+  `MAX_FIXES`) -> review again -> else `StepProblem("REVIEW_NOT_PASSED", options=[approve_anyway, edit, retry])`.
+  Deterministic records (format, assembly, export approval manifest) are approved under the consent without review.
+  TIMEOUT inside a run -> the step pauses with ⚠️ (`problem.options = ["retry"]`), never fails the run.
+* **Retry queue (S10):** `AssistService(retry_busy=True)` (the App) and runner `ai_create` wrap AI calls in
+  `jobs.wait_and_retry`: UPSTREAM_UNAVAILABLE / RATE_LIMITED / SITE_BUSY wait `ai_retry.delays_s` (default
+  15/30/60/120, last repeats) up to `max_total_s` (600), showing `job.waiting = {code, retry_in_s, retry_at,
+  message}`; checks cancel/pause every 0.5 s. `GET/PUT /api/settings/ai-retry`. Library callers (tests) default to
+  no waiting.
+* **Write all chapters:** `POST .../branches/{b}/book/write-all` (202), `GET .../book/write-all` (latest),
+  `GET .../book/write-all/{id}`, `POST .../{id}/cancel|resume`. Drafts only.
+* **Persistence (S11):** `JobStore` uses only `Store.get_setting/set_setting` (key `job:<id>`) and a read query - no
+  schema change. Assist jobs, AI review/fix jobs and Bible sessions save summaries (+ a `resume` body). At App
+  start `mark_interrupted()` turns live jobs into `interrupted`. `GET /api/jobs[?project_id]`,
+  `POST /api/jobs/{id}/resume` (autobook/write_all resume in place; assist/review/bible start a new job from the
+  saved body), `POST /api/jobs/{id}/dismiss`.
+* **Health / diagnostics:** `GET /api/health[?force=1]` (cached 30 s; slot checks at most every 120 s);
+  `GET|POST /api/diagnostics[?format=text&download=1]` (POST may add `{client: {user_agent, screen, page,
+  errors}}`). Whitelisted fields only; `guard()` replaces saved keys, the token, project names and book titles.
+* **Backups:** `GET /api/backups`, `POST /api/backups`, `PUT /api/backups/settings {keep}`,
+  `POST /api/backups/{name}/restore {author_confirms: true, confirm: "RESTORE"}` (safety backup first, `Store.restore`
+  into a new folder, then SQLite online backup into the live DB; refused while a run works). Automatic:
+  `before-run`, `before-assemble`, `before-export` (also for the manual book actions), daily in `main()`.
+* **Journal / shelf:** `GET .../branches/{b}/journal[?step=C02|C&problems=1&format=md&download=1]`, `GET /api/shelf`.
+* **Errors:** every endpoint answers `{errors: [{code, path, message}]}`; unexpected exceptions are logged with the
+  traceback server-side and answered 500 `INTERNAL_ERROR` without details; all errors go into `app.errors`.
+* **Review queue fix:** C02 output has no `chapter_id`, so chapter drafts are keyed by their C01 context (several
+  chapters now appear separately) and titled "Chapter <id>".
+* Tests: `tests/test_autobook.py`; `tests/autobook_fake.py` is a deterministic schema-driven fake AI
+  (`fail_kind`, scripted verdicts, `gate`, `delay`).
 
 ## Tests
 

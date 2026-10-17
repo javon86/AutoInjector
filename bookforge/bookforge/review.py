@@ -298,6 +298,7 @@ class ReviewJob(Job):
                 "project_id": self.project_id, "branch_id": self.branch_id, "slot": self.slot,
                 "slot_label": self.slot_label, "model": self.model, "done": self.done, "total": len(self.record_ids),
                 "current": self.current, "results": list(self.results), "error": self.error,
+                "waiting": self.waiting,
                 "elapsed_ms": int((now - (self.started or self.created)) * 1000) if self.started else 0}
 
 
@@ -420,12 +421,39 @@ class ReviewService:
                     if s["id"] == "format":
                         format_ids.add(i["record_id"])
         recs = self.store.list_records(pid, branch)
+        # Which outline chapter a prose draft belongs to: C02 output has no chapter_id, so use the book path's
+        # chapter list and its C01 context records (a re-written chapter shares the context of the old one).
+        chapter_of: dict[str, str] = {}
+        for s in status["steps"]:
+            for c in s.get("chapters") or []:
+                if c.get("prose"):
+                    chapter_of[c["prose"]["record_id"]] = c["chapter_id"]
+        ctx_chapter = {ctx: key.split(":", 1)[1] for key, ctx in ((bp.mem.get("contexts") or {}).items())
+                       if isinstance(ctx, str) and ":" in key}
+
+        def chapter_key(r):
+            d = r.get("data") or {}
+            if d.get("chapter_id"):
+                return ("id", d.get("chapter_id"), d.get("scene_id"), json.dumps(d.get("outline_ref"), sort_keys=True))
+            for ref in r.get("source_refs") or []:
+                if isinstance(ref, dict) and ref.get("module_id") == "C01":
+                    return ("ctx", ref.get("record_id"), d.get("scene_id"))
+            return ("rec", r["record_id"])
+
+        def chapter_label(r):
+            d = r.get("data") or {}
+            if d.get("chapter_id"):
+                return d["chapter_id"]
+            if r["record_id"] in chapter_of:
+                return chapter_of[r["record_id"]]
+            for ref in r.get("source_refs") or []:
+                if isinstance(ref, dict) and ref.get("module_id") == "C01" and ref.get("record_id") in ctx_chapter:
+                    return ctx_chapter[ref["record_id"]]
+            return None
         newest_chapter: dict[tuple, str] = {}
         for r in recs:
             if r["module_id"] in ("C02", "C03") and r["record_kind"] == "OUTPUT" and not r.get("stale"):
-                d = r.get("data") or {}
-                key = (r["module_id"], d.get("chapter_id"), d.get("scene_id"), json.dumps(d.get("outline_ref"),
-                                                                                         sort_keys=True))
+                key = (r["module_id"],) + chapter_key(r)
                 if key not in newest_chapter or (r.get("created_at") or "") >= newest_chapter[key][0]:
                     newest_chapter[key] = (r.get("created_at") or "", r["record_id"])
         reviews, fixes = self.reviews(pid, branch), self.fixes(pid, branch)
@@ -440,12 +468,12 @@ class ReviewService:
             if not in_path:
                 if r["module_id"][0] in "IK" or r["module_id"] == "C01" or op.get("execution") == "LOGIC":
                     continue
+            chap = None
             if r["module_id"] in ("C02", "C03"):
-                d = r.get("data") or {}
-                key = (r["module_id"], d.get("chapter_id"), d.get("scene_id"), json.dumps(d.get("outline_ref"),
-                                                                                         sort_keys=True))
+                key = (r["module_id"],) + chapter_key(r)
                 if newest_chapter.get(key, (None, r["record_id"]))[1] != r["record_id"]:
                     continue  # replaced by a newer draft of the same chapter
+                chap = chapter_label(r)
             group_set = "FORMAT" if r["record_id"] in format_ids or (in_path and r["module_id"] == "I01") \
                 else r["module_id"][0]
             guide = SET_GUIDE.get(r["module_id"][0], {})
@@ -458,7 +486,8 @@ class ReviewService:
             items.append({
                 "record_id": r["record_id"], "version": r["version"], "module_id": r["module_id"],
                 "set": r["module_id"][0], "op_name": op.get("name") or r["module_id"], "group": group,
-                "group_set": group_set, "title": _title(r)[:160], "short_title": safe_title(self.contracts, r),
+                "group_set": group_set, "title": (f"Chapter {chap}" if chap and r["module_id"] == "C02" else _title(r))[:160],
+                "short_title": f"Chapter {chap}"[:60] if chap else safe_title(self.contracts, r), "chapter_id": chap,
                 "lifecycle": r["lifecycle"], "created_at": r.get("created_at"),
                 "approved_version": r.get("approved_version"), "made_by": self.made_by(pid, branch, r, fixes),
                 "review": rv, "in_book_path": in_path, "ref": r["ref"],
@@ -471,7 +500,9 @@ class ReviewService:
         task = current_task(status, items, pid, branch, self.contracts)
         return {"project_id": pid, "branch_id": branch, "count": len(items), "items": items, "current_task": task,
                 "settings": self.settings(pid), "ai_ready": bool(status.get("ai_ready")),
-                "book": {"done": status.get("done_count"), "total": status.get("total")}}
+                "book": {"done": status.get("done_count"), "total": status.get("total"),
+                         "words": {k: (status.get("words") or {}).get(k) for k in ("words", "target_words", "percent",
+                                                                                  "approved_words", "draft_words")}}}
 
     def summary(self, principal, pid, branch, work=None) -> dict:
         q = self.queue(principal, pid, branch)
@@ -569,10 +600,18 @@ class ReviewService:
         slot = self.assist._check_slot(body.get("slot_id"))
         return self._start(ReviewJob("fix", principal, pid, branch, [rid], slot), self._run_fix)
 
+    def _persist(self, job: ReviewJob):
+        done = {r.get("record_id") for r in job.results if r.get("ok")}
+        left = [r for r in job.record_ids if r not in done]
+        self.assist.persist(job, kind=f"review_{job.kind}", done=job.done, total=len(job.record_ids),
+                            resume={"kind": job.kind, "project_id": job.project_id, "branch_id": job.branch_id,
+                                    "record_ids": left, "slot_id": job.slot_pref} if left else None)
+
     def _start(self, job: ReviewJob, fn) -> dict:
         self._purge()
         with self._lock:
             self._jobs[job.id] = job
+        self._persist(job)
         threading.Thread(target=self._thread, args=(job, fn), name=f"bookforge-{job.kind}", daemon=True).start()
         return job.public()
 
@@ -595,6 +634,7 @@ class ReviewService:
         finally:
             job.current = None
             job.finished = time.time()
+            self._persist(job)
             try:
                 self.store.close()  # this thread's SQLite connection
             except Exception:  # noqa: BLE001
