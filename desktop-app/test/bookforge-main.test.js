@@ -175,6 +175,10 @@ async function main() {
   st = await call("bookforge:status");
   assert(st.linkTest.lastReport === lt.report && st.linkTest.lastSummary && st.linkTest.lastSummary.failCount === 0, "status remembers the last link-test report + summary");
   assert(st.activity.some((a) => /Link test finished/.test(a.say || "")), "the activity feed notes the finished link test");
+  const diag = await call("bookforge:diagnostics", {});
+  assert(diag.ok && new RegExp(`Last link test: \\d+s ago · ${lt.passCount} passed · ${lt.failCount} failed · ${lt.skipCount} skipped`).test(diag.text) && /not passed: bookforge_running=skip/.test(diag.text), "📋 diagnostics summarise the last link test (counts + ids of steps that didn't pass)");
+  assert(!diag.text.includes(token) && !diag.text.includes("Write the outline.") && !diag.text.includes("Here is the outline.") && !diag.text.includes("AutoInjector link test"), "diagnostics never carry the key, prompts, replies or the link-test question");
+  assert(st.health && ["ok", "warn", "bad", "off"].includes(st.health.level) && st.health.checks.some((c) => c.id === "bridge" && c.level === "ok"), "status snapshot carries the overall health (bridge check green while listening)");
   const debugNow = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
   assert(/bookforge-linktest-done/.test(debugNow), "link test logged via logEvent");
   let open = await call("bookforge:linktest-open-report", { file: path.join(path.dirname(lt.report), "feature-test-x.md") });

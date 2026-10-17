@@ -161,6 +161,9 @@ contextBridge.exposeInMainWorld("api", {
   bookforgeConnect: () => ipcRenderer.invoke("bookforge:connect"),
   bookforgeStartApp: () => ipcRenderer.invoke("bookforge:start-app"),
   bookforgeOpenUrl: (url) => ipcRenderer.invoke("bookforge:open-url", { url }),
+  // 📋 Copy diagnostics: a safe text summary (no key/codes/prompts/replies); main writes the clipboard.
+  bookforgeDiagnostics: (extra) => ipcRenderer.invoke("bookforge:diagnostics", extra || {}),
+  bookforgeCopyDiagnostics: (extra) => ipcRenderer.invoke("bookforge:copy-diagnostics", extra || {}),
   // Live activity (text-free events + a fresh status snapshot) and the 🧪 link test.
   onBookforgeActivity: (cb) => ipcRenderer.on("bookforge-activity", (_e, payload) => cb(payload)),
   bookforgeLinkTestRun: () => ipcRenderer.invoke("bookforge:linktest-run"),

@@ -5270,9 +5270,105 @@ function bookforgeStatusSnapshot() {
   snap.connect = Object.assign({}, bfConnect);
   bookforgeAppCheckSoon();
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!bookforgeLauncher() };
+  snap.health = bookforgeHealth(snap);
   return snap;
 }
+// Overall health for the panel's dot (green / amber / ⚠️ / grey when the bridge is off).
+// Each check: level "ok" | "warn" (not there yet / unknown) | "bad" (a real problem).
+function bookforgeHealth(snap) {
+  const checks = [];
+  const add = (id, level, why) => checks.push({ id, level, why });
+  const on = !!(snap.enabled && snap.listening);
+  if (!snap.enabled) add("bridge", "off", "bridge is off");
+  else if (on) add("bridge", "ok", "listening");
+  else if (snap.error) add("bridge", "bad", String(snap.error).slice(0, 40));
+  else add("bridge", "warn", "starting");
+  add("key", snap.tokenPresent ? "ok" : "warn", snap.tokenPresent ? "present" : "missing");
+  const app = snap.app || {};
+  const b = snap.bookforge;
+  const fresh = !!(b && !b.stale);
+  add("bookforge_reachable", app.running === true || fresh ? "ok" : "warn", app.running === true ? "ping ok" : fresh ? "status fresh" : app.running === false ? "no answer to ping" : "not checked yet");
+  const conn = snap.connection || {};
+  add("status_fresh", fresh ? "ok" : "warn", fresh ? "fresh" : b ? "stale" : conn.connected ? "connected, no status yet" : "no status yet");
+  const active = SITE_IDS.filter((s) => snap.sites && snap.sites[s] && snap.sites[s].active);
+  if (!active.length) add("panes", "warn", "no AI is Active");
+  for (const s of active) { const x = snap.sites[s]; add(`pane:${s}`, x.ready || x.inFlight ? "ok" : "bad", x.inFlight ? "busy" : x.ready ? "ready" : "not loaded"); }
+  let level = "ok";
+  if (!snap.enabled) level = "off";
+  else if (checks.some((c) => c.level === "bad")) level = "bad";
+  else if (checks.some((c) => c.level === "warn")) level = "warn";
+  return { level, checks, at: Date.now() };
+}
+// 📋 Copy diagnostics: a SAFE plain-text summary for asking for help. Built only from
+// counters, readiness, outcome codes and ids — never the key, a pairing code, a prompt,
+// a reply, the book's title or BookForge's messages.
+const BF_CODE_RE = /^[A-Za-z0-9_:.-]{1,48}$/;
+function bfSafeCode(v) { const t = String(v == null ? "" : v); return BF_CODE_RE.test(t) ? t : (t ? "OTHER" : ""); }
+function bookforgeDiagnostics(extra) {
+  const snap = bookforgeStatusSnapshot();
+  const now = Date.now();
+  const ago = (t) => (t ? `${Math.max(0, Math.round((now - t) / 1000))}s ago` : "never");
+  let appVersion = "?"; try { appVersion = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
+  const L = [];
+  L.push("AutoInjector — BookForge bridge diagnostics");
+  L.push("(safe to share: no connection key, pairing codes, prompts, replies or book content)");
+  L.push(`Generated: ${new Date(now).toISOString()}`);
+  L.push(`App: AutoInjector ${appVersion} · Electron ${process.versions.electron || "?"} · Node ${process.versions.node} · ${process.platform} ${process.arch}`);
+  L.push(`Bridge: ${snap.enabled ? "ON" : "OFF"} · listening ${snap.listening ? "yes" : "no"} · 127.0.0.1:${snap.port}${snap.error ? ` · start error ${bfSafeCode(snap.error)}` : ""}`);
+  L.push(`Connection key: ${snap.tokenPresent ? "present (not shown)" : "missing"}`);
+  const a = snap.app || {};
+  L.push(`BookForge app: ${a.running === true ? "running" : a.running === false ? "not answering" : "not checked yet"}${a.version ? ` · version ${bfSafeCode(a.version)}` : ""} · last ping ${ago(a.checkedAt)} · launcher ${a.launcherAvailable ? "found" : "not found"}`);
+  const c = snap.connection || {};
+  const cp = snap.connect || {};
+  L.push(`Connection: connected ${c.connected ? "yes" : "no"} · paired ${c.paired ? "yes" : "no"} · last contact ${ago(c.lastContactAt)} · connect phase ${bfSafeCode(cp.phase || "idle")}${cp.step ? ` (step ${bfSafeCode(cp.step)})` : ""}`);
+  const b = snap.bookforge;
+  if (b) L.push(`BookForge status: last update ${ago(b.receivedAt)}${b.stale ? " (STALE)" : ""} · task state ${bfSafeCode((b.current_task && b.current_task.state) || "none")} · approvals ${Number((b.approvals && b.approvals.count) || 0)} · progress ${Number(b.done) || 0}/${Number(b.total) || (Array.isArray(b.checklist) ? b.checklist.length : 0)}`);
+  else L.push("BookForge status: none received yet");
+  const h = snap.health || {};
+  L.push(`Health: ${String(h.level || "?").toUpperCase()} — ${(h.checks || []).map((x) => `${x.id}=${x.level}`).join(", ")}`);
+  for (const s of SITE_IDS) {
+    const x = (snap.sites && snap.sites[s]) || {};
+    const last = x.last ? `${bfSafeCode(x.last.outcome)} ${Math.round((x.last.elapsed_ms || 0) / 1000)}s ${ago(x.last.at)}${x.last.selftest ? " (test)" : ""}` : "none";
+    L.push(`AI ${s}: active ${x.active ? "yes" : "no"} · ready ${x.ready ? "yes" : "no"} · busy ${x.busy || x.inFlight ? "yes" : "no"} · last ${last}`);
+  }
+  const k = snap.counters;
+  L.push(k ? `Counters: requests ${k.requests} · answered ${k.answered} · timeouts ${k.timeouts} · refused (wrong key) ${k.unauthorized}` : "Counters: (bridge not running)");
+  const ls = bfLinkTest.lastSummary;
+  if (ls) {
+    L.push(`Last link test: ${ago(ls.at)} · ${ls.passCount} passed · ${ls.failCount} failed · ${ls.skipCount} skipped${ls.stopped ? " · stopped" : ""}`);
+    const bad = (bfLinkTest.lastSteps || []).filter((x) => x.status !== "pass");
+    if (bad.length) L.push(`  not passed: ${bad.map((x) => `${bfSafeCode(x.id)}=${bfSafeCode(x.status)}${x.http_status ? `(HTTP ${Number(x.http_status)})` : ""}`).join(", ")}`);
+  } else L.push(`Last link test: ${bfLinkTest.running ? "running now" : "never run this session"}`);
+  const probs = bookforgeActivity.filter((e) => e.tone === "warn" || e.tone === "error").slice(-10);
+  L.push(`Recent problems (${probs.length}):`);
+  for (const e of probs) {
+    const bits = [new Date(e.at).toISOString().slice(11, 19), bfSafeCode(e.kind)];
+    if (e.site) bits.push(bfSafeCode(e.site));
+    if (e.outcome) bits.push(bfSafeCode(e.outcome));
+    if (e.error) bits.push(bfSafeCode(String(e.error).split(/[\s:(]/)[0]));
+    if (e.http_status) bits.push(`HTTP ${Number(e.http_status)}`);
+    if (e.selftest) bits.push("(test)");
+    L.push(`  ${bits.join(" ")}`);
+  }
+  const panel = extra && Array.isArray(extra.panelProblems) ? extra.panelProblems.slice(0, 20).map(bfSafeCode).filter(Boolean) : [];
+  if (panel.length) L.push(`Panel problems shown: ${panel.join(", ")}`);
+  return L.join("\n") + "\n";
+}
 ipcMain.handle("bookforge:status", () => bookforgeStatusSnapshot());
+ipcMain.handle("bookforge:diagnostics", (_evt, extra) => {
+  try { return { ok: true, text: bookforgeDiagnostics(extra) }; }
+  catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
+});
+ipcMain.handle("bookforge:copy-diagnostics", (_evt, extra) => {
+  let text;
+  try { text = bookforgeDiagnostics(extra); } catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
+  try {
+    if (!clipboard || typeof clipboard.writeText !== "function") return { ok: false, error: "NO_CLIPBOARD", text };
+    clipboard.writeText(text);
+    logEvent("bookforge-diagnostics-copied", { chars: text.length });
+    return { ok: true, text };
+  } catch (e) { return { ok: false, error: "NO_CLIPBOARD", text }; }
+});
 ipcMain.handle("bookforge:set-enabled", async (_evt, payload) => {
   const enabled = !!(payload && payload.enabled);
   state.bookforge.enabled = enabled;
@@ -5317,7 +5413,7 @@ ipcMain.handle("bookforge:regenerate-token", () => {
 // Node's http client — so the round trips go through the bridge's own HTTP API
 // exactly like BookForge's do. Reports go to the logs folder as
 // bookforge-link-test-<stamp>.md / .json (no key, no prompt text).
-const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null };
+const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null, lastSteps: null };
 // Where BookForge itself runs. Default http://127.0.0.1:8780 (BookForge's own
 // default); BOOKFORGE_PORT (the same variable BookForge reads) changes the port;
 // AUTOINJECTOR_BOOKFORGE_APP_URL (a full loopback .../api/ping URL) overrides both.
@@ -5352,10 +5448,13 @@ async function bookforgeFindApp() {
   const found = (await Promise.all(tries)).find((x) => x.running);
   return found || first;
 }
-// Cached "is BookForge running?" for the panel: refreshed in the background at most every 8 s.
+// Cached "is BookForge running?" for the panel: refreshed in the background at most every 30 s.
 const bfApp = { running: null, base: null, version: null, checkedAt: 0, checking: false };
+// "Ping BookForge at most every 30 s" (the panel's health dot); Connect and the
+// link test still check right away when the user presses them.
+const BF_APP_CHECK_MS = 30000;
 function bookforgeAppCheckSoon(force) {
-  if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < 8000)) return;
+  if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < BF_APP_CHECK_MS)) return;
   bfApp.checking = true;
   bookforgeFindApp().then((r) => {
     const changed = r.running !== bfApp.running || r.base !== bfApp.base;
@@ -5419,6 +5518,7 @@ async function runBookforgeLinkTestNow() {
   const summary = { headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total, stopped: r.stopped, at: Date.now() };
   bfLinkTest.lastReport = file;
   bfLinkTest.lastSummary = summary;
+  bfLinkTest.lastSteps = r.results.map((x) => ({ id: x.id, status: x.status, http_status: x.http_status || null })); // ids/outcomes only (diagnostics)
   logEvent(r.failCount ? "bookforge-linktest-done-with-failures" : "bookforge-linktest-done", { passed: r.passCount, failed: r.failCount, skipped: r.skipCount, stopped: r.stopped, report: file });
   bookforgeNoteActivity({ kind: "linktest", say: `Link test finished: ${r.passCount} passed, ${r.failCount} failed, ${r.skipCount} skipped`, tone: r.failCount ? "error" : "ok" });
   const out = {

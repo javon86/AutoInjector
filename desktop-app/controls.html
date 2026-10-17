@@ -576,186 +576,266 @@
     .badge-final-plan { color:#8ef0b0; }
     .badge-roundtable { color:#7fd4e0; font-weight:600; }
 
-    /* ---- BookForge bridge panel: status hero, next step, setup checklist,
-       connection key, per-AI cards, link test, live activity, ⓘ pop-ups.
-       State is ALWAYS icon + words; colour only reinforces it. ---- */
+    /* ---- BookForge bridge panel (compact): one header line, a strip of AIs +
+       connection-check chips, "Now working on" | "Book checklist" side by side,
+       folded activity log. Collapses to a slim one-line status bar.
+       State is ALWAYS icon + words; colour only reinforces it.
+       Colour language (also used by the slim bar and health dot):
+         connected = green · waiting = amber · working = animated purple→blue
+         problem   = yellow ⚠️ marker (red ring when it blocks) · off = grey
+       AI colours match the rest of the app: ChatGPT #10a37f · Claude #d97757 · Gemini #4285f4.
+       Module-set letter badges A–K: see --bf-set-* below (and BF_SET_COLORS in controls.js). ---- */
     .bf-panel {
-      --bf-accent:#a18bff; --bf-accent-2:#5fd4c4; --bf-card:#13131b; --bf-line:#262637; --bf-muted:#a3a7b7;
-      --bf-ok:#5be08f; --bf-warn:#f2c46d; --bf-err:#ff7a7f; --bf-info:#7fb2ff; --bf-off:#9aa0a6; --bf-work:#b9a6ff;
+      --bf-accent:#a18bff; --bf-card:#13131b; --bf-line:#262637; --bf-muted:#a9adbd;
+      --bf-ok:#5be08f; --bf-wait:#f2b84b; --bf-warn:#f2c46d; --bf-hz:#ffd23f; --bf-err:#ff6b6b; --bf-info:#7fb2ff; --bf-off:#9aa0a6;
+      --bf-work:#b9a6ff; --bf-work-2:#6ea8ff;
+      --bf-chatgpt:#10a37f; --bf-claude:#d97757; --bf-gemini:#4285f4;
+      /* Module sets A–K: 11 hues, each ≥ 4.5:1 contrast with the dark badge text (#0b0b10). */
+      --bf-set-A:#f87171; --bf-set-B:#fb923c; --bf-set-C:#fbbf24; --bf-set-D:#a3e635; --bf-set-E:#34d399; --bf-set-F:#22d3ee;
+      --bf-set-G:#60a5fa; --bf-set-H:#818cf8; --bf-set-I:#c084fc; --bf-set-J:#f472b6; --bf-set-K:#a8a29e;
       --bf-tone:var(--bf-off);
-      position:relative; background:linear-gradient(180deg, #15141f 0%, #121218 60%); border-color:#2c2a45;
+      position:relative; background:linear-gradient(180deg, #15141f 0%, #121218 60%); border-color:#2c2a45; padding:7px 10px 7px; font-size:12.5px; line-height:1.4;
     }
-    .bf-panel .spacer { flex:1 1 auto; }
-    .bf-panel .yc-head { flex-wrap:wrap; row-gap:4px; }
-    .bf-panel .yc-head h2 { color:#d6ceff; opacity:.95; }
-    .bf-exp { font-size:9.5px; font-weight:600; letter-spacing:.06em; padding:1px 6px; margin-left:4px; border-radius:8px; border:1px solid #3d3766; color:#bdb2ff; vertical-align:1px; }
     .bf-panel[data-bf-state="off"] { --bf-tone:var(--bf-off); }
     .bf-panel[data-bf-state="starting"] { --bf-tone:var(--bf-info); }
-    .bf-panel[data-bf-state="waiting"] { --bf-tone:var(--bf-accent-2); }
+    .bf-panel[data-bf-state="waiting"] { --bf-tone:var(--bf-wait); }
     .bf-panel[data-bf-state="connected"] { --bf-tone:var(--bf-ok); }
     .bf-panel[data-bf-state="working"] { --bf-tone:var(--bf-work); }
     .bf-panel[data-bf-state="error"] { --bf-tone:var(--bf-err); }
-    /* status pills (header + AI cards + test rows) */
-    .bf-pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; line-height:1; padding:4px 9px; border-radius:999px;
+    /* state stripe along the top edge; animated while working/starting */
+    .bf-panel::before { content:""; position:absolute; left:0; right:0; top:0; height:3px; border-radius:8px 8px 0 0; background:var(--bf-tone); opacity:.9; }
+    .bf-panel[data-bf-state="working"]::before, .bf-panel[data-bf-state="starting"]::before {
+      background:linear-gradient(90deg, var(--bf-work), var(--bf-work-2), var(--bf-work)); background-size:200% 100%; animation:bfSlide 1.6s linear infinite; }
+    @keyframes bfSlide { to { background-position:-200% 0; } }
+    @keyframes bfPulse { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--pulse, var(--bf-tone)) 55%, transparent); } 50% { box-shadow:0 0 0 5px transparent; } }
+    .bf-panel .spacer { flex:1 1 auto; }
+    .bf-panel button { padding:3px 9px; border-radius:7px; font-size:12px; line-height:1.35; }
+    .bf-panel button.bf-primary, .bf-test-btn { background:linear-gradient(180deg, #2b2550, #221d40); border-color:#4a3f8a; color:#e6e0ff; font-weight:600; }
+    .bf-panel button.bf-primary:hover, .bf-test-btn:hover { background:#332c5e; }
+    .bf-panel button.bf-danger { background:#2a1517; border-color:#5a2a2e; color:#ffc9cc; }
+    .bf-panel button:disabled { opacity:.7; cursor:progress; }
+    .bf-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+    /* ---------- header: one line ---------- */
+    .bf-panel .bf-head { flex-wrap:wrap; row-gap:4px; gap:6px; min-height:28px; }
+    .bf-panel .bf-head h2 { color:#d6ceff; opacity:.95; margin:0; font-size:12px; white-space:nowrap; }
+    .bf-exp { font-size:12px; font-weight:600; letter-spacing:.02em; padding:0 5px; margin-left:3px; border-radius:7px; border:1px solid #3d3766; color:#bdb2ff; text-transform:none; }
+    .bf-health { flex:0 0 auto; width:14px; height:14px; min-width:14px; padding:0 !important; border-radius:50% !important; border:2px solid #0e0e14 !important;
+      background:var(--bf-off) !important; box-shadow:0 0 0 1px #3a3a4a; cursor:pointer; }
+    .bf-health[data-level="ok"] { background:var(--bf-ok) !important; }
+    .bf-health[data-level="warn"] { background:var(--bf-wait) !important; --pulse:var(--bf-wait); animation:bfPulse 2.4s ease-in-out infinite; }
+    .bf-health[data-level="bad"] { background:var(--bf-hz) !important; box-shadow:0 0 0 2px var(--bf-err); }
+    .bf-health:focus-visible { outline:2px solid #7c5ce0; outline-offset:2px; }
+    .bf-pill { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600; line-height:1; padding:4px 8px; border-radius:999px;
       border:1px solid color-mix(in srgb, var(--pill, var(--bf-tone)) 55%, transparent); color:var(--pill, var(--bf-tone));
-      background:color-mix(in srgb, var(--pill, var(--bf-tone)) 12%, transparent); white-space:nowrap; }
+      background:color-mix(in srgb, var(--pill, var(--bf-tone)) 13%, transparent); white-space:nowrap; }
     .bf-pill[data-tone="ok"] { --pill:var(--bf-ok); } .bf-pill[data-tone="warn"] { --pill:var(--bf-warn); }
     .bf-pill[data-tone="err"] { --pill:var(--bf-err); } .bf-pill[data-tone="info"] { --pill:var(--bf-info); }
-    .bf-pill[data-tone="off"] { --pill:var(--bf-off); } .bf-pill[data-tone="work"] { --pill:var(--bf-work); }
-    .bf-pill[data-tone="wait"] { --pill:var(--bf-accent-2); }
-    .bf-test-btn, .bf-panel button.bf-primary { background:linear-gradient(180deg, #2b2550, #221d40); border-color:#4a3f8a; color:#e6e0ff; font-weight:600; }
-    .bf-test-btn:hover, .bf-panel button.bf-primary:hover { background:#332c5e; }
-    .bf-panel button { padding:5px 10px; border-radius:7px; }
-    .bf-panel button.bf-danger { background:#2a1517; border-color:#5a2a2e; color:#ffc9cc; }
-    /* hero */
-    .bf-hero { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:8px 0 6px; padding:12px 14px; border-radius:12px;
-      border:1px solid color-mix(in srgb, var(--bf-tone) 45%, #222); background:
-      radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--bf-tone) 16%, transparent) 0%, transparent 60%), #111119; }
-    .bf-hero-icon { flex:0 0 auto; width:46px; height:46px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px;
-      background:color-mix(in srgb, var(--bf-tone) 18%, #15151d); border:2px solid color-mix(in srgb, var(--bf-tone) 70%, transparent); position:relative; }
-    .bf-panel[data-bf-state="working"] .bf-hero-icon::after, .bf-panel[data-bf-state="starting"] .bf-hero-icon::after {
-      content:""; position:absolute; inset:-5px; border-radius:50%; border:2px solid transparent; border-top-color:var(--bf-tone); animation:capSpin 1s linear infinite; }
-    .bf-panel[data-bf-state="waiting"] .bf-hero-icon { animation:bfPulse 2.4s ease-in-out infinite; }
-    @keyframes bfPulse { 0%,100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--bf-tone) 40%, transparent); } 50% { box-shadow:0 0 0 7px transparent; } }
-    .bf-hero-text { flex:1 1 260px; min-width:0; }
-    .bf-hero-title { font-size:16px; font-weight:700; color:#f1efff; line-height:1.3; }
-    .bf-hero-sub { font-size:12.5px; color:var(--bf-muted); margin-top:2px; }
-    .bf-hero-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .bf-switch { display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; padding:5px 10px; border-radius:8px; border:1px solid #3a3a52; background:#17172a; cursor:pointer; user-select:none; }
-    .bf-switch input { accent-color:var(--bf-accent); width:15px; height:15px; margin:0; }
+    .bf-pill[data-tone="off"] { --pill:var(--bf-off); } .bf-pill[data-tone="wait"] { --pill:var(--bf-wait); }
+    .bf-pill[data-tone="work"] { --pill:var(--bf-work); background:linear-gradient(90deg, color-mix(in srgb, var(--bf-work) 22%, transparent), color-mix(in srgb, var(--bf-work-2) 22%, transparent), color-mix(in srgb, var(--bf-work) 22%, transparent)); background-size:200% 100%; animation:bfSlide 2s linear infinite; }
+    .bf-head-text { flex:1 1 160px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e9e7f7; font-weight:600; font-size:12.5px; }
+    .bf-head-text .sub { color:var(--bf-muted); font-weight:400; }
+    .bf-head-actions { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .bf-anchor { display:inline-flex; align-items:center; gap:3px; position:relative; }
+    .bf-panel button.bf-connect { font-size:12.5px; font-weight:700; padding:4px 11px; border-radius:8px; color:#fff; border:1px solid #6d5ce0;
+      background:linear-gradient(180deg, #7b67f5, #5a46d6); box-shadow:0 0 0 2px color-mix(in srgb, #7b67f5 25%, transparent); }
+    .bf-panel button.bf-connect:hover { background:linear-gradient(180deg, #8a76ff, #644fe0); }
+    .bf-panel button.bf-connect[data-state="connected"] { background:linear-gradient(180deg, #2f8a5a, #236b45); border-color:#3fae72; box-shadow:none; }
+    .bf-switch { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:3px 8px; border-radius:8px; border:1px solid #3a3a52; background:#17172a; cursor:pointer; user-select:none; white-space:nowrap; }
+    .bf-switch input { accent-color:var(--bf-ok); width:14px; height:14px; margin:0; }
     .bf-switch:focus-within { outline:2px solid #7c5ce0; outline-offset:1px; }
-    /* next step */
-    .bf-next { display:flex; gap:9px; align-items:flex-start; padding:9px 12px; margin:0 0 10px; border-radius:10px; background:#17162a; border:1px solid #34305a; border-left:4px solid var(--bf-accent); font-size:13px; }
-    .bf-next-label { flex:0 0 auto; font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--bf-accent); padding-top:2px; }
-    #bf-next { color:#ecebff; }
-    /* cards */
-    .bf-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; align-items:start; }
-    @media (max-width:720px) { .bf-grid { grid-template-columns:minmax(0, 1fr); } }
-    .bf-card { background:var(--bf-card); border:1px solid var(--bf-line); border-radius:10px; padding:10px 12px; min-width:0; }
-    .bf-card h3 { display:flex; align-items:center; gap:6px; margin:0 0 7px; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:#cfc8f5; }
-    .bf-card p { margin:0 0 7px; color:var(--bf-muted); font-size:12px; }
+    .bf-panel button.bf-icon { padding:2px 6px; background:#17172a; border:1px solid #33334a; }
     .bf-info { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; padding:0 !important; border-radius:50% !important; font-size:12px; line-height:1;
-      background:#1d1b30 !important; border:1px solid #3d3766 !important; color:#c9bfff; flex:0 0 auto; }
+      background:#1d1b30 !important; border:1px solid #3a3466 !important; color:#c7bdff; flex:0 0 auto; }
     .bf-info[aria-expanded="true"] { background:#3a3170 !important; color:#fff; }
-    /* checklist */
-    .bf-steps { list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:3px; }
-    .bf-steps li { display:flex; align-items:flex-start; gap:9px; padding:5px 8px; border-radius:8px; border:1px solid transparent; font-size:12.5px; background:#101017; }
-    .bf-step-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
-    .bf-step-text { font-weight:600; color:#e6e4f5; }
-    .bf-step-detail { font-size:11.5px; color:var(--bf-muted); }
-    .bf-step-detail:empty { display:none; }
-    .bf-steps .tip { font-size:11.5px; color:var(--bf-warn); }
-    .bf-steps li .bf-step-state { font-size:11px; color:var(--bf-muted); white-space:nowrap; padding-top:3px; }
-    .bf-check { flex:0 0 auto; width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; border:2px solid #3a3a4a; color:#8d90a0; margin-top:1px; }
-    .bf-steps li[data-st="ok"] .bf-check { background:color-mix(in srgb, var(--bf-ok) 20%, transparent); border-color:var(--bf-ok); color:var(--bf-ok); }
-    .bf-steps li[data-st="ok"] .bf-step-state { color:var(--bf-ok); }
-    .bf-steps li[data-st="bad"] { border-color:#5a2a2e; background:#1d1214; }
-    .bf-steps li[data-st="bad"] .bf-check { border-color:var(--bf-err); color:var(--bf-err); }
-    .bf-steps li[data-st="bad"] .bf-step-state { color:var(--bf-err); }
-    .bf-steps li[data-st="warn"] { border-color:#5c4a22; background:#1f1a10; }
-    .bf-steps li[data-st="warn"] .bf-check { border-color:var(--bf-warn); color:var(--bf-warn); }
-    .bf-steps li[data-st="wait"] .bf-check, .bf-steps li[data-st="run"] .bf-check { border-color:var(--bf-info); color:var(--bf-info); }
-    .bf-steps li[data-current] { border-color:#4a3f8a; background:#1a1830; }
-    .bf-steps li[data-st="todo"] .bf-check { border-color:var(--bf-accent); color:var(--bf-accent); }
-    .bf-steps li[data-st="na"] { opacity:.6; }
-    .bf-key-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-    #bf-token { margin-top:7px; padding:6px 8px; border-radius:7px; background:#0c0c12; border:1px dashed #3d3766; font-size:11.5px; font-family:ui-monospace,monospace; word-break:break-all; color:#e7e2ff; }
-    #bf-msg { font-size:12px; color:#cfe9d8; margin-top:6px; min-height:1em; }
+    .bf-panel .collapse-btn { font-size:13px; min-width:26px; min-height:22px; padding:1px 6px; }
+    /* slim bar extras (only when collapsed) */
+    .bf-slim { display:none; align-items:center; gap:6px; min-width:0; flex:1 1 200px; }
+    #btn-bf-slim-open { white-space:nowrap; }
+    .bf-slim-step { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e9e7f7; font-size:12.5px; }
+    .bf-badge { display:inline-flex; align-items:center; gap:3px; font-size:12px !important; font-weight:700; padding:2px 8px !important; border-radius:999px !important; white-space:nowrap; }
+    .bf-badge[data-tone="warn"] { background:#2a2110 !important; border:1px solid #7a6127 !important; color:#ffd98a; }
+    .bf-badge[data-tone="hz"] { background:#2a2508 !important; border:1px solid #8a7414 !important; color:var(--bf-hz); }
+    .bf-panel[data-collapsed="1"] #bookforge-body, .bf-panel[data-collapsed="1"] .bf-full-only { display:none !important; }
+    .bf-panel[data-collapsed="1"] .bf-slim { display:inline-flex; }
+    .bf-panel[data-collapsed="1"] .bf-head { min-height:24px; }
+    .bf-panel[data-collapsed="1"] .bf-head-text { display:none; }
+
+    /* ---------- body ---------- */
+    #bookforge-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+    .bf-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:4px 9px; border-radius:8px; font-size:12.5px; background:#14141f; border:1px solid var(--bf-line); border-left:3px solid var(--bf-tone); color:#dcdaf0; }
+    .bf-line[data-tone="ok"] { border-left-color:var(--bf-ok); } .bf-line[data-tone="warn"] { border-left-color:var(--bf-wait); background:#1c1810; }
+    .bf-line[data-tone="err"] { border-left-color:var(--bf-err); background:#1f1214; } .bf-line[data-tone="work"] { border-left-color:var(--bf-work); }
+    .bf-next-label { font-size:12px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--bf-accent); }
+    #bf-connect-text:empty { display:none; }
+    #bf-next { color:#ecebff; }
+    #bf-msg { font-size:12px; color:#cfe9d8; }
+    #bf-msg:empty { display:none; }
     #bf-msg[data-tone="err"] { color:var(--bf-err); }
-    /* AI cards */
-    .bf-ais { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; }
-    .bf-ai { border:1px solid var(--bf-line); border-radius:9px; padding:8px 9px; background:#101017; border-top:3px solid var(--site, #555); min-width:0; }
-    .bf-ai[data-site="chatgpt"] { --site:#57c07a; } .bf-ai[data-site="claude"] { --site:#e0a24a; } .bf-ai[data-site="gemini"] { --site:#6ea8ff; }
-    .bf-ai-name { font-weight:700; font-size:12.5px; margin-bottom:5px; }
-    .bf-ai-last { font-size:11.5px; color:var(--bf-muted); margin-top:6px; line-height:1.35; }
-    /* link test */
-    .bf-test-summary { font-size:12.5px; margin:6px 0; padding:7px 9px; border-radius:8px; background:#101017; border:1px solid var(--bf-line); }
+
+    .bf-card { position:relative; background:var(--bf-card); border:1px solid var(--bf-line); border-left:3px solid var(--card-accent, #3a3a52); border-radius:8px; padding:5px 9px 6px; min-width:0; }
+    .bf-card h3 { display:flex; align-items:center; gap:5px; margin:0 0 4px; font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:#cfc8f5; font-weight:700; white-space:nowrap; }
+    .bf-card h3 .bf-h3-extra { margin-left:auto; display:inline-flex; gap:5px; align-items:center; text-transform:none; letter-spacing:0; font-weight:600; }
+    .bf-strip { display:grid; grid-template-columns:minmax(0, 5fr) minmax(0, 7fr); gap:6px; align-items:stretch; }
+    .bf-pair { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; align-items:stretch; }
+    @media (max-width:820px) { .bf-strip, .bf-pair { grid-template-columns:minmax(0, 1fr); } }
+
+    /* AIs: compact horizontal strip, per-AI colour accent */
+    #bf-ais-card { --card-accent:#57507f; }
+    .bf-ais { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:5px; }
+    .bf-ai { position:relative; display:flex; flex-direction:column; gap:2px; border:1px solid var(--bf-line); border-left:3px solid var(--site, #555); border-radius:7px; padding:3px 6px; background:#101017; min-width:0; }
+    .bf-ai[data-site="chatgpt"] { --site:var(--bf-chatgpt); } .bf-ai[data-site="claude"] { --site:var(--bf-claude); } .bf-ai[data-site="gemini"] { --site:var(--bf-gemini); }
+    .bf-ai-top { display:flex; align-items:center; flex-wrap:wrap; gap:3px 4px; min-width:0; }
+    .bf-ai-name { font-weight:700; font-size:12.5px; color:color-mix(in srgb, var(--site) 55%, #fff); white-space:nowrap; }
+    .bf-ai .bf-pill { padding:2px 6px; }
+    .bf-ai-last { font-size:12px; color:var(--bf-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .bf-ai[data-st="work"] { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--bf-work) 45%, transparent); }
+    .bf-ai[data-st="off"] { opacity:.65; }
+
+    /* connection check: one row of chips; full list on demand / on failure */
+    #bf-check-card { --card-accent:var(--bf-tone); }
+    .bf-chips { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+    .bf-chip { position:relative; display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:2px 7px; border-radius:999px; border:1px solid #33334a; background:#101017; color:#d8d6e8; white-space:nowrap; }
+    .bf-chip .ic { font-weight:700; }
+    .bf-chip[data-st="ok"] { border-color:#2c6b47; } .bf-chip[data-st="ok"] .ic { color:var(--bf-ok); }
+    .bf-chip[data-st="bad"] { border-color:#6b2c30; background:#1d1214; } .bf-chip[data-st="bad"] .ic { color:var(--bf-err); }
+    .bf-chip[data-st="warn"] { border-color:#6a5420; background:#1f1a10; } .bf-chip[data-st="warn"] .ic { color:var(--bf-warn); }
+    .bf-chip[data-st="wait"] .ic, .bf-chip[data-st="run"] .ic { color:var(--bf-wait); }
+    .bf-chip[data-st="todo"] .ic { color:var(--bf-accent); }
+    .bf-chip[data-st="na"] { opacity:.6; }
+    .bf-chip[data-ai] { border-left-width:3px; } .bf-chip[data-ai="chatgpt"] { border-left-color:var(--bf-chatgpt); } .bf-chip[data-ai="claude"] { border-left-color:var(--bf-claude); } .bf-chip[data-ai="gemini"] { border-left-color:var(--bf-gemini); }
+    .bf-check-actions { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-top:4px; }
+    .bf-test-summary { font-size:12px; padding:2px 7px; border-radius:6px; background:#101017; border:1px solid var(--bf-line); }
     .bf-test-summary:empty { display:none; }
     .bf-test-summary[data-tone="ok"] { border-color:#2c6b47; color:#cff5dc; }
     .bf-test-summary[data-tone="err"] { border-color:#6b2c30; color:#ffd5d7; }
-    .bf-test-steps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; max-height:300px; overflow-y:auto; }
-    .bf-test-steps li { display:grid; grid-template-columns:auto 1fr auto; gap:3px 8px; align-items:start; padding:5px 7px; border-radius:7px; background:#101017; font-size:12px; }
-    .bf-test-steps li .nm { font-weight:600; }
-    .bf-test-steps li .dt { grid-column:2 / 4; color:var(--bf-muted); font-size:11.5px; }
-    .bf-test-steps li .tip { grid-column:2 / 4; color:var(--bf-warn); font-size:11.5px; }
-    .bf-test-steps li .ms { font-size:11px; color:var(--bf-muted); font-variant-numeric:tabular-nums; }
-    .bf-spin { display:inline-block; width:10px; height:10px; border:2px solid var(--bf-info); border-top-color:transparent; border-radius:50%; animation:capSpin .8s linear infinite; vertical-align:-1px; }
-    /* activity */
-    .bf-feed { list-style:none; margin:0; padding:0; max-height:260px; overflow-y:auto; display:flex; flex-direction:column; }
-    .bf-feed li { display:flex; gap:8px; align-items:baseline; padding:4px 2px; border-bottom:1px solid #1b1b26; font-size:12px; }
-    .bf-feed li:last-child { border-bottom:none; }
-    .bf-feed .t { flex:0 0 auto; font-family:ui-monospace,monospace; font-size:11px; color:#7f8394; }
-    .bf-feed .i { flex:0 0 14px; text-align:center; font-weight:700; }
-    .bf-feed li[data-tone="ok"] .i { color:var(--bf-ok); } .bf-feed li[data-tone="warn"] .i { color:var(--bf-warn); }
-    .bf-feed li[data-tone="error"] .i { color:var(--bf-err); } .bf-feed li[data-tone="info"] .i { color:var(--bf-info); }
-    .bf-feed .empty { color:var(--bf-muted); font-style:italic; border:none; }
-    /* footer: caution + technical line */
-    .bf-caution { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:11.5px; color:#d9c99a; margin:10px 0 2px; }
-    .bf-detail { font-size:11px; color:#7f8394; font-family:ui-monospace,monospace; margin-top:4px; word-break:break-word; }
-    /* ⓘ pop-up */
-    .bf-pop { position:absolute; z-index:40; width:min(360px, calc(100% - 16px)); background:#1a1830; color:#ecebff; border:1px solid #4a3f8a; border-radius:10px; padding:11px 13px 10px; box-shadow:0 10px 30px rgba(0,0,0,.55); font-size:12.5px; line-height:1.5; }
-    .bf-pop[hidden] { display:none; }
-    .bf-pop h4 { margin:0 26px 5px 0; font-size:13px; color:#fff; }
-    .bf-pop p { margin:0 0 6px; }
-    .bf-pop .bf-pop-close { position:absolute; top:6px; right:6px; padding:1px 7px; font-size:12px; background:none; border-color:transparent; }
-    .bf-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-    .bf-card-wide { grid-column:1 / -1; }
-    .bf-subhead { display:flex; align-items:center; gap:6px; margin:10px 0 6px; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#a99fe0; }
-    .bf-panel button.bf-connect { font-size:14px; font-weight:700; padding:9px 16px; border-radius:10px; color:#fff; border:1px solid #6d5ce0;
-      background:linear-gradient(180deg, #7a63ff, #5a45d6); box-shadow:0 2px 10px rgba(110,90,255,.35); }
-    .bf-panel button.bf-connect:hover { background:linear-gradient(180deg, #8a76ff, #644fe0); }
-    .bf-panel button.bf-connect:disabled { opacity:.75; cursor:progress; }
-    .bf-panel button.bf-connect[data-state="connected"] { background:linear-gradient(180deg, #2f8a5a, #236b45); border-color:#3fae72; box-shadow:none; }
-    .bf-connect-msg { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 11px; margin:0 0 8px; border-radius:9px; font-size:12.5px; background:#14141f; border:1px solid var(--bf-line); color:#dcdaf0; }
-    .bf-connect-msg[data-tone="ok"] { border-color:#2c6b47; background:#102018; color:#cff5dc; }
-    .bf-connect-msg[data-tone="warn"] { border-color:#5c4a22; background:#1f1a10; color:#f4e2b5; }
-    .bf-connect-msg[data-tone="err"] { border-color:#6b2c30; background:#1f1214; color:#ffd5d7; }
-    .bf-connect-msg[data-tone="work"] { border-color:#3d3570; background:#17152a; }
-    .bf-test-row { margin-top:2px; }
-    .bf-more > summary { cursor:pointer; font-size:12px; font-weight:600; color:#bdb6e6; list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
-    .bf-more > summary::-webkit-details-marker { display:none; }
-    .bf-more > summary::before { content:"▸"; opacity:.7; }
-    .bf-more[open] > summary::before { content:"▾"; }
-    #bf-other-ways { margin-top:10px; padding-top:8px; border-top:1px dashed #2a2a3c; }
-    #bf-other-ways p { margin:6px 0; color:var(--bf-muted); font-size:12px; }
-    #bf-act-card > summary { text-transform:uppercase; letter-spacing:.06em; font-size:11.5px; color:#cfc8f5; }
-    #bf-act-card[open] > summary { margin-bottom:7px; }
-    .bf-empty { color:var(--bf-muted); font-size:12.5px; font-style:italic; padding:10px 4px; }
-    .bf-now-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:5px; }
-    .bf-now-step { font-size:14.5px; font-weight:700; color:#f1efff; min-width:0; overflow-wrap:anywhere; }
-    .bf-now-msg { font-size:12.5px; color:#d6d4e6; margin-bottom:6px; overflow-wrap:anywhere; }
+    .bf-toggle { background:none !important; border:1px solid transparent !important; color:#bdb6e6 !important; font-weight:600; padding:2px 5px !important; }
+    .bf-toggle:hover { border-color:#3a3466 !important; }
+    .bf-steps { list-style:none; margin:0; padding:5px; display:grid; align-items:start; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:3px; background:var(--bf-card); border:1px solid var(--bf-line); border-radius:8px; }
+    .bf-steps[hidden] { display:none; }
+    .bf-steps li { position:relative; display:flex; align-items:flex-start; gap:7px; padding:3px 7px; border-radius:7px; border:1px solid transparent; font-size:12px; background:#101017; }
+    .bf-step-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+    .bf-step-text { font-weight:600; color:#e6e4f5; }
+    .bf-step-detail { color:var(--bf-muted); }
+    .bf-step-detail:empty { display:none; }
+    .bf-steps .tip { color:var(--bf-warn); }
+    .bf-step-state { font-size:12px; color:var(--bf-muted); white-space:nowrap; }
+    .bf-check { flex:0 0 auto; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; border:2px solid #3a3a4a; color:#8d90a0; margin-top:1px; }
+    .bf-steps li[data-st="ok"] .bf-check { background:color-mix(in srgb, var(--bf-ok) 20%, transparent); border-color:var(--bf-ok); color:var(--bf-ok); }
+    .bf-steps li[data-st="ok"] .bf-step-state { color:var(--bf-ok); }
+    .bf-steps li[data-st="bad"] { border-color:#5a2a2e; background:#1d1214; }
+    .bf-steps li[data-st="bad"] .bf-check, .bf-steps li[data-st="bad"] .bf-step-state { border-color:var(--bf-err); color:var(--bf-err); }
+    .bf-steps li[data-st="warn"] { border-color:#5c4a22; background:#1f1a10; }
+    .bf-steps li[data-st="warn"] .bf-check { border-color:var(--bf-warn); color:var(--bf-warn); }
+    .bf-steps li[data-st="wait"] .bf-check, .bf-steps li[data-st="run"] .bf-check { border-color:var(--bf-wait); color:var(--bf-wait); }
+    .bf-steps li[data-current] { border-color:#4a3f8a; background:#1a1830; }
+    .bf-steps li[data-st="todo"] .bf-check { border-color:var(--bf-accent); color:var(--bf-accent); }
+    .bf-steps li[data-st="na"] { opacity:.6; }
+    .bf-spin { display:inline-block; width:10px; height:10px; border:2px solid var(--bf-wait); border-top-color:transparent; border-radius:50%; animation:capSpin .8s linear infinite; vertical-align:-1px; }
+
+    /* Now working on | Book checklist */
+    #bf-now-card { --card-accent:var(--bf-info); }
+    #bf-now-card[data-tone="work"] { --card-accent:var(--bf-work); } #bf-now-card[data-tone="warn"] { --card-accent:var(--bf-wait); }
+    #bf-now-card[data-tone="ok"] { --card-accent:var(--bf-ok); } #bf-now-card[data-tone="err"] { --card-accent:var(--bf-err); } #bf-now-card[data-tone="off"] { --card-accent:#3a3a52; }
+    #bf-book-card { --card-accent:#4d8fd6; }
+    .bf-empty { color:var(--bf-muted); font-size:12.5px; font-style:italic; padding:2px 0; }
+    .bf-now-top { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .bf-now-step { font-size:13px; font-weight:700; color:#f1efff; min-width:0; overflow-wrap:anywhere; }
+    .bf-now-working { font-size:12px; color:var(--bf-work); }
+    .bf-now-msg { font-size:12px; color:#d6d4e6; margin-top:2px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
     .bf-now-msg:empty { display:none; }
-    .bf-now-working { font-size:12px; color:var(--bf-work); margin-bottom:8px; }
-    .bf-approvals { border-radius:9px; padding:8px 10px; margin:4px 0 8px; border:1px solid var(--bf-line); background:#101017; }
+    .bf-approvals { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin-top:4px; padding:3px 7px; border-radius:7px; border:1px solid var(--bf-line); background:#101017; font-size:12px; }
     .bf-approvals[data-tone="warn"] { border-color:#7a6127; background:#211b0f; }
-    .bf-approvals-title { font-weight:700; font-size:12.5px; }
+    .bf-approvals-title { font-weight:700; }
     .bf-approvals[data-tone="warn"] .bf-approvals-title { color:#ffd98a; }
     .bf-approvals[data-tone="ok"] .bf-approvals-title { color:#bfe9cf; font-weight:600; }
-    .bf-approvals-list { margin:5px 0 7px; padding-left:18px; font-size:12px; color:#e9e4cc; }
+    .bf-approvals-list { color:#e9e4cc; min-width:0; overflow-wrap:anywhere; }
     .bf-approvals-list:empty { display:none; }
-    .bf-approvals-list li { margin:1px 0; overflow-wrap:anywhere; }
-    .bf-book-title { font-weight:700; font-size:13.5px; color:#f1efff; margin-bottom:6px; overflow-wrap:anywhere; }
-    .bf-progress { height:9px; border-radius:6px; background:#1d1d2a; overflow:hidden; border:1px solid #2a2a3c; }
-    .bf-progress-bar { height:100%; width:0%; background:linear-gradient(90deg, var(--bf-accent), var(--bf-accent-2)); transition:width .4s ease; }
-    .bf-progress-text { font-size:11.5px; color:var(--bf-muted); margin:4px 0 7px; }
-    .bf-checklist { list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:2px; max-height:320px; overflow-y:auto; }
-    .bf-checklist li { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:7px; font-size:12.5px; }
-    .bf-checklist li .ic { flex:0 0 18px; text-align:center; font-weight:700; }
-    .bf-checklist li .tt { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
-    .bf-checklist li .set { flex:0 0 auto; font-size:10.5px; font-weight:700; color:#a99fe0; border:1px solid #3d3766; border-radius:6px; padding:0 5px; margin-right:2px; }
-    .bf-checklist li .st { flex:0 0 auto; font-size:11px; color:var(--bf-muted); white-space:nowrap; }
-    .bf-checklist li[data-tone="ok"] .ic { color:var(--bf-ok); } .bf-checklist li[data-tone="ok"] .tt { color:#cfe9d8; }
+    .bf-now-actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
+    .bf-stale { position:relative; font-size:12px; color:#e9d9a6; background:#1c1910; border:1px dashed #6a5a2a; border-radius:7px; padding:2px 7px; margin-top:4px; }
+    .bf-book-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .bf-book-title { font-weight:700; font-size:13px; color:#f1efff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; max-width:100%; }
+    .bf-progress-wrap { display:flex; align-items:center; gap:6px; flex:1 1 140px; min-width:120px; }
+    .bf-progress { flex:1 1 auto; height:8px; border-radius:6px; background:#1d1d2a; overflow:hidden; border:1px solid #2a2a3c; }
+    .bf-progress-bar { height:100%; width:0%; background:linear-gradient(90deg, var(--bf-ok), #4d8fd6); transition:width .4s ease; }
+    .bf-progress-text { font-size:12px; color:#dcdaf0; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .bf-stepper { list-style:none; margin:5px 0 0; padding:0; display:flex; flex-wrap:wrap; gap:4px; }
+    .bf-stepper li { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:1px 6px 1px 2px; border-radius:999px; border:1px solid #2f2f44; background:#101017; color:#cfcde0; white-space:nowrap; max-width:180px; }
+    .bf-stepper li .lbl { overflow:hidden; text-overflow:ellipsis; }
+    .bf-stepper li .ic { font-weight:700; }
+    .bf-stepper li[data-tone="ok"] { border-color:#2c6b47; } .bf-stepper li[data-tone="ok"] .ic { color:var(--bf-ok); }
+    .bf-stepper li[data-tone="work"] { border-color:var(--bf-work); background:#1a1830; color:#fff; --pulse:var(--bf-work); animation:bfPulse 2s ease-in-out infinite; }
+    .bf-stepper li[data-tone="work"] .ic { color:var(--bf-work); }
+    .bf-stepper li[data-tone="warn"] { border-color:#7a6127; background:#211b0f; } .bf-stepper li[data-tone="warn"] .ic { color:var(--bf-warn); }
+    .bf-stepper li[data-tone="err"] { border-color:#6b2c30; } .bf-stepper li[data-tone="err"] .ic { color:var(--bf-err); }
+    .bf-stepper li[data-tone="off"] .ic { color:#6d7080; }
+    .bf-set { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 4px; border-radius:999px; font-size:12px; font-weight:800; color:#0b0b10; background:var(--set, #a8a29e); line-height:1; }
+    .bf-checklist { list-style:none; margin:5px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:2px 8px; max-height:260px; overflow-y:auto; }
+    .bf-checklist[hidden] { display:none; }
+    .bf-checklist li { display:flex; align-items:center; gap:6px; padding:1px 4px; border-radius:6px; font-size:12px; }
+    .bf-checklist li .ic { flex:0 0 14px; text-align:center; font-weight:700; }
+    .bf-checklist li .tt { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .bf-checklist li .st { flex:0 0 auto; color:var(--bf-muted); white-space:nowrap; }
+    .bf-checklist li[data-tone="ok"] .ic { color:var(--bf-ok); }
     .bf-checklist li[data-tone="work"] { background:#1a1830; } .bf-checklist li[data-tone="work"] .ic { color:var(--bf-work); }
     .bf-checklist li[data-tone="warn"] { background:#1f1a10; } .bf-checklist li[data-tone="warn"] .ic, .bf-checklist li[data-tone="warn"] .st { color:var(--bf-warn); }
     .bf-checklist li[data-tone="err"] .ic, .bf-checklist li[data-tone="err"] .st { color:var(--bf-err); }
     .bf-checklist li[data-tone="off"] .ic { color:#6d7080; }
-    .bf-stale { font-size:11.5px; color:#9aa0a6; background:#15151c; border:1px dashed #33333f; border-radius:7px; padding:5px 8px; margin:4px 0 8px; }
-    @media (max-width:560px) {
-      .bf-hero { padding:10px; } .bf-hero-icon { width:38px; height:38px; font-size:18px; }
-      .bf-hero-title { font-size:14.5px; } .bf-grid { grid-template-columns:1fr; }
+
+    /* footer: folded extras on one line */
+    .bf-foot { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; font-size:12px; color:#bdb6e6; }
+    .bf-more > summary { cursor:pointer; font-size:12px; font-weight:600; color:#bdb6e6; list-style:none; display:inline-flex; align-items:center; gap:5px; user-select:none; }
+    .bf-more > summary::-webkit-details-marker { display:none; }
+    .bf-more > summary::before { content:"▸"; opacity:.7; }
+    .bf-more[open] > summary::before { content:"▾"; }
+    .bf-foot details[open] { flex:1 1 100%; order:5; background:var(--bf-card); border:1px solid var(--bf-line); border-radius:8px; padding:5px 9px; }
+    #bf-other-ways p { margin:4px 0; color:var(--bf-muted); font-size:12px; }
+    .bf-key-row { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+    #bf-token { margin-top:5px; padding:4px 7px; border-radius:7px; background:#0c0c12; border:1px dashed #3d3766; font-size:12px; font-family:ui-monospace,monospace; word-break:break-all; color:#e7e2ff; }
+    .bf-feed { list-style:none; margin:4px 0 0; padding:0; max-height:220px; overflow-y:auto; display:flex; flex-direction:column; }
+    .bf-feed li { display:flex; gap:8px; align-items:baseline; padding:2px; border-bottom:1px solid #1b1b26; font-size:12px; }
+    .bf-feed li:last-child { border-bottom:none; }
+    .bf-feed .t { flex:0 0 auto; font-family:ui-monospace,monospace; font-size:12px; color:#7f8394; }
+    .bf-feed .i { flex:0 0 14px; text-align:center; font-weight:700; }
+    .bf-feed li[data-tone="ok"] .i { color:var(--bf-ok); } .bf-feed li[data-tone="warn"] .i { color:var(--bf-warn); }
+    .bf-feed li[data-tone="error"] .i { color:var(--bf-err); } .bf-feed li[data-tone="info"] .i { color:var(--bf-info); }
+    .bf-feed .empty { color:var(--bf-muted); font-style:italic; border:none; }
+    .bf-caution { display:inline-flex; flex-wrap:wrap; align-items:center; gap:4px; color:#d9c99a; }
+    .bf-detail { font-size:12px; color:#7f8394; font-family:ui-monospace,monospace; word-break:break-word; margin:3px 0 0; }
+
+    /* ⚠️ hazard marker: sits ON the element that has the problem; click = where/what/how to fix */
+    .bf-panel button.bf-hz { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:20px; height:20px; min-width:20px; padding:0; margin-left:2px;
+      border-radius:50%; font-size:12px; line-height:1; background:#2a2508; border:1.5px solid var(--bf-hz); color:var(--bf-hz); cursor:pointer; --pulse:var(--bf-hz); animation:bfPulse 2.2s ease-in-out infinite; }
+    .bf-panel button.bf-hz[data-sev="err"] { border-color:var(--bf-err); --pulse:var(--bf-err); background:#2a1214; }
+    .bf-panel button.bf-hz:focus-visible { outline:2px solid #fff; outline-offset:1px; }
+    .bf-panel button.bf-hz[aria-expanded="true"] { background:var(--bf-hz); color:#000; }
+
+    /* pop-over (ⓘ explanations, ⚠️ problems, health, diagnostics fallback) */
+    .bf-pop { position:absolute; z-index:40; width:min(380px, calc(100% - 16px)); background:#1a1830; color:#ecebff; border:1px solid #4a3f8a; border-radius:10px; padding:10px 12px 9px; box-shadow:0 10px 30px rgba(0,0,0,.55); font-size:12.5px; line-height:1.5; }
+    .bf-pop[hidden] { display:none; }
+    .bf-pop[data-kind="problem"] { border-color:#8a7414; border-top:3px solid var(--bf-hz); }
+    .bf-pop[data-kind="problem"][data-sev="err"] { border-top-color:var(--bf-err); }
+    .bf-pop h4 { margin:0 26px 5px 0; font-size:13px; color:#fff; }
+    .bf-pop p { margin:0 0 6px; }
+    .bf-pop .bf-pop-close { position:absolute; top:5px; right:5px; padding:1px 7px; font-size:12px; background:none; border-color:transparent; }
+    .bf-pop-sec { margin:0 0 6px; }
+    .bf-pop-sec > b { display:block; font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:#c7bdff; }
+    .bf-pop ol { margin:2px 0 0; padding-left:18px; }
+    .bf-pop details { margin:2px 0 6px; font-size:12px; }
+    .bf-pop details summary { cursor:pointer; color:#bdb6e6; }
+    .bf-pop code { display:block; margin-top:3px; padding:4px 6px; background:#0f0e1a; border-radius:6px; font-family:ui-monospace,monospace; font-size:12px; word-break:break-word; color:#d6d0ff; }
+    .bf-pop-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+    .bf-pop textarea { width:100%; min-height:140px; font-family:ui-monospace,monospace; font-size:12px; background:#0f0e1a; color:#e6e0ff; border:1px solid #3d3766; border-radius:6px; }
+    .bf-health-list { list-style:none; margin:0 0 6px; padding:0; }
+    .bf-health-list li { display:flex; gap:6px; align-items:baseline; }
+
+    @media (max-width:620px) {
+      .bf-exp { display:none; }
+      .bf-head-text { flex-basis:100%; order:9; }
     }
+    @media (max-width:430px) { .bf-ais { grid-template-columns:minmax(0, 1fr); } }
     @media (prefers-reduced-motion: reduce) {
-      .bf-panel *, .bf-panel *::after { animation:none !important; transition:none !important; }
+      .bf-panel *, .bf-panel *::after, .bf-panel::before { animation:none !important; transition:none !important; }
     }
   </style>
 </head>
@@ -1227,108 +1307,121 @@
       </div><!-- /systemai-body -->
     </div><!-- /butler-bar (col-systemai) -->
 
-    <div id="col-bookforge" class="col yc-panel bf-panel" data-bf-state="off">
-      <div class="yc-head">
-        <h2>📚 BookForge <span class="bf-exp">EXPERIMENTAL</span></h2><span class="spacer"></span>
+    <div id="col-bookforge" class="col yc-panel bf-panel" data-bf-state="off" data-collapsed="0">
+      <!-- One header line: health dot · state pill · what's going on · Connect · Bridge · 📋 · ⓘ · ▾/▸.
+           Collapsed (▸) it IS the slim status bar: pill · current step · approvals · ⚠️ count · Open BookForge. -->
+      <div class="yc-head bf-head">
+        <h2 id="bf-title" title="Show or hide the BookForge details">📚 BookForge <span class="bf-exp">EXPERIMENTAL</span></h2>
+        <button id="bf-health" class="bf-health" type="button" data-level="off" aria-label="Overall health: bridge off" title="Overall health"></button>
         <span id="bf-status" class="bf-pill" data-tone="off" role="status" aria-live="polite">⏻ Off</span>
-        <button class="collapse-btn" id="btn-collapse-bookforge" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
+        <span class="bf-anchor" id="bf-status-anchor"></span>
+        <span id="bf-head-text" class="bf-head-text" aria-live="polite">BookForge isn't connected</span>
+        <span class="bf-slim" id="bf-slim">
+          <span id="bf-slim-step" class="bf-slim-step"></span>
+          <button id="bf-slim-approvals" class="bf-badge" data-tone="warn" type="button" hidden title="Things waiting for your OK — open BookForge's approvals page">✅ 0</button>
+          <button id="bf-slim-problems" class="bf-badge" data-tone="hz" type="button" hidden title="Problems — click to see where and how to fix">⚠️ 0</button>
+          <button id="btn-bf-slim-open" type="button" title="Open BookForge in your browser">📚 Open BookForge</button>
+        </span>
+        <span class="spacer bf-full-only"></span>
+        <span class="bf-head-actions bf-full-only">
+          <span class="bf-anchor" id="bf-connect-anchor"><button id="btn-bf-connect" class="bf-connect" title="Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste">🔗 Connect BookForge</button></span>
+          <span class="bf-anchor" id="bf-switch-anchor"><label id="bf-switch" class="bf-switch" title="Turn the bridge on or off. When it's off, BookForge can't use your AIs."><input type="checkbox" id="bf-enabled"> <span>Bridge</span></label></span>
+          <span class="bf-anchor" id="bf-diag-anchor"><button id="btn-bf-diag" class="bf-icon" type="button" title="📋 Copy diagnostics — a safe summary for asking for help (no key, codes, prompts or replies)" aria-label="Copy diagnostics">📋</button></span>
+          <button class="bf-info" type="button" data-info="what" aria-expanded="false" aria-controls="bf-pop" aria-label="What is this?">ⓘ</button>
+        </span>
+        <button class="collapse-btn" id="btn-collapse-bookforge" type="button" aria-expanded="true" aria-controls="bookforge-body" title="Collapse to a slim status bar" aria-label="Collapse to a slim status bar">▾</button>
       </div>
       <div id="bookforge-body">
-        <div class="bf-grid">
-          <!-- 1. Your AI & connection: bridge, one-click Connect, AIs, and the connection check (= link test) -->
-          <section class="bf-card bf-card-wide" id="bf-conn-card" aria-labelledby="bf-conn-h">
-            <h3 id="bf-conn-h">🔌 Your AI &amp; connection <button class="bf-info" type="button" data-info="what" aria-expanded="false" aria-controls="bf-pop" aria-label="What is this?">ⓘ</button></h3>
-            <div id="bf-hero" class="bf-hero">
-              <div class="bf-hero-icon" id="bf-hero-icon" aria-hidden="true">⏻</div>
-              <div class="bf-hero-text" aria-live="polite">
-                <div class="bf-hero-title" id="bf-hero-title">BookForge isn't connected</div>
-                <div class="bf-hero-sub" id="bf-hero-sub">Press “Connect BookForge” — one click does everything.</div>
-              </div>
-              <div class="bf-hero-actions">
-                <button id="btn-bf-connect" class="bf-connect" title="Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste">🔗 Connect BookForge</button>
-                <label class="bf-switch" title="Turn the bridge on or off. When it's off, BookForge can't use your AIs."><input type="checkbox" id="bf-enabled"> <span>Bridge on</span></label>
-              </div>
-            </div>
-            <div id="bf-connect-msg" class="bf-connect-msg" role="status" aria-live="polite">
-              <span id="bf-connect-text">One click: turns the bridge on, opens BookForge in your browser and hands it the key. Nothing to copy or paste.</span>
-              <button id="btn-bf-start-app" class="bf-primary" style="display:none;" title="Start BookForge (run-bookforge) for you, then connect">▶ Start BookForge for me</button>
-            </div>
-            <div class="bf-next" role="status" aria-live="polite"><span class="bf-next-label">Next step</span><span id="bf-next">Press “🔗 Connect BookForge”.</span></div>
+        <!-- what's happening + the next step, one line -->
+        <div id="bf-connect-msg" class="bf-line" role="status" aria-live="polite">
+          <span id="bf-connect-text"></span>
+          <span><span class="bf-next-label">Next</span> <span id="bf-next">Press “🔗 Connect BookForge”.</span></span>
+          <span class="bf-anchor" id="bf-start-anchor"><button id="btn-bf-start-app" class="bf-primary" style="display:none;" title="Start BookForge (run-bookforge) for you, then connect">▶ Start BookForge for me</button></span>
+          <span id="bf-msg" role="status" aria-live="polite"></span>
+        </div>
 
-            <div class="bf-subhead">Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button></div>
+        <div class="bf-strip">
+          <!-- the three AIs, side by side -->
+          <section class="bf-card" id="bf-ais-card" aria-labelledby="bf-ais-h">
+            <h3 id="bf-ais-h">🤖 Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button></h3>
             <div class="bf-ais" id="bf-ais"></div>
-
-            <div class="bf-subhead">Connection check <button class="bf-info" type="button" data-info="test" aria-expanded="false" aria-controls="bf-pop" aria-label="What does the connection check do?">ⓘ</button></div>
-            <ol class="bf-steps" id="bf-conn-steps" aria-label="Connection check"></ol>
-            <div class="bf-key-row bf-test-row">
-              <button id="btn-bf-test" class="bf-test-btn" title="Check every step for real, including a tiny test question to each Active AI, and save a report">🧪 Test the connection</button>
-              <button id="btn-bf-test-stop" class="bf-danger" style="display:none;" title="Stop the test">■ Stop test</button>
-              <button id="btn-bf-test-report" style="display:none;" title="Open the saved test report">📄 Open last report</button>
-            </div>
-            <div id="bf-test-summary" class="bf-test-summary" role="status" aria-live="polite"></div>
-
-            <details class="bf-more" id="bf-other-ways">
-              <summary>Other ways to connect (copy the key by hand)</summary>
-              <p>Only needed if the one-click Connect doesn't work. The connection key is like a password that lets only your BookForge talk to this app. It never leaves your computer. <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></p>
-              <div class="bf-key-row">
-                <button id="btn-bf-copy" title="Copy the connection key, then paste it into BookForge (Settings → Connect AutoInjector)">📋 Copy connection key</button>
-                <button id="btn-bf-reveal" title="Show or hide the connection key on screen">Show key</button>
-                <button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — BookForge disconnects until it gets the new key">Make a new key</button>
-                <button class="bf-info" type="button" data-info="buttons" aria-expanded="false" aria-controls="bf-pop" aria-label="Copy, Show and Make a new key — what's the difference?">ⓘ</button>
-              </div>
-              <div id="bf-token" style="display:none;" aria-label="Connection key"></div>
-            </details>
-            <div id="bf-msg" role="status" aria-live="polite"></div>
           </section>
+          <!-- connection check: chips; the full list opens on click or when something fails -->
+          <section class="bf-card" id="bf-check-card" aria-labelledby="bf-check-h">
+            <h3 id="bf-check-h">🔌 Connection check <button class="bf-info" type="button" data-info="test" aria-expanded="false" aria-controls="bf-pop" aria-label="What does the connection check do?">ⓘ</button></h3>
+            <div class="bf-chips" id="bf-chips" aria-label="Connection check (summary)"></div>
+            <div class="bf-check-actions">
+              <span class="bf-anchor" id="bf-test-anchor"><button id="btn-bf-test" class="bf-test-btn" title="Check every step for real, including a tiny test question to each Active AI, and save a report">🧪 Test the connection</button></span>
+              <button id="btn-bf-test-stop" class="bf-danger" style="display:none;" title="Stop the test">■ Stop</button>
+              <span class="bf-anchor" id="bf-report-anchor"><button id="btn-bf-test-report" style="display:none;" title="Open the saved test report">📄 Last report</button></span>
+              <button id="btn-bf-checks-more" class="bf-toggle" type="button" aria-expanded="false" aria-controls="bf-conn-steps">Details ▸</button>
+              <span id="bf-test-summary" class="bf-test-summary" role="status" aria-live="polite"></span>
+            </div>
+          </section>
+        </div>
+        <ol class="bf-steps" id="bf-conn-steps" aria-label="Connection check (full list)" hidden></ol>
 
-          <!-- 2. Now working on: BookForge's current sub-module step + approvals -->
-          <section class="bf-card" id="bf-now-card" aria-labelledby="bf-now-h">
+        <div class="bf-pair">
+          <!-- Now working on: BookForge's current step + approvals -->
+          <section class="bf-card" id="bf-now-card" data-tone="off" aria-labelledby="bf-now-h">
             <h3 id="bf-now-h">✍️ Now working on <button class="bf-info" type="button" data-info="now" aria-expanded="false" aria-controls="bf-pop" aria-label="About Now working on">ⓘ</button></h3>
             <div id="bf-now-empty" class="bf-empty">Connect BookForge to see what's happening.</div>
             <div id="bf-now" hidden>
-              <div class="bf-now-top"><span id="bf-now-step" class="bf-now-step"></span><span id="bf-now-state" class="bf-pill" data-tone="info"></span></div>
+              <div class="bf-now-top"><span id="bf-now-step" class="bf-now-step"></span><span id="bf-now-state" class="bf-pill" data-tone="info"></span><span id="bf-now-working" class="bf-now-working" hidden></span></div>
               <div id="bf-now-msg" class="bf-now-msg"></div>
-              <div id="bf-now-working" class="bf-now-working" hidden></div>
               <div id="bf-approvals" class="bf-approvals" data-tone="ok">
-                <div id="bf-approvals-title" class="bf-approvals-title"></div>
-                <ul id="bf-approvals-list" class="bf-approvals-list"></ul>
-                <button id="btn-bf-approve" class="bf-primary" style="display:none;" title="Open BookForge's approvals page in your browser">✅ Review &amp; approve</button>
+                <span id="bf-approvals-title" class="bf-approvals-title"></span>
+                <span id="bf-approvals-list" class="bf-approvals-list"></span>
               </div>
-              <div class="bf-key-row"><button id="btn-bf-goto-task" title="Open the current step in BookForge">▶ Go to current task</button></div>
+              <div class="bf-now-actions">
+                <span class="bf-anchor" id="bf-approve-anchor"><button id="btn-bf-approve" class="bf-primary" style="display:none;" title="Open BookForge's approvals page in your browser">✅ Review &amp; approve</button></span>
+                <span class="bf-anchor" id="bf-goto-anchor"><button id="btn-bf-goto-task" title="Open the current step in BookForge">▶ Go to current task</button></span>
+              </div>
             </div>
-            <div class="bf-stale" id="bf-now-stale" hidden></div>
+            <div class="bf-stale" id="bf-now-stale" hidden><span id="bf-now-stale-text"></span></div>
           </section>
 
-          <!-- 3. Book checklist: the big picture -->
+          <!-- Book checklist: a compact stepper with k/n; the full list on demand -->
           <section class="bf-card" id="bf-book-card" aria-labelledby="bf-book-h">
-            <h3 id="bf-book-h">📖 Book checklist <button class="bf-info" type="button" data-info="book" aria-expanded="false" aria-controls="bf-pop" aria-label="About the book checklist">ⓘ</button></h3>
+            <h3 id="bf-book-h">📖 Book checklist <button class="bf-info" type="button" data-info="book" aria-expanded="false" aria-controls="bf-pop" aria-label="About the book checklist">ⓘ</button>
+              <span class="bf-h3-extra"><span class="bf-anchor" id="bf-open-anchor"><button id="btn-bf-open" title="Open BookForge in your browser">📚 Open BookForge</button></span></span></h3>
             <div id="bf-book-empty" class="bf-empty">When BookForge is connected, your book's progress shows here.</div>
             <div id="bf-book" hidden>
-              <div id="bf-book-title" class="bf-book-title"></div>
-              <div class="bf-progress" role="progressbar" aria-valuemin="0" id="bf-progress" aria-label="Book progress"><div class="bf-progress-bar" id="bf-progress-bar"></div></div>
-              <div id="bf-progress-text" class="bf-progress-text"></div>
-              <ol id="bf-checklist" class="bf-checklist" aria-label="Book checklist"></ol>
+              <div class="bf-book-top">
+                <span id="bf-book-title" class="bf-book-title"></span>
+                <span class="bf-progress-wrap"><span class="bf-progress" role="progressbar" aria-valuemin="0" id="bf-progress" aria-label="Book progress"><span class="bf-progress-bar" id="bf-progress-bar" style="display:block"></span></span><span id="bf-progress-text" class="bf-progress-text"></span></span>
+                <button id="btn-bf-book-more" class="bf-toggle" type="button" aria-expanded="false" aria-controls="bf-checklist">List ▸</button>
+              </div>
+              <ol id="bf-stepper" class="bf-stepper" aria-label="Book checklist (summary)"></ol>
+              <ol id="bf-checklist" class="bf-checklist" aria-label="Book checklist" hidden></ol>
             </div>
             <div class="bf-stale" id="bf-book-stale" hidden></div>
-            <div class="bf-key-row"><button id="btn-bf-open" title="Open BookForge in your browser">📚 Open BookForge</button></div>
           </section>
+        </div>
 
-          <!-- Activity log: kept, but folded away -->
-          <details class="bf-card bf-card-wide bf-more" id="bf-act-card">
+        <div class="bf-foot">
+          <details class="bf-more" id="bf-act-card">
             <summary>Activity log <button class="bf-info" type="button" data-info="activity" aria-expanded="false" aria-controls="bf-pop" aria-label="About the activity log">ⓘ</button></summary>
             <ol id="bf-activity" class="bf-feed" aria-live="polite"></ol>
+            <div id="bf-detail" class="bf-detail"></div>
           </details>
+          <details class="bf-more" id="bf-other-ways">
+            <summary>Other ways to connect</summary>
+            <p>Only needed if the one-click Connect doesn't work. The connection key is like a password that lets only your BookForge talk to this app. It never leaves your computer. <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></p>
+            <div class="bf-key-row">
+              <span class="bf-anchor" id="bf-copy-anchor"><button id="btn-bf-copy" title="Copy the connection key, then paste it into BookForge (Settings → Connect AutoInjector)">📋 Copy connection key</button></span>
+              <span class="bf-anchor" id="bf-reveal-anchor"><button id="btn-bf-reveal" title="Show or hide the connection key on screen">Show key</button></span>
+              <span class="bf-anchor" id="bf-regen-anchor"><button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — BookForge disconnects until it gets the new key">Make a new key</button></span>
+              <button class="bf-info" type="button" data-info="buttons" aria-expanded="false" aria-controls="bf-pop" aria-label="Copy, Show and Make a new key — what's the difference?">ⓘ</button>
+            </div>
+            <div id="bf-token" style="display:none;" aria-label="Connection key"></div>
+          </details>
+          <span class="bf-caution">⚠ Use at your own risk (site terms) <button class="bf-info" type="button" data-info="tos" aria-expanded="false" aria-controls="bf-pop" aria-label="Is this allowed? (terms of service)">ⓘ</button>
+            · keep routing/autopilot off while BookForge works <button class="bf-info" type="button" data-info="routing" aria-expanded="false" aria-controls="bf-pop" aria-label="Why keep routing and autopilot off?">ⓘ</button></span>
         </div>
-
-        <div class="bf-caution">⚠ Use at your own risk: automating these websites may be against their terms.
-          <button class="bf-info" type="button" data-info="tos" aria-expanded="false" aria-controls="bf-pop" aria-label="Is this allowed? (terms of service)">ⓘ</button>
-          <span>· Keep routing / autopilot off while BookForge works.</span>
-          <button class="bf-info" type="button" data-info="routing" aria-expanded="false" aria-controls="bf-pop" aria-label="Why keep routing and autopilot off?">ⓘ</button>
-        </div>
-        <div id="bf-detail" class="bf-detail"></div>
       </div>
       <div id="bf-pop" class="bf-pop" role="dialog" aria-modal="false" aria-labelledby="bf-pop-title" tabindex="-1" hidden>
-        <button class="bf-pop-close" type="button" aria-label="Close this explanation">✕</button>
+        <button class="bf-pop-close" type="button" aria-label="Close">✕</button>
         <h4 id="bf-pop-title"></h4>
         <div id="bf-pop-body"></div>
       </div>
