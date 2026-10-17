@@ -5201,13 +5201,37 @@ async function stopBookforgeBridge() {
 }
 // Last contact / counters / per-site last result outlive a bridge restart
 // within this session (the bridge object is recreated on every enable).
-const bookforgeCarry = { lastContactAt: null, lastExternalContactAt: null, siteLast: {} };
-function bookforgeStatusSnapshot() {
+const bookforgeCarry = { lastContactAt: null, lastExternalContactAt: null, siteLast: {}, bookforge: null, lastPairedAt: null };
+let bfKeyChangedAt = 0; // a new key makes any earlier BookForge contact/pairing count as "not connected"
+// "Is BookForge connected?" in one place (panel, Connect flow and the link test use it).
+function bookforgeConnection(snapBase) {
+  const b = snapBase.bookforge;
+  const on = !!(snapBase.enabled && snapBase.listening);
+  const contactOk = !!(snapBase.lastExternalContactAt && snapBase.lastExternalContactAt > bfKeyChangedAt);
+  const statusFresh = !!(b && !b.stale && b.receivedAt > bfKeyChangedAt);
+  return {
+    connected: on && (contactOk || statusFresh),
+    paired: !!(bookforgeCarry.lastPairedAt && bookforgeCarry.lastPairedAt > bfKeyChangedAt),
+    lastContactAt: snapBase.lastExternalContactAt || null,
+    statusAt: b ? b.receivedAt : null,
+    stale: b ? !!b.stale : null
+  };
+}
+function bookforgeStatusSnapshotBase() {
   const st = bookforgeBridge ? bookforgeBridge.status() : null;
   if (st) {
     if (st.lastContactAt) bookforgeCarry.lastContactAt = st.lastContactAt;
     if (st.lastExternalContactAt) bookforgeCarry.lastExternalContactAt = st.lastExternalContactAt;
     Object.assign(bookforgeCarry.siteLast, st.siteLast || {});
+    if (st.bookforge) bookforgeCarry.bookforge = st.bookforge;
+    if (st.pairing && st.pairing.lastPairedAt) bookforgeCarry.lastPairedAt = st.pairing.lastPairedAt;
+  }
+  // BookForge's own progress report (contract v1.1 POST /v1/status), re-aged now so a
+  // report from before a bridge restart still shows, marked stale after 90 s.
+  let bfStatus = null;
+  if (bookforgeCarry.bookforge) {
+    const age = Math.max(0, Date.now() - bookforgeCarry.bookforge.receivedAt);
+    bfStatus = Object.assign({}, bookforgeCarry.bookforge, { age_ms: age, stale: age > bookforgeBridgeMod.BF_STATUS_STALE_MS });
   }
   const sites = {};
   for (const s of SITE_IDS) {
@@ -5234,8 +5258,19 @@ function bookforgeStatusSnapshot() {
     counters: st ? st.counters : null,
     activity: bookforgeActivity.slice(-30),
     linkTest: { running: bfLinkTest.running, lastReport: bfLinkTest.lastReport, lastSummary: bfLinkTest.lastSummary },
-    sites
+    sites,
+    bookforge: bfStatus,
+    pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
+}
+function bookforgeStatusSnapshot() {
+  const snap = bookforgeStatusSnapshotBase();
+  snap.connection = bookforgeConnection(snap);
+  bookforgeConnectAdvance(snap);
+  snap.connect = Object.assign({}, bfConnect);
+  bookforgeAppCheckSoon();
+  snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!bookforgeLauncher() };
+  return snap;
 }
 ipcMain.handle("bookforge:status", () => bookforgeStatusSnapshot());
 ipcMain.handle("bookforge:set-enabled", async (_evt, payload) => {
@@ -5269,6 +5304,7 @@ ipcMain.handle("bookforge:regenerate-token", () => {
   try {
     const t = bookforgeBridgeMod.regenerateToken(userDataDir());
     if (bookforgeBridge && bookforgeBridge.setToken) bookforgeBridge.setToken(t); // takes effect immediately; the old token stops working
+    bfKeyChangedAt = Date.now();
     logEvent("bookforge-token-regenerated", {});
     bookforgeNoteActivity({ kind: "key_changed" });
     return bookforgeStatusSnapshot();
@@ -5282,9 +5318,50 @@ ipcMain.handle("bookforge:regenerate-token", () => {
 // exactly like BookForge's do. Reports go to the logs folder as
 // bookforge-link-test-<stamp>.md / .json (no key, no prompt text).
 const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null };
+// Where BookForge itself runs. Default http://127.0.0.1:8780 (BookForge's own
+// default); BOOKFORGE_PORT (the same variable BookForge reads) changes the port;
+// AUTOINJECTOR_BOOKFORGE_APP_URL (a full loopback .../api/ping URL) overrides both.
+// When neither is set, BookForge falls back to 8781..8799 if 8780 is busy, so
+// bookforgeFindApp() looks there too.
+const BOOKFORGE_APP_DEFAULT_PORT = 8780;
+function bookforgeAppPort() {
+  const p = Number(process.env.BOOKFORGE_PORT);
+  return Number.isInteger(p) && p > 0 && p < 65536 ? p : BOOKFORGE_APP_DEFAULT_PORT;
+}
 function bookforgeAppUrl() {
   const u = String(process.env.AUTOINJECTOR_BOOKFORGE_APP_URL || "").trim();
-  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u) ? u : bookforgeLinkTest.DEFAULT_BOOKFORGE_URL;
+  if (/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u)) return u;
+  return `http://127.0.0.1:${bookforgeAppPort()}/api/ping`;
+}
+function bookforgeAppConfigured() { return !!(String(process.env.AUTOINJECTOR_BOOKFORGE_APP_URL || "").trim() || process.env.BOOKFORGE_PORT); }
+// GET <ping> -> { running, base, pingUrl, version, other }  (other = something answered that isn't BookForge)
+async function bookforgePing(pingUrl, timeoutMs) {
+  let base = null;
+  try { base = new URL(pingUrl).origin + "/"; } catch (_) { return { running: false, base: null, pingUrl, other: false }; }
+  try {
+    const r = await bookforgeLinkTest.nodeHttp({ method: "GET", url: pingUrl, timeoutMs: timeoutMs || 3000 });
+    if (r.status === 200 && r.json && r.json.app === "bookforge") return { running: true, base, pingUrl, version: r.json.version || null, other: false };
+    return { running: false, base, pingUrl, other: true, http_status: r.status };
+  } catch (e) { return { running: false, base, pingUrl, other: false, error: (e && e.code) || "ERROR" }; }
+}
+async function bookforgeFindApp() {
+  const first = await bookforgePing(bookforgeAppUrl(), 3000);
+  if (first.running || bookforgeAppConfigured()) return first;
+  const tries = [];
+  for (let p = BOOKFORGE_APP_DEFAULT_PORT + 1; p < BOOKFORGE_APP_DEFAULT_PORT + 20; p++) tries.push(bookforgePing(`http://127.0.0.1:${p}/api/ping`, 1500));
+  const found = (await Promise.all(tries)).find((x) => x.running);
+  return found || first;
+}
+// Cached "is BookForge running?" for the panel: refreshed in the background at most every 8 s.
+const bfApp = { running: null, base: null, version: null, checkedAt: 0, checking: false };
+function bookforgeAppCheckSoon(force) {
+  if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < 8000)) return;
+  bfApp.checking = true;
+  bookforgeFindApp().then((r) => {
+    const changed = r.running !== bfApp.running || r.base !== bfApp.base;
+    Object.assign(bfApp, { running: r.running, base: r.running ? r.base : bfApp.base || r.base, version: r.version || null, checkedAt: Date.now() });
+    if (changed) { try { broadcast("bookforge-activity", { event: null, status: bookforgeStatusSnapshot() }); } catch (_) {} }
+  }).catch(() => {}).finally(() => { bfApp.checking = false; });
 }
 async function runBookforgeLinkTestNow() {
   if (bfLinkTest.running) return { ok: false, error: "ALREADY_RUNNING" };
@@ -5304,7 +5381,8 @@ async function runBookforgeLinkTestNow() {
       keyFileExists: () => fs.existsSync(bookforgeBridgeMod.tokenPath(userDataDir())),
       readKey: () => bookforgeBridgeMod.readToken(userDataDir()),
       siteReady: bookforgeSiteReady,
-      bookforgeUrl: bookforgeAppUrl(),
+      bookforgeUrl: await (async () => { try { const f = await bookforgeFindApp(); return f.running ? f.pingUrl : bookforgeAppUrl(); } catch (_) { return bookforgeAppUrl(); } })(),
+      getConnection: () => bookforgeStatusSnapshot().connection,
       replyTimeoutMs: Number(process.env.AUTOINJECTOR_BF_LINKTEST_MS) || bookforgeLinkTest.DEFAULT_REPLY_TIMEOUT_MS,
       shouldStop: () => bfLinkTest.stop,
       onProgress: (p) => {
@@ -5360,6 +5438,144 @@ ipcMain.handle("bookforge:linktest-open-report", async (_evt, { file } = {}) => 
     const err = await shell.openPath(f);
     return err ? { ok: false, error: err } : { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
+});
+
+// ---- 🔗 Connect BookForge: one click, no copy/paste (contract v1.1) ----------
+// 1. turn the bridge on if it's off; 2. check BookForge is running (GET
+// /api/ping); 3. make a one-time pairing code (2 minutes, single use) and open
+// BookForge in the default browser at
+//   http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<bridge url>
+// BookForge then trades the code for the key with POST /v1/pair — the
+// connection key itself is NEVER put in a URL. 4. the panel watches for the
+// pairing and BookForge's first POST /v1/status, then shows "Connected ✔".
+// Neither the code nor the key is ever logged.
+const BF_NO_STATUS_AFTER_MS = 30000; // paired, but no status this long after -> say so
+const bfConnect = { phase: "idle", message: null, startedAt: null, expiresAt: null, pairedAt: null, connectedAt: null, canStartApp: false, step: null, at: null };
+let bfConnectBusy = false;
+function bookforgeSetConnect(phase, extra) {
+  Object.assign(bfConnect, { message: null, step: null }, extra || {}, { phase, at: Date.now() });
+  logEvent("bookforge-connect", { phase, step: bfConnect.step || null }); // never the code or the key
+  return bfConnect;
+}
+// Move the Connect flow along from what the bridge has seen (called on every snapshot).
+function bookforgeConnectAdvance(snap) {
+  const c = bfConnect;
+  // Once connected, fall back to "idle" if the bridge goes off or a new key is made.
+  if (c.phase === "connected" && (!snap.enabled || !snap.listening || (c.connectedAt && c.connectedAt <= bfKeyChangedAt))) { bookforgeSetConnect("idle"); return; }
+  if (!["waiting", "paired", "no_status"].includes(c.phase)) return;
+  const t = Date.now();
+  if (!snap.enabled || !snap.listening) { bookforgeSetConnect("error", { step: "bridge", message: "The bridge was turned off while connecting. Press Connect again." }); return; }
+  const pairedAt = snap.pairing && snap.pairing.lastPairedAt;
+  if (c.phase === "waiting" && pairedAt && pairedAt >= c.startedAt) { c.pairedAt = pairedAt; bookforgeSetConnect("paired", { pairedAt }); }
+  const b = snap.bookforge;
+  if ((c.phase === "paired" || c.phase === "no_status") && b && b.receivedAt >= c.pairedAt) { bookforgeSetConnect("connected", { connectedAt: b.receivedAt }); return; }
+  if (c.phase === "waiting" && t > c.expiresAt) bookforgeSetConnect("expired", { message: "BookForge didn't pick up the connection in time (the one-time code lasts 2 minutes). Press Connect again." });
+  else if (c.phase === "paired" && t - c.pairedAt > BF_NO_STATUS_AFTER_MS) bookforgeSetConnect("no_status", { message: "BookForge has the connection key, but hasn't sent its progress yet. Keep the BookForge page open. If this stays, update BookForge — the AIs still work either way." });
+}
+// The BookForge launcher next to this app (../bookforge/run-bookforge.bat|.sh), if it exists.
+function bookforgeLauncher() {
+  const dir = String(process.env.AUTOINJECTOR_BOOKFORGE_DIR || "").trim() || path.join(__dirname, "..", "bookforge");
+  const f = path.join(dir, process.platform === "win32" ? "run-bookforge.bat" : "run-bookforge.sh");
+  try { return fs.statSync(f).isFile() ? f : null; } catch (_) { return null; }
+}
+async function bookforgeConnectNow() {
+  // 1. bridge on
+  if (!state.bookforge.enabled || !bookforgeBridge) {
+    state.bookforge.enabled = true;
+    saveStateDebounced();
+    bookforgeSetConnect("starting_bridge");
+    const r = await startBookforgeBridge();
+    logEvent("bookforge-enabled", { ok: r.ok, error: r.error || null, port: bookforgeBridgePort(), via: "connect" });
+    if (!r.ok || !bookforgeBridge) {
+      const why = r.error === "EADDRINUSE" ? `another program is using port ${bookforgeBridgePort()} (often a second copy of AutoInjector) — close it and press Connect again` : `the bridge couldn't start (${r.error || "unknown error"})`;
+      return bookforgeSetConnect("error", { step: "bridge", message: `Couldn't connect: ${why}.` });
+    }
+  }
+  // 2. is BookForge running?
+  bookforgeSetConnect("checking");
+  const found = await bookforgeFindApp();
+  Object.assign(bfApp, { running: found.running, base: found.running ? found.base : bfApp.base || found.base, version: found.version || null, checkedAt: Date.now() });
+  if (!found.running) {
+    const launcher = bookforgeLauncher();
+    const startWord = process.platform === "win32" ? "run-bookforge.bat" : "run-bookforge.sh";
+    return bookforgeSetConnect("not_running", {
+      step: "bookforge", canStartApp: !!launcher,
+      message: found.other
+        ? `Something else is answering at ${found.base} — it isn't BookForge. Start BookForge with ${startWord} (or close the other program), then press Connect again.`
+        : `BookForge isn't running yet. Start BookForge with ${startWord}, then press Connect again.`
+    });
+  }
+  // 3. one-time code + open the browser (the key never goes into the URL)
+  if (!bookforgeBridge || typeof bookforgeBridge.createPairingCode !== "function") return bookforgeSetConnect("error", { step: "bridge", message: "The bridge isn't running. Press Connect again." });
+  const startedAt = Date.now();
+  const code = bookforgeBridge.createPairingCode();
+  const bridgeUrl = `http://127.0.0.1:${bookforgeBridge.status().port}`;
+  const url = `${found.base}#/pair?code=${encodeURIComponent(code)}&bridge=${encodeURIComponent(bridgeUrl)}`;
+  try {
+    if (!shell || typeof shell.openExternal !== "function") throw new Error("NO_SHELL");
+    await shell.openExternal(url);
+  } catch (e) {
+    return bookforgeSetConnect("error", { step: "browser", message: `Couldn't open your web browser. Open ${found.base} yourself, or use “Copy connection key” under “Other ways” and paste it into BookForge.` });
+  }
+  return bookforgeSetConnect("waiting", { startedAt, expiresAt: startedAt + bookforgeBridgeMod.PAIR_CODE_TTL_MS, pairedAt: null, connectedAt: null, canStartApp: false });
+}
+ipcMain.handle("bookforge:connect", async () => {
+  if (bfConnectBusy) return Object.assign(bookforgeStatusSnapshot(), { busy: true });
+  bfConnectBusy = true;
+  try { await bookforgeConnectNow(); }
+  catch (e) { bookforgeSetConnect("error", { step: "unknown", message: `Something went wrong while connecting (${String((e && e.message) || e).slice(0, 80)}). Press Connect again.` }); }
+  finally { bfConnectBusy = false; }
+  return bookforgeStatusSnapshot();
+});
+// "Start BookForge for me": runs ../bookforge/run-bookforge.(bat|sh) detached, then
+// waits (up to AUTOINJECTOR_BF_START_WAIT_MS, default 90 s — the first start installs
+// what BookForge needs) until /api/ping answers.
+let bfAppStarting = false;
+ipcMain.handle("bookforge:start-app", async () => {
+  const launcher = bookforgeLauncher();
+  if (!launcher) return { ok: false, error: "NO_LAUNCHER", message: "Couldn't find BookForge next to this app. Start it yourself with run-bookforge.bat, then press Connect again." };
+  if (bfAppStarting) return { ok: false, error: "ALREADY_STARTING", message: "BookForge is already starting — give it a moment." };
+  bfAppStarting = true;
+  try {
+    const pre = await bookforgeFindApp();
+    if (pre.running) return { ok: true, running: true, already: true };
+    const { spawn } = require("child_process");
+    const dir = path.dirname(launcher);
+    let child;
+    try {
+      child = process.platform === "win32"
+        ? spawn("cmd.exe", ["/d", "/s", "/c", `start "BookForge" "${launcher}"`], { cwd: dir, detached: true, stdio: "ignore", windowsVerbatimArguments: true })
+        : spawn("sh", [launcher], { cwd: dir, detached: true, stdio: "ignore" });
+      child.on("error", (e) => logEvent("bookforge-app-start-error", { error: (e && e.code) || String(e) }));
+      child.unref();
+    } catch (e) {
+      logEvent("bookforge-app-start-error", { error: (e && e.code) || String(e) });
+      return { ok: false, error: "SPAWN_FAILED", message: "Couldn't start BookForge. Start it yourself with run-bookforge.bat, then press Connect again." };
+    }
+    logEvent("bookforge-app-started", { launcher: path.basename(launcher) });
+    bookforgeNoteActivity({ kind: "app_start", say: "Starting BookForge for you…", tone: "info" });
+    const waitMs = Number(process.env.AUTOINJECTOR_BF_START_WAIT_MS) || 90000;
+    const until = Date.now() + waitMs;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, Math.min(1500, Math.max(100, waitMs / 10))));
+      const f = await bookforgeFindApp();
+      if (f.running) { Object.assign(bfApp, { running: true, base: f.base, version: f.version || null, checkedAt: Date.now() }); return { ok: true, started: true, running: true }; }
+    }
+    return { ok: true, started: true, running: false, message: "BookForge is still starting (the first start can take a few minutes). When its window says it is running, press Connect again." };
+  } finally { bfAppStarting = false; }
+});
+// Open a BookForge page in the browser (Review & approve, Go to current task,
+// Open BookForge). Only loopback http URLs; otherwise BookForge's own address.
+ipcMain.handle("bookforge:open-url", async (_evt, payload) => {
+  const raw = String((payload && payload.url) || "");
+  let url = null;
+  try { const u = new URL(raw); if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost") && !u.username && !u.password) url = u.href; } catch (_) {}
+  if (!url) url = bfApp.base || bookforgeAppUrl().replace(/api\/ping$/, "");
+  try {
+    if (!shell || typeof shell.openExternal !== "function") throw new Error("NO_SHELL");
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: "OPEN_FAILED", message: `Couldn't open your web browser. Go to ${url} yourself.` }; }
 });
 
 app.whenReady().then(() => {

@@ -109,7 +109,7 @@ async function main() {
 
   console.log("health");
   r = await request(port, "GET", "/v1/health");
-  assert(r.status === 200 && r.json.ok === true && r.json.bridge_version === "1", "health 200 with bridge_version 1");
+  assert(r.status === 200 && r.json.ok === true && r.json.bridge_version === "1.1", "health 200 with bridge_version 1.1 (contract v1.1, backward compatible)");
   assert(["chatgpt", "claude", "gemini"].every((s) => r.json.sites[s] && r.json.sites[s].ready === true && r.json.sites[s].busy === false), "health lists every site ready/not busy");
   r = await request(port, "GET", "/v1/nope");
   assert(r.status === 404 && r.json.error === "NOT_FOUND", "404 NOT_FOUND for unknown path");
@@ -327,6 +327,152 @@ async function main() {
   try { await request(port, "GET", "/v1/health"); } catch (e) { refused = e.code === "ECONNREFUSED"; if (!refused) console.log("    got", e.code); }
   assert(refused, "connection refused once stopped");
 
+  // --- contract v1.1: pairing ----------------------------------------------------
+  console.log("pairing (contract v1.1)");
+  {
+    let clock = 1_000_000;
+    const logs = [];
+    const P = bridgeMod.createBridge({ port: 0, getToken: () => TOKEN, sendToSite: async () => ({ ok: true }), now: () => clock, logger: (k, d) => logs.push(JSON.stringify({ k, d })) });
+    await P.start();
+    const pp = P.status().port;
+    const pair = (body, extra = {}) => request(pp, "POST", "/v1/pair", Object.assign({ token: null, body }, extra));
+    assert(typeof P.createPairingCode === "function", "createPairingCode() is exposed");
+    let res = await pair({ code: "AAAAAAAAAAAA", client: "bookforge" });
+    assert(res.status === 401 && res.json.ok === false && res.json.error === "PAIRING_CODE_INVALID", "no code made yet -> 401 PAIRING_CODE_INVALID");
+    const code = P.createPairingCode();
+    assert(/^[A-Za-z0-9]{12}$/.test(code), `pairing code is 12 chars of [A-Za-z0-9] (${code.length})`);
+    const codes = new Set(); for (let i = 0; i < 50; i++) codes.add(bridgeMod.generatePairingCode());
+    assert(codes.size === 50, "pairing codes are random (50 distinct)");
+    assert(P.status().pairing.pending === true && !JSON.stringify(P.status()).includes(code), "status() says a code is pending but never shows the code");
+    res = await pair({ code: code.toLowerCase() === code ? code.toUpperCase() : code.toLowerCase(), client: "bookforge" });
+    assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID", "wrong code (case matters) -> 401");
+    res = await pair({ code, client: "bookforge" });
+    assert(res.status === 200 && res.json.ok === true && res.json.token === TOKEN && res.json.bridge_version === "1.1", "right code, no Authorization header -> 200 with the connection key + bridge_version 1.1");
+    res = await pair({ code, client: "bookforge" });
+    assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID" && !res.text.includes(TOKEN), "a code works only once (second use -> 401, no key)");
+    assert(P.status().pairing.pending === false && P.status().pairing.lastPairedAt === clock, "status() records when pairing happened");
+    const c1 = P.createPairingCode();
+    const c2 = P.createPairingCode();
+    res = await pair({ code: c1 });
+    assert(res.status === 401, "making a new code invalidates the older unused one");
+    clock += bridgeMod.PAIR_CODE_TTL_MS + 1;
+    res = await pair({ code: c2 });
+    assert(res.status === 410 && res.json.error === "PAIRING_CODE_EXPIRED", "expired code (after 120 s) -> 410 PAIRING_CODE_EXPIRED");
+    const c3 = P.createPairingCode();
+    clock += bridgeMod.PAIR_CODE_TTL_MS - 1000;
+    res = await pair({ code: c3, client: "bookforge" });
+    assert(res.status === 200 && res.json.token === TOKEN, "a code still works just before 120 s");
+    for (const [extra, what] of [[{ rawBody: Buffer.from("nope") }, "non-JSON"], [{ body: [1] }, "array"], [{ body: {} }, "missing code"], [{ body: { code: 123 } }, "numeric code"], [{ body: { code: "x", client: 5 } }, "non-string client"]]) {
+      res = await request(pp, "POST", "/v1/pair", Object.assign({ token: null }, extra));
+      assert(res.status === 400 && res.json.error === "BAD_REQUEST", `bad pair body (${what}) -> 400`);
+    }
+    // rate limit: 10 failures inside 60 s -> 429 for 60 s, even for a valid code
+    clock += 61000; // fresh window
+    const c4 = P.createPairingCode();
+    let statuses = [];
+    for (let i = 0; i < 10; i++) { res = await pair({ code: `WRONGWRONG${String(i).padStart(2, "0")}` }); statuses.push(res.status); }
+    assert(statuses.every((x) => x === 401), "10 wrong codes -> each 401");
+    res = await pair({ code: c4 });
+    assert(res.status === 429 && res.json.error === "TOO_MANY_ATTEMPTS" && !res.text.includes(TOKEN), "11th attempt (even with the right code) -> 429 TOO_MANY_ATTEMPTS");
+    assert(P.status().pairing.locked === true, "status() shows pairing is paused");
+    clock += bridgeMod.PAIR_LOCK_MS + 1;
+    const c5 = P.createPairingCode();
+    res = await pair({ code: c5 });
+    assert(res.status === 200 && res.json.token === TOKEN, "after 60 s pairing works again");
+    const evs = P.status().events.filter((e) => e.kind === "pair");
+    assert(evs.length >= 5 && evs.some((e) => e.outcome === "PAIRED" && e.http_status === 200) && evs.some((e) => e.outcome === "PAIRING_CODE_EXPIRED" && e.http_status === 410) && evs.some((e) => e.outcome === "TOO_MANY_ATTEMPTS" && e.http_status === 429), "pair events (outcome only) are in the activity ring");
+    const dump = JSON.stringify(P.status()) + logs.join("\n");
+    assert(![code, c1, c2, c3, c4, c5].some((c) => dump.includes(c)) && !dump.includes(TOKEN) && !dump.includes("WRONGWRONG"), "codes, presented codes and the key never appear in status/events/logs");
+    assert(/Made a one-time pairing code/.test(bridgeMod.describeEvent({ kind: "pair_code" }).say) && /paired/.test(bridgeMod.describeEvent({ kind: "pair", outcome: "PAIRED" }).say) && bridgeMod.describeEvent({ kind: "pair", outcome: "TOO_MANY_ATTEMPTS" }).tone === "warn", "pair events have plain-English lines");
+    res = await request(pp, "GET", "/v1/pair", { token: null });
+    assert(res.status === 401, "GET /v1/pair is not the pairing endpoint (needs a key -> 401)");
+    // No key yet -> 503 NOT_READY, code not consumed
+    let tok = "";
+    const Q = bridgeMod.createBridge({ port: 0, getToken: () => tok, sendToSite: async () => ({ ok: true }) });
+    await Q.start();
+    const qc = Q.createPairingCode();
+    res = await request(Q.status().port, "POST", "/v1/pair", { token: null, body: { code: qc } });
+    assert(res.status === 503 && res.json.error === "NOT_READY", "no connection key yet -> 503 NOT_READY");
+    tok = TOKEN;
+    res = await request(Q.status().port, "POST", "/v1/pair", { token: null, body: { code: qc } });
+    assert(res.status === 200 && res.json.token === TOKEN, "...and the code is not used up by that");
+    await Q.stop();
+    await P.stop();
+  }
+
+  // --- contract v1.1: status from BookForge ----------------------------------------
+  console.log("status from BookForge (contract v1.1)");
+  {
+    let clock = 5_000_000;
+    const S = bridgeMod.createBridge({ port: 0, getToken: () => TOKEN, sendToSite: async () => ({ ok: true }), now: () => clock });
+    await S.start();
+    const sp = S.status().port;
+    const SECRET_TITLE = "Chapter about TOPSECRET-TITLE-q1";
+    const good = {
+      app: "bookforge", version: 1, bookforge_url: "http://127.0.0.1:8780/",
+      project: { id: "p-1", title: "The Lantern Keeper" },
+      current_task: { set: "B", op: "B03", title: "Main plot", state: "running", message: "Writing the main plot with Claude", url: "http://127.0.0.1:8780/#/op/B03" },
+      working_on: { op: "B03", title: SECRET_TITLE, started_at: "2026-10-17T10:00:00Z" },
+      approvals: { count: 2, items: [{ op: "B01", set: "B", title: "Premise" }, { op: "B02", set: "B", title: "Logline" }], url: "http://localhost:8780/#/approvals" },
+      checklist: [{ id: "A", title: "Book profile", set: "A", state: "done" }, { id: "B", title: "Story bible", set: "B", state: "current" }],
+      done: 1, total: 9, updated_at: 1792231200
+    };
+    assert(S.status().bookforge === null && S.bookforgeStatus() === null, "status().bookforge is null before BookForge reports");
+    let res = await request(sp, "POST", "/v1/status", { token: null, body: good });
+    assert(res.status === 401, "POST /v1/status without the key -> 401");
+    res = await request(sp, "POST", "/v1/status", { body: good });
+    assert(res.status === 200 && res.json.ok === true, "POST /v1/status with the key -> 200 {ok:true}");
+    let b = S.status().bookforge;
+    assert(b && b.project.title === "The Lantern Keeper" && b.current_task.op === "B03" && b.current_task.set === "B" && b.approvals.count === 2 && b.approvals.items.length === 2 && b.checklist.length === 2 && b.done === 1 && b.total === 9, "latest status is exposed as status().bookforge");
+    assert(b.receivedAt === clock && b.stale === false && b.age_ms === 0, "status carries receivedAt and stale:false while fresh");
+    assert(b.working_on.started_at === Date.parse("2026-10-17T10:00:00Z") && b.updated_at === 1792231200000, "started_at / updated_at normalised to epoch ms (ISO or seconds)");
+    assert(typeof S.status().lastExternalContactAt === "number", "a status report counts as contact from BookForge");
+    // sanitising
+    const evil = JSON.parse(JSON.stringify(good));
+    evil.extra_field = "nope";
+    evil.project.title = "T".repeat(500);
+    evil.current_task.message = "M".repeat(2000);
+    evil.current_task.url = "https://evil.example/";
+    evil.current_task.extra = "x";
+    evil.approvals.url = "javascript:alert(1)";
+    evil.approvals.items = Array.from({ length: 50 }, (_, i) => ({ op: `X${i}`, title: "t", junk: 1 }));
+    evil.checklist = Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, title: "row", set: "C", state: "todo" }));
+    evil.bookforge_url = "http://192.168.1.5:8780/";
+    res = await request(sp, "POST", "/v1/status", { body: evil });
+    b = S.status().bookforge;
+    assert(res.status === 200 && !("extra_field" in b) && !("extra" in b.current_task) && !("junk" in b.approvals.items[0]), "unknown fields are dropped (whitelist)");
+    assert(b.project.title.length === 200 && b.current_task.message.length === 500, "titles capped at 200 chars, message at 500");
+    assert(b.approvals.items.length === 20 && b.checklist.length === 40, "approval items capped at 20, checklist at 40");
+    assert(b.current_task.url === null && b.approvals.url === null && b.bookforge_url === null, "non-loopback / non-http URLs are dropped");
+    res = await request(sp, "POST", "/v1/status", { body: Object.assign({}, good, { current_task: Object.assign({}, good.current_task, { url: "http://localhost:8780/#/op/B03" }) }) });
+    assert(S.status().bookforge.current_task.url === "http://localhost:8780/#/op/B03", "http://localhost URLs are kept");
+    for (const [extra, what] of [[{ rawBody: Buffer.from("{bad") }, "non-JSON"], [{ body: [1] }, "array"], [{ body: { app: "other" } }, "app not bookforge"]]) {
+      res = await request(sp, "POST", "/v1/status", extra);
+      assert(res.status === 400 && res.json.error === "BAD_REQUEST", `bad status body (${what}) -> 400`);
+    }
+    const big = Object.assign({}, good, { pad: "x".repeat(bridgeMod.MAX_STATUS_BYTES + 10) });
+    res = await request(sp, "POST", "/v1/status", { body: big });
+    assert(res.status === 413 && res.json.error === "TOO_LARGE", "status body over 32 KiB -> 413");
+    assert(S.status().bookforge.current_task.url === "http://localhost:8780/#/op/B03", "a rejected status leaves the last good one in place");
+    // staleness
+    clock += bridgeMod.BF_STATUS_STALE_MS + 5000;
+    b = S.status().bookforge;
+    assert(b && b.stale === true && b.age_ms === bridgeMod.BF_STATUS_STALE_MS + 5000, "after 90 s without an update the status is marked stale:true (kept, with its age)");
+    res = await request(sp, "POST", "/v1/status", { body: good });
+    assert(S.status().bookforge.stale === false, "a new report makes it fresh again");
+    // activity: only "status received", never the content
+    const sev = S.status().events.filter((e) => e.kind === "status");
+    assert(sev.length === 2, `"status received" is recorded only on the first report and after a gap (${sev.length})`);
+    const evDump = JSON.stringify(S.status().events);
+    assert(!evDump.includes("Lantern") && !evDump.includes("TOPSECRET-TITLE") && !evDump.includes("Main plot"), "status content never goes into the activity ring");
+    assert(S.status().counters.status_updates >= 4, "status updates are counted");
+    assert(/BookForge sent an update/.test(bridgeMod.describeEvent({ kind: "status" }).say), "status events have a plain-English line");
+    // Health and complete still behave as v1
+    res = await request(sp, "GET", "/v1/health");
+    assert(res.status === 200 && res.json.sites && res.json.sites.claude, "v1 /v1/health unchanged");
+    await S.stop();
+  }
+
   console.log("fake-bridge-host fixture (CLI, separate process)");
   {
     const { spawn } = require("child_process");
@@ -389,6 +535,21 @@ async function main() {
     assert(r.status === 409 && r.json.error === "SITE_BUSY", "busy mode -> 409 SITE_BUSY");
     r = await request(h.port, "GET", "/v1/health");
     assert(r.json.sites.gemini.ready === false, "--not-ready reflected in health");
+    await kill(h.child);
+
+    // contract v1.1 helpers for cross-process tests
+    const tmpd = fs.mkdtempSync(path.join(os.tmpdir(), "bf-fh-"));
+    const codeFile = path.join(tmpd, "code.txt");
+    const statusFile = path.join(tmpd, "status.json");
+    h = await spawnHost(["--pairing-code-file", codeFile, "--status-file", statusFile]);
+    const fhCode = fs.readFileSync(codeFile, "utf8");
+    assert(/^[A-Za-z0-9]{12}$/.test(fhCode), "--pairing-code-file writes a 12-char pairing code before READY");
+    r = await request(h.port, "POST", "/v1/pair", { token: null, body: { code: fhCode, client: "bookforge" } });
+    assert(r.status === 200 && r.json.token === TOKEN, "fake host: /v1/pair with that code returns the key");
+    r = await request(h.port, "POST", "/v1/status", { body: { app: "bookforge", version: 1, done: 2, total: 5, checklist: [] } });
+    let wrote = null;
+    for (let i = 0; i < 60 && !wrote; i++) { await sleep(25); try { wrote = JSON.parse(fs.readFileSync(statusFile, "utf8")); } catch (_) {} }
+    assert(r.status === 200 && wrote && wrote.done === 2 && wrote.total === 5, "--status-file receives the sanitized status");
     await kill(h.child);
   }
 

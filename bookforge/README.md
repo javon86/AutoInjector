@@ -66,6 +66,62 @@ without an objective review) one is recorded for exactly that version because yo
 end **⬇ Download my book** gives you the files. Full release readiness (H10) stays in Quality Checks.
 API: `GET /api/projects/{id}/branches/{b}/book`, `POST .../book/{create|write_chapter|approve|setup_format|assemble|export|check}`.
 
+## ▶ Current task and 📝 Needs your approval
+
+The left side bar always starts with two things:
+
+* **▶ Current task** — one big button that takes you to exactly the thing your book needs next: the review
+  queue at the first draft waiting for you, the chapter to write, the book format to set up, and so on. Under it
+  a one-line explanation and where it lives (for example *Set B · B03*). The same card is on the Overview (and on
+  phones, where the side bar is behind **Menu**).
+* **📝 Needs your approval (N)** — opens the review queue. The number updates after everything you do, and every
+  10 seconds while the page is visible.
+
+**The review queue** lists every draft waiting for your approval, in book order (characters and places → planning →
+chapters → book format → assembly …), grouped by step, with who made it (your AI and its model, or you) and the AI
+reviewer's verdict if you asked for one. Each draft has **Open**, **✅ Approve**, **✏️ Edit**, **⏭ Skip** (for now)
+and **🤖 AI review**. **▶ Step through them one by one** shows one draft at a time with big buttons **✅ Approve &
+next**, **⏭ Skip**, **✏️ Edit** and **🤖 Ask AI to review**; after each one the next draft opens, until you see
+**All caught up** and your next Current task. **✅ Approve all shown (N)** asks once, listing everything it will
+approve; drafts that could not be approved are explained in plain words and stay in the list.
+
+**🤖 AI review** sends one draft (with your book profile and the records it was built from) to the AI you pick and
+asks it to act as a strict editor: it answers *approve*, *revise* or *reject* with reasons and suggested changes.
+It is advice only and is shown on the draft and in the queue. For *revise* you can press **🤖 Ask AI to fix it**
+(the AI makes a new version of the draft for you to review) or **✏️ Edit myself**. **🤖 Review all with AI**
+reviews the list one draft at a time, with progress and a **Stop** button.
+
+**Auto-approve (optional, off by default).** At the bottom of the review queue you can tick *Auto-approve drafts that
+pass the AI review*. BookForge asks you to confirm and remembers who turned it on and when. While it is on, a draft
+whose AI review says *approve* is approved in your name without you reading it; *revise*, *reject* or a failed review
+never approve anything. Every automatic approval appears in **Activity**, marked as approved under your standing
+setting. Untick it any time.
+
+## 🧪 Test workflow
+
+The **🧪** button in the top bar opens a panel on the right where you can test — and re-test — each part of making a
+book with your real AI: AI connection, premise, main plot, chapter outline, chapter context and text, AI review,
+approvals, book format, assembly, PDF/EPUB/DOCX export and the content check. Each row has **▶ Run / 🔁 Re-run**,
+its result (*Pass*, *Fail*, *Skipped* with the reason), how long it took, when it last ran and **details** with what
+happened and what to do. **▶ Run all** runs them in order (rows that need a failed row are skipped); **Stop** stops
+after the current row. Everything happens in a separate test book called **“🧪 Workflow test <date>”** — your books are
+never touched, and approvals in the test book are made by the test runner because you pressed Run. Without a
+connected AI the AI rows say *Skipped — connect an AI* and the other rows still run with a fixed test text. Each run
+writes `reports/workflow-test-<stamp>.md` and `.json` (no keys or prompts; at most an 80-character excerpt of an AI
+answer); **📄 Open report** shows it. Test books are listed apart from your books on the home page.
+
+## Connect AutoInjector with one button
+
+In the AutoInjector desktop app press **Connect** next to BookForge: your browser opens BookForge, which says
+*Connecting to AutoInjector…*, connects AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini, checks each one and then
+takes you to your Current task. The one-time code in that link works once, for about two minutes, and is removed from
+the address immediately; it is not your connection key (the key is stored privately and never shown). If it says the
+code expired, press Connect in AutoInjector again. (BookForge remembers its access token in this browser so that tabs
+opened by AutoInjector work; if you never opened BookForge from its start link in this browser, open it once first.)
+Once connected, BookForge keeps AutoInjector informed with a short status — the book's title, your current task, what
+BookForge is working on and how many drafts wait for you (titles only, never your text) — so AutoInjector can show it
+and link back.
+
 ## How to get around
 
 * **🧩 Sets** (top bar) opens a launcher of the 11 module sets; the Overview shows the same sets as

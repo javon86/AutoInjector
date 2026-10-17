@@ -30,6 +30,12 @@ bookforge/
     book_path.py           book profile (GET/PUT /api/projects/{id}/profile, settings key
                            book_profile:<pid>) and "Make my book" (GET/POST .../branches/{b}/book[/action]);
                            every step is a normal engine.dispatch; approvals only with author_confirms
+    review.py              review queue (GET .../branches/{b}/review), "Current task" (current_task() from
+                           BookPath.status()), approvals via BookPath.a_approve/approve_ref, AI reviewer + "fix"
+                           jobs through AssistService._call_ai, opt-in auto-approve (settings review_settings:<pid>),
+                           WorkTracker ("working on")
+    workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
+    status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status)
     selftest.py            "Test everything": real end-to-end self-test through engine.dispatch,
                            writes reports/selftest-<stamp>.md/.json (CLI: python -m bookforge selftest)
     server.py, web/        local HTTP API + browser workspace (web/app.js, web/clipboard.js = the one
@@ -109,6 +115,64 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * The server listens on port 8780 by default (`--port`, `BOOKFORGE_PORT`). Without an explicit port it
   reuses an already running BookForge on the same data folder, or moves to the next free port.
   `POST /api/slots/connect-autoinjector` and `GET /api/slots/{id}/health` serve the Settings page.
+
+## Review queue, Current task, AI reviewer (review.py)
+
+* `GET /api/projects/{pid}/branches/{b}/review` -> `{items, count, current_task, settings, ai_ready, book}`. Items are
+  head OUTPUT records in DRAFT/VALIDATED, newest version not approved, not stale, not replaced by a newer draft of the
+  same chapter; always the records BookPath steps ask to approve (incl. book-format I01 imports and assembly), plus
+  drafts of non-LOGIC operations outside sets I/K (never C01, K09 or other helper records). Order: A, B, C, book
+  format, G, E, F, H, D, J, I, K, then the set's guide op order.
+* `GET .../review/summary` -> `{count, current_task, working_on, auto_approve, book}` (side bar, polled every 10 s
+  while visible). `current_task = {step, action: review|profile|make|new|book_step|book, record_id, chapter_id,
+  set, op, title, state: needs_you|ai_can|blocked|done, message, hash}`.
+* `POST .../review/approve {record_ids (1-200), versions?: {id: version}, author_confirms: true, how?}`: refuses
+  without `author_confirms`; a version mismatch is reported, not approved; otherwise `BookPath.a_approve` in chunks of
+  40 (K09 for the exact version when ACCEPT asks). Outbox event `review.approved_by_author`.
+* `POST .../review/ai {record_ids (1-40), slot_id?}` -> 202 job; `POST .../review/fix {record_id, slot_id?}` -> 202 job
+  (AI returns a complete OUTPUT, references are copied from the original - `keep_refs` - and it is stored with a
+  normal UPDATE dispatch as a new DRAFT); `GET .../review/ai/{job}`; `POST .../review/ai/{job}/cancel`;
+  `GET .../review/record/{rid}` -> verdicts per version.
+* Verdicts `{verdict: APPROVE|REVISE|REJECT, reasons, suggested_changes, confidence, slot, model, at}` are advice and
+  are stored in the settings key `ai_reviews:<pid>:<branch>` (`<record_id>:<version>`), not as records: no
+  specification operation records an AI opinion about an arbitrary record (K09 is the author's authorization, F
+  reviews are anchored manuscript patches). Outbox `review.ai_verdict` (no reason text). AI fixes are noted in
+  `ai_fixes:<pid>:<branch>`. Prompts/replies are never logged.
+* Auto-approve: `GET/PUT .../review/settings {auto_approve, author_confirms}` -> project setting
+  `review_settings:<pid> = {auto_approve, consent: {by, at, warning}, history}`; turning on needs `author_confirms`.
+  `ReviewService.maybe_auto_approve` approves only when the setting is on AND the verdict for exactly that version is
+  APPROVE; outbox `review.auto_approved` (with consent by/at and label) or `review.auto_approve_failed`; on/off changes
+  are logged as `review.auto_approve_on/off`.
+
+## 🧪 Test workflow (workflow_test.py)
+
+`GET /api/workflow-test` (rows, project, report), `POST /api/workflow-test/run {rows: "all" | [ids]}` (202; 409 while
+running; "all" makes a fresh "🧪 Workflow test <date>" project with setting `workflow_test: true` and archives the
+previous test book), `POST /api/workflow-test/stop`, `GET /api/workflow-test/report?format=md|json`. Rows: ai,
+premise, plot, outline, chapter, review, approvals, format, assemble, export, check. AI rows use a gated provider
+registry (selftest's `SelfTestProviders`) limited to slots that pass the run's health check; without one they are
+SKIPPED and a manual candidate keeps dependent rows going. Projects with `workflow_test`/`selftest` settings are
+`test_book: true` in project summaries and never become the "last used" project.
+
+## AutoInjector link: pairing and status push (BookForge side)
+
+* Pairing: AutoInjector opens `http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<urlencoded bridge url>`. The page
+  reads the fragment, removes it with `history.replaceState` (address becomes `#/pair`), and calls
+  `POST /api/slots/pair-autoinjector {code, bridge_url}` (normal bearer auth; the browser token is also kept in
+  `localStorage` so tabs opened by AutoInjector are authenticated). The server checks the code
+  (`^[A-Za-z0-9-]{8,32}$`) and the bridge URL (`validate_bridge_url`: http 127.0.0.1/localhost only), then
+  `POST <bridge>/v1/pair {"code", "client": "bookforge"}` without Authorization (no proxy). 200
+  `{"ok": true, "token"}` -> `connect_autoinjector(token)` (AI-1 claude, AI-2 chatgpt, AI-3 gemini) and a health check
+  per slot; answer `{connected, bridge_url, slots: [{slot_id, site, ok, message, error, ...}], message}` - never the
+  token. 401/404/410 -> 400 `EXPIRED_APPROVAL` "the pairing code expired or was already used — press Connect again in
+  AutoInjector"; not reachable -> `UPSTREAM_UNAVAILABLE`.
+* Status push (`StatusPusher`, daemon thread started by `main()`): when a slot uses the autoinjector adapter with a
+  saved key, `POST <bridge>/v1/status` with `Authorization: Bearer <key>` and the body documented in
+  `status_push.py` (`app, version: 1, bookforge_url, project {id, title}, current_task {set, op, title, state,
+  message, url}, working_on, approvals {count, items (max 20, {op, set, title}), url}, checklist, done, total,
+  updated_at`). Titles only (canon by concept name, other drafts by step name). On change at most every 5 s plus a
+  30 s heartbeat; body < 32 KiB; refused/timeouts back off quietly up to 60 s; 401 stops pushing with that key until a
+  new key is saved. The project is the most recently opened real book (`App.touch_project`, setting `last_project`).
 
 ## Tests
 

@@ -24,6 +24,17 @@ Module._load = function (request) {
   return originalLoad.apply(this, arguments);
 };
 const mockElectron = require(mockElectronPath);
+// shell.openExternal is mocked (main.js destructures `shell` when it loads): record every URL.
+const openedUrls = [];
+mockElectron.shell = { openExternal: async (u) => { openedUrls.push(String(u)); }, openPath: async () => "" };
+// "Start BookForge for me": a fake launcher next to the app that only leaves a marker file.
+const os = require("os");
+const bfDir = fs.mkdtempSync(path.join(os.tmpdir(), "bf-launcher-"));
+const launcherMarker = path.join(bfDir, "started.marker");
+fs.writeFileSync(path.join(bfDir, process.platform === "win32" ? "run-bookforge.bat" : "run-bookforge.sh"),
+  process.platform === "win32" ? `@echo off\r\necho started> "${launcherMarker}"\r\n` : `#!/bin/sh\necho started > "${launcherMarker}"\n`);
+process.env.AUTOINJECTOR_BOOKFORGE_DIR = bfDir;
+process.env.AUTOINJECTOR_BF_START_WAIT_MS = "600";
 
 let passed = 0;
 let failed = 0;
@@ -153,6 +164,8 @@ async function main() {
   assert(lt.steps.filter((x) => x.id.startsWith("roundtrip:") && x.status === "pass").length === activeSites.length && activeSites.length > 0, `a real round trip passed for every Active AI (${activeSites.join(", ")})`);
   const bfStep = lt.steps.find((x) => x.id === "bookforge_running");
   assert(bfStep && bfStep.status === "skip" && /isn't running/.test(bfStep.detail), "BookForge not running -> SKIPPED with instructions");
+  const connStep = lt.steps.find((x) => x.id === "bookforge_connected");
+  assert(connStep && connStep.status === "pass" && /has the connection key/.test(connStep.detail) && lt.steps[lt.steps.length - 1] === connStep, "link test ends with 'BookForge is connected' (PASS: a client already talked to the bridge with the key)");
   assert(lt.report && fs.existsSync(lt.report) && /bookforge-link-test-[0-9-]+\.md$/.test(lt.report) && lt.reportJson && fs.existsSync(lt.reportJson), "Markdown + JSON reports written to the logs folder");
   const md = fs.readFileSync(lt.report, "utf8");
   const js = JSON.parse(fs.readFileSync(lt.reportJson, "utf8"));
@@ -182,11 +195,73 @@ async function main() {
   r = await request("GET", "/v1/health", after);
   assert(r.status === 200, "new token accepted");
 
+  // --- 🔗 Connect BookForge (contract v1.1 pairing) -----------------------------
+  const BF_APP_PORT = PORT + 1; // AUTOINJECTOR_BOOKFORGE_APP_URL points here (nothing listening yet)
+  st = await call("bookforge:set-enabled", { enabled: false });
+  assert(st.enabled === false && st.listening === false, "(bridge off before the Connect test)");
+  openedUrls.length = 0;
+  st = await call("bookforge:connect");
+  assert(st.ok && st.enabled === true && st.listening === true, "Connect turns the bridge on when it was off");
+  assert(st.connect.phase === "not_running" && /isn't running/.test(st.connect.message) && /run-bookforge/.test(st.connect.message), "BookForge not running -> plain instructions (start run-bookforge, press Connect again)");
+  assert(st.connect.canStartApp === true && st.app.launcherAvailable === true, "...and offers 'Start BookForge for me' when the launcher exists next to the app");
+  assert(openedUrls.length === 0, "nothing is opened in the browser while BookForge isn't running");
+  const sa = await call("bookforge:start-app");
+  assert(sa.ok && sa.started === true && sa.running === false && /still starting/.test(sa.message || ""), "start-app spawns the launcher and reports 'still starting' when BookForge doesn't answer in time");
+  assert(await waitUntil(() => fs.existsSync(launcherMarker), 5000), "the launcher really ran (detached)");
+  // A fake BookForge answering /api/ping.
+  const fakeBf = http.createServer((req, res) => {
+    if (req.url === "/api/ping") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ app: "bookforge", version: "0.9.0" })); }
+    else { res.writeHead(404); res.end(); }
+  });
+  await new Promise((r) => fakeBf.listen(BF_APP_PORT, "127.0.0.1", r));
+  st = await call("bookforge:connect");
+  const pairUrlRe = new RegExp(`^http://127\\.0\\.0\\.1:${BF_APP_PORT}/#/pair\\?code=([A-Za-z0-9]{12})&bridge=${encodeURIComponent(`http://127.0.0.1:${PORT}`).replace(/\./g, "\\.")}$`);
+  const m = openedUrls.length === 1 ? pairUrlRe.exec(openedUrls[0]) : null;
+  assert(m, `Connect opens the browser at BookForge's #/pair?code=<12 chars>&bridge=<bridge url> (${openedUrls.join(" ")})`);
+  assert(openedUrls.every((u) => !u.includes(after)), "the connection key is NEVER in the URL");
+  assert(st.connect.phase === "waiting" && st.connect.expiresAt - st.connect.startedAt === 120000 && st.pairing && st.pairing.pending === true, "after opening: waiting for BookForge to pair (code valid 2 minutes)");
+  assert(!JSON.stringify(st).includes(m ? m[1] : "@@") && !JSON.stringify(st).includes(after), "the snapshot never carries the pairing code or the key");
+  const code = m ? m[1] : "";
+  r = await request("POST", "/v1/pair", null, { code, client: "bookforge" });
+  assert(r.status === 200 && r.json.token === after && r.json.bridge_version === "1.1", "BookForge trades the code for the key via POST /v1/pair (no Authorization)");
+  r = await request("POST", "/v1/pair", null, { code, client: "bookforge" });
+  assert(r.status === 401, "the code works only once");
+  st = await call("bookforge:status");
+  assert(st.connect.phase === "paired" && st.connection.paired === true, "the panel sees the pairing ('BookForge has the key')");
+  const statusBody = { app: "bookforge", version: 1, bookforge_url: `http://127.0.0.1:${BF_APP_PORT}/`, project: { id: "p1", title: "The Lantern Keeper" },
+    current_task: { set: "B", op: "B03", title: "Main plot", state: "running", message: "Drafting the main plot", url: `http://127.0.0.1:${BF_APP_PORT}/#/op/B03` },
+    working_on: null, approvals: { count: 1, items: [{ op: "B02", set: "B", title: "Logline" }], url: `http://127.0.0.1:${BF_APP_PORT}/#/approvals` },
+    checklist: [{ id: "A", title: "Book profile", set: "A", state: "done" }], done: 1, total: 9, updated_at: new Date().toISOString() };
+  r = await request("POST", "/v1/status", after, statusBody);
+  assert(r.status === 200 && r.json.ok === true, "BookForge posts its first status with the key");
+  st = await call("bookforge:status");
+  assert(st.connect.phase === "connected" && st.connection.connected === true, "first status after pairing -> 'Connected ✔'");
+  assert(st.bookforge && st.bookforge.project.title === "The Lantern Keeper" && st.bookforge.current_task.op === "B03" && st.bookforge.approvals.count === 1 && st.bookforge.stale === false && st.bookforge.total === 9, "BookForge's status (step, approvals, checklist) shows up in the snapshot");
+  assert(st.app.running === true && st.app.base === `http://127.0.0.1:${BF_APP_PORT}/`, "snapshot knows where BookForge runs");
+  assert(await waitUntil(() => activity.some((a) => a.event && a.event.kind === "pair" && a.event.outcome === "PAIRED") && activity.some((a) => a.event && a.event.kind === "status")), "pairing + first status are broadcast as activity (outcome only)");
+  const actDump2 = JSON.stringify(activity.map((x) => x.event)) + JSON.stringify(st.activity);
+  assert(!actDump2.includes(code) && !actDump2.includes("Lantern Keeper") && !actDump2.includes("Drafting the main plot"), "activity never carries the code or the status content");
+  // Open BookForge pages (Review & approve, Go to current task)
+  openedUrls.length = 0;
+  let o = await call("bookforge:open-url", { url: `http://127.0.0.1:${BF_APP_PORT}/#/approvals` });
+  assert(o.ok && openedUrls[0] === `http://127.0.0.1:${BF_APP_PORT}/#/approvals`, "open-url opens a loopback BookForge page");
+  o = await call("bookforge:open-url", { url: "https://evil.example/phish" });
+  assert(o.ok && openedUrls[1] === `http://127.0.0.1:${BF_APP_PORT}/`, "open-url never opens a non-loopback URL (falls back to BookForge's own address)");
+  // A new key drops the connection until BookForge reconnects
+  st = await call("bookforge:regenerate-token");
+  st = await call("bookforge:status");
+  assert(st.connection.connected === false && st.connection.paired === false && st.connect.phase === "idle", "making a new key -> not connected any more (press Connect again)");
+  const newest = (await call("bookforge:reveal-token")).token;
+  const debugConnect = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
+  assert(/bookforge-connect/.test(debugConnect) && !debugConnect.includes(code) && !debugConnect.includes(after) && !debugConnect.includes(newest), "Connect is logged, but never the code or a key");
+  await new Promise((r2) => fakeBf.close(r2));
+
   st = await call("bookforge:set-enabled", { enabled: false });
   assert(st.enabled === false && st.listening === false, "disable stops the server");
   refused = false;
   try { await request("GET", "/v1/health", after); } catch (e) { refused = e.code === "ECONNREFUSED"; }
   assert(refused, "connection refused after disable");
+  void newest;
   await sleep(150);
   const saved = JSON.parse(fs.readFileSync(path.join(userData, "autoinjector-state.json"), "utf8"));
   assert(saved.bookforge && saved.bookforge.enabled === false && !JSON.stringify(saved).includes(after), "enabled flag persisted; token never in the state file");

@@ -31,6 +31,11 @@
  *     --record-file P   append one JSON line per received prompt: {"site","request_id","prompt"} (the
  *                       prompt as the pane would receive it, i.e. with the envelope instruction)
  *     --verbose         print bridge log events (never prompt/reply text) to stderr
+ *     --pairing-code-file P   (contract v1.1) make a one-time pairing code with the bridge's
+ *                       createPairingCode() and write it (just the code) to file P before READY.
+ *                       Each SIGUSR2 (not on Windows) makes a new code and rewrites P.
+ *     --status-file P   (contract v1.1) whenever BookForge POSTs /v1/status, write the bridge's
+ *                       sanitized view of it (status().bookforge, JSON) to file P.
  *   Env equivalents: AUTOINJECTOR_BOOKFORGE_PORT, AUTOINJECTOR_BOOKFORGE_TOKEN, FAKE_BRIDGE_MODE,
  *   FAKE_BRIDGE_DELAY_MS, FAKE_BRIDGE_TIME_SCALE. CLI flags win over env.
  *
@@ -272,6 +277,8 @@ function parseArgs(argv) {
     else if (a === '--responder') out.responderPath = next();
     else if (a === '--record-file') out.recordFile = next();
     else if (a === '--verbose') out.verbose = true;
+    else if (a === '--pairing-code-file') out.pairingCodeFile = next();
+    else if (a === '--status-file') out.statusFile = next();
     else if (a === '--help' || a === '-h') out.help = true;
     else throw new Error(`unknown argument ${a}`);
   }
@@ -305,6 +312,19 @@ async function cli() {
   let host;
   try { host = await startFakeHost(opts); }
   catch (e) { process.stderr.write(`fake-bridge-host failed to start: ${e && (e.code || e.message)}\n`); process.exit(1); }
+  if (args.pairingCodeFile) {
+    const writeCode = () => { try { fs.writeFileSync(args.pairingCodeFile, host.bridge.createPairingCode()); } catch (e) { process.stderr.write(`could not write pairing code file: ${e.code || e.message}\n`); } };
+    writeCode();
+    if (process.platform !== 'win32') process.on('SIGUSR2', writeCode);
+  }
+  if (args.statusFile) {
+    let lastAt = null;
+    const t = setInterval(() => {
+      const b = host.bridge.bookforgeStatus();
+      if (b && b.receivedAt !== lastAt) { lastAt = b.receivedAt; try { fs.writeFileSync(args.statusFile, JSON.stringify(b)); } catch (_) {} }
+    }, 50);
+    t.unref();
+  }
   process.stdout.write(`READY ${host.port}\n`);
   const shutdown = () => { host.stop().then(() => process.exit(0), () => process.exit(0)); };
   process.on('SIGINT', shutdown);

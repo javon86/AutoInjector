@@ -31,7 +31,10 @@ from .requests import build_request
 from .selftest import SelfTestRunner
 from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
+from .review import ReviewService, WorkTracker
+from .status_push import StatusPusher
 from .store import Store, new_id, utcnow
+from .workflow_test import WorkflowTestRunner
 
 log = logging.getLogger("bookforge.server")
 # 8765 is taken by AutoInjector's extension bridge (server/fake_api_server.py), so BookForge uses 8780.
@@ -59,6 +62,53 @@ class App:
             tx.ensure_principal(principal_id, "Author", sha256_bytes(self.token.encode()))
         self.selftest = SelfTestRunner(self.store, self.engine.providers, principal_id)
         self.assist = AssistService(self.engine, principal_id)
+        self.work = WorkTracker()
+        self.review = ReviewService(self.engine, self.assist, principal_id, work=self.work, on_change=self.changed)
+        self.workflow = WorkflowTestRunner(self.store, self.engine.providers, principal_id)
+        self.pusher = StatusPusher(self)
+        self.work.on_change = self.changed
+        self.port: int | None = None
+        self._last_project: dict | None = None
+
+    # ------------------------------------------------------------------ AutoInjector status link
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{self.port or DEFAULT_PORT}/"
+
+    def changed(self):
+        """Something the status summary shows may have changed: let the status pusher look now."""
+        self.pusher.wake()
+
+    def is_test_project(self, pid: str) -> bool:
+        p = self.store.project(pid)
+        if p is None:
+            return False
+        try:
+            settings = json.loads(p["settings"] or "{}")
+        except ValueError:
+            return False
+        return isinstance(settings, dict) and bool(settings.get("workflow_test") or settings.get("selftest"))
+
+    def touch_project(self, pid: str, branch: str):
+        """Remember the most recently opened real book (for the AutoInjector status summary)."""
+        cur = self._last_project
+        if cur and cur["project_id"] == pid and cur["branch_id"] == branch:
+            return
+        if self.store.project(pid) is None or self.is_test_project(pid):
+            return
+        self._last_project = {"project_id": pid, "branch_id": branch}
+        try:
+            self.store.set_setting("last_project", dict(self._last_project, at=utcnow()))
+        except Exception:  # noqa: BLE001 - a hint, never a reason to fail the request
+            pass
+        self.changed()
+
+    def last_project(self) -> dict | None:
+        cur = self._last_project or self.store.get_setting("last_project")
+        if cur and self.store.project(cur.get("project_id") or "") is not None and \
+                not self.is_test_project(cur["project_id"]):
+            return cur
+        rows = [r for r in self.store.projects_for(self.principal_id) if not self.is_test_project(r["project_id"])]
+        return {"project_id": rows[-1]["project_id"], "branch_id": "main"} if rows else None
 
     @staticmethod
     def ping() -> dict:
@@ -137,7 +187,11 @@ class App:
             return 200, self.engine.providers.slots()
         if parts == ["slots", "connect-autoinjector"] and method == "POST":
             body = body if isinstance(body, dict) else {}
-            return 200, self.engine.providers.connect_autoinjector(body.get("token"), body.get("bridge_url"))
+            out = self.engine.providers.connect_autoinjector(body.get("token"), body.get("bridge_url"))
+            self.changed()
+            return 200, out
+        if parts == ["slots", "pair-autoinjector"] and method == "POST":
+            return 200, self.pair_autoinjector(body if isinstance(body, dict) else {})
         if len(parts) == 2 and parts[0] == "slots" and method == "PUT":
             return 200, self.engine.providers.configure_slot(parts[1], body or {})
         if len(parts) == 3 and parts[0] == "slots" and parts[2] == "health" and method == "GET":
@@ -164,6 +218,8 @@ class App:
             mime = "text/markdown; charset=utf-8" if fmt == "md" else "application/json; charset=utf-8"
             disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
             return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
+        if parts and parts[0] == "workflow-test":
+            return self.route_workflow(method, parts, query, body)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
         if parts == ["projects"] and method == "GET":
@@ -190,7 +246,10 @@ class App:
             if len(parts) >= 4 and parts[2] == "branches":
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
+                self.touch_project(pid, branch)
                 rest = parts[4:]
+                if rest and rest[0] == "review":
+                    return self.route_review(method, rest[1:], query, body, principal, pid, branch)
                 if rest == ["manifest"] and method == "GET":
                     return 200, self.store.feature_manifest(pid, branch)
                 if rest == ["manifest"] and method == "PUT":
@@ -212,8 +271,102 @@ class App:
                 if rest == ["book"] and method == "GET":
                     return 200, BookPath(self.engine, principal, pid, branch).status()
                 if len(rest) == 2 and rest[0] == "book" and method == "POST":
-                    return 200, BookPath(self.engine, principal, pid, branch).act(rest[1], body if isinstance(body, dict) else {})
+                    return 200, self.book_act(principal, pid, branch, rest[1], body if isinstance(body, dict) else {})
         raise ApiError(404, "NOT_FOUND", path, "no such endpoint")
+
+    BOOK_WORK = {"create": "AI is writing", "write_chapter": "AI is writing a chapter", "setup_format": "Setting up the book format",
+                 "assemble": "Putting the book together", "export": "Exporting the book", "check": "Checking the book",
+                 "approve": "Approving"}
+
+    def book_act(self, principal: str, pid: str, branch: str, action: str, body: dict) -> dict:
+        """A "Make my book" step; while it runs the status summary says what BookForge is working on."""
+        title = self.BOOK_WORK.get(action, "Working")
+        op = body.get("op") if action == "create" else {"write_chapter": "C02", "setup_format": "I01",
+                                                         "assemble": "G01", "export": "G11", "check": "H05"}.get(action)
+        if action == "create" and body.get("op") in ("B01", "B03", "B11"):
+            title = {"B01": "Writing the premise", "B03": "Writing the main plot", "B11": "Planning the chapters"}[body["op"]]
+        if action == "write_chapter" and isinstance(body.get("chapter_id"), str):
+            title = f"Writing chapter {body['chapter_id'][:30]}"
+        tok = self.work.begin(pid, op, title)
+        try:
+            return BookPath(self.engine, principal, pid, branch).act(action, body)
+        finally:
+            self.work.end(tok)
+
+    def pair_autoinjector(self, body: dict) -> dict:
+        """One-button pairing (#/pair): code -> connection key at the bridge -> all three slots -> health.
+        The key never appears in the answer."""
+        self.engine.providers.pair_autoinjector(body.get("code"), body.get("bridge_url"))
+        slots = []
+        for s in self.engine.providers.slots():
+            if s["adapter_id"] != "autoinjector":
+                continue
+            hres = self.engine.providers.health_check(s["slot_id"])
+            slots.append({"slot_id": s["slot_id"], "site": s.get("site"), "ok": bool(hres.get("ok")),
+                          "message": hres.get("message"), "error": hres.get("error"),
+                          "site_ready": hres.get("site_ready"), "site_busy": hres.get("site_busy")})
+        self.changed()
+        url = next((s.get("bridge_url") for s in self.engine.providers.slots() if s["adapter_id"] == "autoinjector"), None)
+        return {"connected": True, "bridge_url": url, "slots": slots,
+                "message": "BookForge is connected to AutoInjector: AI-1 = Claude, AI-2 = ChatGPT, AI-3 = Gemini."}
+
+    def route_review(self, method: str, rest: list, query: dict, body, principal: str, pid: str, branch: str):
+        """Review queue, approvals, AI review/fix jobs and the auto-approve setting (see review.py)."""
+        rv = self.review
+        body = body if isinstance(body, dict) else {}
+        try:
+            if rest == [] and method == "GET":
+                return 200, rv.queue(principal, pid, branch)
+            if rest == ["summary"] and method == "GET":
+                return 200, rv.summary(principal, pid, branch)
+            if rest == ["approve"] and method == "POST":
+                return 200, rv.approve(principal, pid, branch, body)
+            if rest == ["settings"] and method == "GET":
+                return 200, rv.settings(pid)
+            if rest == ["settings"] and method == "PUT":
+                return 200, rv.save_settings(principal, pid, branch, body)
+            if rest == ["ai"] and method == "POST":
+                return 202, rv.start_review(principal, pid, branch, body)
+            if rest == ["fix"] and method == "POST":
+                return 202, rv.start_fix(principal, pid, branch, body)
+            if len(rest) == 2 and rest[0] == "ai" and method == "GET":
+                return 200, rv.get_job(principal, rest[1])
+            if len(rest) == 3 and rest[0] == "ai" and rest[2] == "cancel" and method == "POST":
+                return 200, rv.cancel_job(principal, rest[1])
+            if len(rest) == 2 and rest[0] == "record" and method == "GET":
+                return 200, rv.record_reviews(principal, pid, branch, rest[1])
+        except BookforgeError as exc:
+            from .assist import FIX  # noqa: PLC0415
+            for e in exc.errors:
+                e.setdefault("fix", FIX.get(e.get("code"), FIX["INTERNAL_ERROR"]))
+            raise
+        raise ApiError(404, "NOT_FOUND", "/review/" + "/".join(rest), "no such endpoint")
+
+    def route_workflow(self, method: str, parts: list, query: dict, body) -> tuple[int, object]:
+        """🧪 Test workflow panel (workflow_test.py)."""
+        wf = self.workflow
+        if parts == ["workflow-test"] and method == "GET":
+            return 200, wf.status()
+        if parts == ["workflow-test", "run"] and method == "POST":
+            started = wf.start(body if isinstance(body, dict) else {})
+            if started is None:
+                raise ApiError(409, "VERSION_CONFLICT", "/workflow-test", "a workflow test is already running; wait "
+                               "for it or press Stop")
+            return 202, started
+        if parts == ["workflow-test", "stop"] and method == "POST":
+            return 200, wf.stop()
+        if parts == ["workflow-test", "report"] and method == "GET":
+            fmt = (query.get("format") or ["md"])[0]
+            if fmt not in ("md", "json"):
+                raise ApiError(400, "INVALID_INPUT", "/format", "format must be md or json")
+            paths = wf.latest_paths()
+            if not paths:
+                raise ApiError(404, "NOT_FOUND", "/workflow-test/report", "no workflow test report yet; press Run all")
+            path = paths[0] if fmt == "md" else paths[1]
+            mime = "text/markdown; charset=utf-8" if fmt == "md" else "application/json; charset=utf-8"
+            disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+            return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
+        raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
 
     def route_ai(self, method: str, parts: list, query: dict, body, principal: str) -> tuple[int, object]:
         """AI assist ("Fill with AI") and Bible Builder endpoints (proposals; see assist.py)."""
@@ -308,7 +461,7 @@ class App:
         return {"project_id": pid, "name": p["name"], "owner_id": p["owner_id"], "created_at": p["created_at"],
                 "settings": json.loads(p["settings"]), "story_time_unit": p["story_time_unit"],
                 "currency": p["currency"], "branches": branches, "record_counts": counts,
-                "profile": get_profile(self.store, pid),
+                "profile": get_profile(self.store, pid), "test_book": self.is_test_project(pid),
                 "branch_id": branch, "manifest": self.store.feature_manifest(pid, branch)}
 
     def create_project(self, principal: str, body: dict) -> dict:
@@ -362,7 +515,9 @@ class App:
         manual = body.get("manual_candidate")
         if manual is not None and not isinstance(manual, dict):
             raise ApiError(400, "INVALID_INPUT", "/manual_candidate", "manual_candidate must be an object")
-        return {"request": full, "response": self.engine.dispatch(full, principal, manual_candidate=manual)}
+        resp = self.engine.dispatch(full, principal, manual_candidate=manual)
+        self.changed()
+        return {"request": full, "response": resp}
 
     def records(self, pid: str, branch: str, query: dict) -> list[dict]:
         module = (query.get("module") or [None])[0]
@@ -622,6 +777,8 @@ def main(argv=None):
     if httpd.server_address[1] != args.port:
         print(f"Port {args.port} is busy, so Bookforge uses port {httpd.server_address[1]} instead.")
     args.port = httpd.server_address[1]
+    app.port = args.port
+    app.pusher.start()  # sends status to AutoInjector only when a slot is connected to it
     url = f"http://{args.host}:{args.port}/#token={app.token}"
     print(f"Bookforge {__version__} running. Data: {args.data_dir}")
     print(f"Open: {url}")

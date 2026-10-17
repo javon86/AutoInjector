@@ -513,55 +513,81 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
-## BookForge bridge (experimental, off by default)
+## BookForge (experimental, bridge off by default)
 
 Lets BookForge (the book-writing tool in this repo) use the ChatGPT, Claude and
 Gemini panes as its AI slots, with no API keys. **Caution:** automating these
 sites' web UIs may be against their terms of service — use at your own risk.
-The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (normative).
+The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.1, normative).
 
-- Turn it on in the **BookForge bridge (experimental)** panel. Off = nothing
-  listens. On = a small HTTP server on `127.0.0.1:17891` only (env
-  `AUTOINJECTOR_BOOKFORGE_PORT` overrides). The on/off choice is remembered.
-- The panel always shows **where it's at** (a status line with icon + words:
-  Off / Starting / On — waiting for BookForge / BookForge is connected (last
-  contact) / Working (which AI, how long) / Problem, with the fix in words), a
-  **Next step** line, a 4-step setup checklist that ticks itself, a card per AI
-  (Ready / Not loaded / Busy with BookForge + its last result), and a live
-  **Activity** list (no prompt/reply text, no key). Every ⓘ opens a short
-  plain-English explanation (Esc or click outside closes it).
-- The bearer token is called the **connection key** in the UI (BookForge uses
-  the same words). **📋 Copy connection key** puts it on the clipboard — paste it
-  in BookForge under Settings → Connect AutoInjector. **Show key** displays it.
-  **Make a new key** (asks first) replaces it; the old one stops working at once,
-  so BookForge is disconnected until you paste the new key. The key lives in
-  the app's userData folder (`bookforge-bridge-token`, mode 0600), never in the
-  state file, logs or reports.
-- **🧪 Test BookForge link** runs a real, documented end-to-end check: bridge
-  listening, key file present, a wrong key refused (401) and the right one
-  accepted (`/v1/health`), then for each Active AI: window ready + a real
-  `POST /v1/complete` round trip (request_id `selftest-<stamp>-<site>`, a tiny
-  JSON_SCHEMA prompt whose JSON reply must echo a random word), and finally
-  "is BookForge running?" (`GET http://127.0.0.1:8780/api/ping`, SKIPPED with
-  instructions if not; env `AUTOINJECTOR_BOOKFORGE_APP_URL` overrides). Each step
-  is PASS / FAIL / SKIPPED with timing and a how-to-fix tip; Stop works mid-run.
-  The report is saved to the logs folder as `bookforge-link-test-<stamp>.md`
-  and `.json` (environment, every step, the last 80 characters of each reply,
-  recent bridge activity — never the key or the prompt) and opens from the panel.
-  Reply time limit per AI: 3 min (env `AUTOINJECTOR_BF_LINKTEST_MS`).
-- Endpoints: `GET /v1/health`, `POST /v1/complete` (`site`, `prompt`,
-  `request_id`, `timeout_ms`). One request per pane at a time (409 otherwise);
-  repeating a `request_id` within 15 minutes returns the same result instead
-  of sending again.
+**The BookForge panel** has three cards (each with an ⓘ explanation; Esc or a
+click outside closes it):
+
+1. **Your AI & connection**
+   - **🔗 Connect BookForge** — one click: turns the bridge on if it's off,
+     checks BookForge is running (`GET http://127.0.0.1:8780/api/ping`; port from
+     `BOOKFORGE_PORT`, or BookForge's own fallback ports 8781–8799), makes a
+     one-time **pairing code** (12 characters, 2 minutes, single use) and opens
+     your browser at `http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<bridge url>`.
+     BookForge trades the code for the connection key itself (`POST /v1/pair`),
+     so **the key never goes into a URL** and you copy nothing. The panel shows
+     "Connected ✔" once BookForge's first status update arrives. If BookForge
+     isn't running it says so in plain words and, when `../bookforge/run-bookforge.bat`
+     (`.sh` elsewhere) exists next to this app, offers **▶ Start BookForge for me**
+     (spawned detached; the app waits up to 90 s, `AUTOINJECTOR_BF_START_WAIT_MS`,
+     then connects by itself).
+   - **Bridge on** switch (off = nothing listens; on = `127.0.0.1:17891` only,
+     `AUTOINJECTOR_BOOKFORGE_PORT` overrides; remembered).
+   - **Your AIs** — ChatGPT / Claude / Gemini: Ready / Not loaded / Busy / Not active,
+     plus each one's last result.
+   - **Connection check** — one list that is both the live status and the link
+     test: the bridge is on · the key is ready · BookForge is running · BookForge
+     is connected · each AI is ready · each AI answers through the bridge, each
+     with ✓ / ✕ / … and a how-to-fix line. **🧪 Test the connection** runs the
+     real link test (below) and ticks the same rows; **📄 Open last report**.
+   - **Other ways** (folded): 📋 Copy connection key / Show key / Make a new key
+     (asks first; the old key stops working at once and BookForge must connect again).
+2. **Now working on** — from BookForge's status: the current step ("Set B · B03
+   Main plot"), its state, BookForge's plain message, what it's working on with
+   a running clock, **N things need your approval** with the first few titles and
+   **✅ Review & approve** (opens BookForge's approvals page), and **▶ Go to current
+   task**. Without a status: "Connect BookForge to see what's happening".
+3. **Book checklist** — project title, a "k of n done" bar and every part with a
+   state icon (done / in progress / needs your OK / to do), plus **📚 Open BookForge**.
+   If BookForge stops reporting for 90 s, both cards show a grey "last update X min ago".
+
+The **Activity log** (text-free: who connected, which AI was asked, how long it
+took, refused keys/codes) is kept, folded away at the bottom. Only loopback
+`http://127.0.0.1` / `http://localhost` pages are ever opened from the panel.
+
+- The key lives in the app's userData folder (`bookforge-bridge-token`, mode
+  0600), never in the state file, logs, reports or URLs. Pairing codes are never
+  logged either — only the outcome of each pairing attempt.
+- **🧪 Test the connection** (`bookforge-link-test.js`): bridge listening, key file
+  present, a wrong key refused (401) and the right one accepted (`/v1/health`),
+  then for each Active AI: window ready + a real `POST /v1/complete` round trip
+  (request_id `selftest-<stamp>-<site>`, a tiny JSON_SCHEMA prompt whose JSON reply
+  must echo a random word), "is BookForge running?" and "is BookForge connected?"
+  (both SKIPPED with instructions when not). PASS / FAIL / SKIPPED with timing and
+  a how-to-fix tip; Stop works mid-run. Reports: `bookforge-link-test-<stamp>.md`
+  and `.json` in the logs folder (never the key or the prompt; the last 80
+  characters of each reply). Reply time limit per AI: 3 min (`AUTOINJECTOR_BF_LINKTEST_MS`).
+- Endpoints: `GET /v1/health`, `POST /v1/complete` (`site`, `prompt`, `request_id`,
+  `timeout_ms`; one request per pane at a time, 409 otherwise; a repeated
+  `request_id` within 15 minutes returns the same result), and in v1.1
+  `POST /v1/pair` (no key; code -> key) and `POST /v1/status` (BookForge's progress,
+  sanitized: whitelisted fields, capped strings/lists, loopback URLs only, < 32 KiB).
 - A reply to a bridge request is shown in the Conversation panel but is
   **not** relayed to the other AIs (no mesh routing, roundtable, House Rules,
   Prompt Sequence or Manager handling).
-- Code: `bookforge-bridge.js` (pure Node; `status()` also reports last contact,
-  counters and a text-free ring buffer of recent events), `bookforge-link-test.js`
-  (pure link-test orchestration + report). Tests: `test/bookforge-bridge.test.js`,
-  `test/bookforge-main.test.js`, `test/bookforge-link-test.test.js`.
-  `test/fixtures/fake-bridge-host.js` runs the real bridge with fake panes for
-  cross-process tests (see its header for the CLI).
+- Code: `bookforge-bridge.js` (pure Node; also `createPairingCode()`, the latest
+  BookForge status and a text-free event ring in `status()`), `bookforge-link-test.js`
+  (link-test orchestration + report), main.js IPC `bookforge:*` (incl. `connect`,
+  `start-app`, `open-url`). Tests: `test/bookforge-bridge.test.js`,
+  `test/bookforge-main.test.js` (Connect flow with a mocked `shell.openExternal`),
+  `test/bookforge-link-test.test.js`. `test/fixtures/fake-bridge-host.js` runs the
+  real bridge with fake panes for cross-process tests (see its header for the CLI,
+  incl. `--pairing-code-file` and `--status-file`).
 
 ## Picking up where you left off
 

@@ -226,6 +226,25 @@ async function main() {
     await occupy;
   }
 
+  console.log("optional 'BookForge is connected' step (getConnection)");
+  {
+    const B = await makeBridge({ mode: goodReply });
+    const closed = await closedPortUrl();
+    let r = await LT.runLinkTest(baseDeps(B, { sites: [], bookforgeUrl: closed }));
+    assert(!byId(r, "bookforge_connected") && r.total === 5, "without getConnection there is no connection step (old step list unchanged)");
+    let t = 1000000;
+    r = await LT.runLinkTest(baseDeps(B, { sites: [], bookforgeUrl: closed, now: () => t, getConnection: () => ({ connected: false, paired: false }) }));
+    const c = byId(r, "bookforge_connected");
+    assert(c && c.status === "skip" && /Connect BookForge/.test(c.detail) && r.results[r.results.length - 1].id === "bookforge_connected" && r.total === 6, "not connected -> SKIPPED (never failed) with 'press Connect BookForge', as the last step");
+    r = await LT.runLinkTest(baseDeps(B, { sites: [], bookforgeUrl: closed, getConnection: () => ({ connected: false, paired: true }) }));
+    assert(byId(r, "bookforge_connected").status === "skip" && /picked up the key/.test(byId(r, "bookforge_connected").detail), "paired but no report yet -> SKIPPED, explained");
+    r = await LT.runLinkTest(baseDeps(B, { sites: [], bookforgeUrl: closed, now: () => t, getConnection: () => ({ connected: true, statusAt: t - 12000, stale: false }) }));
+    assert(byId(r, "bookforge_connected").status === "pass" && /sent an update on your book 12s ago/.test(byId(r, "bookforge_connected").detail), "connected with a fresh status -> PASS with its age");
+    r = await LT.runLinkTest(baseDeps(B, { sites: [], bookforgeUrl: closed, getConnection: () => { throw new Error("boom"); } }));
+    assert(byId(r, "bookforge_connected").status === "skip", "a getConnection error is handled (SKIPPED, no crash)");
+    await B.bridge.stop();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

@@ -68,6 +68,9 @@ const S = {
   guide: null,             // GET /api/sets for the open project (sets, counts, "what's next")
   prefill: new Map(),      // draft key -> form values handed to the next render (copy, paste, AI)
   pendingFocus: null,      // 'new': focus the New form after the next route
+  task: null,              // GET .../review/summary: current task + approvals count for the open project
+  pairing: null,           // {code, bridge} read once from #/pair?… (never kept in the address)
+  pendingBookStep: null,   // a "Make my book" step to run when the book page opens (Current task)
 };
 
 /* ======================================================================= small utils */
@@ -194,14 +197,31 @@ function initToken() {
   if (m) {
     S.token = decodeURIComponent(m[1]);
     try { sessionStorage.setItem('bf_token', S.token); } catch { /* private mode: keep in memory */ }
+    // Also remembered on this computer (this address only), so a tab AutoInjector opens (#/pair, the
+    // current task, the approval list) works without the start link. Cleared when the token is refused.
+    try { localStorage.setItem('bf_token', S.token); } catch { /* ignore */ }
     history.replaceState(null, '', location.pathname + location.search + '#/');
   } else {
     try { S.token = sessionStorage.getItem('bf_token'); } catch { S.token = null; }
+    if (!S.token) {
+      try { S.token = localStorage.getItem('bf_token'); if (S.token) sessionStorage.setItem('bf_token', S.token); } catch { /* ignore */ }
+    }
   }
+}
+/** #/pair?code=…&bridge=… from AutoInjector: read it once, then remove it from the address right away. */
+function consumePairFragment() {
+  const m = /^#\/pair\?(.*)$/.exec(location.hash || '');
+  if (!m) return false;
+  let params;
+  try { params = new URLSearchParams(m[1]); } catch { params = new URLSearchParams(''); }
+  history.replaceState(null, '', location.pathname + location.search + '#/pair');
+  S.pairing = { code: (params.get('code') || '').trim(), bridge: (params.get('bridge') || '').trim() || BRIDGE_DEFAULT };
+  return true;
 }
 function showAuthProblem(detail) {
   S.authFailed = true;
   try { sessionStorage.removeItem('bf_token'); } catch { /* ignore */ }
+  try { localStorage.removeItem('bf_token'); } catch { /* ignore */ }
   clear($('#sidenav'));
   clear($('#top-links'));
   clear($('#context-bar'));
@@ -256,6 +276,7 @@ async function refreshRecords() {
   renderNav();
   if (S.guide && S.guide.project_id === S.pid) loadGuide().then(() => { if (S.onGuideChanged) { try { S.onGuideChanged(); } catch { /* cosmetic */ } } });
   if (S.onRecordsChanged) { try { S.onRecordsChanged(); } catch { /* view-local refresh */ } }
+  refreshTask();
 }
 /** Set guide for the open project: names, purposes, op order, featured actions, "what's next". */
 async function loadGuide() {
@@ -342,6 +363,7 @@ async function route() {
   closeNav();
   closePops();
   closeJump();
+  consumePairFragment();
   const seq = ++routeSeq;
   const parts = parseRoute();
   const main = $('#main');
@@ -350,6 +372,7 @@ async function route() {
     if (parts[0] === 'p' && parts.length >= 3) {
       await ensureProject(parts[1], parts[2]);
       await loadGuide();
+      refreshTask();
     } else if (parts[0] !== 'settings') {
       // Home: keep the context of the last project only for the top bar.
     }
@@ -385,6 +408,7 @@ async function pickView(parts) {
   if (!parts.length) return viewHome;
   if (parts[0] === 'settings') return viewSettings;
   if (parts[0] === 'start') return viewStart;
+  if (parts[0] === 'pair') return viewPair;
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
     if (!rest.length) return viewOverview;
@@ -396,6 +420,7 @@ async function pickView(parts) {
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
     if (rest[0] === 'book') return viewBook;
+    if (rest[0] === 'review') return m => viewReview(m, rest[1] === 'step', rest[2] || null);
   }
   return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to projects'))); };
 }
@@ -458,6 +483,7 @@ function renderNav() {
     return;
   }
   const parts = parseRoute();
+  nav.appendChild(h('div', { id: 'nav-task', class: 'nav-task' }, taskCard('nav'), approvalsButton()));
   const curOp = parts[3] === 'op' ? parts[4] : (parts[3] === 'rec' || parts[3] === 'edit') ? (recordById(parts[4]) || {}).module_id : null;
   const curSet = parts[3] === 'set' ? parts[4] : curOp ? curOp[0] : null;
   nav.appendChild(h('h2', { id: 'nav-h' }, 'Operation sets'));
@@ -525,7 +551,7 @@ async function viewHome(main) {
       h('p', null, 'Create your first project below. The only required input is a project name; features and release profiles can be changed later in the feature manifest.')));
   } else {
     const ul = h('ul', { class: 'record-list' });
-    for (const p of S.projects) {
+    for (const p of S.projects.filter(x => !x.test_book)) {
       const n = Object.values(p.record_counts || {}).reduce((a, b) => a + b, 0);
       ul.appendChild(h('li', { class: 'record-item' },
         h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main') }, p.name),
@@ -533,6 +559,13 @@ async function viewHome(main) {
         h('div', { class: 'r-badges' }, badge('▤', `${n} records on main`, 'b-muted'))));
     }
     listCard.appendChild(ul);
+    const tests = S.projects.filter(x => x.test_book);
+    if (tests.length) {
+      listCard.appendChild(h('details', { class: 'test-books' }, h('summary', null, `🧪 Test books (${tests.length}) — made by Test everything / Test workflow, not your real books`),
+        h('ul', { class: 'record-list' }, tests.map(p => h('li', { class: 'record-item' },
+          h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main') }, p.name),
+            h('div', { class: 'r-meta' }, `created ${fmtTime(p.created_at)}`)))))));
+    }
   }
   main.appendChild(listCard);
   main.appendChild(h('details', { class: 'card' }, h('summary', null, 'Advanced: create an empty project with chosen features'), projectCreateForm()));
@@ -591,6 +624,7 @@ async function viewOverview(main) {
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openJump(ev.currentTarget) }, '🔍 Jump to…'),
       h('a', { class: 'btn', href: plink('manifest'), title: 'The feature manifest: which parts of BookForge this book uses' }, '🎛️ Book features'),
       h('a', { class: 'btn', href: plink('progress') }, 'Progress'))));
+  main.appendChild(h('div', { class: 'task-slot', 'data-where': 'page' }, taskCard('page')));
   const next = h('div');
   const drawNext = () => clear(next).appendChild(whatsNextCard(null));
   drawNext();
@@ -1845,6 +1879,9 @@ async function viewRecord(main, rid, ver) {
   }
   actions.appendChild(panel);
   main.appendChild(actions);
+  if (isLatest && S.opsById[op.id] && ['DRAFT', 'VALIDATED'].includes(cur.lifecycle) && cur.record_kind === 'OUTPUT') {
+    main.appendChild(recordReviewCard(cur));
+  }
 
   // Content
   const content = h('section', { class: 'card', 'aria-labelledby': 'content-h' }, h('h2', { id: 'content-h' }, 'Content'));
@@ -4395,6 +4432,11 @@ function renderBook(holder, book, redraw) {
     ol.appendChild(li);
   }
   holder.appendChild(ol);
+  if (S.pendingBookStep) {
+    const want = S.pendingBookStep; S.pendingBookStep = null;
+    const st = book.steps.find(x => x.id === want.id);
+    if (st && st.state !== 'done') setTimeout(() => doStep(st), 0);
+  }
   holder.appendChild(h('p', { class: 'small muted' }, 'Behind the scenes this uses the real steps: A01 → B01 → B03 → B11 → C01/C02 → book format (I01) → G02/G01/G05/G04/G07 → G11/G12/G13 → H05. Full release readiness (H10) is in the Quality Checks set.'));
 }
 
@@ -4408,6 +4450,593 @@ async function downloadAsset(f) {
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     toast(`Downloading ${name}`);
   } catch (e) { toast(`Download failed: ${apiErrInfo(e).message}`); }
+}
+
+/* ======================================================================= Current task + approvals count */
+const TASK_ICON = { needs_you: '👋', ai_can: '✨', working: '⏳', blocked: '⏸︎', done: '🎉' };
+function taskRef(t) {
+  if (!t) return '';
+  if (!t.op) return 'Book profile';
+  return `Set ${t.set} · ${t.op}`;
+}
+function myTask() { return S.task && S.task.project_id === S.pid && S.task.branch_id === S.branch ? S.task : null; }
+/** "▶ Current task": one big button to exactly the next thing the book needs. */
+function taskCard(where) {
+  const t = myTask();
+  const box = h('section', { class: `task-card task-${where}`, 'aria-labelledby': `task-h-${where}` },
+    h('h2', { id: `task-h-${where}` }, '▶ Current task'));
+  if (!t) { box.appendChild(h('p', { class: 'small muted' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Checking what is next…')); return box; }
+  const ct = t.current_task || {};
+  box.appendChild(h('button', { type: 'button', class: `primary big task-btn ts-${ct.state}`, 'data-action': ct.action || '',
+    onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), ct.title || 'Open Make my book'));
+  if (ct.message) box.appendChild(h('p', { class: 'small task-msg' }, ct.message));
+  if (t.working_on) box.appendChild(h('p', { class: 'small task-working' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` ${t.working_on.title}…`));
+  box.appendChild(h('p', { class: 'small muted task-ref' }, taskRef(ct)));
+  return box;
+}
+function approvalsButton() {
+  const t = myTask();
+  const n = t ? t.count : null;
+  const here = parseRoute()[3] === 'review';
+  return h('a', { class: `btn approvals-btn${n ? ' has-items' : ''}`, href: plink('review'), 'aria-current': here ? 'page' : null },
+    h('span', { 'aria-hidden': 'true' }, '📝 '), 'Needs your approval ', h('span', { class: 'count-badge', 'aria-label': n == null ? 'counting' : `${n} waiting` }, n == null ? '(…)' : `(${n})`));
+}
+function updateTaskUI() {
+  const nav = document.getElementById('nav-task');
+  if (nav) { clear(nav); nav.appendChild(taskCard('nav')); nav.appendChild(approvalsButton()); }
+  for (const slot of document.querySelectorAll('.task-slot')) { clear(slot).appendChild(taskCard(slot.dataset.where || 'page')); }
+  if (S.onTaskChanged) { try { S.onTaskChanged(); } catch { /* cosmetic */ } }
+}
+let taskBusy = false; let taskAgain = false;
+/** Refresh the current task and the approvals count (after every action, and every 10 s while the tab is visible). */
+async function refreshTask() {
+  if (!S.pid || S.authFailed || parseRoute()[0] !== 'p') return;
+  if (taskBusy) { taskAgain = true; return; }
+  taskBusy = true;
+  const pid = S.pid; const branch = S.branch;
+  try {
+    const s = await api('GET', bpath('/review/summary'));
+    if (pid === S.pid && branch === S.branch) { S.task = s; updateTaskUI(); }
+  } catch { /* keep the last known state; the next refresh tries again */ }
+  finally {
+    taskBusy = false;
+    if (taskAgain) { taskAgain = false; refreshTask(); }
+  }
+}
+function initTaskTimer() {
+  setInterval(() => { if (document.visibilityState === 'visible') refreshTask(); }, 10000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshTask(); });
+}
+/** Do what the current task says: open the review queue at the first draft, the step, the chapter, the form… */
+function runTask(ct, opener) {
+  if (!ct) return;
+  const onBook = parseRoute()[3] === 'book';
+  switch (ct.action) {
+    case 'review': go(plink('review', 'step', ct.record_id)); break;
+    case 'make': openMakeDialog(ct.op || 'A01', null, opener); break;
+    case 'new': goNew(ct.op || 'A01'); break;
+    case 'profile':
+      if (onBook) { openProfileDialog(() => route()); break; }
+      S.pendingBookStep = { id: 'profile' }; go(plink('book')); break;
+    case 'book_step':
+      S.pendingBookStep = { id: ct.step, chapter_id: ct.chapter_id };
+      if (onBook) route(); else go(plink('book'));
+      break;
+    default: go(plink('book'));
+  }
+}
+/** From pages outside a book (e.g. after pairing): open the last book and do its current task. */
+async function goCurrentTask({ run = true } = {}) {
+  try { await loadProjects(); } catch { /* handled below */ }
+  const real = S.projects.filter(p => !p.test_book);
+  const last = loadJSON('bf:last', null);
+  const pick = (last && real.find(p => p.project_id === last.pid)) ? { pid: last.pid, branch: last.branch || 'main' }
+    : real.length ? { pid: real[real.length - 1].project_id, branch: 'main' } : null;
+  if (!pick) { go('#/start'); return; }
+  try {
+    await ensureProject(pick.pid, pick.branch);
+    S.task = await api('GET', bpath('/review/summary'));
+    if (!run) { go(plink('book')); return; }  // e.g. after pairing: show the book, let the author press the next step
+    runTask(S.task.current_task, null);
+  } catch { go(link('p', pick.pid, pick.branch)); }
+}
+
+/* ======================================================================= review queue (#/p/…/review) */
+const VERDICT = { APPROVE: ['✔', 'AI: approve', 'b-ok'], REVISE: ['✎', 'AI: revise', 'b-warn'], REJECT: ['✕', 'AI: reject', 'b-bad'] };
+const RV = { skipped: new Set(), slot: '', seq: 0 };
+function verdictBadge(rv) {
+  if (!rv) return null;
+  const b = VERDICT[rv.verdict] || ['?', rv.verdict, 'b-muted'];
+  return badge(b[0], b[1], b[2], rv.slot_label ? `Reviewed by ${rv.slot_label}` : null);
+}
+function reviewFromQueue(q) {
+  S.task = Object.assign({}, S.task && S.task.project_id === S.pid ? S.task : {}, {
+    project_id: S.pid, branch_id: S.branch, count: q.count, current_task: q.current_task, book: q.book });
+  updateTaskUI();
+}
+function verdictBox(rv, item, { onFix, onEdit } = {}) {
+  if (!rv) return null;
+  const kind = rv.verdict === 'APPROVE' ? 'ok' : rv.verdict === 'REVISE' ? 'stale' : 'failed';
+  const words = { APPROVE: 'The AI reviewer would approve this draft', REVISE: 'The AI reviewer suggests changes', REJECT: 'The AI reviewer would not approve this draft' }[rv.verdict] || 'AI review';
+  return stateBox(kind, words,
+    h('p', { class: 'small muted' }, `${rv.slot_label || rv.slot || 'AI'}${typeof rv.confidence === 'number' ? ` · confidence ${Math.round(rv.confidence * 100)}%` : ''} · ${fmtTime(rv.at)} · this is advice; only you approve.`),
+    (rv.reasons || []).length ? [h('strong', null, 'Why:'), h('ul', null, rv.reasons.map(r => h('li', null, r)))] : null,
+    (rv.suggested_changes || []).length ? [h('strong', null, 'Suggested changes:'), h('ul', null, rv.suggested_changes.map(r => h('li', null, r)))] : null,
+    rv.verdict !== 'APPROVE' && (onFix || onEdit) ? h('div', { class: 'row' },
+      onFix ? h('button', { type: 'button', class: 'primary', onclick: onFix }, '🤖 Ask AI to fix it') : null,
+      onEdit ? h('button', { type: 'button', onclick: onEdit }, '✏️ Edit myself') : null) : null);
+}
+async function approveIds(items, how) {
+  return api('POST', bpath('/review/approve'), { body: {
+    record_ids: items.map(i => i.record_id), versions: Object.fromEntries(items.map(i => [i.record_id, i.version])),
+    author_confirms: true, how } });
+}
+function approveReport(out, items) {
+  const byId = Object.fromEntries(items.map(i => [i.record_id, i]));
+  const failed = (out.results || []).filter(r => !r.ok);
+  return stateBox(failed.length ? 'failed' : 'ok', out.message || (failed.length ? 'Some drafts were not approved' : 'Approved'),
+    failed.length ? h('ul', null, failed.map(r => h('li', null, h('strong', null, (byId[r.record_id] || {}).title || r.record_id), ' — ', r.message || 'not approved'))) : null);
+}
+async function runReviewJob(start, progressEl, { label } = {}) {
+  const seq = RV.seq;
+  let job;
+  try { job = await start(); } catch (e) { clear(progressEl).appendChild(errorWithFix('The AI review could not start', apiErrInfo(e))); return null; }
+  const cancel = h('button', { type: 'button', class: 'small', onclick: async () => {
+    cancel.disabled = true;
+    try { await api('POST', bpath(`/review/ai/${encodeURIComponent(job.job_id)}/cancel`)); } catch { /* the job ends anyway */ }
+  } }, 'Stop');
+  const line = h('span');
+  const bar = h('progress', { max: String(job.total || 1), value: '0', 'aria-label': 'AI review progress' });
+  clear(progressEl).appendChild(h('div', { class: 'state loading' }, h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), line, cancel), bar));
+  const show = j => {
+    line.textContent = `${label || 'AI review'}: ${j.done} of ${j.total} done · ${j.phase || ''} · ${fmtClock(j.elapsed_ms || 0)}`;
+    bar.max = j.total || 1; bar.value = j.done || 0;
+  };
+  show(job);
+  while (!['done', 'error', 'cancelled'].includes(job.status)) {
+    await sleep(1000);
+    if (seq !== RV.seq) return null;  // the page changed; the job keeps running on the server
+    try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+    show(job);
+  }
+  clear(progressEl);
+  return job;
+}
+function jobSummary(job) {
+  if (!job) return null;
+  if (job.status === 'error') return errorWithFix('The AI review did not work', job.error || {});
+  const res = job.results || [];
+  const okRes = res.filter(r => r.ok && r.review);
+  const n = v => okRes.filter(r => r.review.verdict === v).length;
+  const auto = res.filter(r => r.auto_approved).length;
+  const bad = res.filter(r => !r.ok);
+  return stateBox(bad.length ? 'failed' : 'ok', job.status === 'cancelled' ? `Stopped after ${res.length} of ${job.total}` : `AI reviewed ${okRes.length} draft(s)`,
+    h('p', null, `${n('APPROVE')} approve · ${n('REVISE')} revise · ${n('REJECT')} reject`, auto ? ` · ${auto} approved automatically under your auto-approve setting` : ''),
+    bad.length ? h('ul', null, bad.map(r => h('li', null, `${r.record_id}: ${(r.error || {}).message || 'failed'}`, (r.error || {}).fix ? h('div', { class: 'small' }, (r.error || {}).fix) : null))) : null);
+}
+function autoApproveCard(q, reload) {
+  const st = q.settings || {};
+  const id = uid('auto');
+  const box = h('input', { type: 'checkbox', id, checked: !!st.auto_approve, 'aria-describedby': `${id}-h` });
+  const out = h('div', { 'aria-live': 'polite' });
+  box.addEventListener('change', async () => {
+    const on = box.checked;
+    if (on) {
+      const ok = await choiceDialog('Turn on auto-approve?', h('div', null,
+        h('p', { class: 'notice' }, h('strong', null, '⚠︎ '), st.warning || ''),
+        h('p', null, 'This is your standing permission for this book. BookForge records who turned it on and when, and every automatic approval appears in Activity.')),
+      [{ id: 'yes', label: '✔ Yes, auto-approve drafts that pass the AI review' }]);
+      if (ok !== 'yes') { box.checked = false; return; }
+    }
+    box.disabled = true;
+    try {
+      await api('PUT', bpath('/review/settings'), { body: on ? { auto_approve: true, author_confirms: true } : { auto_approve: false } });
+      toast(on ? 'Auto-approve is on for this book' : 'Auto-approve is off');
+      await reload();
+    } catch (e) { box.checked = !on; clear(out).appendChild(errorWithFix('The setting was not changed', apiErrInfo(e))); }
+    box.disabled = false;
+  });
+  return h('section', { class: `card auto-card${st.auto_approve ? ' on' : ''}`, 'aria-labelledby': `${id}-t` },
+    h('h2', { id: `${id}-t` }, '⚙️ Auto-approve (optional, off unless you turn it on)'),
+    h('div', { class: 'check-row' }, box, h('label', { for: id }, h('strong', null, 'Auto-approve drafts that pass the AI review'))),
+    h('p', { class: 'small', id: `${id}-h` }, st.warning || ''),
+    st.auto_approve && st.consent ? h('p', { class: 'small muted' }, `Turned on by ${st.consent.by} on ${fmtTime(st.consent.at)}.`) : null, out);
+}
+async function viewReview(main, step, startId) {
+  S.slotCache = null;  // AI slots may have been connected in another tab (pairing)
+  RV.seq++;
+  const mySeq = RV.seq;
+  S.leaveHooks.push(() => { if (RV.seq === mySeq) RV.seq++; });
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], step ? ['Needs your approval', plink('review')] : 'Needs your approval', ...(step ? ['One by one'] : [])),
+    h('h1', null, step ? '📝 Approve one by one' : '📝 Needs your approval')),
+  h('div', { class: 'row' }, step ? h('a', { class: 'btn', href: plink('review') }, '☰ Back to the list') : null,
+    h('a', { class: 'btn', href: plink('book') }, '📘 Make my book'))));
+  const holder = h('div', null, loadingState('Loading the drafts waiting for you…'));
+  main.appendChild(holder);
+  const load = async () => { const q = await api('GET', bpath('/review')); reviewFromQueue(q); return q; };
+  let q;
+  try { q = await load(); } catch (e) {
+    clear(holder).appendChild(failedState('Could not load the drafts waiting for you', e, h('p', null, h('button', { type: 'button', onclick: () => route() }, 'Try again'))));
+    return;
+  }
+  if (step) renderReviewStep(holder, q, startId, load); else renderReviewList(holder, q, load);
+}
+function allCaughtUp(holder, q) {
+  holder.appendChild(h('section', { class: 'card caught-up' },
+    h('h2', null, '🎉 All caught up'),
+    h('p', null, 'Nothing is waiting for your approval right now.'),
+    h('div', { class: 'task-slot', 'data-where': 'page' }, taskCard('page'))));
+}
+function renderReviewList(holder, q, load) {
+  clear(holder);
+  const msg = h('div', { 'aria-live': 'polite' });
+  const prog = h('div', { 'aria-live': 'polite' });
+  const reload = async (keepMsg) => {
+    let nq; try { nq = await load(); } catch (e) { clear(msg).appendChild(failedState('Could not refresh the list', e)); return; }
+    const m = keepMsg ? Array.from(msg.childNodes) : [];
+    renderReviewList(holder, nq, load);
+    const nm = holder.querySelector('.rv-msg'); if (nm && m.length) append(nm, m);
+    try { await refreshRecords(); } catch { /* best effort */ }
+  };
+  msg.className = 'rv-msg';
+  const shown = q.items.filter(i => !RV.skipped.has(i.record_id));
+  const skipped = q.items.filter(i => RV.skipped.has(i.record_id));
+  const picker = aiPicker(uid('rv-ai'), RV.slot);
+  picker.sel.addEventListener('change', () => { RV.slot = picker.sel.value; });
+  const approveAll = h('button', { type: 'button', class: 'primary', disabled: !shown.length, onclick: async () => {
+    const ok = await choiceDialog(`Approve all ${shown.length} as the author?`, h('div', null,
+      h('p', null, 'You are approving these drafts. Approving makes them part of the book; later steps build on them. BookForge adds an extra approval record for exactly these versions where a step needs one, because you confirm here.'),
+      h('ul', { class: 'small approve-list' }, shown.map(i => h('li', null, `${i.module_id} · ${i.title}`, i.review ? ` (AI: ${i.review.verdict.toLowerCase()})` : '')))),
+    [{ id: 'yes', label: `✅ Yes, approve all ${shown.length}` }]);
+    if (ok !== 'yes') return;
+    approveAll.disabled = true;
+    clear(msg).appendChild(loadingState(`Approving ${shown.length} draft(s)…`));
+    try { const out = await approveIds(shown, 'all'); clear(msg).appendChild(approveReport(out, shown)); announce(out.message); }
+    catch (e) { clear(msg).appendChild(errorWithFix('Nothing was approved', apiErrInfo(e))); }
+    await reload(true);
+  } }, `✅ Approve all shown (${shown.length})`);
+  const reviewAll = h('button', { type: 'button', disabled: !shown.length, onclick: async () => {
+    reviewAll.disabled = true; clear(msg);
+    const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: shown.slice(0, 40).map(i => i.record_id), slot_id: picker.value() } }), prog, { label: 'Reviewing with AI' });
+    if (job) { clear(msg).appendChild(jobSummary(job)); await reload(true); }
+  } }, '🤖 Review all with AI');
+  holder.appendChild(h('section', { class: 'card rv-top' },
+    h('p', null, h('strong', null, shown.length ? `${shown.length} draft(s) are waiting for you` : 'Nothing is waiting for you'),
+      skipped.length ? h('span', { class: 'muted' }, ` · ${skipped.length} skipped for now`) : null,
+      h('span', { class: 'muted small' }, ' · in book order: characters and places → planning → chapters → book format → assembly')),
+    h('div', { class: 'row rv-actions' },
+      h('a', { class: `btn big${shown.length ? ' primary' : ''}`, href: plink('review', 'step'), 'aria-disabled': shown.length ? null : 'true' }, '▶ Step through them one by one'),
+      approveAll, reviewAll),
+    h('div', { class: 'rv-ai-pick' }, picker.field), prog, msg));
+  if (!shown.length && !skipped.length) { allCaughtUp(holder, q); holder.appendChild(autoApproveCard(q, () => reload(false))); return; }
+  let group = null; let ul = null;
+  for (const it of shown) {
+    if (it.group !== group) {
+      group = it.group;
+      ul = h('ul', { class: 'record-list rv-list' });
+      holder.appendChild(h('section', { class: 'card rv-group', 'aria-label': group }, h('h2', null, group), ul));
+    }
+    ul.appendChild(reviewRow(it, { reload, msg, prog, picker }));
+  }
+  if (!shown.length) allCaughtUp(holder, q);
+  if (skipped.length) {
+    holder.appendChild(h('details', { class: 'card' }, h('summary', null, `⏭ Skipped for now (${skipped.length})`),
+      h('ul', { class: 'record-list' }, skipped.map(it => h('li', { class: 'record-item' }, h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: plink('rec', it.record_id) }, it.title), h('div', { class: 'r-meta' }, `${it.module_id} · v${it.version}`))))),
+      h('button', { type: 'button', onclick: () => { RV.skipped.clear(); renderReviewList(holder, q, load); } }, 'Show them again')));
+  }
+  holder.appendChild(autoApproveCard(q, () => reload(false)));
+}
+function reviewRow(it, { reload, msg, prog, picker }) {
+  const details = it.review && ((it.review.reasons || []).length || (it.review.suggested_changes || []).length)
+    ? h('details', { class: 'small rv-why' }, h('summary', null, 'Why the AI said that'),
+      h('ul', null, (it.review.reasons || []).map(r => h('li', null, r))),
+      (it.review.suggested_changes || []).length ? h('p', null, h('strong', null, 'Suggested: '), it.review.suggested_changes.join(' · ')) : null) : null;
+  const approveBtn = h('button', { type: 'button', class: 'small primary', onclick: async () => {
+    approveBtn.disabled = true; clear(msg).appendChild(loadingState(`Approving “${it.title}”…`));
+    try { const out = await approveIds([it], 'one'); clear(msg).appendChild(approveReport(out, [it])); announce(out.message); }
+    catch (e) { clear(msg).appendChild(errorWithFix('It was not approved', apiErrInfo(e))); }
+    await reload(true);
+  } }, '✅ Approve');
+  const aiBtn = h('button', { type: 'button', class: 'small', onclick: async () => {
+    aiBtn.disabled = true; clear(msg);
+    const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: [it.record_id], slot_id: picker.value() } }), prog, { label: `Reviewing “${it.title}”` });
+    if (job) { clear(msg).appendChild(jobSummary(job)); await reload(true); } else aiBtn.disabled = false;
+  } }, '🤖 AI review');
+  return h('li', { class: 'record-item rv-item', 'data-record': it.record_id },
+    h('div', { class: 'r-main' },
+      h('a', { class: 'r-title', href: plink('rec', it.record_id) }, it.title),
+      h('div', { class: 'r-meta' }, `${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
+      details),
+    h('div', { class: 'r-badges' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review)),
+    h('div', { class: 'row rv-buttons' },
+      h('a', { class: 'btn small', href: plink('review', 'step', it.record_id) }, 'Open'),
+      approveBtn,
+      h('a', { class: 'btn small', href: plink('edit', it.record_id) }, '✏️ Edit'),
+      h('button', { type: 'button', class: 'small', onclick: () => { RV.skipped.add(it.record_id); reload(false); } }, '⏭ Skip'),
+      aiBtn));
+}
+async function renderReviewStep(holder, q, startId, load) {
+  clear(holder);
+  const shown = q.items.filter(i => !RV.skipped.has(i.record_id));
+  if (!shown.length) {
+    allCaughtUp(holder, q);
+    if (q.items.length) holder.appendChild(h('p', null, h('button', { type: 'button', onclick: () => { RV.skipped.clear(); renderReviewStep(holder, q, null, load); } }, `Show the ${q.items.length} skipped draft(s) again`)));
+    return;
+  }
+  const it = shown.find(i => i.record_id === startId) || shown[0];
+  const idx = shown.indexOf(it);
+  const want = plink('review', 'step', it.record_id);
+  if (location.hash !== want) history.replaceState(null, '', want);
+  const msg = h('div', { 'aria-live': 'polite', class: 'rv-msg' });
+  const prog = h('div', { 'aria-live': 'polite' });
+  const nextAfter = (nq, curId) => {
+    const order = q.items.map(i => i.record_id);
+    const pos = order.indexOf(curId);
+    const remaining = nq.items.filter(i => !RV.skipped.has(i.record_id));
+    return remaining.find(i => order.indexOf(i.record_id) > pos) || remaining[0] || null;
+  };
+  const go2 = async (curId, keep) => {
+    let nq; try { nq = await load(); } catch (e) { clear(msg).appendChild(failedState('Could not load the next draft', e)); return; }
+    const nx = nextAfter(nq, curId);
+    const keepNodes = keep ? Array.from(msg.childNodes) : [];
+    await renderReviewStep(holder, nq, nx ? nx.record_id : null, load);
+    const nm = holder.querySelector('.rv-msg'); if (nm && keepNodes.length) append(nm, keepNodes);
+    const hd = holder.querySelector('h2'); if (hd) { hd.setAttribute('tabindex', '-1'); hd.focus({ preventScroll: false }); }
+    try { await refreshRecords(); } catch { /* best effort */ }
+  };
+  const stay = async (rid) => {
+    let nq; try { nq = await load(); } catch (e) { clear(msg).appendChild(failedState('Could not refresh', e)); return; }
+    const keepNodes = Array.from(msg.childNodes);
+    await renderReviewStep(holder, nq, rid, load);
+    const nm = holder.querySelector('.rv-msg'); if (nm && keepNodes.length) append(nm, keepNodes);
+    try { await refreshRecords(); } catch { /* best effort */ }
+  };
+  const picker = aiPicker(uid('st-ai'), RV.slot);
+  picker.sel.addEventListener('change', () => { RV.slot = picker.sel.value; });
+  const fix = async () => {
+    clear(msg);
+    const job = await runReviewJob(() => api('POST', bpath('/review/fix'), { body: { record_id: it.record_id, slot_id: picker.value() } }), prog, { label: 'The AI is revising this draft' });
+    if (!job) return;
+    if (job.status === 'done' && (job.results || [])[0]) { clear(msg).appendChild(stateBox('ok', job.results[0].message)); S.details[it.record_id] = null; await stay(it.record_id); }
+    else clear(msg).appendChild(errorWithFix('The AI could not revise it', job.error || {}));
+  };
+  const approveBtn = h('button', { type: 'button', class: 'primary big', onclick: async () => {
+    approveBtn.disabled = true; clear(msg).appendChild(loadingState('Approving…'));
+    let out = null;
+    try { out = await approveIds([it], 'step'); } catch (e) { clear(msg).appendChild(errorWithFix('It was not approved', apiErrInfo(e))); approveBtn.disabled = false; return; }
+    clear(msg).appendChild(approveReport(out, [it]));
+    announce(out.message);
+    if (out.ok) await go2(it.record_id, true); else { approveBtn.disabled = false; await stay(it.record_id); }
+  } }, '✅ Approve & next');
+  const aiBtn = h('button', { type: 'button', class: 'big', onclick: async () => {
+    aiBtn.disabled = true; clear(msg);
+    const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: [it.record_id], slot_id: picker.value() } }), prog, { label: 'AI review' });
+    if (!job) { aiBtn.disabled = false; return; }
+    clear(msg).appendChild(jobSummary(job));
+    const r0 = (job.results || [])[0];
+    if (r0 && r0.auto_approved) await go2(it.record_id, true); else await stay(it.record_id);
+  } }, '🤖 Ask AI to review');
+  const content = h('div', { class: 'data-view' }, loadingState('Loading the draft…'));
+  holder.appendChild(h('section', { class: 'card rv-step', 'aria-labelledby': 'rv-step-h' },
+    h('p', { class: 'small muted' }, `Draft ${idx + 1} of ${shown.length} · ${it.group}`),
+    h('h2', { id: 'rv-step-h', class: 'wrap-anywhere' }, it.title),
+    h('p', { class: 'row small' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review), ` ${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
+    h('div', { class: 'row rv-big' }, approveBtn,
+      h('button', { type: 'button', class: 'big', onclick: () => { RV.skipped.add(it.record_id); go2(it.record_id, false); } }, '⏭ Skip'),
+      h('a', { class: 'btn big', href: plink('edit', it.record_id) }, '✏️ Edit'),
+      aiBtn),
+    h('div', { class: 'rv-ai-pick' }, picker.field), prog, msg,
+    verdictBox(it.review, it, { onFix: fix, onEdit: () => go(plink('edit', it.record_id)) }),
+    h('h3', null, 'What it says'), content,
+    h('p', { class: 'small' }, h('a', { href: plink('rec', it.record_id) }, 'Open the full record page (history, sources, findings)'))));
+  try {
+    const d = await recordDetail(it.record_id, true);
+    const v = d.versions.find(x => x.version === it.version) || d.versions[d.versions.length - 1];
+    clear(content).appendChild((v.representation === 'BINARY_ARTIFACT' || v.binary) ? assetView(v) : renderData(v.data, ''));
+  } catch (e) { clear(content).appendChild(failedState('Could not load the draft', e)); }
+}
+/** Record page: the AI reviewer's advice for this exact version and a button to ask for it. */
+function recordReviewCard(cur) {
+  const box = h('section', { class: 'card', 'aria-labelledby': 'rvc-h' }, h('h2', { id: 'rvc-h' }, '🤖 AI review'));
+  const body = h('div', null, loadingState('Checking for an AI review…'));
+  const prog = h('div', { 'aria-live': 'polite' });
+  const msg = h('div', { 'aria-live': 'polite' });
+  box.appendChild(body); box.appendChild(prog); box.appendChild(msg);
+  const draw = async () => {
+    let info;
+    try { info = await api('GET', bpath(`/review/record/${encodeURIComponent(cur.record_id)}`)); }
+    catch (e) { clear(body).appendChild(h('p', { class: 'small muted' }, 'The AI review is not available right now.')); return; }
+    const rv = (info.reviews || {})[String(cur.version)];
+    clear(body);
+    if (rv) body.appendChild(verdictBox(rv, cur, { onEdit: () => go(plink('edit', cur.record_id)),
+      onFix: info.in_queue ? async () => {
+        const job = await runReviewJob(() => api('POST', bpath('/review/fix'), { body: { record_id: cur.record_id } }), prog, { label: 'The AI is revising this draft' });
+        if (job && job.status === 'done') { S.details[cur.record_id] = null; go(plink('rec', cur.record_id)); route(); }
+        else if (job) clear(msg).appendChild(errorWithFix('The AI could not revise it', job.error || {}));
+      } : null }));
+    else body.appendChild(h('p', { class: 'small' }, 'Ask one of your AIs to read this draft like a strict editor: it answers approve, revise or reject with reasons. It is advice only — you decide.'));
+    body.appendChild(h('div', { class: 'row' },
+      h('button', { type: 'button', onclick: async ev => {
+        ev.currentTarget.disabled = true;
+        const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: [cur.record_id] } }), prog, { label: 'AI review' });
+        if (job) { clear(msg).appendChild(jobSummary(job)); S.details[cur.record_id] = null; if ((job.results || []).some(r => r.auto_approved)) route(); else draw(); }
+      } }, rv ? '🔁 Review again with AI' : '🤖 Ask AI to review'),
+      info.in_queue ? h('a', { class: 'btn', href: plink('review', 'step', cur.record_id) }, '📝 Open in “Needs your approval”') : null));
+  };
+  draw();
+  return box;
+}
+
+/* ======================================================================= one-button pairing (#/pair) */
+async function viewPair(main) {
+  const info = S.pairing; S.pairing = null;
+  main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '🔗 Connect to AutoInjector')));
+  if (!info || !info.code) {
+    main.appendChild(stateBox('empty', 'No pairing code here',
+      h('p', null, 'Press “Connect” in the AutoInjector desktop app: it opens this page with a one-time code and BookForge connects by itself. The code works once and only for about 2 minutes.'),
+      h('p', null, 'You can also paste a connection key in ', h('a', { href: '#/settings' }, 'Settings'), '.')));
+    return;
+  }
+  const holder = h('div', { 'aria-live': 'polite' }, loadingState('Connecting to AutoInjector…'));
+  main.appendChild(holder);
+  let out;
+  try { out = await api('POST', '/slots/pair-autoinjector', { body: { code: info.code, bridge_url: info.bridge } }); }
+  catch (e) {
+    const err = apiErrInfo(e);
+    clear(holder).appendChild(stateBox('failed', 'AutoInjector was not connected',
+      h('p', null, err.message),
+      h('p', null, h('strong', null, 'What to do: '), err.code === 'EXPIRED_APPROVAL' || err.code === 'INVALID_INPUT'
+        ? 'Press Connect again in AutoInjector. A new code is made each time.'
+        : 'Make sure the AutoInjector desktop app is running and its BookForge bridge is switched on, then press Connect again in AutoInjector.'),
+      h('div', { class: 'row' }, h('a', { class: 'btn', href: '#/settings' }, 'Open Settings (connect with a key instead)'),
+        h('button', { type: 'button', onclick: () => goCurrentTask() }, '▶ Go to my current task'))));
+    return;
+  }
+  S.slotCache = null;
+  const allOk = (out.slots || []).length && out.slots.every(s => s.ok);
+  const countdown = h('span', { class: 'small muted' });
+  let timer = null; let left = 6;
+  const stopTimer = () => { clearInterval(timer); timer = null; countdown.textContent = ''; };
+  S.leaveHooks.push(stopTimer);
+  clear(holder).appendChild(stateBox(allOk ? 'ok' : 'blocked', allOk ? 'Connected to AutoInjector' : 'Connected — some AIs are not ready yet',
+    h('p', null, out.message || ''),
+    h('ul', { class: 'plain-list pair-list' }, (out.slots || []).map(s => h('li', { class: 'row' },
+      h('strong', null, `${s.slot_id} · ${SITE_NAME[s.site] || s.site}`),
+      s.ok ? badge('✔', 'Ready', 'b-ok') : badge('✕', 'Not ready', 'b-bad'),
+      h('span', { class: 'small' }, s.ok ? 'ready to write' : (s.message || 'not ready') + ' — open and log in to it in AutoInjector')))),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big', onclick: () => { stopTimer(); goCurrentTask(); } }, '▶ Continue to my current task'),
+      allOk ? h('button', { type: 'button', onclick: stopTimer }, 'Stay here') : null, countdown)));
+  announce(allOk ? 'Connected to AutoInjector' : 'Connected; some AIs are not ready yet');
+  if (allOk) {
+    countdown.textContent = `Going to your current task in ${left} s…`;
+    timer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) { stopTimer(); if (parseRoute()[0] === 'pair') goCurrentTask({ run: false }); return; }
+      countdown.textContent = `Going to your current task in ${left} s…`;
+    }, 1000);
+  }
+}
+
+/* ======================================================================= 🧪 Test workflow drawer */
+const WF = { open: false, timer: null, data: null, opener: null, built: false, el: {} };
+const WF_BADGE = { not_run: ['○', 'Not run', 'b-muted'], running: ['…', 'Running', 'b-info'], PASS: ['✔', 'Pass', 'b-ok'], FAIL: ['✕', 'Fail', 'b-bad'], SKIPPED: ['–', 'Skipped', 'b-muted'] };
+function initWorkflowDrawer() {
+  const btn = $('#wf-btn'); const d = $('#wf-drawer');
+  if (!btn || !d) return;
+  btn.addEventListener('click', () => toggleWorkflow(!WF.open, btn));
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape' || !WF.open || document.querySelector('dialog[open]')) return;
+    if ($('#sidenav').classList.contains('open') && !d.contains(ev.target)) return;
+    toggleWorkflow(false);
+  });
+}
+function toggleWorkflow(open, opener) {
+  const d = $('#wf-drawer'); const btn = $('#wf-btn');
+  WF.open = open;
+  d.hidden = !open;
+  btn.setAttribute('aria-expanded', String(open));
+  document.body.classList.toggle('wf-open', open);
+  clearTimeout(WF.timer);
+  if (open) {
+    WF.opener = opener || btn;
+    if (!WF.built) buildWorkflow();
+    refreshWorkflow();
+    setTimeout(() => { const f = d.querySelector('button'); if (f) f.focus(); }, 0);
+  } else if (WF.opener && WF.opener.focus) WF.opener.focus();
+}
+function buildWorkflow() {
+  const d = clear($('#wf-drawer'));
+  const E = WF.el = {};
+  E.runAll = h('button', { type: 'button', class: 'primary', onclick: () => wfStart({ rows: 'all' }) }, '▶ Run all');
+  E.stop = h('button', { type: 'button', onclick: async () => { try { WF.data = await api('POST', '/workflow-test/stop'); wfRender(); } catch (e) { toast(apiErrInfo(e).message); } } }, '■ Stop');
+  E.report = h('button', { type: 'button', onclick: wfReport }, '📄 Open report');
+  E.project = h('a', { class: 'btn', href: '#/' }, '📂 Open the test book');
+  E.status = h('p', { class: 'small wf-status', 'aria-live': 'polite' });
+  E.msg = h('div', { 'aria-live': 'polite' });
+  E.rows = {};
+  const list = h('ol', { class: 'wf-rows' });
+  d.appendChild(h('div', { class: 'wf-head' }, h('h2', { id: 'wf-title' }, '🧪 Test workflow'),
+    h('button', { type: 'button', class: 'small', 'aria-label': 'Close the test workflow panel', onclick: () => toggleWorkflow(false) }, '✕')));
+  d.appendChild(h('p', { class: 'small' }, 'Test each part of making a book with your real AI — as often as you like. Everything happens in a separate test book (“🧪 Workflow test …”); your books are never touched. Approvals in the test book are made by the test runner because you press Run.'));
+  d.appendChild(h('div', { class: 'row wf-controls' }, E.runAll, E.stop, E.report, E.project));
+  d.appendChild(E.status); d.appendChild(E.msg); d.appendChild(list);
+  WF.list = list;
+  WF.built = true;
+}
+function wfRowEl(r) {
+  const E = WF.el;
+  if (E.rows[r.id]) return E.rows[r.id];
+  const x = {};
+  x.badge = h('span'); x.time = h('span', { class: 'small muted' }); x.last = h('span', { class: 'small muted' });
+  x.btn = h('button', { type: 'button', class: 'small', onclick: () => wfStart({ rows: [r.id] }) }, '▶ Run');
+  x.detail = h('p', { class: 'small wf-detail' }); x.fix = h('p', { class: 'small wf-fix' }); x.excerpt = h('p', { class: 'small muted' });
+  x.mode = h('p', { class: 'small muted' });
+  x.li = h('li', { class: 'wf-row', 'data-row': r.id },
+    h('div', { class: 'row wf-row-head' }, h('strong', { class: 'wf-title' }, r.title), x.badge, x.time, x.btn),
+    x.last,
+    h('details', { class: 'wf-more' }, h('summary', null, 'details'),
+      h('p', { class: 'small' }, h('strong', null, 'What it checks: '), r.about), x.detail, x.mode, x.excerpt, x.fix));
+  WF.list.appendChild(x.li);
+  E.rows[r.id] = x;
+  return x;
+}
+function wfRender() {
+  const st = WF.data; if (!st || !WF.built) return;
+  const E = WF.el;
+  E.runAll.disabled = st.running; E.stop.disabled = !st.running;
+  E.report.disabled = !st.report;
+  E.project.hidden = !(st.project && st.project.id);
+  if (st.project && st.project.id) E.project.href = link('p', st.project.id, 'main');
+  const cur = st.rows.find(r => r.id === st.current);
+  E.status.textContent = st.running ? (st.stopping ? 'Stopping after the current row…' : `Running: ${cur ? cur.title : '…'}`)
+    : st.report ? `Last run: ${st.report.counts.PASS} pass · ${st.report.counts.FAIL} fail · ${st.report.counts.SKIPPED} skipped · ${fmtTime(st.report.finished_at)}`
+      : 'Not run yet. Press ▶ Run all (a few seconds without AI; web AIs can take a few minutes).';
+  for (const r of st.rows) {
+    const x = wfRowEl(r);
+    const b = WF_BADGE[r.status] || ['?', r.status, 'b-muted'];
+    clear(x.badge).appendChild(r.status === 'running' ? h('span', { class: 'badge b-info' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Running') : badge(b[0], b[1], b[2]));
+    x.time.textContent = r.elapsed_ms != null ? fmtMs(r.elapsed_ms) : '';
+    x.last.textContent = r.last_run_at ? `Last run ${fmtTime(r.last_run_at)}` : 'Not run yet';
+    x.btn.textContent = r.last_run_at ? '🔁 Re-run' : '▶ Run';
+    x.btn.disabled = st.running;
+    x.li.className = `wf-row wf-${String(r.status).toLowerCase()}`;
+    x.detail.textContent = r.detail ? `What happened: ${r.detail}` : '';
+    x.mode.textContent = r.mode ? (r.mode === 'AI' ? 'Used your AI.' : 'Used a fixed test text (no AI).') : '';
+    x.excerpt.textContent = r.excerpt ? `Short excerpt: “${r.excerpt}”` : '';
+    x.fix.textContent = r.fix && r.status !== 'PASS' ? `What to do: ${r.fix}` : '';
+  }
+}
+async function refreshWorkflow() {
+  clearTimeout(WF.timer);
+  try { WF.data = await api('GET', '/workflow-test'); wfRender(); }
+  catch (e) { if (WF.el.msg) clear(WF.el.msg).appendChild(errorWithFix('Could not read the test status', apiErrInfo(e))); }
+  if (WF.open && WF.data && WF.data.running) WF.timer = setTimeout(refreshWorkflow, 1000);
+  else if (WF.data && !WF.data.running && WF.wasRunning) { WF.wasRunning = false; loadProjects().catch(() => {}); }
+}
+async function wfStart(body) {
+  if (WF.el.msg) clear(WF.el.msg);
+  try { WF.data = await api('POST', '/workflow-test/run', { body }); WF.wasRunning = true; wfRender(); announce('Workflow test started'); }
+  catch (e) {
+    if (e instanceof ApiError && e.status === 409) toast('A test is already running');
+    else clear(WF.el.msg).appendChild(errorWithFix('The test could not start', apiErrInfo(e)));
+  }
+  refreshWorkflow();
+}
+async function wfReport() {
+  try {
+    const blob = await api('GET', '/workflow-test/report?format=md', { blob: true });
+    const text = await blob.text();
+    const name = (WF.data && WF.data.report && WF.data.report.markdown) || 'workflow-test.md';
+    modal('📄 Workflow test report', close => h('div', null,
+      h('p', { class: 'small muted' }, `Saved as ${name} in the “reports” folder of your BookForge data. No keys or prompts are in it.`),
+      h('pre', { class: 'st-report', tabindex: '0' }, text),
+      h('div', { class: 'form-actions' },
+        h('button', { type: 'button', onclick: () => {
+          const url = URL.createObjectURL(blob); const a = h('a', { href: url, download: name });
+          document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+        } }, '⬇ Download (.md)'), h('button', { type: 'button', onclick: close }, 'Close'))), { wide: true });
+  } catch (e) { toast(`The report could not be opened: ${apiErrInfo(e).message}`); }
 }
 
 /* ======================================================================= boot */
@@ -4448,8 +5077,11 @@ function initNavigation() {
 }
 
 function boot() {
+  consumePairFragment();
   initToken();
   initSelfTestButton();
+  initWorkflowDrawer();
+  initTaskTimer();
   initBibleButton();
   initNavigation();
   const toggle = $('#nav-toggle');
@@ -4461,7 +5093,12 @@ function boot() {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && $('#sidenav').classList.contains('open')) { closeNav(); toggle.focus(); }
   });
-  if (!S.token) { showAuthProblem('No access token was found in the address.'); return; }
+  if (!S.token) {
+    showAuthProblem(S.pairing
+      ? 'To finish connecting AutoInjector, BookForge needs to be opened from its start link once on this computer. Open BookForge from its window or desktop shortcut, then press Connect in AutoInjector again.'
+      : 'No access token was found in the address.');
+    return;
+  }
   window.addEventListener('hashchange', route);
   (async () => {
     try {

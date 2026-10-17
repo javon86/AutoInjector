@@ -15,7 +15,8 @@
  *     wrapPrompt(site, text)?            -> text   (adds the [FROM: <SITE>] reply-envelope instruction)
  *     now()?, logger(kind, detail)?, sites?, timeScale?,
  *     onEvent(event)?                    -> called for every activity event (see below)
- *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields) }
+ *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields),
+ *          createPairingCode() -> string, bookforgeStatus() -> object|null }
  *
  * onCaptured(turn) is called by main.js for every captured reply ({ site, text }).
  * It returns true when the reply belonged to a bridge request (main.js must then
@@ -34,6 +35,21 @@
  * (health checks) and request_ids starting with "selftest-" (completions), so
  * it never counts as "BookForge connected".
  *
+ * Contract v1.1 (backward compatible) adds:
+ *   POST /v1/pair    (NO Authorization) — trade a one-time pairing code made by
+ *                    createPairingCode() for the connection key. 12 chars
+ *                    [A-Za-z0-9], valid PAIR_CODE_TTL_MS, single use; a new code
+ *                    invalidates older unused ones; constant-time compare; after
+ *                    PAIR_MAX_FAILS failures in PAIR_WINDOW_MS every pair attempt
+ *                    gets 429 for PAIR_LOCK_MS. Codes and the key are never logged
+ *                    or recorded — only the outcome.
+ *   POST /v1/status  (Bearer) — BookForge reports what it is doing (current
+ *                    sub-module step, approvals, book checklist). The body is
+ *                    whitelisted and capped (sanitizeBookforgeStatus); the latest
+ *                    one is kept and exposed as status().bookforge (stale after
+ *                    BF_STATUS_STALE_MS). Its content never goes to the activity
+ *                    ring — only a "status received" event.
+ *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
  * timeout behaviour quickly; validation of timeout_ms still uses the contract's
@@ -44,7 +60,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1';
+const BRIDGE_VERSION = '1.1';
 const DEFAULT_PORT = 17891;
 const DEFAULT_SITES = ['chatgpt', 'claude', 'gemini'];
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MiB (413 above this)
@@ -59,11 +75,21 @@ const TOKEN_FILE = 'bookforge-bridge-token';
 const EVENT_RING_SIZE = 50;
 const RECONNECT_GAP_MS = 5 * 60 * 1000; // silence longer than this, then a request = a new "connected" event
 const SELFTEST_ID_PREFIX = 'selftest-';
+// --- contract v1.1: pairing + BookForge status ---
+const PAIR_CODE_LEN = 12;
+const PAIR_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+const PAIR_CODE_TTL_MS = 120 * 1000;
+const PAIR_MAX_FAILS = 10;
+const PAIR_WINDOW_MS = 60 * 1000;
+const PAIR_LOCK_MS = 60 * 1000;
+const MAX_STATUS_BYTES = 32 * 1024; // POST /v1/status bodies over this -> 413
+const BF_STATUS_STALE_MS = 90 * 1000;
 // outcome -> the HTTP status BookForge saw (or would see) for it.
 const OUTCOME_HTTP = {
   OK: 200, CACHED: 200, LATE_REPLY_STORED: 200, TIMEOUT: 504, LATE_EXPIRED: 504,
   SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409,
-  BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401
+  BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401,
+  PAIRED: 200, PAIRING_CODE_INVALID: 401, PAIRING_CODE_EXPIRED: 410, TOO_MANY_ATTEMPTS: 429, NOT_READY: 503
 };
 const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error'];
 
@@ -121,6 +147,77 @@ function loadOrCreateToken(dir) {
 }
 function regenerateToken(dir) { return writeToken(dir, generateToken()); }
 
+// --- contract v1.1 helpers ------------------------------------------------------
+function generatePairingCode() {
+  let c = '';
+  for (let i = 0; i < PAIR_CODE_LEN; i++) c += PAIR_CODE_ALPHABET[crypto.randomInt(PAIR_CODE_ALPHABET.length)];
+  return c;
+}
+// Constant-time string compare over fixed-length digests.
+function safeEqual(a, b) {
+  const x = crypto.createHash('sha256').update(String(a), 'utf8').digest();
+  const y = crypto.createHash('sha256').update(String(b), 'utf8').digest();
+  return crypto.timingSafeEqual(x, y) && String(a).length === String(b).length;
+}
+
+// Sanitize a POST /v1/status body from BookForge. Whitelists fields, caps string
+// lengths and array sizes, and keeps only loopback http URLs. Returns
+// { ok: true, value } or { ok: false, message }.
+const CTRL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+function capStr(v, max) {
+  if (typeof v === 'number' && Number.isFinite(v)) v = String(v);
+  if (typeof v !== 'string') return null;
+  const s = v.replace(CTRL_RE, '').trim();
+  return s ? s.slice(0, max) : null;
+}
+function loopbackUrl(v) {
+  if (typeof v !== 'string' || v.length > 2000) return null;
+  let u;
+  try { u = new URL(v.trim()); } catch (_) { return null; }
+  if (u.protocol !== 'http:' || (u.hostname !== '127.0.0.1' && u.hostname !== 'localhost')) return null;
+  if (u.username || u.password) return null;
+  return u.href.slice(0, 1000);
+}
+function capInt(v, max) {
+  const n = Number(v);
+  if (typeof v === 'boolean' || v === null || v === '' || !Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(max, Math.floor(n)));
+}
+// ISO 8601 string, or Unix epoch in seconds or milliseconds -> epoch ms (or null).
+function toEpochMs(v) {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.round(v < 1e12 ? v * 1000 : v);
+  if (typeof v === 'string' && v.length <= 64) { const t = Date.parse(v); return Number.isFinite(t) ? t : null; }
+  return null;
+}
+function sanitizeBookforgeStatus(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, message: 'body must be a JSON object' };
+  if (body.app !== 'bookforge') return { ok: false, message: 'app must be "bookforge"' };
+  const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+  const out = { app: 'bookforge', version: capInt(body.version, 1000000), bookforge_url: loopbackUrl(body.bookforge_url) };
+  const p = obj(body.project);
+  out.project = p ? { id: capStr(p.id, 100), title: capStr(p.title, 200) } : null;
+  const ct = obj(body.current_task);
+  out.current_task = ct ? {
+    set: capStr(ct.set, 20), op: capStr(ct.op, 40), title: capStr(ct.title, 200),
+    state: capStr(ct.state, 40), message: capStr(ct.message, 500), url: loopbackUrl(ct.url)
+  } : null;
+  const w = obj(body.working_on);
+  out.working_on = w ? { op: capStr(w.op, 40), title: capStr(w.title, 200), started_at: toEpochMs(w.started_at) } : null;
+  const ap = obj(body.approvals);
+  if (ap) {
+    const items = (Array.isArray(ap.items) ? ap.items : []).slice(0, 20).map(obj).filter(Boolean)
+      .map((i) => ({ op: capStr(i.op, 40), set: capStr(i.set, 20), title: capStr(i.title, 200) }));
+    const count = capInt(ap.count, 100000);
+    out.approvals = { count: count == null ? items.length : count, items, url: loopbackUrl(ap.url) };
+  } else out.approvals = null;
+  out.checklist = (Array.isArray(body.checklist) ? body.checklist : []).slice(0, 40).map(obj).filter(Boolean)
+    .map((c) => ({ id: capStr(c.id, 60), title: capStr(c.title, 200), set: capStr(c.set, 20), state: capStr(c.state, 40) }));
+  out.done = capInt(body.done, 100000);
+  out.total = capInt(body.total, 100000);
+  out.updated_at = toEpochMs(body.updated_at);
+  return { ok: true, value: out };
+}
+
 // --- the bridge ---------------------------------------------------------------
 function createBridge(opts) {
   const o = opts || {};
@@ -140,7 +237,7 @@ function createBridge(opts) {
   // Text-free by construction: recordEvent() copies only whitelisted scalar
   // fields (EVENT_FIELDS), so no caller can leak prompt/reply text or a key.
   const events = [];
-  const counters = { requests: 0, answered: 0, timeouts: 0, failed: 0, busy: 0, rejected: 0, unauthorized: 0, health_checks: 0 };
+  const counters = { requests: 0, answered: 0, timeouts: 0, failed: 0, busy: 0, rejected: 0, unauthorized: 0, health_checks: 0, pair_attempts: 0, status_updates: 0 };
   const siteLast = {};
   let lastContactAt = null;
   let lastExternalContactAt = null;
@@ -179,6 +276,40 @@ function createBridge(opts) {
     const gap = lastExternalContactAt == null || t - lastExternalContactAt > RECONNECT_GAP_MS;
     lastExternalContactAt = t;
     if (gap) recordEvent('connected', {});
+  }
+
+  // --- pairing (contract v1.1) ---------------------------------------------------
+  // Only ONE code is live at a time. The code itself is never logged/recorded.
+  let pairing = null; // { code, createdAt, expiresAt, used }
+  let lastPairedAt = null;
+  let lastPairResult = null; // outcome string only
+  const pairFails = []; // timestamps of failed pair attempts (rolling PAIR_WINDOW_MS)
+  let pairLockedUntil = 0;
+  function createPairingCode() {
+    const code = generatePairingCode();
+    const t = now();
+    pairing = { code, createdAt: t, expiresAt: t + PAIR_CODE_TTL_MS, used: false };
+    recordEvent('pair_code', {});
+    return code;
+  }
+  function pairingStatus() {
+    const t = now();
+    return {
+      pending: !!(pairing && !pairing.used && pairing.expiresAt > t),
+      createdAt: pairing ? pairing.createdAt : null,
+      expiresAt: pairing ? pairing.expiresAt : null,
+      lastPairedAt, lastResult: lastPairResult,
+      locked: pairLockedUntil > t
+    };
+  }
+  // --- latest status from BookForge (contract v1.1) ------------------------------
+  let bfStatus = null; // { data, receivedAt }
+  let bfStatusEventAt = 0;
+  function bookforgeStatus() {
+    if (!bfStatus) return null;
+    const t = now();
+    const age = Math.max(0, t - bfStatus.receivedAt);
+    return Object.assign(JSON.parse(JSON.stringify(bfStatus.data)), { receivedAt: bfStatus.receivedAt, age_ms: age, stale: age > BF_STATUS_STALE_MS });
   }
 
   function log(kind, detail) {
@@ -325,7 +456,9 @@ function createBridge(opts) {
       counters: Object.assign({}, counters),
       active: activeRequests(),
       siteLast: JSON.parse(JSON.stringify(siteLast)),
-      events: events.map((e) => Object.assign({}, e))
+      events: events.map((e) => Object.assign({}, e)),
+      pairing: pairingStatus(),
+      bookforge: bookforgeStatus()
     };
   }
 
@@ -353,6 +486,57 @@ function createBridge(opts) {
     countOutcome(code);
     recordEvent('outcome', { site: typeof site === 'string' && sites.includes(site) ? site : undefined, request_id: typeof requestId === 'string' && REQUEST_ID_RE.test(requestId) ? requestId : undefined, outcome: code, http_status: status });
     return send(res, status, errBody(code, message, false));
+  }
+
+  // POST /v1/pair — no Authorization. Never logs or records the code or the key.
+  function handlePair(raw, res, tooLarge) {
+    const t = now();
+    counters.pair_attempts++;
+    const outcome = (status, code, body) => {
+      lastPairResult = code;
+      if (status !== 200) {
+        if (code !== 'TOO_MANY_ATTEMPTS' && code !== 'NOT_READY') {
+          pairFails.push(t);
+          while (pairFails.length && t - pairFails[0] > PAIR_WINDOW_MS) pairFails.shift();
+          if (pairFails.length >= PAIR_MAX_FAILS) { pairLockedUntil = t + PAIR_LOCK_MS; pairFails.length = 0; }
+        }
+      }
+      recordEvent('pair', { outcome: code, http_status: status });
+      if (typeof o.logger === 'function') { try { o.logger('pair', { outcome: code, http_status: status }); } catch (_) {} }
+      return send(res, status, body);
+    };
+    if (pairLockedUntil > t) return outcome(429, 'TOO_MANY_ATTEMPTS', errBody('TOO_MANY_ATTEMPTS', 'too many wrong pairing codes; wait a minute and try again', false));
+    if (tooLarge) return outcome(400, 'BAD_REQUEST', errBody('BAD_REQUEST', 'body too large', false));
+    let body;
+    try { body = JSON.parse(raw.toString('utf8')); } catch (_) { body = undefined; }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.code !== 'string' || !body.code || body.code.length > 128 ||
+        (body.client !== undefined && typeof body.client !== 'string')) {
+      return outcome(400, 'BAD_REQUEST', errBody('BAD_REQUEST', 'body must be {"code": "<pairing code>", "client": "bookforge"}', false));
+    }
+    const p = pairing;
+    if (!p || p.used || !safeEqual(body.code, p.code)) return outcome(401, 'PAIRING_CODE_INVALID', errBody('PAIRING_CODE_INVALID', 'that pairing code is unknown or was already used', false));
+    if (p.expiresAt <= t) return outcome(410, 'PAIRING_CODE_EXPIRED', errBody('PAIRING_CODE_EXPIRED', 'that pairing code has expired; press Connect again in AutoInjector', false));
+    const token = String(getToken() || '');
+    if (!token) return outcome(503, 'NOT_READY', errBody('NOT_READY', 'the bridge has no connection key yet', false));
+    p.used = true;
+    lastPairedAt = t;
+    return outcome(200, 'PAIRED', { ok: true, token, bridge_version: BRIDGE_VERSION });
+  }
+
+  // POST /v1/status — BookForge's progress report (Bearer). Content never logged.
+  function handleStatus(raw, res, size) {
+    if (size > MAX_STATUS_BYTES) return send(res, 413, errBody('TOO_LARGE', `status body is over ${MAX_STATUS_BYTES} bytes`, false));
+    let body;
+    try { body = JSON.parse(raw.toString('utf8')); } catch (_) { return send(res, 400, errBody('BAD_REQUEST', 'body must be JSON', false)); }
+    const r = sanitizeBookforgeStatus(body);
+    if (!r.ok) return send(res, 400, errBody('BAD_REQUEST', r.message, false));
+    const t = now();
+    const firstAfterGap = !bfStatus || t - bfStatus.receivedAt > BF_STATUS_STALE_MS || (lastPairedAt != null && bfStatusEventAt < lastPairedAt);
+    bfStatus = { data: r.value, receivedAt: t };
+    counters.status_updates++;
+    // Only "status received" (no content), and only on the first one / after a gap / after pairing.
+    if (firstAfterGap) { bfStatusEventAt = t; recordEvent('status', {}); }
+    return send(res, 200, { ok: true });
   }
 
   async function handleComplete(raw, res) {
@@ -417,6 +601,8 @@ function createBridge(opts) {
     req.on('end', () => {
       Promise.resolve().then(async () => {
         const url = String(req.url || '').split('?')[0];
+        // v1.1 pairing: the one endpoint that takes no Authorization header.
+        if (url === '/v1/pair' && req.method === 'POST') return handlePair(Buffer.concat(chunks), res, tooLarge);
         if (!authorized(req)) {
           // Never record the presented key — only that an attempt was refused.
           counters.unauthorized++;
@@ -434,6 +620,10 @@ function createBridge(opts) {
             return send(res, 413, errBody('TOO_LARGE', 'request body is over 1 MiB', false));
           }
           return handleComplete(Buffer.concat(chunks), res);
+        }
+        if (url === '/v1/status' && req.method === 'POST') {
+          if (tooLarge) return send(res, 413, errBody('TOO_LARGE', `status body is over ${MAX_STATUS_BYTES} bytes`, false));
+          return handleStatus(Buffer.concat(chunks), res, size);
         }
         return refuse(res, 404, 'NOT_FOUND', 'no such endpoint');
       }).catch(() => send(res, 500, errBody('INTERNAL', 'internal bridge error', false)));
@@ -475,7 +665,7 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, status, recordEvent, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, status, recordEvent, createPairingCode, bookforgeStatus, pairingStatus, address: () => (server ? server.address() : null) };
 }
 
 // --- plain-English activity lines (for the desktop panel + link-test report) ---
@@ -503,6 +693,15 @@ function describeEvent(ev, label) {
     case 'stopped': return { say: 'Bridge turned off', tone: 'info' };
     case 'key_changed': return { say: 'A new connection key was made — BookForge needs the new one before it can connect again', tone: 'warn' };
     case 'start_failed': return { say: `The bridge couldn't start (${e.error || 'unknown error'})`, tone: 'error' };
+    case 'pair_code': return { say: 'Made a one-time pairing code and opened BookForge to connect', tone: 'info' };
+    case 'status': return { say: 'BookForge sent an update on your book', tone: 'ok' };
+    case 'pair': switch (e.outcome) {
+      case 'PAIRED': return { say: 'BookForge picked up the connection key (paired)', tone: 'ok' };
+      case 'PAIRING_CODE_EXPIRED': return { say: 'A pairing code was used too late (codes last 2 minutes) — press Connect again', tone: 'warn' };
+      case 'TOO_MANY_ATTEMPTS': return { say: 'Too many wrong pairing codes — pairing is paused for a minute', tone: 'warn' };
+      case 'PAIRING_CODE_INVALID': return { say: 'Something tried an unknown or already-used pairing code — it was refused', tone: 'warn' };
+      default: return { say: `A pairing attempt was refused (${e.outcome || 'error'})`, tone: 'warn' };
+    }
     case 'outcome': break;
     default: return { say: String(e.kind || 'event'), tone: 'info' };
   }
@@ -537,5 +736,13 @@ module.exports = {
   MAX_BODY_BYTES,
   CACHE_TTL_MS,
   EVENT_RING_SIZE,
-  SELFTEST_ID_PREFIX
+  SELFTEST_ID_PREFIX,
+  sanitizeBookforgeStatus,
+  generatePairingCode,
+  PAIR_CODE_LEN,
+  PAIR_CODE_TTL_MS,
+  PAIR_MAX_FAILS,
+  PAIR_LOCK_MS,
+  MAX_STATUS_BYTES,
+  BF_STATUS_STALE_MS
 };

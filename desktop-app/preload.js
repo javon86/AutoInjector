@@ -157,6 +157,10 @@ contextBridge.exposeInMainWorld("api", {
   bookforgeCopyToken: () => ipcRenderer.invoke("bookforge:copy-token"),
   bookforgeRevealToken: () => ipcRenderer.invoke("bookforge:reveal-token"),
   bookforgeRegenerateToken: () => ipcRenderer.invoke("bookforge:regenerate-token"),
+  // 🔗 Connect BookForge in one click (contract v1.1 pairing; the key never goes into a URL)
+  bookforgeConnect: () => ipcRenderer.invoke("bookforge:connect"),
+  bookforgeStartApp: () => ipcRenderer.invoke("bookforge:start-app"),
+  bookforgeOpenUrl: (url) => ipcRenderer.invoke("bookforge:open-url", { url }),
   // Live activity (text-free events + a fresh status snapshot) and the 🧪 link test.
   onBookforgeActivity: (cb) => ipcRenderer.on("bookforge-activity", (_e, payload) => cb(payload)),
   bookforgeLinkTestRun: () => ipcRenderer.invoke("bookforge:linktest-run"),

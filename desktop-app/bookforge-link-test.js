@@ -16,6 +16,9 @@
 //                      reply must be one JSON object echoing a random word
 //   bookforge_running  GET http://127.0.0.1:8780/api/ping (optional; SKIPPED
 //                      with instructions when BookForge isn't running)
+//   bookforge_connected (only when deps.getConnection is given) BookForge has
+//                      the connection key and has talked to this app (paired /
+//                      sent a status). PASS or SKIPPED with instructions.
 //
 // The report NEVER contains the connection key or the prompt text; for each
 // reply it keeps only the last 80 characters (to show how the reply ended).
@@ -37,6 +40,7 @@ const STEP_NAMES = {
   wrong_key: 'A wrong connection key is refused',
   right_key: 'The right connection key is accepted',
   bookforge_running: 'BookForge is running?',
+  bookforge_connected: 'BookForge is connected to this app',
 };
 const TIPS = {
   bridge_off: 'Tick “Turn the bridge on” in this panel, then run the test again.',
@@ -136,6 +140,7 @@ function nodeHttp({ method = 'GET', url, headers = {}, body, timeoutMs = 10000 }
 //   siteReady(site) -> bool
 //   http({ method, url, headers, body, timeoutMs }) -> Promise<{ status, json, text }>  (default: nodeHttp)
 //   bookforgeUrl (default http://127.0.0.1:8780/api/ping)
+//   getConnection() -> { connected, paired, lastContactAt, statusAt, stale }   (optional; adds bookforge_connected)
 //   replyTimeoutMs (default 180000; clamped to the bridge's 10000..900000)
 //   onProgress({ id, name, site, index, total, status, detail })
 //   shouldStop() -> bool, now(), sleep(ms), pollMs, randomWord(), stamp
@@ -161,6 +166,8 @@ async function runLinkTest(deps) {
   const plan = ['bridge_on', 'key_file', 'wrong_key', 'right_key'];
   for (const s of sites) plan.push(`pane:${s}`, `roundtrip:${s}`);
   plan.push('bookforge_running');
+  const checkConnection = typeof d.getConnection === 'function';
+  if (checkConnection) plan.push('bookforge_connected');
   const total = plan.length;
   const results = [];
   let stopped = false;
@@ -322,6 +329,17 @@ async function runLinkTest(deps) {
       const v = out.res.json.version ? ` version ${out.res.json.version}` : '';
       record('bookforge_running', 'pass', `BookForge${v} is running at ${where}.`, t0, { url, http_status: 200 });
     } else record('bookforge_running', 'skip', `Something answered at ${where} (HTTP ${out.res.status}) but it didn't say it is BookForge — an older BookForge without /api/ping, or another program. Update BookForge, or check what uses that port.`, t0, { url, http_status: out.res.status });
+  }
+  // 7. is BookForge connected to this app? (optional; only when the caller can tell)
+  if (checkConnection && !checkStop()) {
+    const t0 = begin('bookforge_connected');
+    let c = {};
+    try { c = d.getConnection() || {}; } catch (_) { c = {}; }
+    const ago = (ts) => (ts ? `${fmtMs(Math.max(0, d.now() - ts))} ago` : '');
+    if (c.connected && c.statusAt && !c.stale) record('bookforge_connected', 'pass', `BookForge has the connection key and sent an update on your book ${ago(c.statusAt)}.`, t0);
+    else if (c.connected) record('bookforge_connected', 'pass', `BookForge has the connection key and last talked to this app ${ago(c.lastContactAt)}.`, t0);
+    else if (c.paired) record('bookforge_connected', 'skip', 'BookForge picked up the key but has not reported back yet. Keep BookForge open; if this stays, press “🔗 Connect BookForge” again.', t0);
+    else record('bookforge_connected', 'skip', 'BookForge is not connected yet. Press “🔗 Connect BookForge” in this panel — it opens BookForge and hands it the key in one click.', t0);
   }
   // Anything the stop cut short is recorded as skipped so the report is complete.
   if (stopped) {

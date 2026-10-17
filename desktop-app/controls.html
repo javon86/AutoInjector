@@ -629,7 +629,8 @@
     .bf-next-label { flex:0 0 auto; font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--bf-accent); padding-top:2px; }
     #bf-next { color:#ecebff; }
     /* cards */
-    .bf-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:10px; }
+    .bf-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; align-items:start; }
+    @media (max-width:720px) { .bf-grid { grid-template-columns:minmax(0, 1fr); } }
     .bf-card { background:var(--bf-card); border:1px solid var(--bf-line); border-radius:10px; padding:10px 12px; min-width:0; }
     .bf-card h3 { display:flex; align-items:center; gap:6px; margin:0 0 7px; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:#cfc8f5; }
     .bf-card p { margin:0 0 7px; color:var(--bf-muted); font-size:12px; }
@@ -637,18 +638,26 @@
       background:#1d1b30 !important; border:1px solid #3d3766 !important; color:#c9bfff; flex:0 0 auto; }
     .bf-info[aria-expanded="true"] { background:#3a3170 !important; color:#fff; }
     /* checklist */
-    .bf-steps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
-    .bf-steps li { display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:8px; border:1px solid transparent; font-size:12.5px; }
-    .bf-steps li .bf-step-text { flex:1 1 auto; min-width:0; }
-    .bf-steps li .bf-step-state { font-size:11px; color:var(--bf-muted); white-space:nowrap; }
-    .bf-check { flex:0 0 auto; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11.5px; font-weight:700; border:2px solid #3a3a4a; color:#8d90a0; }
-    .bf-steps li.done .bf-check { background:color-mix(in srgb, var(--bf-ok) 20%, transparent); border-color:var(--bf-ok); color:var(--bf-ok); }
-    .bf-steps li.done .bf-step-text { color:#cfe9d8; }
-    .bf-steps li.current { border-color:#4a3f8a; background:#1a1830; }
-    .bf-steps li.current .bf-check { border-color:var(--bf-accent); color:var(--bf-accent); }
-    .bf-steps li.warn { border-color:#5c4a22; background:#1f1a10; }
-    .bf-steps li.warn .bf-check { border-color:var(--bf-warn); color:var(--bf-warn); }
-    /* connection key */
+    .bf-steps { list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:3px; }
+    .bf-steps li { display:flex; align-items:flex-start; gap:9px; padding:5px 8px; border-radius:8px; border:1px solid transparent; font-size:12.5px; background:#101017; }
+    .bf-step-main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+    .bf-step-text { font-weight:600; color:#e6e4f5; }
+    .bf-step-detail { font-size:11.5px; color:var(--bf-muted); }
+    .bf-step-detail:empty { display:none; }
+    .bf-steps .tip { font-size:11.5px; color:var(--bf-warn); }
+    .bf-steps li .bf-step-state { font-size:11px; color:var(--bf-muted); white-space:nowrap; padding-top:3px; }
+    .bf-check { flex:0 0 auto; width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; border:2px solid #3a3a4a; color:#8d90a0; margin-top:1px; }
+    .bf-steps li[data-st="ok"] .bf-check { background:color-mix(in srgb, var(--bf-ok) 20%, transparent); border-color:var(--bf-ok); color:var(--bf-ok); }
+    .bf-steps li[data-st="ok"] .bf-step-state { color:var(--bf-ok); }
+    .bf-steps li[data-st="bad"] { border-color:#5a2a2e; background:#1d1214; }
+    .bf-steps li[data-st="bad"] .bf-check { border-color:var(--bf-err); color:var(--bf-err); }
+    .bf-steps li[data-st="bad"] .bf-step-state { color:var(--bf-err); }
+    .bf-steps li[data-st="warn"] { border-color:#5c4a22; background:#1f1a10; }
+    .bf-steps li[data-st="warn"] .bf-check { border-color:var(--bf-warn); color:var(--bf-warn); }
+    .bf-steps li[data-st="wait"] .bf-check, .bf-steps li[data-st="run"] .bf-check { border-color:var(--bf-info); color:var(--bf-info); }
+    .bf-steps li[data-current] { border-color:#4a3f8a; background:#1a1830; }
+    .bf-steps li[data-st="todo"] .bf-check { border-color:var(--bf-accent); color:var(--bf-accent); }
+    .bf-steps li[data-st="na"] { opacity:.6; }
     .bf-key-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
     #bf-token { margin-top:7px; padding:6px 8px; border-radius:7px; background:#0c0c12; border:1px dashed #3d3766; font-size:11.5px; font-family:ui-monospace,monospace; word-break:break-all; color:#e7e2ff; }
     #bf-msg { font-size:12px; color:#cfe9d8; margin-top:6px; min-height:1em; }
@@ -690,6 +699,57 @@
     .bf-pop p { margin:0 0 6px; }
     .bf-pop .bf-pop-close { position:absolute; top:6px; right:6px; padding:1px 7px; font-size:12px; background:none; border-color:transparent; }
     .bf-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+    .bf-card-wide { grid-column:1 / -1; }
+    .bf-subhead { display:flex; align-items:center; gap:6px; margin:10px 0 6px; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#a99fe0; }
+    .bf-panel button.bf-connect { font-size:14px; font-weight:700; padding:9px 16px; border-radius:10px; color:#fff; border:1px solid #6d5ce0;
+      background:linear-gradient(180deg, #7a63ff, #5a45d6); box-shadow:0 2px 10px rgba(110,90,255,.35); }
+    .bf-panel button.bf-connect:hover { background:linear-gradient(180deg, #8a76ff, #644fe0); }
+    .bf-panel button.bf-connect:disabled { opacity:.75; cursor:progress; }
+    .bf-panel button.bf-connect[data-state="connected"] { background:linear-gradient(180deg, #2f8a5a, #236b45); border-color:#3fae72; box-shadow:none; }
+    .bf-connect-msg { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 11px; margin:0 0 8px; border-radius:9px; font-size:12.5px; background:#14141f; border:1px solid var(--bf-line); color:#dcdaf0; }
+    .bf-connect-msg[data-tone="ok"] { border-color:#2c6b47; background:#102018; color:#cff5dc; }
+    .bf-connect-msg[data-tone="warn"] { border-color:#5c4a22; background:#1f1a10; color:#f4e2b5; }
+    .bf-connect-msg[data-tone="err"] { border-color:#6b2c30; background:#1f1214; color:#ffd5d7; }
+    .bf-connect-msg[data-tone="work"] { border-color:#3d3570; background:#17152a; }
+    .bf-test-row { margin-top:2px; }
+    .bf-more > summary { cursor:pointer; font-size:12px; font-weight:600; color:#bdb6e6; list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+    .bf-more > summary::-webkit-details-marker { display:none; }
+    .bf-more > summary::before { content:"▸"; opacity:.7; }
+    .bf-more[open] > summary::before { content:"▾"; }
+    #bf-other-ways { margin-top:10px; padding-top:8px; border-top:1px dashed #2a2a3c; }
+    #bf-other-ways p { margin:6px 0; color:var(--bf-muted); font-size:12px; }
+    #bf-act-card > summary { text-transform:uppercase; letter-spacing:.06em; font-size:11.5px; color:#cfc8f5; }
+    #bf-act-card[open] > summary { margin-bottom:7px; }
+    .bf-empty { color:var(--bf-muted); font-size:12.5px; font-style:italic; padding:10px 4px; }
+    .bf-now-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:5px; }
+    .bf-now-step { font-size:14.5px; font-weight:700; color:#f1efff; min-width:0; overflow-wrap:anywhere; }
+    .bf-now-msg { font-size:12.5px; color:#d6d4e6; margin-bottom:6px; overflow-wrap:anywhere; }
+    .bf-now-msg:empty { display:none; }
+    .bf-now-working { font-size:12px; color:var(--bf-work); margin-bottom:8px; }
+    .bf-approvals { border-radius:9px; padding:8px 10px; margin:4px 0 8px; border:1px solid var(--bf-line); background:#101017; }
+    .bf-approvals[data-tone="warn"] { border-color:#7a6127; background:#211b0f; }
+    .bf-approvals-title { font-weight:700; font-size:12.5px; }
+    .bf-approvals[data-tone="warn"] .bf-approvals-title { color:#ffd98a; }
+    .bf-approvals[data-tone="ok"] .bf-approvals-title { color:#bfe9cf; font-weight:600; }
+    .bf-approvals-list { margin:5px 0 7px; padding-left:18px; font-size:12px; color:#e9e4cc; }
+    .bf-approvals-list:empty { display:none; }
+    .bf-approvals-list li { margin:1px 0; overflow-wrap:anywhere; }
+    .bf-book-title { font-weight:700; font-size:13.5px; color:#f1efff; margin-bottom:6px; overflow-wrap:anywhere; }
+    .bf-progress { height:9px; border-radius:6px; background:#1d1d2a; overflow:hidden; border:1px solid #2a2a3c; }
+    .bf-progress-bar { height:100%; width:0%; background:linear-gradient(90deg, var(--bf-accent), var(--bf-accent-2)); transition:width .4s ease; }
+    .bf-progress-text { font-size:11.5px; color:var(--bf-muted); margin:4px 0 7px; }
+    .bf-checklist { list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:2px; max-height:320px; overflow-y:auto; }
+    .bf-checklist li { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:7px; font-size:12.5px; }
+    .bf-checklist li .ic { flex:0 0 18px; text-align:center; font-weight:700; }
+    .bf-checklist li .tt { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+    .bf-checklist li .set { flex:0 0 auto; font-size:10.5px; font-weight:700; color:#a99fe0; border:1px solid #3d3766; border-radius:6px; padding:0 5px; margin-right:2px; }
+    .bf-checklist li .st { flex:0 0 auto; font-size:11px; color:var(--bf-muted); white-space:nowrap; }
+    .bf-checklist li[data-tone="ok"] .ic { color:var(--bf-ok); } .bf-checklist li[data-tone="ok"] .tt { color:#cfe9d8; }
+    .bf-checklist li[data-tone="work"] { background:#1a1830; } .bf-checklist li[data-tone="work"] .ic { color:var(--bf-work); }
+    .bf-checklist li[data-tone="warn"] { background:#1f1a10; } .bf-checklist li[data-tone="warn"] .ic, .bf-checklist li[data-tone="warn"] .st { color:var(--bf-warn); }
+    .bf-checklist li[data-tone="err"] .ic, .bf-checklist li[data-tone="err"] .st { color:var(--bf-err); }
+    .bf-checklist li[data-tone="off"] .ic { color:#6d7080; }
+    .bf-stale { font-size:11.5px; color:#9aa0a6; background:#15151c; border:1px dashed #33333f; border-radius:7px; padding:5px 8px; margin:4px 0 8px; }
     @media (max-width:560px) {
       .bf-hero { padding:10px; } .bf-hero-icon { width:38px; height:38px; font-size:18px; }
       .bf-hero-title { font-size:14.5px; } .bf-grid { grid-template-columns:1fr; }
@@ -1169,70 +1229,95 @@
 
     <div id="col-bookforge" class="col yc-panel bf-panel" data-bf-state="off">
       <div class="yc-head">
-        <h2>📚 BookForge bridge <span class="bf-exp">EXPERIMENTAL</span></h2><span class="spacer"></span>
+        <h2>📚 BookForge <span class="bf-exp">EXPERIMENTAL</span></h2><span class="spacer"></span>
         <span id="bf-status" class="bf-pill" data-tone="off" role="status" aria-live="polite">⏻ Off</span>
-        <button id="btn-bf-test-head" class="bf-test-btn" title="Run a real end-to-end test of the BookForge link and save a report">🧪 Test BookForge link</button>
         <button class="collapse-btn" id="btn-collapse-bookforge" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
       </div>
       <div id="bookforge-body">
-        <section id="bf-hero" class="bf-hero" aria-labelledby="bf-hero-title">
-          <div class="bf-hero-icon" id="bf-hero-icon" aria-hidden="true">⏻</div>
-          <div class="bf-hero-text" aria-live="polite">
-            <div class="bf-hero-title" id="bf-hero-title">Bridge is off — BookForge can't use your AIs</div>
-            <div class="bf-hero-sub" id="bf-hero-sub">Nothing is shared with BookForge until you turn the bridge on.</div>
-          </div>
-          <div class="bf-hero-actions">
-            <label class="bf-switch" title="Turn the BookForge bridge on or off"><input type="checkbox" id="bf-enabled"> <span>Turn the bridge on</span></label>
-            <button id="btn-bf-test" class="bf-test-btn" title="Run a real end-to-end test of the BookForge link and save a report">🧪 Test BookForge link</button>
-            <button class="bf-info" type="button" data-info="what" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the BookForge bridge?">ⓘ</button>
-          </div>
-        </section>
-        <div class="bf-next" role="status" aria-live="polite"><span class="bf-next-label">Next step</span><span id="bf-next">Tick “Turn the bridge on” above.</span></div>
-
         <div class="bf-grid">
-          <section class="bf-card" aria-labelledby="bf-setup-h">
-            <h3 id="bf-setup-h">Set up in 4 steps</h3>
-            <ol class="bf-steps" id="bf-steps">
-              <li data-step="1"><span class="bf-check" aria-hidden="true">1</span><span class="bf-step-text">Turn the bridge on</span><span class="bf-step-state"></span><button class="bf-info" type="button" data-info="step1" aria-expanded="false" aria-controls="bf-pop" aria-label="About step 1: turn the bridge on">ⓘ</button></li>
-              <li data-step="2"><span class="bf-check" aria-hidden="true">2</span><span class="bf-step-text">Copy the connection key</span><span class="bf-step-state"></span><button class="bf-info" type="button" data-info="step2" aria-expanded="false" aria-controls="bf-pop" aria-label="About step 2: copy the connection key">ⓘ</button></li>
-              <li data-step="3"><span class="bf-check" aria-hidden="true">3</span><span class="bf-step-text">Paste it in BookForge (Settings → Connect AutoInjector)</span><span class="bf-step-state"></span><button class="bf-info" type="button" data-info="step3" aria-expanded="false" aria-controls="bf-pop" aria-label="About step 3: paste it in BookForge">ⓘ</button></li>
-              <li data-step="4"><span class="bf-check" aria-hidden="true">4</span><span class="bf-step-text">BookForge has connected</span><span class="bf-step-state"></span><button class="bf-info" type="button" data-info="step4" aria-expanded="false" aria-controls="bf-pop" aria-label="About step 4: BookForge has connected">ⓘ</button></li>
-            </ol>
-          </section>
-
-          <section class="bf-card" aria-labelledby="bf-key-h">
-            <h3 id="bf-key-h">Connection key <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></h3>
-            <p>Like a password that lets only your BookForge talk to this app. It never leaves your computer.</p>
-            <div class="bf-key-row">
-              <button id="btn-bf-copy" class="bf-primary" title="Copy the connection key to the clipboard, then paste it into BookForge (Settings → Connect AutoInjector)">📋 Copy connection key</button>
-              <button id="btn-bf-reveal" title="Show or hide the connection key on screen">Show key</button>
-              <button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — BookForge disconnects until you paste the new key">Make a new key</button>
-              <button class="bf-info" type="button" data-info="buttons" aria-expanded="false" aria-controls="bf-pop" aria-label="Copy, Show and Make a new key — what's the difference?">ⓘ</button>
+          <!-- 1. Your AI & connection: bridge, one-click Connect, AIs, and the connection check (= link test) -->
+          <section class="bf-card bf-card-wide" id="bf-conn-card" aria-labelledby="bf-conn-h">
+            <h3 id="bf-conn-h">🔌 Your AI &amp; connection <button class="bf-info" type="button" data-info="what" aria-expanded="false" aria-controls="bf-pop" aria-label="What is this?">ⓘ</button></h3>
+            <div id="bf-hero" class="bf-hero">
+              <div class="bf-hero-icon" id="bf-hero-icon" aria-hidden="true">⏻</div>
+              <div class="bf-hero-text" aria-live="polite">
+                <div class="bf-hero-title" id="bf-hero-title">BookForge isn't connected</div>
+                <div class="bf-hero-sub" id="bf-hero-sub">Press “Connect BookForge” — one click does everything.</div>
+              </div>
+              <div class="bf-hero-actions">
+                <button id="btn-bf-connect" class="bf-connect" title="Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste">🔗 Connect BookForge</button>
+                <label class="bf-switch" title="Turn the bridge on or off. When it's off, BookForge can't use your AIs."><input type="checkbox" id="bf-enabled"> <span>Bridge on</span></label>
+              </div>
             </div>
-            <div id="bf-token" style="display:none;" aria-label="Connection key"></div>
+            <div id="bf-connect-msg" class="bf-connect-msg" role="status" aria-live="polite">
+              <span id="bf-connect-text">One click: turns the bridge on, opens BookForge in your browser and hands it the key. Nothing to copy or paste.</span>
+              <button id="btn-bf-start-app" class="bf-primary" style="display:none;" title="Start BookForge (run-bookforge) for you, then connect">▶ Start BookForge for me</button>
+            </div>
+            <div class="bf-next" role="status" aria-live="polite"><span class="bf-next-label">Next step</span><span id="bf-next">Press “🔗 Connect BookForge”.</span></div>
+
+            <div class="bf-subhead">Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button></div>
+            <div class="bf-ais" id="bf-ais"></div>
+
+            <div class="bf-subhead">Connection check <button class="bf-info" type="button" data-info="test" aria-expanded="false" aria-controls="bf-pop" aria-label="What does the connection check do?">ⓘ</button></div>
+            <ol class="bf-steps" id="bf-conn-steps" aria-label="Connection check"></ol>
+            <div class="bf-key-row bf-test-row">
+              <button id="btn-bf-test" class="bf-test-btn" title="Check every step for real, including a tiny test question to each Active AI, and save a report">🧪 Test the connection</button>
+              <button id="btn-bf-test-stop" class="bf-danger" style="display:none;" title="Stop the test">■ Stop test</button>
+              <button id="btn-bf-test-report" style="display:none;" title="Open the saved test report">📄 Open last report</button>
+            </div>
+            <div id="bf-test-summary" class="bf-test-summary" role="status" aria-live="polite"></div>
+
+            <details class="bf-more" id="bf-other-ways">
+              <summary>Other ways to connect (copy the key by hand)</summary>
+              <p>Only needed if the one-click Connect doesn't work. The connection key is like a password that lets only your BookForge talk to this app. It never leaves your computer. <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></p>
+              <div class="bf-key-row">
+                <button id="btn-bf-copy" title="Copy the connection key, then paste it into BookForge (Settings → Connect AutoInjector)">📋 Copy connection key</button>
+                <button id="btn-bf-reveal" title="Show or hide the connection key on screen">Show key</button>
+                <button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — BookForge disconnects until it gets the new key">Make a new key</button>
+                <button class="bf-info" type="button" data-info="buttons" aria-expanded="false" aria-controls="bf-pop" aria-label="Copy, Show and Make a new key — what's the difference?">ⓘ</button>
+              </div>
+              <div id="bf-token" style="display:none;" aria-label="Connection key"></div>
+            </details>
             <div id="bf-msg" role="status" aria-live="polite"></div>
           </section>
 
-          <section class="bf-card" aria-labelledby="bf-ais-h">
-            <h3 id="bf-ais-h">Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button></h3>
-            <div class="bf-ais" id="bf-ais"></div>
-          </section>
-
-          <section class="bf-card" id="bf-test-card" aria-labelledby="bf-test-h">
-            <h3 id="bf-test-h">🧪 Link test <button class="bf-info" type="button" data-info="test" aria-expanded="false" aria-controls="bf-pop" aria-label="What does the link test do?">ⓘ</button></h3>
-            <p>Checks the whole path for real — key, bridge, and a tiny test question to each Active AI — and saves a report.</p>
-            <div class="bf-key-row">
-              <button id="btn-bf-test-stop" class="bf-danger" style="display:none;" title="Stop the link test">■ Stop test</button>
-              <button id="btn-bf-test-report" style="display:none;" title="Open the saved link-test report">📄 Open report</button>
+          <!-- 2. Now working on: BookForge's current sub-module step + approvals -->
+          <section class="bf-card" id="bf-now-card" aria-labelledby="bf-now-h">
+            <h3 id="bf-now-h">✍️ Now working on <button class="bf-info" type="button" data-info="now" aria-expanded="false" aria-controls="bf-pop" aria-label="About Now working on">ⓘ</button></h3>
+            <div id="bf-now-empty" class="bf-empty">Connect BookForge to see what's happening.</div>
+            <div id="bf-now" hidden>
+              <div class="bf-now-top"><span id="bf-now-step" class="bf-now-step"></span><span id="bf-now-state" class="bf-pill" data-tone="info"></span></div>
+              <div id="bf-now-msg" class="bf-now-msg"></div>
+              <div id="bf-now-working" class="bf-now-working" hidden></div>
+              <div id="bf-approvals" class="bf-approvals" data-tone="ok">
+                <div id="bf-approvals-title" class="bf-approvals-title"></div>
+                <ul id="bf-approvals-list" class="bf-approvals-list"></ul>
+                <button id="btn-bf-approve" class="bf-primary" style="display:none;" title="Open BookForge's approvals page in your browser">✅ Review &amp; approve</button>
+              </div>
+              <div class="bf-key-row"><button id="btn-bf-goto-task" title="Open the current step in BookForge">▶ Go to current task</button></div>
             </div>
-            <div id="bf-test-summary" class="bf-test-summary" role="status" aria-live="polite"></div>
-            <ol id="bf-test-steps" class="bf-test-steps"></ol>
+            <div class="bf-stale" id="bf-now-stale" hidden></div>
           </section>
 
-          <section class="bf-card" aria-labelledby="bf-act-h">
-            <h3 id="bf-act-h">Activity <button class="bf-info" type="button" data-info="activity" aria-expanded="false" aria-controls="bf-pop" aria-label="About the activity list">ⓘ</button></h3>
-            <ol id="bf-activity" class="bf-feed" aria-live="polite"></ol>
+          <!-- 3. Book checklist: the big picture -->
+          <section class="bf-card" id="bf-book-card" aria-labelledby="bf-book-h">
+            <h3 id="bf-book-h">📖 Book checklist <button class="bf-info" type="button" data-info="book" aria-expanded="false" aria-controls="bf-pop" aria-label="About the book checklist">ⓘ</button></h3>
+            <div id="bf-book-empty" class="bf-empty">When BookForge is connected, your book's progress shows here.</div>
+            <div id="bf-book" hidden>
+              <div id="bf-book-title" class="bf-book-title"></div>
+              <div class="bf-progress" role="progressbar" aria-valuemin="0" id="bf-progress" aria-label="Book progress"><div class="bf-progress-bar" id="bf-progress-bar"></div></div>
+              <div id="bf-progress-text" class="bf-progress-text"></div>
+              <ol id="bf-checklist" class="bf-checklist" aria-label="Book checklist"></ol>
+            </div>
+            <div class="bf-stale" id="bf-book-stale" hidden></div>
+            <div class="bf-key-row"><button id="btn-bf-open" title="Open BookForge in your browser">📚 Open BookForge</button></div>
           </section>
+
+          <!-- Activity log: kept, but folded away -->
+          <details class="bf-card bf-card-wide bf-more" id="bf-act-card">
+            <summary>Activity log <button class="bf-info" type="button" data-info="activity" aria-expanded="false" aria-controls="bf-pop" aria-label="About the activity log">ⓘ</button></summary>
+            <ol id="bf-activity" class="bf-feed" aria-live="polite"></ol>
+          </details>
         </div>
 
         <div class="bf-caution">⚠ Use at your own risk: automating these websites may be against their terms.

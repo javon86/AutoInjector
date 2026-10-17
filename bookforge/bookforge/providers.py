@@ -45,6 +45,8 @@ DEFAULT_BRIDGE_URL = "http://127.0.0.1:17891"
 # Default mapping used by "connect all three" (contract: AI-1=claude, AI-2=chatgpt, AI-3=gemini).
 AUTOINJECTOR_DEFAULT_SITES = {"AI-1": "claude", "AI-2": "chatgpt", "AI-3": "gemini"}
 ROLE_RE = re.compile(r"^[A-K](?:[0-9]{2})?$")
+PAIR_CODE_RE = re.compile(r"^[A-Za-z0-9-]{8,32}$")
+PAIR_EXPIRED = ("the pairing code expired or was already used — press Connect again in AutoInjector")
 
 DEFAULT_SLOT = {
     "adapter_id": "none",            # none | anthropic | manual | autoinjector
@@ -457,6 +459,44 @@ class AutoInjectorAdapter:
                              + "; ".join(errors[:5]))
 
 
+def _local_opener():
+    # Never route a localhost bridge call through an HTTP(S) proxy from the environment.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def request_pairing_token(bridge_url: str, code: str, timeout_s: float = 10.0) -> str:
+    """POST <bridge_url>/v1/pair {"code", "client": "bookforge"} -> the connection key (contract: 200
+    {"ok": true, "token": "..."}; 401/404/410 = expired or used code). Never logs the code or key."""
+    url = validate_bridge_url(bridge_url)
+    data = json.dumps({"code": code, "client": "bookforge"}).encode("utf-8")
+    req = urllib.request.Request(url + "/v1/pair", data=data, method="POST")
+    req.add_header("Content-Type", "application/json; charset=utf-8")
+    req.add_header("Accept", "application/json")
+    try:
+        with _local_opener().open(req, timeout=timeout_s) as resp:
+            raw = resp.read(65536)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 404, 410):
+            raise BookforgeError("EXPIRED_APPROVAL", "/code", PAIR_EXPIRED, status="REJECTED") from None
+        raise BookforgeError("UPSTREAM_UNAVAILABLE", "/bridge_url", f"AutoInjector answered the pairing request with "
+                             f"an error (HTTP {exc.code}); press Connect again in AutoInjector") from None
+    except (socket.timeout, TimeoutError):
+        raise BookforgeError("TIMEOUT", "/bridge_url", "AutoInjector did not answer the pairing request in time; "
+                             "press Connect again in AutoInjector") from None
+    except (urllib.error.URLError, ConnectionError, OSError):
+        raise BookforgeError("UPSTREAM_UNAVAILABLE", "/bridge_url", f"AutoInjector is not reachable at {url}; start "
+                             "the AutoInjector desktop app and press Connect again") from None
+    try:
+        out = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        out = None
+    token = out.get("token") if isinstance(out, dict) and out.get("ok") is True else None
+    if not isinstance(token, str) or not (8 <= len(token.strip()) <= 512) or any(c.isspace() for c in token.strip()):
+        raise BookforgeError("UPSTREAM_UNAVAILABLE", "/bridge_url", "AutoInjector gave an unexpected answer to the "
+                             "pairing request; update AutoInjector and press Connect again")
+    return token.strip()
+
+
 class ProviderRegistry:
     def __init__(self, store: Store, secret_path: str | os.PathLike | None = None):
         self.store = store
@@ -549,6 +589,17 @@ class ProviderRegistry:
             self.configure_slot(sid, {"adapter_id": "autoinjector", "site": site, "bridge_url": url,
                                       "api_key": token.strip()})
         return self.slots()
+
+    def pair_autoinjector(self, code: Any, bridge_url: Any = None) -> list[dict]:
+        """One-button pairing: trade a one-time pairing code for the connection key at the bridge
+        (POST <bridge>/v1/pair, no Authorization header), then connect all three slots with it.
+        The key is stored in the local secret file only; it is never returned or logged."""
+        if not isinstance(code, str) or not PAIR_CODE_RE.fullmatch(code.strip()):
+            raise BookforgeError("INVALID_INPUT", "/code", "the pairing code is missing or malformed; press Connect "
+                                 "again in AutoInjector", status="REJECTED")
+        url = validate_bridge_url(bridge_url if bridge_url not in (None, "") else DEFAULT_BRIDGE_URL)
+        token = request_pairing_token(url, code.strip())
+        return self.connect_autoinjector(token, url)
 
     def health_check(self, slot_id: str) -> dict:
         """Test an autoinjector slot's bridge (GET /v1/health). Never raises for bridge problems:

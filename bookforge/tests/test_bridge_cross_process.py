@@ -150,3 +150,52 @@ def test_wrong_token_is_capability_unavailable(h, host_factory):
     assert r["errors"][0]["code"] == "CAPABILITY_UNAVAILABLE"
     assert host.prompts() == []
     assert h.engine.providers.health_check("AI-1")["ok"] is False
+
+
+
+def test_one_button_pairing_and_status_push_through_the_real_bridge(tmp_path, host_factory):
+    """Contract v1.1 end to end: real BookForge server <-> real bookforge-bridge.js (pair + status)."""
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from bookforge.server import App, make_handler
+    from test_autoinjector_link import _book_with_chapter_draft
+    from test_server import TOKEN as AUTHOR_TOKEN
+    from test_server import call
+
+    code_file, status_file = tmp_path / "code.txt", tmp_path / "status.json"
+    host = host_factory("valid", ["--pairing-code-file", str(code_file), "--status-file", str(status_file)])
+    code = code_file.read_text().strip()
+    assert code
+
+    app = App(tmp_path / "data", token=AUTHOR_TOKEN)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        app.engine.providers.secret_path = tmp_path / "secrets.json"
+        app.port = port
+        pid = _book_with_chapter_draft(port)
+        status, out, _ = call(port, "POST", "/api/slots/pair-autoinjector", {"code": code, "bridge_url": host.url})
+        assert status == 200, out
+        assert out["connected"] is True and TOKEN not in json.dumps(out)
+        assert [s["ok"] for s in out["slots"]] == [True, True, True]
+        assert all(app.engine.providers._api_key(s["slot_id"]) == TOKEN for s in app.engine.providers.slots())
+        # the code is single use
+        status, out, _ = call(port, "POST", "/api/slots/pair-autoinjector", {"code": code, "bridge_url": host.url})
+        assert status == 400 and "expired or was already used" in out["errors"][0]["message"]
+        # the status push arrives at the real bridge and is sanitized there
+        sent = app.pusher.tick(now=5000.0)
+        assert sent == 1, app.pusher.last_error
+        for _ in range(50):
+            if status_file.exists() and status_file.read_text().strip():
+                break
+            threading.Event().wait(0.1)  # time.sleep is patched by fast_retries
+        seen = json.loads(status_file.read_text())
+        assert seen["project"]["id"] == pid and seen["approvals"]["count"] == 2
+        assert seen["current_task"]["url"].startswith(f"http://127.0.0.1:{port}/")
+        assert TOKEN not in status_file.read_text()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        app.store.close()
