@@ -1,0 +1,27 @@
+node:assert:152
+  throw new AssertionError(obj);
+  ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'PASS' !== 'FAIL'
+
+    at C:\Users\javon\Documents\git\AutoInjector\desktop-app\test\quality-check.test.js:16:9
+    at check (C:\Users\javon\Documents\git\AutoInjector\desktop-app\test\quality-check.test.js:13:28)
+    at Object.<anonymous> (C:\Users\javon\Documents\git\AutoInjector\desktop-app\test\quality-check.test.js:14:1)
+    at Module._compile (node:internal/modules/cjs/loader:1929:14)
+    at Object..js (node:internal/modules/cjs/loader:2060:10)
+    at Module.load (node:internal/modules/cjs/loader:1651:32)
+    at Module._load (node:internal/modules/cjs/loader:1443:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'PASS',
+  expected: 'FAIL',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.20.0

@@ -2,3 +2,5 @@
 # videos, book output, logs. It lives inside the app folder at runtime and must
 # never be committed (user content, can be gigabytes).
 stuff and thing/
+\# Audit evidence notes.txt
+\# Audit evidence notes.txt

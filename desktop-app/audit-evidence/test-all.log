@@ -1,0 +1,2021 @@
+
+> autoinjector-desktop@1.0.0 test:all
+> npm run test:unit && npm run test:integration && npm run test:e2e
+
+
+> autoinjector-desktop@1.0.0 test:unit
+> node test/controls.test.js && node test/prompt-editor.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js && node test/files.test.js && node test/db-service.test.js && node test/ollama-manager.test.js && node test/output-manager.test.js && node test/read-script.test.js && node test/secret-store.test.js && node test/openai-client.test.js && node test/service-bridge.test.js && node test/interpreter-provider.test.js && node test/tool-provider.test.js && node test/voice-provider.test.js && node test/image-provider.test.js && node test/setup-manager.test.js && node test/gpu-monitor.test.js && node test/video-provider.test.js && node test/endpoint-detect.test.js && node test/log-bundle.test.js
+
+
+== Per-AI pane collapse toggle ==
+  ok   - buildAiRow() created a column for claude
+  ok   - starts in the OPEN state
+  ok   - each column has its own state-cycle button
+  ok   - first click -> REDUCED (the middle state)
+  ok   - second click -> MINIMIZED
+  ok   - third click -> back to OPEN (full cycle)
+  ok   - cycling claude's pane does NOT change chatgpt's — each is independent
+  ok   - back to minimized for the bar-click test
+  ok   - clicking anywhere on the minimized bar opens the pane fully
+
+== Utility panel heading is a clickable collapse target (accessibility) ==
+  ok   - the panel heading exists
+  ok   - heading is exposed as a keyboard-focusable button
+  ok   - panel starts expanded
+  ok   - clicking the heading collapses the panel
+  ok   - a tab appears in the top strip when collapsed
+
+== Automation window titlebar collapse ==
+  ok   - clicking the titlebar button calls toggleWindowCollapse('automation')
+  ok   - a collapse event for a different window id is ignored here
+  ok   - a collapse event for THIS window hides the main body
+  ok   - expanding again shows the body
+
+== House Rules Stop asks for confirmation before ending the run ==
+  ok   - declining the confirm() dialog does NOT call stopHouseRule
+  ok   - accepting the confirm() dialog does call stopHouseRule
+
+== Roundtable v2 is the always-on baseline now, not a House Rules dropdown option ==
+  ok   - hr-mode has no roundtable option — it isn't a stage you start/stop, it's the program's default behavior
+  ok   - the 7 real stage formats (e.g. debate) are still present
+
+== Automation window's transcript also shows the roundtable routing badge ==
+  ok   - a roundtableTag on a turn renders a badge in the Automation window's transcript too
+  ok   - badge text is correct (got "→ Claude")
+
+== Manual Forward/Auto buttons are always visible and always clickable, no matter what a House Rules stage is doing ==
+  ok   - with no House Rule ever run, Forward/Auto rows are visible
+  ok   - still visible while a stage (debate) is actively running
+  ok   - the old hr-active hiding class is gone entirely — nothing toggles it anymore
+  ok   - the buttons stay genuinely clickable during a stage — clicking Auto still calls setRouting
+  ok   - still visible once the stage is stopped and tag-routing resumes underneath
+
+== The combined 'Both' Auto toggle turns both individual routes on/off together ==
+  ok   - each column has a combined Both auto-toggle button
+  ok   - starts off — no routing set up yet
+  ok   - one click turns BOTH individual routes on, in a single action
+  ok   - the Both button itself lights up once both individual routes are on
+  ok   - the individual →ChatGPT toggle also reflects as on
+  ok   - clicking it again while both are on turns both routes off together
+  ok   - Both button turns back off
+
+== Per-pane zoom buttons call setZoom and update the on-screen percentage label ==
+  ok   - starts at 100%
+  ok   - each column has a zoom-out and a zoom-in button
+  ok   - zoom-out calls setZoom with a factor below 1
+  ok   - label reflects the new factor (got "90%")
+  ok   - label updates back up (got "110%")
+
+== Selector picker: the 🎯 menu is collapsed by default and toggles open/closed ==
+  ok   - starts collapsed
+  ok   - each column has its own 🎯 pick button
+  ok   - clicking it opens the menu
+  ok   - clicking it again closes the menu
+
+== Selector picker: a successful pick calls pickSelector with the right site/role and shows the result inline ==
+  ok   - menu has a Pick Input button
+  ok   - clicking Pick Input calls pickSelector('claude', 'input')
+  ok   - the picked selector is shown inline as confirmation
+  ok   - the sample text is shown too -- no separate test panel needed
+
+== Selector picker: a failed/timed-out pick reports the error instead of pretending success ==
+  ok   - the failure reason is shown, not silently swallowed (got "Pick rejected: didn't catch a click (TIMEOUT). Try again.")
+
+== Selector picker: each post-pick validation rejection shows its own specific, actionable reason ==
+  ok   - NOT_FOUND shows its own specific reason (got "Pick rejected: the generated selector doesn't actually match the clicked element — try clicking again. Try again.")
+  ok   - NOT_VISIBLE shows its own specific reason (got "Pick rejected: the clicked element is hidden or zero-size — try clicking the visible part of it. Try again.")
+  ok   - WRONG_ELEMENT_TYPE shows its own specific reason (got "Pick rejected: that doesn't look like the message box you type into — try clicking more precisely. Try again.")
+  ok   - LOOKS_LIKE_ECHO shows its own specific reason (got "Pick rejected: that looks like it's just the last message sent, not a real reply — try clicking the actual reply text. Try again.")
+
+== Selector picker: Clear Overrides clears all three roles for that site ==
+  ok   - Clear Overrides clears input, send, and assistant for that site
+
+== Saved logins: adding one shows it in the list, clicking it calls fillLogin -- never auto-triggered ==
+  ok   - each column has its own login menu
+  ok   - starts with no saved logins
+  ok   - loading the window never calls fillLogin on its own -- purely manual
+  ok   - clicking + Add Login reveals the form
+  ok   - Save Login sends the real label/username/password for the right site
+  ok   - the add form collapses again after a successful save
+  ok   - the form fields (including the password) are cleared after saving, not left sitting in the DOM
+  ok   - the newly saved login appears in the list, labeled with its name and username
+  ok   - clicking the saved login calls fillLogin with that exact site+id -- this is the ONLY thing that ever triggers a fill
+  ok   - the login status line reports what happened
+
+== Saved logins: delete removes it from the list, and a rejected save shows the specific reason ==
+  ok   - the saved login shows up first
+  ok   - the ✕ button calls deleteLogin for the right site
+  ok   - the list reflects the deletion immediately
+  ok   - the specific failure reason is shown, not a bare error code (got "Couldn't save: this system can't provide secure credential storage right now.")
+
+== Connectivity Test: a pass calls runSelfTest and lights the indicator green ==
+  ok   - starts with no result yet
+  ok   - each column's picker menu has a Test button
+  ok   - the indicator shows pending immediately, before the result comes back
+  ok   - clicking Test calls runSelfTest('claude')
+  ok   - a passing result lights the indicator green
+  ok   - the status line confirms success in plain language (got "✅ Claude is hooked up correctly — it replied with exactly what was asked.")
+
+== The Tuner button: click calls runTuner, shows live progress, and reports a final summary ==
+  ok   - the Global panel has a Run Tuner button
+  ok   - clicking it calls runTuner
+  ok   - the button disables itself while a run is in flight, so it can't be double-clicked
+  ok   - live progress names the site currently being checked (got "Running: testing Claude's own connection…")
+  ok   - live progress names both ends of the relay leg currently being checked (got "Running: testing ChatGPT → Claude relay…")
+  ok   - the button re-enables itself once the run finishes
+  ok   - the final summary reports the actual pass counts (got "Done — 3/3 sites OK, 2/2 relay legs OK.")
+  ok   - a fully clean run says so plainly in the main status line, not just the small progress line
+
+== The Tuner button: a run with problems names exactly what failed, not just 'something went wrong' ==
+  ok   - the broken site is named specifically, not just counted (got "Tuner finished with problems — Claude (reply: TIMEOUT); ChatGPT → Claude (relay: TIMEOUT)")
+  ok   - the broken relay leg is named specifically, with its failure stage, not just counted (got "Tuner finished with problems — Claude (reply: TIMEOUT); ChatGPT → Claude (relay: TIMEOUT)")
+
+== Connectivity Test: a failure calls out the specific reason and lights the indicator red ==
+  ok   - a failing result lights the indicator red
+  ok   - the mismatch reason is spelled out, not just a generic failure (got "❌ Gemini: it replied, but not with what was asked — reading may be picking up the wrong text.")
+
+== Connectivity Test: SELECTOR_TOO_BROAD and REPLY_ECHO each get their own distinct, actionable explanation ==
+  ok   - SELECTOR_TOO_BROAD gets its own distinct explanation, not the generic mismatch text (got "❌ Gemini: the reply selector is reading BOTH the sent prompt and the actual reply — it's too broad and needs to be picked more precisely. It actually captured: "prompt+reply mixed together"")
+  ok   - REPLY_ECHO gets its own distinct explanation too (got "❌ Gemini: nothing came back but an echo of what was sent — the reply selector is likely reading the outgoing message, not the actual reply. It actually captured: "the sent prompt again"")
+
+== Activity Log renders the rich pick/test detail (role, selector, sample, token, what was actually captured), not just the bare event name ==
+  ok   - a pick-started entry shows which role was requested (got "System11:30:02 PMselector-pick-started claude role=assistant")
+  ok   - a successful pick shows the selector AND the sample text it actually captured (got "System11:30:02 PMselector-picked claude role=assistant selector="div.reply-body" <div> sample="AUTOINJ-4F7K2Q"")
+  ok   - a failed test shows the token, the error, AND what was actually captured instead (got "System11:30:02 PMselftest-error gemini token=AUTOINJ-XYZ123 got="Sure, happy to help!" ERROR: REPLY_MISMATCH")
+  ok   - an error-kind entry is styled distinctly as an error line
+
+== Unified log: every line is tagged, and the tag checkboxes show/hide categories ==
+  ok   - all 13 tag filters are built (got 13)
+  ok   - every filter starts checked = visible
+  ok   - a manager event carries the Manager chip + data-tag
+  ok   - an AI send carries the Chat chip + data-tag
+  ok   - an event with no tag still renders (neutral chip), never throws
+  ok   - unchecking Manager hides that category (hide-manager class applied)
+  ok   - other categories stay visible
+  ok   - re-checking Manager shows it again
+  ok   - an error-kind line is marked data-level=error
+  ok   - a warning-level line is marked data-level=warning
+  ok   - an ordinary line is data-level=info
+  ok   - the '⚠ Errors only' checkbox exists
+  ok   - checking 'Errors only' puts the log into errors-only mode
+  ok   - in errors-only mode the rule hides info lines but keeps errors and warnings
+  ok   - unchecking restores the full view
+
+== User Panel: Compose + Participants + Send + Attach + Roles + Sequence are all one panel that never collapses ==
+  ok   - the merged User Panel exists
+  ok   - Compose lives inside it
+  ok   - the participant checkboxes live inside it too
+  ok   - the Roles trigger lives inside it
+  ok   - Prompt Sequence's trigger now lives inside it too, not in House Rules
+  ok   - it has no collapse button of its own -- unlike Global/House Rules/Prompt Library, it never minimizes
+  ok   - the grid's own Send/Active column headers are present, in order (got ["Send","Active"])
+  ok   - 4 participant rows (button+checkbox) plus → All = 9 grid cells after the two headers (got 9)
+  ok   - row 0: chatgpt's send button is in the Send column
+  ok   - row 0: chatgpt's own checkbox is row-aligned right next to it, in the Active column (got id="p-chatgpt")
+  ok   - row 1: claude's send button is in the Send column
+  ok   - row 1: claude's own checkbox is row-aligned right next to it, in the Active column (got id="p-claude")
+  ok   - row 2: gemini's send button is in the Send column
+  ok   - row 2: gemini's own checkbox is row-aligned right next to it, in the Active column (got id="p-gemini")
+  ok   - the Butler is a 4th participant row: its → send button sits in the Send column
+  ok   - the Butler has its own Active checkbox in the Active column, like the three AIs
+  ok   - → All is the final row, spanning just the Send column (no checkbox of its own)
+
+== User Panel: [TO: USER] replies collect into a live Messages feed + badge, not just the Transcript stream ==
+  ok   - starts at zero
+  ok   - the zero state is visually hidden via the data-zero attribute
+  ok   - feed starts empty
+  ok   - a reply tagged for another AI doesn't count as a message to the user
+  ok   - a [TO: USER] reply increments the badge
+  ok   - it shows up inline in the feed, color-coded by site
+  ok   - the inline row shows the actual message text
+  ok   - clicking a feed row opens the full Messages popup
+  ok   - the popup lists the same message
+  ok   - the ✕ button closes it
+  ok   - badge tracks the real total (got 5)
+  ok   - the inline feed caps at the 3 most recent, not all 5
+  ok   - the newest one is shown first inline
+  ok   - the popup itself lists every one of them, not just the recent 3
+
+== Global / House Rules / Prompt Library each collapse to a tab in #top-tab-strip, freeing their row's space for the AI panes ==
+  ok   - no tabs by default -- nothing collapsed
+  ok   - Global starts expanded
+  ok   - collapsing Global hides the real panel
+  ok   - a tab for it appears in the top strip
+  ok   - the tab is labeled
+  ok   - all three collapse independently, each getting its own tab
+  ok   - House Rules and Prompt Library are both hidden too
+  ok   - clicking the tab restores the panel
+  ok   - ...and removes its own tab
+  ok   - the other two tabs are unaffected
+
+== Role Assignment popup: open/close, presets, Apply, Clear ==
+  ok   - starts closed
+  ok   - the 🎭 Roles button in the User Panel opens it
+  ok   - each site gets its own role input, inside the popup
+  ok   - each row also has a preset dropdown
+  ok   - presets include general-purpose roles plus a Custom option (got ["— none —","Project Manager","Detective","Research Analyst","Editor","Skeptical Engineer","Strategist","Devil's Advocate","Fact-Checker","Summarizer","Custom…"])
+  ok   - selecting a preset fills the free-text input
+  ok   - picking a preset alone doesn't call setRole yet
+  ok   - Apply calls setRole with the preset that was picked
+  ok   - the 'current' label updates
+  ok   - Apply also calls setRole with typed custom text
+  ok   - the 'current' label reflects the custom text
+  ok   - Clear calls setRole with an empty string
+  ok   - the input itself is cleared too
+  ok   - the preset dropdown resets to '— none —' too
+  ok   - the 'current' label clears
+  ok   - the ✕ button closes the popup
+
+== The Prompt Sequence trigger button opens the sequence popup ==
+  ok   - clicking 🧵 Prompt Sequence calls openSequenceEditor
+
+== The Transcript/Activity Log panel can be collapsed to free up vertical space ==
+  ok   - starts expanded
+  ok   - clicking the collapse button on the Transcript header collapses the whole panel
+  ok   - clicking again expands it back
+
+== A pane's state never changes its position — providers keep a fixed order (AI-UI-003/006) ==
+  ok   - panes start in fixed provider order in the side-by-side strip
+  ok   - reducing claude keeps it in the same strip and position
+  ok   - minimizing claude keeps it in place — order never changes
+  ok   - reopening claude keeps it in place — order still fixed
+  ok   - the other panes are unaffected by claude's state changes
+
+== Collapsing every AI pane hands its space to the Transcript/Log panel ==
+  ok   - starts open — no extra space handed over yet
+  ok   - only one of three minimized — not enough to hand over space yet
+  ok   - all three minimized — Conversation/Log panel grows into the freed space
+  ok   - opening just one pane again gives the space back
+
+== Prompt Library: a compact dropdown, not inline cards ==
+  ok   - both saved prompts appear as options (got 2)
+  ok   - options are labeled by name
+  ok   - Send is enabled once something's selected (first option, by default)
+  ok   - no inline per-AI text boxes/cards render anymore
+
+== Prompt Library: no saved prompts yet ==
+  ok   - a single placeholder option shows instead of an empty dropdown
+  ok   - Send is disabled when there's nothing to select
+  ok   - Delete is disabled too
+
+== Prompt Library Send uses the selected prompt's saved text ==
+  ok   - clicking Send calls sendPrompt
+  ok   - sends exactly the selected prompt's saved per-AI text, blank field included
+
+== '+ New' and 'Edit' open the standalone prompt editor window, they don't edit inline ==
+  ok   - '+ New' opens the editor with no id (blank prompt)
+  ok   - 'Edit' opens the editor targeting the currently-selected prompt's id
+
+== Prompt Library Delete ==
+  ok   - Delete removes the currently-selected prompt (the first one, by default)
+  ok   - the dropdown re-renders with one fewer option
+
+== Prompt Library dropdown updates when the popup editor saves elsewhere ==
+  ok   - starts with one saved prompt
+  ok   - a 'prompts-changed' broadcast (from the popup window saving) re-renders the dropdown without needing a manual refresh
+
+== Extract All: the Activity/Troubleshooting panel has a button that saves everything to a file ==
+  ok   - the '⤓ Extract All' button is present in the Activity / Troubleshooting header
+  ok   - clicking Extract All calls extractAllLogs (dumps conversation + errors)
+  ok   - it shows where the file was saved, with the message + log counts
+
+== Butler: the System AI panel starts/stops a goal, saves config, and shows the ack + status ==
+  ok   - the butler goal box and Start button are present
+  ok   - the LLM endpoint defaults to Ollama's local address (erasable)
+  ok   - Save settings configures the supervisor provider (endpoint + model)
+  ok   - Start Butler calls startManagedTask with the typed goal
+  ok   - the sub-second ack is displayed in the panel
+  ok   - while running, the Stop button is shown
+  ok   - the status line reflects the butler's live status
+  ok   - a RUN_CODE step is shown in the status
+  ok   - Stop calls stopManagedTask
+
+== System Check + User Panel: capability test runs and reports into the ONE Activity Log ==
+  ok   - the old System Check side box is gone (consolidated into the Activity Log)
+  ok   - the 'actually run each capability' toggle is present
+  ok   - unchecked → the quick readiness check runs, not the deep test
+  ok   - the quick check's results land in the center Activity Log
+  ok   - the butler panel has a 🧪 Test-all-capabilities button next to the task box
+  ok   - the button runs the deep capability test
+  ok   - the live reel shows a chip per capability with pass/fail/skip as it goes by
+  ok   - when it's done, the results pop-up opens
+  ok   - the pop-up sorts results into Working / Not-working / Not-set-up buckets
+  ok   - each failure gets a fix-it tip
+  ok   - the summary still lands in the center Activity Log
+  ok   - the pop-up closes on Close
+  ok   - the User Panel also has a 🧪 Capability Test button
+  ok   - System Check with the toggle checked also runs the deep test
+
+== Butler handling-mode toggle + converse from the User Panel ==
+  ok   - the mode toggle is present and starts on Auto
+  ok   - → Butler sends the composed message with the current mode (auto)
+  ok   - one click moves to 'Himself'
+  ok   - next click moves to 'Delegate'
+  ok   - sending in Delegate passes mode 'delegate' to the butler
+  ok   - next click reaches 'Converse'
+  ok   - in Converse, the message goes to butler:chat
+  ok   - Converse does NOT start a task
+  ok   - my converse message is echoed in the butler window
+
+== Butler status light + colour-coded butler log (system / butler / per-AI / to-ME 2×) ==
+  ok   - the Butler status light is present in the User Panel
+  ok   - while working, the light glows and shows what he's doing
+  ok   - when he finishes, the light stops glowing
+  ok   - a question to the user turns the light amber (needs you)
+  ok   - the butler's own reasoning is in his colour
+  ok   - system/config lines are the muted system colour
+  ok   - an AI answering the butler is in that AI's colour
+  ok   - a message addressed to me is the bright, 2× to-me style (.bl-tome)
+  ok   - an AI-to-AI message is coloured as the sender
+
+== Tools/Memory/Awareness/Voice: the System AI panel surfaces and wires the new butler capabilities ==
+  ok   - the panel fetches the tool registry on load
+  ok   - the registered tools are listed for the user
+  ok   - the panel fetches the memory summary on load
+  ok   - the memory item count is shown
+  ok   - the awareness readout renders per-pane status
+  ok   - the Voice controls are present
+  ok   - Save wires to configureVoice with the endpoint + enabled
+  ok   - Test speaks a line via voiceSpeak
+  ok   - the mic button calls voiceListen
+  ok   - a heard transcript is dropped into the goal box
+  ok   - the Image and Video paddles are present in the action bar
+  ok   - the Image paddle opens the wizard on the Images tab
+  ok   - the Video paddle opens the wizard on the Video tab
+  ok   - the Image Generation and Video panels are present
+  ok   - the Image panel loads the SD config on start
+  ok   - the Image panel Save wires to configureImage
+  ok   - image slider img-steps is a range control
+  ok   - image slider img-cfg is a range control
+  ok   - image slider img-width is a range control
+  ok   - image slider img-height is a range control
+  ok   - image slider img-batch is a range control
+  ok   - moving a slider updates its live value readout
+  ok   - Generate appends the LoRA/weights to the prompt
+  ok   - the negative prompt is passed through
+  ok   - the CFG / seed / steps slider values are sent with the render
+  ok   - the 🎲 button resets the seed to random (-1)
+  ok   - after a render the Image panel grows to the large size (shows the preview)
+  ok   - the rendered image is shown in the inline preview
+  ok   - the render is added to the recent-renders strip
+  ok   - the size button cycles minimal → middle
+  ok   - the size button cycles middle → large
+  ok   - the size button wraps large → minimal (three states)
+  ok   - the Open SD UI button opens the Stable Diffusion web UI (endpoint base)
+  ok   - the Video panel loads its config on start
+  ok   - video slider vid-frames is a range control
+  ok   - video slider vid-fps is a range control
+  ok   - video slider vid-steps is a range control
+  ok   - video slider vid-cfg is a range control
+  ok   - video slider vid-motion is a range control
+  ok   - Video Generate passes the prompt + negative to the video provider
+  ok   - the video Motion slider value is sent with the render
+  ok   - after a render the Video panel grows to large (shows the clip preview)
+  ok   - the rendered clip is shown in the inline video preview
+  ok   - the Video panel has its own working size button
+  ok   - collapsing the Video panel hides it and adds a tab
+  ok   - clicking the tab brings the Video panel back
+  ok   - the Image Connection loads its preset backends into a dropdown
+  ok   - the preset dropdown is populated (Choose… + backends)
+  ok   - picking a preset fills the endpoint field — no guessing
+  ok   - Auto-detect scans localhost for a running backend
+  ok   - a detected backend is filled into the endpoint field automatically
+  ok   - the Test button pings the endpoint for reachability
+  ok   - a reachable endpoint is reported clearly
+  ok   - the Video Connection has the same preset + detect + test helpers
+  ok   - the GPU Usage panel is present
+  ok   - the GPU panel polls gpuInfo on start
+  ok   - the GPU panel shows the card name and live utilization
+  ok   - the Butler Device panel with System Check + Send Intro is present
+  ok   - the composer starts empty — no initial prompt is pre-filled
+  ok   - System Check asks the butler to test what he can do
+  ok   - the System Check lists each capability and how many are working — in the Activity Log
+  ok   - the check shows a detailed installed / not-installed status per dependency
+  ok   - Install Missing installs the not-installed dependencies
+  ok   - Send Intro tells the language models who the butler is and how it works
+  ok   - the intro reports which AIs were told — in the Activity Log
+  ok   - with 🔊 on, the System Check summary is spoken
+  ok   - the who's-speaking indicator is present
+  ok   - a speaking event lights that speaker's chip
+  ok   - the chip dims again when it stops
+  ok   - the typed task is sent to the butler from the one merged box
+  ok   - push-to-talk records a spoken task via the voice engine
+  ok   - the ▶ button speaks in that speaker's assigned voice
+  ok   - Voice save carries a distinct voice per speaker
+  ok   - the voice module has microphone + speaker pickers
+  ok   - the panel loads recommended models on start
+  ok   - pulling by name installs the operator's chosen model
+  ok   - the Safeguards controls are present
+  ok   - enabling approval mode saves approvalMode:true
+  ok   - a held action shows the approval prompt with what's waiting
+  ok   - Approve calls approveManagerAction
+  ok   - the approval prompt clears once nothing is pending
+
+== Activity trace: every button click, panel toggle, and message (with its ID) is logged ==
+  ok   - clicking a button logs a ui-click with its id
+  ok   - the click log carries the button's label
+  ok   - opening/closing a panel is logged
+  ok   - minimizing a panel is logged
+  ok   - each message appears in the Activity Log with its ID and target
+  ok   - the panel loads + shows the 'stuff and thing' folder path on start
+  ok   - the installed-model counts per category are shown
+  ok   - the Open models folder button opens the folder
+  ok   - the panel checks storage and confirms new downloads land in 'stuff and thing' when the app's Ollama is running
+  ok   - the 'Move downloaded models here' button runs the migration
+  ok   - the migration result (moved/skipped) is reported into the Activity Log
+  ok   - the 'Download all logs' button gathers every log
+  ok   - it reports how many files were bundled and where — in the Activity Log
+  ok   - the Stop-AIs-Talking button is present
+  ok   - the Stop-AIs-Talking button calls silenceAll
+
+333 passed, 0 failed
+
+== No '?id=' in the URL — blank fields, for creating a new prompt ==
+  ok   - name starts blank
+  ok   - all three per-AI boxes start blank
+
+== '?id=<n>' matching a saved prompt — fields populate from it ==
+  ok   - name is populated from the matching saved prompt
+  ok   - chatgpt's box is populated
+  ok   - claude's box correctly stays blank (it was blank when saved)
+  ok   - gemini's box is populated
+
+== '?id=' pointing at a prompt that no longer exists — doesn't crash, just stays blank ==
+  ok   - name stays blank rather than throwing when the id isn't found
+
+== '→ All' copies the scratch text into every per-AI box, overwriting existing content ==
+  ok   - chatgpt's box gets the shared text
+  ok   - claude's box gets overwritten with it too
+  ok   - gemini's box gets it as well
+
+== Save sends the id/name/per-AI text to savePrompt, then closes the window ==
+  ok   - Save calls savePrompt
+  ok   - passes the id being edited, so it updates in place rather than creating a duplicate
+  ok   - passes the current (possibly edited) name and per-AI text
+  ok   - the window closes itself once the save succeeds
+
+== Save with no '?id=' passes id:null — a genuinely new prompt, not an update ==
+  ok   - id is null/undefined — main.js treats that as create-new, not edit-existing
+
+== Saving with an empty name still saves something sensible ==
+  ok   - an empty name field is saved as "Untitled" rather than blank (got "Untitled")
+
+== Cancel just closes, no save call at all ==
+  ok   - Cancel never calls savePrompt
+  ok   - Cancel does close the window
+
+18 passed, 0 failed
+
+== Starts with a single blank 'all' step, ready to fill in ==
+  ok   - exactly one step row to start
+  ok   - defaults to targeting 'all'
+  ok   - text starts blank
+  ok   - numbered starting at 1
+
+== '+ Add Step' adds rows; removing one renumbers the rest ==
+  ok   - two more clicks add two more rows (3 total)
+  ok   - new rows are numbered in order
+  ok   - removing the middle row leaves two
+  ok   - remaining rows renumber to stay sequential, no gap left behind
+
+== Each step's target dropdown offers All + each of the three sites ==
+  ok   - options are all/chatgpt/claude/gemini (got all,chatgpt,claude,gemini)
+
+== Run Sequence collects every step's target+text and calls runSequence ==
+  ok   - clicking Run Sequence calls runSequence
+  ok   - passes both filled-in steps
+  ok   - step 1 target/text carried through correctly
+  ok   - step 2 target/text carried through correctly
+
+== Run Sequence drops steps with no text before sending ==
+  ok   - the blank/whitespace-only step never reaches runSequence
+
+== Run Sequence with nothing filled in shows a status message instead of calling the backend ==
+  ok   - runSequence is never called when every step is blank
+  ok   - a status message explains why nothing happened
+
+== A rejected run (e.g. ALREADY_RUNNING) re-enables the Run button and shows the error ==
+  ok   - Run re-enables after a rejected start
+  ok   - status shows the actual error (got "Couldn't start: ALREADY_RUNNING")
+
+== onSequenceState broadcasts drive the status line and the Run button's enabled state ==
+  ok   - Run is disabled while a sequence is active
+  ok   - status shows 1-indexed progress (got "Running — step 2 of 3, waiting for a reply before continuing…")
+  ok   - Run re-enables once the sequence finishes
+  ok   - status reports completion
+
+== Close calls closeSequenceEditor ==
+  ok   - clicking Close calls closeSequenceEditor
+
+23 passed, 0 failed
+
+== askManager: a well-formed response is parsed and validated ==
+  ok   - a valid DELEGATE decision comes back parsed
+  ok   - assignment details survive round-tripping through JSON
+  ok   - posts to exactly the configured endpoint, no URL guessing/construction
+  ok   - uses POST
+  ok   - sends the API key as a Bearer token
+  ok   - request body carries the configured model and a system+user message pair
+  ok   - the system prompt names the real targets
+
+== askManager: a response naming an action outside the vocabulary is rejected, not passed through ==
+  ok   - an action outside MANAGER_ACTIONS is rejected at the provider layer already
+
+== askManager: recovers a JSON object even if the model wrapped it in stray prose ==
+  ok   - extracts the {...} block even when it's not the entire message
+
+== askManager: genuinely non-JSON content is reported as INVALID_JSON, not silently ignored ==
+  ok   - no recoverable JSON at all is reported distinctly
+
+== askManager: a non-2xx HTTP response is reported with the status code, API key redacted from the body ==
+  ok   - the HTTP status is surfaced
+  ok   - the API key never leaks into the returned error detail
+
+== askManager: network failures and timeouts are reported distinctly, and the key is redacted from any error text ==
+  ok   - a thrown network error is caught, reported, and redacted
+  ok   - a request that never resolves within timeoutMs is reported as TIMEOUT, not left hanging
+
+== askManager: refuses to even attempt a call with no endpoint/model configured ==
+  ok   - missing endpoint is rejected before any network call
+  ok   - missing model is rejected before any network call
+
+== testConnection (AI-004): reachable is distinct from format-valid ==
+  ok   - a malformed reply is reachable but NOT a passing test (won't enable autonomous operation)
+  ok   - a valid manager reply passes fully
+  ok   - a genuine network failure is reported as not reachable
+
+== redactSecrets / extractJsonObject: the small pure helpers behave correctly on their own ==
+  ok   - redacts every occurrence of the configured key
+  ok   - leaves text alone when there's no apiKey configured
+  ok   - parses a clean JSON object directly
+  ok   - returns null rather than throwing on non-JSON
+
+== RunPod dedicated-pod lifecycle: startPod/getPodStatus/stopPod hit the expected REST calls ==
+  ok   - startPod succeeds against a 2xx response
+  ok   - getPodStatus reads the pod's reported status
+  ok   - stopPod succeeds against a 2xx response
+  ok   - startPod POSTs to the pod's /start route
+  ok   - getPodStatus GETs the pod's own route
+  ok   - stopPod POSTs to the pod's /stop route
+  ok   - refuses to act without a configured pod id
+
+== extractJsonObject: tolerant of fences, prose, trailing commas, extra objects ==
+  ok   - pulls JSON out of a ```json fence
+  ok   - forgives a trailing comma
+  ok   - ignores prose around the object
+  ok   - takes the first complete object when several are present
+  ok   - genuinely non-JSON still returns null
+
+== askManager: one repair retry rescues a weak model that first answered with prose ==
+  ok   - a prose first answer is repaired into a valid action on the retry
+  ok   - the repair costs exactly one extra call, and only when the first was unusable
+
+== buildManagerPrompt: the handling mode steers who does the work ==
+  ok   - auto mode adds no extra directive (system + user only)
+  ok   - self mode injects a 'do it locally, don't delegate' directive
+  ok   - delegate mode injects a 'route it to the AIs' directive
+  ok   - the user payload records the handling mode
+
+== chatWithButler: a plain conversational reply, no JSON/actions ==
+  ok   - returns the model's prose reply as text
+  ok   - uses a conversational system prompt (no action JSON)
+  ok   - includes the new message and prior history
+  ok   - reports a missing endpoint cleanly
+
+45 passed, 0 failed
+
+== selectors.js sync: desktop-app vs. extension ==
+  ok   - extension/selectors.js loads and populates window.__AI_SITES__
+  ok   - both files cover the exact same set of sites (desktop: chatgpt,claude,gemini; extension: chatgpt,claude,gemini)
+  ok   - chatgpt.INPUT_CANDIDATES matches between desktop-app and extension (desktop: ["#prompt-textarea","div[role=\"textbox\"]","div[data-testid=\"textbox\"]","main textarea","textarea","div[contenteditable=\"true\"]"]; extension: ["#prompt-textarea","div[role=\"textbox\"]","div[data-testid=\"textbox\"]","main textarea","textarea","div[contenteditable=\"true\"]"])
+  ok   - chatgpt.SEND_CANDIDATES matches between desktop-app and extension (desktop: ["button[data-testid=\"send-button\"]","button[aria-label*=\"Send\"]","form button[type=\"submit\"]"]; extension: ["button[data-testid=\"send-button\"]","button[aria-label*=\"Send\"]","form button[type=\"submit\"]"])
+  ok   - chatgpt.ASSISTANT_CANDIDATES matches between desktop-app and extension (desktop: ["[data-testid=\"assistant-message\"]","div[data-message-author-role=\"assistant\"]","article:has([data-message-author-role=\"assistant\"])"]; extension: ["[data-testid=\"assistant-message\"]","div[data-message-author-role=\"assistant\"]","article:has([data-message-author-role=\"assistant\"])"])
+  ok   - chatgpt.label matches
+  ok   - chatgpt.newChat is a URL for Start New Chat
+  ok   - claude.INPUT_CANDIDATES matches between desktop-app and extension (desktop: ["div[contenteditable=\"true\"][data-testid]","div[contenteditable=\"true\"].ProseMirror","div[contenteditable=\"true\"][class*=\"composer\"]","div[contenteditable=\"true\"][placeholder]","div[contenteditable=\"true\"]","textarea"]; extension: ["div[contenteditable=\"true\"][data-testid]","div[contenteditable=\"true\"].ProseMirror","div[contenteditable=\"true\"][class*=\"composer\"]","div[contenteditable=\"true\"][placeholder]","div[contenteditable=\"true\"]","textarea"])
+  ok   - claude.SEND_CANDIDATES matches between desktop-app and extension (desktop: ["button[aria-label=\"Send Message\"]","button[aria-label=\"Send message\"]","button[data-testid=\"send-message-button\"]","form button[type=\"submit\"]"]; extension: ["button[aria-label=\"Send Message\"]","button[aria-label=\"Send message\"]","button[data-testid=\"send-message-button\"]","form button[type=\"submit\"]"])
+  ok   - claude.ASSISTANT_CANDIDATES matches between desktop-app and extension (desktop: ["[data-testid=\"chat-message\"]","div.font-claude-message","[data-testid=\"message-content\"]","div.standard-markdown"]; extension: ["[data-testid=\"chat-message\"]","div.font-claude-message","[data-testid=\"message-content\"]","div.standard-markdown"])
+  ok   - claude.label matches
+  ok   - claude.newChat is a URL for Start New Chat
+  ok   - gemini.INPUT_CANDIDATES matches between desktop-app and extension (desktop: ["rich-textarea div[contenteditable=\"true\"]","div.ql-editor[contenteditable=\"true\"]","div[contenteditable=\"true\"]","textarea"]; extension: ["rich-textarea div[contenteditable=\"true\"]","div.ql-editor[contenteditable=\"true\"]","div[contenteditable=\"true\"]","textarea"])
+  ok   - gemini.SEND_CANDIDATES matches between desktop-app and extension (desktop: ["button[aria-label=\"Send message\"]","button.send-button","form button[type=\"submit\"]"]; extension: ["button[aria-label=\"Send message\"]","button.send-button","form button[type=\"submit\"]"])
+  ok   - gemini.ASSISTANT_CANDIDATES matches between desktop-app and extension (desktop: ["message-content .markdown","div.model-response-text","div[data-response-index]"]; extension: ["message-content .markdown","div.model-response-text","div[data-response-index]"])
+  ok   - gemini.label matches
+  ok   - gemini.newChat is a URL for Start New Chat
+
+17 passed, 0 failed
+
+== MDC-001: schema is created and migrations are versioned ==
+  ok   - schema is at version 5 after open
+  ok   - projects, messages and messages_deadletter tables exist
+  ok   - WAL mode is on
+
+== MDC-001: re-opening does not re-run migrations ==
+  ok   - version unchanged on the second open (no double-apply)
+
+== MDC-001: the database survives a service restart with all data intact ==
+  ok   - the message written before restart is still there
+  ok   - the project row survives the restart
+
+== MDC-001: on corruption the service restores the last good snapshot, not damaged data ==
+  ok   - data recovered from the snapshot after corruption
+
+== MDC-001: with no snapshot, a corrupt database refuses to start dirty ==
+  ok   - refuses to open a corrupt database when there is nothing good to restore
+
+== SCS-001: all five+ sources write one log; seq order reproduces the conversation, no gaps ==
+  ok   - every source wrote into the same table
+  ok   - reading in seq order reproduces the exact conversation order
+  ok   - seqs are 1..6 with no gaps
+  ok   - verifyContiguous confirms no gaps and no duplicates
+
+== SCS-003: a fan-out send to several known panes is RESOLVED, not a false warning ==
+  ok   - a single known recipient is RESOLVED
+  ok   - a comma-joined list of KNOWN panes is RESOLVED (was the false-warning bug)
+  ok   - a genuinely unknown recipient is still flagged
+
+== SCS-001: a write that fails is parked in the dead-letter, never partially committed ==
+  ok   - the failing write raises AppendParked rather than succeeding
+  ok   - nothing was partially committed to the messages table
+  ok   - the raw payload is preserved in messages_deadletter — never dropped
+
+== SCS-002: a caller may not choose the number ==
+  ok   - supplying seq or msgId is rejected — AutoInjector assigns numbers
+  ok   - the first message is numbered MSG-000001
+
+== SCS-002: 1,000 concurrent inserts -> 1,000 unique consecutive IDs, zero duplicates, zero gaps ==
+  ok   - every worker process committed all its messages
+  ok   - exactly 1000 messages were stored (got 1000)
+  ok   - zero duplicate sequence numbers
+  ok   - zero gaps — the ids are consecutive 1..1000
+  ok   - every msg_id is unique
+
+25 passed, 0 failed
+
+== SCS-003: REPLY-TO walks back to the originating message; routing anomalies flagged ==
+  ok   - thread() returns origin..message in order (MSG1 -> MSG2 -> MSG3)
+  ok   - originOf() resolves the user message that started the thread
+  ok   - a message to an unknown recipient is flagged ROUTING_UNRESOLVED, not dropped
+  ok   - the unresolved routing is logged
+  ok   - a reply_to pointing at a nonexistent message is nulled, never left dangling
+  ok   - the nulled reply_to is logged
+
+== SCS-007: replaying the same message stores one message and one DROP_DUPLICATE row ==
+  ok   - the replay is reported as a duplicate of the original
+  ok   - only one message is stored
+  ok   - a DROP_DUPLICATE row records the reason and the original MSG id (recoverable, not lost)
+  ok   - an identical message outside the dedup window is NOT dropped
+
+== SCS-004: each model's exact read lag is known; a position ahead of the log is clamped ==
+  ok   - a fully-caught-up model reports lag 0
+  ok   - a model at MSG 4 of 6 reports lag 2
+  ok   - all() reports exact position and lag per model
+  ok   - read position only advances — a lower confirm does not move it back
+  ok   - a position ahead of the log clamps to the max (lag 0)
+  ok   - the clamp is flagged for resync
+
+== SCS-006: per-recipient delivery reaches a terminal state; backoff, max 3 retries, no stuck PENDING ==
+  ok   - both recipients start PENDING
+  ok   - a confirmed recipient becomes DELIVERED
+  ok   - a recipient still PENDING past its timeout moves to RETRY-1 (never stuck PENDING)
+  ok   - after three retries it is at RETRY-3
+  ok   - after 3 retries it gives up as FAILED_PERMANENT
+  ok   - the delivered recipient is unaffected (same MSG id, no second message)
+  ok   - every recipient has reached a terminal state
+  ok   - the permanent failure raised exactly one alert
+
+== SCS-012: exactly one CURRENT baseline; a mismatched prev-hash is refused ==
+  ok   - the first baseline promotes and becomes CURRENT
+  ok   - a promotion with a mismatched prev_hash is refused; prior baseline stays CURRENT
+  ok   - the refused promotion is logged
+  ok   - a promotion presenting the correct prev_hash succeeds
+  ok   - the new baseline is linked to its predecessor
+  ok   - full history is retained
+  ok   - exactly one baseline row is CURRENT
+  ok   - an empty/unverifiable hash refuses promotion
+
+32 passed, 0 failed
+
+== MDC-002: every entity type has a stable ID prefix, timestamps and a project FK ==
+  ok   - a character gets the CHAR- prefix and a per-project number
+  ok   - it carries created/updated timestamps and the project id
+  ok   - each type keeps its own prefixed counter
+  ok   - the character counter advances independently
+
+== MDC-002: writes are validated against the type schema with a specific field-level reason ==
+  ok   - a missing required field is rejected by name: "character.name is required"
+  ok   - an unknown field is rejected by name
+  ok   - an unknown entity type is rejected
+
+== MDC-002: an orphaned row (unknown project) is rejected at write time ==
+  ok   - creating an entity for a nonexistent project fails on the foreign key
+
+== MDC-003: full-text search returns results across entity types, fast ==
+  ok   - a phrase search finds the two matching records across types
+  ok   - results span multiple entity types
+  ok   - search completes in under a second (1ms on 303 records)
+  ok   - every hit resolves to a real entity id
+
+== MDC-003: a stale index rebuilds; FTS failure falls back to LIKE, flagged DEGRADED ==
+  ok   - search works again after an automatic rebuild
+  ok   - the LIKE fallback still finds the record and flags DEGRADED
+
+== MDC-008: artifacts are versioned and hash-verified; history is complete ==
+  ok   - each write is a new version
+  ok   - the recorded hash matches the content
+  ok   - get() returns the authoritative current version
+  ok   - the current version verifies against its recorded hash
+  ok   - the full version history is retained
+
+== MDC-008: a hash mismatch blocks delivery and offers the previous verified version ==
+  ok   - a tampered current version is refused, not delivered
+  ok   - the previous verified version is offered instead
+  ok   - the integrity failure is logged
+
+22 passed, 0 failed
+
+== SCS-013: an owned task refuses a second claim; an expired lease returns it to the queue ==
+  ok   - the first claim is granted
+  ok   - a second model is refused with a clear reason
+  ok   - the owner can renew its own lease
+  ok   - after the lease expires another model may take over
+  ok   - the expiry is logged as OWNER_LEASE_EXPIRED
+  ok   - a non-owner cannot release the task
+  ok   - the real owner can release it
+  ok   - sweepExpired() releases a crashed owner's lease
+
+== MDC-009: writes are policy-checked, atomic, and versioned; a denied write leaves the file intact ==
+  ok   - claude may write a chapter (version 1)
+  ok   - the file reads back through the gateway at version 1
+  ok   - a second write bumps to version 2
+  ok   - the auditor is denied write access to a chapter
+  ok   - the denied write left the previous version untouched
+  ok   - a path-traversal write is rejected
+  ok   - no escaped file was created anywhere under the project root
+  ok   - the artifact store holds the full version history
+
+== MDC-007: a file request returns the current version and is logged; misses suggest, denials say ACCESS_DENIED ==
+  ok   - a valid request returns the authoritative current version
+  ok   - the request is logged with requester, file and result
+  ok   - an unknown file returns FILE_NOT_FOUND (not an empty body)
+  ok   - the closest matching name is suggested
+  ok   - an unknown requester is denied with an explicit reason
+  ok   - both the miss and the denial are recorded in the request log
+
+22 passed, 0 failed
+
+== db-service records captured turns and user messages, and reads them back ==
+  ok   - the database initialized (C:\Users\javon\AppData\Local\Temp\atlsvc-eDjPPH\autoinjector-shared.db)
+  ok   - all three messages were recorded
+  ok   - they read back in order across sources
+  ok   - AutoInjector assigned the message numbers
+  ok   - status() reports the live count
+  ok   - a blank capture is not recorded
+
+== db-service exposes memory (create/search/summary) and project state ==
+  ok   - memoryCreate stores typed entities with prefixed ids
+  ok   - a schema-invalid create is rejected with a reason
+  ok   - memorySummary counts entities per type
+  ok   - memorySearch returns the matching entity with a title
+  ok   - an empty query returns no results (no crash)
+  ok   - projectState returns the sync/ownership/artifact snapshot
+
+== db-service records a Stable Diffusion render as a searchable project image ==
+  ok   - the render is stored as an IMG- entity
+  ok   - imageEntries returns it with prompt and requester
+  ok   - the image is findable via project memory search
+
+== db-service degrades safely when not initialized ==
+  ok   - a broken location reports unavailable rather than hanging
+  ok   - recordTurn/recent/status never throw, even on a bad init
+  ok   - init always returns a status object
+
+18 passed, 0 failed
+
+== recommended(): heavier machines get bigger local models; light machines get small ones ==
+  ok   - 24 GB VRAM -> a larger model first
+  ok   - 8 GB VRAM -> a mid 7–8B model
+  ok   - no GPU -> only tiny models
+  ok   - always returns a short pick list
+
+== recommendedUncensored(): uncensored picks that still follow instructions ==
+  ok   - 8 GB VRAM -> a Dolphin/Hermes uncensored model
+  ok   - big VRAM -> uncensored options too
+  ok   - no GPU -> only tiny uncensored (Dolphin) models
+  ok   - never suggests the weak llama2-uncensored
+
+== listInstalled(): reads the installed models from the Ollama API ==
+  ok   - queries the Ollama /api/tags endpoint
+  ok   - returns the installed model names
+  ok   - Ollama not running -> no models, no crash
+
+== defaultStoreDir(): where models already downloaded actually live ==
+  ok   - OLLAMA_MODELS wins when set
+  ok   - falls back to the per-user .ollama/models store
+
+== the app's own Ollama server: pointed at the shared folder ==
+  ok   - startManaged spawns one server
+  ok   - runs `ollama serve`
+  ok   - server's OLLAMA_MODELS points at the stuff-and-thing llm folder
+  ok   - server binds the dedicated managed host/port
+  ok   - managedStatus reports it running with an endpoint
+  ok   - a second start is a no-op while one is running
+  ok   - stopManaged tears it down
+
+== pull(host): downloads are routed to the app's server ==
+  ok   - pull returns a { child, done } handle even with a host
+
+== migrateStore(): move already-downloaded models into stuff and thing ==
+  ok   - migration succeeds
+  ok   - moves the new blobs + manifest, skips the one already there (moved=2, skipped=1)
+  ok   - the new blob is now in the stuff-and-thing store
+  ok   - the manifest tree is recreated under the destination
+  ok   - the moved blob is gone from the old store (moved, not copied)
+  ok   - migrating a folder onto itself is a safe no-op
+  ok   - a missing source reports cleanly instead of throwing
+
+28 passed, 0 failed
+
+== init lays out the one 'stuff and thing' folder inside the app folder ==
+  ok   - root is <app folder>/stuff and thing
+  ok   - the folder is created
+  ok   - a top-level README explains the whole folder
+
+== category folders ==
+  ok   - images/ exists
+  ok   - videos/
+  ok   - uploads/
+  ok   - books/<title>/
+  ok   - ai-work/<site>/
+
+== models & assets downloads folder (inside stuff and thing) ==
+  ok   - modelsRoot is <stuff and thing>/models
+  ok   - the models folder is created on init
+  ok   - models/llm/ exists
+  ok   - models/image/ exists
+  ok   - models/loras/ exists
+  ok   - models/video/ exists
+  ok   - models/voice/ exists
+  ok   - models/assets/ exists
+  ok   - a top-level README explains what goes where
+  ok   - the llm/ README tells you to set OLLAMA_MODELS
+  ok   - modelsInventory counts files per category (ignoring READMEs)
+
+== name sanitization blocks path traversal and illegal chars ==
+  ok   - strips ../ and separators
+  ok   - a pure-traversal name falls back
+  ok   - no separators survive
+  ok   - empty -> fallback
+  ok   - a traversal title stays inside books/
+
+== saveBuffer writes and never clobbers ==
+  ok   - both writes land
+  ok   - the second write becomes pic-1.png (no overwrite)
+  ok   - contents are independent
+
+== copyInto copies an existing file in ==
+  ok   - copied into uploads/ under its name
+  ok   - content copied intact
+
+29 passed, 0 failed
+
+== Claude: reads the assistant reply, never a later user row ==
+  ok   - reads the assistant reply text
+  ok   - does NOT read the later user message row
+
+== takes the MOST RECENT assistant message when several ==
+  ok   - the newest reply wins
+
+== falls back through the priority list ==
+  ok   - uses the next assistant-specific selector, not the user row
+
+== nothing assistant-ish -> empty, no crash ==
+  ok   - returns empty text safely
+
+== ChatGPT / Gemini read their assistant messages ==
+  ok   - chatgpt: reads the assistant-role message
+  ok   - gemini: reads the model-response text
+
+== generating: a visible Stop button means the model is still speaking ==
+  ok   - Stop button present -> generating:true
+  ok   - not send-ready while generating
+
+== done: the Send button is back and clickable ==
+  ok   - only a Send button -> generating:false
+  ok   - Send button back and enabled -> sendReady:true
+
+== a disabled Send button also counts as still generating ==
+  ok   - disabled Send button -> generating:true
+  ok   - a disabled Send button is not send-ready
+
+== no stop/send buttons matched -> falls back (not generating) ==
+  ok   - no buttons -> generating:false, so completion falls back to the tag/timer
+  ok   - no Send button -> not send-ready
+
+15 passed, 0 failed
+
+== secret-store degrades safely without Electron ==
+  ok   - encryption is reported unavailable outside Electron
+  ok   - seal() returns null when encryption is unavailable
+  ok   - open() returns '' when encryption is unavailable
+  ok   - open(null) returns '' rather than throwing
+
+4 passed, 0 failed
+
+== redaction + JSON extraction ==
+  ok   - redactSecrets masks the key
+  ok   - redactSecrets is a no-op without a key / non-string
+  ok   - extractJsonObject parses clean JSON
+  ok   - extractJsonObject digs JSON out of fences/prose
+  ok   - extractJsonObject returns null when there is nothing to parse
+
+== chatCompletion maps outcomes structurally ==
+  ok   - a 2xx returns {ok, content}
+  ok   - a non-2xx returns kind:http with status + body
+  ok   - a 2xx with unparseable body returns kind:bad-body
+  ok   - a thrown fetch returns kind:network with the raw detail
+  ok   - an abort returns kind:timeout
+
+== probeModels reachability (AI-002) ==
+  ok   - probe hits the /models route
+  ok   - 404 = reachable but not ok
+  ok   - 2xx = ok + reachable
+
+13 passed, 0 failed
+  ok   - bridge started on 127.0.0.1:57648
+
+== auth: a token-protected bridge rejects unauthenticated requests ==
+  ok   - no token -> 401 UNAUTHORIZED
+  ok   - wrong token -> 401
+  ok   - correct token -> 200 with service/version
+
+== status + participants ==
+  ok   - GET /status returns the participant list
+  ok   - per-participant generation/waiting state is exposed
+  ok   - GET /participants returns just the participants
+
+== captured responses (since / site filters) ==
+  ok   - GET /responses returns captured responses
+  ok   - since= filters to newer responses
+  ok   - site= filters by participant
+
+== sending: one participant + all participants ==
+  ok   - POST /participants/chatgpt/send delivers and reports ok
+  ok   - sendTo was called with the right site + text
+  ok   - a failed send surfaces as a 400 with ok:false
+  ok   - a send with no text is rejected
+  ok   - POST /send fans out to all participants
+  ok   - sendAll got the text
+  ok   - POST /send honors an explicit targets list
+
+== Council start / stop ==
+  ok   - POST /council/start starts a run
+  ok   - councilStart got mode/topic/rounds
+  ok   - a bad council start (no mode) surfaces as 400
+  ok   - POST /council/stop stops the run
+
+== Open Interpreter (code execution) capability ==
+  ok   - GET /interpreter/status reports the OI endpoint
+  ok   - POST /interpreter/settings configures the adapter
+  ok   - POST /interpreter/run executes and returns the result
+  ok   - the run reached the interpreter adapter with the task
+  ok   - a run with no task is rejected
+
+== Jarvis orchestrator (native supervisor) ==
+  ok   - GET /jarvis/status returns the supervisor state
+  ok   - POST /jarvis/start kicks off a task
+  ok   - the goal reached the orchestrator
+  ok   - a start with no goal is rejected
+  ok   - POST /jarvis/stop stops the task
+
+== Tools registry (N5) ==
+  ok   - GET /tools/list returns the registry
+  ok   - POST /tools/run invokes a tool and returns its result
+  ok   - the tool name + args reached the registry
+  ok   - a run with no tool is rejected
+
+== Voice (N2) ==
+  ok   - GET /voice/status reports the voice config
+  ok   - POST /voice/settings configures voice
+  ok   - POST /voice/speak speaks the text
+  ok   - a speak with no text is rejected
+  ok   - POST /voice/listen returns a transcript
+
+== Image generation (Stable Diffusion) ==
+  ok   - GET /image/status reports the SD endpoint
+  ok   - POST /image/settings configures the adapter
+  ok   - POST /image/generate renders the prompt
+  ok   - the raw base64 is never streamed back — only the outcome + byte count
+  ok   - a generate with no prompt is rejected
+
+== unknown route ==
+  ok   - unknown path -> 404
+
+== SSE: live events stream (response, generation, error, rate-limit, council) ==
+  ok   - GET /events opens an event-stream (token via query for EventSource)
+  ok   - the stream opens with a hello event
+  ok   - a capture is delivered as a "response" event
+  ok   - a generation-state change is delivered
+  ok   - a send-error is delivered as an "error" event
+  ok   - a rate-limited capture also emits a "rate-limit" event
+  ok   - a House-Rules/Council state change is delivered as "council"
+  ok   - the butler ack is delivered as a "jarvis-ack" event
+  ok   - the butler state is delivered as a "jarvis" event
+  ok   - an internal error log (poll-error) is also surfaced as "error"
+  ok   - bridge.stop() closed the server cleanly
+
+57 passed, 0 failed
+
+== normalize(): native lmc chunks and simple events fold to one shape ==
+  ok   - lmc message -> message
+  ok   - lmc code keeps its format
+  ok   - lmc console -> output
+  ok   - an end marker yields no event
+  ok   - simple event passes through
+
+== guards: disabled / no endpoint / empty task ==
+  ok   - disabled -> INTERPRETER_DISABLED
+  ok   - enabled but no endpoint -> NO_ENDPOINT
+  ok   - empty task -> NEED_TASK
+
+== run(): streams a real execution and concatenates the prose ==
+  ok   - run resolves ok against the stub server
+  ok   - assistant prose is concatenated in order
+  ok   - a code event was streamed
+  ok   - an execution output event was streamed
+  ok   - a done event closed the run
+  ok   - all events captured (5)
+
+== run(): an HTTP error surfaces cleanly ==
+  ok   - a 500 from the OI server is reported, not thrown
+
+== managed mode: AutoInjector spawns the shim itself, waits for /health, then run() works ==
+  ok   - startManaged reports ok once /health answers (http://127.0.0.1:19162/run)
+  ok   - the endpoint points at the spawned shim port
+  ok   - status() reports managed mode + the child pid
+  ok   - run() works against the auto-spawned shim
+  ok   - stopManaged kills the child process
+  ok   - status() reports managed mode is off after stop
+  ok   - startManaged with no command is rejected
+
+22 passed, 0 failed
+
+== the registry ships the two built-in tools ==
+  ok   - http-fetch is registered by default
+  ok   - read-file is registered by default
+  ok   - has() reflects the registry
+  ok   - http-fetch is risk "ask" (approval-gated)
+  ok   - status() reports the tool count
+  ok   - list() never exposes a tool's invoke()
+
+== register / unregister a custom tool ==
+  ok   - a custom tool registers
+  ok   - a malformed tool is rejected
+
+== run(): normalizes results and streams events ==
+  ok   - run returns the tool's ok + message
+  ok   - run streams tool-start … output … done
+  ok   - an unknown tool -> UNKNOWN_TOOL
+  ok   - a throwing tool is caught -> ok:false with the error
+
+== read-file is sandboxed to the configured output root ==
+  ok   - read-file with no root -> NO_OUTPUT_ROOT
+  ok   - read-file reads a file under the root
+  ok   - a .. path escape is refused
+  ok   - read-file with no path -> NEED_PATH
+
+== http-fetch: guards + a real fetch ==
+  ok   - no url -> NEED_URL
+  ok   - a bad url -> BAD_URL
+  ok   - a non-http protocol -> BAD_PROTOCOL
+  ok   - http-fetch GETs the body
+  ok   - a host outside the allowlist is refused
+
+== write-file + list-dir are sandboxed too ==
+  ok   - write-file writes under the sandbox
+  ok   - the file really lands on disk
+  ok   - write-file refuses to escape the sandbox
+  ok   - list-dir lists a sandbox folder
+
+== run-command / install-package spawn a process (stubbed) ==
+  ok   - run-command runs via a shell and returns stdout
+  ok   - run-command with no command -> NEED_COMMAND
+  ok   - install-package runs "<mgr> install <name>" with NO shell (no injection)
+  ok   - an unknown package manager is refused
+  ok   - a package name with shell metacharacters is refused
+
+== open-path uses the injected OS openers ==
+  ok   - a URL opens via openExternal
+  ok   - a path opens via openPath
+
+== create-tool: the butler makes his own tool — approval-gated, persisted, reloadable ==
+  ok   - create-tool registers a new callable tool
+  ok   - a self-made tool is approval-gated (risk "ask")
+  ok   - the tool is persisted to disk
+  ok   - a self-made tool cannot shadow a built-in
+  ok   - an invalid tool name is refused
+  ok   - a tool with no code is refused
+  ok   - running a shell self-made tool spawns it as a separate process
+  ok   - the tool is gone after unregister
+  ok   - loadCreatedTools re-registers the butler's saved tools on startup
+
+== the MCP seam is present but not yet implemented ==
+  ok   - registerMcpServer() is a documented, unimplemented seam
+
+42 passed, 0 failed
+
+== settings + status ==
+  ok   - status reflects unconfigured/disabled
+  ok   - listenSeconds is clamped to <= 60
+  ok   - listenSeconds is clamped to >= 1
+
+== guards: disabled / no endpoint / empty text ==
+  ok   - speak while disabled -> VOICE_DISABLED
+  ok   - listen while disabled -> VOICE_DISABLED
+  ok   - enabled but no endpoint -> NO_ENDPOINT
+  ok   - empty text -> NEED_TEXT
+
+== speak + listen against a stub voice server ==
+  ok   - speak posts /speak and returns the shim result
+  ok   - listen posts /listen and returns the transcript
+  ok   - status shows enabled + speakOnAck after config
+
+== a distinct voice per speaker + output device ==
+  ok   - per-speaker voices round-trip through status()
+  ok   - speak({who:"butler"}) sends the butler voice + the chosen output device
+  ok   - speak({who:"chatgpt"}) sends a DIFFERENT voice — each speaker sounds distinct
+  ok   - an explicit voice override wins
+
+== managed mode requires a command ==
+  ok   - startManaged with no command -> NO_COMMAND
+  ok   - stopManaged is a safe no-op when nothing is running
+
+16 passed, 0 failed
+
+== settings + status ==
+  ok   - status reflects unconfigured/disabled
+  ok   - steps/width/height are stored
+  ok   - a non-positive size is ignored (keeps the last good value)
+  ok   - the CFG/batch/seed sliders are stored
+  ok   - seed -1 (random) is allowed
+
+== guards: empty prompt / disabled / no endpoint ==
+  ok   - empty prompt -> NEED_PROMPT
+  ok   - disabled -> IMAGE_DISABLED
+  ok   - enabled but no endpoint -> NO_ENDPOINT
+
+== generate(): posts txt2img and returns the base64 image ==
+  ok   - generate returns the base64 image from the SD server
+  ok   - the prompt + steps + size reached the SD server
+  ok   - the CFG scale, batch count (n_iter) and seed reached the SD server
+  ok   - generate streams image-start … image events
+
+== a data-URI-prefixed image is cleaned to raw base64 ==
+  ok   - a data:image/png;base64, prefix is stripped
+
+== errors: no image + HTTP error ==
+  ok   - an empty images array -> NO_IMAGE
+  ok   - a 5xx from the SD server -> HTTP_500
+
+15 passed, 0 failed
+
+== the fixed allowlist ==
+  ok   - allowlist includes open-interpreter
+  ok   - allowlist includes voice
+  ok   - allowlist includes voice-model
+  ok   - allowlist includes ollama-model
+  ok   - allowlist includes stability-matrix
+  ok   - has() reflects the allowlist and rejects junk
+  ok   - open-interpreter is a pip target (the keystone)
+  ok   - list() returns UI-friendly metadata
+  ok   - Auto-setup installs Open Interpreter first (the keystone)
+
+== install rejects an unknown target (butler can only pass an id) ==
+  ok   - an off-allowlist target -> UNKNOWN_TARGET
+
+== pip install shells out with an argv array, no shell ==
+  ok   - a successful pip install resolves ok
+  ok   - pip is invoked as `<python> -m pip install … open-interpreter` via argv (no shell)
+  ok   - install streams progress lines
+  ok   - a non-zero exit -> ok:false with the exit code
+
+== download target saves fixed files into models/<category> ==
+  ok   - the download target resolves ok against a reachable server
+  ok   - the voice model file landed in models/voice
+  ok   - detect() sees the downloaded files as installed
+
+== ollama target validates the model name and delegates to the puller ==
+  ok   - ollama-model pulls the default model via the injected puller
+  ok   - a valid custom model tag is passed through
+  ok   - a model name with shell metacharacters -> BAD_MODEL
+
+== handoff target opens the official page (GUI installer) ==
+  ok   - stability-matrix is a handoff that opens its download page
+
+== auto() runs the whole sequence in order and reports each ==
+  ok   - auto() attempts every target in the order
+  ok   - auto() keeps the keystone-first order
+  ok   - auto() reports how many succeeded
+
+== Python resolution: pick a wheel-compatible interpreter, and guide when it is too new ==
+  ok   - a machine with only Python 3.14 resolves as incompatible (no wheels)
+  ok   - the status explains the fix: install Python 3.12
+  ok   - a too-new-Python pip failure explains the cause and points to Python 3.12 (not just "exited 1")
+  ok   - a compatible Python (3.12) installs cleanly
+  ok   - the install prefers a prebuilt wheel over compiling from source (--prefer-binary)
+
+== Windows: find an installed 3.12 via the launcher AND the standard install dirs ==
+  ok   - the py launcher (py -3.12) is tried first on Windows
+  ok   - the per-user install dir (…/Programs/Python/Python312/python.exe) is probed directly
+  ok   - the per-machine Program Files/Python312 dir is probed too
+  ok   - the launcher is preferred over a hard-coded path
+
+33 passed, 0 failed
+
+== parseLine turns an nvidia-smi CSV row into structured usage ==
+  ok   - the GPU name is parsed
+  ok   - util + memory used/total are numbers
+  ok   - memory percent is derived (6144/24576 = 25%)
+  ok   - a malformed row -> null
+
+== read() reports GPUs when nvidia-smi answers ==
+  ok   - both GPUs are reported
+  ok   - the first GPU carries its live utilization
+
+== read() degrades cleanly when nvidia-smi is missing ==
+  ok   - a missing tool -> available:false with a reason (never throws)
+  ok   - empty output -> available:false (no GPU reported)
+
+8 passed, 0 failed
+
+== settings + status ==
+  ok   - settings round-trip through status()
+  ok   - the CFG/motion/seed sliders round-trip too
+
+== _extract handles the common backend shapes ==
+  ok   - videos[] array → base64
+  ok   - single data-URI → stripped base64
+  ok   - a url → videoUrl
+  ok   - an empty body → nothing
+
+== generate() guards ==
+  ok   - no prompt → NEED_PROMPT
+  ok   - disabled → VIDEO_DISABLED
+  ok   - enabled but no endpoint → NO_ENDPOINT
+
+== generate() posts and returns a clip from a reachable backend ==
+  ok   - a base64 clip comes back
+  ok   - the render params reached the backend
+  ok   - CFG/motion/seed are applied to the render
+
+12 passed, 0 failed
+
+== presets give a labelled dropdown per kind ==
+  ok   - image presets carry a label + a full endpoint URL
+  ok   - video presets exist too
+  ok   - the A1111 default (7860) is offered
+
+== probe(): up vs down ==
+  ok   - a listening server probes ok
+  ok   - a dead port probes not-ok (no throw)
+
+== detect(): points a candidate at the stub and finds it ==
+  ok   - detect() reports the reachable stub backend
+
+== test(): reachable reflects the base host ==
+  ok   - a reachable endpoint → reachable:true, with the base host
+  ok   - an unreachable endpoint → reachable:false
+  ok   - no url → NO_URL
+
+9 passed, 0 failed
+
+== stamp() is filesystem-safe ==
+  ok   - stamp has no ":" or "." so it is a valid folder name
+
+== bundle() gathers on-disk files + generated blobs into one folder ==
+  ok   - the bundle folder is created
+  ok   - the folder is timestamped
+  ok   - every on-disk log/state/db file is copied in
+  ok   - the debug log content is copied verbatim
+  ok   - the generated in-memory blobs are written alongside
+  ok   - a same-named file from another folder is kept (prefixed), not clobbered
+  ok   - a missing source is noted, not fatal
+  ok   - each entry reports its size
+
+== bundle() degrades cleanly ==
+  ok   - no logs folder -> a clean error, no throw
+  ok   - no files + no blobs -> an empty bundle, still ok
+
+11 passed, 0 failed
+
+> autoinjector-desktop@1.0.0 test:integration
+> node test/run.js
+
+  ok   - startup completed (all three panes created)
+
+== Persistence: restores transcript/roles/House Rule state on startup ==
+  ok   - transcript is capped to MAX_TRANSCRIPT (1000) on load, even when the saved file has more (got 1000)
+  ok   - the most recent entry survives the cap
+  ok   - the cap evicts from the OLDEST end, keeping exactly the newest 1000
+  ok   - custom roles restored from disk
+  ok   - House Rule mode/topic restored
+  ok   - restored run comes back NOT active — a restart must never auto-send anything
+  ok   - restored run shows as paused, so the user can hit Resume deliberately
+  ok   - nextSpeaker computed correctly from the restored order/phase/lastSpeakerIndex
+
+== Startup: NOTHING is sent to any pane on startup — the app stays silent until the user acts ==
+  ok   - chatgpt received NO send on startup (got 0)
+  ok   - claude received NO send on startup (got 0)
+  ok   - gemini received NO send on startup (got 0)
+
+== Debate: 3 participants, 2 rounds ==
+  ok   - starts successfully
+  ok   - kickoff sent to exactly one participant
+  ok   - turn 2: someone new received a message
+  ok   - turn 3: someone new received a message
+  ok   - turn 4: someone new received a message
+  ok   - turn 5: someone new received a message
+  ok   - turn 6: someone new received a message
+  ok   - no further message sent after the configured rounds complete
+  ok   - captured all 6 turns (got 6)
+  ok   - speaking order covered all 3 participants (got: claude, gemini, chatgpt, claude, gemini, chatgpt)
+  ok   - debate marked inactive once rounds are done
+  ok   - roundNum is 2 (got 2)
+
+== Devil & Angel: role isolation + fan-in ==
+  ok   - starts successfully
+  ok   - exactly one Middle, Devil and Angel, all different sites
+  ok   - devil/angel get nothing until middle speaks
+  ok   - devil's message is framed as coming from Middle
+  ok   - devil's first message explains its role
+  ok   - devil's message doesn't contain angel's message (they can't see each other)
+  ok   - middle hasn't been messaged yet — still waiting on angel too
+  ok   - middle's 2nd message contains BOTH devil's and angel's points combined into one send
+  ok   - still running — middle hasn't responded to the feedback yet, so 'rounds:1' shouldn't have ended it early
+  ok   - devil/angel are NOT re-consulted a second time — rounds:1 means exactly one fan-out cycle
+
+== Chargeback: referee stays silent, 1-round verdict ==
+  ok   - starts successfully
+  ok   - roles assigned: debater1, debater2, referee
+  ok   - referee's acknowledgment does not end or advance the run
+  ok   - referee got an informational copy of debater1's statement (sentLog=2)
+  ok   - referee received exactly 3 sends total (kickoff, one informational copy, one combined final+verdict) — not 4, confirming the two final-round messages were folded into one
+  ok   - the combined final message actually asks for a verdict
+  ok   - sanity: message is plain text, not literally the word debater2
+  ok   - the verdict reply is marked isVerdict in the transcript
+
+== Who Wants to Speak?: only opt-ins get a real turn ==
+  ok   - starts successfully
+  ok   - claude (said NO) never gets a second message
+  ok   - follow-up prompt is the real 'give your point' ask
+
+== Free-for-All + Brainstorm: mesh setup and teardown ==
+  ok   - free-for-all sets up full mesh routing (each site -> both others)
+  ok   - houserule:stop succeeds
+  ok   - BUGFIX: houserule:stop actually clears the mesh routing it set up
+  ok   - wrap-up assigns exactly one synthesizer
+  ok   - the synthesis reply is marked isFinalPlan in the transcript
+
+== Bugfix regression: disabling a participant removes it as a target too ==
+  ok   - full mesh set up as a baseline
+  ok   - BUGFIX: chatgpt no longer routes to disabled claude
+  ok   - BUGFIX: gemini no longer routes to disabled claude
+  ok   - claude's own outgoing routing is also cleared
+
+== Rotation: fixed ChatGPT -> Claude -> Gemini order, UPDATE hidden from transcript ==
+  ok   - starts successfully
+  ok   - ChatGPT (order[0]) gets the raw topic, unwrapped
+  ok   - before any reply, nextSpeaker is chatgpt (awaiting-first)
+  ok   - claude gets the RESPOND-framed message
+  ok   - gemini gets the UPDATE-framed message instructing it not to join yet
+  ok   - after chatgpt speaks, nextSpeaker is claude
+  ok   - gemini's 'UPDATED' ack never lands in the transcript
+  ok   - gemini's silent ack doesn't trigger any further sends
+  ok   - gemini gets a real RESPOND turn this time
+  ok   - chatgpt gets UPDATEd since it's not its turn
+  ok   - rotation wraps back around to chatgpt (RESPOND), completing the fixed cycle
+  ok   - claude gets UPDATEd on the wrap-around
+  ok   - all 3 real replies are visible in the transcript
+  ok   - no 'UPDATED' acknowledgment ever appears in the visible transcript
+  ok   - roundNum tracks completed RESPOND turns after the kickoff (got 2)
+  ok   - can't start a new run while rotation is still active
+
+== Blind Round: all three get the same question at once, none see any answer until all three have answered, then each sees the OTHER two's independent answers ==
+  ok   - refuses to start with fewer than 3 participants enabled
+  ok   - starts successfully with all 3 enabled
+  ok   - all three get the question in the SAME kickoff, not staggered
+  ok   - each site's prompt is framed as an independent ask, not a relay of anyone else's view
+  ok   - capture actually happened within the timeout
+  ok   - chatgpt answering FIRST does not get shown to claude or gemini yet -- nobody's seen anyone else's answer
+  ok   - still running -- only 1 of 3 have answered
+  ok   - pendingReplies reflects exactly who's left to answer
+  ok   - capture actually happened within the timeout
+  ok   - still nothing revealed with 2 of 3 in -- claude hasn't answered yet
+  ok   - only claude is left pending now
+  ok   - chatgpt's reveal includes gemini's independent answer, correctly labeled
+  ok   - chatgpt's reveal includes claude's independent answer too
+  ok   - chatgpt's OWN reveal does not include its own answer echoed back to it
+  ok   - claude's reveal includes both chatgpt's and gemini's independent answers
+  ok   - claude's OWN reveal does not include its own answer
+  ok   - the run ends itself automatically once the reveal goes out -- it's single-round by design
+  ok   - all three independent answers are visible in the transcript
+
+== Pause/Resume: routing round-trips correctly ==
+  ok   - free-for-all's full mesh is set up as a baseline
+  ok   - freshly started run is active, not paused
+  ok   - pause succeeds
+  ok   - pausing clears live routing so nothing keeps forwarding
+  ok   - meshActive turned off while paused
+  ok   - houseRule reports active:false, paused:true
+  ok   - mode is preserved across pause, not reset
+  ok   - can't start a new run while the current one is only paused
+  ok   - resume succeeds
+  ok   - resuming restores the exact routing that was active before pause
+  ok   - meshActive restored on resume
+  ok   - houseRule reports active:true, paused:false after resume
+
+== Role Assignment: custom persona clause injected generically ==
+  ok   - role stored for claude
+  ok   - role clause is prepended to a plain compose send
+  ok   - original message text still follows the role clause
+  ok   - role assignment doesn't leak to a different, unassigned site
+  ok   - role can be cleared back to general-purpose
+  ok   - no role clause once cleared
+
+== Window collapse: shrinks to a titlebar in place, restores exactly on expand ==
+  ok   - the real BaseWindow is reachable via the mock registry
+  ok   - an unknown window id is rejected cleanly
+  ok   - first toggle collapses the Automation window
+  ok   - height shrinks to the titlebar height (got 44)
+  ok   - position and width stay exactly where they were — it collapses in place, not somewhere else
+  ok   - second toggle expands it back
+  ok   - expanding restores the exact original bounds, not just 'some' larger size
+  ok   - the Conversation window no longer exists at all — everything lives in the Automation window now
+
+== Rate-limit detection: auto-pauses instead of cascading a usage-cap message ==
+  ok   - run is marked paused (not stopped) so Resume is available once the limit clears
+  ok   - pauseReason explains why it paused automatically
+  ok   - the rate-limit message was NOT relayed to the other AIs as if it were a real reply
+  ok   - the turn is still visible in the transcript, marked isRateLimited, so the user can see what actually happened
+
+== Rate-limit detection: also catches a usage-cap message during plain Auto-routing, not just House Rules ==
+  ok   - full mesh routing set up as a baseline, no House Rule active
+  ok   - the rate-limit message was NOT relayed through plain Auto-routing either, even though a mesh was fully wired up
+  ok   - there's no House Rule to pause -- nothing structured gets touched outside one
+  ok   - the mesh routing itself is left alone (not cleared) outside a House Rule run
+  ok   - the Activity Log records the detection and that no House Rule was active for it
+
+== waitingSince: tracks when a send started waiting, clears once captured ==
+  ok   - waitingSince is set to a timestamp once a send goes out
+  ok   - waitingSince is cleared back to null once the reply lands, not left stale
+
+== Completion: a reply is held until the site stops generating (Send button returns) ==
+  ok   - the reply is held while generating:true, even though its [FROM:] tag is present
+  ok   - nothing relayed to the other panes mid-generation
+  ok   - the moment the Send button returns (generating:false), the reply is captured
+  ok   - and it relays onward exactly as a normal completed reply
+
+== UI activity: a renderer ui:log lands in the one Activity Log (sanitized) ==
+  ok   - a ui:log adds an entry to the Activity Log
+  ok   - the entry carries the action, button id and label
+  ok   - action + message are length-capped and sanitized
+
+== Stop AIs Talking: relay:silence halts mesh + House Rule + Sequence + Butler at once ==
+  ok   - mesh/Auto is on as a baseline
+  ok   - a House Rule run is active
+  ok   - relay:silence returns ok
+  ok   - all mesh routing is cleared and Auto is off
+  ok   - the House Rule run is stopped
+  ok   - participants stay checked — only the messaging stopped
+  ok   - relay:silence also stops the Butler task (status=finished)
+
+== Models folder: the app reports one findable models home + its inventory ==
+  ok   - models:info returns the models root (C:\Users\javon\Documents\git\AutoInjector\stuff and thing\models)
+  ok   - it reports a per-category inventory (llm/image/…)
+  ok   - it reports whether Ollama is pointed at the folder
+  ok   - models:open resolves the folder path to open
+
+== Extract All writes the full conversation + activity/error log to one text file ==
+  ok   - extract wrote a file (C:\Users\javon\Documents\git\AutoInjector\stuff and thing\logs\autoinjector-extract-2026-10-20_06-30-27.txt)
+  ok   - it reports the counts (msgs=1, log=268)
+  ok   - the file has BOTH sections — the AI conversation and the activity/errors
+  ok   - the FULL reply text is in the file, not a truncated preview
+  ok   - activity-log events are included in the dump
+  ok   - it saves into the program's logs/ folder as a .txt
+
+== sendTextTo: two concurrent sends to the SAME target are serialized, not raced (the real cause of the ~50% SEND_NOT_CONFIRMED rate seen under mesh routing) ==
+  ok   - both sends landed (got 2)
+  ok   - FIFO order is preserved even though B was individually faster than A -- got [Message A (slow), Message B (fast)]
+  ok   - the two sends actually ran one after another (~300ms+ total), not in parallel (took 303ms)
+
+== sendTextTo: a failed send is retried automatically (up to 3 total attempts) before ever being reported as a failure ==
+  ok   - the overall call still succeeds -- the caller never sees the two earlier failures
+  ok   - exactly one real send lands (the successful 3rd attempt), not three separate messages
+  ok   - both earlier failed attempts are logged as retries, individually
+  ok   - the final success is logged with the real attempt count and flagged as self-recovered, not indistinguishable from a clean first try
+  ok   - the delivery ledger also records the real attempt count for the successful entry (got {"id":"MSG-55","ts":1792477828222,"source":null,"target":"claude","seq":"0055","textPreview":"Should self-recover\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: CLAUDE] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]","status":"delivered","error":null,"attempts":3,"duplicate":false})
+  ok   - after all 3 attempts fail, it's reported as a real failure, not silently swallowed
+  ok   - nothing ever actually landed -- all 3 attempts genuinely failed, not a partial success
+  ok   - all 3 attempts actually ran, backing off between each (~300ms for 2 backoffs), not fast-failing after one try (took 314ms)
+  ok   - the ledger records the real attempt count (3) even for a total failure, not left at 1
+  ok   - the final send-error log entry also carries the real attempt count
+
+== Delivery ledger: the program's own record of what was actually sent where, independent of what any AI believes happened ==
+  ok   - the underlying send still succeeds normally
+  ok   - exactly one ledger entry was recorded for the one send (got 1)
+  ok   - a successful compose (no fromSite) is recorded as delivered with no error and source:null (got {"id":"MSG-57","ts":1792477828948,"source":null,"target":"claude","seq":"0057","textPreview":"Ledger test message\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: CLAUDE] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]","status":"delivered","error":null,"attempts":1,"duplicate":false})
+  ok   - the ledger records what was actually sent, not just that something was
+  ok   - each entry gets its own program-assigned message id, never something an AI could claim to have invented
+  ok   - a first-of-its-kind send isn't flagged as a duplicate
+  ok   - a relayed send records the ACTUAL originating site as source, not left null or trusted from anything inside the message text
+  ok   - a failed send is recorded as failed with the real error, not silently dropped from the ledger (got {"id":"MSG-59","ts":1792477829629,"source":null,"target":"chatgpt","seq":"0059","textPreview":"This one will fail\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: CHATGPT] — the closing tag is how this app knows your reply is complete; without it your reply is not received.]","status":"failed","error":"SEND_NOT_CONFIRMED","attempts":3,"duplicate":false})
+  ok   - the first of two identical sends isn't flagged, the second (within the duplicate window) is (got flags [false, true])
+
+== Persistence: role/state changes get written to disk (debounced) ==
+  ok   - the file on disk reflects the new role
+
+== Prompt Library: built-in test prompt, save/send-different-text-per-AI/delete, persisted ==
+  ok   - the built-in 'System Test' prompt exists by default
+  ok   - chatgpt's version of the built-in prompt names the other two AIs (Claude and Gemini)
+  ok   - claude's version names the other two (ChatGPT and Gemini)
+  ok   - gemini's version names the other two (ChatGPT and Claude)
+  ok   - saving a new prompt succeeds
+  ok   - the new prompt comes back in the returned list
+  ok   - an intentionally blank field stays blank rather than getting defaulted to something
+  ok   - prompts:send succeeds when at least one field has text
+  ok   - claude (the blank field) receives nothing at all
+  ok   - chatgpt gets its own exact text verbatim, no wrapper (this isn't a forward)
+  ok   - gemini gets its own distinct text in that same send
+  ok   - sending with every field blank (or whitespace-only) is rejected, not a silent no-op
+  ok   - saving again with the same id updates it in place, doesn't duplicate
+  ok   - the name is updated by the edit
+  ok   - deleting removes it from the list
+  ok   - the deletion is reflected in the persisted state file too
+  ok   - a second built-in prompt explaining [TO: X] tag routing also exists by default
+  ok   - every AI's version actually mentions the [TO: X] tag syntax
+  ok   - each AI's explainer also teaches its own [FROM: X] closing tag (the end-tag completion signal)
+
+== Prompt Library's popup editor window: opens targeting the right prompt, closes on request, and saving there broadcasts to other windows ==
+  ok   - opening the editor for an existing prompt (id 1) succeeds
+  ok   - a real, separate window was created for it
+  ok   - it's open, not already closed
+  ok   - it navigates with the target prompt's id in the URL, so the popup's own page knows which one to load
+  ok   - requesting a blank/new prompt while the editor is already open re-targets it rather than opening a second window
+  ok   - re-navigates with no id — a blank prompt this time
+  ok   - still the same single window instance, not a second one
+  ok   - saving from what would be the popup's Save button works the same as any other save
+  ok   - the Automation window gets a 'prompts-changed' broadcast so its dropdown updates without a manual refresh
+  ok   - closing the editor succeeds
+  ok   - the window is actually closed
+
+== sequence:open / sequence-editor:close manage a single popup window ==
+  ok   - opens successfully
+  ok   - a real window opens for it
+  ok   - opening again re-focuses the SAME window, not a second one
+  ok   - closing succeeds
+  ok   - the window is actually closed
+
+== Prompt Sequence: steps fire one at a time, each waiting for that step's target to actually reply ==
+  ok   - sequence starts successfully
+  ... timed out waiting for: step 1 sent to chatgpt only
+  ok   - nobody else gets anything yet -- waiting on chatgpt's reply
+  ok   - sequence state reports step 0 active
+  ok   - an unaddressed site's reply does not advance the sequence
+  ... timed out waiting for: step 2 ('all') sent to all three once chatgpt's reply advances the sequence
+  ok   - advanced to step 1 (the 'all' step)
+  ... timed out waiting for: step 3 sent to claude once the first reply to the 'all' step lands
+  ok   - advanced to step 2 off the first of the three replies, without waiting for the other two
+  ok   - sequence reports inactive once every step is done
+
+== Prompt Sequence: rejects starting a second run while one is active, and filters malformed steps ==
+  ok   - first run starts
+  ok   - a second run while one is active is rejected
+  ok   - sequence:stop succeeds
+  ok   - stopping mid-run marks it inactive
+  ok   - steps with a bad target or blank-after-trim text are filtered out, and an empty result after filtering is rejected
+
+== site:zoom clamps the factor and calls setZoomFactor on the real embedded page ==
+  ok   - an in-range factor passes through unchanged
+  ok   - setZoomFactor was actually called with it
+  ok   - an out-of-range high factor is clamped to the max (2)
+  ok   - an out-of-range low factor is clamped to the min (0.4)
+
+== automation.js: a picked override is tried BEFORE the built-in candidates, not instead of them ==
+  ok   - input override is tried first, built-ins still follow as fallback
+  ok   - send override is tried first, built-ins still follow as fallback
+  ok   - with no override, the built-in candidate list is used unmodified
+  ok   - overrides argument is optional -- omitting it entirely doesn't throw
+  ok   - assistant override is tried first for reading too, with built-ins as fallback
+  ok   - with no override, reading uses the built-in candidate list unmodified
+  ok   - the pick script carries the marker the test mock (and nothing else) keys off of
+  ok   - the requested role is embedded in the script
+
+== Selector picker: click-to-pick overrides are captured, take priority, persist, and can be cleared ==
+  ok   - starts with no overrides for claude
+  ok   - a successful pick returns the captured selector
+  ok   - the injected script actually requested the 'input' role
+  ok   - the override is stored and visible via state:get
+  ok   - the Activity Log records that a pick started, not just its eventual result
+  ok   - the Activity Log records the picked selector and tag on success
+  ok   - the override survives to the persisted state file
+  ok   - a different site/role picks independently and returns its own sample text
+  ok   - claude's assistant role is untouched by gemini's pick
+  ok   - gemini's assistant override is stored separately
+  ok   - the Activity Log also records the sample text that was actually captured, so you can tell a good pick from a bad one just by reading the log
+  ok   - a pick that times out (no click) is reported, not silently ignored
+  ok   - a failed pick never stores an override
+  ok   - a failed pick is logged with its specific reason too, not silently dropped
+  ok   - an unknown site is rejected
+  ok   - an unknown role is rejected
+  ok   - clearing succeeds
+  ok   - the override is gone after clearing
+
+== Selector picker: a click alone isn't enough -- the pick is validated against the live page before it's ever saved ==
+  ok   - a selector that doesn't actually resolve back to any element (matchCount 0) is rejected, not saved
+  ok   - the rejected pick never becomes an override
+  ok   - the Activity Log records why it was rejected
+  ok   - a matched but zero-size/hidden element is rejected
+  ok   - an element of the wrong kind for the role (e.g. not a button for 'send') is rejected
+  ok   - an 'assistant' pick whose sample just echoes the last message WE sent is rejected, not saved as if it read a real reply
+  ok   - the echo pick never becomes an override
+  ok   - a pick that passes every check still saves normally
+  ok   - the valid override is actually stored
+
+== Saved logins: encrypted at rest, decrypted only for an explicit fill, never sent to the renderer or logged in plaintext ==
+  ok   - starts with no saved logins for claude
+  ok   - saving a login succeeds
+  ok   - the response includes the new entry's label/username
+  ok   - the password (encrypted or not) is NEVER sent back to the renderer, not even the ciphertext
+  ok   - logins:list reflects the save
+  ok   - the raw password never appears anywhere in the persisted state file
+  ok   - what IS persisted is the encrypted ciphertext, keyed under encryptedPassword, distinct from the raw password
+  ok   - filling a saved login succeeds and reports it submitted
+  ok   - the DOM script actually received the real, correctly-decrypted username and password
+  ok   - the raw password never appears in the Activity Log either, including around the fill action
+  ok   - a save is logged with the label/username but never the password
+  ok   - a fill is logged as starting and succeeding, by label, never by credential value
+  ok   - a second, independent login can be saved for the same site
+  ok   - deleting one login leaves the other untouched
+  ok   - deleting an already-gone id is rejected cleanly, not a silent no-op
+  ok   - an unknown site is rejected
+  ok   - a blank label is rejected
+  ok   - a blank username is rejected
+  ok   - a blank password is rejected
+  ok   - filling a nonexistent saved login is rejected cleanly
+  ok   - refuses to save at all when secure storage isn't available, rather than falling back to storing plaintext
+  ok   - a multi-step login (only one field present) is reported honestly, not as a full success or a failure
+  ok   - no login fields found on screen is reported distinctly, not confused with a real failure
+
+== Connectivity Test: sends a reverse-the-token challenge, waits for it to come back transformed, and reports each distinct outcome (pass/too-broad/echo/mismatch/send-failure) ==
+  ok   - the test prompt asks for the token REVERSED, not echoed verbatim -- a selector that just reads the sent prompt back can't satisfy that
+  ok   - a token was actually embedded in the sent prompt
+  ok   - a reply containing the reversed token (and not the original) is reported as a pass
+  ok   - the Activity Log records the test starting, with both the original and reversed token
+  ok   - the Activity Log shows it's specifically waiting on a reply now, not just silence
+  ok   - the Activity Log records the pass
+  ok   - a capture containing BOTH the original and reversed token is reported as SELECTOR_TOO_BROAD, not a pass
+  ok   - the Activity Log records the too-broad verdict
+  ok   - a capture containing only the ORIGINAL token (never the reversed form) is reported as REPLY_ECHO, not a pass
+  ok   - a reply that arrives but matches neither the original nor reversed token is reported as REPLY_MISMATCH, not a pass
+  ok   - the mismatch result carries back exactly what WAS captured, so a broken read-selector can actually be diagnosed
+  ok   - the Activity Log records the mismatch AND what was actually captured instead
+  ok   - a send that never actually submits is reported at the send stage, not misread as a missing reply
+  ok   - a send-stage failure is logged distinctly from a reply-stage failure
+  ok   - an unknown site is rejected
+  ok   - a second test for the same site while one is already running is rejected
+  ok   - the original in-flight test still resolves normally afterward
+
+== The Tuner: runs the per-site connectivity check on all 3 sites, then a genuine A-to-B relay check on all 6 directed pairs ==
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg chatgpt->claude)
+  ok   - claude receives the forwarded reply verbatim, instruction included (leg chatgpt->claude)
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg chatgpt->gemini)
+  ok   - gemini receives the forwarded reply verbatim, instruction included (leg chatgpt->gemini)
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg claude->chatgpt)
+  ok   - chatgpt receives the forwarded reply verbatim, instruction included (leg claude->chatgpt)
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg claude->gemini)
+  ok   - gemini receives the forwarded reply verbatim, instruction included (leg claude->gemini)
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg gemini->chatgpt)
+  ok   - chatgpt receives the forwarded reply verbatim, instruction included (leg gemini->chatgpt)
+  ok   - the relay prompt asks for the self-selecting conditional reply, not a literal "relay this" instruction (leg gemini->claude)
+  ok   - claude receives the forwarded reply verbatim, instruction included (leg gemini->claude)
+  ok   - the full tuner run resolves ok
+  ok   - all 3 site checks passed (got 3/3)
+  ok   - all 6 relay legs passed (got 6/6)
+  ok   - exactly 6 legs were tested, one per directed pair
+  ok   - every individual site result is itself a pass, not just the summary count
+  ok   - the tuner cleans up after itself -- no mesh routing left on for any site once it's done, since none was configured beforehand
+  ok   - the Activity Log records the run starting and its final tally
+
+== The Tuner: refuses to run twice at once, and a manual Test is refused while it's running ==
+  ok   - a second tuner run while one is active is rejected
+  ok   - a manual 🧪 Test is refused while the tuner is running, rather than racing it
+
+== The Tuner: a relay leg whose internal forward silently fails to send is reported as exactly that, not confused with the target never answering ==
+  ... timed out waiting for: tuner connectivity check reaches chatgpt
+  ... timed out waiting for: relay prompt reaches chatgpt (leg chatgpt->gemini)
+  ok   - the leg result itself carries the forward-send stage and real error (got {"ok":false,"leg":"chatgpt->claude","source":"chatgpt","target":"claude","stage":"forward-send","error":"SEND_NOT_CONFIRMED"})
+  ok   - exactly the one sabotaged leg fails, the other 5 (answered normally) still pass
+
+== Manager: configuring the provider, and connection testing ==
+  ok   - a well-formed config is accepted
+  ok   - the response confirms a key is set without ever echoing the raw key back
+  ok   - state:get reflects the saved config, key redacted
+  ok   - an unrecognized provider is rejected
+  ok   - a tier outside 1-4 is rejected
+  ok   - testing the connection with nothing configured is rejected before attempting any network call
+  ok   - a configured-but-unreachable endpoint reports a real, non-crashing connection failure
+
+== Manager: full task lifecycle -- classify/delegate, capture a real reply, finish, and check the on-disk project files ==
+  ok   - starting a task with no endpoint/model configured is rejected
+  ok   - starting a task with a blank request is rejected
+  ok   - starting a properly-configured task succeeds and returns a taskId
+  ok   - the assignment text and a task-identifying wrapper both reach the real send
+  ok   - the task is now waiting on chatgpt specifically
+  ok   - exactly one manager decision call happened before delegation paused the loop
+  ok   - the completed assignment carries the real captured response text
+  ok   - the Manager Activity Log records task completion
+  ok   - task events also flow into the existing global Activity Log, not just the manager-only one
+  ok   - a real project directory was created on disk
+  ok   - the saved checkpoint reflects the actual finished task
+  ok   - the raw, unedited response was preserved on disk separately from the manager's own summary
+  ok   - the dedicated manager:get-state handler returns the same task state
+
+== Jarvis: the supervisor's RUN_CODE action executes code via Open Interpreter and continues ==
+  ok   - the Jarvis/manager task started
+  ok   - RUN_CODE reached Open Interpreter with the task
+  ok   - the code result is folded back into the task as a codeRuns entry
+  ok   - a RUN_CODE decision with no task is rejected and never reaches Open Interpreter
+  ok   - the malformed RUN_CODE is recorded as rejected
+
+== N5 Tools: the butler's USE_TOOL action invokes a registered tool and continues ==
+  ok   - the task started
+  ok   - USE_TOOL reached the tool registry with the tool name + args
+  ok   - the tool result is folded back into the task as a toolCalls entry
+  ok   - a USE_TOOL naming an unregistered tool is rejected and never invoked
+  ok   - the unknown-tool USE_TOOL is recorded as rejected
+
+== Safeguard: a risk-"ask" tool is held for approval even with approval mode off ==
+  ok   - the risk-"ask" tool is held (paused, pendingApproval set) — not auto-run
+  ok   - the tool has NOT run while awaiting approval
+  ok   - once approved, the tool runs
+
+== N3 Memory: the butler REMEMBERs and RECALLs via the shared store ==
+  ok   - the task started
+  ok   - REMEMBER wrote the fact to the memory store
+  ok   - RECALL searched the store for the query
+  ok   - the recalled match is folded into the task's memories[]
+  ok   - relevant memories are seeded from the request at task start
+
+== Images: the butler's GENERATE_IMAGE action renders + records an image ==
+  ok   - the task started
+  ok   - GENERATE_IMAGE reached the image provider with the prompt
+  ok   - the saved image path is folded back as an images entry
+  ok   - the render is recorded as a project image
+  ok   - a GENERATE_IMAGE with no prompt is rejected and never rendered
+  ok   - the promptless GENERATE_IMAGE is recorded as rejected
+
+== Self-install: the butler's SETUP action installs a dependency and continues ==
+  ok   - the task started
+  ok   - SETUP reached the installer with the target id from the allowlist
+  ok   - the install result is folded back into the task as a setups entry
+  ok   - the butler is given the fixed list of setup targets it may choose from
+  ok   - a SETUP naming a target outside the allowlist is rejected and never installed
+  ok   - the off-allowlist SETUP is recorded as rejected
+
+== Butler Device: System Check reports capabilities; Send Intro messages the AIs ==
+  ok   - System Check returns a list of capability checks
+  ok   - the check covers the butler's own capabilities (tools, chat AIs, …)
+  ok   - it reports how many capabilities are working
+  ok   - the check reports detailed install status per dependency (installed vs not)
+  ok   - it lists which dependencies are missing + whether they can be installed
+  ok   - Install Missing installs the not-installed dependencies and reports each
+  ok   - Send Intro targets all three enabled AIs
+  ok   - the intro message is actually sent to the panes
+  ok   - chatgpt received the who-I-am + rules intro (envelope explained)
+  ok   - claude received the who-I-am + rules intro (envelope explained)
+  ok   - gemini received the who-I-am + rules intro (envelope explained)
+
+== Butler handling mode: the toggle + call-sign decide who does the task ==
+  ok   - an explicit 'himself' mode is stored on the task
+  ok   - an explicit 'delegate' mode is stored
+  ok   - in auto, a computer-task keyword ('install') makes it his own job (call-sign)
+  ok   - a leading '!' forces 'himself' AND is stripped from the task text
+  ok   - a plain request with no call-sign stays in auto (the butler decides)
+
+== Butler converse: a plain chat reply, no task started ==
+  ok   - butler:chat returns a conversational reply from the model
+  ok   - the message reaches the conversational path (not the action loop)
+  ok   - converse does NOT start a managed task
+  ok   - a follow-up chat turn includes the prior exchange as history
+
+== Butler: a model that can't issue valid commands is called out, not spun forever ==
+  ok   - the butler tells the user their model can't issue commands + how to fix it
+  ok   - the task is parked (error), not left running
+
+== Butler toolbox: computer-power tools are approval-gated + authored code isn't false-flagged ==
+  ok   - run-command is held for the user's approval, never auto-run
+  ok   - run-command passes validation
+  ok   - create-tool reaches the approval gate
+  ok   - authored code is NOT falsely blocked by the code-injection scan (approval-gated instead)
+
+== Butler capability test: actually exercises every capability and reports what really worked ==
+  ok   - the deep capability test returns a per-capability result list
+  ok   - the test covers "/Run code/"
+  ok   - the test covers "/Open a file/"
+  ok   - the test covers "/Tools/"
+  ok   - the test covers "/Memory/"
+  ok   - the test covers "/Image/"
+  ok   - the test covers "/Video/"
+  ok   - the test covers "/Voice/"
+  ok   - the test covers "/Talk to/"
+  ok   - Run code actually executed a line via Open Interpreter
+  ok   - Tools actually invoked the built-in read-file tool
+  ok   - Memory actually remembered a fact and searched it back
+  ok   - Image actually rendered a test image
+  ok   - Video actually rendered a short test clip
+  ok   - Voice actually spoke a phrase
+  ok   - each exercised capability is marked as actually working (✅), not merely configured
+  ok   - all three AI panes are represented, and none is a false positive without a real reply
+  ok   - it tallies how many capabilities really worked (the 7 exercised locally)
+
+== Capability sweep: the butler runs every action in one fluid task ==
+  ok   - the sweep task started
+  ok   - the whole capability sweep completes without stalling (status: finished)
+  ok   - USE_TOOL fired during the sweep
+  ok   - RUN_CODE fired during the sweep
+  ok   - REMEMBER + RECALL fired during the sweep
+  ok   - GENERATE_IMAGE fired during the sweep
+  ok   - SETUP installed the code-run keystone during the sweep
+  ok   - every capability left its result on the task — no gaps
+
+== N4 Awareness: the butler is handed a live pane-availability picture each turn ==
+  ok   - the snapshot carries an awareness object with a per-pane picture
+  ok   - a disabled pane is marked unavailable
+  ok   - the manager model receives the awareness object in its state
+  ok   - the manager model is also told which tools are available
+
+== Ack-Brain: the butler emits an instant acknowledgment the moment a task starts ==
+  ok   - an 'ack' entry is logged the instant the task starts
+  ok   - the ack echoes the goal ('On it — working on: ...')
+  ok   - the ack comes before the first decision/action
+
+== Manager: approval mode holds an action for a human decision before it ever reaches a real send ==
+  ok   - task starts
+  ok   - the proposed action is held for approval, visible to the UI
+  ok   - critically, nothing was actually sent yet -- approval gates real side effects, not just visibility
+  ok   - rejecting succeeds
+  ok   - rejecting truly never sent anything
+  ok   - the rejected DELEGATE is gone and a fresh decision is what's pending now
+  ok   - the rejection itself, with its reason, is recorded in the manager's own action history
+  ok   - approving succeeds
+  ok   - the send carries the exact assignment that was approved
+
+== Manager: an invalid decision is rejected, escalates the tier after repeating, and a small maximumTurns cap still ends the task ==
+  ok   - the task itself starts fine -- the failure is in what the manager proposes, not in starting
+  ok   - the tier escalated at least once while repeatedly failing to make progress (got tier 3)
+  ok   - each rejected decision is recorded with the specific reason it was rejected for
+  ok   - the Manager Activity Log explains exactly why the task ended, not just that it did
+  ok   - an invalid target never results in an actual send to anyone
+
+== Manager: a no-progress 'thinking' loop stops and asks the user instead of grinding to MAX_TURNS ==
+  ok   - the task starts
+  ok   - the task ends with NEEDS_INPUT (the butler is stuck waiting on the user)
+  ok   - it broke on the stall detector, NOT by exhausting the 20-turn cap
+  ok   - it stopped early (turn 5), well before the turn cap
+  ok   - the butler surfaced a real question to the user, echoing WHY it was stuck (from its own last reason)
+
+== Manager: an explicit ESCALATE action jumps straight to the requested tier, Tier 4 routes to a real AI pane instead of the configured provider, and it de-escalates back down afterward ==
+  ok   - task starts
+  ok   - the adjudication send is clearly labeled as such
+  ok   - the tier actually reached 4, exactly as the ESCALATE action requested, not just incrementally
+  ok   - Tier 4 does NOT call the configured RunPod/Ollama/LM Studio provider at all -- only the initial ESCALATE decision did
+  ok   - de-escalated back down from Tier 4 after making progress again (got tier 3)
+  ok   - exactly one real call to the configured provider happened after de-escalating, to produce the FINISH decision
+
+== Manager: a SAVE action writes real content to disk under the task's own final/ folder, and an unsafe path is refused ==
+  ok   - task starts
+  ok   - the exact saved content lands on disk at the expected path
+  ok   - the unsafe path is caught and rejected specifically, never silently written
+
+== Manager: pause/resume/stop controls work without disturbing an in-flight delegation ==
+  ok   - pausing succeeds while waiting on a reply
+  ok   - status reflects paused
+  ok   - resuming succeeds
+  ok   - resuming a task that was still waiting on a reply goes back to waiting, not straight to another decision
+  ok   - pause/resume never re-sent anything
+  ok   - stopping succeeds
+  ok   - stopping ends the task and clears anything it was still waiting on
+
+== Roundtable v2 baseline: [TO: X] tag parsing, stripping, and routing run always, with no House Rule started ==
+  ok   - relayed text has the tag stripped, framed with the usual [ChatGPT says] wrapper like any other forward
+  ok   - the visible transcript turn is tag-stripped and carries roundtableTag
+  ok   - no raw tag leaks into the visible text
+  ok   - claude itself gets no copy of its own [TO: ALL] message
+  ok   - TO:USER triggers zero relays
+  ok   - TO:USER turn is tag-stripped
+  ok   - TO:NONE never appears in the transcript
+  ok   - TO:NONE triggers zero relays
+  ok   - missing tag defaults to USER (Rule 1's documented fallback)
+  ok   - tag parsing is case-insensitive
+  ok   - a site addressing itself triggers no relay back to itself
+
+== Bugfix regression: mesh routing (Auto-Both) and a [TO: X] tag pointing at the SAME target must not both send -- confirmed real duplicate-delivery bug from a live test session ==
+  ok   - claude (the tag's target) gets exactly ONE copy, not two (got 1)
+  ok   - gemini (not addressed by the tag) still correctly gets its own separate mesh copy, exactly one (got 1)
+  ok   - claude's one copy is the clean, tag-stripped version (tag routing's copy), never a raw mesh copy with the tag still embedded
+  ok   - gemini's mesh copy is now the SAME clean, envelope-stripped body as the tag-routed copy -- mesh no longer leaks the raw [TO:]/[FROM:] tags to a pane the reply wasn't addressed to
+  ok   - the delivery ledger also shows exactly one entry, correctly not flagged as a duplicate
+  ok   - both get exactly one copy each, not two (got chatgpt:1, claude:1)
+
+== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==
+  ok   - debate starts successfully
+  ok   - mesh route gemini->chatgpt enabled
+  ok   - mesh route gemini->claude enabled
+  ok   - chatgpt gets exactly ONE message for this turn, not a duplicate (got 1)
+  ok   - claude gets exactly ONE message for this turn, not a duplicate (got 1)
+  ok   - exactly one of the two received debate's own worded reaction (identifying the real next speaker) -- dedup let the House Rule's send win, same as tag routing already wins over mesh
+  ok   - the OTHER site's one copy is the untouched raw mesh forward (just wrapped in the usual '[X says]' framing every mesh forward gets), not a second copy of debate's own wording -- confirms this isn't two copies landing on the same site under a different guise
+
+== A House Rule turn whose send fails all 3 retry attempts auto-pauses the run (pauseReason: 'send-failed'), instead of leaving it silently 'active' forever waiting on a reply that can never arrive ==
+  ok   - debate starts successfully
+  ok   - the run is now paused, not left silently 'active' forever waiting on a reply that will never come
+  ok   - paused with the specific 'send-failed' reason, distinguishable from a rate-limit pause (got send-failed)
+  ok   - routing was cleared when it paused, same as a rate-limit pause
+  ok   - the pause is recorded in the Activity Log with the real reason and mode
+  ok   - the underlying send failure is also logged with its real attempt count, same as any other exhausted retry
+  ok   - the paused run can still be resumed cleanly, same as a rate-limit pause
+
+== sendTextTo: a concurrent send to the same target waits out an in-progress retry's ENTIRE backoff, not just its current attempt (regression -- the queue slot used to be released during backoff, letting a concurrent send jump ahead and land out of order) ==
+  ok   - both sends eventually land (got 2)
+  ok   - the first call's message lands before the second's, even though the second was fired while the first was only mid-backoff -- got [First (retries once), Second (fired during first's backoff)]
+
+== Bugfix regression: Regenerate now goes through sendTextTo() -- the delivery ledger, the per-target send queue, and the 3-attempt retry -- instead of bypassing all three ==
+  ok   - initial compose succeeds
+  ok   - regenerate succeeds
+  ok   - regenerate re-sends the exact same body verbatim (not re-wrapped), under a fresh message number
+  ok   - regenerate now records its own ledger entry, where it previously recorded none at all (got 1)
+  ok   - the regenerate's ledger entry reflects a real delivered send
+  ok   - correctly flagged duplicate:true -- a regenerate IS an intentional re-send of identical text, and the ledger surfaces that rather than hiding it
+  ok   - a regenerate that needs a retry still eventually succeeds
+  ok   - the regenerate's ledger entry shows the real attempt count -- it self-recovered via retry, same as any other send path (got {"id":"MSG-154","ts":1792478096330,"source":null,"target":"gemini","seq":"0154","textPreview":"Will need a retry to regenerate\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: GEMINI] — the closing tag is how this app knows your reply is complete; without it your reply is no","status":"delivered","error":null,"attempts":2,"duplicate":true})
+  ok   - the failed first attempt is logged as a retry, same as any other send
+  ok   - an invalid site is rejected as BAD_SITE
+
+== A House Rule 'stage' suspends tag-routing while active, and tag-routing resumes automatically once it's stopped ==
+  ok   - debate stage starts successfully
+  ok   - exactly one send happened (debate's own next-speaker logic), not a tag-routed relay on top of it
+  ok   - while a stage is active, captured turns get no roundtableTag at all -- the [TO: CLAUDE] text is left as plain, untouched dialogue
+  ok   - the post-stage turn is tag-parsed again, same as baseline
+
+== End-tag protocol: a baseline reply is captured only once it closes with [FROM: X] (no stability timer) ==
+  ok   - an untagged reply is never captured, no matter how long it sits
+  ok   - both envelope tags are stripped from the captured text
+
+== Missing end-tag watchdog: an untagged reply is discarded and the AI is re-sent the protocol, capped so it can't loop ==
+  ok   - the untagged reply is never captured (treated as lost)
+  ok   - the nudge tells gemini to resend with its own closing tag
+  ok   - the resend nudge is capped, not fired once per attempt (got 2 for 4 untagged messages)
+
+== Regression: a finished self-test's bare-token reply must NOT trip a spurious missing-[FROM:] nudge ==
+  ok   - the self-test passes on the bare reversed token
+  ok   - no missing-tag nudge is sent for the leftover self-test reply once the test ends
+
+== 'NONE' is a complete 'nothing to add' signal: swallowed silently, needs no [FROM:] tag, never nudged ==
+  ok   - a bare NONE never appears in the transcript
+  ok   - a bare NONE is NOT nudged for a missing [FROM:] tag (NONE is a tag in itself)
+  ok   - [TO: NONE] with no [FROM:] is also swallowed silently
+  ok   - [TO: NONE] is not nudged either
+  ok   - a markdown-formatted **NONE** is also swallowed silently
+
+== Robustness: loose [FROM:] name + short trailing tail still complete; empty envelope is swallowed ==
+  ok   - the loosely-named [FROM:] tag is still stripped from the body
+  ok   - an empty-body envelope produces no transcript bubble
+  ok   - an empty-body envelope relays nothing to another pane
+
+== Compose & Sequence teach the [FROM:] envelope on every baseline send ==
+  ok   - a compose send appends the envelope instruction naming the target's own [FROM:] tag
+  ok   - a sequence step send appends the envelope instruction
+
+== Message numbering: the program stamps every send with a running 4-digit [MSG #] header ==
+  ok   - every send begins with a [MSG #NNNN] header (4-digit, zero-padded)
+  ok   - the number increments by one per send (got 0165 -> 0166)
+  ok   - the ledger records the seq in its own field and keeps it out of the message body
+
+== Relay frame tells the receiver how it was addressed ([X → you] / [X → everyone]) ==
+  ok   - a directed [TO: CLAUDE] relay is framed '[ChatGPT → you]'
+  ok   - a [TO: ALL] relay is framed '[Gemini → everyone]'
+  ok   - a plain mesh forward stays neutral '[ChatGPT says]'
+
+== Loop guard: a short reply that keeps ping-ponging is shown but stops being relayed ==
+  ok   - relaying is capped after LOOP_MAX_REPEATS forwards of the same short body (got 3 for 5 sends)
+  ok   - the loop suppression is logged
+  ok   - every copy is still shown in the transcript — nothing is hidden, only the relay is stopped
+
+538 passed, 0 failed
+
+> autoinjector-desktop@1.0.0 test:e2e
+> node test/e2e/smoke.e2e.js
+
+These GUI tests need Playwright (not a project dependency).
+Install it first:  npm install --no-save playwright
+Then on Linux run under a virtual display:  xvfb-run -a npm run test:e2e
