@@ -2844,6 +2844,24 @@ function wireComposeCommands() {
 try { wireComposeCommands(); } catch (e) { console.error("compose command init failed", e); }
 try { wireLockers(); } catch (e) { console.error("locker browser init failed", e); }
 
+// ISS-001: the AI panes are native views drawn ON TOP of this page. Ask main to
+// re-place them the moment the page scrolls or a dialog opens/closes, so they
+// never sit over the sticky User Panel or a pop-up.
+function wirePaneSync() {
+  if (!window.api || typeof window.api.syncPanes !== "function") return;
+  let queued = false;
+  const kick = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; try { const p = window.api.syncPanes(); if (p && p.catch) p.catch(() => {}); } catch (_) {} });
+  };
+  window.addEventListener("scroll", kick, { passive: true, capture: true });
+  window.addEventListener("resize", kick, { passive: true });
+  const mo = new MutationObserver(kick);
+  for (const d of document.querySelectorAll('[role="dialog"], dialog')) mo.observe(d, { attributes: true, attributeFilter: ["class", "style", "open", "hidden"] });
+}
+try { wirePaneSync(); } catch (e) { console.error("pane sync init failed", e); }
+
 // ---- 🔬 Feature Test button: run / stop, live progress, results pop-up ----
 let featureTestRunning = false;
 function wireFeatureTest() {

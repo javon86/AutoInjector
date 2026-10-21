@@ -127,7 +127,31 @@ async function main() {
     assert(r.ok && !fs.existsSync(path.join(root, 'claude', 'listing.txt')), 'deleting inside the locker just works (no approval)');
     fs.writeFileSync(path.join(root, 'claude', 'tool.js'), 'console.log(1)');
     assert(P.checkOp('claude', { type: 'cmd', command: 'node tool.js' }).needsApproval === true, 'running a script needs approval');
-    assert(!P.checkOp('claude', { type: 'cmd', command: 'node missing.js' }).ok, 'a script that isn\'t there is refused');
+    const miss = P.checkOp('claude', { type: 'cmd', command: 'node missing.js' });
+    assert(miss.ok && miss.needsApproval === true, 'a script that isn\'t there YET still counts as a script (needs approval) — an earlier op may create it');
+    r = await P.runOp('claude', { type: 'cmd', command: 'node missing.js' }, { scriptsApproved: true });
+    assert(!r.ok && r.error === 'NOT_ALLOWED' && /doesn't exist/.test(r.output), 'running a missing script is still refused at run time');
+
+    console.log('\n== ISS-005: scripts never run without approval ==');
+    r = await P.runOp('claude', { type: 'cmd', command: 'node tool.js' }, ctx);
+    assert(!r.ok && r.error === 'NEEDS_APPROVAL', 'runOp refuses a script when the request was not approved');
+    r = await P.runOp('claude', { type: 'cmd', command: 'node tool.js' }, { ...ctx, scriptsApproved: 'yes' });
+    assert(!r.ok && r.error === 'NEEDS_APPROVAL', 'only scriptsApproved === true counts');
+    r = await P.runOp('claude', { type: 'cmd', command: 'node tool.js' }, { ...ctx, scriptsApproved: true });
+    assert(r.ok && r.output.trim() === '1', `an approved script runs (${JSON.stringify(r.output)})`);
+    // The exact report scenario: one block that first creates a script, then runs it.
+    const sneaky = L.parseRequest('[TO: TERMINAL]\n```\nwrite sneak.js\nconsole.log("pwned")\n```\n```\nnode sneak.js\n```\n[FROM: CLAUDE]');
+    const sneakyChecks = sneaky.map((op) => P.checkOp('claude', op));
+    assert(sneakyChecks.every((c) => c.ok) && sneakyChecks.some((c) => c.needsApproval), 'a block that creates then runs a script is flagged for approval up front');
+    const outs = [];
+    for (const op of sneaky) { const x = await P.runOp('claude', op, ctx); outs.push(x); if (!x.ok) break; }
+    assert(outs.length === 2 && outs[1].error === 'NEEDS_APPROVAL' && !/pwned/.test(outs[1].output || ''), 'and even if it reached runOp unapproved, the script does not run');
+
+    console.log('\n== ISS-004: icon-font / zero-width junk in captured code ==');
+    const junk = L.parseRequest('```\n\uE056dir\u200B\ntype notes\uFEFF.txt\n```');
+    assert(JSON.stringify(junk.map((o) => o.command)) === '["dir","type notes.txt"]', `private-use + zero-width chars are stripped (${JSON.stringify(junk)})`);
+    assert(L.cleanCapturedText('a\uE056b\u{F0001}c') === 'abc', 'cleanCapturedText strips BMP and supplementary private-use chars');
+    assert(L.cleanCapturedText('h\u00e9llo — ok') === 'h\u00e9llo — ok', 'normal accents and dashes are kept');
     console.log('\n== sharing: one request, look-only ==');
     let clock = Date.now();
     const S = L.createLockers({ root, platform: process.platform, now: () => clock });

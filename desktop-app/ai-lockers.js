@@ -88,8 +88,14 @@ const HELP_TEXT = [
 //  - any other block: each non-empty, non-comment line is a command.
 // No code block at all -> fall back to terminalProvider.extractCommands (bare
 // lines / $-prefixed lines).
+// Chat UIs sometimes leak icon-font glyphs (Private Use Area code points, e.g.
+// U+E056 from a "copy" button) and zero-width characters into a captured code
+// block. They are never valid in a command, so drop them before parsing.
+const INVISIBLE_JUNK = /[-​-‍⁠﻿]|[\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}]/gu;
+function cleanCapturedText(s) { return String(s || '').replace(INVISIBLE_JUNK, ''); }
+
 function parseRequest(body, maxOps = 20) {
-  const text = String(body || '').replace(/\r\n/g, '\n');
+  const text = cleanCapturedText(body).replace(/\r\n/g, '\n');
   const ops = [];
   const fence = /```[^\n`]*\n([\s\S]*?)```/g;
   let m; let sawFence = false;
@@ -238,7 +244,7 @@ function createLockers(opts = {}) {
 
   // Is this cmd line allowed in the site's locker? (pure check — runs nothing)
   // -> { ok:true, kind:'shell'|'script', newCwd? } | { ok:false, reason }
-  function checkCommand(site, line) {
+  function checkCommand(site, line, { allowMissingScript = false } = {}) {
     if (!sites.includes(site)) return { ok: false, reason: 'unknown AI' };
     const lx = lex(line);
     if (lx.error) return { ok: false, reason: lx.error };
@@ -260,7 +266,7 @@ function createLockers(opts = {}) {
         }
         const r = resolveInside(site, script);
         if (!r.ok) return { ok: false, reason: r.reason };
-        if (!fs.existsSync(r.abs)) return { ok: false, reason: `script "${script}" doesn't exist in your locker` };
+        if (!allowMissingScript && !fs.existsSync(r.abs)) return { ok: false, reason: `script "${script}" doesn't exist in your locker` };
         kind = 'script';
         continue;
       }
@@ -316,7 +322,7 @@ function createLockers(opts = {}) {
     }
     const first = String(op.command || '').trim().split(/\s+/)[0].toLowerCase();
     if (BUILTINS.has(first)) return checkBuiltin(site, op.command);
-    const c = checkCommand(site, op.command);
+    const c = checkCommand(site, op.command, { allowMissingScript: true });
     return c.ok ? { ok: true, needsApproval: c.kind === 'script' } : { ok: false, reason: c.reason };
   }
   function parseBuiltin(line) {
@@ -377,6 +383,10 @@ function createLockers(opts = {}) {
       if (BUILTINS.has(first)) return done(await runBuiltin(site, line, ctx));
       const c = checkCommand(site, line);
       if (!c.ok) return done({ ok: false, command: line, error: 'NOT_ALLOWED', output: c.reason });
+      if (c.kind === 'script' && ctx.scriptsApproved !== true) {
+        onLog('locker-script-blocked', { site, command: line });
+        return done({ ok: false, command: line, error: 'NEEDS_APPROVAL', output: 'Scripts only run after the user approves them. This one was not approved, so it was not run.' });
+      }
       const r = await terminalFor(site).run(line, { source: label(site) });
       if (r.ok && c.newCwd) cwd[site] = c.newCwd;
       return { ...r, command: line };
@@ -544,4 +554,4 @@ function createLockers(opts = {}) {
     grant, grantsFor, consumeGrants, listFiles, userFile };
 }
 
-module.exports = { createLockers, parseRequest, lex, HELP_TEXT, ALLOWED };
+module.exports = { createLockers, parseRequest, cleanCapturedText, lex, HELP_TEXT, ALLOWED };

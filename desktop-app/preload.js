@@ -140,6 +140,7 @@ contextBridge.exposeInMainWorld("api", {
   terminalReject: (id, reason) => ipcRenderer.invoke("terminal:reject", { id, reason }),
   terminalSendOutput: (targets) => ipcRenderer.invoke("terminal:send-output", { targets }),
   openLockers: () => ipcRenderer.invoke("lockers:open"),
+  syncPanes: () => ipcRenderer.invoke("panes:sync"),
   runFeatureTest: () => ipcRenderer.invoke("featuretest:run"),
   stopFeatureTest: () => ipcRenderer.invoke("featuretest:stop"),
   openFeatureTestReport: (file) => ipcRenderer.invoke("featuretest:open-report", { file }),

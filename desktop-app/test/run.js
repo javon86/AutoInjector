@@ -2191,6 +2191,17 @@ async function testAiAddressesTerminal() {
   await call("relay:silence", {});
   assert(((await call("terminal:state", {})).state.pending || []).length === 0, "Stop AIs Talking clears pending requests");
 
+  console.log("  -- ISS-005: a block that CREATES a script then runs it still asks first --");
+  await call("routing:auto-all", {});
+  try { fs.unlinkSync(path.join(st0.root, "claude", "sneak.js")); } catch (_) {} // the locker root persists between runs
+  say("claude", "[TO: TERMINAL]\n```\nwrite sneak.js\nconsole.log('sneak ran')\n```\n```\nnode sneak.js\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ((await call("terminal:state", {})).state.pending || []).length === 1, { label: "create-then-run is held for approval" });
+  assert(!fs.existsSync(path.join(st0.root, "claude", "sneak.js")), "nothing in the held request ran yet (not even the write)");
+  before = (await call("state:get", {})).ledger.length;
+  const sreq = (await call("terminal:state", {})).state.pending[0];
+  await call("terminal:approve", { id: sreq.id });
+  await waitUntil(async () => ledgerTo("claude", /sneak ran/, before), { label: "after the user approves, the script runs and Claude gets its output" });
+
   console.log("  -- user command + share output --");
   const ur = await call("terminal:run", { command: "echo from-user" });
   assert(ur.ok && /from-user/.test(ur.result.output), "the user's own command runs and returns its output");

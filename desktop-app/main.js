@@ -756,6 +756,8 @@ function layout() {
   controlsView.setBounds({ x: 0, y: 0, width: w, height: h });
 }
 
+const { clipPaneRects } = require("./pane-layout");
+
 async function syncPaneBounds() {
   if (!win || !controlsView || controlsView.webContents.isDestroyed()) return;
   let rects;
@@ -770,12 +772,23 @@ async function syncPaneBounds() {
           const r = el.getBoundingClientRect();
           out[site] = { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
         }
+        // ISS-001: native panes float ABOVE the HTML, so they must never be
+        // placed over the sticky User Panel or under an open dialog.
+        const up = document.getElementById("col-userpanel");
+        const upr = up ? up.getBoundingClientRect() : null;
+        out.__top = upr && getComputedStyle(up).position === "sticky" ? Math.max(0, Math.round(upr.bottom)) : 0;
+        out.__bottom = window.innerHeight;
+        out.__modal = Array.from(document.querySelectorAll('[role="dialog"], dialog[open]')).some((d) => {
+          const cs = getComputedStyle(d); const b = d.getBoundingClientRect();
+          return cs.display !== "none" && cs.visibility !== "hidden" && b.width > 0 && b.height > 0;
+        });
         return out;
       })();
     `);
   } catch {
     return;
   }
+  const visible = clipPaneRects(rects);
   for (const site of SITE_IDS) {
     const view = siteViews[site];
     if (!view || view.webContents.isDestroyed()) continue;
@@ -785,7 +798,7 @@ async function syncPaneBounds() {
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
       continue;
     }
-    const r = rects && rects[site];
+    const r = visible[site];
     if (!r || r.width < 4 || r.height < 4) {
       // Still enabled and participating -- just its pane got collapsed (or
       // this is a transient layout-measurement gap). Keep the view at a
@@ -2509,8 +2522,12 @@ function deliverToTerminal(turn) {
 async function executeTerminalRequest(req) {
   const L = getLockers();
   const results = [];
+  // Scripts run only if the user approved THIS request (or ticked Auto-run).
+  // ai-lockers.runOp enforces it, so a script can't slip through a block that
+  // looked script-free when it was checked.
+  const ctx = { ...lockerCtx, scriptsApproved: req.approved === true || terminalState.autoRunAI === true };
   for (const op of req.ops) {
-    const r = await L.runOp(req.from, op, lockerCtx);
+    const r = await L.runOp(req.from, op, ctx);
     results.push(r);
     if (!r.ok) break;
   }
@@ -2520,6 +2537,7 @@ async function executeTerminalRequest(req) {
   for (const r of results) {
     let status;
     if (r.error === "NOT_ALLOWED") status = "refused — not allowed in your locker";
+    else if (r.error === "NEEDS_APPROVAL") status = "refused — scripts need the user's approval";
     else if (r.error === "TIMEOUT") status = "still running — timed out waiting, output so far";
     else if (r.error && r.error !== "NONZERO_EXIT") status = `failed: ${r.error}`;
     else status = `exit ${r.exitCode == null ? "?" : r.exitCode}`;
@@ -2535,6 +2553,9 @@ async function executeTerminalRequest(req) {
   return { ok: true, results };
 }
 
+// Re-place the native AI panes right away (scroll, dialog open/close) instead
+// of waiting for the next PANE_SYNC_MS tick — ISS-001.
+ipcMain.handle("panes:sync", async () => { await syncPaneBounds().catch(() => {}); return { ok: true }; });
 ipcMain.handle("lockers:open", async () => {
   try {
     const L = getLockers();
@@ -2694,6 +2715,7 @@ ipcMain.handle("terminal:approve", async (_evt, { id } = {}) => {
   const req = takePending(id);
   if (!req) return { ok: false, error: "NOT_FOUND" };
   logEvent("terminal-request-approved", { id: req.id, from: req.from });
+  req.approved = true;
   executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
   return { ok: true };
 });
@@ -3535,7 +3557,7 @@ function buildAppMenu() {
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
         { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
-        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: "AutoInjector Desktop", detail: "Runs ChatGPT, Claude and Gemini together. See the User Guide (Help menu)." }); } },
+        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: `AutoInjector Desktop ${app.getVersion ? app.getVersion() : ""}`.trim(), detail: `Version ${app.getVersion ? app.getVersion() : "?"} · Electron ${process.versions.electron || "?"} · Node ${process.versions.node}\nRunning from: ${__dirname}\n\nRuns ChatGPT, Claude and Gemini together. See the User Guide (Help menu).` }); } },
       ] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
