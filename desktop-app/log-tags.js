@@ -38,7 +38,7 @@ const EXACT = {
   'menu-error': 'system', 'menu-init-error': 'system', 'persist-error': 'system',
   'poll-error': 'system', 'paused': 'system', 'stopped': 'system',
   // Chat — the three web AIs
-  'captured': 'chat', 'sent': 'chat', 'send-error': 'chat', 'send-retry': 'chat',
+  'captured': 'chat', 'sent': 'chat', 'send-error': 'chat', 'send-retry': 'chat', 'send-unverified': 'chat',
   'compose': 'chat', 'rate-limit-detected': 'chat',
   // Routing / relay between AIs
   'routing-changed': 'routing', 'relay-silenced': 'routing', 'loop-suppressed': 'routing',

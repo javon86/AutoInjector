@@ -1165,6 +1165,10 @@ function broadcastHouseRule() {
 // real contention. Only a genuinely concurrent second call for the same
 // target pays for serialization, by chaining after the first's promise.
 const sendQueues = {};
+// Panes that have shown at least one send PROVEN by its [MSG #n] number appearing
+// in the chat (see sendTextTo). Per run; a pane that never proves one is still
+// trusted on "box emptied" alone, with a send-unverified warning in the log.
+const sendVerifiedSeen = {};
 // Per-pane zoom for the embedded AI pages. Default 60% (override with the
 // AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
 const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
@@ -1220,16 +1224,23 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // the same target (e.g. a mesh forward) jump ahead of a message that's
   // still retrying and land out of order.
   let attempts = 0;
+  let markerBaseline = null; // set by the first try; lets a retry tell "already went out" from "never did"
   const res = await withSendQueue(target, async () => {
     let r;
     for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
       attempts = attempt;
       try {
-        r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true);
+        r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
       } catch (e) {
         r = { ok: false, error: String(e) };
       }
-      if (r && r.ok) break;
+      // The send script proves a send by spotting this message's [MSG #n] number
+      // in the conversation. Once a pane has proven sends that way, a send that
+      // only "emptied the box" without showing up is NOT trusted: the page can
+      // clear its box without sending (that is how ChatGPT went silent).
+      if (r && markerBaseline == null && Number.isInteger(r.markerBaseline)) markerBaseline = r.markerBaseline;
+      if (r && r.ok && r.verified === false && sendVerifiedSeen[target]) r = { ok: false, error: "SEND_UNVERIFIED" };
+      if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
       // E11: a provider-paused conversation won't recover by resending — the
       // composer is gone on purpose. Stop retrying and report it as itself.
       if (r && r.error === "PROVIDER_PAUSED") break;
@@ -1278,7 +1289,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     state.waitingSince[target] = Date.now();
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     broadcast("waiting-changed", { site: target, waiting: true });
-    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
+    if (res.verified === false) logEvent("send-unverified", { target, seq, note: "the box emptied but this message's number never showed in the chat" });
   }
   return res;
 }

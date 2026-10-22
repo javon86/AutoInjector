@@ -36,12 +36,12 @@ function assert(cond, msg) {
   return cond;
 }
 
-async function withFixture(file, fn) {
+async function withFixture(file, fn, query = "") {
   const executablePath = resolveExecutablePath();
   const browser = await chromium.launch(executablePath ? { executablePath } : {});
   try {
     const page = await browser.newPage();
-    await page.goto(`file://${path.join(__dirname, "fixtures", file)}`);
+    await page.goto(`file://${path.join(__dirname, "fixtures", file)}${query}`);
     await fn(page);
   } finally {
     await browser.close();
@@ -105,6 +105,54 @@ async function testClaudeSendNotConfirmedReal() {
   });
 }
 
+// The ChatGPT failure in the 2026-10-21 Extract All: 58 sends to ChatGPT logged
+// as "sent" (55 only on the 2nd try) and not one ChatGPT reply in 43 minutes.
+// These run the send script against an editor that ignores raw DOM writes.
+const sentOn = (page) => page.evaluate(() => window.__sent.slice());
+async function testStrictEditorReallySends() {
+  console.log("\n== buildSendScript('chatgpt') against a strict rich editor: the message REALLY goes out ==");
+  await withFixture("strict-editor.html", async (page) => {
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0007]\n[TO: CLAUDE]\nline two\n[FROM: GEMINI]"));
+    const sent = await sentOn(page);
+    assert(res.ok === true && res.verified === true, `reported sent AND proven by its [MSG #] number in the chat (got: ${JSON.stringify(res)})`);
+    assert(sent.length === 1, `the editor really posted it, once (posted ${sent.length})`);
+    assert(sent[0] === "[MSG #0007]\n[TO: CLAUDE]\nline two\n[FROM: GEMINI]", `line breaks survive (got: ${JSON.stringify(sent[0])})`);
+  });
+}
+async function testNoDuplicateOnSlowPage() {
+  console.log("\n== a page that clears its box slowly gets the message ONCE, even when retried ==");
+  await withFixture("strict-editor.html", async (page) => {
+    const text = "[MSG #0042]\nonly once please";
+    const first = await page.evaluate(buildSendScript("chatgpt", text));
+    // what main.js does after a failed confirmation: same text, plus the first try's baseline
+    const retry = await page.evaluate(buildSendScript("chatgpt", text, undefined, { markerBaseline: first.markerBaseline }));
+    const sent = await sentOn(page);
+    assert(first.ok === true && first.verified === true, `the first try is confirmed by its number in the chat, not by the box emptying (got: ${JSON.stringify(first)})`);
+    assert(retry.ok === true && retry.method === "already-sent", `a retry sees it already went out and does not post again (got: ${JSON.stringify(retry)})`);
+    assert(sent.length === 1, `posted exactly once (posted ${sent.length})`);
+  }, "?slow=1");
+}
+async function testOldNumberOnPageAfterRestart() {
+  console.log("\n== after an app restart, an old [MSG #0001] already in the chat doesn't block the new #0001 ==");
+  await withFixture("strict-editor.html", async (page) => {
+    await page.evaluate(() => { const d = document.createElement("div"); d.textContent = "[MSG #0001]\nfrom yesterday's run"; document.getElementById("log").appendChild(d); });
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0001]\ntoday's first message"));
+    const sent = await sentOn(page);
+    assert(res.ok === true && res.verified === true && res.method !== "already-sent", `the new message is sent, not mistaken for the old one (got: ${JSON.stringify(res)})`);
+    assert(sent.length === 1 && /today/.test(sent[0]), "it really went out");
+  });
+}
+async function testStrictEditorDeadButton() {
+  console.log("\n== a Send button that does nothing is still reported as a failure ==");
+  await withFixture("strict-editor.html", async (page) => {
+    await page.evaluate(() => { const b = document.getElementById("send"); const c = b.cloneNode(true); b.replaceWith(c); c.disabled = false; });
+    await page.evaluate(() => { document.getElementById("prompt-textarea").addEventListener("keydown", (e) => e.stopImmediatePropagation(), true); });
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0003]\nnobody will get this"));
+    assert(res.ok === false && res.error === "SEND_NOT_CONFIRMED", `no false "sent" (got: ${JSON.stringify(res)})`);
+    assert((await sentOn(page)).length === 0, "and nothing was posted");
+  });
+}
+
 async function testFileInputFinderExpressionReal() {
   console.log("\n== buildFileInputFinderExpression('claude') against a real Chromium DOM ==");
   await withFixture("claude-reply.html", async (page) => {
@@ -135,6 +183,10 @@ async function main() {
   await testClaudeSendReal();
   await testClaudeSendNotConfirmedReal();
   await testFileInputFinderExpressionReal();
+  await testStrictEditorReallySends();
+  await testNoDuplicateOnSlowPage();
+  await testOldNumberOnPageAfterRestart();
+  await testStrictEditorDeadButton();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

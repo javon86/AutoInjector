@@ -28,14 +28,29 @@ const DEFAULT_PAUSE_MARKERS = [
   "unable to continue the conversation",
 ];
 
-function buildSendScript(site, text, overrides) {
+// The "[MSG #0042]" header at the top of a send, or null.
+function messageMarker(text) {
+  const m = /^\[MSG #\d+\]/.exec(String(text || ""));
+  return m ? m[0] : null;
+}
+
+function buildSendScript(site, text, overrides, sendOpts) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
     INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS
+    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS,
+    // The [MSG #0042] header main.js stamps on every send. It is unique per send,
+    // so seeing it in the conversation (outside the composer) is PROOF the
+    // message really went out — see markerShown() below.
+    marker: messageMarker(text),
+    // How many times the marker was ALREADY in the chat before this send's
+    // first try (main.js passes it back in on retries). Numbers restart when
+    // the app restarts, so an old "[MSG #0001]" may already be on the page —
+    // only a count ABOVE this baseline proves THIS send landed.
+    markerBaseline: sendOpts && Number.isInteger(sendOpts.markerBaseline) ? sendOpts.markerBaseline : null
   });
 
   return `
@@ -73,6 +88,61 @@ function buildSendScript(site, text, overrides) {
       }
     }
 
+    function composerText(input) {
+      if (!input) return "";
+      return String((input.tagName === "TEXTAREA" ? input.value : (input.innerText || input.textContent)) || "");
+    }
+    const squash = (s) => String(s || "").replace(/\s+/g, "");
+    // Does the composer now hold (the start of) our text? Whitespace-insensitive,
+    // because editors turn line breaks into paragraphs.
+    function holdsText(input, text) {
+      const want = squash(text).slice(0, 60);
+      return !!want && squash(composerText(input)).indexOf(want) !== -1;
+    }
+
+    // Rich editors (ProseMirror, Lexical, Quill…) keep their OWN copy of what's
+    // typed. Writing textContent directly changes the screen but not that copy,
+    // so the page can wipe the box without ever sending (the false "sent" that
+    // starved ChatGPT). execCommand("insertText") goes through the browser's
+    // real editing pipeline, which every editor listens to.
+    function selectAllIn(input) {
+      focusNode(input);
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    const settle = () => new Promise((r) => setTimeout(r, 60)); // editors re-render a beat later
+    async function insertViaEditor(input, text) {
+      // 1) The browser's own editing command. Don't trust its return value
+      //    (editors that handle the edit themselves make it return false);
+      //    check the box instead.
+      try {
+        selectAllIn(input);
+        // Line by line, with a real line break between, so multi-line
+        // messages (code blocks, [TO:] on its own line) keep their shape.
+        const lines = String(text).split("\\n");
+        lines.forEach((line, i) => {
+          if (i > 0) document.execCommand("insertLineBreak");
+          if (line) document.execCommand("insertText", false, line);
+        });
+        await settle();
+        if (holdsText(input, text)) return "insertText";
+      } catch {}
+      // 2) A paste. Every rich editor handles paste itself, reading the
+      //    clipboard data rather than the screen.
+      try {
+        selectAllIn(input);
+        const dt = new DataTransfer();
+        dt.setData("text/plain", text);
+        input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+        await settle();
+        if (holdsText(input, text)) return "paste";
+      } catch {}
+      return "";
+    }
+
     async function injectText(text) {
       const input = qsAllAny(CFG.INPUT_CANDIDATES);
       if (!input) return { ok: false, error: "INPUT_NOT_FOUND" };
@@ -82,6 +152,8 @@ function buildSendScript(site, text, overrides) {
         try { setNativeValue(input, text); return { ok: true }; } catch {}
       }
       if (input.isContentEditable || input.getAttribute("contenteditable") === "true") {
+        const via = await insertViaEditor(input, text);
+        if (via) return { ok: true, via };
         try {
           input.focus();
           input.textContent = "";
@@ -113,27 +185,55 @@ function buildSendScript(site, text, overrides) {
     // usual to clear its input box (a big paste, a laggy tab) -- polling
     // over a longer window gives a genuinely slow-but-real send room to
     // actually confirm, instead of a one-shot guess.
+    // How many times our [MSG #n] marker shows in the page OUTSIDE the composer
+    // (i.e. in the conversation). > 0 = the message is really in the chat.
+    function markerCount() {
+      if (!CFG.marker) return 0;
+      const count = (s) => String(s || "").split(CFG.marker).length - 1;
+      let page = "";
+      try { page = document.body.innerText || ""; } catch { return 0; }
+      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const inBox = input && input.tagName !== "TEXTAREA" ? count(composerText(input)) : 0;
+      return Math.max(0, count(page) - inBox);
+    }
+    const baseline = CFG.markerBaseline != null ? CFG.markerBaseline : markerCount();
+    function markerShown() { return !!CFG.marker && markerCount() > baseline; }
+
+    // -> "seen" (marker in the conversation: proof), "empty" (box cleared, no
+    // proof yet), or "" (still sitting in the box). With a marker we keep
+    // watching for proof a little longer after the box clears.
     async function confirmSent() {
       const start = Date.now();
-      while (Date.now() - start < 2500) {
-        if (await inputIsEmpty()) return true;
+      let emptySince = 0;
+      while (Date.now() - start < 6000) {
+        if (markerShown()) return "seen";
+        if (await inputIsEmpty()) {
+          if (!CFG.marker) return "empty";
+          if (!emptySince) emptySince = Date.now();
+          if (Date.now() - emptySince > 3000) return "empty";
+        } else if (Date.now() - start > 2500 && !emptySince) {
+          return "";
+        }
         await new Promise((r) => setTimeout(r, 150));
       }
-      return inputIsEmpty();
+      return markerShown() ? "seen" : (await inputIsEmpty()) ? "empty" : "";
     }
+    const result = (how, method) => ({ ok: true, method, verified: how === "seen", markerBaseline: baseline });
 
     async function attemptSend() {
       const btn = qsAllAny(CFG.SEND_CANDIDATES);
       if (btn) {
         try { btn.click(); } catch {}
-        if (await confirmSent()) return { ok: true, method: "click" };
+        const how = await confirmSent();
+        if (how) return result(how, "click");
       }
       const active = document.activeElement || document.body;
       try {
         active.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
       } catch {}
-      if (await confirmSent()) return { ok: true, method: "enter" };
-      return { ok: false, error: "SEND_NOT_CONFIRMED" };
+      const how = await confirmSent();
+      if (how) return result(how, "enter");
+      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline };
     }
 
     // E11: distinguish a provider-paused conversation from a plain missing box.
@@ -148,6 +248,9 @@ function buildSendScript(site, text, overrides) {
       return null;
     }
 
+    // A retry of a send whose first try DID land (just too slowly to confirm)
+    // must not post the message twice.
+    if (markerShown()) return { ok: true, method: "already-sent", verified: true, markerBaseline: baseline };
     const inj = await injectText(CFG.text);
     if (!inj.ok) {
       if (inj.error === "INPUT_NOT_FOUND") {
