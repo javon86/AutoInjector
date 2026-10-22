@@ -513,13 +513,40 @@ async function testWindowCollapse() {
   const collapseRes = await call("window:toggle-collapse", { which: "automation" });
   assert(collapseRes.ok && collapseRes.collapsed === true, "first toggle collapses the Automation window");
   const collapsedBounds = automationWin.getBounds();
-  assert(collapsedBounds.height === 44, `height shrinks to the titlebar height (got ${collapsedBounds.height})`);
+  assert(collapsedBounds.height === 39, `height shrinks to the titlebar height (got ${collapsedBounds.height})`);
   assert(collapsedBounds.x === origBounds.x && collapsedBounds.y === origBounds.y && collapsedBounds.width === origBounds.width, "position and width stay exactly where they were — it collapses in place, not somewhere else");
 
   const expandRes = await call("window:toggle-collapse", { which: "automation" });
   assert(expandRes.ok && expandRes.collapsed === false, "second toggle expands it back");
   const restoredBounds = automationWin.getBounds();
   assert(JSON.stringify(restoredBounds) === JSON.stringify(origBounds), "expanding restores the exact original bounds, not just 'some' larger size");
+
+  // ISS-016: real-Windows cases — native frame, maximized, min size, moved while collapsed, views re-laid out.
+  const controls = mockElectron.__registry["controls-ui"];
+  automationWin._frameHeight = 31;
+  automationWin.setMinimumSize(800, 600);
+  automationWin.maximize();
+  await call("window:toggle-collapse", { which: "automation" });
+  const c2 = automationWin.getBounds();
+  assert(!automationWin.isMaximized(), "collapsing a maximized window un-maximizes it first");
+  assert(c2.height === 39 + 31 && automationWin.getContentSize()[1] === 39, `the 39px in-page titlebar stays visible below the native frame (outer ${c2.height})`);
+  assert(automationWin.getMinimumSize()[1] <= c2.height, "minimum size no longer blocks the collapsed height");
+  const again = await call("window:toggle-collapse", { which: "automation" });
+  assert(again.collapsed === false, "a second toggle expands (no double-collapse that would save a collapsed rect)");
+  assert(automationWin.isMaximized(), "a window collapsed while maximized comes back maximized");
+  assert(controls._bounds && controls._bounds.height === automationWin.getContentSize()[1] && controls._bounds.height > 39, "layout() re-fits the controls view to the restored content size, not the 39px bar");
+  automationWin.unmaximize();
+  assert(JSON.stringify(automationWin.getBounds()) === JSON.stringify(origBounds), "its normal (un-maximized) bounds are the saved ones, not the maximized rect");
+  assert(JSON.stringify(automationWin.getMinimumSize()) === JSON.stringify([800, 600]), "the original minimum size is restored");
+
+  await call("window:toggle-collapse", { which: "automation" });
+  automationWin.setBounds({ x: 300, y: 200 }); // user drags the collapsed bar
+  await call("window:toggle-collapse", { which: "automation" });
+  const moved = automationWin.getBounds();
+  assert(moved.x === 300 && moved.y === 200 && moved.width === origBounds.width && moved.height === origBounds.height, "expanding after a move restores size at the new spot, not a jump back");
+  automationWin.setBounds(origBounds);
+  automationWin.setMinimumSize(0, 0);
+  automationWin._frameHeight = 0;
 
   assert(!mockElectron.__windowRegistry["AutoInjector — Conversation"], "the Conversation window no longer exists at all — everything lives in the Automation window now");
 }

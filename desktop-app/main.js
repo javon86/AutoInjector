@@ -97,7 +97,10 @@ const PANE_SYNC_MS = 700;
 const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation", "blind-round"];
 const STAGE_MODES = new Set(HOUSE_RULES);
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "blind-round"]);
-const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
+// px of CONTENT kept visible when a top-level window collapses: controls.html's
+// #window-titlebar (38px + 1px border), which holds the expand button. The OS
+// frame (native title bar + borders, DPI-dependent on Windows) is added at runtime.
+const COLLAPSED_HEIGHT = 39;
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
@@ -164,8 +167,12 @@ const uiViews = []; // every renderer that should receive broadcasts
 // Per top-level window: whether it's currently collapsed to just a titlebar,
 // and (while collapsed) the full bounds to restore on expand.
 const windowCollapse = {
-  automation: { collapsed: false, savedBounds: null, savedMinSize: null }
+  automation: { collapsed: false, savedBounds: null, savedMinSize: null, wasMaximized: false }
 };
+function resetWindowCollapse(which) {
+  const entry = windowCollapse[which];
+  if (entry) Object.assign(entry, { collapsed: false, savedBounds: null, savedMinSize: null, wasMaximized: false });
+}
 
 function targetWindow(which) {
   return which === "automation" ? win : null;
@@ -986,7 +993,7 @@ function createWindow() {
 
   layout();
   win.on("resize", () => { layout(); syncPaneBounds(); });
-  win.on("closed", () => { win = null; });
+  win.on("closed", () => { win = null; resetWindowCollapse("automation"); }); // a recreated window starts expanded
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
   setInterval(healthTick, 5000);
@@ -5248,24 +5255,43 @@ ipcMain.handle("butler:send-intro", async (_evt, { targets } = {}) => { try { re
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
-  if (!target || !entry) return { ok: false, error: "NO_WINDOW" };
+  if (!target || !entry || (typeof target.isDestroyed === "function" && target.isDestroyed())) return { ok: false, error: "NO_WINDOW" };
+  const has = (fn) => typeof target[fn] === "function";
+  const maximized = () => has("isMaximized") && target.isMaximized();
 
   if (!entry.collapsed) {
-    entry.savedBounds = target.getBounds();
-    entry.savedMinSize = typeof target.getMinimumSize === "function" ? target.getMinimumSize() : null;
-    if (typeof target.setMinimumSize === "function") target.setMinimumSize(200, COLLAPSED_HEIGHT);
-    target.setBounds({ x: entry.savedBounds.x, y: entry.savedBounds.y, width: entry.savedBounds.width, height: COLLAPSED_HEIGHT });
+    // ISS-016: save the NORMAL bounds — a maximized rect would restore as a
+    // huge non-maximized window, and setBounds() on a maximized window is unreliable.
+    entry.wasMaximized = maximized();
+    if (entry.wasMaximized && has("unmaximize")) target.unmaximize();
+    const normal = entry.wasMaximized && has("getNormalBounds") ? target.getNormalBounds() : target.getBounds();
+    entry.savedBounds = normal;
+    entry.savedMinSize = has("getMinimumSize") ? target.getMinimumSize() : null;
+    // setBounds() is OUTER size; keep COLLAPSED_HEIGHT of content (the in-page
+    // titlebar with the expand button) visible below the native frame.
+    const [, contentH] = target.getContentSize();
+    const height = COLLAPSED_HEIGHT + Math.max(0, normal.height - contentH);
+    if (has("setMinimumSize")) target.setMinimumSize(Math.min(200, normal.width), height);
+    target.setBounds({ x: normal.x, y: normal.y, width: normal.width, height });
     entry.collapsed = true;
   } else {
-    if (entry.savedBounds) target.setBounds(entry.savedBounds);
-    if (entry.savedMinSize && typeof target.setMinimumSize === "function") target.setMinimumSize(entry.savedMinSize[0], entry.savedMinSize[1]);
-    entry.collapsed = false;
-    entry.savedBounds = null;
-    entry.savedMinSize = null;
+    if (maximized() && has("unmaximize")) target.unmaximize(); // e.g. titlebar double-clicked while collapsed
+    const { savedBounds, savedMinSize, wasMaximized } = entry;
+    resetWindowCollapse(which);
+    if (has("setMinimumSize")) target.setMinimumSize(...(Array.isArray(savedMinSize) ? savedMinSize : [0, 0]));
+    if (savedBounds) {
+      // Keep wherever the user dragged the collapsed bar; restore the size.
+      const here = target.getBounds();
+      target.setBounds({ x: here.x, y: here.y, width: savedBounds.width, height: savedBounds.height });
+    }
+    if (wasMaximized && has("maximize")) target.maximize();
   }
 
   logEvent("window-collapse-changed", { which, collapsed: entry.collapsed });
   broadcast("window-collapse-changed", { which, collapsed: entry.collapsed });
+  // Re-fit the views now (after the renderer has been told to show/hide #wrap)
+  // instead of trusting the 'resize' pass, which measured the old DOM state.
+  if (which === "automation") { layout(); syncPaneBounds().catch(() => {}); }
   return { ok: true, which, collapsed: entry.collapsed };
 });
 

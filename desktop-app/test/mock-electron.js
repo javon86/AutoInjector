@@ -141,7 +141,7 @@ class WebContentsView {
     this.webContents = new FakeWebContents(label);
     registry[label] = this;
   }
-  setBounds() {}
+  setBounds(b) { this._bounds = { ...b }; }
 }
 
 const windowRegistry = {};
@@ -153,9 +153,16 @@ class BaseWindow extends EventEmitter {
     this._bounds = { x: 0, y: 0, width: (opts && opts.width) || 1600, height: (opts && opts.height) || 1000 };
     this._minSize = [(opts && opts.minWidth) || 0, (opts && opts.minHeight) || 0];
     this._destroyed = false;
+    this._frameHeight = 0; // native title bar + borders (tests can set it; real Windows ~31-45px)
+    this._maximized = false;
+    this._normalBounds = null;
     if (opts && opts.title) windowRegistry[opts.title] = this;
   }
-  getContentSize() { return [this._bounds.width, this._bounds.height]; }
+  getContentSize() { return [this._bounds.width, Math.max(0, this._bounds.height - this._frameHeight)]; }
+  isMaximized() { return this._maximized; }
+  maximize() { if (this._maximized) return; this._normalBounds = { ...this._bounds }; this._maximized = true; this._bounds = { x: 0, y: 0, width: 1920, height: 1040 }; }
+  unmaximize() { if (!this._maximized) return; this._maximized = false; this._bounds = { ...this._normalBounds }; }
+  getNormalBounds() { return { ...(this._maximized ? this._normalBounds : this._bounds) }; }
   getBounds() { return { ...this._bounds }; }
   setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
   getMinimumSize() { return this._minSize.slice(); }

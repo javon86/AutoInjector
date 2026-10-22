@@ -1246,6 +1246,8 @@ async function main() {
   await testDeepCapabilityCheck();
   await testButlerModeToggleAndConverse();
   await testButlerLightAndColoredLog();
+  await testIss017StaleSavedAndConverseProse();
+  await testIss018NoDuplicateTabs();
   await testCapabilityPanelsWired();
   await testActivityLogCapturesEverything();
   await testTerminalZone();
@@ -1339,6 +1341,35 @@ async function testButlerModeToggleAndConverse() {
   // My own line is echoed into the butler window.
   assert(/You → 🤵/.test(doc.getElementById("jarvis-log").textContent) && /how's it going\?/.test(doc.getElementById("jarvis-log").textContent),
     "my converse message is echoed in the butler window");
+}
+
+async function testIss017StaleSavedAndConverseProse() {
+  console.log("\n== ISS-017: Butler 'Saved' clears on edit; Converse prose reply isn't truncated ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const sel = doc.getElementById("lsi-model");
+  const o = doc.createElement("option"); o.value = "llama3.1:8b"; o.textContent = "llama3.1:8b"; sel.appendChild(o); sel.value = "llama3.1:8b";
+  click(dom, "btn-lsi-save");
+  await new Promise((r) => setTimeout(r, 20));
+  const msg = doc.getElementById("lsi-msg");
+  assert(/^✓ Saved/.test(msg.textContent), "Save settings shows '✓ Saved'");
+  const ep = doc.getElementById("lsi-endpoint");
+  ep.value = "http://127.0.0.1:1234/v1/chat/completions";
+  ep.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  assert(!/Saved\./.test(msg.textContent) && /Unsaved/.test(msg.textContent), "editing the endpoint after Save clears the stale 'Saved'");
+  click(dom, "btn-lsi-save");
+  await new Promise((r) => setTimeout(r, 20));
+  sel.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  assert(/Unsaved/.test(msg.textContent), "changing the model after Save clears the stale 'Saved' too");
+
+  const prose = "Of course. " + "Here is a longer thought about your plan. ".repeat(20) + "THE END.";
+  if (api._managerLogCb) api._managerLogCb({ category: "response", summary: prose });
+  const last = [...doc.querySelectorAll("#jarvis-log .bl-line.bl-tome")].pop();
+  assert(last && /THE END\.$/.test(last.textContent), "a long Converse reply is shown in full in the butler window (not cut at 500 chars)");
+  if (api._managerLogCb) api._managerLogCb({ category: "decision", summary: "x".repeat(600) });
+  const dec = [...doc.querySelectorAll("#jarvis-log .bl-line.bl-butler")].pop();
+  assert(dec && /…$/.test(dec.textContent), "other long lines are still capped, but marked with an ellipsis");
 }
 
 async function testButlerLightAndColoredLog() {
@@ -1715,3 +1746,18 @@ main().catch((e) => {
   console.error("Test runner crashed:", e);
   process.exit(1);
 });
+
+async function testIss018NoDuplicateTabs() {
+  console.log("\n== ISS-018: minimizing a panel twice never adds a second tab ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  for (let i = 0; i < 6; i++) click(dom, "btn-collapse-global");
+  for (let i = 0; i < 3; i++) click(dom, "btn-collapse-houserules");
+  for (let i = 0; i < 2; i++) click(dom, "btn-collapse-prompts");
+  const tabs = [...doc.querySelectorAll("#top-tab-strip .collapsed-tab")].map((t) => t.textContent);
+  assert(tabs.length === 3, `one tab per minimized panel, not 6+3+2 (got ${tabs.length}: ${tabs.join(" | ")})`);
+  assert(doc.querySelectorAll("#tab-global").length === 1, "exactly one Global tab");
+  doc.getElementById("tab-global").click();
+  assert(!doc.getElementById("tab-global") && !doc.getElementById("col-global").classList.contains("hidden-collapsed"), "clicking the tab restores the panel and removes its tab");
+}

@@ -1475,6 +1475,7 @@ const COLLAPSIBLE_PANELS = {
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
+  if (el(`tab-${key}`)) return; // already minimized: never add a second tab
   el(panelId).classList.add("hidden-collapsed");
   const tab = document.createElement("button");
   tab.className = "collapsed-tab";
@@ -2175,6 +2176,16 @@ if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
   const r = await window.api.configureManagerProvider(cfg);
   if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Saved. Now press “Test” to check the connection, or type a goal for the Butler below." : `Save failed: ${lsiFriendly(r && r.error)}`;
 };
+// ISS-017: "✓ Saved" describes the endpoint/model as they were at Save time.
+// Once either is edited it's no longer true, so don't leave it standing.
+function lsiMarkUnsaved() {
+  const m = el("lsi-msg");
+  if (m && /^✓ Saved/.test(m.textContent)) m.textContent = "Unsaved changes — press “Save settings” (or Test).";
+}
+for (const id of ["lsi-endpoint", "lsi-model"]) {
+  const f = el(id);
+  if (f) { f.addEventListener("input", lsiMarkUnsaved); f.addEventListener("change", lsiMarkUnsaved); }
+}
 if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
   if (!window.api.testManagerConnection) return;
   if (el("lsi-msg")) el("lsi-msg").textContent = "Testing connection…";
@@ -2259,13 +2270,15 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
 //   • chatgpt/claude/gemini — each AI in its own colour (incl. AI↔AI)
 //   • to-ME   — anything addressed to me (an AI's reply, or the butler asking me
 //               something): its own bright colour AND 2× the size.
-function appendButlerLine({ cls, who, text }) {
+function appendButlerLine({ cls, who, text, max = 500 }) {
   const box = el("jarvis-log"); if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const row = document.createElement("div");
   row.className = "bl-line " + (cls || "bl-butler");
   const whoHtml = who ? `<span class="bl-who">${gpuEsc(who)}:</span> ` : "";
-  row.innerHTML = `${whoHtml}${gpuEsc(String(text == null ? "" : text).slice(0, 500))}`;
+  const full = String(text == null ? "" : text);
+  const body = max && full.length > max ? `${full.slice(0, max)}…` : full; // ISS-017: never cut silently
+  row.innerHTML = `${whoHtml}${gpuEsc(body)}`;
   box.appendChild(row);
   while (box.children.length > 140) box.removeChild(box.firstChild);
   if (nearBottom) box.scrollTop = box.scrollHeight; // keep the latest in view (chat feel)
@@ -2280,7 +2293,8 @@ if (window.api.onManagerLog) window.api.onManagerLog((e) => {
     appendButlerLine({ cls: "bl-" + targetSite, who: SITE_LABELS[targetSite], text: e.summary });
   } else if (e.category === "response") {
     // The butler delivering to ME (e.g. the stall-break question) — to-me, 2×.
-    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary });
+    // ISS-017: this is his Converse reply to me -- show all of it, not 500 chars.
+    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary, max: 0 });
   } else if (BUTLER_SYSTEM_CATEGORIES.has(e.category)) {
     appendButlerLine({ cls: "bl-system", who: "System", text: `${e.category}: ${e.summary || ""}` });
   } else {
@@ -2617,7 +2631,7 @@ el("btn-extract-all").onclick = async () => {
   try {
     const res = await window.api.extractAllLogs();
     if (res && res.ok) {
-      if (status) status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`;
+      if (status) { status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`; status.title = status.textContent; }
     } else if (status) {
       status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
     }
