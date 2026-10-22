@@ -689,6 +689,12 @@ instead.
   sending pane, or whether a `[TO: X]` tag is present. **Pause/Stop** in Global
   halt all routing. A reply tagged `[TO: USER]` is never forwarded (it's for you),
   and after 30 hand‑offs in a row relaying pauses until you send a message.
+- **An AI forgets its tags.** If a reply has no closing `[FROM: …]` tag it isn't
+  delivered and the AI is asked to resend it. If it has no opening `[TO: …]` tag it
+  goes to you only (or is passed on by Auto, if that's on). Either way the AI gets a
+  ⚠️ flag **plus the full rules for how to talk to the others** — the same text as the
+  Prompt Library's routing prompt, including any changes you made to it. At most 2
+  flags in a row per AI; none while **Stop AIs Talking** is on.
 - **Messages seem to go missing.** Use **Tools → Relay Trace report**. It lists,
   for each AI, how many messages were sent, proven in the chat, answered and
   passed on — and says where the rest stopped (sending, proving, replying or

@@ -176,6 +176,7 @@ const state = {
   captured: {}, // site -> { id, site, label, text, ts, pinned } | null — last stable reply seen
   pending: {}, // site -> { text, sinceTs, reprompted } — used to detect a stopped reply / a quiet pane with no end tag
   noTagReprompts: {}, // site -> count of consecutive "you forgot the [FROM:] tag, resend" nudges (reset when a valid tagged reply lands)
+  noToReminders: {}, // site -> count of consecutive "you forgot the [TO:] tag" reminders (TR-22; reset by a reply that has one)
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
   generating: {}, // site -> bool — the pane is actively producing a reply (its Stop button is showing / Send disabled), from pollSite's read
@@ -1713,19 +1714,31 @@ function withEnvelope(text, target) {
 // the WHOLE message with the envelope. Capped (MAX_NOTAG_REPROMPTS) so a model
 // that keeps forgetting can't loop forever: past the cap we stop nudging, and if
 // a book run was waiting on this pane we park it as stalled for the user.
-function composeEnvelopeReminder(site) {
+// TR-22: every "you got the tags wrong" flag carries the FULL how-to-talk
+// guide (the same text as the Prompt Library's routing prompt, including any
+// edits the user made to it), so the AI is re-taught the rules each time.
+function protocolGuideFor(site) {
+  const saved = (state.prompts || []).find((p) => p && p.id === 2);
+  const text = (saved && saved.text && String(saved.text[site] || "").trim()) || defaultRoutingExplainerPrompt().text[site] || "";
+  return text.replace(/^Quick reference, not a task[^.]*\.\s*/i, "");
+}
+function composeEnvelopeReminder(site, kind = "missing-from", { forwarded = 0 } = {}) {
   const name = String(site || "").toUpperCase() || "YOU";
+  const flag = kind === "missing-to" && forwarded
+    ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start. Auto routing passed it on this time, but don't rely on that: always start with [TO: who it's for]. No need to resend it.\n"
+    : kind === "missing-to"
+    ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start, so it went to the user ONLY. The other AIs did NOT get it.\n" +
+      "If it was meant for one of them (or everyone), send it again starting with [TO: CLAUDE] / [TO: CHATGPT] / [TO: GEMINI] / [TO: ALL] and ending with [FROM: " + name + "]. If it really was just for the user, reply NONE.\n"
+    : "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n" +
+      "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. Put nothing after the closing tag.\n";
   return (
-    "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
-    "Every message MUST use the communication envelope:\n" +
-    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: TERMINAL] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
-    "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
-    "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
-    "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
-    "Put nothing after the closing tag."
+    flag +
+    "\nQUICK CHECK every time: line 1 = [TO: who it's for] · last line = [FROM: " + name + "] · nothing after it.\n" +
+    "\nHOW WE TALK TO EACH OTHER (the full rules):\n" + protocolGuideFor(site)
   );
 }
 async function missingEndTagReprompt(site, rawText) {
+  if (!state.relayEnabled) { logEvent("endtag-missing", { site, skipped: "relay-silenced" }); return; } // Stop AIs Talking means no nudges either
   const n = (state.noTagReprompts[site] || 0) + 1;
   state.noTagReprompts[site] = n;
   logEvent("endtag-missing", { site, attempt: n, chars: (rawText || "").length });
@@ -1736,6 +1749,20 @@ async function missingEndTagReprompt(site, rawText) {
   try {
     await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true, automatic: true });
   } catch (e) { logEvent("endtag-reprompt-error", { site, error: String(e) }); }
+}
+
+// TR-22: a reply that closed with [FROM:] but never opened with [TO:] is
+// captured (it defaults to the user) — but the AI is flagged and re-taught, so
+// it addresses the others properly next time. Same cap as the [FROM:] nudge
+// (a model that keeps forgetting can't loop), reset by a correctly tagged reply.
+async function missingToReminder(site, { forwarded = 0 } = {}) {
+  if (!state.relayEnabled) return;
+  const n = (state.noToReminders[site] || 0) + 1;
+  state.noToReminders[site] = n;
+  logEvent("totag-missing", { site, attempt: n, forwardedByAuto: forwarded, severity: "warn" });
+  if (n > MAX_NOTAG_REPROMPTS) { logEvent("totag-missing-giveup", { site, attempts: n }); return; }
+  try { await sendTextTo(site, composeEnvelopeReminder(site, "missing-to", { forwarded }), null, { raw: true, automatic: true }); }
+  catch (e) { logEvent("totag-reminder-error", { site, error: String(e) }); }
 }
 
 // Pure target computation, shared by handleRoundtableCapture() and pollSite()'s
@@ -3610,6 +3637,7 @@ async function pollSite(site) {
     state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
     markCaptured(site);
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
+    if (roundtableExplicit) state.noToReminders[site] = 0;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
     logEvent("captured", { site, chars: displayText.length });
@@ -3651,6 +3679,7 @@ async function pollSite(site) {
     // A stage format (House Rules) is already torn down by the same stop, so its
     // path is gated by stageActive/hr.active, not this flag.
     let relayOn = state.relayEnabled;
+    let autoForwarded = 0; // how many AIs Auto passed this reply to (TR-22 flag wording)
     // TR-06: count this reply as one automatic hop if it is about to be handed
     // on automatically (to another AI, the Butler or the terminal). Past the
     // limit, nothing is relayed until the user acts. House Rules stages are
@@ -3691,12 +3720,19 @@ async function pollSite(site) {
         // TR-05: a [TO: USER] reply is for the person, not the other AIs.
         const meshTargets = relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: roundtableTargets, stageActive });
         if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") { logEvent("mesh-skip-to-user", { site }); try { relayTrace.noteHeld(turn.id, "to-user"); } catch (_) {} }
+        autoForwarded = meshTargets.length;
         for (const target of meshTargets) {
           // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
           // relay — never the raw page text, which still carries [TO:]/[FROM:].
           await sendTextTo(target, turn.text, site, { sourceTurnId: turn.id });
         }
       }
+    }
+    // TR-22: no [TO:] tag on a normal reply -> flag it and re-send the rules.
+    // Not during a House Rules stage or a self-test/Tuner (their own formats),
+    // nor while the Feature Test or relay check is running.
+    if (!stageActive && !bareMode && !roundtableExplicit && !ftState.running && !bbState.running) {
+      missingToReminder(site, { forwarded: autoForwarded }).catch(() => {});
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
     if (state.manager.status === "waiting") await handleManagerCapture(turn);

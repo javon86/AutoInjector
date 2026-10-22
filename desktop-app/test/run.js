@@ -569,7 +569,7 @@ async function testWaitingSinceTracking() {
   let g = (await call("state:get", {})).global;
   assert(typeof g.waitingSince.chatgpt === "number" && g.waitingSince.chatgpt > 0, "waitingSince is set to a timestamp once a send goes out");
 
-  say("chatgpt", "Quick answer.");
+  say("chatgpt", "[TO: USER]\nQuick answer."); // tagged: an untagged one now gets a TR-22 reminder (and so waits again)
   await waitUntil(async () => !(await call("state:get", {})).global.waiting.chatgpt, { label: "waiting clears once the reply is captured" });
   g = (await call("state:get", {})).global;
   assert(g.waitingSince.chatgpt === null, "waitingSince is cleared back to null once the reply lands, not left stale");
@@ -1820,6 +1820,56 @@ async function testGeminiRedrawNotRelayedTwice() {
   await waitUntil(() => sentLog("gemini").length >= 1, { label: "flickering reply captured within the ceiling", timeout: 4000 });
   clearInterval(flick);
   assert(sentLog("gemini").length >= 1, "a reply that never holds perfectly still is captured anyway, after the ceiling");
+}
+
+async function testTagReminderTeachesTheRules() {
+  console.log("\n== TR-22: a message with a missing tag gets a flag PLUS the full how-to-talk rules ==");
+  await resetAllParticipants();
+  const isFlag = (e) => /FLAG: NO \[TO:\] TAG/.test(e.text);
+  // no [TO:] tag, no Auto -> it only reached the user; flag + full rules
+  say("claude", "This is for Gemini but I forgot the tag.");
+  await waitUntil(() => sentLog("claude").some(isFlag), { label: "Claude is flagged for the missing [TO:] tag" });
+  let f = sentLog("claude").find(isFlag);
+  assert(/went to the user ONLY/.test(f.text) && /\[FROM: CLAUDE\]/.test(f.text), "the flag says it only reached the user and how to resend");
+  assert(/HOW WE TALK TO EACH OTHER/.test(f.text) && /\[TO: CHATGPT\]/.test(f.text) && /YOUR LOCKER/.test(f.text), "it carries the full rules (routing tags, closing tag, locker)");
+  assert(sentLog("gemini").length === 0, "the untagged message itself was not sent on");
+  // capped: a model that keeps forgetting isn't spammed forever
+  say("claude", "Still no tag, attempt two."); await settle(400);
+  say("claude", "Still no tag, attempt three."); await settle(400);
+  const flags = sentLog("claude").filter(isFlag).length;
+  assert(flags === 2, `reminders are capped at 2 in a row (got ${flags})`);
+  // a correctly tagged reply resets the streak
+  say("claude", "[TO: USER]\nOK, tagged now."); await settle(400);
+  say("claude", "Forgot again."); await settle(500);
+  assert(sentLog("claude").filter(isFlag).length === 3, "after a correct reply, the next slip is flagged again");
+
+  console.log("  -- with Auto on, the flag doesn't claim it only reached the user --");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("gemini", "Untagged but Auto forwards it.");
+  await waitUntil(() => sentLog("gemini").some(isFlag), { label: "Gemini flagged" });
+  f = sentLog("gemini").find(isFlag);
+  assert(/Auto routing passed it on/.test(f.text) && !/went to the user ONLY/.test(f.text), "the flag is accurate when Auto passed it on");
+  await call("routing:stop-all", {});
+
+  console.log("  -- the missing [FROM:] nudge carries the rules too, including your edits to the routing prompt --");
+  await resetAllParticipants();
+  const st = await call("state:get", {});
+  const p2 = st.prompts.find((p) => p.id === 2);
+  await call("prompts:save", { id: 2, name: p2.name, text: { ...p2.text, chatgpt: p2.text.chatgpt + " HOUSE-RULE-MARKER: keep replies short." } });
+  sayRaw("chatgpt", "[TO: USER]\nNo closing tag here");
+  await waitUntil(() => sentLog("chatgpt").some((e) => /NO ENDING TAG RECEIVED/.test(e.text)), { label: "the missing-[FROM:] nudge is sent" });
+  const nudge = sentLog("chatgpt").find((e) => /NO ENDING TAG RECEIVED/.test(e.text));
+  assert(/HOW WE TALK TO EACH OTHER/.test(nudge.text) && /HOUSE-RULE-MARKER/.test(nudge.text), "the nudge includes the full rules as you last edited them");
+  await call("prompts:save", { id: 2, name: p2.name, text: p2.text }); // put it back
+
+  console.log("  -- Stop AIs Talking means no reminders --");
+  await resetAllParticipants();
+  await call("relay:silence", {});
+  say("claude", "Untagged while silenced."); await settle(500);
+  assert(!sentLog("claude").some(isFlag), "no flag is sent while the AIs are silenced");
+  await call("routing:auto-all", {});
+  await call("routing:stop-all", {});
 }
 
 async function testHouseRulesVsMeshDedup() {
@@ -3082,6 +3132,7 @@ async function main() {
   await testRelayTraceFollowsMessages();
   await testBucketBrigadeEndToEnd();
   await testGeminiRedrawNotRelayedTwice();
+  await testTagReminderTeachesTheRules();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
