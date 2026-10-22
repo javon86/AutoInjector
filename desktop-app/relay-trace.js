@@ -39,7 +39,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   function noteSend({ seq, target, from = null, kind = "program", sourceTurnId = null, text = "" }) {
     if (seq == null) return;
     const m = { seq: String(seq), target, from, kind, sourceTurnId, at: now(), hash: hashBody(text), chars: String(text || "").length,
-      result: null, error: null, attempts: null, provenAt: null, startedAt: null, answeredAt: null, answerTurn: null, batched: false, duplicateOf: null };
+      result: null, error: null, attempts: null, provenAt: null, startedAt: null, answeredAt: null, answerTurn: null, batched: false, duplicateOf: null, overtakenBy: null };
     // Same body to the same AI within a short window = a duplicate delivery.
     for (let i = msgs.length - 1; i >= 0; i--) {
       const p = msgs[i];
@@ -53,7 +53,19 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   function noteSendResult(seq, res) {
     const m = bySeq.get(String(seq)); if (!m) return;
     m.attempts = res && res.attempts != null ? res.attempts : m.attempts;
-    if (res && res.ok) { m.result = res.verified === true ? "proven" : res.verified === false ? "unproven" : "sent"; m.provenAt = now(); }
+    if (res && res.ok) {
+      m.result = res.verified === true ? "proven" : res.verified === false ? "unproven" : "sent"; m.provenAt = now();
+      // TR-30: an earlier message to this AI that it had STARTED answering, with
+      // no reply captured yet — this message was typed over that reply, so the
+      // reply may never be captured. (Not flagged when the AI hadn't started:
+      // then it simply answers both at once.)
+      // A reminder the app sends because the reply had no [FROM:] tag replaces
+      // that reply by design — not a loss.
+      if (m.kind !== "auto") for (const p of msgs) {
+        if (p === m || p.target !== m.target || p.answeredAt || !p.startedAt || p.overtakenBy) continue;
+        if (p.result && p.result !== "failed" && p.at < m.at) p.overtakenBy = m.seq;
+      }
+    }
     else { m.result = "failed"; m.error = (res && res.error) || "unknown"; }
   }
 
@@ -101,7 +113,11 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
       else if (m.result === "failed") { s.failed++; s.errors[m.error] = (s.errors[m.error] || 0) + 1; }
       if (m.attempts > 1) s.retried++;
       if (m.startedAt) s.started++;
-      if (m.duplicateOf) { s.duplicates++; anomalies.push({ seq: m.seq, target: m.target, at: m.at, what: `duplicate of #${m.duplicateOf} (same message sent twice)` }); }
+      // Only an AI-to-AI relay sent twice is the app's fault. The same message
+      // sent again by you is your call; a repeated reminder is by design.
+      if (m.duplicateOf && m.kind === "relay") { s.duplicates++; anomalies.push({ seq: m.seq, target: m.target, at: m.at, what: `duplicate of #${m.duplicateOf} (same message sent twice)` }); }
+      else if (m.duplicateOf && m.kind === "program") s.repeatedByYou = (s.repeatedByYou || 0) + 1;
+      if (m.overtakenBy) anomalies.push({ seq: m.seq, target: m.target, at: m.at, what: `the next message (#${m.overtakenBy}) was typed while its reply was still on the page and not captured — that reply may be lost` });
       if (m.provenAt && m.result === "proven") s.proveMs.push(m.provenAt - m.at);
       const st = stageOf(m, at);
       if (st === "answered") { s.answered++; if (!m.batched) s.replyMs.push(m.answeredAt - m.at); }
@@ -157,6 +173,7 @@ function formatReport(r, { label = (s) => LABEL[s] || s, timeFmt = (t) => new Da
     const extra = [];
     if (x.retried) extra.push(`${x.retried} needed a retry`);
     if (x.duplicates) extra.push(`${x.duplicates} DUPLICATE deliveries`);
+    if (x.repeatedByYou) extra.push(`${x.repeatedByYou} sent again by you (same text)`);
     if (x.medianProveSec != null) extra.push(`proven in ~${x.medianProveSec}s`);
     if (x.medianReplySec != null) extra.push(`replies in ~${x.medianReplySec}s`);
     const errs = Object.entries(x.errors).map(([k, v]) => `${k}×${v}`).join(", ");

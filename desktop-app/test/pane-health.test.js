@@ -26,6 +26,16 @@ console.log('\n== stalls explain themselves ==');
 H.onRead('chatgpt', { textLen: 0, generating: false, hasEndTag: false, tail: '' });
 clock += 61000;
 const e = H.evaluate('chatgpt');
+{
+  // TR-31: the reader only sees "[TO:" — named as a reading problem, not a missing tag.
+  let c3 = 1000;
+  const H3 = createPaneHealth({ sites: ['gemini'], now: () => c3, stallMs: 1000 });
+  H3.onSendResult('gemini', { ok: true, verified: true });
+  H3.onRead('gemini', { textLen: 4, generating: false, hasEndTag: false, tail: '[TO:' });
+  c3 += 2000;
+  const g = H3.evaluate('gemini');
+  assert(g.level === 'stalled' && /only sees the start of the reply/.test(g.text), `a "[TO:" fragment is explained as a reading problem (${g.text})`);
+}
 assert(e.level === 'stalled' && /selector matches nothing/.test(e.text), `no reply text on the page -> blamed on the reply selector (${e.text})`);
 let st = H.newStalls();
 assert(st.length === 2 && st.some((x) => x.site === 'chatgpt'), 'each stalled pane is reported once');

@@ -236,6 +236,34 @@ async function testWrapperOverrideStillSends() {
     assert(r.ok && /prompt-textarea/.test(r.selector), `picking the box by clicking its placeholder saves the real editable box (${r.selector})`);
   });
 }
+// TR-31: the reader saw only "[TO:" because the reply was split across blocks.
+async function testSplitReplyClimb() {
+  console.log("\n== TR-31: a reply split across page blocks is read whole, not just its first line ==");
+  await withFixture("split-reply.html", async (page) => {
+    const res = await page.evaluate(buildReadScript("gemini"));
+    assert(/^\[TO: ALL\]/.test(res.text.trim()) && /rest of my reply/.test(res.text) && /\[FROM: GEMINI\]$/.test(res.text.trim()), `the whole reply is read (got ${JSON.stringify(res.text)})`);
+    assert(!/MSG #0013/.test(res.text), "the user's message is not pulled in");
+  });
+}
+// TR-30: an AI still writing whose Stop button isn't recognised.
+async function testNoStopButtonStreaming() {
+  console.log("\n== TR-30: Send stays locked while the page is still writing → wait (AI_BUSY), don't click when it unlocks ==");
+  await withFixture("no-stop-streaming.html", async (page) => {
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0020]\nnext message"));
+    assert(res.ok === false && res.error === "AI_BUSY" && !!res.busyHow, `reports AI_BUSY instead of sending into a reply that's still being written (got ${JSON.stringify(res)})`);
+    assert((await sentOn(page)).length === 0, "nothing was sent");
+  });
+}
+// TR-27 follow-up: the wrapper also holds a hidden fallback textarea.
+async function testWrapperHiddenFallback() {
+  console.log("\n== TR-27: a hidden fallback box inside the wrapper is skipped for the visible editor ==");
+  await withFixture("wrapped-editor-fallback.html", async (page) => {
+    const ov = { input: 'div[aria-label="Ask ChatGPT"]', send: 'button[aria-label="Send"]' };
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0072]\nvia the visible editor", ov));
+    const sent = await sentOn(page);
+    assert(res.ok === true && sent.length === 1 && sent[0] === "[MSG #0072]\nvia the visible editor", `sent through the visible editor (got ${JSON.stringify(res)} / ${JSON.stringify(sent)})`);
+  });
+}
 async function testStrictEditorDeadButton() {
   console.log("\n== a Send button that does nothing is still reported as a failure ==");
   await withFixture("strict-editor.html", async (page) => {
@@ -244,6 +272,7 @@ async function testStrictEditorDeadButton() {
     const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0003]\nnobody will get this"));
     assert(res.ok === false && res.error === "SEND_NOT_CONFIRMED", `no false "sent" (got: ${JSON.stringify(res)})`);
     assert((await sentOn(page)).length === 0, "and nothing was posted");
+    assert(res.diag && res.diag.input && res.diag.input.editable === true && res.diag.button && typeof res.diag.boxChars === "number", `a failed send reports what it used, for the Activity Log (${JSON.stringify(res.diag)})`);
   });
 }
 
@@ -287,6 +316,9 @@ async function main() {
   await testPickerSnapsToWholeReply();
   await testAiBusyNotTyped();
   await testWrapperOverrideStillSends();
+  await testSplitReplyClimb();
+  await testNoStopButtonStreaming();
+  await testWrapperHiddenFallback();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

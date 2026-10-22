@@ -70,6 +70,7 @@ async function main() {
   vp.setSettings({ endpoint: `http://127.0.0.1:${cPort}/prompt` });
   const nc = await vp.generate('a cat');
   assert(nc.error === 'NO_VIDEO' && nc.shape === 'comfy-queue' && /ComfyUI/.test(nc.message || ''), 'a ComfyUI queue reply is explained as such');
+  assert(/workflow-based integration that this app doesn't have yet/.test(nc.message) && /returns the video directly/.test(nc.message) && /AnimateDiff|Stable Video Diffusion/.test(nc.message), 'the ComfyUI message says the app has no workflow integration and names an endpoint that returns the video directly');
   comfyStub.close();
   const emptyStub = replyWith({});
   const ePort2 = await listen(emptyStub);

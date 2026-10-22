@@ -20,11 +20,15 @@ const CANDIDATES = {
   image: [
     { label: 'Automatic1111 / Forge / SD.Next — port 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
     { label: 'Automatic1111 — port 7861', endpoint: 'http://127.0.0.1:7861/sdapi/v1/txt2img', health: 'http://127.0.0.1:7861/sdapi/v1/sd-models' },
-    { label: 'ComfyUI — port 8188', endpoint: 'http://127.0.0.1:8188/prompt', health: 'http://127.0.0.1:8188/system_stats' },
+    // No ComfyUI entry: its /prompt API only queues a job and returns a
+    // prompt_id, never the image the image provider needs (same as video).
   ],
+  // No ComfyUI entry for video: its /prompt API only queues a job and returns a
+  // prompt_id, so it can never hand the clip back the way video-provider.js
+  // needs. The 7860 entry is plain A1111 txt2img — it only makes video when the
+  // AnimateDiff extension is installed and on (otherwise it returns stills).
   video: [
-    { label: 'AnimateDiff via A1111 API — port 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
-    { label: 'ComfyUI video workflow — port 8188', endpoint: 'http://127.0.0.1:8188/prompt', health: 'http://127.0.0.1:8188/system_stats' },
+    { label: 'AnimateDiff via A1111/Forge — port 7860 (needs the AnimateDiff extension; without it you get still images)', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
     { label: 'Stable Video Diffusion server — port 7862', endpoint: 'http://127.0.0.1:7862/generate', health: 'http://127.0.0.1:7862/' },
   ],
 };

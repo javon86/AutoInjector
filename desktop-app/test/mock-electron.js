@@ -60,6 +60,10 @@ class FakeWebContents extends EventEmitter {
     this._sendFailQueue = []; // test-settable: per-attempt pass/fail override for successive send attempts (retries included), shifted per call -- see executeJavaScript()
     this._nextLoginFillResult = null; // test-settable: what the next login-fill script resolves to
     this.loginFillCalls = []; // { username, password } — the REAL (decrypted) credentials the script actually received, in order -- lets a test verify the exact plaintext without ever going through the persisted state file
+    // TR-15: when set, executeJavaScript() hands the REAL script to this function
+    // instead of the string-matching fakes below -- test/stress.test.js points it
+    // at a Playwright page (page.evaluate) so main.js drives a real browser DOM.
+    this.evaluator = null;
     const self = this;
     // A minimal stand-in for webContents.debugger, at the same fidelity as
     // the rest of this mock: it asserts WHAT CDP command was sent with what
@@ -96,6 +100,7 @@ class FakeWebContents extends EventEmitter {
   setZoomFactor(factor) { this.zoomFactor = factor; }
   once(evt, cb) { if (evt === "did-finish-load") setImmediate(cb); return this; }
   async executeJavaScript(script) {
+    if (this.evaluator) return this.evaluator(script);
     if (script.includes("__AUTOINJECTOR_PICK__")) {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
@@ -128,6 +133,7 @@ class FakeWebContents extends EventEmitter {
     const generating = !!this.generating;
     const out = { ok: true, text: this.currentText, generating, sendReady: !generating };
     if (Number.isInteger(this.replyCount)) out.count = this.replyCount; // reply blocks on the page (TR-17)
+    if (typeof this.stopShown === "boolean") out.stopShown = this.stopShown; // TR-30: Stop button alone (default: same as generating)
     return out;
   }
 }

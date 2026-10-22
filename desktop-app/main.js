@@ -224,6 +224,7 @@ const state = {
   },
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
+  voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
@@ -646,6 +647,7 @@ function saveStateDebounced() {
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
+        voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -740,6 +742,13 @@ function loadPersistedState() {
   if (snap.videoConfig && typeof snap.videoConfig === "object") {
     videoProvider.setSettings(snap.videoConfig);
     state.videoConfig = videoProvider.getSettings();
+  }
+  // Voice: settings only — restoring never starts the voice shim (that is still
+  // AUTOINJECTOR_VOICE_SPAWN / the Setup Wizard's job, and it runs after this,
+  // so a managed shim's address still wins over the saved one at runtime).
+  if (snap.voiceConfig && typeof snap.voiceConfig === "object") {
+    voiceProvider.setSettings(snap.voiceConfig);
+    state.voiceConfig = voiceProvider.getSettings();
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
@@ -845,6 +854,7 @@ const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane
 const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 function markCaptured(site) {
+  try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
   capturedCount[site] = readCount[site] != null ? readCount[site] : null;
   tagSeenAt[site] = 0;
   paneHealth.onCapture(site);
@@ -872,7 +882,7 @@ async function probePane(site) {
 // off the page, and refresh the lights (stalls are time-based).
 function healthTick() {
   for (const st of paneHealth.newStalls()) {
-    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, tail: st.read.tail } : null });
+    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, tail: st.read.tail, nodeInfo: st.read.nodeInfo || undefined } : null });
   }
   broadcastHealth();
 }
@@ -1316,6 +1326,10 @@ const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 
 // TR-28: the longest a send waits for the target's just-finished reply to be
 // captured first (capture needs CAPTURE_SETTLE_MS of stillness, up to 3x that).
 const SEND_CAPTURE_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_CAPTURE_WAIT_MS) || (CAPTURE_SETTLE_MS * 3 + POLL_MS * 2);
+// TR-30: how long an untagged reply must hold still before a send may accept
+// it (longer than the tagged settle — without a Stop button, a thinking pause
+// mid-reply must not be mistaken for the end).
+const FORCE_ACCEPT_STABLE_MS = Number(process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS) || Math.max(CAPTURE_SETTLE_MS * 2, 3000);
 // Does this pane have a finished, tagged reply on screen that hasn't been
 // captured yet? Typing a new message now would push it off the "latest reply"
 // spot and it would never be captured (seen live: Gemini's reply to #0002 was
@@ -1330,16 +1344,88 @@ function hasUncapturedReply(site) {
 }
 // Returns "ok" (go ahead and type), "busy" (the page's Stop button is showing —
 // the caller waits like an AI_BUSY), or "stopped" (Stop AIs Talking, relays only).
-async function waitForPendingCapture(target, seq, fromSite) {
+// TR-31: just the start of a routing tag ("[TO:", "[TO: ALL]") and nothing else.
+function isTagFragment(s) {
+  const t = String(s || "").trim();
+  return t.length > 0 && t.length <= 40 && /^\[\s*TO\b\s*:?[^\]\n]*\]?$/i.test(t);
+}
+const forceAcceptUntagged = new Set(); // TR-30: panes whose untagged finished reply pollSite may accept now
+const acceptedUntaggedRaw = {};        // site -> the raw text accepted that way
+const unreadableWarned = {};           // site -> last fragment logged as unreadable (TR-31)
+function isBareModeFor(site) {
+  return (state.hr.active && STAGE_MODES.has(state.hr.mode)) || selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site);
+}
+// A finished reply with NO [FROM:] tag that nothing has dealt with yet.
+function hasUntaggedFinished(site) {
+  const pend = state.pending[site];
+  if (!pend || !pend.text || hasEndTag(pend.text) || pend.reprompted) return false;
+  if (isTagFragment(pend.text) || isNoneSkip(pend.text) || isBareModeFor(site)) return false;
+  if (ftState.running || bbState.running) return false; // the tests measure whether the AI tags its replies itself
+  if (Date.now() - (pend.sinceTs || 0) > 60000) return false;
+  const cap = state.captured[site];
+  if (cap && (cap.text === pend.text || cap.rawText === pend.text)) return false;
+  return true;
+}
+// Safe to read a pane from INSIDE its send queue? Not while a House Rules
+// stage, a Prompt Sequence or the Manager is running: their capture handlers
+// send to the same pane and would wait behind this very send (deadlock). The
+// regular poll timer still reads the pane meanwhile.
+function gateMayPoll(site) {
+  return !isBareModeFor(site) && !state.hr.active && !state.sequence.active && state.manager.status !== "waiting";
+}
+// Returns "ok" (go ahead and type), "busy" (the page's Stop button is showing),
+// "stopped" (Stop AIs Talking, relays only), or "accepted" / "accepted-noto"
+// (TR-30: its untagged finished reply was just captured; "-noto" = it had no
+// [TO:] tag either).
+async function waitForPendingCapture(target, seq, fromSite, { noForce = false } = {}) {
   const stopped = () => !!fromSite && !state.relayEnabled;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  // Read the pane NOW rather than trust a poll that may be up to POLL_MS old:
-  // a reply that finished a moment ago gets its final text (with [FROM:]) on
-  // record before anything is typed over it.
-  for (let i = 0; state.busy[target] && i < 25; i++) await sleep(40); // a poll is mid-read; let it finish
-  try { await pollSite(target); } catch (_) {}
+  const mayPoll = gateMayPoll(target);
+  // Read the pane NOW (when safe) rather than trust a poll up to POLL_MS old:
+  // a reply that finished a moment ago gets its final text on record first.
+  const freshRead = async () => {
+    if (!mayPoll) { await sleep(Math.min(POLL_MS, 1500)); return false; }
+    for (let i = 0; state.busy[target] && i < 75; i++) await sleep(40); // a poll is mid-read; let it finish
+    if (state.busy[target]) return false;
+    try { await pollSite(target); } catch (_) {}
+    return true;
+  };
+  await freshRead();
   if (stopped()) return "stopped";
+  // Only the Stop button means "still writing" here: a disabled Send over text
+  // in the box is also what a failed send leaves behind (the send script itself
+  // detects a page that is still writing — TR-30b).
   if (state.stopShown[target]) return "busy";
+  // TR-30: a finished reply WITHOUT its [FROM:] tag would be buried by this
+  // send. Once it has held still, accept it (and relay it) first.
+  if (!noForce && mayPoll && hasUntaggedFinished(target)) {
+    const t0 = Date.now();
+    const budget = Math.max(SEND_CAPTURE_WAIT_MS, FORCE_ACCEPT_STABLE_MS + 2000);
+    let tries = 0;
+    while (hasUntaggedFinished(target) && Date.now() - t0 < budget) {
+      if (stopped()) return "stopped";
+      const pend = state.pending[target];
+      if (pend && Date.now() - pend.sinceTs >= FORCE_ACCEPT_STABLE_MS) {
+        const before = state.captured[target] && state.captured[target].id;
+        const raw = pend.text;
+        forceAcceptUntagged.add(target);
+        let ran = false;
+        try { ran = await freshRead(); } finally { forceAcceptUntagged.delete(target); }
+        const c = state.captured[target];
+        if (c && c.rawText === raw && acceptedUntaggedRaw[target] === raw) {
+          delete acceptedUntaggedRaw[target];
+          if (c.id === before) return "ok"; // it was only a re-draw of a reply already captured
+          return parseRoundtableTag(raw).explicit === true ? "accepted" : "accepted-noto";
+        }
+        if (ran && ++tries >= 3) { logEvent("untagged-accept-failed", { target, seq, severity: "warn" }); break; }
+        continue;
+      }
+      await sleep(150);
+      await freshRead();
+      if (state.stopShown[target]) return "busy";
+    }
+  }
+  delete acceptedUntaggedRaw[target]; // nothing was accepted this time
   if (!hasUncapturedReply(target)) return "ok";
   // Its own budget, starting now (not shared with any busy wait before it).
   const start = Date.now();
@@ -1398,7 +1484,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   if (!fromSite && !opts.automatic) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
   saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
-  const prompt = `[MSG #${seq}]\n${framed}`;
+  let prompt = `[MSG #${seq}]\n${framed}`;
+  let flagged = false; // TR-30: the missing-[FROM:] flag was added to this message
   try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : opts.automatic ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
@@ -1422,8 +1509,14 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       attempts = attempt;
       // TR-28: let the target's finished reply be captured before we type over it.
       let gate = "ok";
-      try { gate = await waitForPendingCapture(target, seq, fromSite); } catch (_) {}
+      try { gate = await waitForPendingCapture(target, seq, fromSite, { noForce: !!opts.raw }); } catch (_) {}
       if (gate === "stopped") { r = { ok: false, error: "RELAY_STOPPED" }; break; }
+      // TR-30 + TR-22: its last reply had no [FROM:] tag and was accepted just
+      // now — this message carries the flag and the full rules at its top.
+      if ((gate === "accepted" || gate === "accepted-noto") && !flagged) {
+        flagged = true;
+        prompt = `[MSG #${seq}]\n${composeEnvelopeReminder(target, gate === "accepted-noto" ? "accepted-missing-both" : "accepted-missing-from")}\n\n— NEW MESSAGE BELOW —\n\n${framed}`;
+      }
       if (gate === "busy") {
         r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
       } else {
@@ -1444,14 +1537,14 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       // finish (it can't take a new message yet) instead of burning retries.
       if (r && r.error === "AI_BUSY") {
         if (fromSite && !state.relayEnabled) { r = { ok: false, error: "RELAY_STOPPED" }; break; } // Stop AIs Talking while it waited
-        if (!busySince) { busySince = Date.now(); logEvent("send-waiting-busy", { target, from: fromSite || null, seq, pageSaysGenerating: !!state.generating[target] }); }
+        if (!busySince) { busySince = Date.now(); logEvent("send-waiting-busy", { target, from: fromSite || null, seq, pageSaysGenerating: !!state.generating[target], how: (r && r.busyHow) || "stop-button" }); }
         if (Date.now() - busySince < SEND_BUSY_WAIT_MS) { attempt--; await new Promise((resolve) => setTimeout(resolve, SEND_BUSY_POLL_MS)); continue; }
       }
       // E11: a provider-paused conversation won't recover by resending — the
       // composer is gone on purpose. Stop retrying and report it as itself.
       if (r && r.error === "PROVIDER_PAUSED") break;
       if (attempt < SEND_RETRY_ATTEMPTS) {
-        logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown" });
+        logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown", diag: (r && r.diag) || undefined });
         await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS));
       }
     }
@@ -1471,7 +1564,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   }
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
-    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
+    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts, diag: (res && res.diag) || undefined });
     // E11: give the paused case an actionable, human message instead of a bare
     // INPUT_NOT_FOUND — the user needs to open that pane and clear the safeguard.
     if (res && res.error === "PROVIDER_PAUSED") {
@@ -1803,7 +1896,11 @@ function protocolGuideFor(site) {
 }
 function composeEnvelopeReminder(site, kind = "missing-from", { forwarded = 0 } = {}) {
   const name = String(site || "").toUpperCase() || "YOU";
-  const flag = kind === "missing-to" && forwarded
+  const flag = kind === "accepted-missing-from"
+    ? "⚠️ FLAG: NO [FROM:] CLOSING TAG — your last message didn't end with [FROM: " + name + "]. It was passed on anyway because a new message arrived for you, but without the closing tag a message can be lost. Always end with [FROM: " + name + "]. No need to resend it.\n"
+    : kind === "accepted-missing-both"
+    ? "⚠️ FLAG: NO TAGS — your last message had no [TO:] tag at the start and no [FROM: " + name + "] at the end. It was kept (it went to the user only) because a new message arrived for you. Always start with [TO: who it's for] and end with [FROM: " + name + "]. If it was meant for the other AIs, send it again with the tags.\n"
+    : kind === "missing-to" && forwarded
     ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start. Auto routing passed it on this time, but don't rely on that: always start with [TO: who it's for]. No need to resend it.\n"
     : kind === "missing-to"
     ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start, so it went to the user ONLY. The other AIs did NOT get it.\n" +
@@ -3448,11 +3545,12 @@ async function pollSite(site) {
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return;
   state.busy[site] = true;
+  let forcedAccept = false; // TR-30: an untagged finished reply accepted because a send must type over it
   try {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
     // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
     // hide it — drop them before any completion check sees the text (TR-17).
-    const text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
+    let text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
     const pend = state.pending[site];
     // The site's own "still generating" signal (its Stop button is showing, or
     // Send is disabled). This is the reliable "are they done speaking?" answer —
@@ -3470,7 +3568,7 @@ async function pollSite(site) {
       logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
     }
     if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
-    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160) });
+    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null });
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
@@ -3530,30 +3628,50 @@ async function pollSite(site) {
       // nudge. Baseline never captures untagged text, so this only ever matches
       // something a bare-mode/stage run already handled.
       const already = state.captured[site];
-      if (already && already.text === text) return;
+      if (already && (already.text === text || already.rawText === text)) return;
+      // TR-31: only the START of a reply ("[TO:" — seen live on Gemini) means
+      // the reader can't see the rest of it. That's a reading problem, not the
+      // AI forgetting its tag: never nag the AI about it; log it once.
+      if (isTagFragment(text)) {
+        if (unreadableWarned[site] !== text) {
+          unreadableWarned[site] = text;
+          logEvent("reply-unreadable", { site, text: text.trim(), nodeInfo: (res && res.nodeInfo) || null, severity: "warn", note: "the reader only sees the start of the reply — the page may have split it; use 🎯 to pick the reply text if this keeps happening" });
+        }
+        state.pending[site] = { text, sinceTs: pend.text === text ? pend.sinceTs : Date.now(), reprompted: true };
+        return;
+      }
       // Still streaming, OR finished-but-forgot-the-tag. Track quiet time; only
       // act once the pane has gone quiet past the watchdog window.
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
-      if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
+      // TR-30: a send is about to type into this pane, and its finished reply
+      // has no [FROM:] tag. Typing now would bury it for good, so accept it as
+      // finished (it has held still and the page isn't writing) and relay it;
+      // the sender's message tells the AI about the missing tag.
+      if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+        acceptedUntaggedRaw[site] = text;
+        text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
+        forcedAccept = true;
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, severity: "warn", note: "no [FROM:] tag, but a new message had to go in — accepted it rather than lose it" });
+      } else if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
       // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
       // carries our envelope and will never grow one, so let it fall through to
       // the rate-limit handler below (which captures + auto-pauses) instead of
       // futilely re-prompting a capped pane. Anything else is a real message the
       // AI forgot to close: treat it as lost and re-send the protocol asking for
       // a full resend — never capture an untagged (possibly partial) reply.
-      if (!looksLikeRateLimit(text)) {
+      if (!forcedAccept && !looksLikeRateLimit(text)) {
         if (!pend.reprompted) {
           state.pending[site].reprompted = true;
           missingEndTagReprompt(site, text);
         }
         return;
       }
-      // rate-limit: fall through to the dedup + rate-limit handling below.
+      // rate-limit (or TR-30 accepted): fall through to the handling below.
     }
     // Baseline with the end tag present: capture once the text has held still
     // for CAPTURE_SETTLE_MS (TR-17), so a reply still being re-drawn isn't
     // captured twice.
-    if (!bareMode && hasEndTag(text)) {
+    if (!bareMode && hasEndTag(text) && !forcedAccept) {
       // Hold still = same words ignoring spacing; and never wait more than 3x
       // the settle time from when the tag first appeared (a reply whose page
       // text keeps flickering must still be captured).
@@ -3579,6 +3697,7 @@ async function pollSite(site) {
     const redrawCheck = !(selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site));
     if (redrawCheck && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
       state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
+      if (forcedAccept) state.captured[site].rawText = acceptedUntaggedRaw[site];
       logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
       return;
     }
@@ -3633,7 +3752,7 @@ async function pollSite(site) {
     // already computed for the completion gate above.)
     let roundtableTag = null;
     let roundtableExplicit = false;
-    ftRecordCapture(site, text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
+    ftRecordCapture(site, forcedAccept ? acceptedUntaggedRaw[site] : text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
     let displayText = text;
     if (!stageActive) {
       const parsed = parseRoundtableTag(text);
@@ -3820,7 +3939,7 @@ async function pollSite(site) {
     // TR-22: no [TO:] tag on a normal reply -> flag it and re-send the rules.
     // Not during a House Rules stage or a self-test/Tuner (their own formats),
     // nor while the Feature Test or relay check is running.
-    if (!stageActive && !bareMode && !roundtableExplicit && !ftState.running && !bbState.running) {
+    if (!stageActive && !bareMode && !roundtableExplicit && !forcedAccept && !ftState.running && !bbState.running) { // a TR-30 accepted reply's flag rides on the next message
       missingToReminder(site, { forwarded: autoForwarded }).catch(() => {});
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
@@ -3828,6 +3947,9 @@ async function pollSite(site) {
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
+    // TR-30: the captured turn remembers the untagged text the page shows, so
+    // the next read isn't taken for a new reply (or nagged about its tag).
+    if (forcedAccept && state.captured[site] && acceptedUntaggedRaw[site]) state.captured[site].rawText = acceptedUntaggedRaw[site];
     state.busy[site] = false;
   }
 }
@@ -4991,8 +5113,15 @@ ipcMain.handle("memory:search", (_evt, { query } = {}) => ({ ok: true, ...dbServ
 
 // N2 Voice: status/config/test + push-to-talk listen.
 ipcMain.handle("voice:status", () => ({ ok: true, ...voiceProvider.status() }));
-ipcMain.handle("voice:configure", (_evt, patch) => {
+// Apply a voice settings change and persist it (IPC + the service bridge).
+function configureVoiceAndSave(patch) {
   const s = voiceProvider.setSettings(patch || {});
+  state.voiceConfig = voiceProvider.getSettings();
+  saveStateDebounced();
+  return s;
+}
+ipcMain.handle("voice:configure", (_evt, patch) => {
+  const s = configureVoiceAndSave(patch);
   logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
   return { ok: true, ...voiceProvider.status() };
 });
@@ -5018,7 +5147,7 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
   const r = await imageProvider.generate(prompt, { negativePrompt });
   if (!r || !r.ok || !r.imageBase64) {
     // E09: pass the backend's real reason through, not just a bare code.
-    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED" };
+    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED", message: (r && r.message) || null };
   }
   try {
     // E09: save every image the batch produced; preview the first inline.
@@ -5474,7 +5603,7 @@ const serviceBridge = createServiceBridge({
   // N2: local voice capability (speak/listen through the offline shim).
   voice: {
     status: () => voiceProvider.status(),
-    configure: (patch) => voiceProvider.setSettings(patch),
+    configure: (patch) => configureVoiceAndSave(patch),
     speak: (text) => voiceProvider.speak(text),
     listen: (o) => voiceProvider.listen(o),
   },

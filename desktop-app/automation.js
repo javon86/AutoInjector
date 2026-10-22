@@ -48,6 +48,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    ASSISTANT_CANDIDATES: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS,
     // The [MSG #0042] header main.js stamps on every send. It is unique per send,
     // so seeing it in the conversation (outside the composer) is PROOF the
@@ -88,23 +89,30 @@ function buildSendScript(site, text, overrides, sendOpts) {
         while (r.parentElement && r.parentElement.isContentEditable) r = r.parentElement;
         return r;
       }
+      // Inside a wrapper: prefer a VISIBLE editable box (sites keep a hidden
+      // fallback textarea next to the real editor).
       let inner = null;
-      try { inner = n.querySelector(EDITABLE); } catch {}
+      try {
+        const list = Array.from(n.querySelectorAll(EDITABLE));
+        inner = list.find(isShown) || list[0] || null;
+      } catch {}
       return inner ? resolveEditable(inner) : n;
     }
-    // First candidate that leads to a real editable box; else the first match.
+    // The first candidate that leads to a VISIBLE editable box; else a hidden
+    // editable one; else the first match at all.
     function findInput() {
-      let first = null;
+      let first = null, hidden = null;
       for (const sel of CFG.INPUT_CANDIDATES) {
         let list = [];
         try { list = document.querySelectorAll(sel); } catch { continue; }
         for (const n of list) {
           const r = resolveEditable(n);
-          if (isEditable(r)) return r;
+          if (isEditable(r) && isShown(r)) return r;
+          if (isEditable(r) && !hidden) hidden = r;
           if (!first) first = r;
         }
       }
-      return first;
+      return hidden || first;
     }
     const isShown = (b) => { try { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch { return true; } };
     const isOff = (b) => !!(b.disabled || b.getAttribute("aria-disabled") === "true");
@@ -280,14 +288,48 @@ function buildSendScript(site, text, overrides, sendOpts) {
     }
     const result = (how, method) => ({ ok: true, method, verified: how === "seen", markerBaseline: baseline });
 
+    // The AI's latest reply (count + length) — it changes while an AI is still
+    // writing. Falls back to the page text outside the message box when no
+    // reply selector matches.
+    function pageSig() {
+      for (const sel of (CFG.ASSISTANT_CANDIDATES || [])) {
+        let list = [];
+        try { list = document.querySelectorAll(sel); } catch { continue; }
+        if (list.length) { const last = list[list.length - 1]; return list.length * 1000003 + String(last.innerText || last.textContent || "").length; }
+      }
+      let page = 0;
+      try { page = (document.body.innerText || "").length; } catch {}
+      return page - composerText(findInput()).length;
+    }
+    // A short description of what the send used, for the Activity Log when a
+    // send can't be confirmed (so the next report shows WHY).
+    function describe(n) {
+      if (!n) return null;
+      let cls = "";
+      try { cls = String(n.className && n.className.baseVal != null ? n.className.baseVal : n.className || "").slice(0, 60); } catch {}
+      return { tag: (n.tagName || "").toLowerCase(), id: n.id || null, cls: cls || null, label: (n.getAttribute && n.getAttribute("aria-label")) || null, visible: isShown(n), disabled: isOff(n), editable: isEditable(n) };
+    }
+    function diag(method) {
+      const box = findInput();
+      return { method, input: describe(box), boxChars: composerText(box).trim().length, button: describe(findSendButton()) };
+    }
+
     async function attemptSend() {
       // Editors enable their Send button a moment after the text lands; clicking
-      // it while still disabled does nothing. Give it up to ~1.5s.
+      // it while still disabled does nothing. Give it up to ~1.5s — but if the
+      // page keeps changing meanwhile, the AI is still writing its last reply
+      // (its Stop button just wasn't recognised): don't click the moment it
+      // finishes, or that reply is typed over before it's captured (TR-30).
       let btn = findSendButton();
+      const sig0 = pageSig();
+      let waited = false;
       for (let i = 0; btn && isOff(btn) && i < 10; i++) {
+        waited = true;
         await new Promise((r) => setTimeout(r, 150));
         btn = findSendButton();
+        if (btn && isOff(btn) && Math.abs(pageSig() - sig0) > 0) return { ok: false, error: "AI_BUSY", busyHow: "send-locked-while-page-changes", markerBaseline: baseline };
       }
+      if (waited && btn && !isOff(btn) && Math.abs(pageSig() - sig0) > 0) return { ok: false, error: "AI_BUSY", busyHow: "reply-finished-while-waiting", markerBaseline: baseline };
       if (btn) {
         try { btn.click(); } catch {}
         const how = await confirmSent();
@@ -303,7 +345,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
       } catch {}
       const how = await confirmSent();
       if (how) return result(how, "enter");
-      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline };
+      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline, diag: diag(btn ? "click+enter" : "enter (no Send button found)") };
     }
 
     // E11: distinguish a provider-paused conversation from a plain missing box.
@@ -431,15 +473,56 @@ function buildReadScript(site, overrides) {
       }
     }
 
+    // TR-31: the reader got only the START of a reply — a few characters like
+    // "[TO:" (seen live on Gemini) — because the page split the reply into
+    // pieces the selector doesn't cover. Climb to the element holding the
+    // whole reply, with the same guards (no user message, one reply only).
+    if (node && !fragmentFixed && !hasFrom(text) && text.trim().length <= 40 && startsWithTo(text)) {
+      const USER_MARKERS2 = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+      let cur = node;
+      for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
+        const p = cur.parentElement;
+        let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS2); } catch (_) {}
+        if (hasUser) break;
+        const t = p.innerText || p.textContent || "";
+        if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break;
+        cur = p;
+        // the FIRST line-start [TO: — the reply's own tag (a quoted example later
+        // in the reply must not cut it short)
+        let idx = -1; const tm = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:/i.exec(t);
+        if (tm) idx = tm.index + tm[1].length;
+        if (idx < 0) continue;
+        let cand = t.slice(idx);
+        if (hasFrom(cand)) { let end = cand.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi; while ((fm = fre.exec(cand))) end = fm.index + fm[0].length; cand = cand.slice(0, end); }
+        if (cand.trim().length > text.trim().length + 5) { node = p; text = cand; fragmentFixed = "climb-start"; break; }
+      }
+    }
+    // For the log when a reply can't be read properly: what the reader landed on.
+    let nodeInfo = null;
+    if (node && text.trim().length <= 40) {
+      try { nodeInfo = { tag: node.tagName.toLowerCase(), cls: String(node.className || "").slice(0, 60) || null, parentTag: node.parentElement ? node.parentElement.tagName.toLowerCase() : null, parentChars: node.parentElement ? (node.parentElement.innerText || "").length : 0, siblings: node.parentElement ? node.parentElement.children.length : 0 }; } catch (_) {}
+    }
+
     // Is the composer empty? A Send button is ALSO disabled when there's simply
     // nothing to send (idle, empty composer) — so an empty composer must NOT be
     // read as "still generating" (E03: a finished reply left the Send button
     // disabled and its reply stayed uncaptured until a later send).
     // TR-27: a saved selector may name a wrapper around the real box.
-    let inputBox = findAny(CFG.INPUT_CANDIDATES);
-    if (inputBox && inputBox.tagName !== "TEXTAREA" && !inputBox.isContentEditable) {
-      try { const inner = inputBox.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); if (inner) inputBox = inner; } catch (_) {}
+    // Prefer a VISIBLE editable box (sites keep a hidden fallback textarea).
+    let inputBox = null, inputFirst = null;
+    for (const sel of (CFG.INPUT_CANDIDATES || [])) {
+      let list = [];
+      try { list = Array.from(document.querySelectorAll(sel)); } catch (_) { continue; }
+      for (let n of list) {
+        if (n.tagName !== "TEXTAREA" && !n.isContentEditable) {
+          try { const inner = Array.from(n.querySelectorAll('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')); n = inner.find(isVisible) || inner[0] || n; } catch (_) {}
+        }
+        if (!inputFirst) inputFirst = n;
+        if ((n.tagName === "TEXTAREA" || n.isContentEditable) && isVisible(n)) { inputBox = n; break; }
+      }
+      if (inputBox) break;
     }
+    if (!inputBox) inputBox = inputFirst;
     const composerText = inputBox ? (inputBox.value != null ? inputBox.value : (inputBox.innerText || inputBox.textContent || "")) : "";
     const composerEmpty = !String(composerText).trim();
 
@@ -478,7 +561,7 @@ function buildReadScript(site, overrides) {
     }
     if (fragmentFixed === "climb") count = null;
     const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
-    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, count, fragmentFixed };
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, count, fragmentFixed, nodeInfo };
   })();
   `;
 }

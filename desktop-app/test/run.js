@@ -23,6 +23,7 @@ process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_PO
 // so this only affects deliberately-untagged replies (sayRaw).
 process.env.AUTOINJECTOR_NOTAG_QUIET_MS = process.env.AUTOINJECTOR_NOTAG_QUIET_MS || "300";
 process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS = process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS || "100";
+process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS = process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS || "150";
 process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS = process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS || "50";
 
 const path = require("path");
@@ -718,6 +719,31 @@ async function testPersistenceSavesToDisk() {
   assert(saved.customRole && saved.customRole.gemini === "Fact-checker", "the file on disk reflects the new role");
   await call("roles:set", { site: "gemini", role: "" }); // leave roles clean for later tests
   await settle(250);
+}
+
+// Voice settings survive a restart like image/video ones: the startup seed's
+// voiceConfig is restored (without starting the voice shim), and a change made
+// through voice:configure is written to autoinjector-state.json.
+async function testVoiceSettingsPersist() {
+  console.log("\n== Persistence: voice settings are restored on startup and saved on change ==");
+  const voiceProvider = require(path.join(__dirname, "..", "voice-provider"));
+  const st = await call("voice:status", {});
+  assert(st.endpoint === "http://127.0.0.1:8299" && st.voices.claude === "en_GB-alan" && st.micDevice === "mic-seed" && st.speakOnAck === false && st.enabled === false,
+    `the saved voice settings are restored on startup (got ${JSON.stringify({ endpoint: st.endpoint, voices: st.voices, micDevice: st.micDevice, speakOnAck: st.speakOnAck, enabled: st.enabled })})`);
+  assert(st.managed === false, "restoring voice settings doesn't start the voice shim");
+  const before = voiceProvider.getSettings();
+  try {
+    await call("voice:configure", { endpoint: "http://127.0.0.1:8298", voices: { butler: "en_US-amy" }, listenSeconds: 9 });
+    await settle(250); // let the debounced save flush
+    const saved = JSON.parse(fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8"));
+    const vc = saved.voiceConfig || {};
+    assert(vc.endpoint === "http://127.0.0.1:8298" && vc.voices && vc.voices.butler === "en_US-amy" && vc.voices.claude === "en_GB-alan" && vc.listenSeconds === 9 && vc.enabled === false,
+      `voice:configure writes the new voice settings to disk (got ${JSON.stringify(vc)})`);
+    assert(!Object.keys(vc).some((k) => /key|token|secret|password/i.test(k)), "the saved voice settings hold no secret fields");
+  } finally {
+    await call("voice:configure", before);
+    await settle(250);
+  }
 }
 
 async function testPromptLibrary() {
@@ -1933,6 +1959,48 @@ async function testSendWaitsForFinishedReplyCapture() {
   const cap = s.log.filter((l) => l.kind === "captured" && l.detail.site === "gemini").pop();
   const sent = sentLog("gemini")[sentBefore];
   assert(cap && sent && cap.ts <= sent.ts, `Gemini's finished reply was captured BEFORE the new message was typed (captured ${cap && cap.ts}, typed ${sent && sent.ts})`);
+}
+
+async function testUntaggedReplyNotBuriedBySend() {
+  console.log("\n== TR-30: a finished reply missing [FROM:] is accepted, not buried, when the next message must go in ==");
+  await resetAllParticipants();
+  const before = sentLog("claude").length;
+  // Claude finished a reply but forgot its closing tag; a new message for Claude arrives right away.
+  sayRaw("claude", "[TO: USER]\nmy finished answer without the closing tag");
+  await settle(220); // longer than the accept-hold (150ms here), shorter than the missing-tag watchdog (300ms here)
+  const r = await call("send:compose", { text: "the next message", targets: ["claude"] });
+  assert(r.ok && r.results.claude.ok, "the new message is delivered");
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "untagged-reply-accepted" && l.detail.site === "claude"), "the untagged reply was accepted before the new message went in");
+  assert(s.transcript.some((x) => x.site === "claude" && /my finished answer without the closing tag/.test(x.text) && !/\[FROM:/.test(x.text)), "it is in the transcript (tag-free), not lost");
+  const msg = sentLog("claude").slice(before).pop();
+  assert(msg && /NO \[FROM:\] CLOSING TAG/.test(msg.text) && /HOW WE TALK TO EACH OTHER/.test(msg.text) && /the next message/.test(msg.text), "the new message carries the missing-tag flag and the full rules, then the message itself");
+  assert(!s.log.some((l) => l.kind === "endtag-missing" && l.detail.site === "claude" && Date.now() - l.ts < 5000), "no separate 'resend everything' nudge was sent");
+}
+
+async function testFailedSendLeftoverDoesNotStall() {
+  console.log("\n== TR-30 review: text left in the box by a failed try (Send disabled, no Stop button) doesn't stall the retry ==");
+  await resetAllParticipants();
+  const wc = reg("claude").webContents;
+  wc.generating = true; wc.stopShown = false; // what the reader sees: disabled Send over leftover text, no Stop button
+  wc._sendFailQueue = [true]; // the first try isn't confirmed; the retry works
+  const t0 = Date.now();
+  const r = await call("send:compose", { text: "retry me", targets: ["claude"] });
+  assert(r.ok && r.results.claude.ok, `the retry delivers it (${JSON.stringify(r.results.claude)})`);
+  assert(Date.now() - t0 < 10000, `without waiting minutes for a "busy" AI (${Date.now() - t0} ms)`);
+  wc.generating = false; delete wc.stopShown;
+}
+
+async function testTagFragmentNotNudged() {
+  console.log("\n== TR-31: when the reader sees only \"[TO:\", the AI is not nagged about a missing tag ==");
+  await resetAllParticipants();
+  const before = sentLog("gemini").length;
+  sayRaw("gemini", "[TO:");
+  await settle(1500);
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "reply-unreadable" && l.detail.site === "gemini"), "it's logged as a reading problem");
+  assert(sentLog("gemini").length === before, "no missing-tag nudge was sent to Gemini");
+  sayRaw("gemini", "");
 }
 
 async function testHouseRulesVsMeshDedup() {
@@ -3160,6 +3228,7 @@ async function main() {
     customRole: { chatgpt: "", claude: "Skeptical Engineer", gemini: "" },
     selectorOverrides: { claude: { assistant: "span" } }, // TR-24: a bad saved pick from a real run — must be dropped on load
     nextMsgSeq: 500, // TR-29: the [MSG #] counter from the last run carries on
+    voiceConfig: { enabled: false, endpoint: "http://127.0.0.1:8299", speakOnAck: false, voices: { claude: "en_GB-alan" }, micDevice: "mic-seed" }, // restored without starting the shim (testVoiceSettingsPersist)
     hr: { mode: "rotation", topic: "Restored topic", rounds: 0, roundNum: 2, order: ["chatgpt", "claude", "gemini"], phase: "rotating", lastSpeakerIndex: 0, roles: {} }
   }));
 
@@ -3223,6 +3292,7 @@ async function main() {
   await testSendAutoRetry();
   await testDeliveryLedger();
   await testPersistenceSavesToDisk();
+  await testVoiceSettingsPersist();
   await testPromptLibrary();
   await testPromptEditorWindow();
   await testSequenceWindowManagement();
@@ -3287,6 +3357,9 @@ async function main() {
   await testTagReminderTeachesTheRules();
   await testWaitsForBusyAi();
   await testSendWaitsForFinishedReplyCapture();
+  await testUntaggedReplyNotBuriedBySend();
+  await testFailedSendLeftoverDoesNotStall();
+  await testTagFragmentNotNudged();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

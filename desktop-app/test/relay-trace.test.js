@@ -39,11 +39,11 @@ assert(c.retried === 4, 'every one needed a retry — counted');
 assert(/capturing/.test(c.stopsAt), `it names the stage: the AI replied but nothing was captured (${c.stopsAt})`);
 
 console.log('\n== failures, unproven sends, duplicates, batched replies ==');
-send('0007', 'gemini', { text: 'same body' });
+send('0007', 'gemini', { from: 'claude', kind: 'relay', text: 'same body' });
 T.noteSendResult('0007', { ok: false, error: 'SEND_NOT_CONFIRMED', attempts: 3 });
-send('0008', 'gemini', { text: 'same body' });
+send('0008', 'gemini', { from: 'claude', kind: 'relay', text: 'same body' });
 T.noteSendResult('0008', { ok: true, verified: true });
-send('0009', 'gemini', { text: 'same body' });
+send('0009', 'gemini', { from: 'claude', kind: 'relay', text: 'same body' });
 T.noteSendResult('0009', { ok: true, verified: true });
 send('0010', 'claude', { text: 'unproven one' });
 T.noteSendResult('0010', { ok: true, verified: false });
@@ -62,6 +62,27 @@ assert(/RELAY TRACE/.test(text) && /ChatGPT: 4 sent · 4 proven/.test(text), 'pe
 assert(/Messages stop at: capturing/.test(text), 'says where ChatGPT stops');
 assert(/DUPLICATE/.test(text) && /#0009/.test(text), 'flags the duplicate by number');
 assert(/held back — addressed to you/.test(text), 'explains held replies');
+
+console.log('\n== TR-30: repeats you sent and reminders are not app duplicates; a reply typed over is flagged ==');
+{
+  let c2 = 0;
+  const R = createRelayTrace({ now: () => c2, noReplyMs: 600000 });
+  const s2 = (seq, target, extra = {}) => R.noteSend({ seq, target, text: extra.text || 'same', ...extra });
+  s2('0001', 'claude', { kind: 'program', text: 'do it' }); R.noteSendResult('0001', { ok: true, verified: true });
+  c2 += 5000; s2('0002', 'claude', { kind: 'program', text: 'do it' }); R.noteSendResult('0002', { ok: true, verified: true });
+  c2 += 5000; s2('0003', 'gemini', { kind: 'auto', text: 'reminder' }); R.noteSendResult('0003', { ok: true, verified: true });
+  c2 += 5000; s2('0004', 'gemini', { kind: 'auto', text: 'reminder' }); R.noteSendResult('0004', { ok: true, verified: true });
+  let rr = R.report();
+  assert(!rr.anomalies.some((a) => /duplicate/.test(a.what)), 'the same text sent again by you, or a repeated reminder, is not reported as an app duplicate');
+  assert(rr.sites.claude.repeatedByYou === 1 && /1 sent again by you/.test(formatReport(rr)), 'a repeat you sent is noted as yours');
+  // ChatGPT starts answering #0005, then #0006 is typed before that reply is captured.
+  s2('0005', 'chatgpt', { from: 'claude', kind: 'relay', text: 'one' }); R.noteSendResult('0005', { ok: true, verified: true });
+  c2 += 1000; R.noteGenerating('chatgpt');
+  c2 += 3000; s2('0006', 'chatgpt', { from: 'gemini', kind: 'relay', text: 'two' }); R.noteSendResult('0006', { ok: true, verified: true });
+  c2 += 3000; R.noteCapture('chatgpt', 99);
+  rr = R.report();
+  assert(rr.anomalies.some((a) => a.seq === '0005' && /typed while its reply was still on the page/.test(a.what)), 'a message typed over an uncaptured reply is flagged, even though a later reply was captured');
+}
 
 console.log('\n== cap + reset ==');
 const S = createRelayTrace({ now: () => 0, maxMessages: 5 });

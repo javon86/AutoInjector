@@ -37,6 +37,7 @@ function createPaneHealth({ sites, now = () => Date.now(), stallMs = DEFAULT_STA
     if (!r) return "the page hasn't been read yet";
     if (!r.textLen) return "no reply found on the page — the reply selector matches nothing (use 🎯 to pick the reply text)";
     if (r.generating) return "the page still says it is generating (a Stop button is showing)";
+    if (!r.hasEndTag && r.textLen <= 40 && /^\s*\[\s*TO\b/i.test(String(r.tail || ""))) return `the reader only sees the start of the reply ("${String(r.tail || "").trim().slice(0, 40)}") — the page may have split it; use 🎯 to pick the reply text`;
     if (!r.hasEndTag) return "a reply is on the page but it has no closing [FROM:] tag, so it isn't accepted";
     if (r.textLen <= 40) return `the reply selector reads only the last line of the reply ("${String(r.tail || "").trim().slice(0, 40)}") — use 🎯 → Clear Overrides on this pane`;
     return "a tagged reply is on the page but it matches one already captured";

@@ -13,6 +13,12 @@ async function main() {
   assert(ip.length >= 2 && ip.every((p) => p.label && /^https?:\/\//.test(p.endpoint)), 'image presets carry a label + a full endpoint URL');
   assert(ed.presets('video').length >= 2, 'video presets exist too');
   assert(ip.some((p) => /7860/.test(p.endpoint)), 'the A1111 default (7860) is offered');
+  const vpre = ed.presets('video');
+  assert(!vpre.some((p) => /comfy/i.test(p.label) || /:8188\b|\/prompt\b/.test(p.endpoint)), 'no ComfyUI video preset (its /prompt API only queues a job, so it can never return a clip)');
+  assert(!ed.CANDIDATES.video.some((c) => /:8188\b/.test(c.health)), 'auto-detect never offers ComfyUI as a video backend either');
+  assert(!ed.CANDIDATES.image.some((c) => /:8188\b/.test(c.health) || /\/prompt\b/.test(c.endpoint)), 'nor as an image backend (its /prompt only queues a job)');
+  const ad = vpre.find((p) => /AnimateDiff/.test(p.label));
+  assert(ad && /txt2img/.test(ad.endpoint) && /AnimateDiff extension/.test(ad.label) && /still images/.test(ad.label), 'the AnimateDiff preset says it needs the AnimateDiff extension (else still images)');
 
   console.log('\n== probe(): up vs down ==');
   const stub = http.createServer((req, res) => { res.writeHead(200); res.end('ok'); });

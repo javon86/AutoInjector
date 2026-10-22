@@ -13,6 +13,7 @@
     "test:e2e": "node test/e2e/smoke.e2e.js",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:browser": "node test/browser.test.js",
+    "test:stress": "node test/stress.test.js",
     "quality": "node scripts/quality-check.js",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",

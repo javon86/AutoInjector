@@ -103,7 +103,7 @@ function explainError(r, endpoint) {
     const why = shape === 'images'
       ? ' It sent back still images, so that address looks like an image (Stable Diffusion) server rather than a video one — if you use AnimateDiff in Automatic1111/Forge, make sure the AnimateDiff extension is installed and turned on.'
       : shape === 'comfy-queue'
-        ? ' It looks like ComfyUI, which only queues the job and doesn\'t send the clip back in its reply — this app needs a backend that returns the clip directly.'
+        ? ' It looks like ComfyUI, which only queues the job and doesn\'t send the clip back in its reply. ComfyUI needs a workflow-based integration that this app doesn\'t have yet — use an endpoint that returns the video directly instead, e.g. AnimateDiff in Automatic1111/Forge (http://127.0.0.1:7860/sdapi/v1/txt2img with the AnimateDiff extension on) or a Stable Video Diffusion server.'
         : '';
     return `The server${at} answered, but it didn't send back a video, so no working video backend is configured yet.${why} ${NO_BACKEND} Set one up, then enter its address in ${WHERE_SETTINGS} and use Test render.`;
   }

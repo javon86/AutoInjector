@@ -1834,7 +1834,7 @@ if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
   imgMsg("Rendering…");
   const r = await window.api.imageGenerate(prompt, negative);
   if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
-  else imgMsg(`Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+  else imgMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 loadImagePanel();
 

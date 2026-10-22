@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>no stop button fixture</title></head>
+<body>
+<!-- TR-30: an AI that is still writing, whose Stop button the app can't
+     recognise: Send stays disabled until the reply finishes, then enables. -->
+<div id="log"><div data-message-author-role="assistant" id="reply">Working on it</div></div>
+<textarea id="prompt-textarea"></textarea>
+<button type="button" id="send" data-testid="send-button" disabled>Send</button>
+<script>
+  window.__sent = [];
+  const reply = document.getElementById("reply");
+  const btn = document.getElementById("send");
+  let n = 0;
+  const t = setInterval(() => { reply.textContent += " more words"; if (++n >= 40) { clearInterval(t); btn.disabled = false; } }, 100);
+  btn.addEventListener("click", () => { if (btn.disabled) return; const ta = document.getElementById("prompt-textarea"); window.__sent.push(ta.value); ta.value = ""; });
+</script>
+</body></html>

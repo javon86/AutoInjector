@@ -856,10 +856,10 @@
             <select id="vid-preset" title="Pick a common backend to fill in the address" style="flex:1 1 150px; min-width:0;"><option value="">Choose a backend…</option></select>
             <button id="btn-vid-detect" title="Scan this PC for a running video backend and fill it in">🔍 Auto-detect</button>
           </div>
-          <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / SVD / ComfyUI API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
+          <input type="text" id="vid-endpoint" placeholder="http://127.0.0.1:7860/… (AnimateDiff / Stable Video Diffusion API)" style="width:100%; box-sizing:border-box; margin:3px 0;">
           <div class="btns" style="margin:3px 0;"><button id="btn-vid-save">Save</button><button id="btn-vid-test" title="Check the address is reachable right now">✓ Test</button></div>
           <div id="vid-conn-msg" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API (AnimateDiff / Stable Video Diffusion / a ComfyUI workflow). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
+          <p style="opacity:.6; font-size:10.5px; margin:2px 0;">Point this at a local text-to-video HTTP API that sends the finished clip back (AnimateDiff in A1111/Forge — needs the AnimateDiff extension, otherwise you get still images — or a Stable Video Diffusion server). ComfyUI isn't supported for video yet (its API only queues jobs). Pick one above, or press <b>Auto-detect</b>. Clips save into the <code>videos/</code> output folder.</p>
         </details>
       </div>
     </div>
