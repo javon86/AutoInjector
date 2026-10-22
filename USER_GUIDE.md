@@ -689,6 +689,16 @@ instead.
   sending pane, or whether a `[TO: X]` tag is present. **Pause/Stop** in Global
   halt all routing. A reply tagged `[TO: USER]` is never forwarded (it's for you),
   and after 30 hand‑offs in a row relaying pauses until you send a message.
+- **Messages seem to go missing.** Use **Tools → Relay Trace report**. It lists,
+  for each AI, how many messages were sent, proven in the chat, answered and
+  passed on — and says where the rest stopped (sending, proving, replying or
+  capturing), with the message numbers. It's also included in every **Extract All**.
+- **Is everything working?** Use **Tools → Run relay check (Bucket Brigade)**. The
+  checked AIs pass a 20‑item list around through the app (about 23 messages,
+  10–20 minutes). The report gives an **App verdict** — PASS means every hand‑off
+  was delivered, captured and passed on exactly, with no duplicates — and lists
+  separately any mistakes the AIs themselves made. **Tools → Stop relay check** or
+  **Stop AIs Talking** ends it early.
 - **An AI's light is red.** Hover it for the reason. "Can't find its message box"
   usually means you're signed out in that pane. "No reply found on the page" means
   the site changed how it shows replies — use **🎯 Fix selectors → Pick Reply**.
