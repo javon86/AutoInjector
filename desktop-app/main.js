@@ -23,7 +23,7 @@ const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript } = require("./automation");
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
@@ -757,6 +757,51 @@ function layout() {
 }
 
 const { clipPaneRects } = require("./pane-layout");
+const relayPolicy = require("./relay-policy");
+// TR-06: automatic AI-to-AI hand-offs allowed in a row before relaying pauses
+// for the user (override with AUTOINJECTOR_MAX_AUTO_HOPS).
+const autoHops = relayPolicy.createHopCounter({ max: Number(process.env.AUTOINJECTOR_MAX_AUTO_HOPS) || relayPolicy.DEFAULT_MAX_AUTO_HOPS });
+// TR-07 / TR-03: one honest status per AI pane, from proven sends + captures.
+const { createPaneHealth } = require("./pane-health");
+const paneHealth = createPaneHealth({ sites: SITE_IDS, stallMs: Number(process.env.AUTOINJECTOR_STALL_MS) || undefined });
+let lastHealthJson = "";
+function broadcastHealth() {
+  const snap = paneHealth.snapshot();
+  const json = JSON.stringify(snap);
+  if (json === lastHealthJson) return;
+  lastHealthJson = json;
+  broadcast("pane-health", snap);
+}
+function markCaptured(site) { paneHealth.onCapture(site); broadcastHealth(); }
+// TR-08: a read-only page check (sends nothing) a few seconds after each pane
+// loads, so a signed-out pane or a site that changed its page shows up on the
+// light and in the log before any message is lost.
+const PROBE_DELAY_MS = Number(process.env.AUTOINJECTOR_PROBE_DELAY_MS) || 8000;
+async function probePane(site) {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return null;
+  let r;
+  try { r = await view.webContents.executeJavaScript(buildProbeScript(site, state.selectorOverrides[site])); }
+  catch (e) { r = { ok: false, error: String(e) }; }
+  if (!r || typeof r !== "object" || !r.input) r = { ok: false, error: (r && r.error) || "NO_RESULT" };
+  paneHealth.onProbe(site, r);
+  logEvent("pane-check", { site, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, signedOutHint: !!r.signedOutHint, severity: r.ok && r.input && !r.input.found ? "warn" : undefined });
+  broadcastHealth();
+  return r;
+}
+// Every few seconds: log each newly stalled pane once, with the reason read
+// off the page, and refresh the lights (stalls are time-based).
+function healthTick() {
+  for (const st of paneHealth.newStalls()) {
+    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, tail: st.read.tail } : null });
+  }
+  broadcastHealth();
+}
+function resetAutoHops(reason) {
+  const st = autoHops.status();
+  autoHops.reset();
+  if (st.hops) logEvent("hop-count-reset", { reason, hops: st.hops, wasPaused: st.paused });
+}
 
 async function syncPaneBounds() {
   if (!win || !controlsView || controlsView.webContents.isDestroyed()) return;
@@ -845,7 +890,10 @@ function createWindow() {
     try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
     try {
       if (typeof view.webContents.on === "function") {
-        view.webContents.on("did-finish-load", () => { try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {} });
+        view.webContents.on("did-finish-load", () => {
+          try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
+          setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
+        });
       }
     } catch (_) {}
     // When an AI produces a file you download from its pane, grab it into the
@@ -871,6 +919,7 @@ function createWindow() {
   win.on("closed", () => { win = null; });
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
+  setInterval(healthTick, 5000);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -940,7 +989,15 @@ function openSequenceWindow() {
   };
   layoutSequence();
   sequenceWin.on("resize", layoutSequence);
-  sequenceWin.on("closed", () => { sequenceWin = null; sequenceView = null; });
+  // ISS-006 / TR-09: this window shows the run's progress from the
+  // "sequence-state" broadcast, so it must be on the broadcast list —
+  // without this it sat on "Starting sequence…" forever.
+  uiViews.push(sequenceView);
+  sequenceWin.on("closed", () => {
+    const i = uiViews.indexOf(sequenceView);
+    if (i >= 0) uiViews.splice(i, 1);
+    sequenceWin = null; sequenceView = null;
+  });
 }
 function closeSequenceWindow() {
   if (sequenceWin) sequenceWin.close();
@@ -1029,6 +1086,7 @@ function globalSnapshot() {
     waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
     relayEnabled: state.relayEnabled,
+    autoHops: autoHops.status(),
     customRole: { ...state.customRole },
     selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
@@ -1208,6 +1266,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // can tell which message it's answering and not fall behind. Deliberately NOT
   // part of state.lastSentTo (below): Regenerate re-sends the stored body and
   // must get a FRESH number here, never a doubled-up stale one.
+  // TR-06: a send started by the user or by the program itself (compose, a
+  // prompt, a sequence step, a test, the Butler) begins a fresh conversation
+  // turn, so the AI-to-AI hop count starts over. AI-driven sends (relays carry
+  // fromSite; terminal results and missing-tag nudges are marked automatic)
+  // don't reset it.
+  if (!fromSite && !opts.automatic) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
   const prompt = `[MSG #${seq}]\n${framed}`;
 
@@ -1256,6 +1320,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // own field: duplicate detection compares message content, so the per-send
   // [MSG #] header must not make every send look unique.
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
+  paneHealth.onSendResult(target, res);
+  broadcastHealth();
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
@@ -1290,7 +1356,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     broadcast("waiting-changed", { site: target, waiting: true });
     logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
-    if (res.verified === false) logEvent("send-unverified", { target, seq, note: "the box emptied but this message's number never showed in the chat" });
+    if (res.verified === false) logEvent("send-unverified", { target, seq, severity: "warn", note: "the box emptied but this message's number never showed in the chat" });
   }
   return res;
 }
@@ -1601,7 +1667,7 @@ async function missingEndTagReprompt(site, rawText) {
     return;
   }
   try {
-    await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true });
+    await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true, automatic: true });
   } catch (e) { logEvent("endtag-reprompt-error", { site, error: String(e) }); }
 }
 
@@ -1662,17 +1728,21 @@ function loopSuppressRelay(text) {
 // its steps' replies still go through the normal capture/broadcast/tag-
 // routing path, this just also watches for "was that the reply we were
 // waiting on" to advance.
-function broadcastSequenceState() {
+// `ended` says why a run stopped: "done", "stopped", "stalled" (no reply in
+// time), "send-failed" (no AI got the step) or "no-participants".
+function broadcastSequenceState(ended) {
   const seq = state.sequence;
-  broadcast("sequence-state", { active: seq.active, index: seq.index, total: seq.steps.length });
+  if (!seq.active && ended) seq.ended = ended;
+  broadcast("sequence-state", { active: seq.active, index: seq.index, total: seq.steps.length, ended: seq.active ? null : (seq.ended || null) });
 }
 
 async function sendSequenceStep() {
   const seq = state.sequence;
   if (!seq.active || seq.index >= seq.steps.length) {
+    const finished = seq.active;
     seq.active = false;
     logEvent("sequence-done", {});
-    broadcastSequenceState();
+    broadcastSequenceState(finished ? "done" : null);
     return;
   }
   // Every dispatch gets its own generation number, stamped per-site into
@@ -1686,14 +1756,31 @@ async function sendSequenceStep() {
   seq.generation++;
   seq.sentTs = Date.now();
   const step = seq.steps[seq.index];
-  const targets = step.target === "all" ? SITE_IDS : [step.target];
+  // "All" means the AIs that are checked Active — never an unchecked pane.
+  const targets = step.target === "all" ? SITE_IDS.filter((s) => state.enabled[s]) : [step.target];
+  if (!targets.length) {
+    seq.active = false;
+    logEvent("sequence-stop", { reason: "no-participants", index: seq.index });
+    broadcastSequenceState("no-participants");
+    return;
+  }
+  let delivered = 0;
   for (const t of targets) {
     if (SITES[t]) {
       seq.dispatchGen[t] = seq.generation;
-      await sendTextTo(t, withEnvelope(step.text, t), null);
+      const r = await sendTextTo(t, withEnvelope(step.text, t), null);
+      if (r && r.ok) delivered++;
     }
   }
-  logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation });
+  // Nobody got the step: stop now with the reason, instead of "waiting for a
+  // reply" for 4 minutes on a message that never went out.
+  if (!delivered) {
+    seq.active = false;
+    logEvent("sequence-send-failed", { index: seq.index, target: step.target });
+    broadcastSequenceState("send-failed");
+    return;
+  }
+  logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation, delivered });
   broadcastSequenceState();
 }
 
@@ -1709,13 +1796,14 @@ function sequenceWatchdog() {
     const step = seq.steps[seq.index];
     seq.active = false;
     logEvent("sequence-stalled", { index: seq.index, target: step && step.target });
-    broadcastSequenceState();
+    broadcastSequenceState("stalled");
   }
 }
 
 async function startSequence(steps) {
-  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0 };
+  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0, ended: null };
   state.relayEnabled = true; // a sequence run re-enables forwarding after any prior Stop
+  broadcastSequenceState(); // the window shows "step 1 of N" right away, not after every send finishes
   await sendSequenceStep();
 }
 
@@ -1723,7 +1811,7 @@ async function handleSequenceCapture(turn) {
   const seq = state.sequence;
   if (!seq.active) return;
   const step = seq.steps[seq.index];
-  if (!step) { seq.active = false; broadcastSequenceState(); return; }
+  if (!step) { seq.active = false; broadcastSequenceState("done"); return; }
   // For an "all" step, the first of the three replies to arrive is enough
   // to advance — waiting for all three would mean one slow AI blocks the
   // whole sequence indefinitely.
@@ -1986,6 +2074,33 @@ function detectManagerStall() {
   return state.manager.thinkingStreak >= MANAGER_STALL_LIMIT;
 }
 
+// TR-10 (ISS-011, the "Butler Himself" memory loop): a butler model that keeps
+// saving or searching the SAME thing never moves the task forward. The second
+// identical REMEMBER/RECALL in a task is not run again — the butler is told it
+// was already done; the third time, the task stops with a plain reason instead
+// of spinning until the turn limit. Returns true when it handled the action.
+const MEMORY_REPEAT_LIMIT = 3;
+async function guardRepeatedMemoryAction(m, action, arg) {
+  const sig = `${action}:${String(arg || "").replace(/\s+/g, " ").trim().toLowerCase()}`;
+  m.memorySigs = m.memorySigs || [];
+  if (!m.memorySigs.includes(sig)) { m.memorySigs.push(sig); if (m.memorySigs.length > 50) m.memorySigs.shift(); return false; }
+  m.memoryRepeats = (m.memoryRepeats || 0) + 1;
+  const what = action === "REMEMBER" ? "saved that fact" : "searched memory for that";
+  logManagerEvent({ category: "memory", severity: "warning", summary: `Skipped a repeat: already ${what} in this task (repeat ${m.memoryRepeats})`, details: { action, arg: String(arg || "").slice(0, 200) } });
+  m.previousManagerActions.push({ action, rejected: true, rejectReason: `already ${what} in this task — use the result you have and move on`, ts: Date.now() });
+  if (m.memoryRepeats >= MEMORY_REPEAT_LIMIT) {
+    const msg = `I stopped this task: I kept repeating the same memory step (${action.toLowerCase()}) without making progress.`;
+    broadcast("manager-ack", { taskId: m.taskId, text: msg, ts: Date.now() });
+    await finishManagedTask({ ok: false, reason: "REPEATING_MEMORY_STEP" });
+    return true;
+  }
+  m.noProgressStreak++;
+  m.status = "assembling";
+  if (detectNoProgress()) await escalateManagerTier(`repeated ${action}`);
+  else await runManagerTurn();
+  return true;
+}
+
 async function executeManagerAction(decision) {
   const m = state.manager;
   const action = decision.action;
@@ -2104,6 +2219,7 @@ async function executeManagerAction(decision) {
     case "REMEMBER": {
       // N3: persist a durable fact into the shared memory store.
       const fact = String(decision.fact != null ? decision.fact : decision.value).trim();
+      if (await guardRepeatedMemoryAction(m, "REMEMBER", fact)) break;
       const res = dbService.memoryCreate("fact", { statement: fact, source: `manager:${m.taskId}` });
       logManagerEvent({
         category: "memory",
@@ -2118,6 +2234,7 @@ async function executeManagerAction(decision) {
     case "RECALL": {
       // N3: search the shared memory store; results feed back into the prompt.
       const q = String(decision.query).trim();
+      if (await guardRepeatedMemoryAction(m, "RECALL", q)) break;
       const res = dbService.memorySearch(q);
       const found = (res && res.results) || [];
       for (const row of found) {
@@ -2437,7 +2554,7 @@ async function replyFromTerminal(site, body) {
     `Any other tag works as usual. End with [FROM: ${tag}].)`;
   if (ftState.running) { ftState.termReplies.push({ site, text, ts: Date.now() }); if (ftState.termReplies.length > 500) ftState.termReplies.shift(); }
   try {
-    const r = await sendTextTo(site, text, null);
+    const r = await sendTextTo(site, text, null, { automatic: true }); // a terminal result is part of the AI's own loop, not a fresh start
     if (!r || !r.ok) logEvent("terminal-reply-error", { to: site, error: (r && r.error) || "unknown" });
     return r;
   } catch (e) {
@@ -3095,6 +3212,7 @@ async function pollSite(site) {
     // site's stop/send selectors don't match, this is false and completion falls
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
+    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160) });
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
@@ -3131,6 +3249,7 @@ async function pollSite(site) {
       const seen = state.captured[site];
       if (seen && seen.text === text) return; // already swallowed this exact NONE
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       state.noTagReprompts[site] = 0;
       if (state.waiting[site]) {
         state.waiting[site] = false;
@@ -3191,6 +3310,7 @@ async function pollSite(site) {
     if (looksLikeRateLimit(text)) {
       const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, isRateLimited: true };
       state.captured[site] = turn;
+      markCaptured(site);
       pushTranscriptTurn(turn);
       broadcast("capture", turn);
       logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
@@ -3225,14 +3345,17 @@ async function pollSite(site) {
     // is swallowed entirely, never reaching the transcript. (stageActive was
     // already computed for the completion gate above.)
     let roundtableTag = null;
+    let roundtableExplicit = false;
     ftRecordCapture(site, text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
     let displayText = text;
     if (!stageActive) {
       const parsed = parseRoundtableTag(text);
       roundtableTag = parsed.tag;
+      roundtableExplicit = parsed.explicit === true;
       displayText = parsed.body;
       if (roundtableTag === "NONE") {
         state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+        markCaptured(site);
         if (state.waiting[site]) {
           state.waiting[site] = false;
           state.waitingSince[site] = null;
@@ -3254,6 +3377,7 @@ async function pollSite(site) {
     // Baseline path only; a stage/self-test manages its own (already-bare) output.
     if (!bareMode && !displayText.trim()) {
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       state.noTagReprompts[site] = 0;
       if (state.waiting[site]) {
         state.waiting[site] = false;
@@ -3276,6 +3400,7 @@ async function pollSite(site) {
       if (ignoreCount > 0) state.hr.ignoreCaptureFrom.set(site, ignoreCount - 1);
       if (silentAckCount > 0) state.hr.silentAckFrom.set(site, silentAckCount - 1);
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       if (state.waiting[site]) {
         state.waiting[site] = false;
         state.waitingSince[site] = null;
@@ -3287,6 +3412,9 @@ async function pollSite(site) {
 
     const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text: displayText, ts: Date.now(), pinned: false };
     if (roundtableTag) turn.roundtableTag = roundtableTag;
+    // Only a tag the AI actually wrote limits Auto routing (TR-05); an untagged
+    // reply (defaulted to USER) is forwarded by Auto exactly as before.
+    const meshTag = roundtableExplicit ? turn.roundtableTag : null;
     // state.captured[site] tracks the RAW text (matching what pollSite reads
     // straight off the page) so the "already.text === text" dedup check
     // above keeps working on the next poll — storing the tag-stripped
@@ -3302,6 +3430,7 @@ async function pollSite(site) {
     // the end) the display text differs from the page, so store raw text for the
     // "already captured this" check; otherwise store the turn as-is.
     state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
+    markCaptured(site);
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
@@ -3342,26 +3471,47 @@ async function pollSite(site) {
     // [TO:] tag relay below — not just the mesh routing arrays it also clears.
     // A stage format (House Rules) is already torn down by the same stop, so its
     // path is gated by stageActive/hr.active, not this flag.
-    const relayOn = state.relayEnabled;
+    let relayOn = state.relayEnabled;
+    // TR-06: count this reply as one automatic hop if it is about to be handed
+    // on automatically (to another AI, the Butler or the terminal). Past the
+    // limit, nothing is relayed until the user acts. House Rules stages are
+    // bounded by their own rounds and don't count.
+    if (!stageActive && relayOn && !looping) {
+      const tagTargets = roundtableTargetsFor(turn);
+      const wouldRelay = turn.roundtableTag === "BUTLER" || turn.roundtableTag === "TERMINAL" || tagTargets.length > 0 ||
+        relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: new Set(tagTargets), stageActive: false }).length > 0;
+      if (wouldRelay) {
+        const hop = autoHops.note();
+        if (!hop.allowed) {
+          relayOn = false;
+          logEvent("hop-limit", { site, hops: hop.hops, max: hop.max, severity: "warn" });
+          if (hop.justPaused) {
+            broadcast("relay-paused", { hops: hop.hops, max: hop.max, ts: Date.now(), text: `The AIs have passed messages to each other ${hop.max} times in a row without you, so automatic relaying is paused (this stops runaway loops). Their replies still show here. Send a message, or click Auto, to let them continue.` });
+          }
+        }
+      }
+    }
     if (!stageActive && turn.roundtableTag === "BUTLER") {
       // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
       // butler's converse path and do NOT also mesh-forward it to the other AIs.
       if (relayOn) await deliverToButler(turn);
     } else if (!stageActive && turn.roundtableTag === "TERMINAL") {
       // Command Prompt connection: the AI wants commands run on this PC. Never
-      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" like every
-      // other automatic path; the run itself is fire-and-forget so a long
-      // command never holds this pane's poll loop.
+      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" (and the
+      // hop limit) like every other automatic path; the run itself is
+      // fire-and-forget so a long command never holds this pane's poll loop.
       if (relayOn) deliverToTerminal(turn);
-      else logEvent("terminal-request-dropped", { from: site, reason: "relay-silenced" });
+      else logEvent("terminal-request-dropped", { from: site, reason: state.relayEnabled ? "hop-limit" : "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
       if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
       else if (!looping && relayOn) await handleRoundtableCapture(turn);
       const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
       if (!looping && relayOn) {
-        for (const target of state.routing[site]) {
-          if (target === site || roundtableTargets.has(target)) continue;
+        // TR-05: a [TO: USER] reply is for the person, not the other AIs.
+        const meshTargets = relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: roundtableTargets, stageActive });
+        if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") logEvent("mesh-skip-to-user", { site });
+        for (const target of meshTargets) {
           // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
           // relay — never the raw page text, which still carries [TO:]/[FROM:].
           await sendTextTo(target, turn.text, site);
@@ -3583,6 +3733,7 @@ ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
   try { dbService.recordUserMessage(text, list); } catch (_) {}
   state.relayEnabled = true; // a fresh user send re-engages the conversation after a Stop
+  resetAutoHops("compose");
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   // Teach the envelope per target so the reply comes back with its [FROM:] tag
@@ -3600,6 +3751,7 @@ ipcMain.handle("send:forward", async (_evt, { source, targets }) => {
   // state.captured stores RAW text (for dedup); strip the [TO:]/[FROM:] envelope
   // before forwarding so the target doesn't receive routing markers.
   const clean = stripEnvelope(cap.text);
+  resetAutoHops("forward");
   const results = {};
   for (const t of list) results[t] = await sendTextTo(t, clean, source);
   return { ok: true, results };
@@ -3620,6 +3772,7 @@ ipcMain.handle("send:regenerate", async (_evt, site) => {
   // concurrent mesh-forward into the same pane (the exact typing-collision
   // bug the send queue exists to prevent) and never showed up in the ledger
   // at all.
+  resetAutoHops("regenerate");
   const res = await sendTextTo(site, text, null, { raw: true });
   if (res && res.ok) logEvent("regenerate", { site });
   return res;
@@ -3671,6 +3824,7 @@ ipcMain.handle("prompts:send", async (_evt, { text }) => {
   const targets = SITE_IDS.filter((s) => text && String(text[s] || "").trim());
   if (!targets.length) return { ok: false, error: "NEED_TEXT" };
   logEvent("prompt-send", { targets });
+  resetAutoHops("prompt-send");
   const results = {};
   for (const s of targets) results[s] = await sendTextTo(s, String(text[s]).trim(), null);
   return { ok: true, results };
@@ -3708,14 +3862,29 @@ async function silenceAllRelay() {
   state.meshActive = false;
   state.relayEnabled = false; // halt the always-on baseline [TO:] tag relay too, not just mesh
   if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
-  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
+  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState("stopped"); }
   try { await stopManagedTask(); } catch (_) {}
   try { cancelPendingTerminalRequests("relay-silenced"); } catch (_) {}
+  resetAutoHops("silenced");
   logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
 }
 ipcMain.handle("relay:silence", async () => silenceAllRelay());
+// TR-08: run the read-only page check now (all panes, or { site }).
+ipcMain.handle("health:check", async (_evt, { site } = {}) => {
+  const list = site && SITES[site] ? [site] : SITE_IDS;
+  const results = {};
+  for (const s of list) results[s] = await probePane(s);
+  return { ok: true, results, health: paneHealth.snapshot() };
+});
+// TR-07: current health of every pane (the lights also update live via "pane-health").
+ipcMain.handle("health:get", () => ({ ok: true, health: paneHealth.snapshot() }));
+// TR-06: read or change the AI-to-AI hop limit ({ max } to change it).
+ipcMain.handle("relay:hop-limit", (_evt, { max } = {}) => {
+  if (max != null) { autoHops.setMax(max); logEvent("hop-limit-changed", { max: autoHops.status().max }); }
+  return { ok: true, ...autoHops.status() };
+});
 
 ipcMain.handle("routing:auto-all", () => {
   const active = SITE_IDS.filter((s) => state.enabled[s]);
@@ -3724,6 +3893,7 @@ ipcMain.handle("routing:auto-all", () => {
   }
   state.meshActive = active.length >= 2;
   state.relayEnabled = true; // turning Auto on re-enables automatic forwarding
+  resetAutoHops("auto-on");
   logEvent("auto-mesh-enabled", { participants: active });
   return { ok: true, global: globalSnapshot() };
 });
@@ -4104,7 +4274,7 @@ ipcMain.handle("sequence:run", async (_evt, { steps }) => {
 ipcMain.handle("sequence:stop", () => {
   state.sequence.active = false;
   logEvent("sequence-stop", {});
-  broadcastSequenceState();
+  broadcastSequenceState("stopped");
   return { ok: true };
 });
 

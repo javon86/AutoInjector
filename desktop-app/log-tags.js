@@ -42,6 +42,8 @@ const EXACT = {
   'compose': 'chat', 'rate-limit-detected': 'chat',
   // Routing / relay between AIs
   'routing-changed': 'routing', 'relay-silenced': 'routing', 'loop-suppressed': 'routing',
+  'hop-limit': 'routing', 'hop-count-reset': 'routing', 'hop-limit-changed': 'routing',
+  'sequence-send-failed': 'roundtable', 'pane-check': 'chat', 'mesh-skip-to-user': 'routing', 'capture-stalled': 'chat',
   'endtag-missing': 'routing', 'endtag-missing-giveup': 'routing', 'endtag-reprompt-error': 'routing',
   'participant-changed': 'routing', 'auto-mesh-enabled': 'routing', 'roundtable-skip': 'roundtable',
   // Models / Ollama

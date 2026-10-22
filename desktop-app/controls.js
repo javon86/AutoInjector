@@ -228,10 +228,45 @@ async function runSelfTest(site) {
   }
 }
 
-function led(site, ok) {
+// TR-07: the light next to each AI's name is its LIVE health, not just "page
+// loaded": green = last message delivered and its reply captured; amber =
+// waiting for a reply, or a send that couldn't be proven; red = send failed or
+// no reply for minutes (hover for the reason). Grey until something is sent.
+const HEALTH_COLOR = { idle: "#666", ok: "#29c447", waiting: "#f5b642", warn: "#f5b642", stalled: "#e5484d", error: "#e5484d" };
+const paneHealthState = {};
+const paneLoaded = {};
+function paintLed(site) {
   const node = document.getElementById(`led-${site}`);
-  if (node) node.style.background = ok ? "#29c447" : "#444";
+  if (!node) return;
+  const h = paneHealthState[site];
+  if (!paneLoaded[site] && (!h || h.level === "idle")) { node.style.background = "#333"; node.title = "Page not loaded"; return; }
+  if (!h || h.level === "idle") { node.style.background = HEALTH_COLOR.idle; node.title = "Page loaded — nothing sent yet"; return; }
+  node.style.background = HEALTH_COLOR[h.level] || "#666";
+  node.title = h.text || h.level;
 }
+function led(site, ok) { paneLoaded[site] = !!ok; paintLed(site); }
+// Click a light to re-run the read-only page check for that AI (TR-08).
+function wireLedChecks() {
+  for (const site of SITES) {
+    const node = document.getElementById(`led-${site}`);
+    if (!node || node._checkWired || !window.api.healthCheck) continue;
+    node._checkWired = true;
+    node.style.cursor = "pointer";
+    node.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      setStatus(`Checking ${SITE_LABELS[site]}'s page…`);
+      try {
+        const r = await window.api.healthCheck(site);
+        const h = r && r.health && r.health[site];
+        setStatus(`${SITE_LABELS[site]}: ${h ? h.text : "check finished"}`);
+      } catch (_) { setStatus(`${SITE_LABELS[site]}: check failed`); }
+    });
+  }
+}
+if (window.api.onPaneHealth) window.api.onPaneHealth((snap) => {
+  if (!snap) return;
+  for (const site of Object.keys(snap)) { paneHealthState[site] = snap[site]; paintLed(site); }
+});
 
 function beep() {
   try {
@@ -563,7 +598,7 @@ function buildAiColumn(site) {
 
   const head = document.createElement("div");
   head.className = "card-head";
-  head.innerHTML = `<span class="led" id="led-${site}" title="Pane loaded"></span><span class="gendot" id="gendot-${site}"></span><span class="pane-name">${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="led" id="led-${site}" title="Page not loaded"></span><span class="gendot" id="gendot-${site}"></span><span class="pane-name">${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
   const zoomOutBtn = document.createElement("button");
   zoomOutBtn.className = "zoom-btn";
   zoomOutBtn.textContent = "－";
@@ -883,6 +918,7 @@ function buildAiRow() {
   const box = el("expanded-strip");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildAiColumn(site));
+  try { wireLedChecks(); } catch (_) {}
 }
 
 // The three AI panes ALWAYS stay in #expanded-strip in SITES order — a state
@@ -951,7 +987,7 @@ function applyGlobal(global) {
   }
   if (typeof global.meshActive === "boolean") {
     el("mesh-status").textContent = global.meshActive
-      ? "Auto is ON — enabled participants keep forwarding replies to each other."
+      ? "Auto is ON — enabled participants forward replies to each other (replies addressed to you stay with you)."
       : "Auto is off.";
   }
   if (global.customRole) {
@@ -1283,8 +1319,22 @@ window.api.onSent(({ target, from }) => {
   setStatus(from ? `Sent ${SITE_LABELS[from]}'s reply to ${SITE_LABELS[target]}.` : `Sent to ${SITE_LABELS[target]}.`);
   flashReceived(target);
 });
+// Plain-language versions of the send errors people actually see.
+const SEND_ERROR_TEXT = {
+  SEND_NOT_CONFIRMED: "the message is still sitting in its box — the Send button didn't work",
+  SEND_UNVERIFIED: "the box cleared but the message never showed up in the chat",
+  INPUT_NOT_FOUND: "couldn't find its message box — is it signed in and on a chat page?",
+  NO_VIEW: "its pane isn't open",
+};
 window.api.onSendError(({ target, error }) => {
-  setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
+  setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${SEND_ERROR_TEXT[error] || error}`);
+});
+// TR-06: too many AI-to-AI hand-offs in a row — relaying paused until I act.
+if (window.api.onRelayPaused) window.api.onRelayPaused((p) => {
+  if (!p) return;
+  setStatus(`Auto paused after ${p.max} AI-to-AI hand-offs — send a message or click Auto to continue.`);
+  if (el("mesh-status")) el("mesh-status").textContent = `Auto PAUSED — ${p.max} hand-offs in a row without you. Send a message or click Auto to continue.`;
+  try { logToCenter(p.text, { tag: "routing", err: true }); } catch (_) {}
 });
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);

@@ -85,7 +85,14 @@ function main() {
   testQuotedExampleNotTruncated();
   testWhitespaceTolerance();
   testNoneAndStrip();
-  console.log(`\n${passed} passed, ${failed} failed`);
+  console.log("\n== TR-05: explicit vs defaulted [TO: USER] ==");
+{
+  const { parseRoundtableTag } = require("../envelope");
+  assert(parseRoundtableTag("[TO: USER]\nhi").explicit === true, "a written [TO: USER] is explicit");
+  const d = parseRoundtableTag("no tag at all");
+  assert(d.tag === "USER" && d.explicit === false, "a missing tag still defaults to USER, but is marked not explicit");
+}
+console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
 main();

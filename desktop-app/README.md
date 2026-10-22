@@ -329,6 +329,17 @@ target getting sent to twice for one reply — once via mesh with the raw,
 un-stripped tag still in the body, once via tag routing with the clean,
 stripped version) until it was root-caused and fixed.
 
+### Reliability rules (October 2026)
+
+These came out of the 21 Oct 2026 Extract All and test report. Tracker IDs (TR-xx) match the fix-status doc.
+
+- **A send counts only when it's proven (TR-01).** Every message starts with a unique `[MSG #n]`. The send script types through the browser's editing pipeline (paste as a fallback), and a send is *verified* only when that number appears in the chat outside the message box. A retry first checks whether the last try already landed, so a slow page never gets the same message twice. Once a pane has proven one send, an unproven "box emptied" result is treated as a failure (`SEND_UNVERIFIED`) and retried. Line breaks survive.
+- **`[TO: USER]` stays with you under Auto (TR-05).** Auto routing no longer forwards a reply the AI explicitly addressed to the user. A reply with no `[TO:]` tag at all is forwarded as before. House Rules stages keep their own routing.
+- **Hop limit (TR-06).** Each automatic hand-off (AI to AI, to the Butler or to the terminal) counts as a hop. After 30 in a row (`AUTOINJECTOR_MAX_AUTO_HOPS`, or the `relay:hop-limit` IPC) relaying pauses until you send something, click Auto, or press Stop AIs Talking. Program-started sends (a prompt, a sequence step, a test, the Butler) start the count over; AI-driven sends (relays, terminal results, missing-tag nudges) don't.
+- **Health lights (TR-07).** The light before each AI's name is green only when its last message was delivered and the reply captured; amber while waiting or when a send couldn't be proven; red when a send failed or no reply came for 3 minutes (`AUTOINJECTOR_STALL_MS`). Hover it for the reason. A stall is logged once as `capture-stalled` with what was on the page: no reply found (selector), still "generating", or a reply missing its `[FROM:]` tag.
+- **Prompt Sequence (TR-09).** The Sequence window now receives progress updates, "All" means the AIs checked Active, and a run that can't deliver a step stops at once and says why (finished / stopped / no reply in time / couldn't deliver).
+- **Butler memory loop (TR-10).** A repeated identical REMEMBER/RECALL in one task is skipped and the Butler is told; the third repeat ends the task with a plain reason.
+
 ## House Rules
 
 Instead of manually wiring up Forward/Auto buttons, **House Rules** (in the

@@ -11,7 +11,7 @@
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression } = require("../automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildProbeScript } = require("../automation");
 
 // Playwright's own auto-detected browser (e.g. what `npx playwright install`
 // puts in ~/.cache/ms-playwright on a normal machine or CI runner) is tried
@@ -142,6 +142,19 @@ async function testOldNumberOnPageAfterRestart() {
     assert(sent.length === 1 && /today/.test(sent[0]), "it really went out");
   });
 }
+async function testProbeScript() {
+  console.log("\n== TR-08: the read-only page check finds the box/button and sends NOTHING ==");
+  await withFixture("strict-editor.html", async (page) => {
+    const r = await page.evaluate(buildProbeScript("chatgpt"));
+    assert(r.ok && r.input.found && r.input.selector === "#prompt-textarea", `finds ChatGPT's message box (${JSON.stringify(r.input)})`);
+    assert(r.send.found, "finds the Send button");
+    assert((await sentOn(page)).length === 0, "and posts nothing");
+  });
+  await withFixture("claude-reply.html", async (page) => {
+    const r = await page.evaluate(buildProbeScript("claude"));
+    assert(r.ok && r.assistant.count >= 1, `counts Claude's replies on the page (${JSON.stringify(r.assistant)})`);
+  });
+}
 async function testStrictEditorDeadButton() {
   console.log("\n== a Send button that does nothing is still reported as a failure ==");
   await withFixture("strict-editor.html", async (page) => {
@@ -187,6 +200,7 @@ async function main() {
   await testNoDuplicateOnSlowPage();
   await testOldNumberOnPageAfterRestart();
   await testStrictEditorDeadButton();
+  await testProbeScript();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

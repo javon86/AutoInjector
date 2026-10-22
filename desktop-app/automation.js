@@ -500,4 +500,46 @@ function buildLoginFillScript(site, username, password) {
   `;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript };
+// TR-08: a READ-ONLY page check — sends nothing, clicks nothing. Reports which
+// of each selector list actually matches on the live page right now, so a
+// changed site (or a signed-out pane) shows up before any message is lost.
+// -> { ok, url, input:{found,selector}, send:{found,selector},
+//      assistant:{count,selector}, stop:{found}, signedOutHint }
+function buildProbeScript(site, overrides) {
+  const cfg = siteConfig(site);
+  const ov = overrides || {};
+  const payload = JSON.stringify({
+    INPUT: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    ASSISTANT: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    STOP: cfg.STOP_CANDIDATES || [],
+  });
+  return `
+  (() => {
+    const CFG = ${payload};
+    function first(list) {
+      for (const sel of list || []) { try { if (document.querySelector(sel)) return sel; } catch (_) {} }
+      return null;
+    }
+    let assistantCount = 0, assistantSel = null;
+    for (const sel of CFG.ASSISTANT) {
+      try { const n = document.querySelectorAll(sel).length; if (n && !assistantSel) { assistantSel = sel; assistantCount = n; } } catch (_) {}
+    }
+    const inputSel = first(CFG.INPUT);
+    let body = "";
+    try { body = String(document.body ? document.body.innerText : "").slice(0, 4000).toLowerCase(); } catch (_) {}
+    const signedOutHint = !inputSel && /(log ?in|sign ?in|sign up|create account|continue with google)/.test(body);
+    return {
+      ok: true,
+      url: String(location.href || ""),
+      input: { found: !!inputSel, selector: inputSel },
+      send: { found: !!first(CFG.SEND), selector: first(CFG.SEND) },
+      assistant: { count: assistantCount, selector: assistantSel },
+      stop: { found: !!first(CFG.STOP) },
+      signedOutHint,
+    };
+  })();
+  `;
+}
+
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript };

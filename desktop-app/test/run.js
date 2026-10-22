@@ -813,7 +813,7 @@ async function testSequenceBackend() {
   const runRes = await call("sequence:run", { steps });
   assert(runRes.ok, "sequence starts successfully");
 
-  await waitUntil(() => sentLog("chatgpt").some((e) => e.text === "Step 1 for chatgpt"), { label: "step 1 sent to chatgpt only" });
+  await waitUntil(() => sentLog("chatgpt").some((e) => e.text.includes("Step 1 for chatgpt")), { label: "step 1 sent to chatgpt only" });
   assert(sentLog("claude").length === 0 && sentLog("gemini").length === 0, "nobody else gets anything yet -- waiting on chatgpt's reply");
   let s = await call("state:get", {});
   assert(s.sequence.active === true && s.sequence.index === 0, "sequence state reports step 0 active");
@@ -825,13 +825,13 @@ async function testSequenceBackend() {
   assert(s.sequence.index === 0, "an unaddressed site's reply does not advance the sequence");
 
   say("chatgpt", "Here's my reply to step 1.");
-  await waitUntil(() => SITES.every((s2) => sentLog(s2).some((e) => e.text === "Step 2 for everyone")), { label: "step 2 ('all') sent to all three once chatgpt's reply advances the sequence" });
+  await waitUntil(() => SITES.every((s2) => sentLog(s2).some((e) => e.text.includes("Step 2 for everyone"))), { label: "step 2 ('all') sent to all three once chatgpt's reply advances the sequence" });
   s = await call("state:get", {});
   assert(s.sequence.index === 1, "advanced to step 1 (the 'all' step)");
 
   // for an 'all' step, the FIRST of the three to reply is enough to advance
   say("gemini", "Gemini replies first.");
-  await waitUntil(() => sentLog("claude").some((e) => e.text === "Step 3 for claude"), { label: "step 3 sent to claude once the first reply to the 'all' step lands" });
+  await waitUntil(() => sentLog("claude").some((e) => e.text.includes("Step 3 for claude")), { label: "step 3 sent to claude once the first reply to the 'all' step lands" });
   s = await call("state:get", {});
   assert(s.sequence.index === 2, "advanced to step 2 off the first of the three replies, without waiting for the other two");
 
@@ -1248,11 +1248,12 @@ async function testTunerDistinguishesForwardFailureFromNoReply() {
   console.log("\n== The Tuner: a relay leg whose internal forward silently fails to send is reported as exactly that, not confused with the target never answering ==");
   await resetAllParticipants();
 
+  const startCounts = Object.fromEntries(SITES.map((s) => [s, sentLog(s).length])); // taken BEFORE the run starts sending
   const tunerRunPromise = call("tuner:run", {});
 
   // Phase 1: answer all 3 connectivity checks normally
   for (const site of SITES) {
-    const before = sentLog(site).length;
+    const before = startCounts[site];
     await waitUntil(() => sentLog(site).length > before, { label: `tuner connectivity check reaches ${site}` });
     const token = extractSelftestToken(sentLog(site)[sentLog(site).length - 1].text);
     say(site, reverseStr(token));
@@ -1649,6 +1650,80 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   await call("routing:stop-all", {});
 }
 
+async function testToUserStaysWithUserAndHopLimit() {
+  console.log("\n== TR-05: with Auto on, a [TO: USER] reply is NOT forwarded to the other AIs ==");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("claude", "[TO: USER]\nThis one is just for the human.");
+  await waitUntil(async () => (await call("state:get", {})).log.some((l) => l.kind === "captured" && l.detail.site === "claude"), { label: "claude's [TO: USER] reply is captured" });
+  await settle();
+  assert(sentLog("chatgpt").length === 0 && sentLog("gemini").length === 0, `nobody else gets it (chatgpt:${sentLog("chatgpt").length}, gemini:${sentLog("gemini").length})`);
+  assert((await call("state:get", {})).log.some((l) => l.kind === "mesh-skip-to-user" && l.detail.site === "claude"), "the Activity Log says why it wasn't forwarded");
+  say("claude", "[TO: GEMINI]\nThis one is for Gemini.");
+  await waitUntil(() => sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, { label: "a reply addressed to an AI still relays (and Auto still lets the third AI overhear)" });
+  assert(sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, "addressed replies still flow as before");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("claude", "No routing tag on this one.");
+  await waitUntil(() => sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, { label: "an untagged reply is still forwarded by Auto" });
+  assert(sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, "a reply with NO [TO:] tag is still forwarded by Auto (only a written [TO: USER] stays with you)");
+
+  console.log("\n== TR-06: AI-to-AI hand-offs pause after the hop limit; a user send resumes ==");
+  await resetAllParticipants();
+  await call("relay:hop-limit", { max: 3 });
+  await call("routing:auto-all", {});
+  const ping = async (site, to, n) => { say(site, `[TO: ${to.toUpperCase()}]\nping ${n}`); await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.site === site && t.text.includes(`ping ${n}`)), { label: `ping ${n} captured` }); await settle(150); };
+  await ping("claude", "gemini", 1); await ping("gemini", "claude", 2); await ping("claude", "gemini", 3);
+  const before = sentLog("gemini").length + sentLog("claude").length + sentLog("chatgpt").length;
+  await ping("gemini", "claude", 4);
+  await settle();
+  const after = sentLog("gemini").length + sentLog("claude").length + sentLog("chatgpt").length;
+  let s = await call("state:get", {});
+  assert(after === before, `the 4th hand-off is NOT relayed (sends before ${before}, after ${after})`);
+  assert(s.log.some((l) => l.kind === "hop-limit"), "the Activity Log records the hop limit");
+  assert(s.transcript.some((t) => /ping 4/.test(t.text)), "the blocked reply is still shown in the conversation");
+  const hl = await call("relay:hop-limit", {});
+  assert(hl.paused === true && hl.hops === 3, `relaying is paused at 3 (${JSON.stringify(hl)})`);
+  await call("send:compose", { text: "carry on", targets: ["claude"] });
+  const hl2 = await call("relay:hop-limit", {});
+  assert(hl2.paused === false && hl2.hops === 0, "a message from the user resets it");
+  await call("relay:hop-limit", { max: 30 });
+
+  console.log("\n== TR-07: each pane's health light reflects proven sends and captures ==");
+  await resetAllParticipants();
+  await call("send:compose", { text: "health check", targets: ["claude"] });
+  let h = (await call("health:get", {})).health;
+  assert(h.claude.level === "waiting", `after a send, Claude is waiting (${h.claude.level})`);
+  say("claude", "[TO: USER]\nhere you go");
+  await waitUntil(async () => (await call("health:get", {})).health.claude.level === "ok", { label: "Claude goes green once its reply is captured" });
+  h = (await call("health:get", {})).health;
+  assert(h.claude.level === "ok", `Claude is green after its reply (${h.claude.level})`);
+  reg("gemini").webContents._forceSendFail = true;
+  await call("send:compose", { text: "this will fail", targets: ["gemini"] });
+  reg("gemini").webContents._forceSendFail = false;
+  h = (await call("health:get", {})).health;
+  assert(h.gemini.level === "error" && /SEND_NOT_CONFIRMED/.test(h.gemini.text), `a failed send turns Gemini red with the reason (${JSON.stringify(h.gemini)})`);
+  await call("routing:stop-all", {});
+}
+
+async function testSequenceEndsHonestly() {
+  console.log("\n== TR-09: a Prompt Sequence never sends to unchecked AIs, and stops with the reason when a step can't be delivered ==");
+  await resetAllParticipants();
+  await call("participants:set", { site: "gemini", enabled: false });
+  const r = await call("sequence:run", { steps: [{ target: "all", text: "step one for everyone" }, { target: "claude", text: "step two" }] });
+  assert(r.ok, "sequence starts");
+  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, { label: "the 'all' step reaches the checked AIs" });
+  assert(sentLog("gemini").length === 0, "an unchecked AI never gets an 'all' step");
+  await call("sequence:stop", {});
+  await resetAllParticipants();
+  for (const s of SITES) reg(s).webContents._forceSendFail = true;
+  const r2 = await call("sequence:run", { steps: [{ target: "claude", text: "nobody will get this" }] });
+  for (const s of SITES) reg(s).webContents._forceSendFail = false;
+  const st = await call("state:get", {});
+  assert(r2.ok && st.log.some((l) => l.kind === "sequence-send-failed"), "a step that can't be delivered stops the run right away (logged), instead of waiting 4 minutes");
+  assert(!(await call("state:get", {})).log.some((l) => l.kind === "sequence-stalled" && Date.now() - l.ts < 5000), "it is not reported as a stall");
+}
+
 async function testHouseRulesVsMeshDedup() {
   console.log("\n== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==");
   await resetAllParticipants();
@@ -2009,8 +2084,10 @@ async function testAddressingAwareRelayFrame() {
   await resetAllParticipants();
   await call("routing:auto-all", {});
   const bG = sentLog("gemini").length;
-  say("chatgpt", "[TO: USER]\njust a note"); // USER => no tag relay; mesh forwards it to the others
-  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the [TO: USER] reply to gemini" });
+  // An UNTAGGED reply (no [TO:] at all) => no tag relay; mesh forwards it. (A
+  // written [TO: USER] now stays with the user — TR-05, tested separately.)
+  say("chatgpt", "just a note");
+  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the untagged reply to gemini" });
   assert(sentLog("gemini").pop().text.includes("[ChatGPT says]"), "a plain mesh forward stays neutral '[ChatGPT says]'");
 }
 
@@ -2705,6 +2782,22 @@ async function testManagerMemoryActions() {
   await call("manager:stop", {});
 }
 
+async function testManagerMemoryLoopGuard() {
+  console.log("\n== TR-10: a butler that keeps saving the SAME fact stops with a reason instead of looping ==");
+  resetManagerStub();
+  memoryCreateCalls = []; memorySearchCalls = [];
+  queueManagerDecisionRepeating({ action: "REMEMBER", fact: "the sky is blue", reason: "again", confidence: 0.9 });
+  const started = await call("manager:start-task", { userRequest: "loop on memory" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager && ["finished", "error"].includes(s.manager.status); }, { label: "the repeating task ends on its own", timeout: 15000 });
+  const st = await call("manager:get-state", {});
+  assert(["finished", "error"].includes(st.manager.status), `the task ended (${st.manager.status})`);
+  assert(memoryCreateCalls.length === 1, `the fact was saved once, not over and over (${memoryCreateCalls.length})`);
+  const s = await call("state:get", {});
+  assert(JSON.stringify(s.log).includes("Skipped a repeat") || JSON.stringify(st).includes("Skipped a repeat"), "the skipped repeats are logged in plain words");
+  await call("manager:stop", {});
+}
+
 // N4: the awareness object exposes per-pane availability, and a disabled pane is
 // marked unavailable so the butler won't delegate to it. It is present in the
 // state the manager model receives each turn.
@@ -2878,6 +2971,9 @@ async function main() {
   await testMessageSeqNumbering();
   await testAddressingAwareRelayFrame();
   await testLoopGuardSuppressesRelay();
+  await testToUserStaysWithUserAndHopLimit();
+  await testManagerMemoryLoopGuard();
+  await testSequenceEndsHonestly();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

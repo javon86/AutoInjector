@@ -16,8 +16,10 @@
 const ROUNDTABLE_TAG_RE = /^\s*\[\s*TO\s*:\s*(GEMINI|CHATGPT|CLAUDE|BUTLER|TERMINAL|ALL|USER|NONE)\s*\]\s*/i;
 function parseRoundtableTag(text) {
   const m = ROUNDTABLE_TAG_RE.exec(text);
-  if (!m) return { tag: "USER", body: text }; // Rule 1: a missing tag defaults to the user
-  return { tag: m[1].toUpperCase(), body: text.slice(m[0].length) };
+  // `explicit` = the AI actually wrote the tag. Callers that must tell a real
+  // [TO: USER] from "no tag at all" (Auto routing, TR-05) check it.
+  if (!m) return { tag: "USER", body: text, explicit: false }; // Rule 1: a missing tag defaults to the user
+  return { tag: m[1].toUpperCase(), body: text.slice(m[0].length), explicit: true };
 }
 
 // End-tag protocol: every baseline reply must close with [FROM: <who>]. Its
