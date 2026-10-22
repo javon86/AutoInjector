@@ -23,6 +23,7 @@ process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_PO
 // so this only affects deliberately-untagged replies (sayRaw).
 process.env.AUTOINJECTOR_NOTAG_QUIET_MS = process.env.AUTOINJECTOR_NOTAG_QUIET_MS || "300";
 process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS = process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS || "100";
+process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS = process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS || "50";
 
 const path = require("path");
 const fs = require("fs");
@@ -1872,6 +1873,19 @@ async function testTagReminderTeachesTheRules() {
   await call("routing:stop-all", {});
 }
 
+async function testWaitsForBusyAi() {
+  console.log("\n== TR-25: a message to an AI that's still writing waits for it, instead of failing ==");
+  await resetAllParticipants();
+  reg("gemini").webContents._busyCount = 4; // still writing for 4 checks
+  const r = await call("send:compose", { text: "wait for me", targets: ["gemini"] });
+  assert(r.ok && r.results.gemini.ok, `delivered once Gemini finished (${JSON.stringify(r.results.gemini)})`);
+  const s = await call("state:get", {});
+  const sent = s.log.filter((l) => l.kind === "sent" && l.detail.target === "gemini").pop();
+  assert(sent && sent.detail.attempts === 1, `the waiting didn't use up retries (attempts ${sent && sent.detail.attempts})`);
+  assert(s.log.some((l) => l.kind === "send-waiting-busy" && l.detail.target === "gemini"), "the Activity Log says it waited for Gemini");
+  assert(!s.log.some((l) => l.kind === "send-error" && l.detail.target === "gemini" && Date.now() - l.ts < 3000), "no send error");
+}
+
 async function testHouseRulesVsMeshDedup() {
   console.log("\n== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==");
   await resetAllParticipants();
@@ -3010,6 +3024,7 @@ async function main() {
     savedAt: Date.now(),
     transcript: oldTranscript,
     customRole: { chatgpt: "", claude: "Skeptical Engineer", gemini: "" },
+    selectorOverrides: { claude: { assistant: "span" } }, // TR-24: a bad saved pick from a real run — must be dropped on load
     hr: { mode: "rotation", topic: "Restored topic", rounds: 0, roundNum: 2, order: ["chatgpt", "claude", "gemini"], phase: "rotating", lastSpeakerIndex: 0, roles: {} }
   }));
 
@@ -3036,6 +3051,7 @@ async function main() {
   assert(restored.transcript[restored.transcript.length - 1].text === "Restored opening message", "the most recent entry survives the cap");
   assert(restored.transcript[0].text === "synthetic old turn #51", "the cap evicts from the OLDEST end, keeping exactly the newest 1000");
   assert(restored.global.customRole.claude === "Skeptical Engineer", "custom roles restored from disk");
+  assert(!restored.global.selectorOverrides.claude.assistant && restored.log.some((l) => l.kind === "selector-override-dropped" && l.detail.selector === "span"), "a saved bare-tag reply selector (\"span\") is dropped on load and logged (TR-24)");
   assert(restored.houseRule.mode === "rotation" && restored.houseRule.topic === "Restored topic", "House Rule mode/topic restored");
   assert(restored.houseRule.active === false, "restored run comes back NOT active — a restart must never auto-send anything");
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
@@ -3133,6 +3149,7 @@ async function main() {
   await testBucketBrigadeEndToEnd();
   await testGeminiRedrawNotRelayedTwice();
   await testTagReminderTeachesTheRules();
+  await testWaitsForBusyAi();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

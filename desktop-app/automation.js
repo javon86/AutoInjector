@@ -10,6 +10,12 @@
 // any other pane, on demand or automatically) instead of a fixed turn order.
 const SITES = require("./selectors");
 
+// TR-24: a selector that is only a tag name ("span", "p", "div") matches
+// hundreds of unrelated elements — never a usable override. Shared by the
+// read/probe scripts (they skip it) and main.js (it refuses to save it).
+function isBareTagSelector(sel) { return /^\s*[a-z][a-z0-9-]*\s*$/i.test(String(sel || "")); }
+function usableOverride(sel) { return sel && !isBareTagSelector(sel) ? sel : null; }
+
 function siteConfig(site) {
   const cfg = SITES[site];
   if (!cfg) throw new Error(`Unknown site: ${site}`);
@@ -39,8 +45,9 @@ function buildSendScript(site, text, overrides, sendOpts) {
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
-    INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
     PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS,
     // The [MSG #0042] header main.js stamps on every send. It is unique per send,
     // so seeing it in the conversation (outside the composer) is PROOF the
@@ -251,6 +258,18 @@ function buildSendScript(site, text, overrides, sendOpts) {
     // A retry of a send whose first try DID land (just too slowly to confirm)
     // must not post the message twice.
     if (markerShown()) return { ok: true, method: "already-sent", verified: true, markerBaseline: baseline };
+    // TR-25: the AI is still writing its last reply (its Stop button shows).
+    // Chat sites won't take a new message then — say so instead of typing
+    // into the box and failing three times.
+    // Same rule as the reader's "generating" flag: the FIRST Stop selector that
+    // matches anything, and only if that button is visible.
+    for (const sel of CFG.STOP_CANDIDATES) {
+      let b = null; try { b = document.querySelector(sel); } catch (_) {}
+      if (!b) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { ok: false, error: "AI_BUSY", markerBaseline: baseline };
+      break;
+    }
     const inj = await injectText(CFG.text);
     if (!inj.ok) {
       if (inj.error === "INPUT_NOT_FOUND") {
@@ -267,11 +286,14 @@ function buildSendScript(site, text, overrides, sendOpts) {
 function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
+  const ovAssistant = usableOverride(ov.assistant);
   const payload = JSON.stringify({
-    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    ASSISTANT_CANDIDATES: ovAssistant ? [ovAssistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    DEFAULT_ASSISTANT: cfg.ASSISTANT_CANDIDATES,
+    OVERRIDE: ovAssistant,
+    SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
-    INPUT_CANDIDATES: ov.input ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
+    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -301,8 +323,50 @@ function buildReadScript(site, overrides) {
     for (const sel of CFG.ASSISTANT_CANDIDATES) {
       document.querySelectorAll(sel).forEach((n) => all.push(n));
     }
-    const node = all.length ? all[all.length - 1] : null;
-    const text = node ? (node.innerText || node.textContent || "") : "";
+    let node = all.length ? all[all.length - 1] : null;
+    let text = node ? (node.innerText || node.textContent || "") : "";
+    // TR-23: a saved "reply" selector that only reaches PART of the reply (a
+    // single paragraph — e.g. just the "[FROM: X]" line) made whole replies
+    // look empty. If the built-in selectors find a reply whose text ENDS WITH
+    // what the override read, the override is reading a fragment: use the
+    // whole reply instead.
+    let fragmentFixed = false;
+    if (CFG.OVERRIDE && text.trim()) {
+      let full = null;
+      for (const sel of CFG.DEFAULT_ASSISTANT) {
+        try { const list = document.querySelectorAll(sel); if (list.length) { full = list[list.length - 1]; break; } } catch (_) {}
+      }
+      const fullText = full ? (full.innerText || full.textContent || "") : "";
+      if (full && fullText.trim().length > text.trim().length && fullText.trim().endsWith(text.trim())) { node = full; text = fullText; fragmentFixed = "defaults"; }
+    }
+    // Still only part of a reply (it closes with [FROM:] but has no [TO:] —
+    // e.g. the site splits one reply into several blocks, or its layout
+    // changed): climb to the element that holds the whole reply. Never into a
+    // block that contains the user's own message or more than one reply.
+    const hasFrom = (s) => /\\[\\s*FROM\\s*:/i.test(s);
+    const startsWithTo = (s) => /^\\s*\\[\\s*TO\\s*:/i.test(s);
+    // Only when the block we read has no [TO: anywhere — if it does, the AI
+    // wrote (or quoted) it there and climbing could pick up a quoted tag.
+    if (node && hasFrom(text) && !startsWithTo(text) && !/\\[\\s*TO\\s*:/i.test(text)) {
+      const USER_MARKERS = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+      let cur = node;
+      for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
+        const p = cur.parentElement;
+        let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS); } catch (_) {}
+        if (hasUser) break;
+        const t = p.innerText || p.textContent || "";
+        if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break; // that's more than one reply
+        cur = p;
+        const m = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:[^\\]]*\\][\\s\\S]*\\[\\s*FROM\\s*:/i.exec(t); // the tag must start a line
+        if (m) {
+          const start = m.index + m[1].length;
+          // end right after the LAST [FROM: …] so page buttons below it don't tag along
+          let end = t.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi;
+          while ((fm = fre.exec(t))) end = fm.index + fm[0].length;
+          node = p; text = t.slice(start, end); fragmentFixed = "climb"; break;
+        }
+      }
+    }
 
     // Is the composer empty? A Send button is ALSO disabled when there's simply
     // nothing to send (idle, empty composer) — so an empty composer must NOT be
@@ -328,11 +392,15 @@ function buildReadScript(site, overrides) {
     // a genuinely new reply adds one (TR-17). Counted with ONE selector only —
     // the first that matches — so nested wrappers or a saved override that
     // matches the same nodes can never inflate it.
+    // After a fragment fix the override's matches are paragraphs, not replies:
+    // count with the built-in selectors, or report "unknown" after a climb.
     let count = 0;
-    for (const sel of CFG.ASSISTANT_CANDIDATES) {
+    const countWith = fragmentFixed === "defaults" ? CFG.DEFAULT_ASSISTANT : CFG.ASSISTANT_CANDIDATES;
+    for (const sel of countWith) {
       try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
     }
-    return { ok: true, text, generating, sendReady, composerEmpty, count };
+    if (fragmentFixed === "climb") count = null;
+    return { ok: true, text, generating, sendReady, composerEmpty, count, fragmentFixed };
   })();
   `;
 }
@@ -349,13 +417,19 @@ function buildReadScript(site, overrides) {
 // __AUTOINJECTOR_PICK__ is a literal marker so the test mock can recognize
 // this script by content, the same way it recognizes buildSendScript's
 // output via "typeByKeyboard".
-function buildPickScript(role) {
+function buildPickScript(role, site) {
   const TIMEOUT_MS = 30000;
+  let defaults = [];
+  try { defaults = site ? siteConfig(site).ASSISTANT_CANDIDATES : []; } catch (_) {}
+  // Only markers that mean "an AI reply" — never "article" or *message*
+  // test-ids, which also match the user's own turns or one fixed old turn.
+  const MESSAGE_MARKERS = [...defaults, '[data-message-author-role="assistant"]', "model-response", "message-content", ".standard-markdown", ".markdown"];
   const label = role === "input" ? "the message box you type into" : role === "send" ? "the Send button" : "the text of a reply";
   return `
   (() => new Promise((resolve) => {
     // __AUTOINJECTOR_PICK__
     const ROLE = ${JSON.stringify(role)};
+    const MESSAGE_MARKERS = ${JSON.stringify(MESSAGE_MARKERS)};
     let done = false;
     const banner = document.createElement("div");
     banner.textContent = "AutoInjector: click ${label} now\\u2026";
@@ -371,7 +445,8 @@ function buildPickScript(role) {
     }
 
     function attrSelector(el) {
-      if (el.getAttribute && el.getAttribute("data-testid")) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
+      // a test-id that ends in a number names ONE turn (e.g. conversation-turn-12) — not usable
+      if (el.getAttribute && el.getAttribute("data-testid") && !/\\d+$/.test(el.getAttribute("data-testid"))) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
       if (el.getAttribute && el.getAttribute("aria-label")) return el.tagName.toLowerCase() + '[aria-label="' + el.getAttribute("aria-label") + '"]';
       if (el.id && !/^[a-f0-9]{6,}$/i.test(el.id)) return "#" + CSS.escape(el.id);
       if (el.className && typeof el.className === "string") {
@@ -384,14 +459,20 @@ function buildPickScript(role) {
     function nearestByRole(el) {
       if (ROLE === "input") return el.closest('textarea, [contenteditable="true"]') || el;
       if (ROLE === "send") return el.closest('button, [role="button"], input[type="submit"]') || el;
-      // assistant: climb through plain single-child wrapper elements only,
-      // so clicking inner text lands on the smallest element that still
-      // contains the whole reply rather than the message list container.
+      // assistant (TR-24): snap to the element that holds the WHOLE reply —
+      // the site's own message container — never the word or paragraph that
+      // was clicked (that is how "span" / one-paragraph selectors got saved).
+      for (const sel of MESSAGE_MARKERS) {
+        try { const c = el.closest(sel); if (c) { c.__aiPickSelector = sel; return c; } } catch (_) {}
+      }
+      // No known container: climb single-child wrappers, then keep climbing
+      // until the element has something more specific than a bare tag.
       let node = el, depth = 0;
       while (node.parentElement && node.parentElement.children.length <= 1 && depth < 6) {
         node = node.parentElement;
         depth++;
       }
+      while (node.parentElement && node.parentElement !== document.body && /^[a-z0-9-]+$/i.test(attrSelector(node)) && depth < 12) { node = node.parentElement; depth++; }
       return node;
     }
 
@@ -401,7 +482,9 @@ function buildPickScript(role) {
       e.preventDefault();
       e.stopImmediatePropagation();
       const target = nearestByRole(e.target);
-      const selector = attrSelector(target);
+      // A reply pick that snapped to a known reply container saves THAT
+      // container's selector (it matches every reply, and only replies).
+      const selector = target.__aiPickSelector || attrSelector(target);
       const sample = (target.innerText || target.textContent || "").trim().slice(0, 120);
       const tag = target.tagName.toLowerCase();
       // Validated right here, against the live page, in the same tick as the
@@ -517,9 +600,9 @@ function buildProbeScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
-    INPUT: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
-    SEND: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    ASSISTANT: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    INPUT: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    ASSISTANT: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     STOP: cfg.STOP_CANDIDATES || [],
   });
   return `
@@ -550,4 +633,4 @@ function buildProbeScript(site, overrides) {
   `;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript };
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };

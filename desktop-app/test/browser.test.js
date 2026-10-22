@@ -11,7 +11,7 @@
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildProbeScript } = require("../automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildProbeScript, buildPickScript } = require("../automation");
 
 // Playwright's own auto-detected browser (e.g. what `npx playwright install`
 // puts in ~/.cache/ms-playwright on a normal machine or CI runner) is tried
@@ -155,6 +155,65 @@ async function testProbeScript() {
     assert(r.ok && r.assistant.count >= 1, `counts Claude's replies on the page (${JSON.stringify(r.assistant)})`);
   });
 }
+// TR-23 / TR-24: the 21-22 Oct runs had Claude's reply selector saved as
+// "span" and ChatGPT reading only the "[FROM: CHATGPT]" line of each reply.
+async function testFragmentAndBareOverrides() {
+  console.log("\n== TR-23/24: a saved reply selector that reads only part of the reply, or is a bare tag, can't break reading ==");
+  await withFixture("claude-reply.html", async (page) => {
+    await page.evaluate(() => {
+      const md = document.querySelector(".standard-markdown");
+      md.innerHTML = '<p>[TO: GEMINI]</p><p>The whole reply body.</p><p class="lastline">[FROM: CLAUDE]</p>';
+      const junk = document.createElement("span"); junk.textContent = "Copy"; document.body.appendChild(junk);
+    });
+    let r = await page.evaluate(buildReadScript("claude", { assistant: "p.lastline" }));
+    assert(/^\[TO: GEMINI\][\s\S]*whole reply body[\s\S]*\[FROM: CLAUDE\]/.test(r.text), `an override that reads only the last line still gets the whole reply (${JSON.stringify(r.text)})`);
+    r = await page.evaluate(buildReadScript("claude", { assistant: "span" }));
+    assert(/whole reply body/.test(r.text) && !/^Copy$/.test(r.text.trim()), `a bare "span" override is ignored (read: ${JSON.stringify(r.text.slice(0, 60))})`);
+    const pr = await page.evaluate(buildProbeScript("claude", { assistant: "span" }));
+    assert(pr.assistant.selector !== "span", `the page check ignores it too (${pr.assistant.selector})`);
+  });
+}
+async function testSplitReplyWithNoKnownContainer() {
+  console.log("\n== TR-23: a reply split into blocks, with the site's usual containers gone, is still read whole ==");
+  await withFixture("strict-editor.html", async (page) => {
+    await page.evaluate(() => {
+      document.getElementById("log").innerHTML =
+        '<div class="turn user"><div data-message-author-role="user">[MSG #0001] question … end with [FROM: CHATGPT]</div></div>' +
+        '<div class="turn bot"><h6>ChatGPT said:</h6><div class="blk">[TO: USER]</div><div class="blk">Here is the answer.</div><div class="blk last">[FROM: CHATGPT]</div></div>';
+    });
+    const r = await page.evaluate(buildReadScript("chatgpt", { assistant: "div.blk.last" }));
+    assert(/^\[TO: USER\][\s\S]*Here is the answer\.[\s\S]*\[FROM: CHATGPT\]$/.test(r.text.trim()) && r.fragmentFixed, `reads the whole reply, not just "[FROM: CHATGPT]" (${JSON.stringify(r.text)})`);
+    assert(!/question/.test(r.text) && !/ChatGPT said/.test(r.text), "never pulls in the user's message or the site's heading");
+    // page buttons under the reply don't tag along
+    await page.evaluate(() => { const bar = document.createElement("div"); bar.textContent = "Copy  Retry  ChatGPT can make mistakes. Check important info before relying on it."; document.querySelector(".turn.bot").appendChild(bar); });
+    const r2 = await page.evaluate(buildReadScript("chatgpt", { assistant: "div.blk.last" }));
+    assert(/\[FROM: CHATGPT\]$/.test(r2.text.trim()), `the read stops at the closing tag, not the page's buttons (${JSON.stringify(r2.text.slice(-60))})`);
+    // a quoted [TO: …] INSIDE an untagged reply is never taken as the routing tag
+    await page.evaluate(() => { document.getElementById("log").innerHTML = '<div class="turn bot"><div class="blk only">Sure. Start each reply with [TO: ALL] when you want everyone. Done. [FROM: CLAUDE]</div><div>Copy</div></div>'; });
+    const r3 = await page.evaluate(buildReadScript("claude", { assistant: "div.blk.only" }));
+    assert(/^Sure\./.test(r3.text.trim()) && !r3.fragmentFixed, `a quoted tag isn't used to re-cut the reply (${JSON.stringify(r3.text.slice(0, 40))})`);
+  });
+}
+async function testPickerSnapsToWholeReply() {
+  console.log("\n== TR-24: picking a reply by clicking a word inside it saves the WHOLE reply's container ==");
+  await withFixture("claude-reply.html", async (page) => {
+    const pending = page.evaluate(buildPickScript("assistant", "claude"));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.querySelector(".standard-markdown p").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+    const r = await pending;
+    assert(r.ok && /standard-markdown/.test(r.selector) && r.selector !== "p", `the picked selector is the reply container, not the clicked paragraph (${r.selector})`);
+  });
+}
+async function testAiBusyNotTyped() {
+  console.log("\n== TR-25: while the AI is still writing (Stop button showing), the app waits instead of typing ==");
+  await withFixture("strict-editor.html", async (page) => {
+    await page.evaluate(() => { const s = document.createElement("button"); s.setAttribute("data-testid", "stop-button"); s.textContent = "Stop"; document.body.appendChild(s); });
+    const r = await page.evaluate(buildSendScript("chatgpt", "[MSG #0099]\nnot yet"));
+    assert(r.ok === false && r.error === "AI_BUSY", `reports AI_BUSY (got ${JSON.stringify(r)})`);
+    const box = await page.evaluate(() => document.getElementById("prompt-textarea").textContent);
+    assert(box === "" && (await sentOn(page)).length === 0, "nothing was typed or sent");
+  });
+}
 async function testStrictEditorDeadButton() {
   console.log("\n== a Send button that does nothing is still reported as a failure ==");
   await withFixture("strict-editor.html", async (page) => {
@@ -201,6 +260,10 @@ async function main() {
   await testOldNumberOnPageAfterRestart();
   await testStrictEditorDeadButton();
   await testProbeScript();
+  await testFragmentAndBareOverrides();
+  await testSplitReplyWithNoKnownContainer();
+  await testPickerSnapsToWholeReply();
+  await testAiBusyNotTyped();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

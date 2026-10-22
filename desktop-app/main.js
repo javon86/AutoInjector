@@ -23,7 +23,7 @@ const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
@@ -700,7 +700,14 @@ function loadPersistedState() {
   }
   if (snap.selectorOverrides) {
     for (const site of SITE_IDS) {
-      if (snap.selectorOverrides[site]) state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
+      if (snap.selectorOverrides[site]) {
+        state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
+        // TR-24: a saved selector that is only a tag name ("span", "p") matches
+        // hundreds of things and made replies unreadable — drop it.
+        for (const [role, sel] of Object.entries(state.selectorOverrides[site])) {
+          if (isBareTagSelector(sel)) { delete state.selectorOverrides[site][role]; logEvent("selector-override-dropped", { site, role, selector: sel, reason: "too generic (a bare tag name)", severity: "warn" }); }
+        }
+      }
     }
   }
   if (snap.savedLogins && typeof snap.savedLogins === "object") {
@@ -822,6 +829,7 @@ const relayTrace = relayTraceLib.createRelayTrace({ noReplyMs: Number(process.en
 const readCount = {};
 const capturedCount = {};
 const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
+const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 function markCaptured(site) {
   capturedCount[site] = readCount[site] != null ? readCount[site] : null;
@@ -843,7 +851,7 @@ async function probePane(site) {
   catch (e) { r = { ok: false, error: String(e) }; }
   if (!r || typeof r !== "object" || !r.input) r = { ok: false, error: (r && r.error) || "NO_RESULT" };
   paneHealth.onProbe(site, r);
-  logEvent("pane-check", { site, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, signedOutHint: !!r.signedOutHint, severity: r.ok && r.input && !r.input.found ? "warn" : undefined });
+  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, signedOutHint: !!r.signedOutHint, severity: r.ok && r.input && !r.input.found ? "warn" : undefined });
   broadcastHealth();
   return r;
 }
@@ -1289,6 +1297,9 @@ const sendQueues = {};
 // in the chat (see sendTextTo). Per run; a pane that never proves one is still
 // trusted on "box emptied" alone, with a send-unverified warning in the log.
 const sendVerifiedSeen = {};
+// TR-25: how long a send waits for an AI that is still writing its last reply.
+const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
+const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
 // Per-pane zoom for the embedded AI pages. Default 60% (override with the
 // AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
 const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
@@ -1352,6 +1363,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // still retrying and land out of order.
   let attempts = 0;
   let markerBaseline = null; // set by the first try; lets a retry tell "already went out" from "never did"
+  let busySince = 0; // TR-25: when we started waiting for a busy AI
   const res = await withSendQueue(target, async () => {
     let r;
     for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
@@ -1368,6 +1380,13 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (r && markerBaseline == null && Number.isInteger(r.markerBaseline)) markerBaseline = r.markerBaseline;
       if (r && r.ok && r.verified === false && sendVerifiedSeen[target]) r = { ok: false, error: "SEND_UNVERIFIED" };
       if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
+      // TR-25: the AI is still writing its previous reply — wait for it to
+      // finish (it can't take a new message yet) instead of burning retries.
+      if (r && r.error === "AI_BUSY") {
+        if (fromSite && !state.relayEnabled) { r = { ok: false, error: "RELAY_STOPPED" }; break; } // Stop AIs Talking while it waited
+        if (!busySince) { busySince = Date.now(); logEvent("send-waiting-busy", { target, from: fromSite || null, seq, pageSaysGenerating: !!state.generating[target] }); }
+        if (Date.now() - busySince < SEND_BUSY_WAIT_MS) { attempt--; await new Promise((resolve) => setTimeout(resolve, SEND_BUSY_POLL_MS)); continue; }
+      }
       // E11: a provider-paused conversation won't recover by resending — the
       // composer is gone on purpose. Stop retrying and report it as itself.
       if (r && r.error === "PROVIDER_PAUSED") break;
@@ -1789,9 +1808,9 @@ async function handleRoundtableCapture(turn) {
   // Tell the receiver how it was addressed: a named [TO: X] tag → "you"; [TO: ALL]
   // → "everyone". This is the addressing awareness the stripped tag would carry.
   const addressing = turn.roundtableTag === "ALL" ? "everyone" : "you";
-  for (const target of roundtableTargetsFor(turn)) {
-    await sendTextTo(target, turn.text, turn.site, { addressing, sourceTurnId: turn.id });
-  }
+  // Each target has its own send queue; send to them side by side so one AI
+  // that is still busy writing (TR-25 wait) doesn't hold up the others.
+  await Promise.all(roundtableTargetsFor(turn).map((target) => sendTextTo(target, turn.text, turn.site, { addressing, sourceTurnId: turn.id })));
 }
 
 // Loop guard: models acking each other produce SHORT, near-identical replies
@@ -3384,6 +3403,10 @@ async function pollSite(site) {
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (res && res.fragmentFixed && !fragmentWarned[site]) {
+      fragmentWarned[site] = true;
+      logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
+    }
     if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
     paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160) });
     // Publish generation-state transitions (drives the UI dot and the service
@@ -3713,20 +3736,24 @@ async function pollSite(site) {
       else logEvent("terminal-request-dropped", { from: site, reason: state.relayEnabled ? "hop-limit" : "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
+      // The tag relay and Auto forwards are NOT awaited (TR-25): a target that
+      // is still writing may take minutes, and this pane must keep being read
+      // meanwhile. Per-target send queues keep each AI's messages in order.
+      const relayJobs = [];
       if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-      else if (!looping && relayOn) await handleRoundtableCapture(turn);
+      else if (!looping && relayOn) relayJobs.push(handleRoundtableCapture(turn));
       const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
       if (!looping && relayOn) {
         // TR-05: a [TO: USER] reply is for the person, not the other AIs.
         const meshTargets = relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: roundtableTargets, stageActive });
         if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") { logEvent("mesh-skip-to-user", { site }); try { relayTrace.noteHeld(turn.id, "to-user"); } catch (_) {} }
         autoForwarded = meshTargets.length;
-        for (const target of meshTargets) {
-          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-          // relay — never the raw page text, which still carries [TO:]/[FROM:].
-          await sendTextTo(target, turn.text, site, { sourceTurnId: turn.id });
-        }
+        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+        // relay — never the raw page text, which still carries [TO:]/[FROM:].
+        // Side by side, like the tag relay (TR-25).
+        for (const target of meshTargets) relayJobs.push(sendTextTo(target, turn.text, site, { sourceTurnId: turn.id }));
       }
+      if (relayJobs.length) Promise.all(relayJobs).catch((e) => logEvent("relay-error", { site, error: String(e) }));
     }
     // TR-22: no [TO:] tag on a normal reply -> flag it and re-send the rules.
     // Not during a House Rules stage or a self-test/Tuner (their own formats),
@@ -4554,7 +4581,7 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
   logEvent("selector-pick-started", { site, role });
   let res;
   try {
-    res = await view.webContents.executeJavaScript(buildPickScript(role), true);
+    res = await view.webContents.executeJavaScript(buildPickScript(role, site), true);
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
@@ -4571,6 +4598,8 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
     if (res.visible === false) problems.push("NOT_VISIBLE");
     if (res.roleOk === false) problems.push("WRONG_ELEMENT_TYPE");
     if (role === "assistant" && looksLikeEcho(res.sample, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
+    if (isBareTagSelector(res.selector)) problems.push("TOO_GENERIC");
+    if (role === "assistant" && typeof res.matchCount === "number" && res.matchCount > 60) problems.push("TOO_BROAD");
     if (problems.length) {
       logEvent("selector-pick-rejected", { site, role, selector: res.selector, reasons: problems, sample: res.sample || null });
       return { ok: false, error: problems[0], reasons: problems };

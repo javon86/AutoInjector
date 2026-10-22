@@ -1324,6 +1324,7 @@ const SEND_ERROR_TEXT = {
   SEND_NOT_CONFIRMED: "the message is still sitting in its box — the Send button didn't work",
   SEND_UNVERIFIED: "the box cleared but the message never showed up in the chat",
   INPUT_NOT_FOUND: "couldn't find its message box — is it signed in and on a chat page?",
+  AI_BUSY: "it was still writing its last reply for 5 minutes, so the new message couldn't go in",
   NO_VIEW: "its pane isn't open",
 };
 window.api.onSendError(({ target, error }) => {

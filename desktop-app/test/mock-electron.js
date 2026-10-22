@@ -115,6 +115,8 @@ class FakeWebContents extends EventEmitter {
       // verify the real retry loop in sendTextTo(), not just a permanently
       // broken or permanently working send. Falls back to the simpler
       // always-fail/always-succeed _forceSendFail once the queue is empty.
+      // _busyCount: report AI_BUSY (the AI is still writing) this many times first (TR-25)
+      if (this._busyCount > 0) { this._busyCount--; return { ok: false, error: "AI_BUSY" }; }
       const failThisAttempt = this._sendFailQueue.length ? this._sendFailQueue.shift() : this._forceSendFail;
       if (failThisAttempt) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });

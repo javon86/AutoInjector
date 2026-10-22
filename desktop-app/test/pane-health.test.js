@@ -43,6 +43,14 @@ H.onSendResult('gemini', { ok: true, verified: true }); clock += 61000;
 assert(H.newStalls().some((x) => x.site === 'gemini'), 'a NEW stall after a new send is reported again');
 assert(Object.keys(H.snapshot()).length === 3, 'snapshot covers every pane');
 
+console.log('\n== TR-23: a reply reader stuck on the last line is named ==');
+{
+  let c2 = 1; const P = createPaneHealth({ sites: ['chatgpt'], now: () => c2, stallMs: 1000 });
+  P.onSendResult('chatgpt', { ok: true, verified: true });
+  P.onRead('chatgpt', { textLen: 15, generating: false, hasEndTag: true, tail: '[FROM: CHATGPT]' });
+  c2 = 2000;
+  assert(/reads only the last line/.test(P.evaluate('chatgpt').text), `stall reason names the narrow reader (${P.evaluate('chatgpt').text})`);
+}
 console.log('\n== TR-08: the page check shows on the light before anything is sent ==');
 {
   const P = createPaneHealth({ sites: ['chatgpt'], now: () => 0 });
