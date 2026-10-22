@@ -772,7 +772,15 @@ function broadcastHealth() {
   lastHealthJson = json;
   broadcast("pane-health", snap);
 }
-function markCaptured(site) { paneHealth.onCapture(site); broadcastHealth(); }
+// TR-13: Relay Trace — follows every [MSG #n] through each provable stage.
+const relayTraceLib = require("./relay-trace");
+const relayTrace = relayTraceLib.createRelayTrace({ noReplyMs: Number(process.env.AUTOINJECTOR_STALL_MS) || undefined });
+function markCaptured(site) {
+  paneHealth.onCapture(site);
+  broadcastHealth();
+  const c = state.captured[site];
+  try { relayTrace.noteCapture(site, c ? c.id : null, { none: !!(c && (isNoneSkip(String(c.text || "")) || parseRoundtableTag(String(c.text || "")).tag === "NONE")), rateLimited: !!(c && c.isRateLimited) }); } catch (_) {}
+}
 // TR-08: a read-only page check (sends nothing) a few seconds after each pane
 // loads, so a signed-out pane or a site that changed its page shows up on the
 // light and in the log before any message is lost.
@@ -1274,6 +1282,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   if (!fromSite && !opts.automatic) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
   const prompt = `[MSG #${seq}]\n${framed}`;
+  try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : opts.automatic ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -1322,6 +1331,11 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
   paneHealth.onSendResult(target, res);
   broadcastHealth();
+  try { relayTrace.noteSendResult(seq, { ...(res || {}), attempts }); } catch (_) {}
+  if (bbState.running) {
+    bbState.sends.push({ target, from: fromSite || null, seq, text: prompt, ok: !!(res && res.ok), verified: !!(res && res.verified === true), ts: Date.now() });
+    if (bbState.sends.length > 500) bbState.sends.shift();
+  }
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
     logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
@@ -1696,7 +1710,7 @@ async function handleRoundtableCapture(turn) {
   // → "everyone". This is the addressing awareness the stripped tag would carry.
   const addressing = turn.roundtableTag === "ALL" ? "everyone" : "you";
   for (const target of roundtableTargetsFor(turn)) {
-    await sendTextTo(target, turn.text, turn.site, { addressing });
+    await sendTextTo(target, turn.text, turn.site, { addressing, sourceTurnId: turn.id });
   }
 }
 
@@ -2716,7 +2730,13 @@ ipcMain.handle("lockers:attach", async (_evt, { site, rel, targets } = {}) => {
 });
 // ---- 🧪 Feature Test: every AI through every feature, judged by real evidence ----
 const ftState = { running: false, stop: false, rawCaptures: [], termReplies: [] };
+// TR-14 Bucket Brigade state: raw captures + the FULL text of every send while it runs.
+const bbState = { running: false, stop: false, captures: [], sends: [] };
 function ftRecordCapture(site, text) {
+  if (bbState.running) {
+    bbState.captures.push({ site, text: String(text || ""), ts: Date.now() });
+    if (bbState.captures.length > 500) bbState.captures.shift();
+  }
   if (!ftState.running) return;
   ftState.rawCaptures.push({ site, text: String(text || ""), ts: Date.now() });
   if (ftState.rawCaptures.length > 500) ftState.rawCaptures.shift();
@@ -2779,6 +2799,75 @@ async function runFeatureTestNow() {
     checks: r.results.map((x) => ({ name: x.name, ok: x.ok, detail: x.detail, tip: x.tip })),
   };
 }
+// ---- TR-14 Bucket Brigade: a scored relay run on the real sites ----
+const bucketBrigade = require("./bucket-brigade");
+async function runBrigadeNow() {
+  if (bbState.running) return { ok: false, error: "ALREADY_RUNNING" };
+  if (ftState.running) return { ok: false, error: "The Feature Test is running — wait for it to finish." };
+  if (state.hr && state.hr.active) return { ok: false, error: "A House Rules format is running — stop it first." };
+  if (state.sequence && state.sequence.active) return { ok: false, error: "A Prompt Sequence is running — stop it first." };
+  const sites = SITE_IDS.filter((s) => state.enabled[s] && siteViews[s] && !siteViews[s].webContents.isDestroyed());
+  if (sites.length < 2) return { ok: false, error: "Check at least two AIs Active for the relay check." };
+  // Only the [TO:] tag relay runs during the check — Auto would spray copies.
+  const saved = { routing: {}, meshActive: state.meshActive, relayEnabled: state.relayEnabled };
+  for (const s of SITE_IDS) { saved.routing[s] = new Set(state.routing[s]); state.routing[s].clear(); }
+  state.meshActive = false;
+  state.relayEnabled = true;
+  Object.assign(bbState, { running: true, stop: false, captures: [], sends: [] });
+  // The check makes 19 hand-offs in a row; never let a lowered hop limit cut it short.
+  const savedHopMax = autoHops.status().max;
+  if (savedHopMax < 40) autoHops.setMax(40);
+  logEvent("brigade-start", { sites });
+  broadcast("brigade-progress", { status: "start", sites });
+  let r;
+  try {
+    r = await bucketBrigade.runBrigade({
+      sites,
+      label: siteLabel,
+      send: (site, text) => sendTextTo(site, text, null),
+      captureSince: (site, ts) => bbState.captures.filter((c) => c.site === site && c.ts >= ts),
+      sendsSince: (target, ts) => bbState.sends.filter((x) => x.target === target && x.ts >= ts),
+      shouldStop: () => bbState.stop,
+      hopTimeoutMs: Number(process.env.AUTOINJECTOR_BRIGADE_HOP_MS) || 4 * 60 * 1000,
+      setupWaitMs: Number(process.env.AUTOINJECTOR_BRIGADE_SETUP_MS) || 20000,
+      pollMs: Number(process.env.AUTOINJECTOR_BRIGADE_POLL_MS) || 1000,
+      settleMs: Number(process.env.AUTOINJECTOR_BRIGADE_SETTLE_MS) || 3000,
+      onProgress: (p) => { broadcast("brigade-progress", p); if (p.status === "hop-problem") logEvent("brigade-hop-problem", { item: p.item, site: p.site, detail: p.detail, severity: "warn" }); },
+    });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    for (const s of SITE_IDS) state.routing[s] = saved.routing[s];
+    state.meshActive = saved.meshActive;
+    state.relayEnabled = saved.relayEnabled;
+    autoHops.setMax(savedHopMax);
+    bbState.running = false;
+  }
+  if (!r.ok) { logEvent("brigade-error", { error: r.error }); broadcast("brigade-progress", { status: "done", ok: false, error: r.error }); return r; }
+  let file = null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    file = outputManager.saveBuffer(outputManager.logsDir(), `bucket-brigade-${stamp}.md`, bucketBrigade.formatReport(r, { label: siteLabel }) + "\n\n---\n\n" + relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel }));
+    try { if (shell && shell.openPath) shell.openPath(file); } catch (_) {}
+  } catch (e) { logEvent("brigade-report-error", { error: String(e) }); file = null; }
+  logEvent("brigade-done", { appPass: r.appPass, finished: r.finished, hops: r.hops.length, repairs: r.repairs, app: r.app, report: file, severity: r.appPass ? undefined : "warn" });
+  broadcast("brigade-progress", { status: "done", ok: true, appPass: r.appPass, finished: r.finished, file });
+  return { ok: true, appPass: r.appPass, finished: r.finished, app: r.app, repairs: r.repairs, report: file };
+}
+async function confirmAndRunBrigade() {
+  try {
+    if (dialog && dialog.showMessageBox) {
+      const c = await dialog.showMessageBox({ type: "question", buttons: ["Run it", "Cancel"], defaultId: 0, cancelId: 1, title: "Relay check (Bucket Brigade)",
+        message: "Run the 20-step relay check on the AIs that are checked Active?",
+        detail: "It sends about 23 messages to the real AI sites (this uses some of your usage on them) and takes roughly 10–20 minutes. Auto routing is paused while it runs and put back afterwards. A report opens when it finishes." });
+      if (c.response !== 0) return;
+    }
+    const r = await runBrigadeNow();
+    if (!r.ok && dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "warning", title: "Relay check", message: `Couldn't run the relay check: ${r.error}` });
+  } catch (e) { bbState.running = false; logEvent("brigade-error", { error: String(e) }); }
+}
+ipcMain.handle("brigade:run", async () => { try { return await runBrigadeNow(); } catch (e) { bbState.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("brigade:stop", () => { bbState.stop = true; logEvent("brigade-stop-requested", {}); return { ok: true }; });
 ipcMain.handle("featuretest:run", async () => { try { return await runFeatureTestNow(); } catch (e) { ftState.running = false; return { ok: false, error: String(e) }; } });
 ipcMain.handle("featuretest:stop", () => { ftState.stop = true; logEvent("featuretest-stop-requested", {}); return { ok: true }; });
 ipcMain.handle("featuretest:open-report", async (_evt, { file } = {}) => {
@@ -3217,6 +3306,7 @@ async function pollSite(site) {
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
       state.generating[site] = generating;
+      if (generating) { try { relayTrace.noteGenerating(site); } catch (_) {} }
       broadcast("generation", { site, generating });
     }
 
@@ -3465,7 +3555,8 @@ async function pollSite(site) {
     // relay (roundtable + mesh); the bounded, directed paths (House Rules
     // stages, Prompt Sequence, Manager) always run.
     const looping = !stageActive && loopSuppressRelay(turn.text);
-    if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
+    if (looping) { logEvent("loop-suppressed", { site, chars: turn.text.length }); try { relayTrace.noteHeld(turn.id, "loop-guard"); } catch (_) {} }
+    if (!state.relayEnabled && !stageActive) { try { relayTrace.noteHeld(turn.id, "relay-off"); } catch (_) {} }
     // "Stop AIs Talking" (relay:silence) flips relayEnabled off. It must halt
     // EVERY automatic AI->AI forwarding path, including the always-on baseline
     // [TO:] tag relay below — not just the mesh routing arrays it also clears.
@@ -3484,6 +3575,7 @@ async function pollSite(site) {
         const hop = autoHops.note();
         if (!hop.allowed) {
           relayOn = false;
+          try { relayTrace.noteHeld(turn.id, "hop-limit"); } catch (_) {}
           logEvent("hop-limit", { site, hops: hop.hops, max: hop.max, severity: "warn" });
           if (hop.justPaused) {
             broadcast("relay-paused", { hops: hop.hops, max: hop.max, ts: Date.now(), text: `The AIs have passed messages to each other ${hop.max} times in a row without you, so automatic relaying is paused (this stops runaway loops). Their replies still show here. Send a message, or click Auto, to let them continue.` });
@@ -3494,13 +3586,13 @@ async function pollSite(site) {
     if (!stageActive && turn.roundtableTag === "BUTLER") {
       // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
       // butler's converse path and do NOT also mesh-forward it to the other AIs.
-      if (relayOn) await deliverToButler(turn);
+      if (relayOn) { try { relayTrace.noteHandoff(turn.id, "butler"); } catch (_) {} await deliverToButler(turn); }
     } else if (!stageActive && turn.roundtableTag === "TERMINAL") {
       // Command Prompt connection: the AI wants commands run on this PC. Never
       // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" (and the
       // hop limit) like every other automatic path; the run itself is
       // fire-and-forget so a long command never holds this pane's poll loop.
-      if (relayOn) deliverToTerminal(turn);
+      if (relayOn) { try { relayTrace.noteHandoff(turn.id, "terminal"); } catch (_) {} deliverToTerminal(turn); }
       else logEvent("terminal-request-dropped", { from: site, reason: state.relayEnabled ? "hop-limit" : "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
@@ -3510,11 +3602,11 @@ async function pollSite(site) {
       if (!looping && relayOn) {
         // TR-05: a [TO: USER] reply is for the person, not the other AIs.
         const meshTargets = relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: roundtableTargets, stageActive });
-        if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") logEvent("mesh-skip-to-user", { site });
+        if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") { logEvent("mesh-skip-to-user", { site }); try { relayTrace.noteHeld(turn.id, "to-user"); } catch (_) {} }
         for (const target of meshTargets) {
           // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
           // relay — never the raw page text, which still carries [TO:]/[FROM:].
-          await sendTextTo(target, turn.text, site);
+          await sendTextTo(target, turn.text, site, { sourceTurnId: turn.id });
         }
       }
     }
@@ -3714,6 +3806,12 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
+        { type: "separator" },
+        { label: "Relay Trace report (where every message went)", click: () => { try { saveRelayTraceReport(); } catch (e) { logEvent("relay-trace-error", { error: String(e) }); } } },
+        { label: "Reset Relay Trace", click: () => { relayTrace.reset(); logEvent("relay-trace-reset", {}); } },
+        { label: "Run relay check (Bucket Brigade, ~23 messages)…", click: () => { confirmAndRunBrigade(); } },
+        { label: "Stop relay check", click: () => { bbState.stop = true; logEvent("brigade-stop-requested", {}); } },
+        { type: "separator" },
         { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
@@ -3866,6 +3964,7 @@ async function silenceAllRelay() {
   try { await stopManagedTask(); } catch (_) {}
   try { cancelPendingTerminalRequests("relay-silenced"); } catch (_) {}
   resetAutoHops("silenced");
+  if (bbState.running) bbState.stop = true; // Stop AIs Talking also ends a relay check
   logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
@@ -4098,6 +4197,11 @@ function buildExtractText() {
     lines.push("");
   }
   lines.push("========================================");
+  lines.push("RELAY TRACE (where every message went — see TR-13)");
+  lines.push("========================================");
+  try { lines.push(relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel })); } catch (e) { lines.push(`(relay trace unavailable: ${e})`); }
+  lines.push("");
+  lines.push("========================================");
   lines.push("ACTIVITY / TROUBLESHOOTING (errors and events)");
   lines.push("========================================");
   if (!state.log.length) lines.push("(no activity logged)");
@@ -4109,6 +4213,25 @@ function buildExtractText() {
   lines.push("");
   return lines.join("\n");
 }
+// TR-13: the Relay Trace on its own — { report, text }, or { save:true } to
+// write it to the logs folder and open it; { reset:true } starts a fresh trace.
+function saveRelayTraceReport() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+  const text = relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel });
+  const file = outputManager.saveBuffer(outputManager.logsDir(), `relay-trace-${stamp}.txt`, text);
+  logEvent("relay-trace-saved", { file });
+  try { if (shell && shell.openPath) shell.openPath(file); } catch (_) {}
+  return file;
+}
+ipcMain.handle("trace:report", (_evt, { save, reset } = {}) => {
+  try {
+    if (reset) { relayTrace.reset(); logEvent("relay-trace-reset", {}); return { ok: true, reset: true }; }
+    const report = relayTrace.report();
+    const text = relayTraceLib.formatReport(report, { label: siteLabel });
+    const file = save ? saveRelayTraceReport() : null;
+    return { ok: true, report, text, file };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
 ipcMain.handle("logs:extract-all", () => {
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);

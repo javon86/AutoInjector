@@ -1329,6 +1329,16 @@ const SEND_ERROR_TEXT = {
 window.api.onSendError(({ target, error }) => {
   setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${SEND_ERROR_TEXT[error] || error}`);
 });
+// TR-14: Bucket Brigade progress on the status line (started from the Tools menu).
+if (window.api.onBrigadeProgress) window.api.onBrigadeProgress((p) => {
+  if (!p) return;
+  const L = (s) => SITE_LABELS[s] || s;
+  if (p.status === "start") setStatus(`Relay check started (${(p.sites || []).map(L).join(" → ")}). Auto is paused until it finishes.`);
+  else if (p.status === "setup") setStatus(`Relay check: explaining the rules to ${L(p.site)}…`);
+  else if (p.status === "hop") setStatus(`Relay check: step ${p.index} of ${p.of} — waiting for ${L(p.site)} to add ${p.item}…`);
+  else if (p.status === "hop-problem") setStatus(`Relay check: problem at ${p.item} (${L(p.site)}): ${p.detail || "see the report"}`);
+  else if (p.status === "done") setStatus(p.ok ? `Relay check finished — app ${p.appPass ? "PASSED" : "FAILED"}${p.finished ? "" : " (did not finish)"}. The report has opened.` : `Relay check couldn't run: ${p.error || "error"}`);
+});
 // TR-06: too many AI-to-AI hand-offs in a row — relaying paused until I act.
 if (window.api.onRelayPaused) window.api.onRelayPaused((p) => {
   if (!p) return;

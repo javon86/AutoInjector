@@ -43,7 +43,8 @@ const EXACT = {
   // Routing / relay between AIs
   'routing-changed': 'routing', 'relay-silenced': 'routing', 'loop-suppressed': 'routing',
   'hop-limit': 'routing', 'hop-count-reset': 'routing', 'hop-limit-changed': 'routing',
-  'sequence-send-failed': 'roundtable', 'pane-check': 'chat', 'mesh-skip-to-user': 'routing', 'capture-stalled': 'chat',
+  'sequence-send-failed': 'roundtable', 'pane-check': 'chat',
+  'relay-trace-saved': 'files', 'relay-trace-reset': 'routing', 'relay-trace-error': 'routing', 'mesh-skip-to-user': 'routing', 'capture-stalled': 'chat',
   'endtag-missing': 'routing', 'endtag-missing-giveup': 'routing', 'endtag-reprompt-error': 'routing',
   'participant-changed': 'routing', 'auto-mesh-enabled': 'routing', 'roundtable-skip': 'roundtable',
   // Models / Ollama
@@ -74,6 +75,7 @@ const PREFIX = [
   ['houserule-', () => 'roundtable'],
   ['sequence-', () => 'roundtable'],
   ['tuner-', () => 'roundtable'],
+  ['brigade-', () => 'roundtable'],
   ['selftest-', () => 'roundtable'],
   ['setup-', () => 'setup'],
   ['install-missing', () => 'setup'],

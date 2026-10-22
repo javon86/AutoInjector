@@ -1724,6 +1724,66 @@ async function testSequenceEndsHonestly() {
   assert(!(await call("state:get", {})).log.some((l) => l.kind === "sequence-stalled" && Date.now() - l.ts < 5000), "it is not reported as a stall");
 }
 
+async function testRelayTraceFollowsMessages() {
+  console.log("\n== TR-13: the Relay Trace follows a message from you, to Claude, through Claude's reply, on to Gemini ==");
+  await resetAllParticipants();
+  await call("trace:report", { reset: true });
+  await call("send:compose", { text: "trace me", targets: ["claude"] });
+  say("claude", "[TO: GEMINI]\nPassing this on.");
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "claude's reply is relayed to gemini" });
+  const r = await call("trace:report", {});
+  assert(r.ok && r.report.sites.claude.sent === 1 && r.report.sites.claude.answered === 1, `Claude: 1 sent, 1 answered (${JSON.stringify(r.report.sites.claude)})`);
+  assert(r.report.sites.gemini && r.report.sites.gemini.sent === 1, "Gemini: the relayed copy is traced");
+  assert(r.report.replyOutcomes.forwarded === 1, "Claude's reply is recorded as passed on");
+  assert(/RELAY TRACE/.test(r.text) && /Claude: 1 sent/.test(r.text), "the written report reads plainly");
+  const ex = await call("logs:extract-all", {});
+  const body = fs.readFileSync(ex.file, "utf8");
+  assert(/RELAY TRACE \(where every message went/.test(body), "Extract All now includes the Relay Trace");
+}
+
+async function testBucketBrigadeEndToEnd() {
+  console.log("\n== TR-14: the Bucket Brigade runs 19 real hand-offs through the app's relay and scores them ==");
+  const bb = require(path.join(__dirname, "..", "bucket-brigade"));
+  await resetAllParticipants();
+  process.env.AUTOINJECTOR_BRIGADE_SETUP_MS = "200";
+  process.env.AUTOINJECTOR_BRIGADE_POLL_MS = "50";
+  process.env.AUTOINJECTOR_BRIGADE_HOP_MS = "8000";
+  process.env.AUTOINJECTOR_BRIGADE_SETTLE_MS = "100";
+  await call("routing:auto-all", {}); // the check must switch Auto off for its run and put it back after
+  const order = ["chatgpt", "claude", "gemini"];
+  const seen = { chatgpt: 0, claude: 0, gemini: 0 };
+  let running = true;
+  // Pretend to be the three AIs: follow the brigade rules from whatever the app typed in.
+  const actor = (async () => {
+    while (running) {
+      for (const site of order) {
+        const log = sentLog(site);
+        while (seen[site] < log.length) {
+          const text = log[seen[site]++].text;
+          if (!/^BRIGADE$/m.test(text) || /Reply to THIS message with just NONE/.test(text)) continue;
+          const got = bb.parseItems(text);
+          const k = bb.IDS.indexOf(got.ids[got.ids.length - 1]) + 1;
+          if ((k - 1) % order.length !== order.indexOf(site)) continue;
+          const id = bb.IDS[k];
+          const to = id === "B20" ? "USER" : order[(order.indexOf(site) + 1) % order.length].toUpperCase();
+          say(site, `[TO: ${to}]\nBRIGADE\n${[...got.ids.map((i) => `${i}: ${got.items[i]}`), `${id}: ${bb.ITEMS[id]}`].join("\n")}`);
+        }
+      }
+      await settle(40);
+    }
+  })();
+  const r = await call("brigade:run", {});
+  running = false; await actor;
+  assert(r.ok && r.finished, `the run finished (${JSON.stringify(r).slice(0, 200)})`);
+  assert(r.appPass === true, `app verdict PASS: ${JSON.stringify(r.app)}`);
+  assert(r.report && fs.existsSync(r.report) && /App verdict: PASS/.test(fs.readFileSync(r.report, "utf8")) && /RELAY TRACE/.test(fs.readFileSync(r.report, "utf8")), "a report with the verdict and the Relay Trace is saved");
+  const g = (await call("relay:hop-limit", {}));
+  assert(g.paused === false, "the hop limit never tripped during a 19-step check");
+  const routing = (await call("state:get", {})).global.routing;
+  assert(Object.values(routing).some((v) => v.length > 0), `Auto routing was put back afterwards (${JSON.stringify(routing)})`);
+  await call("routing:stop-all", {});
+}
+
 async function testHouseRulesVsMeshDedup() {
   console.log("\n== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==");
   await resetAllParticipants();
@@ -2874,6 +2934,13 @@ async function main() {
     return r && r.webContents && Array.isArray(r.webContents.sentLog);
   }), { label: "createWindow registered all three panes" });
   assert(!!started, "startup completed (all three panes created)");
+  // Dev shortcut: RUN_ONLY=testName node test/run.js runs just that one scenario.
+  if (process.env.RUN_ONLY) {
+    const only = String(process.env.RUN_ONLY).split(",");
+    for (const name of only) { const fn = eval(name); await fn(); } // eslint-disable-line no-eval
+    console.log(`\n${passed} passed, ${failed} failed`);
+    process.exit(failed ? 1 : 0);
+  }
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -2974,6 +3041,8 @@ async function main() {
   await testToUserStaysWithUserAndHopLimit();
   await testManagerMemoryLoopGuard();
   await testSequenceEndsHonestly();
+  await testRelayTraceFollowsMessages();
+  await testBucketBrigadeEndToEnd();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
