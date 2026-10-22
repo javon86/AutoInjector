@@ -77,6 +77,13 @@ const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
 // treated as lost and the messaging protocol is re-sent asking for a full resend.
 // It's deliberately longer than STABLE_MS so a mid-reply pause never trips it.
 const NOTAG_QUIET_MS = Number(process.env.AUTOINJECTOR_NOTAG_QUIET_MS) || 12000;
+// TR-17: a reply carrying its [FROM:] tag must also hold still this long before
+// it's captured, so a page that re-draws the finished reply (Gemini) is read
+// once, in its final form.
+const CAPTURE_SETTLE_MS = Number(process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS) || 1500;
+// ...and a re-drawn copy that shows up later is recognised as the same reply
+// (same text apart from spacing / citation chips) within this window.
+const REPLY_REVISION_MS = Number(process.env.AUTOINJECTOR_REPLY_REVISION_MS) || 60000;
 const MAX_NOTAG_REPROMPTS = Number(process.env.AUTOINJECTOR_MAX_NOTAG_REPROMPTS) || 2;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
@@ -772,10 +779,52 @@ function broadcastHealth() {
   lastHealthJson = json;
   broadcast("pane-health", snap);
 }
+// TR-19: which build is running (git commit + branch when run from a clone), so
+// every Extract All / About says exactly what code produced it. Never throws.
+const _buildInfo = { version: "", commit: null, date: null, branch: null, dir: __dirname };
+function buildInfo() {
+  if (!_buildInfo.version) { try { _buildInfo.version = (app && app.getVersion ? app.getVersion() : "") || ""; } catch (_) {} }
+  return _buildInfo;
+}
+// Looked up in the background after start (never blocks the window), and only
+// trusted when this folder really is the app's own git clone — never a parent
+// repo an installed copy happens to sit in, never inside app.asar.
+function loadBuildInfoAsync(onDone) {
+  if (/app\.asar/i.test(__dirname)) return;
+  let cp; try { cp = require("child_process"); } catch (_) { return; }
+  const git = (args) => new Promise((resolve) => {
+    try { cp.execFile("git", ["-C", __dirname, ...args], { timeout: 5000, windowsHide: true }, (err, out) => resolve(err ? null : String(out || "").trim())); }
+    catch (_) { resolve(null); }
+  });
+  (async () => {
+    const top = await git(["rev-parse", "--show-toplevel"]);
+    if (!top) return;
+    const rel = path.relative(path.resolve(top), __dirname);
+    if (rel !== "" && rel !== "desktop-app") return; // not the AutoInjector clone itself
+    const log = await git(["log", "-1", "--format=%h %cs"]);
+    const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (!log) return;
+    const [commit, date] = log.split(" ");
+    Object.assign(_buildInfo, { commit: commit || null, date: date || null, branch: branch || null });
+    try { onDone && onDone(_buildInfo); } catch (_) {}
+  })().catch(() => {});
+}
+function buildLine() {
+  const b = buildInfo();
+  return `Build: v${b.version || "?"}${b.commit ? ` · commit ${b.commit}${b.date ? ` (${b.date})` : ""}` : ""}${b.branch ? ` · branch ${b.branch}` : ""} · running from ${b.dir}`;
+}
+
 // TR-13: Relay Trace — follows every [MSG #n] through each provable stage.
 const relayTraceLib = require("./relay-trace");
 const relayTrace = relayTraceLib.createRelayTrace({ noReplyMs: Number(process.env.AUTOINJECTOR_STALL_MS) || undefined });
+// TR-17: reply-block count on the page at the last read, and at the last capture.
+const readCount = {};
+const capturedCount = {};
+const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
+const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 function markCaptured(site) {
+  capturedCount[site] = readCount[site] != null ? readCount[site] : null;
+  tagSeenAt[site] = 0;
   paneHealth.onCapture(site);
   broadcastHealth();
   const c = state.captured[site];
@@ -870,6 +919,10 @@ async function syncPaneBounds() {
 
 function createWindow() {
   win = new BaseWindow({ width: 1700, height: 1050, title: "AutoInjector Desktop — Automation" });
+  loadBuildInfoAsync((bi) => {
+    try { if (win && !win.isDestroyed?.() && win.setTitle) win.setTitle(`AutoInjector Desktop — Automation · build ${bi.commit}${bi.branch ? ` (${bi.branch})` : ""}`); } catch (_) {}
+    logEvent("app-build", { version: buildInfo().version, commit: bi.commit, date: bi.date, branch: bi.branch, dir: bi.dir });
+  });
 
   controlsView = new WebContentsView({
     webPreferences: {
@@ -1640,7 +1693,7 @@ async function startRotation() {
 // unit-tested directly (main.js only runs under the Electron harness). It also
 // carries the E04 quoted/fenced-example guard and recognizes [TO: BUTLER] (E05).
 const {
-  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope,
+  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope, stripUiChips, sameReplyText,
 } = require("./envelope");
 
 // Append a concise envelope instruction to an outbound prompt so the receiving
@@ -3291,7 +3344,9 @@ async function pollSite(site) {
   state.busy[site] = true;
   try {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
-    const text = (res && res.text) || "";
+    // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
+    // hide it — drop them before any completion check sees the text (TR-17).
+    const text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
     const pend = state.pending[site];
     // The site's own "still generating" signal (its Stop button is showing, or
     // Send is disabled). This is the reliable "are they done speaking?" answer —
@@ -3301,6 +3356,8 @@ async function pollSite(site) {
     // site's stop/send selectors don't match, this is false and completion falls
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
+    readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
     paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160) });
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
@@ -3381,10 +3438,38 @@ async function pollSite(site) {
       }
       // rate-limit: fall through to the dedup + rate-limit handling below.
     }
-    // Baseline with the end tag present falls straight through — capture now.
+    // Baseline with the end tag present: capture once the text has held still
+    // for CAPTURE_SETTLE_MS (TR-17), so a reply still being re-drawn isn't
+    // captured twice.
+    if (!bareMode && hasEndTag(text)) {
+      // Hold still = same words ignoring spacing; and never wait more than 3x
+      // the settle time from when the tag first appeared (a reply whose page
+      // text keeps flickering must still be captured).
+      if (!tagSeenAt[site]) tagSeenAt[site] = Date.now();
+      const capped = Date.now() - tagSeenAt[site] >= CAPTURE_SETTLE_MS * 3;
+      if (settleKey(text) !== settleKey(pend.text)) {
+        state.pending[site] = { text, sinceTs: Date.now(), reprompted: false };
+        if (!capped) return;
+      } else if (Date.now() - pend.sinceTs < CAPTURE_SETTLE_MS && !capped) return;
+    }
 
     const already = state.captured[site];
-    if (already && already.text === text) return; // no new completed reply
+    // A new reply block on the page means a new reply even if its words match
+    // the last one (TR-17); otherwise identical text is the reply we already have.
+    const newBlock = capturedCount[site] != null && readCount[site] != null && readCount[site] > capturedCount[site];
+    if (already && already.text === text && !newBlock) return; // no new completed reply
+    // TR-17: the same reply re-drawn (spacing / citation chips changed) is not a
+    // new reply — never capture or relay it twice. Remember the new raw text so
+    // the next poll doesn't see it as new either.
+    const sameBlock = capturedCount[site] != null && readCount[site] === capturedCount[site]; // no new reply block appeared
+    // Applies on the baseline AND during House Rules stages; only the bare-token
+    // self-tests / Tuner / test runs are left alone.
+    const redrawCheck = !(selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site));
+    if (redrawCheck && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
+      state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
+      logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
+      return;
+    }
 
     // A rate-limit/usage-cap message isn't a real contribution — feeding it
     // into routing/House Rules/Prompt Sequence/the manager loop would relay
@@ -3460,6 +3545,9 @@ async function pollSite(site) {
     // shown by the bubble/label. Universal: a stage reply carrying one is cleaned
     // too. (On the baseline path the tag's presence is what got us here.)
     displayText = parseEndTag(displayText).body;
+    // Gemini's citation chips ("PDF", "+ 1") are page furniture, not words the
+    // AI wrote — keep them out of the transcript and the relayed message.
+    if (site === "gemini") displayText = stripUiChips(displayText);
 
     // Empty envelope (e.g. "[TO: GEMINI][FROM: CLAUDE]" with no body between the
     // tags) — nothing to show or relay. Swallow it rather than pushing an empty
@@ -3817,7 +3905,7 @@ function buildAppMenu() {
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
         { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
-        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: `AutoInjector Desktop ${app.getVersion ? app.getVersion() : ""}`.trim(), detail: `Version ${app.getVersion ? app.getVersion() : "?"} · Electron ${process.versions.electron || "?"} · Node ${process.versions.node}\nRunning from: ${__dirname}\n\nRuns ChatGPT, Claude and Gemini together. See the User Guide (Help menu).` }); } },
+        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: `AutoInjector Desktop ${app.getVersion ? app.getVersion() : ""}`.trim(), detail: `${buildLine()}\nElectron ${process.versions.electron || "?"} · Node ${process.versions.node}\n\nRuns ChatGPT, Claude and Gemini together. See the User Guide (Help menu).` }); } },
       ] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -4181,6 +4269,7 @@ function buildExtractText() {
   lines.push("AutoInjector — Extract All");
   lines.push(`Generated: ${now.toLocaleString()}`);
   lines.push(`AI messages: ${state.transcript.length} · Activity/errors: ${state.log.length}`);
+  lines.push(buildLine());
   lines.push("");
   lines.push("========================================");
   lines.push("AI CONVERSATION (what the language models said)");

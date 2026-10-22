@@ -124,7 +124,9 @@ class FakeWebContents extends EventEmitter {
     // `generating`/`sendReady` default to "done" so existing tests are unaffected;
     // a test can set webContents.generating = true to simulate an in-progress reply.
     const generating = !!this.generating;
-    return { ok: true, text: this.currentText, generating, sendReady: !generating };
+    const out = { ok: true, text: this.currentText, generating, sendReady: !generating };
+    if (Number.isInteger(this.replyCount)) out.count = this.replyCount; // reply blocks on the page (TR-17)
+    return out;
   }
 }
 

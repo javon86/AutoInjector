@@ -55,6 +55,23 @@ function findEndTag(text) {
   return { index: last.index, from: (last[1] || "").trim().toUpperCase() };
 }
 function hasEndTag(text) { return !!findEndTag(text); }
+
+// TR-17: Gemini re-draws a finished reply a few seconds later — it adds the
+// paragraph breaks and its citation chips ("PDF", "+ 1") — so the same reply
+// can be read twice with slightly different text. These helpers let the app
+// recognise "the same reply, re-drawn" and drop the chip lines.
+const UI_CHIP_LINE = /^[ \t]*(?:PDF|\+ ?\d{1,2})[ \t]*$/;
+function stripUiChips(text) {
+  const lines = String(text || "").split("\n");
+  const kept = lines.filter((l) => !UI_CHIP_LINE.test(l));
+  if (kept.length === lines.length) return String(text || "");
+  return kept.map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n{3,}/g, "\n\n");
+}
+// Same reply, ignoring all whitespace and UI chip lines?
+function sameReplyText(a, b) {
+  const k = (s) => stripUiChips(String(s || "")).replace(/\s+/g, "");
+  return !!a && !!b && k(a) === k(b);
+}
 function parseEndTag(text) {
   const s = String(text || "");
   const f = findEndTag(s);
@@ -81,5 +98,5 @@ function stripEnvelope(text) {
 
 module.exports = {
   ROUNDTABLE_TAG_RE, END_TAG_RE, END_TAG_MAX_TAIL,
-  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope,
+  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope, stripUiChips, sameReplyText,
 };

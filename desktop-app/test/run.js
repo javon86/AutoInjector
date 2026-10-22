@@ -22,6 +22,7 @@ process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_PO
 // test runs on the fast clock. Baseline replies complete on their tag instantly,
 // so this only affects deliberately-untagged replies (sayRaw).
 process.env.AUTOINJECTOR_NOTAG_QUIET_MS = process.env.AUTOINJECTOR_NOTAG_QUIET_MS || "300";
+process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS = process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS || "100";
 
 const path = require("path");
 const fs = require("fs");
@@ -500,7 +501,8 @@ async function testRoleInjection() {
 
 async function testWindowCollapse() {
   console.log("\n== Window collapse: shrinks to a titlebar in place, restores exactly on expand ==");
-  const automationWin = mockElectron.__windowRegistry["AutoInjector Desktop — Automation"];
+  // The title may end with " · build <commit> (<branch>)" (TR-19), so match by prefix.
+  const automationWin = Object.entries(mockElectron.__windowRegistry).find(([t]) => t.startsWith("AutoInjector Desktop — Automation"))?.[1];
   assert(!!automationWin, "the real BaseWindow is reachable via the mock registry");
 
   const before = await call("window:toggle-collapse", { which: "bogus" });
@@ -1739,6 +1741,7 @@ async function testRelayTraceFollowsMessages() {
   const ex = await call("logs:extract-all", {});
   const body = fs.readFileSync(ex.file, "utf8");
   assert(/RELAY TRACE \(where every message went/.test(body), "Extract All now includes the Relay Trace");
+  assert(/^Build: v/m.test(body), "Extract All says which build produced it (TR-19)");
 }
 
 async function testBucketBrigadeEndToEnd() {
@@ -1782,6 +1785,41 @@ async function testBucketBrigadeEndToEnd() {
   const routing = (await call("state:get", {})).global.routing;
   assert(Object.values(routing).some((v) => v.length > 0), `Auto routing was put back afterwards (${JSON.stringify(routing)})`);
   await call("routing:stop-all", {});
+}
+
+async function testGeminiRedrawNotRelayedTwice() {
+  console.log("\n== TR-17: a reply the page re-draws (Gemini adds spacing + citation chips) is captured and relayed ONCE ==");
+  await resetAllParticipants();
+  const g = reg("gemini").webContents;
+  g.replyCount = 4;
+  say("gemini", "[TO: CLAUDE]\nTheory Record[This is opinion.]Claude, look at Exhibit H.");
+  await waitUntil(() => sentLog("claude").length === 1, { label: "the first read is relayed to Claude" });
+  g.currentText = "[TO: CLAUDE]\nTheory Record\n\n[This is opinion.]\n\nClaude, look at Exhibit H.   \nPDF\n+ 1\n[FROM: GEMINI]";
+  await settle(600);
+  assert(sentLog("claude").length === 1, `the re-drawn copy is NOT relayed again (claude got ${sentLog("claude").length})`);
+  let s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "reply-redrawn" && l.detail.site === "gemini"), "the Activity Log records the re-draw");
+  assert(s.transcript.filter((t) => t.site === "gemini" && /Exhibit H/.test(t.text)).length === 1, "and the conversation shows it once");
+  g.replyCount = 5; // a genuinely NEW reply block with the same words
+  await settle(300);
+  assert(sentLog("claude").length === 2, `a new reply block with the same words IS a new reply (claude got ${sentLog("claude").length})`);
+  assert(!/\nPDF\n|\+ 1/.test(sentLog("claude")[1].text), "Gemini's citation chips are not passed on to Claude");
+  delete g.replyCount;
+
+  console.log("  -- chips landing AFTER the [FROM:] tag don't hide it --");
+  await resetAllParticipants();
+  reg("gemini").webContents.currentText = "[TO: CLAUDE]\nChips after the tag.\n[FROM: GEMINI]\n\nPDF\n+ 1";
+  await waitUntil(() => sentLog("claude").length === 1, { label: "a reply with chips after its tag is still captured and relayed", timeout: 4000 });
+  assert(sentLog("claude").length === 1, "captured and relayed (not left for the missing-tag nudge)");
+  assert(!sentLog("gemini").some((e) => /closing tag|\[FROM:/i.test(e.text) && /resend/i.test(e.text)), "Gemini was not nudged to resend");
+
+  console.log("  -- a tagged reply whose page text keeps flickering is still captured (settle ceiling) --");
+  await resetAllParticipants();
+  let n = 0;
+  const flick = setInterval(() => { n++; reg("claude").webContents.currentText = `[TO: GEMINI]\nStatus line ${n}\n[FROM: CLAUDE]`; }, 60);
+  await waitUntil(() => sentLog("gemini").length >= 1, { label: "flickering reply captured within the ceiling", timeout: 4000 });
+  clearInterval(flick);
+  assert(sentLog("gemini").length >= 1, "a reply that never holds perfectly still is captured anyway, after the ceiling");
 }
 
 async function testHouseRulesVsMeshDedup() {
@@ -3043,6 +3081,7 @@ async function main() {
   await testSequenceEndsHonestly();
   await testRelayTraceFollowsMessages();
   await testBucketBrigadeEndToEnd();
+  await testGeminiRedrawNotRelayedTwice();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -324,7 +324,15 @@ function buildReadScript(site, overrides) {
     // The Send button is back and clickable — the model is done speaking.
     const sendReady = !generating && !!sendBtn && isVisible(sendBtn) && !isDisabled(sendBtn);
 
-    return { ok: true, text, generating, sendReady, composerEmpty };
+    // How many reply blocks are on the page: a re-drawn reply keeps the count,
+    // a genuinely new reply adds one (TR-17). Counted with ONE selector only —
+    // the first that matches — so nested wrappers or a saved override that
+    // matches the same nodes can never inflate it.
+    let count = 0;
+    for (const sel of CFG.ASSISTANT_CANDIDATES) {
+      try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
+    }
+    return { ok: true, text, generating, sendReady, composerEmpty, count };
   })();
   `;
 }
