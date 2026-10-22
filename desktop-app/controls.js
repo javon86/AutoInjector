@@ -1547,8 +1547,8 @@ const CAP_TIPS = {
   "Tools (USE_TOOL)": "No tools are registered, or the read-file tool failed — check the output folder exists and is readable.",
   "Memory (remember & recall)": "The shared database is off or unavailable — reopen the app; if it persists, check disk space where app data lives.",
   "Image generation": "Turn on Image generation and set a reachable Stable Diffusion endpoint in the Image panel (Auto-detect can find it).",
-  "Video generation": "Turn on Video generation and set a reachable text-to-video endpoint in the Video panel (AnimateDiff / SVD / ComfyUI).",
-  "Voice (speak)": "Enable Voice and set the local voice shim endpoint (install piper/whisper via the Setup Wizard).",
+  "Video generation": "Set up a text-to-video backend (AnimateDiff / Stable Video Diffusion) with its API on, then enter its address in Setup Wizard → Video and press Check connection.",
+  "Voice (speak)": "Make sure the voice service is running (Setup Wizard → Installs → Voice engine) and that its address in System AI → 🔊 Voice is right — press Test there to check.",
   "Talk to ChatGPT": "Open the ChatGPT pane and make sure you're signed in, then enable it as a participant up top.",
   "Talk to Claude": "Open the Claude pane and make sure you're signed in, then enable it as a participant up top.",
   "Talk to Gemini": "Open the Gemini pane and make sure you're signed in, then enable it as a participant up top.",
@@ -1651,20 +1651,28 @@ if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
   logToCenter("🩺 System check…", { tag: "setup" });
   let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
   if (!r || !r.ok) { logToCenter(`System check failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
-  logToCenter(`🩺 System check — ${r.okCount}/${r.total} capabilities ready.`, { tag: "setup" });
-  for (const c of r.checks) {
+  // Three honest buckets: ✅ checked & working, ❌ turned on but not working,
+  // ⚪ not set up (optional). Counted here so older results still render.
+  const checks = Array.isArray(r.checks) ? r.checks : [];
+  const nFail = checks.filter((c) => c.ok === false).length;
+  const nNotSet = checks.filter((c) => c.ok !== true && c.ok !== false).length;
+  const took = typeof r.elapsedMs === "number" ? ` (took ${(r.elapsedMs / 1000).toFixed(1)}s)` : "";
+  logToCenter(`🩺 System check — ${r.okCount}/${r.total} working · ${nFail} need attention · ${nNotSet} not set up (optional)${took}.`, { tag: "setup" });
+  for (const c of checks) {
     const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
     logToCenter(`${mark} ${c.name}${c.detail ? " — " + c.detail : ""}`, { tag: "setup", err: c.ok === false });
   }
   if (Array.isArray(r.installs) && r.installs.length) {
-    logToCenter(`Dependencies — ${(r.missing || []).length} not installed:`, { tag: "setup" });
+    // Every add-on is optional: "not installed" is information, not an error.
+    logToCenter(`Optional add-ons — ${(r.missing || []).length} not installed (Install Missing can add them):`, { tag: "setup" });
     for (const it of r.installs) {
-      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
-      logToCenter(`   ${it.label}: ${mark}`, { tag: "setup", err: it.installed === false });
+      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "⚪ not installed (optional)" : "⚪ couldn't tell";
+      logToCenter(`   ${it.label}: ${mark}${it.detail ? " — " + it.detail : ""}`, { tag: "setup" });
     }
   }
+  logToCenter("ℹ️ ✅ here means set up and answering. To actually exercise each one (render an image, run code, ping the AIs), run 🧪 Capability Test.", { tag: "setup" });
   if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
-  deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working. ${(r.missing || []).length} dependencies not installed.`);
+  deviceSpeak(`System check: ${r.okCount} of ${r.total} working${nFail ? `, ${nFail} need attention` : ""}. ${(r.missing || []).length} optional add-ons not installed.`);
 };
 // Install everything that's missing (Open Interpreter first, so he controls it).
 if (el("btn-install-missing")) el("btn-install-missing").onclick = async () => {
@@ -1708,7 +1716,7 @@ async function deviceListenOnce() {
   logToCenter("🎤 Listening…", { tag: "voice" });
   let r; try { r = await window.api.voiceListen({}); } catch (_) { r = null; }
   if (r && r.ok && r.text && r.text.trim()) return r.text.trim();
-  logToCenter(r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.", { tag: "voice" });
+  logToCenter(r && r.error ? `Didn't catch that — ${voiceErrText(r)}` : "Didn't catch that.", { tag: "voice", err: !!(r && r.error) });
   return null;
 }
 if (el("btn-device-ptt")) el("btn-device-ptt").onclick = async () => {
@@ -1902,7 +1910,7 @@ if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
   vidMsg("Rendering… (video can take a while)");
   const r = await window.api.videoGenerate(prompt, negative);
   if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
-  else vidMsg(`Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
+  else vidMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
 };
 loadVideoPanel();
 
@@ -2342,6 +2350,9 @@ function _voiceConfigFromUI() {
   };
 }
 function voiceMsg(t) { if (el("voice-msg")) el("voice-msg").textContent = t; }
+// OP-12: prefer the plain-language message (which address, what's wrong, how to
+// fix it) over a raw code like ECONNREFUSED.
+function voiceErrText(r) { return (r && (r.message || r.error)) || "error"; }
 // Load saved voice config into the fields, and enumerate the machine's mics/speakers.
 async function loadVoicePanel() {
   if (window.api.voiceStatus) {
@@ -2376,7 +2387,7 @@ for (const who of VOICE_WHO) {
     await window.api.configureVoice(_voiceConfigFromUI());
     voiceMsg(`Speaking as ${who}…`);
     const r = await window.api.voiceSpeak(`This is the ${who} voice.`, who);
-    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${(r && r.error) || "error"}`);
+    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${voiceErrText(r)}`);
   };
 }
 if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
@@ -2387,9 +2398,15 @@ if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
 if (el("btn-voice-test")) el("btn-voice-test").onclick = async () => {
   if (!window.api.configureVoice || !window.api.voiceSpeak) return;
   await window.api.configureVoice(_voiceConfigFromUI());
+  // Cheap check first: is anything answering at the voice address?
+  if (window.api.voiceCheck) {
+    voiceMsg("Checking the voice service…");
+    let c; try { c = await window.api.voiceCheck(); } catch (_) { c = null; }
+    if (!c || !c.ok) { voiceMsg(`Voice test failed: ${voiceErrText(c)}`); return; }
+  }
   voiceMsg("Speaking a test line…");
   const r = await window.api.voiceSpeak("AutoInjector voice is working.");
-  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${(r && r.error) || "error"}`);
+  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${voiceErrText(r)}`);
 };
 if (el("btn-mic")) el("btn-mic").onclick = async () => {
   if (!window.api.voiceListen) return;
@@ -2399,7 +2416,7 @@ if (el("btn-mic")) el("btn-mic").onclick = async () => {
     if (el("jarvis-goal")) el("jarvis-goal").value = r.text;
     voiceMsg(`Heard: "${String(r.text).slice(0, 60)}" — press Start Butler.`);
   } else {
-    voiceMsg(`Couldn't hear you: ${(r && r.error) || "error"}`);
+    voiceMsg(`Couldn't hear you: ${voiceErrText(r)}`);
   }
 };
 

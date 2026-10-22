@@ -53,6 +53,41 @@ async function main() {
   assert(eR.error === 'HTTP_500' && /out of memory/i.test(eR.detail || ''), 'the backend reason is returned in detail');
   errStub.close();
 
+  console.log('\n== OP-13: NO_VIDEO and friends come with a plain-language message ==');
+  assert(!r.message, 'a successful render carries no error message');
+  const replyWith = (obj) => http.createServer((req, res) => { req.resume(); req.on('end', () => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); }); });
+  const imgStub = replyWith({ images: ['iVBORw0KGgo='], info: '' });
+  const iPort = await listen(imgStub);
+  vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${iPort}/sdapi/v1/txt2img` });
+  const nv = await vp.generate('a cat');
+  assert(nv.ok === false && nv.error === 'NO_VIDEO' && nv.shape === 'images', 'an image-only reply is NO_VIDEO (shape: images)');
+  assert(/didn't send back a video/.test(nv.message || '') && /no working video backend is configured/.test(nv.message), 'the message says no working video backend is configured');
+  assert(/image \(Stable Diffusion\) server/.test(nv.message) && /AnimateDiff/.test(nv.message), 'it explains the address looks like an image server and mentions AnimateDiff');
+  assert(/Setup Wizard → Video/.test(nv.message) && nv.message.includes(`127.0.0.1:${iPort}`), 'it says where to set one up and names the address it tried');
+  imgStub.close();
+  const comfyStub = replyWith({ prompt_id: 'abc', number: 1, node_errors: {} });
+  const cPort = await listen(comfyStub);
+  vp.setSettings({ endpoint: `http://127.0.0.1:${cPort}/prompt` });
+  const nc = await vp.generate('a cat');
+  assert(nc.error === 'NO_VIDEO' && nc.shape === 'comfy-queue' && /ComfyUI/.test(nc.message || ''), 'a ComfyUI queue reply is explained as such');
+  comfyStub.close();
+  const emptyStub = replyWith({});
+  const ePort2 = await listen(emptyStub);
+  vp.setSettings({ endpoint: `http://127.0.0.1:${ePort2}/gen` });
+  const ne = await vp.generate('a cat');
+  assert(ne.error === 'NO_VIDEO' && ne.shape === 'empty' && /text-to-video backend/.test(ne.message || ''), 'an empty reply still gets the how-to-set-up message');
+  emptyStub.close();
+  vp.setSettings({ enabled: true, endpoint: '' });
+  const nE = await vp.generate('a cat');
+  assert(/No video backend is set up yet/.test(nE.message || '') && /Setup Wizard → Video/.test(nE.message), 'NO_ENDPOINT says no video backend is set up and where to do it');
+  vp.setSettings({ enabled: false });
+  assert(/turned off/.test((await vp.generate('a cat')).message || ''), 'VIDEO_DISABLED says video is turned off');
+  const dead = http.createServer(); const dPort = await listen(dead); await new Promise((res) => dead.close(res));
+  vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${dPort}/gen` });
+  const ref = await vp.generate('a cat');
+  assert(ref.error === 'ECONNREFUSED' && /Nothing is running/.test(ref.message || '') && ref.message.includes(`127.0.0.1:${dPort}`), 'ECONNREFUSED says nothing is running at the address');
+  assert(/out of memory/.test(vp.explainError({ error: 'HTTP_500', detail: 'CUDA out of memory' }, 'http://x')), 'an HTTP error message includes the backend reason');
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

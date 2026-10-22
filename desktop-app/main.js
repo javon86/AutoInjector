@@ -38,6 +38,7 @@ const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
 const endpointDetect = require("./endpoint-detect");
+const diagnostics = require("./diagnostics");
 const logBundle = require("./log-bundle");
 const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
@@ -198,7 +199,8 @@ const state = {
   meshActive: false, // whether global Auto is currently on
   relayEnabled: true, // master switch for AUTOMATIC AI->AI forwarding (baseline [TO:] tag relay + mesh). "Stop AIs Talking" flips this off; the next user send / relay-mode start turns it back on. Direct user sends are never gated by it.
   nextTurnId: 1,
-  nextMsgSeq: 1, // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
+  nextMsgSeq: 1,
+  stopShown: {}, // site -> the page's Stop button is showing (TR-28; set by pollSite) // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
 
   nextLedgerId: 1,
   hr: null, // House Rules run state, see resetHouseRule()
@@ -639,6 +641,7 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
@@ -687,6 +690,9 @@ function loadPersistedState() {
     state.transcript = snap.transcript.length > MAX_TRANSCRIPT ? snap.transcript.slice(snap.transcript.length - MAX_TRANSCRIPT) : snap.transcript;
     state.nextTurnId = snap.transcript.reduce((m, t) => Math.max(m, (t.id || 0) + 1), 1);
   }
+  // TR-29: carry the [MSG #] counter on, so after a restart the AIs don't see
+  // #0001 again while they still remember #0011 from before.
+  if (Number.isInteger(snap.nextMsgSeq) && snap.nextMsgSeq > state.nextMsgSeq) state.nextMsgSeq = Math.min(snap.nextMsgSeq, 9999999);
   if (snap.customRole) {
     for (const site of SITE_IDS) if (typeof snap.customRole[site] === "string") state.customRole[site] = snap.customRole[site];
   }
@@ -1307,6 +1313,44 @@ const sendVerifiedSeen = {};
 // TR-25: how long a send waits for an AI that is still writing its last reply.
 const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
 const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
+// TR-28: the longest a send waits for the target's just-finished reply to be
+// captured first (capture needs CAPTURE_SETTLE_MS of stillness, up to 3x that).
+const SEND_CAPTURE_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_CAPTURE_WAIT_MS) || (CAPTURE_SETTLE_MS * 3 + POLL_MS * 2);
+// Does this pane have a finished, tagged reply on screen that hasn't been
+// captured yet? Typing a new message now would push it off the "latest reply"
+// spot and it would never be captured (seen live: Gemini's reply to #0002 was
+// lost when #0005 went in the moment Gemini stopped writing).
+function hasUncapturedReply(site) {
+  const pend = state.pending[site];
+  if (!pend || !pend.text || !hasEndTag(pend.text)) return false;
+  if (Date.now() - (pend.sinceTs || 0) > 60000) return false; // stale — whatever happened to it, don't hold sends for it
+  const cap = state.captured[site];
+  if (cap && (cap.text === pend.text || sameReplyText(cap.text, pend.text))) return false;
+  return true;
+}
+// Returns "ok" (go ahead and type), "busy" (the page's Stop button is showing —
+// the caller waits like an AI_BUSY), or "stopped" (Stop AIs Talking, relays only).
+async function waitForPendingCapture(target, seq, fromSite) {
+  const stopped = () => !!fromSite && !state.relayEnabled;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Read the pane NOW rather than trust a poll that may be up to POLL_MS old:
+  // a reply that finished a moment ago gets its final text (with [FROM:]) on
+  // record before anything is typed over it.
+  for (let i = 0; state.busy[target] && i < 25; i++) await sleep(40); // a poll is mid-read; let it finish
+  try { await pollSite(target); } catch (_) {}
+  if (stopped()) return "stopped";
+  if (state.stopShown[target]) return "busy";
+  if (!hasUncapturedReply(target)) return "ok";
+  // Its own budget, starting now (not shared with any busy wait before it).
+  const start = Date.now();
+  logEvent("send-waiting-capture", { target, from: fromSite || null, seq, note: "letting its finished reply be captured first" });
+  while (hasUncapturedReply(target) && Date.now() - start < SEND_CAPTURE_WAIT_MS) {
+    if (stopped()) return "stopped";
+    await sleep(150);
+  }
+  if (hasUncapturedReply(target)) logEvent("send-capture-wait-timeout", { target, seq, waitedMs: Date.now() - start, severity: "warn" });
+  return stopped() ? "stopped" : "ok";
+}
 // Per-pane zoom for the embedded AI pages. Default 60% (override with the
 // AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
 const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
@@ -1353,6 +1397,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // don't reset it.
   if (!fromSite && !opts.automatic) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
+  saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
   const prompt = `[MSG #${seq}]\n${framed}`;
   try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : opts.automatic ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
 
@@ -1375,10 +1420,18 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     let r;
     for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
       attempts = attempt;
-      try {
-        r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
-      } catch (e) {
-        r = { ok: false, error: String(e) };
+      // TR-28: let the target's finished reply be captured before we type over it.
+      let gate = "ok";
+      try { gate = await waitForPendingCapture(target, seq, fromSite); } catch (_) {}
+      if (gate === "stopped") { r = { ok: false, error: "RELAY_STOPPED" }; break; }
+      if (gate === "busy") {
+        r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
+      } else {
+        try {
+          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
+        } catch (e) {
+          r = { ok: false, error: String(e) };
+        }
       }
       // The send script proves a send by spotting this message's [MSG #n] number
       // in the conversation. Once a pane has proven sends that way, a send that
@@ -3409,6 +3462,8 @@ async function pollSite(site) {
     // site's stop/send selectors don't match, this is false and completion falls
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
+    // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
+    state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
     readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
     if (res && res.fragmentFixed && !fragmentWarned[site]) {
       fragmentWarned[site] = true;
@@ -3861,7 +3916,7 @@ ipcMain.handle("ollama:migrate", async () => {
 async function startManagedOllama() {
   try {
     const det = await ollamaManager.detect();
-    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "ollama not installed" }); return; }
+    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "Ollama isn't installed (optional) — the app's own Ollama server was not started", severity: "info" }); return; }
     let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
     const host = process.env.AUTOINJECTOR_OLLAMA_HOST || ollamaManager.DEFAULT_MANAGED_HOST;
     const r = ollamaManager.startManaged({ modelsDir, host, onLog: (line) => { if (line) broadcast("ollama-progress", { model: "(server)", line }); } });
@@ -4941,8 +4996,13 @@ ipcMain.handle("voice:configure", (_evt, patch) => {
   logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
   return { ok: true, ...voiceProvider.status() };
 });
+// Failed results carry `error` (short code, e.g. ECONNREFUSED) and `message`
+// (plain words: which address was tried, that the voice service isn't running,
+// and how to start it or change the address) — the UI shows the message.
 ipcMain.handle("voice:speak", async (_evt, { text, who, voice } = {}) => voiceProvider.speak(text, { who, voice }));
 ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
+// OP-12: cheap connectivity check (GET /health on the voice address).
+ipcMain.handle("voice:check", async () => { try { return await voiceProvider.checkConnection(); } catch (e) { return { ok: false, reachable: false, error: String(e), message: `Couldn't check the voice service: ${e}` }; } });
 
 // Image generation (Stable Diffusion): status/config + a manual generate for the
 // wizard's "Test" button. Config persists in the app state snapshot.
@@ -4988,13 +5048,18 @@ ipcMain.handle("video:configure", (_evt, patch) => {
 });
 ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) => {
   const r = await videoProvider.generate(prompt, { negativePrompt });
-  if (!r || !r.ok) return { ok: false, error: (r && r.error) || "FAILED" };
+  // OP-13: hand back the plain-language `message` (e.g. what NO_VIDEO means and
+  // how to set up a backend) alongside the short code.
+  if (!r || !r.ok) {
+    const fail = { ok: false, error: (r && r.error) || "FAILED" };
+    return { ...fail, message: (r && r.message) || videoProvider.explainError(fail) };
+  }
   if (r.videoBase64) {
     try {
       const buf = Buffer.from(r.videoBase64, "base64");
       const savedPath = outputManager.saveBuffer(outputManager.videosDir(), `vid-${Date.now()}.mp4`, buf);
       return { ok: true, path: savedPath, preview: `data:video/mp4;base64,${r.videoBase64}` };
-    } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+    } catch (e) { const fail = { ok: false, error: `SAVE_FAILED: ${e}` }; return { ...fail, message: videoProvider.explainError(fail) }; }
   }
   // A backend that returns a URL (rendered file on its own server) — hand it through.
   return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
@@ -5009,39 +5074,34 @@ ipcMain.handle("endpoints:test", async (_evt, { url } = {}) => { try { return aw
 // GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
 ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });
 
-// Butler System Check: the butler reports on everything HE can do, so you can
-// see at a glance what's working and what isn't. ok=true (working) / false
-// (error) / null (available but not turned on / not configured yet).
+// Butler System Check (the quick 🩺 check): reports on everything the butler
+// can do. ok=true (checked and working — switched-on services are actually
+// pinged) / false (turned on but not working, with the reason) / null (not set
+// up — optional). All checks run at once with per-check time limits; the logic
+// lives in diagnostics.js so it's unit-testable (OP-14).
 async function butlerSelfCheck() {
-  const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || "" });
-  try { const mc = managerConfigSnapshot(); const has = !!(mc.endpoint && mc.model); add("Brain (local model)", has ? true : null, has ? `${mc.model} @ ${mc.endpoint}` : "no endpoint/model saved yet — set one in the Butler settings"); } catch (e) { add("Brain (local model)", false, String(e)); }
-  try { const s = interpreterProvider.status(); add("Run code (Open Interpreter)", s.enabled ? true : null, s.enabled ? `endpoint ${s.endpoint}` : "not enabled — install via Setup Wizard → Auto-setup"); } catch (e) { add("Run code (Open Interpreter)", false, String(e)); }
-  try { const py = await setupManager.pythonStatus(); add("Install toolchain (Python)", py.missing ? false : (py.compatible ? true : null), py.note); } catch (e) { add("Install toolchain (Python)", null, String(e)); }
-  try { const t = toolProvider.list(); add("Tools (USE_TOOL)", t.length > 0, t.length ? `${t.length}: ${t.map((x) => x.name).join(", ")}` : "none registered"); } catch (e) { add("Tools (USE_TOOL)", false, String(e)); }
-  try { const d = dbService.status(); add("Memory (remember/recall)", !!d.available, d.available ? `ready (${d.count || 0} messages)` : (d.reason || "off")); } catch (e) { add("Memory (remember/recall)", false, String(e)); }
-  try { const v = voiceProvider.status(); add("Voice (speak & listen)", v.enabled ? true : null, v.enabled ? `endpoint ${v.endpoint}` : "off"); } catch (e) { add("Voice (speak & listen)", false, String(e)); }
-  try { const im = imageProvider.status(); add("Image generation", im.enabled ? true : null, im.enabled ? `endpoint ${im.endpoint}` : (im.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Image generation", false, String(e)); }
-  try { const vi = videoProvider.status(); add("Video generation", vi.enabled ? true : null, vi.enabled ? `endpoint ${vi.endpoint}` : (vi.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Video generation", false, String(e)); }
-  try { const root = outputManager.modelsRoot(); add("Models & content folder", !!root, root || "not ready"); } catch (e) { add("Models & content folder", false, String(e)); }
-  try { const g = await gpuMonitor.read(); add("GPU monitor", g.available ? true : null, g.available ? g.gpus.map((x) => x.name).join(", ") : (g.reason || "n/a")); } catch (e) { add("GPU monitor", false, String(e)); }
-  try { const en = SITE_IDS.filter((s) => state.enabled[s]); add("Chat AIs (ChatGPT/Claude/Gemini)", en.length > 0, en.length ? `enabled: ${en.join(", ")}` : "none enabled"); } catch (e) { add("Chat AIs (ChatGPT/Claude/Gemini)", false, String(e)); }
-  // Detailed install status of each dependency the butler can set up himself, so
-  // the check clearly separates what's INSTALLED from what's NOT — and which ones
-  // he can install for you. Open Interpreter is the keystone (it lets him run
-  // code and drive the rest).
-  const installs = [];
-  let missing = [];
-  try {
-    const all = await setupManager.detectAll();
-    for (const t of setupManager.list()) {
-      const d = all[t.id] || {};
-      installs.push({ id: t.id, label: t.label, installed: d.installed, kind: t.kind, installable: t.kind !== "handoff", detail: d.reason || "" });
-      if (d.installed === false && t.kind !== "handoff") missing.push(t.id);
-    }
-  } catch (e) { logEvent("selfcheck-installs-error", { error: String(e) }); }
-  const okCount = checks.filter((c) => c.ok === true).length;
-  return { ok: true, checks, okCount, total: checks.length, installs, missing, canInstall: missing.length > 0 };
+  const r = await diagnostics.runSystemCheck({
+    managerConfig: () => managerConfigSnapshot(),
+    interpreterStatus: () => interpreterProvider.status(),
+    voiceStatus: () => voiceProvider.status(),
+    // OP-12: the voice service's own check gives the plain "not running — start
+    // it like this" message instead of a generic "isn't answering".
+    voiceCheck: (timeoutMs) => voiceProvider.checkConnection({ timeoutMs }),
+    imageStatus: () => imageProvider.status(),
+    videoStatus: () => videoProvider.status(),
+    pythonStatus: () => setupManager.pythonStatus(),
+    toolList: () => toolProvider.list(),
+    dbStatus: () => dbService.status(),
+    modelsRoot: () => outputManager.modelsRoot(),
+    gpuRead: () => gpuMonitor.read(),
+    enabledSites: () => SITE_IDS.filter((s) => state.enabled[s]),
+    probe: (url, timeoutMs) => endpointDetect.test(url, { timeoutMs }),
+    installTargets: () => setupManager.list(),
+    detectInstalls: () => setupManager.detectAll(),
+    onError: (kind, err) => logEvent(/error$/.test(kind) ? kind : "selfcheck-error", { check: kind, error: String(err) }),
+  });
+  logEvent("selfcheck-done", { okCount: r.okCount, failCount: r.failCount, notSetUp: r.notSetUpCount, total: r.total, elapsedMs: r.elapsedMs, severity: "info" });
+  return r;
 }
 ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
 
@@ -5055,13 +5115,15 @@ ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCh
 // step streams a "capability-test-step" event so the UI fills in live. Same
 // {name, ok, detail} shape as butlerSelfCheck so the panel renders it identically.
 let capabilityTestInFlight = false;
-function _withTimeout(promise, ms, onTimeout) {
-  return new Promise((resolve) => {
-    let done = false;
-    const t = setTimeout(() => { if (!done) { done = true; resolve(typeof onTimeout === "function" ? onTimeout() : { ok: false, error: "TIMEOUT" }); } }, ms);
-    Promise.resolve(promise).then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
-      (e) => { if (!done) { done = true; clearTimeout(t); resolve({ ok: false, error: String((e && e.message) || e) }); } });
-  });
+const _withTimeout = diagnostics.withTimeout;
+// Before a step that can wait minutes (image: ~3 min, video: ~5 min), ping the
+// server first: if nothing is listening, fail in ~2s with a plain reason instead
+// of sitting through the full generate timeout. Returns null when reachable,
+// else the failure text.
+const CAPTEST_PING_MS = 2500;
+async function _captestUnreachable(url) {
+  const p = await diagnostics.pingEndpoint((u, ms) => endpointDetect.test(u, { timeoutMs: ms }), url, CAPTEST_PING_MS);
+  return p.reachable === false ? `${p.base} isn't answering: ${p.why}. Is that server running?` : null;
 }
 async function butlerCapabilityTest() {
   if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
@@ -5083,7 +5145,9 @@ async function butlerCapabilityTest() {
     // 1) Brain — a real round-trip to the configured local model.
     try {
       const mc = managerConfigSnapshot();
-      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "no endpoint/model saved yet — set one in the Butler settings");
+      let down = null;
+      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "not set up (optional) — no endpoint/model saved yet; set one in the Butler settings");
+      else if ((down = await _captestUnreachable(mc.endpoint))) step("Brain (local model)", false, `not reachable: ${down}`);
       else {
         const r = await _withTimeout(managerProvider.testConnection(state.managerConfig), 25000);
         if (r && r.ok) step("Brain (local model)", true, `answered & followed the manager format — ${mc.model}`);
@@ -5095,7 +5159,9 @@ async function butlerCapabilityTest() {
     // 2) Run code — actually execute a line via Open Interpreter.
     try {
       const s = interpreterProvider.status();
-      if (!s.enabled) step("Run code (Open Interpreter)", null, "not enabled — install via Setup Wizard → Auto-setup");
+      let down = null;
+      if (!s.enabled) step("Run code (Open Interpreter)", null, "not set up (optional) — install via Setup Wizard → Auto-setup");
+      else if (s.endpoint && (down = await _captestUnreachable(s.endpoint))) step("Run code (Open Interpreter)", false, `couldn't run: ${down}`);
       else {
         const r = await _withTimeout(interpreterProvider.run("Print exactly: CAPTEST-OK", { onEvent: () => {} }), 60000);
         step("Run code (Open Interpreter)", !!(r && r.ok), r && r.ok ? `ran a line of code (${String(r.message || "").slice(0, 40)})` : `couldn't run: ${(r && r.error) || "failed"}`);
@@ -5140,9 +5206,14 @@ async function butlerCapabilityTest() {
     // 6) Image — really render a tiny test image and save it.
     try {
       const im = imageProvider.status();
-      if (!im.enabled) step("Image generation", null, im.configured ? "configured, turned off" : "no endpoint set");
+      let down = null;
+      if (!im.enabled) step("Image generation", null, im.configured ? "not set up (optional) — configured but turned off" : "not set up (optional) — no endpoint set");
+      else if (im.endpoint && (down = await _captestUnreachable(im.endpoint))) step("Image generation", false, `couldn't render: ${down}`);
       else {
-        const r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
+        // `let`, not `const`: a save failure below replaces r. (With `const` the
+        // reassignment threw "Assignment to constant variable", which was then
+        // shown to the user as the reason image generation failed.)
+        let r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
         let saved = null;
         if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
         step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
@@ -5152,40 +5223,51 @@ async function butlerCapabilityTest() {
     // 7) Video — really make a short test clip and save it.
     try {
       const vi = videoProvider.status();
-      if (!vi.enabled) step("Video generation", null, vi.configured ? "configured, turned off" : "no endpoint set");
+      let down = null;
+      if (!vi.enabled) step("Video generation", null, vi.configured ? "not set up (optional) — configured but turned off" : "not set up (optional) — no video backend set up yet (Setup Wizard → Video)");
+      else if (vi.endpoint && (down = await _captestUnreachable(vi.endpoint))) step("Video generation", false, `couldn't make one: ${down}`);
       else {
-        const r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
+        let r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
         let saved = null;
         if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
         else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
-        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && r.error) || "no video"}`);
+        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}`);
       }
     } catch (e) { step("Video generation", false, String(e)); }
 
     // 8) Voice — actually speak a short phrase.
     try {
       const v = voiceProvider.status();
-      if (!v.enabled) step("Voice (speak)", null, "off");
-      else {
+      let down = null;
+      if (!v.enabled) step("Voice (speak)", null, "not set up (optional) — Voice is turned off");
+      else if (v.endpoint && (down = await _captestUnreachable(v.endpoint))) {
+        // OP-12: say what to do, not just "connection refused".
+        let msg = down;
+        try { const c = await voiceProvider.checkConnection({ timeoutMs: 1500 }); if (c && !c.ok && c.message) msg = c.message; } catch (_) {}
+        step("Voice (speak)", false, `couldn't speak: ${msg}`);
+      } else {
         const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
-        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && r.error) || "failed"}`);
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && (r.message || r.error)) || "failed"}`);
       }
     } catch (e) { step("Voice (speak)", false, String(e)); }
 
     // 9) Talk to the AIs — a real reverse-a-token ping into each live pane.
-    for (const site of SITE_IDS) {
+    // The panes are independent, so they're pinged at the same time: the wait
+    // for replies is now one reply-timeout (~45s worst case), not three in a row.
+    await Promise.all(SITE_IDS.map(async (site) => {
       const label = (SITES[site] && SITES[site].label) || site;
       try {
-        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not enabled as a participant"); continue; }
+        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not set up (optional) — not enabled as a participant"); return; }
         const view = siteViews[site];
         const url = view ? view.webContents.getURL() : "";
-        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "no page loaded — open/sign in to this AI first"); continue; }
-        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); continue; }
-        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); continue; }
-        const r = await _withTimeout(runConnectivityTest(site), SELFTEST_TIMEOUT_MS + 10000, () => ({ ok: false, error: "TIMEOUT" }));
+        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "not set up — no page loaded; open/sign in to this AI first"); return; }
+        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); return; }
+        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); return; }
+        const limitMs = SELFTEST_TIMEOUT_MS + 10000;
+        const r = await _withTimeout(runConnectivityTest(site), limitMs, () => ({ ok: false, error: `no reply within ${Math.round(limitMs / 1000)}s` }));
         step(`Talk to ${label}`, !!(r && r.ok), r && r.ok ? "sent a message and got the right reply back" : `no good reply: ${(r && (r.error || r.stage)) || "failed"}`);
       } catch (e) { step(`Talk to ${label}`, false, String(e)); }
-    }
+    }));
 
     const okCount = checks.filter((c) => c.ok === true).length;
     const failCount = checks.filter((c) => c.ok === false).length;
@@ -5205,7 +5287,13 @@ ipcMain.handle("butler:install-missing", async () => {
   try {
     const sc = await butlerSelfCheck();
     const missing = sc.missing || [];
-    if (!missing.length) { broadcast("setup-progress", { line: "Everything is already installed ✓", done: true, ok: true }); return { ok: true, missing: [], results: [] }; }
+    if (!missing.length) {
+      const unknown = sc.unknown || [];
+      // Don't announce "all installed" when some couldn't be checked.
+      const line = unknown.length ? `Nothing to install that I could confirm — couldn't check: ${unknown.join(", ")}. Run 🩺 System Check for the reason.` : "Everything is already installed ✓";
+      broadcast("setup-progress", { line, done: true, ok: !unknown.length });
+      return { ok: true, missing: [], unknown, results: [] };
+    }
     // Keystone first: Open Interpreter, then the rest in setup-manager's order.
     const order = setupManager.AUTO_ORDER.filter((id) => missing.includes(id));
     for (const id of missing) if (!order.includes(id)) order.push(id);
@@ -5466,6 +5554,9 @@ function configureSetupManager() {
       modelsDir: (cat) => outputManager.modelsDir(cat),
       pullOllamaModel: (model, onProgress) => ollamaManager.pull(model, (line) => { try { onProgress && onProgress(line); } catch (_) {} broadcast("ollama-progress", { model, line }); }),
       detectOllama: () => ollamaManager.detect(),
+      // Which models are downloaded — asks the app's own Ollama if it's running,
+      // else the default one. Short limit: this feeds the System Check.
+      listOllamaModels: () => { const ms = ollamaManager.managedStatus(); return ollamaManager.listInstalled(ms.running ? ms.endpoint : undefined, 3000); },
       openExternal: (url) => { try { if (shell && url) shell.openExternal(url); } catch (_) {} },
     });
   } catch (e) { logEvent("setup-configure-error", { error: String(e) }); }

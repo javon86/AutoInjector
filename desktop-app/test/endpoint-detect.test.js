@@ -35,6 +35,30 @@ async function main() {
   assert((await ed.test('')).error === 'NO_URL', 'no url → NO_URL');
   stub.close();
 
+  console.log('\n== OP-14: probe() says WHY it failed, and never waits past its limit ==');
+  const net = require('net');
+  const tmp = net.createServer(); await new Promise((r) => tmp.listen(0, '127.0.0.1', r));
+  const dead = tmp.address().port; await new Promise((r) => tmp.close(r));
+  const pr = await ed.probe(`http://127.0.0.1:${dead}/`, 800);
+  assert(pr.ok === false && pr.reason === 'refused', 'a closed port → reason "refused" (nothing running there)');
+  const tr = await ed.test(`http://127.0.0.1:${dead}/x`, { timeoutMs: 800 });
+  assert(tr.reachable === false && tr.reason === 'refused', 'test() passes the reason through');
+  // Accepts the connection, starts a response, then trickles one header byte
+  // every 100ms and never finishes the headers: the socket is never idle, so
+  // only a wall-clock cap stops it.
+  const trickle = net.createServer((sock) => {
+    sock.on('error', () => {});
+    sock.write('HTTP/1.1 200 OK\r\nX-Slow: ');
+    const iv = setInterval(() => { try { sock.write('a'); } catch (_) {} }, 100);
+    sock.on('close', () => clearInterval(iv));
+  });
+  await new Promise((r) => trickle.listen(0, '127.0.0.1', r));
+  const t0 = Date.now();
+  const hr = await ed.probe(`http://127.0.0.1:${trickle.address().port}/`, 400);
+  const took = Date.now() - t0;
+  assert(hr.ok === false && hr.reason === 'timeout' && took < 1000, `a server that keeps the socket busy but never answers times out at the limit (${took}ms)`);
+  trickle.close();
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

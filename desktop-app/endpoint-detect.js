@@ -38,23 +38,36 @@ function configure(patch) {
 
 function presets(kind) { return (CANDIDATES[kind] || []).map((c) => ({ label: c.label, endpoint: c.endpoint })); }
 
-// GET a URL with a short timeout; resolve { ok } — ok means the server answered
-// (any status < 500), i.e. something is listening and speaking HTTP there.
+// GET a URL with a short timeout; resolve { ok, reason? } — ok means the server
+// answered (any status < 500), i.e. something is listening and speaking HTTP
+// there. On failure `reason` says why, so diagnostics can tell the user
+// "connection refused" (nothing running) apart from "timeout" (hung / busy).
+// The limit is a hard wall-clock cap: Node's socket `timeout` only measures
+// idle time, so a server that accepts and then dribbles could otherwise hang.
 function probe(url, timeoutMs) {
   return new Promise((resolve) => {
-    let u; try { u = new URL(url); } catch { return resolve({ ok: false }); }
+    let u; try { u = new URL(url); } catch { return resolve({ ok: false, reason: 'bad-url' }); }
     const lib = u.protocol === 'https:' ? deps.https : deps.http;
+    const ms = Math.max(300, timeoutMs || 1500);
     let done = false;
-    const finish = (ok) => { if (!done) { done = true; resolve({ ok }); } };
     let req;
+    let timer = null;
+    const finish = (ok, reason) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(ok ? { ok: true } : { ok: false, reason: reason || 'error' });
+    };
+    timer = setTimeout(() => { try { req && req.destroy(); } catch {} finish(false, 'timeout'); }, ms);
     try {
-      req = lib.get({ hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, timeout: Math.max(300, timeoutMs || 1500) }, (res) => {
+      req = lib.get({ hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, timeout: ms }, (res) => {
         res.resume();
-        finish(!!(res.statusCode && res.statusCode < 500));
+        const okStatus = !!(res.statusCode && res.statusCode < 500);
+        finish(okStatus, okStatus ? null : `HTTP ${res.statusCode}`);
       });
-      req.on('error', () => finish(false));
-      req.on('timeout', () => { try { req.destroy(); } catch {} finish(false); });
-    } catch { finish(false); }
+      req.on('error', (e) => finish(false, (e && e.code === 'ECONNREFUSED') ? 'refused' : String((e && (e.code || e.message)) || 'error')));
+      req.on('timeout', () => { try { req.destroy(); } catch {} finish(false, 'timeout'); });
+    } catch (e) { finish(false, String((e && e.message) || e)); }
   });
 }
 
@@ -75,7 +88,7 @@ async function test(url, opts = {}) {
   let base = url;
   try { const u = new URL(url); base = `${u.protocol}//${u.host}`; } catch { /* use as-is */ }
   const r = await probe(base, opts.timeoutMs || 1500);
-  return { reachable: r.ok, base };
+  return r.ok ? { reachable: true, base } : { reachable: false, base, reason: r.reason };
 }
 
 module.exports = { CANDIDATES, presets, detect, test, probe, configure };

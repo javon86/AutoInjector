@@ -214,6 +214,28 @@ async function testAiBusyNotTyped() {
     assert(box === "" && (await sentOn(page)).length === 0, "nothing was typed or sent");
   });
 }
+// TR-27: the live ChatGPT overrides named a WRAPPER div ("Ask ChatGPT") as the
+// message box, with a hidden "Send" button first on the page. Every relay to
+// ChatGPT then failed with SEND_NOT_CONFIRMED.
+async function testWrapperOverrideStillSends() {
+  console.log("\n== TR-27: a saved message-box selector that names a WRAPPER still sends into the real editor ==");
+  await withFixture("wrapped-editor.html", async (page) => {
+    const ov = { input: 'div[aria-label="Ask ChatGPT"]', send: 'button[aria-label="Send"]' };
+    const res = await page.evaluate(buildSendScript("chatgpt", "[MSG #0071]\n[TO: CLAUDE]\nthrough the wrapper\n[FROM: GEMINI]", ov));
+    const sent = await sentOn(page);
+    assert(res.ok === true && res.verified === true, `sent and proven (got: ${JSON.stringify(res)})`);
+    assert(sent.length === 1 && sent[0] === "[MSG #0071]\n[TO: CLAUDE]\nthrough the wrapper\n[FROM: GEMINI]", `the editor posted the whole message once (got: ${JSON.stringify(sent)})`);
+    const wrapperText = await page.evaluate(() => document.querySelector(".placeholder") !== null);
+    assert(wrapperText, "the wrapper's own contents (placeholder) were not overwritten");
+  });
+  await withFixture("wrapped-editor.html", async (page) => {
+    const pending = page.evaluate(buildPickScript("input", "chatgpt"));
+    await page.waitForTimeout(150);
+    await page.evaluate(() => document.querySelector(".placeholder").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+    const r = await pending;
+    assert(r.ok && /prompt-textarea/.test(r.selector), `picking the box by clicking its placeholder saves the real editable box (${r.selector})`);
+  });
+}
 async function testStrictEditorDeadButton() {
   console.log("\n== a Send button that does nothing is still reported as a failure ==");
   await withFixture("strict-editor.html", async (page) => {
@@ -264,6 +286,7 @@ async function main() {
   await testSplitReplyWithNoKnownContainer();
   await testPickerSnapsToWholeReply();
   await testAiBusyNotTyped();
+  await testWrapperOverrideStillSends();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

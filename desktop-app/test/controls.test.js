@@ -1545,6 +1545,23 @@ async function testCapabilityPanelsWired() {
   await new Promise((r) => setTimeout(r, 20));
   assert(api.calls.some((c) => c.fn === "voiceListen"), "the mic button calls voiceListen");
   assert(doc.getElementById("jarvis-goal").value === "hello from mic", "a heard transcript is dropped into the goal box");
+  // OP-12: Test checks the voice service first and shows the plain-language
+  // reason (not a raw ECONNREFUSED) when nothing is running at the address.
+  const VOICE_DOWN = "The voice service isn't running at http://127.0.0.1:8232 — nothing answered at that address.";
+  api.voiceCheck = async () => { api.calls.push({ fn: "voiceCheck" }); return { ok: false, reachable: false, error: "ECONNREFUSED", endpoint: "http://127.0.0.1:8232", message: VOICE_DOWN }; };
+  const speaksBefore = api.calls.filter((c) => c.fn === "voiceSpeak").length;
+  click(dom, "btn-voice-test");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(api.calls.some((c) => c.fn === "voiceCheck"), "Test runs the cheap voice connectivity check first");
+  assert(doc.getElementById("voice-msg").textContent.includes(VOICE_DOWN) && !/ECONNREFUSED/.test(doc.getElementById("voice-msg").textContent), "a dead voice address is shown in plain words, not as ECONNREFUSED");
+  assert(api.calls.filter((c) => c.fn === "voiceSpeak").length === speaksBefore, "Test doesn't try to speak when the voice service isn't running");
+  const listenBefore = api.voiceListen;
+  api.voiceListen = async () => ({ ok: false, error: "ECONNREFUSED", message: VOICE_DOWN });
+  click(dom, "btn-mic");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(doc.getElementById("voice-msg").textContent.includes(VOICE_DOWN), "a failed listen shows the plain-language reason");
+  api.voiceListen = listenBefore;
+  delete api.voiceCheck;
 
   // The Image / Video paddles open the wizard on their own tab.
   assert(doc.getElementById("btn-open-image") && doc.getElementById("btn-open-video"), "the Image and Video paddles are present in the action bar");
@@ -1623,6 +1640,13 @@ async function testCapabilityPanelsWired() {
   assert(vidCfgCall && vidCfgCall.patch.motion === 1.5, "the video Motion slider value is sent with the render");
   assert(doc.getElementById("col-video").getAttribute("data-size") === "large", "after a render the Video panel grows to large (shows the clip preview)");
   assert(doc.getElementById("vid-preview").getAttribute("src") === "data:video/mp4;base64,BBBB", "the rendered clip is shown in the inline video preview");
+  // OP-13: a failed render shows the plain-language reason (e.g. NO_VIDEO).
+  const genBefore = api.videoGenerate;
+  api.videoGenerate = async () => ({ ok: false, error: "NO_VIDEO", message: "The server answered, but it didn't send back a video, so no working video backend is configured yet." });
+  click(dom, "btn-vid-generate");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(/no working video backend is configured/.test(doc.getElementById("vid-msg").textContent) && !/Failed: NO_VIDEO/.test(doc.getElementById("vid-msg").textContent), "a NO_VIDEO render shows the plain-language message, not the bare code");
+  api.videoGenerate = genBefore;
   click(dom, "btn-vid-size");
   assert(["minimal", "middle", "large"].includes(doc.getElementById("col-video").getAttribute("data-size")), "the Video panel has its own working size button");
   // Tab collapse: minimizing sends the panel up to a tab; clicking it restores.

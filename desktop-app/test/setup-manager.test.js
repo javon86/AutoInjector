@@ -147,6 +147,98 @@ async function main() {
   assert(asStr.some((s) => /Program Files\/Python312\/python\.exe$/.test(s)), 'the per-machine Program Files/Python312 dir is probed too');
   assert(asStr.indexOf('py -3.12') < asStr.findIndex((s) => /Python312\/python\.exe/.test(s)), 'the launcher is preferred over a hard-coded path');
 
+  console.log('\n== OP-14: Python lookup probes candidates at the same time, keeps the preference order ==');
+  {
+    const D = 150;
+    let calls = 0;
+    // Every candidate takes 150ms to answer; only python3.11 and python3 work.
+    const slowStub = (cmd, args, opts, cb) => {
+      calls++;
+      setTimeout(() => {
+        if (cmd === 'python3.11') cb(null, '3.11\n', '');
+        else if (cmd === 'python3') cb(null, '3.13\n', '');
+        else cb(new Error('not found'));
+      }, D);
+      return { on() {} };
+    };
+    sm._resetPython();
+    sm.configure({ execFile: slowStub });
+    const t0 = Date.now();
+    const [a, b] = await Promise.all([sm.resolvePython(true), sm.resolvePython(true)]);
+    const took = Date.now() - t0;
+    const n = sm._pyCandidates().length;
+    console.log(`     (measured ${took}ms for ${n} candidates; one at a time would be ~${n * D}ms)`);
+    assert(took < (n * D) / 2, `all candidates are probed concurrently (${took}ms)`);
+    assert(a === b && calls <= n, 'two callers at once share ONE lookup (no duplicate process storm)');
+    assert(a.version === '3.11' && a.compatible === true, 'the first compatible Python in preference order still wins');
+    sm.configure({ execFile: cp.execFile });
+    sm._resetPython();
+  }
+
+  console.log('\n== OP-14: "no Python" is not cached forever (installing Python is picked up) ==');
+  {
+    let pythonInstalled = false;
+    const stub = (cmd, args, opts, cb) => { if (pythonInstalled && cmd === 'python3') cb(null, '3.12\n', ''); else cb(new Error('not found')); return { on() {} }; };
+    sm._resetPython();
+    sm.configure({ execFile: stub });
+    const s1 = await sm.pythonStatus();
+    assert(s1.missing === true, 'no Python on the machine → missing');
+    pythonInstalled = true;
+    const realNow = Date.now;
+    Date.now = () => realNow() + 31000; // 31s later
+    try {
+      const s2 = await sm.pythonStatus();
+      assert(s2.missing === false && s2.version === '3.12', 'after the user installs Python, the next check finds it (no restart needed)');
+    } finally { Date.now = realNow; }
+    sm.configure({ execFile: cp.execFile });
+    sm._resetPython();
+  }
+
+  console.log('\n== OP-14: install detection runs at the same time, and says why ==');
+  {
+    const D = 150;
+    const stub = (cmd, args, opts, cb) => {
+      setTimeout(() => {
+        if (args.includes('-c')) return cb(null, '3.12\n', '');
+        if (args.includes('show')) return cb(null, 'Name: x\n', '');
+        cb(new Error('n/a'));
+      }, D);
+      return { on() {} };
+    };
+    sm.configure({
+      execFile: stub,
+      detectOllama: () => new Promise((r) => setTimeout(() => r({ available: true, version: '0.5' }), D)),
+      listOllamaModels: async () => ({ ok: true, models: [] }),
+    });
+    sm._resetPython();
+    await sm.resolvePython(); // resolve Python first (measured above) so only detection is timed
+    const t0 = Date.now();
+    const all = await sm.detectAll();
+    const took = Date.now() - t0;
+    console.log(`     (measured ${took}ms; one at a time would be ≥${3 * D}ms)`);
+    assert(took < 3 * D, `pip show ×2 and the Ollama check overlap (${took}ms)`);
+    assert(all['open-interpreter'].installed === true && all.voice.installed === true, 'pip targets are detected');
+    assert(all['ollama-model'].installed === false && /no model is downloaded/.test(all['ollama-model'].reason), 'Ollama present but no model → NOT reported as installed, and says why');
+
+    sm.configure({ listOllamaModels: async () => ({ ok: true, models: ['llama3.2:3b'] }) });
+    assert((await sm.detect('ollama-model')).installed === true, 'Ollama with a model downloaded → installed');
+    sm.configure({ listOllamaModels: async () => ({ ok: false, models: [], reason: 'unreachable' }) });
+    const unk = await sm.detect('ollama-model');
+    assert(unk.installed === null && /server didn't answer/.test(unk.reason), "Ollama installed but its server is down → \"couldn't tell\", not a false yes/no");
+    sm.configure({ detectOllama: async () => ({ available: false }) });
+    const noOl = await sm.detect('ollama-model');
+    assert(noOl.installed === false && /not installed/.test(noOl.reason), 'no Ollama → not installed, with the reason');
+
+    // No Python → pip targets are "not installed" without spawning pip at all.
+    let pipSpawned = false;
+    sm.configure({ execFile: (cmd, args, opts, cb) => { if (args.includes('show')) pipSpawned = true; cb(new Error('not found')); return { on() {} }; } });
+    sm._resetPython();
+    const noPy = await sm.detect('voice');
+    assert(noPy.installed === false && /Python/.test(noPy.reason) && !pipSpawned, 'no Python → pip targets report "needs Python" without running pip');
+    sm.configure({ execFile: cp.execFile });
+    sm._resetPython();
+  }
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

@@ -29,7 +29,7 @@
 <body>
   <header>
     <h1>🧙 Setup Wizard</h1>
-    <div id="intro">Point the panes at ChatGPT, Claude and Gemini and sign in. Optionally set up a local AI for the System AI / butler, image generation, and voice.</div>
+    <div id="intro">Point the panes at ChatGPT, Claude and Gemini and sign in. Optionally set up a local AI for the System AI / butler, image and video generation, and voice.</div>
   </header>
 
   <div id="tabs">
@@ -70,8 +70,21 @@
     </div>
 
     <div class="panel" id="panel-video">
-      <p class="muted">Video generation is coming next. Local text-to-video backends (e.g. AnimateDiff, Stable Video Diffusion) aren't standardized yet, so this tab is a placeholder — renders will save into the <span class="name">videos/</span> output folder once wired.</p>
-      <div class="item"><div style="flex:1 1 auto;"><div class="name">Video generation</div><div class="why">Planned — endpoint config will appear here. For now, the storage folder and the roadmap are in place.</div></div></div>
+      <p class="muted">Video generation runs on a separate local text-to-video server (a GPU app you run yourself) — for example <span class="name">AnimateDiff</span> (an extension for Automatic1111/Forge) or a <span class="name">Stable Video Diffusion</span> server. The app doesn't include one. Start yours with its API turned on, paste its generate URL below, then press <b>Check connection</b> and <b>Test render</b>. Clips save into the <span class="name">videos/</span> output folder.</p>
+      <label class="muted" for="vd-endpoint">Video backend endpoint (full text-to-video generate URL)</label>
+      <input type="text" id="vd-endpoint" placeholder="http://127.0.0.1:7860/sdapi/v1/txt2img (AnimateDiff) or your video server's generate URL" style="width:100%; box-sizing:border-box; margin:4px 0; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:6px; padding:6px 8px;">
+      <div class="runtime-row">
+        <label>Size <input type="number" id="vd-width" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;">×<input type="number" id="vd-height" value="512" min="64" step="64" style="width:64px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
+        <label>Frames <input type="number" id="vd-frames" value="16" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
+        <label>FPS <input type="number" id="vd-fps" value="8" min="1" style="width:56px; background:#141414; color:#e8e8e8; border:1px solid #2a2a2a; border-radius:4px;"></label>
+        <label><input type="checkbox" id="vd-enabled"> Enable video generation</label>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center; margin:4px 0;">
+        <button class="primary" id="btn-vd-save">Save</button>
+        <button class="primary" id="btn-vd-check">Check connection</button>
+        <button class="primary" id="btn-vd-test">Test render</button>
+      </div>
+      <div id="vd-msg" class="muted" style="font-size:11.5px;"></div>
     </div>
 
     <div class="panel" id="panel-advanced">

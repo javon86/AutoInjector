@@ -72,6 +72,59 @@ function buildSendScript(site, text, overrides, sendOpts) {
       return null;
     }
 
+    // TR-27: a saved "message box" selector can point at a WRAPPER around the
+    // real editor (e.g. a div labelled "Ask ChatGPT" that holds the editable
+    // box) or at a paragraph INSIDE it. Typing into the wrapper never reaches
+    // the editor, so the send can't go out (ChatGPT's SEND_NOT_CONFIRMED).
+    // Always work on the real editable element: the textarea, or the OUTERMOST
+    // contenteditable element.
+    const EDITABLE = 'textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
+    function isEditable(n) { return !!n && (n.tagName === "TEXTAREA" || n.isContentEditable === true); }
+    function resolveEditable(n) {
+      if (!n) return null;
+      if (n.tagName === "TEXTAREA") return n;
+      if (n.isContentEditable) {
+        let r = n;
+        while (r.parentElement && r.parentElement.isContentEditable) r = r.parentElement;
+        return r;
+      }
+      let inner = null;
+      try { inner = n.querySelector(EDITABLE); } catch {}
+      return inner ? resolveEditable(inner) : n;
+    }
+    // First candidate that leads to a real editable box; else the first match.
+    function findInput() {
+      let first = null;
+      for (const sel of CFG.INPUT_CANDIDATES) {
+        let list = [];
+        try { list = document.querySelectorAll(sel); } catch { continue; }
+        for (const n of list) {
+          const r = resolveEditable(n);
+          if (isEditable(r)) return r;
+          if (!first) first = r;
+        }
+      }
+      return first;
+    }
+    const isShown = (b) => { try { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch { return true; } };
+    const isOff = (b) => !!(b.disabled || b.getAttribute("aria-disabled") === "true");
+    // TR-27: the Send button of the FIRST selector that matches a VISIBLE
+    // button (a hidden leftover can match first). Within that selector an
+    // enabled one wins; a disabled one is still returned — the caller waits
+    // for it to enable rather than clicking some lower-priority button.
+    // Nothing visible at all: the first match.
+    function findSendButton() {
+      let first = null;
+      for (const sel of CFG.SEND_CANDIDATES) {
+        let list = [];
+        try { list = Array.from(document.querySelectorAll(sel)); } catch { continue; }
+        if (!first && list.length) first = list[0];
+        const shown = list.filter(isShown);
+        if (shown.length) return shown.find((b) => !isOff(b)) || shown[0];
+      }
+      return first;
+    }
+
     function focusNode(n) {
       try { n.focus(); } catch {}
       try { n.scrollIntoView({ block: "nearest" }); } catch {}
@@ -151,7 +204,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
     }
 
     async function injectText(text) {
-      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const input = findInput();
       if (!input) return { ok: false, error: "INPUT_NOT_FOUND" };
       focusNode(input);
 
@@ -181,7 +234,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
     // so checking for that is a reliable, site-agnostic way to tell a real
     // send from a no-op click.
     async function inputIsEmpty() {
-      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const input = findInput();
       if (!input) return true; // can't find it to check anymore -- don't block success on that
       const remaining = (input.tagName === "TEXTAREA" ? input.value : input.textContent) || "";
       return remaining.trim().length === 0;
@@ -199,7 +252,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
       const count = (s) => String(s || "").split(CFG.marker).length - 1;
       let page = "";
       try { page = document.body.innerText || ""; } catch { return 0; }
-      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const input = findInput();
       const inBox = input && input.tagName !== "TEXTAREA" ? count(composerText(input)) : 0;
       return Math.max(0, count(page) - inBox);
     }
@@ -228,13 +281,23 @@ function buildSendScript(site, text, overrides, sendOpts) {
     const result = (how, method) => ({ ok: true, method, verified: how === "seen", markerBaseline: baseline });
 
     async function attemptSend() {
-      const btn = qsAllAny(CFG.SEND_CANDIDATES);
+      // Editors enable their Send button a moment after the text lands; clicking
+      // it while still disabled does nothing. Give it up to ~1.5s.
+      let btn = findSendButton();
+      for (let i = 0; btn && isOff(btn) && i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        btn = findSendButton();
+      }
       if (btn) {
         try { btn.click(); } catch {}
         const how = await confirmSent();
         if (how) return result(how, "click");
       }
-      const active = document.activeElement || document.body;
+      // Enter goes to the editor itself (where the site listens), not to
+      // whatever happens to have focus.
+      const box = findInput();
+      if (box) focusNode(box);
+      const active = box || document.activeElement || document.body;
       try {
         active.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
       } catch {}
@@ -372,7 +435,11 @@ function buildReadScript(site, overrides) {
     // nothing to send (idle, empty composer) — so an empty composer must NOT be
     // read as "still generating" (E03: a finished reply left the Send button
     // disabled and its reply stayed uncaptured until a later send).
-    const inputBox = findAny(CFG.INPUT_CANDIDATES);
+    // TR-27: a saved selector may name a wrapper around the real box.
+    let inputBox = findAny(CFG.INPUT_CANDIDATES);
+    if (inputBox && inputBox.tagName !== "TEXTAREA" && !inputBox.isContentEditable) {
+      try { const inner = inputBox.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); if (inner) inputBox = inner; } catch (_) {}
+    }
     const composerText = inputBox ? (inputBox.value != null ? inputBox.value : (inputBox.innerText || inputBox.textContent || "")) : "";
     const composerEmpty = !String(composerText).trim();
 
@@ -381,7 +448,17 @@ function buildReadScript(site, overrides) {
     // Send is disabled WHILE the composer still holds text. A disabled Send over an
     // empty composer is the idle state, not streaming.
     const stopBtn = findAny(CFG.STOP_CANDIDATES);
-    const sendBtn = findAny(CFG.SEND_CANDIDATES);
+    // TR-27: same Send-button rule as the send script — a hidden, disabled
+    // leftover "Send" that matches first must not make the pane look busy.
+    let sendBtn = null, firstSend = null;
+    for (const sel of (CFG.SEND_CANDIDATES || [])) {
+      let list = [];
+      try { list = Array.from(document.querySelectorAll(sel)); } catch (_) { continue; }
+      if (!firstSend && list.length) firstSend = list[0];
+      const shown = list.filter(isVisible);
+      if (shown.length) { sendBtn = shown.find((b) => !isDisabled(b)) || shown[0]; break; }
+    }
+    if (!sendBtn) sendBtn = firstSend;
     let generating = false;
     if (stopBtn && isVisible(stopBtn)) generating = true;
     else if (sendBtn && isDisabled(sendBtn) && !composerEmpty) generating = true;
@@ -400,7 +477,8 @@ function buildReadScript(site, overrides) {
       try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
     }
     if (fragmentFixed === "climb") count = null;
-    return { ok: true, text, generating, sendReady, composerEmpty, count, fragmentFixed };
+    const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, count, fragmentFixed };
   })();
   `;
 }
@@ -457,7 +535,15 @@ function buildPickScript(role, site) {
     }
 
     function nearestByRole(el) {
-      if (ROLE === "input") return el.closest('textarea, [contenteditable="true"]') || el;
+      if (ROLE === "input") {
+        // TR-27: snap to the real editable box — the outermost contenteditable
+        // (or textarea) — even if the click landed on a wrapper or placeholder.
+        let n = el.closest('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]');
+        if (!n) { try { n = el.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); } catch (_) {} }
+        if (!n) { let p = el.parentElement; for (let i = 0; p && i < 4 && !n; i++, p = p.parentElement) { try { n = p.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); } catch (_) {} } }
+        if (n && n.tagName !== "TEXTAREA") { while (n.parentElement && n.parentElement.isContentEditable) n = n.parentElement; }
+        return n || el;
+      }
       if (ROLE === "send") return el.closest('button, [role="button"], input[type="submit"]') || el;
       // assistant (TR-24): snap to the element that holds the WHOLE reply —
       // the site's own message container — never the word or paragraph that

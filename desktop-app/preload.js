@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld("api", {
   configureVoice: (patch) => ipcRenderer.invoke("voice:configure", patch),
   voiceSpeak: (text, who) => ipcRenderer.invoke("voice:speak", { text, who }),
   voiceListen: (opts) => ipcRenderer.invoke("voice:listen", opts || {}),
+  voiceCheck: () => ipcRenderer.invoke("voice:check"),
   // Image generation (Stable Diffusion)
   imageStatus: () => ipcRenderer.invoke("image:status"),
   configureImage: (patch) => ipcRenderer.invoke("image:configure", patch),
