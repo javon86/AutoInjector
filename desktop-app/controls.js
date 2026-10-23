@@ -3698,13 +3698,19 @@ function bfRenderSlim(s, d) {
   const op = el("btn-bf-slim-open");
   if (op) op.style.display = bfOpenFor(s) ? "" : "none";
 }
+// L1: is the BookForge panel open in the sense that it may check on BookForge in
+// the background? Only when the author expanded it themselves: not minimized to a
+// tab, not folded to the slim bar, and not merely shown as it is by default.
+function bfPanelExpanded(panel, state) {
+  return !!(panel && !panel.classList.contains("hidden-collapsed") && state && !state.collapsed && state.userExpanded);
+}
 async function bookforgeRefresh() {
   if (!window.api || typeof window.api.bookforgeStatus !== "function") { bfActionProblem("status", "IPC_MISSING", { where: "The BookForge status", tech: "window.api.bookforgeStatus is missing" }); return; }
   let s = null;
   // L1: main only checks whether BookForge is running (a local GET) while the
-  // bridge is on or this panel is open.
-  const panel = el("col-bookforge");
-  const panelOpen = !!(panel && !panel.classList.contains("hidden-collapsed"));
+  // bridge is on, after Connect / the link test, or while the author has this
+  // panel expanded (the default view and the folded slim bar count as closed).
+  const panelOpen = bfPanelExpanded(el("col-bookforge"), bf);
   try { s = await window.api.bookforgeStatus({ panelOpen }); }
   catch (e) { bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus: ${String((e && e.message) || e).slice(0, 160)}` }); return; }
   if (s && s.ok) bookforgeRender(s);
@@ -3726,10 +3732,11 @@ function bfSetCollapsed(on, save) {
     btn.title = t; btn.setAttribute("aria-label", t);
   }
   if (on) bfCloseInfo(false);
-  if (save) bfStore.set("bf-collapsed", on ? "1" : null);
+  if (save) { bfStore.set("bf-collapsed", on ? "1" : "0"); if (!on) bf.userExpanded = true; }
   bfRenderAll();
 }
 bf.collapsed = bfStore.get("bf-collapsed") === "1";
+bf.userExpanded = bfStore.get("bf-collapsed") === "0"; // the author expanded the panel themselves (L1)
 if (el("btn-collapse-bookforge")) el("btn-collapse-bookforge").onclick = () => bfSetCollapsed(!bf.collapsed, true);
 if (el("bf-title")) {
   const h2 = el("bf-title");

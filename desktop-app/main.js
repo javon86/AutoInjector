@@ -6105,9 +6105,11 @@ function bookforgeStatusSnapshot(opts) {
   snap.connection = bookforgeConnection(snap);
   bookforgeConnectAdvance(snap);
   snap.connect = Object.assign({}, bfConnect);
-  // L1: with the bridge OFF (the default) and the panel closed, never contact
-  // local services in the background. Connect / the link test check right away.
-  if (snap.enabled || (opts && opts.panelOpen)) bookforgeAppCheckSoon();
+  // L1: with the bridge OFF (the default) and the panel not expanded by the
+  // author, never contact local services in the background — unless the author
+  // pressed Connect / the link test / Start BookForge (they check right away and
+  // keep the status current from then on).
+  if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) bookforgeAppCheckSoon();
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!bookforgeLauncher() };
   snap.health = bookforgeHealth(snap);
   return snap;
@@ -6282,6 +6284,7 @@ async function bookforgePing(pingUrl, timeoutMs) {
 // scan: also look on 8781..8799 (only when the user pressed Connect / the link
 // test / Start BookForge — never from the panel's background check, L1).
 async function bookforgeFindApp({ scan = true } = {}) {
+  if (scan) bfApp.userAsked = true; // only the author's own actions scan (L1)
   const first = await bookforgePing(bookforgeAppUrl(), 3000);
   if (first.running || bookforgeAppConfigured() || !scan) return first;
   const tries = [];
@@ -6290,10 +6293,10 @@ async function bookforgeFindApp({ scan = true } = {}) {
   return found || first;
 }
 // Cached "is BookForge running?" for the panel: refreshed in the background at most every 30 s.
-const bfApp = { running: null, base: null, version: null, checkedAt: 0, checking: false };
+const bfApp = { running: null, base: null, version: null, checkedAt: 0, checking: false, userAsked: false };
 // "Ping BookForge at most every 30 s" (the panel's health dot); Connect and the
 // link test still check right away when the user presses them.
-const BF_APP_CHECK_MS = 30000;
+const BF_APP_CHECK_MS = Number(process.env.AUTOINJECTOR_BF_APP_CHECK_MS) || 30000;
 function bookforgeAppCheckSoon(force) {
   if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < BF_APP_CHECK_MS)) return;
   bfApp.checking = true;
