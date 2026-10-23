@@ -58,15 +58,15 @@ def _blank_vs_empty(op, name, doc, prefix, wrap):
     for path in _string_leaves(doc):
         ptr = _ptr(prefix, path)
         empty = {(e["code"], e["path"]): e["message"] for e in PKG.check(op, name, wrap(_set(doc, path, "")))}
-        if ("INVALID_INPUT", ptr) not in empty:
-            continue  # "" is allowed (or refused for another reason) here: nothing to compare
+        if "empty" not in empty.get(("INVALID_INPUT", ptr), ""):
+            # "" is allowed here, or refused by another rule: a choice list, a fixed value, a format, or a
+            # value union where a space is content (a patch replacing two spaces by one): nothing to compare
+            continue
         checked += 1
         errs = PKG.check(op, name, wrap(_set(doc, path, BLANK)))
         hit = [e for e in errs if (e["code"], e["path"]) == ("INVALID_INPUT", ptr)]
         if not hit:
             failures.append(f"{op} {name} {ptr}: spaces accepted")
-        elif "empty" not in empty[("INVALID_INPUT", ptr)]:
-            pass  # a choice list / fixed value refuses "" with its own message; refused is what matters
         elif "empty" not in hit[0]["message"] or str([p for p in path if not isinstance(p, int)][-1]) not in hit[0]["message"]:
             failures.append(f"{op} {name} {ptr}: message is not field-level: {hit[0]['message']!r}")
     return checked, failures
@@ -127,6 +127,16 @@ def test_engine_refuses_required_text_of_only_spaces(hx, op, field, free_text):
         assert f"'{field}'" in msg and "empty" in msg, msg
     assert r["output_refs"] == [] and r["result"] is None
     assert hx.store.query_one("SELECT COUNT(*) c FROM records")["c"] == before
+
+
+def test_a_space_stays_valid_content_in_a_value_union():
+    # F09 grammar patches replace "  " by " ": a patch replacement is a value, not a text field to fill
+    # in, so the blank rule leaves the text alternative of such a union alone (tests/test_set_f.py
+    # covers the real patch end to end)
+    item = PKG.definition("F09", "OUTPUT")["properties"]["patches"]["items"]
+    validator = PKG.validator("F09", "OUTPUT")
+    assert validator.evolve(schema=item["properties"]["replacement"]).is_valid(" ")
+    assert not validator.evolve(schema=item["properties"]["replacement"]).is_valid("")
 
 
 def test_manual_candidate_of_only_spaces_is_refused(hx):

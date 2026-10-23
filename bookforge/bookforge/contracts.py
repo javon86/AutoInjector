@@ -37,19 +37,30 @@ def _min_length_not_blank(validator, min_length, instance, schema):
     """
     yield from _base_min_length(validator, min_length, instance, schema)
     if (isinstance(instance, str) and instance and min_length >= 1 and not instance.strip()
-            and validator.is_type(instance, "string")):
+            and not schema.get(BLANK_OK) and validator.is_type(instance, "string")):
         yield ValidationError(f"{instance!r} is blank (only spaces)")
 
 
-def _same_dialect(schema, _top=True):
-    """Drop nested "$schema": "<2020-12>" markers (the package embeds shared schemas whole).
+# Marks a text alternative of a value union (oneOf/anyOf, e.g. a patch's replacement value): there a
+# space is content (a patch replacing two spaces by one), not a blank answer, so the blank rule skips it.
+BLANK_OK = "x-bookforge-blank-ok"
 
-    They change nothing about the meaning, but jsonschema switches to its stock validator class at
-    such a subschema, which would skip BookforgeValidator's own rules inside embedded references.
+
+def _same_dialect(schema, _top=True):
+    """Prepare a loaded schema for BookforgeValidator (once, at load).
+
+    * Drop nested "$schema": "<2020-12>" markers (the package embeds shared schemas whole). They
+      change nothing about the meaning, but jsonschema switches to its stock validator class at such
+      a subschema, which would skip BookforgeValidator's own rules inside embedded references.
+    * Mark the string alternatives of value unions with BLANK_OK (see above).
     """
     if isinstance(schema, dict):
         if not _top and schema.get("$schema") == Draft202012Validator.META_SCHEMA["$id"]:
             del schema["$schema"]
+        for kw in ("oneOf", "anyOf"):
+            for alt in schema.get(kw) or ():
+                if isinstance(alt, dict) and alt.get("type") == "string":
+                    alt[BLANK_OK] = True
         for v in schema.values():
             _same_dialect(v, False)
     elif isinstance(schema, list):
