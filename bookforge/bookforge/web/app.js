@@ -576,7 +576,7 @@ async function viewHome(main) {
       ul.appendChild(h('li', { class: 'record-item' },
         h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main') }, p.name),
           h('div', { class: 'r-meta' }, `${p.project_id} · created ${fmtTime(p.created_at)} · branches: ${p.branches.join(', ')}`)),
-        h('div', { class: 'r-badges' }, badge('▤', `${n} records on main`, 'b-muted'))));
+        h('div', { class: 'r-badges' }, badge('▤', `${n} records on main`, 'b-muted'), bookActions(p))));
     }
     listCard.appendChild(ul);
     const tests = S.projects.filter(x => x.test_book);
@@ -584,11 +584,61 @@ async function viewHome(main) {
       listCard.appendChild(h('details', { class: 'test-books' }, h('summary', null, `🧪 Test books (${tests.length}) — made by Test everything / Test workflow, not your real books`),
         h('ul', { class: 'record-list' }, tests.map(p => h('li', { class: 'record-item' },
           h('div', { class: 'r-main' }, h('a', { class: 'r-title', href: link('p', p.project_id, 'main') }, p.name),
-            h('div', { class: 'r-meta' }, `created ${fmtTime(p.created_at)}`)))))));
+            h('div', { class: 'r-meta' }, `created ${fmtTime(p.created_at)}`)), h('div', { class: 'r-badges' }, bookActions(p)))))));
     }
   }
+  listCard.appendChild(archivedBooks());
   main.appendChild(listCard);
   main.appendChild(h('details', { class: 'card' }, h('summary', null, 'Advanced: create an empty project with chosen features'), projectCreateForm()));
+}
+
+/* BF-19: archive (hide, kept and backed up) or permanently delete a book from the book list. */
+function bookActions(p, archived) {
+  const arch = h('button', { type: 'button', class: 'small', title: archived ? 'Show this book in your list again' : 'Hide this book from your list (it is kept and backed up)',
+    onclick: async ev => {
+      const b = ev.currentTarget;
+      if (!archived && !confirm(`Archive “${p.name}”? It disappears from your book list but is kept (and backed up). You can bring it back under 🗄 Archived books.`)) return;
+      b.disabled = true;
+      try { const r = await api('POST', `/projects/${encodeURIComponent(p.project_id)}/archive`, { body: { archived: !archived } }); toast(r.message); route(); }
+      catch (e) { const pr = toProblem(e); toast(`${pr.title}: ${pr.message}`); b.disabled = false; }
+    } }, archived ? '↩ Unarchive' : '🗄 Archive');
+  const del = h('button', { type: 'button', class: 'small danger', onclick: () => deleteBook(p) }, '🗑 Delete…');
+  return h('span', { class: 'row' }, arch, del);
+}
+function archivedBooks() {
+  const box = h('div');
+  const det = h('details', { class: 'archived-books' }, h('summary', null, '🗄 Archived books'), box);
+  det.addEventListener('toggle', async () => {
+    if (!det.open) return;
+    clear(box).appendChild(loadingState('Loading archived books…'));
+    try {
+      const list = await api('GET', '/projects?archived=1');
+      clear(box).appendChild(list.length ? h('ul', { class: 'record-list' }, list.map(p => h('li', { class: 'record-item' },
+        h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, p.name), h('div', { class: 'r-meta' }, `created ${fmtTime(p.created_at)}`)),
+        h('div', { class: 'r-badges' }, bookActions(p, true))))) : h('p', { class: 'small muted' }, 'No archived books.'));
+    } catch (e) { clear(box).appendChild(failedState('Could not load archived books', e)); }
+  });
+  return det;
+}
+function deleteBook(p) {
+  modal('🗑 Delete a book', close => {
+    const word = h('input', { type: 'text', id: uid('del'), autocomplete: 'off', spellcheck: 'false' });
+    const out = h('div', { 'aria-live': 'polite' });
+    const go2 = h('button', { type: 'submit', class: 'danger' }, '🗑 Delete this book for good');
+    return h('form', { novalidate: true, onsubmit: async ev => {
+      ev.preventDefault(); clear(out); clearFieldProblems(ev.currentTarget);
+      if (word.value.trim() !== p.name.trim()) { markFieldProblem(word, { code: 'MISSING_INPUT', message: 'Type the book\'s name exactly.' }, { step: 'Delete a book', field: 'Book name' }); word.focus(); return; }
+      go2.disabled = true; out.appendChild(loadingState('Deleting… (a safety backup is made first)'));
+      try {
+        const r = await api('POST', `/projects/${encodeURIComponent(p.project_id)}/delete`, { body: { author_confirms: true, confirm: word.value.trim() } });
+        close(); toast(r.message); S.project = null; await loadProjects(); route();
+      } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Delete a book' }))); go2.disabled = false; }
+    } },
+    h('div', { class: 'state blocked' }, h('h3', null, `⚠️ This deletes “${p.name}” and everything in it`),
+      h('p', null, 'The book disappears from BookForge. A safety backup is made first; until the automatic backups rotate it out, restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
+    h('div', { class: 'field' }, h('label', { for: word.id }, 'Type the book\'s name to confirm'), word),
+    out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
+  });
 }
 
 function projectCreateForm() {

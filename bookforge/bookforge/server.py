@@ -18,6 +18,7 @@ import threading
 import time
 import traceback
 import webbrowser
+from contextlib import contextmanager
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,7 +41,7 @@ from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
 from .shelf import finished_books
 from .status_push import StatusPusher
-from .store import Store, new_id, utcnow
+from .store import Store, new_id, utcnow, write_private
 from .workflow_test import WorkflowTestRunner
 
 log = logging.getLogger("bookforge.server")
@@ -48,6 +49,72 @@ log = logging.getLogger("bookforge.server")
 DEFAULT_PORT = 8780
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_BODY = 64 * 1024 * 1024
+MAX_JSON_DEPTH = 200  # deeper request JSON is refused before parsing (Python's parser would hit RecursionError)
+VERSION_RE = re.compile(r"[0-9]{1,15}")  # ASCII digits only ('²'.isdigit() is True) and small enough for SQLite
+# Requests that do not count as "a writer" for the restore/delete gate (they take the exclusive gate themselves or
+# only make backups, which BackupManager serialises).
+EXCLUSIVE_ROUTES = (("backups",),)
+
+
+class _NoNaN(ValueError):
+    pass
+
+
+def _reject_constant(name):
+    raise _NoNaN(name)
+
+
+def _too_deep(raw: bytes, limit: int = MAX_JSON_DEPTH) -> bool:
+    """True when JSON nests deeper than ``limit`` (brackets inside strings are skipped)."""
+    if raw.count(b"[") + raw.count(b"{") <= limit:
+        return False  # cannot be that deep: skip the byte-by-byte scan
+    depth = 0
+    in_str = esc = False
+    for b in raw:
+        if in_str:
+            if esc:
+                esc = False
+            elif b == 0x5c:
+                esc = True
+            elif b == 0x22:
+                in_str = False
+        elif b == 0x22:
+            in_str = True
+        elif b in (0x5b, 0x7b):
+            depth += 1
+            if depth > limit:
+                return True
+        elif b in (0x5d, 0x7d):
+            depth -= 1
+    return False
+
+
+def parse_json_body(raw: bytes):
+    """Request JSON: strict (no NaN/Infinity, which browsers cannot read back), bounded depth, clean 400s."""
+    if _too_deep(raw):
+        raise ApiError(400, "INVALID_INPUT", "/body", f"the JSON is nested too deeply (more than {MAX_JSON_DEPTH} "
+                       "levels)")
+    try:
+        return json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
+    except _NoNaN as exc:
+        raise ApiError(400, "INVALID_INPUT", "/body", f"invalid JSON: {exc} is not allowed (use a number or null)")
+    except (ValueError, RecursionError):
+        raise ApiError(400, "INVALID_INPUT", "/body", "invalid JSON")
+
+
+def need_object(body, path: str = "/body") -> dict:
+    if not isinstance(body, dict):
+        raise ApiError(400, "INVALID_INPUT", path, "the request body must be a JSON object")
+    return body
+
+
+def need_str(body: dict, key: str, path: str | None = None, required: bool = False) -> str | None:
+    v = body.get(key)
+    if v is None and not required:
+        return None
+    if not isinstance(v, str):
+        raise ApiError(400, "INVALID_INPUT", path or f"/{key}", f"{key} must be text")
+    return v
 
 
 class ApiError(Exception):
@@ -79,7 +146,12 @@ class App:
         self.workflow = WorkflowTestRunner(self.store, self.engine.providers, principal_id)
         self.pusher = StatusPusher(self)
         self.work.on_change = self.changed
-        self.backups = BackupManager(self.store, busy=self._restore_busy)
+        # Writers vs. restore/delete: every request that changes data (and every book step) holds a writer slot;
+        # a restore or a book deletion takes the gate exclusively, so neither can start while the other runs.
+        self._gate = threading.Lock()
+        self._writers = 0
+        self._exclusive: str | None = None
+        self.backups = BackupManager(self.store, busy=self._restore_busy, exclusive=self.exclusive)
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
         self.health = HealthService(self)
@@ -127,6 +199,7 @@ class App:
         return {"project_id": rows[-1]["project_id"], "branch_id": "main"} if rows else None
 
     def _restore_busy(self) -> str | None:
+        """Why a restore (or deleting a book) must wait: any run, test, book step, AI job or other write."""
         if self.autobook.active():
             return "the Make-a-book run"
         if self.write_all.active():
@@ -135,7 +208,47 @@ class App:
             return "Test everything"
         if self.workflow.running:
             return "the workflow test"
+        cur = self.work.current(None)
+        if cur:
+            return f"“{cur['title']}”"
+        if any(not j.finished for j in list(self.assist._jobs.values())):
+            return "the AI fill (Fill with AI)"
+        if any(not j.finished for j in list(self.review._jobs.values())):
+            return "the AI review / fix"
+        if any(s.busy() for s in list(self.assist._sessions.values())):
+            return "the Bible Builder"
+        with self._gate:
+            if self._writers:
+                return "the change that is being saved right now"
         return None
+
+    @contextmanager
+    def writer(self):
+        """Hold a writer slot; refused (409) while a restore or a book deletion runs."""
+        with self._gate:
+            if self._exclusive:
+                raise ApiError(409, "VERSION_CONFLICT", "", f"{self._exclusive} is running right now; try again in "
+                               "a moment")
+            self._writers += 1
+        try:
+            yield
+        finally:
+            with self._gate:
+                self._writers -= 1
+
+    @contextmanager
+    def exclusive(self, what: str = "a restore"):
+        """No new writer may start while this is held (the caller then checks _restore_busy for running ones)."""
+        with self._gate:
+            if self._exclusive:
+                raise BookforgeError("VERSION_CONFLICT", "", f"{self._exclusive} is already running; wait for it",
+                                     status="REJECTED")
+            self._exclusive = what
+        try:
+            yield
+        finally:
+            with self._gate:
+                self._exclusive = None
 
     @staticmethod
     def ping() -> dict:
@@ -152,11 +265,7 @@ class App:
         except OSError:
             pass
         tok = secrets.token_urlsafe(24)
-        p.write_text(tok)
-        try:
-            os.chmod(p, 0o600)
-        except OSError:
-            pass
+        write_private(p, tok.encode())  # mode 0600 from the first byte
         return tok
 
     def authenticate(self, header: str | None) -> str:
@@ -200,6 +309,14 @@ class App:
     # ------------------------------------------------------------------ routes
     def route(self, method: str, path: str, query: dict, body, principal: str, headers) -> tuple[int, object]:
         parts = [unquote(p) for p in path.strip("/").split("/")][1:]  # drop 'api'
+        if method == "GET" or tuple(parts[:1]) in EXCLUSIVE_ROUTES or \
+                (len(parts) == 3 and parts[0] == "projects" and parts[2] == "delete"):
+            return self._route(method, parts, path, query, body, principal, headers)
+        with self.writer():
+            return self._route(method, parts, path, query, body, principal, headers)
+
+    def _route(self, method: str, parts: list, path: str, query: dict, body, principal: str,
+               headers) -> tuple[int, object]:
         if parts == ["session"] and method == "GET":
             return 200, {"principal_id": principal, "contract_version": CONTRACT_VERSION,
                          "closure_revision": CLOSURE_REVISION, "app_version": __version__,
@@ -252,11 +369,14 @@ class App:
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
         if parts == ["projects"] and method == "GET":
+            if (query.get("archived") or ["0"])[0] in ("1", "true", "yes"):
+                return 200, [dict(self.project_summary(principal, r["project_id"]), archived=True)
+                             for r in self.archived_projects(principal)]
             return 200, [self.project_summary(principal, r["project_id"]) for r in self.store.projects_for(principal)]
         if parts == ["projects"] and method == "POST":
-            return 201, self.create_project(principal, body or {})
+            return 201, self.create_project(principal, need_object({} if body is None else body))
         if parts == ["dispatch"] and method == "POST":
-            return 200, self.dispatch(principal, body or {})
+            return 200, self.dispatch(principal, need_object({} if body is None else body))
         if len(parts) >= 2 and parts[0] == "projects":
             pid = parts[1]
             if len(parts) == 2 and method == "GET":
@@ -264,9 +384,13 @@ class App:
                 self._require_access(principal, pid, branch)
                 return 200, self.project_summary(principal, pid, branch)
             if len(parts) == 3 and parts[2] == "branches" and method == "POST":
-                return 201, self.create_branch(principal, pid, body or {})
+                return 201, self.create_branch(principal, pid, need_object({} if body is None else body))
             if len(parts) == 3 and parts[2] == "backup" and method == "POST":
                 return 200, self.backup(principal, pid)
+            if len(parts) == 3 and parts[2] == "archive" and method == "POST":
+                return 200, self.archive_project(principal, pid, need_object({} if body is None else body))
+            if len(parts) == 3 and parts[2] == "delete" and method == "POST":
+                return 200, self.delete_project(principal, pid, need_object({} if body is None else body))
             if len(parts) == 3 and parts[2] == "profile" and method in ("GET", "PUT"):
                 self._require_access(principal, pid)
                 if method == "GET":
@@ -282,13 +406,14 @@ class App:
                 if rest == ["manifest"] and method == "GET":
                     return 200, self.store.feature_manifest(pid, branch)
                 if rest == ["manifest"] and method == "PUT":
-                    return 200, self.engine.set_manifest(principal, pid, branch, body or {})
+                    return 200, self.engine.set_manifest(principal, pid, branch,
+                                                         need_object({} if body is None else body))
                 if rest == ["records"] and method == "GET":
                     return 200, self.records(pid, branch, query)
                 if len(rest) == 2 and rest[0] == "records" and method == "GET":
                     return 200, self.record_detail(pid, branch, rest[1])
                 if len(rest) == 3 and rest[0] == "assets" and method == "GET":
-                    if not rest[2].isdigit():
+                    if not VERSION_RE.fullmatch(rest[2]):
                         raise ApiError(400, "INVALID_INPUT", "/version", "the version must be a whole number")
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
                 if rest == ["journal"] and method == "GET":
@@ -322,13 +447,14 @@ class App:
             title = {"B01": "Writing the premise", "B03": "Writing the main plot", "B11": "Planning the chapters"}[body["op"]]
         if action == "write_chapter" and isinstance(body.get("chapter_id"), str):
             title = f"Writing chapter {body['chapter_id'][:30]}"
-        if action in ("assemble", "export"):
-            self.backups.try_backup(f"before-{action}")  # S9: automatic backup before big steps
-        tok = self.work.begin(pid, op, title)
-        try:
-            return BookPath(self.engine, principal, pid, branch).act(action, body)
-        finally:
-            self.work.end(tok)
+        with self.writer():  # a restore waits for this step (and this step waits for a running restore)
+            if action in ("assemble", "export"):
+                self.backups.try_backup(f"before-{action}")  # S9: automatic backup before big steps
+            tok = self.work.begin(pid, op, title)
+            try:
+                return BookPath(self.engine, principal, pid, branch).act(action, body)
+            finally:
+                self.work.end(tok)
 
     # ------------------------------------------------------------------ S2 write all chapters
     def route_write_all(self, method, rest, principal, pid, branch):
@@ -368,6 +494,9 @@ class App:
             if parts == ["autobook"] and method == "GET":
                 return 200, {"runs": ab.list(principal), "active": [ab.public(r) for r in ab.active()]}
             if parts == ["autobook"] and method == "POST":
+                for k in ("genre", "length", "slot_id", "idea"):
+                    if body.get(k) is not None and not isinstance(body.get(k), str):
+                        raise ApiError(400, "INVALID_INPUT", f"/{k}", f"{k} must be text")
                 return 202, ab.start(principal, body)
             if len(parts) == 2 and method == "GET":
                 return 200, ab.public(ab.owned(principal, parts[1]))
@@ -645,12 +774,20 @@ class App:
                 "branch_id": branch, "manifest": self.store.feature_manifest(pid, branch)}
 
     def create_project(self, principal: str, body: dict) -> dict:
-        name = (body.get("name") or "").strip()
+        name = (need_str(body, "name") or "").strip()
         if not name:
             raise ApiError(400, "MISSING_INPUT", "/name", "project name is required")
         features = body.get("features") or {}
         if not isinstance(features, dict) or any(not isinstance(v, bool) for v in features.values()):
             raise ApiError(400, "INVALID_INPUT", "/features", "features must be booleans")
+        for k in ("story_time_unit", "currency"):
+            if body.get(k) not in (None, "") and not isinstance(body.get(k), str):
+                raise ApiError(400, "INVALID_INPUT", f"/{k}", f"{k} must be text")
+        if body.get("settings") is not None and not isinstance(body.get("settings"), dict):
+            raise ApiError(400, "INVALID_INPUT", "/settings", "settings must be an object")
+        rp = body.get("release_profiles")
+        if rp is not None and (not isinstance(rp, list) or not all(isinstance(x, str) for x in rp)):
+            raise ApiError(400, "INVALID_INPUT", "/release_profiles", "release_profiles must be a list of names")
         if body.get("profile") is not None:
             clean_profile(body.get("profile"))  # refuse a bad profile before anything is created
         pid = self.engine.bootstrap_project(principal, name, settings=body.get("settings") or {},
@@ -662,8 +799,9 @@ class App:
         return self.project_summary(principal, pid)
 
     def create_branch(self, principal: str, pid: str, body: dict) -> dict:
+        need_str(body, "parent_branch_id")
         self._require_access(principal, pid, body.get("parent_branch_id") or "main")
-        bid = body.get("branch_id") or ""
+        bid = need_str(body, "branch_id") or ""
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", bid):
             raise ApiError(400, "INVALID_INPUT", "/branch_id", "branch id: letters, digits, . _ - (max 64)")
         if self.store.branch_exists(pid, bid):
@@ -685,6 +823,14 @@ class App:
             for k in ("project_id", "branch_id", "target_operation", "action"):
                 if not req.get(k):
                     raise ApiError(400, "MISSING_INPUT", f"/request/{k}", f"{k} is required")
+                if not isinstance(req[k], str):
+                    raise ApiError(400, "INVALID_INPUT", f"/request/{k}", f"{k} must be text")
+            if req.get("idempotency_key") is not None and not isinstance(req["idempotency_key"], str):
+                raise ApiError(400, "INVALID_INPUT", "/request/idempotency_key", "idempotency_key must be text")
+            for k, typ, what in (("payload", dict, "an object"), ("base_ref", dict, "an object"),
+                                 ("input_refs", list, "a list")):
+                if req.get(k) is not None and not isinstance(req[k], typ):
+                    raise ApiError(400, "INVALID_INPUT", f"/request/{k}", f"{k} must be {what}")
             op = self.engine.contracts.operation(req["target_operation"])
             timeout = op["timeout_ms"] if op else 180000
             full = build_request(project_id=req["project_id"], branch_id=req["branch_id"],
@@ -805,12 +951,63 @@ class App:
                 "exported_at": utcnow(), "contract_version": CONTRACT_VERSION, "records": out}
 
     def backup(self, principal, pid) -> dict:
+        """The project page's Back up now: the same pinned, verified backup as Settings → Backups."""
         if not self.store.has_scope(principal, pid, "main", "I11:create"):
             raise ApiError(403, "PERMISSION_DENIED", "", "missing scope for backup")
-        dest = self.store.data_dir / "backups" / utcnow().replace(":", "").replace(".", "")
-        manifest = self.store.backup(dest)
-        problems = Store.verify_backup(dest)
-        return {"path": str(dest), "manifest": manifest, "verified": not problems, "problems": problems}
+        b = self.backups.backup("manual")
+        return dict(b, path=str(self.backups.dir / b["name"]))
+
+    # ------------------------------------------------------------------ BF-19 archive / delete a book
+    def archived_projects(self, principal: str) -> list:
+        return self.store.query("SELECT DISTINCT p.* FROM projects p JOIN grants g ON g.project_id IN "
+                                "(p.project_id,'*') WHERE g.principal_id=? AND p.archived=1 ORDER BY p.created_at",
+                                (principal,))
+
+    def _owned_project(self, principal: str, pid: str):
+        p = self.store.project(pid)
+        if p is None or not self.store.has_project_access(principal, pid):
+            raise ApiError(404, "NOT_FOUND", "/project_id", "this book does not exist")
+        if not self.store.has_scope(principal, pid, "main", "K01:create"):
+            raise ApiError(403, "PERMISSION_DENIED", "", "only the book's owner can archive or delete it")
+        return p
+
+    def archive_project(self, principal: str, pid: str, body: dict) -> dict:
+        """Hide a book from the lists (it stays in the data folder and in every backup); archived: false brings it
+        back."""
+        p = self._owned_project(principal, pid)
+        archived = body.get("archived", True)
+        if not isinstance(archived, bool):
+            raise ApiError(400, "INVALID_INPUT", "/archived", "archived must be true or false")
+        with self.store.transaction() as tx:
+            tx.execute("UPDATE projects SET archived=? WHERE project_id=?", (int(archived), pid))
+        if archived and self._last_project and self._last_project.get("project_id") == pid:
+            self._last_project = None
+        self.changed()
+        word = "archived (hidden from your book list; it is kept and backed up)" if archived else "back in your list"
+        return {"project_id": pid, "archived": archived, "message": f"“{p['name']}” is {word}."}
+
+    def delete_project(self, principal: str, pid: str, body: dict) -> dict:
+        """Permanently delete a book. Needs author_confirms: true and the book's exact name typed as confirm;
+        refused while anything else is working; an automatic safety backup is made first."""
+        p = self._owned_project(principal, pid)
+        typed = body.get("confirm")
+        if body.get("author_confirms") is not True or not isinstance(typed, str) or \
+                typed.strip() != (p["name"] or "").strip():
+            raise ApiError(400, "APPROVAL_REQUIRED", "/confirm", "deleting a book cannot be undone: type the book's "
+                           "exact name to confirm (author_confirms: true)")
+        with self.exclusive("deleting a book"):
+            why = self._restore_busy()
+            if why:
+                raise ApiError(409, "VERSION_CONFLICT", "/project_id", f"wait until {why} is finished, then delete")
+            safety = self.backups.backup("before-delete")  # refuses (disk full…) before anything is removed
+            removed = self.store.delete_project(pid)
+        if self._last_project and self._last_project.get("project_id") == pid:
+            self._last_project = None
+        self.changed()
+        log.info("deleted project %s (%d asset files; safety backup %s)", pid, removed, safety.get("name"))
+        return {"deleted": pid, "safety_backup": safety.get("name"), "assets_removed": removed,
+                "message": f"“{p['name']}” was deleted. Until the automatic backups rotate it out, restoring the "
+                           f"backup {safety.get('name')} brings it back."}
 
 
 def make_handler(app: App):
@@ -858,20 +1055,20 @@ def make_handler(app: App):
                 return self._send(200, app.ping())
             try:
                 principal = app.authenticate(self.headers.get("Authorization"))
-                length = int(self.headers.get("Content-Length") or 0)
+                cl = (self.headers.get("Content-Length") or "0").strip()
+                if not re.fullmatch(r"[0-9]{1,15}", cl):
+                    self.close_connection = True  # the body cannot be skipped safely
+                    raise ApiError(400, "INVALID_INPUT", "/Content-Length", "Content-Length must be a whole number "
+                                   "of bytes")
+                length = int(cl)
                 if length > MAX_BODY:
+                    self.close_connection = True
                     raise ApiError(413, "INVALID_INPUT", "/body", "body too large")
                 raw = self.rfile.read(length) if length else b""
                 body = None
                 if raw:
                     ctype = (self.headers.get("Content-Type") or "").split(";")[0]
-                    if ctype == "application/json":
-                        try:
-                            body = json.loads(raw.decode("utf-8"))
-                        except ValueError:
-                            raise ApiError(400, "INVALID_INPUT", "/body", "invalid JSON")
-                    else:
-                        body = raw
+                    body = parse_json_body(raw) if ctype == "application/json" else raw
                 status, payload = app.route(method, url.path, parse_qs(url.query), body, principal, self.headers)
                 if isinstance(payload, tuple) and payload and payload[0] == "__binary__":
                     _, mime, data, name = payload[:4]
@@ -902,6 +1099,30 @@ def make_handler(app: App):
 
         def do_PUT(self):
             self._handle("PUT")
+
+        def _not_allowed(self, with_body: bool = True):
+            errs = [error("INVALID_INPUT", urlparse(self.path).path, f"the {self.command} method is not supported "
+                          "here (use GET, POST or PUT)")]
+            self.close_connection = True  # any request body is left unread
+            if with_body:
+                return self._send(405, {"errors": errs}, extra={"Allow": "GET, POST, PUT"})
+            self.send_response(405)
+            self.send_header("Allow", "GET, POST, PUT")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_DELETE(self):
+            self._not_allowed()
+
+        def do_PATCH(self):
+            self._not_allowed()
+
+        def do_OPTIONS(self):
+            self._not_allowed()
+
+        def do_HEAD(self):
+            self._not_allowed(with_body=False)
 
     return Handler
 
