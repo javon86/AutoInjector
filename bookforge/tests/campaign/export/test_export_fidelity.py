@@ -196,7 +196,6 @@ def test_scene_break_markers_and_dialogue():
 
 
 # ----------------------------------------------------------------------------- known bugs pinned
-@pytest.mark.xfail(strict=True, reason="BF-06: control characters break EPUB/DOCX (XML 1.0 illegal chars not removed)")
 @pytest.mark.parametrize("ch", ["\x01", "\x08", "\x1b"])
 def test_bf06_control_chars_keep_epub_docx_well_formed(ch):
     from lxml import etree
@@ -210,7 +209,6 @@ def test_bf06_control_chars_keep_epub_docx_well_formed(ch):
     etree.fromstring(zipfile.ZipFile(io.BytesIO(build_docx(b, created="2026-01-01T00:00:00Z"))).read("word/document.xml"))
 
 
-@pytest.mark.xfail(strict=True, reason="BF-06 (same root cause): XML-illegal noncharacters U+FFFE/U+FFFF pass into EPUB")
 def test_bf06_noncharacters_keep_epub_well_formed():
     from bookforge.exporters.epub import build_epub
     b = bookmod.build_book(META, [{"id": "C02-c1", "text": "# T\nbad￿char"}])
@@ -224,8 +222,6 @@ def test_bf20_pdf_covers_unicode():
 
 
 # ----------------------------------------------------------------------------- NEW bugs (xfail strict)
-@pytest.mark.xfail(strict=True, reason="NEW-export-6: no-break spaces (U+00A0/U+202F) are turned into ordinary "
-                                       "breakable spaces in every format (str.split() in book.parse_chapter)")
 def test_nbsp_preserved():
     text = "# T\nMr. Smith paid 100 € — « Bonjour ! »"
     b = build_all([{"id": "C02-n1", "text": text}], toc=False)
@@ -233,8 +229,6 @@ def test_nbsp_preserved():
     assert " " in docx_blocks(b.docx)[0]
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-7: soft hyphens (U+00AD) print as visible hyphens mid-word in "
-                                       "the PDF (WinAnsi 0xAD = 'hyphen' glyph; never stripped)")
 def test_soft_hyphen_not_printed_in_pdf():
     b = build_all([{"id": "C02-s1", "text": "# T\nsuper­cali­fragi­listic word­break here."}],
                   toc=False)
@@ -242,16 +236,12 @@ def test_soft_hyphen_not_printed_in_pdf():
     assert "supercalifragilistic" in text.replace("­", "") and "-" not in text
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-8: decomposed (NFD) accents block the PDF although the "
-                                       "precomposed glyph exists in WinAnsi (no NFC normalisation)")
 def test_nfd_text_is_pdf_renderable():
     text = unicodedata.normalize("NFD", "# Café\nNaïve façade, crème brûlée.")
     b = bookmod.build_book(META, [{"id": "C02-f1", "text": text}])
     assert unencodable(bookmod.all_text(b)) == []
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-9: inline emphasis markup (*italic*, **bold**, _x_) is printed "
-                                       "literally; the AI prose task never states the plain-text/'# Title' convention")
 def test_markdown_emphasis_not_printed_literally():
     b = build_all([{"id": "C02-m1", "text": "# T\nShe was *very* tired and **angry**."}], toc=False)
     assert "*" not in "".join(pdf_pages_text(b.pdf, bottom=b.geom.bottom - 1))

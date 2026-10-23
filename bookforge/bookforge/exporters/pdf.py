@@ -53,9 +53,10 @@ def pdf_text_string(text: str) -> bytes:
 
 
 def pdf_name(name: str) -> str:
+    """PDF name object; anything but ASCII letters/digits/-_. is written as #XX UTF-8 bytes (PDF 1.7 7.3.5)."""
     out = []
     for ch in name:
-        if ch.isalnum() or ch in "-_.":
+        if (ch.isascii() and ch.isalnum()) or ch in "-_.":
             out.append(ch)
         else:
             out.extend(f"#{b:02X}" for b in ch.encode("utf-8"))
@@ -98,6 +99,21 @@ class PdfWriter:
         out += (f"trailer\n<< /Size {len(self.objects) + 1} /Root {root} 0 R /Info {info} 0 R "
                 f"/ID [<{doc_id}> <{doc_id}>] >>\nstartxref\n{xref}\n%%EOF\n").encode("ascii")
         return bytes(out)
+
+
+def image_matrix(orientation: int, x: float, y: float, dw: float, dh: float) -> tuple:
+    """cm matrix that maps the image unit square onto the display box (x, y, dw, dh), applying the EXIF
+    orientation of the stored pixels (1 = as stored; 2-8 mirror/rotate as cameras record them)."""
+    return {
+        1: (dw, 0, 0, dh, x, y),
+        2: (-dw, 0, 0, dh, x + dw, y),
+        3: (-dw, 0, 0, -dh, x + dw, y + dh),
+        4: (dw, 0, 0, -dh, x, y + dh),
+        5: (0, -dh, -dw, 0, x + dw, y + dh),
+        6: (0, -dh, dw, 0, x, y + dh),
+        7: (0, dh, dw, 0, x, y),
+        8: (0, dh, -dw, 0, x + dw, y),
+    }.get(orientation, (dw, 0, 0, dh, x, y))
 
 
 def _xobject(w: PdfWriter, img: ImageInfo) -> int:
@@ -154,7 +170,8 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
                 if clip:
                     cx, cy, cw, ch = clip
                     content += f"{num(cx)} {num(cy)} {num(cw)} {num(ch)} re W n\n".encode("ascii")
-                content += (f"{num(dw)} 0 0 {num(dh)} {num(x)} {num(y)} cm /{img_objs[key][0]} Do\nQ\n").encode("ascii")
+                m = image_matrix(images[key].orientation, x, y, dw, dh)
+                content += (" ".join(num(v) for v in m) + f" cm /{img_objs[key][0]} Do\nQ\n").encode("ascii")
         content_obj = w.add(PdfWriter.stream("", bytes(content)))
         used_fonts = sorted({op[1] for op in page.ops if op[0] == "text"})
         used_imgs = sorted({op[1] for op in page.ops if op[0] == "img"})
