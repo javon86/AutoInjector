@@ -325,9 +325,19 @@ class BookPath:
             steps.append(dict({"id": sid, "title": title, "about": about, "state": state, "approve": [],
                                "action": None, "op": None}, **kw))
 
-        def item(r):
-            return {"record_id": r["record_id"], "version": r["version"], "module_id": r["module_id"],
-                    "title": _title(r), "lifecycle": r["lifecycle"]}
+        def item(r, chapter_id=None):
+            out = {"record_id": r["record_id"], "version": r["version"], "module_id": r["module_id"],
+                   "title": _title(r), "lifecycle": r["lifecycle"]}
+            # What BookForge's checks found blocking when this draft was last checked: the page offers to redo or
+            # edit it instead of only "approve" (which would be refused again).
+            blocking = [f"{f.get('rule_id')}: {f.get('message')}" for f in r.get("findings") or []
+                        if f.get("severity") == "BLOCKING" and f.get("decision") in ("FAIL", "UNKNOWN")]
+            if blocking and r["lifecycle"] in ("DRAFT", "VALIDATED"):
+                redo = REDO_FOR.get(r["module_id"])
+                if redo and r["module_id"] == "C02":
+                    redo = dict(redo, chapter_id=chapter_id) if chapter_id else None
+                out.update(problems=blocking[:6], redo=redo)
+            return out
 
         step("profile", "Book profile", "Title, author, genre, length and your idea in a few words.",
              "done" if prof.get("title") else "needs_you", action="edit_profile")
@@ -364,7 +374,7 @@ class BookPath:
                 st = ("done" if appr else "needs_you" if latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
                       else "ai_can" if ai else "needs_you")
                 chapters.append(dict(ch, state=st, context_id=ctx["record_id"] if ctx else None,
-                                     prose=item(latest) if latest else None,
+                                     prose=item(latest, ch["chapter_id"]) if latest else None,
                                      approved=item(appr) if appr else None))
         all_written = bool(chapters) and all(c["state"] == "done" for c in chapters)
         step("chapters", "Write the chapters",
@@ -417,8 +427,7 @@ class BookPath:
                 art = rec["data"].get("artifact_ref")
                 # A file made before the title/author changed is still offered (it is what exists), marked out of
                 # date and named after the title it carries, and the export step asks to make it again.
-                old = (not meta_id or (e.get("metadata") not in (None, meta_id))
-                       or (e.get("title", cur_title), e.get("author", cur_author)) != (cur_title, cur_author))
+                old = not meta_id or (e.get("title", cur_title), e.get("author", cur_author)) != (cur_title, cur_author)
                 files.append({"format": fmt_name, "profile": prof_type, "op": op, "mime_type": mime,
                               "record_id": art["record_id"] if art else None,
                               "version": art["version"] if art else None,

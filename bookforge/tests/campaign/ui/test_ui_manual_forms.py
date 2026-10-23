@@ -162,9 +162,6 @@ def test_settings_backup_forms(make_context, server):
     assert_clean(page, "settings")
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-5: a Concept of only spaces passes the required check (UI and server) "
-                   "and is saved as a character whose name/title is blank; the book then lists an empty character "
-                   "(app.js form node.get keeps whitespace; the schema only says minLength 1)")
 def test_blank_required_text_is_refused(make_context, server):
     proj = server.api("POST", "/projects", {"name": "Blank Test", "profile": {"title": "Blank Test", "ai_slot": "manual"}})
     pid = proj["project_id"]

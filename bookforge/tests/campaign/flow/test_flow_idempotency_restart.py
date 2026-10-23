@@ -63,6 +63,67 @@ def test_write_chapter_twice_does_not_duplicate_the_chapter(tmp_path):
     assert ai.kinds.count("C02") == 1 and len(outputs(app, pid, "C02")) == 1
 
 
+def test_guided_refused_outline_offers_redo_and_the_redo_replaces_it(tmp_path):
+    """NEW-flow-1 / NEW-ui-1 on "Make my book": a refused outline says why and how to redo it; Redo with AI sets the
+    refused draft aside and the new outline (written knowing the refusal) can be approved."""
+    state = {"n": 0}
+
+    def outline(ctx, out):
+        state["n"] += 1
+        if state["n"] == 1:
+            for it in out["chapters"]:
+                for f in it["facts"]:
+                    if f["predicate"] == "plan.pov_id":
+                        f["value"] = "ghost-of-nobody"
+        return out
+    ai = fk.TraceAI(overrides={"B11": outline})
+    app = fk.make_app(tmp_path, fake=ai)
+    pid = guided_book(app)
+    for op in ("B01", "B03"):
+        out = act(app, pid, "create", {"op": op})
+        assert act(app, pid, "approve", {"record_ids": [out["created"]["record_id"]], "author_confirms": True})["ok"]
+    first = act(app, pid, "create", {"op": "B11"})["created"]
+    step = {s["id"]: s for s in fk.bp_of(app, pid).status()["steps"]}["outline"]
+    item = step["approve"][0]
+    assert item["problems"] and "CANON_UNRESOLVED" in json.dumps(item["problems"])
+    assert item["redo"] == {"action": "create", "op": "B11"}
+    refused = act(app, pid, "approve", {"record_ids": [first["record_id"]], "author_confirms": True})
+    assert not refused["ok"] and refused["results"][0]["redo"] == {"action": "create", "op": "B11"}
+    again = act(app, pid, "create", {"op": "B11"})  # pressing the step again does not ask the AI again
+    assert again.get("existing") and again["created"]["record_id"] == first["record_id"] and state["n"] == 1
+    redo = act(app, pid, "create", {"op": "B11", "redo": True})
+    assert redo["ok"] and redo["created"]["record_id"] != first["record_id"] and state["n"] == 2
+    second_ctx = [c for k, c in ai.contexts if k == "B11"][1]
+    assert "ghost-of-nobody" in json.dumps(second_ctx.get("previous_attempt_problems"))
+    step = {s["id"]: s for s in redo["book"]["steps"]}["outline"]
+    assert [i["record_id"] for i in step["approve"]] == [redo["created"]["record_id"]]  # the refused one is gone
+    assert act(app, pid, "approve", {"record_ids": [redo["created"]["record_id"]], "author_confirms": True})["ok"]
+
+
+def test_concurrent_profile_saves_keep_both_changes(tmp_path):
+    """save_profile reads and writes the profile in one transaction: two saves at once keep both fields."""
+    import threading  # noqa: PLC0415
+    app = fk.make_app(tmp_path, fake=fk.TraceAI())
+    pid = guided_book(app)
+    errs = []
+
+    def put(k, v):
+        try:
+            for _ in range(20):
+                save_profile(app.store, pid, {k: f"{v}"})
+        except Exception as exc:  # noqa: BLE001
+            errs.append(exc)
+        finally:
+            app.store.close()
+    ts = [threading.Thread(target=put, args=("genre", "Mystery")), threading.Thread(target=put, args=("tone", "Eerie"))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(30)
+    prof = app.store.get_setting(f"book_profile:{pid}")
+    assert not errs and prof["genre"] == "Mystery" and prof["tone"] == "Eerie" and prof["title"] == "Twice"
+
+
 def test_approved_steps_are_not_redone_by_their_actions(tmp_path):
     """Pressing assemble/export/check again after approval: the approved chapters are the only source and the
     newest export still holds each chapter exactly once."""

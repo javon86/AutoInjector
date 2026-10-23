@@ -284,6 +284,17 @@ def test_chapter_far_shorter_than_target_is_flagged(tmp_path):
     assert run["status"] != "done" or run["problem"]
 
 
+def test_word_count_does_not_count_approved_chapters_twice(tmp_path):
+    """BF-13: an approved chapter is 'approved', not also 'in drafts'; a book far below its length says so."""
+    app = fk.make_app(tmp_path, fake=fk.TraceAI())
+    run = fk.run_book(app)
+    w = fk.bp_of(app, run["project_id"]).word_stats()
+    assert w["approved_words"] > 0 and w["draft_words"] == 0 and w["words"] == w["approved_words"]
+    assert w["short"] and "shorter than planned" in w["warning"]
+    assert run["status"] == "done" and run["problem"]["code"] == "BOOK_TOO_SHORT"
+    assert run["problem"]["severity"] == "warning"
+
+
 @pytest.mark.xfail(strict=True, reason="BF-20: base-14 fonts only - Hebrew/Arabic/emoji chapters stop the whole "
                                        "book at assembly (no EPUB/DOCX either)")
 def test_unicode_rtl_and_emoji_chapter_reaches_every_format(tmp_path):

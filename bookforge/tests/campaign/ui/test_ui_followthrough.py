@@ -173,10 +173,6 @@ def autobook(server):
     return s["project_id"]
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-1: following 'Do the next step' (characters only, no places) leads to "
-                   "a chapter outline that can never be approved: the B11 prompt says 'use null for an undecided "
-                   "location' but approval refuses null (PLAN_UNDECIDED) and any invented id (CANON_UNRESOLVED); the "
-                   "canon step is 'done' with A01 only (book_path.py:281-287, set_b.py:294-302, set_b.py:654)")
 def test_guided_path_without_places_reaches_a_made_book(make_context, ai_server):
     ctx = make_context()
     page = open_app(ctx, ai_server, "#/start")
@@ -254,9 +250,6 @@ def test_profile_dialog_validation_and_persistence(make_context, ai_server):
     assert_clean(page, "profile dialog")
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-3: the 📝 Book profile dialog saves an empty title (no check in the "
-                   "dialog, PUT /projects/{id}/profile accepts it: book_path.py:95 save_profile/clean_profile); the "
-                   "wizard insists on a title, and the book page then drops the profile step back to 'needs you'")
 def test_profile_dialog_refuses_an_empty_title(make_context, ai_server):
     pid = autobook(ai_server)
     ctx = make_context()
@@ -274,10 +267,6 @@ def test_profile_dialog_refuses_an_empty_title(make_context, ai_server):
     assert profile["title"] == "The Keeper of Gullhaven", "an empty title was saved"
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-2: after the title is changed on a finished book nothing becomes "
-                   "stale: the book stays 'made' (10/10, no button to export again) and the download is named with "
-                   "the NEW title but the EPUB inside still carries the OLD title (book_path status ignores the "
-                   "profile's updated_at; app.js downloadAsset names the file from the current profile)")
 def test_retitled_finished_book_is_not_downloaded_with_stale_metadata(make_context, ai_server, tmp_path):
     pid = autobook(ai_server)
     prof = ai_server.api("GET", f"/projects/{pid}/profile")
@@ -298,11 +287,6 @@ def test_retitled_finished_book_is_not_downloaded_with_stale_metadata(make_conte
     assert (not still_made) or inside == "A Brand New Title", (d.suggested_filename, inside)
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-6: the characters/places the 🚀 wizard asks the AI for are generated "
-                   "into a Bible Builder session but never saved or shown on the guided path: the book's step stays "
-                   "'AI can do it' and 'Do the next step' opens an empty 'Make up characters' dialog (A01 only), so the "
-                   "wizard's places are lost unless the author finds 📖 Bible Builder (app.js viewStart -> "
-                   "POST /bible-builder without /create; book_path canon step counts only saved drafts)")
 def test_wizard_canon_reaches_the_guided_path(make_context, ai_server):
     ctx = make_context()
     page = open_app(ctx, ai_server, "#/start")
@@ -320,8 +304,6 @@ def test_wizard_canon_reaches_the_guided_path(make_context, ai_server):
     assert place in shown, f"the wizard made {names}, the guided path shows none of the place {place!r}"
 
 
-@pytest.mark.xfail(strict=True, reason="BF-12 (known): 'What's next' on operation pages contradicts the Current task "
-                   "(book made, 0 approvals waiting, yet 'What's next: … drafts, none approved yet')")
 def test_whats_next_agrees_with_current_task_on_a_made_book(make_context, ai_server):
     pid = autobook(ai_server)
     page = open_app(make_context(), ai_server, f"#/p/{pid}/main/op/B11")
@@ -333,8 +315,6 @@ def test_whats_next_agrees_with_current_task_on_a_made_book(make_context, ai_ser
     assert not re.search(r"none approved|Validate it and Accept|drafts", line), line
 
 
-@pytest.mark.xfail(strict=True, reason="BF-13 (known): a 'Short story (about 5,000 words)' of ~190 words is "
-                   "reported as made with no length warning")
 def test_made_book_far_below_its_length_is_flagged(make_context, ai_server):
     pid = autobook(ai_server)
     page = open_app(make_context(), ai_server, f"#/p/{pid}/main/book")
