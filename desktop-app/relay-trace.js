@@ -66,11 +66,14 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
         if (p.result && p.result !== "failed" && p.at < m.at) p.overtakenBy = m.seq;
       }
     }
+    // A send its caller withdrew before it was typed (a BookForge request that
+    // timed out while the AI was busy) never went out: not a failure, not waiting.
+    else if (res && res.error === "CANCELLED") { m.result = "cancelled"; }
     else { m.result = "failed"; m.error = (res && res.error) || "unknown"; }
   }
 
   // Messages to `site` that went out and haven't been answered yet, oldest first.
-  function waiting(site) { return msgs.filter((m) => m.target === site && m.result && m.result !== "failed" && !m.answeredAt); }
+  function waiting(site) { return msgs.filter((m) => m.target === site && m.result && m.result !== "failed" && m.result !== "cancelled" && !m.answeredAt); }
 
   function noteGenerating(site) {
     for (const m of waiting(site)) if (!m.startedAt) m.startedAt = now();
@@ -78,8 +81,14 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
 
   // A finished reply from `site` was captured (turnId may be null for a silent
   // NONE / empty reply). It answers every message that site was still waiting on.
+  // When the AI was seen writing after some of them but NOT after the newest
+  // ones, the reply on the page is the answer to the older message (typed over
+  // before it was captured): the newer ones stay open for the next reply.
   function noteCapture(site, turnId, { none = false, rateLimited = false } = {}) {
-    const open = waiting(site);
+    let open = waiting(site);
+    let lastStarted = -1;
+    open.forEach((m, i) => { if (m.startedAt) lastStarted = i; });
+    if (lastStarted >= 0) open = open.slice(0, lastStarted + 1);
     const t = { site, at: now(), answers: open.map((m) => m.seq), handoffs: [], held: none ? "nothing-to-add" : rateLimited ? "rate-limited" : null };
     open.forEach((m, i) => { m.answeredAt = t.at; m.answerTurn = turnId; m.batched = i < open.length - 1; if (!m.startedAt) m.startedAt = t.at; });
     if (turnId != null) turns.set(turnId, t);
@@ -89,10 +98,14 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   // A captured reply was handed to the Butler/terminal, or deliberately held.
   function noteHandoff(turnId, to) { const t = turns.get(turnId); if (t) t.handoffs.push({ to, seq: null }); }
   function noteHeld(turnId, reason) { const t = turns.get(turnId); if (t && !t.held) t.held = reason; }
+  // The [MSG #] numbers a captured reply answers (the BookForge bridge owns a
+  // reply only when it answers the bridge's own prompt). null = unknown turn.
+  function answersOf(turnId) { const t = turns.get(turnId); return t ? t.answers.slice() : null; }
 
   function stageOf(m, at) {
     if (!m.result) return "typing";
     if (m.result === "failed") return "failed";
+    if (m.result === "cancelled") return "cancelled";
     if (m.answeredAt) return "answered";
     if (at - m.at >= noReplyMs) return m.result === "unproven" ? "unproven-no-reply" : "no-reply";
     return m.result === "unproven" ? "unproven-waiting" : "waiting";
@@ -105,12 +118,13 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
     const sites = {};
     const anomalies = [];
     for (const m of msgs) {
-      const s = sites[m.target] || (sites[m.target] = { sent: 0, proven: 0, sentUnchecked: 0, unproven: 0, failed: 0, started: 0, answered: 0, waiting: 0, noReply: 0, duplicates: 0, retried: 0, replyMs: [], proveMs: [], errors: {} });
+      const s = sites[m.target] || (sites[m.target] = { sent: 0, proven: 0, sentUnchecked: 0, unproven: 0, failed: 0, cancelled: 0, started: 0, answered: 0, waiting: 0, noReply: 0, duplicates: 0, retried: 0, replyMs: [], proveMs: [], errors: {} });
       s.sent++;
       if (m.result === "proven") s.proven++;
       else if (m.result === "sent") s.sentUnchecked++;
       else if (m.result === "unproven") s.unproven++;
       else if (m.result === "failed") { s.failed++; s.errors[m.error] = (s.errors[m.error] || 0) + 1; }
+      else if (m.result === "cancelled") s.cancelled++;
       if (m.attempts > 1) s.retried++;
       if (m.startedAt) s.started++;
       // Only an AI-to-AI relay sent twice is the app's fault. The same message
@@ -153,11 +167,11 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   }
 
   function reset() { msgs = []; bySeq.clear(); turns.clear(); }
-  return { noteSend, noteSendResult, noteGenerating, noteCapture, noteHandoff, noteHeld, report, reset, _msgs: () => msgs };
+  return { noteSend, noteSendResult, noteGenerating, noteCapture, noteHandoff, noteHeld, answersOf, report, reset, _msgs: () => msgs };
 }
 
 const LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
-const HELD_TEXT = { "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice" };
+const HELD_TEXT = { "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice", "bookforge": "answer to a BookForge request (handed to BookForge)" };
 
 function formatReport(r, { label = (s) => LABEL[s] || s, timeFmt = (t) => new Date(t).toLocaleTimeString() } = {}) {
   const L = [];
@@ -169,7 +183,7 @@ function formatReport(r, { label = (s) => LABEL[s] || s, timeFmt = (t) => new Da
   L.push("Per AI (messages the app sent TO each AI):");
   for (const s of sites) {
     const x = r.sites[s];
-    L.push(`- ${label(s)}: ${x.sent} sent · ${x.proven} proven in the chat${x.sentUnchecked ? ` · ${x.sentUnchecked} sent (not checkable)` : ""}${x.unproven ? ` · ${x.unproven} UNPROVEN` : ""}${x.failed ? ` · ${x.failed} FAILED` : ""} · ${x.answered} got a reply${x.noReply ? ` · ${x.noReply} NO REPLY` : ""}${x.waiting ? ` · ${x.waiting} still waiting` : ""}`);
+    L.push(`- ${label(s)}: ${x.sent} sent · ${x.proven} proven in the chat${x.sentUnchecked ? ` · ${x.sentUnchecked} sent (not checkable)` : ""}${x.unproven ? ` · ${x.unproven} UNPROVEN` : ""}${x.failed ? ` · ${x.failed} FAILED` : ""}${x.cancelled ? ` · ${x.cancelled} withdrawn before typing` : ""} · ${x.answered} got a reply${x.noReply ? ` · ${x.noReply} NO REPLY` : ""}${x.waiting ? ` · ${x.waiting} still waiting` : ""}`);
     const extra = [];
     if (x.retried) extra.push(`${x.retried} needed a retry`);
     if (x.duplicates) extra.push(`${x.duplicates} DUPLICATE deliveries`);

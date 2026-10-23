@@ -320,6 +320,146 @@ async function main() {
     assert(seen.some((e) => e.kind === "stopped"), "onEvent fires for 'stopped'");
   }
 
+  // --- BF-01: a reply is the bridge's only if it answers the bridge's own [MSG #] --------
+  console.log("ownership by [MSG #] seq (BF-01)");
+  {
+    const O = makeHarness();
+    await O.bridge.start();
+    let typed = null;
+    O.setSend(() => new Promise((resolve) => { typed = resolve; }));
+    const p = request(O.port, "POST", "/v1/complete", { body: completeBody({ request_id: "own-1", timeout_ms: 600000 }) });
+    await sleep(30);
+    assert(O.bridge.awaitingReply("claude") === false, "awaitingReply is false while the prompt is still queued");
+    assert(O.bridge.onCaptured({ site: "claude", text: "the user's side answer [FROM: CLAUDE]", answers: ["0020"] }) === false,
+      "a reply captured while the prompt is still queued (not typed) is never taken");
+    assert(O.bridge.onCaptured({ site: "claude", text: "no trace info [FROM: CLAUDE]" }) === false,
+      "...not even without Relay Trace info");
+    typed({ ok: true, seq: "0021" });
+    await sleep(10);
+    assert(O.bridge.awaitingReply("claude") === true, "awaitingReply is true once the prompt was typed");
+    assert(O.bridge.onCaptured({ site: "claude", text: "older reply [FROM: CLAUDE]", answers: ["0020"] }) === false,
+      "a reply the Relay Trace says answers an older message (#0020) is not taken");
+    assert(O.bridge.onCaptured({ site: "claude", text: "older again [FROM: CLAUDE]", answers: [] }) === false,
+      "a reply that answers nothing open is not taken");
+    assert(O.bridge.onCaptured({ site: "claude", text: "before typing [FROM: CLAUDE]", ts: 0 }) === false,
+      "without trace info, a reply captured before the prompt was typed is not taken");
+    assert(O.bridge.onCaptured({ site: "claude", text: `${SECRET_REPLY} [FROM: CLAUDE]`, answers: ["0020", "0021"] }) === true,
+      "the reply that answers #0021 is taken");
+    r = await p;
+    assert(r.status === 200 && r.json.text === SECRET_REPLY && r.json.seq === "0021" && r.json.reply_to === "0021",
+      "the 200 carries seq and reply_to = the [MSG #] it answers");
+    assert(O.bridge.awaitingReply("claude") === false, "awaitingReply false once answered");
+    await O.bridge.stop();
+  }
+
+  // --- BF-02: a prompt not typed by the timeout is withdrawn; the 504 says so -------------
+  console.log("timeout before typing: the queued send is withdrawn (BF-02)");
+  {
+    const C = makeHarness();
+    await C.bridge.start();
+    let token = null;
+    C.setSend(async (site, text, meta) => {
+      token = meta.cancelToken;
+      while (!meta.cancelToken.cancelled) await sleep(2); // "the AI is busy"
+      return { ok: false, error: "CANCELLED" };
+    });
+    r = await request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "busy-ai-1", timeout_ms: 10000 }) });
+    assert(r.status === 504 && r.json.error === "TIMEOUT" && r.json.typed === false && r.json.ambiguous === false,
+      "504 says typed:false (and is not ambiguous)");
+    assert(/never typed/.test(r.json.message) && /withdrawn/.test(r.json.message), `the 504 message says the prompt was never typed (${r.json.message})`);
+    assert(token && token.cancelled === true, "sendToSite got a cancelToken and the bridge cancelled it");
+    r = await request(C.port, "GET", "/v1/health");
+    assert(r.json.sites.claude.busy === false, "the site is free at once (no late window for an untyped prompt)");
+    C.setSend(async (site) => { setTimeout(() => C.bridge.onCaptured({ site, text: "ok [FROM: CLAUDE]", answers: ["0031"] }), 5); return { ok: true, seq: "0031" }; });
+    r = await request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "busy-ai-2", timeout_ms: 60000 }) });
+    assert(r.status === 200 && r.json.seq === "0031", "'Try again' with a NEW request_id goes straight through (no 409)");
+
+    // typing in progress at the timeout: wait for that attempt, then report what really happened
+    C.setSend(async (site, text, meta) => { meta.cancelToken.typing = true; await sleep(60); meta.cancelToken.typing = false; return { ok: true, seq: "0032" }; });
+    r = await request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "typing-1", timeout_ms: 10000 }) });
+    assert(r.status === 504 && r.json.typed === true && r.json.seq === "0032" && r.json.ambiguous === true && r.json.late_window_ms === 10000,
+      "a timeout while the prompt is being typed waits for it: 504 typed:true with its seq and the late window");
+    assert(/typed into claude as \[MSG #0032\]/.test(r.json.message) && /same request_id/.test(r.json.message), "the 504 message says it was typed and how to collect it");
+    r = await request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "typing-2" }) });
+    assert(r.status === 409 && /reserved for the answer/.test(r.json.message) && /typing-1/.test(r.json.message) && /#0032/.test(r.json.message),
+      "a different request_id during the late window gets 409 that names the pending request");
+    assert(C.bridge.onCaptured({ site: "claude", text: "late [FROM: CLAUDE]", answers: ["0032"] }) === true, "the late answer to #0032 is stored");
+    r = await request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "typing-1" }) });
+    assert(r.status === 200 && r.json.text === "late" && r.json.seq === "0032", "the same request_id collects it");
+
+    // stop() withdraws a queued prompt too
+    let stopToken = null;
+    C.setSend(async (site, text, meta) => { stopToken = meta.cancelToken; while (!meta.cancelToken.cancelled) await sleep(2); return { ok: false, error: "CANCELLED" }; });
+    const pStop = request(C.port, "POST", "/v1/complete", { body: completeBody({ request_id: "stop-1", timeout_ms: 600000 }) });
+    await sleep(30);
+    await C.bridge.stop();
+    r = await pStop.catch(() => ({ status: 0 }));
+    assert(stopToken && stopToken.cancelled === true, "stop() cancels a prompt that was not typed yet");
+  }
+
+  // --- BF-09: Host check, key before body, pairing not triggerable from a web page ---------
+  console.log("HTTP hardening (BF-09)");
+  {
+    const S9 = makeHarness({ bodyTimeLimitMs: 150 });
+    await S9.bridge.start();
+    const p9 = S9.port;
+    r = await request(p9, "GET", "/v1/health", { headers: { Host: "evil.example" } });
+    assert(r.status === 403 && r.json.error === "FORBIDDEN", "Host: evil.example (DNS rebinding) -> 403");
+    r = await request(p9, "GET", "/v1/health", { headers: { Host: `evil.example:${p9}` } });
+    assert(r.status === 403, "Host: evil.example:<port> -> 403");
+    r = await request(p9, "GET", "/v1/health", { headers: { Host: `127.0.0.1:${p9 + 1}` } });
+    assert(r.status === 403, "Host 127.0.0.1 with another port -> 403");
+    r = await request(p9, "GET", "/v1/health", { headers: { Host: `localhost:${p9}` } });
+    assert(r.status === 200, "Host localhost:<port> -> 200");
+    r = await request(p9, "GET", "/v1/health", { headers: { Host: "127.0.0.1" } });
+    assert(r.status === 200, "Host 127.0.0.1 (no port) -> 200");
+    assert(S9.bridge.status().events.some((e) => e.kind === "forbidden_host") && /not addressed to 127\.0\.0\.1/.test(bridgeMod.describeEvent({ kind: "forbidden_host" }).say), "a refused Host is recorded with a plain-English line");
+
+    // the key is checked before the body: a 401 arrives while the body is still outstanding
+    const net = require("net");
+    const early = await new Promise((resolve) => {
+      const sock = net.connect(p9, "127.0.0.1", () => {
+        sock.write(`POST /v1/complete HTTP/1.1\r\nHost: 127.0.0.1:${p9}\r\nAuthorization: Bearer wrong\r\nContent-Type: application/json\r\nContent-Length: 500000\r\n\r\n{"site":`);
+      });
+      let got = "";
+      const t = setTimeout(() => { sock.destroy(); resolve(got); }, 2000);
+      sock.on("data", (d) => { got += d.toString("utf8"); if (/\r\n\r\n/.test(got)) { clearTimeout(t); sock.destroy(); resolve(got); } });
+      sock.on("error", () => {});
+    });
+    assert(/^HTTP\/1\.1 401/.test(early), `wrong key -> 401 before the (incomplete) body is read (${early.split("\r\n")[0]})`);
+
+    // a body that never finishes arriving is cut off
+    const slow = await new Promise((resolve) => {
+      const sock = net.connect(p9, "127.0.0.1", () => {
+        sock.write(`POST /v1/complete HTTP/1.1\r\nHost: 127.0.0.1:${p9}\r\nAuthorization: Bearer ${TOKEN}\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"site":`);
+      });
+      let got = "";
+      const t = setTimeout(() => { sock.destroy(); resolve(got); }, 3000);
+      sock.on("data", (d) => { got += d.toString("utf8"); });
+      sock.on("close", () => { clearTimeout(t); resolve(got); });
+      sock.on("error", () => {});
+    });
+    assert(/^HTTP\/1\.1 408/.test(slow), `a body that stalls past the time limit -> 408 (${slow.split("\r\n")[0] || "no answer"})`);
+    assert(S9.sends.length === 0, "nothing was sent for refused requests");
+
+    // pairing: a web page's "simple" POST (text/plain) or any browser Origin is refused and never locks pairing
+    const code9 = S9.bridge.createPairingCode();
+    for (let i = 0; i < 15; i++) {
+      r = await new Promise((resolve, reject) => {
+        const data = Buffer.from(JSON.stringify({ code: `WRONGWRONG${String(i).padStart(2, "0")}` }));
+        const rq = http.request({ host: "127.0.0.1", port: p9, method: "POST", path: "/v1/pair", agent: false, headers: { "Content-Type": "text/plain;charset=UTF-8", "Content-Length": data.length } }, (res) => { res.resume(); res.on("end", () => resolve({ status: res.statusCode })); });
+        rq.on("error", reject); rq.end(data);
+      });
+    }
+    assert(r.status === 403, "POST /v1/pair with Content-Type text/plain (a web page's simple request) -> 403");
+    r = await request(p9, "POST", "/v1/pair", { token: null, body: { code: "WRONGWRONG99" }, headers: { Origin: "https://evil.example" } });
+    assert(r.status === 403, "POST /v1/pair with a browser Origin header -> 403");
+    assert(S9.bridge.status().pairing.locked === false, "those refusals never trip the pairing lockout");
+    r = await request(p9, "POST", "/v1/pair", { token: null, body: { code: code9, client: "bookforge" } });
+    assert(r.status === 200 && r.json.token === TOKEN, "BookForge's own JSON pairing still works afterwards");
+    await S9.bridge.stop();
+  }
+
   console.log("stop");
   await H.bridge.stop();
   assert(H.bridge.status().listening === false, "status() not listening after stop");

@@ -10,17 +10,45 @@
  *   createBridge({
  *     port = 17891, host = "127.0.0.1",
  *     getToken()                         -> current bearer token string ('' = refuse all)
- *     sendToSite(site, text, meta)       -> Promise<{ ok, error?, seq? }>   (meta = { request_id })
+ *     sendToSite(site, text, meta)       -> Promise<{ ok, error?, seq? }>
+ *                                           meta = { request_id, cancelToken }; cancelToken is
+ *                                           { cancelled, typing }: the bridge sets cancelled when
+ *                                           the request times out before its prompt was typed, and
+ *                                           the host then withdraws the queued send (error
+ *                                           "CANCELLED") and sets typing while it is typing
  *     siteReady(site)                    -> bool   (pane exists and is loaded)
  *     wrapPrompt(site, text)?            -> text   (adds the [FROM: <SITE>] reply-envelope instruction)
- *     now()?, logger(kind, detail)?, sites?, timeScale?,
+ *     now()?, logger(kind, detail)?, sites?, timeScale?, bodyTimeLimitMs?,
  *     onEvent(event)?                    -> called for every activity event (see below)
  *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields),
  *          createPairingCode() -> string, bookforgeStatus() -> object|null }
  *
- * onCaptured(turn) is called by main.js for every captured reply ({ site, text }).
- * It returns true when the reply belonged to a bridge request (main.js must then
- * skip ALL relay handling for it) and false otherwise.
+ * onCaptured(turn) is called by main.js for every captured reply
+ * ({ site, text, answers }). It returns true when the reply belonged to a bridge
+ * request (main.js must then skip ALL relay handling for it) and false otherwise.
+ * A reply belongs to the request ONLY when it answers that request's prompt:
+ * the prompt was typed (sendToSite resolved ok with its [MSG #] seq) and
+ * turn.answers — the [MSG #] numbers the Relay Trace says this reply answers —
+ * contains that seq. (Without turn.answers, a reply captured before the prompt
+ * was typed is still never taken.) A reply to the user's side question, or one
+ * captured while the prompt is still queued behind a busy AI, is left to the
+ * normal relay. awaitingReply(site) says whether a typed prompt awaits its answer.
+ *
+ * Timeouts (BF-02 / NEW-bridge-2): if the prompt was never typed when the
+ * request times out, the queued send is withdrawn, the site is free at once and
+ * the 504 says typed:false (asking again with any request_id is safe). If it was
+ * typed, the 504 says typed:true + seq and the site stays reserved for its answer
+ * for a late window (min(timeout_ms, LATE_WINDOW_MAX_MS)); a retry with the SAME
+ * request_id collects it, a different request_id gets 409 SITE_BUSY saying so.
+ * Every 200 carries seq (the [MSG #] its prompt was typed as) and reply_to (the
+ * [MSG #] the captured reply answers) — they are always equal.
+ *
+ * HTTP hardening (BF-09): only Host 127.0.0.1 / localhost / [::1] (with this
+ * bridge's port) is served (DNS rebinding); the key is checked from the headers
+ * before any body is read; bodies have size and time limits; /v1/pair needs a
+ * JSON Content-Type and no Origin header, so a web page can neither pair nor
+ * trip the pairing lockout with a "simple" cross-site POST (a JSON POST needs a
+ * CORS preflight, which this server never grants).
  *
  * Logging: only site, request_id, chars, outcome/status and elapsed_ms are ever
  * logged — never prompt/reply text and never the token.
@@ -69,6 +97,14 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 240000;
 const MIN_TIMEOUT_MS = 10000;
 const MAX_TIMEOUT_MS = 900000;
+// The late window after a 504 for a prompt that WAS typed: the site stays
+// reserved for its answer for min(timeout_ms, this). BookForge's busy-retry
+// budget (jobs.DEFAULT_RETRY max_total_s = 600 s) is twice this, so a request
+// refused with 409 meanwhile still gets its turn.
+const LATE_WINDOW_MAX_MS = 5 * 60 * 1000;
+const BODY_TIME_LIMIT_MS = 30000; // a request body must arrive within this
+const MAX_PAIR_BODY_BYTES = 4096;
+const HOST_RE = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?$/i;
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 const TOKEN_FILE = 'bookforge-bridge-token';
@@ -231,6 +267,7 @@ function createBridge(opts) {
   const now = typeof o.now === 'function' ? o.now : Date.now;
   const sites = Array.isArray(o.sites) && o.sites.length ? o.sites.slice() : DEFAULT_SITES.slice();
   const timeScale = Number(o.timeScale) > 0 ? Number(o.timeScale) : 1;
+  const bodyTimeLimitMs = Number(o.bodyTimeLimitMs) > 0 ? Number(o.bodyTimeLimitMs) : BODY_TIME_LIMIT_MS;
   if (typeof sendToSite !== 'function') throw new Error('bookforge-bridge: sendToSite is required');
 
   // --- activity: counters, last contact, per-site last result, event ring ----
@@ -353,28 +390,36 @@ function createBridge(opts) {
 
   // Start a new bridge request. Returns the entry; entry.outcome resolves with
   // { status, body } once the reply is captured or the send fails/aborts.
+  // phase: 'sending' (queued / waiting for the AI, not typed yet) -> 'waiting'
+  // (typed as [MSG #seq], answer due) -> 'late' (timed out, answer still due).
   function begin(site, prompt, requestId) {
     let resolve;
     const outcome = new Promise((r) => { resolve = r; });
+    const cancelToken = { cancelled: false, typing: false };
     const entry = {
-      site, requestId, startedAt: now(), seq: null, phase: 'sending',
-      outcome, resolve, done: false, lateTimer: null, promptChars: prompt.length
+      site, requestId, startedAt: now(), seq: null, typed: false, typedAt: null, phase: 'sending',
+      outcome, resolve, done: false, lateTimer: null, lateWindowMs: 0, promptChars: prompt.length,
+      cancelToken, sendSettled: null
     };
     active.set(site, entry);
     inflight.set(requestId, entry);
     log('request', { site, request_id: requestId, chars: prompt.length });
     let sendPromise;
-    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), { request_id: requestId })); }
+    try { sendPromise = Promise.resolve(sendToSite(site, wrapPrompt(site, prompt), { request_id: requestId, cancelToken })); }
     catch (e) { sendPromise = Promise.reject(e); }
-    sendPromise.then((r) => {
-      if (entry.done) return;
+    entry.sendSettled = sendPromise.then((r) => {
       if (r && r.ok) {
+        if (entry.done) return; // stopped meanwhile
+        entry.typed = true;
+        entry.typedAt = now();
         if (r.seq != null) entry.seq = String(r.seq);
         if (entry.phase === 'sending') entry.phase = 'waiting';
         log('sent', { site, request_id: requestId, seq: entry.seq });
         return;
       }
+      if (entry.done) return;
       const code = r && r.error ? String(r.error) : 'unknown';
+      if (code === 'CANCELLED') return; // we withdrew it (timeout/stop); that path answers the request
       if (code === 'NO_VIEW' || code === 'SITE_NOT_READY') {
         log('outcome', { site, request_id: requestId, outcome: 'SITE_NOT_READY', elapsed_ms: now() - entry.startedAt });
         finish(entry, { status: 503, body: errBody('SITE_NOT_READY', `${site} pane is missing or not loaded`, false) });
@@ -391,41 +436,73 @@ function createBridge(opts) {
     return entry;
   }
 
-  // Wait for an entry's outcome for at most timeoutMs. On timeout the entry
-  // enters its "late" window: the site stays busy until the reply is captured
-  // (then cached under the request_id) or timeoutMs more passes.
+  function lateSeconds(entry) { return Math.max(1, Math.round(entry.lateWindowMs / 1000)); }
+
+  // The request's time is up. Not typed yet: withdraw the queued send (wait for
+  // an attempt that is typing right now to end), free the site, 504 typed:false.
+  // Typed: start the late window (once) and answer 504 typed:true. Returns the
+  // 504 for the typed case; null when entry.outcome carries the answer.
+  async function expire(entry, timeoutMs) {
+    if (entry.done) return null;
+    if (!entry.typed) {
+      entry.cancelToken.cancelled = true;
+      if (entry.cancelToken.typing && entry.sendSettled) { try { await entry.sendSettled; } catch (_) {} }
+      if (entry.done) return null;
+      if (!entry.typed) {
+        log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'TIMEOUT', error: 'not typed', elapsed_ms: now() - entry.startedAt });
+        finish(entry, { status: 504, body: Object.assign(errBody('TIMEOUT',
+          `${entry.site} was still busy, so the prompt was never typed; it was withdrawn and nothing is pending — asking again is safe`, false),
+          { typed: false, seq: null }) });
+        return null;
+      }
+    }
+    if (entry.phase !== 'late') {
+      entry.phase = 'late';
+      entry.lateWindowMs = Math.min(timeoutMs, LATE_WINDOW_MAX_MS);
+      entry.lateTimer = setTimeout(() => {
+        if (entry.done) return;
+        log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'LATE_EXPIRED', elapsed_ms: now() - entry.startedAt });
+        finish(entry, { status: 504, body: Object.assign(errBody('TIMEOUT',
+          `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but no answer to it was captured, even after another ${lateSeconds(entry)} s; ${entry.site} is free again`, true),
+          { typed: true, seq: entry.seq, late_expired: true }) });
+      }, Math.max(1, Math.round(entry.lateWindowMs * timeScale)));
+    }
+    log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'TIMEOUT', elapsed_ms: now() - entry.startedAt });
+    return { status: 504, body: Object.assign(errBody('TIMEOUT',
+      `the prompt was typed into ${entry.site} as [MSG #${entry.seq}], but its answer was not captured within ${timeoutMs} ms; it may still arrive — ask again with the same request_id within ${lateSeconds(entry)} s to collect it`, true),
+      { typed: true, seq: entry.seq, late_window_ms: entry.lateWindowMs }) };
+  }
+
+  // Wait for an entry's outcome for at most timeoutMs (see expire()).
   function awaitEntry(entry, timeoutMs) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        if (entry.done) return;
-        if (entry.phase !== 'late') {
-          entry.phase = 'late';
-          entry.lateTimer = setTimeout(() => {
-            if (entry.done) return;
-            log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'LATE_EXPIRED', elapsed_ms: now() - entry.startedAt });
-            entry.done = true;
-            if (active.get(entry.site) === entry) active.delete(entry.site);
-            if (inflight.get(entry.requestId) === entry) inflight.delete(entry.requestId);
-            entry.resolve({ status: 504, body: errBody('TIMEOUT', 'no reply was captured; the late-reply window has expired', true) });
-          }, Math.max(1, Math.round(timeoutMs * timeScale)));
-        }
-        log('outcome', { site: entry.site, request_id: entry.requestId, outcome: 'TIMEOUT', elapsed_ms: now() - entry.startedAt });
-        resolve({ status: 504, body: errBody('TIMEOUT', `sent, but no reply was captured from ${entry.site} within ${timeoutMs} ms; it may still arrive — retry with the same request_id to collect it`, true) });
+        expire(entry, timeoutMs).then((out) => { if (out) resolve(out); }, () => {});
       }, Math.max(1, Math.round(timeoutMs * timeScale)));
       entry.outcome.then((out) => { clearTimeout(timer); resolve(out); });
     });
   }
 
+  // BF-01: own a captured reply only if it answers THIS request's typed prompt.
   function onCaptured(turn) {
     if (!turn || typeof turn.site !== 'string') return false;
     const entry = active.get(turn.site);
-    if (!entry || entry.done) return false;
+    if (!entry || entry.done || !entry.typed) return false; // nothing typed yet: it can't be our answer
+    if (Array.isArray(turn.answers)) {
+      if (entry.seq == null || !turn.answers.map(String).includes(entry.seq)) return false;
+    } else if (typeof turn.ts === 'number' && entry.typedAt != null && turn.ts < entry.typedAt) return false;
     const text = stripEnvelope(turn.text);
     const elapsed = now() - entry.startedAt;
-    const body = { ok: true, site: entry.site, request_id: entry.requestId, text, seq: entry.seq, elapsed_ms: elapsed };
+    const body = { ok: true, site: entry.site, request_id: entry.requestId, text, seq: entry.seq, reply_to: entry.seq, elapsed_ms: elapsed };
     log('outcome', { site: entry.site, request_id: entry.requestId, outcome: entry.phase === 'late' ? 'LATE_REPLY_STORED' : 'OK', chars: text.length, elapsed_ms: elapsed });
     finish(entry, { status: 200, body });
     return true;
+  }
+
+  // A typed bridge prompt on this site is waiting for its answer.
+  function awaitingReply(site) {
+    const entry = active.get(site);
+    return !!(entry && !entry.done && entry.typed);
   }
 
   function siteStatus() {
@@ -443,7 +520,7 @@ function createBridge(opts) {
     const t = now();
     for (const [s, e] of active) {
       if (e.done) continue;
-      out[s] = { request_id: e.requestId, started_at: e.startedAt, elapsed_ms: t - e.startedAt, phase: e.phase, selftest: e.requestId.startsWith(SELFTEST_ID_PREFIX) };
+      out[s] = { request_id: e.requestId, started_at: e.startedAt, elapsed_ms: t - e.startedAt, phase: e.phase, typed: e.typed, seq: e.seq, selftest: e.requestId.startsWith(SELFTEST_ID_PREFIX) };
     }
     return out;
   }
@@ -573,7 +650,14 @@ function createBridge(opts) {
       return send(res, out.status, out.body);
     }
     const busy = active.get(site);
-    if (busy && !busy.done) return refuse(res, 409, 'SITE_BUSY', `another bridge request is in flight for ${site}`, site, requestId);
+    if (busy && !busy.done) {
+      const why = busy.phase === 'late'
+        ? `${site} is still reserved for the answer to an earlier BookForge prompt (request ${busy.requestId}, typed as [MSG #${busy.seq}], which timed out); ask again with that request_id to collect it — ${site} is free again when it arrives or within ${lateSeconds(busy)} s`
+        : busy.typed
+          ? `${site} is answering another bridge request (request ${busy.requestId}, typed as [MSG #${busy.seq}])`
+          : `another bridge request for ${site} (request ${busy.requestId}) is waiting to be typed`;
+      return refuse(res, 409, 'SITE_BUSY', why, site, requestId);
+    }
     let ready = false;
     try { ready = !!siteReady(site); } catch (_) { ready = false; }
     if (!ready) {
@@ -585,31 +669,86 @@ function createBridge(opts) {
     return send(res, out.status, out.body);
   }
 
-  function handle(req, res) {
+  // Close the connection after an early answer (the unread body is discarded).
+  function sendAndClose(res, status, body) {
+    if (res.headersSent || res.writableEnded) return;
+    res.setHeader('Connection', 'close');
+    send(res, status, body);
+  }
+
+  // BF-09: a page on another site that resolves its own name to 127.0.0.1 (DNS
+  // rebinding) sends its own name as Host — only loopback names are served.
+  function hostAllowed(req) {
+    const m = HOST_RE.exec(String(req.headers.host || '').trim());
+    if (!m) return false;
+    return !m[1] || listeningPort == null || Number(m[1]) === listeningPort;
+  }
+
+  function contentTypeIsJson(req) {
+    return /^application\/json\s*(?:;|$)/i.test(String(req.headers['content-type'] || '').trim());
+  }
+
+  // Read the body: at most `limit` bytes, within BODY_TIME_LIMIT_MS. Calls
+  // done(buffer, size, tooLarge) once, or answers 408 itself.
+  function readBody(req, res, limit, done) {
     const chunks = [];
     let size = 0;
     let tooLarge = false;
+    let finished = false;
     const declared = Number(req.headers['content-length']);
-    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) tooLarge = true;
+    if (Number.isFinite(declared) && declared > limit) tooLarge = true;
+    const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      sendAndClose(res, 408, errBody('BAD_REQUEST', 'the request body did not arrive in time', false));
+      setImmediate(() => { try { req.destroy(); } catch (_) {} });
+    }, bodyTimeLimitMs);
     req.on('data', (c) => {
       size += c.length;
-      if (size > MAX_BODY_BYTES) { tooLarge = true; chunks.length = 0; }
+      if (size > limit) { tooLarge = true; chunks.length = 0; }
       else if (!tooLarge) chunks.push(c);
-      if (size > HARD_DRAIN_CAP) req.destroy();
+      if (size > HARD_DRAIN_CAP) { finished = true; clearTimeout(timer); req.destroy(); }
     });
     req.on('error', () => {});
     req.on('end', () => {
+      clearTimeout(timer);
+      if (finished) return;
+      finished = true;
+      done(Buffer.concat(chunks), size, tooLarge);
+    });
+  }
+
+  function handle(req, res) {
+    req.on('error', () => {});
+    const url = String(req.url || '').split('?')[0];
+    const fail = () => send(res, 500, errBody('INTERNAL', 'internal bridge error', false));
+    if (!hostAllowed(req)) {
+      recordEvent('forbidden_host', { http_status: 403 });
+      return sendAndClose(res, 403, errBody('FORBIDDEN', 'this bridge only answers requests addressed to 127.0.0.1 or localhost', false));
+    }
+    // v1.1 pairing: the one endpoint that takes no Authorization header.
+    if (url === '/v1/pair' && req.method === 'POST') {
+      // A web page can POST here only as a "simple" request (no JSON Content-Type)
+      // and always sends Origin: refused, and NOT counted toward the lockout.
+      if (req.headers.origin !== undefined || !contentTypeIsJson(req)) {
+        recordEvent('pair', { outcome: 'BAD_REQUEST', http_status: 403 });
+        return sendAndClose(res, 403, errBody('FORBIDDEN', 'pairing requests must come from BookForge itself (JSON, no browser Origin)', false));
+      }
+      return readBody(req, res, MAX_PAIR_BODY_BYTES, (raw, size, tooLarge) => {
+        Promise.resolve().then(() => handlePair(raw, res, tooLarge)).catch(fail);
+      });
+    }
+    // The key is checked from the headers BEFORE any body is read.
+    if (!authorized(req)) {
+      // Never record the presented key — only that an attempt was refused.
+      counters.unauthorized++;
+      recordEvent('unauthorized', { http_status: 401, selftest: req.headers['x-autoinjector-selftest'] === '1' });
+      return sendAndClose(res, 401, errBody('UNAUTHORIZED', 'missing or wrong bearer token', false));
+    }
+    noteContact(req.headers['x-autoinjector-selftest'] === '1');
+    const limit = url === '/v1/status' ? MAX_STATUS_BYTES : MAX_BODY_BYTES;
+    readBody(req, res, limit, (raw, size, tooLarge) => {
       Promise.resolve().then(async () => {
-        const url = String(req.url || '').split('?')[0];
-        // v1.1 pairing: the one endpoint that takes no Authorization header.
-        if (url === '/v1/pair' && req.method === 'POST') return handlePair(Buffer.concat(chunks), res, tooLarge);
-        if (!authorized(req)) {
-          // Never record the presented key — only that an attempt was refused.
-          counters.unauthorized++;
-          recordEvent('unauthorized', { http_status: 401, selftest: req.headers['x-autoinjector-selftest'] === '1' });
-          return send(res, 401, errBody('UNAUTHORIZED', 'missing or wrong bearer token', false));
-        }
-        noteContact(req.headers['x-autoinjector-selftest'] === '1');
         if (url === '/v1/health' && req.method === 'GET') {
           counters.health_checks++;
           return send(res, 200, { ok: true, bridge_version: BRIDGE_VERSION, sites: siteStatus() });
@@ -619,14 +758,14 @@ function createBridge(opts) {
             log('outcome', { outcome: 'TOO_LARGE', chars: size });
             return send(res, 413, errBody('TOO_LARGE', 'request body is over 1 MiB', false));
           }
-          return handleComplete(Buffer.concat(chunks), res);
+          return handleComplete(raw, res);
         }
         if (url === '/v1/status' && req.method === 'POST') {
           if (tooLarge) return send(res, 413, errBody('TOO_LARGE', `status body is over ${MAX_STATUS_BYTES} bytes`, false));
-          return handleStatus(Buffer.concat(chunks), res, size);
+          return handleStatus(raw, res, size);
         }
         return refuse(res, 404, 'NOT_FOUND', 'no such endpoint');
-      }).catch(() => send(res, 500, errBody('INTERNAL', 'internal bridge error', false)));
+      }).catch(fail);
     });
   }
 
@@ -652,7 +791,8 @@ function createBridge(opts) {
   function stop() {
     // Fail anything still waiting so no HTTP handler hangs, then close.
     for (const entry of Array.from(active.values())) {
-      finish(entry, { status: 503, body: errBody('SITE_NOT_READY', 'the bridge was stopped', false) });
+      entry.cancelToken.cancelled = true; // a prompt not typed yet is withdrawn too
+      finish(entry, { status: 503, body: Object.assign(errBody('SITE_NOT_READY', 'the bridge was stopped', false), { typed: entry.typed }) });
     }
     const srv = server;
     server = null;
@@ -665,7 +805,7 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, status, recordEvent, createPairingCode, bookforgeStatus, pairingStatus, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, awaitingReply, status, recordEvent, createPairingCode, bookforgeStatus, pairingStatus, address: () => (server ? server.address() : null) };
 }
 
 // --- plain-English activity lines (for the desktop panel + link-test report) ---
@@ -689,6 +829,7 @@ function describeEvent(ev, label) {
     case 'unauthorized': return e.selftest
       ? { say: 'The link test checked that a wrong connection key is refused', tone: 'info' }
       : { say: 'Something tried to connect with a wrong or missing connection key — it was refused', tone: 'warn' };
+    case 'forbidden_host': return { say: 'Refused a request that was not addressed to 127.0.0.1/localhost (a web page may have tried to reach the bridge)', tone: 'warn' };
     case 'listening': return { say: `Bridge turned on — listening on 127.0.0.1:${e.port != null ? e.port : '?'}`, tone: 'ok' };
     case 'stopped': return { say: 'Bridge turned off', tone: 'info' };
     case 'key_changed': return { say: 'A new connection key was made — BookForge needs the new one before it can connect again', tone: 'warn' };
@@ -744,5 +885,7 @@ module.exports = {
   PAIR_MAX_FAILS,
   PAIR_LOCK_MS,
   MAX_STATUS_BYTES,
-  BF_STATUS_STALE_MS
+  BF_STATUS_STALE_MS,
+  LATE_WINDOW_MAX_MS,
+  BODY_TIME_LIMIT_MS
 };
