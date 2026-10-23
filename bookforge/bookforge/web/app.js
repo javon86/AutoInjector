@@ -243,6 +243,12 @@ function checkItem(p) {
 /** Technical detail (field key, format, error code…): in the page, shown only with 🔧 Details on. */
 function tech(...children) { return h('span', { class: 'tech' }, ' ', ...children); }
 function techBlock(...children) { return h('div', { class: 'tech tech-block' }, ...children); }
+/** An element's words without its 🔧 technical details (for the screen-reader announcement). */
+function spokenText(el) {
+  const c = el.cloneNode(true);
+  for (const t of c.querySelectorAll('.tech')) t.remove();
+  return (c.textContent || '').replace(/\s+/g, ' ').trim();
+}
 function techOn() { return document.documentElement.classList.contains('show-tech'); }
 function setTech(on) {
   document.documentElement.classList.toggle('show-tech', !!on);
@@ -4976,7 +4982,7 @@ function renderBook(holder, book, redraw) {
       try { await refreshRecords(); } catch { /* best effort */ }
       if (out && out.book) { renderBook(holder, out.book, redraw); refreshTask(); } else await redraw();
       // the message goes into the freshly drawn page, after the steps are up to date
-      const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(note.textContent || ''); }
+      const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(spokenText(note)); }
     } catch (e) {
       const st = book.steps.find(x => x.id === curStep);
       const p = toProblem(e, { book: profileOf().title || S.project.name, step: st ? st.title : 'Make my book', set: st && st.op ? st.op[0] : null, op: st ? st.op : null });

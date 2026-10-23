@@ -127,6 +127,8 @@ def test_refused_outline_in_plain_words_redo_and_plain_editor(make_context, ai_s
         assert "fix" in cls.split() and "ok" not in cls.split(), (cls, text)
         assert "needs fixing" in text and not CODE_RE.search(text), text
         assert "Redo with AI" in text and "Edit it" in text
+        page.wait_for_function("() => /needs fixing/.test(document.querySelector('#live').textContent)", timeout=3000)
+        assert not CODE_RE.search(page.text_content("#live")), "the screen-reader announcement carries no rule codes"
     finally:
         bridge.ai._canon_ids = polite
     # ✏️ Edit it: the plain outline editor, not the record view
