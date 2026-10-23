@@ -48,9 +48,6 @@ def _route(app, method, path, body=None):
 
 
 # ---------------------------------------------------------------------------------------------- asset damage
-@pytest.mark.xfail(strict=True, reason="NEW-fault-8: Store.backup hashes whatever bytes are on disk and "
-                                       "verify_backup compares against that manifest, never against binaries.content_hash"
-                                       ": a backup of a truncated asset is reported verified")
 def test_backup_of_a_truncated_asset_is_not_verified(app):
     pid, (up,) = _book(app)
     p = _asset_path(app, up)
@@ -59,8 +56,6 @@ def test_backup_of_a_truncated_asset_is_not_verified(app):
     assert b["verified"] is False
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-9: restore only copies asset files that are missing, so restoring a "
-                                       "good backup never repairs a damaged (truncated/overwritten) asset")
 def test_restore_from_a_good_backup_repairs_a_damaged_asset(app):
     pid, (up,) = _book(app)
     good = app.backups.backup("manual")
@@ -81,8 +76,6 @@ def test_truncated_asset_download_is_a_clean_hash_mismatch(app):
     assert ei.value.code == "HASH_MISMATCH"
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-10: a deleted asset file makes Store.read_binary raise "
-                                       "FileNotFoundError: GET .../assets answers 500 INTERNAL_ERROR (shelf/exports too)")
 def test_deleted_asset_download_is_a_clean_error(app):
     pid, (up,) = _book(app)
     _asset_path(app, up).unlink()
@@ -124,9 +117,6 @@ def test_backup_disk_full_while_copying_assets_is_clean_and_leaves_nothing(app, 
     assert app.backups.backup("manual")["verified"]
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-11: 'database or disk is full' from SQLite while writing the backup "
-                                       "DB is a sqlite3.OperationalError, not OSError: BackupManager.backup does not "
-                                       "catch it (500 INTERNAL_ERROR), leaves the half-written folder and no last_error")
 def test_backup_sqlite_disk_full_is_clean_and_leaves_nothing(app, monkeypatch):
     _book(app)
     real = sqlite3.connect
@@ -142,8 +132,6 @@ def test_backup_sqlite_disk_full_is_clean_and_leaves_nothing(app, monkeypatch):
     assert app.backups.last_error
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-11: BackupManager.backup creates the backups folder outside its "
-                                       "try/except, so an unwritable/read-only data folder raises a raw OSError (500)")
 def test_backup_into_an_unwritable_backups_folder_is_a_clean_error(app):
     _book(app)
     (app.store.data_dir / "backups").write_text("not a folder")  # mkdir fails like a read-only target
@@ -155,9 +143,6 @@ def test_backup_into_an_unwritable_backups_folder_is_a_clean_error(app):
     assert health["backups"]["status"] != "ok"
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-11: ENOSPC while storing an upload/asset escapes as a raw OSError "
-                                       "(HTTP 500) and leaves a partial *.tmp-* file in assets/ that every later "
-                                       "backup copies and lists in its manifest")
 def test_upload_disk_full_is_clean_and_leaves_no_partial_file(app, monkeypatch):
     pid, _ = _book(app)
     before = sorted(p.name for p in app.store.asset_dir.iterdir())
@@ -177,7 +162,7 @@ def test_upload_disk_full_commits_no_record(app, monkeypatch):
     def replace(*a):
         raise OSError(errno.ENOSPC, "No space left on device")
     monkeypatch.setattr(store_mod, "os", types.SimpleNamespace(replace=replace, PathLike=os.PathLike))
-    with pytest.raises(OSError):
+    with pytest.raises(BookforgeError):  # a clean "is the disk full?" error since NEW-fault-11 (was a raw OSError)
         app.upload("author", pid, "main", b"new asset" * 100, {"Content-Type": "image/png"})
     assert app.store.query_one("SELECT COUNT(*) n FROM records")["n"] == n
     assert check_store(app.store.data_dir) == []
@@ -195,9 +180,6 @@ def _corrupt_index_page(db: Path, index: str):
         f.write(bytes([0x0a, 0, 0, 0, 0x7f, 0x0f, 0xff, 0, 0, 0, 0, 0]))  # nonsense b-tree header
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-12: nothing ever runs PRAGMA integrity_check/quick_check: with a "
-                                       "corrupted page the ❤️ health check says the database is ok and new backups of "
-                                       "the corrupted file are 'verified' (and rotation then deletes the good ones)")
 def test_corrupted_database_is_detected_by_health_and_backups(tmp_path):
     a = App(tmp_path / "data", token=TOKEN)
     pid = a.engine.bootstrap_project("author", "B")
@@ -280,9 +262,6 @@ def test_damaged_backup_is_never_restored(app, damage):
     assert (app.store.data_dir / "bookforge.sqlite3").stat().st_size >= live_before
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-13: schema versions are never compared: verify_backup/restore accept "
-                                       "a backup whose manifest and database say schema_version 99, and Store() opens a "
-                                       "database from a newer BookForge without complaint")
 def test_backup_from_a_newer_schema_version_is_refused(app):
     b = _good_backup(app)
     src = app.backups.dir / b["name"]
@@ -299,7 +278,6 @@ def test_backup_from_a_newer_schema_version_is_refused(app):
         app.backups.restore(b["name"], CONFIRM)
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-13: Store() opens a database written by a newer schema version")
 def test_store_refuses_a_database_from_a_newer_schema(tmp_path):
     s = Store(tmp_path / "d")
     with s.transaction() as tx:

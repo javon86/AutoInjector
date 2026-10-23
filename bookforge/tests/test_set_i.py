@@ -425,7 +425,7 @@ def test_retention_plan():
     assert "s39" not in keep and len(keep) <= 7 + 1 + 5
 
 
-def test_migration_rehearsal_isolated_and_promoted(h, tmp_path):
+def test_migration_rehearsal_isolated_and_promoted(h, tmp_path, monkeypatch):
     ref = a01(h)
     pointer = tmp_path / "ACTIVE"
 
@@ -439,6 +439,12 @@ def test_migration_rehearsal_isolated_and_promoted(h, tmp_path):
     assert json.loads(pointer.read_text())["data_dir"] == rep["root"]
     # original is unchanged
     assert h.store.query_one("SELECT value FROM meta WHERE key='schema_version'")["value"] == "1"
+    # A Store refuses a database from a newer schema (NEW-fault-13); the BookForge that ships migration m-0002
+    # understands version 2, so open the promoted root as that version.
+    import bookforge.store as store_mod
+    with pytest.raises(Exception):
+        Store(rep["root"])
+    monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 2)
     new = Store(rep["root"])
     assert new.query_one("SELECT value FROM meta WHERE key='migration_id'")["value"] == "m-0002"
     assert new.get_record(h.project_id, "main", ref["record_id"])["content_hash"] == ref["content_hash"]
