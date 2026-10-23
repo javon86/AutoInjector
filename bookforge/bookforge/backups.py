@@ -7,9 +7,11 @@ promises). Backups live in ``<data_dir>/backups/<name>`` named ``bk-<sequence>-<
 number, not the wall clock, says which backup is newer, so a clock that jumps back or forward cannot reorder them.
 
 Rotation (``backup_keep``, default 10) only ever removes AUTOMATIC backups (daily, before a run / assembling /
-exporting / deleting a book), and only once that many newer automatic backups VERIFIED: a damaged new backup never
-pushes a good old one out. Backups you made with "Back up now" and the safety copies made before a restore are
-pinned (never rotated), and the backup being restored from is never rotated.
+exporting a book), and only once that many newer automatic backups VERIFIED: a damaged new backup never pushes a
+good old one out. Unverified automatic backups are capped at ``backup_keep`` as well (oldest removed first), so a
+damaged data folder cannot fill the disk with them. Backups you made with "Back up now", the safety copies made
+before a restore and the safety copy made before a book is deleted are pinned (never rotated), and the backup
+being restored from is never rotated.
 
 Restore never writes into a backup or trusts an unverified one: ``Store.restore`` first copies the verified
 snapshot into a NEW folder (it refuses on any hash problem or a newer schema version), a fresh safety backup of the
@@ -44,8 +46,8 @@ REASONS = {"daily": "Daily backup (first start of the day)", "manual": "You pres
            "before-run": "Before a Make-a-book-for-me run", "before-assemble": "Before putting a book together",
            "before-export": "Before exporting a book", "before-restore": "Safety copy before a restore",
            "before-delete": "Before a book was deleted"}
-AUTOMATIC = {"daily", "before-run", "before-assemble", "before-export", "before-delete"}  # rotated
-PINNED = {"manual", "before-restore"}  # never rotated
+AUTOMATIC = {"daily", "before-run", "before-assemble", "before-export"}  # rotated
+PINNED = {"manual", "before-restore", "before-delete"}  # never rotated (the only way back to a deleted book)
 DISK_MESSAGE = "the backup could not be written (is the disk full or the data folder read-only?)"
 
 
@@ -66,6 +68,7 @@ class BackupManager:
         self.busy = busy  # callable -> str|None: why a restore must wait (e.g. a run is active)
         self.exclusive = exclusive  # context manager factory: no new writer may start while it is held
         self.last_error: str | None = None
+        self.on_restored: list = []  # callables run after a restore touched the live data (e.g. drop health caches)
 
     # ------------------------------------------------------------------ settings
     def keep(self) -> int:
@@ -115,7 +118,7 @@ class BackupManager:
                 log.error("%s", self.last_error)
             else:
                 self.last_error = None
-                self.rotate(protect=tuple(protect) + (dest.name,))
+            self.rotate(protect=tuple(protect) + (dest.name,))
         return dict(self._describe(dest), created_at=manifest.get("created_at"), problems=problems[:5])
 
     def try_backup(self, reason: str) -> dict | None:
@@ -161,19 +164,26 @@ class BackupManager:
         return items[0] if items else None
 
     def rotate(self, protect: tuple = ()):
-        """Remove automatic backups beyond the newest ``keep`` verified ones; pinned ones and ``protect`` stay."""
+        """Remove automatic backups beyond the newest ``keep`` verified ones and the newest ``keep`` unverified ones.
+
+        A damaged (unverified) backup never pushes a good one out, and unverified ones are capped too (oldest go
+        first): once an asset file is missing every new backup is unverified, and they must not fill the disk.
+        Pinned backups and ``protect`` (e.g. the backup being restored from) always stay."""
         keep = self.keep()
-        good = 0
+        good = bad = 0
         with self._lock:
             for b in self.list():
                 if b["pinned"]:
                     continue
-                if good < keep:
-                    if b["verified"]:
+                if b["verified"]:
+                    if good < keep:
                         good += 1
+                        continue
+                elif good < keep and bad < keep:
+                    bad += 1
                     continue  # an unverified backup newer than the kept good ones stays (for inspection)
                 if b["name"] in protect:
-                    continue  # e.g. the backup that is being restored from
+                    continue
                 shutil.rmtree(self.dir / b["name"], ignore_errors=True)
 
     def daily_if_needed(self) -> dict | None:
@@ -252,6 +262,12 @@ class BackupManager:
                                  "restore the safety copy") from exc
         finally:
             shutil.rmtree(staging, ignore_errors=True)
+            if live_touched:
+                for fn in self.on_restored:
+                    try:
+                        fn()
+                    except Exception:  # noqa: BLE001 - a cache hook must never hide the restore's own result
+                        log.exception("after-restore hook failed")
         log.info("restored backup %s (safety copy %s, %d asset files put back)", name, safety.get("name"), repaired)
         return {"restored": name, "safety_backup": safety.get("name"), "assets_repaired": repaired,
                 "message": f"Your books were restored from the backup of {self._describe(src).get('created_at')}. "

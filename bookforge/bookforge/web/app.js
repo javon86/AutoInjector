@@ -766,7 +766,7 @@ function deleteBook(p) {
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Delete a book' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, `⚠️ This deletes “${p.name}” and everything in it`),
-      h('p', null, 'The book disappears from BookForge. A safety backup is made first; until the automatic backups rotate it out, restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
+      h('p', null, 'The book disappears from BookForge. A safety backup is made first and kept (it is never rotated out); restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
     h('div', { class: 'field' }, h('label', { for: word.id }, 'Type the book\'s name to confirm'), word),
     out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
   });

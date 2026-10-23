@@ -57,6 +57,12 @@ class HealthService:
         self._slot_cache: dict[str, tuple[float, dict]] = {}
         self._qc: tuple[float, list] | None = None  # (monotonic time, quick_check rows)
 
+    def forget(self):
+        """Drop cached results (after a restore the database file is a different one: check it again)."""
+        with self._lock:
+            self._last, self._at = None, 0.0
+            self._qc = None
+
     def run(self, force: bool = False) -> dict:
         with self._lock:
             if not force and self._last and time.monotonic() - self._at < CACHE_S:

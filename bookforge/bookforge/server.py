@@ -155,6 +155,7 @@ class App:
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
         self.health = HealthService(self)
+        self.backups.on_restored.append(self.health.forget)  # a restored database must be checked afresh
         self.port: int | None = None
         self._last_project: dict | None = None
 
@@ -1012,8 +1013,8 @@ class App:
         self.changed()
         log.info("deleted project %s (%d asset files; safety backup %s)", pid, removed, safety.get("name"))
         return {"deleted": pid, "safety_backup": safety.get("name"), "assets_removed": removed,
-                "message": f"“{p['name']}” was deleted. Until the automatic backups rotate it out, restoring the "
-                           f"backup {safety.get('name')} brings it back."}
+                "message": f"“{p['name']}” was deleted. Restoring the backup {safety.get('name')} brings it "
+                           "back (that safety copy is kept: automatic rotation never removes it)."}
 
 
 def make_handler(app: App):
