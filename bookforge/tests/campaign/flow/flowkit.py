@@ -123,7 +123,9 @@ class TextBridgeAI(AutoInjectorAdapter):
         kind = self.brain.kinds[-1] if self.brain.kinds else "?"
         text = self.render(kind, data, reask)
         self.texts.append((kind, text))
-        return {"ok": True, "text": text}
+        # like the real bridge: the [MSG #] the prompt was typed as, and the one the reply answers (BF-01)
+        seq = f"{len(self.texts):04d}"
+        return {"ok": True, "text": text, "seq": seq, "reply_to": seq}
 
 
 def make_app(tmp_path, name="data", fake=None):

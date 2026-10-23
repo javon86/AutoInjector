@@ -79,6 +79,9 @@ def test_settings_connect_form(make_context, server, bridge):
 def test_pair_link_needs_confirmation_and_a_local_bridge(make_context, server, bridge):
     """BF-07: a web page can open #/pair links; BookForge never pairs from the address alone."""
     page = open_app(make_context(), server)
+    before = slots(server)  # (the server is shared with the tests above: compare, don't assume a fresh one)
+    pair_calls = []
+    page.on("request", lambda rq: pair_calls.append(rq.url) if "pair-autoinjector" in rq.url else None)
     page.goto(server.base + "#/pair?code=GOOD-1234-5678&bridge=http://evil.example:17891")
     page.wait_for_selector("#main .state.failed", timeout=15000)
     assert "not from AutoInjector" in page.inner_text("#main")
@@ -87,5 +90,5 @@ def test_pair_link_needs_confirmation_and_a_local_bridge(make_context, server, b
     page.get_by_role("button", name="Cancel").click()
     page.wait_for_selector("#main .state.empty", timeout=5000)
     assert "Nothing was changed" in page.inner_text("#main")
-    assert all(s["adapter_id"] != "autoinjector" for s in slots(server).values())
+    assert not pair_calls and slots(server) == before, f"nothing was paired or changed ({pair_calls})"
     page.bf_problems.clear()
