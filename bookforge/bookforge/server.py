@@ -39,7 +39,7 @@ from .selftest import SelfTestRunner
 from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
-from .shelf import finished_books
+from .shelf import shelf as shelf_page
 from .status_push import StatusPusher
 from .store import Store, new_id, utcnow, write_private
 from .workflow_test import WorkflowTestRunner
@@ -555,7 +555,7 @@ class App:
                 self.changed()
                 return 200, out
         if parts == ["shelf"] and method == "GET":
-            return 200, {"books": finished_books(self, verify=True, principal=principal)}
+            return 200, shelf_page(self, principal=principal)
         if parts == ["settings", "ai-retry"]:
             if method == "GET":
                 cur = self.store.get_setting("ai_retry") or {}
@@ -1008,6 +1008,10 @@ class App:
                 raise ApiError(409, "VERSION_CONFLICT", "/project_id", f"wait until {why} is finished, then delete")
             safety = self.backups.backup("before-delete")  # refuses (disk full…) before anything is removed
             removed = self.store.delete_project(pid)
+        try:
+            self.assist.forget_project(pid)  # its Bible Builder reports no longer carry the book's name
+        except Exception:  # noqa: BLE001 - the book is deleted either way
+            log.exception("could not tidy Bible Builder reports of deleted project %s", pid)
         if self._last_project and self._last_project.get("project_id") == pid:
             self._last_project = None
         self.changed()

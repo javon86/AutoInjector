@@ -1051,6 +1051,33 @@ class AssistService:
         sess = self._session(principal, sid)
         return sess.report_paths or sess.write_report()
 
+    def forget_project(self, pid: str) -> int:
+        """A book was deleted: drop its Bible Builder sessions and take its name out of the reports already
+        written for it (they then say the book was deleted). Returns the number of reports rewritten."""
+        with self._lock:
+            for sid, sess in list(self._sessions.items()):
+                if sess.project_id == pid:
+                    del self._sessions[sid]
+        n = 0
+        try:
+            paths = sorted(self.reports_dir.glob("bible-builder-*.json"))
+        except OSError:
+            return 0
+        for js in paths:
+            try:
+                rep = json.loads(js.read_text(encoding="utf-8"))
+                proj = rep.get("project") if isinstance(rep, dict) else None
+                if not isinstance(proj, dict) or proj.get("project_id") != pid:
+                    continue
+                rep["project"] = {"project_id": pid, "name": None, "deleted": True}
+                js.write_text(json.dumps(rep, indent=2, ensure_ascii=False), encoding="utf-8")
+                js.with_suffix(".md").write_text(render_markdown(rep), encoding="utf-8")
+                n += 1
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                log.warning("could not update Bible Builder report %s after a delete: %s", js.name,
+                            type(exc).__name__)
+        return n
+
 
 # ====================================================================== Bible Builder session
 class BibleSession:
@@ -1556,7 +1583,8 @@ class BibleSession:
                                  "created": sum(1 for i in its if i["outcome"] == "created"), "message": s["message"]})
         return {"kind": "bible-builder", "session_id": self.id, "bookforge_version": __version__,
                 "contract_version": CONTRACT_VERSION, "written_at": _iso(),
-                "project": {"project_id": self.project_id, "name": proj["name"] if proj else None},
+                "project": {"project_id": self.project_id, "name": proj["name"] if proj else None}
+                | ({} if proj else {"deleted": True}),
                 "branch_id": self.branch_id, "idea_chars": len(self.idea), "idea_sha256_16": sha16(self.idea),
                 "slot_preference": self.slot_pref or "auto",
                 "runs": [{k: v for k, v in r.items() if k != "items"} | {"items": len(r.get("items") or [])}
@@ -1582,11 +1610,17 @@ def _cell(v) -> str:
     return str("" if v is None else v).replace("|", "\\|").replace("\n", " ")
 
 
+def _project_label(project: dict) -> str:
+    if project.get("deleted") or not project.get("name"):
+        return "(a book that was deleted)" if project.get("deleted") else "(unnamed book)"
+    return _cell(project["name"])
+
+
 def render_markdown(rep: dict) -> str:
     c = rep["counts"]
     out = [f"# BookForge Bible Builder report", "",
            f"- Written: {rep['written_at']}", f"- BookForge {rep['bookforge_version']}, contract {rep['contract_version']}",
-           f"- Project: {rep['project']['name']} ({rep['project']['project_id']}), branch {rep['branch_id']}",
+           f"- Project: {_project_label(rep['project'])} ({rep['project']['project_id']}), branch {rep['branch_id']}",
            f"- Session: {rep['session_id']}", f"- Book idea: {rep['idea_chars']} characters (sha256 {rep['idea_sha256_16']}…;"
            " the text itself is not stored here)", f"- AI choice: {rep['slot_preference']}", "",
            "## Summary", "",
