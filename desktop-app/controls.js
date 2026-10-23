@@ -2975,7 +2975,7 @@ const BF_OUTCOME = {
   CACHED: () => "Gave an earlier answer again"
 };
 // Why an AI window isn't ready, as a short pill word (main sends problem + problemSay).
-const BF_NOT_READY_WORD = { SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…" };
+const BF_NOT_READY_WORD = { SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…", CHECKING: "Checking…" };
 function bfNotReadyWord(x) { return BF_NOT_READY_WORD[x && x.problem] || "Not loaded"; }
 function bfAiView(s, site) {
   const x = (s.sites && s.sites[site]) || {};

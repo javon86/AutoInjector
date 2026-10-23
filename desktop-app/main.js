@@ -5973,6 +5973,7 @@ function bookforgeSiteProblem(site) {
   if (paneLoadFailed[site]) return { code: "LOAD_FAILED", say: `the ${L} page didn't load (${paneLoadFailed[site]}) — reload it` };
   let box = { found: null, signedOut: false };
   try { box = paneHealth.messageBox(site); } catch (_) {}
+  if (box.found === null) return { code: "CHECKING", say: `the ${L} page hasn't been checked yet — give it a moment` };
   if (box.found === false) return box.signedOut
     ? { code: "SIGNED_OUT", say: `${L} looks signed out — open its window and log in` }
     : { code: "NO_MESSAGE_BOX", say: `${L}'s message box isn't on the page — open its window (log in, or use 🎯 if the site changed its page)` };
