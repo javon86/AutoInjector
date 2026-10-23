@@ -146,6 +146,47 @@ def get_ledger(store, project_id, branch_id, account_id, period):
     return read_state(store, project_id, branch_id, NS_LEDGER, ledger_key(account_id, period))
 
 
+def current_period() -> str:
+    """Quota period used for automatic AI dispatch reservations: the UTC calendar month (YYYY-MM)."""
+    return now().strftime("%Y-%m")
+
+
+def reserve(store, principal_id, project_id, branch_id, *, account_id, period, job_id: str, amount: int,
+            currency: str | None = None) -> dict | None:
+    """Atomically reserve `amount` minor units before paid work (K12 rule spent+reserved+estimate <= limit).
+
+    Returns the reservation ({account_id, period, reservation_id, amount}), or None when no ledger is configured
+    for this account/period. Raises QUOTA_EXCEEDED (work held, nothing reserved) when the quota is insufficient.
+    """
+    if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+        raise BookforgeError("INVALID_INPUT", "/estimated_cost", "estimate is integer minor units", status="REJECTED")
+    key = ledger_key(account_id, period)
+    with store.transaction() as tx:
+        led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
+        if led is None:
+            return None
+        if currency is not None and led["currency"] != currency:
+            raise BookforgeError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is in "
+                                 f"{led['currency']} but this work is priced in {currency}; BookForge does not "
+                                 "convert currencies, so the work is held")
+        if led["spent"] + led["reserved"] + amount > led["limit"]:
+            left = max(0, led["limit"] - led["spent"] - led["reserved"])
+            raise BookforgeError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is reached: this "
+                                 f"AI call may cost up to {amount} and only {left} of {led['limit']} "
+                                 f"{led['currency']} minor units remain. The work is held; raise the cap or wait for "
+                                 "the next period, or write this part yourself.",
+                                 unresolved=["user_decision:quota_exceeded"])
+        reservation_id = new_id("resv")
+        led["reserved"] += amount
+        led["reservations"][reservation_id] = {"job_id": job_id, "amount": amount, "state": "RESERVED",
+                                               "currency": led["currency"], "account_id": account_id,
+                                               "period": period, "at": iso(now())}
+        tx.put_state(project_id, branch_id, NS_LEDGER, key, led, expected_revision=rev)
+        _ledger_audit(tx, project_id, branch_id, principal_id, "RESERVE",
+                      {"key": key, "reservation_id": reservation_id, "amount": amount, "job_id": job_id})
+    return {"account_id": account_id, "period": period, "reservation_id": reservation_id, "amount": amount}
+
+
 def _find_reservation(led: dict, reservation_id: str) -> dict:
     res = led["reservations"].get(reservation_id)
     if res is None:

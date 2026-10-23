@@ -81,8 +81,6 @@ def test_e07_lost_then_used_in_one_batch_is_detected(h):
     assert sorted(inv, key=lambda x: x[1] or 0) == [([], None), (["brass-key"], 100), ([], 200)]
 
 
-@XFAIL(strict=True, reason="NEW-ops-1: E applies an earlier-in-story-time event without re-checking the "
-                                       "already accepted later events whose `before` it invalidates")
 def test_e02_out_of_order_insertion_rechecks_later_events(h):
     """Spec E: apply in (story_time, scene_order, event_order, event_id) order; `before` must match the projected
     state; impossible chronology commits no invalid state. ch1 (t=100) moves Mara harbor->lighthouse; ch2 then
@@ -102,7 +100,6 @@ def test_e02_out_of_order_insertion_rechecks_later_events(h):
     assert h.validate(r2["output_refs"][0])["status"] != "VALIDATED"
 
 
-@XFAIL(strict=True, reason="NEW-ops-2: E08 never compares power use with the pinned A09 limits")
 def test_e08_power_above_a09_limit_is_a_finding(h):
     """Spec E: '... power use exceeding A09 limits produces a finding and commits no invalid state.'"""
     h.set_features(magic=True)
@@ -135,8 +132,6 @@ def test_e08_negative_power_is_still_refused(h):
     assert "NEGATIVE_VALUE" in rules(r) and r["result"]["accepted_event_ids"] == []
 
 
-@XFAIL(strict=True, reason="NEW-ops-7: E11/E12 CHECK compare chapter claims only with A/B baseline; the accepted "
-                            "E state passed in source_refs is ignored, so a continuity break is not found")
 @pytest.mark.parametrize("op", ["E11", "E12"])
 def test_continuity_check_uses_accepted_state(h, op):
     """Spec E: 'E11 checks adjacent chapter/scene state ...; E12 compares manuscript claims with A/E'. ch1 (accepted,
@@ -208,8 +203,6 @@ def test_canon_change_ripples_to_plans_prose_state_and_j06(h):
     assert {ch1["record_id"], ch2["record_id"], e_head["record_id"]} <= impacted
 
 
-@XFAIL(strict=True, reason="NEW-ops-3: references inside a manual_candidate (and other handler-built "
-                                       "outputs) get no dependency edge, so the consumer never becomes stale")
 def test_manual_candidate_references_are_recorded_reads(h):
     """Spec Shared s6/Set A: a changed producer invalidates consumers that read it. A02 created with the SAME
     linked_refs once via payload and once via manual_candidate must behave the same after A01 changes."""
@@ -225,8 +218,6 @@ def test_manual_candidate_references_are_recorded_reads(h):
 
 
 # ============================================================================ I: approvals honoured
-@XFAIL(strict=True, reason="NEW-ops-4: I01 marks canon APPROVED from any approval record whose decision "
-                                       "says APPROVED - expired or bound to another record")
 @pytest.mark.parametrize("which", ["expired", "other-subject"])
 def test_i01_approved_canon_needs_valid_bound_approval(h, which):
     """Spec I: 'APPROVED requires a valid I10 approval/delegation and resolved applicable sources'; K09 APPROVED
@@ -276,9 +267,6 @@ def test_locked_record_cannot_be_replaced_or_reapproved_without_authorization(h)
 
 
 # ============================================================================ ACCEPT-stage dependency predicate
-@XFAIL(strict=True, reason="NEW-ops-5: ACCEPT ignores the dependency matrix ACCEPT predicate "
-                                       "ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED; a consumer is approved while "
-                                       "its HARD input is an unvalidated draft or REJECTED")
 @pytest.mark.parametrize("input_state", ["DRAFT", "REJECTED"])
 def test_accept_requires_validated_hard_inputs(h, input_state):
     b01 = h.dispatch("B01", "CREATE", payload={"idea": "i", "goals": ["g"]},
@@ -299,8 +287,6 @@ def test_accept_requires_validated_hard_inputs(h, input_state):
 
 
 # ============================================================================ K: cost cap stops work
-@XFAIL(strict=True, reason="NEW-ops-6: the K12 quota ledger is never consulted before AI dispatch; an "
-                                       "exhausted cost cap does not stop paid generation")
 def test_exhausted_quota_holds_ai_generation(h):
     """Spec K: 'K12 atomically enforces spent+reserved+estimate <= quota ... Reserve before dispatch ...
     insufficient quota holds next work.' With a zero quota and a priced slot, C02 generation must not call
@@ -308,13 +294,35 @@ def test_exhausted_quota_holds_ai_generation(h):
     w = build_world(h)
     fake = use_ai(h, FakeAI(), input_cost_minor_per_mtok=1_000_000_000, output_cost_minor_per_mtok=1_000_000_000)
     for account in ("AI-1", h.project_id, "default"):
-        kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id=account, period="2026-10",
+        kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id=account, period=kr.current_period(),
                            limit=0, currency="USD")
     ctx_ref = make_context(h, w)["output_refs"][0]
     r = h.create("C02", {"chapter_id": "ch1", "outline_ref": w["outline"], "context_ref": ctx_ref,
                          "instruction": "write"})
     assert fake.calls["prose"] == 0 and r["status"] in ("BLOCKED", "PARTIAL"), (r["status"], fake.calls)
     assert ("QUOTA_EXCEEDED" in [e["code"] for e in r["errors"]])
+
+
+def test_ai_generation_reserves_then_settles_actual_cost(h):
+    """Regression for NEW-ops-6: with room under the cap the call runs, and the ledger ends with the actual
+    cost spent and nothing left reserved; a later call that no longer fits is held."""
+    w = build_world(h)
+    fake = use_ai(h, FakeAI(), input_cost_minor_per_mtok=1_000_000, output_cost_minor_per_mtok=1_000_000)
+    period = kr.current_period()
+    kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id=h.project_id, period=period,
+                       limit=10**9, currency="USD")
+    ctx_ref = make_context(h, w)["output_refs"][0]
+    r = h.create("C02", {"chapter_id": "ch1", "outline_ref": w["outline"], "context_ref": ctx_ref,
+                         "instruction": "write"})
+    assert r["status"] == "DRAFT" and fake.calls["prose"] == 1, r
+    led = kr.get_ledger(h.store, h.project_id, "main", h.project_id, period)[0]
+    assert led["reserved"] == 0 and led["spent"] > 0
+    assert all(x["state"] == "SETTLED" for x in led["reservations"].values())
+    kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id=h.project_id, period=period,
+                       limit=led["spent"], currency="USD")
+    r2 = h.create("C02", {"chapter_id": "ch1", "outline_ref": w["outline"], "context_ref": ctx_ref,
+                          "instruction": "write again"})
+    assert "QUOTA_EXCEEDED" in [e["code"] for e in r2["errors"]] and fake.calls["prose"] == 1
 
 
 def test_k12_reservation_respects_trusted_ledger(h):

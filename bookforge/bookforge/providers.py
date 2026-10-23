@@ -133,7 +133,17 @@ def estimate_tokens(text: str) -> int:
     return max(1, int(len(text) / 3.5) + 1)
 
 
+class _NeverRaised(Exception):
+    """Stand-in for an SDK exception class this SDK version does not define (never matches)."""
+
+
+SDK_UPGRADE = "python -m pip install --upgrade anthropic"
+
+
 class AnthropicAdapter:
+    """Anthropic Messages API adapter. The `anthropic` SDK is an optional dependency (see requirements.txt):
+    a missing or too-old SDK, and any error the SDK raises that is not classified below, become a clear
+    BookforgeError instead of an INTERNAL_ERROR traceback."""
     adapter_id = "anthropic"
 
     def __init__(self, api_key: str | None):
@@ -147,14 +157,27 @@ class AnthropicAdapter:
             import anthropic  # noqa: PLC0415 - optional dependency
         except ImportError as exc:
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "the 'anthropic' package is not installed; "
-                                 "run: python -m pip install anthropic") from exc
-        if self.api_key:
-            return anthropic, anthropic.Anthropic(api_key=self.api_key, max_retries=0, timeout=600.0)
-        return anthropic, anthropic.Anthropic(max_retries=0, timeout=600.0)
+                                 f"run: {SDK_UPGRADE}") from exc
+        try:
+            if self.api_key:
+                return anthropic, anthropic.Anthropic(api_key=self.api_key, max_retries=0, timeout=600.0)
+            return anthropic, anthropic.Anthropic(max_retries=0, timeout=600.0)
+        except (TypeError, AttributeError) as exc:
+            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "the installed 'anthropic' package is too old for "
+                                 f"BookForge ({exc}); run: {SDK_UPGRADE}") from exc
+        except Exception as exc:  # noqa: BLE001 - e.g. no API key configured anywhere
+            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", f"the Anthropic client could not start: {exc}. "
+                                 "Check the API key in Settings (or ANTHROPIC_API_KEY).") from exc
+
+    @staticmethod
+    def _err(sdk, name: str) -> type:
+        cls = getattr(sdk, name, None)
+        return cls if isinstance(cls, type) and issubclass(cls, BaseException) else _NeverRaised
 
     def submit(self, slot: dict, system: str, user: str, schema: dict) -> tuple[dict, dict]:
         """One attempt. Returns (parsed_json, usage). Raises classified BookforgeError."""
-        anthropic, client = self._client()
+        sdk, client = self._client()
+        e = lambda name: self._err(sdk, name)  # noqa: E731
         try:
             with client.beta.messages.stream(
                 model=slot["model"],
@@ -167,35 +190,53 @@ class AnthropicAdapter:
                 fallbacks="default",
             ) as stream:
                 response = stream.get_final_message()
-        except anthropic.RateLimitError as exc:
+        except e("RateLimitError") as exc:
             raise BookforgeError("RATE_LIMITED", "", f"provider rate limited: {exc}") from exc
-        except anthropic.APITimeoutError as exc:
+        except e("APITimeoutError") as exc:
             raise BookforgeError("TIMEOUT", "", "provider request timed out") from exc
-        except anthropic.APIConnectionError as exc:
+        except e("APIConnectionError") as exc:
             raise BookforgeError("UPSTREAM_UNAVAILABLE", "", f"provider unreachable: {exc}") from exc
-        except anthropic.AuthenticationError as exc:
+        except e("AuthenticationError") as exc:
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "provider credentials rejected") from exc
-        except anthropic.PermissionDeniedError as exc:
+        except e("PermissionDeniedError") as exc:
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "provider permission denied") from exc
-        except anthropic.BadRequestError as exc:
-            raise BookforgeError("INVALID_INPUT", "", f"provider rejected request: {exc.message}",
+        except e("BadRequestError") as exc:
+            raise BookforgeError("INVALID_INPUT", "", f"provider rejected request: {getattr(exc, 'message', exc)}",
                                  status="REJECTED") from exc
-        except anthropic.APIStatusError as exc:
-            if exc.status_code >= 500:
-                raise BookforgeError("UPSTREAM_UNAVAILABLE", "", f"provider error {exc.status_code}") from exc
-            raise BookforgeError("INTERNAL_ERROR", "", f"provider error {exc.status_code}") from exc
-        if response.stop_reason == "refusal":
+        except e("APIStatusError") as exc:
+            code = getattr(exc, "status_code", 0) or 0
+            if code >= 500:
+                raise BookforgeError("UPSTREAM_UNAVAILABLE", "", f"provider error {code}") from exc
+            raise BookforgeError("INTERNAL_ERROR", "", f"provider error {code}") from exc
+        except (TypeError, AttributeError) as exc:
+            # An SDK without beta streaming / output_config / fallbacks rejects the call before sending it.
+            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "the installed 'anthropic' package does not support "
+                                 f"the features BookForge uses ({type(exc).__name__}: {exc}); run: "
+                                 f"{SDK_UPGRADE}") from exc
+        except e("APIError") as exc:
+            raise BookforgeError("INTERNAL_ERROR", "", f"unexpected Anthropic API error: {exc}") from exc
+        except BookforgeError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - anything else the SDK raises gets a plain message
+            raise BookforgeError("INTERNAL_ERROR", "", f"unexpected error from the Anthropic SDK "
+                                 f"({type(exc).__name__}: {exc})") from exc
+        stop = getattr(response, "stop_reason", None)
+        if stop == "refusal":
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "the model declined this request; supply a manual "
                                  "candidate or adjust the instruction")
-        if response.stop_reason == "max_tokens":
+        if stop == "max_tokens":
             raise BookforgeError("CONTEXT_TOO_LARGE", "", "output exceeded the slot's max_output_tokens")
-        text = next((b.text for b in response.content if getattr(b, "type", "") == "text"), "")
+        text = next((b.text for b in getattr(response, "content", None) or []
+                     if getattr(b, "type", "") == "text"), "")
         try:
             data = json.loads(text)
         except ValueError as exc:
             raise BookforgeError("INTERNAL_ERROR", "", "provider returned invalid JSON") from exc
-        usage = {"input_tokens": getattr(response.usage, "input_tokens", 0),
-                 "output_tokens": getattr(response.usage, "output_tokens", 0),
+        if not isinstance(data, dict):
+            raise BookforgeError("INTERNAL_ERROR", "", "provider returned JSON that is not an object")
+        usage_obj = getattr(response, "usage", None)
+        usage = {"input_tokens": getattr(usage_obj, "input_tokens", 0) or 0,
+                 "output_tokens": getattr(usage_obj, "output_tokens", 0) or 0,
                  "model": getattr(response, "model", slot["model"]),
                  "provider_request_id": getattr(response, "_request_id", None)}
         return data, usage
@@ -497,6 +538,11 @@ def request_pairing_token(bridge_url: str, code: str, timeout_s: float = 10.0) -
     return token.strip()
 
 
+def _principal(ctx) -> str:
+    """Who the cost-ledger audit names (assist jobs run AI calls without a dispatch principal)."""
+    return getattr(ctx, "principal_id", None) or "bookforge-assist"
+
+
 class ProviderRegistry:
     def __init__(self, store: Store, secret_path: str | os.PathLike | None = None):
         self.store = store
@@ -717,19 +763,80 @@ class ProviderRegistry:
             ctx._ai_call_seq = call + 1
         except AttributeError:
             pass
+        # K12: reserve the worst-case cost before dispatch; an insufficient quota holds the work (QUOTA_EXCEEDED).
+        reservations = self._reserve_cost(ctx, slot, needed, call)
         with self._lock:
             self._active[slot["slot_id"]] += 1
         try:
             data, usage = self._with_retries(adapter, slot, system, user, schema, ctx.request.get("deadline"),
                                              request_id=ctx.request.get("request_id"), call=call)
+        except BookforgeError as exc:
+            # A timed-out paid call may still have run: keep the reservation until it reconciles (spec K).
+            self._settle_cost(ctx, reservations, None, ambiguous=bool(exc.unresolved) and exc.code == "TIMEOUT")
+            raise
+        except BaseException:
+            self._settle_cost(ctx, reservations, None)
+            raise
         finally:
             with self._lock:
                 self._active[slot["slot_id"]] -= 1
+        self._settle_cost(ctx, reservations, usage, slot=slot)
         resource = {"resource_kind": "AI", "ai_slot": slot["slot_id"], "adapter_id": slot["adapter_id"],
                     "model": usage.get("model", slot["model"]), "input_tokens": usage.get("input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0), "context_tokens_estimate": needed,
                     "provider_request_id": usage.get("provider_request_id"), "at": utcnow()}
         return data, resource
+
+    # ------------------------------------------------------------------ cost cap (K12 ledger)
+    @staticmethod
+    def call_cost(slot: dict, input_tokens: int, output_tokens: int) -> int:
+        """Integer minor units for one call at the slot's per-million-token prices (rounded up)."""
+        def part(tokens, price):
+            return -(-max(0, int(tokens)) * max(0, int(price)) // 1_000_000)
+        return (part(input_tokens, slot.get("input_cost_minor_per_mtok", 0))
+                + part(output_tokens, slot.get("output_cost_minor_per_mtok", 0)))
+
+    def _reserve_cost(self, ctx, slot: dict, needed: int, call: int) -> list[dict]:
+        """Reserve the estimate on every configured ledger that governs this call: the slot's account, the
+        project's account and the 'default' account for the current month. No ledger configured = no cap."""
+        from . import k_runtime as kr
+        estimate = self.call_cost(slot, needed, int(slot.get("max_output_tokens", 16000)))
+        if estimate <= 0 or not getattr(ctx, "project_id", None) or not getattr(ctx, "branch_id", None):
+            return []
+        project = self.store.project(ctx.project_id)
+        currency = project["currency"] if project is not None else None
+        period = kr.current_period()
+        job_id = f"{getattr(ctx, 'op_id', 'AI')}:{(getattr(ctx, 'request', None) or {}).get('request_id')}:{call}"
+        done: list[dict] = []
+        try:
+            for account in dict.fromkeys((slot["slot_id"], ctx.project_id, "default")):
+                res = kr.reserve(self.store, _principal(ctx), ctx.project_id, ctx.branch_id, account_id=account,
+                                 period=period, job_id=job_id, amount=estimate, currency=currency)
+                if res is not None:
+                    done.append(res)
+        except BookforgeError:
+            self._settle_cost(ctx, done, None)  # release what was already reserved on other ledgers
+            raise
+        return done
+
+    def _settle_cost(self, ctx, reservations: list[dict], usage: dict | None, *, slot: dict | None = None,
+                     ambiguous: bool = False):
+        """Record the actual cost (success), keep the reservation (ambiguous), or refund it (failed call)."""
+        from . import k_runtime as kr
+        actual = self.call_cost(slot, usage.get("input_tokens", 0), usage.get("output_tokens", 0)) \
+            if (usage is not None and slot is not None) else 0
+        for res in reservations:
+            args = dict(account_id=res["account_id"], period=res["period"], reservation_id=res["reservation_id"])
+            try:
+                if usage is not None:
+                    kr.settle(self.store, _principal(ctx), ctx.project_id, ctx.branch_id, actual=actual, **args)
+                elif ambiguous:
+                    kr.settle(self.store, _principal(ctx), ctx.project_id, ctx.branch_id, actual=0,
+                              ambiguous=True, **args)
+                else:
+                    kr.cancel_reservation(self.store, _principal(ctx), ctx.project_id, ctx.branch_id, **args)
+            except BookforgeError as exc:  # never lose the generated work over ledger bookkeeping
+                log.warning("cost ledger %s/%s not settled: %s", res["account_id"], res["period"], exc)
 
     def _with_retries(self, adapter, slot, system, user, schema, deadline: str | None, *,
                       request_id: str | None = None, call: int = 0):

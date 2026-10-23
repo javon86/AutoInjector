@@ -280,9 +280,17 @@ BookForge is running.
 ## Using AI (optional)
 
 Bookforge has exactly three AI slots (AI-1, AI-2, AI-3), configured under **Settings**.
-The bundled adapter uses Anthropic's Claude (default model `claude-opus-5-5`); it needs
-`python -m pip install anthropic` and an API key (entered in Settings - stored in a local
-secret file, never in project data or exports - or set `ANTHROPIC_API_KEY`).
+The bundled adapter uses Anthropic's Claude (default model `claude-opus-5-5`); it needs the
+optional `anthropic` SDK - a recent release, so install or update it with
+`python -m pip install --upgrade anthropic` (it is not in `requirements.txt` because manual and
+AutoInjector slots do not need it) - and an API key (entered in Settings - stored in a local
+secret file, never in project data or exports - or set `ANTHROPIC_API_KEY`). A missing or too-old
+SDK shows a plain "install/upgrade anthropic" message instead of failing the step.
+
+**Cost cap.** When a K12 cost ledger is configured for the current month (for the slot, e.g.
+`AI-1`, for the project, or for `default`), every paid AI call first reserves its worst-case cost
+(slot prices x estimated input and `max_output_tokens`) and settles the actual cost afterwards. If
+the cap does not have room, the work is held with `QUOTA_EXCEEDED` and the AI is not called.
 
 **Experimental: AutoInjector web sessions.** Instead of an API key, a slot can use the
 ChatGPT, Claude or Gemini web session you are already logged in to inside the AutoInjector
