@@ -277,6 +277,8 @@ const PLAIN_ERR = {
   INTERNAL_ERROR: 'BookForge hit an unexpected problem. Try again; if it keeps happening, use 📋 Copy diagnostics.',
 };
 /** Plain words for an error from the server (client-side form errors are already plain and kept as they are). */
+/** A backup whose files Windows would not flush to disk: it reads back right, but a power cut could still lose it. */
+const BEST_EFFORT_SAY = 'Flushed to disk: best effort. The copy reads back correctly, but the system did not confirm it reached the disk, so a power cut right now could still lose it. Make another backup later, or keep a copy elsewhere.';
 function plainError(e) {
   if (!e || typeof e !== 'object') return String(e || '');
   if (!('retryable' in e)) return e.message || '';
@@ -2732,7 +2734,7 @@ async function viewProgress(main) {
     try {
       const r = await api('POST', `/projects/${encodeURIComponent(S.pid)}/backup`);
       clear(out).appendChild(r.verified
-        ? stateBox('ok', 'Backup created and verified', h('p', { class: 'wrap-anywhere' }, 'Location: ', h('code', null, r.path)))
+        ? stateBox('ok', 'Backup created and verified', h('p', { class: 'wrap-anywhere' }, 'Location: ', h('code', null, r.path)), r.flushed === 'best effort' ? h('p', { class: 'small' }, BEST_EFFORT_SAY) : null)
         : stateBox('failed', 'Backup created but verification found problems', h('p', { class: 'wrap-anywhere' }, 'Location: ', h('code', null, r.path)),
           h('ul', null, (r.problems || []).map(p => h('li', null, typeof p === 'string' ? p : JSON.stringify(p))))));
     } catch (e) { clear(out).appendChild(failedState('Backup failed', e)); }
@@ -6563,7 +6565,7 @@ function backupsCard() {
     const keep = h('input', { type: 'number', id: 'bk-keep', min: '1', max: '100', value: String(out.keep), class: 'wz-num' });
     const now = h('button', { type: 'button', class: 'primary', onclick: async ev => {
       ev.currentTarget.disabled = true;
-      try { await api('POST', '/backups'); toast('Backup saved and verified'); load(); refreshHealth(true); } catch (e) { box.prepend(problemBox(toProblem(e, { step: 'Settings › Backups' }))); ev.currentTarget.disabled = false; }
+      try { const r = await api('POST', '/backups'); toast(r && r.flushed === 'best effort' ? 'Backup saved and verified (flushed to disk: best effort)' : 'Backup saved and verified'); load(); refreshHealth(true); } catch (e) { box.prepend(problemBox(toProblem(e, { step: 'Settings › Backups' }))); ev.currentTarget.disabled = false; }
     } }, '💾 Back up now');
     const saveKeep = h('button', { type: 'button', class: 'small', onclick: async () => {
       clearFieldProblems(card);
@@ -6574,7 +6576,7 @@ function backupsCard() {
       out.last_error ? problemBox({ code: 'INTERNAL_ERROR', message: 'The last automatic backup failed.', fix: 'Press 💾 Back up now; if it fails, check the free disk space.' }) : null,
       out.backups.length ? h('ul', { class: 'record-list bk-list' }, out.backups.map(b => h('li', { class: 'record-item' },
         h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, fmtTime(b.created_at)), h('div', { class: 'r-meta' }, `${b.label || b.reason || 'Backup'} · ${(b.bytes / 1024 / 1024).toFixed(1)} MB`)),
-        h('div', { class: 'r-badges' }, b.verified ? badge('✔', 'Verified', 'b-ok') : hazard({ code: 'HASH_MISMATCH', message: 'This backup did not verify.', where: { step: 'Settings › Backups' } }, {}, { small: true }),
+        h('div', { class: 'r-badges' }, b.verified ? (b.flushed === 'best effort' ? h('span', { title: BEST_EFFORT_SAY }, badge('✔', 'Verified · flushed: best effort', 'b-warn')) : badge('✔', 'Verified', 'b-ok')) : hazard({ code: 'HASH_MISMATCH', message: 'This backup did not verify.', where: { step: 'Settings › Backups' } }, {}, { small: true }),
           h('button', { type: 'button', class: 'small danger', onclick: () => restoreBackup(b, load) }, '↩ Restore'))))) : stateBox('empty', 'No backup yet'));
   };
   load();

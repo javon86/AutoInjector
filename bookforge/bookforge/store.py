@@ -143,6 +143,25 @@ def _windows() -> bool:
     return getattr(_os, "name", os.name) == "nt"
 
 
+_FLUSH_LOCK = threading.Lock()
+_FLUSH_BEST_EFFORT = [0]  # how many file flushes failed and were let pass (Windows only), since start
+
+
+def _flush_failed(path, exc):
+    """Windows: a file flush (FlushFileBuffers) failed. The data was written and closed, so BookForge goes on, but it
+    cannot promise the bytes reached the disk: logged as a warning and counted (backups then say "best effort")."""
+    with _FLUSH_LOCK:
+        _FLUSH_BEST_EFFORT[0] += 1
+    log.warning("could not flush %s to disk (%s); continuing without the durability promise (best effort on "
+                "Windows)", path, exc)
+
+
+def best_effort_flushes() -> int:
+    """How many file flushes failed and were let pass so far (backups compare this before and after)."""
+    with _FLUSH_LOCK:
+        return _FLUSH_BEST_EFFORT[0]
+
+
 def _fsync_fd_path(path: Path, dir_ok: bool = False):
     """fsync a file (or, where the platform allows it, a directory) so a power cut cannot lose it.
 
@@ -170,7 +189,10 @@ def _fsync_fd_path(path: Path, dir_ok: bool = False):
     except OSError as exc:
         if not (dir_ok or _windows()):
             raise
-        log.debug("could not flush %s to disk (%s); continuing (best effort on this system)", path, exc)
+        if dir_ok:
+            log.debug("could not flush folder %s (%s); the system journals the rename", path, exc)
+        else:
+            _flush_failed(path, exc)
     finally:
         _os.close(fd)
 
@@ -238,7 +260,7 @@ def write_private(path: str | os.PathLike, data: bytes):
             except OSError as exc:
                 if not _windows():
                     raise
-                log.debug("could not flush %s to disk (%s); continuing", tmp, exc)
+                _flush_failed(tmp, exc)
         finally:
             _os.close(fd)
         replace_file(tmp, path)
@@ -758,7 +780,7 @@ class Tx:
                     except OSError as exc:
                         if not _windows():
                             raise
-                        log.debug("could not flush %s to disk (%s); continuing", tmp, exc)
+                        _flush_failed(tmp, exc)
                 replace_file(tmp, path)
             except OSError as exc:
                 tmp.unlink(missing_ok=True)

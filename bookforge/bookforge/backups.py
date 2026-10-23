@@ -35,7 +35,7 @@ from pathlib import Path
 
 from .canonical import sha256_bytes
 from .errors import BookforgeError
-from .store import Store, durable_copy, fsync_dir, fsync_file
+from .store import Store, best_effort_flushes, durable_copy, fsync_dir, fsync_file
 
 log = logging.getLogger("bookforge.backups")
 
@@ -110,6 +110,7 @@ class BackupManager:
             try:
                 self.dir.mkdir(parents=True, exist_ok=True)
                 dest = self.dir / f"bk-{self._next_seq():06d}-{_stamp()}-{reason}"
+                flush_before = best_effort_flushes()
                 manifest = self.store.backup(dest)
                 problems = Store.verify_backup(dest)
                 info = {"reason": reason, "label": REASONS[reason], "verified": not problems,
@@ -117,6 +118,12 @@ class BackupManager:
                 (dest / "bookforge-backup.json").write_text(json.dumps(info), encoding="utf-8")
                 fsync_file(dest / "bookforge-backup.json")
                 fsync_dir(dest)
+                if best_effort_flushes() != flush_before:
+                    # Verified = the copy reads back right; but the system could not confirm it reached the disk
+                    # (Windows refused a flush), so say so instead of implying it survives a power cut.
+                    info["flushed"] = "best effort"
+                    (dest / "bookforge-backup.json").write_text(json.dumps(info), encoding="utf-8")
+                    log.warning("backup %s: some files could not be flushed to disk (best effort)", dest.name)
             except (OSError, sqlite3.Error) as exc:
                 self.last_error = f"{type(exc).__name__}: {exc}"[:300]
                 log.error("backup failed: %s", self.last_error)
@@ -157,7 +164,8 @@ class BackupManager:
             pass
         reason = info.get("reason")
         return {"name": d.name, "created_at": created, "reason": reason, "label": info.get("label"),
-                "verified": info.get("verified"), "bytes": size, "pinned": reason not in AUTOMATIC,
+                "verified": info.get("verified"), "flushed": info.get("flushed") or "yes",
+                "bytes": size, "pinned": reason not in AUTOMATIC,
                 "seq": _seq(d.name)}
 
     def list(self) -> list[dict]:
