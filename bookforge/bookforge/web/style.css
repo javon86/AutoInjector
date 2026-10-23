@@ -412,6 +412,15 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
   max-height: min(78vh, calc(100vh - 120px)); overflow-y: auto; display: none; flex-direction: column; gap: 10px;
   overscroll-behavior: contain; }
 .ai-dock.has-panels { display: flex; }
+/* An open panel docks beside the page and the page makes room for it (it must not cover the form it fills). */
+:root { --dock-w: 400px; }
+body.ai-docked .ai-dock { top: 64px; bottom: 12px; right: 12px; width: var(--dock-w); max-height: none; }
+body.ai-docked .shell { padding-right: calc(var(--dock-w) + 20px); }
+@media (max-width: 1000px) {
+  /* narrow screens: a short sheet at the bottom; the page scrolls past it */
+  body.ai-docked .ai-dock { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 42vh; }
+  body.ai-docked .shell { padding-right: 0; padding-bottom: 44vh; }
+}
 .ap { background: var(--surface); border: 1px solid var(--border); border-top: 4px solid var(--accent);
   border-radius: var(--radius); box-shadow: 0 4px 18px rgba(0, 0, 0, .18); padding: 10px 14px 12px; min-width: 0; }
 .ap-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
@@ -931,3 +940,8 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
   .topbar-context #project-select, .topbar-context #branch-select { max-width: none; }
   .mab-btn .tb-label { display: inline; }
 }
+
+/* ---------------------------------------------------------------- Make my book: warnings, refused drafts */
+.words-warn { margin: 6px 0 0; padding: 6px 10px; border-left: 4px solid var(--warn, #b45309); background: var(--surface-2); }
+.refused-box { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.bb-wizard:empty { display: none; }

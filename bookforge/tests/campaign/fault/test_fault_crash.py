@@ -130,8 +130,6 @@ CANON_PARTIAL = ("SELECT EXISTS(SELECT 1 FROM heads WHERE module_id IN ('A03','A
                  "NOT EXISTS(SELECT 1 FROM heads WHERE module_id='A01')")
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-5: SIGKILL between bootstrap_project and saving the run leaves a "
-                                       "half-created 'New book (being made…)' project; resume creates a second one")
 def test_crash_right_after_the_project_is_created_leaves_one_book(tmp_path):
     data, p, run = _crash_then_resume(tmp_path, "--kill-when", ORPHAN)
     try:
@@ -142,11 +140,18 @@ def test_crash_right_after_the_project_is_created_leaves_one_book(tmp_path):
         p.kill()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-6: SIGKILL after the AI profile is saved but before the project is "
-                                       "renamed: resume skips the rename, the finished book stays 'New book (being made…)'")
 def test_crash_after_profile_saved_still_names_the_book(tmp_path):
-    data, p, run = _crash_then_resume(tmp_path, "--kill-when", TITLE_SAVED)
+    """NEW-fault-6: the AI profile and the book's name are now saved in ONE transaction, so there is no commit at
+    which the title is saved and the book is still 'New book (being made…)': the kill point is never reached and
+    the run makes a correctly named book. (Resume also renames a book left unnamed by an older BookForge: see
+    test_resume_names_a_book_left_unnamed in the flow campaign.)"""
+    data = tmp_path / "data"
+    p = Proc(data, "--kill-when", TITLE_SAVED)
     try:
+        st, b = p.call("POST", "/api/autobook", RUN_BODY)
+        assert st == 202, b
+        run = _finish(p, b["id"])
+        assert p.p.poll() is None, "a commit saved the title while the book was still unnamed"
         assert run["status"] == "done"
         names = [r[1] for r in _projects(data)]
         assert names == [run["title"]], names
@@ -156,9 +161,6 @@ def test_crash_after_profile_saved_still_names_the_book(tmp_path):
         p.kill()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-7: SIGKILL while Bible Builder entries are being created (a place "
-                                       "saved, no character yet): every resume/retry stops with 'The AI did not make a "
-                                       "main character' - the run can never finish")
 def test_crash_during_canon_creation_can_still_finish(tmp_path):
     data, p, run = _crash_then_resume(tmp_path, "--kill-when", CANON_PARTIAL)
     try:

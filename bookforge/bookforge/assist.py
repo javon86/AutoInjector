@@ -1335,10 +1335,16 @@ class BibleSession:
 
     def _add_items(self, sketch: list[dict], counts: dict, run_no: int) -> list[str]:
         with self._lock:
+            approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
             if not self.taken_subjects:
-                approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
                 for r in approved + drafts:
                     self.taken_subjects.update(r.get("subject_ids") or [])
+            # Names already used (saved canon, this session's entries, earlier rows of this sketch): an AI that
+            # suggests the same character twice gets a placeholder instead, so it invents a different one.
+            taken_names = {str(n).strip().lower() for r in approved + drafts
+                           for n in [r.get("concept")] + list(r.get("names") or []) if str(n or "").strip()}
+            taken_names |= {str(i.get("name") or "").strip().lower() for i in self.items.values()
+                            if not i.get("placeholder")}
             new = []
             per = {op: [i for i in sketch if i.get("section") == op][:n] for op, n in counts.items()}
             for op_id, n in counts.items():
@@ -1348,12 +1354,20 @@ class BibleSession:
                     seq = sum(1 for k in self.items if self.items[k]["op"] == op_id) + 1
                     key = f"{op_id}-{seq}"
                     name = str(row.get("name") or "").strip()[:120]
+                    dup = name if name and name.lower() in taken_names else None
+                    if dup:
+                        name = ""
+                    elif name:
+                        taken_names.add(name.lower())
                     item = {"key": key, "op": op_id, "name": name or f"{label} {seq}", "placeholder": not name,
                             "role": str(row.get("role") or "").strip()[:600], "raw_links": list(row.get("links") or []),
                             "links": [], "status": "pending", "message": "Waiting", "proposal": None, "findings": [],
                             "removed_refs": [], "error": None, "slot": None, "model": None, "elapsed_ms": None,
                             "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None}
                     item["subject_id"] = slugify(item["name"], self.taken_subjects)
+                    if dup:
+                        item["duplicate_of"] = dup
+                        item["message"] = f"“{dup}” is already in the book: the AI makes a different one"
                     self.items[key] = item
                     self.order.append(key)
                     new.append(key)

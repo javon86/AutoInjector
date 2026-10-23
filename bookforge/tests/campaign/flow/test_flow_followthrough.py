@@ -280,19 +280,33 @@ def test_make_my_book_over_http_follows_through(tmp_path):
 
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-flow-7: the book format captures title/author once; after the author "
-                                       "changes them in the profile, every step still says done and re-exports "
-                                       "carry the OLD title/author (no way to refresh from Make my book)")
 def test_profile_title_change_reaches_the_next_export(tmp_path):
+    """NEW-flow-7: after the title/author change in the profile, the format step is out of date and offers to make it
+    again, the export step stops saying done (the old files stay listed, marked out of date and named after the old
+    title), and following the offered steps puts the NEW title/author in every file."""
     app = fk.make_app(tmp_path, fake=fk.TraceAI())
     run = fk.run_book(app)
     pid = run["project_id"]
     save_profile(app.store, pid, {"title": "A Brand New Title", "author": "New Pen"})
     bp = fk.bp_of(app, pid)
-    st = {s["id"]: s for s in bp.status()["steps"]}
-    if st["format"]["state"] == "done":  # nothing tells the author the format is out of date: export again
-        out = bp.act("export", {})
-        assert out["ok"], out
+    status = bp.status()
+    st = {s["id"]: s for s in status["steps"]}
+    assert st["format"]["state"] != "done" and st["format"]["action"] == "setup_format" and st["format"]["out_of_date"]
+    assert st["export"]["state"] != "done" and status["next"] == "format"
+    assert {f["out_of_date"] for f in st["export"]["files"]} == {True}
+    assert {f["title"] for f in st["export"]["files"]} == {"The Keeper of Gullhaven"}
+    assert not bp.act("export", {})["ok"]  # exporting with the old format is refused, not silently stale
+    out = bp.act("setup_format", {})
+    assert out["ok"], out
+    items = {s["id"]: s for s in out["book"]["steps"]}["format"]["approve"]
+    assert items and fk.bp_of(app, pid).act("approve", {"record_ids": [i["record_id"] for i in items],
+                                                        "author_confirms": True})["ok"]
+    st = {s["id"]: s for s in fk.bp_of(app, pid).status()["steps"]}
+    assert st["format"]["state"] == "done" and st["assemble"]["state"] == "done" and st["export"]["action"] == "export"
+    out = fk.bp_of(app, pid).act("export", {})
+    assert out["ok"], out
+    st = {s["id"]: s for s in out["book"]["steps"]}
+    assert st["export"]["state"] == "done" and not any(f["out_of_date"] for f in st["export"]["files"])
     ex = fk.export_files(app, pid)
     assert fk.epub_info(ex["EPUB"])["meta"] == {"title": ["A Brand New Title"], "creator": ["New Pen"]}
     assert fk.docx_info(ex["DOCX"])["meta"] == {"title": "A Brand New Title", "author": "New Pen"}

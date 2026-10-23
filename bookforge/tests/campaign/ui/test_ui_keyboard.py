@@ -213,9 +213,6 @@ def test_paste_fallback_box_without_clipboard_permission(make_context, ai_server
     assert "Copied" in t or "Ctrl+C" in t, t
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-4: every green ✔ message box is announced to screen readers as "
-                   "'Approved: …' (stateBox 'ok' -> visually-hidden word 'Approved'), e.g. 'Approved: Your AI wrote "
-                   "the premise. Read it, then approve it.' while nothing was approved (app.js:541 words.ok)")
 def test_success_messages_do_not_claim_an_approval(make_context, ai_server, book):
     proj = ai_server.api("POST", "/projects", {"name": "SR Book", "profile": {"title": "SR Book", "idea": "A keeper vanishes.",
                                                                              "length": "short_story"},
@@ -243,10 +240,6 @@ COVERED_JS = """() => { const out = [];
   return out; }"""
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-8: the ✨ Fill with AI panel is a fixed 440 px overlay at the bottom "
-                   "right; while it is open it covers the right-hand controls of the very form it fills (e.g. the "
-                   "'Add' button and pickers of list fields) even when scrolled to the middle of the screen, and it "
-                   "stays open on other operation pages (style.css:411 .ai-dock fixed, main is not narrowed)")
 def test_fill_with_ai_panel_does_not_cover_the_form(make_context, ai_server, book):
     pid = book["pid"]
     page = open_app(make_context(), ai_server, f"#/p/{pid}/main/op/B11")
@@ -258,14 +251,17 @@ def test_fill_with_ai_panel_does_not_cover_the_form(make_context, ai_server, boo
     assert not covered, covered
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-ui-7: download names drop every non-ASCII letter: a book titled "
-                   "'Café Ñandú' downloads as 'Caf and.epub', a title in Cyrillic/CJK as 'book.epub' (app.js "
-                   "downloadAsset/downloadFile: title.replace(/[^\\w\\- ]+/g, ''))")
 def test_download_name_keeps_accented_title(make_context, ai_server, book, tmp_path):
     pid = book["pid"]
     prof = ai_server.api("GET", f"/projects/{pid}/profile")
     prof["title"] = "Café Ñandú"
     ai_server.api("PUT", f"/projects/{pid}/profile", prof)
+    # A file is named after the title it carries (NEW-ui-2): make the format and the files again with the new title
+    act = lambda a, body=None: ai_server.api("POST", f"/projects/{pid}/branches/main/book/{a}", body or {})  # noqa: E731
+    out = act("setup_format")
+    items = next(s for s in out["book"]["steps"] if s["id"] == "format")["approve"]
+    assert act("approve", {"record_ids": [i["record_id"] for i in items], "author_confirms": True})["ok"]
+    assert act("export")["ok"]
     page = open_app(make_context(), ai_server, f"#/p/{pid}/main/book")
     with page.expect_download(timeout=15000) as dl:
         page.locator("#step-export .downloads button", has_text="EPUB").click()

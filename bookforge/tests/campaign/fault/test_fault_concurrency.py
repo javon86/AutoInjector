@@ -295,9 +295,6 @@ def test_restore_is_refused_while_make_a_book_runs(tmp_path):
     app.store.close()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-18: a paused run whose book was removed by a restore resumes into "
-                                       "'The AI did not make a main character' (Try again forever) instead of saying "
-                                       "the book no longer exists")
 def test_restore_under_a_paused_run_then_resume_reports_a_clear_problem(tmp_path):
     app = make_app(tmp_path / "data")
     b = app.backups.backup("manual")
@@ -328,9 +325,6 @@ def test_restore_under_a_paused_run_then_resume_reports_a_clear_problem(tmp_path
 
 
 # ---------------------------------------------------------------------------------------------- BookPath memory
-@pytest.mark.xfail(strict=True, reason="NEW-fault-17: BookPath keeps book_path:<pid>:<branch> as one settings blob read "
-                                       "at construction and written back whole (no CAS): two book actions at the same "
-                                       "time (two tabs, or Write-all + a manual step) silently drop each other's state")
 def test_two_book_actions_at_once_keep_both_results(tmp_path):
     app = make_app(tmp_path / "data")
     pid = made_book(app)["project_id"]

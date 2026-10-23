@@ -144,7 +144,8 @@ def test_revise_twice_pauses_for_the_author_then_approve_anyway(tmp_path):
     assert fake.kinds.count("fix") == 2
     assert steps(run)["canon"]["state"] == "paused" and steps(run)["premise"]["state"] == "pending"
     head = app.store.history(run["project_id"], "main", prob["record_id"])[-1]
-    assert head["lifecycle"] == "DRAFT" and head["version"] == 3  # two AI fixes, nothing approved
+    # two AI fixes, nothing approved (the run runs BookForge's checks - VALIDATE - before each AI review)
+    assert head["lifecycle"] in ("DRAFT", "VALIDATED") and head["version"] == 3
     with pytest.raises(BookforgeError):
         app.autobook.decide("author", run["id"], {"action": "approve_anyway"})  # needs author_confirms
     app.autobook.decide("author", run["id"], {"action": "approve_anyway", "author_confirms": True})

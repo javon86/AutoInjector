@@ -396,6 +396,9 @@ async function route() {
       h('p', null, h('a', { href: '#/' }, 'Back to projects'))));
   }
   if (seq === routeSeq && !S.authFailed) {
+    // ✨ Fill with AI panels belong to their operation's form: on any other page they fold to their header
+    const here = parts[0] === 'p' && parts[3] === 'op' ? `${parts[1]}|${parts[2]}|${parts[4]}` : null;
+    for (const [key, p] of AP.panels) if (key !== here && !p.min) p.setMin(true);
     const h1 = main.querySelector('h1');
     document.title = h1 ? `${h1.textContent} – Bookforge` : 'Bookforge';
     if (!main.contains(document.activeElement) || document.activeElement === document.body) main.focus({ preventScroll: true });
@@ -538,7 +541,8 @@ function closeNav() {
 /* ======================================================================= common states */
 function stateBox(kind, title, ...body) {
   const icons = { empty: '○', loading: '…', blocked: '⏸︎', failed: '✕', stale: '⚠︎', ok: '✔', draft: '✎' };
-  const words = { empty: 'Empty', loading: 'Loading', blocked: 'Blocked', failed: 'Failed', stale: 'Stale', ok: 'Approved', draft: 'Draft' };
+  // The hidden word a screen reader says first: 'ok' is any success (not necessarily an approval).
+  const words = { empty: 'Empty', loading: 'Loading', blocked: 'Blocked', failed: 'Failed', stale: 'Stale', ok: 'Done', draft: 'Draft' };
   return h('section', { class: `state ${kind}`, role: kind === 'failed' ? 'alert' : null },
     h('h3', null, h('span', { 'aria-hidden': 'true' }, icons[kind] || ''),
       h('span', { class: 'visually-hidden' }, `${words[kind] || kind}: `), title), ...body);
@@ -806,7 +810,7 @@ async function viewOperation(main, opId) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${sInfo.name}`, plink('set', op.set)], `${op.id} ${op.name}`),
     h('h1', null, `${op.id} ${op.name}`)),
-  h('div', { class: 'row' }, opStateBadge(opId), badge(isCreative(op) ? '✦' : '⚙︎', op.execution, 'b-muted'),
+  h('div', { class: 'row' }, h('span', { class: 'op-state-slot' }, opStateBadge(opId)), badge(isCreative(op) ? '✦' : '⚙︎', op.execution, 'b-muted'),
     badge('▦', op.ui_type, 'b-muted'))));
   main.appendChild(stepNav(opId));
   const nextBox = h('div');
@@ -851,7 +855,8 @@ async function viewOperation(main, opId) {
     }
   };
   renderRecs();
-  S.onRecordsChanged = renderRecs;
+  // the page header's state badge follows the records too (it said "Empty" after a record was created here)
+  S.onRecordsChanged = () => { renderRecs(); const slot = main.querySelector('.op-state-slot'); if (slot) clear(slot).appendChild(opStateBadge(opId)); };
   S.leaveHooks.push(() => { S.onRecordsChanged = null; });
   main.appendChild(recCard);
 
@@ -1382,8 +1387,16 @@ function buildString(schema, value, ptr, name, label, required, nullable, ctx) {
   describe(control, sh.hintId);
   const wrap = h('div', { class: 'field' + (long ? ' wide' : '') }, h('label', { for: sh.id }, label, sh.reqTag), control, sh.hint, sh.err);
   ctx.register(ptr, { ptr, wrap, control, errEl: sh.err, label });
-  return { el: wrap, get: () => {
+  return { el: wrap, get: errs => {
     const v = control.value;
+    if (v !== '' && v.trim() === '') {
+      // only spaces/new lines: that is not a value (a blank name or title would be saved otherwise)
+      if (required && !nullable) {
+        if (errs) errs.push({ path: ptr, code: 'MISSING_INPUT', message: 'required: write something here (only spaces were entered)' });
+        return undefined;
+      }
+      return nullable && required ? null : undefined;
+    }
     if (v === '') return nullable ? (required ? null : undefined) : (required ? '' : undefined);
     return v;
   } };
@@ -2904,8 +2917,15 @@ function openAssistPanel(opId, opener) {
   if (!p) { p = buildAssistPanel(opId, S.pid, S.branch, S.project ? S.project.name : ''); AP.panels.set(key, p); $('#ai-dock').appendChild(p.el); }
   p.opener = opener || null;
   p.setMin(false);
-  $('#ai-dock').classList.add('has-panels');
+  syncDock();
   p.focusFirst();
+}
+/** While a panel is open the dock is a column beside the page (wide screens) or a short sheet (narrow ones), and
+ *  the page makes room for it, so the panel never covers the form it fills. */
+function syncDock() {
+  const panels = [...AP.panels.values()];
+  $('#ai-dock').classList.toggle('has-panels', panels.length > 0);
+  document.body.classList.toggle('ai-docked', panels.some(p => !p.min));
 }
 
 function buildAssistPanel(opId, pid, branch, projectName) {
@@ -2930,13 +2950,14 @@ function buildAssistPanel(opId, pid, branch, projectName) {
   p.setMin = min => {
     p.min = min; body.hidden = min; el.classList.toggle('min', min);
     minBtn.textContent = min ? 'Show' : 'Minimize'; minBtn.setAttribute('aria-expanded', String(!min));
+    syncDock();
   };
   p.close = () => {
     if (p.job && ['queued', 'running'].includes(p.job.status) && !confirm('The AI is still working on this. Stop it and close the panel?')) return;
     if (p.job && ['queued', 'running'].includes(p.job.status)) api('POST', `/assist/${encodeURIComponent(p.job.job_id)}/cancel`).catch(() => {});
     clearInterval(p.timer); clearTimeout(p.poll);
     el.remove(); AP.panels.delete(`${pid}|${branch}|${opId}`);
-    if (!AP.panels.size) $('#ai-dock').classList.remove('has-panels');
+    syncDock();
     if (p.opener && document.contains(p.opener)) p.opener.focus();
   };
   p.setState = (icon, word, cls) => clear(statusBadge).appendChild(badge(icon, word, cls));
@@ -3503,6 +3524,15 @@ function whatsNextCard(currentOp) {
   const g = S.guide;
   if (!g || g.project_id !== S.pid) return h('div');
   const n = g.next_step;
+  const t = myTask();
+  S.lastMade = !!(t && t.current_task && t.current_task.state === 'done');
+  if (S.lastMade) {
+    // The book is made (the Current task says so): the main-path guide must not contradict it with leftovers such as
+    // chapter context drafts, which the book path never needs approved.
+    return h('section', { class: 'card next-card done', 'aria-label': 'What’s next' },
+      h('p', null, h('strong', null, '🎉 Your book is made. '), 'Download it from ', h('a', { href: plink('book') }, 'Make my book'),
+        '. Everything else in the sets is optional; ', h('a', { href: plink('progress') }, 'Progress'), ' shows what more you can add.'));
+  }
   if (!n) {
     return h('section', { class: 'card next-card done', 'aria-label': 'What’s next' },
       h('p', null, h('strong', null, '🎉 Every step of the main path has an approved record. '),
@@ -4255,9 +4285,17 @@ function openProfileDialog(onSaved) {
     const out = h('div', { 'aria-live': 'polite' });
     const save = h('button', { type: 'submit', class: 'primary' }, 'Save profile');
     return h('form', { novalidate: true, onsubmit: async ev => {
-      ev.preventDefault(); clear(out); save.disabled = true;
+      ev.preventDefault(); clear(out); clearFieldProblems(pf.el);
+      const body = pf.get();
+      if (!String(body.title || '').trim()) {   // the book needs a title (the server refuses an empty one too)
+        markFieldProblem(pf.f.title, { code: 'MISSING_INPUT', path: '/title', message: 'Give your book a title (a working title is fine).' },
+          { book: prof.title || S.project.name, step: 'Book profile', field: 'Title' });
+        pf.f.title.focus();
+        return;
+      }
+      save.disabled = true;
       try {
-        const saved = await api('PUT', `/projects/${encodeURIComponent(S.pid)}/profile`, { body: pf.get() });
+        const saved = await api('PUT', `/projects/${encodeURIComponent(S.pid)}/profile`, { body });
         S.project.profile = saved;
         toast('Book profile saved'); close();
         if (onSaved) onSaved(saved); else route();
@@ -4448,9 +4486,12 @@ function renderBook(holder, book, redraw) {
         return;
       }
       if (out && !out.ok && curStep) BOOK_ERR[`${S.pid}:${curStep}`] = { code: out.code || 'FAILED', message: out.message, details: out.problems || null };
+      const refused = (out && out.results || []).filter(r => !r.ok);
       const note = out ? stateBox(out.ok ? 'ok' : 'failed', out.message || (out.ok ? 'Done' : 'Not done'),
         (out.problems || []).length ? h('ul', null, out.problems.map(p => h('li', null, p))) : null,
-        (out.results || []).filter(r => !r.ok).length ? h('ul', null, out.results.filter(r => !r.ok).map(r => h('li', null, `${r.record_id}: ${(r.problems || []).join('; ')}`))) : null) : null;
+        refused.length ? h('ul', null, refused.map(r => h('li', null, `${r.record_id}: ${(r.problems || []).join('; ')}`))) : null,
+        refused.length ? h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), refused[0].fix || 'Edit it so the checks pass.') : null,
+        refused.length ? redoBox(refused.map(r => Object.assign({ title: '' }, r))) : null) : null;
       try { await refreshRecords(); } catch { /* best effort */ }
       if (out && out.book) renderBook(holder, out.book, redraw); else await redraw();
       // the message goes into the freshly drawn page, after the steps are up to date
@@ -4476,12 +4517,42 @@ function renderBook(holder, book, redraw) {
     if (ok !== 'yes') return;
     await run(() => post('approve', { record_ids: items.map(i => i.record_id), author_confirms: true }), 'Approving…', (book.steps.find(s => (s.approve || []).some(a => items.some(i => i.record_id === a.record_id))) || {}).id);
   };
+  let bbPendingP = null;   // the wizard's Bible Builder entries not saved yet (canon step), when there are any
+  const redoBox = (items) => {
+    // A draft BookForge's checks refuse cannot be approved by pressing approve again: offer to redo or edit it.
+    const box = h('div', { class: 'refused-box' });
+    for (const i of items) {
+      const redo = i.redo;
+      box.appendChild(h('div', { class: 'row' }, h('span', { class: 'small' }, `${i.module_id} · ${i.title || i.record_id}: `),
+        redo && book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post(redo.action, Object.assign({}, redo, { action: undefined, redo: true })),
+          'Your AI is writing it again… (web AIs can take a few minutes)', (book.steps.find(st => (st.approve || []).some(a => a.record_id === i.record_id)) || {}).id) }, '🔁 Redo with AI') : null,
+        h('a', { class: 'btn small', href: plink('rec', i.record_id) }, '✏️ Edit it')));
+    }
+    return box;
+  };
   const doStep = async s => {
     if (!s) return;
     if (s.id === 'profile') { openProfileDialog(() => redraw()); return; }
-    if (s.approve && s.approve.length) { await approve(s.approve, s.title.toLowerCase()); return; }
+    if (s.approve && s.approve.length) {
+      const ok = s.approve.filter(i => !(i.problems || []).length);
+      if (!ok.length) {   // every waiting draft is refused by BookForge's checks: approving again cannot help
+        clear(msg).appendChild(stateBox('failed', `BookForge’s checks found problems in the ${s.title.toLowerCase()}: let the AI write it again, or edit it`,
+          h('ul', null, s.approve.flatMap(i => (i.problems || []).slice(0, 4).map(p => h('li', null, p)))), redoBox(s.approve),
+          h('p', { class: 'small muted' }, 'Changed something it depends on since? ',
+            h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, s.title.toLowerCase()) }, '✔ Check again and approve'))));
+        msg.querySelector('button') && msg.querySelector('button').focus();
+        return;
+      }
+      await approve(ok, s.title.toLowerCase()); return;
+    }
     if (s.state === 'blocked') { toast(`Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}`); return; }
-    if (s.id === 'canon') { if (book.ai_ready) openMakeDialog('A01', null, null); else goNew('A01'); return; }
+    if (s.id === 'canon') {
+      // characters/places the 🚀 wizard asked the AI for and that are not saved yet: review and save those first
+      const pend = bbPendingP ? await bbPendingP : null;
+      if (pend && (pend.items.length || pend.busy)) { openBible(holder.querySelector('#step-canon .bb-wizard button')); return; }
+      if (book.ai_ready) openMakeDialog('A01', null, null); else goNew('A01');
+      return;
+    }
     if (['premise', 'plot', 'outline'].includes(s.id)) { await run(() => post('create', { op: s.op }), book.ai_ready ? 'Your AI is writing… (web AIs can take a few minutes)' : 'Preparing the form…', s.id); return; }
     if (s.id === 'chapters') {
       const c = (s.chapters || []).find(x => x.state !== 'done' && !(x.prose && ['DRAFT', 'VALIDATED'].includes(x.prose.lifecycle)));
@@ -4514,6 +4585,7 @@ function renderBook(holder, book, redraw) {
     if (s.state === 'blocked' && s.waiting_for) li.appendChild(h('p', { class: 'small muted' }, `Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}.`));
     if (s.approve && s.approve.length) {
       li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: plink('rec', i.record_id) }, `${i.module_id} · ${i.title}`), ' ', lifecycleBadge(i.lifecycle),
+        (i.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), ' ', redoBox([i])] : null,
         h('button', { type: 'button', class: 'small', onclick: () => approve([i], `“${i.title}”`) }, '✔ Approve')))));
     }
     const acts = h('div', { class: 'row' });
@@ -4522,6 +4594,11 @@ function renderBook(holder, book, redraw) {
       acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', disabled: !book.ai_ready, onclick: ev => openMakeDialog('A01', null, ev.currentTarget) }, '✨ Make up characters'));
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write one myself'));
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: ev => openBible(ev.currentTarget) }, '📖 Bible Builder'));
+      if (s.state !== 'done') {
+        const note = h('div', { class: 'bb-wizard', 'aria-live': 'polite' });
+        li.appendChild(note);
+        bbPendingP = wizardCanon(note);
+      }
     }
     if (['premise', 'plot', 'outline'].includes(s.id) && s.state !== 'done' && s.state !== 'blocked') {
       if (book.ai_ready) acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('create', { op: s.op }), 'Your AI is writing…') }, '✨ Let my AI draft it'));
@@ -4548,14 +4625,18 @@ function renderBook(holder, book, redraw) {
       li.appendChild(writeAllBox(book, redraw));
     }
     if (['setup_format', 'assemble', 'export', 'check'].includes(s.action)) {
-      const label = { setup_format: '⚙️ Set up the book format', assemble: '🧩 Put the book together', export: '📦 Export my book', check: '🔎 Check the book' }[s.action];
+      const label = s.action === 'setup_format' && s.out_of_date ? '⚙️ Make the format again (new title/author)'
+        : s.action === 'export' && (s.files || []).some(f => f.out_of_date) ? '📦 Export my book again'
+        : { setup_format: '⚙️ Set up the book format', assemble: '🧩 Put the book together', export: '📦 Export my book', check: '🔎 Check the book' }[s.action];
       acts.appendChild(h('button', { type: 'button', class: 'small primary', onclick: () => run(() => post(s.action), 'Working…', s.id) }, label));
     }
     if (s.approve && s.approve.length > 1) acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, `${s.approve.length} items`) }, `✔ Approve all ${s.approve.length}`));
     if (s.id === 'check' && s.result) li.appendChild(h('p', { class: 'small' }, 'Result: ', badge(s.result === 'PASS' ? '✔' : '✕', s.result, s.result === 'PASS' ? 'b-ok' : 'b-bad')));
     if (s.id === 'export' && (s.files || []).length) {
       li.appendChild(h('div', { class: 'downloads' }, h('strong', null, '⬇ Download my book: '),
-        s.files.map(f => h('button', { type: 'button', class: 'primary small', onclick: () => downloadAsset(f) }, f.format))));
+        s.files.map(f => h('button', { type: 'button', class: f.out_of_date ? 'small' : 'primary small', title: f.out_of_date ? `Made with the old title “${f.title || ''}”: export again for the new one` : null,
+          onclick: () => downloadAsset(f) }, f.format, f.out_of_date ? ' (out of date)' : '')),
+        s.files.some(f => f.out_of_date) ? h('p', { class: 'small notice' }, '⚠️ These files still carry the old title/author. Make the book format again and export again to update them.') : null));
     }
     if (acts.childNodes.length) li.appendChild(acts);
     ol.appendChild(li);
@@ -4569,11 +4650,27 @@ function renderBook(holder, book, redraw) {
   holder.appendChild(h('p', { class: 'small muted' }, 'Behind the scenes this uses the real steps: A01 → B01 → B03 → B11 → C01/C02 → book format (I01) → G02/G01/G05/G04/G07 → G11/G12/G13 → H05. Full release readiness (H10) is in the Quality Checks set.'));
 }
 
+async function wizardCanon(note) {
+  // The 🚀 wizard asks the AI for characters/places in a Bible Builder session; show them here until they are saved.
+  try {
+    const r = await api('GET', `/bible-builder?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
+    const sess = r && r.session;
+    if (!sess) return null;
+    const items = (sess.items || []).filter(i => i.status === 'done' && !i.created_ref && i.valid !== false);
+    if (!items.length && !sess.busy) return null;
+    clear(note).append(h('p', { class: 'small notice' },
+      sess.busy && !items.length ? '⏳ Your AI is still making the characters and places you asked for in the wizard…'
+        : `✨ Your AI made these for you (not saved yet): ${items.map(i => `${i.name} (${i.op})`).join(', ')}. `,
+      h('button', { type: 'button', class: 'small primary', onclick: ev => openBible(ev.currentTarget) }, '📖 Review and save them')));
+    return { busy: !!sess.busy, items };
+  } catch { return null; }   // the book page works without it
+}
+
 async function downloadAsset(f) {
   try {
     const blob = await api('GET', bpath(`/assets/${encodeURIComponent(f.record_id)}/${f.version}`), { blob: true });
-    const ext = { PDF: 'pdf', EPUB: 'epub', DOCX: 'docx' }[f.format] || 'bin';
-    const name = `${(profileOf().title || S.project.name || 'book').replace(/[^\w\- ]+/g, '').trim() || 'book'}.${ext}`;
+    // Named after the title the file carries (a file made before the title changed keeps its old name).
+    const name = downloadName(f.title || profileOf().title || S.project.name, f.format);
     const url = URL.createObjectURL(blob);
     const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
@@ -4620,6 +4717,11 @@ function updateTaskUI() {
   if (nav) { clear(nav); nav.appendChild(taskCard('nav')); nav.appendChild(approvalsButton()); }
   for (const slot of document.querySelectorAll('.task-slot')) { clear(slot).appendChild(taskCard(slot.dataset.where || 'page')); }
   if (S.onTaskChanged) { try { S.onTaskChanged(); } catch { /* cosmetic */ } }
+  const made = !!(myTask() && myTask().current_task && myTask().current_task.state === 'done');
+  if (made !== S.lastMade) {   // "What's next" follows the Current task (redrawn only when "made" changes)
+    S.lastMade = made;
+    if (S.onGuideChanged) { try { S.onGuideChanged(); } catch { /* cosmetic */ } }
+  }
 }
 let taskBusy = false; let taskAgain = false;
 /** Refresh the current task and the approvals count (after every action, and every 10 s while the tab is visible). */
@@ -5363,11 +5465,20 @@ function showGlobalProblem(prob) {
 }
 
 /* ======================================================================= shared: downloads, set chips, clocks */
+// A file name from a book title: every letter and digit of any script is kept (Café Ñandú, Война и мир, 雪国);
+// only characters file systems refuse or treat specially are dropped.
+function safeFileStem(title) {
+  return String(title || '').normalize('NFC').replace(/[^\p{L}\p{M}\p{N}\-_ '’.,()&!]+/gu, ' ')
+    .replace(/\s+/g, ' ').replace(/^[\s.]+|[\s.]+$/g, '').slice(0, 120).trim();
+}
+function downloadName(title, format) {
+  const ext = { PDF: 'pdf', EPUB: 'epub', DOCX: 'docx' }[format] || 'bin';
+  return `${safeFileStem(title) || 'book'}.${ext}`;
+}
 async function downloadFile(pid, branch, f, title) {
   try {
     const blob = await api('GET', `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch)}/assets/${encodeURIComponent(f.record_id)}/${f.version}`, { blob: true });
-    const ext = { PDF: 'pdf', EPUB: 'epub', DOCX: 'docx' }[f.format] || 'bin';
-    const name = `${(title || 'book').replace(/[^\w\- ]+/g, '').trim() || 'book'}.${ext}`;
+    const name = downloadName(f.title || title, f.format);
     const url = URL.createObjectURL(blob);
     const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
@@ -5397,8 +5508,10 @@ function wordsLine(w) {
   return h('div', { class: 'words-line' },
     h('div', { class: 'row space' }, h('span', null, h('span', { 'aria-hidden': 'true' }, '📝 '), h('strong', null, `${(w.words || 0).toLocaleString()} words`),
       h('span', { class: 'muted' }, ` of about ${w.target_words.toLocaleString()}`)),
-    h('span', { class: 'small muted' }, `${(w.approved_words || 0).toLocaleString()} approved · ${(w.draft_words || 0).toLocaleString()} in drafts`)),
-    h('progress', { class: 'words-bar', max: '100', value: String(pct), 'aria-label': `Words: ${pct}% of the target` }));
+    h('span', { class: 'small muted' }, w.draft_words ? `${(w.approved_words || 0).toLocaleString()} approved · ${w.draft_words.toLocaleString()} more in drafts`
+      : `${(w.approved_words || 0).toLocaleString()} approved`)),
+    h('progress', { class: 'words-bar', max: '100', value: String(pct), 'aria-label': `Words: ${pct}% of the target` }),
+    w.short && w.warning ? h('p', { class: 'words-warn small', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '), w.warning) : null);
 }
 
 /* ======================================================================= ⚡ Make a book for me (R14, S21) */
@@ -5626,6 +5739,8 @@ function renderRun() {
   if (r.status === 'done') {
     doneBox = h('section', { class: 'mb-done state ok' }, h('h3', null, '🎉 Your book is made'),
       h('p', null, 'Every step is done: written, reviewed, put together and checked.'),
+      r.problem && r.problem.severity === 'warning'
+        ? h('p', { class: 'words-warn', role: 'note' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '), r.problem.message, r.problem.fix ? h('span', { class: 'small' }, ` ${r.problem.fix}`) : null) : null,
       h('div', { class: 'downloads' }, h('strong', null, '⬇ Download: '), (r.files || []).map(f => h('button', { type: 'button', class: 'primary', 'data-format': f.format, onclick: () => downloadFile(r.project_id, r.branch_id || 'main', f, r.title) }, `${f.format}`))),
       h('div', { class: 'row' }, h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, '📘 Open the book'),
         h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'journal'), onclick: () => closeMakeBook() }, '📜 Book journal'),
@@ -5789,7 +5904,7 @@ async function viewJournal(main) {
     try {
       const qs = new URLSearchParams({ format: 'md', download: '1' }); if (step.value) qs.set('step', step.value); if (probs.checked) qs.set('problems', '1');
       const blob = await api('GET', bpath(`/journal?${qs}`), { blob: true });
-      const url = URL.createObjectURL(blob); const a = h('a', { href: url, download: `book-journal-${(profileOf().title || S.project.name).replace(/[^\w\- ]+/g, '').trim() || 'book'}.md` });
+      const url = URL.createObjectURL(blob); const a = h('a', { href: url, download: `book-journal-${safeFileStem(profileOf().title || S.project.name) || 'book'}.md` });
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); toast('Journal downloaded');
     } catch (e) { showGlobalProblem(toProblem(e, { step: 'Book journal' })); }
   } }, '⬇ Download (.md)');
