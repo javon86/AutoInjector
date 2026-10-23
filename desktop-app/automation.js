@@ -561,7 +561,8 @@ function buildReadScript(site, overrides) {
     }
     if (fragmentFixed === "climb") count = null;
     const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
-    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, count, fragmentFixed, nodeInfo };
+    const inputFound = !!inputBox; // the AI's message box is on the page (a signed-out page has none)
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, inputFound, count, fragmentFixed, nodeInfo };
   })();
   `;
 }

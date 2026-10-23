@@ -134,6 +134,7 @@ class FakeWebContents extends EventEmitter {
     const out = { ok: true, text: this.currentText, generating, sendReady: !generating };
     if (Number.isInteger(this.replyCount)) out.count = this.replyCount; // reply blocks on the page (TR-17)
     if (typeof this.stopShown === "boolean") out.stopShown = this.stopShown; // TR-30: Stop button alone (default: same as generating)
+    out.inputFound = typeof this.inputFound === "boolean" ? this.inputFound : true; // the message box is on the page (false = signed out / page changed)
     return out;
   }
 }

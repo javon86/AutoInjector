@@ -1,0 +1,4 @@
+jsonschema>=4.18,<5
+# Optional: the Anthropic adapter for the AI slots needs the 'anthropic' SDK (a recent release: BookForge uses
+# beta.messages.stream with output_config and fallbacks). Not needed for manual or AutoInjector slots.
+#   python -m pip install --upgrade anthropic

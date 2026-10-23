@@ -47,6 +47,12 @@
   The fake AI answers every message that carries a "[MSG #n]" header with ONE
   reply: "[TO: X]" first, a body holding a unique token (e.g. GEMINI-R3), and
   "[FROM: SITE]" last. window.__fake.dump() reports what was posted / replied.
+  Optional reply hook (test/bookforge-e2e.test.js): when the page has an async
+  window.__fakeHook(message) (e.g. a Playwright exposeFunction), every new reply
+  asks it first; it returns null (normal reply) or { lines, to?, delayMs?,
+  tagged? } -- the body lines ("{TOKEN}" is replaced by the reply's token), the
+  [TO:] target, extra thinking time and whether [FROM:] is forced on/off. Such
+  a reply is re-drawn without re-flowing its lines (it may hold JSON).
 -->
 <div id="log"></div>
 <div id="composer-area"></div>
@@ -207,13 +213,16 @@
     return OTHERS[(start + k - 1) % 2];
   }
   function sentence() { const n = 6 + Math.floor(rText() * 6); const w = []; for (let i = 0; i < n; i++) w.push(WORDS[Math.floor(rText() * WORDS.length)]); const s = w.join(" "); return s[0].toUpperCase() + s.slice(1) + "."; }
-  function newReply(inReplyTo) {
+  function newReply(inReplyTo, hook) {
     const k = ++replyNo;
-    const to = planTarget(k);
+    const to = (hook && hook.to) || planTarget(k);
     const token = NAME + "-R" + k;
-    const lines = ["[TO: " + to + "]", "Reply " + k + " from " + NAME + " to " + inReplyTo + ", token " + token + ". " + sentence(), sentence() + " " + sentence()];
-    const tagged = !(has("nofrom") && k > 1 && rFrom() < NOFROM_RATE);
-    return { k, to, token, inReplyTo, lines, tagged, resend: false };
+    const lines = hook && Array.isArray(hook.lines)
+      ? ["[TO: " + to + "]"].concat(hook.lines.map((l) => String(l).split("{TOKEN}").join(token)))
+      : ["[TO: " + to + "]", "Reply " + k + " from " + NAME + " to " + inReplyTo + ", token " + token + ". " + sentence(), sentence() + " " + sentence()];
+    let tagged = !(has("nofrom") && k > 1 && rFrom() < NOFROM_RATE);
+    if (hook && typeof hook.tagged === "boolean") tagged = hook.tagged;
+    return { k, to, token, inReplyTo, lines, tagged, resend: false, raw: !!(hook && Array.isArray(hook.lines)), delayMs: (hook && Number(hook.delayMs)) || 0, hooked: !!hook };
   }
   function mkBlock() {
     let md;
@@ -222,10 +231,11 @@
     else { const b = el("model-response", {}, log); const mc = el("message-content", {}, b); md = el("div", { class: "markdown" }, mc); }
     return md;
   }
-  function paint(md, text, redrawn) {
+  function paint(md, text, redrawn, raw) {
     md.innerHTML = "";
     const lines = text.split("\n");
     if (!redrawn) { for (const l of lines) el("p", { text: l }, md); return; }
+    if (raw) { for (const l of lines) el("p", { text: l }, md); if (SITE === "gemini") el("p", { text: "PDF", class: "chip" }, md); return; }
     // The re-draw: the body sentences split into their own paragraphs, extra
     // spacing, and a citation chip AFTER the closing tag.
     for (const l of lines) {
@@ -237,15 +247,19 @@
   async function reply(msg) {
     const seq = (/^\[MSG #(\d+)\]/.exec(msg) || [])[1];
     let r;
-    if (/NO ENDING TAG RECEIVED/.test(msg) && lastReply) r = Object.assign({}, lastReply, { tagged: true, resend: true, inReplyTo: "#" + seq });
-    else r = newReply("#" + seq);
-    lastReply = r;
-    const full = r.lines.concat(r.tagged ? ["[FROM: " + NAME + "]"] : []).join("\n");
     aborted = false;
     setGenerating(true); // with no Stop button, Send just stays disabled while it writes
-    const rec = { k: r.k, token: r.token, to: r.to, inReplyTo: r.inReplyTo, tagged: r.tagged, resend: r.resend, text: full, startedAt: Date.now(), finishedAt: null, aborted: false, redrawn: false };
+    if (/NO ENDING TAG RECEIVED/.test(msg) && lastReply) r = Object.assign({}, lastReply, { tagged: true, resend: true, inReplyTo: "#" + seq, delayMs: 0 });
+    else {
+      let hook = null;
+      if (typeof window.__fakeHook === "function") { try { hook = await window.__fakeHook(msg); } catch (_) { hook = null; } }
+      r = newReply("#" + seq, hook);
+    }
+    lastReply = r;
+    const full = r.lines.concat(r.tagged ? ["[FROM: " + NAME + "]"] : []).join("\n");
+    const rec = { k: r.k, token: r.token, to: r.to, inReplyTo: r.inReplyTo, tagged: r.tagged, resend: r.resend, hooked: !!r.hooked, text: full, startedAt: Date.now(), finishedAt: null, aborted: false, redrawn: false };
     F.replies.push(rec);
-    await sleep(between(150, 400)); // "thinking"
+    await sleep(between(150, 400) + (r.delayMs || 0)); // "thinking"
     const md = mkBlock();
     if (has("stream")) {
       const parts = full.split(/(?=[ \n])/);
@@ -261,7 +275,7 @@
     rec.finishedAt = Date.now();
     setGenerating(false);
     if (has("redraw") && !aborted) {
-      setTimeout(() => { paint(md, full, true); rec.redrawn = true; F.redraws++; }, between(200, 1200));
+      setTimeout(() => { paint(md, full, true, r.raw); rec.redrawn = true; F.redraws++; }, between(200, 1200));
     }
   }
   F.idle = () => !generating && F.jobs === 0;

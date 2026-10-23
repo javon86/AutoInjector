@@ -161,5 +161,24 @@ contextBridge.exposeInMainWorld("api", {
   onLockerChanged: (cb) => ipcRenderer.on("locker-changed", (_e, payload) => cb(payload)),
   lockersStatus: () => ipcRenderer.invoke("lockers:status"),
   onTerminalData: (cb) => ipcRenderer.on("terminal-data", (_e, payload) => cb(payload)),
-  onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload))
+  onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
+  // BookForge bridge (experimental) — see docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
+  bookforgeStatus: (opts) => ipcRenderer.invoke("bookforge:status", opts || {}),
+  bookforgeSetEnabled: (enabled) => ipcRenderer.invoke("bookforge:set-enabled", { enabled }),
+  bookforgeCopyToken: () => ipcRenderer.invoke("bookforge:copy-token"),
+  bookforgeRevealToken: () => ipcRenderer.invoke("bookforge:reveal-token"),
+  bookforgeRegenerateToken: () => ipcRenderer.invoke("bookforge:regenerate-token"),
+  // 🔗 Connect BookForge in one click (contract v1.1 pairing; the key never goes into a URL)
+  bookforgeConnect: () => ipcRenderer.invoke("bookforge:connect"),
+  bookforgeStartApp: () => ipcRenderer.invoke("bookforge:start-app"),
+  bookforgeOpenUrl: (url) => ipcRenderer.invoke("bookforge:open-url", { url }),
+  // 📋 Copy diagnostics: a safe text summary (no key/codes/prompts/replies); main writes the clipboard.
+  bookforgeDiagnostics: (extra) => ipcRenderer.invoke("bookforge:diagnostics", extra || {}),
+  bookforgeCopyDiagnostics: (extra) => ipcRenderer.invoke("bookforge:copy-diagnostics", extra || {}),
+  // Live activity (text-free events + a fresh status snapshot) and the 🧪 link test.
+  onBookforgeActivity: (cb) => ipcRenderer.on("bookforge-activity", (_e, payload) => cb(payload)),
+  bookforgeLinkTestRun: () => ipcRenderer.invoke("bookforge:linktest-run"),
+  bookforgeLinkTestStop: () => ipcRenderer.invoke("bookforge:linktest-stop"),
+  bookforgeOpenLinkTestReport: (file) => ipcRenderer.invoke("bookforge:linktest-open-report", { file }),
+  onBookforgeLinkTestProgress: (cb) => ipcRenderer.on("bookforge-linktest-progress", (_e, payload) => cb(payload))
 });
