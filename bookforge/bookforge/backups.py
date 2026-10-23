@@ -49,6 +49,15 @@ PINNED = {"manual", "before-restore"}  # never rotated
 DISK_MESSAGE = "the backup could not be written (is the disk full or the data folder read-only?)"
 
 
+def _when(iso) -> str:
+    """'23 October 2026, 20:03 UTC' for messages to the author."""
+    try:
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return f"{t.day} {t:%B %Y, %H:%M} UTC"
+    except (TypeError, ValueError):
+        return "an earlier time"
+
+
 def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
@@ -254,5 +263,5 @@ class BackupManager:
             shutil.rmtree(staging, ignore_errors=True)
         log.info("restored backup %s (safety copy %s, %d asset files put back)", name, safety.get("name"), repaired)
         return {"restored": name, "safety_backup": safety.get("name"), "assets_repaired": repaired,
-                "message": f"Your books were restored from the backup of {self._describe(src).get('created_at')}. "
-                           f"A safety copy of how things were just before is kept as {safety.get('name')}."}
+                "message": "Your books were restored from the backup of {}. A safety backup of how things were just "
+                           "before is listed under Backups.".format(_when(self._describe(src).get("created_at")))}
