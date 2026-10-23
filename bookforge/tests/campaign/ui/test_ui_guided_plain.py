@@ -232,6 +232,18 @@ def test_restore_toast_and_settings_and_pairing_wording(make_context, server, br
     page.wait_for_function("() => !document.querySelector('dialog[open]')", timeout=60000)
     toast = page.inner_text("#toast")
     assert "restored from the backup of" in toast and not re.search(r"\d{4}-\d\d-\d\dT|bk-\d+", toast), toast
+    assert "(You pressed Back up now)" in toast, toast   # the page's own words: local time and the kind of backup
+    # deleting a book still says what happened to that book (its own message)
+    server.api("POST", "/projects", {"name": "Book To Delete", "profile": {"title": "Book To Delete"}})
+    goto(page, "#/")
+    page.locator("#main li, #main .record-item").filter(has_text="Book To Delete").first.get_by_role("button", name="🗑 Delete…").click()
+    dlg = page.locator("dialog[open]")
+    dlg.locator("input[type=text]").fill("Book To Delete")
+    dlg.get_by_role("button", name="🗑 Delete this book for good").click()
+    page.wait_for_function("() => !document.querySelector('dialog[open]')", timeout=60000)
+    toast = page.inner_text("#toast")
+    assert "restored" not in toast and toast.strip(), toast
+    assert "Book To Delete" not in [p["name"] for p in server.api("GET", "/projects")]
     # the server's own message is plain too (other clients show it as it is)
     names = [b["name"] for b in server.api("GET", "/backups")["backups"] if b["reason"] == "manual"]
     out = server.api("POST", f"/backups/{names[0]}/restore", {"author_confirms": True, "confirm": "RESTORE"})

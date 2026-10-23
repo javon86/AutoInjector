@@ -825,7 +825,7 @@ function deleteBook(p) {
       go2.disabled = true; out.appendChild(loadingState('Deleting… (a safety backup is made first)'));
       try {
         const r = await api('POST', `/projects/${encodeURIComponent(p.project_id)}/delete`, { body: { author_confirms: true, confirm: word.value.trim() } });
-        close(); toast(`Your books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); route();
+        close(); toast(r.message); S.project = null; await loadProjects(); route();
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Delete a book' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, `⚠️ This deletes “${p.name}” and everything in it`),
@@ -6560,7 +6560,7 @@ function restoreBackup(b, reload) {
       go2.disabled = true; out.appendChild(loadingState('Restoring… (a safety backup is made first)'));
       try {
         const r = await api('POST', `/backups/${encodeURIComponent(b.name)}/restore`, { body: { author_confirms: true, confirm: word.value.trim() } });
-        close(); toast(r.message); S.project = null; await loadProjects(); reload(); route();
+        close(); toast(`Your books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); reload(); route();
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Restore a backup' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. BookForge first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
