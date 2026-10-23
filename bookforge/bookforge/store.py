@@ -126,6 +126,95 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+# os/sqlite3 names bound at import: durable-write helpers keep working when tests swap the module's ``os``/``sqlite3``
+# for a fault-injecting stand-in (only ``os.replace`` / ``sqlite3.connect`` are meant to be replaced).
+_os = os
+_DB_ERROR = sqlite3.DatabaseError
+TMP_MARK = ".tmp-"
+
+
+def _fsync_fd_path(path: Path, dir_ok: bool = False):
+    """fsync a file (or, where the platform allows it, a directory) so a power cut cannot lose it."""
+    try:
+        fd = _os.open(str(path), _os.O_RDONLY)
+    except OSError:
+        if dir_ok:
+            return  # Windows cannot open directories; NTFS journals the rename itself
+        raise
+    try:
+        _os.fsync(fd)
+    except OSError:
+        if not dir_ok:
+            raise
+    finally:
+        _os.close(fd)
+
+
+def fsync_file(path: str | os.PathLike):
+    _fsync_fd_path(Path(path))
+
+
+def fsync_dir(path: str | os.PathLike):
+    _fsync_fd_path(Path(path), dir_ok=True)
+
+
+def tmp_name(path: Path) -> Path:
+    return path.with_name(f"{path.name}{TMP_MARK}{uuid.uuid4().hex[:8]}")
+
+
+def durable_copy(src: str | os.PathLike, dst: str | os.PathLike):
+    """Copy src over dst atomically and durably (temp file in dst's folder, fsync, rename, fsync folder)."""
+    dst = Path(dst)
+    tmp = tmp_name(dst)
+    try:
+        shutil.copyfile(src, tmp)
+        fsync_file(tmp)
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    fsync_dir(dst.parent)
+
+
+def write_private(path: str | os.PathLike, data: bytes):
+    """Write a secret file that is never readable by others, not even for a moment.
+
+    The temp file is created with mode 0600 in one step (O_CREAT|O_EXCL), written, fsynced and renamed over the
+    target, so there is no window in which a world-readable file holds the secret."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tmp_name(path)
+    flags = _os.O_WRONLY | _os.O_CREAT | _os.O_EXCL | getattr(_os, "O_BINARY", 0) | getattr(_os, "O_NOFOLLOW", 0)
+    fd = _os.open(str(tmp), flags, 0o600)
+    try:
+        try:
+            view = memoryview(data)
+            while view:
+                n = _os.write(fd, view)
+                view = view[n:]
+            _os.fsync(fd)
+        finally:
+            _os.close(fd)
+        _os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    fsync_dir(path.parent)
+
+
+def _schema_of(value) -> int | None:
+    try:
+        v = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return v if v >= 0 else None
+
+
+def newer_schema_message(found) -> str:
+    return (f"this data was written by a newer BookForge (database version {found}; this BookForge understands "
+            f"version {SCHEMA_VERSION} and older). Update BookForge, then try again; nothing was changed.")
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:20]}"
 
@@ -144,9 +233,37 @@ class Store:
         self._local = threading.local()
         self.fault_hook: Callable[[str], None] | None = None
         with self.connection() as conn:
+            try:
+                self._check_schema(conn)
+            except BaseException:
+                self.close()
+                raise
             conn.executescript(DDL)
             conn.execute("INSERT OR IGNORE INTO meta(key,value) VALUES('schema_version',?)", (str(SCHEMA_VERSION),))
             conn.commit()
+        self._sweep_partial_assets()
+
+    @staticmethod
+    def _check_schema(conn):
+        """Refuse a database written by a newer BookForge before anything is written to it."""
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone():
+            return
+        row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        if row is None:
+            return
+        v = _schema_of(row[0])
+        if v is None or v > SCHEMA_VERSION:
+            raise BookforgeError("UNSUPPORTED_CONTRACT", "/schema_version", newer_schema_message(row[0]),
+                                 status="REJECTED")
+
+    def _sweep_partial_assets(self):
+        """Start-up: remove half-written asset temp files left by a crash or a full disk (never real assets)."""
+        try:
+            for f in self.asset_dir.iterdir():
+                if TMP_MARK in f.name and f.is_file():
+                    f.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ connections
     @contextmanager
@@ -242,8 +359,19 @@ class Store:
 
     def read_binary(self, rec: dict) -> bytes:
         meta = rec.get("binary") or {}
-        path = self.asset_dir / meta["storage_uri"].split("/")[-1]
-        data = path.read_bytes()
+        uri = meta.get("storage_uri")
+        if not isinstance(uri, str) or not uri:
+            raise BookforgeError("NOT_FOUND", "/storage_uri", "this record has no stored file")
+        path = self.asset_dir / uri.split("/")[-1]
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            raise BookforgeError("NOT_FOUND", "/content_hash", "the stored file for this item is missing from the "
+                                 "BookForge data folder; restore a backup (Settings → Backups) to bring it back") \
+                from None
+        except OSError as exc:
+            raise BookforgeError("INTERNAL_ERROR", "/content_hash", "the stored file for this item could not be read "
+                                 f"({type(exc).__name__}); check the BookForge data folder and the disk") from None
         if sha256_bytes(data) != rec["content_hash"]:
             raise BookforgeError("HASH_MISMATCH", "/content_hash", "stored artifact bytes do not match their hash")
         return data
@@ -328,64 +456,129 @@ class Store:
 
     # ------------------------------------------------------------------ backup / restore
     def backup(self, dest_dir: str | os.PathLike) -> dict:
-        """Transaction-consistent snapshot of DB + asset bytes with a SHA-256 manifest.
+        """Transaction-consistent snapshot of DB + asset bytes with a SHA-256 manifest, fsynced to disk.
 
-        Credentials live in the secret store (outside the DB) and are excluded.
+        Credentials live in the secret store (outside the DB) and are excluded. Half-written upload temp files are
+        never copied. The manifest records the hash of each COPY; ``verify_backup`` additionally compares every
+        asset with the hash its record promises, so a backup of a damaged asset is never called verified.
         """
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
+        db_copy = dest / "bookforge.sqlite3"
         with self.connection() as conn:
-            target = sqlite3.connect(dest / "bookforge.sqlite3")
-            conn.backup(target)
-            target.close()
+            target = sqlite3.connect(db_copy)
+            try:
+                conn.backup(target)
+            finally:
+                target.close()
+        fsync_file(db_copy)
         (dest / "assets").mkdir(exist_ok=True)
         files = {}
         for f in sorted(self.asset_dir.iterdir()):
-            shutil.copy2(f, dest / "assets" / f.name)
-            files[f.name] = sha256_bytes(f.read_bytes())
+            if TMP_MARK in f.name or not f.is_file():
+                continue
+            copy = dest / "assets" / f.name
+            shutil.copy2(f, copy)
+            fsync_file(copy)
+            files[f.name] = sha256_bytes(copy.read_bytes())
         manifest = {"schema_version": SCHEMA_VERSION, "created_at": utcnow(),
-                    "db_sha256": sha256_bytes((dest / "bookforge.sqlite3").read_bytes()), "assets": files}
+                    "db_sha256": sha256_bytes(db_copy.read_bytes()), "assets": files}
         (dest / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        fsync_file(dest / "manifest.json")
+        fsync_dir(dest / "assets")
+        fsync_dir(dest)
+        fsync_dir(dest.parent)
         return manifest
 
     @staticmethod
+    def schema_problem(src_dir: str | os.PathLike) -> str | None:
+        """A plain-language reason when a snapshot comes from a newer BookForge (manifest or database)."""
+        src = Path(src_dir)
+        try:
+            manifest = json.loads((src / "manifest.json").read_text())
+        except (OSError, ValueError):
+            return None  # reported by verify_backup as an unreadable manifest
+        found = manifest.get("schema_version") if isinstance(manifest, dict) else None
+        if found is not None:  # very old manifests carry no version: the database's own meta row decides
+            v = _schema_of(found)
+            if v is None or v > SCHEMA_VERSION:
+                return newer_schema_message(found)
+        db = src / "bookforge.sqlite3"
+        if not db.exists():
+            return None
+        try:
+            conn = sqlite3.connect(db)
+            try:
+                row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+            finally:
+                conn.close()
+        except _DB_ERROR:
+            return None  # damage is reported by verify_backup
+        if row is not None:
+            v = _schema_of(row[0])
+            if v is None or v > SCHEMA_VERSION:
+                return newer_schema_message(row[0])
+        return None
+
+    @staticmethod
     def verify_backup(src_dir: str | os.PathLike) -> list[str]:
-        """Verify a snapshot before promotion: DB hash, every asset hash, revision links, refs."""
+        """Verify a snapshot before promotion: schema version, DB hash and SQLite integrity, every asset hash
+        (against the manifest AND against the hash its record promises), revision links, refs."""
         src = Path(src_dir)
         problems = []
         try:
             manifest = json.loads((src / "manifest.json").read_text())
+            if not isinstance(manifest, dict):
+                raise ValueError("not an object")
         except (OSError, ValueError) as exc:
             return [f"manifest unreadable: {exc}"]
+        schema = Store.schema_problem(src)
+        if schema:
+            return [schema]
+        assets = manifest.get("assets") if isinstance(manifest.get("assets"), dict) else {}
         db = src / "bookforge.sqlite3"
         if not db.exists() or sha256_bytes(db.read_bytes()) != manifest.get("db_sha256"):
             problems.append("database hash mismatch")
-        for name, digest in manifest.get("assets", {}).items():
+        for name, digest in assets.items():
             p = src / "assets" / name
             if not p.exists():
                 problems.append(f"missing asset {name}")
             elif sha256_bytes(p.read_bytes()) != digest:
                 problems.append(f"asset hash mismatch {name}")
-        if not problems:
+        if problems:
+            return problems
+        try:
             conn = sqlite3.connect(db)
-            conn.row_factory = sqlite3.Row
-            for row in conn.execute("SELECT * FROM records"):
-                if row["representation"] == "JSON_RECORD" and sha256_bytes(row["content"]) != row["content_hash"]:
-                    problems.append(f"record hash mismatch {row['record_id']}@{row['version']}")
-                if row["version"] > 1 and not conn.execute(
-                        "SELECT 1 FROM records WHERE project_id=? AND branch_id=? AND record_id=? AND version=?",
-                        (row["project_id"], row["branch_id"], row["record_id"], row["version"] - 1)).fetchone():
-                    problems.append(f"broken revision chain {row['record_id']}@{row['version']}")
-            for row in conn.execute("SELECT * FROM binaries"):
-                name = row["storage_uri"].split("/")[-1]
-                if name not in manifest.get("assets", {}):
-                    problems.append(f"binary {row['record_id']} not in snapshot")
-            conn.close()
+            try:
+                conn.row_factory = sqlite3.Row
+                check = [r[0] for r in conn.execute("PRAGMA integrity_check")]
+                if check != ["ok"]:
+                    return [f"database integrity check failed: {'; '.join(map(str, check[:3]))}"]
+                for row in conn.execute("SELECT * FROM records"):
+                    if row["representation"] == "JSON_RECORD" and sha256_bytes(row["content"]) != row["content_hash"]:
+                        problems.append(f"record hash mismatch {row['record_id']}@{row['version']}")
+                    if row["version"] > 1 and not conn.execute(
+                            "SELECT 1 FROM records WHERE project_id=? AND branch_id=? AND record_id=? AND version=?",
+                            (row["project_id"], row["branch_id"], row["record_id"], row["version"] - 1)).fetchone():
+                        problems.append(f"broken revision chain {row['record_id']}@{row['version']}")
+                for row in conn.execute("SELECT * FROM binaries"):
+                    name = row["storage_uri"].split("/")[-1]
+                    if name not in assets:
+                        problems.append(f"binary {row['record_id']} not in snapshot")
+                    elif assets[name] != row["content_hash"]:
+                        problems.append(f"asset {name} is damaged (its bytes do not match record {row['record_id']})")
+            finally:
+                conn.close()
+        except _DB_ERROR as exc:
+            problems.append(f"database unreadable: {exc}")
         return problems
 
     @classmethod
     def restore(cls, src_dir: str | os.PathLike, new_data_dir: str | os.PathLike) -> "Store":
         """Restore into a NEW isolated root; refuse promotion when verification fails."""
+        schema = cls.schema_problem(src_dir)
+        if schema:
+            raise BookforgeError("UNSUPPORTED_CONTRACT", "/schema_version", schema, status="REJECTED")
         problems = cls.verify_backup(src_dir)
         if problems:
             raise BookforgeError("HASH_MISMATCH", "", "restore verification failed: " + "; ".join(problems[:5]))
@@ -396,6 +589,39 @@ class Store:
         shutil.copy2(src / "bookforge.sqlite3", dst / "bookforge.sqlite3")
         shutil.copytree(src / "assets", dst / "assets")
         return cls(dst)
+
+    # ------------------------------------------------------------------ delete a project (BF-19)
+    PROJECT_TABLES = ("grants", "branches", "feature_manifests", "records", "binaries", "lifecycle", "heads",
+                      "receipts", "audit", "provenance", "dependency_edges", "checkpoints", "module_state",
+                      "approvals", "outbox", "projects")
+
+    def delete_project(self, project_id: str) -> int:
+        """Permanently remove one project: every row that belongs to it, its jobs and settings, and the asset
+        files no other project uses. Returns the number of asset files removed."""
+        with self.transaction() as tx:
+            c = tx.conn
+            names = {r["storage_uri"].split("/")[-1] for r in c.execute(
+                "SELECT storage_uri FROM binaries WHERE project_id=?", (project_id,))}
+            c.execute("DELETE FROM consumed_events WHERE event_id IN (SELECT event_id FROM outbox WHERE project_id=?)",
+                      (project_id,))
+            for table in self.PROJECT_TABLES:
+                c.execute(f"DELETE FROM {table} WHERE project_id=?", (project_id,))  # noqa: S608 - fixed names
+            c.execute("DELETE FROM settings WHERE instr(key, ?) > 0", (project_id,))
+            c.execute("DELETE FROM settings WHERE key LIKE 'job:%' AND CASE WHEN json_valid(value) THEN "
+                      "json_extract(value, '$.project_id') END = ?", (project_id,))
+        removed = 0
+        # A second write transaction holds SQLite's write lock while files go, so an upload of identical bytes
+        # (which checks for the file inside its own transaction) cannot reuse a file that is being removed.
+        with self.transaction() as tx:
+            for n in sorted(names):
+                if tx.conn.execute("SELECT 1 FROM binaries WHERE storage_uri LIKE ? LIMIT 1", ("%/" + n,)).fetchone():
+                    continue
+                try:
+                    (self.asset_dir / n).unlink()
+                    removed += 1
+                except FileNotFoundError:
+                    pass
+        return removed
 
 
 class Tx:
@@ -476,9 +702,21 @@ class Tx:
         fname = f"{content_hash}.bin"
         path = self.store.asset_dir / fname
         if not path.exists():
-            tmp = path.with_suffix(".tmp-" + uuid.uuid4().hex[:8])
-            tmp.write_bytes(data)
-            os.replace(tmp, path)
+            tmp = tmp_name(path)
+            try:
+                with open(tmp, "wb") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    _os.fsync(fh.fileno())
+                os.replace(tmp, path)
+            except OSError as exc:
+                tmp.unlink(missing_ok=True)
+                raise BookforgeError("INTERNAL_ERROR", "/body", "BookForge could not save the file (is the disk full "
+                                     f"or the data folder read-only? {type(exc).__name__})") from exc
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                raise
+            fsync_dir(self.store.asset_dir)
         storage_uri = f"bookforge-asset://{project_id}/{branch_id}/{fname}"
         meta = {"record_id": record_id, "project_id": project_id, "branch_id": branch_id, "owner": module_id[0],
                 "module_id": module_id, "version": version, "mime_type": mime_type, "byte_length": len(data),

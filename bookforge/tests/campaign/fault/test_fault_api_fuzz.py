@@ -133,7 +133,7 @@ def test_malformed_requests_get_a_clean_4xx(srv, method, path, body):
     assert b"TOP-SECRET" not in json.dumps(out).encode()
 
 
-NEW1 = "NEW-fault-1: wrong-typed JSON bodies / path values raise inside the route and answer 500 INTERNAL_ERROR"
+# NEW-fault-1: wrong-typed JSON bodies / path values used to raise inside the route and answer 500 INTERNAL_ERROR
 SERVER_500_CASES = [
     ("POST", "/api/projects", [1]),
     ("POST", "/api/projects", "just a string"),
@@ -151,7 +151,6 @@ SERVER_500_CASES = [
 ]
 
 
-@pytest.mark.xfail(strict=True, reason=NEW1)
 @pytest.mark.parametrize("method,path,body", SERVER_500_CASES)
 def test_wrong_typed_input_is_a_4xx_not_a_500(srv, method, path, body):
     app, port, pid = srv
@@ -160,7 +159,6 @@ def test_wrong_typed_input_is_a_4xx_not_a_500(srv, method, path, body):
     assert is_clean_error(st, out), (st, out)
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-1: deeply nested JSON (RecursionError) answers 500")
 def test_deeply_nested_json_is_a_4xx(srv):
     app, port, pid = srv
     st, out = call(port, "POST", "/api/projects", raw=b"[" * 100000 + b"]" * 100000)
@@ -178,7 +176,6 @@ def _raw(port, data: bytes, timeout=3.0) -> bytes:
         s.close()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-1: a non-numeric Content-Length answers 500 (int() in _handle)")
 def test_non_numeric_content_length_is_a_4xx(srv):
     app, port, pid = srv
     out = _raw(port, b"POST /api/projects HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + TOKEN.encode() +
@@ -186,8 +183,6 @@ def test_non_numeric_content_length_is_a_4xx(srv):
     assert out.split(b" ")[1].startswith(b"4"), out
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-2: a negative Content-Length makes the handler block on "
-                                       "rfile.read(-1) until the client closes (request hangs, thread held)")
 def test_negative_content_length_answers_promptly(srv):
     app, port, pid = srv
     out = _raw(port, b"POST /api/projects HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer " + TOKEN.encode() +
@@ -203,8 +198,6 @@ def test_oversized_body_refused_before_reading(srv):
     assert out.startswith(b"HTTP/1.0 413"), out
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-3: NaN/Infinity in a request body is stored and echoed back, so "
-                                       "GET /api/projects is no longer valid JSON for the browser (JSON.parse fails)")
 def test_nan_in_body_cannot_poison_the_project_list(srv):
     app, port, pid = srv
     call(port, "POST", "/api/projects", raw=b'{"name": "n", "settings": {"a": NaN, "b": Infinity}}')
@@ -218,8 +211,6 @@ def test_nan_in_body_cannot_poison_the_project_list(srv):
     json.loads(raw, parse_constant=strict)  # what a browser's JSON.parse accepts
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-4: DELETE/PATCH/OPTIONS/HEAD on /api answer 501 with an HTML "
-                                       "page instead of a JSON 405")
 @pytest.mark.parametrize("method", ["DELETE", "PATCH", "OPTIONS"])
 def test_unsupported_methods_get_json_405(srv, method):
     app, port, pid = srv

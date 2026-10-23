@@ -2,7 +2,8 @@
 
 Each check answers {id, title, status: ok|warn|problem|info, detail, fix, action}. ``overall`` is the worst status
 (info counts as ok). Checks are light: the database is read and a single settings row is written; the disk check
-uses ``shutil.disk_usage``; AI slot checks reuse ``ProviderRegistry.health_check`` (the AutoInjector bridge's
+uses ``shutil.disk_usage``; the database check also runs SQLite's ``PRAGMA quick_check`` (page and b-tree
+damage) at most every ``QUICK_CHECK_S`` unless forced; AI slot checks reuse ``ProviderRegistry.health_check`` (the AutoInjector bridge's
 GET /v1/health) at most once per ``SLOT_TTL_S`` per slot; exported files are re-read and their SHA-256 compared
 with the export descriptor; stuck jobs are live jobs whose state did not change for ``STUCK_S``.
 Results never contain keys, tokens, prompts or book text.
@@ -24,6 +25,7 @@ STUCK_S = 15 * 60
 LOW_DISK = 500 * 1024 * 1024
 VERY_LOW_DISK = 100 * 1024 * 1024
 BACKUP_WARN_DAYS = 7
+QUICK_CHECK_S = 600.0  # SQLite's quick_check reads the whole file: at most every 10 minutes unless forced
 RANK = {"ok": 0, "info": 0, "warn": 1, "problem": 2}
 
 
@@ -53,6 +55,7 @@ class HealthService:
         self._last: dict | None = None
         self._at = 0.0
         self._slot_cache: dict[str, tuple[float, dict]] = {}
+        self._qc: tuple[float, list] | None = None  # (monotonic time, quick_check rows)
 
     def run(self, force: bool = False) -> dict:
         with self._lock:
@@ -84,14 +87,26 @@ class HealthService:
             st.query_one("SELECT COUNT(*) AS n FROM projects")
             st.set_setting("health:probe", {"at": now_iso()})
             ok = (st.get_setting("health:probe") or {}).get("at")
+            qc = self._qc
+            if force or qc is None or time.monotonic() - qc[0] > QUICK_CHECK_S:
+                qc = (time.monotonic(), [str(r[0]) for r in st.query("PRAGMA quick_check")])
+                self._qc = qc
         except Exception as exc:  # noqa: BLE001
             return {"id": "database", "title": "Your books' database", "status": "problem",
                     "detail": f"BookForge could not read or write its database ({type(exc).__name__}).",
                     "fix": "Close other programs that might use the BookForge data folder, make sure the disk is not "
-                           "full, then restart BookForge.", "code": "INTERNAL_ERROR"}
+                           "full, then restart BookForge. If it stays, restore the newest verified backup "
+                           "(Settings → Backups).", "code": "INTERNAL_ERROR"}
         ms = int((time.monotonic() - t0) * 1000)
+        if qc[1] != ["ok"]:
+            return {"id": "database", "title": "Your books' database", "status": "problem", "code": "HASH_MISMATCH",
+                    "detail": "SQLite found damage inside the BookForge database file (quick_check: "
+                              f"{'; '.join(qc[1][:2])[:200]}).",
+                    "fix": "Stop working in BookForge, then restore the newest verified backup made before the damage "
+                           "(Settings → Backups). Backups of a damaged database are marked as not verified.",
+                    "action": "settings"}
         return {"id": "database", "title": "Your books' database", "status": "ok" if ok else "problem",
-                "detail": f"Readable and writable ({ms} ms).", "fix": None}
+                "detail": f"Readable, writable and undamaged ({ms} ms).", "fix": None}
 
     def c_disk(self, force):
         d = self.app.store.data_dir

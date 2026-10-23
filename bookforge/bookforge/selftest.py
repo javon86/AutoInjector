@@ -433,9 +433,15 @@ class SelfTest:
                 f"package sha256 {c.package_sha256}")
 
     def p_project(self):
+        old = [r["project_id"] for r in self.store.query("SELECT project_id, settings FROM projects WHERE archived=0")
+               if '"selftest": true' in (r["settings"] or "")]
         self.project_id = self.engine.bootstrap_project(
             self.principal, self.project_name, settings={"selftest": True},
             features={"character_arcs": False}, release_profiles=list(RELEASE_PROFILES))
+        if old:  # BF-19: earlier self-test books are archived (hidden, kept), so only the newest one is listed
+            with self.store.transaction() as tx:
+                for o in old:
+                    tx.conn.execute("UPDATE projects SET archived=1 WHERE project_id=?", (o,))
         return f"project '{self.project_name}' ({self.project_id}) with release profiles {', '.join(RELEASE_PROFILES)}"
 
     def _count(self):

@@ -31,7 +31,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .errors import BookforgeError
-from .store import Store, new_id, utcnow
+from .store import Store, new_id, utcnow, write_private
 
 log = logging.getLogger("bookforge.providers")
 
@@ -543,6 +543,17 @@ def _principal(ctx) -> str:
     return getattr(ctx, "principal_id", None) or "bookforge-assist"
 
 
+_SECRET_LOCKS: dict[str, threading.Lock] = {}
+_SECRET_LOCKS_GUARD = threading.Lock()
+
+
+def _secret_lock(path: Path) -> threading.Lock:
+    """One lock per secret file for the whole process (several registries may share a file)."""
+    key = os.path.abspath(str(path))
+    with _SECRET_LOCKS_GUARD:
+        return _SECRET_LOCKS.setdefault(key, threading.Lock())
+
+
 class ProviderRegistry:
     def __init__(self, store: Store, secret_path: str | os.PathLike | None = None):
         self.store = store
@@ -674,19 +685,15 @@ class ProviderRegistry:
         return self._secrets().get(slot_id, {}).get("api_key")
 
     def _store_api_key(self, slot_id: str, key: str | None):
-        secrets = self._secrets()
-        if key:
-            secrets.setdefault(slot_id, {})["api_key"] = key
-        else:
-            secrets.pop(slot_id, None)
-        self.secret_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.secret_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(secrets))
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, self.secret_path)
+        """Read-modify-write of the secret file under a per-file lock (two slots saved at once must not lose one),
+        written with mode 0600 from the first byte (store.write_private)."""
+        with _secret_lock(self.secret_path):
+            secrets = self._secrets()
+            if key:
+                secrets.setdefault(slot_id, {})["api_key"] = key
+            else:
+                secrets.pop(slot_id, None)
+            write_private(self.secret_path, json.dumps(secrets).encode("utf-8"))
 
     def adapter(self, slot: dict):
         if self.test_adapter is not None:

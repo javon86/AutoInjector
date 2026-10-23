@@ -247,9 +247,6 @@ def test_export_while_a_chapter_is_being_edited_uses_the_approved_text(tmp_path)
 
 
 # ---------------------------------------------------------------------------------------------- restore vs other work
-@pytest.mark.xfail(strict=True, reason="NEW-fault-16: restore is only refused while Make-a-book / Write-all / "
-                                       "self-test / workflow test run; a manual book action (export, assemble, AI "
-                                       "fix...) keeps running and commits records for a project the restore removed")
 def test_restore_is_refused_while_a_manual_export_is_running(tmp_path, monkeypatch):
     app = make_app(tmp_path / "data")
     empty = app.backups.backup("manual")  # before any book exists
