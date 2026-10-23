@@ -537,11 +537,19 @@ class BookPath:
         ids = body.get("record_ids")
         if not isinstance(ids, list) or not ids or not all(isinstance(x, str) for x in ids) or len(ids) > 40:
             raise _err("INVALID_INPUT", "/record_ids", "list the records to approve (1-40)")
+        versions = body.get("versions") if isinstance(body.get("versions"), dict) else {}
         results = []
         for rid in dict.fromkeys(ids):
-            r = self.rec(rid)
+            seen = versions.get(rid)  # the exact version the author looked at, when the caller knows it
+            seen = seen if isinstance(seen, int) and not isinstance(seen, bool) else None
+            r = self.rec(rid, seen)
             if r is None:
                 results.append({"record_id": rid, "ok": False, "problems": ["record not found"]})
+                continue
+            if seen is not None and r["version"] != r["latest_version"]:
+                results.append({"record_id": rid, "ok": False, "version": r["latest_version"], "problems": [
+                    f"This draft changed since you looked at it (it is now version {r['latest_version']}). "
+                    "Open it again before approving."]})
                 continue
             if r["lifecycle"] in ("APPROVED", "LOCKED"):
                 results.append({"record_id": rid, "ok": True, "status": r["lifecycle"], "problems": []})

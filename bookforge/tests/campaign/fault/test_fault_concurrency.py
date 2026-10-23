@@ -169,9 +169,6 @@ def _sync_validation(app, n=2):
     app.engine.run_validation = run_validation
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-14: Engine._accept reads the candidate's lifecycle outside the "
-                                       "commit transaction: two tabs approving the same draft both commit, giving two "
-                                       "approval records, two ACCEPT audit rows and two record.approved events")
 def test_two_tabs_approving_the_same_draft_approve_it_once(served):
     app, port = served
     pid = app.engine.bootstrap_project("author", "Tabs")
@@ -189,9 +186,6 @@ def test_two_tabs_approving_the_same_draft_approve_it_once(served):
     assert len(app.store.get_record(pid, "main", rid)["approval_ids"]) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-15: review/approve checks `versions` against the head, but "
-                                       "BookPath.a_approve then approves whatever is latest: a revision saved by another "
-                                       "tab in between is approved although the author never saw it")
 def test_approve_never_approves_a_version_the_author_did_not_see(served, monkeypatch):
     app, port = served
     pid = app.engine.bootstrap_project("author", "Tabs")

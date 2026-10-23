@@ -526,7 +526,7 @@ class ReviewService:
             raise BookforgeError("INVALID_INPUT", "/versions", "versions must map record IDs to versions",
                                  status="REJECTED")
         how = body.get("how") if body.get("how") in ("one", "all", "step", "workflow_test") else "one"
-        results, todo = [], []
+        results, todo, checked = [], [], {}
         for rid in dict.fromkeys(ids):
             head = self._head(pid, branch, rid)
             if head is None:
@@ -539,9 +539,13 @@ class ReviewService:
                                            f"{head['version']}). Open it again before approving."})
                 continue
             todo.append(rid)
+            checked[rid] = head["version"]
         bp = self.bp(principal, pid, branch)
         for i in range(0, len(todo), 40):
-            out = bp.a_approve({"record_ids": todo[i:i + 40], "author_confirms": True})
+            # Pass the checked versions so exactly what was checked is approved, never a revision saved since.
+            chunk = todo[i:i + 40]
+            out = bp.a_approve({"record_ids": chunk, "author_confirms": True,
+                                "versions": {rid: checked[rid] for rid in chunk}})
             for r in out["results"]:
                 r = dict(r)
                 r.pop("ref", None)
