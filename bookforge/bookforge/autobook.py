@@ -264,7 +264,8 @@ class _Runner:
                 return r["output_refs"][0]
             errs = r.get("errors") or []
             code = busy_code(errs)
-            if code is None and any(e.get("code") == "CAPABILITY_UNAVAILABLE" for e in errs) and self._slots_busy():
+            if code is None and any(e.get("code") == "CAPABILITY_UNAVAILABLE" for e in errs) and self._slots_busy(
+                    getattr(bp.engine.providers, "pinned", None)):
                 code = "RATE_LIMITED"
             if code:
                 raise BookforgeError(code, "", (errs[0].get("message") if errs else "") or "the AI is busy")
@@ -303,9 +304,13 @@ class _Runner:
                 return True
         return False
 
-    def _slots_busy(self) -> bool:
+    def _slots_busy(self, pinned: str | None = None) -> bool:
+        """True when every AI that may take this step is set up but busy (so the step waits and retries). A book or
+        run pinned to one AI (``pinned``) only ever uses that one: its being busy is enough, whatever the others do."""
         slots = [s for s in self.app.engine.providers.slots() if s["adapter_id"] in ("anthropic", "autoinjector")
                  or (s["adapter_id"] == "manual" and self.app.engine.providers.test_adapter is not None)]
+        if pinned:
+            slots = [s for s in slots if s["slot_id"] == pinned]
         return bool(slots) and all(s["active_jobs"] >= s["max_concurrent"] for s in slots)
 
     def _who(self, run: dict) -> str:
