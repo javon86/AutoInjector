@@ -250,10 +250,16 @@ class App:
             with self._gate:
                 self._exclusive = None
 
-    @staticmethod
-    def ping() -> dict:
-        """Unauthenticated liveness answer for AutoInjector: identity and versions only, no project data."""
-        return {"app": "bookforge", "version": __version__, "contract_version": CONTRACT_VERSION}
+    def ping(self, challenge: str | None = None) -> dict:
+        """Unauthenticated liveness answer for AutoInjector: identity and versions only, no project data.
+
+        BF-08: with ?challenge=<16..64 hex chars> it also returns proof = HMAC-SHA256(access token, challenge),
+        so a second BookForge start can tell "my own data folder is already running here" without ever sending
+        the token to whatever answers on the port (the answer can't be faked or replayed without the token)."""
+        out = {"app": "bookforge", "version": __version__, "contract_version": CONTRACT_VERSION}
+        if isinstance(challenge, str) and PING_CHALLENGE_RE.match(challenge):
+            out["proof"] = ping_proof(self.token, challenge)
+        return out
 
     @staticmethod
     def _load_or_create_token(data_dir: Path) -> str:
@@ -1052,7 +1058,7 @@ def make_handler(app: App):
                 return self._send(405, {"errors": [error("INVALID_INPUT", url.path, "method not allowed")]})
             if url.path == "/api/ping" and method == "GET":
                 # No auth and no project data: lets AutoInjector see that BookForge is running.
-                return self._send(200, app.ping())
+                return self._send(200, app.ping((parse_qs(url.query).get("challenge") or [None])[0]))
             try:
                 principal = app.authenticate(self.headers.get("Authorization"))
                 cl = (self.headers.get("Content-Length") or "0").strip()
@@ -1127,18 +1133,38 @@ def make_handler(app: App):
     return Handler
 
 
+PING_CHALLENGE_RE = re.compile(r"^[0-9a-f]{16,64}$")
+
+
+def ping_proof(token: str, challenge: str) -> str:
+    import hashlib  # noqa: PLC0415
+    import hmac  # noqa: PLC0415
+    return hmac.new(token.encode("utf-8"), f"bookforge-ping:{challenge}".encode("ascii"), hashlib.sha256).hexdigest()
+
+
 def already_running(host: str, port: int, token: str) -> bool:
-    """True when a Bookforge with this data folder (same access token) already answers on host:port."""
+    """True when a Bookforge with this data folder (same access token) already answers on host:port.
+
+    BF-08: the token is never sent. We ask /api/ping (no auth) with a fresh random challenge and check its
+    HMAC proof, so another program on that port learns nothing and can't pass as this BookForge (which
+    would make us open the browser with the token in the address)."""
+    import hmac  # noqa: PLC0415
     import http.client  # noqa: PLC0415
+    challenge = secrets.token_hex(16)
     try:
         conn = http.client.HTTPConnection(host, port, timeout=1.5)
-        conn.request("GET", "/api/session", headers={"Authorization": f"Bearer {token}"})
+        conn.request("GET", f"/api/ping?challenge={challenge}", headers={"Accept": "application/json"})
         resp = conn.getresponse()
-        body = resp.read()
+        body = resp.read(65536)
         conn.close()
-        return resp.status == 200 and b"contract_version" in body
-    except (OSError, http.client.HTTPException):
+        if resp.status != 200:
+            return False
+        data = json.loads(body.decode("utf-8"))
+    except (OSError, http.client.HTTPException, ValueError, UnicodeDecodeError):
         return False
+    proof = data.get("proof") if isinstance(data, dict) else None
+    return (isinstance(proof, str) and data.get("app") == "bookforge"
+            and hmac.compare_digest(proof, ping_proof(token, challenge)))
 
 
 def default_data_dir() -> Path:

@@ -62,6 +62,9 @@ JOB_TTL_S = 3600
 MAX_SESSIONS = 20
 SESSION_TTL_S = 6 * 3600
 SLOT_WAIT_S = 600
+# Deadline of one AI call. For an AutoInjector slot this becomes the bridge's timeout_ms (contract max 900 s); the
+# bridge's late window after a timeout is capped separately (jobs.BRIDGE_LATE_WINDOW_S), so a site is never held
+# longer than the busy-retry budget (jobs.DEFAULT_RETRY) other requests wait for it.
 AI_DEADLINE_S = 900
 MAX_SECTION_COUNT = 12
 MAX_RUN_ITEMS = 40

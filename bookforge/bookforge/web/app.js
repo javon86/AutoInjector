@@ -5114,10 +5114,38 @@ async function viewPair(main) {
       h('p', null, 'You can also paste a connection key in ', h('a', { href: '#/settings' }, 'Settings'), '.')));
     return;
   }
-  const holder = h('div', { 'aria-live': 'polite' }, loadingState('Connecting to AutoInjector…'));
+  // BF-07: a link can be opened by any web page, so never pair from the address alone: only a bridge on
+  // this computer, and only after the author confirms (with a warning when it is not AutoInjector's usual port).
+  const bm = /^http:\/\/(127\.0\.0\.1|localhost)(?::(\d{1,5}))?\/?$/.exec(info.bridge || '');
+  if (!bm) {
+    main.appendChild(stateBox('failed', 'This connection link is not from AutoInjector',
+      h('p', null, 'It points BookForge at an address that is not on this computer, so BookForge did not connect.'),
+      h('p', null, h('strong', null, 'What to do: '), 'Press Connect in the AutoInjector desktop app to get a new link.')));
+    return;
+  }
+  const bridgeUrl = `http://${bm[1]}:${bm[2] || '80'}`;
+  const usualPort = bridgeUrl === BRIDGE_DEFAULT || bridgeUrl === BRIDGE_DEFAULT.replace('127.0.0.1', 'localhost');
+  const holder = h('div', { 'aria-live': 'polite' });
   main.appendChild(holder);
+  const confirmed = await new Promise(resolve => {
+    const yes = h('button', { type: 'button', class: 'primary big', onclick: () => resolve(true) },
+      usualPort ? 'Connect to AutoInjector' : `Connect to port ${bm[2] || '80'} anyway`);
+    holder.appendChild(stateBox(usualPort ? 'empty' : 'blocked', 'Connect BookForge to AutoInjector?',
+      h('p', null, 'Only continue if you just pressed “Connect” in the AutoInjector desktop app. BookForge will then send its AI requests through AutoInjector.'),
+      usualPort ? null : h('p', null, h('strong', null, 'Check first: '), `this link points at port ${bm[2] || '80'} on this computer, not AutoInjector's usual port (17891). Continue only if you changed AutoInjector's bridge port yourself.`),
+      h('div', { class: 'row' }, yes, h('button', { type: 'button', onclick: () => resolve(false) }, 'Cancel'))));
+    S.leaveHooks.push(() => resolve(false));
+    yes.focus();
+  });
+  if (!confirmed) {
+    if (parseRoute()[0] !== 'pair') return;
+    clear(holder).appendChild(stateBox('empty', 'Not connected',
+      h('p', null, 'Nothing was changed. To connect, press Connect in the AutoInjector desktop app again.')));
+    return;
+  }
+  clear(holder).appendChild(loadingState('Connecting to AutoInjector…'));
   let out;
-  try { out = await api('POST', '/slots/pair-autoinjector', { body: { code: info.code, bridge_url: info.bridge } }); }
+  try { out = await api('POST', '/slots/pair-autoinjector', { body: { code: info.code, bridge_url: bridgeUrl } }); }
   catch (e) {
     const err = apiErrInfo(e);
     clear(holder).appendChild(stateBox('failed', 'AutoInjector was not connected',

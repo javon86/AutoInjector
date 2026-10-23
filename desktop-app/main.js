@@ -1382,8 +1382,9 @@ function gateMayPoll(site) {
 // "stopped" (Stop AIs Talking, relays only), or "accepted" / "accepted-noto"
 // (TR-30: its untagged finished reply was just captured; "-noto" = it had no
 // [TO:] tag either).
-async function waitForPendingCapture(target, seq, fromSite, { noForce = false } = {}) {
-  const stopped = () => !!fromSite && !state.relayEnabled;
+async function waitForPendingCapture(target, seq, fromSite, { noForce = false, isCancelled = null } = {}) {
+  // A withdrawn send (BookForge bridge: its request timed out) stops waiting at once.
+  const stopped = () => (!!fromSite && !state.relayEnabled) || (!!isCancelled && isCancelled());
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const mayPoll = gateMayPoll(target);
   // Read the pane NOW (when safe) rather than trust a poll up to POLL_MS old:
@@ -1474,7 +1475,9 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // verbatim -- for callers (Regenerate) whose text is already the exact,
   // fully-framed string that was actually sent last time, so re-framing it
   // here would double it up.
-  const framed = opts.raw ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
+  // opts.bridge (BookForge) is verbatim too: its prompt reaches the AI exactly as
+  // BookForge wrote it, plus only the [MSG #] line (BF-16).
+  const framed = opts.raw || opts.bridge ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
   // Program-kept running message number, stamped on EVERY outgoing send as a
   // 4-digit [MSG #0001] header (the AIs don't count anything — the app does). It
   // gives each message a single continuous id across all three panes so a model
@@ -1486,7 +1489,10 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // turn, so the AI-to-AI hop count starts over. AI-driven sends (relays carry
   // fromSite; terminal results and missing-tag nudges are marked automatic)
   // don't reset it.
-  if (!fromSite && !opts.automatic) resetAutoHops("program-send");
+  // BookForge bridge sends (opts.bridge) are a program's own request/answer, not a
+  // new turn of the user's conversation: they must never re-arm the AI-to-AI hop
+  // limit (BF-03).
+  if (!fromSite && !opts.automatic && !opts.bridge) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
   saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
   let prompt = `[MSG #${seq}]\n${framed}`;
@@ -1508,27 +1514,39 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   let attempts = 0;
   let markerBaseline = null; // set by the first try; lets a retry tell "already went out" from "never did"
   let busySince = 0; // TR-25: when we started waiting for a busy AI
+  // BF-02: opts.cancelToken ({ cancelled, typing }) lets the caller withdraw a
+  // send that is still queued or waiting for a busy AI. It is checked before
+  // every attempt and during every wait; once typing has started (token.typing)
+  // that attempt runs to its end. A withdrawn send returns { error: "CANCELLED" }.
+  const token = opts.cancelToken && typeof opts.cancelToken === "object" ? opts.cancelToken : null;
+  const isCancelled = () => !!(token && token.cancelled);
   const res = await withSendQueue(target, async () => {
     let r;
     for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
       attempts = attempt;
+      if (isCancelled()) { r = { ok: false, error: "CANCELLED" }; break; }
       // TR-28: let the target's finished reply be captured before we type over it.
       let gate = "ok";
-      try { gate = await waitForPendingCapture(target, seq, fromSite, { noForce: !!opts.raw }); } catch (_) {}
+      try { gate = await waitForPendingCapture(target, seq, fromSite, { noForce: !!opts.raw, isCancelled }); } catch (_) {}
+      if (isCancelled()) { r = { ok: false, error: "CANCELLED" }; break; }
       if (gate === "stopped") { r = { ok: false, error: "RELAY_STOPPED" }; break; }
       // TR-30 + TR-22: its last reply had no [FROM:] tag and was accepted just
       // now — this message carries the flag and the full rules at its top.
-      if ((gate === "accepted" || gate === "accepted-noto") && !flagged) {
+      // Never on a BookForge prompt (BF-16): it goes in exactly as written.
+      if ((gate === "accepted" || gate === "accepted-noto") && !flagged && !opts.bridge) {
         flagged = true;
         prompt = `[MSG #${seq}]\n${composeEnvelopeReminder(target, gate === "accepted-noto" ? "accepted-missing-both" : "accepted-missing-from")}\n\n— NEW MESSAGE BELOW —\n\n${framed}`;
       }
       if (gate === "busy") {
         r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
       } else {
+        if (token) token.typing = true;
         try {
           r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
         } catch (e) {
           r = { ok: false, error: String(e) };
+        } finally {
+          if (token) token.typing = false;
         }
       }
       // The send script proves a send by spotting this message's [MSG #n] number
@@ -1543,7 +1561,11 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (r && r.error === "AI_BUSY") {
         if (fromSite && !state.relayEnabled) { r = { ok: false, error: "RELAY_STOPPED" }; break; } // Stop AIs Talking while it waited
         if (!busySince) { busySince = Date.now(); logEvent("send-waiting-busy", { target, from: fromSite || null, seq, pageSaysGenerating: !!state.generating[target], how: (r && r.busyHow) || "stop-button" }); }
-        if (Date.now() - busySince < SEND_BUSY_WAIT_MS) { attempt--; await new Promise((resolve) => setTimeout(resolve, SEND_BUSY_POLL_MS)); continue; }
+        if (Date.now() - busySince < SEND_BUSY_WAIT_MS) {
+          await new Promise((resolve) => setTimeout(resolve, SEND_BUSY_POLL_MS));
+          if (isCancelled()) { r = { ok: false, error: "CANCELLED" }; break; }
+          attempt--; continue;
+        }
       }
       // E11: a provider-paused conversation won't recover by resending — the
       // composer is gone on purpose. Stop retrying and report it as itself.
@@ -1556,6 +1578,15 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     return r;
   });
 
+  // BF-02: withdrawn before it was typed — nothing went out, so it is neither a
+  // failed send (no error shown, pane health untouched) nor a message waiting
+  // for a reply.
+  if (res && res.error === "CANCELLED") {
+    try { relayTrace.noteSendResult(seq, { ...res, attempts }); } catch (_) {}
+    logEvent("send-cancelled", { target, seq, note: "withdrawn by its sender before it was typed" });
+    return res;
+  }
+
   // Record the seq-INDEPENDENT body (framed) as the ledger text, with seq as its
   // own field: duplicate detection compares message content, so the per-send
   // [MSG #] header must not make every send look unique.
@@ -1563,6 +1594,10 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   paneHealth.onSendResult(target, res);
   broadcastHealth();
   try { relayTrace.noteSendResult(seq, { ...(res || {}), attempts }); } catch (_) {}
+  // A BookForge prompt the AI is already answering: count it as started now
+  // (the page may have begun writing before the send script returned), so the
+  // Relay Trace can tell its reply from an older one still on the page.
+  if (opts.bridge && res && res.ok && state.generating[target]) { try { relayTrace.noteGenerating(target); } catch (_) {} }
   if (bbState.running) {
     bbState.sends.push({ target, from: fromSite || null, seq, text: prompt, ok: !!(res && res.ok), verified: !!(res && res.verified === true), ts: Date.now() });
     if (bbState.sends.length > 500) bbState.sends.shift();
@@ -3658,6 +3693,16 @@ async function pollSite(site) {
         forcedAccept = true;
         logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, severity: "warn", note: "no [FROM:] tag, but a new message had to go in — accepted it rather than lose it" });
       } else if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
+      // BF-16: this pane owes the BookForge bridge an answer to a prompt it
+      // already typed. BookForge asks for bare JSON and never gets tag reminders,
+      // so once its reply has gone quiet it is taken as finished (the Relay
+      // Trace still decides whether it answers BookForge's prompt).
+      else if (!pend.reprompted && bookforgeAwaitingReply(site) && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+        acceptedUntaggedRaw[site] = text;
+        text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
+        forcedAccept = true;
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "no [FROM:] tag on a reply while a BookForge prompt waits for its answer — taken as finished, no reminder sent" });
+      }
       // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
       // carries our envelope and will never grow one, so let it fall through to
       // the rate-limit handler below (which captures + auto-pauses) instead of
@@ -3865,8 +3910,17 @@ async function pollSite(site) {
     // or has nothing pending for this site, leaving normal handling untouched.
     if (bookforgeBridge) {
       let owned = false;
-      try { owned = bookforgeBridge.onCaptured(turn); } catch (e) { logEvent("bookforge-error", { site, error: String(e) }); }
-      if (owned) { logEvent("bookforge-owned-reply", { site, chars: turn.text.length }); return; }
+      // Ownership is by [MSG #] number (BF-01): the Relay Trace says which
+      // messages this reply answers; the bridge takes it only if one of them is
+      // the prompt it typed.
+      let answers = null;
+      try { answers = relayTrace.answersOf(turn.id); } catch (_) {}
+      try { owned = bookforgeBridge.onCaptured({ ...turn, answers }); } catch (e) { logEvent("bookforge-error", { site, error: String(e) }); }
+      if (owned) {
+        try { relayTrace.noteHeld(turn.id, "bookforge"); } catch (_) {}
+        logEvent("bookforge-owned-reply", { site, chars: turn.text.length });
+        return;
+      }
     }
 
     // Mesh routing (Auto/Auto-Both/manual routing:set) and either tag-based
@@ -5870,6 +5924,11 @@ function bookforgeBridgePort() {
   const p = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
   return Number.isInteger(p) && p > 0 && p < 65536 ? p : bookforgeBridgeMod.DEFAULT_PORT;
 }
+// True while the bridge's prompt to this site has been typed and its answer is
+// still due (pollSite then never nags that pane about missing tags).
+function bookforgeAwaitingReply(site) {
+  try { return !!(bookforgeBridge && typeof bookforgeBridge.awaitingReply === "function" && bookforgeBridge.awaitingReply(site)); } catch (_) { return false; }
+}
 function bookforgeSiteReady(site) {
   const view = siteViews[site];
   if (!view || !view.webContents || view.webContents.isDestroyed()) return false;
@@ -5893,12 +5952,14 @@ async function startBookforgeBridgeNow() {
     getToken: () => currentToken,
     siteReady: bookforgeSiteReady,
     wrapPrompt: (site, text) => withEnvelope(text, site),
-    sendToSite: async (site, text) => {
+    sendToSite: async (site, text, meta) => {
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
       // await) once the view exists, so reading it first gives this send's
       // exact [MSG #] number without changing sendTextTo's return shape.
       const seq = String(state.nextMsgSeq).padStart(4, "0");
-      const res = await sendTextTo(site, text, null);
+      // bridge: verbatim, no hop-count reset, no tag flags (BF-03/BF-16);
+      // cancelToken: the bridge withdraws it if its request times out first (BF-02).
+      const res = await sendTextTo(site, text, null, { bridge: true, cancelToken: meta && meta.cancelToken ? meta.cancelToken : null });
       return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
     },
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).

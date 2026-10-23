@@ -311,7 +311,7 @@ async function main() {
     console.log(`\n== BookForge e2e: seed=${SEED} quirks=${QUIRKS} (chatgpt: ${quirkList}) bridge=${bridgeImpl ? path.basename(bridgeImpl) : "bookforge-bridge.js"} faults=${[...FAULTS].join(",") || "none"} hop limit=${HOP_MAX} ==`);
 
     const idleAll = async () => (await Promise.all(SITES.map((s) => pages[s].evaluate(() => window.__fake.idle())))).every(Boolean);
-    const sentLogs = () => events.filter((e) => e.kind === "sent" || e.kind === "send-error").length;
+    const sentLogs = () => events.filter((e) => e.kind === "sent" || e.kind === "send-error" || e.kind === "send-cancelled").length; // a withdrawn (BF-02) send ends as send-cancelled
     async function quiet(ms, budget) {
       let last = Date.now();
       const until = Date.now() + budget;
@@ -461,9 +461,18 @@ async function main() {
     check("BF-01-stored", kept.length === 0, "BookForge never kept an answer that was made for another prompt", kept);
 
     // BF-02: nothing typed for a request after BookForge got its 504
+    // (a post that a LATER request with the same prompt got its 200 for — BookForge's "Try again" with a
+    // new request_id after a 504 that said typed:false — is that request's own send, not a ghost)
+    const claimedByLater = (r, p) => proxyLog.some((x) => x.i > r.i && x.site === r.site && x.prompt === r.prompt && x.status === 200 && x.body && String(x.body.seq) === p.seq);
     const ghosts = [];
     for (const r of proxyLog.filter((x) => x.status === 504)) {
-      for (const p of postsOf(r)) if (p.at > r.doneAt) ghosts.push(`${r.request_id}: 504 at +${((r.doneAt - r.sentAt) / 1000).toFixed(1)} s, prompt typed into ${LABEL[r.site]} as #${p.seq} ${((p.at - r.doneAt) / 1000).toFixed(1)} s LATER`);
+      for (const p of postsOf(r)) if (p.at > r.doneAt && !claimedByLater(r, p)) ghosts.push(`${r.request_id}: 504 at +${((r.doneAt - r.sentAt) / 1000).toFixed(1)} s, prompt typed into ${LABEL[r.site]} as #${p.seq} ${((p.at - r.doneAt) / 1000).toFixed(1)} s LATER`);
+      // the 504 must say truthfully whether the prompt was typed
+      const typedBefore = postsOf(r).filter((p) => p.at >= r.sentAt && p.at <= r.doneAt && !claimedByLater(r, p));
+      const said = r.body ? r.body.typed : undefined;
+      if (said === false && typedBefore.length) ghosts.push(`${r.request_id}: the 504 says the prompt was never typed, but it was typed as #${typedBefore[0].seq}`);
+      if (said === true && !postsOf(r).some((p) => p.seq === String(r.body.seq))) ghosts.push(`${r.request_id}: the 504 says the prompt was typed as #${r.body.seq}, but no such message reached ${LABEL[r.site]}`);
+      if (said !== true && said !== false) ghosts.push(`${r.request_id}: the 504 does not say whether the prompt was typed`);
     }
     const timeouts = proxyLog.filter((x) => x.status === 504).length;
     if (timeoutTarget) check("timeout-forced", timeoutTarget.status === 504, `the forced timeout happened (${timeoutTarget.request_id}: HTTP ${timeoutTarget.status})`);
