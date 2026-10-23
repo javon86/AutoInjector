@@ -128,6 +128,129 @@ function humanize(key) {
   const s = String(key).replace(/_refs$/, ' references').replace(/_ref$/, ' reference').replace(/_/g, ' ');
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+/* ======================================================================= plain words (BF-11)
+ * One place for the words authors see instead of contract jargon (execution kinds, field keys, formats,
+ * error codes). The technical details stay in the page inside .tech elements and show only while
+ * "🔧 Details" is switched on (html.show-tech, remembered in this browser) — for power users.
+ */
+const PLAIN_EXEC = {
+  LOGIC: 'BookForge does it (no AI)',
+  HYBRID: 'Your AI drafts it, or you write it yourself',
+  AI: 'Your AI drafts it (you can also write it yourself)',
+  'LOGIC/HYBRID': 'BookForge does it, with your AI or you filling in the creative parts',
+  'AI/HYBRID': 'Your AI drafts it, or you write it yourself',
+};
+function plainExecution(ex) { return PLAIN_EXEC[ex] || 'BookForge does it'; }
+/** One-line hints for the fields authors meet most; others get a hint from their name and kind (fieldHint). */
+const FIELD_HINT = {
+  concept: 'Who or what this is, in a sentence or two (a name and a short description is enough).',
+  instruction: 'What you want done, in your own words.',
+  idea: 'Your book idea in a few sentences.',
+  premise: 'What the book is about, in a few sentences.',
+  reason: 'Why, in a sentence.',
+  goals: 'What this should achieve.',
+  constraints: 'Anything it must or must not do.',
+  preferences: 'How you would like it done.',
+  mode: 'Choose how this should run.',
+  events: 'The events, one per item, in story order.',
+  span_ids: 'Which passages of the text this is about.',
+  source_refs: 'The records this is based on.',
+  manuscript_ref: 'Pick the manuscript (your chapters) to work on.',
+  main_plot_ref: 'Pick the main plot.',
+  style_ref: 'Pick the writing style to follow.',
+  outline_ref: 'Pick the chapter outline.',
+  premise_ref: 'Pick the premise.',
+  job_id: 'A short name for this job, e.g. job-1.',
+  character_id: 'Which character (as named in your story bible).',
+  chapter_id: 'Which chapter, e.g. ch-1.',
+  scene_id: 'Which scene, e.g. s-1.',
+  chapter_position: 'Where this chapter sits in the book.',
+  language_tag: 'The language, e.g. en or en-GB.',
+  title: 'The title.',
+  name: 'The name.',
+  summary: 'A short summary.',
+  text: 'The text itself.',
+  rewrite_goal: 'What the rewrite should change.',
+  transition_goal: 'What the transition should do.',
+  style_goal: 'How the style should change.',
+  style_name: 'A name for this style.',
+  style_rules: 'The rules of this style, one per item.',
+  feature_selected: 'Tick if this book uses this feature.',
+  phase: 'Which stage this belongs to.',
+  project_metadata: 'The book’s details.',
+};
+/** A plain one-line hint: the table above, else (required fields only) one made from the field's name and kind. */
+function fieldHint(key, kind, required) {
+  if (!key || /^\d+$/.test(key) || key === 'payload' || key === 'manual_candidate') return '';
+  if (FIELD_HINT[key]) return FIELD_HINT[key];
+  if (!required) return '';
+  const thing = humanize(key.replace(/_(refs?|ids?)$/, '')).toLowerCase();
+  if (/_ref$/.test(key) || kind === 'ref') return `Pick the ${thing} this builds on.`;
+  if (/_refs$/.test(key) || kind === 'refs') return `Pick the ${thing} records this uses (one or more).`;
+  if (/_ids$/.test(key)) return `Which ${thing}s (their ids, as shown on their records).`;
+  if (/_id$/.test(key)) return `Which ${thing} (its id, as shown on its record).`;
+  if (kind === 'choice') return 'Choose one of the options.';
+  if (kind === 'bool') return 'Tick for yes.';
+  if (kind === 'number') return 'A number.';
+  if (kind === 'list') return 'Add at least one with the Add button.';
+  if (kind === 'group') return 'Fill in the parts below.';
+  return `Write the ${thing} in your own words.`;
+}
+/** Technical detail (field key, format, error code…): in the page, shown only with 🔧 Details on. */
+function tech(...children) { return h('span', { class: 'tech' }, ' ', ...children); }
+function techBlock(...children) { return h('div', { class: 'tech tech-block' }, ...children); }
+function techOn() { return document.documentElement.classList.contains('show-tech'); }
+function setTech(on) {
+  document.documentElement.classList.toggle('show-tech', !!on);
+  saveJSON('bf:show-tech', !!on);
+  for (const b of document.querySelectorAll('.tech-toggle')) b.setAttribute('aria-pressed', String(!!on));
+}
+function techToggle() {
+  return h('button', { type: 'button', class: 'small tech-toggle', 'aria-pressed': String(techOn()),
+    title: 'Show or hide technical details (field keys, formats, operation codes, error codes) — for power users',
+    onclick: () => setTech(!techOn()) }, h('span', { 'aria-hidden': 'true' }, '🔧'), ' Details');
+}
+if (loadJSON('bf:show-tech', false)) document.documentElement.classList.add('show-tech');
+const PLAIN_ERR = {
+  MISSING_INPUT: 'Please fill this in.',
+  NOT_FOUND: 'The record this points to was not found (it may have been removed). Pick another one.',
+  PERMISSION_DENIED: 'You are not allowed to change this.',
+  LOCKED_FACT: 'This record is locked: it needs an approval before it can change.',
+  APPROVAL_REQUIRED: 'This needs your approval first.',
+  CAPABILITY_UNAVAILABLE: 'No AI is ready for this. Connect one in Settings, or write it yourself.',
+  HASH_MISMATCH: 'A linked record changed since it was picked. Pick it again.',
+  LEASE_EXPIRED: 'This took too long and was stopped. Try again.',
+  TIMEOUT: 'This took too long. Try again.',
+  QUOTA_EXCEEDED: 'The AI is over its limit right now. Try again later.',
+  UPSTREAM_UNAVAILABLE: 'The AI did not answer. Try again in a moment.',
+  UNSUPPORTED_CONTRACT: 'This version of BookForge does not understand that request.',
+  INTERNAL_ERROR: 'BookForge hit an unexpected problem. Try again; if it keeps happening, use 📋 Copy diagnostics.',
+};
+/** Plain words for an error from the server (client-side form errors are already plain and kept as they are). */
+function plainError(e) {
+  if (!e || typeof e !== 'object') return String(e || '');
+  if (!('retryable' in e)) return e.message || '';
+  const m = String(e.message || '');
+  if (e.code === 'VERSION_CONFLICT') {
+    const v = /stale base (?:version )?v?(\d+); head is v?(\d+)/.exec(m);
+    return v ? `Someone saved a newer version of this record (v${v[2]}) while you were editing v${v[1]}. Reload it, then make your change again.`
+      : 'This changed while you were working on it. Reload, then try again.';
+  }
+  if (e.code === 'INVALID_INPUT') {
+    if (/is empty|should be non-empty|is too short/.test(m) && !/\[/.test(m)) return 'This is empty: please type some text (spaces alone don’t count).';
+    if (/unsupported field/.test(m)) return 'This field does not belong here.';
+    if (/is not one of|const/.test(m)) return 'Choose one of the offered options.';
+    if (/does not match|is not a '/.test(m)) return 'This is not in the expected format.';
+    if (/is too long/.test(m)) return 'This is too long.';
+    if (/is not of type/.test(m)) return 'This is the wrong kind of value.';
+    return m.length < 120 && !/[{}[\]'/]/.test(m) ? m : 'This value is not accepted.';
+  }
+  return PLAIN_ERR[e.code] || m;
+}
+/** "(CODE at /path: raw message)" for the 🔧 Details view of a server error. */
+function errTech(e) {
+  return tech(h('code', null, [e.code, e.path ? `at ${e.path}` : null].filter(Boolean).join(' ')), e.message && plainError(e) !== e.message ? ` — ${e.message}` : '');
+}
 function fmtTime(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
@@ -791,7 +914,7 @@ function viewSet(main, letter) {
       h('h3', null, `${o.id} ${o.name}`),
       h('p', null, o.purpose.length > 160 ? o.purpose.slice(0, 157) + '…' : o.purpose),
       h('div', { class: 'row' }, opStateBadge(o.id), badge('▤', `${st.count} records`, 'b-muted'),
-        badge(o.execution.includes('AI') || o.execution.includes('HYBRID') ? '✦' : '⚙︎', o.execution, 'b-muted'),
+        badge(o.execution.includes('AI') || o.execution.includes('HYBRID') ? '✦' : '⚙︎', isCreative(o) ? 'AI or you' : 'Automatic', 'b-muted', plainExecution(o.execution)),
         isRequired(o.id) ? null : badge('–', 'not in manifest', 'b-muted'))));
   }
   if (letter === 'A') {
@@ -814,8 +937,8 @@ async function viewOperation(main, opId) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['Your books', '#/'], [S.project.name, plink()], [`${op.set} · ${sInfo.name}`, plink('set', op.set)], `${op.id} ${op.name}`),
     h('h1', null, `${op.id} ${op.name}`)),
-  h('div', { class: 'row' }, h('span', { class: 'op-state-slot' }, opStateBadge(opId)), badge(isCreative(op) ? '✦' : '⚙︎', op.execution, 'b-muted'),
-    badge('▦', op.ui_type, 'b-muted'))));
+  h('div', { class: 'row' }, h('span', { class: 'op-state-slot' }, opStateBadge(opId)), badge(isCreative(op) ? '✦' : '⚙︎', plainExecution(op.execution), 'b-muted'),
+    tech(badge('▦', op.ui_type, 'b-muted')), techToggle())));
   main.appendChild(stepNav(opId));
   const nextBox = h('div');
   const drawNext = () => clear(nextBox).appendChild(whatsNextCard(opId));
@@ -825,10 +948,15 @@ async function viewOperation(main, opId) {
   main.appendChild(nextBox);
 
   const notRequired = S.manifest && !isRequired(opId);
-  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'op-about' }, h('h2', { id: 'op-about' }, 'About this operation'),
+  const needs = (op.create_requires || []).map(x => humanize(x.replace(/^\/?payload\//, '').split('/')[0]));
+  main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'op-about' }, h('h2', { id: 'op-about' }, 'About this step'),
     h('dl', { class: 'kv' },
-      h('dt', null, 'Purpose'), h('dd', null, op.purpose),
+      h('dt', null, 'What it is for'), h('dd', null, op.purpose),
+      h('dt', null, 'Who does it'), h('dd', null, plainExecution(op.execution)),
+      h('dt', null, 'To start, fill in'), h('dd', null, needs.length ? [...new Set(needs)].join(', ') : 'nothing special')),
+    techBlock(h('dl', { class: 'kv' },
       h('dt', null, 'Execution'), h('dd', null, op.execution),
+      h('dt', null, 'UI type'), h('dd', null, op.ui_type || '—'),
       h('dt', null, 'AI policy'), h('dd', null, op.ai || '—'),
       h('dt', null, 'Routes'), h('dd', null, op.routes || '—'),
       h('dt', null, 'Minimum first input'), h('dd', null, (op.create_requires || []).length ? op.create_requires.map(x => h('code', null, x)).reduce((a, x) => a.concat(a.length ? [', ', x] : [x]), []) : 'none'),
@@ -837,7 +965,7 @@ async function viewOperation(main, opId) {
           ? `${b.allowed_producers.slice(0, 6).join(', ')} … (${b.allowed_producers.length})` : b.allowed_producers.join(', '),
         b.required_at_create ? ' (required)' : '')) : 'none'),
       h('dt', null, 'Manifest'), h('dd', null, S.manifest ? (isRequired(opId) ? 'Required in this branch’s feature manifest' : 'Not in required_operations for this branch') : 'unknown'),
-      h('dt', null, 'Specification'), h('dd', null, h('code', null, op.specification || '')))));
+      h('dt', null, 'Specification'), h('dd', null, h('code', null, op.specification || ''))))));
   if (notRequired && ['B08', 'B09', 'E08', 'A09'].includes(opId) || (notRequired && op.set === 'D')) {
     main.appendChild(stateBox('blocked', 'This operation may be disabled by a feature toggle',
       h('p', null, 'Requests can return NOT_APPLICABLE until the matching feature is enabled. ',
@@ -850,10 +978,9 @@ async function viewOperation(main, opId) {
     const recs = S.records.filter(r => r.module_id === opId);
     clear(recCard).appendChild(h('h2', { id: 'op-recs' }, `Records (${recs.length})`));
     if (!recs.length) {
-      recCard.appendChild(stateBox('empty', `No ${op.id} records on branch ${S.branch}`,
-        h('p', null, 'Minimum first input: ', (op.create_requires || []).length
-          ? op.create_requires.map(x => h('code', null, x)).reduce((a, x) => a.concat(a.length ? [', ', x] : [x]), [])
-          : 'see the required fields below', '. Fill the form below and choose Create.')));
+      recCard.appendChild(stateBox('empty', `Nothing here yet`,
+        h('p', null, 'Fill in the form below (the fields marked Required) and press Create.',
+          tech(`No ${op.id} records on branch ${S.branch}. Minimum first input: `, (op.create_requires || []).join(', ') || 'none', '.'))));
     } else {
       recCard.appendChild(recordList(recs));
     }
@@ -907,10 +1034,11 @@ async function createSection(op, schema) {
       },
       onGuidance: op.assist ? text => { openAssistPanel(op.id, pasteBtn); const p = AP.panels.get(`${S.pid}|${S.branch}|${op.id}`); if (p && p.setPrompt) p.setPrompt(text); } : null,
     }) }, h('span', { 'aria-hidden': 'true' }, '📥'), ' Paste');
-  card.appendChild(h('div', { class: 'new-head' }, h('h2', { id: 'new-h' }, `New ${op.id} record`), pasteBtn, aiBtn,
+  card.appendChild(h('div', { class: 'new-head' }, h('h2', { id: 'new-h' }, `New: ${op.name}`, tech(`(${op.id})`)), pasteBtn, aiBtn,
     aiBtn ? infoTip('What does Fill with AI do?', ...TIP_ASSIST(op)) : null));
   if (aiBtn) card.appendChild(h('p', { class: 'small muted', id: 'ai-btn-h' }, 'Fill with AI: type what you want and one of your AIs fills this form for you to review. Nothing is saved until you press Create.'));
-  card.appendChild(h('p', { class: 'muted small' }, 'Fields marked Required must be filled. Optional fields left empty are not sent (absent means “not supplied”).'));
+  card.appendChild(h('p', { class: 'muted small' }, 'Fill in the fields marked Required; leave the others empty if you like. ', techToggle(),
+    tech('Optional fields left empty are not sent (absent means “not supplied”).')));
   if (draft && draft.from_book) {
     card.appendChild(stateBox('draft', 'Prepared by “Make my book” — write it, then press Create',
       h('p', null, draft.from_book.message || '', ' The links to earlier steps are already filled in. ',
@@ -921,7 +1049,7 @@ async function createSection(op, schema) {
     card.appendChild(stateBox('draft', c ? `Copied from ${c.record_id} v${c.version}${c.title ? ` “${c.title}”` : ''} — please review`
       : `Pasted into the form${(pz.filled || []).length ? `: ${pz.filled.map(humanize).join(', ')}` : ''} — please review`,
     h('p', null, 'Nothing has been saved yet. Check the fields, change anything you like, then press Create. ',
-      c && c.manual ? 'The complete copied record is also in “Manual candidate” below (tick it to use it as-is). ' : '',
+      c && c.manual ? 'The complete copied record is also in “Write it myself” below (tick it to use it as-is). ' : '',
       skipped.length ? `Skipped (not fields of this form): ${skipped.join(', ')}. ` : '',
       h('button', { type: 'button', class: 'link', onclick: () => {
         if (confirm('Clear the form?')) { removeKey(draftKey); route(); }
@@ -958,9 +1086,10 @@ async function createSection(op, schema) {
     manualNode = buildNode(schema.output, draft ? draft.manual : undefined, '/manual_candidate', '', true, mctx, 0, { root: true });
     body.appendChild(manualNode.el);
     manualToggle.addEventListener('change', () => { body.hidden = !manualToggle.checked; });
-    manualWrap.appendChild(h('fieldset', { class: 'field' }, h('legend', null, 'Manual candidate'),
-      h('div', { class: 'check-row' }, manualToggle, h('label', { for: tid }, 'Write the output myself (manual candidate)')),
-      h('span', { class: 'hint', id: tid + '-h' }, 'Use this when no AI slot is connected or you want to supply your own text. The output form below is sent as manual_candidate and validated against the operation’s output schema. Nothing is sent to any AI provider in manual mode.'),
+    manualWrap.appendChild(h('fieldset', { class: 'field' }, h('legend', null, 'Write it myself'),
+      h('div', { class: 'check-row' }, manualToggle, h('label', { for: tid }, 'Write the finished result myself (no AI)')),
+      h('span', { class: 'hint', id: tid + '-h' }, 'Tick this when no AI is connected, or when you want to write the result yourself. Nothing is sent to an AI.',
+        tech('The form below is sent as manual_candidate and checked against the operation’s OUTPUT schema.')),
       body));
     formEl.appendChild(manualWrap);
   }
@@ -1010,9 +1139,9 @@ async function runDispatch(o) {
   const ctrl = new AbortController();
   clear(panel);
   const cancel = h('button', { type: 'button', onclick: () => ctrl.abort() }, 'Cancel');
-  panel.appendChild(h('div', { class: 'result-panel' }, loadingState(`Sending ${action} to ${op.id} — attempt ${keyStore.attempts}`),
-    h('p', { class: 'small muted' }, `Idempotency key ${keyStore.key}. `, keyStore.attempts > 1
-      ? 'This is a retry of the same submission with the same key, so it cannot create a duplicate.' : ''),
+  panel.appendChild(h('div', { class: 'result-panel' }, loadingState(action === 'CREATE' ? 'Saving…' : action === 'UPDATE' ? 'Saving the new version…' : 'Working…'),
+    h('p', { class: 'small muted' }, keyStore.attempts > 1 ? 'Trying again with the same content: it cannot be saved twice.' : '',
+      tech(`${action} ${op.id}, attempt ${keyStore.attempts}, idempotency key ${keyStore.key}`)),
     cancel));
   announce(`Sending ${action} to ${op.id}`);
   if (button) button.disabled = true;
@@ -1071,7 +1200,7 @@ function responsibleLinks(path, schema) {
 function renderResponse(resp, { op, action, forms, onManual, schema }) {
   const st = resp.status;
   const box = h('div', { class: 'result-panel', role: 'region', 'aria-label': `${op.id} ${action} result` });
-  box.appendChild(h('h3', null, statusBadge(st), `${op.id} ${action}`, h('span', { class: 'small muted' }, `attempt ${resp.attempt_id || ''}`)));
+  box.appendChild(h('h3', null, statusBadge(st), ` ${op.name}`, tech(h('span', { class: 'small muted' }, `${op.id} ${action} · attempt ${resp.attempt_id || ''}`))));
   const explain = {
     DRAFT: 'Saved as a draft revision. Draft is not approval: validate and accept it to approve.',
     VALIDATED: 'Validation passed. The revision still needs Accept to become approved.',
@@ -1090,18 +1219,18 @@ function renderResponse(resp, { op, action, forms, onManual, schema }) {
   }
   const errs = resp.errors || [];
   if (errs.length) {
-    box.appendChild(h('h4', null, 'Errors'));
+    box.appendChild(h('h4', null, 'What to fix'));
     const ul = h('ul', { class: 'error-list' });
     for (const e of errs) {
       const fieldLink = findFieldLink(e.path, forms);
-      const li = h('li', null, badge('✕', e.code, e.code === 'CAPABILITY_UNAVAILABLE' || e.code === 'APPROVAL_REQUIRED' ? 'b-warn' : 'b-bad'), ' ',
-        e.path ? (fieldLink || h('code', null, e.path)) : null, ' — ', e.message, e.retryable ? ' (retryable: submit again)' : '');
+      const li = h('li', null, h('span', { 'aria-hidden': 'true' }, e.code === 'CAPABILITY_UNAVAILABLE' || e.code === 'APPROVAL_REQUIRED' ? '⚠️ ' : '✕ '),
+        fieldLink ? [fieldLink, ': '] : null, plainError(e), e.retryable ? ' You can press the button again.' : '', errTech(e));
       const resp2 = responsibleLinks(e.path, schema);
       if (resp2) li.appendChild(h('div', { class: 'small' }, resp2));
       if (e.code === 'CAPABILITY_UNAVAILABLE') {
         li.appendChild(h('div', { class: 'row', style: 'margin-top:6px' },
-          onManual ? h('button', { type: 'button', class: 'primary small', onclick: onManual }, 'Fill in a manual candidate') : null,
-          h('a', { class: 'btn small', href: '#/settings' }, 'Configure an AI slot')));
+          onManual ? h('button', { type: 'button', class: 'primary small', onclick: onManual }, '✍️ Write it myself') : null,
+          h('a', { class: 'btn small', href: '#/settings' }, 'Connect an AI')));
       }
       if (e.code === 'LOCKED_FACT' || e.code === 'APPROVAL_REQUIRED') {
         li.appendChild(h('div', { class: 'small' }, 'Approvals come from ', h('a', { href: plink('op', 'K09') }, 'K09 Approval Checkpoints'), ' or ',
@@ -1117,7 +1246,7 @@ function renderResponse(resp, { op, action, forms, onManual, schema }) {
     box.appendChild(h('ul', null, unresolved.map(u => {
       const m = /^([A-K]\d\d):(.*)$/.exec(u);
       if (m && S.opsById[m[1]]) {
-        if (m[2] === 'manual_candidate' && onManual) return h('li', null, h('code', null, u), ' — ', h('button', { type: 'button', class: 'link', onclick: onManual }, 'fill the manual candidate'));
+        if (m[2] === 'manual_candidate' && onManual) return h('li', null, 'No AI wrote this: ', h('button', { type: 'button', class: 'link', onclick: onManual }, 'write it yourself'), tech(h('code', null, u)));
         return h('li', null, h('code', null, u), ' — ', h('a', { href: plink('op', m[1]) }, opLabel(m[1])));
       }
       return h('li', null, h('code', null, u));
@@ -1235,12 +1364,14 @@ class FormCtx {
     }
     this.errored = [];
   }
-  markError(f, msg) {
+  markError(f, msg, raw) {
     if (!f.errEl) return;
-    const code = (/\(([A-Z_]+)\)\s*$/.exec(msg) || [])[1] || 'INVALID_INPUT';
+    const code = (raw && raw.code) || (/\(([A-Z_]+)\)\s*$/.exec(msg) || [])[1] || 'INVALID_INPUT';
+    const plain = msg.replace(/\s*\([A-Z_]+\)\s*$/, '');
     const where = { book: (profileOf().title || (S.project || {}).name), field: f.label || f.ptr };
     f.errEl.hidden = false;
-    f.errEl.appendChild(h('span', { style: 'display:block' }, hazard({ code, message: msg.replace(/\s*\([A-Z_]+\)\s*$/, ''), path: f.ptr, where }, { form: () => focusField(f) }, { small: true }), ' ', msg));
+    f.errEl.appendChild(h('span', { style: 'display:block' }, hazard({ code, message: plain, path: f.ptr, where }, { form: () => focusField(f) }, { small: true }), ' ', plain,
+      raw && 'retryable' in raw ? errTech(raw) : null));
     f.wrap.classList.add('has-error');
     if (f.control) {
       f.control.setAttribute('aria-invalid', 'true');
@@ -1292,10 +1423,10 @@ function showFormErrors(errs, forms, summaryEl) {
   for (const e of errs) {
     const f = locateField(e.path, forms);
     const ctx = f && forms.find(c => c && [...c.fields.values()].includes(f));
-    if (f && ctx) ctx.markError(f, `${e.message}${e.code ? ` (${e.code})` : ''}`);
+    if (f && ctx) ctx.markError(f, plainError(e), e);
     items.push(h('li', null, f && f.control
-      ? h('a', { href: '#' + f.control.id, onclick: ev => { ev.preventDefault(); focusField(f); } }, f.label || e.path)
-      : h('code', null, e.path || '(request)'), ': ', e.message));
+      ? h('a', { href: '#' + f.control.id, onclick: ev => { ev.preventDefault(); focusField(f); } }, f.label || humanize(String(e.path || '').split('/').pop()))
+      : (f && f.label) || 'The form', ': ', plainError(e), 'retryable' in e ? errTech(e) : null));
   }
   if (summaryEl) {
     clear(summaryEl).appendChild(h('div', { class: 'error-summary', role: 'alert', tabindex: '-1' },
@@ -1307,10 +1438,12 @@ function fieldShell(ctx, ptr, label, required, opts = {}) {
   const id = ctx.id(ptr);
   const hintId = id + '-hint'; const errId = id + '-err';
   const key = ptr.split('/').pop();
-  const hintParts = [];
-  if (opts.hint) hintParts.push(opts.hint);
-  if (key && !/^\d+$/.test(key) && key !== 'payload' && key !== 'manual_candidate') hintParts.push(`Field ${key}`);
-  const hint = hintParts.length ? h('span', { class: 'hint', id: hintId }, hintParts.join(' · ')) : null;
+  // plain words first (a one-line hint for every required field), technical bits behind 🔧 Details
+  const hintParts = [fieldHint(key, opts.kind, required), opts.hint].filter(Boolean);
+  const techParts = [...(opts.tech || [])];
+  if (key && !/^\d+$/.test(key) && key !== 'payload' && key !== 'manual_candidate') techParts.unshift(`Field ${key}`);
+  const hint = hintParts.length || techParts.length ? h('span', { class: 'hint', id: hintId }, hintParts.join(' · '),
+    techParts.length ? tech(`(${techParts.join(' · ')})`) : null) : null;
   const err = h('span', { class: 'field-error', id: errId, hidden: true });
   const reqTag = opts.noTag ? null : h('span', { class: `req-tag${required ? ' required' : ''}` }, required ? 'Required' : 'Optional');
   return { id, hintId: hint ? hintId : null, hint, err, reqTag };
@@ -1373,14 +1506,16 @@ function buildNode(schema, value, ptr, name, required, ctx, depth, opts = {}) {
   if (t === 'boolean') return buildBoolean(value, ptr, label, required, nullable, ctx);
   if (t === 'object' && schema.properties && Object.keys(schema.properties).length) return buildObject(schema, value, ptr, label, required, ctx, depth, opts);
   if (t === 'array') return buildArray(schema, value, ptr, name, label, required, ctx, depth);
-  return buildJson(value, ptr, label, required, ctx, t === 'object' ? 'Free-form object as JSON' : 'JSON value');
+  return buildJson(value, ptr, label, required, ctx, t === 'object' ? 'Advanced: written as JSON, e.g. {"key": "value"}' : 'Advanced: written as JSON (text in "quotes")');
 }
 
 function buildString(schema, value, ptr, name, label, required, nullable, ctx) {
-  const sh = fieldShell(ctx, ptr, label, required, {
-    hint: [schema.format === 'date-time' ? 'Date-time, RFC3339 UTC, e.g. 2026-01-31T12:00:00Z' : null,
-      schema.pattern ? `Format ${schema.pattern}` : null, schema.maxLength ? `max ${schema.maxLength} characters` : null,
-      nullable ? 'Leave empty for null (unknown / not applicable)' : null].filter(Boolean).join(' · ') });
+  const sh = fieldShell(ctx, ptr, label, required, { kind: 'text',
+    hint: [schema.format === 'date-time' ? 'A date and time, e.g. 2026-01-31T12:00:00Z' : null,
+      schema.maxLength ? `up to ${schema.maxLength} characters` : null,
+      nullable ? 'Leave empty if unknown or not applicable' : null].filter(Boolean).join(' · '),
+    tech: [schema.format === 'date-time' ? 'RFC3339 UTC' : null, schema.pattern ? `pattern ${schema.pattern}` : null,
+      nullable ? 'empty = null' : null].filter(Boolean) });
   const long = LONG_TEXT.test(name || '') && !(schema.maxLength && schema.maxLength <= 200) && !/_id$/.test(name || '');
   const control = long
     ? h('textarea', { id: sh.id, rows: /^(text|prose|body|passage)$/.test(name) ? 12 : 4, class: /^(text|prose|body|passage)$/.test(name) ? 'prose' : null, spellcheck: 'true' })
@@ -1408,8 +1543,8 @@ function buildString(schema, value, ptr, name, label, required, nullable, ctx) {
 
 function buildNumber(schema, value, ptr, label, required, nullable, ctx, integer) {
   const bounds = [schema.minimum !== undefined ? `min ${schema.minimum}` : null, schema.maximum !== undefined ? `max ${schema.maximum}` : null,
-    integer ? 'whole number' : 'number', nullable ? 'leave empty for null' : null].filter(Boolean).join(' · ');
-  const sh = fieldShell(ctx, ptr, label, required, { hint: bounds });
+    integer ? 'whole number' : 'number', nullable ? 'leave empty if unknown' : null].filter(Boolean).join(' · ');
+  const sh = fieldShell(ctx, ptr, label, required, { hint: bounds, kind: 'number', tech: nullable ? ['empty = null'] : [] });
   const control = h('input', { id: sh.id, type: 'number', step: integer ? '1' : 'any', inputmode: integer ? 'numeric' : 'decimal' });
   if (schema.minimum !== undefined) control.min = schema.minimum;
   if (schema.maximum !== undefined) control.max = schema.maximum;
@@ -1434,7 +1569,7 @@ function buildNumber(schema, value, ptr, label, required, nullable, ctx, integer
 }
 
 function buildBoolean(value, ptr, label, required, nullable, ctx) {
-  const sh = fieldShell(ctx, ptr, label, required);
+  const sh = fieldShell(ctx, ptr, label, required, { kind: 'bool' });
   if (required && !nullable) {
     const control = h('input', { type: 'checkbox', id: sh.id, checked: value === true });
     describe(control, sh.hintId);
@@ -1443,9 +1578,9 @@ function buildBoolean(value, ptr, label, required, nullable, ctx) {
     return { el: wrap, get: () => control.checked };
   }
   const control = h('select', { id: sh.id },
-    h('option', { value: '' }, nullable ? '— null (unknown) —' : '— not set —'),
-    h('option', { value: 'true', selected: value === true }, 'Yes (true)'),
-    h('option', { value: 'false', selected: value === false }, 'No (false)'));
+    h('option', { value: '' }, nullable ? '— unknown —' : '— not set —'),
+    h('option', { value: 'true', selected: value === true }, 'Yes'),
+    h('option', { value: 'false', selected: value === false }, 'No'));
   describe(control, sh.hintId);
   const wrap = h('div', { class: 'field' }, h('label', { for: sh.id }, label, sh.reqTag), control, sh.hint, sh.err);
   ctx.register(ptr, { ptr, wrap, control, errEl: sh.err, label });
@@ -1453,13 +1588,13 @@ function buildBoolean(value, ptr, label, required, nullable, ctx) {
 }
 
 function buildEnum(schema, value, ptr, label, required, ctx) {
-  const sh = fieldShell(ctx, ptr, label, required);
+  const sh = fieldShell(ctx, ptr, label, required, { kind: 'choice' });
   const control = h('select', { id: sh.id });
   const hasNull = schema.enum.includes(null);
   control.appendChild(h('option', { value: '' }, required ? '— choose —' : '— not set —'));
   for (const v of schema.enum) {
     control.appendChild(h('option', { value: JSON.stringify(v), selected: value !== undefined && JSON.stringify(value) === JSON.stringify(v) },
-      v === null ? 'null (unknown)' : String(v)));
+      v === null ? 'unknown' : String(v)));
   }
   if (required) control.setAttribute('aria-required', 'true');
   describe(control, sh.hintId);
@@ -1471,7 +1606,7 @@ function buildEnum(schema, value, ptr, label, required, ctx) {
 function buildConst(schema, ptr, label, ctx) {
   const id = ctx.id(ptr);
   const wrap = h('div', { class: 'field' }, h('span', { class: 'field-label', id }, label),
-    h('code', null, JSON.stringify(schema.const)), h('span', { class: 'hint' }, 'Fixed value'));
+    h('code', null, JSON.stringify(schema.const)), h('span', { class: 'hint' }, 'Set by BookForge (you cannot change it)'));
   ctx.register(ptr, { ptr, wrap, control: null, errEl: null, label });
   return { el: wrap, get: () => schema.const };
 }
@@ -1503,8 +1638,8 @@ function buildScalarAny(alts, value, ptr, label, required, ctx) {
       if (!kinds.includes(k)) kinds.push(k);
     }
   }
-  const names = { string: 'Text', number: 'Number', boolean: 'True / false', null: 'Null (unknown)', list: 'List' };
-  const sh = fieldShell(ctx, ptr, label, required, { hint: 'Choose the value type, then enter the value. List: one item per line.' });
+  const names = { string: 'Text', number: 'Number', boolean: 'Yes / no', null: 'Unknown', list: 'List' };
+  const sh = fieldShell(ctx, ptr, label, required, { hint: 'Choose what kind of value it is, then enter it. List: one item per line.' });
   const typeSel = h('select', { id: sh.id + '-type', 'aria-label': `${label}: value type` });
   for (const k of kinds) typeSel.appendChild(h('option', { value: k }, names[k] || k));
   let initKind = 'string';
@@ -1568,7 +1703,7 @@ function variantMatches(v, value) {
   return false;
 }
 function buildVariant(schema, value, ptr, label, required, ctx, depth) {
-  const sh = fieldShell(ctx, ptr, label, required, { hint: 'Choose which form of this field to fill' });
+  const sh = fieldShell(ctx, ptr, label, required, { hint: 'Choose which kind to fill in', kind: 'choice' });
   const sel = h('select', { id: sh.id });
   if (!required) sel.appendChild(h('option', { value: '' }, '— not set —'));
   schema.oneOf.forEach((v, i) => sel.appendChild(h('option', { value: String(i) }, variantName(v, i))));
@@ -1621,6 +1756,8 @@ function buildObject(schema, value, ptr, label, required, ctx, depth, opts) {
   let include = null;
   const legend = h('legend', { id: id + '-legend' }, label, h('span', { class: `req-tag${required ? ' required' : ''}` }, required ? 'Required' : 'Optional'));
   const wrap = h('fieldset', { class: 'field', 'aria-describedby': id + '-err' }, legend);
+  const gHint = fieldHint(ptr.split('/').pop(), 'group', required);
+  if (gHint) wrap.appendChild(h('span', { class: 'hint' }, gHint));
   if (optionalToggle) {
     include = h('input', { type: 'checkbox', id: id + '-inc', 'aria-controls': id + '-body', checked: value !== undefined && value !== null });
     wrap.appendChild(h('div', { class: 'check-row' }, include, h('label', { for: id + '-inc' }, `Provide ${label.toLowerCase()}`)));
@@ -1647,7 +1784,7 @@ function buildArray(schema, value, ptr, name, label, required, ctx, depth) {
   const id = ctx.id(ptr);
   const err = h('span', { class: 'field-error', id: id + '-err', hidden: true });
   const reqTag = h('span', { class: `req-tag${required ? ' required' : ''}` }, required ? 'Required' : 'Optional');
-  const hintTxt = [schema.minItems ? `at least ${schema.minItems}` : null, schema.maxItems ? `at most ${schema.maxItems}` : null].filter(Boolean).join(', ');
+  const hintTxt = [fieldHint(name, items.enum ? 'choice' : 'list', required), schema.minItems ? `at least ${schema.minItems}` : null, schema.maxItems ? `at most ${schema.maxItems}` : null].filter(Boolean).join(' · ');
   // enum items -> checkbox group
   if (items.enum && items.enum.length <= 40) {
     const boxes = items.enum.map((v, i) => {
@@ -1727,7 +1864,7 @@ async function approvedRef(r) {
 function fillRefSelect(select, allowed, { nullable, required, current }) {
   const map = new Map();
   clear(select);
-  if (nullable) select.appendChild(h('option', { value: '__null' }, '— none (null) —'));
+  if (nullable) select.appendChild(h('option', { value: '__null' }, '— none —'));
   select.appendChild(h('option', { value: '' }, required && !nullable ? '— choose a record —' : '— not set —'));
   const recs = candidateRecords(allowed.list);
   const groups = new Map();
@@ -1769,14 +1906,19 @@ function producerHelp(allowed) {
   if (!allowed.list) return null;
   const ops = allowed.list.slice(0, 5);
   return h('span', null, 'Create one in ', ops.map((p, i) => [i ? ', ' : '', h('a', { href: plink('op', p) }, opLabel(p))]),
-    allowed.list.length > 5 ? ` or ${allowed.list.length - 5} other modules` : '', '.');
+    allowed.list.length > 5 ? ` or ${allowed.list.length - 5} other steps` : '', '.');
 }
 
+/** Hint for a record picker: what kind of record, in words; the operation codes go behind 🔧 Details. */
+function refHintOpts(allowed, kind) {
+  if (!allowed.list) return { kind, hint: 'Pick a record from this book.', tech: ['accepts any record in this branch'] };
+  const names = allowed.list.slice(0, 3).map(m => (S.opsById[m] ? S.opsById[m].name : m));
+  return { kind, hint: `Pick from: ${names.join(', ')}${allowed.list.length > 3 ? ' and more' : ''}.`,
+    tech: [`accepts ${allowed.list.length > 6 ? allowed.list.slice(0, 6).join(', ') + ' …' : allowed.list.join(', ')}`] };
+}
 function buildRefField(refSchema, value, ptr, label, required, ctx, nullable) {
   const allowed = allowedModules(refSchema, ptr, ctx);
-  const sh = fieldShell(ctx, ptr, label, required, { hint: allowed.list
-    ? `Accepts records from ${allowed.list.length > 6 ? allowed.list.slice(0, 6).join(', ') + ' …' : allowed.list.join(', ')}`
-    : 'Accepts any record in this branch' });
+  const sh = fieldShell(ctx, ptr, label, required, refHintOpts(allowed, 'ref'));
   const select = h('select', { id: sh.id });
   if (required) select.setAttribute('aria-required', 'true');
   describe(select, sh.hintId);
@@ -1811,9 +1953,7 @@ function buildRefField(refSchema, value, ptr, label, required, ctx, nullable) {
 
 function buildRefArray(refSchema, value, ptr, label, required, ctx) {
   const allowed = allowedModules(refSchema, ptr, ctx);
-  const sh = fieldShell(ctx, ptr, label, required, { hint: allowed.list
-    ? `Accepts records from ${allowed.list.length > 6 ? allowed.list.slice(0, 6).join(', ') + ' …' : allowed.list.join(', ')}`
-    : 'Accepts any record in this branch' });
+  const sh = fieldShell(ctx, ptr, label, required, refHintOpts(allowed, 'refs'));
   const chosen = Array.isArray(value) ? value.filter(isRefValue) : [];
   const listEl = h('ul', { class: 'ref-list' });
   const select = h('select', { id: sh.id, 'aria-label': `${label}: record to add` });
@@ -1822,7 +1962,7 @@ function buildRefArray(refSchema, value, ptr, label, required, ctx) {
   const addBtn = h('button', { type: 'button', class: 'small' }, 'Add');
   const renderList = () => {
     clear(listEl);
-    if (!chosen.length) listEl.appendChild(h('li', { class: 'small muted' }, 'None selected (sent as an empty list when required).'));
+    if (!chosen.length) listEl.appendChild(h('li', { class: 'small muted' }, 'None picked yet.'));
     chosen.forEach((ref, i) => listEl.appendChild(h('li', null, refChip(ref),
       h('button', { type: 'button', class: 'small', 'aria-label': `Remove ${ref.record_id} v${ref.version}`, onclick: () => {
         chosen.splice(i, 1); renderList(); listEl.dispatchEvent(new Event('change', { bubbles: true })); select.focus();
@@ -2126,8 +2266,9 @@ async function viewEdit(main, rid) {
       h('p', null, `UPDATE replaces ${op.id} OUTPUT records only; this is a ${latest.record_kind} record.`)));
     return;
   }
-  const card = h('section', { class: 'card', 'aria-labelledby': 'ed-h' }, h('h2', { id: 'ed-h' }, 'Full replacement'),
-    h('p', { class: 'small muted' }, `Saving creates revision v${latest.version + 1} as a new DRAFT. The approved head stays as it is until the new revision is validated and accepted. Every field is sent: this is a full replacement, not a patch.`));
+  const card = h('section', { class: 'card', 'aria-labelledby': 'ed-h' }, h('h2', { id: 'ed-h' }, 'Edit'),
+    h('p', { class: 'small muted' }, `Saving makes version ${latest.version + 1} as a draft. The approved version stays in the book until you approve the new one. `, techToggle(),
+      tech('Every field is sent: this is a full replacement (UPDATE), not a patch.')));
   if (latest.lifecycle === 'LOCKED') card.appendChild(stateBox('blocked', 'This record is LOCKED',
     h('p', null, 'An UPDATE needs a protected-change authorization (an I10 or K09 approval with scope ', h('code', null, `${op.id}:protected_change`), ').')));
   const draftKey = `bf:draft:${S.pid}:${S.branch}:${op.id}:edit:${rid}`;

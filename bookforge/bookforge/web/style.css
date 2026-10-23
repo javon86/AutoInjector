@@ -945,3 +945,9 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
 .words-warn { margin: 6px 0 0; padding: 6px 10px; border-left: 4px solid var(--warn, #b45309); background: var(--surface-2); }
 .refused-box { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 .bb-wizard:empty { display: none; }
+
+/* 🔧 Details (BF-11): technical words stay in the page but show only when the author asks for them */
+html:not(.show-tech) .tech { display: none !important; }
+.tech { color: var(--text-muted); font-size: .85em; }
+.tech-block { margin-top: 8px; }
+.tech-toggle[aria-pressed="true"] { background: var(--surface-2); }

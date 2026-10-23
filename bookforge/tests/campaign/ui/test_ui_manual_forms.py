@@ -190,3 +190,72 @@ def test_blank_required_text_is_refused(make_context, server):
         goto(page, f"#/p/{pid}/main/op/A01")
         shot(page, "NEW-ui-5_blank_character_saved")
     assert recs == [], f"saved: {[r['title'] for r in recs]!r}"
+
+
+JARGON = ["HYBRID", "T1 Schema", "Schema/Form Builder", "manual_candidate", "Accepts references from", "Accepts records from",
+          "Field concept", "(null)", "for null", "Idempotency", "/base_ref", "stale base", "MISSING_INPUT", "INVALID_INPUT"]
+
+
+@pytest.mark.parametrize("op", ["A01", "B11", "C01"])
+def test_manual_forms_speak_plain_words(make_context, server, op):
+    """BF-11: no contract jargon on the author's forms, a one-line hint on every required field, and the
+    technical details still there behind 🔧 Details."""
+    proj = server.api("POST", "/projects", {"name": f"Plain {op}", "profile": {"title": f"Plain {op}", "ai_slot": "manual"}})
+    page = open_app(make_context(), server, f"#/p/{proj['project_id']}/main/op/{op}")
+    page.evaluate("() => { try { localStorage.removeItem('bf:show-tech'); } catch (e) {} document.documentElement.classList.remove('show-tech'); }")
+    goto(page, f"#/p/{proj['project_id']}/main/op/{op}")
+    main = page.inner_text("#main")
+    leaked = [w for w in JARGON if w in main]
+    assert not leaked, leaked
+    # every required field (the Required tag) carries a visible, non-empty hint
+    missing = page.evaluate("""() => Array.from(document.querySelectorAll('#main form .field'))
+        .filter(f => !f.closest('[hidden]') && f.querySelector(':scope > label .req-tag.required, :scope > legend .req-tag.required, :scope > .check-row label .req-tag.required'))
+        .filter(f => { const hint = f.querySelector(':scope > .hint'); return !hint || !hint.innerText.trim(); })
+        .map(f => (f.querySelector('label, legend') || f).innerText.trim())""")
+    assert missing == [], missing
+    # 🔧 Details shows the technical words again (and is remembered)
+    page.locator("#main .tech-toggle").first.click()
+    shown = page.inner_text("#main")
+    assert "Execution" in shown and "Field " in shown, shown[:400]
+    page.reload()
+    page.wait_for_selector("#main h1", timeout=15000)
+    settle(page)
+    assert page.evaluate("() => document.documentElement.classList.contains('show-tech')")
+    page.locator("#main .tech-toggle").first.click()
+    assert not page.evaluate("() => document.documentElement.classList.contains('show-tech')")
+    assert_clean(page, f"plain-{op}")
+
+
+def test_server_refusal_is_shown_in_plain_words(make_context, server):
+    """A refusal from the server (here a stale edit: the record changed in between) is explained in words at the
+    form, with the error code and pointer only under 🔧 Details."""
+    proj = server.api("POST", "/projects", {"name": "Stale Words", "profile": {"title": "Stale Words", "ai_slot": "manual"}})
+    pid = proj["project_id"]
+    page = open_app(make_context(), server, f"#/p/{pid}/main/op/A01")
+    page.locator("#main form textarea[id$='_payload_concept']").first.fill("Ada Quill, cartographer")
+    submit(page)
+    recs = server.api("GET", f"/projects/{pid}/branches/main/records")
+    assert len(recs) == 1, recs
+    rid = recs[0]["record_id"]
+    goto(page, f"#/p/{pid}/main/edit/{rid}")
+    # someone else saves v2 meanwhile
+    detail = server.api("GET", f"/projects/{pid}/branches/main/records/{rid}")
+    v1 = detail["versions"][-1]
+    req = {"project_id": pid, "branch_id": "main", "target_operation": "A01", "action": "UPDATE",
+           "payload": dict(v1["data"], concept="Ada Quill, cartographer (other tab)"),
+           "base_ref": v1["ref"], "input_refs": [], "idempotency_key": "other-tab-1"}
+    out = server.api("POST", "/dispatch", {"request": req})
+    assert out["response"]["status"] == "DRAFT", out
+    box = page.locator("#main form textarea[id$='_payload_concept'], #main form input[id$='_payload_concept']").first
+    box.fill("Ada Quill, cartographer (this tab)")
+    page.locator("#main form button[type=submit]").first.click()
+    problem = page.locator("#main .error-summary, #main .result-panel .error-list").first
+    problem.wait_for(timeout=10000)
+    settle(page, 300)
+    text = page.inner_text("#main")
+    assert "newer version" in text and "v2" in text, text[:1500]
+    leaked = [w for w in ("stale base", "/base_ref", "VERSION_CONFLICT") if w in text]
+    assert not leaked, leaked
+    page.locator("#main .tech-toggle").first.click()
+    assert "VERSION_CONFLICT" in page.inner_text("#main")
+    page.locator("#main .tech-toggle").first.click()
