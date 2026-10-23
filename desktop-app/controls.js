@@ -3218,8 +3218,10 @@ function bfShortLabel(r) {
   const op = String(r.op || r.id || "");
   const set = String(r.set || "");
   const title = String(r.title || "");
-  // "B03" with set "B" -> "03"; an op that IS the set ("A") -> its title
-  let lbl = op && set && op.toUpperCase().startsWith(set.toUpperCase()) && op.length > set.length ? op.slice(set.length) : (op && op !== set ? op : title);
+  // An op code "B03" in set "B" -> "03"; an op that IS the set ("A") -> its title.
+  // A step id that merely starts with the set's letter ("chapters" in set C) stays whole.
+  const code = /^([A-K])(\d+)$/i.exec(op);
+  let lbl = code && set && code[1].toUpperCase() === set.toUpperCase() ? code[2] : (op && op !== set ? op : title);
   if (!lbl) lbl = title || op || "?";
   return lbl.length > 14 ? `${lbl.slice(0, 13)}…` : lbl;
 }
