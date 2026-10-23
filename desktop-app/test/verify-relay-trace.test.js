@@ -32,6 +32,7 @@ function run(lib, steps) {
     if (s.t) clock += s.t;
     if (s.send) { T.noteSend({ seq: s.send, target: s.to, kind: s.kind || 'relay', from: s.from || null, text: `[MSG #${s.send}]\nbody ${s.send}` }); T.noteSendResult(s.send, { ok: true, verified: true, attempts: 1 }); }
     if (s.gen) T.noteGenerating(s.gen);
+    if (s.idle && T.noteIdle) T.noteIdle(s.idle); // main.js reports the writing->idle edge (M1)
     if (s.cap) T.noteCapture(s.cap, s.turn, { none: !!s.none });
   }
   clock += NO_REPLY + 1;
@@ -81,23 +82,40 @@ differs('typed while still writing, then answered', [
   { t: 500, gen: 'claude' }, { t: 3000, cap: 'claude', turn: 2 }
 ], '0001:t1 0002:t2', '0001:t1 0002:t1');
 
-// RISK: an older message that was SEEN being answered but whose reply was never
-// captured (e.g. a second identical NONE is swallowed without a capture, or a
-// same-text reply is treated as a re-draw) stays open + started. If the next
-// message is answered faster than one poll (POLL_MS 1500 ms by default, so the
-// generating edge is never seen), the new rule gives the captured reply to the
-// STALE message and leaves the new one open -> a false "NO REPLY" for it.
+// M1 (was a RISK, now fixed): an older message that was SEEN being answered but
+// whose reply was never captured as a new reply (a second identical NONE, or a
+// same-text reply treated as a re-draw) stays open + started. When the next
+// message is typed while the AI is idle and answered faster than one poll (no
+// writing edge seen), the captured reply must answer the NEW message too —
+// not leave it open (false "NO REPLY"; with BookForge ON the bridge prompt
+// would not own its own answer -> 504, then a LATE_REPLY_STORED mix-up).
+// The "keep the newest open" rule now applies only to messages typed while
+// the AI was still writing (the "typed while still writing" case above).
 const staleSteps = [
   { send: '0001', to: 'gemini' }, { t: 500, gen: 'gemini' }, { t: 1000, cap: 'gemini', turn: 1, none: true },
-  { send: '0002', to: 'gemini' }, { t: 500, gen: 'gemini' }, // second NONE: never captured (main.js returns early: seen.text === text)
+  { send: '0002', to: 'gemini' }, { t: 500, gen: 'gemini' }, { t: 1000, idle: 'gemini' }, // second NONE: never captured (main.js: seen.text === text)
   { t: 5000, send: '0003', to: 'gemini' }, { t: 900, cap: 'gemini', turn: 3 } // fast real reply
 ];
-const st = differs('stale started message + a fast reply', staleSteps, '0001:t1 0002:t3 0003:OPEN', '0001:t1 0002:t3 0003:t3');
-assert(st.noReply === 1, `new rule reports a false NO REPLY for 0003 (noReply=${st.noReply})`);
-// With the BookForge bridge ON this is the ownership input: answersOf(turn 3)
-// would not contain 0003, so a bridge prompt typed as 0003 would NOT own its
-// own answer (the answer would go to the normal relay and the request time out).
-assert(JSON.stringify(st.answersOf(3)) === '["0002"]', `answersOf(3) = ${JSON.stringify(st.answersOf(3))} (bridge prompt 0003 would not own its answer)`);
+const st = same('stale started message + a fast reply (typed while idle)', staleSteps);
+assert(st.noReply === 0, `no false NO REPLY for 0003 (noReply=${st.noReply})`);
+assert(JSON.stringify(st.answersOf(3)).includes('"0003"'), `answersOf(3) = ${JSON.stringify(st.answersOf(3))} includes the new message 0003 (a bridge prompt owns its answer)`);
+// main.js also closes the stale message when the second NONE / same text is seen
+// (closeUncapturedReply -> noteCapture(site, null)); then turn 3 answers only 0003.
+const closed = run(NEW, [
+  { send: '0001', to: 'gemini' }, { t: 500, gen: 'gemini' }, { t: 1000, cap: 'gemini', turn: 1, none: true },
+  { send: '0002', to: 'gemini' }, { t: 500, gen: 'gemini' }, { t: 1000, cap: 'gemini', turn: null, none: true },
+  { t: 5000, send: '0003', to: 'gemini' }, { t: 900, cap: 'gemini', turn: 3 }
+]);
+assert(closed.msgs === '0001:t1 0002:none 0003:t3' && closed.noReply === 0, `stale message closed by the repeated NONE: ${closed.msgs} (noReply ${closed.noReply})`);
+assert(JSON.stringify(closed.answersOf(3)) === '["0003"]', `answersOf(3) = ${JSON.stringify(closed.answersOf(3))}`);
+// Typed over the stale message's reply while the AI was STILL writing, then a
+// fast reply: the older message keeps the reply, the newer stays open (the
+// rule's purpose is preserved).
+const over = run(NEW, [
+  { send: '0001', to: 'gemini' }, { t: 500, gen: 'gemini' }, { t: 300, send: '0002', to: 'gemini' }, { t: 900, cap: 'gemini', turn: 1 },
+  { t: 300, gen: 'gemini' }, { t: 900, cap: 'gemini', turn: 2 }
+]);
+assert(over.msgs === '0001:t1 0002:t2', `typed while writing: ${over.msgs}`);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

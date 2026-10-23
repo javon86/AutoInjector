@@ -858,7 +858,21 @@ const capturedCount = {};
 const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
 const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
 const settleKey = (s) => String(s || "").replace(/\s+/g, "");
+// M1: the AI was seen writing since the last capture (the Relay Trace then
+// counts the messages it was answering as started).
+const wroteSinceCapture = {};
+// M1: a new reply was seen being written but is not captured as a new reply
+// (a second identical NONE, or the same text again): close the messages it
+// answered in the Relay Trace, so a stale "started" message can't take the
+// next message's reply (a false "no reply", or a BookForge prompt not owning
+// its own answer).
+function closeUncapturedReply(site, why) {
+  if (!wroteSinceCapture[site]) return;
+  wroteSinceCapture[site] = false;
+  try { relayTrace.noteCapture(site, null, { none: why === "none-again" }); } catch (_) {}
+}
 function markCaptured(site) {
+  wroteSinceCapture[site] = false;
   try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
   capturedCount[site] = readCount[site] != null ? readCount[site] : null;
   tagSeenAt[site] = 0;
@@ -3613,7 +3627,8 @@ async function pollSite(site) {
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
       state.generating[site] = generating;
-      if (generating) { try { relayTrace.noteGenerating(site); } catch (_) {} }
+      if (generating) { wroteSinceCapture[site] = true; try { relayTrace.noteGenerating(site); } catch (_) {} }
+      else { try { relayTrace.noteIdle(site); } catch (_) {} }
       broadcast("generation", { site, generating });
     }
 
@@ -3644,7 +3659,7 @@ async function pollSite(site) {
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
       if (Date.now() - pend.sinceTs < STABLE_MS) return;
       const seen = state.captured[site];
-      if (seen && seen.text === text) return; // already swallowed this exact NONE
+      if (seen && seen.text === text) { closeUncapturedReply(site, "none-again"); return; } // already swallowed this exact NONE
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
       markCaptured(site);
       state.noTagReprompts[site] = 0;
@@ -3748,6 +3763,7 @@ async function pollSite(site) {
     if (redrawCheck && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
       state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
       if (forcedAccept) state.captured[site].rawText = acceptedUntaggedRaw[site];
+      closeUncapturedReply(site, "same-text");
       logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
       return;
     }
