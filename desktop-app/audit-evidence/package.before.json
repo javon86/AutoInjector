@@ -1,0 +1,79 @@
+{
+  "name": "autoinjector-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop app: ChatGPT, Claude and Gemini as three real browser panes in one window, routing messages between them via browser copy/paste automation (no API keys for those three), plus an optional manager/orchestrator that supervises them via a self-hosted RunPod/Ollama/LM Studio model.",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/ensure-deps.js && electron .",
+    "pretest": "node scripts/ensure-deps.js",
+    "test": "npm run test:unit",
+    "test:unit": "node test/controls.test.js && node test/prompt-editor.test.js && node test/prompt-sequence.test.js && node test/manager-provider.test.js && node test/selectors-sync.test.js && node test/shared-db.test.js && node test/sync.test.js && node test/memory.test.js && node test/files.test.js && node test/db-service.test.js && node test/ollama-manager.test.js && node test/output-manager.test.js && node test/read-script.test.js && node test/secret-store.test.js && node test/openai-client.test.js && node test/service-bridge.test.js && node test/interpreter-provider.test.js && node test/tool-provider.test.js && node test/voice-provider.test.js && node test/image-provider.test.js && node test/setup-manager.test.js && node test/gpu-monitor.test.js && node test/video-provider.test.js && node test/endpoint-detect.test.js && node test/log-bundle.test.js",
+    "test:integration": "node test/run.js",
+    "test:e2e": "node test/e2e/smoke.e2e.js",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:browser": "node test/browser.test.js",
+    "quality": "node scripts/quality-check.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "~43.0.0",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.1.1"
+  },
+  "build": {
+    "appId": "com.autoinjector.desktop",
+    "productName": "AutoInjector Desktop",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "automation.js",
+      "selectors.js",
+      "manager-provider.js",
+      "openai-client.js",
+      "service-bridge.js",
+      "interpreter-provider.js",
+      "tool-provider.js",
+      "voice-provider.js",
+      "image-provider.js",
+      "video-provider.js",
+      "endpoint-detect.js",
+      "setup-manager.js",
+      "gpu-monitor.js",
+      "ollama-manager.js",
+      "output-manager.js",
+      "secret-store.js",
+      "db-service.js",
+      "shared/**/*.js",
+      "controls.html",
+      "controls.js",
+      "setup-wizard.html",
+      "setup-wizard.js",
+      "feed.html",
+      "feed.js",
+      "prompt-editor.html",
+      "prompt-editor.js",
+      "prompt-sequence.html",
+      "prompt-sequence.js",
+      "scripts/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "systeminformation": "^5.33.1"
+  }
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>wrapped editor fixture</title></head>
+<body>
+<!-- A chat composer in the style of modern rich editors (Lexical / Slate):
+     its own STATE changes only through the browser's editing pipeline
+     (beforeinput / paste); raw DOM writes (textContent = ...) are wiped on
+     the next render, and Send posts the STATE, not what's on screen.
+     ?slow=1 makes the composer clear 7 s after a real send (a laggy page). -->
+<div id="log"></div>
+<!-- TR-27: the saved "message box" selector names this WRAPPER (not the
+     editable box inside it), and a hidden "Send" button comes first in the
+     page — the shape of the ChatGPT overrides seen in a live log. -->
+<button type="button" aria-label="Send" style="display:none" disabled>old</button>
+<div aria-label="Ask ChatGPT" id="wrap"><span class="placeholder">Ask anything</span><div id="prompt-textarea" contenteditable="true"><p></p></div></div>
+<button type="button" id="send" aria-label="Send">Send</button>
+<script>
+  let state = "";
+  window.__sent = [];
+  const slow = /slow=1/.test(location.search);
+  const ed = document.getElementById("prompt-textarea");
+  const btn = document.getElementById("send");
+  const log = document.getElementById("log");
+  function render() { ed.textContent = state; document.querySelector(".placeholder").style.display = state ? "none" : ""; btn.disabled = !state.trim(); }
+  ed.addEventListener("beforeinput", (e) => {
+    e.preventDefault();
+    if (e.inputType === "insertText") state += e.data || "";
+    else if (e.inputType === "insertParagraph" || e.inputType === "insertLineBreak") state += "\n";
+    else if (e.inputType.indexOf("delete") === 0) state = "";
+    render();
+  });
+  ed.addEventListener("input", render);
+  ed.addEventListener("paste", (e) => { e.preventDefault(); state += e.clipboardData.getData("text/plain"); render(); });
+  function send() {
+    if (!state.trim()) return;
+    window.__sent.push(state);
+    const d = document.createElement("div");
+    d.setAttribute("data-message-author-role", "user");
+    d.textContent = state;
+    log.appendChild(d);
+    const clear = () => { state = ""; render(); };
+    if (slow) setTimeout(clear, 7000); else clear();
+  }
+  btn.addEventListener("click", () => { if (!btn.disabled) send(); });
+  ed.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+  render();
+</script>
+</body></html>

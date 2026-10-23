@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>split reply fixture</title></head>
+<body>
+<!-- TR-31: a reply whose first line ([TO: ...]) sits in the element the reader
+     selects, while the rest of it is rendered in a sibling block the selector
+     doesn't cover (seen live on Gemini: the reader saw only "[TO:"). -->
+<div id="chat">
+  <user-query><p>[MSG #0013] hello</p></user-query>
+  <model-response>
+    <message-content><div class="markdown"><p>[TO: ALL]</p></div></message-content>
+    <div class="response-extra"><p>Here is the rest of my reply.</p><pre>code block</pre><p>[FROM: GEMINI]</p></div>
+  </model-response>
+</div>
+</body></html>

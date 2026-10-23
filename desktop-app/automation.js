@@ -10,6 +10,12 @@
 // any other pane, on demand or automatically) instead of a fixed turn order.
 const SITES = require("./selectors");
 
+// TR-24: a selector that is only a tag name ("span", "p", "div") matches
+// hundreds of unrelated elements — never a usable override. Shared by the
+// read/probe scripts (they skip it) and main.js (it refuses to save it).
+function isBareTagSelector(sel) { return /^\s*[a-z][a-z0-9-]*\s*$/i.test(String(sel || "")); }
+function usableOverride(sel) { return sel && !isBareTagSelector(sel) ? sel : null; }
+
 function siteConfig(site) {
   const cfg = SITES[site];
   if (!cfg) throw new Error(`Unknown site: ${site}`);
@@ -28,14 +34,31 @@ const DEFAULT_PAUSE_MARKERS = [
   "unable to continue the conversation",
 ];
 
-function buildSendScript(site, text, overrides) {
+// The "[MSG #0042]" header at the top of a send, or null.
+function messageMarker(text) {
+  const m = /^\[MSG #\d+\]/.exec(String(text || ""));
+  return m ? m[0] : null;
+}
+
+function buildSendScript(site, text, overrides, sendOpts) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
   const payload = JSON.stringify({
     text,
-    INPUT_CANDIDATES: ov.input ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS
+    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    ASSISTANT_CANDIDATES: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS,
+    // The [MSG #0042] header main.js stamps on every send. It is unique per send,
+    // so seeing it in the conversation (outside the composer) is PROOF the
+    // message really went out — see markerShown() below.
+    marker: messageMarker(text),
+    // How many times the marker was ALREADY in the chat before this send's
+    // first try (main.js passes it back in on retries). Numbers restart when
+    // the app restarts, so an old "[MSG #0001]" may already be on the page —
+    // only a count ABOVE this baseline proves THIS send landed.
+    markerBaseline: sendOpts && Number.isInteger(sendOpts.markerBaseline) ? sendOpts.markerBaseline : null
   });
 
   return `
@@ -48,6 +71,66 @@ function buildSendScript(site, text, overrides) {
         if (node) return node;
       }
       return null;
+    }
+
+    // TR-27: a saved "message box" selector can point at a WRAPPER around the
+    // real editor (e.g. a div labelled "Ask ChatGPT" that holds the editable
+    // box) or at a paragraph INSIDE it. Typing into the wrapper never reaches
+    // the editor, so the send can't go out (ChatGPT's SEND_NOT_CONFIRMED).
+    // Always work on the real editable element: the textarea, or the OUTERMOST
+    // contenteditable element.
+    const EDITABLE = 'textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
+    function isEditable(n) { return !!n && (n.tagName === "TEXTAREA" || n.isContentEditable === true); }
+    function resolveEditable(n) {
+      if (!n) return null;
+      if (n.tagName === "TEXTAREA") return n;
+      if (n.isContentEditable) {
+        let r = n;
+        while (r.parentElement && r.parentElement.isContentEditable) r = r.parentElement;
+        return r;
+      }
+      // Inside a wrapper: prefer a VISIBLE editable box (sites keep a hidden
+      // fallback textarea next to the real editor).
+      let inner = null;
+      try {
+        const list = Array.from(n.querySelectorAll(EDITABLE));
+        inner = list.find(isShown) || list[0] || null;
+      } catch {}
+      return inner ? resolveEditable(inner) : n;
+    }
+    // The first candidate that leads to a VISIBLE editable box; else a hidden
+    // editable one; else the first match at all.
+    function findInput() {
+      let first = null, hidden = null;
+      for (const sel of CFG.INPUT_CANDIDATES) {
+        let list = [];
+        try { list = document.querySelectorAll(sel); } catch { continue; }
+        for (const n of list) {
+          const r = resolveEditable(n);
+          if (isEditable(r) && isShown(r)) return r;
+          if (isEditable(r) && !hidden) hidden = r;
+          if (!first) first = r;
+        }
+      }
+      return hidden || first;
+    }
+    const isShown = (b) => { try { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch { return true; } };
+    const isOff = (b) => !!(b.disabled || b.getAttribute("aria-disabled") === "true");
+    // TR-27: the Send button of the FIRST selector that matches a VISIBLE
+    // button (a hidden leftover can match first). Within that selector an
+    // enabled one wins; a disabled one is still returned — the caller waits
+    // for it to enable rather than clicking some lower-priority button.
+    // Nothing visible at all: the first match.
+    function findSendButton() {
+      let first = null;
+      for (const sel of CFG.SEND_CANDIDATES) {
+        let list = [];
+        try { list = Array.from(document.querySelectorAll(sel)); } catch { continue; }
+        if (!first && list.length) first = list[0];
+        const shown = list.filter(isShown);
+        if (shown.length) return shown.find((b) => !isOff(b)) || shown[0];
+      }
+      return first;
     }
 
     function focusNode(n) {
@@ -73,8 +156,63 @@ function buildSendScript(site, text, overrides) {
       }
     }
 
+    function composerText(input) {
+      if (!input) return "";
+      return String((input.tagName === "TEXTAREA" ? input.value : (input.innerText || input.textContent)) || "");
+    }
+    const squash = (s) => String(s || "").replace(/\s+/g, "");
+    // Does the composer now hold (the start of) our text? Whitespace-insensitive,
+    // because editors turn line breaks into paragraphs.
+    function holdsText(input, text) {
+      const want = squash(text).slice(0, 60);
+      return !!want && squash(composerText(input)).indexOf(want) !== -1;
+    }
+
+    // Rich editors (ProseMirror, Lexical, Quill…) keep their OWN copy of what's
+    // typed. Writing textContent directly changes the screen but not that copy,
+    // so the page can wipe the box without ever sending (the false "sent" that
+    // starved ChatGPT). execCommand("insertText") goes through the browser's
+    // real editing pipeline, which every editor listens to.
+    function selectAllIn(input) {
+      focusNode(input);
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(input);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    const settle = () => new Promise((r) => setTimeout(r, 60)); // editors re-render a beat later
+    async function insertViaEditor(input, text) {
+      // 1) The browser's own editing command. Don't trust its return value
+      //    (editors that handle the edit themselves make it return false);
+      //    check the box instead.
+      try {
+        selectAllIn(input);
+        // Line by line, with a real line break between, so multi-line
+        // messages (code blocks, [TO:] on its own line) keep their shape.
+        const lines = String(text).split("\\n");
+        lines.forEach((line, i) => {
+          if (i > 0) document.execCommand("insertLineBreak");
+          if (line) document.execCommand("insertText", false, line);
+        });
+        await settle();
+        if (holdsText(input, text)) return "insertText";
+      } catch {}
+      // 2) A paste. Every rich editor handles paste itself, reading the
+      //    clipboard data rather than the screen.
+      try {
+        selectAllIn(input);
+        const dt = new DataTransfer();
+        dt.setData("text/plain", text);
+        input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+        await settle();
+        if (holdsText(input, text)) return "paste";
+      } catch {}
+      return "";
+    }
+
     async function injectText(text) {
-      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const input = findInput();
       if (!input) return { ok: false, error: "INPUT_NOT_FOUND" };
       focusNode(input);
 
@@ -82,6 +220,8 @@ function buildSendScript(site, text, overrides) {
         try { setNativeValue(input, text); return { ok: true }; } catch {}
       }
       if (input.isContentEditable || input.getAttribute("contenteditable") === "true") {
+        const via = await insertViaEditor(input, text);
+        if (via) return { ok: true, via };
         try {
           input.focus();
           input.textContent = "";
@@ -102,7 +242,7 @@ function buildSendScript(site, text, overrides) {
     // so checking for that is a reliable, site-agnostic way to tell a real
     // send from a no-op click.
     async function inputIsEmpty() {
-      const input = qsAllAny(CFG.INPUT_CANDIDATES);
+      const input = findInput();
       if (!input) return true; // can't find it to check anymore -- don't block success on that
       const remaining = (input.tagName === "TEXTAREA" ? input.value : input.textContent) || "";
       return remaining.trim().length === 0;
@@ -113,27 +253,99 @@ function buildSendScript(site, text, overrides) {
     // usual to clear its input box (a big paste, a laggy tab) -- polling
     // over a longer window gives a genuinely slow-but-real send room to
     // actually confirm, instead of a one-shot guess.
+    // How many times our [MSG #n] marker shows in the page OUTSIDE the composer
+    // (i.e. in the conversation). > 0 = the message is really in the chat.
+    function markerCount() {
+      if (!CFG.marker) return 0;
+      const count = (s) => String(s || "").split(CFG.marker).length - 1;
+      let page = "";
+      try { page = document.body.innerText || ""; } catch { return 0; }
+      const input = findInput();
+      const inBox = input && input.tagName !== "TEXTAREA" ? count(composerText(input)) : 0;
+      return Math.max(0, count(page) - inBox);
+    }
+    const baseline = CFG.markerBaseline != null ? CFG.markerBaseline : markerCount();
+    function markerShown() { return !!CFG.marker && markerCount() > baseline; }
+
+    // -> "seen" (marker in the conversation: proof), "empty" (box cleared, no
+    // proof yet), or "" (still sitting in the box). With a marker we keep
+    // watching for proof a little longer after the box clears.
     async function confirmSent() {
       const start = Date.now();
-      while (Date.now() - start < 2500) {
-        if (await inputIsEmpty()) return true;
+      let emptySince = 0;
+      while (Date.now() - start < 6000) {
+        if (markerShown()) return "seen";
+        if (await inputIsEmpty()) {
+          if (!CFG.marker) return "empty";
+          if (!emptySince) emptySince = Date.now();
+          if (Date.now() - emptySince > 3000) return "empty";
+        } else if (Date.now() - start > 2500 && !emptySince) {
+          return "";
+        }
         await new Promise((r) => setTimeout(r, 150));
       }
-      return inputIsEmpty();
+      return markerShown() ? "seen" : (await inputIsEmpty()) ? "empty" : "";
+    }
+    const result = (how, method) => ({ ok: true, method, verified: how === "seen", markerBaseline: baseline });
+
+    // The AI's latest reply (count + length) — it changes while an AI is still
+    // writing. Falls back to the page text outside the message box when no
+    // reply selector matches.
+    function pageSig() {
+      for (const sel of (CFG.ASSISTANT_CANDIDATES || [])) {
+        let list = [];
+        try { list = document.querySelectorAll(sel); } catch { continue; }
+        if (list.length) { const last = list[list.length - 1]; return list.length * 1000003 + String(last.innerText || last.textContent || "").length; }
+      }
+      let page = 0;
+      try { page = (document.body.innerText || "").length; } catch {}
+      return page - composerText(findInput()).length;
+    }
+    // A short description of what the send used, for the Activity Log when a
+    // send can't be confirmed (so the next report shows WHY).
+    function describe(n) {
+      if (!n) return null;
+      let cls = "";
+      try { cls = String(n.className && n.className.baseVal != null ? n.className.baseVal : n.className || "").slice(0, 60); } catch {}
+      return { tag: (n.tagName || "").toLowerCase(), id: n.id || null, cls: cls || null, label: (n.getAttribute && n.getAttribute("aria-label")) || null, visible: isShown(n), disabled: isOff(n), editable: isEditable(n) };
+    }
+    function diag(method) {
+      const box = findInput();
+      return { method, input: describe(box), boxChars: composerText(box).trim().length, button: describe(findSendButton()) };
     }
 
     async function attemptSend() {
-      const btn = qsAllAny(CFG.SEND_CANDIDATES);
+      // Editors enable their Send button a moment after the text lands; clicking
+      // it while still disabled does nothing. Give it up to ~1.5s — but if the
+      // page keeps changing meanwhile, the AI is still writing its last reply
+      // (its Stop button just wasn't recognised): don't click the moment it
+      // finishes, or that reply is typed over before it's captured (TR-30).
+      let btn = findSendButton();
+      const sig0 = pageSig();
+      let waited = false;
+      for (let i = 0; btn && isOff(btn) && i < 10; i++) {
+        waited = true;
+        await new Promise((r) => setTimeout(r, 150));
+        btn = findSendButton();
+        if (btn && isOff(btn) && Math.abs(pageSig() - sig0) > 0) return { ok: false, error: "AI_BUSY", busyHow: "send-locked-while-page-changes", markerBaseline: baseline };
+      }
+      if (waited && btn && !isOff(btn) && Math.abs(pageSig() - sig0) > 0) return { ok: false, error: "AI_BUSY", busyHow: "reply-finished-while-waiting", markerBaseline: baseline };
       if (btn) {
         try { btn.click(); } catch {}
-        if (await confirmSent()) return { ok: true, method: "click" };
+        const how = await confirmSent();
+        if (how) return result(how, "click");
       }
-      const active = document.activeElement || document.body;
+      // Enter goes to the editor itself (where the site listens), not to
+      // whatever happens to have focus.
+      const box = findInput();
+      if (box) focusNode(box);
+      const active = box || document.activeElement || document.body;
       try {
         active.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
       } catch {}
-      if (await confirmSent()) return { ok: true, method: "enter" };
-      return { ok: false, error: "SEND_NOT_CONFIRMED" };
+      const how = await confirmSent();
+      if (how) return result(how, "enter");
+      return { ok: false, error: "SEND_NOT_CONFIRMED", markerBaseline: baseline, diag: diag(btn ? "click+enter" : "enter (no Send button found)") };
     }
 
     // E11: distinguish a provider-paused conversation from a plain missing box.
@@ -148,6 +360,21 @@ function buildSendScript(site, text, overrides) {
       return null;
     }
 
+    // A retry of a send whose first try DID land (just too slowly to confirm)
+    // must not post the message twice.
+    if (markerShown()) return { ok: true, method: "already-sent", verified: true, markerBaseline: baseline };
+    // TR-25: the AI is still writing its last reply (its Stop button shows).
+    // Chat sites won't take a new message then — say so instead of typing
+    // into the box and failing three times.
+    // Same rule as the reader's "generating" flag: the FIRST Stop selector that
+    // matches anything, and only if that button is visible.
+    for (const sel of CFG.STOP_CANDIDATES) {
+      let b = null; try { b = document.querySelector(sel); } catch (_) {}
+      if (!b) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { ok: false, error: "AI_BUSY", markerBaseline: baseline };
+      break;
+    }
     const inj = await injectText(CFG.text);
     if (!inj.ok) {
       if (inj.error === "INPUT_NOT_FOUND") {
@@ -164,11 +391,14 @@ function buildSendScript(site, text, overrides) {
 function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
+  const ovAssistant = usableOverride(ov.assistant);
   const payload = JSON.stringify({
-    ASSISTANT_CANDIDATES: ov.assistant ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
-    SEND_CANDIDATES: ov.send ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    ASSISTANT_CANDIDATES: ovAssistant ? [ovAssistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    DEFAULT_ASSISTANT: cfg.ASSISTANT_CANDIDATES,
+    OVERRIDE: ovAssistant,
+    SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
-    INPUT_CANDIDATES: ov.input ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
+    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -198,14 +428,101 @@ function buildReadScript(site, overrides) {
     for (const sel of CFG.ASSISTANT_CANDIDATES) {
       document.querySelectorAll(sel).forEach((n) => all.push(n));
     }
-    const node = all.length ? all[all.length - 1] : null;
-    const text = node ? (node.innerText || node.textContent || "") : "";
+    let node = all.length ? all[all.length - 1] : null;
+    let text = node ? (node.innerText || node.textContent || "") : "";
+    // TR-23: a saved "reply" selector that only reaches PART of the reply (a
+    // single paragraph — e.g. just the "[FROM: X]" line) made whole replies
+    // look empty. If the built-in selectors find a reply whose text ENDS WITH
+    // what the override read, the override is reading a fragment: use the
+    // whole reply instead.
+    let fragmentFixed = false;
+    if (CFG.OVERRIDE && text.trim()) {
+      let full = null;
+      for (const sel of CFG.DEFAULT_ASSISTANT) {
+        try { const list = document.querySelectorAll(sel); if (list.length) { full = list[list.length - 1]; break; } } catch (_) {}
+      }
+      const fullText = full ? (full.innerText || full.textContent || "") : "";
+      if (full && fullText.trim().length > text.trim().length && fullText.trim().endsWith(text.trim())) { node = full; text = fullText; fragmentFixed = "defaults"; }
+    }
+    // Still only part of a reply (it closes with [FROM:] but has no [TO:] —
+    // e.g. the site splits one reply into several blocks, or its layout
+    // changed): climb to the element that holds the whole reply. Never into a
+    // block that contains the user's own message or more than one reply.
+    const hasFrom = (s) => /\\[\\s*FROM\\s*:/i.test(s);
+    const startsWithTo = (s) => /^\\s*\\[\\s*TO\\s*:/i.test(s);
+    // Only when the block we read has no [TO: anywhere — if it does, the AI
+    // wrote (or quoted) it there and climbing could pick up a quoted tag.
+    if (node && hasFrom(text) && !startsWithTo(text) && !/\\[\\s*TO\\s*:/i.test(text)) {
+      const USER_MARKERS = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+      let cur = node;
+      for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
+        const p = cur.parentElement;
+        let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS); } catch (_) {}
+        if (hasUser) break;
+        const t = p.innerText || p.textContent || "";
+        if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break; // that's more than one reply
+        cur = p;
+        const m = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:[^\\]]*\\][\\s\\S]*\\[\\s*FROM\\s*:/i.exec(t); // the tag must start a line
+        if (m) {
+          const start = m.index + m[1].length;
+          // end right after the LAST [FROM: …] so page buttons below it don't tag along
+          let end = t.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi;
+          while ((fm = fre.exec(t))) end = fm.index + fm[0].length;
+          node = p; text = t.slice(start, end); fragmentFixed = "climb"; break;
+        }
+      }
+    }
+
+    // TR-31: the reader got only the START of a reply — a few characters like
+    // "[TO:" (seen live on Gemini) — because the page split the reply into
+    // pieces the selector doesn't cover. Climb to the element holding the
+    // whole reply, with the same guards (no user message, one reply only).
+    if (node && !fragmentFixed && !hasFrom(text) && text.trim().length <= 40 && startsWithTo(text)) {
+      const USER_MARKERS2 = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+      let cur = node;
+      for (let i = 0; i < 10 && cur.parentElement && cur.parentElement !== document.body; i++) {
+        const p = cur.parentElement;
+        let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS2); } catch (_) {}
+        if (hasUser) break;
+        const t = p.innerText || p.textContent || "";
+        if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break;
+        cur = p;
+        // the FIRST line-start [TO: — the reply's own tag (a quoted example later
+        // in the reply must not cut it short)
+        let idx = -1; const tm = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:/i.exec(t);
+        if (tm) idx = tm.index + tm[1].length;
+        if (idx < 0) continue;
+        let cand = t.slice(idx);
+        if (hasFrom(cand)) { let end = cand.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi; while ((fm = fre.exec(cand))) end = fm.index + fm[0].length; cand = cand.slice(0, end); }
+        if (cand.trim().length > text.trim().length + 5) { node = p; text = cand; fragmentFixed = "climb-start"; break; }
+      }
+    }
+    // For the log when a reply can't be read properly: what the reader landed on.
+    let nodeInfo = null;
+    if (node && text.trim().length <= 40) {
+      try { nodeInfo = { tag: node.tagName.toLowerCase(), cls: String(node.className || "").slice(0, 60) || null, parentTag: node.parentElement ? node.parentElement.tagName.toLowerCase() : null, parentChars: node.parentElement ? (node.parentElement.innerText || "").length : 0, siblings: node.parentElement ? node.parentElement.children.length : 0 }; } catch (_) {}
+    }
 
     // Is the composer empty? A Send button is ALSO disabled when there's simply
     // nothing to send (idle, empty composer) — so an empty composer must NOT be
     // read as "still generating" (E03: a finished reply left the Send button
     // disabled and its reply stayed uncaptured until a later send).
-    const inputBox = findAny(CFG.INPUT_CANDIDATES);
+    // TR-27: a saved selector may name a wrapper around the real box.
+    // Prefer a VISIBLE editable box (sites keep a hidden fallback textarea).
+    let inputBox = null, inputFirst = null;
+    for (const sel of (CFG.INPUT_CANDIDATES || [])) {
+      let list = [];
+      try { list = Array.from(document.querySelectorAll(sel)); } catch (_) { continue; }
+      for (let n of list) {
+        if (n.tagName !== "TEXTAREA" && !n.isContentEditable) {
+          try { const inner = Array.from(n.querySelectorAll('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')); n = inner.find(isVisible) || inner[0] || n; } catch (_) {}
+        }
+        if (!inputFirst) inputFirst = n;
+        if ((n.tagName === "TEXTAREA" || n.isContentEditable) && isVisible(n)) { inputBox = n; break; }
+      }
+      if (inputBox) break;
+    }
+    if (!inputBox) inputBox = inputFirst;
     const composerText = inputBox ? (inputBox.value != null ? inputBox.value : (inputBox.innerText || inputBox.textContent || "")) : "";
     const composerEmpty = !String(composerText).trim();
 
@@ -214,14 +531,37 @@ function buildReadScript(site, overrides) {
     // Send is disabled WHILE the composer still holds text. A disabled Send over an
     // empty composer is the idle state, not streaming.
     const stopBtn = findAny(CFG.STOP_CANDIDATES);
-    const sendBtn = findAny(CFG.SEND_CANDIDATES);
+    // TR-27: same Send-button rule as the send script — a hidden, disabled
+    // leftover "Send" that matches first must not make the pane look busy.
+    let sendBtn = null, firstSend = null;
+    for (const sel of (CFG.SEND_CANDIDATES || [])) {
+      let list = [];
+      try { list = Array.from(document.querySelectorAll(sel)); } catch (_) { continue; }
+      if (!firstSend && list.length) firstSend = list[0];
+      const shown = list.filter(isVisible);
+      if (shown.length) { sendBtn = shown.find((b) => !isDisabled(b)) || shown[0]; break; }
+    }
+    if (!sendBtn) sendBtn = firstSend;
     let generating = false;
     if (stopBtn && isVisible(stopBtn)) generating = true;
     else if (sendBtn && isDisabled(sendBtn) && !composerEmpty) generating = true;
     // The Send button is back and clickable — the model is done speaking.
     const sendReady = !generating && !!sendBtn && isVisible(sendBtn) && !isDisabled(sendBtn);
 
-    return { ok: true, text, generating, sendReady, composerEmpty };
+    // How many reply blocks are on the page: a re-drawn reply keeps the count,
+    // a genuinely new reply adds one (TR-17). Counted with ONE selector only —
+    // the first that matches — so nested wrappers or a saved override that
+    // matches the same nodes can never inflate it.
+    // After a fragment fix the override's matches are paragraphs, not replies:
+    // count with the built-in selectors, or report "unknown" after a climb.
+    let count = 0;
+    const countWith = fragmentFixed === "defaults" ? CFG.DEFAULT_ASSISTANT : CFG.ASSISTANT_CANDIDATES;
+    for (const sel of countWith) {
+      try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
+    }
+    if (fragmentFixed === "climb") count = null;
+    const stopShown = !!(stopBtn && isVisible(stopBtn)); // TR-28: the page's own "still writing" signal, on its own
+    return { ok: true, text, generating, stopShown, sendReady, composerEmpty, count, fragmentFixed, nodeInfo };
   })();
   `;
 }
@@ -238,13 +578,19 @@ function buildReadScript(site, overrides) {
 // __AUTOINJECTOR_PICK__ is a literal marker so the test mock can recognize
 // this script by content, the same way it recognizes buildSendScript's
 // output via "typeByKeyboard".
-function buildPickScript(role) {
+function buildPickScript(role, site) {
   const TIMEOUT_MS = 30000;
+  let defaults = [];
+  try { defaults = site ? siteConfig(site).ASSISTANT_CANDIDATES : []; } catch (_) {}
+  // Only markers that mean "an AI reply" — never "article" or *message*
+  // test-ids, which also match the user's own turns or one fixed old turn.
+  const MESSAGE_MARKERS = [...defaults, '[data-message-author-role="assistant"]', "model-response", "message-content", ".standard-markdown", ".markdown"];
   const label = role === "input" ? "the message box you type into" : role === "send" ? "the Send button" : "the text of a reply";
   return `
   (() => new Promise((resolve) => {
     // __AUTOINJECTOR_PICK__
     const ROLE = ${JSON.stringify(role)};
+    const MESSAGE_MARKERS = ${JSON.stringify(MESSAGE_MARKERS)};
     let done = false;
     const banner = document.createElement("div");
     banner.textContent = "AutoInjector: click ${label} now\\u2026";
@@ -260,7 +606,8 @@ function buildPickScript(role) {
     }
 
     function attrSelector(el) {
-      if (el.getAttribute && el.getAttribute("data-testid")) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
+      // a test-id that ends in a number names ONE turn (e.g. conversation-turn-12) — not usable
+      if (el.getAttribute && el.getAttribute("data-testid") && !/\\d+$/.test(el.getAttribute("data-testid"))) return '[data-testid="' + el.getAttribute("data-testid") + '"]';
       if (el.getAttribute && el.getAttribute("aria-label")) return el.tagName.toLowerCase() + '[aria-label="' + el.getAttribute("aria-label") + '"]';
       if (el.id && !/^[a-f0-9]{6,}$/i.test(el.id)) return "#" + CSS.escape(el.id);
       if (el.className && typeof el.className === "string") {
@@ -271,16 +618,30 @@ function buildPickScript(role) {
     }
 
     function nearestByRole(el) {
-      if (ROLE === "input") return el.closest('textarea, [contenteditable="true"]') || el;
+      if (ROLE === "input") {
+        // TR-27: snap to the real editable box — the outermost contenteditable
+        // (or textarea) — even if the click landed on a wrapper or placeholder.
+        let n = el.closest('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]');
+        if (!n) { try { n = el.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); } catch (_) {} }
+        if (!n) { let p = el.parentElement; for (let i = 0; p && i < 4 && !n; i++, p = p.parentElement) { try { n = p.querySelector('textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]'); } catch (_) {} } }
+        if (n && n.tagName !== "TEXTAREA") { while (n.parentElement && n.parentElement.isContentEditable) n = n.parentElement; }
+        return n || el;
+      }
       if (ROLE === "send") return el.closest('button, [role="button"], input[type="submit"]') || el;
-      // assistant: climb through plain single-child wrapper elements only,
-      // so clicking inner text lands on the smallest element that still
-      // contains the whole reply rather than the message list container.
+      // assistant (TR-24): snap to the element that holds the WHOLE reply —
+      // the site's own message container — never the word or paragraph that
+      // was clicked (that is how "span" / one-paragraph selectors got saved).
+      for (const sel of MESSAGE_MARKERS) {
+        try { const c = el.closest(sel); if (c) { c.__aiPickSelector = sel; return c; } } catch (_) {}
+      }
+      // No known container: climb single-child wrappers, then keep climbing
+      // until the element has something more specific than a bare tag.
       let node = el, depth = 0;
       while (node.parentElement && node.parentElement.children.length <= 1 && depth < 6) {
         node = node.parentElement;
         depth++;
       }
+      while (node.parentElement && node.parentElement !== document.body && /^[a-z0-9-]+$/i.test(attrSelector(node)) && depth < 12) { node = node.parentElement; depth++; }
       return node;
     }
 
@@ -290,7 +651,9 @@ function buildPickScript(role) {
       e.preventDefault();
       e.stopImmediatePropagation();
       const target = nearestByRole(e.target);
-      const selector = attrSelector(target);
+      // A reply pick that snapped to a known reply container saves THAT
+      // container's selector (it matches every reply, and only replies).
+      const selector = target.__aiPickSelector || attrSelector(target);
       const sample = (target.innerText || target.textContent || "").trim().slice(0, 120);
       const tag = target.tagName.toLowerCase();
       // Validated right here, against the live page, in the same tick as the
@@ -397,4 +760,46 @@ function buildLoginFillScript(site, username, password) {
   `;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript };
+// TR-08: a READ-ONLY page check — sends nothing, clicks nothing. Reports which
+// of each selector list actually matches on the live page right now, so a
+// changed site (or a signed-out pane) shows up before any message is lost.
+// -> { ok, url, input:{found,selector}, send:{found,selector},
+//      assistant:{count,selector}, stop:{found}, signedOutHint }
+function buildProbeScript(site, overrides) {
+  const cfg = siteConfig(site);
+  const ov = overrides || {};
+  const payload = JSON.stringify({
+    INPUT: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
+    SEND: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
+    ASSISTANT: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
+    STOP: cfg.STOP_CANDIDATES || [],
+  });
+  return `
+  (() => {
+    const CFG = ${payload};
+    function first(list) {
+      for (const sel of list || []) { try { if (document.querySelector(sel)) return sel; } catch (_) {} }
+      return null;
+    }
+    let assistantCount = 0, assistantSel = null;
+    for (const sel of CFG.ASSISTANT) {
+      try { const n = document.querySelectorAll(sel).length; if (n && !assistantSel) { assistantSel = sel; assistantCount = n; } } catch (_) {}
+    }
+    const inputSel = first(CFG.INPUT);
+    let body = "";
+    try { body = String(document.body ? document.body.innerText : "").slice(0, 4000).toLowerCase(); } catch (_) {}
+    const signedOutHint = !inputSel && /(log ?in|sign ?in|sign up|create account|continue with google)/.test(body);
+    return {
+      ok: true,
+      url: String(location.href || ""),
+      input: { found: !!inputSel, selector: inputSel },
+      send: { found: !!first(CFG.SEND), selector: first(CFG.SEND) },
+      assistant: { count: assistantCount, selector: assistantSel },
+      stop: { found: !!first(CFG.STOP) },
+      signedOutHint,
+    };
+  })();
+  `;
+}
+
+module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };

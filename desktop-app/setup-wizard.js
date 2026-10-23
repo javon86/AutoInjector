@@ -220,6 +220,59 @@ if (el("btn-sd-test")) el("btn-sd-test").onclick = async () => {
   sdMsg(r && r.ok ? `Rendered ✓ → ${r.path}` : `Test failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 
+// ---- Video tab: text-to-video endpoint config + check + a test render ----
+// Same shape as the Images tab. The backend isn't bundled, so this step is where
+// the user points the app at one and proves it works.
+async function loadVideoConfig() {
+  if (!dl.videoStatus) return;
+  try {
+    const s = await dl.videoStatus();
+    if (!s) return;
+    if (el("vd-endpoint")) el("vd-endpoint").value = s.endpoint || "";
+    if (el("vd-enabled")) el("vd-enabled").checked = !!s.enabled;
+    if (el("vd-width") && s.width) el("vd-width").value = s.width;
+    if (el("vd-height") && s.height) el("vd-height").value = s.height;
+    if (el("vd-frames") && s.frames) el("vd-frames").value = s.frames;
+    if (el("vd-fps") && s.fps) el("vd-fps").value = s.fps;
+  } catch (_) {}
+}
+function videoConfigFromUI() {
+  return {
+    enabled: !!(el("vd-enabled") && el("vd-enabled").checked),
+    endpoint: (el("vd-endpoint") && el("vd-endpoint").value || "").trim(),
+    width: Number(el("vd-width") && el("vd-width").value) || 512,
+    height: Number(el("vd-height") && el("vd-height").value) || 512,
+    frames: Number(el("vd-frames") && el("vd-frames").value) || 16,
+    fps: Number(el("vd-fps") && el("vd-fps").value) || 8,
+  };
+}
+function vdMsg(t) { if (el("vd-msg")) el("vd-msg").textContent = t; }
+const VD_NO_BACKEND = "No video backend is set up yet. Start a text-to-video server (e.g. AnimateDiff or Stable Video Diffusion) with its API on, then paste its generate URL above.";
+if (el("btn-vd-save")) el("btn-vd-save").onclick = async () => {
+  if (!dl.configureVideo) return;
+  const r = await dl.configureVideo(videoConfigFromUI());
+  vdMsg(r && r.ok ? (r.enabled ? "Saved — video generation is on." : "Saved — video generation is off.") : `Save failed: ${(r && (r.message || r.error)) || "error"}`);
+};
+if (el("btn-vd-check")) el("btn-vd-check").onclick = async () => {
+  const cfg = videoConfigFromUI();
+  if (!cfg.endpoint) { vdMsg(VD_NO_BACKEND); return; }
+  if (!dl.testEndpoint) return;
+  vdMsg(`Checking ${cfg.endpoint}…`);
+  let r; try { r = await dl.testEndpoint(cfg.endpoint); } catch (_) { r = null; }
+  if (r && r.reachable) vdMsg(`Reachable ✓ — something is answering at ${r.base || cfg.endpoint}. Press Test render to confirm it really sends back a video.`);
+  else vdMsg(`Nothing is answering at ${(r && r.base) || cfg.endpoint}. Start your video backend with its API turned on, or fix the address.`);
+};
+if (el("btn-vd-test")) el("btn-vd-test").onclick = async () => {
+  if (!dl.configureVideo || !dl.videoGenerate) return;
+  const cfg = videoConfigFromUI();
+  if (!cfg.endpoint) { vdMsg(VD_NO_BACKEND); return; }
+  if (!cfg.enabled) { vdMsg("Tick \"Enable video generation\" first, then press Test render."); return; }
+  await dl.configureVideo(cfg);
+  vdMsg("Rendering a short test clip… (video can take several minutes)");
+  let r; try { r = await dl.videoGenerate("a short test clip: a simple spinning cube"); } catch (e) { r = { ok: false, error: String(e) }; }
+  vdMsg(r && r.ok ? `Rendered ✓ → ${r.path || r.url}` : `Test failed: ${(r && (r.message || r.error)) || "error"}`);
+};
+
 // Open directly on a requested tab (?tab=images|video|advanced|localai), so the
 // Image/Video paddles in the main menu land the user on the right tab.
 function activateRequestedTab() {
@@ -235,4 +288,5 @@ function activateRequestedTab() {
 loadCatalog();
 loadSetupTargets();
 loadImageConfig();
+loadVideoConfig();
 activateRequestedTab();

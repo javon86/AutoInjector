@@ -123,7 +123,11 @@ function generate(prompt, opts = {}) {
           // E09: keep EVERY image the batch produced, not just the first. imageBase64
           // stays the first one for back-compat; images[] carries the whole batch.
           const imgs = Array.isArray(j.images) ? j.images.map(_cleanBase64).filter(Boolean) : [];
-          if (!imgs.length) return finish({ ok: false, error: 'NO_IMAGE' });
+          if (!imgs.length) {
+            // ComfyUI's /prompt only queues the job (returns a prompt_id) — say so plainly.
+            if (j && j.prompt_id) return finish({ ok: false, error: 'NO_IMAGE', shape: 'comfy-queue', message: "ComfyUI only queued the job and didn't send an image back — the app needs an endpoint that returns the image directly. Use the Automatic1111 / Forge API (…/sdapi/v1/txt2img), e.g. launched from Stability Matrix with the API on." });
+            return finish({ ok: false, error: 'NO_IMAGE', message: "The image server answered, but its reply had no image in it. Check that the address is a txt2img API (e.g. http://127.0.0.1:7860/sdapi/v1/txt2img)." });
+          }
           onEvent({ type: 'image', content: `${imgs.length} image(s), ${imgs[0].length} base64 chars` });
           finish({ ok: true, imageBase64: imgs[0], images: imgs, info: j.info || '' });
         });

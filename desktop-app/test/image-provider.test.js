@@ -67,7 +67,12 @@ async function main() {
   const server3 = http.createServer((req, res) => { req.resume(); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ images: [] })); });
   const port3 = await listen(server3);
   ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port3}/sdapi/v1/txt2img` });
-  assert((await ip.generate('x')).error === 'NO_IMAGE', 'an empty images array -> NO_IMAGE');
+  { const ni = await ip.generate('x'); assert(ni.error === 'NO_IMAGE' && /no image in it/.test(ni.message || ''), 'an empty images array -> NO_IMAGE, explained in plain words'); }
+  const serverC = http.createServer((req, res) => { req.resume(); res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ prompt_id: 'abc', number: 1 })); });
+  const portC = await listen(serverC);
+  ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${portC}/prompt` });
+  { const nc = await ip.generate('x'); assert(nc.error === 'NO_IMAGE' && nc.shape === 'comfy-queue' && /ComfyUI only queued the job/.test(nc.message || ''), 'a ComfyUI queue-only reply is explained as such'); }
+  serverC.close();
   const server4 = http.createServer((req, res) => { req.resume(); res.writeHead(500); res.end('boom'); });
   const port4 = await listen(server4);
   ip.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${port4}/sdapi/v1/txt2img` });

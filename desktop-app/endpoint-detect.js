@@ -20,11 +20,15 @@ const CANDIDATES = {
   image: [
     { label: 'Automatic1111 / Forge / SD.Next — port 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
     { label: 'Automatic1111 — port 7861', endpoint: 'http://127.0.0.1:7861/sdapi/v1/txt2img', health: 'http://127.0.0.1:7861/sdapi/v1/sd-models' },
-    { label: 'ComfyUI — port 8188', endpoint: 'http://127.0.0.1:8188/prompt', health: 'http://127.0.0.1:8188/system_stats' },
+    // No ComfyUI entry: its /prompt API only queues a job and returns a
+    // prompt_id, never the image the image provider needs (same as video).
   ],
+  // No ComfyUI entry for video: its /prompt API only queues a job and returns a
+  // prompt_id, so it can never hand the clip back the way video-provider.js
+  // needs. The 7860 entry is plain A1111 txt2img — it only makes video when the
+  // AnimateDiff extension is installed and on (otherwise it returns stills).
   video: [
-    { label: 'AnimateDiff via A1111 API — port 7860', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
-    { label: 'ComfyUI video workflow — port 8188', endpoint: 'http://127.0.0.1:8188/prompt', health: 'http://127.0.0.1:8188/system_stats' },
+    { label: 'AnimateDiff via A1111/Forge — port 7860 (needs the AnimateDiff extension; without it you get still images)', endpoint: 'http://127.0.0.1:7860/sdapi/v1/txt2img', health: 'http://127.0.0.1:7860/sdapi/v1/sd-models' },
     { label: 'Stable Video Diffusion server — port 7862', endpoint: 'http://127.0.0.1:7862/generate', health: 'http://127.0.0.1:7862/' },
   ],
 };
@@ -38,23 +42,36 @@ function configure(patch) {
 
 function presets(kind) { return (CANDIDATES[kind] || []).map((c) => ({ label: c.label, endpoint: c.endpoint })); }
 
-// GET a URL with a short timeout; resolve { ok } — ok means the server answered
-// (any status < 500), i.e. something is listening and speaking HTTP there.
+// GET a URL with a short timeout; resolve { ok, reason? } — ok means the server
+// answered (any status < 500), i.e. something is listening and speaking HTTP
+// there. On failure `reason` says why, so diagnostics can tell the user
+// "connection refused" (nothing running) apart from "timeout" (hung / busy).
+// The limit is a hard wall-clock cap: Node's socket `timeout` only measures
+// idle time, so a server that accepts and then dribbles could otherwise hang.
 function probe(url, timeoutMs) {
   return new Promise((resolve) => {
-    let u; try { u = new URL(url); } catch { return resolve({ ok: false }); }
+    let u; try { u = new URL(url); } catch { return resolve({ ok: false, reason: 'bad-url' }); }
     const lib = u.protocol === 'https:' ? deps.https : deps.http;
+    const ms = Math.max(300, timeoutMs || 1500);
     let done = false;
-    const finish = (ok) => { if (!done) { done = true; resolve({ ok }); } };
     let req;
+    let timer = null;
+    const finish = (ok, reason) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(ok ? { ok: true } : { ok: false, reason: reason || 'error' });
+    };
+    timer = setTimeout(() => { try { req && req.destroy(); } catch {} finish(false, 'timeout'); }, ms);
     try {
-      req = lib.get({ hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, timeout: Math.max(300, timeoutMs || 1500) }, (res) => {
+      req = lib.get({ hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname + u.search, timeout: ms }, (res) => {
         res.resume();
-        finish(!!(res.statusCode && res.statusCode < 500));
+        const okStatus = !!(res.statusCode && res.statusCode < 500);
+        finish(okStatus, okStatus ? null : `HTTP ${res.statusCode}`);
       });
-      req.on('error', () => finish(false));
-      req.on('timeout', () => { try { req.destroy(); } catch {} finish(false); });
-    } catch { finish(false); }
+      req.on('error', (e) => finish(false, (e && e.code === 'ECONNREFUSED') ? 'refused' : String((e && (e.code || e.message)) || 'error')));
+      req.on('timeout', () => { try { req.destroy(); } catch {} finish(false, 'timeout'); });
+    } catch (e) { finish(false, String((e && e.message) || e)); }
   });
 }
 
@@ -75,7 +92,7 @@ async function test(url, opts = {}) {
   let base = url;
   try { const u = new URL(url); base = `${u.protocol}//${u.host}`; } catch { /* use as-is */ }
   const r = await probe(base, opts.timeoutMs || 1500);
-  return { reachable: r.ok, base };
+  return r.ok ? { reachable: true, base } : { reachable: false, base, reason: r.reason };
 }
 
 module.exports = { CANDIDATES, presets, detect, test, probe, configure };

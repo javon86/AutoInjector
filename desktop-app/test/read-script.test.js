@@ -32,6 +32,13 @@ console.log("\n== Claude: reads the assistant reply, never a later user row ==")
   assert(!/USER TYPED THIS/.test(r.text), "does NOT read the later user message row");
 }
 
+console.log("\n== TR-17: the reply-block count isn't inflated by nested wrappers ==");
+{
+  const reply = (s) => `<div data-response-index="1"><div class="model-response-text"><message-content><div class="markdown">${s}</div></message-content></div></div>`;
+  const r = run(reply("one") + reply("two"), "gemini");
+  assert(r.count === 2, `two Gemini replies (each matched by 3 nested selectors) count as 2, not 6 (got ${r.count})`);
+}
+
 console.log("\n== takes the MOST RECENT assistant message when several ==");
 {
   const r = run(`

@@ -228,10 +228,45 @@ async function runSelfTest(site) {
   }
 }
 
-function led(site, ok) {
+// TR-07: the light next to each AI's name is its LIVE health, not just "page
+// loaded": green = last message delivered and its reply captured; amber =
+// waiting for a reply, or a send that couldn't be proven; red = send failed or
+// no reply for minutes (hover for the reason). Grey until something is sent.
+const HEALTH_COLOR = { idle: "#666", ok: "#29c447", waiting: "#f5b642", warn: "#f5b642", stalled: "#e5484d", error: "#e5484d" };
+const paneHealthState = {};
+const paneLoaded = {};
+function paintLed(site) {
   const node = document.getElementById(`led-${site}`);
-  if (node) node.style.background = ok ? "#29c447" : "#444";
+  if (!node) return;
+  const h = paneHealthState[site];
+  if (!paneLoaded[site] && (!h || h.level === "idle")) { node.style.background = "#333"; node.title = "Page not loaded"; return; }
+  if (!h || h.level === "idle") { node.style.background = HEALTH_COLOR.idle; node.title = "Page loaded — nothing sent yet"; return; }
+  node.style.background = HEALTH_COLOR[h.level] || "#666";
+  node.title = h.text || h.level;
 }
+function led(site, ok) { paneLoaded[site] = !!ok; paintLed(site); }
+// Click a light to re-run the read-only page check for that AI (TR-08).
+function wireLedChecks() {
+  for (const site of SITES) {
+    const node = document.getElementById(`led-${site}`);
+    if (!node || node._checkWired || !window.api.healthCheck) continue;
+    node._checkWired = true;
+    node.style.cursor = "pointer";
+    node.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      setStatus(`Checking ${SITE_LABELS[site]}'s page…`);
+      try {
+        const r = await window.api.healthCheck(site);
+        const h = r && r.health && r.health[site];
+        setStatus(`${SITE_LABELS[site]}: ${h ? h.text : "check finished"}`);
+      } catch (_) { setStatus(`${SITE_LABELS[site]}: check failed`); }
+    });
+  }
+}
+if (window.api.onPaneHealth) window.api.onPaneHealth((snap) => {
+  if (!snap) return;
+  for (const site of Object.keys(snap)) { paneHealthState[site] = snap[site]; paintLed(site); }
+});
 
 function beep() {
   try {
@@ -563,7 +598,7 @@ function buildAiColumn(site) {
 
   const head = document.createElement("div");
   head.className = "card-head";
-  head.innerHTML = `<span class="led" id="led-${site}" title="Pane loaded"></span><span class="gendot" id="gendot-${site}"></span><span class="pane-name">${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
+  head.innerHTML = `<span class="led" id="led-${site}" title="Page not loaded"></span><span class="gendot" id="gendot-${site}"></span><span class="pane-name">${SITE_LABELS[site]}</span><span class="role-badge" id="role-badge-${site}"></span><span class="test-led" id="test-led-${site}" title="Connectivity test: not run yet"></span><span class="spacer"></span>`;
   const zoomOutBtn = document.createElement("button");
   zoomOutBtn.className = "zoom-btn";
   zoomOutBtn.textContent = "－";
@@ -883,6 +918,7 @@ function buildAiRow() {
   const box = el("expanded-strip");
   box.innerHTML = "";
   for (const site of SITES) box.appendChild(buildAiColumn(site));
+  try { wireLedChecks(); } catch (_) {}
 }
 
 // The three AI panes ALWAYS stay in #expanded-strip in SITES order — a state
@@ -951,7 +987,7 @@ function applyGlobal(global) {
   }
   if (typeof global.meshActive === "boolean") {
     el("mesh-status").textContent = global.meshActive
-      ? "Auto is ON — enabled participants keep forwarding replies to each other."
+      ? "Auto is ON — enabled participants forward replies to each other (replies addressed to you stay with you)."
       : "Auto is off.";
   }
   if (global.customRole) {
@@ -1283,8 +1319,33 @@ window.api.onSent(({ target, from }) => {
   setStatus(from ? `Sent ${SITE_LABELS[from]}'s reply to ${SITE_LABELS[target]}.` : `Sent to ${SITE_LABELS[target]}.`);
   flashReceived(target);
 });
+// Plain-language versions of the send errors people actually see.
+const SEND_ERROR_TEXT = {
+  SEND_NOT_CONFIRMED: "the message is still sitting in its box — the Send button didn't work",
+  SEND_UNVERIFIED: "the box cleared but the message never showed up in the chat",
+  INPUT_NOT_FOUND: "couldn't find its message box — is it signed in and on a chat page?",
+  AI_BUSY: "it was still writing its last reply for 5 minutes, so the new message couldn't go in",
+  NO_VIEW: "its pane isn't open",
+};
 window.api.onSendError(({ target, error }) => {
-  setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${error}`);
+  setStatus(`Error sending to ${SITE_LABELS[target] || target}: ${SEND_ERROR_TEXT[error] || error}`);
+});
+// TR-14: Bucket Brigade progress on the status line (started from the Tools menu).
+if (window.api.onBrigadeProgress) window.api.onBrigadeProgress((p) => {
+  if (!p) return;
+  const L = (s) => SITE_LABELS[s] || s;
+  if (p.status === "start") setStatus(`Relay check started (${(p.sites || []).map(L).join(" → ")}). Auto is paused until it finishes.`);
+  else if (p.status === "setup") setStatus(`Relay check: explaining the rules to ${L(p.site)}…`);
+  else if (p.status === "hop") setStatus(`Relay check: step ${p.index} of ${p.of} — waiting for ${L(p.site)} to add ${p.item}…`);
+  else if (p.status === "hop-problem") setStatus(`Relay check: problem at ${p.item} (${L(p.site)}): ${p.detail || "see the report"}`);
+  else if (p.status === "done") setStatus(p.ok ? `Relay check finished — app ${p.appPass ? "PASSED" : "FAILED"}${p.finished ? "" : " (did not finish)"}. The report has opened.` : `Relay check couldn't run: ${p.error || "error"}`);
+});
+// TR-06: too many AI-to-AI hand-offs in a row — relaying paused until I act.
+if (window.api.onRelayPaused) window.api.onRelayPaused((p) => {
+  if (!p) return;
+  setStatus(`Auto paused after ${p.max} AI-to-AI hand-offs — send a message or click Auto to continue.`);
+  if (el("mesh-status")) el("mesh-status").textContent = `Auto PAUSED — ${p.max} hand-offs in a row without you. Send a message or click Auto to continue.`;
+  try { logToCenter(p.text, { tag: "routing", err: true }); } catch (_) {}
 });
 window.api.onWaitingChanged(({ site, waiting }) => setGenerating(site, waiting));
 window.api.onHouseRuleState(applyHouseRule);
@@ -1415,6 +1476,7 @@ const COLLAPSIBLE_PANELS = {
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
+  if (el(`tab-${key}`)) return; // already minimized: never add a second tab
   el(panelId).classList.add("hidden-collapsed");
   const tab = document.createElement("button");
   tab.className = "collapsed-tab";
@@ -1486,8 +1548,8 @@ const CAP_TIPS = {
   "Tools (USE_TOOL)": "No tools are registered, or the read-file tool failed — check the output folder exists and is readable.",
   "Memory (remember & recall)": "The shared database is off or unavailable — reopen the app; if it persists, check disk space where app data lives.",
   "Image generation": "Turn on Image generation and set a reachable Stable Diffusion endpoint in the Image panel (Auto-detect can find it).",
-  "Video generation": "Turn on Video generation and set a reachable text-to-video endpoint in the Video panel (AnimateDiff / SVD / ComfyUI).",
-  "Voice (speak)": "Enable Voice and set the local voice shim endpoint (install piper/whisper via the Setup Wizard).",
+  "Video generation": "Set up a text-to-video backend (AnimateDiff / Stable Video Diffusion) with its API on, then enter its address in Setup Wizard → Video and press Check connection.",
+  "Voice (speak)": "Make sure the voice service is running (Setup Wizard → Installs → Voice engine) and that its address in System AI → 🔊 Voice is right — press Test there to check.",
   "Talk to ChatGPT": "Open the ChatGPT pane and make sure you're signed in, then enable it as a participant up top.",
   "Talk to Claude": "Open the Claude pane and make sure you're signed in, then enable it as a participant up top.",
   "Talk to Gemini": "Open the Gemini pane and make sure you're signed in, then enable it as a participant up top.",
@@ -1590,20 +1652,28 @@ if (el("btn-selfcheck")) el("btn-selfcheck").onclick = async () => {
   logToCenter("🩺 System check…", { tag: "setup" });
   let r; try { r = await window.api.butlerSelfCheck(); } catch (_) { r = null; }
   if (!r || !r.ok) { logToCenter(`System check failed: ${(r && r.error) || "error"}`, { tag: "setup", err: true }); return; }
-  logToCenter(`🩺 System check — ${r.okCount}/${r.total} capabilities ready.`, { tag: "setup" });
-  for (const c of r.checks) {
+  // Three honest buckets: ✅ checked & working, ❌ turned on but not working,
+  // ⚪ not set up (optional). Counted here so older results still render.
+  const checks = Array.isArray(r.checks) ? r.checks : [];
+  const nFail = checks.filter((c) => c.ok === false).length;
+  const nNotSet = checks.filter((c) => c.ok !== true && c.ok !== false).length;
+  const took = typeof r.elapsedMs === "number" ? ` (took ${(r.elapsedMs / 1000).toFixed(1)}s)` : "";
+  logToCenter(`🩺 System check — ${r.okCount}/${r.total} working · ${nFail} need attention · ${nNotSet} not set up (optional)${took}.`, { tag: "setup" });
+  for (const c of checks) {
     const mark = c.ok === true ? "✅" : c.ok === false ? "❌" : "⚪";
     logToCenter(`${mark} ${c.name}${c.detail ? " — " + c.detail : ""}`, { tag: "setup", err: c.ok === false });
   }
   if (Array.isArray(r.installs) && r.installs.length) {
-    logToCenter(`Dependencies — ${(r.missing || []).length} not installed:`, { tag: "setup" });
+    // Every add-on is optional: "not installed" is information, not an error.
+    logToCenter(`Optional add-ons — ${(r.missing || []).length} not installed (Install Missing can add them):`, { tag: "setup" });
     for (const it of r.installs) {
-      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "❌ not installed" : "⚪ n/a";
-      logToCenter(`   ${it.label}: ${mark}`, { tag: "setup", err: it.installed === false });
+      const mark = it.installed === true ? "✅ installed" : it.installed === false ? "⚪ not installed (optional)" : "⚪ couldn't tell";
+      logToCenter(`   ${it.label}: ${mark}${it.detail ? " — " + it.detail : ""}`, { tag: "setup" });
     }
   }
+  logToCenter("ℹ️ ✅ here means set up and answering. To actually exercise each one (render an image, run code, ping the AIs), run 🧪 Capability Test.", { tag: "setup" });
   if (el("btn-install-missing")) el("btn-install-missing").disabled = !r.canInstall;
-  deviceSpeak(`System check: ${r.okCount} of ${r.total} capabilities working. ${(r.missing || []).length} dependencies not installed.`);
+  deviceSpeak(`System check: ${r.okCount} of ${r.total} working${nFail ? `, ${nFail} need attention` : ""}. ${(r.missing || []).length} optional add-ons not installed.`);
 };
 // Install everything that's missing (Open Interpreter first, so he controls it).
 if (el("btn-install-missing")) el("btn-install-missing").onclick = async () => {
@@ -1647,7 +1717,7 @@ async function deviceListenOnce() {
   logToCenter("🎤 Listening…", { tag: "voice" });
   let r; try { r = await window.api.voiceListen({}); } catch (_) { r = null; }
   if (r && r.ok && r.text && r.text.trim()) return r.text.trim();
-  logToCenter(r && r.error ? `Didn't catch that (${r.error}).` : "Didn't catch that.", { tag: "voice" });
+  logToCenter(r && r.error ? `Didn't catch that — ${voiceErrText(r)}` : "Didn't catch that.", { tag: "voice", err: !!(r && r.error) });
   return null;
 }
 if (el("btn-device-ptt")) el("btn-device-ptt").onclick = async () => {
@@ -1765,7 +1835,7 @@ if (el("btn-img-generate")) el("btn-img-generate").onclick = async () => {
   imgMsg("Rendering…");
   const r = await window.api.imageGenerate(prompt, negative);
   if (r && r.ok) { imgMsg(`Rendered ✓ → ${r.path}`); imgShowPreview(r.preview, r.path); }
-  else imgMsg(`Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
+  else imgMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} (is your SD server running with --api?)`);
 };
 loadImagePanel();
 
@@ -1841,7 +1911,7 @@ if (el("btn-vid-generate")) el("btn-vid-generate").onclick = async () => {
   vidMsg("Rendering… (video can take a while)");
   const r = await window.api.videoGenerate(prompt, negative);
   if (r && r.ok) { vidMsg(`Rendered ✓ → ${r.path || r.url}`); vidShowPreview(r.preview, r.path || r.url); }
-  else vidMsg(`Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
+  else vidMsg(r && r.message ? `Failed: ${r.message}` : `Failed: ${(r && r.error) || "error"} — set a video endpoint in ⚙️ Connection, and make sure the backend is running.`);
 };
 loadVideoPanel();
 
@@ -2115,6 +2185,16 @@ if (el("btn-lsi-save")) el("btn-lsi-save").onclick = async () => {
   const r = await window.api.configureManagerProvider(cfg);
   if (el("lsi-msg")) el("lsi-msg").textContent = r && r.ok ? "✓ Saved. Now press “Test” to check the connection, or type a goal for the Butler below." : `Save failed: ${lsiFriendly(r && r.error)}`;
 };
+// ISS-017: "✓ Saved" describes the endpoint/model as they were at Save time.
+// Once either is edited it's no longer true, so don't leave it standing.
+function lsiMarkUnsaved() {
+  const m = el("lsi-msg");
+  if (m && /^✓ Saved/.test(m.textContent)) m.textContent = "Unsaved changes — press “Save settings” (or Test).";
+}
+for (const id of ["lsi-endpoint", "lsi-model"]) {
+  const f = el(id);
+  if (f) { f.addEventListener("input", lsiMarkUnsaved); f.addEventListener("change", lsiMarkUnsaved); }
+}
 if (el("btn-lsi-test")) el("btn-lsi-test").onclick = async () => {
   if (!window.api.testManagerConnection) return;
   if (el("lsi-msg")) el("lsi-msg").textContent = "Testing connection…";
@@ -2199,13 +2279,15 @@ if (window.api.onManagerState) window.api.onManagerState((m) => {
 //   • chatgpt/claude/gemini — each AI in its own colour (incl. AI↔AI)
 //   • to-ME   — anything addressed to me (an AI's reply, or the butler asking me
 //               something): its own bright colour AND 2× the size.
-function appendButlerLine({ cls, who, text }) {
+function appendButlerLine({ cls, who, text, max = 500 }) {
   const box = el("jarvis-log"); if (!box) return;
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const row = document.createElement("div");
   row.className = "bl-line " + (cls || "bl-butler");
   const whoHtml = who ? `<span class="bl-who">${gpuEsc(who)}:</span> ` : "";
-  row.innerHTML = `${whoHtml}${gpuEsc(String(text == null ? "" : text).slice(0, 500))}`;
+  const full = String(text == null ? "" : text);
+  const body = max && full.length > max ? `${full.slice(0, max)}…` : full; // ISS-017: never cut silently
+  row.innerHTML = `${whoHtml}${gpuEsc(body)}`;
   box.appendChild(row);
   while (box.children.length > 140) box.removeChild(box.firstChild);
   if (nearBottom) box.scrollTop = box.scrollHeight; // keep the latest in view (chat feel)
@@ -2220,7 +2302,8 @@ if (window.api.onManagerLog) window.api.onManagerLog((e) => {
     appendButlerLine({ cls: "bl-" + targetSite, who: SITE_LABELS[targetSite], text: e.summary });
   } else if (e.category === "response") {
     // The butler delivering to ME (e.g. the stall-break question) — to-me, 2×.
-    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary });
+    // ISS-017: this is his Converse reply to me -- show all of it, not 500 chars.
+    appendButlerLine({ cls: "bl-tome", who: "🤵 Butler → You", text: e.summary, max: 0 });
   } else if (BUTLER_SYSTEM_CATEGORIES.has(e.category)) {
     appendButlerLine({ cls: "bl-system", who: "System", text: `${e.category}: ${e.summary || ""}` });
   } else {
@@ -2268,6 +2351,9 @@ function _voiceConfigFromUI() {
   };
 }
 function voiceMsg(t) { if (el("voice-msg")) el("voice-msg").textContent = t; }
+// OP-12: prefer the plain-language message (which address, what's wrong, how to
+// fix it) over a raw code like ECONNREFUSED.
+function voiceErrText(r) { return (r && (r.message || r.error)) || "error"; }
 // Load saved voice config into the fields, and enumerate the machine's mics/speakers.
 async function loadVoicePanel() {
   if (window.api.voiceStatus) {
@@ -2302,7 +2388,7 @@ for (const who of VOICE_WHO) {
     await window.api.configureVoice(_voiceConfigFromUI());
     voiceMsg(`Speaking as ${who}…`);
     const r = await window.api.voiceSpeak(`This is the ${who} voice.`, who);
-    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${(r && r.error) || "error"}`);
+    voiceMsg(r && r.ok ? `Spoke as ${who} ✓` : `Voice test failed: ${voiceErrText(r)}`);
   };
 }
 if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
@@ -2313,9 +2399,15 @@ if (el("btn-voice-save")) el("btn-voice-save").onclick = async () => {
 if (el("btn-voice-test")) el("btn-voice-test").onclick = async () => {
   if (!window.api.configureVoice || !window.api.voiceSpeak) return;
   await window.api.configureVoice(_voiceConfigFromUI());
+  // Cheap check first: is anything answering at the voice address?
+  if (window.api.voiceCheck) {
+    voiceMsg("Checking the voice service…");
+    let c; try { c = await window.api.voiceCheck(); } catch (_) { c = null; }
+    if (!c || !c.ok) { voiceMsg(`Voice test failed: ${voiceErrText(c)}`); return; }
+  }
   voiceMsg("Speaking a test line…");
   const r = await window.api.voiceSpeak("AutoInjector voice is working.");
-  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${(r && r.error) || "error"}`);
+  voiceMsg(r && r.ok ? "Spoke a test line ✓" : `Voice test failed: ${voiceErrText(r)}`);
 };
 if (el("btn-mic")) el("btn-mic").onclick = async () => {
   if (!window.api.voiceListen) return;
@@ -2325,7 +2417,7 @@ if (el("btn-mic")) el("btn-mic").onclick = async () => {
     if (el("jarvis-goal")) el("jarvis-goal").value = r.text;
     voiceMsg(`Heard: "${String(r.text).slice(0, 60)}" — press Start Butler.`);
   } else {
-    voiceMsg(`Couldn't hear you: ${(r && r.error) || "error"}`);
+    voiceMsg(`Couldn't hear you: ${voiceErrText(r)}`);
   }
 };
 
@@ -3848,7 +3940,7 @@ el("btn-extract-all").onclick = async () => {
   try {
     const res = await window.api.extractAllLogs();
     if (res && res.ok) {
-      if (status) status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`;
+      if (status) { status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`; status.title = status.textContent; }
     } else if (status) {
       status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
     }
@@ -4137,6 +4229,24 @@ function wireComposeCommands() {
 }
 try { wireComposeCommands(); } catch (e) { console.error("compose command init failed", e); }
 try { wireLockers(); } catch (e) { console.error("locker browser init failed", e); }
+
+// ISS-001: the AI panes are native views drawn ON TOP of this page. Ask main to
+// re-place them the moment the page scrolls or a dialog opens/closes, so they
+// never sit over the sticky User Panel or a pop-up.
+function wirePaneSync() {
+  if (!window.api || typeof window.api.syncPanes !== "function") return;
+  let queued = false;
+  const kick = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; try { const p = window.api.syncPanes(); if (p && p.catch) p.catch(() => {}); } catch (_) {} });
+  };
+  window.addEventListener("scroll", kick, { passive: true, capture: true });
+  window.addEventListener("resize", kick, { passive: true });
+  const mo = new MutationObserver(kick);
+  for (const d of document.querySelectorAll('[role="dialog"], dialog')) mo.observe(d, { attributes: true, attributeFilter: ["class", "style", "open", "hidden"] });
+}
+try { wirePaneSync(); } catch (e) { console.error("pane sync init failed", e); }
 
 // ---- 🔬 Feature Test button: run / stop, live progress, results pop-up ----
 let featureTestRunning = false;

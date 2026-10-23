@@ -34,17 +34,19 @@ function runNodeFiles(files, opts) {
     if (res.error && res.error.code === "ETIMEDOUT") { timedOut.push(file); continue; }
     const m = SUMMARY_RE.exec(res.stdout || "");
     if (!m) { crashed.push(file); failed += 1; continue; }
+    if (res.status !== 0 || res.error) crashed.push(file);
     passed += Number(m[1]); failed += Number(m[2]);
   }
   return { passed, failed, crashed, timedOut, count: files.length };
 }
 function layerLine(name, r) {
-  const status = r.status || (r.failed === 0 && r.crashed.length === 0 ? "PASS" : "FAIL");
+  const status = r.status || (r.failed === 0 && r.crashed.length === 0 && !(r.timedOut || []).length && r.count > 0 ? "PASS" : "FAIL");
   let detail = "";
   if (r.passed != null) detail = `${r.passed} passed, ${r.failed} failed across ${r.count} file(s)`;
   if (r.note) detail = detail ? `${detail} — ${r.note}` : r.note;
   console.log(`  [${status}] ${name}${detail ? " — " + detail : ""}`);
   for (const c of (r.crashed || [])) console.log(`      CRASHED: ${c}`);
+  for (const t of (r.timedOut || [])) console.log(`      TIMED OUT: ${t}`);
   return status;
 }
 
@@ -67,7 +69,7 @@ function runPythonAtelier() {
     const res = spawnSync(bin, [t], { cwd: dir, encoding: "utf8", timeout: 300000 });
     const txt = (res.stdout || "") + (res.stderr || "");
     const m = /(\d+)\s*\/\s*(\d+)\s+passed/.exec(txt) || SUMMARY_RE.exec(txt);
-    if (res.status !== 0 && !m) { crashed.push(t); failed += 1; continue; }
+    if (res.status !== 0 || res.error || !m) { crashed.push(t); failed += 1; continue; }
     if (m && m[2] != null && /\//.test(m[0])) { passed += Number(m[1]); failed += (Number(m[2]) - Number(m[1])); }
     else if (m) { passed += Number(m[1]); failed += Number(m[2]); }
   }
@@ -83,7 +85,7 @@ function main() {
   // report a timeout as UNVERIFIED rather than letting it stall the whole run.
   const integ = runNodeFiles(filesFromScript("test:integration"), { timeoutMs: 240000 });
   if (integ.timedOut.length && integ.passed === 0 && integ.failed === 0) {
-    statuses.integration = layerLine("Integration", { status: "UNVERIFIED", note: `timed out after 60s (${integ.timedOut.join(", ")}) — see QA-001` });
+    statuses.integration = layerLine("Integration", { status: "UNVERIFIED", note: `timed out after 240s (${integ.timedOut.join(", ")}) — see QA-001` });
   } else {
     statuses.integration = layerLine("Integration", integ);
   }
@@ -92,9 +94,10 @@ function main() {
   // GUI E2E is heavy (spawns Electron under a display); run only on request, and
   // report UNVERIFIED — not PASS — when we didn't run it here.
   if (process.argv.includes("--e2e")) {
-    const hasXvfb = spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).status === 0;
+    const needsXvfb = process.platform === "linux" && !process.env.DISPLAY;
+    const hasXvfb = !needsXvfb || spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).status === 0;
     statuses.e2e = hasXvfb
-      ? layerLine("GUI E2E", runNodeFiles(filesFromScript("test:e2e"), { bin: "xvfb-run", args: ["-a", process.execPath] }))
+      ? layerLine("GUI E2E", runNodeFiles(filesFromScript("test:e2e"), needsXvfb ? { cmd: { bin: "xvfb-run", args: ["-a", process.execPath] } } : {}))
       : layerLine("GUI E2E", { status: "UNVERIFIED", note: "xvfb-run not available" });
   } else {
     statuses.e2e = layerLine("GUI E2E", { status: "UNVERIFIED", note: "not run (pass --e2e to include)" });

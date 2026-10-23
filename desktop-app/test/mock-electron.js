@@ -60,6 +60,10 @@ class FakeWebContents extends EventEmitter {
     this._sendFailQueue = []; // test-settable: per-attempt pass/fail override for successive send attempts (retries included), shifted per call -- see executeJavaScript()
     this._nextLoginFillResult = null; // test-settable: what the next login-fill script resolves to
     this.loginFillCalls = []; // { username, password } — the REAL (decrypted) credentials the script actually received, in order -- lets a test verify the exact plaintext without ever going through the persisted state file
+    // TR-15: when set, executeJavaScript() hands the REAL script to this function
+    // instead of the string-matching fakes below -- test/stress.test.js points it
+    // at a Playwright page (page.evaluate) so main.js drives a real browser DOM.
+    this.evaluator = null;
     const self = this;
     // A minimal stand-in for webContents.debugger, at the same fidelity as
     // the rest of this mock: it asserts WHAT CDP command was sent with what
@@ -96,6 +100,7 @@ class FakeWebContents extends EventEmitter {
   setZoomFactor(factor) { this.zoomFactor = factor; }
   once(evt, cb) { if (evt === "did-finish-load") setImmediate(cb); return this; }
   async executeJavaScript(script) {
+    if (this.evaluator) return this.evaluator(script);
     if (script.includes("__AUTOINJECTOR_PICK__")) {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
@@ -115,6 +120,8 @@ class FakeWebContents extends EventEmitter {
       // verify the real retry loop in sendTextTo(), not just a permanently
       // broken or permanently working send. Falls back to the simpler
       // always-fail/always-succeed _forceSendFail once the queue is empty.
+      // _busyCount: report AI_BUSY (the AI is still writing) this many times first (TR-25)
+      if (this._busyCount > 0) { this._busyCount--; return { ok: false, error: "AI_BUSY" }; }
       const failThisAttempt = this._sendFailQueue.length ? this._sendFailQueue.shift() : this._forceSendFail;
       if (failThisAttempt) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
@@ -124,7 +131,10 @@ class FakeWebContents extends EventEmitter {
     // `generating`/`sendReady` default to "done" so existing tests are unaffected;
     // a test can set webContents.generating = true to simulate an in-progress reply.
     const generating = !!this.generating;
-    return { ok: true, text: this.currentText, generating, sendReady: !generating };
+    const out = { ok: true, text: this.currentText, generating, sendReady: !generating };
+    if (Number.isInteger(this.replyCount)) out.count = this.replyCount; // reply blocks on the page (TR-17)
+    if (typeof this.stopShown === "boolean") out.stopShown = this.stopShown; // TR-30: Stop button alone (default: same as generating)
+    return out;
   }
 }
 
@@ -137,7 +147,7 @@ class WebContentsView {
     this.webContents = new FakeWebContents(label);
     registry[label] = this;
   }
-  setBounds() {}
+  setBounds(b) { this._bounds = { ...b }; }
 }
 
 const windowRegistry = {};
@@ -149,9 +159,16 @@ class BaseWindow extends EventEmitter {
     this._bounds = { x: 0, y: 0, width: (opts && opts.width) || 1600, height: (opts && opts.height) || 1000 };
     this._minSize = [(opts && opts.minWidth) || 0, (opts && opts.minHeight) || 0];
     this._destroyed = false;
+    this._frameHeight = 0; // native title bar + borders (tests can set it; real Windows ~31-45px)
+    this._maximized = false;
+    this._normalBounds = null;
     if (opts && opts.title) windowRegistry[opts.title] = this;
   }
-  getContentSize() { return [this._bounds.width, this._bounds.height]; }
+  getContentSize() { return [this._bounds.width, Math.max(0, this._bounds.height - this._frameHeight)]; }
+  isMaximized() { return this._maximized; }
+  maximize() { if (this._maximized) return; this._normalBounds = { ...this._bounds }; this._maximized = true; this._bounds = { x: 0, y: 0, width: 1920, height: 1040 }; }
+  unmaximize() { if (!this._maximized) return; this._maximized = false; this._bounds = { ...this._normalBounds }; }
+  getNormalBounds() { return { ...(this._maximized ? this._normalBounds : this._bounds) }; }
   getBounds() { return { ...this._bounds }; }
   setBounds(b) { this._bounds = { ...this._bounds, ...b }; }
   getMinimumSize() { return this._minSize.slice(); }

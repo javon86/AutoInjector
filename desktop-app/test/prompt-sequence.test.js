@@ -165,6 +165,14 @@ async function testSequenceStateUpdatesStatusAndDisablesRun() {
   api.fireSequenceState({ active: false, index: 3, total: 3 });
   assert(!doc.getElementById("btn-run").disabled, "Run re-enables once the sequence finishes");
   assert(doc.getElementById("status").textContent === "Sequence finished.", "status reports completion");
+
+  // TR-09: the window says WHY a run ended, not "finished" for everything.
+  api.fireSequenceState({ active: false, index: 0, total: 3, ended: "stalled" });
+  assert(/no reply came back in time/.test(doc.getElementById("status").textContent), "a stalled run says so");
+  api.fireSequenceState({ active: false, index: 0, total: 3, ended: "send-failed" });
+  assert(/couldn't be delivered/.test(doc.getElementById("status").textContent), "a run whose step couldn't be sent says so");
+  api.fireSequenceState({ active: false, index: 3, total: 3, ended: "done" });
+  assert(/every step got a reply/.test(doc.getElementById("status").textContent), "a completed run says so");
 }
 
 async function testCloseButtonCallsCloseSequenceEditor() {

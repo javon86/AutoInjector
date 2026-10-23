@@ -85,7 +85,22 @@ function main() {
   testQuotedExampleNotTruncated();
   testWhitespaceTolerance();
   testNoneAndStrip();
-  console.log(`\n${passed} passed, ${failed} failed`);
+  console.log("\n== TR-17: re-drawn replies and citation chips ==");
+{
+  const { sameReplyText, stripUiChips } = require("../envelope");
+  assert(sameReplyText("Record[This]Claude", "Record\n\n[This]\n\nClaude   \nPDF\n+ 1"), "spacing + chip lines changed = the same reply");
+  assert(!sameReplyText("Theory 1", "Theory 2"), "different words = a different reply");
+  assert(stripUiChips("cut:   \nPDF\n+ 1\n\nThe next") === "cut:\n\nThe next", "chip lines are removed cleanly");
+  assert(stripUiChips("Price is +1 today\nPDF report attached") === "Price is +1 today\nPDF report attached", "real text mentioning PDF or +1 is left alone");
+}
+console.log("\n== TR-05: explicit vs defaulted [TO: USER] ==");
+{
+  const { parseRoundtableTag } = require("../envelope");
+  assert(parseRoundtableTag("[TO: USER]\nhi").explicit === true, "a written [TO: USER] is explicit");
+  const d = parseRoundtableTag("no tag at all");
+  assert(d.tag === "USER" && d.explicit === false, "a missing tag still defaults to USER, but is marked not explicit");
+}
+console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }
 main();

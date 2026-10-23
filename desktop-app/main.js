@@ -23,7 +23,7 @@ const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
-const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript } = require("./automation");
+const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
@@ -39,6 +39,7 @@ const videoProvider = require("./video-provider");
 const setupManager = require("./setup-manager");
 const gpuMonitor = require("./gpu-monitor");
 const endpointDetect = require("./endpoint-detect");
+const diagnostics = require("./diagnostics");
 const logBundle = require("./log-bundle");
 const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
@@ -79,6 +80,13 @@ const STABLE_MS = Number(process.env.AUTOINJECTOR_STABLE_MS) || 1800;
 // treated as lost and the messaging protocol is re-sent asking for a full resend.
 // It's deliberately longer than STABLE_MS so a mid-reply pause never trips it.
 const NOTAG_QUIET_MS = Number(process.env.AUTOINJECTOR_NOTAG_QUIET_MS) || 12000;
+// TR-17: a reply carrying its [FROM:] tag must also hold still this long before
+// it's captured, so a page that re-draws the finished reply (Gemini) is read
+// once, in its final form.
+const CAPTURE_SETTLE_MS = Number(process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS) || 1500;
+// ...and a re-drawn copy that shows up later is recognised as the same reply
+// (same text apart from spacing / citation chips) within this window.
+const REPLY_REVISION_MS = Number(process.env.AUTOINJECTOR_REPLY_REVISION_MS) || 60000;
 const MAX_NOTAG_REPROMPTS = Number(process.env.AUTOINJECTOR_MAX_NOTAG_REPROMPTS) || 2;
 const MAX_LOG = 300;
 const MAX_TRANSCRIPT = 1000; // oldest-first eviction, same idea as MAX_LOG for the debug log -- a long-running relay must not grow this without bound
@@ -92,7 +100,10 @@ const PANE_SYNC_MS = 700;
 const HOUSE_RULES = ["who-wants-to-speak", "debate", "free-for-all", "devil-angel", "chargeback", "brainstorm", "rotation", "blind-round"];
 const STAGE_MODES = new Set(HOUSE_RULES);
 const NEEDS_EXACTLY_THREE = new Set(["devil-angel", "chargeback", "rotation", "blind-round"]);
-const COLLAPSED_HEIGHT = 44; // px — how tall a top-level window is once collapsed to just its titlebar
+// px of CONTENT kept visible when a top-level window collapses: controls.html's
+// #window-titlebar (38px + 1px border), which holds the expand button. The OS
+// frame (native title bar + borders, DPI-dependent on Windows) is added at runtime.
+const COLLAPSED_HEIGHT = 39;
 const MAX_DEBUG_LOG_LINES = 2000;
 const SAVE_DEBOUNCE_MS = Number(process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS) || 500;
 const FILE_ATTACH_PROTOCOL_VERSION = "1.3";
@@ -159,8 +170,12 @@ const uiViews = []; // every renderer that should receive broadcasts
 // Per top-level window: whether it's currently collapsed to just a titlebar,
 // and (while collapsed) the full bounds to restore on expand.
 const windowCollapse = {
-  automation: { collapsed: false, savedBounds: null, savedMinSize: null }
+  automation: { collapsed: false, savedBounds: null, savedMinSize: null, wasMaximized: false }
 };
+function resetWindowCollapse(which) {
+  const entry = windowCollapse[which];
+  if (entry) Object.assign(entry, { collapsed: false, savedBounds: null, savedMinSize: null, wasMaximized: false });
+}
 
 function targetWindow(which) {
   return which === "automation" ? win : null;
@@ -171,6 +186,7 @@ const state = {
   captured: {}, // site -> { id, site, label, text, ts, pinned } | null — last stable reply seen
   pending: {}, // site -> { text, sinceTs, reprompted } — used to detect a stopped reply / a quiet pane with no end tag
   noTagReprompts: {}, // site -> count of consecutive "you forgot the [FROM:] tag, resend" nudges (reset when a valid tagged reply lands)
+  noToReminders: {}, // site -> count of consecutive "you forgot the [TO:] tag" reminders (TR-22; reset by a reply that has one)
   busy: {}, // site -> bool — poll in flight, skip overlapping polls
   waiting: {}, // site -> bool — a message was just sent, waiting on a fresh reply (drives the idle/generating dot)
   generating: {}, // site -> bool — the pane is actively producing a reply (its Stop button is showing / Send disabled), from pollSite's read
@@ -185,7 +201,8 @@ const state = {
   meshActive: false, // whether global Auto is currently on
   relayEnabled: true, // master switch for AUTOMATIC AI->AI forwarding (baseline [TO:] tag relay + mesh). "Stop AIs Talking" flips this off; the next user send / relay-mode start turns it back on. Direct user sends are never gated by it.
   nextTurnId: 1,
-  nextMsgSeq: 1, // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
+  nextMsgSeq: 1,
+  stopShown: {}, // site -> the page's Stop button is showing (TR-28; set by pollSite) // program-kept running message number stamped on every outgoing send ([MSG #0001], 4-digit) so the AIs can tell which message they're answering
 
   nextLedgerId: 1,
   hr: null, // House Rules run state, see resetHouseRule()
@@ -209,6 +226,7 @@ const state = {
   },
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
+  voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
   bookforge: { enabled: false }, // BookForge bridge (experimental) — persisted; OFF by default. See startBookforgeBridge().
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
@@ -627,10 +645,12 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
+        voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
         bookforge: { enabled: !!state.bookforge.enabled }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
           mode: hr.mode,
@@ -676,6 +696,9 @@ function loadPersistedState() {
     state.transcript = snap.transcript.length > MAX_TRANSCRIPT ? snap.transcript.slice(snap.transcript.length - MAX_TRANSCRIPT) : snap.transcript;
     state.nextTurnId = snap.transcript.reduce((m, t) => Math.max(m, (t.id || 0) + 1), 1);
   }
+  // TR-29: carry the [MSG #] counter on, so after a restart the AIs don't see
+  // #0001 again while they still remember #0011 from before.
+  if (Number.isInteger(snap.nextMsgSeq) && snap.nextMsgSeq > state.nextMsgSeq) state.nextMsgSeq = Math.min(snap.nextMsgSeq, 9999999);
   if (snap.customRole) {
     for (const site of SITE_IDS) if (typeof snap.customRole[site] === "string") state.customRole[site] = snap.customRole[site];
   }
@@ -696,7 +719,14 @@ function loadPersistedState() {
   }
   if (snap.selectorOverrides) {
     for (const site of SITE_IDS) {
-      if (snap.selectorOverrides[site]) state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
+      if (snap.selectorOverrides[site]) {
+        state.selectorOverrides[site] = { ...snap.selectorOverrides[site] };
+        // TR-24: a saved selector that is only a tag name ("span", "p") matches
+        // hundreds of things and made replies unreadable — drop it.
+        for (const [role, sel] of Object.entries(state.selectorOverrides[site])) {
+          if (isBareTagSelector(sel)) { delete state.selectorOverrides[site][role]; logEvent("selector-override-dropped", { site, role, selector: sel, reason: "too generic (a bare tag name)", severity: "warn" }); }
+        }
+      }
     }
   }
   if (snap.savedLogins && typeof snap.savedLogins === "object") {
@@ -716,6 +746,13 @@ function loadPersistedState() {
   if (snap.videoConfig && typeof snap.videoConfig === "object") {
     videoProvider.setSettings(snap.videoConfig);
     state.videoConfig = videoProvider.getSettings();
+  }
+  // Voice: settings only — restoring never starts the voice shim (that is still
+  // AUTOINJECTOR_VOICE_SPAWN / the Setup Wizard's job, and it runs after this,
+  // so a managed shim's address still wins over the saved one at runtime).
+  if (snap.voiceConfig && typeof snap.voiceConfig === "object") {
+    voiceProvider.setSettings(snap.voiceConfig);
+    state.voiceConfig = voiceProvider.getSettings();
   }
   if (snap.managerConfig && typeof snap.managerConfig === "object") {
     state.managerConfig = { ...state.managerConfig, ...openManagerConfig(snap.managerConfig) };
@@ -761,6 +798,105 @@ function layout() {
   controlsView.setBounds({ x: 0, y: 0, width: w, height: h });
 }
 
+const { clipPaneRects } = require("./pane-layout");
+const relayPolicy = require("./relay-policy");
+// TR-06: automatic AI-to-AI hand-offs allowed in a row before relaying pauses
+// for the user (override with AUTOINJECTOR_MAX_AUTO_HOPS).
+const autoHops = relayPolicy.createHopCounter({ max: Number(process.env.AUTOINJECTOR_MAX_AUTO_HOPS) || relayPolicy.DEFAULT_MAX_AUTO_HOPS });
+// TR-07 / TR-03: one honest status per AI pane, from proven sends + captures.
+const { createPaneHealth } = require("./pane-health");
+const paneHealth = createPaneHealth({ sites: SITE_IDS, stallMs: Number(process.env.AUTOINJECTOR_STALL_MS) || undefined });
+let lastHealthJson = "";
+function broadcastHealth() {
+  const snap = paneHealth.snapshot();
+  const json = JSON.stringify(snap);
+  if (json === lastHealthJson) return;
+  lastHealthJson = json;
+  broadcast("pane-health", snap);
+}
+// TR-19: which build is running (git commit + branch when run from a clone), so
+// every Extract All / About says exactly what code produced it. Never throws.
+const _buildInfo = { version: "", commit: null, date: null, branch: null, dir: __dirname };
+function buildInfo() {
+  if (!_buildInfo.version) { try { _buildInfo.version = (app && app.getVersion ? app.getVersion() : "") || ""; } catch (_) {} }
+  return _buildInfo;
+}
+// Looked up in the background after start (never blocks the window), and only
+// trusted when this folder really is the app's own git clone — never a parent
+// repo an installed copy happens to sit in, never inside app.asar.
+function loadBuildInfoAsync(onDone) {
+  if (/app\.asar/i.test(__dirname)) return;
+  let cp; try { cp = require("child_process"); } catch (_) { return; }
+  const git = (args) => new Promise((resolve) => {
+    try { cp.execFile("git", ["-C", __dirname, ...args], { timeout: 5000, windowsHide: true }, (err, out) => resolve(err ? null : String(out || "").trim())); }
+    catch (_) { resolve(null); }
+  });
+  (async () => {
+    const top = await git(["rev-parse", "--show-toplevel"]);
+    if (!top) return;
+    const rel = path.relative(path.resolve(top), __dirname);
+    if (rel !== "" && rel !== "desktop-app") return; // not the AutoInjector clone itself
+    const log = await git(["log", "-1", "--format=%h %cs"]);
+    const branch = await git(["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (!log) return;
+    const [commit, date] = log.split(" ");
+    Object.assign(_buildInfo, { commit: commit || null, date: date || null, branch: branch || null });
+    try { onDone && onDone(_buildInfo); } catch (_) {}
+  })().catch(() => {});
+}
+function buildLine() {
+  const b = buildInfo();
+  return `Build: v${b.version || "?"}${b.commit ? ` · commit ${b.commit}${b.date ? ` (${b.date})` : ""}` : ""}${b.branch ? ` · branch ${b.branch}` : ""} · running from ${b.dir}`;
+}
+
+// TR-13: Relay Trace — follows every [MSG #n] through each provable stage.
+const relayTraceLib = require("./relay-trace");
+const relayTrace = relayTraceLib.createRelayTrace({ noReplyMs: Number(process.env.AUTOINJECTOR_STALL_MS) || undefined });
+// TR-17: reply-block count on the page at the last read, and at the last capture.
+const readCount = {};
+const capturedCount = {};
+const tagSeenAt = {}; // when a [FROM:]-tagged reply first appeared on this pane (settle ceiling)
+const fragmentWarned = {}; // TR-23: logged the "override reads only part of the reply" warning
+const settleKey = (s) => String(s || "").replace(/\s+/g, "");
+function markCaptured(site) {
+  try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
+  capturedCount[site] = readCount[site] != null ? readCount[site] : null;
+  tagSeenAt[site] = 0;
+  paneHealth.onCapture(site);
+  broadcastHealth();
+  const c = state.captured[site];
+  try { relayTrace.noteCapture(site, c ? c.id : null, { none: !!(c && (isNoneSkip(String(c.text || "")) || parseRoundtableTag(String(c.text || "")).tag === "NONE")), rateLimited: !!(c && c.isRateLimited) }); } catch (_) {}
+}
+// TR-08: a read-only page check (sends nothing) a few seconds after each pane
+// loads, so a signed-out pane or a site that changed its page shows up on the
+// light and in the log before any message is lost.
+const PROBE_DELAY_MS = Number(process.env.AUTOINJECTOR_PROBE_DELAY_MS) || 8000;
+async function probePane(site) {
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return null;
+  let r;
+  try { r = await view.webContents.executeJavaScript(buildProbeScript(site, state.selectorOverrides[site])); }
+  catch (e) { r = { ok: false, error: String(e) }; }
+  if (!r || typeof r !== "object" || !r.input) r = { ok: false, error: (r && r.error) || "NO_RESULT" };
+  paneHealth.onProbe(site, r);
+  logEvent("pane-check", { site, overrides: Object.keys(state.selectorOverrides[site] || {}).length ? { ...state.selectorOverrides[site] } : null, ok: !!r.ok, input: r.input ? r.input.found : null, send: r.send ? r.send.found : null, replies: r.assistant ? r.assistant.count : null, replySelector: r.assistant ? r.assistant.selector : null, signedOutHint: !!r.signedOutHint, severity: r.ok && r.input && !r.input.found ? "warn" : undefined });
+  broadcastHealth();
+  return r;
+}
+// Every few seconds: log each newly stalled pane once, with the reason read
+// off the page, and refresh the lights (stalls are time-based).
+function healthTick() {
+  for (const st of paneHealth.newStalls()) {
+    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, tail: st.read.tail, nodeInfo: st.read.nodeInfo || undefined } : null });
+  }
+  broadcastHealth();
+}
+function resetAutoHops(reason) {
+  const st = autoHops.status();
+  autoHops.reset();
+  if (st.hops) logEvent("hop-count-reset", { reason, hops: st.hops, wasPaused: st.paused });
+}
+
 async function syncPaneBounds() {
   if (!win || !controlsView || controlsView.webContents.isDestroyed()) return;
   let rects;
@@ -775,12 +911,23 @@ async function syncPaneBounds() {
           const r = el.getBoundingClientRect();
           out[site] = { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
         }
+        // ISS-001: native panes float ABOVE the HTML, so they must never be
+        // placed over the sticky User Panel or under an open dialog.
+        const up = document.getElementById("col-userpanel");
+        const upr = up ? up.getBoundingClientRect() : null;
+        out.__top = upr && getComputedStyle(up).position === "sticky" ? Math.max(0, Math.round(upr.bottom)) : 0;
+        out.__bottom = window.innerHeight;
+        out.__modal = Array.from(document.querySelectorAll('[role="dialog"], dialog[open]')).some((d) => {
+          const cs = getComputedStyle(d); const b = d.getBoundingClientRect();
+          return cs.display !== "none" && cs.visibility !== "hidden" && b.width > 0 && b.height > 0;
+        });
         return out;
       })();
     `);
   } catch {
     return;
   }
+  const visible = clipPaneRects(rects);
   for (const site of SITE_IDS) {
     const view = siteViews[site];
     if (!view || view.webContents.isDestroyed()) continue;
@@ -790,7 +937,7 @@ async function syncPaneBounds() {
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
       continue;
     }
-    const r = rects && rects[site];
+    const r = visible[site];
     if (!r || r.width < 4 || r.height < 4) {
       // Still enabled and participating -- just its pane got collapsed (or
       // this is a transient layout-measurement gap). Keep the view at a
@@ -809,6 +956,10 @@ async function syncPaneBounds() {
 
 function createWindow() {
   win = new BaseWindow({ width: 1700, height: 1050, title: "AutoInjector Desktop — Automation" });
+  loadBuildInfoAsync((bi) => {
+    try { if (win && !win.isDestroyed?.() && win.setTitle) win.setTitle(`AutoInjector Desktop — Automation · build ${bi.commit}${bi.branch ? ` (${bi.branch})` : ""}`); } catch (_) {}
+    logEvent("app-build", { version: buildInfo().version, commit: bi.commit, date: bi.date, branch: bi.branch, dir: bi.dir });
+  });
 
   controlsView = new WebContentsView({
     webPreferences: {
@@ -837,7 +988,10 @@ function createWindow() {
     try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
     try {
       if (typeof view.webContents.on === "function") {
-        view.webContents.on("did-finish-load", () => { try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {} });
+        view.webContents.on("did-finish-load", () => {
+          try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
+          setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
+        });
       }
     } catch (_) {}
     // When an AI produces a file you download from its pane, grab it into the
@@ -860,9 +1014,10 @@ function createWindow() {
 
   layout();
   win.on("resize", () => { layout(); syncPaneBounds(); });
-  win.on("closed", () => { win = null; });
+  win.on("closed", () => { win = null; resetWindowCollapse("automation"); }); // a recreated window starts expanded
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
+  setInterval(healthTick, 5000);
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -932,7 +1087,15 @@ function openSequenceWindow() {
   };
   layoutSequence();
   sequenceWin.on("resize", layoutSequence);
-  sequenceWin.on("closed", () => { sequenceWin = null; sequenceView = null; });
+  // ISS-006 / TR-09: this window shows the run's progress from the
+  // "sequence-state" broadcast, so it must be on the broadcast list —
+  // without this it sat on "Starting sequence…" forever.
+  uiViews.push(sequenceView);
+  sequenceWin.on("closed", () => {
+    const i = uiViews.indexOf(sequenceView);
+    if (i >= 0) uiViews.splice(i, 1);
+    sequenceWin = null; sequenceView = null;
+  });
 }
 function closeSequenceWindow() {
   if (sequenceWin) sequenceWin.close();
@@ -1021,6 +1184,7 @@ function globalSnapshot() {
     waitingSince: { ...state.waitingSince },
     meshActive: state.meshActive,
     relayEnabled: state.relayEnabled,
+    autoHops: autoHops.status(),
     customRole: { ...state.customRole },
     selectorOverrides: Object.fromEntries(SITE_IDS.map((s) => [s, { ...state.selectorOverrides[s] }]))
   };
@@ -1157,6 +1321,127 @@ function broadcastHouseRule() {
 // real contention. Only a genuinely concurrent second call for the same
 // target pays for serialization, by chaining after the first's promise.
 const sendQueues = {};
+// Panes that have shown at least one send PROVEN by its [MSG #n] number appearing
+// in the chat (see sendTextTo). Per run; a pane that never proves one is still
+// trusted on "box emptied" alone, with a send-unverified warning in the log.
+const sendVerifiedSeen = {};
+// TR-25: how long a send waits for an AI that is still writing its last reply.
+const SEND_BUSY_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS) || 5 * 60 * 1000;
+const SEND_BUSY_POLL_MS = Number(process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS) || 2000;
+// TR-28: the longest a send waits for the target's just-finished reply to be
+// captured first (capture needs CAPTURE_SETTLE_MS of stillness, up to 3x that).
+const SEND_CAPTURE_WAIT_MS = Number(process.env.AUTOINJECTOR_SEND_CAPTURE_WAIT_MS) || (CAPTURE_SETTLE_MS * 3 + POLL_MS * 2);
+// TR-30: how long an untagged reply must hold still before a send may accept
+// it (longer than the tagged settle — without a Stop button, a thinking pause
+// mid-reply must not be mistaken for the end).
+const FORCE_ACCEPT_STABLE_MS = Number(process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS) || Math.max(CAPTURE_SETTLE_MS * 2, 3000);
+// Does this pane have a finished, tagged reply on screen that hasn't been
+// captured yet? Typing a new message now would push it off the "latest reply"
+// spot and it would never be captured (seen live: Gemini's reply to #0002 was
+// lost when #0005 went in the moment Gemini stopped writing).
+function hasUncapturedReply(site) {
+  const pend = state.pending[site];
+  if (!pend || !pend.text || !hasEndTag(pend.text)) return false;
+  if (Date.now() - (pend.sinceTs || 0) > 60000) return false; // stale — whatever happened to it, don't hold sends for it
+  const cap = state.captured[site];
+  if (cap && (cap.text === pend.text || sameReplyText(cap.text, pend.text))) return false;
+  return true;
+}
+// Returns "ok" (go ahead and type), "busy" (the page's Stop button is showing —
+// the caller waits like an AI_BUSY), or "stopped" (Stop AIs Talking, relays only).
+// TR-31: just the start of a routing tag ("[TO:", "[TO: ALL]") and nothing else.
+function isTagFragment(s) {
+  const t = String(s || "").trim();
+  return t.length > 0 && t.length <= 40 && /^\[\s*TO\b\s*:?[^\]\n]*\]?$/i.test(t);
+}
+const forceAcceptUntagged = new Set(); // TR-30: panes whose untagged finished reply pollSite may accept now
+const acceptedUntaggedRaw = {};        // site -> the raw text accepted that way
+const unreadableWarned = {};           // site -> last fragment logged as unreadable (TR-31)
+function isBareModeFor(site) {
+  return (state.hr.active && STAGE_MODES.has(state.hr.mode)) || selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site);
+}
+// A finished reply with NO [FROM:] tag that nothing has dealt with yet.
+function hasUntaggedFinished(site) {
+  const pend = state.pending[site];
+  if (!pend || !pend.text || hasEndTag(pend.text) || pend.reprompted) return false;
+  if (isTagFragment(pend.text) || isNoneSkip(pend.text) || isBareModeFor(site)) return false;
+  if (ftState.running || bbState.running) return false; // the tests measure whether the AI tags its replies itself
+  if (Date.now() - (pend.sinceTs || 0) > 60000) return false;
+  const cap = state.captured[site];
+  if (cap && (cap.text === pend.text || cap.rawText === pend.text)) return false;
+  return true;
+}
+// Safe to read a pane from INSIDE its send queue? Not while a House Rules
+// stage, a Prompt Sequence or the Manager is running: their capture handlers
+// send to the same pane and would wait behind this very send (deadlock). The
+// regular poll timer still reads the pane meanwhile.
+function gateMayPoll(site) {
+  return !isBareModeFor(site) && !state.hr.active && !state.sequence.active && state.manager.status !== "waiting";
+}
+// Returns "ok" (go ahead and type), "busy" (the page's Stop button is showing),
+// "stopped" (Stop AIs Talking, relays only), or "accepted" / "accepted-noto"
+// (TR-30: its untagged finished reply was just captured; "-noto" = it had no
+// [TO:] tag either).
+async function waitForPendingCapture(target, seq, fromSite, { noForce = false } = {}) {
+  const stopped = () => !!fromSite && !state.relayEnabled;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const mayPoll = gateMayPoll(target);
+  // Read the pane NOW (when safe) rather than trust a poll up to POLL_MS old:
+  // a reply that finished a moment ago gets its final text on record first.
+  const freshRead = async () => {
+    if (!mayPoll) { await sleep(Math.min(POLL_MS, 1500)); return false; }
+    for (let i = 0; state.busy[target] && i < 75; i++) await sleep(40); // a poll is mid-read; let it finish
+    if (state.busy[target]) return false;
+    try { await pollSite(target); } catch (_) {}
+    return true;
+  };
+  await freshRead();
+  if (stopped()) return "stopped";
+  // Only the Stop button means "still writing" here: a disabled Send over text
+  // in the box is also what a failed send leaves behind (the send script itself
+  // detects a page that is still writing — TR-30b).
+  if (state.stopShown[target]) return "busy";
+  // TR-30: a finished reply WITHOUT its [FROM:] tag would be buried by this
+  // send. Once it has held still, accept it (and relay it) first.
+  if (!noForce && mayPoll && hasUntaggedFinished(target)) {
+    const t0 = Date.now();
+    const budget = Math.max(SEND_CAPTURE_WAIT_MS, FORCE_ACCEPT_STABLE_MS + 2000);
+    let tries = 0;
+    while (hasUntaggedFinished(target) && Date.now() - t0 < budget) {
+      if (stopped()) return "stopped";
+      const pend = state.pending[target];
+      if (pend && Date.now() - pend.sinceTs >= FORCE_ACCEPT_STABLE_MS) {
+        const before = state.captured[target] && state.captured[target].id;
+        const raw = pend.text;
+        forceAcceptUntagged.add(target);
+        let ran = false;
+        try { ran = await freshRead(); } finally { forceAcceptUntagged.delete(target); }
+        const c = state.captured[target];
+        if (c && c.rawText === raw && acceptedUntaggedRaw[target] === raw) {
+          delete acceptedUntaggedRaw[target];
+          if (c.id === before) return "ok"; // it was only a re-draw of a reply already captured
+          return parseRoundtableTag(raw).explicit === true ? "accepted" : "accepted-noto";
+        }
+        if (ran && ++tries >= 3) { logEvent("untagged-accept-failed", { target, seq, severity: "warn" }); break; }
+        continue;
+      }
+      await sleep(150);
+      await freshRead();
+      if (state.stopShown[target]) return "busy";
+    }
+  }
+  delete acceptedUntaggedRaw[target]; // nothing was accepted this time
+  if (!hasUncapturedReply(target)) return "ok";
+  // Its own budget, starting now (not shared with any busy wait before it).
+  const start = Date.now();
+  logEvent("send-waiting-capture", { target, from: fromSite || null, seq, note: "letting its finished reply be captured first" });
+  while (hasUncapturedReply(target) && Date.now() - start < SEND_CAPTURE_WAIT_MS) {
+    if (stopped()) return "stopped";
+    await sleep(150);
+  }
+  if (hasUncapturedReply(target)) logEvent("send-capture-wait-timeout", { target, seq, waitedMs: Date.now() - start, severity: "warn" });
+  return stopped() ? "stopped" : "ok";
+}
 // Per-pane zoom for the embedded AI pages. Default 60% (override with the
 // AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
 const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
@@ -1196,8 +1481,17 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // can tell which message it's answering and not fall behind. Deliberately NOT
   // part of state.lastSentTo (below): Regenerate re-sends the stored body and
   // must get a FRESH number here, never a doubled-up stale one.
+  // TR-06: a send started by the user or by the program itself (compose, a
+  // prompt, a sequence step, a test, the Butler) begins a fresh conversation
+  // turn, so the AI-to-AI hop count starts over. AI-driven sends (relays carry
+  // fromSite; terminal results and missing-tag nudges are marked automatic)
+  // don't reset it.
+  if (!fromSite && !opts.automatic) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
-  const prompt = `[MSG #${seq}]\n${framed}`;
+  saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
+  let prompt = `[MSG #${seq}]\n${framed}`;
+  let flagged = false; // TR-30: the missing-[FROM:] flag was added to this message
+  try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : opts.automatic ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -1212,21 +1506,50 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // the same target (e.g. a mesh forward) jump ahead of a message that's
   // still retrying and land out of order.
   let attempts = 0;
+  let markerBaseline = null; // set by the first try; lets a retry tell "already went out" from "never did"
+  let busySince = 0; // TR-25: when we started waiting for a busy AI
   const res = await withSendQueue(target, async () => {
     let r;
     for (let attempt = 1; attempt <= SEND_RETRY_ATTEMPTS; attempt++) {
       attempts = attempt;
-      try {
-        r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target]), true);
-      } catch (e) {
-        r = { ok: false, error: String(e) };
+      // TR-28: let the target's finished reply be captured before we type over it.
+      let gate = "ok";
+      try { gate = await waitForPendingCapture(target, seq, fromSite, { noForce: !!opts.raw }); } catch (_) {}
+      if (gate === "stopped") { r = { ok: false, error: "RELAY_STOPPED" }; break; }
+      // TR-30 + TR-22: its last reply had no [FROM:] tag and was accepted just
+      // now — this message carries the flag and the full rules at its top.
+      if ((gate === "accepted" || gate === "accepted-noto") && !flagged) {
+        flagged = true;
+        prompt = `[MSG #${seq}]\n${composeEnvelopeReminder(target, gate === "accepted-noto" ? "accepted-missing-both" : "accepted-missing-from")}\n\n— NEW MESSAGE BELOW —\n\n${framed}`;
       }
-      if (r && r.ok) break;
+      if (gate === "busy") {
+        r = { ok: false, error: "AI_BUSY", markerBaseline }; // still writing — wait below without typing
+      } else {
+        try {
+          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
+        } catch (e) {
+          r = { ok: false, error: String(e) };
+        }
+      }
+      // The send script proves a send by spotting this message's [MSG #n] number
+      // in the conversation. Once a pane has proven sends that way, a send that
+      // only "emptied the box" without showing up is NOT trusted: the page can
+      // clear its box without sending (that is how ChatGPT went silent).
+      if (r && markerBaseline == null && Number.isInteger(r.markerBaseline)) markerBaseline = r.markerBaseline;
+      if (r && r.ok && r.verified === false && sendVerifiedSeen[target]) r = { ok: false, error: "SEND_UNVERIFIED" };
+      if (r && r.ok) { if (r.verified) sendVerifiedSeen[target] = true; break; }
+      // TR-25: the AI is still writing its previous reply — wait for it to
+      // finish (it can't take a new message yet) instead of burning retries.
+      if (r && r.error === "AI_BUSY") {
+        if (fromSite && !state.relayEnabled) { r = { ok: false, error: "RELAY_STOPPED" }; break; } // Stop AIs Talking while it waited
+        if (!busySince) { busySince = Date.now(); logEvent("send-waiting-busy", { target, from: fromSite || null, seq, pageSaysGenerating: !!state.generating[target], how: (r && r.busyHow) || "stop-button" }); }
+        if (Date.now() - busySince < SEND_BUSY_WAIT_MS) { attempt--; await new Promise((resolve) => setTimeout(resolve, SEND_BUSY_POLL_MS)); continue; }
+      }
       // E11: a provider-paused conversation won't recover by resending — the
       // composer is gone on purpose. Stop retrying and report it as itself.
       if (r && r.error === "PROVIDER_PAUSED") break;
       if (attempt < SEND_RETRY_ATTEMPTS) {
-        logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown" });
+        logEvent("send-retry", { target, from: fromSite || null, attempt, nextAttempt: attempt + 1, error: (r && r.error) || "unknown", diag: (r && r.diag) || undefined });
         await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_BACKOFF_MS));
       }
     }
@@ -1237,9 +1560,16 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // own field: duplicate detection compares message content, so the per-send
   // [MSG #] header must not make every send look unique.
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
+  paneHealth.onSendResult(target, res);
+  broadcastHealth();
+  try { relayTrace.noteSendResult(seq, { ...(res || {}), attempts }); } catch (_) {}
+  if (bbState.running) {
+    bbState.sends.push({ target, from: fromSite || null, seq, text: prompt, ok: !!(res && res.ok), verified: !!(res && res.verified === true), ts: Date.now() });
+    if (bbState.sends.length > 500) bbState.sends.shift();
+  }
   if (!res || !res.ok) {
     broadcast("send-error", { target, error: res?.error || "unknown", reason: res?.reason || null });
-    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts });
+    logEvent("send-error", { target, from: fromSite || null, error: res?.error || "unknown", attempts, diag: (res && res.diag) || undefined });
     // E11: give the paused case an actionable, human message instead of a bare
     // INPUT_NOT_FOUND — the user needs to open that pane and clear the safeguard.
     if (res && res.error === "PROVIDER_PAUSED") {
@@ -1270,7 +1600,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     state.waitingSince[target] = Date.now();
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
     broadcast("waiting-changed", { site: target, waiting: true });
-    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq });
+    logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
+    if (res.verified === false) logEvent("send-unverified", { target, seq, severity: "warn", note: "the box emptied but this message's number never showed in the chat" });
   }
   return res;
 }
@@ -1540,7 +1871,7 @@ async function startRotation() {
 // unit-tested directly (main.js only runs under the Electron harness). It also
 // carries the E04 quoted/fenced-example guard and recognizes [TO: BUTLER] (E05).
 const {
-  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope,
+  parseRoundtableTag, findEndTag, hasEndTag, parseEndTag, isNoneSkip, stripEnvelope, stripUiChips, sameReplyText,
 } = require("./envelope");
 
 // Append a concise envelope instruction to an outbound prompt so the receiving
@@ -1560,19 +1891,35 @@ function withEnvelope(text, target) {
 // the WHOLE message with the envelope. Capped (MAX_NOTAG_REPROMPTS) so a model
 // that keeps forgetting can't loop forever: past the cap we stop nudging, and if
 // a book run was waiting on this pane we park it as stalled for the user.
-function composeEnvelopeReminder(site) {
+// TR-22: every "you got the tags wrong" flag carries the FULL how-to-talk
+// guide (the same text as the Prompt Library's routing prompt, including any
+// edits the user made to it), so the AI is re-taught the rules each time.
+function protocolGuideFor(site) {
+  const saved = (state.prompts || []).find((p) => p && p.id === 2);
+  const text = (saved && saved.text && String(saved.text[site] || "").trim()) || defaultRoutingExplainerPrompt().text[site] || "";
+  return text.replace(/^Quick reference, not a task[^.]*\.\s*/i, "");
+}
+function composeEnvelopeReminder(site, kind = "missing-from", { forwarded = 0 } = {}) {
   const name = String(site || "").toUpperCase() || "YOU";
+  const flag = kind === "accepted-missing-from"
+    ? "⚠️ FLAG: NO [FROM:] CLOSING TAG — your last message didn't end with [FROM: " + name + "]. It was passed on anyway because a new message arrived for you, but without the closing tag a message can be lost. Always end with [FROM: " + name + "]. No need to resend it.\n"
+    : kind === "accepted-missing-both"
+    ? "⚠️ FLAG: NO TAGS — your last message had no [TO:] tag at the start and no [FROM: " + name + "] at the end. It was kept (it went to the user only) because a new message arrived for you. Always start with [TO: who it's for] and end with [FROM: " + name + "]. If it was meant for the other AIs, send it again with the tags.\n"
+    : kind === "missing-to" && forwarded
+    ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start. Auto routing passed it on this time, but don't rely on that: always start with [TO: who it's for]. No need to resend it.\n"
+    : kind === "missing-to"
+    ? "⚠️ FLAG: NO [TO:] TAG — your last message had no routing tag at the start, so it went to the user ONLY. The other AIs did NOT get it.\n" +
+      "If it was meant for one of them (or everyone), send it again starting with [TO: CLAUDE] / [TO: CHATGPT] / [TO: GEMINI] / [TO: ALL] and ending with [FROM: " + name + "]. If it really was just for the user, reply NONE.\n"
+    : "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n" +
+      "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. Put nothing after the closing tag.\n";
   return (
-    "⚠️ NO ENDING TAG RECEIVED — your last message was not delivered and has been discarded.\n\n" +
-    "Every message MUST use the communication envelope:\n" +
-    "• START with a routing tag in brackets: [TO: CHATGPT] / [TO: GEMINI] / [TO: CLAUDE] / [TO: BUTLER] / [TO: TERMINAL] / [TO: ALL] / [TO: USER] / [TO: NONE]\n" +
-    "• END with your own closing tag, same bracket form: [FROM: " + name + "]\n\n" +
-    "The [FROM: ...] tag is what tells the system your message is finished — without it nothing is sent. " +
-    "Please resend your ENTIRE message again, beginning with [TO: ...] and ending with [FROM: " + name + "]. " +
-    "Put nothing after the closing tag."
+    flag +
+    "\nQUICK CHECK every time: line 1 = [TO: who it's for] · last line = [FROM: " + name + "] · nothing after it.\n" +
+    "\nHOW WE TALK TO EACH OTHER (the full rules):\n" + protocolGuideFor(site)
   );
 }
 async function missingEndTagReprompt(site, rawText) {
+  if (!state.relayEnabled) { logEvent("endtag-missing", { site, skipped: "relay-silenced" }); return; } // Stop AIs Talking means no nudges either
   const n = (state.noTagReprompts[site] || 0) + 1;
   state.noTagReprompts[site] = n;
   logEvent("endtag-missing", { site, attempt: n, chars: (rawText || "").length });
@@ -1581,8 +1928,22 @@ async function missingEndTagReprompt(site, rawText) {
     return;
   }
   try {
-    await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true });
+    await sendTextTo(site, composeEnvelopeReminder(site), null, { raw: true, automatic: true });
   } catch (e) { logEvent("endtag-reprompt-error", { site, error: String(e) }); }
+}
+
+// TR-22: a reply that closed with [FROM:] but never opened with [TO:] is
+// captured (it defaults to the user) — but the AI is flagged and re-taught, so
+// it addresses the others properly next time. Same cap as the [FROM:] nudge
+// (a model that keeps forgetting can't loop), reset by a correctly tagged reply.
+async function missingToReminder(site, { forwarded = 0 } = {}) {
+  if (!state.relayEnabled) return;
+  const n = (state.noToReminders[site] || 0) + 1;
+  state.noToReminders[site] = n;
+  logEvent("totag-missing", { site, attempt: n, forwardedByAuto: forwarded, severity: "warn" });
+  if (n > MAX_NOTAG_REPROMPTS) { logEvent("totag-missing-giveup", { site, attempts: n }); return; }
+  try { await sendTextTo(site, composeEnvelopeReminder(site, "missing-to", { forwarded }), null, { raw: true, automatic: true }); }
+  catch (e) { logEvent("totag-reminder-error", { site, error: String(e) }); }
 }
 
 // Pure target computation, shared by handleRoundtableCapture() and pollSite()'s
@@ -1609,9 +1970,9 @@ async function handleRoundtableCapture(turn) {
   // Tell the receiver how it was addressed: a named [TO: X] tag → "you"; [TO: ALL]
   // → "everyone". This is the addressing awareness the stripped tag would carry.
   const addressing = turn.roundtableTag === "ALL" ? "everyone" : "you";
-  for (const target of roundtableTargetsFor(turn)) {
-    await sendTextTo(target, turn.text, turn.site, { addressing });
-  }
+  // Each target has its own send queue; send to them side by side so one AI
+  // that is still busy writing (TR-25 wait) doesn't hold up the others.
+  await Promise.all(roundtableTargetsFor(turn).map((target) => sendTextTo(target, turn.text, turn.site, { addressing, sourceTurnId: turn.id })));
 }
 
 // Loop guard: models acking each other produce SHORT, near-identical replies
@@ -1642,17 +2003,21 @@ function loopSuppressRelay(text) {
 // its steps' replies still go through the normal capture/broadcast/tag-
 // routing path, this just also watches for "was that the reply we were
 // waiting on" to advance.
-function broadcastSequenceState() {
+// `ended` says why a run stopped: "done", "stopped", "stalled" (no reply in
+// time), "send-failed" (no AI got the step) or "no-participants".
+function broadcastSequenceState(ended) {
   const seq = state.sequence;
-  broadcast("sequence-state", { active: seq.active, index: seq.index, total: seq.steps.length });
+  if (!seq.active && ended) seq.ended = ended;
+  broadcast("sequence-state", { active: seq.active, index: seq.index, total: seq.steps.length, ended: seq.active ? null : (seq.ended || null) });
 }
 
 async function sendSequenceStep() {
   const seq = state.sequence;
   if (!seq.active || seq.index >= seq.steps.length) {
+    const finished = seq.active;
     seq.active = false;
     logEvent("sequence-done", {});
-    broadcastSequenceState();
+    broadcastSequenceState(finished ? "done" : null);
     return;
   }
   // Every dispatch gets its own generation number, stamped per-site into
@@ -1666,14 +2031,31 @@ async function sendSequenceStep() {
   seq.generation++;
   seq.sentTs = Date.now();
   const step = seq.steps[seq.index];
-  const targets = step.target === "all" ? SITE_IDS : [step.target];
+  // "All" means the AIs that are checked Active — never an unchecked pane.
+  const targets = step.target === "all" ? SITE_IDS.filter((s) => state.enabled[s]) : [step.target];
+  if (!targets.length) {
+    seq.active = false;
+    logEvent("sequence-stop", { reason: "no-participants", index: seq.index });
+    broadcastSequenceState("no-participants");
+    return;
+  }
+  let delivered = 0;
   for (const t of targets) {
     if (SITES[t]) {
       seq.dispatchGen[t] = seq.generation;
-      await sendTextTo(t, withEnvelope(step.text, t), null);
+      const r = await sendTextTo(t, withEnvelope(step.text, t), null);
+      if (r && r.ok) delivered++;
     }
   }
-  logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation });
+  // Nobody got the step: stop now with the reason, instead of "waiting for a
+  // reply" for 4 minutes on a message that never went out.
+  if (!delivered) {
+    seq.active = false;
+    logEvent("sequence-send-failed", { index: seq.index, target: step.target });
+    broadcastSequenceState("send-failed");
+    return;
+  }
+  logEvent("sequence-step-sent", { index: seq.index, target: step.target, generation: seq.generation, delivered });
   broadcastSequenceState();
 }
 
@@ -1689,13 +2071,14 @@ function sequenceWatchdog() {
     const step = seq.steps[seq.index];
     seq.active = false;
     logEvent("sequence-stalled", { index: seq.index, target: step && step.target });
-    broadcastSequenceState();
+    broadcastSequenceState("stalled");
   }
 }
 
 async function startSequence(steps) {
-  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0 };
+  state.sequence = { active: true, steps, index: 0, generation: 0, dispatchGen: {}, sentTs: 0, ended: null };
   state.relayEnabled = true; // a sequence run re-enables forwarding after any prior Stop
+  broadcastSequenceState(); // the window shows "step 1 of N" right away, not after every send finishes
   await sendSequenceStep();
 }
 
@@ -1703,7 +2086,7 @@ async function handleSequenceCapture(turn) {
   const seq = state.sequence;
   if (!seq.active) return;
   const step = seq.steps[seq.index];
-  if (!step) { seq.active = false; broadcastSequenceState(); return; }
+  if (!step) { seq.active = false; broadcastSequenceState("done"); return; }
   // For an "all" step, the first of the three replies to arrive is enough
   // to advance — waiting for all three would mean one slow AI blocks the
   // whole sequence indefinitely.
@@ -1966,6 +2349,33 @@ function detectManagerStall() {
   return state.manager.thinkingStreak >= MANAGER_STALL_LIMIT;
 }
 
+// TR-10 (ISS-011, the "Butler Himself" memory loop): a butler model that keeps
+// saving or searching the SAME thing never moves the task forward. The second
+// identical REMEMBER/RECALL in a task is not run again — the butler is told it
+// was already done; the third time, the task stops with a plain reason instead
+// of spinning until the turn limit. Returns true when it handled the action.
+const MEMORY_REPEAT_LIMIT = 3;
+async function guardRepeatedMemoryAction(m, action, arg) {
+  const sig = `${action}:${String(arg || "").replace(/\s+/g, " ").trim().toLowerCase()}`;
+  m.memorySigs = m.memorySigs || [];
+  if (!m.memorySigs.includes(sig)) { m.memorySigs.push(sig); if (m.memorySigs.length > 50) m.memorySigs.shift(); return false; }
+  m.memoryRepeats = (m.memoryRepeats || 0) + 1;
+  const what = action === "REMEMBER" ? "saved that fact" : "searched memory for that";
+  logManagerEvent({ category: "memory", severity: "warning", summary: `Skipped a repeat: already ${what} in this task (repeat ${m.memoryRepeats})`, details: { action, arg: String(arg || "").slice(0, 200) } });
+  m.previousManagerActions.push({ action, rejected: true, rejectReason: `already ${what} in this task — use the result you have and move on`, ts: Date.now() });
+  if (m.memoryRepeats >= MEMORY_REPEAT_LIMIT) {
+    const msg = `I stopped this task: I kept repeating the same memory step (${action.toLowerCase()}) without making progress.`;
+    broadcast("manager-ack", { taskId: m.taskId, text: msg, ts: Date.now() });
+    await finishManagedTask({ ok: false, reason: "REPEATING_MEMORY_STEP" });
+    return true;
+  }
+  m.noProgressStreak++;
+  m.status = "assembling";
+  if (detectNoProgress()) await escalateManagerTier(`repeated ${action}`);
+  else await runManagerTurn();
+  return true;
+}
+
 async function executeManagerAction(decision) {
   const m = state.manager;
   const action = decision.action;
@@ -2084,6 +2494,7 @@ async function executeManagerAction(decision) {
     case "REMEMBER": {
       // N3: persist a durable fact into the shared memory store.
       const fact = String(decision.fact != null ? decision.fact : decision.value).trim();
+      if (await guardRepeatedMemoryAction(m, "REMEMBER", fact)) break;
       const res = dbService.memoryCreate("fact", { statement: fact, source: `manager:${m.taskId}` });
       logManagerEvent({
         category: "memory",
@@ -2098,6 +2509,7 @@ async function executeManagerAction(decision) {
     case "RECALL": {
       // N3: search the shared memory store; results feed back into the prompt.
       const q = String(decision.query).trim();
+      if (await guardRepeatedMemoryAction(m, "RECALL", q)) break;
       const res = dbService.memorySearch(q);
       const found = (res && res.results) || [];
       for (const row of found) {
@@ -2417,7 +2829,7 @@ async function replyFromTerminal(site, body) {
     `Any other tag works as usual. End with [FROM: ${tag}].)`;
   if (ftState.running) { ftState.termReplies.push({ site, text, ts: Date.now() }); if (ftState.termReplies.length > 500) ftState.termReplies.shift(); }
   try {
-    const r = await sendTextTo(site, text, null);
+    const r = await sendTextTo(site, text, null, { automatic: true }); // a terminal result is part of the AI's own loop, not a fresh start
     if (!r || !r.ok) logEvent("terminal-reply-error", { to: site, error: (r && r.error) || "unknown" });
     return r;
   } catch (e) {
@@ -2514,8 +2926,12 @@ function deliverToTerminal(turn) {
 async function executeTerminalRequest(req) {
   const L = getLockers();
   const results = [];
+  // Scripts run only if the user approved THIS request (or ticked Auto-run).
+  // ai-lockers.runOp enforces it, so a script can't slip through a block that
+  // looked script-free when it was checked.
+  const ctx = { ...lockerCtx, scriptsApproved: req.approved === true || terminalState.autoRunAI === true };
   for (const op of req.ops) {
-    const r = await L.runOp(req.from, op, lockerCtx);
+    const r = await L.runOp(req.from, op, ctx);
     results.push(r);
     if (!r.ok) break;
   }
@@ -2525,6 +2941,7 @@ async function executeTerminalRequest(req) {
   for (const r of results) {
     let status;
     if (r.error === "NOT_ALLOWED") status = "refused — not allowed in your locker";
+    else if (r.error === "NEEDS_APPROVAL") status = "refused — scripts need the user's approval";
     else if (r.error === "TIMEOUT") status = "still running — timed out waiting, output so far";
     else if (r.error && r.error !== "NONZERO_EXIT") status = `failed: ${r.error}`;
     else status = `exit ${r.exitCode == null ? "?" : r.exitCode}`;
@@ -2540,6 +2957,9 @@ async function executeTerminalRequest(req) {
   return { ok: true, results };
 }
 
+// Re-place the native AI panes right away (scroll, dialog open/close) instead
+// of waiting for the next PANE_SYNC_MS tick — ISS-001.
+ipcMain.handle("panes:sync", async () => { await syncPaneBounds().catch(() => {}); return { ok: true }; });
 ipcMain.handle("lockers:open", async () => {
   try {
     const L = getLockers();
@@ -2571,7 +2991,13 @@ ipcMain.handle("lockers:attach", async (_evt, { site, rel, targets } = {}) => {
 });
 // ---- 🧪 Feature Test: every AI through every feature, judged by real evidence ----
 const ftState = { running: false, stop: false, rawCaptures: [], termReplies: [] };
+// TR-14 Bucket Brigade state: raw captures + the FULL text of every send while it runs.
+const bbState = { running: false, stop: false, captures: [], sends: [] };
 function ftRecordCapture(site, text) {
+  if (bbState.running) {
+    bbState.captures.push({ site, text: String(text || ""), ts: Date.now() });
+    if (bbState.captures.length > 500) bbState.captures.shift();
+  }
   if (!ftState.running) return;
   ftState.rawCaptures.push({ site, text: String(text || ""), ts: Date.now() });
   if (ftState.rawCaptures.length > 500) ftState.rawCaptures.shift();
@@ -2634,6 +3060,75 @@ async function runFeatureTestNow() {
     checks: r.results.map((x) => ({ name: x.name, ok: x.ok, detail: x.detail, tip: x.tip })),
   };
 }
+// ---- TR-14 Bucket Brigade: a scored relay run on the real sites ----
+const bucketBrigade = require("./bucket-brigade");
+async function runBrigadeNow() {
+  if (bbState.running) return { ok: false, error: "ALREADY_RUNNING" };
+  if (ftState.running) return { ok: false, error: "The Feature Test is running — wait for it to finish." };
+  if (state.hr && state.hr.active) return { ok: false, error: "A House Rules format is running — stop it first." };
+  if (state.sequence && state.sequence.active) return { ok: false, error: "A Prompt Sequence is running — stop it first." };
+  const sites = SITE_IDS.filter((s) => state.enabled[s] && siteViews[s] && !siteViews[s].webContents.isDestroyed());
+  if (sites.length < 2) return { ok: false, error: "Check at least two AIs Active for the relay check." };
+  // Only the [TO:] tag relay runs during the check — Auto would spray copies.
+  const saved = { routing: {}, meshActive: state.meshActive, relayEnabled: state.relayEnabled };
+  for (const s of SITE_IDS) { saved.routing[s] = new Set(state.routing[s]); state.routing[s].clear(); }
+  state.meshActive = false;
+  state.relayEnabled = true;
+  Object.assign(bbState, { running: true, stop: false, captures: [], sends: [] });
+  // The check makes 19 hand-offs in a row; never let a lowered hop limit cut it short.
+  const savedHopMax = autoHops.status().max;
+  if (savedHopMax < 40) autoHops.setMax(40);
+  logEvent("brigade-start", { sites });
+  broadcast("brigade-progress", { status: "start", sites });
+  let r;
+  try {
+    r = await bucketBrigade.runBrigade({
+      sites,
+      label: siteLabel,
+      send: (site, text) => sendTextTo(site, text, null),
+      captureSince: (site, ts) => bbState.captures.filter((c) => c.site === site && c.ts >= ts),
+      sendsSince: (target, ts) => bbState.sends.filter((x) => x.target === target && x.ts >= ts),
+      shouldStop: () => bbState.stop,
+      hopTimeoutMs: Number(process.env.AUTOINJECTOR_BRIGADE_HOP_MS) || 4 * 60 * 1000,
+      setupWaitMs: Number(process.env.AUTOINJECTOR_BRIGADE_SETUP_MS) || 20000,
+      pollMs: Number(process.env.AUTOINJECTOR_BRIGADE_POLL_MS) || 1000,
+      settleMs: Number(process.env.AUTOINJECTOR_BRIGADE_SETTLE_MS) || 3000,
+      onProgress: (p) => { broadcast("brigade-progress", p); if (p.status === "hop-problem") logEvent("brigade-hop-problem", { item: p.item, site: p.site, detail: p.detail, severity: "warn" }); },
+    });
+  } catch (e) {
+    r = { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    for (const s of SITE_IDS) state.routing[s] = saved.routing[s];
+    state.meshActive = saved.meshActive;
+    state.relayEnabled = saved.relayEnabled;
+    autoHops.setMax(savedHopMax);
+    bbState.running = false;
+  }
+  if (!r.ok) { logEvent("brigade-error", { error: r.error }); broadcast("brigade-progress", { status: "done", ok: false, error: r.error }); return r; }
+  let file = null;
+  try {
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    file = outputManager.saveBuffer(outputManager.logsDir(), `bucket-brigade-${stamp}.md`, bucketBrigade.formatReport(r, { label: siteLabel }) + "\n\n---\n\n" + relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel }));
+    try { if (shell && shell.openPath) shell.openPath(file); } catch (_) {}
+  } catch (e) { logEvent("brigade-report-error", { error: String(e) }); file = null; }
+  logEvent("brigade-done", { appPass: r.appPass, finished: r.finished, hops: r.hops.length, repairs: r.repairs, app: r.app, report: file, severity: r.appPass ? undefined : "warn" });
+  broadcast("brigade-progress", { status: "done", ok: true, appPass: r.appPass, finished: r.finished, file });
+  return { ok: true, appPass: r.appPass, finished: r.finished, app: r.app, repairs: r.repairs, report: file };
+}
+async function confirmAndRunBrigade() {
+  try {
+    if (dialog && dialog.showMessageBox) {
+      const c = await dialog.showMessageBox({ type: "question", buttons: ["Run it", "Cancel"], defaultId: 0, cancelId: 1, title: "Relay check (Bucket Brigade)",
+        message: "Run the 20-step relay check on the AIs that are checked Active?",
+        detail: "It sends about 23 messages to the real AI sites (this uses some of your usage on them) and takes roughly 10–20 minutes. Auto routing is paused while it runs and put back afterwards. A report opens when it finishes." });
+      if (c.response !== 0) return;
+    }
+    const r = await runBrigadeNow();
+    if (!r.ok && dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "warning", title: "Relay check", message: `Couldn't run the relay check: ${r.error}` });
+  } catch (e) { bbState.running = false; logEvent("brigade-error", { error: String(e) }); }
+}
+ipcMain.handle("brigade:run", async () => { try { return await runBrigadeNow(); } catch (e) { bbState.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("brigade:stop", () => { bbState.stop = true; logEvent("brigade-stop-requested", {}); return { ok: true }; });
 ipcMain.handle("featuretest:run", async () => { try { return await runFeatureTestNow(); } catch (e) { ftState.running = false; return { ok: false, error: String(e) }; } });
 ipcMain.handle("featuretest:stop", () => { ftState.stop = true; logEvent("featuretest-stop-requested", {}); return { ok: true }; });
 ipcMain.handle("featuretest:open-report", async (_evt, { file } = {}) => {
@@ -2699,6 +3194,7 @@ ipcMain.handle("terminal:approve", async (_evt, { id } = {}) => {
   const req = takePending(id);
   if (!req) return { ok: false, error: "NOT_FOUND" };
   logEvent("terminal-request-approved", { id: req.id, from: req.from });
+  req.approved = true;
   executeTerminalRequest(req).catch((e) => logEvent("terminal-request-error", { id: req.id, error: String(e) }));
   return { ok: true };
 });
@@ -3054,9 +3550,12 @@ async function pollSite(site) {
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return;
   state.busy[site] = true;
+  let forcedAccept = false; // TR-30: an untagged finished reply accepted because a send must type over it
   try {
     const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
-    const text = (res && res.text) || "";
+    // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
+    // hide it — drop them before any completion check sees the text (TR-17).
+    let text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
     const pend = state.pending[site];
     // The site's own "still generating" signal (its Stop button is showing, or
     // Send is disabled). This is the reliable "are they done speaking?" answer —
@@ -3066,10 +3565,20 @@ async function pollSite(site) {
     // site's stop/send selectors don't match, this is false and completion falls
     // back to the [FROM:] tag / stability timer, exactly as before.
     const generating = !!(res && res.generating);
+    // TR-28: the Stop button alone (older read results without the field fall back to `generating`).
+    state.stopShown[site] = res && typeof res.stopShown === "boolean" ? res.stopShown : generating;
+    readCount[site] = res && Number.isInteger(res.count) ? res.count : null;
+    if (res && res.fragmentFixed && !fragmentWarned[site]) {
+      fragmentWarned[site] = true;
+      logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
+    }
+    if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
+    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null });
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
       state.generating[site] = generating;
+      if (generating) { try { relayTrace.noteGenerating(site); } catch (_) {} }
       broadcast("generation", { site, generating });
     }
 
@@ -3102,6 +3611,7 @@ async function pollSite(site) {
       const seen = state.captured[site];
       if (seen && seen.text === text) return; // already swallowed this exact NONE
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       state.noTagReprompts[site] = 0;
       if (state.waiting[site]) {
         state.waiting[site] = false;
@@ -3123,30 +3633,79 @@ async function pollSite(site) {
       // nudge. Baseline never captures untagged text, so this only ever matches
       // something a bare-mode/stage run already handled.
       const already = state.captured[site];
-      if (already && already.text === text) return;
+      if (already && (already.text === text || already.rawText === text)) return;
+      // TR-31: only the START of a reply ("[TO:" — seen live on Gemini) means
+      // the reader can't see the rest of it. That's a reading problem, not the
+      // AI forgetting its tag: never nag the AI about it; log it once.
+      if (isTagFragment(text)) {
+        if (unreadableWarned[site] !== text) {
+          unreadableWarned[site] = text;
+          logEvent("reply-unreadable", { site, text: text.trim(), nodeInfo: (res && res.nodeInfo) || null, severity: "warn", note: "the reader only sees the start of the reply — the page may have split it; use 🎯 to pick the reply text if this keeps happening" });
+        }
+        state.pending[site] = { text, sinceTs: pend.text === text ? pend.sinceTs : Date.now(), reprompted: true };
+        return;
+      }
       // Still streaming, OR finished-but-forgot-the-tag. Track quiet time; only
       // act once the pane has gone quiet past the watchdog window.
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
-      if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
+      // TR-30: a send is about to type into this pane, and its finished reply
+      // has no [FROM:] tag. Typing now would bury it for good, so accept it as
+      // finished (it has held still and the page isn't writing) and relay it;
+      // the sender's message tells the AI about the missing tag.
+      if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+        acceptedUntaggedRaw[site] = text;
+        text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
+        forcedAccept = true;
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, severity: "warn", note: "no [FROM:] tag, but a new message had to go in — accepted it rather than lose it" });
+      } else if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
       // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
       // carries our envelope and will never grow one, so let it fall through to
       // the rate-limit handler below (which captures + auto-pauses) instead of
       // futilely re-prompting a capped pane. Anything else is a real message the
       // AI forgot to close: treat it as lost and re-send the protocol asking for
       // a full resend — never capture an untagged (possibly partial) reply.
-      if (!looksLikeRateLimit(text)) {
+      if (!forcedAccept && !looksLikeRateLimit(text)) {
         if (!pend.reprompted) {
           state.pending[site].reprompted = true;
           missingEndTagReprompt(site, text);
         }
         return;
       }
-      // rate-limit: fall through to the dedup + rate-limit handling below.
+      // rate-limit (or TR-30 accepted): fall through to the handling below.
     }
-    // Baseline with the end tag present falls straight through — capture now.
+    // Baseline with the end tag present: capture once the text has held still
+    // for CAPTURE_SETTLE_MS (TR-17), so a reply still being re-drawn isn't
+    // captured twice.
+    if (!bareMode && hasEndTag(text) && !forcedAccept) {
+      // Hold still = same words ignoring spacing; and never wait more than 3x
+      // the settle time from when the tag first appeared (a reply whose page
+      // text keeps flickering must still be captured).
+      if (!tagSeenAt[site]) tagSeenAt[site] = Date.now();
+      const capped = Date.now() - tagSeenAt[site] >= CAPTURE_SETTLE_MS * 3;
+      if (settleKey(text) !== settleKey(pend.text)) {
+        state.pending[site] = { text, sinceTs: Date.now(), reprompted: false };
+        if (!capped) return;
+      } else if (Date.now() - pend.sinceTs < CAPTURE_SETTLE_MS && !capped) return;
+    }
 
     const already = state.captured[site];
-    if (already && already.text === text) return; // no new completed reply
+    // A new reply block on the page means a new reply even if its words match
+    // the last one (TR-17); otherwise identical text is the reply we already have.
+    const newBlock = capturedCount[site] != null && readCount[site] != null && readCount[site] > capturedCount[site];
+    if (already && already.text === text && !newBlock) return; // no new completed reply
+    // TR-17: the same reply re-drawn (spacing / citation chips changed) is not a
+    // new reply — never capture or relay it twice. Remember the new raw text so
+    // the next poll doesn't see it as new either.
+    const sameBlock = capturedCount[site] != null && readCount[site] === capturedCount[site]; // no new reply block appeared
+    // Applies on the baseline AND during House Rules stages; only the bare-token
+    // self-tests / Tuner / test runs are left alone.
+    const redrawCheck = !(selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site));
+    if (redrawCheck && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
+      state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
+      if (forcedAccept) state.captured[site].rawText = acceptedUntaggedRaw[site];
+      logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
+      return;
+    }
 
     // A rate-limit/usage-cap message isn't a real contribution — feeding it
     // into routing/House Rules/Prompt Sequence/the manager loop would relay
@@ -3162,6 +3721,7 @@ async function pollSite(site) {
     if (looksLikeRateLimit(text)) {
       const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, isRateLimited: true };
       state.captured[site] = turn;
+      markCaptured(site);
       pushTranscriptTurn(turn);
       broadcast("capture", turn);
       logEvent("rate-limit-detected", { site, chars: text.length, houseRuleActive: state.hr.active });
@@ -3196,14 +3756,17 @@ async function pollSite(site) {
     // is swallowed entirely, never reaching the transcript. (stageActive was
     // already computed for the completion gate above.)
     let roundtableTag = null;
-    ftRecordCapture(site, text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
+    let roundtableExplicit = false;
+    ftRecordCapture(site, forcedAccept ? acceptedUntaggedRaw[site] : text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
     let displayText = text;
     if (!stageActive) {
       const parsed = parseRoundtableTag(text);
       roundtableTag = parsed.tag;
+      roundtableExplicit = parsed.explicit === true;
       displayText = parsed.body;
       if (roundtableTag === "NONE") {
         state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+        markCaptured(site);
         if (state.waiting[site]) {
           state.waiting[site] = false;
           state.waitingSince[site] = null;
@@ -3218,6 +3781,9 @@ async function pollSite(site) {
     // shown by the bubble/label. Universal: a stage reply carrying one is cleaned
     // too. (On the baseline path the tag's presence is what got us here.)
     displayText = parseEndTag(displayText).body;
+    // Gemini's citation chips ("PDF", "+ 1") are page furniture, not words the
+    // AI wrote — keep them out of the transcript and the relayed message.
+    if (site === "gemini") displayText = stripUiChips(displayText);
 
     // Empty envelope (e.g. "[TO: GEMINI][FROM: CLAUDE]" with no body between the
     // tags) — nothing to show or relay. Swallow it rather than pushing an empty
@@ -3225,6 +3791,7 @@ async function pollSite(site) {
     // Baseline path only; a stage/self-test manages its own (already-bare) output.
     if (!bareMode && !displayText.trim()) {
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       state.noTagReprompts[site] = 0;
       if (state.waiting[site]) {
         state.waiting[site] = false;
@@ -3247,6 +3814,7 @@ async function pollSite(site) {
       if (ignoreCount > 0) state.hr.ignoreCaptureFrom.set(site, ignoreCount - 1);
       if (silentAckCount > 0) state.hr.silentAckFrom.set(site, silentAckCount - 1);
       state.captured[site] = { id: state.nextTurnId++, site, label: SITES[site].label, text, ts: Date.now(), pinned: false };
+      markCaptured(site);
       if (state.waiting[site]) {
         state.waiting[site] = false;
         state.waitingSince[site] = null;
@@ -3258,6 +3826,9 @@ async function pollSite(site) {
 
     const turn = { id: state.nextTurnId++, site, label: SITES[site].label, text: displayText, ts: Date.now(), pinned: false };
     if (roundtableTag) turn.roundtableTag = roundtableTag;
+    // Only a tag the AI actually wrote limits Auto routing (TR-05); an untagged
+    // reply (defaulted to USER) is forwarded by Auto exactly as before.
+    const meshTag = roundtableExplicit ? turn.roundtableTag : null;
     // state.captured[site] tracks the RAW text (matching what pollSite reads
     // straight off the page) so the "already.text === text" dedup check
     // above keeps working on the next poll — storing the tag-stripped
@@ -3273,7 +3844,9 @@ async function pollSite(site) {
     // the end) the display text differs from the page, so store raw text for the
     // "already captured this" check; otherwise store the turn as-is.
     state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
+    markCaptured(site);
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
+    if (roundtableExplicit) state.noToReminders[site] = 0;
     pushTranscriptTurn(turn);
     broadcast("capture", turn);
     logEvent("captured", { site, chars: displayText.length });
@@ -3318,43 +3891,81 @@ async function pollSite(site) {
     // relay (roundtable + mesh); the bounded, directed paths (House Rules
     // stages, Prompt Sequence, Manager) always run.
     const looping = !stageActive && loopSuppressRelay(turn.text);
-    if (looping) logEvent("loop-suppressed", { site, chars: turn.text.length });
+    if (looping) { logEvent("loop-suppressed", { site, chars: turn.text.length }); try { relayTrace.noteHeld(turn.id, "loop-guard"); } catch (_) {} }
+    if (!state.relayEnabled && !stageActive) { try { relayTrace.noteHeld(turn.id, "relay-off"); } catch (_) {} }
     // "Stop AIs Talking" (relay:silence) flips relayEnabled off. It must halt
     // EVERY automatic AI->AI forwarding path, including the always-on baseline
     // [TO:] tag relay below — not just the mesh routing arrays it also clears.
     // A stage format (House Rules) is already torn down by the same stop, so its
     // path is gated by stageActive/hr.active, not this flag.
-    const relayOn = state.relayEnabled;
+    let relayOn = state.relayEnabled;
+    let autoForwarded = 0; // how many AIs Auto passed this reply to (TR-22 flag wording)
+    // TR-06: count this reply as one automatic hop if it is about to be handed
+    // on automatically (to another AI, the Butler or the terminal). Past the
+    // limit, nothing is relayed until the user acts. House Rules stages are
+    // bounded by their own rounds and don't count.
+    if (!stageActive && relayOn && !looping) {
+      const tagTargets = roundtableTargetsFor(turn);
+      const wouldRelay = turn.roundtableTag === "BUTLER" || turn.roundtableTag === "TERMINAL" || tagTargets.length > 0 ||
+        relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: new Set(tagTargets), stageActive: false }).length > 0;
+      if (wouldRelay) {
+        const hop = autoHops.note();
+        if (!hop.allowed) {
+          relayOn = false;
+          try { relayTrace.noteHeld(turn.id, "hop-limit"); } catch (_) {}
+          logEvent("hop-limit", { site, hops: hop.hops, max: hop.max, severity: "warn" });
+          if (hop.justPaused) {
+            broadcast("relay-paused", { hops: hop.hops, max: hop.max, ts: Date.now(), text: `The AIs have passed messages to each other ${hop.max} times in a row without you, so automatic relaying is paused (this stops runaway loops). Their replies still show here. Send a message, or click Auto, to let them continue.` });
+          }
+        }
+      }
+    }
     if (!stageActive && turn.roundtableTag === "BUTLER") {
       // E05: the AI addressed the local butler with [TO: BUTLER]. Hand it to the
       // butler's converse path and do NOT also mesh-forward it to the other AIs.
-      if (relayOn) await deliverToButler(turn);
+      if (relayOn) { try { relayTrace.noteHandoff(turn.id, "butler"); } catch (_) {} await deliverToButler(turn); }
     } else if (!stageActive && turn.roundtableTag === "TERMINAL") {
       // Command Prompt connection: the AI wants commands run on this PC. Never
-      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" like every
-      // other automatic path; the run itself is fire-and-forget so a long
-      // command never holds this pane's poll loop.
-      if (relayOn) deliverToTerminal(turn);
-      else logEvent("terminal-request-dropped", { from: site, reason: "relay-silenced" });
+      // mesh-forwarded to the other AIs. Gated by "Stop AIs Talking" (and the
+      // hop limit) like every other automatic path; the run itself is
+      // fire-and-forget so a long command never holds this pane's poll loop.
+      if (relayOn) { try { relayTrace.noteHandoff(turn.id, "terminal"); } catch (_) {} deliverToTerminal(turn); }
+      else logEvent("terminal-request-dropped", { from: site, reason: state.relayEnabled ? "hop-limit" : "relay-silenced" });
     } else {
       let hrSentTargets = new Set();
+      // The tag relay and Auto forwards are NOT awaited (TR-25): a target that
+      // is still writing may take minutes, and this pane must keep being read
+      // meanwhile. Per-target send queues keep each AI's messages in order.
+      const relayJobs = [];
       if (stageActive) hrSentTargets = await handleHouseRuleCapture(turn);
-      else if (!looping && relayOn) await handleRoundtableCapture(turn);
+      else if (!looping && relayOn) relayJobs.push(handleRoundtableCapture(turn));
       const roundtableTargets = !stageActive ? new Set(roundtableTargetsFor(turn)) : hrSentTargets;
       if (!looping && relayOn) {
-        for (const target of state.routing[site]) {
-          if (target === site || roundtableTargets.has(target)) continue;
-          // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
-          // relay — never the raw page text, which still carries [TO:]/[FROM:].
-          await sendTextTo(target, turn.text, site);
-        }
+        // TR-05: a [TO: USER] reply is for the person, not the other AIs.
+        const meshTargets = relayPolicy.meshTargetsFor({ site, tag: meshTag, routing: state.routing[site], alreadyCovered: roundtableTargets, stageActive });
+        if (!meshTargets.length && state.routing[site].size && !stageActive && meshTag === "USER") { logEvent("mesh-skip-to-user", { site }); try { relayTrace.noteHeld(turn.id, "to-user"); } catch (_) {} }
+        autoForwarded = meshTargets.length;
+        // Forward the ENVELOPE-STRIPPED body (turn.text), same as the tag-routing
+        // relay — never the raw page text, which still carries [TO:]/[FROM:].
+        // Side by side, like the tag relay (TR-25).
+        for (const target of meshTargets) relayJobs.push(sendTextTo(target, turn.text, site, { sourceTurnId: turn.id }));
       }
+      if (relayJobs.length) Promise.all(relayJobs).catch((e) => logEvent("relay-error", { site, error: String(e) }));
+    }
+    // TR-22: no [TO:] tag on a normal reply -> flag it and re-send the rules.
+    // Not during a House Rules stage or a self-test/Tuner (their own formats),
+    // nor while the Feature Test or relay check is running.
+    if (!stageActive && !bareMode && !roundtableExplicit && !forcedAccept && !ftState.running && !bbState.running) { // a TR-30 accepted reply's flag rides on the next message
+      missingToReminder(site, { forwarded: autoForwarded }).catch(() => {});
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
     if (state.manager.status === "waiting") await handleManagerCapture(turn);
   } catch (e) {
     logEvent("poll-error", { site, error: String(e) });
   } finally {
+    // TR-30: the captured turn remembers the untagged text the page shows, so
+    // the next read isn't taken for a new reply (or nagged about its tag).
+    if (forcedAccept && state.captured[site] && acceptedUntaggedRaw[site]) state.captured[site].rawText = acceptedUntaggedRaw[site];
     state.busy[site] = false;
   }
 }
@@ -3443,7 +4054,7 @@ ipcMain.handle("ollama:migrate", async () => {
 async function startManagedOllama() {
   try {
     const det = await ollamaManager.detect();
-    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "ollama not installed" }); return; }
+    if (!det || !det.available) { logEvent("ollama-managed-skip", { reason: "Ollama isn't installed (optional) — the app's own Ollama server was not started", severity: "info" }); return; }
     let modelsDir; try { modelsDir = outputManager.modelsDir("llm"); } catch (_) { return; }
     const host = process.env.AUTOINJECTOR_OLLAMA_HOST || ollamaManager.DEFAULT_MANAGED_HOST;
     const r = ollamaManager.startManaged({ modelsDir, host, onLog: (line) => { if (line) broadcast("ollama-progress", { model: "(server)", line }); } });
@@ -3546,12 +4157,18 @@ function buildAppMenu() {
       ] },
       { label: "Tools", submenu: [
         { label: "Setup Wizard", click: () => openWizardWindow() },
+        { type: "separator" },
+        { label: "Relay Trace report (where every message went)", click: () => { try { saveRelayTraceReport(); } catch (e) { logEvent("relay-trace-error", { error: String(e) }); } } },
+        { label: "Reset Relay Trace", click: () => { relayTrace.reset(); logEvent("relay-trace-reset", {}); } },
+        { label: "Run relay check (Bucket Brigade, ~23 messages)…", click: () => { confirmAndRunBrigade(); } },
+        { label: "Stop relay check", click: () => { bbState.stop = true; logEvent("brigade-stop-requested", {}); } },
+        { type: "separator" },
         { label: "Open Content Folder (\"stuff and thing\")", click: () => { try { const r = outputManager.root(); if (shell && r) shell.openPath(r); } catch (_) {} } },
       ] },
       { label: "Help", submenu: [
         { label: "User Guide", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/USER_GUIDE.md"); } },
         { label: "Under Construction / Status", click: () => { if (shell) shell.openExternal("https://github.com/javon86/AutoInjector/blob/main/UNDER_CONSTRUCTION.md"); } },
-        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: "AutoInjector Desktop", detail: "Runs ChatGPT, Claude and Gemini together. See the User Guide (Help menu)." }); } },
+        { label: "About AutoInjector", click: () => { if (dialog && dialog.showMessageBox) dialog.showMessageBox({ type: "info", title: "AutoInjector", message: `AutoInjector Desktop ${app.getVersion ? app.getVersion() : ""}`.trim(), detail: `${buildLine()}\nElectron ${process.versions.electron || "?"} · Node ${process.versions.node}\n\nRuns ChatGPT, Claude and Gemini together. See the User Guide (Help menu).` }); } },
       ] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -3565,6 +4182,7 @@ ipcMain.handle("send:compose", async (_evt, { text, targets }) => {
   if (!text || !list.length) return { ok: false, error: "NEED_TEXT_AND_TARGET" };
   try { dbService.recordUserMessage(text, list); } catch (_) {}
   state.relayEnabled = true; // a fresh user send re-engages the conversation after a Stop
+  resetAutoHops("compose");
   logEvent("compose", { targets: list, chars: text.length });
   const results = {};
   // Teach the envelope per target so the reply comes back with its [FROM:] tag
@@ -3582,6 +4200,7 @@ ipcMain.handle("send:forward", async (_evt, { source, targets }) => {
   // state.captured stores RAW text (for dedup); strip the [TO:]/[FROM:] envelope
   // before forwarding so the target doesn't receive routing markers.
   const clean = stripEnvelope(cap.text);
+  resetAutoHops("forward");
   const results = {};
   for (const t of list) results[t] = await sendTextTo(t, clean, source);
   return { ok: true, results };
@@ -3602,6 +4221,7 @@ ipcMain.handle("send:regenerate", async (_evt, site) => {
   // concurrent mesh-forward into the same pane (the exact typing-collision
   // bug the send queue exists to prevent) and never showed up in the ledger
   // at all.
+  resetAutoHops("regenerate");
   const res = await sendTextTo(site, text, null, { raw: true });
   if (res && res.ok) logEvent("regenerate", { site });
   return res;
@@ -3653,6 +4273,7 @@ ipcMain.handle("prompts:send", async (_evt, { text }) => {
   const targets = SITE_IDS.filter((s) => text && String(text[s] || "").trim());
   if (!targets.length) return { ok: false, error: "NEED_TEXT" };
   logEvent("prompt-send", { targets });
+  resetAutoHops("prompt-send");
   const results = {};
   for (const s of targets) results[s] = await sendTextTo(s, String(text[s]).trim(), null);
   return { ok: true, results };
@@ -3690,14 +4311,30 @@ async function silenceAllRelay() {
   state.meshActive = false;
   state.relayEnabled = false; // halt the always-on baseline [TO:] tag relay too, not just mesh
   if (state.hr.active) { state.hr.active = false; logEvent("houserule-stop", { mode: state.hr.mode }); broadcastHouseRule(); }
-  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState(); }
+  if (state.sequence.active) { state.sequence.active = false; logEvent("sequence-stop", {}); broadcastSequenceState("stopped"); }
   try { await stopManagedTask(); } catch (_) {}
   try { cancelPendingTerminalRequests("relay-silenced"); } catch (_) {}
+  resetAutoHops("silenced");
+  if (bbState.running) bbState.stop = true; // Stop AIs Talking also ends a relay check
   logEvent("relay-silenced", {});
   syncPaneBounds();
   return { ok: true, global: globalSnapshot() };
 }
 ipcMain.handle("relay:silence", async () => silenceAllRelay());
+// TR-08: run the read-only page check now (all panes, or { site }).
+ipcMain.handle("health:check", async (_evt, { site } = {}) => {
+  const list = site && SITES[site] ? [site] : SITE_IDS;
+  const results = {};
+  for (const s of list) results[s] = await probePane(s);
+  return { ok: true, results, health: paneHealth.snapshot() };
+});
+// TR-07: current health of every pane (the lights also update live via "pane-health").
+ipcMain.handle("health:get", () => ({ ok: true, health: paneHealth.snapshot() }));
+// TR-06: read or change the AI-to-AI hop limit ({ max } to change it).
+ipcMain.handle("relay:hop-limit", (_evt, { max } = {}) => {
+  if (max != null) { autoHops.setMax(max); logEvent("hop-limit-changed", { max: autoHops.status().max }); }
+  return { ok: true, ...autoHops.status() };
+});
 
 ipcMain.handle("routing:auto-all", () => {
   const active = SITE_IDS.filter((s) => state.enabled[s]);
@@ -3706,6 +4343,7 @@ ipcMain.handle("routing:auto-all", () => {
   }
   state.meshActive = active.length >= 2;
   state.relayEnabled = true; // turning Auto on re-enables automatic forwarding
+  resetAutoHops("auto-on");
   logEvent("auto-mesh-enabled", { participants: active });
   return { ok: true, global: globalSnapshot() };
 });
@@ -3894,6 +4532,7 @@ function buildExtractText() {
   lines.push("AutoInjector — Extract All");
   lines.push(`Generated: ${now.toLocaleString()}`);
   lines.push(`AI messages: ${state.transcript.length} · Activity/errors: ${state.log.length}`);
+  lines.push(buildLine());
   lines.push("");
   lines.push("========================================");
   lines.push("AI CONVERSATION (what the language models said)");
@@ -3910,6 +4549,11 @@ function buildExtractText() {
     lines.push("");
   }
   lines.push("========================================");
+  lines.push("RELAY TRACE (where every message went — see TR-13)");
+  lines.push("========================================");
+  try { lines.push(relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel })); } catch (e) { lines.push(`(relay trace unavailable: ${e})`); }
+  lines.push("");
+  lines.push("========================================");
   lines.push("ACTIVITY / TROUBLESHOOTING (errors and events)");
   lines.push("========================================");
   if (!state.log.length) lines.push("(no activity logged)");
@@ -3921,6 +4565,25 @@ function buildExtractText() {
   lines.push("");
   return lines.join("\n");
 }
+// TR-13: the Relay Trace on its own — { report, text }, or { save:true } to
+// write it to the logs folder and open it; { reset:true } starts a fresh trace.
+function saveRelayTraceReport() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+  const text = relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel });
+  const file = outputManager.saveBuffer(outputManager.logsDir(), `relay-trace-${stamp}.txt`, text);
+  logEvent("relay-trace-saved", { file });
+  try { if (shell && shell.openPath) shell.openPath(file); } catch (_) {}
+  return file;
+}
+ipcMain.handle("trace:report", (_evt, { save, reset } = {}) => {
+  try {
+    if (reset) { relayTrace.reset(); logEvent("relay-trace-reset", {}); return { ok: true, reset: true }; }
+    const report = relayTrace.report();
+    const text = relayTraceLib.formatReport(report, { label: siteLabel });
+    const file = save ? saveRelayTraceReport() : null;
+    return { ok: true, report, text, file };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
 ipcMain.handle("logs:extract-all", () => {
   try {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
@@ -4086,7 +4749,7 @@ ipcMain.handle("sequence:run", async (_evt, { steps }) => {
 ipcMain.handle("sequence:stop", () => {
   state.sequence.active = false;
   logEvent("sequence-stop", {});
-  broadcastSequenceState();
+  broadcastSequenceState("stopped");
   return { ok: true };
 });
 
@@ -4118,7 +4781,7 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
   logEvent("selector-pick-started", { site, role });
   let res;
   try {
-    res = await view.webContents.executeJavaScript(buildPickScript(role), true);
+    res = await view.webContents.executeJavaScript(buildPickScript(role, site), true);
   } catch (e) {
     res = { ok: false, error: String(e) };
   }
@@ -4135,6 +4798,8 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
     if (res.visible === false) problems.push("NOT_VISIBLE");
     if (res.roleOk === false) problems.push("WRONG_ELEMENT_TYPE");
     if (role === "assistant" && looksLikeEcho(res.sample, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
+    if (isBareTagSelector(res.selector)) problems.push("TOO_GENERIC");
+    if (role === "assistant" && typeof res.matchCount === "number" && res.matchCount > 60) problems.push("TOO_BROAD");
     if (problems.length) {
       logEvent("selector-pick-rejected", { site, role, selector: res.selector, reasons: problems, sample: res.sample || null });
       return { ok: false, error: problems[0], reasons: problems };
@@ -4464,13 +5129,25 @@ ipcMain.handle("memory:search", (_evt, { query } = {}) => ({ ok: true, ...dbServ
 
 // N2 Voice: status/config/test + push-to-talk listen.
 ipcMain.handle("voice:status", () => ({ ok: true, ...voiceProvider.status() }));
-ipcMain.handle("voice:configure", (_evt, patch) => {
+// Apply a voice settings change and persist it (IPC + the service bridge).
+function configureVoiceAndSave(patch) {
   const s = voiceProvider.setSettings(patch || {});
+  state.voiceConfig = voiceProvider.getSettings();
+  saveStateDebounced();
+  return s;
+}
+ipcMain.handle("voice:configure", (_evt, patch) => {
+  const s = configureVoiceAndSave(patch);
   logEvent("voice-config", { enabled: s.enabled, endpoint: s.endpoint, speakOnAck: s.speakOnAck });
   return { ok: true, ...voiceProvider.status() };
 });
+// Failed results carry `error` (short code, e.g. ECONNREFUSED) and `message`
+// (plain words: which address was tried, that the voice service isn't running,
+// and how to start it or change the address) — the UI shows the message.
 ipcMain.handle("voice:speak", async (_evt, { text, who, voice } = {}) => voiceProvider.speak(text, { who, voice }));
 ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
+// OP-12: cheap connectivity check (GET /health on the voice address).
+ipcMain.handle("voice:check", async () => { try { return await voiceProvider.checkConnection(); } catch (e) { return { ok: false, reachable: false, error: String(e), message: `Couldn't check the voice service: ${e}` }; } });
 
 // Image generation (Stable Diffusion): status/config + a manual generate for the
 // wizard's "Test" button. Config persists in the app state snapshot.
@@ -4486,7 +5163,7 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
   const r = await imageProvider.generate(prompt, { negativePrompt });
   if (!r || !r.ok || !r.imageBase64) {
     // E09: pass the backend's real reason through, not just a bare code.
-    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED" };
+    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED", message: (r && r.message) || null };
   }
   try {
     // E09: save every image the batch produced; preview the first inline.
@@ -4516,13 +5193,18 @@ ipcMain.handle("video:configure", (_evt, patch) => {
 });
 ipcMain.handle("video:generate", async (_evt, { prompt, negativePrompt } = {}) => {
   const r = await videoProvider.generate(prompt, { negativePrompt });
-  if (!r || !r.ok) return { ok: false, error: (r && r.error) || "FAILED" };
+  // OP-13: hand back the plain-language `message` (e.g. what NO_VIDEO means and
+  // how to set up a backend) alongside the short code.
+  if (!r || !r.ok) {
+    const fail = { ok: false, error: (r && r.error) || "FAILED" };
+    return { ...fail, message: (r && r.message) || videoProvider.explainError(fail) };
+  }
   if (r.videoBase64) {
     try {
       const buf = Buffer.from(r.videoBase64, "base64");
       const savedPath = outputManager.saveBuffer(outputManager.videosDir(), `vid-${Date.now()}.mp4`, buf);
       return { ok: true, path: savedPath, preview: `data:video/mp4;base64,${r.videoBase64}` };
-    } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
+    } catch (e) { const fail = { ok: false, error: `SAVE_FAILED: ${e}` }; return { ...fail, message: videoProvider.explainError(fail) }; }
   }
   // A backend that returns a URL (rendered file on its own server) — hand it through.
   return { ok: true, url: r.videoUrl || null, preview: r.videoUrl || null };
@@ -4537,39 +5219,34 @@ ipcMain.handle("endpoints:test", async (_evt, { url } = {}) => { try { return aw
 // GPU usage: "how much GPU are we using" for the monitor panel (best-effort).
 ipcMain.handle("gpu:info", async () => { try { return await gpuMonitor.read(); } catch (e) { return { available: false, reason: String(e) }; } });
 
-// Butler System Check: the butler reports on everything HE can do, so you can
-// see at a glance what's working and what isn't. ok=true (working) / false
-// (error) / null (available but not turned on / not configured yet).
+// Butler System Check (the quick 🩺 check): reports on everything the butler
+// can do. ok=true (checked and working — switched-on services are actually
+// pinged) / false (turned on but not working, with the reason) / null (not set
+// up — optional). All checks run at once with per-check time limits; the logic
+// lives in diagnostics.js so it's unit-testable (OP-14).
 async function butlerSelfCheck() {
-  const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, ok, detail: detail || "" });
-  try { const mc = managerConfigSnapshot(); const has = !!(mc.endpoint && mc.model); add("Brain (local model)", has ? true : null, has ? `${mc.model} @ ${mc.endpoint}` : "no endpoint/model saved yet — set one in the Butler settings"); } catch (e) { add("Brain (local model)", false, String(e)); }
-  try { const s = interpreterProvider.status(); add("Run code (Open Interpreter)", s.enabled ? true : null, s.enabled ? `endpoint ${s.endpoint}` : "not enabled — install via Setup Wizard → Auto-setup"); } catch (e) { add("Run code (Open Interpreter)", false, String(e)); }
-  try { const py = await setupManager.pythonStatus(); add("Install toolchain (Python)", py.missing ? false : (py.compatible ? true : null), py.note); } catch (e) { add("Install toolchain (Python)", null, String(e)); }
-  try { const t = toolProvider.list(); add("Tools (USE_TOOL)", t.length > 0, t.length ? `${t.length}: ${t.map((x) => x.name).join(", ")}` : "none registered"); } catch (e) { add("Tools (USE_TOOL)", false, String(e)); }
-  try { const d = dbService.status(); add("Memory (remember/recall)", !!d.available, d.available ? `ready (${d.count || 0} messages)` : (d.reason || "off")); } catch (e) { add("Memory (remember/recall)", false, String(e)); }
-  try { const v = voiceProvider.status(); add("Voice (speak & listen)", v.enabled ? true : null, v.enabled ? `endpoint ${v.endpoint}` : "off"); } catch (e) { add("Voice (speak & listen)", false, String(e)); }
-  try { const im = imageProvider.status(); add("Image generation", im.enabled ? true : null, im.enabled ? `endpoint ${im.endpoint}` : (im.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Image generation", false, String(e)); }
-  try { const vi = videoProvider.status(); add("Video generation", vi.enabled ? true : null, vi.enabled ? `endpoint ${vi.endpoint}` : (vi.configured ? "configured, turned off" : "no endpoint set")); } catch (e) { add("Video generation", false, String(e)); }
-  try { const root = outputManager.modelsRoot(); add("Models & content folder", !!root, root || "not ready"); } catch (e) { add("Models & content folder", false, String(e)); }
-  try { const g = await gpuMonitor.read(); add("GPU monitor", g.available ? true : null, g.available ? g.gpus.map((x) => x.name).join(", ") : (g.reason || "n/a")); } catch (e) { add("GPU monitor", false, String(e)); }
-  try { const en = SITE_IDS.filter((s) => state.enabled[s]); add("Chat AIs (ChatGPT/Claude/Gemini)", en.length > 0, en.length ? `enabled: ${en.join(", ")}` : "none enabled"); } catch (e) { add("Chat AIs (ChatGPT/Claude/Gemini)", false, String(e)); }
-  // Detailed install status of each dependency the butler can set up himself, so
-  // the check clearly separates what's INSTALLED from what's NOT — and which ones
-  // he can install for you. Open Interpreter is the keystone (it lets him run
-  // code and drive the rest).
-  const installs = [];
-  let missing = [];
-  try {
-    const all = await setupManager.detectAll();
-    for (const t of setupManager.list()) {
-      const d = all[t.id] || {};
-      installs.push({ id: t.id, label: t.label, installed: d.installed, kind: t.kind, installable: t.kind !== "handoff", detail: d.reason || "" });
-      if (d.installed === false && t.kind !== "handoff") missing.push(t.id);
-    }
-  } catch (e) { logEvent("selfcheck-installs-error", { error: String(e) }); }
-  const okCount = checks.filter((c) => c.ok === true).length;
-  return { ok: true, checks, okCount, total: checks.length, installs, missing, canInstall: missing.length > 0 };
+  const r = await diagnostics.runSystemCheck({
+    managerConfig: () => managerConfigSnapshot(),
+    interpreterStatus: () => interpreterProvider.status(),
+    voiceStatus: () => voiceProvider.status(),
+    // OP-12: the voice service's own check gives the plain "not running — start
+    // it like this" message instead of a generic "isn't answering".
+    voiceCheck: (timeoutMs) => voiceProvider.checkConnection({ timeoutMs }),
+    imageStatus: () => imageProvider.status(),
+    videoStatus: () => videoProvider.status(),
+    pythonStatus: () => setupManager.pythonStatus(),
+    toolList: () => toolProvider.list(),
+    dbStatus: () => dbService.status(),
+    modelsRoot: () => outputManager.modelsRoot(),
+    gpuRead: () => gpuMonitor.read(),
+    enabledSites: () => SITE_IDS.filter((s) => state.enabled[s]),
+    probe: (url, timeoutMs) => endpointDetect.test(url, { timeoutMs }),
+    installTargets: () => setupManager.list(),
+    detectInstalls: () => setupManager.detectAll(),
+    onError: (kind, err) => logEvent(/error$/.test(kind) ? kind : "selfcheck-error", { check: kind, error: String(err) }),
+  });
+  logEvent("selfcheck-done", { okCount: r.okCount, failCount: r.failCount, notSetUp: r.notSetUpCount, total: r.total, elapsedMs: r.elapsedMs, severity: "info" });
+  return r;
 }
 ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCheck(); } catch (e) { return { ok: false, error: String(e) }; } });
 
@@ -4583,13 +5260,15 @@ ipcMain.handle("butler:selfcheck", async () => { try { return await butlerSelfCh
 // step streams a "capability-test-step" event so the UI fills in live. Same
 // {name, ok, detail} shape as butlerSelfCheck so the panel renders it identically.
 let capabilityTestInFlight = false;
-function _withTimeout(promise, ms, onTimeout) {
-  return new Promise((resolve) => {
-    let done = false;
-    const t = setTimeout(() => { if (!done) { done = true; resolve(typeof onTimeout === "function" ? onTimeout() : { ok: false, error: "TIMEOUT" }); } }, ms);
-    Promise.resolve(promise).then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
-      (e) => { if (!done) { done = true; clearTimeout(t); resolve({ ok: false, error: String((e && e.message) || e) }); } });
-  });
+const _withTimeout = diagnostics.withTimeout;
+// Before a step that can wait minutes (image: ~3 min, video: ~5 min), ping the
+// server first: if nothing is listening, fail in ~2s with a plain reason instead
+// of sitting through the full generate timeout. Returns null when reachable,
+// else the failure text.
+const CAPTEST_PING_MS = 2500;
+async function _captestUnreachable(url) {
+  const p = await diagnostics.pingEndpoint((u, ms) => endpointDetect.test(u, { timeoutMs: ms }), url, CAPTEST_PING_MS);
+  return p.reachable === false ? `${p.base} isn't answering: ${p.why}. Is that server running?` : null;
 }
 async function butlerCapabilityTest() {
   if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
@@ -4611,7 +5290,9 @@ async function butlerCapabilityTest() {
     // 1) Brain — a real round-trip to the configured local model.
     try {
       const mc = managerConfigSnapshot();
-      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "no endpoint/model saved yet — set one in the Butler settings");
+      let down = null;
+      if (!(mc.endpoint && mc.model)) step("Brain (local model)", null, "not set up (optional) — no endpoint/model saved yet; set one in the Butler settings");
+      else if ((down = await _captestUnreachable(mc.endpoint))) step("Brain (local model)", false, `not reachable: ${down}`);
       else {
         const r = await _withTimeout(managerProvider.testConnection(state.managerConfig), 25000);
         if (r && r.ok) step("Brain (local model)", true, `answered & followed the manager format — ${mc.model}`);
@@ -4623,7 +5304,9 @@ async function butlerCapabilityTest() {
     // 2) Run code — actually execute a line via Open Interpreter.
     try {
       const s = interpreterProvider.status();
-      if (!s.enabled) step("Run code (Open Interpreter)", null, "not enabled — install via Setup Wizard → Auto-setup");
+      let down = null;
+      if (!s.enabled) step("Run code (Open Interpreter)", null, "not set up (optional) — install via Setup Wizard → Auto-setup");
+      else if (s.endpoint && (down = await _captestUnreachable(s.endpoint))) step("Run code (Open Interpreter)", false, `couldn't run: ${down}`);
       else {
         const r = await _withTimeout(interpreterProvider.run("Print exactly: CAPTEST-OK", { onEvent: () => {} }), 60000);
         step("Run code (Open Interpreter)", !!(r && r.ok), r && r.ok ? `ran a line of code (${String(r.message || "").slice(0, 40)})` : `couldn't run: ${(r && r.error) || "failed"}`);
@@ -4668,9 +5351,14 @@ async function butlerCapabilityTest() {
     // 6) Image — really render a tiny test image and save it.
     try {
       const im = imageProvider.status();
-      if (!im.enabled) step("Image generation", null, im.configured ? "configured, turned off" : "no endpoint set");
+      let down = null;
+      if (!im.enabled) step("Image generation", null, im.configured ? "not set up (optional) — configured but turned off" : "not set up (optional) — no endpoint set");
+      else if (im.endpoint && (down = await _captestUnreachable(im.endpoint))) step("Image generation", false, `couldn't render: ${down}`);
       else {
-        const r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
+        // `let`, not `const`: a save failure below replaces r. (With `const` the
+        // reassignment threw "Assignment to constant variable", which was then
+        // shown to the user as the reason image generation failed.)
+        let r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
         let saved = null;
         if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
         step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
@@ -4680,40 +5368,51 @@ async function butlerCapabilityTest() {
     // 7) Video — really make a short test clip and save it.
     try {
       const vi = videoProvider.status();
-      if (!vi.enabled) step("Video generation", null, vi.configured ? "configured, turned off" : "no endpoint set");
+      let down = null;
+      if (!vi.enabled) step("Video generation", null, vi.configured ? "not set up (optional) — configured but turned off" : "not set up (optional) — no video backend set up yet (Setup Wizard → Video)");
+      else if (vi.endpoint && (down = await _captestUnreachable(vi.endpoint))) step("Video generation", false, `couldn't make one: ${down}`);
       else {
-        const r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
+        let r = await _withTimeout(videoProvider.generate("a short test clip: a simple spinning cube", { onEvent: () => {} }), (vi.timeoutMs || 300000) + 5000);
         let saved = null;
         if (r && r.ok && r.videoBase64) { try { saved = outputManager.saveBuffer(outputManager.videosDir(), `captest-${Date.now()}.mp4`, Buffer.from(r.videoBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
         else if (r && r.ok && r.videoUrl) saved = r.videoUrl;
-        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && r.error) || "no video"}`);
+        step("Video generation", !!(r && r.ok && saved), saved ? `made a clip (${typeof saved === "string" && /^https?:/.test(saved) ? saved : path.basename(saved)})` : `couldn't make one: ${(r && (r.message || r.error)) || "no video"}`);
       }
     } catch (e) { step("Video generation", false, String(e)); }
 
     // 8) Voice — actually speak a short phrase.
     try {
       const v = voiceProvider.status();
-      if (!v.enabled) step("Voice (speak)", null, "off");
-      else {
+      let down = null;
+      if (!v.enabled) step("Voice (speak)", null, "not set up (optional) — Voice is turned off");
+      else if (v.endpoint && (down = await _captestUnreachable(v.endpoint))) {
+        // OP-12: say what to do, not just "connection refused".
+        let msg = down;
+        try { const c = await voiceProvider.checkConnection({ timeoutMs: 1500 }); if (c && !c.ok && c.message) msg = c.message; } catch (_) {}
+        step("Voice (speak)", false, `couldn't speak: ${msg}`);
+      } else {
         const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
-        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && r.error) || "failed"}`);
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && (r.message || r.error)) || "failed"}`);
       }
     } catch (e) { step("Voice (speak)", false, String(e)); }
 
     // 9) Talk to the AIs — a real reverse-a-token ping into each live pane.
-    for (const site of SITE_IDS) {
+    // The panes are independent, so they're pinged at the same time: the wait
+    // for replies is now one reply-timeout (~45s worst case), not three in a row.
+    await Promise.all(SITE_IDS.map(async (site) => {
       const label = (SITES[site] && SITES[site].label) || site;
       try {
-        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not enabled as a participant"); continue; }
+        if (!state.enabled[site]) { step(`Talk to ${label}`, null, "not set up (optional) — not enabled as a participant"); return; }
         const view = siteViews[site];
         const url = view ? view.webContents.getURL() : "";
-        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "no page loaded — open/sign in to this AI first"); continue; }
-        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); continue; }
-        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); continue; }
-        const r = await _withTimeout(runConnectivityTest(site), SELFTEST_TIMEOUT_MS + 10000, () => ({ ok: false, error: "TIMEOUT" }));
+        if (!view || !url || /^about:blank/.test(url)) { step(`Talk to ${label}`, null, "not set up — no page loaded; open/sign in to this AI first"); return; }
+        if (tunerInFlight.active || selftestInFlight.has(site)) { step(`Talk to ${label}`, null, "skipped — a connection test is already running"); return; }
+        if (state.manager && state.manager.pendingModels && state.manager.pendingModels.includes(site)) { step(`Talk to ${label}`, null, "skipped — the butler is mid-task with this pane"); return; }
+        const limitMs = SELFTEST_TIMEOUT_MS + 10000;
+        const r = await _withTimeout(runConnectivityTest(site), limitMs, () => ({ ok: false, error: `no reply within ${Math.round(limitMs / 1000)}s` }));
         step(`Talk to ${label}`, !!(r && r.ok), r && r.ok ? "sent a message and got the right reply back" : `no good reply: ${(r && (r.error || r.stage)) || "failed"}`);
       } catch (e) { step(`Talk to ${label}`, false, String(e)); }
-    }
+    }));
 
     const okCount = checks.filter((c) => c.ok === true).length;
     const failCount = checks.filter((c) => c.ok === false).length;
@@ -4733,7 +5432,13 @@ ipcMain.handle("butler:install-missing", async () => {
   try {
     const sc = await butlerSelfCheck();
     const missing = sc.missing || [];
-    if (!missing.length) { broadcast("setup-progress", { line: "Everything is already installed ✓", done: true, ok: true }); return { ok: true, missing: [], results: [] }; }
+    if (!missing.length) {
+      const unknown = sc.unknown || [];
+      // Don't announce "all installed" when some couldn't be checked.
+      const line = unknown.length ? `Nothing to install that I could confirm — couldn't check: ${unknown.join(", ")}. Run 🩺 System Check for the reason.` : "Everything is already installed ✓";
+      broadcast("setup-progress", { line, done: true, ok: !unknown.length });
+      return { ok: true, missing: [], unknown, results: [] };
+    }
     // Keystone first: Open Interpreter, then the rest in setup-manager's order.
     const order = setupManager.AUTO_ORDER.filter((id) => missing.includes(id));
     for (const id of missing) if (!order.includes(id)) order.push(id);
@@ -4783,24 +5488,43 @@ ipcMain.handle("butler:send-intro", async (_evt, { targets } = {}) => { try { re
 ipcMain.handle("window:toggle-collapse", (_evt, { which }) => {
   const target = targetWindow(which);
   const entry = windowCollapse[which];
-  if (!target || !entry) return { ok: false, error: "NO_WINDOW" };
+  if (!target || !entry || (typeof target.isDestroyed === "function" && target.isDestroyed())) return { ok: false, error: "NO_WINDOW" };
+  const has = (fn) => typeof target[fn] === "function";
+  const maximized = () => has("isMaximized") && target.isMaximized();
 
   if (!entry.collapsed) {
-    entry.savedBounds = target.getBounds();
-    entry.savedMinSize = typeof target.getMinimumSize === "function" ? target.getMinimumSize() : null;
-    if (typeof target.setMinimumSize === "function") target.setMinimumSize(200, COLLAPSED_HEIGHT);
-    target.setBounds({ x: entry.savedBounds.x, y: entry.savedBounds.y, width: entry.savedBounds.width, height: COLLAPSED_HEIGHT });
+    // ISS-016: save the NORMAL bounds — a maximized rect would restore as a
+    // huge non-maximized window, and setBounds() on a maximized window is unreliable.
+    entry.wasMaximized = maximized();
+    if (entry.wasMaximized && has("unmaximize")) target.unmaximize();
+    const normal = entry.wasMaximized && has("getNormalBounds") ? target.getNormalBounds() : target.getBounds();
+    entry.savedBounds = normal;
+    entry.savedMinSize = has("getMinimumSize") ? target.getMinimumSize() : null;
+    // setBounds() is OUTER size; keep COLLAPSED_HEIGHT of content (the in-page
+    // titlebar with the expand button) visible below the native frame.
+    const [, contentH] = target.getContentSize();
+    const height = COLLAPSED_HEIGHT + Math.max(0, normal.height - contentH);
+    if (has("setMinimumSize")) target.setMinimumSize(Math.min(200, normal.width), height);
+    target.setBounds({ x: normal.x, y: normal.y, width: normal.width, height });
     entry.collapsed = true;
   } else {
-    if (entry.savedBounds) target.setBounds(entry.savedBounds);
-    if (entry.savedMinSize && typeof target.setMinimumSize === "function") target.setMinimumSize(entry.savedMinSize[0], entry.savedMinSize[1]);
-    entry.collapsed = false;
-    entry.savedBounds = null;
-    entry.savedMinSize = null;
+    if (maximized() && has("unmaximize")) target.unmaximize(); // e.g. titlebar double-clicked while collapsed
+    const { savedBounds, savedMinSize, wasMaximized } = entry;
+    resetWindowCollapse(which);
+    if (has("setMinimumSize")) target.setMinimumSize(...(Array.isArray(savedMinSize) ? savedMinSize : [0, 0]));
+    if (savedBounds) {
+      // Keep wherever the user dragged the collapsed bar; restore the size.
+      const here = target.getBounds();
+      target.setBounds({ x: here.x, y: here.y, width: savedBounds.width, height: savedBounds.height });
+    }
+    if (wasMaximized && has("maximize")) target.maximize();
   }
 
   logEvent("window-collapse-changed", { which, collapsed: entry.collapsed });
   broadcast("window-collapse-changed", { which, collapsed: entry.collapsed });
+  // Re-fit the views now (after the renderer has been told to show/hide #wrap)
+  // instead of trusting the 'resize' pass, which measured the old DOM state.
+  if (which === "automation") { layout(); syncPaneBounds().catch(() => {}); }
   return { ok: true, which, collapsed: entry.collapsed };
 });
 
@@ -4895,7 +5619,7 @@ const serviceBridge = createServiceBridge({
   // N2: local voice capability (speak/listen through the offline shim).
   voice: {
     status: () => voiceProvider.status(),
-    configure: (patch) => voiceProvider.setSettings(patch),
+    configure: (patch) => configureVoiceAndSave(patch),
     speak: (text) => voiceProvider.speak(text),
     listen: (o) => voiceProvider.listen(o),
   },
@@ -4975,6 +5699,9 @@ function configureSetupManager() {
       modelsDir: (cat) => outputManager.modelsDir(cat),
       pullOllamaModel: (model, onProgress) => ollamaManager.pull(model, (line) => { try { onProgress && onProgress(line); } catch (_) {} broadcast("ollama-progress", { model, line }); }),
       detectOllama: () => ollamaManager.detect(),
+      // Which models are downloaded — asks the app's own Ollama if it's running,
+      // else the default one. Short limit: this feeds the System Check.
+      listOllamaModels: () => { const ms = ollamaManager.managedStatus(); return ollamaManager.listInstalled(ms.running ? ms.endpoint : undefined, 3000); },
       openExternal: (url) => { try { if (shell && url) shell.openExternal(url); } catch (_) {} },
     });
   } catch (e) { logEvent("setup-configure-error", { error: String(e) }); }

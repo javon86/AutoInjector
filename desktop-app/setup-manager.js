@@ -100,6 +100,9 @@ const deps = {
   pullOllamaModel: null,
   // is Ollama installed? () => Promise<{ available }>
   detectOllama: null,
+  // which Ollama models are downloaded? () => Promise<{ ok, models:[name], reason? }>
+  // Optional: without it, "ollama-model" can only say whether Ollama itself is there.
+  listOllamaModels: null,
   // open a URL in the user's browser (for handoff targets): (url) => void
   openExternal: null,
 };
@@ -155,6 +158,8 @@ function _pyCandidates(platform, env) {
 function _probePy(cand) {
   return new Promise((resolve) => {
     let done = false; const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    // A full path to a python.exe that isn't there: skip without spawning.
+    try { if (path.isAbsolute(cand.cmd) && deps.fs && !deps.fs.existsSync(cand.cmd)) return finish(null); } catch (_) { /* just try it */ }
     try {
       const args = [...cand.pre, '-c', 'import sys;print("%d.%d" % sys.version_info[:2])'];
       const child = deps.execFile(cand.cmd, args, { timeout: 6000, windowsHide: true }, (err, stdout) => {
@@ -171,27 +176,53 @@ function _probePy(cand) {
 function _pyCompatible(p) { return !!(p && p.major === 3 && p.minor >= PY_MIN_MINOR && p.minor <= PY_MAX_MINOR); }
 
 let _pyResolved = null;
-/**
- * Resolve the best Python for pip installs: the first that works AND is in the
- * known-good range; otherwise the first that works (flagged incompatible), so
- * the caller can warn. Cached; pass force=true to re-probe. Non-throwing.
- */
-async function resolvePython(force) {
-  if (_pyResolved && !force) return _pyResolved;
-  let firstWorking = null;
+let _pyResolvedAt = 0;
+let _pyInFlight = null;
+// A found Python is cached for the session. A "no Python found" result is only
+// trusted briefly, so installing Python and re-running the System Check is
+// picked up without restarting the app (it used to stay "missing" forever).
+const PY_MISSING_TTL_MS = 30000;
+
+async function _resolvePythonNow() {
   const seen = new Set();
+  const cands = [];
   for (const c of _pyCandidates()) {
     const key = `${c.cmd} ${c.pre.join(' ')}`;
     if (seen.has(key)) continue; seen.add(key);
-    const p = await _probePy(c); // eslint-disable-line no-await-in-loop
-    if (!p) continue;
-    if (!firstWorking) firstWorking = p;
-    if (_pyCompatible(p)) { _pyResolved = { ...p, compatible: true }; return _pyResolved; }
+    cands.push(c);
   }
-  _pyResolved = firstWorking
+  // Probe every candidate at once (each has its own 6s limit) instead of one by
+  // one — on Windows the list is ~20 entries and a serial walk could take a
+  // minute. The preference order is kept by picking from the ordered results.
+  const found = await Promise.all(cands.map((c) => _probePy(c)));
+  const firstCompatible = found.find((p) => p && _pyCompatible(p));
+  if (firstCompatible) return { ...firstCompatible, compatible: true };
+  const firstWorking = found.find(Boolean);
+  return firstWorking
     ? { ...firstWorking, compatible: false }
     : { cmd: (process.platform === 'win32' ? 'python' : 'python3'), pre: [], major: null, minor: null, version: null, compatible: false, missing: true };
-  return _pyResolved;
+}
+
+/**
+ * Resolve the best Python for pip installs: the first that works AND is in the
+ * known-good range; otherwise the first that works (flagged incompatible), so
+ * the caller can warn. Cached (a "missing" result only for 30s); pass
+ * force=true to re-probe. Concurrent callers share one probe. Non-throwing.
+ */
+async function resolvePython(force) {
+  if (_pyResolved && !force) {
+    const stale = _pyResolved.missing && (Date.now() - _pyResolvedAt) > PY_MISSING_TTL_MS;
+    if (!stale) return _pyResolved;
+  }
+  if (_pyInFlight) return _pyInFlight;
+  _pyInFlight = (async () => {
+    try {
+      const r = await _resolvePythonNow();
+      _pyResolved = r; _pyResolvedAt = Date.now();
+      return r;
+    } finally { _pyInFlight = null; }
+  })();
+  return _pyInFlight;
 }
 
 /** For the UI / self-check: which Python will be used, and is it usable? */
@@ -209,7 +240,7 @@ async function pythonStatus() {
 }
 
 // Reset the cached Python resolution (used by tests).
-function _resetPython() { _pyResolved = null; }
+function _resetPython() { _pyResolved = null; _pyResolvedAt = 0; _pyInFlight = null; }
 
 function has(id) { return Object.prototype.hasOwnProperty.call(TARGETS, id); }
 function get(id) { return TARGETS[id] || null; }
@@ -222,6 +253,7 @@ function list() {
 // -------- detection: is a target already installed? (best-effort) -------------
 async function _pipShow(pkg) {
   const py = await resolvePython();
+  if (py.missing) return false; // no Python → nothing can be pip-installed; don't spawn a doomed `pip`
   return new Promise((resolve) => {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
@@ -239,6 +271,8 @@ async function detect(id) {
   if (!t) return { id, installed: null, reason: 'unknown target' };
   try {
     if (t.kind === 'pip') {
+      const py = await resolvePython();
+      if (py.missing) return { id, installed: false, reason: 'needs Python, which was not found' };
       const ok = await _pipShow(t.check || t.packages[0]);
       return { id, installed: ok };
     }
@@ -252,17 +286,31 @@ async function detect(id) {
     if (t.kind === 'ollama') {
       if (!deps.detectOllama) return { id, installed: null, reason: 'no ollama detector' };
       const d = await deps.detectOllama();
-      // "installed" here means the runtime is present; a specific model is pulled on demand.
-      return { id, installed: !!(d && d.available), detail: d };
+      if (!(d && d.available)) return { id, installed: false, reason: 'Ollama itself is not installed (get it from ollama.com)', detail: d };
+      // Ollama being present is not the same as a model being downloaded — check
+      // the model list when we can, instead of reporting "installed" on the
+      // runtime alone.
+      if (typeof deps.listOllamaModels !== 'function') return { id, installed: null, reason: 'Ollama is installed; could not check which models are downloaded', detail: d };
+      let m = null;
+      try { m = await deps.listOllamaModels(); } catch (e) { m = { ok: false, reason: String((e && e.message) || e) }; }
+      if (!m || !m.ok) return { id, installed: null, reason: `Ollama is installed, but its server didn't answer (${(m && m.reason) || 'unreachable'}), so models couldn't be listed`, detail: d };
+      const models = Array.isArray(m.models) ? m.models : [];
+      if (!models.length) return { id, installed: false, reason: 'Ollama is installed, but no model is downloaded yet', detail: d };
+      return { id, installed: true, reason: `${models.length} model(s): ${models.slice(0, 3).join(', ')}${models.length > 3 ? ', …' : ''}`, detail: d };
     }
     if (t.kind === 'handoff') return { id, installed: null, reason: 'external installer' };
   } catch (e) { return { id, installed: null, reason: String((e && e.message) || e) }; }
   return { id, installed: null };
 }
 
+// Detect every target at once (each is independent; the pip ones share one
+// Python lookup). Used to run them one after another, which stacked up several
+// seconds of `pip show` + `ollama --version` on Windows.
 async function detectAll() {
+  const ids = Object.keys(TARGETS);
+  const results = await Promise.all(ids.map((id) => detect(id)));
   const out = {};
-  for (const id of Object.keys(TARGETS)) out[id] = await detect(id);
+  ids.forEach((id, i) => { out[id] = results[i]; });
   return out;
 }
 

@@ -80,9 +80,17 @@ el("btn-run").onclick = async () => {
 
 el("btn-close").onclick = () => window.api.closeSequenceEditor();
 
-window.api.onSequenceState(({ active, index, total }) => {
+const ENDED_TEXT = {
+  done: "Sequence finished — every step got a reply.",
+  stopped: "Sequence stopped.",
+  stalled: "Stopped: no reply came back in time for this step. Check that AI's pane (its light shows why).",
+  "send-failed": "Stopped: this step couldn't be delivered to any AI. Check the panes' lights and the Activity Log.",
+  "no-participants": "Stopped: no AI is checked Active.",
+};
+window.api.onSequenceState(({ active, index, total, ended }) => {
   el("btn-run").disabled = active;
   if (active) el("status").textContent = `Running — step ${index + 1} of ${total}, waiting for a reply before continuing…`;
+  else if (ended) el("status").textContent = ENDED_TEXT[ended] || `Sequence ended (${ended}).`;
   else if (total > 0) el("status").textContent = "Sequence finished.";
 });
 

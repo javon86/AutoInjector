@@ -22,6 +22,9 @@ process.env.AUTOINJECTOR_SELFTEST_POLL_MS = process.env.AUTOINJECTOR_SELFTEST_PO
 // test runs on the fast clock. Baseline replies complete on their tag instantly,
 // so this only affects deliberately-untagged replies (sayRaw).
 process.env.AUTOINJECTOR_NOTAG_QUIET_MS = process.env.AUTOINJECTOR_NOTAG_QUIET_MS || "300";
+process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS = process.env.AUTOINJECTOR_CAPTURE_SETTLE_MS || "100";
+process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS = process.env.AUTOINJECTOR_FORCE_ACCEPT_STABLE_MS || "150";
+process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS = process.env.AUTOINJECTOR_SEND_BUSY_POLL_MS || "50";
 
 const path = require("path");
 const fs = require("fs");
@@ -500,7 +503,8 @@ async function testRoleInjection() {
 
 async function testWindowCollapse() {
   console.log("\n== Window collapse: shrinks to a titlebar in place, restores exactly on expand ==");
-  const automationWin = mockElectron.__windowRegistry["AutoInjector Desktop — Automation"];
+  // The title may end with " · build <commit> (<branch>)" (TR-19), so match by prefix.
+  const automationWin = Object.entries(mockElectron.__windowRegistry).find(([t]) => t.startsWith("AutoInjector Desktop — Automation"))?.[1];
   assert(!!automationWin, "the real BaseWindow is reachable via the mock registry");
 
   const before = await call("window:toggle-collapse", { which: "bogus" });
@@ -510,13 +514,40 @@ async function testWindowCollapse() {
   const collapseRes = await call("window:toggle-collapse", { which: "automation" });
   assert(collapseRes.ok && collapseRes.collapsed === true, "first toggle collapses the Automation window");
   const collapsedBounds = automationWin.getBounds();
-  assert(collapsedBounds.height === 44, `height shrinks to the titlebar height (got ${collapsedBounds.height})`);
+  assert(collapsedBounds.height === 39, `height shrinks to the titlebar height (got ${collapsedBounds.height})`);
   assert(collapsedBounds.x === origBounds.x && collapsedBounds.y === origBounds.y && collapsedBounds.width === origBounds.width, "position and width stay exactly where they were — it collapses in place, not somewhere else");
 
   const expandRes = await call("window:toggle-collapse", { which: "automation" });
   assert(expandRes.ok && expandRes.collapsed === false, "second toggle expands it back");
   const restoredBounds = automationWin.getBounds();
   assert(JSON.stringify(restoredBounds) === JSON.stringify(origBounds), "expanding restores the exact original bounds, not just 'some' larger size");
+
+  // ISS-016: real-Windows cases — native frame, maximized, min size, moved while collapsed, views re-laid out.
+  const controls = mockElectron.__registry["controls-ui"];
+  automationWin._frameHeight = 31;
+  automationWin.setMinimumSize(800, 600);
+  automationWin.maximize();
+  await call("window:toggle-collapse", { which: "automation" });
+  const c2 = automationWin.getBounds();
+  assert(!automationWin.isMaximized(), "collapsing a maximized window un-maximizes it first");
+  assert(c2.height === 39 + 31 && automationWin.getContentSize()[1] === 39, `the 39px in-page titlebar stays visible below the native frame (outer ${c2.height})`);
+  assert(automationWin.getMinimumSize()[1] <= c2.height, "minimum size no longer blocks the collapsed height");
+  const again = await call("window:toggle-collapse", { which: "automation" });
+  assert(again.collapsed === false, "a second toggle expands (no double-collapse that would save a collapsed rect)");
+  assert(automationWin.isMaximized(), "a window collapsed while maximized comes back maximized");
+  assert(controls._bounds && controls._bounds.height === automationWin.getContentSize()[1] && controls._bounds.height > 39, "layout() re-fits the controls view to the restored content size, not the 39px bar");
+  automationWin.unmaximize();
+  assert(JSON.stringify(automationWin.getBounds()) === JSON.stringify(origBounds), "its normal (un-maximized) bounds are the saved ones, not the maximized rect");
+  assert(JSON.stringify(automationWin.getMinimumSize()) === JSON.stringify([800, 600]), "the original minimum size is restored");
+
+  await call("window:toggle-collapse", { which: "automation" });
+  automationWin.setBounds({ x: 300, y: 200 }); // user drags the collapsed bar
+  await call("window:toggle-collapse", { which: "automation" });
+  const moved = automationWin.getBounds();
+  assert(moved.x === 300 && moved.y === 200 && moved.width === origBounds.width && moved.height === origBounds.height, "expanding after a move restores size at the new spot, not a jump back");
+  automationWin.setBounds(origBounds);
+  automationWin.setMinimumSize(0, 0);
+  automationWin._frameHeight = 0;
 
   assert(!mockElectron.__windowRegistry["AutoInjector — Conversation"], "the Conversation window no longer exists at all — everything lives in the Automation window now");
 }
@@ -567,7 +598,7 @@ async function testWaitingSinceTracking() {
   let g = (await call("state:get", {})).global;
   assert(typeof g.waitingSince.chatgpt === "number" && g.waitingSince.chatgpt > 0, "waitingSince is set to a timestamp once a send goes out");
 
-  say("chatgpt", "Quick answer.");
+  say("chatgpt", "[TO: USER]\nQuick answer."); // tagged: an untagged one now gets a TR-22 reminder (and so waits again)
   await waitUntil(async () => !(await call("state:get", {})).global.waiting.chatgpt, { label: "waiting clears once the reply is captured" });
   g = (await call("state:get", {})).global;
   assert(g.waitingSince.chatgpt === null, "waitingSince is cleared back to null once the reply lands, not left stale");
@@ -688,6 +719,31 @@ async function testPersistenceSavesToDisk() {
   assert(saved.customRole && saved.customRole.gemini === "Fact-checker", "the file on disk reflects the new role");
   await call("roles:set", { site: "gemini", role: "" }); // leave roles clean for later tests
   await settle(250);
+}
+
+// Voice settings survive a restart like image/video ones: the startup seed's
+// voiceConfig is restored (without starting the voice shim), and a change made
+// through voice:configure is written to autoinjector-state.json.
+async function testVoiceSettingsPersist() {
+  console.log("\n== Persistence: voice settings are restored on startup and saved on change ==");
+  const voiceProvider = require(path.join(__dirname, "..", "voice-provider"));
+  const st = await call("voice:status", {});
+  assert(st.endpoint === "http://127.0.0.1:8299" && st.voices.claude === "en_GB-alan" && st.micDevice === "mic-seed" && st.speakOnAck === false && st.enabled === false,
+    `the saved voice settings are restored on startup (got ${JSON.stringify({ endpoint: st.endpoint, voices: st.voices, micDevice: st.micDevice, speakOnAck: st.speakOnAck, enabled: st.enabled })})`);
+  assert(st.managed === false, "restoring voice settings doesn't start the voice shim");
+  const before = voiceProvider.getSettings();
+  try {
+    await call("voice:configure", { endpoint: "http://127.0.0.1:8298", voices: { butler: "en_US-amy" }, listenSeconds: 9 });
+    await settle(250); // let the debounced save flush
+    const saved = JSON.parse(fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8"));
+    const vc = saved.voiceConfig || {};
+    assert(vc.endpoint === "http://127.0.0.1:8298" && vc.voices && vc.voices.butler === "en_US-amy" && vc.voices.claude === "en_GB-alan" && vc.listenSeconds === 9 && vc.enabled === false,
+      `voice:configure writes the new voice settings to disk (got ${JSON.stringify(vc)})`);
+    assert(!Object.keys(vc).some((k) => /key|token|secret|password/i.test(k)), "the saved voice settings hold no secret fields");
+  } finally {
+    await call("voice:configure", before);
+    await settle(250);
+  }
 }
 
 async function testPromptLibrary() {
@@ -813,7 +869,7 @@ async function testSequenceBackend() {
   const runRes = await call("sequence:run", { steps });
   assert(runRes.ok, "sequence starts successfully");
 
-  await waitUntil(() => sentLog("chatgpt").some((e) => e.text === "Step 1 for chatgpt"), { label: "step 1 sent to chatgpt only" });
+  await waitUntil(() => sentLog("chatgpt").some((e) => e.text.includes("Step 1 for chatgpt")), { label: "step 1 sent to chatgpt only" });
   assert(sentLog("claude").length === 0 && sentLog("gemini").length === 0, "nobody else gets anything yet -- waiting on chatgpt's reply");
   let s = await call("state:get", {});
   assert(s.sequence.active === true && s.sequence.index === 0, "sequence state reports step 0 active");
@@ -825,13 +881,13 @@ async function testSequenceBackend() {
   assert(s.sequence.index === 0, "an unaddressed site's reply does not advance the sequence");
 
   say("chatgpt", "Here's my reply to step 1.");
-  await waitUntil(() => SITES.every((s2) => sentLog(s2).some((e) => e.text === "Step 2 for everyone")), { label: "step 2 ('all') sent to all three once chatgpt's reply advances the sequence" });
+  await waitUntil(() => SITES.every((s2) => sentLog(s2).some((e) => e.text.includes("Step 2 for everyone"))), { label: "step 2 ('all') sent to all three once chatgpt's reply advances the sequence" });
   s = await call("state:get", {});
   assert(s.sequence.index === 1, "advanced to step 1 (the 'all' step)");
 
   // for an 'all' step, the FIRST of the three to reply is enough to advance
   say("gemini", "Gemini replies first.");
-  await waitUntil(() => sentLog("claude").some((e) => e.text === "Step 3 for claude"), { label: "step 3 sent to claude once the first reply to the 'all' step lands" });
+  await waitUntil(() => sentLog("claude").some((e) => e.text.includes("Step 3 for claude")), { label: "step 3 sent to claude once the first reply to the 'all' step lands" });
   s = await call("state:get", {});
   assert(s.sequence.index === 2, "advanced to step 2 off the first of the three replies, without waiting for the other two");
 
@@ -1248,11 +1304,12 @@ async function testTunerDistinguishesForwardFailureFromNoReply() {
   console.log("\n== The Tuner: a relay leg whose internal forward silently fails to send is reported as exactly that, not confused with the target never answering ==");
   await resetAllParticipants();
 
+  const startCounts = Object.fromEntries(SITES.map((s) => [s, sentLog(s).length])); // taken BEFORE the run starts sending
   const tunerRunPromise = call("tuner:run", {});
 
   // Phase 1: answer all 3 connectivity checks normally
   for (const site of SITES) {
-    const before = sentLog(site).length;
+    const before = startCounts[site];
     await waitUntil(() => sentLog(site).length > before, { label: `tuner connectivity check reaches ${site}` });
     const token = extractSelftestToken(sentLog(site)[sentLog(site).length - 1].text);
     say(site, reverseStr(token));
@@ -1649,6 +1706,303 @@ async function testMeshAndTagRoutingDontDoubleDispatch() {
   await call("routing:stop-all", {});
 }
 
+async function testToUserStaysWithUserAndHopLimit() {
+  console.log("\n== TR-05: with Auto on, a [TO: USER] reply is NOT forwarded to the other AIs ==");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("claude", "[TO: USER]\nThis one is just for the human.");
+  await waitUntil(async () => (await call("state:get", {})).log.some((l) => l.kind === "captured" && l.detail.site === "claude"), { label: "claude's [TO: USER] reply is captured" });
+  await settle();
+  assert(sentLog("chatgpt").length === 0 && sentLog("gemini").length === 0, `nobody else gets it (chatgpt:${sentLog("chatgpt").length}, gemini:${sentLog("gemini").length})`);
+  assert((await call("state:get", {})).log.some((l) => l.kind === "mesh-skip-to-user" && l.detail.site === "claude"), "the Activity Log says why it wasn't forwarded");
+  say("claude", "[TO: GEMINI]\nThis one is for Gemini.");
+  await waitUntil(() => sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, { label: "a reply addressed to an AI still relays (and Auto still lets the third AI overhear)" });
+  assert(sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, "addressed replies still flow as before");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("claude", "No routing tag on this one.");
+  await waitUntil(() => sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, { label: "an untagged reply is still forwarded by Auto" });
+  assert(sentLog("gemini").length === 1 && sentLog("chatgpt").length === 1, "a reply with NO [TO:] tag is still forwarded by Auto (only a written [TO: USER] stays with you)");
+
+  console.log("\n== TR-06: AI-to-AI hand-offs pause after the hop limit; a user send resumes ==");
+  await resetAllParticipants();
+  await call("relay:hop-limit", { max: 3 });
+  await call("routing:auto-all", {});
+  const ping = async (site, to, n) => { say(site, `[TO: ${to.toUpperCase()}]\nping ${n}`); await waitUntil(async () => (await call("state:get", {})).transcript.some((t) => t.site === site && t.text.includes(`ping ${n}`)), { label: `ping ${n} captured` }); await settle(150); };
+  await ping("claude", "gemini", 1); await ping("gemini", "claude", 2); await ping("claude", "gemini", 3);
+  const before = sentLog("gemini").length + sentLog("claude").length + sentLog("chatgpt").length;
+  await ping("gemini", "claude", 4);
+  await settle();
+  const after = sentLog("gemini").length + sentLog("claude").length + sentLog("chatgpt").length;
+  let s = await call("state:get", {});
+  assert(after === before, `the 4th hand-off is NOT relayed (sends before ${before}, after ${after})`);
+  assert(s.log.some((l) => l.kind === "hop-limit"), "the Activity Log records the hop limit");
+  assert(s.transcript.some((t) => /ping 4/.test(t.text)), "the blocked reply is still shown in the conversation");
+  const hl = await call("relay:hop-limit", {});
+  assert(hl.paused === true && hl.hops === 3, `relaying is paused at 3 (${JSON.stringify(hl)})`);
+  await call("send:compose", { text: "carry on", targets: ["claude"] });
+  const hl2 = await call("relay:hop-limit", {});
+  assert(hl2.paused === false && hl2.hops === 0, "a message from the user resets it");
+  await call("relay:hop-limit", { max: 30 });
+
+  console.log("\n== TR-07: each pane's health light reflects proven sends and captures ==");
+  await resetAllParticipants();
+  await call("send:compose", { text: "health check", targets: ["claude"] });
+  let h = (await call("health:get", {})).health;
+  assert(h.claude.level === "waiting", `after a send, Claude is waiting (${h.claude.level})`);
+  say("claude", "[TO: USER]\nhere you go");
+  await waitUntil(async () => (await call("health:get", {})).health.claude.level === "ok", { label: "Claude goes green once its reply is captured" });
+  h = (await call("health:get", {})).health;
+  assert(h.claude.level === "ok", `Claude is green after its reply (${h.claude.level})`);
+  reg("gemini").webContents._forceSendFail = true;
+  await call("send:compose", { text: "this will fail", targets: ["gemini"] });
+  reg("gemini").webContents._forceSendFail = false;
+  h = (await call("health:get", {})).health;
+  assert(h.gemini.level === "error" && /SEND_NOT_CONFIRMED/.test(h.gemini.text), `a failed send turns Gemini red with the reason (${JSON.stringify(h.gemini)})`);
+  await call("routing:stop-all", {});
+}
+
+async function testSequenceEndsHonestly() {
+  console.log("\n== TR-09: a Prompt Sequence never sends to unchecked AIs, and stops with the reason when a step can't be delivered ==");
+  await resetAllParticipants();
+  await call("participants:set", { site: "gemini", enabled: false });
+  const r = await call("sequence:run", { steps: [{ target: "all", text: "step one for everyone" }, { target: "claude", text: "step two" }] });
+  assert(r.ok, "sequence starts");
+  await waitUntil(() => sentLog("chatgpt").length === 1 && sentLog("claude").length === 1, { label: "the 'all' step reaches the checked AIs" });
+  assert(sentLog("gemini").length === 0, "an unchecked AI never gets an 'all' step");
+  await call("sequence:stop", {});
+  await resetAllParticipants();
+  for (const s of SITES) reg(s).webContents._forceSendFail = true;
+  const r2 = await call("sequence:run", { steps: [{ target: "claude", text: "nobody will get this" }] });
+  for (const s of SITES) reg(s).webContents._forceSendFail = false;
+  const st = await call("state:get", {});
+  assert(r2.ok && st.log.some((l) => l.kind === "sequence-send-failed"), "a step that can't be delivered stops the run right away (logged), instead of waiting 4 minutes");
+  assert(!(await call("state:get", {})).log.some((l) => l.kind === "sequence-stalled" && Date.now() - l.ts < 5000), "it is not reported as a stall");
+}
+
+async function testRelayTraceFollowsMessages() {
+  console.log("\n== TR-13: the Relay Trace follows a message from you, to Claude, through Claude's reply, on to Gemini ==");
+  await resetAllParticipants();
+  await call("trace:report", { reset: true });
+  await call("send:compose", { text: "trace me", targets: ["claude"] });
+  say("claude", "[TO: GEMINI]\nPassing this on.");
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "claude's reply is relayed to gemini" });
+  const r = await call("trace:report", {});
+  assert(r.ok && r.report.sites.claude.sent === 1 && r.report.sites.claude.answered === 1, `Claude: 1 sent, 1 answered (${JSON.stringify(r.report.sites.claude)})`);
+  assert(r.report.sites.gemini && r.report.sites.gemini.sent === 1, "Gemini: the relayed copy is traced");
+  assert(r.report.replyOutcomes.forwarded === 1, "Claude's reply is recorded as passed on");
+  assert(/RELAY TRACE/.test(r.text) && /Claude: 1 sent/.test(r.text), "the written report reads plainly");
+  const ex = await call("logs:extract-all", {});
+  const body = fs.readFileSync(ex.file, "utf8");
+  assert(/RELAY TRACE \(where every message went/.test(body), "Extract All now includes the Relay Trace");
+  assert(/^Build: v/m.test(body), "Extract All says which build produced it (TR-19)");
+}
+
+async function testBucketBrigadeEndToEnd() {
+  console.log("\n== TR-14: the Bucket Brigade runs 19 real hand-offs through the app's relay and scores them ==");
+  const bb = require(path.join(__dirname, "..", "bucket-brigade"));
+  await resetAllParticipants();
+  process.env.AUTOINJECTOR_BRIGADE_SETUP_MS = "200";
+  process.env.AUTOINJECTOR_BRIGADE_POLL_MS = "50";
+  process.env.AUTOINJECTOR_BRIGADE_HOP_MS = "8000";
+  process.env.AUTOINJECTOR_BRIGADE_SETTLE_MS = "100";
+  await call("routing:auto-all", {}); // the check must switch Auto off for its run and put it back after
+  const order = ["chatgpt", "claude", "gemini"];
+  const seen = { chatgpt: 0, claude: 0, gemini: 0 };
+  let running = true;
+  // Pretend to be the three AIs: follow the brigade rules from whatever the app typed in.
+  const actor = (async () => {
+    while (running) {
+      for (const site of order) {
+        const log = sentLog(site);
+        while (seen[site] < log.length) {
+          const text = log[seen[site]++].text;
+          if (!/^BRIGADE$/m.test(text) || /Reply to THIS message with just NONE/.test(text)) continue;
+          const got = bb.parseItems(text);
+          const k = bb.IDS.indexOf(got.ids[got.ids.length - 1]) + 1;
+          if ((k - 1) % order.length !== order.indexOf(site)) continue;
+          const id = bb.IDS[k];
+          const to = id === "B20" ? "USER" : order[(order.indexOf(site) + 1) % order.length].toUpperCase();
+          say(site, `[TO: ${to}]\nBRIGADE\n${[...got.ids.map((i) => `${i}: ${got.items[i]}`), `${id}: ${bb.ITEMS[id]}`].join("\n")}`);
+        }
+      }
+      await settle(40);
+    }
+  })();
+  const r = await call("brigade:run", {});
+  running = false; await actor;
+  assert(r.ok && r.finished, `the run finished (${JSON.stringify(r).slice(0, 200)})`);
+  assert(r.appPass === true, `app verdict PASS: ${JSON.stringify(r.app)}`);
+  assert(r.report && fs.existsSync(r.report) && /App verdict: PASS/.test(fs.readFileSync(r.report, "utf8")) && /RELAY TRACE/.test(fs.readFileSync(r.report, "utf8")), "a report with the verdict and the Relay Trace is saved");
+  const g = (await call("relay:hop-limit", {}));
+  assert(g.paused === false, "the hop limit never tripped during a 19-step check");
+  const routing = (await call("state:get", {})).global.routing;
+  assert(Object.values(routing).some((v) => v.length > 0), `Auto routing was put back afterwards (${JSON.stringify(routing)})`);
+  await call("routing:stop-all", {});
+}
+
+async function testGeminiRedrawNotRelayedTwice() {
+  console.log("\n== TR-17: a reply the page re-draws (Gemini adds spacing + citation chips) is captured and relayed ONCE ==");
+  await resetAllParticipants();
+  const g = reg("gemini").webContents;
+  g.replyCount = 4;
+  say("gemini", "[TO: CLAUDE]\nTheory Record[This is opinion.]Claude, look at Exhibit H.");
+  await waitUntil(() => sentLog("claude").length === 1, { label: "the first read is relayed to Claude" });
+  g.currentText = "[TO: CLAUDE]\nTheory Record\n\n[This is opinion.]\n\nClaude, look at Exhibit H.   \nPDF\n+ 1\n[FROM: GEMINI]";
+  await settle(600);
+  assert(sentLog("claude").length === 1, `the re-drawn copy is NOT relayed again (claude got ${sentLog("claude").length})`);
+  let s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "reply-redrawn" && l.detail.site === "gemini"), "the Activity Log records the re-draw");
+  assert(s.transcript.filter((t) => t.site === "gemini" && /Exhibit H/.test(t.text)).length === 1, "and the conversation shows it once");
+  g.replyCount = 5; // a genuinely NEW reply block with the same words
+  await settle(300);
+  assert(sentLog("claude").length === 2, `a new reply block with the same words IS a new reply (claude got ${sentLog("claude").length})`);
+  assert(!/\nPDF\n|\+ 1/.test(sentLog("claude")[1].text), "Gemini's citation chips are not passed on to Claude");
+  delete g.replyCount;
+
+  console.log("  -- chips landing AFTER the [FROM:] tag don't hide it --");
+  await resetAllParticipants();
+  reg("gemini").webContents.currentText = "[TO: CLAUDE]\nChips after the tag.\n[FROM: GEMINI]\n\nPDF\n+ 1";
+  await waitUntil(() => sentLog("claude").length === 1, { label: "a reply with chips after its tag is still captured and relayed", timeout: 4000 });
+  assert(sentLog("claude").length === 1, "captured and relayed (not left for the missing-tag nudge)");
+  assert(!sentLog("gemini").some((e) => /closing tag|\[FROM:/i.test(e.text) && /resend/i.test(e.text)), "Gemini was not nudged to resend");
+
+  console.log("  -- a tagged reply whose page text keeps flickering is still captured (settle ceiling) --");
+  await resetAllParticipants();
+  let n = 0;
+  const flick = setInterval(() => { n++; reg("claude").webContents.currentText = `[TO: GEMINI]\nStatus line ${n}\n[FROM: CLAUDE]`; }, 60);
+  await waitUntil(() => sentLog("gemini").length >= 1, { label: "flickering reply captured within the ceiling", timeout: 4000 });
+  clearInterval(flick);
+  assert(sentLog("gemini").length >= 1, "a reply that never holds perfectly still is captured anyway, after the ceiling");
+}
+
+async function testTagReminderTeachesTheRules() {
+  console.log("\n== TR-22: a message with a missing tag gets a flag PLUS the full how-to-talk rules ==");
+  await resetAllParticipants();
+  const isFlag = (e) => /FLAG: NO \[TO:\] TAG/.test(e.text);
+  // no [TO:] tag, no Auto -> it only reached the user; flag + full rules
+  say("claude", "This is for Gemini but I forgot the tag.");
+  await waitUntil(() => sentLog("claude").some(isFlag), { label: "Claude is flagged for the missing [TO:] tag" });
+  let f = sentLog("claude").find(isFlag);
+  assert(/went to the user ONLY/.test(f.text) && /\[FROM: CLAUDE\]/.test(f.text), "the flag says it only reached the user and how to resend");
+  assert(/HOW WE TALK TO EACH OTHER/.test(f.text) && /\[TO: CHATGPT\]/.test(f.text) && /YOUR LOCKER/.test(f.text), "it carries the full rules (routing tags, closing tag, locker)");
+  assert(sentLog("gemini").length === 0, "the untagged message itself was not sent on");
+  // capped: a model that keeps forgetting isn't spammed forever
+  say("claude", "Still no tag, attempt two."); await settle(400);
+  say("claude", "Still no tag, attempt three."); await settle(400);
+  const flags = sentLog("claude").filter(isFlag).length;
+  assert(flags === 2, `reminders are capped at 2 in a row (got ${flags})`);
+  // a correctly tagged reply resets the streak
+  say("claude", "[TO: USER]\nOK, tagged now."); await settle(400);
+  say("claude", "Forgot again."); await settle(500);
+  assert(sentLog("claude").filter(isFlag).length === 3, "after a correct reply, the next slip is flagged again");
+
+  console.log("  -- with Auto on, the flag doesn't claim it only reached the user --");
+  await resetAllParticipants();
+  await call("routing:auto-all", {});
+  say("gemini", "Untagged but Auto forwards it.");
+  await waitUntil(() => sentLog("gemini").some(isFlag), { label: "Gemini flagged" });
+  f = sentLog("gemini").find(isFlag);
+  assert(/Auto routing passed it on/.test(f.text) && !/went to the user ONLY/.test(f.text), "the flag is accurate when Auto passed it on");
+  await call("routing:stop-all", {});
+
+  console.log("  -- the missing [FROM:] nudge carries the rules too, including your edits to the routing prompt --");
+  await resetAllParticipants();
+  const st = await call("state:get", {});
+  const p2 = st.prompts.find((p) => p.id === 2);
+  await call("prompts:save", { id: 2, name: p2.name, text: { ...p2.text, chatgpt: p2.text.chatgpt + " HOUSE-RULE-MARKER: keep replies short." } });
+  sayRaw("chatgpt", "[TO: USER]\nNo closing tag here");
+  await waitUntil(() => sentLog("chatgpt").some((e) => /NO ENDING TAG RECEIVED/.test(e.text)), { label: "the missing-[FROM:] nudge is sent" });
+  const nudge = sentLog("chatgpt").find((e) => /NO ENDING TAG RECEIVED/.test(e.text));
+  assert(/HOW WE TALK TO EACH OTHER/.test(nudge.text) && /HOUSE-RULE-MARKER/.test(nudge.text), "the nudge includes the full rules as you last edited them");
+  await call("prompts:save", { id: 2, name: p2.name, text: p2.text }); // put it back
+
+  console.log("  -- Stop AIs Talking means no reminders --");
+  await resetAllParticipants();
+  await call("relay:silence", {});
+  say("claude", "Untagged while silenced."); await settle(500);
+  assert(!sentLog("claude").some(isFlag), "no flag is sent while the AIs are silenced");
+  await call("routing:auto-all", {});
+  await call("routing:stop-all", {});
+}
+
+async function testWaitsForBusyAi() {
+  console.log("\n== TR-25: a message to an AI that's still writing waits for it, instead of failing ==");
+  await resetAllParticipants();
+  reg("gemini").webContents._busyCount = 4; // still writing for 4 checks
+  const r = await call("send:compose", { text: "wait for me", targets: ["gemini"] });
+  assert(r.ok && r.results.gemini.ok, `delivered once Gemini finished (${JSON.stringify(r.results.gemini)})`);
+  const s = await call("state:get", {});
+  const sent = s.log.filter((l) => l.kind === "sent" && l.detail.target === "gemini").pop();
+  assert(sent && sent.detail.attempts === 1, `the waiting didn't use up retries (attempts ${sent && sent.detail.attempts})`);
+  assert(s.log.some((l) => l.kind === "send-waiting-busy" && l.detail.target === "gemini"), "the Activity Log says it waited for Gemini");
+  assert(!s.log.some((l) => l.kind === "send-error" && l.detail.target === "gemini" && Date.now() - l.ts < 3000), "no send error");
+}
+
+async function testSendWaitsForFinishedReplyCapture() {
+  console.log("\n== TR-28: a message to an AI that just finished writing waits until that reply is captured ==");
+  await resetAllParticipants();
+  const wc = reg("gemini").webContents;
+  // Gemini is still writing a reply that will end with its [FROM:] tag.
+  wc.generating = true;
+  wc._busyCount = 1e9;
+  sayRaw("gemini", "[TO: USER]\nmy answer to the earlier message\n[FROM: GEMINI]");
+  const sendP = call("send:compose", { text: "next message", targets: ["gemini"] });
+  await settle(300);
+  const sentBefore = sentLog("gemini").length;
+  // It finishes: the Stop button goes away at the same moment for both checks.
+  wc.generating = false;
+  wc._busyCount = 0;
+  const r = await sendP;
+  assert(r.ok && r.results.gemini.ok, `the message still goes out (${JSON.stringify(r.results.gemini)})`);
+  const s = await call("state:get", {});
+  const cap = s.log.filter((l) => l.kind === "captured" && l.detail.site === "gemini").pop();
+  const sent = sentLog("gemini")[sentBefore];
+  assert(cap && sent && cap.ts <= sent.ts, `Gemini's finished reply was captured BEFORE the new message was typed (captured ${cap && cap.ts}, typed ${sent && sent.ts})`);
+}
+
+async function testUntaggedReplyNotBuriedBySend() {
+  console.log("\n== TR-30: a finished reply missing [FROM:] is accepted, not buried, when the next message must go in ==");
+  await resetAllParticipants();
+  const before = sentLog("claude").length;
+  // Claude finished a reply but forgot its closing tag; a new message for Claude arrives right away.
+  sayRaw("claude", "[TO: USER]\nmy finished answer without the closing tag");
+  await settle(220); // longer than the accept-hold (150ms here), shorter than the missing-tag watchdog (300ms here)
+  const r = await call("send:compose", { text: "the next message", targets: ["claude"] });
+  assert(r.ok && r.results.claude.ok, "the new message is delivered");
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "untagged-reply-accepted" && l.detail.site === "claude"), "the untagged reply was accepted before the new message went in");
+  assert(s.transcript.some((x) => x.site === "claude" && /my finished answer without the closing tag/.test(x.text) && !/\[FROM:/.test(x.text)), "it is in the transcript (tag-free), not lost");
+  const msg = sentLog("claude").slice(before).pop();
+  assert(msg && /NO \[FROM:\] CLOSING TAG/.test(msg.text) && /HOW WE TALK TO EACH OTHER/.test(msg.text) && /the next message/.test(msg.text), "the new message carries the missing-tag flag and the full rules, then the message itself");
+  assert(!s.log.some((l) => l.kind === "endtag-missing" && l.detail.site === "claude" && Date.now() - l.ts < 5000), "no separate 'resend everything' nudge was sent");
+}
+
+async function testFailedSendLeftoverDoesNotStall() {
+  console.log("\n== TR-30 review: text left in the box by a failed try (Send disabled, no Stop button) doesn't stall the retry ==");
+  await resetAllParticipants();
+  const wc = reg("claude").webContents;
+  wc.generating = true; wc.stopShown = false; // what the reader sees: disabled Send over leftover text, no Stop button
+  wc._sendFailQueue = [true]; // the first try isn't confirmed; the retry works
+  const t0 = Date.now();
+  const r = await call("send:compose", { text: "retry me", targets: ["claude"] });
+  assert(r.ok && r.results.claude.ok, `the retry delivers it (${JSON.stringify(r.results.claude)})`);
+  assert(Date.now() - t0 < 10000, `without waiting minutes for a "busy" AI (${Date.now() - t0} ms)`);
+  wc.generating = false; delete wc.stopShown;
+}
+
+async function testTagFragmentNotNudged() {
+  console.log("\n== TR-31: when the reader sees only \"[TO:\", the AI is not nagged about a missing tag ==");
+  await resetAllParticipants();
+  const before = sentLog("gemini").length;
+  sayRaw("gemini", "[TO:");
+  await settle(1500);
+  const s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "reply-unreadable" && l.detail.site === "gemini"), "it's logged as a reading problem");
+  assert(sentLog("gemini").length === before, "no missing-tag nudge was sent to Gemini");
+  sayRaw("gemini", "");
+}
+
 async function testHouseRulesVsMeshDedup() {
   console.log("\n== Bugfix regression: an active House Rules stage's own send and a manually re-enabled mesh Auto route to the SAME target must not both fire for one turn ==");
   await resetAllParticipants();
@@ -1981,6 +2335,11 @@ async function testMessageSeqNumbering() {
   const m2 = /^\[MSG #(\d{4,})\]\n/.exec(sent[sent.length - 1].text);
   assert(m1 && m2, "every send begins with a [MSG #NNNN] header (4-digit, zero-padded)");
   assert(m1 && m2 && Number(m2[1]) === Number(m1[1]) + 1, `the number increments by one per send (got ${m1 && m1[1]} -> ${m2 && m2[1]})`);
+  // TR-29: the counter carried on from the saved state (seeded at 500), and is saved again.
+  assert(m1 && Number(m1[1]) >= 500, `numbering continues from the last run instead of restarting at 0001 (got ${m1 && m1[1]})`);
+  await settle(250);
+  const savedNow = JSON.parse(fs.readFileSync(path.join(mockElectron.__userDataDir, "autoinjector-state.json"), "utf8"));
+  assert(m2 && savedNow.nextMsgSeq > Number(m2[1]), `the next number is saved to disk (saved ${savedNow.nextMsgSeq})`);
   // Program-kept: the seq lives in the ledger's own field, not fused into the body.
   const s = await call("state:get", {});
   const led = s.ledger.filter((e) => e.target === "chatgpt").pop();
@@ -2009,8 +2368,10 @@ async function testAddressingAwareRelayFrame() {
   await resetAllParticipants();
   await call("routing:auto-all", {});
   const bG = sentLog("gemini").length;
-  say("chatgpt", "[TO: USER]\njust a note"); // USER => no tag relay; mesh forwards it to the others
-  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the [TO: USER] reply to gemini" });
+  // An UNTAGGED reply (no [TO:] at all) => no tag relay; mesh forwards it. (A
+  // written [TO: USER] now stays with the user — TR-05, tested separately.)
+  say("chatgpt", "just a note");
+  await waitUntil(() => sentLog("gemini").length === bG + 1, { label: "mesh forwards the untagged reply to gemini" });
   assert(sentLog("gemini").pop().text.includes("[ChatGPT says]"), "a plain mesh forward stays neutral '[ChatGPT says]'");
 }
 
@@ -2190,6 +2551,17 @@ async function testAiAddressesTerminal() {
   assert(req.from === "chatgpt" && req.risk === "dangerous" && /script/.test(req.reason), "the request says why it needs approval");
   await call("relay:silence", {});
   assert(((await call("terminal:state", {})).state.pending || []).length === 0, "Stop AIs Talking clears pending requests");
+
+  console.log("  -- ISS-005: a block that CREATES a script then runs it still asks first --");
+  await call("routing:auto-all", {});
+  try { fs.unlinkSync(path.join(st0.root, "claude", "sneak.js")); } catch (_) {} // the locker root persists between runs
+  say("claude", "[TO: TERMINAL]\n```\nwrite sneak.js\nconsole.log('sneak ran')\n```\n```\nnode sneak.js\n```\n[FROM: CLAUDE]");
+  await waitUntil(async () => ((await call("terminal:state", {})).state.pending || []).length === 1, { label: "create-then-run is held for approval" });
+  assert(!fs.existsSync(path.join(st0.root, "claude", "sneak.js")), "nothing in the held request ran yet (not even the write)");
+  before = (await call("state:get", {})).ledger.length;
+  const sreq = (await call("terminal:state", {})).state.pending[0];
+  await call("terminal:approve", { id: sreq.id });
+  await waitUntil(async () => ledgerTo("claude", /sneak ran/, before), { label: "after the user approves, the script runs and Claude gets its output" });
 
   console.log("  -- user command + share output --");
   const ur = await call("terminal:run", { command: "echo from-user" });
@@ -2446,6 +2818,22 @@ async function testButlerDevice() {
   assert(typeof chk.okCount === "number" && chk.okCount <= chk.total, "it reports how many capabilities are working");
   assert(Array.isArray(chk.installs) && chk.installs.some((i) => i.id === "open-interpreter"), "the check reports detailed install status per dependency (installed vs not)");
   assert(Array.isArray(chk.missing) && typeof chk.canInstall === "boolean", "it lists which dependencies are missing + whether they can be installed");
+  assert(chk.checks.every((c) => ["ok", "failed", "not-set-up"].includes(c.status)), "every result says ok / failed / not set up");
+  assert(typeof chk.elapsedMs === "number" && typeof chk.failCount === "number", "it reports how long it took and how many need attention");
+
+  // OP-14: a service that's switched on but has nothing listening is ❌, not a
+  // false ✅ — the quick check now actually pings it.
+  {
+    const endpointDetect = require(path.join(__dirname, "..", "endpoint-detect"));
+    const savedStatus = imageProvider.status, savedTest = endpointDetect.test;
+    try {
+      imageProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img" });
+      endpointDetect.test = async (url) => ({ reachable: false, base: "http://127.0.0.1:7860", reason: "refused" });
+      const c2 = await call("butler:selfcheck", {});
+      const im = c2.checks.find((c) => /Image/.test(c.name));
+      assert(im && im.ok === false && /isn't answering/.test(im.detail), "an enabled image endpoint with nothing listening is reported as not working (❌), with the reason");
+    } finally { imageProvider.status = savedStatus; endpointDetect.test = savedTest; }
+  }
 
   const inst = await call("butler:install-missing", {});
   assert(inst && inst.ok && Array.isArray(inst.results), "Install Missing installs the not-installed dependencies and reports each");
@@ -2565,6 +2953,45 @@ async function testButlerToolbox() {
   assert(!ct.previousManagerActions.some((a) => a.rejected), "authored code is NOT falsely blocked by the code-injection scan (approval-gated instead)");
 }
 
+// OP-12 / OP-13: a dead voice address and a missing/wrong video backend are
+// reported in plain words (which address, what's wrong, what to do) through the
+// real IPC handlers — voice:check, the System Check, and video:generate.
+async function testVoiceVideoPlainErrors() {
+  console.log("\n== OP-12/OP-13: voice + video failures come back in plain words, not raw codes ==");
+  const http = require("http");
+  const voiceProvider = require(path.join(__dirname, "..", "voice-provider"));
+  const videoProvider = require(path.join(__dirname, "..", "video-provider"));
+  const savedVoice = voiceProvider.getSettings(), savedVideo = videoProvider.getSettings();
+  const srv = http.createServer();
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const deadEp = `http://127.0.0.1:${srv.address().port}`;
+  await new Promise((r) => srv.close(r));
+  try {
+    await call("voice:configure", { enabled: true, endpoint: deadEp });
+    const chk = await call("voice:check", {});
+    assert(chk && chk.ok === false && chk.error === "ECONNREFUSED" && chk.endpoint === deadEp, "voice:check reports the dead address with the short code");
+    assert(chk.message && chk.message.includes(deadEp) && /isn't running/.test(chk.message) && /Setup Wizard/.test(chk.message), "voice:check explains the voice service isn't running there and how to start it");
+    const spoke = await call("voice:speak", { text: "hello" });
+    assert(spoke && spoke.error === "ECONNREFUSED" && /isn't running/.test(spoke.message || ""), "voice:speak to a dead address returns the plain-language message");
+    const sc = await call("butler:selfcheck", {});
+    const v = sc.checks.find((c) => /^Voice/.test(c.name));
+    assert(v && v.ok === false && /isn't running/.test(v.detail), "the System Check pings the voice service and shows it as not running (not a false ✅)");
+
+    await call("video:configure", { enabled: true, endpoint: "" });
+    const noEp = await call("video:generate", { prompt: "a cat" });
+    assert(noEp && noEp.ok === false && noEp.error === "NO_ENDPOINT" && /No video backend is set up yet/.test(noEp.message || ""), "video:generate with no backend explains that none is set up");
+    const origGen = videoProvider.generate;
+    videoProvider.generate = async () => ({ ok: false, error: "NO_VIDEO", shape: "images" }); // a stub without a message
+    try {
+      const nv = await call("video:generate", { prompt: "a cat" });
+      assert(nv && nv.error === "NO_VIDEO" && /no working video backend is configured/.test(nv.message || ""), "video:generate fills in the plain NO_VIDEO message even if the provider result lacked one");
+    } finally { videoProvider.generate = origGen; }
+  } finally {
+    voiceProvider.setSettings(savedVoice);
+    await call("video:configure", savedVideo);
+  }
+}
+
 // The DEEP capability test (System Check → "Actually run each capability"):
 // unlike the readiness check, this really EXERCISES each capability once. We stub
 // each provider's status() to "on" and its action to succeed, then prove the
@@ -2588,6 +3015,11 @@ async function testButlerCapabilityTest() {
   };
   const videoGenCalls = [], voiceSpeakCalls = [];
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "captest-"));
+  // The sweep pings each server before its long-running step; the stub
+  // endpoints below aren't real servers, so say they answer.
+  const endpointDetect = require(path.join(__dirname, "..", "endpoint-detect"));
+  const savedEdTest = endpointDetect.test;
+  endpointDetect.test = async (url) => ({ reachable: true, base: url });
   try {
     interpreterProvider.status = () => ({ enabled: true, endpoint: "http://127.0.0.1:8231/run" });
     dbService.status = () => ({ available: true, count: 0 });
@@ -2626,7 +3058,27 @@ async function testButlerCapabilityTest() {
     const talk = r.checks.filter((c) => /^Talk to/.test(c.name));
     assert(talk.length === 3 && talk.every((c) => c.ok !== true), "all three AI panes are represented, and none is a false positive without a real reply");
     assert(typeof r.okCount === "number" && typeof r.failCount === "number" && r.okCount >= 7, "it tallies how many capabilities really worked (the 7 exercised locally)");
+
+    // OP-14: a dead image/video server fails in seconds with the reason,
+    // instead of sitting through the full multi-minute generate timeout.
+    imageProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://127.0.0.1:7860/sdapi/v1/txt2img", timeoutMs: 180000 });
+    videoProvider.status = () => ({ enabled: true, configured: true, endpoint: "http://127.0.0.1:7862/generate", timeoutMs: 300000 });
+    endpointDetect.test = async (url) => ({ reachable: false, base: new URL(url).origin, reason: "refused" });
+    imageGenCalls = []; videoGenCalls.length = 0;
+    const t0 = Date.now();
+    const r2 = await call("butler:capability-test", {});
+    const took = Date.now() - t0;
+    const im2 = r2.checks.find((c) => /Image/.test(c.name)), vi2 = r2.checks.find((c) => /Video/.test(c.name));
+    assert(im2.ok === false && /refused/.test(im2.detail) && vi2.ok === false && /refused/.test(vi2.detail), "a dead image/video server is reported as not working, with \"connection refused\"");
+    assert(imageGenCalls.length === 0 && videoGenCalls.length === 0, "no generate call is attempted against a server that isn't there");
+    // The panes have no real AI to answer, so each "Talk to" ping waits its full
+    // reply timeout (~45s). Pinged one after another that was ~135s; now they
+    // overlap, and the dead image/video servers add only a ~0s refused ping
+    // (not their 3–5 minute generate timeouts).
+    console.log(`     (capability sweep with dead servers + 3 silent panes took ${took}ms)`);
+    assert(took < 100000, `the sweep doesn't wait out generate timeouts or ping the panes one at a time (${took}ms)`);
   } finally {
+    endpointDetect.test = savedEdTest;
     Object.assign(interpreterProvider, { status: saved.iStatus, run: saved.iRun });
     dbService.status = saved.dStatus;
     imageProvider.status = saved.imStatus;
@@ -2694,6 +3146,22 @@ async function testManagerMemoryActions() {
   await call("manager:stop", {});
 }
 
+async function testManagerMemoryLoopGuard() {
+  console.log("\n== TR-10: a butler that keeps saving the SAME fact stops with a reason instead of looping ==");
+  resetManagerStub();
+  memoryCreateCalls = []; memorySearchCalls = [];
+  queueManagerDecisionRepeating({ action: "REMEMBER", fact: "the sky is blue", reason: "again", confidence: 0.9 });
+  const started = await call("manager:start-task", { userRequest: "loop on memory" });
+  assert(started && started.ok, "the task started");
+  await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager && ["finished", "error"].includes(s.manager.status); }, { label: "the repeating task ends on its own", timeout: 15000 });
+  const st = await call("manager:get-state", {});
+  assert(["finished", "error"].includes(st.manager.status), `the task ended (${st.manager.status})`);
+  assert(memoryCreateCalls.length === 1, `the fact was saved once, not over and over (${memoryCreateCalls.length})`);
+  const s = await call("state:get", {});
+  assert(JSON.stringify(s.log).includes("Skipped a repeat") || JSON.stringify(st).includes("Skipped a repeat"), "the skipped repeats are logged in plain words");
+  await call("manager:stop", {});
+}
+
 // N4: the awareness object exposes per-pane availability, and a disabled pane is
 // marked unavailable so the butler won't delegate to it. It is present in the
 // state the manager model receives each turn.
@@ -2758,6 +3226,9 @@ async function main() {
     savedAt: Date.now(),
     transcript: oldTranscript,
     customRole: { chatgpt: "", claude: "Skeptical Engineer", gemini: "" },
+    selectorOverrides: { claude: { assistant: "span" } }, // TR-24: a bad saved pick from a real run — must be dropped on load
+    nextMsgSeq: 500, // TR-29: the [MSG #] counter from the last run carries on
+    voiceConfig: { enabled: false, endpoint: "http://127.0.0.1:8299", speakOnAck: false, voices: { claude: "en_GB-alan" }, micDevice: "mic-seed" }, // restored without starting the shim (testVoiceSettingsPersist)
     hr: { mode: "rotation", topic: "Restored topic", rounds: 0, roundNum: 2, order: ["chatgpt", "claude", "gemini"], phase: "rotating", lastSpeakerIndex: 0, roles: {} }
   }));
 
@@ -2770,6 +3241,13 @@ async function main() {
     return r && r.webContents && Array.isArray(r.webContents.sentLog);
   }), { label: "createWindow registered all three panes" });
   assert(!!started, "startup completed (all three panes created)");
+  // Dev shortcut: RUN_ONLY=testName node test/run.js runs just that one scenario.
+  if (process.env.RUN_ONLY) {
+    const only = String(process.env.RUN_ONLY).split(",");
+    for (const name of only) { const fn = eval(name); await fn(); } // eslint-disable-line no-eval
+    console.log(`\n${passed} passed, ${failed} failed`);
+    process.exit(failed ? 1 : 0);
+  }
 
   console.log("\n== Persistence: restores transcript/roles/House Rule state on startup ==");
   const restored = await call("state:get", {});
@@ -2777,6 +3255,7 @@ async function main() {
   assert(restored.transcript[restored.transcript.length - 1].text === "Restored opening message", "the most recent entry survives the cap");
   assert(restored.transcript[0].text === "synthetic old turn #51", "the cap evicts from the OLDEST end, keeping exactly the newest 1000");
   assert(restored.global.customRole.claude === "Skeptical Engineer", "custom roles restored from disk");
+  assert(!restored.global.selectorOverrides.claude.assistant && restored.log.some((l) => l.kind === "selector-override-dropped" && l.detail.selector === "span"), "a saved bare-tag reply selector (\"span\") is dropped on load and logged (TR-24)");
   assert(restored.houseRule.mode === "rotation" && restored.houseRule.topic === "Restored topic", "House Rule mode/topic restored");
   assert(restored.houseRule.active === false, "restored run comes back NOT active — a restart must never auto-send anything");
   assert(restored.houseRule.paused === true, "restored run shows as paused, so the user can hit Resume deliberately");
@@ -2813,6 +3292,7 @@ async function main() {
   await testSendAutoRetry();
   await testDeliveryLedger();
   await testPersistenceSavesToDisk();
+  await testVoiceSettingsPersist();
   await testPromptLibrary();
   await testPromptEditorWindow();
   await testSequenceWindowManagement();
@@ -2842,6 +3322,7 @@ async function main() {
   await testCoerceMalformedDelegate();
   await testButlerToolbox();
   await testButlerCapabilityTest();
+  await testVoiceVideoPlainErrors();
   await testButlerCapabilitySweep();
   await testManagerAwareness();
   await testManagerAckBrain();
@@ -2867,6 +3348,18 @@ async function main() {
   await testMessageSeqNumbering();
   await testAddressingAwareRelayFrame();
   await testLoopGuardSuppressesRelay();
+  await testToUserStaysWithUserAndHopLimit();
+  await testManagerMemoryLoopGuard();
+  await testSequenceEndsHonestly();
+  await testRelayTraceFollowsMessages();
+  await testBucketBrigadeEndToEnd();
+  await testGeminiRedrawNotRelayedTwice();
+  await testTagReminderTeachesTheRules();
+  await testWaitsForBusyAi();
+  await testSendWaitsForFinishedReplyCapture();
+  await testUntaggedReplyNotBuriedBySend();
+  await testFailedSendLeftoverDoesNotStall();
+  await testTagFragmentNotNudged();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

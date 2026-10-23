@@ -1,0 +1,272 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>fake chat (TR-15)</title>
+<style>
+  body { font: 14px sans-serif; margin: 8px; }
+  #log > * { display: block; margin: 6px 0; }
+  user-query, model-response, message-content, rich-textarea { display: block; }
+  .user-text { white-space: pre-wrap; }
+  .composer { border: 1px solid #888; min-height: 24px; padding: 4px; }
+  .composer p { margin: 0; }
+  button { min-width: 20px; min-height: 16px; }
+</style>
+</head>
+<body>
+<!--
+  TR-15 fake-site stress test: ONE parameterised fake chat site that copies the
+  DOM shape of ChatGPT / Claude / Gemini closely enough for the app's REAL
+  selectors (selectors.js) and REAL send/read scripts (automation.js), plus the
+  page behaviours that have bitten the relay in real runs. Driven by
+  test/stress.test.js; usable by hand too: open
+    fake-chat.html?site=gemini&seed=7&quirks=default
+  Params:
+    site    chatgpt | claude | gemini            (DOM shape + [FROM:] name)
+    seed    any string; same seed = same replies, plan and timings
+    quirks  default | all | none | comma list, e.g. "rich,stop,stream" or
+            "default,-nofrom" (site defaults minus one)
+    plan    rr (each reply addressed to the other two AIs in turn, default)
+            | random (seeded pick of the other AIs or ALL)
+    nofrom  chance (0-1) a reply forgets its [FROM:] tag (default 0.2)
+    speed   timing multiplier (default 1; 2 = everything twice as slow)
+  Quirks:
+    rich         rich editor: keeps its OWN text state, changed only through
+                 beforeinput / paste; raw DOM writes are wiped; Send posts the
+                 state, not the screen (Lexical / ProseMirror / Quill)
+    disabledsend Send is disabled while the composer is empty
+    stop         a Stop button replaces Send while the AI is writing; clicking
+                 it ABORTS the reply (Gemini morphs its one button in place)
+    stream       the reply appears chunk by chunk; [FROM:] arrives last
+    redraw       the finished reply is re-drawn a moment later: new paragraph
+                 breaks and, on Gemini, a "PDF" citation chip after [FROM:]
+    hiddensend   a hidden, disabled duplicate "Send" button earlier in the
+                 page that matches the same selector (ChatGPT)
+    wrapper      a labelled wrapper div + placeholder around the editor (ChatGPT)
+    slowclear    the composer clears ~0.5-1.5 s after a real send
+    nofrom       now and then a reply ends without its [FROM:] tag; the AI
+                 re-sends the whole reply, tagged, when the app's
+                 "NO ENDING TAG RECEIVED" reminder arrives
+  The fake AI answers every message that carries a "[MSG #n]" header with ONE
+  reply: "[TO: X]" first, a body holding a unique token (e.g. GEMINI-R3), and
+  "[FROM: SITE]" last. window.__fake.dump() reports what was posted / replied.
+-->
+<div id="log"></div>
+<div id="composer-area"></div>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const SITE = (Q.get("site") || "chatgpt").toLowerCase();
+  const NAME = SITE.toUpperCase();
+  const SEED = Q.get("seed") || "1";
+  const PLAN = Q.get("plan") || "rr";
+  const NOFROM_RATE = Q.has("nofrom") ? Number(Q.get("nofrom")) : 0.2;
+  const SPEED = Number(Q.get("speed")) || 1;
+  const ALL_QUIRKS = ["rich", "disabledsend", "stop", "stream", "redraw", "hiddensend", "wrapper", "slowclear", "nofrom"];
+  const SITE_DEFAULTS = {
+    chatgpt: ["rich", "disabledsend", "stop", "stream", "hiddensend", "wrapper", "slowclear", "nofrom"],
+    claude: ["rich", "disabledsend", "stop", "stream", "slowclear", "nofrom"],
+    gemini: ["rich", "disabledsend", "stop", "stream", "redraw", "nofrom"],
+  };
+  function parseQuirks(spec) {
+    const set = new Set();
+    for (const raw of String(spec || "default").split(",")) {
+      const q = raw.trim().toLowerCase();
+      if (!q) continue;
+      if (q === "default") (SITE_DEFAULTS[SITE] || []).forEach((x) => set.add(x));
+      else if (q === "all") ALL_QUIRKS.forEach((x) => set.add(x));
+      else if (q === "none") set.clear();
+      else if (q[0] === "-") set.delete(q.slice(1));
+      else set.add(q);
+    }
+    return set;
+  }
+  const QUIRKS = parseQuirks(Q.get("quirks"));
+  const has = (q) => QUIRKS.has(q);
+
+  // Seeded RNG (mulberry32 over a string hash): same seed + site = same run.
+  function hash(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
+  function rngFor(tag) { let a = hash(SEED + "|" + SITE + "|" + tag); return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const rText = rngFor("text"), rPlan = rngFor("plan"), rTime = rngFor("time"), rFrom = rngFor("nofrom");
+  const between = (lo, hi) => Math.round((lo + (hi - lo) * rTime()) * SPEED);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const OTHERS = ["chatgpt", "claude", "gemini"].filter((s) => s !== SITE).map((s) => s.toUpperCase());
+  const WORDS = "relay pane token signal editor router message capture stream chunk header queue retry proof settle redraw marker tag hop mesh agent reply draft summary point detail answer".split(" ");
+
+  // ---- DOM, per site -----------------------------------------------------
+  const log = document.getElementById("log");
+  const area = document.getElementById("composer-area");
+  let ed, sendBtn, stopBtn = null;
+  function el(tag, attrs, parent) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) { if (k === "text") n.textContent = v; else n.setAttribute(k, v); }
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  const hidden = (n, h) => { if (n) n.style.display = h ? "none" : ""; };
+  if (SITE === "chatgpt") {
+    const form = el("form", {}, area);
+    form.addEventListener("submit", (e) => e.preventDefault());
+    if (has("hiddensend")) el("button", { type: "button", "data-testid": "send-button", "aria-label": "Send prompt", style: "display:none", disabled: "", text: "old" }, form);
+    let holder = form;
+    if (has("wrapper")) { holder = el("div", { "aria-label": "Ask ChatGPT", id: "wrap" }, form); el("span", { class: "placeholder", text: "Ask anything" }, holder); }
+    ed = el("div", { id: "prompt-textarea", contenteditable: "true", class: "ProseMirror composer" }, holder);
+    sendBtn = el("button", { type: "button", "data-testid": "send-button", "aria-label": "Send prompt", id: "send", text: "Send" }, form);
+    if (has("stop")) { stopBtn = el("button", { type: "button", "data-testid": "stop-button", "aria-label": "Stop streaming", id: "stop", text: "Stop" }, form); hidden(stopBtn, true); }
+  } else if (SITE === "claude") {
+    const fs = el("fieldset", {}, area);
+    ed = el("div", { contenteditable: "true", class: "ProseMirror composer", "data-testid": "chat-input" }, fs);
+    sendBtn = el("button", { type: "button", "aria-label": "Send message", id: "send", text: "Send" }, fs);
+    if (has("stop")) { stopBtn = el("button", { type: "button", "aria-label": "Stop response", id: "stop", text: "Stop" }, fs); hidden(stopBtn, true); }
+  } else {
+    const rt = el("rich-textarea", {}, area);
+    ed = el("div", { class: "ql-editor composer", contenteditable: "true" }, rt);
+    sendBtn = el("button", { type: "button", class: "send-button", "aria-label": "Send message", id: "send", text: "Send" }, area);
+    // Gemini has ONE button that morphs into Stop while writing (see setGenerating).
+  }
+
+  // ---- the composer ------------------------------------------------------
+  let state = "";            // the editor's OWN copy of the text (rich mode)
+  const composerText = () => (has("rich") ? state : (ed.innerText || ""));
+  function caretToEnd() {
+    try { const r = document.createRange(); r.selectNodeContents(ed); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } catch (_) {}
+  }
+  function render() {
+    if (has("rich")) {
+      ed.innerHTML = "";
+      for (const line of state.split("\n")) { const p = document.createElement("p"); if (line) p.textContent = line; else p.appendChild(document.createElement("br")); ed.appendChild(p); }
+      if (document.activeElement === ed) caretToEnd();
+    }
+    const ph = document.querySelector(".placeholder"); if (ph) ph.style.display = composerText().trim() ? "none" : "";
+    syncButtons();
+  }
+  if (has("rich")) {
+    ed.addEventListener("beforeinput", (e) => {
+      e.preventDefault();
+      // Typing over a selection replaces it (select-all + insertText).
+      let replacing = false; try { const rs = e.getTargetRanges(); replacing = rs.length > 0 && !rs[0].collapsed; } catch (_) {}
+      if (replacing) state = "";
+      if (e.inputType === "insertText") state += e.data || "";
+      else if (e.inputType === "insertParagraph" || e.inputType === "insertLineBreak") state += "\n";
+      else if (e.inputType.indexOf("delete") === 0) state = "";
+      render();
+    });
+    ed.addEventListener("input", render); // raw DOM writes are wiped on the next render
+    ed.addEventListener("paste", (e) => {
+      e.preventDefault();
+      if (!getSelection().isCollapsed) state = "";
+      state += (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+      render();
+    });
+  } else {
+    ed.addEventListener("input", () => syncButtons());
+  }
+  function clearComposer(sentText) {
+    if (has("rich")) { if (state === sentText) { state = ""; render(); } }
+    else if ((ed.innerText || "") === sentText) { ed.textContent = ""; syncButtons(); }
+  }
+
+  // ---- buttons / generating state ---------------------------------------
+  let generating = false, aborted = false;
+  function syncButtons() {
+    const empty = !composerText().trim();
+    if (SITE === "gemini" && has("stop")) {
+      if (generating) { sendBtn.className = "send-button stop"; sendBtn.setAttribute("aria-label", "Stop response"); sendBtn.disabled = false; return; }
+      sendBtn.className = "send-button"; sendBtn.setAttribute("aria-label", "Send message");
+    }
+    if (stopBtn) { hidden(stopBtn, !generating); hidden(sendBtn, generating); }
+    // No Stop button: Send stays visible but disabled while the AI writes.
+    sendBtn.disabled = (has("disabledsend") && empty) || (generating && !has("stop"));
+  }
+  function setGenerating(g) { generating = g; syncButtons(); }
+  function stopClicked() { if (generating) { aborted = true; window.__fake.stopClicks++; } }
+  if (stopBtn) stopBtn.addEventListener("click", stopClicked);
+  sendBtn.addEventListener("click", () => {
+    if (SITE === "gemini" && has("stop") && generating) return stopClicked();
+    if (!sendBtn.disabled) post();
+  });
+  ed.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!generating) post(); } });
+
+  // ---- posting a message ---------------------------------------------------
+  const F = window.__fake = { site: SITE, quirks: Array.from(QUIRKS), posted: [], replies: [], stopClicks: 0, ignoredPosts: 0, redraws: 0, jobs: 0 };
+  function post() {
+    const text = composerText();
+    if (!text.trim()) return;
+    if (generating) { F.ignoredPosts++; return; } // a real page won't take a message mid-reply
+    F.posted.push({ text, at: Date.now() });
+    let u;
+    if (SITE === "chatgpt") { u = el("div", { "data-message-author-role": "user" }, log); el("div", { class: "user-text", text }, u); }
+    else if (SITE === "claude") { u = el("div", { "data-testid": "user-message", class: "user-text", text }, log); }
+    else { u = el("user-query", {}, log); el("div", { class: "query-text user-text", text }, u); }
+    if (has("slowclear")) setTimeout(() => clearComposer(text), between(500, 1500)); else clearComposer(text);
+    if (/^\[MSG #\d+\]/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
+  }
+
+  // ---- the fake AI ---------------------------------------------------------
+  let replyNo = 0, lastReply = null;
+  function planTarget(k) {
+    if (PLAN === "random") { const x = rPlan(); return x < 0.15 ? "ALL" : x < 0.575 ? OTHERS[0] : OTHERS[1]; }
+    const start = hash(SEED + SITE) % 2;
+    return OTHERS[(start + k - 1) % 2];
+  }
+  function sentence() { const n = 6 + Math.floor(rText() * 6); const w = []; for (let i = 0; i < n; i++) w.push(WORDS[Math.floor(rText() * WORDS.length)]); const s = w.join(" "); return s[0].toUpperCase() + s.slice(1) + "."; }
+  function newReply(inReplyTo) {
+    const k = ++replyNo;
+    const to = planTarget(k);
+    const token = NAME + "-R" + k;
+    const lines = ["[TO: " + to + "]", "Reply " + k + " from " + NAME + " to " + inReplyTo + ", token " + token + ". " + sentence(), sentence() + " " + sentence()];
+    const tagged = !(has("nofrom") && k > 1 && rFrom() < NOFROM_RATE);
+    return { k, to, token, inReplyTo, lines, tagged, resend: false };
+  }
+  function mkBlock() {
+    let md;
+    if (SITE === "chatgpt") { const b = el("div", { "data-message-author-role": "assistant" }, log); md = el("div", { class: "markdown" }, b); }
+    else if (SITE === "claude") { const b = el("div", { class: "font-claude-message" }, log); md = el("div", { class: "standard-markdown" }, b); }
+    else { const b = el("model-response", {}, log); const mc = el("message-content", {}, b); md = el("div", { class: "markdown" }, mc); }
+    return md;
+  }
+  function paint(md, text, redrawn) {
+    md.innerHTML = "";
+    const lines = text.split("\n");
+    if (!redrawn) { for (const l of lines) el("p", { text: l }, md); return; }
+    // The re-draw: the body sentences split into their own paragraphs, extra
+    // spacing, and a citation chip AFTER the closing tag.
+    for (const l of lines) {
+      if (/^\[(TO|FROM):/.test(l)) { el("p", { text: l }, md); continue; }
+      for (const s of l.split(/(?<=\.)\s+/)) el("p", { text: "  " + s + " " }, md);
+    }
+    if (SITE === "gemini") el("p", { text: "PDF", class: "chip" }, md); // only Gemini has citation chips
+  }
+  async function reply(msg) {
+    const seq = (/^\[MSG #(\d+)\]/.exec(msg) || [])[1];
+    let r;
+    if (/NO ENDING TAG RECEIVED/.test(msg) && lastReply) r = Object.assign({}, lastReply, { tagged: true, resend: true, inReplyTo: "#" + seq });
+    else r = newReply("#" + seq);
+    lastReply = r;
+    const full = r.lines.concat(r.tagged ? ["[FROM: " + NAME + "]"] : []).join("\n");
+    aborted = false;
+    setGenerating(true); // with no Stop button, Send just stays disabled while it writes
+    const rec = { k: r.k, token: r.token, to: r.to, inReplyTo: r.inReplyTo, tagged: r.tagged, resend: r.resend, text: full, startedAt: Date.now(), finishedAt: null, aborted: false, redrawn: false };
+    F.replies.push(rec);
+    await sleep(between(150, 400)); // "thinking"
+    const md = mkBlock();
+    if (has("stream")) {
+      const parts = full.split(/(?=[ \n])/);
+      let shown = "";
+      for (let i = 0; i < parts.length && !aborted;) {
+        const n = 2 + Math.floor(rTime() * 3);
+        shown += parts.slice(i, i + n).join(""); i += n;
+        paint(md, shown, false);
+        await sleep(between(50, 110));
+      }
+    } else paint(md, full, false);
+    rec.aborted = aborted;
+    rec.finishedAt = Date.now();
+    setGenerating(false);
+    if (has("redraw") && !aborted) {
+      setTimeout(() => { paint(md, full, true); rec.redrawn = true; F.redraws++; }, between(200, 1200));
+    }
+  }
+  F.idle = () => !generating && F.jobs === 0;
+  F.dump = () => ({ site: SITE, quirks: F.quirks, posted: F.posted, replies: F.replies, stopClicks: F.stopClicks, ignoredPosts: F.ignoredPosts, redraws: F.redraws, idle: F.idle() });
+  render();
+})();
+</script>
+</body></html>

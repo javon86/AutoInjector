@@ -7,6 +7,8 @@ const vp = require('../voice-provider');
 let passed = 0, failed = 0;
 function assert(c, m) { if (c) { passed++; console.log(`  ok   - ${m}`); } else { failed++; console.log(`  FAIL - ${m}`); } return c; }
 function listen(server) { return new Promise((r) => server.listen(0, '127.0.0.1', () => r(server.address().port))); }
+// A port with nothing listening on it (bind, read the port, close).
+async function deadPort() { const s = http.createServer(); const p = await listen(s); await new Promise((r) => s.close(r)); return p; }
 
 // A stub voice shim: /health, /speak echoes ms, /listen returns a fixed transcript.
 function makeStub() {
@@ -60,6 +62,66 @@ async function main() {
   const override = await vp.speak('hi', { voice: 'custom-voice' });
   assert(override.voice === 'custom-voice', 'an explicit voice override wins');
   server.close();
+
+  console.log('\n== OP-12: plain-language errors instead of a raw ECONNREFUSED ==');
+  assert(!spoke.message && !heard.message, 'a successful speak/listen carries no error message');
+  vp.setSettings({ enabled: false });
+  const off = await vp.speak('hi');
+  assert(off.error === 'VOICE_DISABLED' && /turned off/i.test(off.message || ''), 'VOICE_DISABLED comes with a plain "voice is turned off" message');
+  vp.setSettings({ enabled: true, endpoint: '' });
+  const noEp = await vp.speak('hi');
+  assert(noEp.error === 'NO_ENDPOINT' && /No voice service address/i.test(noEp.message || '') && /8232/.test(noEp.message), 'NO_ENDPOINT says no address is set and suggests the default one');
+  vp.setSettings({ endpoint: 'not a url' });
+  assert(/isn't a valid web address/.test((await vp.speak('hi')).message || ''), 'BAD_ENDPOINT explains the address is not valid');
+  const dead = await deadPort();
+  const deadEp = `http://127.0.0.1:${dead}`;
+  vp.setSettings({ enabled: true, endpoint: deadEp });
+  const refused = await vp.speak('hello');
+  assert(refused.ok === false && refused.error === 'ECONNREFUSED', 'speak to a dead address keeps the short code ECONNREFUSED in error');
+  const m = refused.message || '';
+  assert(m.includes(deadEp), 'the message names the address it tried');
+  assert(/isn't running/i.test(m), 'the message says the voice service is not running');
+  assert(/Setup Wizard/.test(m) && /voice_shim\.py/.test(m), 'the message says how to start it');
+  assert(/change the voice address/i.test(m) && /Voice settings/.test(m), 'the message says where to change the address');
+  assert(!/^ECONNREFUSED/.test(m), 'the message is plain words, not the raw socket code');
+  const refusedListen = await vp.listen({ seconds: 2 });
+  assert(refusedListen.error === 'ECONNREFUSED' && refusedListen.message && refusedListen.message.includes(deadEp), 'listen gets the same plain message');
+  assert(/try 127\.0\.0\.1 instead of "localhost"/.test(vp.explainError({ error: 'ECONNREFUSED' }, 'http://localhost:8232')), 'a refused "localhost" address suggests 127.0.0.1 (IPv6 ::1 vs IPv4 shim)');
+  assert(!/instead of "localhost"/.test(m), 'no localhost hint for a 127.0.0.1 address');
+  assert(/didn't answer in time/.test(vp.explainError({ error: 'TIMEOUT' }, deadEp)), 'TIMEOUT has a plain message');
+  assert(/can't be found/.test(vp.explainError({ error: 'ENOTFOUND' }, 'http://nope:8232')), 'ENOTFOUND has a plain message');
+  assert(/HTTP 500: model missing/.test(vp.explainError({ error: 'HTTP_500', body: '{"error":"model missing"}' }, deadEp)), 'an HTTP error includes the service\'s reason');
+
+  console.log('\n== OP-12: checkConnection() — a cheap GET /health ==');
+  const chkDead = await vp.checkConnection({ timeoutMs: 1000 });
+  assert(chkDead.ok === false && chkDead.reachable === false && chkDead.error === 'ECONNREFUSED' && chkDead.endpoint === deadEp, 'a dead address is reported unreachable with the code + address');
+  assert(/isn't running/.test(chkDead.message || ''), 'and with the plain "not running" message');
+  const server2 = makeStub();
+  const port2 = await listen(server2);
+  vp.setSettings({ endpoint: `http://127.0.0.1:${port2}` });
+  const chkUp = await vp.checkConnection();
+  assert(chkUp.ok === true && chkUp.reachable === true && /running/.test(chkUp.message), 'a running voice shim is reported reachable');
+  server2.close();
+  const other = http.createServer((req, res) => { res.writeHead(404); res.end('not here'); });
+  const port3 = await listen(other);
+  vp.setSettings({ endpoint: `http://127.0.0.1:${port3}` });
+  const chkOther = await vp.checkConnection();
+  assert(chkOther.ok === false && chkOther.error === 'HTTP_404' && /isn't the AutoInjector voice service/.test(chkOther.message || ''), 'some other server at the address is called out as not the voice service');
+  other.close();
+  vp.setSettings({ endpoint: '' });
+  assert((await vp.checkConnection()).error === 'NO_ENDPOINT', 'checkConnection with no address -> NO_ENDPOINT');
+  assert(vp.status().lastStartError === '', 'status() reports no managed-start error by default');
+
+  console.log('\n== settings round-trip (what the app persists + restores) ==');
+  const want = { enabled: true, endpoint: 'http://127.0.0.1:8299', speakOnAck: false, listenSeconds: 9, voices: { butler: 'en_US-amy', chatgpt: '', claude: 'en_GB-alan', gemini: '' }, micDevice: 'mic-1', speakerDevice: 'spk-2', timeoutMs: 30000 };
+  vp.setSettings(want);
+  const saved = JSON.parse(JSON.stringify(vp.getSettings())); // as written to autoinjector-state.json
+  vp.setSettings({ enabled: false, endpoint: '', speakOnAck: true, listenSeconds: 6, voices: { butler: '', chatgpt: '', claude: '', gemini: '' }, micDevice: '', speakerDevice: '', timeoutMs: 60000 });
+  vp.setSettings(saved); // as restored on startup
+  assert(JSON.stringify(vp.getSettings()) === JSON.stringify(want), 'getSettings() -> JSON -> setSettings() restores every voice setting exactly');
+  assert(!Object.keys(saved).some((k) => /key|token|secret|password/i.test(k)), 'the persisted voice settings hold no secret fields');
+  assert(vp.status().managed === false, 'restoring settings never starts the voice shim');
+  vp.setSettings({ enabled: false, endpoint: '' });
 
   console.log('\n== managed mode requires a command ==');
   assert((await vp.startManaged({})).error === 'NO_COMMAND', 'startManaged with no command -> NO_COMMAND');

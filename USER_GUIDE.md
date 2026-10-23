@@ -204,6 +204,13 @@ Turn on **Auto** (per pane, or **Auto (checked participants)** in Global) and
 every reply is forwarded to the other panes automatically — the simplest way to
 start a continuous three‑way conversation. **Pause** holds it; **Stop** ends it.
 
+Two safety rules apply while Auto is on:
+- A reply the AI addressed **`[TO: USER]`** is meant for you, so it is **not**
+  forwarded to the other AIs. (A reply with no `[TO:]` tag at all still is.)
+- After **30 AI‑to‑AI hand‑offs in a row** without you, relaying **pauses** and
+  the status line says so. Their replies still show up. **Send a message or click
+  Auto** to let them continue. This stops runaway loops.
+
 ### c) House Rules ✅
 Pick a **format** to run a structured session using your Compose text as the
 topic:
@@ -222,6 +229,13 @@ ideas together into a summary.
 
 The header of **every AI pane** carries a small row of buttons that act on that
 one pane:
+
+- **The health light** (the dot before the AI's name) — **green**: its last
+  message was delivered and its reply came back; **amber**: waiting for the reply,
+  or the send couldn't be proven; **red**: the send failed, the page can't find its
+  message box (signed out?), or no reply came for 3 minutes; **grey**: nothing sent
+  yet. **Hover** it for the exact reason; **click** it to re‑check the page (this
+  sends nothing).
 
 - **－ / 100% / ＋** — **zoom** the live embedded page in/out (fit more of the
   real conversation, or make it bigger).
@@ -246,7 +260,9 @@ system check — see §11.)*
 - **Prompt Library ✅** — save prompts you use often; **+ New** / **Edit** open a
   small editor; **Send** fires the selected one.
 - **Prompt Sequence ✅** — **🧵 Sequence** opens an editor where you list prompts
-  to fire one after another automatically.
+  to fire one after another automatically. Each step waits for a reply. **All**
+  means the AIs checked Active. If a step can't be delivered, or no reply comes in
+  time, the run stops and the window says why.
 - **Roles ✅** — **🎭 Roles** lets you label each AI (e.g. "critic", "writer") so
   formats and prompts can reference them.
 - **Attach a document ✅** — **📎 Attach** picks a file, previews it, and sends its
@@ -671,7 +687,28 @@ instead.
   the error.
 - **A reply won't forward to another AI.** Check whether **Auto** is on for the
   sending pane, or whether a `[TO: X]` tag is present. **Pause/Stop** in Global
-  halt all routing.
+  halt all routing. A reply tagged `[TO: USER]` is never forwarded (it's for you),
+  and after 30 hand‑offs in a row relaying pauses until you send a message.
+- **An AI forgets its tags.** If a reply has no closing `[FROM: …]` tag it isn't
+  delivered and the AI is asked to resend it. If it has no opening `[TO: …]` tag it
+  goes to you only (or is passed on by Auto, if that's on). Either way the AI gets a
+  ⚠️ flag **plus the full rules for how to talk to the others** — the same text as the
+  Prompt Library's routing prompt, including any changes you made to it. At most 2
+  flags in a row per AI; none while **Stop AIs Talking** is on.
+- **Messages seem to go missing.** Use **Tools → Relay Trace report**. It lists,
+  for each AI, how many messages were sent, proven in the chat, answered and
+  passed on — and says where the rest stopped (sending, proving, replying or
+  capturing), with the message numbers. It's also included in every **Extract All**.
+- **Is everything working?** Use **Tools → Run relay check (Bucket Brigade)**. The
+  checked AIs pass a 20‑item list around through the app (about 23 messages,
+  10–20 minutes). The report gives an **App verdict** — PASS means every hand‑off
+  was delivered, captured and passed on exactly, with no duplicates — and lists
+  separately any mistakes the AIs themselves made. **Tools → Stop relay check** or
+  **Stop AIs Talking** ends it early.
+- **An AI's light is red.** Hover it for the reason. "Can't find its message box"
+  usually means you're signed out in that pane. "No reply found on the page" means
+  the site changed how it shows replies — use **🎯 Fix selectors → Pick Reply**.
+  "No closing [FROM:] tag" means the AI forgot its envelope; it is asked to resend.
 - **An optional panel says "off" or "not active".** That feature needs its server
   configured — see [section 15](#15-what-you-need-to-run-each-part). Nothing
   breaks; the rest of the app keeps working.

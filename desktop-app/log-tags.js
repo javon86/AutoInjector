@@ -38,10 +38,15 @@ const EXACT = {
   'menu-error': 'system', 'menu-init-error': 'system', 'persist-error': 'system',
   'poll-error': 'system', 'paused': 'system', 'stopped': 'system',
   // Chat — the three web AIs
-  'captured': 'chat', 'sent': 'chat', 'send-error': 'chat', 'send-retry': 'chat',
+  'captured': 'chat', 'sent': 'chat', 'send-error': 'chat', 'send-retry': 'chat', 'send-unverified': 'chat',
   'compose': 'chat', 'rate-limit-detected': 'chat',
   // Routing / relay between AIs
   'routing-changed': 'routing', 'relay-silenced': 'routing', 'loop-suppressed': 'routing',
+  'hop-limit': 'routing', 'hop-count-reset': 'routing', 'hop-limit-changed': 'routing',
+  'sequence-send-failed': 'roundtable', 'pane-check': 'chat', 'app-build': 'system', 'reply-redrawn': 'chat',
+  'totag-missing': 'routing', 'totag-missing-giveup': 'routing', 'totag-reminder-error': 'routing',
+  'send-waiting-busy': 'chat', 'reply-selector-fragment': 'chat', 'selector-override-dropped': 'chat',
+  'relay-trace-saved': 'files', 'relay-trace-reset': 'routing', 'relay-trace-error': 'routing', 'mesh-skip-to-user': 'routing', 'capture-stalled': 'chat',
   'endtag-missing': 'routing', 'endtag-missing-giveup': 'routing', 'endtag-reprompt-error': 'routing',
   'participant-changed': 'routing', 'auto-mesh-enabled': 'routing', 'roundtable-skip': 'roundtable',
   // Models / Ollama
@@ -72,6 +77,7 @@ const PREFIX = [
   ['houserule-', () => 'roundtable'],
   ['sequence-', () => 'roundtable'],
   ['tuner-', () => 'roundtable'],
+  ['brigade-', () => 'roundtable'],
   ['selftest-', () => 'roundtable'],
   ['setup-', () => 'setup'],
   ['install-missing', () => 'setup'],

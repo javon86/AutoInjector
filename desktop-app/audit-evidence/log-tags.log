@@ -1,0 +1,69 @@
+
+== 13 tags, with the required grouping ==
+  ok   - there are exactly 13 tags (got 13)
+  ok   - chat and manager are distinct tags
+  ok   - the manager is separate from chat
+  ok   - tag system has a label + colour
+  ok   - tag chat has a label + colour
+  ok   - tag manager has a label + colour
+  ok   - tag routing has a label + colour
+  ok   - tag roundtable has a label + colour
+  ok   - tag setup has a label + colour
+  ok   - tag models has a label + colour
+  ok   - tag voice has a label + colour
+  ok   - tag media has a label + colour
+  ok   - tag code has a label + colour
+  ok   - tag memory has a label + colour
+  ok   - tag files has a label + colour
+  ok   - tag user has a label + colour
+
+== the three AIs share "chat"; the butler is "manager" ==
+  ok   - AI sends/captures are chat
+  ok   - butler reasoning is manager
+
+== manager sub-actions get their topical tag ==
+  ok   - a manager code/tool run is tagged Code & Tools
+  ok   - a manager remember/recall is tagged Memory
+  ok   - manager image/setup/file map to their tags
+
+== representative events across every category ==
+  ok   - state-restored -> system (got system)
+  ok   - bridge-started -> system (got system)
+  ok   - persist-error -> system (got system)
+  ok   - this-kind-does-not-exist -> system (got system)
+  ok   - routing-changed -> routing (got routing)
+  ok   - endtag-missing -> routing (got routing)
+  ok   - loop-suppressed -> routing (got routing)
+  ok   - houserule-start -> roundtable (got roundtable)
+  ok   - sequence-step-sent -> roundtable (got roundtable)
+  ok   - tuner-done -> roundtable (got roundtable)
+  ok   - selftest-started -> roundtable (got roundtable)
+  ok   - setup-autowire -> setup (got setup)
+  ok   - install-missing-done -> setup (got setup)
+  ok   - selfcheck-installs-error -> setup (got setup)
+  ok   - ollama-managed -> models (got models)
+  ok   - models-init -> models (got models)
+  ok   - voice-config -> voice (got voice)
+  ok   - voice-shim -> voice (got voice)
+  ok   - image-config -> media (got media)
+  ok   - video-config -> media (got media)
+  ok   - generation -> media (got media)
+  ok   - interpreter-shim -> code (got code)
+  ok   - interpreter-managed-error -> code (got code)
+  ok   - db-init -> memory (got memory)
+  ok   - db-init-error -> memory (got memory)
+  ok   - file-attached -> files (got files)
+  ok   - ai-download -> files (got files)
+  ok   - logs-download-all -> files (got files)
+  ok   - extract-all -> files (got files)
+  ok   - ui-click -> user (got user)
+  ok   - ui-panel -> user (got user)
+  ok   - prompt-saved -> user (got user)
+  ok   - login-saved -> user (got user)
+  ok   - zoom-changed -> user (got user)
+
+== EVERY real emitted kind resolves to a known tag — nothing is dropped ==
+  ok   - all 114 emitted kinds map to a valid tag (0 unknown)
+  ok   - the butler's core flow events stay under the Manager tag
+
+57 passed, 0 failed

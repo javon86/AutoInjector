@@ -1,0 +1,378 @@
+# Audit evidence notes
+
+The ZIP contains repository inventory/hashes, machine-readable live test results, synthetic parser/read-script results, unit/integration logs, parked-subsystem results and audit scripts. It deliberately excludes the user's historical state, database, private conversations, browser profiles and credentials.
+
+Additional observations captured through tool calls rather than the standalone result scripts:
+
+- Native UI actions: Stop AIs Talking, New Chat, compose/All, Setup → Local AI/Video/Images, Test render, wizard close and outer scrolling. No automated screenshot archive is included because the early screens contained unrelated private conversations.
+- Unauthenticated command proof: POST `http://127.0.0.1:8765/tools/run`, Origin `https://example.invalid`, body `{"tool":"run-command","args":{"command":"echo AUTOINJECTOR_QA_HARMLESS_42","cwd":"<audit work folder>"}}`. Response HTTP 200, CORS `*`, `ok:true`, output `AUTOINJECTOR_QA_HARMLESS_42`, process code 0. No token or approval was supplied. No destructive command was used.
+- Media backend direct error: HTTP 500, `NotImplementedError`, no operator for `memory_efficient_attention_forward`; inputs float16, final dimension 512; xFormers reports GPU capability `(12, 0)` while listed operators require capability at most `(9, 0)` and/or max dimension 256; some operators were not built. Provider result hides these details as HTTP_500.
+- Python bridge startup: `ModuleNotFoundError: No module named 'aiohttp'`; default Python 3.14.7 also lacked websockets, torch and interpreter. This does not describe the separate existing Stable Diffusion Python environment.
+- Fresh Electron process: exit -2147483645. `startup-stderr.log` records encryption warning “The system cannot find the file specified” and repeated GPU subprocess exit -1073741515, followed by “GPU process isn't usable. Goodbye.” Treat as sandbox launch failure, not proof the running user's app cannot start.
+- Log tags: separate `node test/log-tags.test.js` completed 57 passed, 0 failed; this output was captured by the audit tool, outside unit-tests.log.
+- Browser/Electron E2E: missing Playwright. Existing suite instructions request optional installation. No dependency installation performed.
+- Packaging comparison: `main.js` requires `log-bundle.js` and `log-tags.js`, both absent from explicit build.files. No packaged build executed.
+- Separate minimal real manager `askManager` call: TIMEOUT after 15011 ms with an audit-specific 15000 ms timeout; possible contention with prior generation.
+- ATELIER `test_transaction.py`: prior standalone run crashed with WinError 32 deleting its own temporary directory. Not rerun because its crash-test subprocess lifecycle needs inspection. The 24 other scripts have recorded results (178/181 assertions); the transaction crash is additional.
+- Git source status was clean after testing. All audit scripts and source copies are in the audit workspace. Repeated test execution did not repair application logic.
+
+Interpretation cautions:
+
+- A direct-send HTTP success is not reply-capture success. Read the corresponding capture/route record.
+- Claude's first capture was delayed and later released by another send. Later routes were blocked by provider UI, not proof of a pure routing-table failure.
+- Integration tests mock Electron and providers; they are not live AI/media success.
+- `butler-results.json` records the explicitly stopped task. Final application status `finished` after stop does not mean its arithmetic task completed.
+- The 100-request load test measures a cheap health endpoint only.
+- Audit scripts can send prompts or run the harmless command if manually replayed; inspect them before reuse. Paths are machine-specific.
+
+
+
+# AUTO INJECTOR — COMPLETE SYSTEM TEST REPORT
+
+Audit date: September 17, 2026, Pacific time (evidence timestamps use September 18 UTC). Repository: `C:\Users\javon\Documents\git\AutoInjector`. Revision: `f5b3ec95dc035fb3d73592faa2c5ebcf3c939391`. Platform: Windows; Node v24.20.0; Python 3.14.7.
+
+This is a practical, bounded audit of the accessible application on this machine, **not a certification that every feature was tested**. No application source fixes were made. Results distinguish real service calls, native UI interaction, mocked tests, and inspection. Existing private conversation content and secret values are excluded from this report.
+
+## 1. Executive Summary
+
+**Auto Injector operates in part, but is not ready for an unrestricted production release.** The existing Electron application was running and usable. Actual ChatGPT and Gemini sends, reply capture, and bidirectional relay worked. Claude accepted the first test and displayed a correct answer, but reply capture stalled until a later send; subsequently the provider paused the conversation behind a safeguard and further sends failed. The local Butler model answered a direct chat request, but a real orchestration task did not advance during the bounded observation. Neither image nor video generation produced an artifact.
+
+The most serious finding is a **live, unauthenticated command-execution endpoint that bypasses the application's tool approval gate**. A harmless echo command demonstrated this; no destructive command was used. Also, “Stop AIs Talking” does not stop baseline tag routing. The parser can mistake quoted/code examples for closing tags and truncate content.
+
+Automated coverage is substantial: **869 assertions passed across 25 configured unit suites**, **57 additional log-tag assertions passed**, and **538 integration assertions passed in a writable isolated copy**. These 1,464 assertions are not 1,464 live end-to-end tests. The integration harness replaces Electron automation and AI/provider responses with mocks. Real testing exposed failures that these green suites do not cover.
+
+## 2. System Architecture Discovered
+
+The repository inventory contains **275 tracked files**. A file inventory, SHA-256 hashes, and 38 discovered JavaScript environment-variable names are included in the evidence bundle. Inventory is complete for tracked repository files; generated model assets, third-party dependencies, private browser profiles, and every file outside the repository were not recursively audited.
+
+| Layer | Files/components | Actual role |
+|---|---|---|
+| Desktop entry and orchestration | `desktop-app/package.json`, `main.js` | Electron main process; native window and embedded AI views; IPC handlers; queues; captures; routing; structured discussion modes; Butler executor; persistence |
+| Desktop UI | `controls.html/js`, `preload.js`, `feed.html/js`, `prompt-editor.html/js`, `prompt-sequence.html/js`, `setup-wizard.html/js` | Compose/target controls, model panes, feed, logs, prompt library, sequences, setup, Butler, media, GPU and storage panels; preload IPC API |
+| Browser automation | `automation.js`, `selectors.js` | Inject text, click/Enter submission, read DOM responses, detect generation, locate upload fields, select DOM elements and fill saved logins |
+| Routing | `main.js::sendTextTo`, `pollSite`, `parseRoundtableTag`, `findEndTag`, `handleRoundtableCapture` | Outbound numbering, sender framing, per-target queues, retries, baseline TO/FROM routing, duplicate suppression and a short-response loop guard |
+| Butler | `manager-provider.js`, orchestration in `main.js` | OpenAI-compatible local/cloud endpoint; JSON action vocabulary; planning, delegation, review, execution, memory, image generation and setup actions |
+| Local models | `ollama-manager.js`, `openai-client.js` | Ollama discovery/pull/managed process; OpenAI-compatible requests; separate user and app-managed endpoints |
+| Execution | `tool-provider.js`, `interpreter-provider.js` | Sandboxed output-file tools, HTTP fetch, shell commands, launching paths, installation, user-created tools; optional Open Interpreter HTTP shim |
+| Images/video | `image-provider.js`, `video-provider.js`, `endpoint-detect.js` | HTTP media adapters, settings and presets; image adapter expects A1111-style `images`; video adapter expects immediate base64 or URL responses |
+| Voice | `voice-provider.js`, `integrations/voice/voice_shim.py` | Optional local speech/listen shim, per-speaker voices, microphone/speaker settings |
+| Storage | `db-service.js`, `shared/`, `output-manager.js`, `secret-store.js` | SQLite messages/memory/files/sync; state JSON; outputs under `stuff and thing`; OS-backed secret sealing |
+| Local API | `service-bridge.js` | HTTP/SSE on default `127.0.0.1:8765`; status, participants, replies, send, council, Butler, interpreter, tools, voice and image endpoints |
+| Browser extension | `AutoInjector/extension/manifest.json`, `background.js`, `content.js`, `selectors.js`, popup/roundtable HTML/JS | Separate MV3 product path; browser-tab injection, fixed-order roundtable and local bridge connection |
+| Python bridge | `AutoInjector/server/fake_api_server.py`, requirements and launch scripts | HTTP OpenAI-like completions on 17890 and WebSocket on 8765; distinct from desktop HTTP bridge |
+| Optional integrations | `integrations/open-interpreter/`, `integrations/personaljarvis/` | Shims and plugin examples; not proof those external packages are installed |
+| Parked subsystem | `desktop-app/atelier/` | Python book-production/governance tools, transactions, registers and tests. Explicitly marked under construction and not wired into desktop runtime |
+| Distribution | Windows/macOS/Linux launchers; `scripts/ensure-deps.js`; electron-builder configuration | Dependency checks/install and desktop packaging |
+| Diagnostics/tests | `log-tags.js`, `log-bundle.js`, `test/`, `.github/workflows/desktop-app-tests.yml` | Activity categories, exports, mocked integration, jsdom UI, optional real-browser/Electron tests |
+
+Additional discovered features include file attachments/download capture, saved-login support, structured debate/review formats, prompt sequences, persistent memory, capability checks, endpoint discovery, managed installation, model migration, self-created tools, and log bundling. Their existence is not a claim that all were exercised live.
+
+The desktop AI panes use signed-in **web UIs**, not the three vendors' official APIs. Butler instead uses a configurable API. Current Butler configuration points to `http://127.0.0.1:11434/v1/chat/completions`, model `llama3.2:1b`, 180-second timeout, tier 2, maximum 20 turns, general approval mode off. Individual risky tools are intended to require approval regardless of that general switch.
+
+Persistent runtime files were found under `C:\Users\javon\AppData\Roaming\autoinjector-desktop`: state JSON, debug log, SQLite database/WAL/SHM and browser-related files. At inspection the debug log was approximately 308 KB and state JSON 278 KB. These private files were not copied into the deliverable.
+
+Logging inspection: activity records contain timestamps, event kinds and structured details; captured/sent events identify the site and character counts, and outgoing prompts carry numbered `[MSG #NNNN]` headers. Manager events include categories, severity/task context and errors. Not every event carries a common end-to-end message ID or stack trace. The tag suite recognizes 114 emitted event kinds. Several `try/catch` blocks around database recording, setup and auxiliary operations are best-effort or silent; provider HTTP errors lose their backend body. Consequently the logs are useful but do not reliably explain every missing reply or backend failure. Log rotation, redaction under every export path and large-log performance were not exhaustively tested.
+
+## 3. Components Tested
+
+| Component | Result | Evidence class and limits |
+|---|---|---|
+| Existing desktop instance | PARTIAL PASS | Real UI and bridge responsive; not a clean-start proof |
+| Fresh isolated Electron launch | BLOCKED | Repeated GPU child-process failures in audit sandbox; no successful fresh-window measurement |
+| Unit/provider/storage/UI fixtures | PASS | 869 configured assertions, 0 failures; primarily isolated/mocked |
+| Log tag engine | PASS | Additional 57 assertions, 0 failures |
+| Integration state machines | PASS | 538 assertions in writable copy; AI and Electron boundaries mocked |
+| Native interface | PARTIAL PASS | Compose, Send All, New Chat, stop control, setup tabs and test render exercised; not every control |
+| ChatGPT | PASS | Live direct response and relay in both directions with Gemini |
+| Gemini | PASS | Live direct response and relay in both directions with ChatGPT |
+| Claude | FAIL | Correct first visible answer but capture delayed; subsequent provider pause blocked composer |
+| Baseline routing/parser | FAIL | Useful routes work; stop behavior, Butler tag and quoted closing-tag failures reproduced |
+| Butler | PARTIAL PASS | Real local chat answered; live orchestration did not progress during bounded observation; mock actions pass |
+| Local command tool | FAIL | Harmless command executes, but unauthenticated bridge bypasses approval |
+| Image generation | FAIL | Disabled in UI; root endpoint gives 405; correct endpoint gives backend 500 |
+| Video generation | FAIL | Disabled state handled; configured backend returns 500; no clip |
+| Local model connectivity | PARTIAL PASS | Both Ollama endpoints respond; one model actually generated text |
+| Voice/Open Interpreter | BLOCKED | Disabled and unconfigured in live application |
+| HTTP recovery/load | PARTIAL PASS | Four malformed/unavailable cases correctly return 400; 100 concurrent health requests succeeded |
+| Browser/Electron automated E2E suites | BLOCKED | Playwright missing |
+| Python API server | BLOCKED | Startup attempted; missing `aiohttp` in selected Python |
+| Browser extension | NOT TESTED | Source/manifest inspected; no extension installation or live extension session tested |
+| ATELIER | PARTIAL PASS | 178/181 reported assertions across 24 recorded scripts; separate transaction script crashed; parked subsystem |
+| Installer | NOT TESTED | Manifest inspected; required modules absent from file list; installer not built |
+
+## 4. AI Communication Matrix
+
+“PASS” below means an actual captured response containing the test marker, not merely HTTP success. “BLOCKED” does not assert that a route is impossible.
+
+| Source → destination | Live outcome |
+|---|---|
+| User → ChatGPT | PASS: `QA0917_CHATGPT 6*7=42` captured |
+| User → Gemini | PASS: `QA0917_GEMINI 6*7=42` captured |
+| User → Claude | PARTIAL/FAIL: correct answer visible; no capture within initial 30-second polling window; later captured when another send changed state |
+| User → All | PARTIAL PASS: native Send All dispatched; ChatGPT and Gemini captured `QA_UI_42`; Claude displayed provider safeguard pause |
+| User → Butler | PARTIAL PASS: API task accepted; no completed answer during observation; separate direct provider chat answered |
+| ChatGPT → Gemini | PASS: target acknowledgment captured in 12.549 seconds |
+| Gemini → ChatGPT | PASS: target acknowledgment captured in 10.42 seconds |
+| ChatGPT → Claude | FAIL in this run: source captured and addressed correctly; no target acknowledgment; provider-blocked Claude |
+| Gemini → Claude | FAIL in this run: source captured and addressed correctly; no target acknowledgment; provider-blocked Claude |
+| Claude → ChatGPT | BLOCKED: source injection returned `INPUT_NOT_FOUND` |
+| Claude → Gemini | BLOCKED: source injection returned `INPUT_NOT_FOUND` |
+| ChatGPT/Claude/Gemini → Butler | FAIL at parser level: `[TO: BUTLER]` becomes USER, not Butler; no live three-route exercise |
+| Butler → ChatGPT/Claude/Gemini | NOT VERIFIED LIVE; delegation/state transitions covered by mocked integration |
+| Butler → All | NOT VERIFIED LIVE; multi-assignment behavior exists, but no successful live Butler fan-out demonstrated |
+
+The two successful AI-to-AI tests were sequential and directed; target replies used USER to terminate them. They do not prove all-model simultaneous conversations or long-term context retention. No successful three-model answer → review → final workflow was obtained because Claude was blocked. Mocked multi-stage formats did execute in the integration suite.
+
+The tests ran after “Stop AIs Talking” was pressed and routing arrays were confirmed empty with mesh false. Tag forwarding nevertheless occurred. This is direct evidence for E02.
+
+**`NO ENDING TAG RECEIVED`:** the actual trigger is `main.js::pollSite` seeing non-generating text without an accepted ending tag, unchanged for the default 12-second quiet period. `missingEndTagReprompt` discards that reply from normal capture and sends a protocol reminder, capped at two reminders. The integration run reproduced missing-tag discard, the reminder and the cap using an accelerated test clock. This was not a new live missing-tag test. A tag followed by more than 40 characters or a blank-line-separated tail also fails the parser's completion test. Conversely, code/quoted tags can be falsely accepted. A false `generating:true` blocks the watchdog entirely. Existing logs contained 12 missing-tag events and one give-up event; these historical counts are not all audit-generated.
+
+## 5. Butler Test Results
+
+Implemented modes are `converse`, `auto`, `self`, and `delegate`. Code separates conversational prose from JSON-driven task execution. The action vocabulary includes planning, delegation, send/forward, comparison/critique/verification, save/export, approval/pause, `RUN_CODE`, `USE_TOOL`, memory, `GENERATE_IMAGE`, and `SETUP`. There is no `GENERATE_VIDEO` action in that vocabulary.
+
+Actual results:
+
+- `manager-provider.chatWithButler` against the saved local model returned `It's QA_LOCAL_42. What's on your mind?` in 3.627 seconds. Transport and generation worked; exact-output compliance did not.
+- A live `/jarvis/start` request to calculate 6×7 without tools or delegation was accepted. Repeated status checks remained `classifying` with no recorded actions for roughly 45–50 seconds. The audit explicitly stopped the task; the resulting `finished` state is **not successful task completion**.
+- A separate minimal `askManager` call using a 15-second audit timeout returned `TIMEOUT`. This was a shorter timeout than the saved 180 seconds and may have overlapped a still-running model request; it does not prove the model could never finish.
+- Real `/tools/run` executed `echo AUTOINJECTOR_QA_HARMLESS_42` and returned exit code 0. This proves direct command transport, **not that Butler autonomously planned and executed it**.
+- Mocked integration exercised manager decisions, delegation, code/tool execution, review, persistence, error handling and approval gates. The providers in that suite return scripted responses.
+
+Prior debug logs contained 45 `INVALID_JSON`, 4 `HTTP_404`, 4 `HTTP_500`, 3 `TIMEOUT`, and 2 `UNKNOWN_ACTION` manager error values. These are historical observations, not 58 new errors caused during this audit; some other manager entries had no simple error string. They support further investigation of structured-output reliability but do not establish one root cause.
+
+Open Interpreter was disabled/unconfigured, and the selected Python environment had no `interpreter` package. Computer launching, genuine Butler file transformation, installations and self-created tools were not run live. No autonomous task execution success is claimed.
+
+## 6. Image Generation Results
+
+The running app had image generation disabled, with endpoint `http://127.0.0.1:7860`, 512×512, 20 steps, batch count 1. The server at port 7860 responded to `/sdapi/v1/sd-models`.
+
+Tests:
+
+1. Native Setup → Images → Test render returned `IMAGE_DISABLED`. The control responded, but its generic “is your SD server running with --api?” hint was misleading for this cause. Test render saves the current form configuration before trying; no settings were intentionally changed.
+2. An isolated provider instance with generation enabled and the saved root endpoint returned `HTTP_405` in 7 ms.
+3. The proper `/sdapi/v1/txt2img` URL, 256×256, 2 steps, fixed seed 42 returned `HTTP_500` in approximately 609 ms.
+4. Direct inspection of that server response identified `NotImplementedError` in `memory_efficient_attention_forward`: the installed xFormers operators did not support the reported GPU compute capability `(12, 0)` and/or requested head dimension. No image was returned.
+5. A synthetic HTTP server returned two images to a batch-count-2 request. `image-provider.generate()` returned only the first. The second was discarded.
+
+No output image was saved or viewed because no real generation succeeded. Different resolutions beyond the one small diagnostic render, long prompts, missing checkpoint/LoRA, image editing, round-trip attachment, and real image cancellation were not exercised. No OOM was intentionally induced. The adapters expose no cancellation option in the inspected implementation.
+
+## 7. Video Results
+
+The saved video configuration was disabled and pointed at `/sdapi/v1/txt2img` on port 7860. The provider's disabled-state test returned `VIDEO_DISABLED`. A separate enabled provider instance with 256×256, 2 steps and 2 frames returned `HTTP_500` against that endpoint. No clip, saved output, preview playback or cancellation success was demonstrated.
+
+The Setup Wizard's Video tab says video generation is planned and is a placeholder, while the primary application already has a video provider and controls. This is an observed UI/documentation inconsistency.
+
+Code inspection: the video adapter posts a flat prompt/settings object and expects an immediate clip URL/base64 response. The ComfyUI preset points at `/prompt`, but there is no graph construction, prompt-ID polling, history lookup or output retrieval in this adapter. The AnimateDiff preset points at ordinary txt2img without constructing an AnimateDiff extension workflow. Thus presets/health checks do not establish working backend compatibility. ComfyUI port 8188 refused connection here. These compatibility findings are inspection-only, not successful live tests against those products.
+
+## 8. Local Model Results
+
+Ollama answered on both 11434 and 11435. Both advertised seven models: `dolphin-phi:latest`, `tinydolphin:latest`, `llama2-uncensored:7b`, `jikepjikep_16HEX/gemma-4-2b-nightshift-heretic-uncensored-q6:latest`, `llama3.2:3b`, `llama3.2:1b`, and `gemma4:26b`.
+
+Only **llama3.2:1b** was actually exercised for generation. `/api/ps` reported it loaded with context length 4096, size 1,514,584,145 bytes and equal `size_vram`. That is runtime-reported GPU residency, not an independently measured per-layer acceleration profile. The other models' presence does not prove they load or fit in memory.
+
+Model switching, all-model load tests, CPU fallback, streaming cancellation, token throughput, long-context behavior and download/migration were not exercised live. No additional models were downloaded. A short local conversational request worked; orchestration was substantially less reliable in the bounded tests.
+
+## 9. UI Results
+
+Native interactions performed on the real Electron window:
+
+- Activated and inspected the application at approximately 1688×1045 screenshot dimensions.
+- Clicked **Stop AIs Talking**; Butler indicator became idle, routing arrays emptied and mesh became false. Subsequent tag routes still forwarded (failure).
+- Clicked **New Chat**; all three embedded services navigated to fresh conversations. Existing chats were not deleted.
+- Focused the application compose box, typed a harmless QA prompt, clicked **All**, and observed actual outgoing prompts and responses.
+- Opened **Setup**, inspected **Local AI**, switched to **Video** and **Images**, and clicked **Test render**.
+- Closed the wizard and exercised outer scrolling. No whole-window crash or freeze was observed during these actions.
+
+Limits: not every button, dropdown, toggle, hidden panel, keyboard shortcut or log filter was clicked. The main accessibility tree initially omitted the large control subtree and sometimes exposed focus only as the root document; screenshot-guided interactions were therefore needed. Embedded model panes remained large while lower controls required scrolling. Resizing checks were planned in the isolated startup harness but never reached because fresh launch failed; no successful resize claim is made.
+
+The UI Send All test exposed a Claude provider pause labelled `[reasoning_extraction]`, even though the prompt was a harmless test. The audit did not bypass that safeguard or change the provider model to evade it. Auto Injector subsequently returned `INPUT_NOT_FOUND`, which does not explain the underlying provider pause to the user.
+
+## 10. Performance Results
+
+| Measurement | Observation | Interpretation |
+|---|---|---|
+| ChatGPT direct send → capture | 3.434 s | Includes injection/polling; not time-to-first-token |
+| Gemini direct send → capture | 8.552 s | Same qualification |
+| Claude direct capture | No capture in initial ~34 s request/test interval | Correct reply visible; later state change released capture |
+| Gemini → ChatGPT relay | 10.420 s | Two-model bounded relay |
+| 100 concurrent `/health` requests | 100 HTTP 200, 340.9 ms total | Local HTTP liveness only, not 100 concurrent AI tasks |
+| Local conversational request | 3.627 s | One short response; no tokens/sec measurement |
+| Local structured request | 15.011 s then TIMEOUT | Audit timeout, possible in-flight contention |
+| GPU | NVIDIA GeForce RTX 5070 Ti, 16,303 MiB total | `nvidia-smi` |
+| GPU snapshots | 8,898 MiB/27%, later 10,166 MiB/28% | Whole-machine snapshots; not attributed solely to Auto Injector |
+| Initial GPU temperature | 34°C | Single snapshot |
+| Electron working sets | Nine observed processes approximately 63–490 MiB each | Process list, not reliable attribution or leak measurement |
+| Python working sets | One approximately 3,991 MiB, another 4.3 MiB | Includes existing media runtime; not app-only memory |
+| Parser long input | One million body characters preserved; ~0.86 ms | Pure parser probe, not browser transport |
+
+CPU utilization percentages and whole-machine RAM were not reliably measured. Some process CPU counters were unavailable; available CPU values are cumulative seconds, not percentages. There was no sustained soak, controlled leak test, CPU fallback comparison, thermal test or OOM test. A fresh Electron startup attempt in the audit sandbox exited `-2147483645`, with repeated GPU process exit `-1073741515` and “GPU process isn't usable.” The already-running user instance remained available, so this cannot be attributed to a universal application startup defect.
+
+## 11. Errors Found
+
+### E01 — CRITICAL — Local API bypasses authentication and tool approval
+
+**What happened / actual:** POST `/tools/run` executed a harmless shell echo without a token or approval prompt. HTTP 200, exit 0, wildcard CORS; an arbitrary Origin header was accepted. **Reproduce:** send `{ "tool":"run-command", "args":{"command":"echo AUTOINJECTOR_QA_HARMLESS_42", "cwd":"<audit work folder>"} }` to the running localhost bridge. **Expected:** authentication and the same risky-tool approval gate used by Butler. **Cause/files:** `service-bridge.js::authorized` accepts all requests when no token; `/tools/run` invokes `toolProvider.run` directly; `main.js` wires that callback without `executeManagerAction`'s approval check; `tool-provider.js::run` does not enforce risk itself. **Repair:** require a generated local credential, restrict allowed origins, and enforce approval in a shared execution boundary. Browser-origin exploitation was not tested; browser private-network protections may impose extra constraints. Unauthenticated local execution itself was proven.
+
+### E02 — HIGH — “Stop AIs Talking” does not stop tag-based relays
+
+**Actual:** ChatGPT ↔ Gemini relays passed after the button was clicked and routing arrays/mesh were off. **Reproduce:** click Stop, then capture a reply beginning `[TO: GEMINI]` from ChatGPT. **Expected:** no new automatic relay. **Cause/files:** `main.js:3225` `relay:silence` clears mesh, sequences and tasks, but `pollSite` still calls `handleRoundtableCapture` at roughly line 2881. **Repair:** use one explicit relay-enabled flag checked by every forwarding path and invalidate queued work when stopping. Preserve direct user sends separately.
+
+### E03 — HIGH — Completed Claude answer can remain uncaptured
+
+**Actual:** correct visible answer with `[FROM: CLAUDE]`, but `generating:true`, `waiting:true`, no capture; a later send caused the prior answer to appear. **Reproduce:** leave a completed Claude reply with an empty composer/disabled Send button. The exact read script also reproduces this against a jsdom fixture. **Expected:** idle disabled Send is not generation. **Cause/files:** `automation.js::buildReadScript`, lines 173–178, treats any disabled Send as generating; `main.js::pollSite` exits before closing-tag processing. **Repair:** identify genuine streaming state; do not infer generation solely from an empty-composer Send button. Add an idle-composer regression fixture and a real-site test.
+
+### E04 — HIGH — Closing tags inside code/quotes truncate content
+
+**Actual:** `Example: "[FROM: CHATGPT]"` becomes `Example: "`; a JavaScript string containing the same marker loses the remainder and closing code fence. A short meaningful tail after a tag is also removed. **Reproduce:** run the recorded `quoted`, `code`, or `tail` parser cases. **Expected:** literal examples preserved; only an actual envelope terminator completes the message. **Cause/files:** `main.js:1469–1487`, `findEndTag` accepts the last matching marker with up to 40 trailing characters; `parseEndTag` drops that suffix. **Repair:** define standalone terminal tag syntax and account for quoted/fenced content; test streamed partial code explicitly.
+
+### E05 — HIGH — `[TO: BUTLER]` is not a supported destination
+
+**Actual:** parser returns USER and leaves `[TO: BUTLER]` in the body. **Reproduce:** `[TO: BUTLER]\nhello\n[FROM: CHATGPT]`. **Expected:** route to Butler or explicitly reject unsupported addressing. **Cause/files:** `main.js:1452` `ROUNDTABLE_TAG_RE` and `roundtableTargetsFor` list only the three web AIs and ALL/USER/NONE. **Repair:** introduce an explicit Butler delivery path, with provenance and action approval, or make the interface/protocol clearly state that model-to-Butler tags are unsupported.
+
+### E06 — MEDIUM — Ambiguous/multiple/wrong tags are accepted inconsistently
+
+**Actual:** multiple TO tags use only the first; a wrong sender or `[FROM: X]` counts as completion; spaces before the colon fail; unknown recipients silently default to USER. **Reproduce:** supplied `multiple`, `wrongSender`, `spaces`, `unknown` cases. **Expected:** documented strict behavior with diagnostics. **Cause/files:** same parser functions. Pane identity remains the stored sender, so this test did **not** prove metadata impersonation; permissive terminators still hide malformed output. **Repair:** validate the envelope, preserve raw text, report mismatch and reject ambiguous routing without losing the answer.
+
+### E07 — HIGH — Saved image endpoint is unusable
+
+**Actual:** enabled provider POST to saved root URL returned 405; live image feature was also disabled. **Reproduce:** POST generation to `http://127.0.0.1:7860`. **Expected:** valid txt2img URL or clear configuration validation. **Cause/files:** saved `imageConfig.endpoint`; setup accepts a reachable host without proving generation-contract compatibility. **Repair:** distinguish base URL from endpoint, normalize known A1111 paths and validate configuration. This is a local configuration failure, not evidence every installation has the same setting.
+
+### E08 — HIGH — Local image/video backend cannot run current attention operator
+
+**Actual:** correct API route returns 500 with xFormers `NotImplementedError`, unsupported GPU capability/head dimension. **Reproduce:** 256×256, 2-step txt2img diagnostic request. **Expected:** small successful render. **Cause:** installed backend attention implementation lacks a compatible operator for this GPU/request. **Files:** external Stable Diffusion environment; surfaced by `image-provider.js` and `video-provider.js`. **Repair:** verify the backend's compatible PyTorch/CUDA/attention configuration and run its own small render before retesting Auto Injector. No runtime packages or GPU settings were changed during the audit.
+
+### E09 — MEDIUM — Media provider hides useful backend errors and drops extra images
+
+**Actual:** detailed backend response becomes only `HTTP_500`; synthetic two-image response returns the first only. **Reproduce:** current failing backend and recorded two-image fixture. **Expected:** sanitized diagnostic body and preservation of all requested outputs. **Cause/files:** image/video HTTP ≥400 branches resume/discard the body; `image-provider.js` reads `j.images[0]`. **Repair:** bound and retain safe error detail, return an image array, save/report each image, and verify the batch-count contract end to end.
+
+### E10 — HIGH — Distribution file list omits required modules
+
+**Actual:** build include audit found `log-bundle.js` and `log-tags.js` absent. **Reproduce:** compare top-level local `require()` calls in `main.js` with `package.json::build.files`. **Expected:** every required runtime module included. **Cause/files:** `desktop-app/package.json`, `main.js:41–42`. **Repair:** add both modules and run a packaged-launch smoke test. **Evidence class:** manifest/code inspection plus dependency comparison; no installer was built, so an actual installed crash is not claimed.
+
+### E11 — MEDIUM — Provider pause is reported as missing input
+
+**Actual:** Claude displayed a safeguard pause; subsequent injection returned `INPUT_NOT_FOUND`, blocking four route legs. **Reproduce:** the recorded live Claude sequence; provider decisions may not reproduce deterministically. **Expected:** identify a paused/provider-blocked conversation and give actionable status. **Cause/files:** browser selector/injection path has no demonstrated handler for this provider-specific interruption. **Repair:** detect provider pause/error UI, stop retries for that conversation and surface the reason. Do not attempt to bypass provider safeguards.
+
+### E12 — HIGH — Video presets exceed implemented transport capability
+
+**Actual:** inspected generic JSON request does not implement native ComfyUI workflow/queue retrieval or an AnimateDiff workflow; wizard says video is planned. **Reproduce:** inspect `endpoint-detect.js::CANDIDATES.video`, `video-provider.js::generate`, `setup-wizard.html`. **Expected:** each offered preset has a tested adapter or is labelled unsupported. **Cause:** health reachability is being used where API compatibility is needed. **Repair:** implement separate backend adapters and real sample workflows; update wizard to match supported functionality. **Evidence class:** inspection, plus failed current backend test; no live ComfyUI compatibility test.
+
+### E13 — MEDIUM — Butler orchestration not demonstrated with configured model
+
+**Actual:** real simple task remained classifying during ~45–50 seconds; direct structured probe hit 15-second audit timeout. Historical structured-output errors are numerous. **Expected:** prompt progress, valid actions and a final answer. **Cause:** unresolved; possible large context, request contention, insufficient model instruction compliance or slow structured generation. **Files:** `manager-provider.js`, `openai-client.js`, `main.js` manager loop. **Repair:** instrument request length, elapsed time, queueing, token counts and validation errors; test a compact JSON decision fixture with each supported model; show waiting/cancellation accurately. This is a bounded incomplete test, not a proven infinite hang.
+
+### E14 — MEDIUM — Parked ATELIER Windows path mismatch
+
+**Actual:** two `test_depgraph.py` assertions failed: derived backslash paths did not match declared slash paths and included an unexpected candidate-file occurrence. **Reproduce:** `python atelier/test_depgraph.py` on Windows. **Expected:** declared and derived graph agree for the fixture. **Cause/files:** `atelier/build_depgraph.py:63` uses `str(f.relative_to(root))`; `test_depgraph.py` expects portable paths. **Repair:** normalize repository-relative paths with `as_posix()` and retest both Windows and Linux; investigate candidate-file exclusion independently. This subsystem is parked and does not explain desktop routing failures.
+
+### E15 — LOW/MEDIUM — Test prerequisites and platform failures limit release confidence
+
+**Actual:** browser/Electron E2E need missing Playwright; Python bridge startup fails missing `aiohttp`; ATELIER symlink test fails WinError 1314; transaction suite crashes during temporary-directory cleanup with WinError 32. **Reproduce:** commands in detailed log. **Expected:** explicit prerequisite checks and platform-aware test outcomes. **Files:** `test/e2e/helpers.js`, server requirements/launchers, `atelier/test_safe_write.py`, `atelier/test_transaction.py`. **Repair:** document isolated test setup, mark unavailable capabilities as skipped, and make crash-test cleanup robust on Windows. These are distinct environment/test blockers, not evidence all corresponding production features are broken.
+
+Additional non-product audit failures: an initial Desktop-directory lookup found no conventional Desktop folder; process CIM access was denied; one `rg` glob was invalid for the shell; some reads used the wrong working directory and were corrected; initial `unittest discover` ran zero ATELIER tests because these are standalone scripts; a PowerShell redirection error prevented saving the first ATELIER batch and the non-transaction scripts were rerun into structured evidence. Git later reported sandbox ownership mismatch; per-command `safe.directory` was used only for read-only status/inventory. No global Git settings were changed.
+
+## 12. Features That Work Correctly
+
+- Actual ChatGPT and Gemini injection/capture and directed two-way relay.
+- Correct pane-based sender labels and target-specific framing in observed successful routes.
+- Fresh-chat navigation for all three services and native compose/Send All interaction.
+- Local API health/status/participants, and clear 400 responses for malformed JSON, unknown site, missing image prompt and unknown tool.
+- Local Ollama model discovery and one real conversational generation.
+- Existing secret-store tests pass; implementation refuses plaintext fallback when OS encryption is unavailable.
+- Storage, synchronization, provider, UI fixture, approval-state-machine and orchestration tests passed within their mocked scope.
+- Loop suppression for repeated short messages passed mocked integration; this is not protection against every long-message feedback loop.
+- Image/video disabled states are explicit, rather than false success.
+- Setup navigation and image test feedback respond without a visible UI crash.
+
+## 13. Features Implemented but Not Fully Testable
+
+Claude continuation was blocked by provider UI. Voice and Open Interpreter were unconfigured. No working media render meant output saving/playback and real cancellation could not be verified. Playwright was absent, and a new Electron process failed under sandbox GPU constraints. Other installed local models were not loaded. No cloud credentials, RunPod lifecycle or paid APIs were exercised. The browser extension was inspected but not installed/tested. No installer build or packaged runtime test was performed. A long-running soak and full GPU memory stress were deliberately outside this bounded safe run.
+
+## 14. Missing or Incomplete Features
+
+- Baseline model-to-Butler tag routing.
+- Complete native backend adapters for the offered video/ComfyUI presets.
+- Consistent Video setup UI and Butler video action.
+- Batch image preservation.
+- Media request cancellation/abort plumbing in the inspected adapters.
+- A shared security/approval boundary for UI, Butler and local API execution.
+- A reliable stop switch for all routing paths.
+- `tool-provider.js::connectMcp` explicitly returns `MCP_NOT_IMPLEMENTED`; the registry is extensible but not a complete MCP client.
+- ATELIER is intentionally not integrated into the live application.
+
+These are implementation observations, not claims that every item was promised as a finished release feature.
+
+## 15. Recommended Fix Order
+
+1. **Critical repairs:** secure the bridge and enforce tool approval centrally. Add a regression proving unauthenticated and unapproved commands cannot run.
+2. **Stability repairs:** make Stop universal; repair completed-reply detection; include required packaging files; add a real packaged Windows smoke test.
+3. **Communication/routing repairs:** strict terminal-envelope parsing, quoted/code preservation, ambiguity diagnostics, Butler destination semantics, provider-pause detection and bounded routing lifecycle.
+4. **Butler repairs:** measure structured-request behavior, test configured models, improve progress/error reporting and cancellation; prove ask-versus-execute and delegation modes with actual services.
+5. **AI/model repairs:** maintain real-site selector fixtures, test Claude idle/paused states, test model switching/fallback under controlled load.
+6. **Image/video repairs:** correct endpoint configuration; resolve external attention backend; retain safe error detail; implement real media adapters, batch output and cancellation.
+7. **UI repairs:** reconcile wizard/provider capabilities and improve cause-specific errors; complete responsive sizing and accessibility checks.
+8. **Performance improvements:** only after correctness, measure queue latency, sustained concurrent runs, memory growth, GPU residency and long logs.
+9. **Code cleanup:** split the approximately 251 KB `main.js` and 125 KB `controls.js` around tested boundaries; centralize shared protocol/security contracts; normalize ATELIER Windows paths. Module size alone is not a defect, but it makes these cross-path inconsistencies harder to review.
+
+## 16. Final Test Scorecard
+
+| Area | Result |
+|---|---|
+| Startup | PARTIAL PASS — existing instance works; fresh isolated launch BLOCKED |
+| UI | PARTIAL PASS |
+| ChatGPT integration | PASS for tested scenarios |
+| Claude integration | FAIL for capture/continued routing in this run |
+| Gemini integration | PASS for tested scenarios |
+| Butler | PARTIAL PASS; no completed autonomous task demonstrated |
+| AI-to-AI routing | PARTIAL PASS overall; FAIL release gate due stop/parser issues |
+| Computer execution | FAIL safety gate; harmless direct command execution works |
+| Image generation | FAIL |
+| Video generation | FAIL |
+| Local models | PARTIAL PASS |
+| Error recovery | PARTIAL PASS |
+| Stability | PARTIALLY TESTED; no sustained-run verdict |
+| Security | FAIL |
+| Packaged release | NOT TESTED; blocking manifest defect found |
+
+No percentage score is assigned: mocked assertions, external-service behavior and untested controls are not interchangeable units of coverage.
+
+## 17. Detailed Test Log
+
+Chronological sequence; machine-readable files contain exact timestamps for live probes.
+
+1. Inspected task workspace: only empty `work` and `outputs` directories; no app terminal attached. Located actual repository under Documents/git.
+2. Read package/scripts/README, inventoried entry points, integrations, tests and storage; repository initially clean at recorded revision.
+3. Found running Electron, Ollama and Python processes. Native window selection located AutoInjector Desktop.
+4. Ran `npm run test:unit` directly to avoid installing/changing dependencies: exit 0, 869 assertions, 25 suites.
+5. Started `node test/run.js` in original checkout. Export assertions failed, then `readFileSync(undefined)` crashed. Output location was outside writable audit roots.
+6. Inspected actual GUI. Pressed Stop, then New Chat. Verified fresh ChatGPT/Claude/Gemini pages and mesh/routing off.
+7. Probed desktop bridge, both Ollama endpoints and media ports. Desktop/11434/11435/7860 answered; 8188 refused.
+8. Sent individual QA prompts through application HTTP send path. ChatGPT and Gemini captured markers. Claude's correct visible answer remained uncaptured in the initial window.
+9. Sent harmless echo through unauthenticated `/tools/run` with arbitrary Origin; observed successful execution and wildcard CORS.
+10. Copied 275 tracked files to the audit workspace without application data/models. Reused installed dependencies via `NODE_PATH`; reran integration suite: exit 0, 538 assertions. No application repair was needed to obtain this result.
+11. Native compose → All test: ChatGPT/Gemini markers captured. Claude's earlier answer was released, then its new request encountered provider safeguard pause.
+12. Ran 13 pure-parser scenarios plus one real read-script DOM fixture. Confirmed Butler destination fallback, quoted/code truncation, tag tolerance behavior and false generation detection. One-million-character parser input retained its body.
+13. Tested image provider saved root URL, corrected API path and direct backend error. No successful image. Ran actual local Butler chat; received short prose response.
+14. Attempted Python bridge startup: `ModuleNotFoundError: No module named 'aiohttp'`. Dependency probes also found no websockets/torch/interpreter in that selected Python; this does not describe the separate running media environment.
+15. Ran standalone log-tags suite: 57 passed. Browser/Electron E2E attempts blocked by missing Playwright.
+16. Ran six directed live AI route scenarios. ChatGPT↔Gemini passed. Claude-destination acknowledgments absent; Claude-source sends returned INPUT_NOT_FOUND. Tests terminated with USER-directed target responses.
+17. Opened Setup tabs. Video placeholder observed; Images Test render returned IMAGE_DISABLED; closed wizard.
+18. Attempted fresh isolated Electron launch with separate profile and bridge disabled. Windows GPU child processes failed repeatedly; process exited before control/resize probes. No successful cold-start or resize measurement.
+19. Ran ATELIER scripts. Found Windows depgraph failures, missing symlink privilege and transaction-cleanup crash. Standard unittest discovery was inapplicable. Repeated non-transaction scripts with a proper result recorder.
+20. Started harmless live Butler arithmetic task; observed classifying with no actions; explicitly stopped after bounded observation. Separate 15-second structured-model request timed out.
+21. Checked package includes; required log modules missing. Scanned tracked text for several high-confidence credential formats; no matches. This is not a comprehensive secret audit.
+22. Sent 100 concurrent bridge health checks: all succeeded. Malformed JSON, unknown site, missing prompt and unknown tool returned appropriate 400s.
+23. Synthetic two-image response demonstrated first-image-only handling. Video disabled and enabled-current-backend probes returned VIDEO_DISABLED and HTTP_500 respectively.
+24. Rechecked source Git status: no tracked modifications. Collected evidence and wrote this report. No destructive test, intentional OOM, credential disclosure, dependency installation or functional repair was performed.
+
+State changes made during QA: automatic modes were stopped; the previously paused Butler task was stopped; new service conversations were opened and harmless test messages added; a QA draft remains in compose; Setup test-render saved its existing image form values; a new audit Butler task was started and stopped. Historical conversations/files were not deleted. Test profiles, copied source, fixtures and temporary test outputs were created under audit workspace/temp locations. The original integration attempt could not write its intended export; the isolated copy could.
+
+## 18. Overall Assessment
+
+Auto Injector can currently coordinate real ChatGPT and Gemini web sessions, maintain a local capture feed, expose an HTTP bridge, and connect to a local Ollama model. Its mocked tests cover many useful behaviors and pass in a writable environment. Those are meaningful foundations.
+
+The complete three-AI/Butler/media system was **not** demonstrated as reliable. Actual tests found a security boundary failure, an ineffective global relay stop, incorrect completion detection, parser truncation, unavailable model-to-Butler routing, broken local media generation and a packaging omission. Claude also encountered an external safeguard that the application did not diagnose well. Local conversational generation worked, while orchestration remained unproven in the allotted observation.
+
+The immediate priorities are the local execution boundary, universal stop semantics and correct response completion. After those, prove one complete user → Butler → assistants → reviewed result workflow on the actual machine, then one image and one video workflow against supported backends. Release confidence should come from those real runs and a packaged Windows launch, not solely from the current green mock suites.
+
