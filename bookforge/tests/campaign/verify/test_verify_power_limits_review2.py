@@ -43,3 +43,46 @@ def test_e08_uses_only_the_tracked_characters_power_limits(h):
     r = e_create(h, "E08", "mara", "APPLY", events=evs, current_snapshot_ref=start["output_refs"][0])
     assert "POWER_LIMIT" not in rules(r), [f["message"] for f in r["result"]["findings"]]
     assert r["result"]["accepted_event_ids"] == [evs[0]["event_id"]]
+
+
+def _two_characters(h):
+    h.set_features(magic=True)
+    w = build_world(h)
+
+    def a09(name, sid, limit):
+        return approved(h, "A09", {"concept": name}, {
+            "concept": name, "attributes": {"costs": "one unit per use", "limits": f"at most {limit} units"},
+            "linked_refs": [], "protected_fact_flags": [],
+            "facts": [fact(sid, "x.a09.cost", 1), fact(sid, "x.a09.limit", limit)]})
+    tide, storm = a09("Tide magic", "tide-magic", 10), a09("Storm magic", "storm-magic", 1)
+    mara = approved(h, "A01", {"concept": "Mara"}, {
+        "concept": "Mara", "attributes": {}, "linked_refs": [tide, w["places"]], "protected_fact_flags": [],
+        "facts": [fact("mara", "entity.name", "Mara"), fact("mara", "entity.power_remaining", 30)]})
+    tom = approved(h, "A01", {"concept": "Tom"}, {
+        "concept": "Tom", "attributes": {}, "linked_refs": [storm, w["places"]], "protected_fact_flags": [],
+        "facts": [fact("tom", "entity.name", "Tom"), fact("tom", "entity.power_remaining", 5)]})
+    return w, mara, tom
+
+
+def test_e08_the_tracked_characters_own_limit_still_applies(h):
+    """Regression guard for the fix above: Tom's own storm limit (1 per use) refuses Tom spending 2 even when Mara
+    (limit 10) is pinned too; Mara spending 11 at once is refused by her own limit; holding 30 units (more than the
+    per-use limit) is not a finding by itself."""
+    w, mara, tom = _two_characters(h)
+    _, evs = chapter(h, w, "ch1", "Tom spent two units of storm power while Mara watched.",
+                     [ev("/power_remaining", "SET", 5, 3, 10, "spent two units of storm power", entity="tom")])
+    start = e_create(h, "E08", "tom", "INITIALIZE", baseline_ref=tom, source_refs=[tom, mara])
+    accept_ok(h, start["output_refs"][0])
+    r = e_create(h, "E08", "tom", "APPLY", events=evs, current_snapshot_ref=start["output_refs"][0])
+    assert "POWER_LIMIT" in rules(r) and r["result"]["accepted_event_ids"] == []
+
+    _, evs = chapter(h, w, "ch2", "Mara spent eleven units of tide power at once.",
+                     [ev("/power_remaining", "SET", 30, 19, 20, "spent eleven units of tide power")])
+    start = e_create(h, "E08", "mara", "INITIALIZE", baseline_ref=mara, source_refs=[mara, tom])
+    accept_ok(h, start["output_refs"][0])
+    r = e_create(h, "E08", "mara", "APPLY", events=evs, current_snapshot_ref=start["output_refs"][0])
+    assert "POWER_LIMIT" in rules(r) and r["result"]["accepted_event_ids"] == []
+    _, evs = chapter(h, w, "ch3", "Mara spent two units of tide power.",
+                     [ev("/power_remaining", "SET", 30, 28, 30, "spent two units of tide power")])
+    r = e_create(h, "E08", "mara", "APPLY", events=evs, current_snapshot_ref=start["output_refs"][0])
+    assert "POWER_LIMIT" not in rules(r) and r["result"]["accepted_event_ids"] == [evs[0]["event_id"]]

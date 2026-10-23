@@ -266,6 +266,10 @@ def test_download_name_keeps_accented_title(make_context, ai_server, book, tmp_p
     out = act("setup_format")
     items = next(s for s in out["book"]["steps"] if s["id"] == "format")["approve"]
     assert act("approve", {"record_ids": [i["record_id"] for i in items], "author_confirms": True})["ok"]
+    # the title page is made when the book is put together (ACCEPT-1): do that again too, as the book page asks
+    out = act("assemble")
+    items = next(s for s in out["book"]["steps"] if s["id"] == "assemble")["approve"]
+    assert act("approve", {"record_ids": [i["record_id"] for i in items], "author_confirms": True})["ok"]
     assert act("export")["ok"]
     page = open_app(make_context(), ai_server, f"#/p/{pid}/main/book")
     with page.expect_download(timeout=15000) as dl:

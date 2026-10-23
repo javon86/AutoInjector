@@ -966,3 +966,31 @@ class ProviderRegistry:
                     raise
                 log.warning("AI attempt %s on %s failed: %s", attempt + 1, slot["slot_id"], exc.code)
         raise last or BookforgeError("TIMEOUT", "", "deadline reached before a retry could run")
+
+
+class PinnedProviders(ProviderRegistry):
+    """The author's AI slots, optionally limited to one slot the author picked (a Make-a-book run's choice, or the
+    AI chosen for the book in its profile / the wizard). Shares the base registry's busy counters, cost
+    reservations' store and test adapter, so concurrency limits stay correct. A pinned slot ignores role routing
+    (like an explicit pick in generate) but never an ineligible slot: a pinned slot that is busy or not set up
+    gives CAPABILITY_UNAVAILABLE instead of silently using another AI."""
+
+    def __init__(self, base: ProviderRegistry, slot_id: str | None):
+        base = getattr(base, "_base", base)  # never stack pins: always share the one real registry
+        self._base = base
+        super().__init__(base.store, base.secret_path)
+        self._active = base._active
+        self._lock = base._lock
+        self.pinned = slot_id
+
+    @property
+    def test_adapter(self):
+        return getattr(self._base, "test_adapter", None)
+
+    @test_adapter.setter
+    def test_adapter(self, value):  # the base registry owns it
+        pass
+
+    def eligible(self, project_id, capability, needed_tokens, operation=None):
+        out = super().eligible(project_id, capability, needed_tokens, operation if not self.pinned else None)
+        return [s for s in out if s["slot_id"] == self.pinned] if self.pinned else out
