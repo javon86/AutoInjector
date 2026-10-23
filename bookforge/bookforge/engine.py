@@ -313,9 +313,23 @@ class Engine:
         if head_lc == "LOCKED" and not self._protected_change_authorized(ctx, base):
             raise BookforgeError("LOCKED_FACT", "/base_ref", "record is LOCKED; a protected-change authorization "
                                  "(I10/K09 approval with scope OP:protected_change) is required", status="BLOCKED")
-        result = handler.update(ctx)
+        try:
+            result = handler.update(ctx)
+        except BookforgeError:
+            # Another writer may have replaced the record while this handler read state the winner
+            # had already moved on (e.g. two workers leasing one queue job). The root cause is then a
+            # stale base, so say that (the caller re-reads and retries) rather than the symptom.
+            self._raise_if_head_moved(ctx, base)
+            raise
         return self._publish(ctx, result, attempt_id, request_hash, version=base["version"] + 1,
                              record_id=base["record_id"], expected_latest=base["version"])
+
+    def _raise_if_head_moved(self, ctx: Context, base: dict) -> None:
+        head = self.store.query_one("SELECT latest_version FROM heads WHERE project_id=? AND branch_id=? AND record_id=?",
+                                    (ctx.project_id, ctx.branch_id, base["record_id"]))
+        if head is not None and head["latest_version"] != base["version"]:
+            raise BookforgeError("VERSION_CONFLICT", "/base_ref/version",
+                                 f"stale base v{base['version']}; head is v{head['latest_version']}", status="REJECTED")
 
     def _protected_change_authorized(self, ctx: Context, base: dict) -> bool:
         rows = self.store.query("SELECT body FROM approvals WHERE project_id=? AND branch_id=? AND decision='APPROVED' "

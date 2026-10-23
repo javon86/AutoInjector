@@ -241,7 +241,8 @@ def test_k05_concurrent_dispatch_single_lease(h):
         t.join()
     ok = [r for r in results if r["status"] == "DRAFT"]
     assert len(ok) == 1, [r["errors"] for r in results]
-    assert all(errors_of(r)[0][0] == "VERSION_CONFLICT" for r in results if r["status"] != "DRAFT")
+    assert all(errors_of(r)[0][0] == "VERSION_CONFLICT" for r in results if r["status"] != "DRAFT"), \
+        [r["errors"] for r in results]
     job = h.store.get_state(h.project_id, "main", kr.NS_JOBS, q["record_id"])
     assert job["fencing_token"] == 1 and job["attempt_id"] == ok[0]["result"]["attempt_id"]
 
