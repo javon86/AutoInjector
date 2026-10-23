@@ -163,7 +163,7 @@ contextBridge.exposeInMainWorld("api", {
   onTerminalData: (cb) => ipcRenderer.on("terminal-data", (_e, payload) => cb(payload)),
   onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
   // BookForge bridge (experimental) — see docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
-  bookforgeStatus: () => ipcRenderer.invoke("bookforge:status"),
+  bookforgeStatus: (opts) => ipcRenderer.invoke("bookforge:status", opts || {}),
   bookforgeSetEnabled: (enabled) => ipcRenderer.invoke("bookforge:set-enabled", { enabled }),
   bookforgeCopyToken: () => ipcRenderer.invoke("bookforge:copy-token"),
   bookforgeRevealToken: () => ipcRenderer.invoke("bookforge:reveal-token"),

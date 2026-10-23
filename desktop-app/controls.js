@@ -3694,7 +3694,11 @@ function bfRenderSlim(s, d) {
 async function bookforgeRefresh() {
   if (!window.api || typeof window.api.bookforgeStatus !== "function") { bfActionProblem("status", "IPC_MISSING", { where: "The BookForge status", tech: "window.api.bookforgeStatus is missing" }); return; }
   let s = null;
-  try { s = await window.api.bookforgeStatus(); }
+  // L1: main only checks whether BookForge is running (a local GET) while the
+  // bridge is on or this panel is open.
+  const panel = el("col-bookforge");
+  const panelOpen = !!(panel && !panel.classList.contains("hidden-collapsed"));
+  try { s = await window.api.bookforgeStatus({ panelOpen }); }
   catch (e) { bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus: ${String((e && e.message) || e).slice(0, 160)}` }); return; }
   if (s && s.ok) bookforgeRender(s);
   else bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus returned ${s ? JSON.stringify(Object.keys(s)).slice(0, 80) : "nothing"}` });

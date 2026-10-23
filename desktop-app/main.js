@@ -6067,12 +6067,14 @@ function bookforgeStatusSnapshotBase() {
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
-function bookforgeStatusSnapshot() {
+function bookforgeStatusSnapshot(opts) {
   const snap = bookforgeStatusSnapshotBase();
   snap.connection = bookforgeConnection(snap);
   bookforgeConnectAdvance(snap);
   snap.connect = Object.assign({}, bfConnect);
-  bookforgeAppCheckSoon();
+  // L1: with the bridge OFF (the default) and the panel closed, never contact
+  // local services in the background. Connect / the link test check right away.
+  if (snap.enabled || (opts && opts.panelOpen)) bookforgeAppCheckSoon();
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!bookforgeLauncher() };
   snap.health = bookforgeHealth(snap);
   return snap;
@@ -6158,7 +6160,7 @@ function bookforgeDiagnostics(extra) {
   if (panel.length) L.push(`Panel problems shown: ${panel.join(", ")}`);
   return L.join("\n") + "\n";
 }
-ipcMain.handle("bookforge:status", () => bookforgeStatusSnapshot());
+ipcMain.handle("bookforge:status", (_evt, payload) => bookforgeStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
 ipcMain.handle("bookforge:diagnostics", (_evt, extra) => {
   try { return { ok: true, text: bookforgeDiagnostics(extra) }; }
   catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
@@ -6244,9 +6246,11 @@ async function bookforgePing(pingUrl, timeoutMs) {
     return { running: false, base, pingUrl, other: true, http_status: r.status };
   } catch (e) { return { running: false, base, pingUrl, other: false, error: (e && e.code) || "ERROR" }; }
 }
-async function bookforgeFindApp() {
+// scan: also look on 8781..8799 (only when the user pressed Connect / the link
+// test / Start BookForge — never from the panel's background check, L1).
+async function bookforgeFindApp({ scan = true } = {}) {
   const first = await bookforgePing(bookforgeAppUrl(), 3000);
-  if (first.running || bookforgeAppConfigured()) return first;
+  if (first.running || bookforgeAppConfigured() || !scan) return first;
   const tries = [];
   for (let p = BOOKFORGE_APP_DEFAULT_PORT + 1; p < BOOKFORGE_APP_DEFAULT_PORT + 20; p++) tries.push(bookforgePing(`http://127.0.0.1:${p}/api/ping`, 1500));
   const found = (await Promise.all(tries)).find((x) => x.running);
@@ -6260,7 +6264,12 @@ const BF_APP_CHECK_MS = 30000;
 function bookforgeAppCheckSoon(force) {
   if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < BF_APP_CHECK_MS)) return;
   bfApp.checking = true;
-  bookforgeFindApp().then((r) => {
+  // Background check: BookForge's usual address, or the one Connect found.
+  const remembered = bfApp.base && !bookforgeAppConfigured() ? `${bfApp.base}api/ping` : null;
+  const check = remembered && remembered !== bookforgeAppUrl()
+    ? bookforgePing(remembered, 3000).then((r) => (r.running ? r : bookforgeFindApp({ scan: false })))
+    : bookforgeFindApp({ scan: false });
+  check.then((r) => {
     const changed = r.running !== bfApp.running || r.base !== bfApp.base;
     Object.assign(bfApp, { running: r.running, base: r.running ? r.base : bfApp.base || r.base, version: r.version || null, checkedAt: Date.now() });
     if (changed) { try { broadcast("bookforge-activity", { event: null, status: bookforgeStatusSnapshot() }); } catch (_) {} }
