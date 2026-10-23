@@ -25,6 +25,10 @@ BookForge (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0
 * Reject request bodies over 1 MiB (413). Reject non-JSON (400).
 * Never log prompt or reply text; log only site, request_id, chars, outcome, elapsed.
 * Never put the token in URLs or logs.
+* Only requests whose `Host` is `127.0.0.1`, `localhost` or `[::1]` (optionally with the
+  bridge's own port) are served; anything else gets `403 FORBIDDEN` (DNS-rebinding guard).
+* The token is checked from the headers **before** the body is read (a wrong key gets 401
+  at once); a body must arrive within 30 s (else `408`).
 
 ## Endpoints
 
@@ -45,14 +49,20 @@ Request:
 Behavior:
 1. At most ONE in-flight bridge request per site. A second request for a busy site ->
    `409 SITE_BUSY` (unless it is the same `request_id`, see 5).
-2. The bridge sends the prompt to that site's pane through the existing send path,
-   wrapped with the app's reply-envelope instruction so the reply ends with
-   `[FROM: <SITE>]`, and waits for the NEXT captured reply from that site.
-3. A captured reply that belongs to a bridge request is **owned by the bridge**: it
-   is shown in the transcript but is NOT relayed to other AIs (no mesh routing,
-   roundtable, house-rule, sequence or manager handling).
+2. The bridge sends the prompt to that site's pane through the existing send path —
+   verbatim, with only the `[MSG #n]` line in front and the app's reply-envelope
+   instruction after it (no role clause, no tag reminders) — and waits for the captured
+   reply that ANSWERS that message. A bridge send never resets the AI-to-AI hop count.
+3. A captured reply is **owned by the bridge** only if it answers the bridge's own
+   prompt: the prompt was typed as `[MSG #n]` and the Relay Trace says the reply answers
+   `#n`. A reply captured while the prompt is still queued (e.g. the AI is finishing an
+   answer to the user) is never taken. An owned reply is shown in the transcript but is
+   NOT relayed to other AIs (no mesh routing, roundtable, house-rule, sequence or manager
+   handling), and its missing `[FROM:]` tag is never nagged about.
 4. Success: `200 {"ok": true, "site", "request_id", "text": "<envelope-stripped reply>",
-   "seq": "0007", "elapsed_ms": 1234}`.
+   "seq": "0007", "reply_to": "0007", "elapsed_ms": 1234}` — `seq` is the `[MSG #]` the
+   prompt was typed as, `reply_to` the one the reply answers. BookForge refuses a 200
+   without `seq` or with `reply_to != seq`.
 5. Idempotency: results are cached by `request_id` for 15 minutes. Repeating a
    completed `request_id` returns the cached 200 response without re-sending. Repeating
    an in-flight `request_id` waits for (joins) the same in-flight result.
@@ -63,15 +73,22 @@ Behavior:
 | 400 | BAD_REQUEST | invalid body/field | false |
 | 401 | UNAUTHORIZED | missing/wrong token | false |
 | 404 | UNKNOWN_SITE / NOT_FOUND | bad site / path | false |
-| 409 | SITE_BUSY | another bridge request in flight for that site | false |
+| 403 | FORBIDDEN | wrong `Host`, or a `/v1/pair` from a browser (see Pairing) | false |
+| 409 | SITE_BUSY | another bridge request in flight for that site (the message names it) | false |
 | 413 | TOO_LARGE | body over 1 MiB | false |
 | 502 | SEND_FAILED | the prompt could not be delivered to the pane | false |
 | 503 | SITE_NOT_READY | pane missing/destroyed/not loaded | false |
-| 504 | TIMEOUT | sent, but no captured reply before timeout_ms | **true** |
+| 504 | TIMEOUT | no captured answer before timeout_ms; `typed` says whether the prompt was typed | **true** if typed |
 
-On 504 the site may still be answering; the site stays `busy` until that reply is
-captured (it is then stored under the request_id, so a later retry with the same
-request_id returns it) or for at most timeout_ms more, then frees.
+Every 504 says `"typed": true|false`.
+* `typed: false` — the AI was still busy, so the prompt was never typed: the queued send is
+  withdrawn, the site is free at once and asking again (any request_id) is safe.
+* `typed: true` (+ `seq`, `late_window_ms`) — the site may still be answering; it stays
+  `busy` until that answer is captured (stored under the request_id, so a retry with the
+  same request_id returns it) or for `late_window_ms` = min(timeout_ms, 300 s), then frees
+  (joiners then get a 504 with `late_expired: true`). A different request_id meanwhile gets
+  `409 SITE_BUSY` naming the pending request. BookForge's "Try again" re-uses the timed-out
+  request_id for the same prompt, and its busy-retry budget (600 s) is twice the late window.
 
 ## Contract v1.1 additions (backward compatible)
 
@@ -94,7 +111,11 @@ New error codes: `PAIRING_CODE_INVALID` (401), `PAIRING_CODE_EXPIRED` (410),
    **The connection key is never put in a URL.**
 2. The code: 12 characters `[A-Za-z0-9]` (crypto random), valid **120 s**, **single use**.
    Only one code is live: making a new code invalidates any older unused one.
-3. BookForge's `#/pair` page calls (no Authorization header):
+3. BookForge's `#/pair` page asks the author to confirm first (and warns when the link's
+   bridge is not on port 17891; non-loopback bridges are refused), then BookForge's server
+   calls (no Authorization header; `Content-Type: application/json` is required and a
+   request carrying a browser `Origin` header is refused with 403 — neither counts toward
+   the lockout below, so a web page cannot lock pairing):
 
    `POST <bridge>/v1/pair` `{"code": "<CODE>", "client": "bookforge"}`
 
