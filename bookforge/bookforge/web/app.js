@@ -2394,10 +2394,15 @@ const SIMPLE_OPS = ['C02', 'B11'];
 function simpleHref(i) { return SIMPLE_OPS.includes(i.module_id) ? plink('write', i.record_id) : plink('rec', i.record_id); }
 /** Where "✏️ Edit" goes: the simple editor for chapters and the outline, the full form otherwise. */
 function simpleEditHref(i) { return SIMPLE_OPS.includes(i.module_id) ? plink('write', i.record_id, 'edit') : plink('edit', i.record_id); }
-/** "# Title\n\nText…" -> { title, body } (the chapter prose starts with its title line when it has one). */
+/** "# Title\n\nText…" -> { title, body }. The same rule as the exporter (exporters/book.py): the first non-blank line
+ * names the chapter when, trimmed, it starts with "# " and has more after it. A line of only "#" is a scene break,
+ * never a title, so a chapter that opens with one is left exactly as written. */
 function splitChapter(text) {
-  const m = /^\s*#\s+([^\n]+)\n+/.exec(String(text || ''));
-  return m ? { title: m[1].trim(), body: String(text).slice(m[0].length) } : { title: '', body: String(text || '') };
+  const s = String(text || '');
+  const m = /^(?:[^\S\r\n]*(?:\r\n|\r|\n))*([^\r\n]*)(?:\r\n|\r|\n|$)/.exec(s);
+  const line = m ? m[1].trim() : '';
+  if (!line.startsWith('# ') || line.length <= 2) return { title: '', body: s };
+  return { title: line.slice(2).trim(), body: s.slice(m[0].length).replace(/^(?:[^\S\r\n]*(?:\r\n|\r|\n))+/, '') };
 }
 function joinChapter(title, body) {
   const t = title.trim(); const b = body.replace(/\s+$/, '');
