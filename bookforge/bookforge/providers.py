@@ -277,6 +277,40 @@ def schema_errors(schema: dict, data: Any, limit: int = 20) -> list[str]:
     return out
 
 
+# NEW-bridge-2: a prompt the bridge TYPED but whose answer did not arrive before the 504. Until its late window
+# ends, the same prompt to the same site (the author's "Try again" makes a new BookForge request id) is sent with
+# the timed-out bridge request_id, so the bridge hands back the late answer instead of refusing the new id with
+# 409 SITE_BUSY and later typing the prompt a second time. key -> (bridge request_id, monotonic expiry).
+_LATE_TYPED: dict[tuple[str, str, str], tuple[str, float]] = {}
+_LATE_LOCK = threading.Lock()
+
+
+def _late_key(bridge_url: str, site: str, prompt: str) -> tuple[str, str, str]:
+    return (bridge_url, site, hashlib.sha256(prompt.encode("utf-8")).hexdigest())
+
+
+def _late_get(key) -> str | None:
+    with _LATE_LOCK:
+        hit = _LATE_TYPED.get(key)
+        if hit and hit[1] > time.monotonic():
+            return hit[0]
+        _LATE_TYPED.pop(key, None)
+        return None
+
+
+def _late_put(key, bridge_id: str, window_s: float) -> None:
+    with _LATE_LOCK:
+        now = time.monotonic()
+        for k in [k for k, v in _LATE_TYPED.items() if v[1] <= now]:
+            del _LATE_TYPED[k]
+        _LATE_TYPED[key] = (bridge_id, now + max(1.0, window_s))
+
+
+def _late_drop(key) -> None:
+    with _LATE_LOCK:
+        _LATE_TYPED.pop(key, None)
+
+
 def bridge_request_id(request_id: str | None, site: str, call: int, reask: int) -> str:
     """Deterministic bridge request_id: same BookForge request + site + call + re-ask number ->
     same id, so a retry of the same logical call joins/reuses the bridge's cached reply."""
@@ -321,7 +355,7 @@ class AutoInjectorAdapter:
             with opener.open(req, timeout=timeout_s) as resp:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
-            raise self._http_error(exc) from None
+            raise self._http_error(exc, (body or {}).get("site")) from None
         except (socket.timeout, TimeoutError) as exc:
             raise BookforgeError("TIMEOUT", "", "the AutoInjector bridge did not answer in time") from exc
         except urllib.error.URLError as exc:
@@ -341,14 +375,22 @@ class AutoInjectorAdapter:
             raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "AutoInjector bridge returned an unexpected answer")
         return out
 
-    def _http_error(self, exc: urllib.error.HTTPError) -> BookforgeError:
-        code, detail = exc.code, ""
+    def _http_error(self, exc: urllib.error.HTTPError, site: str | None = None) -> BookforgeError:
+        code, detail, body = exc.code, "", None
         try:
             body = json.loads(exc.read().decode("utf-8"))
             if isinstance(body, dict):
                 detail = f" ({body.get('error') or ''}: {str(body.get('message') or '')[:200]})"
+            else:
+                body = None
         except (ValueError, OSError, UnicodeDecodeError):
             pass
+        err = self._classify_http(code, detail, body or {}, site or "the web site")
+        err.bridge_body = body or {}  # submit() reads typed / seq / late_window_ms from a 504
+        return err
+
+    @staticmethod
+    def _classify_http(code: int, detail: str, body: dict, site: str) -> BookforgeError:
         if code == 409:
             return BookforgeError("RATE_LIMITED", "", "the web site is busy with another bridge request" + detail)
         if code == 401:
@@ -359,6 +401,16 @@ class AutoInjectorAdapter:
             return BookforgeError("INVALID_INPUT", "", f"the AutoInjector bridge rejected the request "
                                   f"(HTTP {code}){detail}", status="REJECTED")
         if code == 504:
+            if body.get("typed") is False:
+                return BookforgeError("TIMEOUT", "", f"{site} was still busy with something else, so BookForge's "
+                                      "prompt was never typed (AutoInjector withdrew it). Try again sends it.")
+            if body.get("typed") is True and body.get("late_expired"):
+                return BookforgeError("TIMEOUT", "", f"BookForge's prompt was typed into {site}, but no answer came, "
+                                      f"even after waiting longer. Try again asks {site} again.")
+            if body.get("typed") is True:
+                return BookforgeError("TIMEOUT", "", f"BookForge's prompt was typed into {site}, but the answer did "
+                                      "not arrive in time; it may still be coming. Try again collects it (nothing is "
+                                      "typed twice).")
             return BookforgeError("TIMEOUT", "", "the web site did not answer before the timeout; it may still be "
                                   "answering" + detail)
         if code in (502, 503):
@@ -420,6 +472,23 @@ class AutoInjectorAdapter:
             return cls.DEFAULT_TIMEOUT_MS
         return max(10000, min(900000, int(remaining * 1000) - 5000))
 
+    @staticmethod
+    def _check_reply_seq(reply: dict, site: str) -> None:
+        """BF-01: an answer must name the [MSG #] its prompt was typed as (seq) and, when the bridge says which
+        message the captured reply answers (reply_to), that must be the same one. Otherwise it may be the
+        answer to something else typed into that window (the author's own question), so it is never used."""
+        seq = reply.get("seq")
+        if not isinstance(seq, str) or not seq.strip():
+            raise BookforgeError("UPSTREAM_UNAVAILABLE", "", f"AutoInjector returned an answer from {site} without "
+                                 "saying which message it answers, so BookForge did not use it (it could be the "
+                                 "answer to something else typed into that window). Update AutoInjector and try "
+                                 "again.")
+        reply_to = reply.get("reply_to")
+        if reply_to is not None and str(reply_to) != seq:
+            raise BookforgeError("UPSTREAM_UNAVAILABLE", "", f"AutoInjector returned an answer from {site} to message "
+                                 f"#{reply_to}, but BookForge's prompt was message #{seq}, so BookForge did not use "
+                                 "it. Try again.")
+
     def submit(self, slot: dict, system: str, user: str, schema: dict, *, request_id: str | None = None,
                attempt: int = 0, deadline: str | None = None, call: int = 0) -> tuple[dict, dict]:
         """One logical attempt (plus up to MAX_REASKS free schema re-asks on the same site).
@@ -436,13 +505,25 @@ class AutoInjectorAdapter:
         bridge_id = None
         for reask in range(self.MAX_REASKS + 1):
             prompt = self.build_prompt(system, user, schema, errors)
-            bridge_id = bridge_request_id(request_id, site, call, reask)
+            late_key = _late_key(self.bridge_url, site, prompt)
+            # A "Try again" after a 504 whose prompt WAS typed: collect that answer under its own bridge id.
+            bridge_id = _late_get(late_key) or bridge_request_id(request_id, site, call, reask)
             started = time.monotonic()
-            reply = self._call("POST", "/v1/complete", {"site": site, "prompt": prompt, "request_id": bridge_id,
-                                                         "timeout_ms": tmo}, tmo / 1000.0 + 30.0)
+            try:
+                reply = self._call("POST", "/v1/complete", {"site": site, "prompt": prompt, "request_id": bridge_id,
+                                                             "timeout_ms": tmo}, tmo / 1000.0 + 30.0)
+            except BookforgeError as exc:
+                body = getattr(exc, "bridge_body", None) or {}
+                if body.get("typed") is True and not body.get("late_expired"):
+                    _late_put(late_key, bridge_id, float(body.get("late_window_ms") or tmo) / 1000.0)
+                else:
+                    _late_drop(late_key)
+                raise
+            _late_drop(late_key)
             text = reply.get("text")
             if not reply.get("ok") or not isinstance(text, str):
                 raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "AutoInjector bridge answered without reply text")
+            self._check_reply_seq(reply, site)
             in_tok += estimate_tokens(prompt)
             out_tok += estimate_tokens(text)
             data = extract_json_object(text)

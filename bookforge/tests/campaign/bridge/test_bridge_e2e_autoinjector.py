@@ -8,7 +8,7 @@ BookForge's own deterministic test AI (``fake_site_brain.py`` -> ``tests/autoboo
 are injected: a request that arrives while Claude answers the user's quick side question (``steal``) and a request
 that times out while Gemini answers a slow side question (``timeout``).
 
-Each check of that run is one test below; known bridge bugs are strict xfails, so they flip when fixed.
+Each check of that run is one test below; a known bridge bug would be a strict xfail (KNOWN), so it flips when fixed.
 
 Needs: node, the desktop-app checkout next to this BookForge (or AUTOINJECTOR_DESKTOP_APP=<path>) with its
 node_modules (playwright) and Chromium. Skipped otherwise, or with BF_E2E=0. ~1.5-2 min.
@@ -32,20 +32,9 @@ pytestmark = pytest.mark.skipif(
     or not (APP / "node_modules" / "playwright").exists(),
     reason="needs the AutoInjector desktop-app (with node_modules) next to BookForge; BF_E2E=0 skips")
 
-# check id -> why it is expected to fail with the bridge as shipped (strict: flips to XPASS when fixed)
-KNOWN = {
-    "BF-01": "BF-01 bridge accepts a capture while still 'sending' (the user's quick side answer, then every later "
-             "Claude answer is one prompt behind)",
-    "BF-01-prompt": "BF-01 (same, by prompt hash)",
-    "BF-01-stored": "BF-01 consequence: schema-valid wrong answers (Bible items, review verdicts) are kept",
-    "stored-canon": "BF-01 consequence: the second character is approved with the first character's answer",
-    "no-steal": "BF-01 consequence: the user's side answer is handed to BookForge",
-    "side-relay": "BF-01 consequence: that side answer (addressed to ChatGPT) is swallowed, never relayed",
-    "BF-02": "BF-02 ghost send: the prompt is typed after BookForge got its 504",
-    "late-steal": "NEW-bridge-1: the late window stores the reply to the user's earlier question as the answer",
-    "BF-03": "BF-03 bridge sends reset AutoInjector's hop limit",
-    "BF-16": "BF-16 AutoInjector's missing-[FROM:] flag + full rules are put in front of BookForge prompts",
-}
+# check id -> why it is expected to fail with the bridge as shipped (strict: flips to XPASS when fixed). Empty: the
+# bridge bugs this run pinned (BF-01, BF-02, BF-03, BF-16, NEW-bridge-1 and their consequences) are fixed.
+KNOWN: dict[str, str] = {}
 CHECKS = ["pair-link", "pair-bridge-url", "pair-api", "pair-no-key", "connected", "idle-relay", "idle-no-bridge",
           "run-start", "run-done", "no-unexpected-pauses", "three-ais", "BF-01", "BF-01-prompt", "BF-01-stored",
           "timeout-forced", "BF-02", "late-window", "no-double-typing", "BF-03", "hop-limit", "BF-16", "no-leak",

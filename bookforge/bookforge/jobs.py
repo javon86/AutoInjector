@@ -31,7 +31,11 @@ MAX_KEPT = 300
 KEEP_FINISHED_S = 14 * 24 * 3600
 LIVE = ("queued", "running", "waiting", "pausing")
 BUSY_CODES = ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED")
-DEFAULT_RETRY = {"enabled": True, "delays_s": [15, 30, 60, 120], "max_total_s": 600}
+# After a 504 for a prompt it already typed, the AutoInjector bridge keeps that site reserved for the late answer
+# for at most this long (bookforge-bridge.js LATE_WINDOW_MAX_MS); meanwhile other requests to the site get
+# 409 SITE_BUSY (-> RATE_LIMITED here). The default busy-retry budget is twice that, so they still get their turn.
+BRIDGE_LATE_WINDOW_S = 300
+DEFAULT_RETRY = {"enabled": True, "delays_s": [15, 30, 60, 120], "max_total_s": 2 * BRIDGE_LATE_WINDOW_S}
 
 
 def now_iso() -> str:
