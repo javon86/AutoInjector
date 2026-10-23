@@ -90,6 +90,18 @@ export function partName(ptr) {
   if (/^\/?main_plot/.test(String(ptr || ''))) return PART.main_plot;
   return '';
 }
+const OUT_OF_DATE = 'It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix '
+  + 'that. Approve the current version of what it was made from (for example the chapter outline or the characters), then '
+  + 'make it again from them (🔁 Redo with AI, or write it again yourself).';
+/** A short check message in plainer words ("/chapters/2/summary is too long" -> "Summary is too long"), or '' when it
+ * is too long or too technical to show the author (then only 🔧 Details has it). */
+function shortPlain(msg) {
+  let m = String(msg || '').replace(/\s*\(at [^)]*\)\s*$/, '').trim();
+  m = m.replace(/^\/((?:[^\s/:]+\/)*)([^\s/:]+):?(?=\s)/, (_all, _dirs, last) => (/^\d+$/.test(last) ? 'it' : last.replace(/_/g, ' ')));
+  if (!m || m.length > 140 || /[{}[\]<>]|\b[A-K]\d\d-[0-9a-f]{6,}|Traceback|\bNone\b/.test(m) || !/[a-z]{3}/i.test(m)) return '';
+  m = m.charAt(0).toUpperCase() + m.slice(1);
+  return /[.!?]$/.test(m) ? m : `${m}.`;
+}
 const CHECKS = {
   CANON_UNRESOLVED: m => {
     const x = /^(\S*): ([\w.]+) '([^']*)' is not declared/.exec(m);
@@ -115,8 +127,13 @@ const CHECKS = {
   PLAN_ORDER_DUPLICATE: m => `${partName(m) || 'Two chapters'} share the same place in the order.`,
   PLAN_PARENT_UNKNOWN: m => `${partName(m) || 'A scene'} belongs to a chapter that is not in the outline.`,
   TARGET_LENGTH: () => 'The number of chapters does not match the length you chose for the book.',
-  INPUT_STALE: () => 'Something it was built from has changed since. Let the AI write it again, or edit it.',
-  STALE_PIN: () => 'Something it was built from has changed since. Let the AI write it again, or edit it.',
+  // Out of date / inputs not approved: editing this draft cannot help (the same advice as the server's
+  // book_path.refusal_advice and autobook STALE_FIX).
+  STALE: () => OUT_OF_DATE,
+  SOURCE_PIN: () => OUT_OF_DATE,
+  INPUT_STALE: () => OUT_OF_DATE,
+  STALE_PIN: () => OUT_OF_DATE,
+  INPUT_NOT_VALIDATED: () => 'Something it was made from is not approved yet: approve that first, then approve this again.',
   CANON_NOT_APPROVED: () => 'It uses characters or places that are not approved yet. Approve them first.',
   FACT_CONTRADICTION: m => `${partName(m) || 'It'} says two different things about the same detail.`,
 };
@@ -133,5 +150,7 @@ export function plainCheck(s) {
   if (CHECKS[code]) return { text: CHECKS[code](msg), raw };
   if (PROBLEMS[code]) return { text: `${PROBLEMS[code].what} ${PROBLEMS[code].fix}`, raw };
   const where = partName(msg) || partName((/\(at ([^)]+)\)/.exec(msg) || [])[1]);
+  const said = shortPlain(msg);
+  if (said) return { text: `${where ? `${where}: ` : ''}${said} Edit it so BookForge’s checks pass, or let the AI write it again.`, raw };
   return { text: `${where ? `${where}: s` : 'S'}omething here does not pass BookForge’s checks. Edit it, or let the AI write it again.`, raw };
 }
