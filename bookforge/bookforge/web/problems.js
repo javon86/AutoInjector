@@ -66,3 +66,72 @@ export function problemFor(code, status) {
   if (status >= 500) return PROBLEMS.HTTP_500;
   return FALLBACK;
 }
+
+// ---------------------------------------------------------------- check findings ("RULE_ID: message" strings)
+// What BookForge's checks say about a draft (book path `problems`, refused approvals), in plain words. The raw
+// rule text stays available behind 🔧 Details; this table only decides what the author reads.
+const PART = { chapters: 'Chapter', scenes: 'Scene', events: 'Event', main_plot: 'The main plot', arcs: 'Arc' };
+const WHAT = {
+  'plan.location_id': ['place', 'one of your book’s places'], 'plan.pov_id': ['point-of-view character', 'one of your characters'],
+  'plan.character_ids': ['character', 'one of your characters'], 'plan.obligation_ids': ['plot thread', 'a thread of the main plot'],
+  'plan.event_ids': ['event', 'an event of the main plot'], 'plan.parent_id': ['chapter', 'a chapter of the outline'],
+  'plan.objective': ['goal', 'a goal'],
+};
+/** "gullhaven-harbor" -> "Gullhaven Harbor" (ids the AI made up read as names). */
+export function slugName(v) {
+  const s = String(v ?? '').trim();
+  if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(s) || /^[A-K]\d\d-[0-9a-f]{8,}$/i.test(s)) return s;
+  return s.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+/** Where a finding points, in words: "/chapters/0/facts/6" -> "Chapter 1"; unknown -> ''. */
+export function partName(ptr) {
+  const m = /^\/?(?:[a-z_]+\/)*?(chapters|scenes|events|arcs)\/(\d+)/.exec(String(ptr || ''));
+  if (m) return `${PART[m[1]]} ${parseInt(m[2], 10) + 1}`;
+  if (/^\/?main_plot/.test(String(ptr || ''))) return PART.main_plot;
+  return '';
+}
+const CHECKS = {
+  CANON_UNRESOLVED: m => {
+    const x = /^(\S*): ([\w.]+) '([^']*)' is not declared/.exec(m);
+    if (!x) return 'It names someone or something that is not in your story bible yet.';
+    const [what, known] = WHAT[x[2]] || ['name', 'in your story bible'];
+    const where = partName(x[1]);
+    return `${where || 'It'} names a ${what}, “${slugName(x[3])}”, that is not ${known}. Pick one of yours for it (or leave it open), or let the AI write it again.`;
+  },
+  PLAN_UNDECIDED: m => {
+    const x = /^(\S*): ([\w.]+) of '([^']*)'/.exec(m);
+    const [what] = (x && WHAT[x[2]]) || ['detail'];
+    return `${(x && partName(x[1])) || 'A chapter'} has no ${what} chosen yet. Choose one before approving.`;
+  },
+  PLAN_FIELD_MISSING: m => `${partName(m) || 'A chapter'} is missing part of its plan (what happens, who tells it or where). Fill it in.`,
+  PLAN_OBJECTIVE_UNKNOWN: m => `${partName(m) || 'A chapter'} does not say what happens in it yet. Write a sentence for it.`,
+  PLAN_REF_UNKNOWN: m => {
+    const x = /^(\S*): ([\w.]+) '([^']*)'/.exec(m);
+    const [what, known] = (x && WHAT[x[2]]) || ['name', 'in the plan it builds on'];
+    return `${(x && partName(x[1])) || 'It'} mentions a ${what}${x ? ` “${slugName(x[3])}”` : ''} that is not ${known}.`;
+  },
+  PLAN_REF_UNTRACED: m => CHECKS.PLAN_REF_UNKNOWN(m),
+  PLAN_ITEM_DUPLICATE: m => `${partName(m) || 'A chapter'} uses the same name as another one. Give each chapter its own.`,
+  PLAN_ORDER_DUPLICATE: m => `${partName(m) || 'Two chapters'} share the same place in the order.`,
+  PLAN_PARENT_UNKNOWN: m => `${partName(m) || 'A scene'} belongs to a chapter that is not in the outline.`,
+  TARGET_LENGTH: () => 'The number of chapters does not match the length you chose for the book.',
+  INPUT_STALE: () => 'Something it was built from has changed since. Let the AI write it again, or edit it.',
+  STALE_PIN: () => 'Something it was built from has changed since. Let the AI write it again, or edit it.',
+  CANON_NOT_APPROVED: () => 'It uses characters or places that are not approved yet. Approve them first.',
+  FACT_CONTRADICTION: m => `${partName(m) || 'It'} says two different things about the same detail.`,
+};
+/**
+ * Plain words for one check problem ("RULE_ID: message (at /path)" or a kernel "CODE: message").
+ * Returns { text, raw }: text for the author, raw for 🔧 Details.
+ */
+export function plainCheck(s) {
+  const raw = String(s ?? '');
+  const x = /^([A-Z][A-Z0-9_]*(?::[\w-]+)?): ([\s\S]*)$/.exec(raw);
+  if (!x) return { text: raw, raw: '' };
+  const code = x[1].split(':')[0];
+  const msg = x[2];
+  if (CHECKS[code]) return { text: CHECKS[code](msg), raw };
+  if (PROBLEMS[code]) return { text: `${PROBLEMS[code].what} ${PROBLEMS[code].fix}`, raw };
+  const where = partName(msg) || partName((/\(at ([^)]+)\)/.exec(msg) || [])[1]);
+  return { text: `${where ? `${where}: s` : 'S'}omething here does not pass BookForge’s checks. Edit it, or let the AI write it again.`, raw };
+}
