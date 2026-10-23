@@ -167,9 +167,14 @@ def test_paste_fills_the_form_without_saving(make_context, ai_server, book):
     page = open_app(ctx, ai_server, f"#/p/{pid}/main/edit/{rec['record_id']}")
     page.evaluate("t => navigator.clipboard.writeText(t)", json.dumps(data))
     page.locator("#main button.paste-btn").first.click()
-    page.locator("#toast:not([hidden])").wait_for(timeout=5000)
+    # wait for the paste's own toast (not just any visible toast: an earlier one may still be showing)
+    # and for the re-rendered form to hold the pasted value (route() re-renders asynchronously)
+    page.wait_for_function("() => { const t = document.querySelector('#toast'); return t && !t.hidden && /Pasted|None of|Nothing/.test(t.textContent); }",
+                           timeout=10000)
     toast = page.inner_text("#toast")
     assert "Pasted" in toast and "skipped 1" in toast, toast
+    page.wait_for_function("""() => Array.from(document.querySelectorAll('#main form textarea, #main form input'))
+                                     .some(e => e.value.includes('PASTED premise'))""", timeout=10000)
     settle(page)
     vals = page.evaluate("Array.from(document.querySelectorAll('#main form textarea, #main form input')).map(e => e.value)")
     assert any("PASTED premise" in v for v in vals), vals

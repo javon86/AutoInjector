@@ -59,6 +59,7 @@ class BookFakeAI:
         self.failures: list[BookforgeError] = []  # raised before answering, one per call
         self.kind_failures: dict[str, list] = {}  # answer kind -> errors raised instead of that answer
         self.gate = None  # threading.Event: when set to an unset Event, every call waits for it
+        self.waiting = threading.Event()  # set once a call is blocked on the gate (tests wait on this, not a sleep)
         self.delay = 0.0
         self.lock = threading.Lock()
         self.kinds: list[str] = []
@@ -80,8 +81,10 @@ class BookFakeAI:
                 exc = self.failures.pop(0)
                 self.kinds.append(f"fail:{exc.code}")
                 raise exc
-        if self.gate is not None:
-            self.gate.wait(30)
+        gate = self.gate
+        if gate is not None:
+            self.waiting.set()
+            gate.wait(30)
         if self.delay:
             import time  # noqa: PLC0415
             time.sleep(self.delay)

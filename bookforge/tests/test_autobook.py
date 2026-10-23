@@ -176,10 +176,10 @@ def test_pause_resume_and_cancel(tmp_path):
     app = make_app(tmp_path, fake=fake)
     fake.gate = threading.Event()
     r = app.autobook.start("author", {"author_confirms": True})
-    for _ in range(200):
-        if app.autobook.get(r["id"]).get("current") == "profile":
-            break
-        time.sleep(0.01)
+    # pause while the run is inside an AI call (blocked on the gate): it must report "pausing" until
+    # that answer comes back. Waiting on the call itself, not a sleep/poll of "current", which also
+    # matched the moment before the call where a pause is taken at once (-> "paused": flaky).
+    assert fake.waiting.wait(30), "the run never asked the AI"
     app.autobook.pause("author", r["id"])
     assert app.autobook.get(r["id"])["status"] == "pausing"
     fake.gate.set()
@@ -195,9 +195,10 @@ def test_pause_resume_and_cancel(tmp_path):
     assert run["status"] == "done"
     assert sum(1 for k in fake.kinds if k == "profile") == 1 or "profile" not in done_before
     # cancel a second run while it waits for the AI
+    fake.waiting.clear()
     fake.gate = threading.Event()
     r2 = app.autobook.start("author", {"author_confirms": True})
-    time.sleep(0.2)
+    assert fake.waiting.wait(30), "the second run never asked the AI"
     app.autobook.cancel("author", r2["id"])
     fake.gate.set()
     app.autobook.wait_for(r2["id"], 60)
@@ -212,7 +213,7 @@ def test_restart_shows_interrupted_and_resumes(tmp_path):
     app = make_app(tmp_path, fake=fake)
     fake.gate = threading.Event()
     r = app.autobook.start("author", {"author_confirms": True})
-    time.sleep(0.2)
+    assert fake.waiting.wait(30), "the run never asked the AI"
     app.autobook.pause("author", r["id"])
     fake.gate.set()
     app.autobook.wait_for(r["id"], 60)
