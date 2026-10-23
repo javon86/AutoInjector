@@ -374,8 +374,13 @@ API: `POST /api/bible-builder {project_id, branch_id, idea, counts?, slot_id?}`,
 
 * Exports use the PDF base-14 fonts (Times/Helvetica/Courier) and are not embedded; print
   interiors therefore fail the H09 font-embedding check until font import/embedding is added.
-* EPUB conformance needs the external **EPUBCheck** tool; without it H09 reports UNKNOWN for
-  EPUB output, so an EPUB release cannot reach READY.
+* The official EPUB validator **EPUBCheck** is optional. Without it the EPUB is still checked by
+  Bookforge, and the H09 report adds a note "not checked by EPUBCheck" (it does not block the
+  release). To add the official check: install Java (11 or newer), download EPUBCheck from
+  https://www.w3.org/publishing/epubcheck/ and unzip it into `bookforge/tools/` so that
+  `bookforge/tools/epubcheck-<version>/epubcheck.jar` exists - or set the environment variable
+  `BOOKFORGE_EPUBCHECK` to the full path of `epubcheck.jar` (or of an `epubcheck` program).
+  Restart Bookforge; the self-test's environment notes say whether it was found.
 * No image-generation adapter is bundled: art operations accept uploaded images (rights must
   be cleared by review) and maps are rendered deterministically as SVG.
 * Single-author local use; there is no multi-user server or cloud sync.
