@@ -103,6 +103,7 @@ const MAX_TIMEOUT_MS = 900000;
 // refused with 409 meanwhile still gets its turn.
 const LATE_WINDOW_MAX_MS = 5 * 60 * 1000;
 const BODY_TIME_LIMIT_MS = 30000; // a request body must arrive within this
+const STOP_FLUSH_MS = 2000; // stop(): how long answers already given may take to go out before connections are dropped
 const MAX_PAIR_BODY_BYTES = 4096;
 const HOST_RE = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?$/i;
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -368,6 +369,7 @@ function createBridge(opts) {
   let server = null;
   let listeningPort = null;
   let lastError = null;
+  const openResponses = new Set(); // HTTP responses not yet written (L2)
 
   function pruneCache() {
     const t = now();
@@ -720,6 +722,11 @@ function createBridge(opts) {
 
   function handle(req, res) {
     req.on('error', () => {});
+    // L2: stop() lets these answers go out before it drops the connections.
+    openResponses.add(res);
+    const forget = () => openResponses.delete(res);
+    res.once('finish', forget);
+    res.once('close', forget);
     const url = String(req.url || '').split('?')[0];
     const fail = () => send(res, 500, errBody('INTERNAL', 'internal bridge error', false));
     if (!hostAllowed(req)) {
@@ -798,10 +805,21 @@ function createBridge(opts) {
     server = null;
     listeningPort = null;
     if (!srv) return Promise.resolve();
+    // L2: stop listening now (and drop idle keep-alive sockets), but let the
+    // answers just given above (503 "the bridge was stopped", with `typed`) be
+    // written before any open connection is dropped — closing every connection
+    // in this same tick reset them (ECONNRESET) instead. Anything still open
+    // after STOP_FLUSH_MS (a client that stopped reading) is dropped anyway.
     return new Promise((resolve) => {
       srv.close(() => resolve());
-      try { srv.closeAllConnections(); } catch (_) {}
+      try { srv.closeIdleConnections(); } catch (_) {}
       log('stopped', {});
+      const started = Date.now();
+      const drop = () => {
+        if (openResponses.size && Date.now() - started < STOP_FLUSH_MS) { setTimeout(drop, 10); return; }
+        try { srv.closeAllConnections(); } catch (_) {}
+      };
+      setImmediate(drop);
     });
   }
 

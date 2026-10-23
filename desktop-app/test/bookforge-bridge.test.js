@@ -395,6 +395,26 @@ async function main() {
     await C.bridge.stop();
     r = await pStop.catch(() => ({ status: 0 }));
     assert(stopToken && stopToken.cancelled === true, "stop() cancels a prompt that was not typed yet");
+    assert(r.status === 503 && r.json && /the bridge was stopped/.test(r.json.message) && r.json.typed === false,
+      `L2: the waiting caller gets 503 "the bridge was stopped" with typed:false, not a reset connection (got ${r.status})`);
+  }
+
+  // L2: a prompt already typed when the bridge is turned off: 503 typed:true is delivered
+  {
+    const T = makeHarness();
+    await T.bridge.start();
+    T.setSend(async () => ({ ok: true, seq: "0077" }));
+    const pTyped = request(T.port, "POST", "/v1/complete", { body: completeBody({ request_id: "stop-typed", timeout_ms: 600000 }) })
+      .then((x) => x, (e) => ({ status: 0, code: e.code }));
+    await sleep(40);
+    const port = T.port;
+    await T.bridge.stop();
+    const r = await pTyped;
+    assert(r.status === 503 && r.json && r.json.error === "SITE_NOT_READY" && r.json.typed === true,
+      `L2: stop() with a typed prompt in flight answers 503 typed:true (got ${r.status} ${r.code || ""})`);
+    let refused = false;
+    try { await request(port, "GET", "/v1/health"); } catch (e) { refused = true; }
+    assert(refused, "L2: the port is closed after stop()");
   }
 
   // --- BF-09: Host check, key before body, pairing not triggerable from a web page ---------
