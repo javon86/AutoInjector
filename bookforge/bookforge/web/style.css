@@ -311,6 +311,8 @@ th { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: 
 .state.blocked { border-color: var(--warn); background: var(--warn-soft); }
 .state.failed { border-color: var(--bad); background: var(--bad-soft); }
 .state.stale { border-color: var(--warn); background: var(--warn-soft); }
+.state.fix { border-color: var(--warn); background: var(--warn-soft); }
+.state.ask { border-color: var(--info); background: var(--info-soft); }
 .state.ok { border-color: var(--ok); background: var(--ok-soft); }
 .state.draft { border-color: var(--info); background: var(--info-soft); }
 .state ul { margin: 6px 0 0; padding-left: 1.2em; }

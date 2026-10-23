@@ -1,7 +1,7 @@
 // Bookforge browser workspace. Vanilla ES module, no network access beyond this local server.
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
-import { problemFor } from './problems.js';
+import { plainCheck, problemFor, slugName } from './problems.js';
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -196,9 +196,59 @@ function fieldHint(key, kind, required) {
   if (kind === 'group') return 'Fill in the parts below.';
   return `Write the ${thing} in your own words.`;
 }
+/** Plain names for the drafts the book path lists (their stored titles are often just record ids). */
+const ITEM_NAME = { A01: 'Character', A03: 'World', A04: 'Place', B01: 'Premise', B03: 'Main plot', B11: 'Chapter outline', C02: 'Chapter',
+  G02: 'Chapter order', G06: 'Chapter headings', G08: 'Title page', G01: 'Manuscript (all chapters together)', G05: 'Typography',
+  G04: 'Page layout', G07: 'Table of contents', H05: 'Book check', I01: 'Book format' };
+const AUX_NAME = { PAGE_PROFILE: 'page size', FONT_PROFILE: 'font', ASSET_MANIFEST: 'font file', PUBLICATION_METADATA: 'title and author',
+  TOC_STYLE: 'contents style', OUTPUT_PROFILE: 'file settings', MANUSCRIPT_PDF: 'PDF settings', EPUB_REFLOWABLE: 'EPUB settings', EDITABLE_DOCX: 'Word (DOCX) settings' };
+/** What approving a step's drafts means, as the object of "You are approving …". */
+const STEP_NOUN = { canon: 'these characters and places', premise: 'the premise', plot: 'the main plot', outline: 'the chapter outline',
+  chapters: 'these chapters', format: 'the book format', assemble: 'the put-together book' };
+const ITEM_NAMES = {};   // record id -> plain name found in its data (book-format settings)
+function isIdTitle(t, rid) { return !t || t === rid || /^[A-K]\d\d(?:-[0-9a-f]{6,})?$/i.test(String(t).trim()); }
+/** A draft's name for the author: chapter label, a real title, or what kind of thing it is ("Title page"). */
+function itemName(i) {
+  if (!i) return '';
+  if (ITEM_NAMES[i.record_id]) return ITEM_NAMES[i.record_id];
+  if (i.chapter_name) return i.chapter_name;
+  const t = String(i.title || '').replace(/^#\s+/, '').split('\n')[0].trim();
+  if (!isIdTitle(t, i.record_id)) return plainText(t);
+  return ITEM_NAME[i.module_id] || 'Draft';
+}
+/** Book-format settings carry their kind only in their data: look it up once ("Book format: page size"). */
+async function loadItemName(i) {
+  if (!i || i.module_id !== 'I01' || ITEM_NAMES[i.record_id] || !isIdTitle(i.title, i.record_id)) return itemName(i);
+  try {
+    const d = await recordDetail(i.record_id);
+    const data = (d.versions[d.versions.length - 1] || {}).data || {};
+    const aux = data.auxiliary_record || {};
+    const kind = (aux.data && AUX_NAME[aux.data.profile_type]) || AUX_NAME[aux.record_kind];
+    if (kind) ITEM_NAMES[i.record_id] = `Book format: ${kind}`;
+  } catch { /* the generic name stays */ }
+  return itemName(i);
+}
+/** "Chapter 1" for an outline chapter: its position in the outline (chapter ids like "ch1" are internal). */
+function chapterName(c, idx) { return `Chapter ${idx + 1}`; }
+/** Server-made titles and messages in the author's words ("Chapter ch1" -> "Chapter 1"). */
+function plainText(s) {
+  return String(s ?? '').replace(/\b([Cc]hapter) ch-?(\d+)\b/g, '$1 $2')
+    .replace(/ \((?:Set [A-K]|[A-K]\d\d(?:\/[A-K]\d\d)*)\)/g, '');   // step codes in passing: "(H05)", "(Set A)"
+}
+/** A check problem ("RULE: message") as plain words, the rule text behind 🔧 Details. */
+function checkItem(p) {
+  const c = plainCheck(p);
+  return h('li', null, c.text, c.raw ? tech(h('code', null, c.raw)) : null);
+}
 /** Technical detail (field key, format, error code…): in the page, shown only with 🔧 Details on. */
 function tech(...children) { return h('span', { class: 'tech' }, ' ', ...children); }
 function techBlock(...children) { return h('div', { class: 'tech tech-block' }, ...children); }
+/** An element's words without its 🔧 technical details (for the screen-reader announcement). */
+function spokenText(el) {
+  const c = el.cloneNode(true);
+  for (const t of c.querySelectorAll('.tech')) t.remove();
+  return (c.textContent || '').replace(/\s+/g, ' ').trim();
+}
 function techOn() { return document.documentElement.classList.contains('show-tech'); }
 function setTech(on) {
   document.documentElement.classList.toggle('show-tech', !!on);
@@ -254,6 +304,14 @@ function errTech(e) {
 function fmtTime(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+/** "23 October 2026, 20:03" (local time) for messages; fmtTime stays the compact form for lists. */
+function fmtWhen(iso) {
+  if (!iso) return 'an earlier time';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'an earlier time';
+  try { return d.toLocaleString(undefined, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  catch { return d.toLocaleString(); }
 }
 function shortHash(h) { return h ? h.slice(0, 10) + '…' : ''; }
 function announce(msg) {
@@ -446,10 +504,13 @@ async function recordDetail(rid, force) {
 }
 function opStats(opId) {
   const recs = S.records.filter(r => r.module_id === opId);
-  const st = { count: recs.length, approved: 0, stale: 0, draft: 0 };
+  // staleUsed: approved records that are out of date. Out-of-date working drafts nobody approved (helper drafts such as
+  // the plain first compile or chapter contexts, drafts replaced by a redo) don't need the author: the sidebar skips them.
+  const st = { count: recs.length, approved: 0, stale: 0, staleUsed: 0, draft: 0 };
   for (const r of recs) {
     if (r.approved_version) st.approved++;
     if (r.stale) st.stale++;
+    if (r.stale && r.approved_version) st.staleUsed++;
     if (r.lifecycle === 'DRAFT' || r.lifecycle === 'VALIDATED') st.draft++;
   }
   return st;
@@ -468,7 +529,7 @@ function opStateText(opId) {
   if (!st.count) return isRequired(opId) ? 'empty' : 'not required';
   const parts = [`${st.count} rec`];
   if (st.approved) parts.push(`✔${st.approved} approved`);
-  if (st.stale) parts.push(`⚠︎${st.stale} stale`);
+  if (st.staleUsed) parts.push(`⚠︎${st.staleUsed} out of date`);
   if (!st.approved && !st.stale) parts.push('draft');
   return parts.join(' · ');
 }
@@ -553,6 +614,7 @@ async function pickView(parts) {
     if (rest[0] === 'op' && S.opsById[rest[1]]) return m => viewOperation(m, rest[1]);
     if (rest[0] === 'rec' && rest[1]) return m => viewRecord(m, rest[1], rest[2] ? parseInt(rest[2], 10) : null);
     if (rest[0] === 'edit' && rest[1]) return m => viewEdit(m, rest[1]);
+    if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -639,12 +701,12 @@ function renderNav() {
     let staleSet = 0;
     for (const o of ops) {
       const st = opStats(o.id);
-      staleSet += st.stale;
-      ul.appendChild(h('li', { class: st.stale ? 'has-hazard' : null }, h('a', { href: link('p', S.pid, S.branch, 'op', o.id),
+      staleSet += st.staleUsed;
+      ul.appendChild(h('li', { class: st.staleUsed ? 'has-hazard' : null }, h('a', { href: link('p', S.pid, S.branch, 'op', o.id),
         'aria-current': curOp === o.id ? 'page' : null },
       h('span', { class: 'op-id' }, o.id), h('span', { class: 'op-name' }, o.name),
       h('span', { class: 'op-meta' }, opStateText(o.id))),
-      st.stale ? hazard({ code: 'STALE', message: `${st.stale} record(s) of this step are out of date.`, where: { book: profileOf().title || S.project.name, set: letter, step: o.name, op: o.id } },
+      st.staleUsed ? hazard({ code: 'STALE', message: `${st.staleUsed} approved part(s) of this step were made from something that changed since.`, where: { book: profileOf().title || S.project.name, set: letter, step: o.name, op: o.id } },
         { open: link('p', S.pid, S.branch, 'op', o.id), openLabel: 'Open the step' }, { small: true }) : null));
     }
     const btn = h('button', { type: 'button', class: 'set-toggle', 'aria-expanded': String(!!open), 'aria-controls': listId,
@@ -655,7 +717,7 @@ function renderNav() {
       } },
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▸'),
     h('span', { class: `set-letter set-${letter}` }, letter), h('span', { class: 'set-name' }, name),
-    staleSet ? h('span', { class: 'set-warn', title: `${staleSet} out-of-date record(s)` }, '⚠️') : null,
+    staleSet ? h('span', { class: 'set-warn', title: `${staleSet} approved part(s) here were made from something that changed since (for example a chapter you edited). 📘 Make my book shows what to redo.`, 'aria-label': `${staleSet} out of date` }, '⚠️') : null,
     h('span', { class: 'set-count' }, `${total} rec`));
     nav.appendChild(h('div', { class: `set-group set-${letter}${letter === curSet ? ' here' : ''}` }, btn, ul));
   }
@@ -667,9 +729,10 @@ function closeNav() {
 
 /* ======================================================================= common states */
 function stateBox(kind, title, ...body) {
-  const icons = { empty: '○', loading: '…', blocked: '⏸︎', failed: '✕', stale: '⚠︎', ok: '✔', draft: '✎' };
-  // The hidden word a screen reader says first: 'ok' is any success (not necessarily an approval).
-  const words = { empty: 'Empty', loading: 'Loading', blocked: 'Blocked', failed: 'Failed', stale: 'Stale', ok: 'Done', draft: 'Draft' };
+  const icons = { empty: '○', loading: '…', blocked: '⏸︎', failed: '✕', stale: '⚠︎', ok: '✔', draft: '✎', ask: '❓', fix: '⚠️' };
+  // The hidden word a screen reader says first: 'ok' is any success (not necessarily an approval); 'ask' is a question
+  // for the author, 'fix' something made that still needs fixing (amber, not an error).
+  const words = { empty: 'Empty', loading: 'Loading', blocked: 'Blocked', failed: 'Failed', stale: 'Stale', ok: 'Done', draft: 'Draft', ask: 'Please confirm', fix: 'Needs fixing' };
   return h('section', { class: `state ${kind}`, role: kind === 'failed' ? 'alert' : null },
     h('h3', null, h('span', { 'aria-hidden': 'true' }, icons[kind] || ''),
       h('span', { class: 'visually-hidden' }, `${words[kind] || kind}: `), title), ...body);
@@ -2320,6 +2383,223 @@ async function viewEdit(main, rid) {
   main.appendChild(card);
 }
 
+/* ======================================================================= views: read / change a chapter or the outline
+ * The guided path's reader and editor for the two things authors change most: a chapter's text (title + prose) and the
+ * chapter outline (per chapter: what happens, whose eyes, where). Saving makes a new draft version (UPDATE); the
+ * approved one stays in the book until the author approves the new one. The developer record view (versions,
+ * checks, sources, every field) stays one click away behind 🔧 Details.
+ */
+const SIMPLE_OPS = ['C02', 'B11'];
+/** Where a draft opens for the author: the simple reader for chapters and the outline, the record view otherwise. */
+function simpleHref(i) { return SIMPLE_OPS.includes(i.module_id) ? plink('write', i.record_id) : plink('rec', i.record_id); }
+/** Where "✏️ Edit" goes: the simple editor for chapters and the outline, the full form otherwise. */
+function simpleEditHref(i) { return SIMPLE_OPS.includes(i.module_id) ? plink('write', i.record_id, 'edit') : plink('edit', i.record_id); }
+/** "# Title\n\nText…" -> { title, body } (the chapter prose starts with its title line when it has one). */
+function splitChapter(text) {
+  const m = /^\s*#\s+([^\n]+)\n+/.exec(String(text || ''));
+  return m ? { title: m[1].trim(), body: String(text).slice(m[0].length) } : { title: '', body: String(text || '') };
+}
+function joinChapter(title, body) {
+  const t = title.trim(); const b = body.replace(/\s+$/, '');
+  return t ? `# ${t}\n\n${b}` : b;
+}
+const PLAN_FIELD = { what: 'plan.objective', pov: 'plan.pov_id', place: 'plan.location_id' };
+function planFact(item, pred) { return (item.facts || []).find(f => f && f.predicate === pred) || null; }
+/** The book's characters or places for a picker: [{ id, name }] (id = the name id the outline uses). */
+async function canonChoices(op) {
+  const recs = S.records.filter(r => r.module_id === op && r.record_kind === 'OUTPUT' && !['REJECTED', 'SUPERSEDED'].includes(r.lifecycle));
+  const out = [];
+  for (const r of recs) {
+    let id = r.record_id;
+    try {
+      const d = await recordDetail(r.record_id);
+      const v = d.versions.find(x => x.version === (r.approved_version || r.latest_version)) || d.versions[d.versions.length - 1];
+      const f = ((v && v.data && v.data.facts) || []).find(x => x.predicate === 'entity.name') || ((v && v.data && v.data.facts) || [])[0];
+      if (f && f.subject_id) id = f.subject_id;
+    } catch { /* the record id works too */ }
+    out.push({ id, rid: r.record_id, name: recordTitle(r) + (r.approved_version ? '' : ' (not approved yet)') });
+  }
+  return out;
+}
+function choiceSelect(id, choices, current, noneLabel, what) {
+  const sel = h('select', { id });
+  sel.appendChild(h('option', { value: '' }, noneLabel));
+  let found = current == null || current === '';
+  for (const c of choices) {
+    const on = c.id === current || c.rid === current;
+    if (on) found = true;
+    sel.appendChild(h('option', { value: c.id, selected: on }, c.name));
+  }
+  if (!found) sel.appendChild(h('option', { value: String(current), selected: true }, `“${slugName(current)}” (not one of your ${what})`));
+  return sel;
+}
+
+async function viewWrite(main, rid, mode) {
+  const d = await recordDetail(rid, true);
+  const latest = d.versions[d.versions.length - 1];
+  if (!SIMPLE_OPS.includes(latest.module_id) || latest.record_kind !== 'OUTPUT') { await viewRecord(main, rid, null); return; }
+  const isChapter = latest.module_id === 'C02';
+  let label = isChapter ? 'Chapter' : 'Chapter outline';
+  if (isChapter) {
+    try {
+      const book = await api('GET', bpath('/book'));
+      const st = book.steps.find(x => x.id === 'chapters');
+      const i = ((st && st.chapters) || []).findIndex(c => [c.prose, c.approved].some(r => r && r.record_id === rid));
+      if (i >= 0) label = chapterName(st.chapters[i], i);
+    } catch { /* "Chapter" is enough */ }
+  }
+  // the outline names characters and places by id: show and pick them by name
+  const [people, places] = isChapter ? [[], []] : await Promise.all([canonChoices('A01'), canonChoices('A04')]);
+  const nameOf = (list, v) => { const c = list.find(x => x.id === v || x.rid === v); return c ? c.name.replace(/ \(not approved yet\)$/, '') : slugName(v); };
+  const approvedV = latest.approved_version;
+  const waiting = ['DRAFT', 'VALIDATED'].includes(latest.lifecycle);
+  const title = h('h1', { class: 'wrap-anywhere' }, isChapter ? `📖 ${label}` : '📖 Chapter outline');
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], label), title),
+  h('div', { class: 'row' }, waiting ? badge('✎', approvedV ? 'New version, waiting for your approval' : 'Draft, waiting for your approval', 'b-warn')
+    : latest.lifecycle === 'APPROVED' || latest.lifecycle === 'LOCKED' ? badge('✔', 'Approved', 'b-ok') : lifecycleBadge(latest.lifecycle),
+  techToggle(), h('a', { class: 'btn small tech', href: plink('rec', rid) }, '🔧 Developer view (versions, checks, sources)'))));
+  const msg = h('div', { 'aria-live': 'polite' });
+  main.appendChild(msg);
+  if (waiting && approvedV) main.appendChild(h('p', { class: 'notice small' }, `This is a newer version. The approved one (version ${approvedV}) stays in the book until you approve this one.`));
+  const blocking = (latest.findings || []).filter(f => f.severity === 'BLOCKING' && ['FAIL', 'UNKNOWN'].includes(f.decision));
+  if (waiting && blocking.length) {
+    main.appendChild(stateBox('fix', 'BookForge’s checks found problems: change it below, or let the AI write it again',
+      h('ul', null, blocking.slice(0, 6).map(f => checkItem(`${f.rule_id}: ${f.message}`)))));
+  }
+  const card = h('section', { class: 'card simple-doc', 'aria-labelledby': 'sd-h' });
+  main.appendChild(card);
+  const back = () => h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book');
+  const approveBtn = () => waiting ? h('button', { type: 'button', class: 'primary', onclick: () => approveThis() }, '✔ Approve this version') : null;
+
+  const approveThis = async () => {
+    const ok = await choiceDialog('Approve as the author?', h('p', null, `You are approving this version of ${isChapter ? label : 'the chapter outline'}. It becomes part of the book; later steps built on the old version are marked to redo.`),
+      [{ id: 'yes', label: '✔ Yes, I approve' }]);
+    if (ok !== 'yes') return;
+    clear(msg).appendChild(loadingState('Approving…'));
+    try {
+      const out = await api('POST', bpath('/book/approve'), { body: { record_ids: [rid], versions: { [rid]: latest.version }, author_confirms: true } });
+      const r = (out.results || [])[0] || {};
+      if (r.ok) { toast(`${isChapter ? label : 'The chapter outline'} is approved`); S.details[rid] = null; try { await refreshRecords(); } catch { /* best effort */ } go(plink('book')); return; }
+      clear(msg).appendChild(stateBox('fix', 'Not approved yet: BookForge’s checks found problems', h('ul', null, (r.problems || []).map(checkItem)),
+        h('p', { class: 'small' }, h('strong', null, 'What to do: '), 'press ✏️ Change it and fix what the list says.')));
+    } catch (e) { clear(msg).appendChild(problemBox(toProblem(e, { book: S.project.name, step: label }), { retry: approveThis })); }
+  };
+
+  const reader = () => {
+    clear(card);
+    card.appendChild(h('h2', { id: 'sd-h', class: 'visually-hidden' }, isChapter ? 'The chapter' : 'The chapters, one by one'));
+    if (isChapter) {
+      const { title: t, body } = splitChapter(latest.data.text);
+      card.append(t ? h('h2', { class: 'chapter-title' }, t) : null, proseBlock(body || '(This chapter has no text yet.)'));
+    } else {
+      const ol = h('ol', { class: 'outline-read' });
+      for (const [i, it] of (latest.data.chapters || []).entries()) {
+        const what = (planFact(it, PLAN_FIELD.what) || {}).value || it.summary || '';
+        const pov = (planFact(it, PLAN_FIELD.pov) || {}).value; const place = (planFact(it, PLAN_FIELD.place) || {}).value;
+        ol.appendChild(h('li', null, h('strong', null, `Chapter ${i + 1}`), ' — ', plainText(String(what).replace(/^ch-?\d+:\s*/, '')),
+          h('div', { class: 'small muted' }, `Told by: ${pov ? nameOf(people, pov) : 'not decided yet'} · Where: ${place ? nameOf(places, place) : 'not decided yet'}`)));
+      }
+      card.appendChild(ol);
+    }
+    card.appendChild(h('div', { class: 'form-actions' }, approveBtn(),
+      h('button', { type: 'button', onclick: () => editor() }, '✏️ Change it'), back()));
+  };
+
+  const draftKey = `bf:simple:${S.pid}:${S.branch}:${rid}`;
+  const editor = async () => {
+    clear(card);
+    const saved = loadJSON(draftKey, null);
+    const draft = saved && saved.base_version === latest.version ? saved : null;
+    const err = h('div', { 'aria-live': 'polite' });
+    const status = h('span', { class: 'draft-state small muted', role: 'status' }, draft ? 'Your unsaved changes are back.' : '');
+    const save = h('button', { type: 'submit', class: 'primary' }, '💾 Save as a new version');
+    let collect;
+    const form = h('form', { novalidate: true });
+    card.append(h('h2', { id: 'sd-h' }, isChapter ? `Change ${label}` : 'Change the chapter outline'),
+      h('p', { class: 'small muted' }, 'Saving makes a new version for you to approve. ', approvedV ? 'The approved version stays in the book until then.' : ''), form);
+    if (isChapter) {
+      const parts = draft ? draft.v : splitChapter(latest.data.text);
+      const tIn = h('input', { type: 'text', id: 'sd-title', value: parts.title || '', 'aria-describedby': 'sd-title-h' });
+      const bIn = h('textarea', { id: 'sd-text', rows: '18', 'aria-describedby': 'sd-text-h', class: 'prose-edit' });
+      bIn.value = parts.body || '';
+      form.append(h('div', { class: 'field' }, h('label', { for: tIn.id }, 'Chapter title'), tIn, h('span', { class: 'hint', id: 'sd-title-h' }, 'Optional. Shown as “' + label + ': title”.')),
+        h('div', { class: 'field' }, h('label', { for: bIn.id }, 'The chapter text'), bIn, h('span', { class: 'hint', id: 'sd-text-h' }, 'Leave an empty line between paragraphs.')));
+      collect = () => ({ v: { title: tIn.value, body: bIn.value }, data: Object.assign({}, latest.data, { text: joinChapter(tIn.value, bIn.value) }),
+        empty: !bIn.value.trim() ? bIn : null });
+      bIn.focus();
+    } else {
+      const rows = [];
+      for (const [i, it] of (latest.data.chapters || []).entries()) {
+        const dv = draft && draft.v[i];
+        const what = dv ? dv.what : String((planFact(it, PLAN_FIELD.what) || {}).value || it.summary || '').replace(/^ch-?\d+:\s*/, '');
+        const pov = dv ? dv.pov : (planFact(it, PLAN_FIELD.pov) || {}).value;
+        const place = dv ? dv.place : (planFact(it, PLAN_FIELD.place) || {}).value;
+        const wIn = h('textarea', { id: `sd-what-${i}`, rows: '2' }); wIn.value = what;
+        const pSel = choiceSelect(`sd-pov-${i}`, people, pov, '— Not decided yet —', 'characters');
+        const lSel = choiceSelect(`sd-place-${i}`, places, place, places.length ? '— Not decided yet —' : '— No place (the book has no places yet) —', 'places');
+        rows.push({ it, wIn, pSel, lSel });
+        form.appendChild(h('fieldset', { class: 'field outline-chapter' }, h('legend', null, `Chapter ${i + 1}`),
+          h('div', { class: 'field' }, h('label', { for: wIn.id }, 'What happens'), wIn),
+          h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: pSel.id }, 'Told through the eyes of'), pSel),
+            h('div', { class: 'field' }, h('label', { for: lSel.id }, 'Where it happens'), lSel))));
+      }
+      collect = () => {
+        const chapters = rows.map(({ it, wIn, pSel, lSel }) => {
+          const c = JSON.parse(JSON.stringify(it));
+          const id = (planFact(c, 'plan.item_id') || {}).value || ((c.facts || [])[0] || {}).subject_id;
+          const setFact = (pred, value) => {
+            const f = planFact(c, pred);
+            if (f) f.value = value;
+            else if (id) (c.facts = c.facts || []).push({ assertion_type: 'PLAN', effective_from: null, effective_to: null, predicate: pred, source_refs: [], subject_id: id, value });
+          };
+          setFact(PLAN_FIELD.what, wIn.value.trim());
+          setFact(PLAN_FIELD.pov, pSel.value || null);
+          setFact(PLAN_FIELD.place, lSel.value || null);
+          c.summary = /^ch-?\d+:\s/.test(it.summary || '') && id ? `${id}: ${wIn.value.trim()}` : wIn.value.trim();
+          return c;
+        });
+        return { v: rows.map(r => ({ what: r.wIn.value, pov: r.pSel.value, place: r.lSel.value })),
+          data: Object.assign({}, latest.data, { chapters }), empty: (rows.find(r => !r.wIn.value.trim()) || {}).wIn || null };
+      };
+      if (rows[0]) rows[0].wIn.focus();
+    }
+    form.append(err, h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: () => { removeKey(draftKey); reader(); } }, 'Cancel'), back(), status));
+    form.addEventListener('input', () => { saveJSON(draftKey, { base_version: latest.version, v: collect().v }); status.textContent = 'Changes kept in this browser until you save.'; });
+    form.addEventListener('change', () => saveJSON(draftKey, { base_version: latest.version, v: collect().v }));
+    let key = null; let keySig = '';
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault(); clear(err);
+      const c = collect();
+      if (c.empty) { err.appendChild(stateBox('failed', 'Something is empty', h('p', null, isChapter ? 'Write the chapter text (spaces alone don’t count).' : 'Write a sentence for every chapter: what happens in it.'))); c.empty.focus(); return; }
+      const sig = JSON.stringify(c.data);
+      if (sig !== keySig) { key = randomKey(); keySig = sig; }   // the same content resent reuses its key: never saved twice
+      save.disabled = true; err.appendChild(loadingState('Saving…'));
+      try {
+        const out = await api('POST', '/dispatch', { body: { request: { project_id: S.pid, branch_id: S.branch, target_operation: latest.module_id, action: 'UPDATE',
+          payload: c.data, base_ref: latest.ref, input_refs: [], idempotency_key: key } } });
+        const resp = out.response || {};
+        clear(err);
+        if ((resp.errors || []).length || !(resp.output_refs || []).length) {
+          err.appendChild(stateBox('failed', 'Not saved', h('ul', null, (resp.errors || []).map(e => h('li', null, plainError(e), errTech(e)))),
+            h('p', { class: 'small' }, 'Your changes are kept here: fix them and save again.')));
+          save.disabled = false; return;
+        }
+        removeKey(draftKey);
+        S.details[rid] = null;
+        try { await refreshRecords(); } catch { /* best effort */ }
+        toast(`Saved as version ${resp.output_refs[0].version}: approve it to put it in the book`);
+        go(plink('write', rid));   // the reader, showing the new version (and its checks)
+      } catch (e) {
+        clear(err).appendChild(problemBox(toProblem(e, { book: S.project.name, step: label }), {}));
+        save.disabled = false;
+      }
+    });
+  };
+  const stored = loadJSON(draftKey, null);
+  if (mode === 'edit' || (stored && stored.base_version === latest.version)) await editor(); else reader();
+}
+
 /* ======================================================================= views: manifest */
 async function viewManifest(main) {
   const m = await api('GET', bpath('/manifest'));
@@ -2502,7 +2782,7 @@ async function viewSettings(main) {
     h('ul', null,
       h('li', null, 'Bookforge has exactly three AI slots: AI-1, AI-2 and AI-3. All are optional.'),
       h('li', null, 'When a creative operation runs, its context package (only the records that operation needs from the current project) is sent to the one slot selected for that job — never to the other slots, and never with secrets or unrelated projects.'),
-      h('li', null, 'Without a connected slot, creative operations answer CAPABILITY_UNAVAILABLE and accept a manual candidate instead: you write the output in the form and Bookforge validates and stores it. Nothing leaves this computer in manual mode.'),
+      h('li', null, 'Without a connected slot, the creative steps can’t use an AI: BookForge opens the form for you to write that part yourself, then checks and stores it. Nothing leaves this computer when you write it yourself.', tech(h('code', null, 'CAPABILITY_UNAVAILABLE'), ' + manual candidate')),
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
       h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
@@ -2683,7 +2963,7 @@ function slotForm(s) {
     f('effort', 'Effort', effort, 'Higher effort is slower and uses more tokens.'),
     f('caps', 'Capabilities', caps, 'Comma separated, e.g. text, json.'),
     f('roles', 'Roles', roles, 'Optional, comma separated operation IDs or set letters, e.g. B, C02. Matching work goes only to slots with that role.'),
-    f('ctx', 'Context limit (tokens)', ctxLimit, 'Larger mandatory context is split or blocked with CONTEXT_TOO_LARGE.'),
+    f('ctx', 'Context limit (tokens)', ctxLimit, 'How much this AI can read at once. Larger required material is split, or the step stops and says it is too much for this AI.'),
     f('maxout', 'Max output (tokens)', maxOut),
     f('conc', 'Max concurrent jobs', maxConc, 'Autoinjector slots always run one job at a time.'),
     f('cur', 'Currency', currency),
@@ -3293,7 +3573,7 @@ function initBibleButton() {
   btn.addEventListener('click', ev => openBible(ev.currentTarget));
   const d = $('#bible-dialog');
   d.addEventListener('cancel', ev => { ev.preventDefault(); if (!ev.target.closest || !ev.target.closest('.info-wrap')) closeBible(); });
-  d.addEventListener('close', () => { clearTimeout(BB.poll); });
+  d.addEventListener('close', () => { clearTimeout(BB.poll); afterWorkDialog(); });
 }
 async function openBible(opener) {
   const d = $('#bible-dialog');
@@ -3315,6 +3595,15 @@ async function openBible(opener) {
     renderBible();
     if (BB.session && BB.session.busy) bbPoll();
   } catch (e) { bbShell(failedState('The Bible Builder could not open', e)); }
+}
+/** A dialog that saves drafts (📖 Bible Builder, ✨ Make up characters) closed: the page behind it and the sidebar
+ * show what changed now, not after a reload (the book page redraws; other pages refresh their record lists). */
+async function afterWorkDialog() {
+  try { await refreshRecords(); } catch { /* best effort */ }
+  if (!S.bookRedraw) return;
+  await S.bookRedraw();
+  const f = document.activeElement;
+  if (!f || f === document.body || !document.contains(f)) { const b = document.querySelector('#main .book-top button.primary'); if (b) b.focus(); }
 }
 function closeBible() {
   const d = BB.dialog; if (!d) return;
@@ -4619,18 +4908,46 @@ async function viewBook(main) {
   const drawBook = async () => {
     try { book = await api('GET', bpath('/book')); }
     catch (e) { clear(holder).appendChild(failedState('Could not load the book path', e, h('p', null, h('button', { type: 'button', onclick: drawBook }, 'Try again')))); return; }
+    if (!document.contains(holder)) return;   // the author moved on meanwhile
     renderBook(holder, book, drawBook);
+    refreshTask();   // the sidebar's Current task follows the page right away (not on its next 10 s tick)
   };
+  // Dialogs that save drafts (Bible Builder, ✨ Make up characters) redraw this page when they close.
+  S.bookRedraw = drawBook;
+  S.leaveHooks.push(() => { if (S.bookRedraw === drawBook) S.bookRedraw = null; });
   await drawBook();
   S.onRecordsChanged = null;
 }
 
 const BOOK_ERR = {};   // step id -> the problem of the last attempt on this page (shown as ⚠️ on that step)
 const RAIL_WORD = { done: 'done', needs_you: 'needs you', ai_can: 'AI can do it', ready: 'ready', blocked: 'waiting', problem: 'problem' };
+/** The newest revision of an approved chapter when it is a draft waiting for approval (the author or the AI changed it). */
+function waitingRevision(c) {
+  const p = c.prose; const a = c.approved;
+  if (!p || !a || !['DRAFT', 'VALIDATED'].includes(p.lifecycle)) return null;
+  return p.record_id !== a.record_id || p.version > a.version ? p : null;
+}
+/** Plain words for a step's own message ("B11 could not be created (BLOCKED)." is how the server says it). */
+function stepMessage(out, noun) {
+  const m = plainText(out.message || '');
+  if (/^[A-K]\d\d could not be created/.test(m)) return [`The ${noun || 'draft'} could not be made: BookForge’s checks did not accept it.`, tech(h('code', null, m))];
+  return [m || (out.ok ? 'Done' : 'Not done')];
+}
 function renderBook(holder, book, redraw) {
   clear(holder);
   const pct = Math.round((book.done_count / book.total) * 100);
   const msg = h('div', { 'aria-live': 'polite', class: 'book-msg' });
+  // Plain names: chapters by their place in the outline, other drafts by what they are.
+  const chapStep = book.steps.find(x => x.id === 'chapters');
+  const chapOf = {};
+  ((chapStep && chapStep.chapters) || []).forEach((c, i) => {
+    c.name = chapterName(c, i);
+    for (const r of [c.prose, c.approved]) if (r) { r.chapter_name = c.name; chapOf[r.record_id] = c.name; }
+  });
+  for (const st of book.steps) for (const i of st.approve || []) if (chapOf[i.record_id]) i.chapter_name = chapOf[i.record_id];
+  const stepOfRecord = rid => book.steps.find(st => (st.approve || []).some(a => a.record_id === rid)
+    || (st.chapters || []).some(c => [c.prose, c.approved].some(r => r && r.record_id === rid))) || null;
+  const nameEl = i => h('span', { 'data-item-name': i.record_id }, itemName(i));
   let curStep = null;
   const run = async (fn, busyText, stepId) => {
     curStep = stepId || null;
@@ -4645,15 +4962,27 @@ function renderBook(holder, book, redraw) {
       }
       if (out && !out.ok && curStep) BOOK_ERR[`${S.pid}:${curStep}`] = { code: out.code || 'FAILED', message: out.message, details: out.problems || null };
       const refused = (out && out.results || []).filter(r => !r.ok);
-      const note = out ? stateBox(out.ok ? 'ok' : 'failed', out.message || (out.ok ? 'Done' : 'Not done'),
-        (out.problems || []).length ? h('ul', null, out.problems.map(p => h('li', null, p))) : null,
-        refused.length ? h('ul', null, refused.map(r => h('li', null, `${r.record_id}: ${(r.problems || []).join('; ')}`))) : null,
-        refused.length ? h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), refused[0].fix || 'Edit it so the checks pass.') : null,
-        refused.length ? redoBox(refused.map(r => Object.assign({ title: '' }, r))) : null) : null;
+      const noun = STEP_NOUN[curStep] || '';
+      // A new draft the checks refuse is not "done": say it needs fixing (amber) and offer the ways forward.
+      const fresh = out && out.ok && out.created && out.book ? out.book.steps.flatMap(st => st.approve || []).find(i => i.record_id === out.created.record_id) : null;
+      let note = null;
+      if (fresh && (fresh.problems || []).length) {
+        note = stateBox('fix', `Your AI wrote a new version of the ${noun.replace(/^(the|these) /, '') || 'draft'}, but it needs fixing before you can approve it`,
+          h('ul', null, fresh.problems.slice(0, 4).map(checkItem)),
+          h('p', { class: 'small' }, h('strong', null, 'What to do: '), 'let the AI write it again, or edit it yourself.'),
+          redoBox([fresh]));
+      } else if (out) {
+        note = stateBox(out.ok ? 'ok' : 'failed', ...stepMessage(out, noun.replace(/^(the|these) /, '')),
+          (out.problems || []).length ? h('ul', null, out.problems.map(checkItem)) : null,
+          refused.length ? h('ul', null, refused.map(r => h('li', null, h('strong', null, itemName(Object.assign({ module_id: r.module_id, title: '' }, r, { chapter_name: chapOf[r.record_id] }))), ': ',
+            h('ul', null, (r.problems || []).map(checkItem))))) : null,
+          refused.length ? h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), refused[0].fix || 'Edit it so the checks pass.') : null,
+          refused.length ? redoBox(refused.map(r => Object.assign({ title: '' }, r, { chapter_name: chapOf[r.record_id] }))) : null);
+      }
       try { await refreshRecords(); } catch { /* best effort */ }
-      if (out && out.book) renderBook(holder, out.book, redraw); else await redraw();
+      if (out && out.book) { renderBook(holder, out.book, redraw); refreshTask(); } else await redraw();
       // the message goes into the freshly drawn page, after the steps are up to date
-      const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(out.message || ''); }
+      const nm = holder.querySelector('.book-msg'); if (nm && note) { clear(nm).appendChild(note); announce(spokenText(note)); }
     } catch (e) {
       const st = book.steps.find(x => x.id === curStep);
       const p = toProblem(e, { book: profileOf().title || S.project.name, step: st ? st.title : 'Make my book', set: st && st.op ? st.op[0] : null, op: st ? st.op : null });
@@ -4666,25 +4995,27 @@ function renderBook(holder, book, redraw) {
   const post = (action, body) => api('POST', bpath(`/book/${action}`), { body: body || {} });
   const approve = async (items, what) => {
     if (!items.length) return;
-    const names = items.map(i => `• ${i.module_id} ${i.title}`).join('\n');
+    await Promise.all(items.map(loadItemName));
+    const names = items.map(i => `• ${itemName(i)}`).join('\n');
     const ok = await choiceDialog('Approve as the author?', h('div', null,
       h('p', null, `You are approving ${what}. Approving makes it part of the book; later steps build on it. If you change it later, the steps built on it are marked to redo.`),
       h('pre', { class: 'small' }, names),
       h('p', { class: 'small muted' }, 'Some steps need an explicit approval record; BookForge records one for exactly these versions because you confirm here.')),
     [{ id: 'yes', label: '✔ Yes, I approve' }]);
     if (ok !== 'yes') return;
-    await run(() => post('approve', { record_ids: items.map(i => i.record_id), author_confirms: true }), 'Approving…', (book.steps.find(s => (s.approve || []).some(a => items.some(i => i.record_id === a.record_id))) || {}).id);
+    const versions = Object.fromEntries(items.filter(i => Number.isInteger(i.version)).map(i => [i.record_id, i.version]));
+    await run(() => post('approve', { record_ids: items.map(i => i.record_id), versions, author_confirms: true }), 'Approving…', (stepOfRecord(items[0].record_id) || {}).id);
   };
-  let bbPendingP = null;   // the wizard's Bible Builder entries not saved yet (canon step), when there are any
+  let bbPending = null; let bbFirst = null;   // the wizard's Bible Builder entries not saved yet (canon step), when there are any
   const redoBox = (items) => {
     // A draft BookForge's checks refuse cannot be approved by pressing approve again: offer to redo or edit it.
     const box = h('div', { class: 'refused-box' });
     for (const i of items) {
       const redo = i.redo;
-      box.appendChild(h('div', { class: 'row' }, h('span', { class: 'small' }, `${i.module_id} · ${i.title || i.record_id}: `),
+      box.appendChild(h('div', { class: 'row' }, h('span', { class: 'small' }, itemName(i), ': '),
         redo && book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post(redo.action, Object.assign({}, redo, { action: undefined, redo: true })),
-          'Your AI is writing it again… (web AIs can take a few minutes)', (book.steps.find(st => (st.approve || []).some(a => a.record_id === i.record_id)) || {}).id) }, '🔁 Redo with AI') : null,
-        h('a', { class: 'btn small', href: plink('rec', i.record_id) }, '✏️ Edit it')));
+          'Your AI is writing it again… (web AIs can take a few minutes)', (stepOfRecord(i.record_id) || {}).id) }, '🔁 Redo with AI') : null,
+        h('a', { class: 'btn small', href: simpleEditHref(i) }, '✏️ Edit it')));
     }
     return box;
   };
@@ -4694,19 +5025,19 @@ function renderBook(holder, book, redraw) {
     if (s.approve && s.approve.length) {
       const ok = s.approve.filter(i => !(i.problems || []).length);
       if (!ok.length) {   // every waiting draft is refused by BookForge's checks: approving again cannot help
-        clear(msg).appendChild(stateBox('failed', `BookForge’s checks found problems in the ${s.title.toLowerCase()}: let the AI write it again, or edit it`,
-          h('ul', null, s.approve.flatMap(i => (i.problems || []).slice(0, 4).map(p => h('li', null, p)))), redoBox(s.approve),
+        clear(msg).appendChild(stateBox('failed', `BookForge’s checks found problems in ${STEP_NOUN[s.id] || s.title.toLowerCase()}: let the AI write it again, or edit it`,
+          h('ul', null, s.approve.flatMap(i => (i.problems || []).slice(0, 4).map(checkItem))), redoBox(s.approve),
           h('p', { class: 'small muted' }, 'Changed something it depends on since? ',
-            h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, s.title.toLowerCase()) }, '✔ Check again and approve'))));
+            h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, STEP_NOUN[s.id] || 'these drafts') }, '✔ Check again and approve'))));
         msg.querySelector('button') && msg.querySelector('button').focus();
         return;
       }
-      await approve(ok, s.title.toLowerCase()); return;
+      await approve(ok, STEP_NOUN[s.id] || 'these drafts'); return;
     }
     if (s.state === 'blocked') { toast(`Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}`); return; }
     if (s.id === 'canon') {
       // characters/places the 🚀 wizard asked the AI for and that are not saved yet: review and save those first
-      const pend = bbPendingP ? await bbPendingP : null;
+      const pend = bbPending || (bbFirst ? await bbFirst : null);
       if (pend && (pend.items.length || pend.busy)) { openBible(holder.querySelector('#step-canon .bb-wizard button')); return; }
       if (book.ai_ready) openMakeDialog('A01', null, null); else goNew('A01');
       return;
@@ -4714,7 +5045,7 @@ function renderBook(holder, book, redraw) {
     if (['premise', 'plot', 'outline'].includes(s.id)) { await run(() => post('create', { op: s.op }), book.ai_ready ? 'Your AI is writing… (web AIs can take a few minutes)' : 'Preparing the form…', s.id); return; }
     if (s.id === 'chapters') {
       const c = (s.chapters || []).find(x => x.state !== 'done' && !(x.prose && ['DRAFT', 'VALIDATED'].includes(x.prose.lifecycle)));
-      if (c) await run(() => post('write_chapter', { chapter_id: c.chapter_id }), book.ai_ready ? `Your AI is writing chapter ${c.chapter_id}…` : 'Preparing the chapter form…', s.id);
+      if (c) await run(() => post('write_chapter', { chapter_id: c.chapter_id }), book.ai_ready ? `Your AI is writing ${c.name}…` : 'Preparing the chapter form…', s.id);
       return;
     }
     if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…', s.id);
@@ -4739,12 +5070,12 @@ function renderBook(holder, book, redraw) {
       h('div', { class: 'row space bs-head' }, h('h3', null, s.title, s.id === book.next ? h('span', { class: 'here-tag' }, '👉 You are here') : null),
         h('span', { class: 'row' }, s.op ? setChip(s.op[0], s.op) : null, badge(b[0], b[1], b[2]),
           err ? hazard(Object.assign({}, toProblem(err), { where: { book: profileOf().title || S.project.name, step: s.title, set: s.op ? s.op[0] : null, op: s.op } }), { retry: () => doStep(s) }) : null)),
-      h('p', { class: 'small' }, s.about));
+      h('p', { class: 'small' }, plainText(s.about)));
     if (s.state === 'blocked' && s.waiting_for) li.appendChild(h('p', { class: 'small muted' }, `Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}.`));
     if (s.approve && s.approve.length) {
-      li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: plink('rec', i.record_id) }, `${i.module_id} · ${i.title}`), ' ', lifecycleBadge(i.lifecycle),
+      li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: simpleHref(i) }, nameEl(i)), ' ', lifecycleBadge(i.lifecycle),
         (i.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), ' ', redoBox([i])] : null,
-        h('button', { type: 'button', class: 'small', onclick: () => approve([i], `“${i.title}”`) }, '✔ Approve')))));
+        h('button', { type: 'button', class: 'small', onclick: () => approve([i], `“${itemName(i)}”`) }, '✔ Approve')))));
     }
     const acts = h('div', { class: 'row' });
     if (s.id === 'profile') acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => openProfileDialog(() => redraw()) }, s.state === 'done' ? 'Edit' : 'Fill in'));
@@ -4755,24 +5086,39 @@ function renderBook(holder, book, redraw) {
       if (s.state !== 'done') {
         const note = h('div', { class: 'bb-wizard', 'aria-live': 'polite' });
         li.appendChild(note);
-        bbPendingP = wizardCanon(note);
+        bbFirst = wizardCanon(note, v => { bbPending = v; }, redraw);
       }
     }
     if (['premise', 'plot', 'outline'].includes(s.id) && s.state !== 'done' && s.state !== 'blocked') {
-      if (book.ai_ready) acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('create', { op: s.op }), 'Your AI is writing…') }, '✨ Let my AI draft it'));
-      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => run(() => post('create', { op: s.op, manual: true }), 'Preparing the form…') }, '✍️ Write it myself'));
-      acts.appendChild(h('a', { class: 'btn small', href: plink('op', s.op) }, `Open ${s.op}`));
+      if (book.ai_ready) acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('create', { op: s.op }), 'Your AI is writing…', s.id) }, '✨ Let my AI draft it'));
+      acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => run(() => post('create', { op: s.op, manual: true }), 'Preparing the form…', s.id) }, '✍️ Write it myself'));
+      acts.appendChild(h('a', { class: 'btn small tech', href: plink('op', s.op) }, `Open ${s.op} (all fields)`));
+    }
+    if (s.id === 'outline' && s.state === 'done') {
+      const o = S.records.find(r => r.module_id === 'B11' && r.approved_version);
+      if (o) acts.appendChild(h('a', { class: 'btn small', href: plink('write', o.record_id) }, '📖 Read or change the outline'));
+      if (o && o.latest_version > o.approved_version && ['DRAFT', 'VALIDATED'].includes(o.lifecycle)) {
+        const w = { record_id: o.record_id, version: o.latest_version, module_id: 'B11', title: '', lifecycle: o.lifecycle };
+        li.appendChild(h('div', { class: 'chapter-revision' }, badge('✎', 'Your changes wait for approval', 'b-warn'), ' ',
+          h('a', { class: 'btn small', href: plink('write', o.record_id) }, '📖 Read the new version'), ' ',
+          h('button', { type: 'button', class: 'small primary', onclick: () => approve([w], 'the new version of the chapter outline') }, '✔ Approve the new version')));
+      }
     }
     if (s.id === 'chapters' && (s.chapters || []).length) {
       li.appendChild(h('ul', { class: 'book-items' }, s.chapters.map(c => {
         const cb = BOOK_STATE[c.state] || BOOK_STATE.blocked;
         const wc = wordsBy[c.chapter_id];
-        return h('li', null, h('strong', null, c.chapter_id), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]),
+        const w = waitingRevision(c);
+        return h('li', { 'data-chapter': c.chapter_id }, h('strong', null, c.name), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]),
           wc && (wc.approved_words || wc.draft_words) ? h('span', { class: 'small muted' }, ` ${Math.max(wc.approved_words, wc.draft_words)} words `) : ' ',
-          c.prose ? h('a', { class: 'btn small', href: plink('rec', c.prose.record_id) }, 'Read') : null,
+          c.prose ? h('a', { class: 'btn small', href: plink('write', (w ? c.approved : c.prose).record_id) }, '📖 Read') : null,
+          w ? h('div', { class: 'chapter-revision' }, badge('✎', 'Your changes wait for approval', 'b-warn'), ' ',
+            (w.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), h('ul', { class: 'small' }, w.problems.slice(0, 3).map(checkItem)), redoBox([w])] : null,
+            h('a', { class: 'btn small', href: plink('write', w.record_id) }, '📖 Read the new version'), ' ',
+            h('button', { type: 'button', class: 'small primary', onclick: () => approve([w], `the new version of ${c.name}`) }, '✔ Approve the new version')) : null,
           c.state !== 'done' && !(c.prose && ['DRAFT', 'VALIDATED'].includes(c.prose.lifecycle))
-            ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id }), `Your AI is writing ${c.chapter_id}… (web AIs can take a few minutes)`) }, '✨ Write it with AI') : null,
-              h('button', { type: 'button', class: 'small', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id, manual: true }), 'Preparing the chapter form…') }, '✍️ Write it myself')] : null);
+            ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id }), `Your AI is writing ${c.name}… (web AIs can take a few minutes)`, 'chapters') }, '✨ Write it with AI') : null,
+              h('button', { type: 'button', class: 'small', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id, manual: true }), 'Preparing the chapter form…', 'chapters') }, '✍️ Write it myself')] : null);
       })));
     }
     if (s.id === 'chapters' && book.ai_ready && (s.chapters || []).some(c => c.state !== 'done' && !c.prose)) {
@@ -4788,8 +5134,8 @@ function renderBook(holder, book, redraw) {
         : { setup_format: '⚙️ Set up the book format', assemble: '🧩 Put the book together', export: '📦 Export my book', check: '🔎 Check the book' }[s.action];
       acts.appendChild(h('button', { type: 'button', class: 'small primary', onclick: () => run(() => post(s.action), 'Working…', s.id) }, label));
     }
-    if (s.approve && s.approve.length > 1) acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, `${s.approve.length} items`) }, `✔ Approve all ${s.approve.length}`));
-    if (s.id === 'check' && s.result) li.appendChild(h('p', { class: 'small' }, 'Result: ', badge(s.result === 'PASS' ? '✔' : '✕', s.result, s.result === 'PASS' ? 'b-ok' : 'b-bad')));
+    if (s.approve && s.approve.length > 1) acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, `these ${s.approve.length} drafts`) }, `✔ Approve all ${s.approve.length}`));
+    if (s.id === 'check' && s.result) li.appendChild(h('p', { class: 'small' }, 'Result: ', badge(s.result === 'PASS' ? '✔' : '✕', s.result === 'PASS' ? 'Passed' : 'Problems found', s.result === 'PASS' ? 'b-ok' : 'b-bad')));
     if (s.id === 'export' && (s.files || []).length) {
       li.appendChild(h('div', { class: 'downloads' }, h('strong', null, '⬇ Download my book: '),
         s.files.map(f => h('button', { type: 'button', class: f.out_of_date ? 'small' : 'primary small', title: f.out_of_date ? `Made with the old title “${f.title || ''}”: export again for the new one` : null,
@@ -4805,23 +5151,44 @@ function renderBook(holder, book, redraw) {
     const st = book.steps.find(x => x.id === want.id);
     if (st && st.state !== 'done') setTimeout(() => doStep(st), 0);
   }
-  holder.appendChild(h('p', { class: 'small muted' }, 'Behind the scenes this uses the real steps: A01 → B01 → B03 → B11 → C01/C02 → book format (I01) → G02/G01/G05/G04/G07 → G11/G12/G13 → H05. Full release readiness (H10) is in the Quality Checks set.'));
+  holder.appendChild(h('div', { class: 'row small muted book-tech' }, techToggle(),
+    techBlock('Behind the scenes this uses the real steps: A01 → B01 → B03 → B11 → C01/C02 → book format (I01) → G02/G01/G05/G04/G07 → G11/G12/G13 → H05. Full release readiness (H10) is in the Quality Checks set.')));
+  // book-format settings name their kind only in their data: fill those names in once known
+  for (const el of holder.querySelectorAll('[data-item-name]')) {
+    const i = book.steps.flatMap(st => st.approve || []).find(x => x.record_id === el.dataset.itemName);
+    if (i && i.module_id === 'I01') loadItemName(i).then(n => { el.textContent = n; });
+  }
 }
 
-async function wizardCanon(note) {
-  // The 🚀 wizard asks the AI for characters/places in a Bible Builder session; show them here until they are saved.
-  try {
-    const r = await api('GET', `/bible-builder?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
-    const sess = r && r.session;
-    if (!sess) return null;
-    const items = (sess.items || []).filter(i => i.status === 'done' && !i.created_ref && i.valid !== false);
-    if (!items.length && !sess.busy) return null;
-    clear(note).append(h('p', { class: 'small notice' },
-      sess.busy && !items.length ? '⏳ Your AI is still making the characters and places you asked for in the wizard…'
-        : `✨ Your AI made these for you (not saved yet): ${items.map(i => `${i.name} (${i.op})`).join(', ')}. `,
-      h('button', { type: 'button', class: 'small primary', onclick: ev => openBible(ev.currentTarget) }, '📖 Review and save them')));
-    return { busy: !!sess.busy, items };
-  } catch { return null; }   // the book page works without it
+/** The 🚀 wizard asks the AI for characters/places in a Bible Builder session: show them here until they are saved,
+ * and keep watching while the AI is still busy (the note changes to "made these" by itself). onChange gets each state;
+ * the returned promise is the first one. */
+function wizardCanon(note, onChange, redraw) {
+  let wasBusy = false;
+  const check = async () => {
+    let st = null;
+    try {
+      const r = await api('GET', `/bible-builder?project_id=${encodeURIComponent(S.pid)}&branch_id=${encodeURIComponent(S.branch)}`);
+      const sess = r && r.session;
+      if (sess) {
+        const items = (sess.items || []).filter(i => i.status === 'done' && !i.created_ref && i.valid !== false);
+        if (items.length || sess.busy) st = { busy: !!sess.busy, items };
+      }
+    } catch { st = wasBusy ? { busy: true, items: [] } : null; }   // the book page works without it; retry while busy
+    if (!document.contains(note) && wasBusy) return st;   // the page was redrawn or left: that page watches now
+    clear(note);
+    if (st) {
+      note.append(h('p', { class: 'small notice' },
+        st.busy && !st.items.length ? [h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Your AI is still making the characters and places you asked for in the wizard…']
+          : `✨ Your AI made these for you (not saved yet): ${st.items.map(i => `${i.name} (${(ITEM_NAME[i.op] || 'entry').toLowerCase()})`).join(', ')}. `,
+        h('button', { type: 'button', class: 'small primary', onclick: ev => openBible(ev.currentTarget) }, '📖 Review and save them')));
+    }
+    if (onChange) onChange(st);
+    if (st && st.busy) { wasBusy = true; setTimeout(() => { if (document.contains(note)) check(); }, 2000); }
+    else if (wasBusy && !st && redraw && document.contains(note)) redraw();   // made and already saved elsewhere
+    return st;
+  };
+  return check();
 }
 
 async function downloadAsset(f) {
@@ -4852,15 +5219,15 @@ function taskCard(where) {
   if (!t) { box.appendChild(h('p', { class: 'small muted' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Checking what is next…')); return box; }
   const ct = t.current_task || {};
   box.appendChild(h('button', { type: 'button', class: `primary big task-btn ts-${ct.state}`, 'data-action': ct.action || '',
-    onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), ct.title || 'Open Make my book'));
-  if (ct.message) box.appendChild(h('p', { class: 'small task-msg' }, ct.message));
-  if (t.working_on) box.appendChild(h('p', { class: 'small task-working' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` ${t.working_on.title}…`));
+    onclick: ev => runTask(ct, ev.currentTarget) }, h('span', { 'aria-hidden': 'true' }, `${TASK_ICON[ct.state] || '▶'} `), plainText(ct.title) || 'Open Make my book'));
+  if (ct.message) box.appendChild(h('p', { class: 'small task-msg' }, plainText(ct.message)));
+  if (t.working_on) box.appendChild(h('p', { class: 'small task-working' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` ${plainText(t.working_on.title)}…`));
   if (t.book && t.book.words && t.book.words.words) {
     const w = t.book.words;
     box.appendChild(h('div', { class: 'task-words small' }, `📝 ${w.words.toLocaleString()} / ~${w.target_words.toLocaleString()} words`,
       h('progress', { max: '100', value: String(w.percent || 0), 'aria-label': `${w.percent || 0}% of the word target` })));
   }
-  box.appendChild(h('p', { class: 'small muted task-ref' }, taskRef(ct)));
+  box.appendChild(h('p', { class: 'small muted task-ref tech' }, taskRef(ct)));
   return box;
 }
 function approvalsButton() {
@@ -5139,14 +5506,14 @@ function reviewRow(it, { reload, msg, prog, picker }) {
   } }, '🤖 AI review');
   return h('li', { class: 'record-item rv-item', 'data-record': it.record_id },
     h('div', { class: 'r-main' },
-      h('a', { class: 'r-title', href: plink('rec', it.record_id) }, it.title),
+      h('a', { class: 'r-title', href: simpleHref(it) }, plainText(it.title)),
       h('div', { class: 'r-meta' }, `${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
       details),
     h('div', { class: 'r-badges' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review)),
     h('div', { class: 'row rv-buttons' },
       h('a', { class: 'btn small', href: plink('review', 'step', it.record_id) }, 'Open'),
       approveBtn,
-      h('a', { class: 'btn small', href: plink('edit', it.record_id) }, '✏️ Edit'),
+      h('a', { class: 'btn small', href: simpleEditHref(it) }, '✏️ Edit'),
       h('button', { type: 'button', class: 'small', onclick: () => { RV.skipped.add(it.record_id); reload(false); } }, '⏭ Skip'),
       aiBtn));
 }
@@ -5214,20 +5581,22 @@ async function renderReviewStep(holder, q, startId, load) {
   const content = h('div', { class: 'data-view' }, loadingState('Loading the draft…'));
   holder.appendChild(h('section', { class: 'card rv-step', 'aria-labelledby': 'rv-step-h' },
     h('p', { class: 'small muted' }, `Draft ${idx + 1} of ${shown.length} · ${it.group}`),
-    h('h2', { id: 'rv-step-h', class: 'wrap-anywhere' }, it.title),
+    h('h2', { id: 'rv-step-h', class: 'wrap-anywhere' }, plainText(it.title)),
     h('p', { class: 'row small' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review), ` ${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
     h('div', { class: 'row rv-big' }, approveBtn,
       h('button', { type: 'button', class: 'big', onclick: () => { RV.skipped.add(it.record_id); go2(it.record_id, false); } }, '⏭ Skip'),
-      h('a', { class: 'btn big', href: plink('edit', it.record_id) }, '✏️ Edit'),
+      h('a', { class: 'btn big', href: simpleEditHref(it) }, '✏️ Edit'),
       aiBtn),
     h('div', { class: 'rv-ai-pick' }, picker.field), prog, msg,
-    verdictBox(it.review, it, { onFix: fix, onEdit: () => go(plink('edit', it.record_id)) }),
+    verdictBox(it.review, it, { onFix: fix, onEdit: () => go(simpleEditHref(it)) }),
     h('h3', null, 'What it says'), content,
     h('p', { class: 'small' }, h('a', { href: plink('rec', it.record_id) }, 'Open the full record page (history, sources, findings)'))));
   try {
     const d = await recordDetail(it.record_id, true);
     const v = d.versions.find(x => x.version === it.version) || d.versions[d.versions.length - 1];
-    clear(content).appendChild((v.representation === 'BINARY_ARTIFACT' || v.binary) ? assetView(v) : renderData(v.data, ''));
+    const chap = v.module_id === 'C02' && v.data && typeof v.data.text === 'string' ? splitChapter(v.data.text) : null;
+    clear(content).appendChild((v.representation === 'BINARY_ARTIFACT' || v.binary) ? assetView(v)
+      : chap ? h('div', null, chap.title ? h('h3', null, chap.title) : null, proseBlock(chap.body)) : renderData(v.data, ''));
   } catch (e) { clear(content).appendChild(failedState('Could not load the draft', e)); }
 }
 /** Record page: the AI reviewer's advice for this exact version and a button to ask for it. */
@@ -5243,7 +5612,7 @@ function recordReviewCard(cur) {
     catch (e) { clear(body).appendChild(h('p', { class: 'small muted' }, 'The AI review is not available right now.')); return; }
     const rv = (info.reviews || {})[String(cur.version)];
     clear(body);
-    if (rv) body.appendChild(verdictBox(rv, cur, { onEdit: () => go(plink('edit', cur.record_id)),
+    if (rv) body.appendChild(verdictBox(rv, cur, { onEdit: () => go(simpleEditHref(cur)),
       onFix: info.in_queue ? async () => {
         const job = await runReviewJob(() => api('POST', bpath('/review/fix'), { body: { record_id: cur.record_id } }), prog, { label: 'The AI is revising this draft' });
         if (job && job.status === 'done') { S.details[cur.record_id] = null; go(plink('rec', cur.record_id)); route(); }
@@ -5288,7 +5657,7 @@ async function viewPair(main) {
   const confirmed = await new Promise(resolve => {
     const yes = h('button', { type: 'button', class: 'primary big', onclick: () => resolve(true) },
       usualPort ? 'Connect to AutoInjector' : `Connect to port ${bm[2] || '80'} anyway`);
-    holder.appendChild(stateBox(usualPort ? 'empty' : 'blocked', 'Connect BookForge to AutoInjector?',
+    holder.appendChild(stateBox('ask', 'Connect BookForge to AutoInjector?',
       h('p', null, 'Only continue if you just pressed “Connect” in the AutoInjector desktop app. BookForge will then send its AI requests through AutoInjector.'),
       usualPort ? null : h('p', null, h('strong', null, 'Check first: '), `this link points at port ${bm[2] || '80'} on this computer, not AutoInjector's usual port (17891). Continue only if you changed AutoInjector's bridge port yourself.`),
       h('div', { class: 'row' }, yes, h('button', { type: 'button', onclick: () => resolve(false) }, 'Cancel'))));
@@ -5321,7 +5690,7 @@ async function viewPair(main) {
   let timer = null; let left = 6;
   const stopTimer = () => { clearInterval(timer); timer = null; countdown.textContent = ''; };
   S.leaveHooks.push(stopTimer);
-  clear(holder).appendChild(stateBox(allOk ? 'ok' : 'blocked', allOk ? 'Connected to AutoInjector' : 'Connected — some AIs are not ready yet',
+  clear(holder).appendChild(stateBox(allOk ? 'ok' : 'fix', allOk ? 'Connected to AutoInjector' : 'Connected — some AIs are not ready yet',
     h('p', null, out.message || ''),
     h('ul', { class: 'plain-list pair-list' }, (out.slots || []).map(s => h('li', { class: 'row' },
       h('strong', null, `${s.slot_id} · ${SITE_NAME[s.site] || s.site}`),
@@ -6198,7 +6567,7 @@ function restoreBackup(b, reload) {
       go2.disabled = true; out.appendChild(loadingState('Restoring… (a safety backup is made first)'));
       try {
         const r = await api('POST', `/backups/${encodeURIComponent(b.name)}/restore`, { body: { author_confirms: true, confirm: word.value.trim() } });
-        close(); toast(r.message); S.project = null; await loadProjects(); reload(); route();
+        close(); toast(`Your books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); reload(); route();
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Restore a backup' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. BookForge first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
@@ -6262,6 +6631,7 @@ function initNavigation() {
   sd.addEventListener('click', ev => { if (ev.target === sd) closeSetPanel(); });  // backdrop click
   const md = $('#make-dialog');
   md.addEventListener('cancel', ev => { ev.preventDefault(); if (!ev.target.closest || !ev.target.closest('.info-wrap')) closeMake(); });
+  md.addEventListener('close', afterWorkDialog);
   const jd = $('#jump-dialog');
   jd.addEventListener('cancel', ev => { ev.preventDefault(); closeJump(true); });
   jd.addEventListener('click', ev => { if (ev.target === jd) closeJump(true); });
