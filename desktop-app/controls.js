@@ -2725,8 +2725,9 @@ const BF_INFO = {
     "Show key — shows the key on screen, in case you'd rather type it. Click Hide key when you're done.",
     "Make a new key — throws the old key away and makes a new one. BookForge is disconnected until it gets the new key (press Connect BookForge again). Only do this if you think someone else has seen your key."]],
   ais: ["What do the AI statuses mean?", [
-    "Ready — the window is loaded; BookForge can use it.",
-    "Not loaded — the window is missing or still loading. Open it, log in, and wait until the page has finished loading. A ⚠️ marker offers 🔁 Reload.",
+    "Ready — the window is loaded and its message box is on the page; BookForge can use it.",
+    "Not loaded / Didn't load — the window is missing, still loading, or its page failed to load. Open it and wait until the page has finished loading. A ⚠️ marker offers 🔁 Reload.",
+    "Signed out? / No message box — the page loaded but there is no message box: log in, or (if the site changed its page) use 🎯 to pick the box.",
     "Busy — it's answering a BookForge question right now. Leave that window alone until it finishes.",
     "Not active — tick that AI as Active in this app if you want BookForge to use it.",
     "Under each status you see the result of its last request and when it happened."]],
@@ -2973,14 +2974,18 @@ const BF_OUTCOME = {
   SITE_BUSY: () => "Was busy — told BookForge to wait",
   CACHED: () => "Gave an earlier answer again"
 };
+// Why an AI window isn't ready, as a short pill word (main sends problem + problemSay).
+const BF_NOT_READY_WORD = { SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…" };
+function bfNotReadyWord(x) { return BF_NOT_READY_WORD[x && x.problem] || "Not loaded"; }
 function bfAiView(s, site) {
   const x = (s.sites && s.sites[site]) || {};
-  let pill = ["Not loaded", "err", "✕", "bad"];
+  let pill = [bfNotReadyWord(x), "err", "✕", "bad"];
   if (!x.active) pill = ["Not active", "off", "–", "off"];
   else if (x.inFlight) pill = [x.inFlight.selftest ? "Testing" : "Busy", "work", "✍️", "work"];
   else if (x.ready) pill = ["Ready", "ok", "✔", "ok"];
   let last;
   if (x.inFlight) last = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
+  else if (x.active && !x.ready && x.problemSay) last = `Not ready: ${x.problemSay}`;
   else if (x.last) { const f = BF_OUTCOME[x.last.outcome]; last = `${f ? f(x.last) : x.last.outcome}${x.last.selftest ? " (test)" : ""} · ${bfAgo(x.last.at)}`; }
   else last = "No requests yet";
   return { x, pill, last };
@@ -3054,8 +3059,8 @@ function bfConnRows(s, d) {
     if (!x.active) { rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} (not used)`, st: "na", state: "Not used", detail: `Not Active in this app — tick ${L} as Active to use it.` }); continue; }
     rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} window`,
       st: x.inFlight ? "ok" : x.ready ? "ok" : "bad",
-      state: x.inFlight ? "Busy" : x.ready ? "Ready" : "Not loaded",
-      detail: x.inFlight ? "Answering right now." : x.ready ? "" : "Open its window, log in and wait until it has loaded." });
+      state: x.inFlight ? "Busy" : x.ready ? "Ready" : bfNotReadyWord(x),
+      detail: x.inFlight ? "Answering right now." : x.ready ? "" : x.problemSay ? `Not ready: ${x.problemSay}.` : "Open its window, log in and wait until it has loaded." });
     const lastTest = x.last && x.last.selftest ? x.last : null;
     rows.push({ id: `trip:${site}`, site, label: `${L} answers through the bridge`, short: `${L} test`,
       st: lastTest ? (lastTest.outcome === "OK" ? "ok" : "bad") : "na",

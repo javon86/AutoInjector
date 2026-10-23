@@ -71,5 +71,24 @@ console.log('\n== TR-08: the page check shows on the light before anything is se
   P.onProbe('chatgpt', { ok: false, error: 'NO_RESULT' });
   assert(P.evaluate('chatgpt').level === 'idle', 'a check that could not run never turns the light red');
 }
+console.log("\n== messageBox: newest evidence wins ==");
+{
+  let t = 1000;
+  const H = createPaneHealth({ sites: ["claude"], now: () => t });
+  assert(H.messageBox("claude").found === null, "nothing read or checked yet -> unknown");
+  H.onProbe("claude", { ok: true, input: { found: false }, send: { found: false }, signedOutHint: true });
+  let b = H.messageBox("claude");
+  assert(b.found === false && b.signedOut === true, "page check: no box + log-in prompt -> signed out");
+  t += 10; H.onRead("claude", { textLen: 0, inputFound: true });
+  assert(H.messageBox("claude").found === true, "a later read that finds the box overrides the older page check (signed in since)");
+  t += 10; H.onRead("claude", { textLen: 0, inputFound: false });
+  b = H.messageBox("claude");
+  assert(b.found === false && b.signedOut === true, "a later read without the box -> not found (log-in hint from the page check)");
+  t += 10; H.onProbe("claude", { ok: true, input: { found: true }, send: { found: true } });
+  assert(H.messageBox("claude").found === true, "a newer page check that finds it wins");
+  t += 10; H.onRead("claude", { textLen: 5 }); // an older read result without the field
+  assert(H.messageBox("claude").found === true, "a read without inputFound leaves the page check in charge");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

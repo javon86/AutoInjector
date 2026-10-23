@@ -261,6 +261,28 @@ async function main() {
   assert(/bookforge-connect/.test(debugConnect) && !debugConnect.includes(code) && !debugConnect.includes(after) && !debugConnect.includes(newest), "Connect is logged, but never the code or a key");
   await new Promise((r2) => fakeBf.close(r2));
 
+  // "Ready" means the page check passes — not just "the window exists and isn't loading".
+  {
+    const cw = reg("claude").webContents;
+    cw.inputFound = false; // the read finds no message box (signed out, or the site changed its page)
+    let s2 = await waitUntil(async () => { const x = await call("bookforge:status"); return x.sites.claude.ready === false ? x : null; });
+    assert(s2 && s2.sites.claude.problem === "NO_MESSAGE_BOX" && /message box/.test(s2.sites.claude.problemSay), `no message box on the page -> Claude is NOT ready (${s2 && s2.sites.claude.problem})`);
+    r = await request("GET", "/v1/health", newest);
+    assert(r.status === 200 && r.json.sites.claude.ready === false, "health tells BookForge Claude is not ready (so it never says 'logged in and free')");
+    r = await request("POST", "/v1/complete", newest, { site: "claude", prompt: "hi", request_id: "notready-1", timeout_ms: 10000 });
+    assert(r.status === 503 && r.json.error === "SITE_NOT_READY" && /message box/.test(r.json.message), `a prompt to a not-ready pane: 503 with the reason (${r.json && r.json.message})`);
+    cw.inputFound = true;
+    s2 = await waitUntil(async () => { const x = await call("bookforge:status"); return x.sites.claude.ready === true ? x : null; });
+    assert(!!s2 && s2.sites.claude.problem === null, "message box back -> ready again");
+    cw.emit("did-fail-load", {}, -105, "ERR_NAME_NOT_RESOLVED", "https://claude.ai/", true);
+    s2 = await call("bookforge:status");
+    assert(s2.sites.claude.ready === false && s2.sites.claude.problem === "LOAD_FAILED" && /didn't load/.test(s2.sites.claude.problemSay), "a page that failed to load is NOT ready");
+    cw.emit("did-fail-load", {}, -3, "ERR_ABORTED", "https://claude.ai/x", true);
+    cw.emit("did-finish-load");
+    s2 = await call("bookforge:status");
+    assert(s2.sites.claude.ready === true, "a later load that finishes makes it ready again");
+  }
+
   st = await call("bookforge:set-enabled", { enabled: false });
   assert(st.enabled === false && st.listening === false, "disable stops the server");
   refused = false;

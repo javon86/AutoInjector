@@ -28,9 +28,20 @@ function createPaneHealth({ sites, now = () => Date.now(), stallMs = DEFAULT_STA
   }
   function onCapture(site) { const p = s[site]; if (p) { p.capturedAt = now(); p.stallLogged = false; } }
   // What the read script saw on the last poll: { textLen, generating, hasEndTag, tail }
-  function onRead(site, info) { const p = s[site]; if (p) p.read = info || null; }
+  function onRead(site, info) { const p = s[site]; if (p) { p.read = info || null; p.readAt = now(); } }
   // TR-08: result of the read-only page check (automation.buildProbeScript).
-  function onProbe(site, probe) { const p = s[site]; if (p) p.probe = probe || null; }
+  function onProbe(site, probe) { const p = s[site]; if (p) { p.probe = probe || null; p.probeAt = now(); } }
+  // Is the AI's message box on the page, by the NEWEST evidence (the last read
+  // or the last page check)? true / false, or null when nothing says yet.
+  // signedOut: the page check also saw a log-in / sign-up prompt.
+  function messageBox(site) {
+    const p = s[site]; if (!p) return { found: null, signedOut: false };
+    const pr = p.probe && p.probe.ok && p.probe.input ? p.probe : null;
+    const rd = p.read && typeof p.read.inputFound === "boolean" ? p.read : null;
+    const useRead = rd && (!pr || (p.readAt || 0) >= (p.probeAt || 0));
+    const found = useRead ? rd.inputFound : pr ? !!pr.input.found : null;
+    return { found, signedOut: found === false && !!(pr && !pr.input.found && pr.signedOutHint) };
+  }
 
   function stallReason(p) {
     const r = p.read;
@@ -79,7 +90,7 @@ function createPaneHealth({ sites, now = () => Date.now(), stallMs = DEFAULT_STA
   }
 
   function snapshot() { const o = {}; for (const site of Object.keys(s)) o[site] = evaluate(site); return o; }
-  return { onSendResult, onCapture, onRead, onProbe, evaluate, newStalls, snapshot };
+  return { onSendResult, onCapture, onRead, onProbe, messageBox, evaluate, newStalls, snapshot };
 }
 
 module.exports = { createPaneHealth, DEFAULT_STALL_MS };

@@ -116,7 +116,14 @@ console.log("\n== E03 regression: a finished reply with an EMPTY composer is NOT
     <div contenteditable="true"></div>
     <button data-testid="send-button" aria-label="Send prompt" disabled>send</button>`);
   assert(r.composerEmpty === true, "the empty composer is detected");
+  assert(r.inputFound === true, "the message box is reported as found");
   assert(r.generating === false, "disabled Send over an EMPTY composer -> generating:false (idle, not streaming)");
+}
+
+console.log("\n== a page with no message box (signed out) reports inputFound:false ==");
+{
+  const r = runGen(`<h1>Welcome back</h1><button>Log in</button><button>Sign up</button>`);
+  assert(r.inputFound === false, "no message box on the page -> inputFound:false (BookForge won't call the pane Ready)");
 }
 
 console.log("\n== no stop/send buttons matched -> falls back (not generating) ==");

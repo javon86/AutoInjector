@@ -16,7 +16,8 @@
  *                                           the request times out before its prompt was typed, and
  *                                           the host then withdraws the queued send (error
  *                                           "CANCELLED") and sets typing while it is typing
- *     siteReady(site)                    -> bool   (pane exists and is loaded)
+ *     siteReady(site)                    -> bool   (pane exists, loaded, and its message box is on the page)
+ *     siteProblem(site)?                 -> string|null (why it isn't ready, in plain words, for the 503 message)
  *     wrapPrompt(site, text)?            -> text   (adds the [FROM: <SITE>] reply-envelope instruction)
  *     now()?, logger(kind, detail)?, sites?, timeScale?, bodyTimeLimitMs?,
  *     onEvent(event)?                    -> called for every activity event (see below)
@@ -264,6 +265,7 @@ function createBridge(opts) {
   const getToken = typeof o.getToken === 'function' ? o.getToken : () => '';
   const sendToSite = o.sendToSite;
   const siteReady = typeof o.siteReady === 'function' ? o.siteReady : () => true;
+  const siteProblem = typeof o.siteProblem === 'function' ? o.siteProblem : () => null;
   const wrapPrompt = typeof o.wrapPrompt === 'function' ? o.wrapPrompt : defaultWrapPrompt;
   const now = typeof o.now === 'function' ? o.now : Date.now;
   const sites = Array.isArray(o.sites) && o.sites.length ? o.sites.slice() : DEFAULT_SITES.slice();
@@ -664,7 +666,9 @@ function createBridge(opts) {
     try { ready = !!siteReady(site); } catch (_) { ready = false; }
     if (!ready) {
       log('outcome', { site, request_id: requestId, outcome: 'SITE_NOT_READY' });
-      return send(res, 503, errBody('SITE_NOT_READY', `${site} pane is missing or not loaded`, false));
+      let why = null;
+      try { why = siteProblem(site); } catch (_) { why = null; }
+      return send(res, 503, errBody('SITE_NOT_READY', why ? `${site} isn't ready: ${String(why).slice(0, 200)}` : `${site} pane is missing or not loaded`, false));
     }
     const entry = begin(site, prompt, requestId);
     const out = await awaitEntry(entry, timeoutMs);

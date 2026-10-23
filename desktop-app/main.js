@@ -885,6 +885,7 @@ function markCaptured(site) {
 // loads, so a signed-out pane or a site that changed its page shows up on the
 // light and in the log before any message is lost.
 const PROBE_DELAY_MS = Number(process.env.AUTOINJECTOR_PROBE_DELAY_MS) || 8000;
+const paneLoadFailed = {}; // site -> why its last page load failed (cleared when a load finishes)
 async function probePane(site) {
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return null;
@@ -1003,8 +1004,16 @@ function createWindow() {
     try {
       if (typeof view.webContents.on === "function") {
         view.webContents.on("did-finish-load", () => {
+          delete paneLoadFailed[site];
           try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
           setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
+        });
+        // A page that failed to load (no network, site down) is not ready for
+        // BookForge until a later load finishes. -3 = a load replaced by another.
+        view.webContents.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
+          if (isMainFrame === false || code === -3) return;
+          paneLoadFailed[site] = String(desc || `error ${code}`).slice(0, 60);
+          logEvent("pane-load-failed", { site, code, error: paneLoadFailed[site], severity: "warn" });
         });
       }
     } catch (_) {}
@@ -3622,7 +3631,7 @@ async function pollSite(site) {
       logEvent("reply-selector-fragment", { site, selector: (state.selectorOverrides[site] || {}).assistant || null, severity: "warn", note: "the saved reply selector only reads part of each reply; using the whole reply instead — clear it with 🎯 → Clear Overrides" });
     }
     if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
-    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null });
+    paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null, inputFound: res && typeof res.inputFound === "boolean" ? res.inputFound : undefined });
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
@@ -5945,12 +5954,25 @@ function bookforgeBridgePort() {
 function bookforgeAwaitingReply(site) {
   try { return !!(bookforgeBridge && typeof bookforgeBridge.awaitingReply === "function" && bookforgeBridge.awaitingReply(site)); } catch (_) { return false; }
 }
-function bookforgeSiteReady(site) {
+// Why a pane can't take a BookForge prompt right now, in plain words (null =
+// it can). Not just "the window exists and isn't loading": a page that failed
+// to load, or one with no message box (signed out, or the site changed its
+// page — the TR-08 page check and every read look for it) is not ready.
+function bookforgeSiteProblem(site) {
   const view = siteViews[site];
-  if (!view || !view.webContents || view.webContents.isDestroyed()) return false;
-  try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return false; } catch (_) { return false; }
-  return true;
+  const L = siteLabel(site);
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return { code: "NO_PANE", say: `the ${L} window is missing` };
+  try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return { code: "LOADING", say: `the ${L} page is still loading` }; }
+  catch (_) { return { code: "NO_PANE", say: `the ${L} window is missing` }; }
+  if (paneLoadFailed[site]) return { code: "LOAD_FAILED", say: `the ${L} page didn't load (${paneLoadFailed[site]}) — reload it` };
+  let box = { found: null, signedOut: false };
+  try { box = paneHealth.messageBox(site); } catch (_) {}
+  if (box.found === false) return box.signedOut
+    ? { code: "SIGNED_OUT", say: `${L} looks signed out — open its window and log in` }
+    : { code: "NO_MESSAGE_BOX", say: `${L}'s message box isn't on the page — open its window (log in, or use 🎯 if the site changed its page)` };
+  return null;
 }
+function bookforgeSiteReady(site) { return !bookforgeSiteProblem(site); }
 let bookforgeStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
 function startBookforgeBridge() {
   if (bookforgeBridge) return Promise.resolve({ ok: true });
@@ -5967,6 +5989,7 @@ async function startBookforgeBridgeNow() {
     host: "127.0.0.1",
     getToken: () => currentToken,
     siteReady: bookforgeSiteReady,
+    siteProblem: (s) => { const p = bookforgeSiteProblem(s); return p ? p.say : null; },
     wrapPrompt: (site, text) => withEnvelope(text, site),
     sendToSite: async (site, text, meta) => {
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
@@ -6040,7 +6063,10 @@ function bookforgeStatusSnapshotBase() {
   const sites = {};
   for (const s of SITE_IDS) {
     const base = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
+    const problem = bookforgeSiteProblem(s);
     sites[s] = Object.assign({}, base, {
+      problem: problem ? problem.code : null,
+      problemSay: problem ? problem.say : null,
       label: siteLabel(s),
       active: !!(state.enabled && state.enabled[s]), // "Active" (checked) in the app
       last: bookforgeCarry.siteLast[s] || null,
