@@ -314,17 +314,22 @@ class BookPath:
         return {"title": title, "author": author, "identifier": self.mem["identifier"],
                 "rights": f"Copyright {datetime.now().year} {author}. All rights reserved."}
 
-    def format_out_of_date(self, fmt_recs: dict) -> bool:
-        """True when the title/author in the book format (and so in the files) differ from the book profile."""
-        meta = fmt_recs.get("metadata")
-        data = (meta or {}).get("data") or {}
+    @staticmethod
+    def format_title_author(meta_rec) -> tuple | None:
+        """(title, author) carried by the book format's PUBLICATION_METADATA record, or None when unknown."""
+        data = (meta_rec or {}).get("data") or {}
         aux = data.get("auxiliary_record") if isinstance(data.get("auxiliary_record"), dict) else None
         md = (aux or {}).get("data") if aux else data
         if not isinstance(md, dict) or "title" not in md:
-            return False
-        return (md.get("title"), md.get("author")) != self.title_author()
+            return None
+        return md.get("title"), md.get("author")
 
-    def assembly_out_of_date(self, asm: dict, fmt: dict) -> str | None:
+    def format_out_of_date(self, fmt_recs: dict) -> bool:
+        """True when the title/author in the book format (and so in the files) differ from the book profile."""
+        ta = self.format_title_author(fmt_recs.get("metadata"))
+        return ta is not None and ta != self.title_author()
+
+    def assembly_out_of_date(self, asm: dict, fmt_recs: dict) -> str | None:
         """Why an existing assembly no longer matches the book (plain words), or None. The title page (G08) and the
         chapter headings (G06) are made when the book is put together, so a book put together before BookForge added
         them, or before the book format changed (a new title or author), must be put together again."""
@@ -333,9 +338,9 @@ class BookPath:
         if not asm.get("G06") or not asm.get("G08"):
             return ("BookForge now adds a title page and chapter headings: put the book together again "
                     "(nothing you wrote changes).")
-        made_with = asm.get("pdf_profile")
-        cur = (fmt.get("pdf_profile") or {}).get("record_id")
-        if asm.get("format_changed") or (made_with and cur and made_with != cur):
+        made_with = asm.get("title_page")
+        cur = self.format_title_author(fmt_recs.get("metadata"))
+        if asm.get("format_changed") or (made_with and cur and tuple(made_with) != tuple(cur)):
             return ("The book format changed since the book was put together (for example a new title or author): "
                     "put it together again so the title page shows it.")
         return None
@@ -474,7 +479,7 @@ class BookPath:
         # assembly
         asm = self.mem.get("assembly") or {}
         asm_recs = {op: self.ref_ok(asm.get(op), approved=False) for op in ASSEMBLY}
-        asm_why = self.assembly_out_of_date(asm, fmt)
+        asm_why = self.assembly_out_of_date(asm, fmt_recs)
         asm_have = all(asm_recs.values()) and asm.get("chapters") == [c["approved"]["record_id"] + ":" + str(
             c["approved"]["version"]) for c in chapters if c.get("approved")] and not asm_why
         asm_done = asm_have and all(self.ref_ok(asm.get(op)) for op in ASSEMBLY)
@@ -813,10 +818,14 @@ class BookPath:
         if not refresh:
             fmt["toc_style"] = self.import_profile("TOC_STYLE", {"max_depth": 1, "include_pages": True,
                                                                  "link_targets": True}, "Contents style")
+        old_ta = self.format_title_author(self.ref_ok(old.get("metadata"), approved=False))
+        changed = not refresh or old_ta is None or tuple(old_ta) != (md["title"], md["author"])
+
         def put(m):
             m["format"] = fmt
-            if isinstance(m.get("assembly"), dict) and m["assembly"].get("G01"):
-                # The title page of the assembled book came from the old format: it must be put together again.
+            if changed and isinstance(m.get("assembly"), dict) and m["assembly"].get("G01"):
+                # The title page (or the layout) of the assembled book came from the old format: put it together
+                # again. Remaking the format with the same title, author, font and page changes nothing.
                 m["assembly"]["format_changed"] = True
         self.remember(put)
         if refresh:
@@ -857,7 +866,9 @@ class BookPath:
         asm["G07"], _ = self.create("G07", {"paginated_book_ref": asm["G04"],
                                             "toc_style_ref": self._appr(fmt["toc_style"]), "max_passes": 6})
         asm["chapters"] = [f"{c['record_id']}:{c['version']}" for c in chapters]
-        asm["pdf_profile"] = fmt["pdf_profile"]["record_id"]  # the title page was made from this format
+        # the title page was made with this title/author (from the approved book format)
+        asm["title_page"] = list(self.format_title_author(self.rec(fmt["metadata"]["record_id"])) or
+                                 self.title_author())
 
         def put(m):
             m["assembly"] = asm
