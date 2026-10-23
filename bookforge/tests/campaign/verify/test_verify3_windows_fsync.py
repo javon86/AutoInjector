@@ -20,6 +20,8 @@ from bookforge.store import Store, durable_copy, write_private
 class WindowsLikeOS:
     """os stand-in: directories cannot be opened; fsync needs a descriptor opened with write access."""
 
+    name = "nt"  # the durable-write helpers switch to Windows behaviour (best-effort flushes, rename retries)
+
     def __init__(self):
         self._writable: dict[int, bool] = {}
 
