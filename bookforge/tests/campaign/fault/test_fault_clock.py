@@ -30,9 +30,6 @@ def clock_back(monkeypatch, days=1):
     monkeypatch.setattr(store_mod, "utcnow", shifted)
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-19: rotation sorts backups by the manifest's wall-clock created_at; "
-                                       "after the clock goes back, 'Back up now' answers 201 with a name, but rotation "
-                                       "has already deleted that brand-new backup (bytes 0, verified None)")
 def test_backup_made_after_the_clock_went_back_is_kept(app, monkeypatch):
     app.backups.set_keep(3)
     for _ in range(3):
@@ -43,8 +40,6 @@ def test_backup_made_after_the_clock_went_back_is_kept(app, monkeypatch):
     assert b["name"] in names and (app.backups.dir / b["name"] / "manifest.json").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-19: the restore safety copy made after a clock jump back is rotated "
-                                       "away at once, so the restore cannot be undone")
 def test_restore_safety_copy_survives_a_clock_jump(app, monkeypatch):
     app.backups.set_keep(3)
     first = [app.backups.backup("manual") for _ in range(3)]
@@ -53,8 +48,6 @@ def test_restore_safety_copy_survives_a_clock_jump(app, monkeypatch):
     assert (app.backups.dir / out["safety_backup"] / "manifest.json").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-19: daily_if_needed compares now with a 'latest' backup stamped in "
-                                       "the future, so no daily backup is made until the clock catches up")
 def test_daily_backup_after_the_clock_went_forward_then_back(app, monkeypatch):
     fwd = lambda: (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")  # noqa
     monkeypatch.setattr(store_mod, "utcnow", fwd)
@@ -70,8 +63,6 @@ def _create(app, pid, concept):
     return r["output_refs"][0]
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-20: the journal sorts entries by wall-clock text: after the clock "
-                                       "goes back, later steps are listed before earlier ones (no sequence tie-breaker)")
 def test_journal_keeps_happened_before_order_across_a_clock_jump(app, monkeypatch):
     pid = app.store.query_one("SELECT project_id FROM projects")["project_id"]
     first = _create(app, pid, "Made first")
@@ -82,9 +73,6 @@ def test_journal_keeps_happened_before_order_across_a_clock_jump(app, monkeypatc
     assert order == [first["record_id"], second["record_id"]], order
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-fault-20: job events are stamped to the second ('...:05Z') and kernel rows "
-                                       "to the microsecond ('...:05.300000Z'); as text '.' < 'Z', so a run event is "
-                                       "listed after kernel steps that happened later in the same second")
 def test_journal_orders_run_events_and_steps_within_one_second(app, monkeypatch):
     pid = app.store.query_one("SELECT project_id FROM projects")["project_id"]
     app.jobstore.save({"id": "run-clock", "kind": "autobook", "project_id": pid, "branch_id": "main",

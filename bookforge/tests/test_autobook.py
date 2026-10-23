@@ -400,9 +400,12 @@ def test_backups_rotation_and_guarded_restore(tmp_path):
     app = make_app(tmp_path)
     p1 = app.engine.bootstrap_project("author", "Before backup")
     app.backups.set_keep(3)
-    names = [app.backups.backup("manual")["name"] for _ in range(5)]
-    kept = [b["name"] for b in app.backups.list()]
+    # BF-05: only automatic backups rotate; "Back up now" copies and restore safety copies are pinned
+    manual = app.backups.backup("manual")["name"]
+    names = [app.backups.backup("before-export")["name"] for _ in range(5)]
+    kept = [b["name"] for b in app.backups.list() if not b["pinned"]]
     assert len(kept) == 3 and set(kept) == set(names[-3:]) and all(b["verified"] for b in app.backups.list())
+    assert manual in [b["name"] for b in app.backups.list()]
     p2 = app.engine.bootstrap_project("author", "After backup")
     with pytest.raises(BookforgeError) as exc:
         app.backups.restore(kept[0], {"author_confirms": True})  # the word RESTORE is missing
@@ -413,7 +416,8 @@ def test_backups_rotation_and_guarded_restore(tmp_path):
     out = app.backups.restore(kept[0], {"author_confirms": True, "confirm": "RESTORE"})
     assert out["safety_backup"].endswith("before-restore")
     assert app.store.project(p1) is not None and app.store.project(p2) is None
-    assert len(app.backups.list()) == 3  # rotation keeps the newest 3 (incl. the safety copy)
+    # 3 automatic + the pinned manual backup + the pinned safety copy
+    assert len(app.backups.list()) == 5 and kept[0] in [b["name"] for b in app.backups.list()]
     # the safety copy can bring the later project back
     app.backups.restore(out["safety_backup"], {"author_confirms": True, "confirm": "restore"})
     assert app.store.project(p2) is not None

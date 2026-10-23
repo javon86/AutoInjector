@@ -8,14 +8,21 @@ problems, backups, exports).
 
 Entries: {at, kind, step: {set, op, name}, who, ai, what, outcome, approval, problem: {code, message}, run_id}.
 They never contain API keys, connection keys, prompts, AI replies or book text: only step names, record IDs,
-verdict words, error codes and BookForge's own messages. Filters: ``step`` (an operation ID like C02 or a set
-letter like C) and ``problems`` (only entries with a problem or a failed outcome). ``render_markdown`` gives the
-downloadable .md version.
+verdict words, error codes and BookForge's own messages.
+
+Order: entries happen-before each other in the order they were stored (SQLite rowid for the audit log and the
+activity events, list order for a job's events), not in wall-clock text order: timestamps are normalised to
+microseconds (a job event "…:05Z" sorts before a step at "…:05.3Z") and a stamp that goes BACKWARDS within one
+source (the system clock was set back) is held at the previous one, so a later step is never listed first.
+
+Filters: ``step`` (an operation ID like C02 or a set letter like C) and ``problems`` (only entries with a problem or
+a failed outcome). ``render_markdown`` gives the downloadable .md version.
 """
 from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 
 from .sets_guide import SET_GUIDE
 
@@ -55,7 +62,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
     # approvals by record (from activity events) to label ACCEPT audit rows with their kind
     approval_of: dict[str, tuple[str, dict]] = {}
     events = store.query("SELECT event_type, payload, created_at FROM outbox WHERE project_id=? AND branch_id=? "
-                         "ORDER BY created_at", (pid, branch))
+                         "ORDER BY rowid", (pid, branch))
     for e in events:
         try:
             p = json.loads(e["payload"])
@@ -76,8 +83,9 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         except ValueError:
             res = {}
         prov[(r["record_id"], r["version"])] = (r["transform"], res)
+    clock = _Monotonic()
     for a in store.query("SELECT operation_id, action, principal_id, outcome, recorded_at, output_refs FROM audit "
-                         "WHERE project_id=? AND branch_id=? ORDER BY recorded_at", (pid, branch)):
+                         "WHERE project_id=? AND branch_id=? ORDER BY rowid", (pid, branch)):
         if a["action"] in ("READ",) or (a["action"] == "VALIDATE" and a["outcome"] == "SUCCESS"):
             continue
         try:
@@ -120,7 +128,9 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             ent["what"] = f"{name}: {a['action'].lower()} ({a['outcome']})"
         if a["outcome"] not in ("SUCCESS",):
             ent["problem"] = {"code": a["outcome"], "message": f"{a['action']} {a['outcome'].lower()}"}
+        ent["_key"] = clock(a["recorded_at"])
         entries.append(ent)
+    clock = _Monotonic()
     for e in events:
         et = e["event_type"]
         try:
@@ -158,16 +168,21 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             ent.setdefault("problem", None)
             ent.setdefault("approval", None)
             ent["at"] = e["created_at"]
+            ent["_key"] = clock(e["created_at"])
             entries.append(ent)
+        else:
+            clock(e["created_at"])
     for j in app.jobstore.list(project_id=pid, limit=100):
         if j.get("branch_id") not in (None, branch):
             continue
         label = {"autobook": "Make a book for me", "write_all": "Write all chapters", "assist": "Fill with AI",
                  "review_review": "AI review", "review_fix": "AI fix", "bible": "Bible Builder"}.get(j.get("kind"),
                                                                                                  j.get("kind"))
+        clock = _Monotonic()
         if j.get("kind") in ("autobook", "write_all"):
             step_ops = {s["id"]: s.get("op") for s in j.get("steps") or []}
             for ev in j.get("events") or []:
+                key = clock(_iso_fix(ev.get("at")))
                 if ev.get("kind") in ("done",):
                     continue
                 op = step_ops.get(ev.get("step")) or ev.get("module_id")
@@ -186,6 +201,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                     continue  # the verdict/fix itself comes from the activity log
                 if ent["kind"] == "ai" and ev.get("module_id"):
                     continue  # the record creation comes from the audit log with its AI slot
+                ent["_key"] = key
                 entries.append(ent)
         elif j.get("status") in ("error", "interrupted"):
             err = j.get("error") or {}
@@ -193,8 +209,11 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                             "who": "BookForge", "ai": {"slot": j.get("slot")} if j.get("slot") else None,
                             "what": f"{label}: {j.get('status')}", "outcome": j.get("status"), "approval": None,
                             "problem": {"code": err.get("code") or j.get("status").upper(),
-                                        "message": err.get("message") or j.get("phase")}})
-    entries.sort(key=lambda x: x.get("at") or "")
+                                        "message": err.get("message") or j.get("phase")},
+                            "_key": clock(_iso_fix(j.get("updated_at")))})
+    entries.sort(key=lambda x: x["_key"])  # stable: equal keys keep their stored order
+    for x in entries:
+        del x["_key"]
     if step:
         s = step.upper()
         entries = [x for x in entries if (x["step"].get("op") or "") == s or (len(s) == 1 and x["step"].get("set") == s)]
@@ -213,6 +232,34 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
 
 def _iso_fix(v):
     return v if isinstance(v, str) else None
+
+
+def _norm(v) -> str:
+    """A stamp as fixed-width UTC text with microseconds ('…:05Z' -> '…:05.000000Z'); '' when unknown."""
+    if not isinstance(v, str) or not v:
+        return ""
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            t = datetime.strptime(v, fmt)
+        except ValueError:
+            continue
+        if t.tzinfo is not None:
+            t = t.astimezone(timezone.utc).replace(tzinfo=None)
+        return t.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return v
+
+
+class _Monotonic:
+    """Sort keys for one source in stored order: a stamp earlier than the previous one is held at the previous."""
+
+    def __init__(self):
+        self.last = ""
+
+    def __call__(self, v) -> str:
+        n = _norm(v)
+        if n and n > self.last:
+            self.last = n
+        return self.last
 
 
 ICON = {"ai": "🤖", "ai_review": "🧐", "ai_fix": "🛠", "approval": "✅", "problem": "⚠️", "retry": "⏳",
