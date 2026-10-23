@@ -118,11 +118,16 @@ def get_profile(store, pid: str) -> dict:
 
 
 def save_profile(store, pid: str, body) -> dict:
+    """Save the book profile (merged into the stored one). A new title also renames the book everywhere it is
+    listed (Your books, the book picker, the breadcrumb), in the same transaction: never one without the other."""
     clean = clean_profile(body)
-    with store.transaction():  # read-merge-write in one transaction: two saves at once keep both changes
-        prof = dict(get_profile(store, pid), **clean)
+    with store.transaction() as tx:  # read-merge-write in one transaction: two saves at once keep both changes
+        old = get_profile(store, pid)
+        prof = dict(old, **clean)
         prof["updated_at"] = _now()
         store.set_setting(f"book_profile:{pid}", prof)
+        if clean.get("title") and old.get("title") and clean["title"] != old["title"]:
+            tx.execute("UPDATE projects SET name=? WHERE project_id=?", (clean["title"], pid))
     return prof
 
 
@@ -133,14 +138,35 @@ def chapter_target(prof: dict) -> int:
 
 
 # ---------------------------------------------------------------------------------- path
+def pinned_engine(engine, slot: str | None):
+    """The engine that sends every AI step of a book to the AI chosen for it (profile ``ai_slot`` AI-1/AI-2/AI-3).
+
+    "Automatic" (empty) keeps the shared engine: each AI step goes to the slot whose Settings roles name that step
+    (an operation such as C02, or its set letter such as C); with no role match, to the cheapest connected slot,
+    then the least busy one, then AI-1 before AI-2 before AI-3. So parallel work (Write all chapters, reviews, a
+    second book) spreads to another slot while one is busy, and roles let the author send e.g. chapters to one AI
+    and planning to another. "manual" means no AI at all (handled by ai_ready)."""
+    from .engine import Engine  # noqa: PLC0415 - engine imports this module's helpers indirectly
+    from .providers import PinnedProviders  # noqa: PLC0415
+    if slot not in ("AI-1", "AI-2", "AI-3"):
+        return engine
+    cur = engine.providers
+    if getattr(cur, "pinned", None) == slot:
+        return engine
+    return Engine(engine.store, engine.contracts, providers=PinnedProviders(cur, slot))
+
+
 class BookPath:
     def __init__(self, engine, principal: str, pid: str, branch: str):
-        self.engine, self.store, self.principal = engine, engine.store, principal
+        self.store, self.principal = engine.store, principal
         self.pid, self.branch = pid, branch
         self.c = engine.contracts
         self.key = f"book_path:{pid}:{branch}"
         self.mem = self.store.get_setting(self.key) or {}
         self.profile = get_profile(self.store, pid)
+        # The AI the author chose for this book (wizard / book profile) writes every AI step of it.
+        self.ai_slot = self.profile.get("ai_slot") or ""
+        self.engine = pinned_engine(engine, self.ai_slot)
         self._recs = None
 
     # ----------------------------------------------------------------- storage helpers
@@ -260,12 +286,22 @@ class BookPath:
 
     # ----------------------------------------------------------------- facts about the book
     def ai_ready(self) -> bool:
-        if (self.profile.get("ai_slot") or "") == "manual":
+        if self.ai_slot == "manual":
             return False
         for s in self.engine.providers.slots():
+            if self.ai_slot and s["slot_id"] != self.ai_slot:
+                continue  # the book is pinned to one AI: only that one counts
             if s.get("adapter_id") in ("anthropic", "autoinjector") and s.get("has_credentials"):
                 return True
         return False
+
+    def no_ai_reason(self) -> str:
+        if self.ai_slot == "manual":
+            return "the book profile says you write it yourself"
+        if self.ai_slot:
+            return (f"the AI chosen for this book ({self.ai_slot}) is not set up: set it up in Settings, or choose "
+                    "another AI (or Automatic) in the book profile")
+        return "no AI is connected"
 
     def title_author(self) -> tuple[str, str]:
         title = self.profile.get("title") or (self.store.project(self.pid) or {"name": "Untitled book"})["name"]
@@ -287,6 +323,22 @@ class BookPath:
         if not isinstance(md, dict) or "title" not in md:
             return False
         return (md.get("title"), md.get("author")) != self.title_author()
+
+    def assembly_out_of_date(self, asm: dict, fmt: dict) -> str | None:
+        """Why an existing assembly no longer matches the book (plain words), or None. The title page (G08) and the
+        chapter headings (G06) are made when the book is put together, so a book put together before BookForge added
+        them, or before the book format changed (a new title or author), must be put together again."""
+        if not asm.get("G01"):
+            return None
+        if not asm.get("G06") or not asm.get("G08"):
+            return ("BookForge now adds a title page and chapter headings: put the book together again "
+                    "(nothing you wrote changes).")
+        made_with = asm.get("pdf_profile")
+        cur = (fmt.get("pdf_profile") or {}).get("record_id")
+        if asm.get("format_changed") or (made_with and cur and made_with != cur):
+            return ("The book format changed since the book was put together (for example a new title or author): "
+                    "put it together again so the title page shows it.")
+        return None
 
     def outline(self):
         a = self.approved("B11")
@@ -343,7 +395,7 @@ class BookPath:
                 redo = REDO_FOR.get(r["module_id"])
                 if redo and r["module_id"] == "C02":
                     redo = dict(redo, chapter_id=chapter_id) if chapter_id else None
-                out.update(problems=blocking[:6], redo=redo)
+                out.update(problems=blocking[:6], redo=redo, fix=refusal_advice(blocking, redo))
             return out
 
         step("profile", "Book profile", "Title, author, genre, length and your idea in a few words.",
@@ -378,15 +430,28 @@ class BookPath:
                 ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
                 if latest and latest.get("stale") and not appr:
                     latest = None  # set aside (e.g. redone): not waiting for the author
-                st = ("done" if appr else "needs_you" if latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
+                # A newer revision of an approved chapter (the author edited it, or asked for changes) waits for
+                # approval: the chapter is not done until it is approved, and the book made from the older text
+                # becomes out of date once it is (the assembly pins the approved chapter versions).
+                revision = bool(appr and latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
+                                and not latest.get("stale")
+                                and (latest["record_id"], latest["version"]) != (appr["record_id"], appr["version"]))
+                st = ("needs_you" if revision else "done" if appr else
+                      "needs_you" if latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
                       else "ai_can" if ai else "needs_you")
                 chapters.append(dict(ch, state=st, context_id=ctx["record_id"] if ctx else None,
                                      prose=item(latest, ch["chapter_id"]) if latest else None,
-                                     approved=item(appr) if appr else None))
+                                     approved=item(appr) if appr else None, revision_waiting=revision))
         all_written = bool(chapters) and all(c["state"] == "done" for c in chapters)
+        # The book is put together from APPROVED chapter texts only: a waiting revision of an approved chapter keeps
+        # the chapters step open (Approve) without stopping the author from re-assembling the approved book.
+        all_approved = bool(chapters) and all(c.get("approved") for c in chapters)
+        revised = [c["chapter_id"] for c in chapters if c.get("revision_waiting")]
         step("chapters", "Write the chapters",
              "Each outline chapter gets its context (automatic) and its prose (your AI, or you write it). "
-             "Read each chapter and approve it.",
+             "Read each chapter and approve it." +
+             (f" Your changes to chapter(s) {', '.join(revised)} wait for your approval: the book you can download "
+              "still has the earlier text until you approve them and put the book together again." if revised else ""),
              "blocked" if not outline else "done" if all_written else
              ("needs_you" if any(c["state"] == "needs_you" for c in chapters) else "ai_can"),
              chapters=chapters, waiting_for="B11" if not outline else None, action="write_chapter",
@@ -409,15 +474,20 @@ class BookPath:
         # assembly
         asm = self.mem.get("assembly") or {}
         asm_recs = {op: self.ref_ok(asm.get(op), approved=False) for op in ASSEMBLY}
+        asm_why = self.assembly_out_of_date(asm, fmt)
         asm_have = all(asm_recs.values()) and asm.get("chapters") == [c["approved"]["record_id"] + ":" + str(
-            c["approved"]["version"]) for c in chapters if c.get("approved")]
+            c["approved"]["version"]) for c in chapters if c.get("approved")] and not asm_why
         asm_done = asm_have and all(self.ref_ok(asm.get(op)) for op in ASSEMBLY)
-        ready_asm = all_written and fmt_done
+        ready_asm = all_approved and fmt_done
+        if not asm_why and asm.get("G01") and not asm_have:
+            asm_why = ("An approved chapter (or something else the book is made from) changed since the book was put "
+                       "together: put it together again so the files carry the new text.")
         step("assemble", "Put the book together", "Chapter order, one manuscript, typography, page layout and table "
-             "of contents (automatic), for you to approve.",
+             "of contents (automatic), for you to approve." + (f" {asm_why}" if asm_why else ""),
              "done" if asm_done else "needs_you" if asm_have else "ready" if ready_asm else "blocked",
              action="assemble" if ready_asm and not asm_have else None,
-             waiting_for=None if ready_asm else ("chapters" if not all_written else "format"),
+             waiting_for=None if ready_asm else ("chapters" if not all_approved else "format"),
+             out_of_date=bool(asm_why), reason=asm_why or None,
              approve=[item(r) for r in asm_recs.values() if asm_have and r and r["lifecycle"] in ("DRAFT", "VALIDATED")])
         # exports
         exports = self.mem.get("exports") or {}
@@ -434,7 +504,8 @@ class BookPath:
                 art = rec["data"].get("artifact_ref")
                 # A file made before the title/author changed is still offered (it is what exists), marked out of
                 # date and named after the title it carries, and the export step asks to make it again.
-                old = not meta_id or (e.get("title", cur_title), e.get("author", cur_author)) != (cur_title, cur_author)
+                old = (not meta_id or not asm_done
+                       or (e.get("title", cur_title), e.get("author", cur_author)) != (cur_title, cur_author))
                 files.append({"format": fmt_name, "profile": prof_type, "op": op, "mime_type": mime,
                               "record_id": art["record_id"] if art else None,
                               "version": art["version"] if art else None,
@@ -445,8 +516,9 @@ class BookPath:
         exp_ready = asm_done and fmt_done
         step("export", "Export my book", "Makes the " + ", ".join(EXPORT_FOR[p][1] for p in wanted) +
              " file(s) from the approved book. Pressing it confirms your approved chapters as the source." +
-             (" The files below were made with an older title/author: export again." if files and not exp_done
-              and len(current) < len(files) else ""),
+             (" The files below were made from an earlier version of the book (" +
+              ("put the book together again, then export again" if not asm_done else "an older title or author: "
+               "export again") + ")." if files and not exp_done and len(current) < len(files) else ""),
              "done" if exp_done else "ready" if exp_ready else "blocked",
              action="export" if exp_ready and not exp_done else None,
              waiting_for=None if exp_ready else ("assemble" if not asm_done else "format"), files=files)
@@ -456,9 +528,9 @@ class BookPath:
             (asm.get("G01") or {}).get("record_id") else None
         step("check", "Check the book", "A deterministic check that every chapter is present once and in order "
              "(H05). Full release readiness (H10) is in the Quality Checks set.",
-             "done" if h05_rec else "ready" if asm_done else "blocked",
+             "done" if h05_rec and asm_done else "ready" if asm_done else "blocked",
              action="check" if asm_done and not h05_rec else None, waiting_for=None if asm_done else "assemble",
-             result=(h05_rec["data"].get("status") if h05_rec else None))
+             result=(h05_rec["data"].get("status") if h05_rec and asm_done else None))
         nxt = next((s for s in steps if s["state"] != "done"), None)
         try:
             words = self.word_stats(chapters)
@@ -494,7 +566,7 @@ class BookPath:
             return self._manual(op, payload, f"The {what} form is ready: write it under “Manual candidate” and "
                                 "press Create.")
         if not self.ai_ready():
-            return self._manual(op, payload, f"No AI is connected (or you chose to write it yourself), so the {what} "
+            return self._manual(op, payload, f"No AI can write it ({self.no_ai_reason()}), so the {what} "
                                 "form is filled in for you: write the text under “Manual candidate” and press Create. "
                                 "To let an AI write it, open Settings and connect AutoInjector or add an API key.")
         r = self.dispatch(op, "CREATE", payload=payload)
@@ -690,9 +762,7 @@ class BookPath:
                 if redo and r["module_id"] == "C02":
                     cid = self._chapter_of(rid)
                     redo = dict(redo, chapter_id=cid) if cid else None
-                res.update(module_id=r["module_id"], redo=redo,
-                    fix="Edit it so the checks pass, or let the AI write it again (🔁 Redo with AI)." if redo else
-                    "Edit it so the checks pass.")
+                res.update(module_id=r["module_id"], redo=redo, fix=refusal_advice(res.get("problems") or [], redo))
             results.append(res)
         ok = all(x["ok"] for x in results)
         n = sum(1 for x in results if x["ok"])
@@ -743,17 +813,23 @@ class BookPath:
         if not refresh:
             fmt["toc_style"] = self.import_profile("TOC_STYLE", {"max_depth": 1, "include_pages": True,
                                                                  "link_targets": True}, "Contents style")
-        self.remember(lambda m: m.__setitem__("format", fmt))
+        def put(m):
+            m["format"] = fmt
+            if isinstance(m.get("assembly"), dict) and m["assembly"].get("G01"):
+                # The title page of the assembled book came from the old format: it must be put together again.
+                m["assembly"]["format_changed"] = True
+        self.remember(put)
         if refresh:
             return {"ok": True, "message": f"The book format now carries “{md['title']}” by {md['author']}. Approve "
-                    "it, then export the book again."}
+                    "it, then put the book together again (the title page shows the new title) and export it again."}
         return {"ok": True, "message": "Book format settings made from your profile (6 x 9 inch pages, Times 11 pt). "
                 "Approve them to continue."}
 
     def a_assemble(self, body):
         st = self.status()
         steps = {s["id"]: s for s in st["steps"]}
-        if steps["chapters"]["state"] != "done" or steps["format"]["state"] != "done":
+        if not steps["chapters"].get("chapters") or not all(c.get("approved") for c in steps["chapters"]["chapters"]) \
+                or steps["format"]["state"] != "done":
             raise StepError.msg("Approve every chapter and the book format first.")
         chapters = [c["approved"] for c in steps["chapters"]["chapters"]]
         refs = [self.rec(c["record_id"], c["version"])["ref"] for c in chapters]
@@ -781,6 +857,7 @@ class BookPath:
         asm["G07"], _ = self.create("G07", {"paginated_book_ref": asm["G04"],
                                             "toc_style_ref": self._appr(fmt["toc_style"]), "max_passes": 6})
         asm["chapters"] = [f"{c['record_id']}:{c['version']}" for c in chapters]
+        asm["pdf_profile"] = fmt["pdf_profile"]["record_id"]  # the title page was made from this format
 
         def put(m):
             m["assembly"] = asm
@@ -874,6 +951,23 @@ class StepError(Exception):
     @classmethod
     def msg(cls, text):
         return cls(text, None, text)
+
+
+def refusal_advice(probs: list, redo=None) -> str:
+    """What the author can do about a draft BookForge's checks refused, in plain words. Editing only helps when the
+    text itself is wrong: a draft made from a plan or inputs that changed since (STALE, SOURCE_PIN) stays out of date
+    whatever is typed into it, and one whose inputs are not approved yet waits for those inputs."""
+    rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
+    again = " (🔁 Redo with AI, or write it again yourself)" if redo else ""
+    if rules and rules <= {"STALE", "SOURCE_PIN", "INPUT_NOT_VALIDATED"}:
+        if rules & {"STALE", "SOURCE_PIN"}:
+            return ("It was made from a plan or other inputs that changed since, so it is out of date: editing it "
+                    "cannot fix that. Approve the current version of what it was made from (for example the chapter "
+                    "outline or the characters), then make it again from them" + again + ".")
+        return ("Something it was made from is not approved yet (see the problem above): approve that first, then "
+                "approve this again.")
+    return ("Edit it so the checks pass, or let the AI write it again (🔁 Redo with AI)." if redo else
+            "Edit it so the checks pass.")
 
 
 def count_words(text) -> int:

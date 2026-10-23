@@ -301,8 +301,22 @@ def test_profile_title_change_reaches_the_next_export(tmp_path):
     items = {s["id"]: s for s in out["book"]["steps"]}["format"]["approve"]
     assert items and fk.bp_of(app, pid).act("approve", {"record_ids": [i["record_id"] for i in items],
                                                         "author_confirms": True})["ok"]
+    # ACCEPT-1: the title page is made when the book is put together, so that step is out of date now and says why;
+    # exporting before it is redone is refused (it would print the old title on the first page).
+    status = fk.bp_of(app, pid).status()
+    st = {s["id"]: s for s in status["steps"]}
+    assert st["format"]["state"] == "done" and status["next"] == "assemble"
+    assert st["assemble"]["state"] == "ready" and st["assemble"]["action"] == "assemble"
+    assert st["assemble"]["out_of_date"]
+    assert "title page" in st["assemble"]["about"] and st["export"]["state"] == "blocked"
+    assert st["export"]["waiting_for"] == "assemble" and not fk.bp_of(app, pid).act("export", {})["ok"]
+    out = fk.bp_of(app, pid).act("assemble", {})
+    assert out["ok"], out
+    items = {s["id"]: s for s in out["book"]["steps"]}["assemble"]["approve"]
+    assert items and fk.bp_of(app, pid).act("approve", {"record_ids": [i["record_id"] for i in items],
+                                                        "author_confirms": True})["ok"]
     st = {s["id"]: s for s in fk.bp_of(app, pid).status()["steps"]}
-    assert st["format"]["state"] == "done" and st["assemble"]["state"] == "done" and st["export"]["action"] == "export"
+    assert st["assemble"]["state"] == "done" and st["export"]["action"] == "export"
     out = fk.bp_of(app, pid).act("export", {})
     assert out["ok"], out
     st = {s["id"]: s for s in out["book"]["steps"]}
@@ -310,3 +324,14 @@ def test_profile_title_change_reaches_the_next_export(tmp_path):
     ex = fk.export_files(app, pid)
     assert fk.epub_info(ex["EPUB"])["meta"] == {"title": ["A Brand New Title"], "creator": ["New Pen"]}
     assert fk.docx_info(ex["DOCX"])["meta"] == {"title": "A Brand New Title", "author": "New Pen"}
+    # The visible title page (what a reader sees first), not only the metadata, carries the new title and author.
+    import pypdfium2 as pdfium  # noqa: PLC0415
+    pdf_p1 = pdfium.PdfDocument(ex["PDF"])[0].get_textpage().get_text_range()
+    assert "A Brand New Title" in pdf_p1 and "New Pen" in pdf_p1 and "Gullhaven" not in pdf_p1, pdf_p1
+    z = zipfile.ZipFile(io.BytesIO(ex["EPUB"]))
+    epub_p1 = z.read(sorted(n for n in z.namelist() if n.endswith(".xhtml") and "/text/" in n)[0]).decode("utf-8")
+    assert "A Brand New Title" in epub_p1 and "New Pen" in epub_p1 and "Gullhaven" not in epub_p1, epub_p1[:400]
+    docx_title = [t for sty, t in fk.docx_info(ex["DOCX"])["paras"] if sty in ("Title", "Subtitle")]
+    assert docx_title == ["A Brand New Title", "New Pen"], docx_title
+    # ...and the book list / picker / breadcrumb show the new name (renamed with the profile, atomically).
+    assert app.store.project(pid)["name"] == "A Brand New Title"
