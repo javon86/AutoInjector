@@ -151,7 +151,8 @@ class App:
         self._gate = threading.Lock()
         self._writers = 0
         self._exclusive: str | None = None
-        self.backups = BackupManager(self.store, busy=self._restore_busy, exclusive=self.exclusive)
+        self.backups = BackupManager(self.store, busy=self._restore_busy, exclusive=self.exclusive,
+                                     after_restore=self._after_restore)
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
         self.health = HealthService(self)
@@ -197,6 +198,24 @@ class App:
             return cur
         rows = [r for r in self.store.projects_for(self.principal_id) if not self.is_test_project(r["project_id"])]
         return {"project_id": rows[-1]["project_id"], "branch_id": "main"} if rows else None
+
+    def _after_restore(self, name: str):
+        """A backup taken while a run was working stores that run as running: nothing runs it now, so it becomes
+        "interrupted - Resume" (as after a restart), and the run caches forget the pre-restore state."""
+        alive = set()
+        for svc in (self.autobook, self.write_all):
+            with svc._lock:
+                for rid in list(svc._cache):
+                    if svc.alive(rid):
+                        alive.add(rid)
+                    else:
+                        svc._cache.pop(rid, None)
+        n = self.jobstore.mark_interrupted(
+            "Interrupted — your books were restored from a backup made while this was running. Press Resume to "
+            "continue from the restored book.", keep=alive)
+        if n:
+            log.info("after restoring %s: %d job(s) from the backup marked interrupted", name, n)
+        self.changed()
 
     def _restore_busy(self) -> str | None:
         """Why a restore (or deleting a book) must wait: any run, test, book step, AI job or other write."""

@@ -11,6 +11,7 @@ Settlement/cancellation follow the K set rules (integer minor units, explicit cu
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from .canonical import sha256_json
@@ -27,7 +28,13 @@ NS_K09 = "K09.checkpoints"
 NS_K01 = "K01.project"
 NS_LEDGER = "K12.ledger"
 
+log = logging.getLogger("bookforge.k_runtime")
+
 LEASE_SECONDS = 60
+# A reservation kept AMBIGUOUS after a timed-out paid call (the provider may or may not have done the work) is
+# released after this long when nothing reconciled it: the Messages API has no job-status lookup, and a cap that stays
+# reserved forever would hold every later AI call for no reason. The release is logged and audited.
+AMBIGUOUS_RELEASE_SECONDS = 30 * 60
 HEARTBEAT_SECONDS = 20
 DEFAULT_SETTINGS = {"locale": "en-US", "default_mode": "MANUAL", "max_parallel_jobs": 1}
 
@@ -165,6 +172,7 @@ def reserve(store, principal_id, project_id, branch_id, *, account_id, period, j
         led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
         if led is None:
             return None
+        _release_expired(tx, project_id, branch_id, principal_id, key, led)
         if currency is not None and led["currency"] != currency:
             raise BookforgeError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is in "
                                  f"{led['currency']} but this work is priced in {currency}; BookForge does not "
@@ -215,6 +223,7 @@ def settle(store, principal_id, project_id, branch_id, *, account_id, period, re
                                  status="REJECTED")
         if ambiguous:
             res["state"] = "AMBIGUOUS"
+            res.setdefault("ambiguous_at", iso(now()))
         else:
             led["reserved"] -= res["amount"]
             led["spent"] += actual
@@ -225,6 +234,67 @@ def settle(store, principal_id, project_id, branch_id, *, account_id, period, re
     overrun = max(0, actual - res["amount"]) if not ambiguous else 0
     return {"ledger": led, "overrun": overrun,
             "hold_next_work": led["spent"] + led["reserved"] >= led["limit"] or overrun > 0}
+
+
+def _release(led: dict, reservation_id: str, res: dict, why: str):
+    led["reserved"] -= res["amount"]
+    res.update(state="RELEASED", actual=0, settled_at=utcnow(), released_because=why)
+    log.warning("cost ledger %s/%s: released AMBIGUOUS reservation %s (%s minor units, job %s): %s",
+                res.get("account_id"), res.get("period"), reservation_id, res["amount"], res.get("job_id"), why)
+
+
+def _release_expired(tx, project_id, branch_id, principal_id, key: str, led: dict) -> list[str]:
+    """Release AMBIGUOUS reservations older than AMBIGUOUS_RELEASE_SECONDS (inside the caller's transaction; the
+    caller writes the ledger). Returns the released reservation ids."""
+    out = []
+    limit = now() - timedelta(seconds=AMBIGUOUS_RELEASE_SECONDS)
+    for rid, res in sorted((led.get("reservations") or {}).items()):
+        if res.get("state") != "AMBIGUOUS":
+            continue
+        try:
+            since = parse_time(res.get("ambiguous_at") or res.get("at") or "")
+        except ValueError:
+            since = None
+        if since is not None and since > limit:
+            continue
+        _release(led, rid, res, f"the timed-out AI call was not confirmed within {AMBIGUOUS_RELEASE_SECONDS // 60} "
+                                "minutes, so its reservation no longer holds the cost cap")
+        _ledger_audit(tx, project_id, branch_id, principal_id, "RELEASE",
+                      {"key": key, "reservation_id": rid, "amount": res["amount"], "reason": "expired"})
+        out.append(rid)
+    return out
+
+
+def reconcile_ambiguous(store, principal_id, project_id, branch_id, *, account_id, period) -> list[str]:
+    """Release this ledger's expired AMBIGUOUS reservations now (also done before every new reservation)."""
+    key = ledger_key(account_id, period)
+    with store.transaction() as tx:
+        led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
+        if led is None:
+            return []
+        out = _release_expired(tx, project_id, branch_id, principal_id, key, led)
+        if out:
+            tx.put_state(project_id, branch_id, NS_LEDGER, key, led, expected_revision=rev)
+    return out
+
+
+def release_ambiguous(store, principal_id, project_id, branch_id, *, account_id, period, reservation_id,
+                      reason: str = "the provider reported that the call failed") -> dict:
+    """The provider says a timed-out call failed (nothing was charged): release its AMBIGUOUS reservation now."""
+    key = ledger_key(account_id, period)
+    with store.transaction() as tx:
+        led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
+        if led is None:
+            raise BookforgeError("NOT_FOUND", "/account_id", "quota not configured")
+        res = _find_reservation(led, reservation_id)
+        if res["state"] != "AMBIGUOUS":
+            raise BookforgeError("VERSION_CONFLICT", "/reservation_id", f"reservation is {res['state']}",
+                                 status="REJECTED")
+        _release(led, reservation_id, res, reason)
+        tx.put_state(project_id, branch_id, NS_LEDGER, key, led, expected_revision=rev)
+        _ledger_audit(tx, project_id, branch_id, principal_id, "RELEASE",
+                      {"key": key, "reservation_id": reservation_id, "amount": res["amount"], "reason": reason[:200]})
+    return led
 
 
 def cancel_reservation(store, principal_id, project_id, branch_id, *, account_id, period, reservation_id,

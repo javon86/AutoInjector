@@ -59,8 +59,10 @@ def _seq(name: str) -> int:
 
 
 class BackupManager:
-    def __init__(self, store: Store, busy=None, exclusive=None):
+    def __init__(self, store: Store, busy=None, exclusive=None, after_restore=None):
         self.store = store
+        # callable(name): runs after a successful restore (e.g. work that was live in the backup becomes interrupted)
+        self.after_restore = after_restore
         self.dir = Path(store.data_dir) / "backups"
         self._lock = threading.RLock()
         self.busy = busy  # callable -> str|None: why a restore must wait (e.g. a run is active)
@@ -253,6 +255,11 @@ class BackupManager:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         log.info("restored backup %s (safety copy %s, %d asset files put back)", name, safety.get("name"), repaired)
+        if self.after_restore:
+            try:
+                self.after_restore(name)
+            except Exception:  # noqa: BLE001 - the restore itself is done; never report it as failed
+                log.exception("after restoring %s: follow-up failed", name)
         return {"restored": name, "safety_backup": safety.get("name"), "assets_repaired": repaired,
                 "message": f"Your books were restored from the backup of {self._describe(src).get('created_at')}. "
                            f"A safety copy of how things were just before is kept as {safety.get('name')}."}

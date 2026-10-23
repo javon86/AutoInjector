@@ -206,13 +206,15 @@ class JobStore:
                 break
         return out
 
-    def mark_interrupted(self) -> int:
-        """Start-up: work that was live when BookForge stopped becomes 'interrupted' (resumable)."""
+    def mark_interrupted(self, phase: str | None = None, keep=frozenset()) -> int:
+        """Start-up (and after a restore): work stored as live becomes 'interrupted' (resumable). ``keep``: ids of
+        jobs that really are running in this process."""
         n = 0
         for j in self.list(limit=MAX_KEPT):
-            if j.get("status") in LIVE:
+            if j.get("status") in LIVE and j.get("id") not in keep:
                 j["status"] = "interrupted"
-                j["phase"] = "Interrupted — BookForge was closed or restarted while this was running. Press Resume."
+                j["phase"] = phase or ("Interrupted — BookForge was closed or restarted while this was running. "
+                                       "Press Resume.")
                 j["interrupted_at"] = now_iso()
                 j["waiting"] = None
                 self.save(j)
