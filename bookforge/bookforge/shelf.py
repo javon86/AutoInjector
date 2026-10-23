@@ -25,7 +25,7 @@ def _is_test(settings_json: str) -> bool:
     return isinstance(s, dict) and bool(s.get("workflow_test") or s.get("selftest"))
 
 
-def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str | None = None,
+def finished_books(app, *, verify: bool = True, limit: int | None = 200, principal: str | None = None,
                    include_archived: bool = False) -> list[dict]:
     store = app.store
     rows = store.query("SELECT key, value, updated_at FROM settings WHERE key LIKE 'book_path:%'")
@@ -86,7 +86,9 @@ def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str
     return out[:limit]
 
 
-def shelf(app, *, principal: str | None = None) -> dict:
-    """The Shelf page: finished books, and separately the archived ones (still downloadable)."""
-    books = finished_books(app, verify=True, principal=principal, include_archived=True)
-    return {"books": [b for b in books if not b["archived"]], "archived": [b for b in books if b["archived"]]}
+def shelf(app, *, principal: str | None = None, limit: int = 200) -> dict:
+    """The Shelf page: finished books, and separately the archived ones (still downloadable). Each list keeps its own
+    newest ``limit`` books, so many archived books never push a finished one off the Shelf."""
+    books = finished_books(app, verify=True, principal=principal, include_archived=True, limit=None)
+    return {"books": [b for b in books if not b["archived"]][:limit],
+            "archived": [b for b in books if b["archived"]][:limit]}
