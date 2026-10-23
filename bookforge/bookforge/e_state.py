@@ -12,6 +12,9 @@ event_id) order:
   before; list membership changes on an unknown list are refused.
 * A change at or before the instant the current value was established is a chronology
   conflict (no zero-length or overlapping intervals are ever produced).
+* A change inserted before a later, already applied event must leave the value that event's
+  ``before`` was checked against unchanged; otherwise it is a chronology conflict (an
+  out-of-order insertion never yields an impossible timeline).
 
 The applied change closes the current fact at story_time and opens [story_time, old_to) with
 the event's prose pin as source. Failures are returned as (rule_id, message) and leave the
@@ -100,6 +103,11 @@ def overlaps(facts: list[dict]) -> list[tuple[str, str]]:
     return bad
 
 
+def _event_established(fact: dict) -> bool:
+    """True when the fact was opened by an applied event (its source is C prose), not by A/B baseline canon."""
+    return any(isinstance(r, dict) and str(r.get("module_id", "")).startswith("C") for r in fact.get("source_refs") or [])
+
+
 class Projection:
     def __init__(self, facts: list[dict]):
         self.facts = [copy.deepcopy(f) for f in facts]
@@ -157,11 +165,21 @@ class Projection:
             return label, f"{ev['event_id']} after: {err}"
         if cur is not None:
             end = cur["effective_to"]
-            cur["effective_to"] = t
         else:
             later = [f["effective_from"] for f in self._series(subject, predicate)
                      if f["effective_from"] is not None and f["effective_from"] > t]
             end = min(later) if later else None
+        if end is not None and not same(after, cur_val):
+            # Inserting a change before an already applied one: the later change was checked against the old
+            # value (its `before`), which no longer holds once this event changes the state in between.
+            nxt = [f for f in self._series(subject, predicate) if f["effective_from"] == end]
+            if any(_event_established(f) for f in nxt):
+                return ("CHRONOLOGY", f"{ev['event_id']} at story_time {t} changes {subject} {predicate} to "
+                        f"{after!r} before the change already accepted at {end}, which expected "
+                        f"{'unknown (null)' if cur is None else repr(cur_val)}; the timeline would be impossible - "
+                        "fix the earlier chapter's event or replay the later events")
+        if cur is not None:
+            cur["effective_to"] = t
         self.facts.append({"subject_id": subject, "predicate": predicate, "value": copy.deepcopy(after),
                            "assertion_type": "FACT", "effective_from": t, "effective_to": end,
                            "source_refs": [ev["source_ref"]]})

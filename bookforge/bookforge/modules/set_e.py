@@ -142,6 +142,42 @@ class StateTracker(OperationHandler):
             out.append(r)
         return out
 
+    def state_records(self, ctx: Context, findings: list) -> list[dict]:
+        """Accepted E snapshots pinned in a CHECK's source_refs (spec E: E11/E12 compare claims with A/E state)."""
+        out, seen = [], set()
+        for i, r in enumerate(ctx.field_records("source_refs")):
+            if r["module_id"][0] != "E" or r["record_kind"] != "OUTPUT" or r["record_id"] in seen:
+                continue
+            seen.add(r["record_id"])
+            snap = (r.get("data") or {}).get("snapshot")
+            if not isinstance(snap, dict):
+                continue
+            if r["lifecycle"] not in APPROVED or r["stale"]:
+                findings.append(self._f(ctx, "UNAPPROVED_STATE", f"/payload/source_refs/{i} is "
+                                        f"{'stale' if r['stale'] else r['lifecycle']} E state, not the accepted "
+                                        "state; ignored", "MAJOR", "UNKNOWN", refs=[r["ref"]]))
+                continue
+            out.append(r)
+        return out
+
+    def overlay_state(self, ctx: Context, entity: str, facts: list[dict], states: list[dict]) -> list[dict]:
+        """Accepted E state replaces the A/B baseline series it projects (it already starts from that baseline)."""
+        if not states:
+            return facts
+        single = OP_CONFIG[ctx.op_id][1]
+        state_facts = [copy.deepcopy(f) for r in states for f in r["data"]["snapshot"]["facts"]
+                       if f.get("assertion_type") == "FACT" and (not single or f["subject_id"] == entity)
+                       and self.tracked_predicate(ctx, f["predicate"])]
+        covered = {(f["subject_id"], f["predicate"]) for f in state_facts}
+        out = [f for f in facts if (f["subject_id"], f["predicate"]) not in covered]
+        seen = {canonical_bytes(f) for f in out}
+        for f in state_facts:
+            k = canonical_bytes(f)
+            if k not in seen:
+                seen.add(k)
+                out.append(f)
+        return out
+
     def select_facts(self, ctx: Context, entity: str, recs: list[dict]) -> list[dict]:
         single = OP_CONFIG[ctx.op_id][1]
         out, seen = [], set()
@@ -329,6 +365,9 @@ class StateTracker(OperationHandler):
                 recs = self.baseline_records(ctx, False, findings)
                 baseline_refs = [r["ref"] for r in recs]
                 facts = self.select_facts(ctx, entity, recs)
+                states = self.state_records(ctx, findings)
+                facts = self.overlay_state(ctx, entity, facts, states)
+                baseline_refs += [r["ref"] for r in states]
                 start_accepted = []
         links.extend(baseline_refs)
 
@@ -384,8 +423,15 @@ class StateTracker(OperationHandler):
         proj = Projection(facts)
         applied: list[dict] = []
         registry = ctx.contracts.predicate_registry.get("predicates", {})
+        limits = self.power_limits(ctx, hkey, baseline_refs) if op == "E08" else []
         for ev in sorted(seq, key=sort_key):
             predicate = self.paths(ctx)[ev["path"]]
+            if limits and ev["path"] == "/power_remaining":
+                over = self.power_limit_error(ev, limits)
+                if over:
+                    findings.append(self._f(ctx, "POWER_LIMIT", over, evidence=ev["evidence"],
+                                            refs=[ev["source_ref"]] + [r for _, r in limits]))
+                    continue
             err = proj.apply(ev, predicate, registry.get(predicate))
             if err:
                 findings.append(self._f(ctx, err[0], err[1], evidence=ev["evidence"], refs=[ev["source_ref"]]))
@@ -427,6 +473,52 @@ class StateTracker(OperationHandler):
                                   "findings": [{"rule_id": f["rule_id"], "message": f["message"]} for f in conflicts]})
         ctx.on_commit(commit)
         return Result(data=data, findings=list(findings), source_refs=baseline_refs + bundle_refs, transform="LOGIC")
+
+    # ---------------------------------------------------------------- A09 power limits (E08)
+    def power_limits(self, ctx: Context, hkey: str, baseline_refs: list[dict]) -> list[tuple]:
+        """Numeric x.a09.limit facts of the approved A09 systems governing this character.
+
+        A09 records come from the selected baseline (this request's or the one recorded at INITIALIZE), the
+        A09 records those baseline A records link to, and approved A09 records pinned in source_refs.
+        """
+        refs = list(baseline_refs) + list((ctx.get_state(BASELINE_NS, hkey) or {}).get("refs", []))
+        refs += [r["ref"] for r in ctx.field_records("source_refs") if r["lifecycle"] in APPROVED]
+        a09s, seen = [], set()
+
+        def add(rec):
+            if rec is not None and rec["module_id"] == "A09" and rec["record_id"] not in seen:
+                seen.add(rec["record_id"])
+                a09s.append(rec)
+        for ref in refs:
+            rec = _approved_version(ctx, ref["record_id"])
+            if rec is None or rec["module_id"][0] != "A":
+                continue
+            add(rec)
+            for link in (rec.get("data") or {}).get("linked_refs") or []:
+                if isinstance(link, dict) and link.get("module_id") == "A09":
+                    add(_approved_version(ctx, link["record_id"]))
+        out = []
+        for rec in a09s:
+            for f in (rec.get("data") or {}).get("facts") or []:
+                v = f.get("value")
+                if (f.get("predicate") == "x.a09.limit" and f.get("assertion_type", "FACT") == "FACT"
+                        and isinstance(v, (int, float)) and not isinstance(v, bool)):
+                    out.append((v, rec["ref"]))
+        return out
+
+    @staticmethod
+    def power_limit_error(ev: dict, limits: list[tuple]) -> str | None:
+        """Spec E: power use exceeding A09 limits is a finding. The strictest numeric limit bounds both the
+        power a character can hold and the amount spent by one event."""
+        limit = min(v for v, _ in limits)
+        before, after = ev["before"], ev["after"]
+        num = (lambda x: isinstance(x, (int, float)) and not isinstance(x, bool))
+        if num(after) and after > limit:
+            return (f"{ev['event_id']}: power {after} exceeds the A09 limit of {limit}; the power system does not "
+                    "allow it (change the prose or the A09 limits)")
+        if num(before) and num(after) and before - after > limit:
+            return (f"{ev['event_id']}: spends {before - after} power at once, more than the A09 limit of {limit}")
+        return None
 
     def affected_heads(self, ctx: Context, hkey: str, superseded: list[str]) -> list[dict]:
         out = []
