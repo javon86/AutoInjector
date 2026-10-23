@@ -423,7 +423,7 @@ class StateTracker(OperationHandler):
         proj = Projection(facts)
         applied: list[dict] = []
         registry = ctx.contracts.predicate_registry.get("predicates", {})
-        limits = self.power_limits(ctx, hkey, baseline_refs) if op == "E08" else []
+        limits = self.power_limits(ctx, hkey, baseline_refs, entity) if op == "E08" else []
         for ev in sorted(seq, key=sort_key):
             predicate = self.paths(ctx)[ev["path"]]
             if limits and ev["path"] == "/power_remaining":
@@ -475,12 +475,16 @@ class StateTracker(OperationHandler):
         return Result(data=data, findings=list(findings), source_refs=baseline_refs + bundle_refs, transform="LOGIC")
 
     # ---------------------------------------------------------------- A09 power limits (E08)
-    def power_limits(self, ctx: Context, hkey: str, baseline_refs: list[dict]) -> list[tuple]:
-        """Numeric x.a09.limit facts of the approved A09 systems governing this character.
+    def power_limits(self, ctx: Context, hkey: str, baseline_refs: list[dict], entity: str) -> list[tuple]:
+        """Numeric x.a09.limit facts of the approved A09 systems governing THIS character (spec A: "A09 powers must
+        state costs and limits used by scenes"; spec E: "power use exceeding A09 limits produces a finding").
 
-        A09 records come from the selected baseline (this request's or the one recorded at INITIALIZE), the
-        A09 records those baseline A records link to, and approved A09 records pinned in source_refs.
+        Only the character's own A09 systems count: those linked from the character's own A records (the explicit
+        baseline_ref, and baseline/source A records with a fact about this entity), plus A09 records pinned
+        directly. Another character pinned in the same request (a scene with both of them) does not impose its
+        power system's limits on this one.
         """
+        explicit = ctx.field_record("baseline_ref")
         refs = list(baseline_refs) + list((ctx.get_state(BASELINE_NS, hkey) or {}).get("refs", []))
         refs += [r["ref"] for r in ctx.field_records("source_refs") if r["lifecycle"] in APPROVED]
         a09s, seen = [], set()
@@ -489,11 +493,21 @@ class StateTracker(OperationHandler):
             if rec is not None and rec["module_id"] == "A09" and rec["record_id"] not in seen:
                 seen.add(rec["record_id"])
                 a09s.append(rec)
+
+        def own(rec) -> bool:
+            if explicit is not None and rec["record_id"] == explicit["record_id"]:
+                return True
+            return any(isinstance(f, dict) and f.get("subject_id") == entity
+                       for f in (rec.get("data") or {}).get("facts") or [])
         for ref in refs:
             rec = _approved_version(ctx, ref["record_id"])
             if rec is None or rec["module_id"][0] != "A":
                 continue
-            add(rec)
+            if rec["module_id"] == "A09":
+                add(rec)  # pinned directly
+                continue
+            if not own(rec):
+                continue  # another character's (or place's) record: its powers are not this character's
             for link in (rec.get("data") or {}).get("linked_refs") or []:
                 if isinstance(link, dict) and link.get("module_id") == "A09":
                     add(_approved_version(ctx, link["record_id"]))
@@ -508,16 +522,21 @@ class StateTracker(OperationHandler):
 
     @staticmethod
     def power_limit_error(ev: dict, limits: list[tuple]) -> str | None:
-        """Spec E: power use exceeding A09 limits is a finding. The strictest numeric limit bounds both the
-        power a character can hold and the amount spent by one event."""
+        """Spec E: power use exceeding A09 limits is a finding. An A09 limit (x.a09.limit) bounds the power USED by
+        one event - spent (before - after) or drawn at once (after - before) - not the power a character holds:
+        no separate maximum-power fact exists in the predicate registry, so holding 8 units under a limit of 10
+        per use is fine. With several of the character's own systems, the strictest limit applies."""
         limit = min(v for v, _ in limits)
         before, after = ev["before"], ev["after"]
         num = (lambda x: isinstance(x, (int, float)) and not isinstance(x, bool))
-        if num(after) and after > limit:
-            return (f"{ev['event_id']}: power {after} exceeds the A09 limit of {limit}; the power system does not "
-                    "allow it (change the prose or the A09 limits)")
-        if num(before) and num(after) and before - after > limit:
-            return (f"{ev['event_id']}: spends {before - after} power at once, more than the A09 limit of {limit}")
+        if not (num(before) and num(after)):
+            return None
+        if before - after > limit:
+            return (f"{ev['event_id']}: spends {before - after} power at once, more than the A09 limit of {limit} "
+                    "per use; the power system does not allow it (change the prose or the A09 limits)")
+        if after - before > limit:
+            return (f"{ev['event_id']}: draws {after - before} power at once, more than the A09 limit of {limit} "
+                    "per use; the power system does not allow it (change the prose or the A09 limits)")
         return None
 
     def affected_heads(self, ctx: Context, hkey: str, superseded: list[str]) -> list[dict]:
