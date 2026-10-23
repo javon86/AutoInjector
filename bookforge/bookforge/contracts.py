@@ -13,7 +13,7 @@ import zipfile
 from functools import lru_cache
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError, validators
 
 from . import CONTRACT_VERSION
 from .canonical import json_pointer, sha256_bytes
@@ -24,6 +24,42 @@ DEFAULT_ZIP = PACKAGE_DIR / "contracts.zip"
 
 ACTIONS = ("CREATE", "UPDATE", "READ", "VALIDATE", "ACCEPT")
 SETS = "ABCDEFGHIJK"
+
+_base_min_length = Draft202012Validator.VALIDATORS["minLength"]
+
+
+def _min_length_not_blank(validator, min_length, instance, schema):
+    """minLength, plus: a text that must not be empty must not be only spaces either.
+
+    Every required text field in the contracts carries minLength >= 1, so "   " used to pass
+    where "" was refused (NEW-ui-5). A whitespace-only value now fails the same way as an
+    empty one, for every operation, every action and the manual candidates.
+    """
+    yield from _base_min_length(validator, min_length, instance, schema)
+    if (isinstance(instance, str) and instance and min_length >= 1 and not instance.strip()
+            and validator.is_type(instance, "string")):
+        yield ValidationError(f"{instance!r} is blank (only spaces)")
+
+
+def _same_dialect(schema, _top=True):
+    """Drop nested "$schema": "<2020-12>" markers (the package embeds shared schemas whole).
+
+    They change nothing about the meaning, but jsonschema switches to its stock validator class at
+    such a subschema, which would skip BookforgeValidator's own rules inside embedded references.
+    """
+    if isinstance(schema, dict):
+        if not _top and schema.get("$schema") == Draft202012Validator.META_SCHEMA["$id"]:
+            del schema["$schema"]
+        for v in schema.values():
+            _same_dialect(v, False)
+    elif isinstance(schema, list):
+        for v in schema:
+            _same_dialect(v, False)
+    return schema
+
+
+# The validator class every contract check uses (Draft 2020-12 + the blank-text rule above).
+BookforgeValidator = validators.extend(Draft202012Validator, {"minLength": _min_length_not_blank})
 
 
 class ContractPackage:
@@ -66,7 +102,7 @@ class ContractPackage:
 
     @lru_cache(maxsize=256)
     def schema(self, op_id: str) -> dict:
-        return self._json(self.operations[op_id]["schema"])
+        return _same_dialect(self._json(self.operations[op_id]["schema"]))
 
     @lru_cache(maxsize=256)
     def descriptor(self, op_id: str) -> dict:
@@ -79,15 +115,15 @@ class ContractPackage:
     def validator(self, op_id: str, name: str) -> Draft202012Validator:
         full = dict(self.schema(op_id))
         full["$ref"] = f"#/$defs/{name}"
-        return Draft202012Validator(full, format_checker=FormatChecker())
+        return BookforgeValidator(full, format_checker=FormatChecker())
 
     @lru_cache(maxsize=64)
     def shared_schema(self, name: str) -> dict:
-        return self._json(f"Contracts/shared/{name}.schema.json")
+        return _same_dialect(self._json(f"Contracts/shared/{name}.schema.json"))
 
     @lru_cache(maxsize=64)
     def shared_validator(self, name: str) -> Draft202012Validator:
-        return Draft202012Validator(self.shared_schema(name), format_checker=FormatChecker())
+        return BookforgeValidator(self.shared_schema(name), format_checker=FormatChecker())
 
     def cases(self, op_id: str) -> list:
         return self._json(f"Acceptance_Cases/{op_id}.cases.json")
@@ -151,6 +187,12 @@ def _collect(err, out: dict):
             _collect(best, out)
             return
     p = json_pointer(base)
+    if err.validator == "minLength" and isinstance(err.instance, str) and not err.instance.strip():
+        field = next((str(x) for x in reversed(base) if not isinstance(x, int)), "this field")
+        # takes precedence over a pattern/format complaint at the same spot: "it's empty" is the useful message
+        out[("INVALID_INPUT", p)] = error("INVALID_INPUT", p,
+                                          f"'{field}' is empty: please type some text (spaces alone don't count)")
+        return
     if err.validator == "const" and base and base[-1] == "contract_version":
         out.setdefault(("UNSUPPORTED_CONTRACT", p), error("UNSUPPORTED_CONTRACT", p, "unsupported contract_version"))
         return
@@ -170,4 +212,4 @@ def get_package() -> ContractPackage:
         return _PACKAGE
 
 
-__all__ = ["ContractPackage", "get_package", "schema_errors", "ACTIONS", "SETS", "CONTRACT_VERSION"]
+__all__ = ["ContractPackage", "BookforgeValidator", "get_package", "schema_errors", "ACTIONS", "SETS", "CONTRACT_VERSION"]

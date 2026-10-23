@@ -308,9 +308,9 @@ def extract_json_object(text: str) -> dict | None:
 
 def schema_errors(schema: dict, data: Any, limit: int = 20) -> list[str]:
     """Exact validation errors as 'JSON pointer: message' lines (empty when valid)."""
-    from jsonschema import Draft202012Validator  # noqa: PLC0415 - required dependency
+    from .contracts import BookforgeValidator  # noqa: PLC0415 - same rules as the engine (blank text refused)
     out = []
-    for e in sorted(Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.absolute_path)):
+    for e in sorted(BookforgeValidator(schema).iter_errors(data), key=lambda e: list(e.absolute_path)):
         ptr = "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in e.absolute_path) or "/"
         out.append(f"{ptr}: {e.message[:300]}")
         if len(out) >= limit:
