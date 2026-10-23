@@ -24,6 +24,8 @@ the settings key ``book_path:<project_id>:<branch_id>`` only to find them again.
 from __future__ import annotations
 
 import hashlib
+import json
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -36,8 +38,23 @@ LENGTHS = {"short_story": ("Short story", 1, 3), "novella": ("Novella", 6, 10), 
 AI_SLOT_CHOICES = ("", "AI-1", "AI-2", "AI-3", "manual")
 FORMAT_KEYS = ("font_file", "font", "page", "pdf_profile", "epub_profile", "docx_profile", "metadata", "toc_style")
 ASSEMBLY = ("G02", "G01", "G05", "G04", "G07")
-# Rough word targets for the profile length (used for the progress bar only).
+# Rough word targets for the profile length (the progress bar, and the "much shorter than planned" warning).
 WORD_TARGETS = {"short_story": 5000, "novella": 25000, "novel": 80000}
+# A written book with fewer words than this share of its target is flagged as far below its length.
+SHORT_SHARE = 0.25
+# Profile fields that must not be blank once given (the wizard insists on a title; so does the profile dialog).
+REQUIRED_PROFILE = ("title",)
+# Steps whose AI work must not run twice at once for the same book (pressing a button twice, two tabs).
+_STEP_LOCKS: dict[str, threading.Lock] = {}
+_STEP_LOCKS_GUARD = threading.Lock()
+
+
+def _step_lock(key: str) -> threading.Lock:
+    with _STEP_LOCKS_GUARD:
+        return _STEP_LOCKS.setdefault(key, threading.Lock())
+# How the author gets a refused AI draft redone from the book page (the step action and its body).
+REDO_FOR = {"B01": {"action": "create", "op": "B01"}, "B03": {"action": "create", "op": "B03"},
+            "B11": {"action": "create", "op": "B11"}, "C02": {"action": "write_chapter"}}
 EXPORT_FOR = {"MANUSCRIPT_PDF": ("G11", "PDF", "application/pdf"),
               "EPUB_REFLOWABLE": ("G12", "EPUB", "application/epub+zip"),
               "EDITABLE_DOCX": ("G13", "DOCX",
@@ -72,6 +89,8 @@ def clean_profile(body) -> dict:
         if not isinstance(v, str):
             raise _err("INVALID_INPUT", f"/{k}", f"{k} must be text")
         v = v.strip()
+        if k in REQUIRED_PROFILE and not v:
+            raise _err("MISSING_INPUT", f"/{k}", f"the book needs a {k}: it cannot be empty or only spaces")
         if len(v) > PROFILE_FIELDS[k]:
             raise _err("INVALID_INPUT", f"/{k}", f"{k} is limited to {PROFILE_FIELDS[k]} characters")
         if k == "length" and v and v not in LENGTHS:
@@ -86,16 +105,17 @@ def get_profile(store, pid: str) -> dict:
     prof = store.get_setting(f"book_profile:{pid}")
     if prof is None:
         p = store.project(pid)
-        import json  # noqa: PLC0415
         settings = json.loads(p["settings"]) if p and p["settings"] else {}
         prof = settings.get("book_profile") if isinstance(settings, dict) else None
     return prof if isinstance(prof, dict) else {}
 
 
 def save_profile(store, pid: str, body) -> dict:
-    prof = dict(get_profile(store, pid), **clean_profile(body))
-    prof["updated_at"] = _now()
-    store.set_setting(f"book_profile:{pid}", prof)
+    clean = clean_profile(body)
+    with store.transaction():  # read-merge-write in one transaction: two saves at once keep both changes
+        prof = dict(get_profile(store, pid), **clean)
+        prof["updated_at"] = _now()
+        store.set_setting(f"book_profile:{pid}", prof)
     return prof
 
 
@@ -117,8 +137,18 @@ class BookPath:
         self._recs = None
 
     # ----------------------------------------------------------------- storage helpers
-    def save(self):
-        self.store.set_setting(self.key, self.mem)
+    def remember(self, change):
+        """Change this book's path memory atomically: re-read the stored memory inside one write transaction, apply
+        change(mem) to it and write it back. Two book actions at the same time (two tabs, Write-all + a manual
+        step) therefore each keep their own result instead of the last writer replacing the whole memory."""
+        with self.store.transaction() as tx:
+            row = tx.conn.execute("SELECT value FROM settings WHERE key=?", (self.key,)).fetchone()
+            mem = json.loads(row["value"]) if row else {}
+            mem = mem if isinstance(mem, dict) else {}
+            change(mem)
+            self.store.set_setting(self.key, mem)
+        self.mem = mem
+        return mem
 
     def records(self):
         if self._recs is None:
@@ -145,7 +175,19 @@ class BookPath:
         return out
 
     def drafts(self, op):
-        return [r for r in self.heads(op) if r["lifecycle"] in ("DRAFT", "VALIDATED") and not r.get("approved_version")]
+        """Unapproved drafts waiting for the author (drafts set aside or out of date are not waiting)."""
+        return [r for r in self.heads(op) if r["lifecycle"] in ("DRAFT", "VALIDATED") and not r.get("approved_version")
+                and not r.get("stale")]
+
+    def set_aside(self, rec, reason: str):
+        """Take an unapproved draft out of the approval queue (marked out of date, kept in its history), e.g. an AI
+        draft BookForge's checks refused and the AI is asked to redo."""
+        with self.store.transaction() as tx:
+            tx.mark_stale(self.pid, self.branch, rec["record_id"], rec["version"], reason[:300])
+            tx.insert_outbox(self.pid, self.branch, "book_path.draft_set_aside",
+                             {"record_id": rec["record_id"], "version": rec["version"],
+                              "module_id": rec["module_id"], "reason": reason[:300]})
+        self._recs = None
 
     def ref_ok(self, ref, approved=True):
         if not ref:
@@ -218,14 +260,26 @@ class BookPath:
                 return True
         return False
 
+    def title_author(self) -> tuple[str, str]:
+        title = self.profile.get("title") or (self.store.project(self.pid) or {"name": "Untitled book"})["name"]
+        return title, self.profile.get("author") or "Unknown author"
+
     def metadata(self) -> dict:
         if not self.mem.get("identifier"):
-            self.mem["identifier"] = f"urn:uuid:{uuid.uuid4()}"
-            self.save()
-        title = self.profile.get("title") or (self.store.project(self.pid) or {})["name"]
-        author = self.profile.get("author") or "Unknown author"
+            self.remember(lambda m: m.setdefault("identifier", f"urn:uuid:{uuid.uuid4()}"))
+        title, author = self.title_author()
         return {"title": title, "author": author, "identifier": self.mem["identifier"],
                 "rights": f"Copyright {datetime.now().year} {author}. All rights reserved."}
+
+    def format_out_of_date(self, fmt_recs: dict) -> bool:
+        """True when the title/author in the book format (and so in the files) differ from the book profile."""
+        meta = fmt_recs.get("metadata")
+        data = (meta or {}).get("data") or {}
+        aux = data.get("auxiliary_record") if isinstance(data.get("auxiliary_record"), dict) else None
+        md = (aux or {}).get("data") if aux else data
+        if not isinstance(md, dict) or "title" not in md:
+            return False
+        return (md.get("title"), md.get("author")) != self.title_author()
 
     def outline(self):
         a = self.approved("B11")
@@ -305,6 +359,8 @@ class BookPath:
         if outline:
             for ch in self.outline_chapters(outline):
                 ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
+                if latest and latest.get("stale") and not appr:
+                    latest = None  # set aside (e.g. redone): not waiting for the author
                 st = ("done" if appr else "needs_you" if latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
                       else "ai_can" if ai else "needs_you")
                 chapters.append(dict(ch, state=st, context_id=ctx["record_id"] if ctx else None,
@@ -322,13 +378,17 @@ class BookPath:
         fmt = self.mem.get("format") or {}
         fmt_recs = {k: self.ref_ok(fmt.get(k), approved=False) for k in FORMAT_KEYS}
         fmt_have = all(fmt_recs.values())
+        fmt_old = fmt_have and self.format_out_of_date(fmt_recs)
+        fmt_have = fmt_have and not fmt_old
         fmt_done = fmt_have and all(self.ref_ok(fmt.get(k)) for k in FORMAT_KEYS)
         step("format", "Book format", "Page size, font, contents style and the PDF/EPUB/DOCX settings, made from "
-             "your book profile (automatic).",
+             "your book profile (automatic)." + (" The title or author changed in the book profile since the format "
+                                                 "was made: make it again so the files carry the new ones."
+                                                 if fmt_old else ""),
              "done" if fmt_done else "needs_you" if fmt_have else ("ready" if prof.get("title") else "blocked"),
              action=None if fmt_done else "setup_format" if not fmt_have else None,
-             waiting_for=None if prof.get("title") else "profile",
-             approve=[item(r) for r in fmt_recs.values() if r and r["lifecycle"] in ("DRAFT", "VALIDATED")])
+             waiting_for=None if prof.get("title") else "profile", out_of_date=fmt_old,
+             approve=[item(r) for r in fmt_recs.values() if fmt_have and r and r["lifecycle"] in ("DRAFT", "VALIDATED")])
         # assembly
         asm = self.mem.get("assembly") or {}
         asm_recs = {op: self.ref_ok(asm.get(op), approved=False) for op in ASSEMBLY}
@@ -346,6 +406,8 @@ class BookPath:
         exports = self.mem.get("exports") or {}
         wanted = self.release_profiles()
         files = []
+        meta_id = (fmt.get("metadata") or {}).get("record_id") if fmt_done else None
+        cur_title, cur_author = self.title_author()
         for prof_type in wanted:
             op, fmt_name, mime = EXPORT_FOR[prof_type]
             e = exports.get(prof_type)
@@ -353,16 +415,25 @@ class BookPath:
             g07_id = asm["G07"]["record_id"] if isinstance(asm.get("G07"), dict) else None
             if rec and g07_id and e.get("assembly") == g07_id:
                 art = rec["data"].get("artifact_ref")
+                # A file made before the title/author changed is still offered (it is what exists), marked out of
+                # date and named after the title it carries, and the export step asks to make it again.
+                old = (not meta_id or (e.get("metadata") not in (None, meta_id))
+                       or (e.get("title", cur_title), e.get("author", cur_author)) != (cur_title, cur_author))
                 files.append({"format": fmt_name, "profile": prof_type, "op": op, "mime_type": mime,
                               "record_id": art["record_id"] if art else None,
                               "version": art["version"] if art else None,
-                              "descriptor_id": rec["record_id"], "sha256": rec["data"].get("sha256")})
-        exp_done = asm_done and len(files) == len(wanted) and bool(wanted)
+                              "descriptor_id": rec["record_id"], "sha256": rec["data"].get("sha256"),
+                              "title": e.get("title"), "author": e.get("author"), "out_of_date": bool(old)})
+        current = [f for f in files if not f["out_of_date"]]
+        exp_done = asm_done and fmt_done and len(current) == len(wanted) and bool(wanted)
+        exp_ready = asm_done and fmt_done
         step("export", "Export my book", "Makes the " + ", ".join(EXPORT_FOR[p][1] for p in wanted) +
-             " file(s) from the approved book. Pressing it confirms your approved chapters as the source.",
-             "done" if exp_done else "ready" if asm_done else "blocked",
-             action="export" if asm_done and not exp_done else None,
-             waiting_for=None if asm_done else "assemble", files=files)
+             " file(s) from the approved book. Pressing it confirms your approved chapters as the source." +
+             (" The files below were made with an older title/author: export again." if files and not exp_done
+              and len(current) < len(files) else ""),
+             "done" if exp_done else "ready" if exp_ready else "blocked",
+             action="export" if exp_ready and not exp_done else None,
+             waiting_for=None if exp_ready else ("assemble" if not asm_done else "format"), files=files)
         # check
         h05 = (self.mem.get("check") or {}).get("H05")
         h05_rec = self.ref_ok(h05, approved=False) if h05 and (self.mem.get("check") or {}).get("assembly") == \
@@ -462,7 +533,20 @@ class BookPath:
         if op not in ("B01", "B03", "B11"):
             raise _err("INVALID_INPUT", "/op", "this step creates B01, B03 or B11")
         what = {"B01": "premise", "B03": "main plot", "B11": "chapter outline"}[op]
-        return self._ai_or_manual(op, self.payload_for(op), what, manual=body.get("manual") is True)
+        manual, redo = body.get("manual") is True, body.get("redo") is True
+        with _step_lock(f"{self.key}:{op}"):  # a second press waits for the first, then finds its draft
+            self._recs = None
+            if self.approved(op):
+                raise StepError.msg(f"The {what} is already approved. To change it, open it and edit it.")
+            drafts = sorted(self.drafts(op), key=lambda r: r.get("created_at") or "", reverse=True)
+            if drafts and redo and not manual:
+                for d in drafts:
+                    self.set_aside(d, f"replaced: the author asked the AI to write the {what} again")
+            elif drafts and not manual:
+                return {"ok": True, "existing": True, "created": drafts[0]["ref"],
+                        "message": f"The {what} is already written and waits for you: read it and approve it (or "
+                                   "press 🔁 Redo with AI for a new one)."}
+            return self._ai_or_manual(op, self.payload_for(op), what, manual=manual)
 
     def _req_for(self, op, payload):
         return build_request(project_id=self.pid, branch_id=self.branch, op_id=op, action="CREATE",
@@ -482,8 +566,8 @@ class BookPath:
         if not ctx or ctx.get("stale"):
             ref, _ = self.create("C01", {"chapter_id": cid, "outline_ref": outline["ref"],
                                          "instruction": f"context for chapter {cid}"})
-            self.mem.setdefault("contexts", {})[f"{outline['record_id']}:{cid}"] = ref["record_id"]
-            self.save()
+            key = f"{outline['record_id']}:{cid}"
+            self.remember(lambda m: m.setdefault("contexts", {}).__setitem__(key, ref["record_id"]))
             ctx = self.rec(ref["record_id"])
         prof = self.profile
         instruction = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
@@ -493,8 +577,19 @@ class BookPath:
 
     def a_write_chapter(self, body):
         cid = body.get("chapter_id")
-        payload = self.prepare_chapter(cid)
-        out = self._ai_or_manual("C02", payload, f"chapter “{cid}”", manual=body.get("manual") is True)
+        manual, redo = body.get("manual") is True, body.get("redo") is True
+        with _step_lock(f"{self.key}:C02:{cid}"):
+            outline = self.outline()
+            if outline and isinstance(cid, str) and not manual:
+                _ctx, latest, appr = self.chapter_prose(outline, cid)
+                if not appr and latest and latest["lifecycle"] in ("DRAFT", "VALIDATED") and not latest.get("stale"):
+                    if not redo:
+                        return {"ok": True, "existing": True, "created": latest["ref"],
+                                "message": f"Chapter “{cid}” is already written and waits for you: read it and "
+                                           "approve it (or press 🔁 Redo with AI for a new one)."}
+                    self.set_aside(latest, f"replaced: the author asked the AI to write chapter {cid} again")
+            payload = self.prepare_chapter(cid)
+            out = self._ai_or_manual("C02", payload, f"chapter “{cid}”", manual=manual)
         if out.get("needs_manual"):
             out["manual_on"] = True
         return out
@@ -516,19 +611,34 @@ class BookPath:
         rows, draft_total, approved_total = [], 0, 0
         for c in chapters:
             d = a = 0
-            if c.get("prose"):
-                r = self.rec(c["prose"]["record_id"], c["prose"]["version"])
-                d = count_words((r or {}).get("data", {}).get("text") if r else "")
-            if c.get("approved"):
-                r = self.rec(c["approved"]["record_id"], c["approved"]["version"])
+            prose, appr = c.get("prose"), c.get("approved")
+            # The newest prose of an approved chapter usually IS the approved text: it is not also "in drafts".
+            same = bool(prose and appr and prose["record_id"] == appr["record_id"]
+                        and prose["version"] == appr["version"])
+            if prose and not same:
+                r = self.rec(prose["record_id"], prose["version"])
+                if r and r["lifecycle"] in ("DRAFT", "VALIDATED") and not r.get("stale"):
+                    d = count_words((r.get("data") or {}).get("text"))
+            if appr:
+                r = self.rec(appr["record_id"], appr["version"])
                 a = count_words((r or {}).get("data", {}).get("text") if r else "")
             rows.append({"chapter_id": c["chapter_id"], "draft_words": d, "approved_words": a})
             draft_total += d
             approved_total += a
-        target = WORD_TARGETS.get(self.profile.get("length") or "", WORD_TARGETS["short_story"])
+        length = self.profile.get("length") or ""
+        target = WORD_TARGETS.get(length, WORD_TARGETS["short_story"])
         best = sum(max(r["draft_words"], r["approved_words"]) for r in rows)
+        written = bool(rows) and all(r["approved_words"] or r["draft_words"] for r in rows)
+        short = bool(target and written and best < target * SHORT_SHARE)
+        warning = None
+        if short:
+            what = LENGTHS.get(length, ("book",))[0].lower()
+            warning = (f"This book is much shorter than planned: {best:,} words, where a {what} is about "
+                       f"{target:,} words. Ask the AI to write longer chapters, or change the length in the book "
+                       "profile.")
         return {"chapters": rows, "draft_words": draft_total, "approved_words": approved_total, "words": best,
-                "target_words": target, "percent": min(100, int(round(100 * best / target))) if target else 0}
+                "target_words": target, "percent": min(100, int(round(100 * best / target))) if target else 0,
+                "short": short, "warning": warning}
 
     def a_approve(self, body):
         if body.get("author_confirms") is not True:
@@ -547,26 +657,53 @@ class BookPath:
                 results.append({"record_id": rid, "ok": True, "status": r["lifecycle"], "problems": []})
                 continue
             try:
-                results.append(self.approve_ref(r["ref"]))
+                res = self.approve_ref(r["ref"])
             except StepError as exc:
-                results.append({"record_id": rid, "ok": False, "problems": exc.problems or [exc.message]})
+                res = {"record_id": rid, "ok": False, "problems": exc.problems or [exc.message]}
+            if not res["ok"]:
+                # BookForge's own checks refused it: pressing approve again cannot help. Say how to get past it.
+                redo = REDO_FOR.get(r["module_id"])
+                if redo and r["module_id"] == "C02":
+                    cid = self._chapter_of(rid)
+                    redo = dict(redo, chapter_id=cid) if cid else None
+                res.update(module_id=r["module_id"], redo=redo,
+                    fix="Edit it so the checks pass, or let the AI write it again (🔁 Redo with AI)." if redo else
+                    "Edit it so the checks pass.")
+            results.append(res)
         ok = all(x["ok"] for x in results)
         n = sum(1 for x in results if x["ok"])
         return {"ok": ok, "results": results,
                 "message": f"Approved {n} of {len(results)}." + ("" if ok else " Some need fixing — see below.")}
 
+    def _chapter_of(self, rid: str) -> str | None:
+        outline = self.outline()
+        for ch in self.outline_chapters(outline) if outline else []:
+            _ctx, latest, _appr = self.chapter_prose(outline, ch["chapter_id"])
+            if latest and latest["record_id"] == rid:
+                return ch["chapter_id"]
+        return None
+
     def a_setup_format(self, body):
         if not self.profile.get("title"):
             raise StepError.msg("Fill in the book profile (at least the title) first.")
         md = self.metadata()
-        fmt = {}
-        fmt["font_file"] = self.import_profile("ASSET_MANIFEST", {"assets": [], "placement_ids": ["font:times-roman"]},
-                                               "Font file list")
-        fmt["font"] = self.import_profile("FONT_PROFILE", {"font_refs": [fmt["font_file"]], "embedding_permitted": True,
-                                                           "fallback_names": ["Times-Roman"], "font_size_pt": 11,
-                                                           "line_height_pt": 14, "language_tag": "en"}, "Font")
-        fmt["page"] = self.import_profile("PAGE_PROFILE", {"width_mm": 152.4, "height_mm": 228.6, "bleed_mm": 0,
-                                                           "safe_margin_mm": 15}, "Page size 6 x 9 in")
+        old = self.mem.get("format") or {}
+        # Remaking the format after the title/author changed: keep the font, page and contents style the assembled
+        # book was laid out with; only the records that carry the title/author are made again.
+        keep = {k: old[k] for k in ("font_file", "font", "page", "toc_style")
+                if self.ref_ok(old.get(k), approved=False)}
+        refresh = len(keep) == 4
+        fmt = dict(keep) if refresh else {}
+        if not refresh:
+            fmt["font_file"] = self.import_profile("ASSET_MANIFEST", {"assets": [],
+                                                                      "placement_ids": ["font:times-roman"]},
+                                                   "Font file list")
+            fmt["font"] = self.import_profile("FONT_PROFILE", {"font_refs": [fmt["font_file"]],
+                                                               "embedding_permitted": True,
+                                                               "fallback_names": ["Times-Roman"], "font_size_pt": 11,
+                                                               "line_height_pt": 14, "language_tag": "en"}, "Font")
+            fmt["page"] = self.import_profile("PAGE_PROFILE", {"width_mm": 152.4, "height_mm": 228.6, "bleed_mm": 0,
+                                                               "safe_margin_mm": 15}, "Page size 6 x 9 in")
         fmt["pdf_profile"] = self.import_profile("OUTPUT_PROFILE", {
             "profile_id": "manuscript-pdf", "profile_type": "MANUSCRIPT_PDF",
             "required_checks": ["H05", "H09"], "required_export_operations": ["G11"],
@@ -579,10 +716,13 @@ class BookPath:
                 "metadata": dict(md), "printer_profile_ref": None, "page_profile_ref": page,
                 "font_profile_ref": fmt["font"]}, f"{ptype.split('_')[0]} settings")
         fmt["metadata"] = self.import_profile("PUBLICATION_METADATA", dict(md), "Title and author")
-        fmt["toc_style"] = self.import_profile("TOC_STYLE", {"max_depth": 1, "include_pages": True,
-                                                             "link_targets": True}, "Contents style")
-        self.mem["format"] = fmt
-        self.save()
+        if not refresh:
+            fmt["toc_style"] = self.import_profile("TOC_STYLE", {"max_depth": 1, "include_pages": True,
+                                                                 "link_targets": True}, "Contents style")
+        self.remember(lambda m: m.__setitem__("format", fmt))
+        if refresh:
+            return {"ok": True, "message": f"The book format now carries “{md['title']}” by {md['author']}. Approve "
+                    "it, then export the book again."}
         return {"ok": True, "message": "Book format settings made from your profile (6 x 9 inch pages, Times 11 pt). "
                 "Approve them to continue."}
 
@@ -608,9 +748,11 @@ class BookPath:
         asm["G07"], _ = self.create("G07", {"paginated_book_ref": asm["G04"],
                                             "toc_style_ref": self._appr(fmt["toc_style"]), "max_passes": 6})
         asm["chapters"] = [f"{c['record_id']}:{c['version']}" for c in chapters]
-        self.mem["assembly"] = asm
-        self.mem.pop("exports", None)
-        self.save()
+
+        def put(m):
+            m["assembly"] = asm
+            m.pop("exports", None)
+        self.remember(put)
         return {"ok": True, "message": f"The book is put together from {len(refs)} approved chapter(s). Approve the "
                 "assembly to export it."}
 
@@ -623,7 +765,11 @@ class BookPath:
         st = {s["id"]: s for s in self.status()["steps"]}
         if st["assemble"]["state"] != "done":
             raise StepError.msg("Put the book together and approve it first.")
+        if st["format"]["state"] != "done":
+            raise StepError.msg("The book format is out of date (the title or author changed): make it again and "
+                                "approve it first.")
         asm, fmt = self.mem["assembly"], self.mem["format"]
+        title, author = self.title_author()
         chapters = []
         for x in asm["chapters"]:
             rid, ver = x.rsplit(":", 1)
@@ -649,11 +795,11 @@ class BookPath:
                 else:
                     ref, _ = self.create("G13", {"final_book_ref": g07, "docx_profile_ref": self._appr(fmt["docx_profile"]),
                                                  "metadata_ref": self._appr(fmt["metadata"])})
-                made[prof_type] = {"descriptor": ref, "assembly": asm["G07"]["record_id"]}
+                made[prof_type] = {"descriptor": ref, "assembly": asm["G07"]["record_id"],
+                                   "metadata": fmt["metadata"]["record_id"], "title": title, "author": author}
             except StepError as exc:
                 problems_.append(f"{name}: {exc.message}")
-        self.mem["exports"] = dict(self.mem.get("exports") or {}, **made)
-        self.save()
+        self.remember(lambda m: m.__setitem__("exports", dict(m.get("exports") or {}, **made)))
         if problems_:
             return {"ok": bool(made), "message": "Some files could not be made.", "problems": problems_}
         return {"ok": True, "message": f"Your book is ready: {', '.join(EXPORT_FOR[p][1] for p in made)}. "
@@ -665,8 +811,7 @@ class BookPath:
         if st["assemble"]["state"] != "done":
             raise StepError.msg("Put the book together and approve it first.")
         ref, r = self.create("H05", {"manuscript_ref": self._appr(asm["G01"]), "chapter_manifest_ref": self._appr(asm["G02"])})
-        self.mem["check"] = {"H05": ref, "assembly": asm["G01"]["record_id"]}
-        self.save()
+        self.remember(lambda m: m.__setitem__("check", {"H05": ref, "assembly": asm["G01"]["record_id"]}))
         res = (r.get("result") or {}).get("status")
         return {"ok": res == "PASS", "message": f"Content check: {res}.", "problems": [] if res == "PASS" else
                 [f.get("message") for f in (r.get("result") or {}).get("findings") or [] if f.get("decision") == "FAIL"][:8]}

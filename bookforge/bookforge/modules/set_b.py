@@ -283,19 +283,26 @@ class PlanHandler(OperationHandler):
             field, unit, events = ITEM_FIELDS[self.op_id]
             items = pr.plan_items(data.get(field) or [], field, add, unit=unit, events=events)
             if unit:
-                self._check_undecided(ctx, items, field, add)
+                self._check_undecided(ctx, items, field, add, src)
         self._check_canon(ctx, data, src, add)
         rule = getattr(self, f"_rules_{self.op_id.lower()}", None)
         if rule:
             rule(ctx, data, items, src, add, record_id)
         return out
 
-    def _check_undecided(self, ctx: Context, items: list, field: str, add):
+    def _check_undecided(self, ctx: Context, items: list, field: str, add, src: Sources | None = None):
         required = set((ctx.manifest or {}).get("required_operations") or []) & prose_consumers(ctx.contracts)
+        # A chapter outline for a book whose pinned canon has no place at all cannot name one: there plan.location_id
+        # null means "no place decided yet" and is accepted (the B11 prompt asks for exactly that). With places in
+        # canon, an undecided location still blocks prose jobs as before.
+        no_places = self.op_id == "B11" and src is not None and not any(r["module_id"] == "A04" for r in src.canon())
         for it in items:
             for pred in ("plan.pov_id", "plan.location_id"):
                 if it.has(pred) and it.get(pred) is None:
-                    if required:
+                    if pred == "plan.location_id" and no_places:
+                        add("PLAN_UNDECIDED", f"/{field}/{it.index}: {pred} of '{it.item_id}' is open (the book has "
+                            "no places yet)", "INFO", "UNKNOWN")
+                    elif required:
                         add("PLAN_UNDECIDED", f"/{field}/{it.index}: {pred} of '{it.item_id}' is undecided; selected "
                             f"job(s) {', '.join(sorted(required))} need it before approval", "BLOCKING", "UNKNOWN")
                     else:
@@ -651,8 +658,32 @@ class PlanHandler(OperationHandler):
             "plan.parent_id (string or null) and plan.objective (observable outcome). Use only predicates from "
             "predicate_conventions, assertion_type PLAN, integer story-time ticks or null with effective_to > "
             "effective_from, source_refs [] and links [] unless citing a provided pin. Reuse known_ids exactly; "
-            "use null for an undecided POV/location rather than guessing. Never contradict protected facts. "
-            "Return only JSON matching the output schema.")
+            + ("never invent an ID. plan.pov_id must be one of allowed.pov_ids; plan.location_id must be one of "
+               "allowed.location_ids, or null only when allowed.location_ids is empty; give exactly "
+               "allowed.chapter_count chapters when it is set, each with a unique plan.item_id and plan.order. If "
+               "previous_attempt_problems is given, an earlier outline was refused for those reasons: avoid them. "
+               if self.op_id == "B11" else
+               "use null for an undecided POV/location rather than guessing. ")
+            + "Never contradict protected facts. Return only JSON matching the output schema.")
+
+    @staticmethod
+    def _earlier_refusals(ctx: Context, limit: int = 3) -> list[str]:
+        """Blocking findings of the newest unapproved outlines of this branch (drafts BookForge's checks refused),
+        so a fresh outline does not repeat them."""
+        try:
+            recs = ctx.store.list_records(ctx.project_id, ctx.branch_id, "B11", "OUTPUT")
+        except Exception:  # noqa: BLE001 - feedback is best effort
+            return []
+        out: list[str] = []
+        for r in sorted(recs, key=lambda x: x.get("created_at") or "", reverse=True)[:limit]:
+            if r.get("approved_version") or r["lifecycle"] in ("APPROVED", "LOCKED"):
+                continue
+            for f in r.get("findings") or []:
+                if f.get("severity") == "BLOCKING" and f.get("decision") in ("FAIL", "UNKNOWN"):
+                    msg = f"{f.get('rule_id')}: {f.get('message')}"[:300]
+                    if msg not in out:
+                        out.append(msg)
+        return out[:12]
 
     def ai_context(self, ctx: Context) -> dict:
         base = super().ai_context(ctx)
@@ -668,6 +699,14 @@ class PlanHandler(OperationHandler):
             "location_ids": sorted({i for r in canon if r["module_id"] == "A04" for i in pr.declared_ids(r)}),
         }
         base["known_ids"] = known
+        if self.op_id == "B11":
+            target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
+            base["allowed"] = {"pov_ids": known["character_ids"], "location_ids": known["location_ids"],
+                               "chapter_count": target["value"] if isinstance(target, dict)
+                               and target.get("unit") == "chapters" else None}
+            problems = self._earlier_refusals(ctx)
+            if problems:
+                base["previous_attempt_problems"] = problems
         base["predicate_conventions"] = pr.registry_brief(ctx.contracts.predicate_registry)
         base["selected_features"] = (ctx.manifest or {}).get("features") or {}
         return base

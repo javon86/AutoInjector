@@ -433,8 +433,10 @@ class ProseWriter(OperationHandler):
             raise
         text = out.get("text") if isinstance(out, dict) else None
         if not isinstance(text, str) or not text.strip():
-            raise BookforgeError("UPSTREAM_UNAVAILABLE", "/text", "AI returned empty prose; generation output text "
-                                 "must be nonempty")
+            # A content problem, not a connection problem: the AI answered, but with no text. INVALID_INPUT is not
+            # busy-retried (re-asking a paid model in a loop) and tells the author what actually happened.
+            raise BookforgeError("INVALID_INPUT", "/text", "the AI answered with no chapter text (empty prose), so "
+                                 "nothing was saved; ask it again or write the chapter yourself", status="REJECTED")
         findings = []
         plan_ref = [ctx.field_record(self.plan_field)["ref"]] if self.plan_field and ctx.field_record(
             self.plan_field) else []

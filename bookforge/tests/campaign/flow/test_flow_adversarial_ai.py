@@ -116,8 +116,6 @@ def test_empty_profile_strings_get_safe_defaults(tmp_path):
 
 
 # ------------------------------------------------------------------------------------------- empty prose
-@pytest.mark.xfail(strict=True, reason="NEW-flow-4: empty AI prose is reported as UPSTREAM_UNAVAILABLE, so the run "
-                                       "busy-waits/re-pays and tells the author to check the AI connection")
 def test_empty_chapter_text_is_a_content_problem_not_a_connection_problem(tmp_path):
     ai = fk.TraceAI(overrides={"C02": lambda ctx, out: dict(out, text="  \n\n ")})
     app = fk.make_app(tmp_path, fake=ai)
@@ -184,8 +182,6 @@ def test_outline_order_comes_from_plan_order_not_answer_order(tmp_path):
 
 
 # ------------------------------------------------------------------------------------------- canon
-@pytest.mark.xfail(strict=True, reason="NEW-flow-3: duplicate character names from the AI become two approved "
-                                       "canon characters with the same name (no dedupe/flag)")
 def test_duplicate_character_names_are_not_silently_approved_twice(tmp_path):
     def same(ctx, out):
         for it in out["items"]:
@@ -255,8 +251,6 @@ def test_reviewer_always_rejects_nothing_is_approved_then_cancel(tmp_path):
     assert approved_ids(app, pid) == set()
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-flow-5: decide(approve_anyway) on a cancelled run approves the draft "
-                                       "and THEN fails with 'this run is cancelled' (side effect behind an error)")
 def test_decide_on_a_cancelled_run_changes_nothing(tmp_path):
     app = fk.make_app(tmp_path, fake=fk.TraceAI(default_verdict="REJECT"))
     run = fk.run_book(app)
@@ -265,7 +259,9 @@ def test_decide_on_a_cancelled_run_changes_nothing(tmp_path):
     with pytest.raises(BookforgeError) as exc:
         app.autobook.decide("author", run["id"], {"action": "approve_anyway", "author_confirms": True})
     assert "cancelled" in str(exc.value)
-    assert fk.bp_of(app, pid).rec(rid)["lifecycle"] == "DRAFT"  # an error answer must not have approved it
+    # an error answer must not have approved it (the run checks drafts with VALIDATE before the AI review, so a
+    # draft that passes BookForge's checks is VALIDATED - still waiting for approval)
+    assert fk.bp_of(app, pid).rec(rid)["lifecycle"] in ("DRAFT", "VALIDATED")
 
 
 @pytest.mark.parametrize("bad", [{"verdict": "MAYBE"}, {"verdict": "approve"}, {"verdict": None}, {}])
@@ -280,8 +276,6 @@ def test_reviewer_garbage_verdict_is_never_taken_as_approve(tmp_path, bad):
     assert approved_ids(app, run["project_id"]) == set()
 
 
-@pytest.mark.xfail(strict=True, reason="BF-13: no length check - a 4-word chapter for a novella is approved and "
-                                       "exported as a finished book")
 def test_chapter_far_shorter_than_target_is_flagged(tmp_path):
     ai = fk.TraceAI(overrides={"C02": lambda ctx, out: dict(
         out, text=f"It was dark in {(ctx.get('request_payload') or {})['chapter_id']}.")})

@@ -41,9 +41,6 @@ def act(app, pid, action, body=None):
 
 
 # ------------------------------------------------------------------------------------------- "next step" twice
-@pytest.mark.xfail(strict=True, reason="NEW-flow-6: pressing a Make-my-book create step twice (or after it is done) "
-                                       "asks the AI again and leaves duplicate premise/plan drafts that can all be "
-                                       "approved")
 def test_create_step_twice_does_not_duplicate_the_premise(tmp_path):
     app = fk.make_app(tmp_path, fake=fk.TraceAI())
     pid = guided_book(app)
@@ -53,8 +50,6 @@ def test_create_step_twice_does_not_duplicate_the_premise(tmp_path):
     assert len(outputs(app, pid, "B01")) == 1, second.get("message")
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-flow-6: write_chapter twice writes the same chapter twice (two AI "
-                                       "calls, two drafts for one outline chapter)")
 def test_write_chapter_twice_does_not_duplicate_the_chapter(tmp_path):
     ai = fk.TraceAI()
     app = fk.make_app(tmp_path, fake=ai)
@@ -86,10 +81,9 @@ def test_approved_steps_are_not_redone_by_their_actions(tmp_path):
 
 
 # ------------------------------------------------------------------------------------------- "Try again" loops
-@pytest.mark.xfail(strict=True, reason="NEW-flow-1: when BookForge's checks refuse the approval of an AI draft "
-                                       "(TARGET_LENGTH, CANON_UNRESOLVED, PLAN_ITEM_DUPLICATE ...), 'Try again' "
-                                       "re-submits the same draft forever; the AI is never asked to fix or redo it")
-def test_try_again_after_a_refused_outline_lets_the_ai_fix_it(tmp_path):
+def test_refused_outline_is_written_again_by_the_ai_not_resubmitted(tmp_path):
+    """NEW-flow-1: an outline BookForge's checks refuse (5 chapters for a 3-chapter book) is set aside and the AI
+    writes it again, told what was refused - the run is not stuck re-submitting the same draft."""
     state = {"n": 0}
 
     def outline(ctx, out):
@@ -101,18 +95,40 @@ def test_try_again_after_a_refused_outline_lets_the_ai_fix_it(tmp_path):
     ai = fk.TraceAI(overrides={"B11": outline})
     app = fk.make_app(tmp_path, fake=ai)
     run = fk.run_book(app)
-    assert run["problem"]["step"] == "outline" and "TARGET_LENGTH" in json.dumps(run["problem"])
-    for _ in range(2):
-        app.autobook.decide("author", run["id"], {"action": "retry"})
-        run = fk.wait_run(app, run["id"])
-        if run["status"] == "done":
-            break
+    assert run["status"] == "done", run.get("problem")
+    pid = run["project_id"]
+    b11 = outputs(app, pid, "B11")
+    assert len(b11) == 2 and [r["stale"] for r in b11] == [True, False]  # the refused one was set aside
+    assert len(fk.bp_of(app, pid).outline_chapters(fk.bp_of(app, pid).outline())) == 3
+    second = [c for k, c in ai.contexts if k == "B11"][1]
+    assert "TARGET_LENGTH" in json.dumps(second.get("previous_attempt_problems")), second.keys()
+    assert second["allowed"]["chapter_count"] == 3 and second["allowed"]["pov_ids"]
+    assert any(e["kind"] == "fix" and "refused" in e["message"] for e in run["events"])
+
+
+def test_try_again_after_a_refused_outline_lets_the_ai_fix_it(tmp_path):
+    """NEW-flow-1: when every attempt is refused the run pauses (CHECKS_REFUSED, no 'approve anyway'); once the AI
+    gets it right, Try again finishes the book instead of re-submitting the refused draft."""
+    state = {"bad": True}
+
+    def outline(ctx, out):
+        if state["bad"]:
+            out["chapters"] = out["chapters"] + [fk.plan_item(f"ch{i}", i - 1, "extra", "mara-vell",
+                                                              "gullhaven-harbor") for i in (4, 5)]
+        return out
+    ai = fk.TraceAI(overrides={"B11": outline})
+    app = fk.make_app(tmp_path, fake=ai)
+    run = fk.run_book(app)
+    assert run["status"] == "paused" and run["problem"]["step"] == "outline", run.get("problem")
+    assert run["problem"]["code"] == "CHECKS_REFUSED" and "TARGET_LENGTH" in json.dumps(run["problem"])
+    assert "approve_anyway" not in run["problem"]["options"]
+    assert ai.kinds.count("B11") == 3  # the first draft and MAX_FIXES (2) new ones
+    state["bad"] = False
+    app.autobook.decide("author", run["id"], {"action": "retry"})
+    run = fk.wait_run(app, run["id"])
     assert run["status"] == "done", run.get("problem")
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-flow-2: when the canon step stops after some Bible entries were saved "
-                                       "but no main character (crash or a refused A01 create), Try again never makes "
-                                       "a character again - the run can never finish")
 def test_canon_step_recovers_when_the_main_character_was_not_saved(tmp_path, monkeypatch):
     app = fk.make_app(tmp_path, fake=fk.TraceAI())
     orig = Engine.dispatch
@@ -133,6 +149,69 @@ def test_canon_step_recovers_when_the_main_character_was_not_saved(tmp_path, mon
     for _ in range(2):  # the author presses Try again
         app.autobook.decide("author", run["id"], {"action": "retry"})
         run = fk.wait_run(app, run["id"])
+        if run["status"] == "done":
+            break
+    assert run["status"] == "done", run.get("problem")
+    assert len(outputs(app, pid, "A04")) == 1  # the saved place is kept; only the missing characters were made
+
+
+def test_resume_names_a_book_left_unnamed(tmp_path):
+    """NEW-fault-6 (recovery): a book whose profile has its title but whose name is still the placeholder (stopped
+    between the two by an older BookForge) gets its name when the run resumes."""
+    from bookforge.autobook import NEW_BOOK_NAME  # noqa: PLC0415
+    app = fk.make_app(tmp_path, fake=fk.TraceAI())
+    run = fk.run_book(app)
+    pid = run["project_id"]
+    with app.store.transaction() as tx:
+        tx.execute("UPDATE projects SET name=? WHERE project_id=?", (NEW_BOOK_NAME, pid))
+    raw = app.autobook.get(run["id"])
+    raw["status"] = "paused"
+    next(s for s in raw["steps"] if s["id"] == "profile")["state"] = "pending"
+    app.autobook.save(raw)
+    app.autobook.resume("author", run["id"])
+    run = fk.wait_run(app, run["id"])
+    assert run["status"] == "done", run.get("problem")
+    assert app.store.project(pid)["name"] == run["title"] == "The Keeper of Gullhaven"
+
+
+def test_decide_is_refused_unless_the_run_waits_for_a_decision(tmp_path):
+    """NEW-flow-5 (regression): a finished run refuses a decision before doing anything."""
+    app = fk.make_app(tmp_path, fake=fk.TraceAI())
+    run = fk.run_book(app)
+    with pytest.raises(Exception) as exc:
+        app.autobook.decide("author", run["id"], {"action": "retry"})
+    assert "done" in str(exc.value)
+
+
+def test_two_make_a_book_presses_at_once_start_one_run(tmp_path):
+    """BF-17: the 'is a run already working?' check and the launch are one step, so two presses at the same moment
+    start exactly one run (the other is refused), and the run's services stay with that run's thread."""
+    import threading  # noqa: PLC0415
+    from bookforge.errors import BookforgeError  # noqa: PLC0415
+    ai = fk.TraceAI()
+    ai.gate = threading.Event()
+    app = fk.make_app(tmp_path, fake=ai)
+    barrier = threading.Barrier(4)
+    out = []
+
+    def press():
+        barrier.wait()
+        try:
+            out.append(app.autobook.start("author", {"author_confirms": True})["id"])
+        except BookforgeError as exc:
+            out.append(exc.code)
+    threads = [threading.Thread(target=press) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    started = [x for x in out if x.startswith("run-")]
+    try:
+        assert len(started) == 1 and sorted(x for x in out if not x.startswith("run-")) == ["VERSION_CONFLICT"] * 3
+        assert getattr(app.autobook._tl, "run_id", None) is None  # this (test) thread is not inside the run
+    finally:
+        ai.gate.set()
+        run = fk.wait_run(app, started[0])
     assert run["status"] == "done", run.get("problem")
 
 
