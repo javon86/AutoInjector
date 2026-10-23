@@ -209,6 +209,7 @@ def test_b12_scenes_follow_outline(h):
     mara, harbor = canon(h)
     main = foundation(h, canon_refs=[mara, harbor])
     o = outline(h, main)
+    assert h.validate(o["output_refs"][0])["status"] == "VALIDATED"  # B12 ACCEPT needs a validated outline
     scenes = {"scenes": [
         item("sc-1", 0, "climb the tower", parent="ch-1", unit=(["e1"], "char-mara", "loc-harbor", ["obl-1"])),
         item("sc-2", 1, "ring early", parent="ch-1", unit=(["e2"], "char-mara", "loc-harbor", [])),

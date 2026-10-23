@@ -364,13 +364,16 @@ class Engine:
                                      request_id=req["request_id"], attempt_id=attempt_id,
                                      principal_id=ctx.principal_id, input_refs=source_refs,
                                      transform=result.transform, resource=result.resource)
+                linked = set()
                 for ptr, rec in ctx.resolved.items():
                     if ptr == "/base_ref":
                         continue
+                    linked.add((rec["record_id"], rec["version"]))
                     tx.insert_edge(project_id=ctx.project_id, branch_id=ctx.branch_id, producer_ref=rec["ref"],
                                    consumer_operation=ctx.op_id, consumer_ref=ref,
                                    paths=self._read_paths(ctx.op_id, ptr), kind=self._edge_kind(ctx.op_id, ptr),
                                    stage="DRAFT")
+                self._insert_output_edges(ctx, tx, result.data, ref, staged_refs, linked)
                 for fn in ctx.post_commit:
                     fn(tx)
                 output_refs = [ref] + staged_refs
@@ -395,6 +398,28 @@ class Engine:
                 return replay
             raise
         return response
+
+    def _insert_output_edges(self, ctx: Context, tx, data, ref: dict, staged_refs: list[dict], linked: set):
+        """Record a dependency edge for every reference stored inside the output itself.
+
+        Handler-built or author-supplied (manual_candidate) outputs can link records that were never in the
+        request; without an edge those consumers would never be marked stale when the producer changes.
+        """
+        skip = {(ref["record_id"], ref["version"])} | {(s["record_id"], s["version"]) for s in staged_refs}
+        for parts, out_ref in iter_references(data or {}, ()):
+            key = (out_ref.get("record_id"), out_ref.get("version"))
+            if key in linked or key in skip:
+                continue
+            if out_ref.get("project_id") != ctx.project_id or out_ref.get("branch_id") != ctx.branch_id:
+                continue
+            producer = self.store.get_record(ctx.project_id, ctx.branch_id, out_ref["record_id"], out_ref["version"])
+            if producer is None or producer["content_hash"] != out_ref.get("content_hash"):
+                continue  # unresolvable links are reported by VALIDATE (LINK_RESOLUTION)
+            linked.add(key)
+            ptr = "/payload" + json_pointer(parts)
+            tx.insert_edge(project_id=ctx.project_id, branch_id=ctx.branch_id, producer_ref=producer["ref"],
+                           consumer_operation=ctx.op_id, consumer_ref=ref, paths=self._read_paths(ctx.op_id, ptr),
+                           kind=self._edge_kind(ctx.op_id, ptr), stage="DRAFT")
 
     def _commit_side_records(self, ctx: Context, attempt_id: str):
         with self.store.transaction() as tx:
@@ -578,10 +603,11 @@ class Engine:
         if rec["version"] != rec["latest_version"]:
             raise BookforgeError("VERSION_CONFLICT", "/payload/candidate_ref",
                                  "a newer revision exists; accept the latest candidate", status="REJECTED")
-        findings = self.run_validation(ctx, handler, rec)
+        findings = self.run_validation(ctx, handler, rec) + self.accept_input_findings(ctx, rec)
         if self.blocking(findings):
             with self.store.transaction() as tx:
-                tx.set_lifecycle(rec["ref"], "DRAFT", findings=findings)
+                if self._accept_state_changed(ctx, rec) is None:  # never demote a revision another tab approved
+                    tx.set_lifecycle(rec["ref"], "DRAFT", findings=findings)
             return self._response(ctx.request["request_id"], attempt_id, "DRAFT", [rec["ref"]], rec["data"],
                                   findings, [error("APPROVAL_REQUIRED", "/payload/candidate_ref",
                                                    "candidate has unresolved blocking findings")],
@@ -612,6 +638,23 @@ class Engine:
         }
         response = None
         with self.store.transaction() as tx:
+            # Re-check under the write lock: another tab may have approved, rejected or replaced this
+            # revision while we validated (two concurrent ACCEPTs must approve it exactly once).
+            current = self._accept_state_changed(ctx, rec)
+            if current is not None:
+                if current["lifecycle"] in ("APPROVED", "LOCKED"):
+                    response = self._response(ctx.request["request_id"], attempt_id, "APPROVED", [current["ref"]],
+                                              current["data"] if current["record_kind"] == "OUTPUT" else None,
+                                              current["findings"], [], current["source_refs"], [], None)
+                    self._store_receipt(tx, ctx, request_hash, response)
+                    return response
+                if current["version"] != current["latest_version"]:
+                    raise BookforgeError("VERSION_CONFLICT", "/payload/candidate_ref",
+                                         "a newer revision was saved while this one was being approved; review and "
+                                         "accept the latest candidate", status="REJECTED")
+                raise BookforgeError("INVALID_INPUT", "/payload/candidate_ref",
+                                     f"candidate became {current['lifecycle']} while it was being approved and "
+                                     "cannot be accepted", status="REJECTED")
             tx.insert_approval(approval_body, ctx.project_id, ctx.branch_id)
             audit_id = tx.insert_audit(project_id=ctx.project_id, branch_id=ctx.branch_id,
                                        request_id=ctx.request["request_id"], attempt_id=attempt_id,
@@ -635,8 +678,75 @@ class Engine:
             self._store_receipt(tx, ctx, request_hash, response)
         return response
 
-    def _check_approval(self, ctx: Context, approval_rec: dict, rec: dict) -> dict:
-        """approval_ref must be the CURRENT K09/I10 decision, APPROVED, unexpired, binding this exact candidate."""
+    def _accept_state_changed(self, ctx: Context, rec: dict) -> dict | None:
+        """Fresh read of the candidate; returns it when it was approved, locked, rejected or superseded, or a
+        newer revision was saved, since `rec` was read (a concurrent DRAFT<->VALIDATED recheck is harmless)."""
+        cur = self.store.get_record(ctx.project_id, ctx.branch_id, rec["record_id"], rec["version"])
+        if cur is None:
+            raise BookforgeError("NOT_FOUND", "/payload/candidate_ref", "candidate no longer exists")
+        if cur["lifecycle"] not in ("DRAFT", "VALIDATED") or cur["latest_version"] != rec["latest_version"]:
+            return cur
+        return None
+
+    # Lifecycles that satisfy ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED for a HARD input (SUPERSEDED was approved).
+    ACCEPTABLE_INPUT_STATES = ("VALIDATED", "APPROVED", "LOCKED", "SUPERSEDED")
+
+    def accept_input_findings(self, ctx: Context, rec: dict) -> list[dict]:
+        """Shared Contract s9 ACCEPT predicate ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED.
+
+        Pin resolution is checked by run_validation; here every selected input the candidate read must also be
+        validated: a HARD input still in DRAFT, or any REJECTED input, blocks approval.
+        """
+        if not any(d["required_when"].get("operator") == "ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED"
+                   for d in self.contracts.dependencies(ctx.op_id, "ACCEPT")):
+            return []
+        rows = self.store.query("SELECT producer_record_id, producer_version, producer_module, kind FROM "
+                                "dependency_edges WHERE project_id=? AND branch_id=? AND consumer_record_id=? AND "
+                                "consumer_version=?", (ctx.project_id, ctx.branch_id, rec["record_id"],
+                                                       rec["version"]))
+        findings, seen = [], set()
+        for row in rows:
+            key = (row["producer_record_id"], row["producer_version"])
+            if key in seen or row["producer_record_id"] == rec["record_id"]:
+                continue
+            seen.add(key)
+            src = self.store.get_record(ctx.project_id, ctx.branch_id, *key)
+            if src is None or src["record_kind"] != "OUTPUT":
+                continue  # missing pins are SOURCE_PIN findings; side records have no lifecycle of their own
+            name = f"{src['module_id']} {src['record_id']} v{src['version']}"
+            if src["lifecycle"] == "REJECTED":
+                findings.append(ctx.finding("INPUT_NOT_VALIDATED", f"input {name} was rejected; choose another "
+                                            "input or create a replacement before approving this",
+                                            severity="BLOCKING", decision="FAIL"))
+            elif row["kind"] == "HARD" and src["lifecycle"] not in self.ACCEPTABLE_INPUT_STATES:
+                if (self.contracts.operation(src["module_id"]) or {}).get("execution") == "LOGIC":
+                    # A deterministic derived input (e.g. a C01 context package) needs no author approval:
+                    # its structural and owner checks are evaluated here instead.
+                    bad = self.blocking(self._validate_input(ctx, src))
+                    if not bad:
+                        continue
+                    detail = f"its checks fail: {bad[0]['message']}"
+                else:
+                    detail = "validate or approve it first"
+                findings.append(ctx.finding("INPUT_NOT_VALIDATED", f"required input {name} is still "
+                                            f"{src['lifecycle']}; {detail}", severity="BLOCKING",
+                                            decision="UNKNOWN"))
+        return findings
+
+    def _validate_input(self, ctx: Context, src: dict) -> list[dict]:
+        """VALIDATE-equivalent checks of an input record, run as its own operation (read-only)."""
+        request = dict(ctx.request, target_operation=src["module_id"], action="VALIDATE",
+                       base_ref=src["ref"], payload={"candidate_ref": src["ref"]}, input_refs=[])
+        sub = Context(self, request, ctx.principal_id, action="VALIDATE", evidence_origin=ctx.evidence_origin)
+        sub.resolved = {"/base_ref": src, "/payload/candidate_ref": src}
+        sub.base = src
+        return self.run_validation(sub, get_handler(src["module_id"]), src)
+
+    def _check_approval(self, ctx: Context, approval_rec: dict, rec: dict | None) -> dict:
+        """approval_ref must be the CURRENT K09/I10 decision, APPROVED, unexpired, binding this exact candidate.
+
+        rec=None checks the decision itself only (for a subject that has no stored record yet).
+        """
         path = "/payload/approval_ref"
         latest = self.store.get_record(ctx.project_id, ctx.branch_id, approval_rec["record_id"])
         if latest is None or latest["version"] != approval_rec["version"]:
@@ -645,7 +755,7 @@ class Engine:
         if approval_rec["module_id"] == "K09":
             from .k_runtime import check_k09_authorization
             check_k09_authorization(self.store, approval_rec, None, path)  # head, decision, expiry
-            if not self._k09_binds(ctx, approval_rec, rec):
+            if rec is not None and not self._k09_binds(ctx, approval_rec, rec):
                 raise BookforgeError("APPROVAL_REQUIRED", path, "authorization does not bind this exact "
                                      "candidate revision; prior approval cannot authorize changed output")
             data = approval_rec["data"]
@@ -658,7 +768,7 @@ class Engine:
             if not expiry or _parse_time(expiry) <= _now():
                 raise BookforgeError("EXPIRED_APPROVAL", path, "approval has expired")
             subject = body.get("subject_ref") or {}
-            if (subject.get("record_id"), subject.get("version"), subject.get("content_hash")) != (
+            if rec is not None and (subject.get("record_id"), subject.get("version"), subject.get("content_hash")) != (
                     rec["record_id"], rec["version"], rec["content_hash"]):
                 raise BookforgeError("APPROVAL_REQUIRED", path, "approval covers a different revision; prior "
                                      "approval cannot authorize changed output")

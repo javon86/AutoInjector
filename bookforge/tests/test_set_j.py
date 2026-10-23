@@ -91,6 +91,8 @@ def conflict_setup(h, locked_lifecycle="LOCKED"):
     assert h.approve(j01)["status"] == "APPROVED"
     j04r = j(h, "J04", {"conflict_refs": [j01]})
     assert j04r["status"] == "DRAFT", j04r
+    # consumers of the options (J05/J11) can only be accepted on validated inputs (Shared s9 ACCEPT predicate)
+    assert h.validate(j04r["output_refs"][0])["status"] == "VALIDATED"
     return hi, lo, j01, j04r
 
 

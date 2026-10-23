@@ -59,12 +59,14 @@ def _plan(subject, predicate, value):
 
 
 def approved_chapters(h, texts):
-    """B01 -> B03 -> B11 outline (manual, draft) -> C01 context (LOGIC) -> C02 prose (manual, approved).
+    """B01 -> B03 -> B11 outline (manual, approved) -> C01 context (LOGIC) -> C02 prose (manual, approved).
 
-    Only the C prose must be approved for assembly; outline/context approval belongs to B/C."""
+    C02 ACCEPT needs its HARD inputs validated (Shared s9 ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED): the C01
+    context is checked in place, and C01's own rule needs an approved outline, so the outline is approved."""
     b01, _ = h.create_approved("B01", {"idea": "a salt-road journey", "goals": ["finish"]},
                                manual_candidate={"premise": "p", "dramatic_question": "q?", "concept_summary": "s"})
-    b03, _ = h.create_approved("B03", {"premise_ref": b01, "canon_refs": [], "constraints": []},
+    from test_set_b import canon  # the outline's POV/location must be declared by pinned canon to validate
+    b03, _ = h.create_approved("B03", {"premise_ref": b01, "canon_refs": list(canon(h)), "constraints": []},
                                manual_candidate={"main_plot": {"summary": "x", "facts": [], "links": []},
                                                  "objectives": [], "plot_obligations": []})
     chapters = []
@@ -73,12 +75,13 @@ def approved_chapters(h, texts):
         chapters.append({"summary": f"chapter {i}", "links": [], "facts": [
             _plan(cid, "plan.item_id", cid), _plan(cid, "plan.order", i), _plan(cid, "plan.parent_id", None),
             _plan(cid, "plan.objective", "the journey advances"), _plan(cid, "plan.event_ids", []),
-            _plan(cid, "plan.pov_id", None), _plan(cid, "plan.location_id", None),
+            _plan(cid, "plan.pov_id", "char-mara"), _plan(cid, "plan.location_id", "loc-harbor"),
             _plan(cid, "plan.obligation_ids", [])]})
     r = h.dispatch("B11", "CREATE", payload={"main_plot_ref": b03, "selected_plan_refs": []},
                    manual_candidate={"chapters": chapters, "unresolved_threads": []})
     assert r["status"] == "DRAFT", r
     b11 = r["output_refs"][0]
+    assert h.approve(b11)["status"] == "APPROVED"
     out = []
     for i, text in enumerate(texts, start=1):
         r = h.create("C01", {"chapter_id": f"ch{i}", "outline_ref": b11, "instruction": "context"})

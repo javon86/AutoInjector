@@ -144,6 +144,8 @@ def test_i08_routes_to_owner_and_deduplicates_outbox(h):
 
 def test_i09_fallback_candidate_cannot_self_approve(h):
     subj = a01(h)
+    # ACCEPT needs validated HARD inputs (Shared s9 ALL_SELECTED_INPUTS_RESOLVED_AND_VALIDATED): the evidence is checked
+    assert h.validate(subj)["status"] == "VALIDATED"
     mref = missing(h, subj)["output_refs"][0]
     value = {"summary": "A drowned-lighthouse premise", "facts": [], "links": []}
     noev = h.create("I09", {"missing_request_ref": mref, "candidate_value": value, "evidence_refs": [],

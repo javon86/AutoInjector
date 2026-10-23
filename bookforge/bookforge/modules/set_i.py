@@ -96,10 +96,9 @@ class CanonDatabase(OperationHandler):
         if appr["module_id"] not in ("I10", "K09"):
             raise BookforgeError("INVALID_INPUT", "/payload/approval_ref/module_id",
                                  "approval_ref must be an I10 or K09 decision", status="REJECTED")
-        data = appr.get("data") or {}
-        decision = data.get("decision") if appr["module_id"] == "K09" else (data.get("approval") or {}).get("decision")
-        if decision != "APPROVED":
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref", f"approval decision is {decision}")
+        # Same rules as ACCEPT: the current decision, APPROVED, unexpired and bound to this exact source
+        # revision (an AUXILIARY first import has no source record, so only the decision itself is checked).
+        ctx.engine._check_approval(ctx, appr, ctx.field_record("source_ref"))
         return "APPROVED"
 
     def update(self, ctx: Context) -> Result:
