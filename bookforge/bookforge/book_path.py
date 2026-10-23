@@ -7,7 +7,8 @@ for G12/G13 and the output profiles) are derived from it when those records are 
 
 The book path walks the first usable vertical slice of the build plan in order: canon (A01) ->
 premise (B01) -> main plot (B03) -> chapter outline (B11) -> chapters (C01 context + C02 prose per
-outline chapter) -> book format (I01 profiles) -> assembly (G02/G01/G05/G04/G07) -> exports
+outline chapter) -> book format (I01 profiles) -> assembly (G02/G01/G05, G06 chapter headings + G08 title
+page compiled in, G04/G07) -> exports
 (G11 PDF / G12 EPUB / G13 DOCX for the selected release profiles) -> a content check (H05).
 
 Every step goes through ``engine.dispatch`` exactly like the workspace forms. Rules kept here:
@@ -35,7 +36,13 @@ PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "l
 LENGTHS = {"short_story": ("Short story", 1, 3), "novella": ("Novella", 6, 10), "novel": ("Novel", 20, 30)}
 AI_SLOT_CHOICES = ("", "AI-1", "AI-2", "AI-3", "manual")
 FORMAT_KEYS = ("font_file", "font", "page", "pdf_profile", "epub_profile", "docx_profile", "metadata", "toc_style")
-ASSEMBLY = ("G02", "G01", "G05", "G04", "G07")
+# Assembly records the author approves, in dependency order: chapter order (G02), chapter title rules (G06) and
+# the title page (G08) compiled into the manuscript (G01), its typography (G05), page layout (G04) and contents
+# (G07). G06/G08 are built on a plain first compile (kept as working drafts "G01_plain"/"G05_plain").
+ASSEMBLY = ("G02", "G06", "G08", "G01", "G05", "G04", "G07")
+# Chapter headings: "Chapter 3: <title>", the title being the "# Title" line the chapter prose starts with
+# (the C02 prose task asks for it); a chapter without one is headed "Chapter 3".
+CHAPTER_TITLE_RULES = {"pattern": "Chapter {number}: {title}", "include_number": True}
 # Rough word targets for the profile length (used for the progress bar only).
 WORD_TARGETS = {"short_story": 5000, "novella": 25000, "novel": 80000}
 EXPORT_FOR = {"MANUSCRIPT_PDF": ("G11", "PDF", "application/pdf"),
@@ -598,8 +605,17 @@ class BookPath:
         asm = {}
         asm["G02"], _ = self.create("G02", {"approved_chapter_refs": refs, "ordered_chapter_ids":
                                             [r["record_id"] for r in refs], "manifest_revision": m["revision"]})
-        asm["G01"], _ = self.create("G01", {"ordered_manifest_ref": asm["G02"], "approved_chapter_refs": refs,
-                                            "section_id_policy": "STABLE_ID"})
+        compile_payload = {"ordered_manifest_ref": asm["G02"], "approved_chapter_refs": refs,
+                           "section_id_policy": "STABLE_ID"}
+        asm["G01_plain"], _ = self.create("G01", compile_payload)
+        asm["G05_plain"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": "en",
+                                                  "manuscript_ref": asm["G01_plain"]})
+        # Title page (title and author from the book profile) and chapter headings, compiled into the manuscript.
+        asm["G06"], _ = self.create("G06", {"typography_ref": asm["G05_plain"],
+                                            "chapter_title_rules_ref": self._title_rules()})
+        asm["G08"], _ = self.create("G08", {"book_ref": asm["G01_plain"], "front_matter_items": ["title_page"],
+                                            "publication_profile_ref": self._appr(fmt["pdf_profile"])})
+        asm["G01"], _ = self.create("G01", compile_payload, input_refs=[asm["G06"], asm["G08"]])
         asm["G05"], _ = self.create("G05", {"font_profile_ref": self._appr(fmt["font"]), "language_tag": "en",
                                             "manuscript_ref": asm["G01"]})
         asm["G04"], _ = self.create("G04", {"manuscript_ref": asm["G01"], "page_profile_ref": self._appr(fmt["page"]),
@@ -613,6 +629,15 @@ class BookPath:
         self.save()
         return {"ok": True, "message": f"The book is put together from {len(refs)} approved chapter(s). Approve the "
                 "assembly to export it."}
+
+    def _title_rules(self):
+        """The TITLE_RULES record for chapter headings (made once, reused while it is current)."""
+        ref = self.mem.get("title_rules")
+        if not self.ref_ok(ref, approved=False):
+            ref = self.import_profile("TITLE_RULES", dict(CHAPTER_TITLE_RULES), "Chapter headings")
+            self.mem["title_rules"] = ref
+            self.save()
+        return ref
 
     def _appr(self, ref):
         """The approved revision of a record this path created (approval keeps the same version)."""

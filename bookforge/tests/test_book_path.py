@@ -111,7 +111,7 @@ def test_make_my_book_manual_end_to_end(h):
     out = bp().act("assemble", {})
     assert out["ok"], out
     st = steps(bp())
-    assert st["assemble"]["state"] == "needs_you" and len(st["assemble"]["approve"]) == 5
+    assert st["assemble"]["state"] == "needs_you" and len(st["assemble"]["approve"]) == 7
     assert st["export"]["state"] == "blocked"
     approve(h, [x["record_id"] for x in st["assemble"]["approve"]])
     out = bp().act("export", {})

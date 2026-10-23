@@ -3,8 +3,10 @@ step made is real, correct, consistent with the earlier steps, and actually used
 the PDF, EPUB and DOCX text (paragraph by paragraph)."""
 from __future__ import annotations
 
+import io
 import json
 import threading
+import zipfile
 
 import pytest
 
@@ -48,13 +50,14 @@ def check_exports(app, pid, chapters, title, author, files=None):
     # EPUB: one chapter section per chapter, paragraphs equal, spine and nav == chapters
     e = fk.epub_info(ex["EPUB"])
     assert [c["paras"] for c in e["chapters"]] == [ps for _cid, ps in expected]
-    assert len(e["nav"]) == len(chapters) and len(e["spine"]) == len(chapters) + 1  # + contents page
+    assert len(e["nav"]) == len(chapters) and len(e["spine"]) == len(chapters) + 2  # + title page, contents
     assert [h for h, _ in e["nav"]] == [c["heading"] for c in e["chapters"]]
     assert [href.split("#")[0] for _h, href in e["nav"]] == [f"text/{c['href'].split('/')[-1]}" for c in e["chapters"]]
     assert e["meta"] == {"title": [title], "creator": [author]} and e["scripts"] == 0
     # DOCX: the body paragraphs are exactly the chapters' paragraphs (headings in between), TOC == chapters
     d = fk.docx_info(ex["DOCX"])
-    body = [t for s, t in d["paras"] if t and not s.lower().startswith(("toc", "heading"))]
+    body = [t for s, t in d["paras"] if t and not s.lower().startswith(("toc", "heading", "title", "subtitle"))]
+    assert [t for s, t in d["paras"] if s in ("Title", "Subtitle")] == [title, author]  # the title page (BF-04)
     assert body == all_expected, (body[:6], all_expected[:6])
     toc = [t for s, t in d["paras"] if s.lower().startswith("toc ") and s.lower() != "toc heading" and t]
     assert len(toc) == len(chapters) and len([h for h in d["headings"]]) == len(chapters)
@@ -176,14 +179,24 @@ def test_edit_chapter_two_then_reassemble_exports_new_text_only(tmp_path):
         assert not any(p in txt for p in old_paras), f"old chapter 2 text still in {fmt}"
 
 
-@pytest.mark.xfail(strict=True, reason="BF-04: exports have no title page; the title/author are only metadata")
 def test_title_page_shows_profile_title_and_author(tmp_path):
-    app = fk.make_app(tmp_path, fake=fk.TraceAI())
+    # chapter 2's prose names its title on a "# " line (as the C02 task asks); the others have none
+    def titled(ctx, out):
+        if (ctx.get("request_payload") or {}).get("chapter_id") == "ch2":
+            out["text"] = "# Chapter 2: The *Brass* Key\n\n" + out["text"]
+        return out
+    app = fk.make_app(tmp_path, fake=fk.TraceAI(overrides={"C02": titled}))
     run = fk.run_book(app)
     ex = fk.export_files(app, run["project_id"], run["files"])
     first = fk.norm(fk.pdf_info(ex["PDF"])["pages"][0])
     assert "The Keeper of Gullhaven" in first and "Rowan Ashby" in first
     assert "The Keeper of Gullhaven" in " ".join(fk.docx_info(ex["DOCX"])["texts"][:3])
+    e = fk.epub_info(ex["EPUB"])
+    title_doc = zipfile.ZipFile(io.BytesIO(ex["EPUB"])).read("OEBPS/" + e["spine"][0]).decode("utf-8")
+    assert 'epub:type="titlepage"' in title_doc and "The Keeper of Gullhaven" in title_doc and "Rowan Ashby" in title_doc
+    # chapter headings: G06 numbering + the prose's own title (no doubled "Chapter 2", no markup)
+    assert [c["heading"] for c in e["chapters"]] == ["Chapter 1", "Chapter 2: The Brass Key", "Chapter 3"]
+    assert fk.docx_info(ex["DOCX"])["headings"] == ["Chapter 1", "Chapter 2: The Brass Key", "Chapter 3"]
 
 
 def test_make_my_book_over_http_follows_through(tmp_path):

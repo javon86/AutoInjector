@@ -207,6 +207,17 @@ class Context:
         return sha256_text(text)
 
 
+# How prose "text" is laid out: the exporters (exporters/book.py) read exactly these conventions, so the AI is told
+# them instead of guessing Markdown/HTML that would otherwise be printed literally in the book.
+PROSE_OPS = {f"C{n:02d}" for n in range(2, 12)}
+CHAPTER_TITLE_CONVENTION = ("Start the text with one line '# ' followed by a short title for this chapter (just the "
+                            "title, without 'Chapter' or a number; numbering is added when the book is assembled).")
+PROSE_CONVENTIONS = ("Write the prose as plain text: one paragraph per line (a blank line between paragraphs is "
+                     "fine), a line with only *** for a scene break, '## ' only for a sub-heading. For emphasis "
+                     "use *italic* or **bold** sparingly; no other Markdown, no HTML, no code fences, no notes or "
+                     "commentary outside the story.")
+
+
 class OperationHandler:
     """Default behavior used by every operation unless a module overrides it."""
 
@@ -259,8 +270,11 @@ class OperationHandler:
 
     def ai_task(self, ctx: Context) -> str:
         op = ctx.op
-        return (f"Operation {op['id']} - {op['name']}. Purpose: {op['purpose']} "
+        task = (f"Operation {op['id']} - {op['name']}. Purpose: {op['purpose']} "
                 f"AI policy: {op.get('ai', '')} Return only JSON matching the output schema.")
+        if op["id"] in PROSE_OPS:
+            task += " " + (CHAPTER_TITLE_CONVENTION + " " if op["id"] == "C02" else "") + PROSE_CONVENTIONS
+        return task
 
     def ai_context(self, ctx: Context) -> dict:
         refs = {}
