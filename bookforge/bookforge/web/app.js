@@ -2515,14 +2515,23 @@ async function viewWrite(main, rid, mode) {
   const editor = async () => {
     clear(card);
     const saved = loadJSON(draftKey, null);
-    const draft = saved && saved.base_version === latest.version ? saved : null;
+    // Unsaved changes are never thrown away: changes made on an older version (someone, an AI job or another window
+    // saved a newer one meanwhile) come back on top of the newest version, with a notice.
+    const draft = saved && saved.v ? saved : null;
+    const older = draft && draft.base_version !== latest.version ? draft.base_version : null;
     const err = h('div', { 'aria-live': 'polite' });
     const status = h('span', { class: 'draft-state small muted', role: 'status' }, draft ? 'Your unsaved changes are back.' : '');
     const save = h('button', { type: 'submit', class: 'primary' }, '💾 Save as a new version');
     let collect;
     const form = h('form', { novalidate: true });
     card.append(h('h2', { id: 'sd-h' }, isChapter ? `Change ${label}` : 'Change the chapter outline'),
-      h('p', { class: 'small muted' }, 'Saving makes a new version for you to approve. ', approvedV ? 'The approved version stays in the book until then.' : ''), form);
+      h('p', { class: 'small muted' }, 'Saving makes a new version for you to approve. ', approvedV ? 'The approved version stays in the book until then.' : ''),
+      older != null ? stateBox('fix', 'Your unsaved changes are back, on top of the newest version',
+        h('p', null, `You were changing version ${older}; version ${latest.version} was saved since (in another window, by an AI job, or by someone else). `
+          + `Your text is in the boxes below and saving makes it the next version. Check that it still has what changed in version ${latest.version} `
+          + '(🔧 Developer view shows every version).'),
+        h('button', { type: 'button', class: 'small', 'data-discard-draft': '1', onclick: () => { removeKey(draftKey); editor(); } }, 'Discard my changes and show the newest version')) : null,
+      form);
     if (isChapter) {
       const parts = draft ? draft.v : splitChapter(latest.data.text);
       const tIn = h('input', { type: 'text', id: 'sd-title', value: parts.title || '', 'aria-describedby': 'sd-title-h' });
@@ -2585,6 +2594,7 @@ async function viewWrite(main, rid, mode) {
           payload: c.data, base_ref: latest.ref, input_refs: [], idempotency_key: key } } });
         const resp = out.response || {};
         clear(err);
+        if ((resp.errors || []).some(e => e && e.code === 'VERSION_CONFLICT')) { conflict(c); return; }
         if ((resp.errors || []).length || !(resp.output_refs || []).length) {
           err.appendChild(stateBox('failed', 'Not saved', h('ul', null, (resp.errors || []).map(e => h('li', null, plainError(e), errTech(e)))),
             h('p', { class: 'small' }, 'Your changes are kept here: fix them and save again.')));
@@ -2596,13 +2606,24 @@ async function viewWrite(main, rid, mode) {
         toast(`Saved as version ${resp.output_refs[0].version}: approve it to put it in the book`);
         go(plink('write', rid));   // the reader, showing the new version (and its checks)
       } catch (e) {
+        if (e instanceof ApiError && (e.errors || []).some(x => x && x.code === 'VERSION_CONFLICT')) { conflict(c); return; }
         clear(err).appendChild(problemBox(toProblem(e, { book: S.project.name, step: label }), {}));
         save.disabled = false;
       }
     });
+    // A newer version was saved while the author was typing: keep their text and put it on top of the newest version.
+    const conflict = c => {
+      saveJSON(draftKey, { base_version: latest.version, v: c.v });
+      clear(err).appendChild(stateBox('fix', 'Not saved yet: a newer version was saved while you were changing this',
+        h('p', null, 'Your changes are kept. Load the newest version: your text comes back on top of it, so you can check it and save again.'),
+        h('button', { type: 'button', class: 'primary small', 'data-load-newest': '1', onclick: () => { S.details[rid] = null; go(plink('write', rid, 'edit')); } },
+          '🔄 Load the newest version (keeps your changes)')));
+      save.disabled = false;
+      const b = err.querySelector('button'); if (b) b.focus();
+    };
   };
   const stored = loadJSON(draftKey, null);
-  if (mode === 'edit' || (stored && stored.base_version === latest.version)) await editor(); else reader();
+  if (mode === 'edit' || (stored && stored.v)) await editor(); else reader();
 }
 
 /* ======================================================================= views: manifest */
