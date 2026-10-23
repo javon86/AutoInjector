@@ -132,7 +132,8 @@ async function main() {
   assert(stateRes.transcript.some((t) => t.site === "claude" && t.text === "Here is the outline."), "bridge-owned reply is shown in the transcript");
 
   // A normal (non-bridge) reply still relays as before.
-  reg("claude").webContents.currentText = "[TO: USER]\nA normal follow-up.\n[FROM: CLAUDE]";
+  // Untagged on purpose: a written [TO: USER] now stays with the user (TR-05), so it would not be relayed.
+  reg("claude").webContents.currentText = "A normal follow-up.\n[FROM: CLAUDE]";
   const relayed = await waitUntil(() => reg("gemini").webContents.sentLog[0]);
   assert(relayed && relayed.text.includes("A normal follow-up."), "a non-bridge reply is still relayed normally");
   await call("routing:set", { source: "claude", target: "gemini", enabled: false });

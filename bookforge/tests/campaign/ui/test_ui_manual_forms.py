@@ -1,0 +1,179 @@
+"""The manual path with NO AI connected: the wizard, "Do the next step" opening ready-made forms, empty/invalid/valid
+submits with the problem shown at the field, autosaved drafts surviving a reload, approval through the confirm dialog,
+and the Settings forms (backup keep, restore guard)."""
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from .ui_helpers import assert_clean, goto, open_app, settle, shot
+
+
+def book_top(page):
+    t = page.inner_text("#main .book-top")
+    m = re.search(r"(\d+) of (\d+) steps done", t)
+    nxt = page.locator("#main .book-top button", has_text="Do the next step")
+    return int(m.group(1)), (nxt.inner_text().split(":", 1)[-1].strip() if nxt.count() else None)
+
+
+def submit(page):
+    page.locator("#main form button[type=submit]").first.click()
+    settle(page, 600)
+
+
+def test_manual_path_forms(make_context, server):
+    page = open_app(make_context(), server, "#/start")
+    # wizard on a server without AI: step 2 says so and offers Manual
+    page.fill("#wz-title", "Hand Made")
+    page.fill("#wz-idea", "A keeper vanishes; his apprentice searches the harbor.")
+    page.select_option("#wz-length", value="short_story")
+    page.get_by_role("button", name="Next ▶").click()
+    page.get_by_text("Manual — I’ll write it myself").wait_for()
+    page.wait_for_function("() => !document.querySelector('#main .wz-card .spinner')", timeout=10000)
+    assert "No AI is ready" in page.inner_text("#main .wz-card")
+    page.get_by_text("Manual — I’ll write it myself").click()
+    page.get_by_role("button", name="Next ▶").click()
+    settle(page)
+    assert "ready-to-fill forms" in page.inner_text("#main .wz-card")
+    page.get_by_role("button", name="Next ▶").click()
+    settle(page)
+    assert "I write it myself (no AI)" in page.inner_text("#main .wz-card")
+    page.get_by_role("button", name="🚀 Create my book").click()
+    page.wait_for_url(re.compile(r"/book$"), timeout=20000)
+    settle(page)
+    pid = page.url.split("#/p/")[1].split("/")[0]
+    assert book_top(page) == (1, "Characters and places")
+
+    # Do the next step -> the A01 form
+    page.locator("#main .book-top button", has_text="Do the next step").click()
+    page.wait_for_function("() => location.hash.endsWith('/op/A01')", timeout=10000)
+    settle(page, 400)
+    concept = page.locator("#main form textarea[id$='_payload_concept']").first
+    # empty submit: refused, the problem is at the Concept field, nothing saved
+    submit(page)
+    assert concept.get_attribute("aria-invalid") == "true"
+    summary = page.locator("#main .error-summary").first
+    assert "Concept" in summary.inner_text()
+    assert server.api("GET", f"/projects/{pid}/branches/main/records") == []
+    # typed text is autosaved: it survives a reload before submitting
+    concept.fill("Mara Vell, apprentice lighthouse keeper")
+    page.wait_for_timeout(1200)
+    page.reload()
+    page.wait_for_selector("#main form textarea[id$='_payload_concept']", timeout=15000)
+    settle(page, 400)
+    concept = page.locator("#main form textarea[id$='_payload_concept']").first
+    assert concept.input_value() == "Mara Vell, apprentice lighthouse keeper", "the typed text was lost on reload"
+    assert concept.get_attribute("aria-invalid") != "true"
+    submit(page)
+    recs = server.api("GET", f"/projects/{pid}/branches/main/records")
+    assert [r["module_id"] for r in recs] == ["A01"] and recs[0]["title"].startswith("Mara Vell")
+    # after the save the draft is gone: a reload shows an empty form and the record in the list
+    page.reload()
+    page.wait_for_selector("#main form textarea[id$='_payload_concept']", timeout=15000)
+    settle(page, 400)
+    assert page.locator("#main form textarea[id$='_payload_concept']").first.input_value() == ""
+    assert "Mara Vell" in page.inner_text("#main")
+
+    # back on the book: approve it with the confirm dialog (Escape first: nothing approved)
+    goto(page, f"#/p/{pid}/main/book")
+    assert book_top(page) == (1, "Characters and places")
+    page.locator("#main .book-top button", has_text="Do the next step").click()
+    dlg = page.locator("dialog[open]", has_text="Approve as the author?")
+    dlg.wait_for(timeout=5000)
+    assert "Mara Vell" in dlg.inner_text()
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(300)
+    assert server.api("GET", f"/projects/{pid}/branches/main/records")[0]["approved_version"] is None
+    page.locator("#main .book-top button", has_text="Do the next step").click()
+    page.get_by_role("button", name="✔ Yes, I approve").click()
+    page.wait_for_function("() => /2 of \\d+ steps done/.test(document.querySelector('#main .book-top').textContent)",
+                           timeout=15000)
+    assert book_top(page) == (2, "Premise")
+    assert server.api("GET", f"/projects/{pid}/branches/main/records")[0]["approved_version"] == 1
+
+    # premise: the next step prepares the B01 form in manual mode
+    page.locator("#main .book-top button", has_text="Do the next step").click()
+    page.wait_for_function("() => location.hash.endsWith('/op/B01')", timeout=15000)
+    settle(page, 500)
+    manual = page.locator("#main input[type=checkbox][id^=manual]").first
+    assert manual.is_checked(), "the B01 form did not open in manual mode"
+    out_fields = page.locator("#main form textarea:visible")
+    assert out_fields.count() >= 2
+    submit(page)                                # the output is empty: refused at the fields
+    invalid = page.locator("#main [aria-invalid=true]").count()
+    assert invalid >= 1
+    assert not [r for r in server.api("GET", f"/projects/{pid}/branches/main/records") if r["module_id"] == "B01"]
+    for i in range(out_fields.count()):
+        f = out_fields.nth(i)
+        if not f.input_value().strip():
+            f.fill(f"Hand-written text {i}: an apprentice searches a foggy harbor.")
+    submit(page)
+    b01 = [r for r in server.api("GET", f"/projects/{pid}/branches/main/records") if r["module_id"] == "B01"]
+    if not b01:
+        shot(page, "manual_b01_not_saved")
+    assert b01, page.inner_text("#main .error-summary") if page.locator("#main .error-summary").count() else "no B01"
+    goto(page, f"#/p/{pid}/main/book")
+    assert book_top(page)[1] == "Premise"
+    assert_clean(page, "manual path")
+
+
+def test_settings_backup_forms(make_context, server):
+    page = open_app(make_context(), server, "#/settings")
+    page.wait_for_selector("#bk-keep", timeout=10000)
+    keep = page.locator("#bk-keep")
+    orig = keep.input_value()
+    # invalid: 0 is refused at the field, the stored value stays
+    keep.fill("0")
+    keep.locator("xpath=..").get_by_role("button", name="Save").click()
+    page.wait_for_timeout(600)
+    assert keep.get_attribute("aria-invalid") == "true" or page.locator("#main [role=alert]").count()
+    assert str(server.api("GET", "/backups")["keep"]) == orig
+    expected = [p for p in page.bf_problems if "/api/backups/settings" in p or "status of 400" in p]
+    assert expected, "the invalid value did not reach the server's check"
+    page.bf_problems.clear()
+    # valid: saved and still there after a reload
+    keep.fill("7")
+    keep.locator("xpath=..").get_by_role("button", name="Save").click()
+    page.locator("#toast:not([hidden])").wait_for(timeout=5000)
+    assert server.api("GET", "/backups")["keep"] == 7
+    page.reload()
+    page.wait_for_selector("#bk-keep", timeout=10000)
+    assert page.locator("#bk-keep").input_value() == "7"
+    # back up now -> a verified backup is listed
+    page.get_by_role("button", name="💾 Back up now").click()
+    page.locator("#main .bk-list li").first.wait_for(timeout=15000)
+    n = len(server.api("GET", "/backups")["backups"])
+    assert n >= 1
+    # restore is guarded: unticked / wrong word are refused at the field; Cancel does nothing
+    page.locator("#main .bk-list button", has_text="Restore").first.click()
+    dlg = page.locator("dialog[open]")
+    dlg.get_by_role("button", name="↩ Restore this backup").click()
+    page.wait_for_timeout(300)
+    assert dlg.locator("input[type=checkbox][aria-invalid=true]").count() == 1
+    dlg.locator("input[type=checkbox]").check()
+    dlg.locator("input[type=text]").fill("restor")
+    dlg.get_by_role("button", name="↩ Restore this backup").click()
+    page.wait_for_timeout(300)
+    assert dlg.locator("input[type=text][aria-invalid=true]").count() == 1
+    dlg.get_by_role("button", name="Cancel").click()
+    assert not page.locator("dialog[open]").count()
+    assert len(server.api("GET", "/backups")["backups"]) == n, "something was restored or backed up"
+    assert_clean(page, "settings")
+
+
+@pytest.mark.xfail(strict=True, reason="NEW-ui-5: a Concept of only spaces passes the required check (UI and server) "
+                   "and is saved as a character whose name/title is blank; the book then lists an empty character "
+                   "(app.js form node.get keeps whitespace; the schema only says minLength 1)")
+def test_blank_required_text_is_refused(make_context, server):
+    proj = server.api("POST", "/projects", {"name": "Blank Test", "profile": {"title": "Blank Test", "ai_slot": "manual"}})
+    pid = proj["project_id"]
+    page = open_app(make_context(), server, f"#/p/{pid}/main/op/A01")
+    concept = page.locator("#main form textarea[id$='_payload_concept']").first
+    concept.fill("   ")
+    submit(page)
+    recs = server.api("GET", f"/projects/{pid}/branches/main/records")
+    if recs:
+        goto(page, f"#/p/{pid}/main/op/A01")
+        shot(page, "NEW-ui-5_blank_character_saved")
+    assert recs == [], f"saved: {[r['title'] for r in recs]!r}"
