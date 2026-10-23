@@ -5,8 +5,11 @@ Courier) with WinAnsi encoding and the Adobe AFM advance widths in fontmetrics.p
 breaking measures the exact glyph widths the viewer will use. Body paragraphs are justified
 (PDF Tw word spacing) with a first-line indent; chapters start on a new page; sub-headings
 keep with the next two lines; images scale into their placement box and never split.
-Page numbers are continuous arabic numerals centred in the bottom margin. Not implemented:
-hyphenation, kerning, widow/orphan control beyond keep-with-next, inline styles.
+Page numbers are continuous arabic numerals centred in the bottom margin. Inline emphasis
+runs (book "runs") are set in the family's italic/bold faces. PDF text mapping: soft hyphens
+(U+00AD) are invisible break hints and are dropped (no automatic hyphenation), narrow/figure
+no-break spaces print as the WinAnsi no-break space, and no-break spaces never break a line.
+Not implemented: hyphenation, kerning, widow/orphan control beyond keep-with-next.
 """
 from __future__ import annotations
 
@@ -39,9 +42,19 @@ def resolve_family(names: list[str]) -> str | None:
     return None
 
 
+# What the PDF prints for characters WinAnsi lacks but that have an exact typographic stand-in.
+_PDF_MAP = str.maketrans({"\u00ad": None, "\u202f": "\u00a0", "\u2007": "\u00a0", "\u2060": None,
+                          "\u2011": "-"})
+
+
+def pdf_text(text: str) -> str:
+    """Book text as the PDF sets it (see module doc): soft hyphens dropped, narrow no-break spaces mapped."""
+    return text.translate(_PDF_MAP)
+
+
 def unencodable(text: str) -> list[str]:
     bad = []
-    for ch in sorted(set(text)):
+    for ch in sorted(set(pdf_text(text))):
         if ch in "\n\t":
             continue
         try:
@@ -150,8 +163,13 @@ class Layout:
         return [(h["heading_id"], h["page"]) for h in self.heading_pages]
 
 
+def words_of(text: str) -> list[str]:
+    """Break opportunities are ordinary spaces only (no-break spaces stay inside their word)."""
+    return [w for w in pdf_text(text).replace("\t", " ").replace("\n", " ").split(" ") if w]
+
+
 def wrap(text: str, font: str, size: float, width: float) -> list[list[str]]:
-    words = text.split()
+    words = words_of(text)
     lines: list[list[str]] = []
     cur: list[str] = []
     space = text_width(" ", font, size)
@@ -173,6 +191,74 @@ def wrap(text: str, font: str, size: float, width: float) -> list[list[str]]:
             continue
         add = ww if not cur else cur_w + space + ww
         if cur and add > width:
+            lines.append(cur)
+            cur, cur_w = [w], ww
+        else:
+            cur.append(w)
+            cur_w = add
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def styled_words(runs: list, fonts: dict) -> list[list[tuple[str, str]]]:
+    """Inline runs [(text, style)] -> words, each a list of (text, font) segments (a word may change face
+    mid-word, e.g. an italic word followed by a roman comma)."""
+    words: list[list[tuple[str, str]]] = []
+    cur: list[tuple[str, str]] = []
+    for text, style in runs:
+        font = fonts.get(style) or fonts[""]
+        for j, part in enumerate(pdf_text(text).replace("\t", " ").replace("\n", " ").split(" ")):
+            if j and cur:
+                words.append(cur)
+                cur = []
+            if part:
+                if cur and cur[-1][1] == font:
+                    cur[-1] = (cur[-1][0] + part, font)
+                else:
+                    cur.append((part, font))
+    if cur:
+        words.append(cur)
+    return words
+
+
+def _word_width(word, size: float) -> float:
+    return sum(text_width(t, f, size) for t, f in word)
+
+
+def wrap_styled(words: list, size: float, first_width: float, width: float, space_font: str) -> list[list]:
+    """Greedy line breaking of styled words (same rules as wrap(); first line may be narrower)."""
+    lines: list[list] = []
+    cur: list = []
+    cur_w = 0.0
+    space = text_width(" ", space_font, size)
+
+    def avail():
+        return first_width if not lines else width
+
+    for w in words:
+        ww = _word_width(w, size)
+        if ww > avail():  # break an over-long token by characters, keeping each character's face
+            if cur:
+                lines.append(cur)
+                cur, cur_w = [], 0.0
+            piece: list = []
+            pw = 0.0
+            for seg, font in w:
+                for ch in seg:
+                    cw = text_width(ch, font, size)
+                    if piece and pw + cw > avail():
+                        lines.append([piece])
+                        piece, pw = [], 0.0
+                    if piece and piece[-1][1] == font:
+                        piece[-1] = (piece[-1][0] + ch, font)
+                    else:
+                        piece.append((ch, font))
+                    pw += cw
+            cur, cur_w = [piece], pw
+            continue
+        add = ww if not cur else cur_w + space + ww
+        if cur and add > avail():
             lines.append(cur)
             cur, cur_w = [w], ww
         else:
@@ -245,13 +331,58 @@ class _Composer:
         self.page.ops.append(("text", font, size, x, baseline, text, tw))
         self.y -= self.t.leading * size / self.t.size
 
+    def line_styled(self, words: list, size: float, *, indent: float = 0.0, justify: bool = False):
+        """One justified/left-aligned line of styled words: one text op per run of the same face."""
+        width = self.g.content_width - indent
+        space = text_width(" ", self.t.regular, size)
+        natural = sum(_word_width(w, size) for w in words) + space * (len(words) - 1)
+        tw = 0.0
+        if justify and len(words) > 1:
+            tw = (width - natural) / (len(words) - 1)
+            if tw > size * 1.5:
+                tw = 0.0
+        baseline = self.y - size
+        x = self.g.left + indent
+        cur_font, cur_text = None, ""
+
+        def flush():
+            nonlocal x
+            if cur_font is not None and cur_text:
+                self.page.ops.append(("text", cur_font, size, x, baseline, cur_text, tw))
+                x += text_width(cur_text, cur_font, size) + tw * cur_text.count(" ")
+
+        for wi, word in enumerate(words):
+            for si, (seg, font) in enumerate(word):
+                if wi and not si:
+                    cur_text += " "  # the inter-word space belongs to the run before it
+                if font != cur_font:
+                    flush()
+                    cur_font, cur_text = font, seg
+                else:
+                    cur_text += seg
+        flush()
+        self.y -= self.t.leading * size / self.t.size
+
+    def paragraph_runs(self, runs: list, *, indent_first: bool = True):
+        size = self.t.size
+        lead = self.t.leading
+        indent = size * 1.5 if indent_first else 0.0
+        fonts = {"": self.t.regular, "i": self.t.italic, "b": self.t.bold, "bi": self.t.bold}
+        words = styled_words(runs, fonts)
+        if not words:
+            return
+        lines = wrap_styled(words, size, self.g.content_width - indent, self.g.content_width, self.t.regular)
+        for i, ws in enumerate(lines):
+            self.ensure(lead)
+            self.line_styled(ws, size, indent=indent if i == 0 else 0.0, justify=i != len(lines) - 1)
+
     def paragraph(self, text: str, *, font: str | None = None, size: float | None = None, align: str = "justify",
                   indent_first: bool = True):
         font = font or self.t.regular
         size = size or self.t.size
         lead = self.t.leading * size / self.t.size
         indent = size * 1.5 if indent_first else 0.0
-        first_lines = wrap(text, font, size, self.g.content_width - indent) if text.split() else []
+        first_lines = wrap(text, font, size, self.g.content_width - indent) if words_of(text) else []
         if not first_lines:
             return
         lines = [first_lines[0]]
@@ -293,8 +424,11 @@ class _Composer:
             raise LayoutError(f"image {block['key']} not supplied")
         box_w = min(mm_to_pt(block["w_mm"]), self.g.content_width)
         box_h = mm_to_pt(block["h_mm"]) * box_w / mm_to_pt(block["w_mm"])
-        if box_h > self.g.content_height - self.t.leading:
-            scale = (self.g.content_height - self.t.leading) / box_h
+        # Tallest box a page can hold: from the top of the text area down to the composer floor (which
+        # keeps clear of the page number), less the space ensure() reserves around the image.
+        max_h = max(self.g.height - self.g.top - self.floor - self.t.leading * 0.5, 1.0)
+        if box_h > max_h:
+            scale = max_h / box_h
             box_w, box_h = box_w * scale, box_h * scale
         iw, ih = info
         if block["fit"] == "CONTAIN":
@@ -403,7 +537,9 @@ def paginate(book: dict, geom: Geometry, typo: Typography, *, toc_entries: list[
         c.heading(sec)
         for b in sec["blocks"]:
             t = b["t"]
-            if t == "p":
+            if t == "p" and b.get("runs"):
+                c.paragraph_runs(b["runs"], indent_first=not b.get("first"))
+            elif t == "p":
                 c.paragraph(b["text"], indent_first=not b.get("first"))
             elif t == "meta":
                 c.paragraph(b["text"], align="center", indent_first=False)

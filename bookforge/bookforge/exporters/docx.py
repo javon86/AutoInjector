@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import posixpath
 import xml.etree.ElementTree as ET
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import escape as _escape
+from xml.sax.saxutils import quoteattr as _quoteattr
 
+from .book import xml_safe
 from .ziputil import build_zip, read_zip
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -28,8 +30,27 @@ EMU_PER_MM = 36000
 DOCX_FONTS = {"times": "Times New Roman", "helvetica": "Arial", "courier": "Courier New"}
 
 
-def _t(text: str) -> str:
-    return f"<w:r><w:t xml:space=\"preserve\">{escape(text)}</w:t></w:r>"
+def escape(text: str) -> str:
+    return _escape(xml_safe(text))
+
+
+def quoteattr(text: str) -> str:
+    return _quoteattr(xml_safe(text))
+
+
+_RPR = {"i": "<w:rPr><w:i/><w:iCs/></w:rPr>", "b": "<w:rPr><w:b/><w:bCs/></w:rPr>",
+        "bi": "<w:rPr><w:b/><w:bCs/><w:i/><w:iCs/></w:rPr>"}
+
+
+def _t(text: str, style: str = "") -> str:
+    return f"<w:r>{_RPR.get(style, '')}<w:t xml:space=\"preserve\">{escape(text)}</w:t></w:r>"
+
+
+def _runs(block: dict) -> str:
+    """Paragraph runs: plain text, or italic/bold runs for inline emphasis."""
+    if not block.get("runs"):
+        return _t(block["text"])
+    return "".join(_t(text, style) for text, style in block["runs"])
 
 
 def _p(style: str, inner: str, ppr_extra: str = "") -> str:
@@ -80,14 +101,29 @@ def _styles(family: str, size_pt: float, leading_pt: float) -> str:
             + "</w:styles>\n")
 
 
-def _drawing(rid: str, n: int, cx: int, cy: int, name: str) -> str:
+# EXIF orientation -> DrawingML (rotation in 60000ths of a degree, horizontal flip, vertical flip); flips are
+# applied before the rotation. Word/LibreOffice show the stored pixels, so the camera orientation is applied here.
+_ORIENT = {1: (0, False, False), 2: (0, True, False), 3: (10800000, False, False), 4: (0, False, True),
+           5: (16200000, True, False), 6: (5400000, False, False), 7: (5400000, True, False),
+           8: (16200000, False, False)}
+
+
+def _drawing(rid: str, n: int, cx: int, cy: int, name: str, orientation: int = 1) -> str:
+    """Inline picture shown at cx x cy EMU (display size, after the EXIF orientation)."""
+    rot, flip_h, flip_v = _ORIENT.get(orientation, (0, False, False))
+    fx, fy = (cy, cx) if orientation in (5, 6, 7, 8) else (cx, cy)  # frame before rotation
+    xattrs = (f" rot=\"{rot}\"" if rot else "") + (" flipH=\"1\"" if flip_h else "") + (" flipV=\"1\"" if flip_v else "")
+    # As Word writes a rotated inline picture: extent = the frame before rotation, effectExtent = what the
+    # rotation adds/removes on each side so the line reserves the rotated (display) box.
+    ex, ey = (cx - fx) // 2, (cy - fy) // 2
+    effect = f"<wp:effectExtent l=\"{ex}\" t=\"{ey}\" r=\"{ex}\" b=\"{ey}\"/>" if (ex or ey) else ""
     return ("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"
-            f"<wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name={quoteattr(name)} descr=\"\"/>"
+            f"<wp:extent cx=\"{fx}\" cy=\"{fy}\"/>{effect}<wp:docPr id=\"{n}\" name={quoteattr(name)} descr=\"\"/>"
             "<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>"
             "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">"
             f"<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{n}\" name={quoteattr(name)}/><pic:cNvPicPr/></pic:nvPicPr>"
             f"<pic:blipFill><a:blip r:embed=\"{rid}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"
-            f"<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm>"
+            f"<pic:spPr><a:xfrm{xattrs}><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{fx}\" cy=\"{fy}\"/></a:xfrm>"
             "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>"
             "</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>")
 
@@ -153,7 +189,7 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
         for b in s["blocks"]:
             t = b["t"]
             if t == "p":
-                body.append(_p("FirstParagraph" if b.get("first") else "BodyText", _t(b["text"])))
+                body.append(_p("FirstParagraph" if b.get("first") else "BodyText", _runs(b)))
             elif t == "meta":
                 body.append(_p("MetaLine", _t(b["text"])))
             elif t == "h2":
@@ -170,9 +206,14 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                     img_rid[b["key"]] = rid
                 drawing_n += 1
                 box_w, box_h = b["w_mm"] * EMU_PER_MM, b["h_mm"] * EMU_PER_MM
+                if page:  # same rule as the PDF: the box never exceeds the usable page width/height
+                    usable_w = (page["width_mm"] - 2 * page["safe_margin_mm"]) * EMU_PER_MM
+                    usable_h = (page["height_mm"] - 2 * page["safe_margin_mm"]) * EMU_PER_MM * 0.95
+                    k = min(1.0, usable_w / box_w, usable_h / box_h)
+                    box_w, box_h = box_w * k, box_h * k
                 s_ = min(box_w / info.width, box_h / info.height)
                 body.append(_p("Figure", _drawing(img_rid[b["key"]], drawing_n, int(info.width * s_),
-                                                  int(info.height * s_), b["id"])))
+                                                  int(info.height * s_), b["id"], info.orientation)))
     sect = ""
     if page:
         tw = lambda mm: int(round(mm * 1440 / 25.4))  # noqa: E731 - twentieths of a point

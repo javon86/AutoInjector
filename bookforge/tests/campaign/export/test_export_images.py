@@ -130,8 +130,6 @@ def test_cover_fit_is_clipped_to_its_box_when_rendered():
     assert above[2] < 150 or above[0] > 100, "COVER image leaks outside its clip box"
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-3: H07 (h_checks.pdf_layout) ignores the clipping path, so every "
-                                       "COVER-fit image that overflows its box is reported as a MAJOR SAFE_MARGIN failure")
 def test_h07_accepts_clipped_cover_image():
     data = png(Image.new("RGB", (100, 1000), (0, 0, 200)))
     b = place(data, w=80, h=60, fit="COVER")
@@ -139,9 +137,6 @@ def test_h07_accepts_clipped_cover_image():
     assert issues == []
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-4: a page-height illustration is scaled to content_height-leading "
-                                       "but the composer floor is above the bottom margin, so the image overlaps the "
-                                       "page number (layout.py _Composer.image vs floor)")
 @pytest.mark.parametrize("margins", [0, 20])
 def test_tall_image_does_not_overlap_page_number(margins):
     data = png(Image.new("RGB", (100, 1000), (0, 0, 200)))
@@ -151,8 +146,6 @@ def test_tall_image_does_not_overlap_page_number(margins):
     assert footer[4] + footer[2] < y, f"page number top {footer[4] + footer[2]:.1f} >= image bottom {y:.1f}"
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-5: DOCX images are sized from width_mm/height_mm without clamping "
-                                       "to the page's usable width (PDF clamps), so full-width art runs off the page")
 def test_docx_image_fits_usable_page_width():
     data = png(Image.new("RGB", (300, 200), (0, 0, 200)))
     b = place(data, w=152.4, h=101.6)
@@ -184,17 +177,12 @@ CORRUPT = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-2: corrupt PNG/JPEG bytes are accepted without decoding (passed "
-                                       "through into PDF/EPUB/DOCX) or crash with a raw IndexError/zlib.error instead "
-                                       "of UnsupportedImage")
 @pytest.mark.parametrize("name", sorted(CORRUPT))
 def test_corrupt_image_rejected_cleanly(name):
     with pytest.raises(UnsupportedImage):
         load_image(CORRUPT[name]())
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-10: EXIF orientation is ignored - a phone photo tagged 'rotate 90' "
-                                       "prints sideways in the PDF while EPUB readers rotate it")
 def test_exif_orientation_respected():
     im = Image.new("RGB", (40, 30), RED)
     exif = Image.Exif()
@@ -203,8 +191,6 @@ def test_exif_orientation_respected():
     assert (info.width, info.height) == (30, 40)
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-11: RGBA PNG decode is a pure-Python per-byte loop (~0.7 MP/s) and "
-                                       "is repeated by every assemble() (G03, G01 validate, G04, G07, each export)")
 def test_rgba_png_decode_throughput():
     w = 800
     data = png(Image.frombytes("RGBA", (w, w), os.urandom(w * w * 4)))

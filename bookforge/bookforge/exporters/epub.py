@@ -8,15 +8,39 @@ print page geometry, cover or spine values unless an EBOOK cover is supplied.
 
 `inspect_epub(data)` checks the OCF container rules, parses every XML/XHTML file, verifies
 manifest hrefs exist, spine idrefs, the nav document, relative links/anchors and image
-references. EPUBCheck is NOT bundled; callers must report its absence as UNKNOWN.
+references. The official EPUBCheck is run by h_checks (H09) when it is installed.
 """
 from __future__ import annotations
 
 import posixpath
 import xml.etree.ElementTree as ET
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import escape as _escape
+from xml.sax.saxutils import quoteattr as _quoteattr
 
+from .book import xml_safe
 from .ziputil import build_zip, read_zip
+
+
+def escape(text: str) -> str:
+    return _escape(xml_safe(text))
+
+
+def quoteattr(text: str) -> str:
+    return _quoteattr(xml_safe(text))
+
+
+_EMPH_TAGS = {"i": ("<em>", "</em>"), "b": ("<strong>", "</strong>"), "bi": ("<strong><em>", "</em></strong>")}
+
+
+def inline_xhtml(block: dict) -> str:
+    """Paragraph content: plain text, or <em>/<strong> runs for inline emphasis."""
+    if not block.get("runs"):
+        return escape(block["text"])
+    out = []
+    for text, style in block["runs"]:
+        open_, close = _EMPH_TAGS.get(style, ("", ""))
+        out.append(f"{open_}{escape(text)}{close}")
+    return "".join(out)
 
 MIMETYPE = b"application/epub+zip"
 NS = {"opf": "http://www.idpf.org/2007/opf", "dc": "http://purl.org/dc/elements/1.1/",
@@ -99,7 +123,7 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
             t = b["t"]
             if t == "p":
                 cls_attr = " class=\"first\"" if b.get("first") else ""
-                parts.append(f"<p id={quoteattr(b['id'])}{cls_attr}>{escape(b['text'])}</p>\n")
+                parts.append(f"<p id={quoteattr(b['id'])}{cls_attr}>{inline_xhtml(b)}</p>\n")
             elif t == "meta":
                 parts.append(f"<p class=\"meta\">{escape(b['text'])}</p>\n")
             elif t == "h2":
@@ -141,14 +165,23 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
         if children:
             nav.append("\n<ol>\n" + "".join(f"<li>{link(c)}</li>\n" for c in children) + "</ol>\n")
         nav.append("</li>\n")
+    if not groups and sections:  # an empty <ol> is invalid: point at the first page instead
+        nav.append(f"<li><a href={quoteattr(names[sections[0]['id']] + '#' + sections[0]['id'])}>"
+                   f"{escape(sections[0]['heading'] or meta.get('title', 'Start'))}</a></li>\n")
     nav.append("</ol>\n</nav>\n")
     first_chapter = next((s for s in sections if s["kind"] == "chapter"), None)
-    nav.append("<nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">\n<ol>\n")
-    nav.append("<li><a epub:type=\"toc\" href=\"nav.xhtml#toc\">Contents</a></li>\n")
-    if first_chapter:
-        nav.append(f"<li><a epub:type=\"bodymatter\" href={quoteattr(names[first_chapter['id']] + '#' + first_chapter['id'])}>"
-                   f"{escape(first_chapter['heading'])}</a></li>\n")
-    nav.append("</ol>\n</nav>\n")
+    toc_section = next((s for s in sections if s["kind"] == "toc"), None)
+    title_section = next((s for s in sections if s["kind"] == "title_page"), None)
+    # Landmarks may only point into spine documents (EPUBCheck RSC-011): the nav document itself is not in the
+    # spine, so the "toc" landmark targets the book's Contents page when there is one.
+    marks = [(kind, sec) for kind, sec in (("titlepage", title_section), ("toc", toc_section),
+                                           ("bodymatter", first_chapter)) if sec is not None]
+    if marks:
+        nav.append("<nav epub:type=\"landmarks\" id=\"landmarks\" hidden=\"\">\n<ol>\n")
+        for kind, sec in marks:
+            nav.append(f"<li><a epub:type=\"{kind}\" href={quoteattr(names[sec['id']] + '#' + sec['id'])}>"
+                       f"{escape(sec['heading'])}</a></li>\n")
+        nav.append("</ol>\n</nav>\n")
     nav_doc = _xhtml("Contents", lang, "".join(nav)).replace(b"href=\"../style.css\"", b"href=\"style.css\"")
     files.append(("OEBPS/nav.xhtml", nav_doc))
     manifest.append(("nav", "nav.xhtml", "application/xhtml+xml", "nav"))

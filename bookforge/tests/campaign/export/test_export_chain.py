@@ -118,15 +118,12 @@ def test_epubcheck_only_reports_the_landmark_error(chain_epubcheck):
     assert all("RSC-011" in m and "nav.xhtml" in m for m in msgs), msgs
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-export-1: every EPUB fails EPUBCheck - nav landmarks link to "
-                                       "nav.xhtml#toc which is not a spine item (RSC-011, epub.py:147)")
 def test_epub_passes_epubcheck(chain_epubcheck):
     rc, msgs = chain_epubcheck
     assert rc == 0 and msgs == [], msgs
 
 
 @needs_epubcheck
-@pytest.mark.xfail(strict=True, reason="NEW-export-1: with EPUBCheck installed H09's epub_check fails every EPUB")
 def test_h09_epub_check_with_real_epubcheck(chain, monkeypatch):
     _, out = chain
     monkeypatch.setitem(hc.EXTERNAL_VALIDATORS, "epubcheck", epubcheck_validator)
@@ -136,7 +133,6 @@ def test_h09_epub_check_with_real_epubcheck(chain, monkeypatch):
 
 
 @needs_epubcheck
-@pytest.mark.xfail(strict=True, reason="NEW-export-1: also without TOC/front matter (G12 straight from G01)")
 def test_epub_from_compiled_manuscript_passes_epubcheck(h, tmp_path):
     b = Book(h, texts=(CH_A, CH_B))
     r = b.export("G12", b.g01(b.g02()))
@@ -280,9 +276,6 @@ def test_shelf_fingerprints_match_files_and_detect_tampering(h):
 
 
 # ----------------------------------------------------------------------------- matter item IDs
-@pytest.mark.xfail(strict=True, reason="NEW-export-12: non-ASCII front/back-matter item IDs (accepted by G08's "
-                                       "str.isalnum check) crash G11 with INTERNAL_ERROR UnicodeEncodeError in "
-                                       "pdf.pdf_name")
 def test_non_ascii_matter_item_id_exports_pdf(h):
     b = Book(h)
     h.engine.providers.test_adapter = AnyAI([{"item_id": "dédicace", "title": "Dédicace", "text": "Pour Marie."}])

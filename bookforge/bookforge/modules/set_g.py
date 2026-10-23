@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import math
+import unicodedata
 from dataclasses import dataclass, field
 
 from .. import CONTRACT_VERSION
@@ -56,6 +57,14 @@ EXPORT_MIME = {"G11": "application/pdf", "G12": "application/epub+zip",
                "G13": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 APPROVED = ("APPROVED", "LOCKED")
 DEFAULT_MAX_PASSES = 6
+
+
+def valid_item_id(iid) -> bool:
+    """Front/back-matter item IDs become EPUB ids, DOCX bookmarks and PDF destination names: letters (any
+    script), combining marks, decimal digits, '_' and '-' only (all valid XML name characters)."""
+    return isinstance(iid, str) and bool(iid) and all(
+        ch in "_-" or unicodedata.category(ch) in ("Lu", "Ll", "Lt", "Lm", "Lo", "Mn", "Mc", "Nd") for ch in iid)
+
 
 # Registered G-owned extension predicates for G03 placement SemanticRecords
 # (predicate_registry: x.<namespace>.<name> needs type/unit/meaning/owner before automatic use).
@@ -733,8 +742,10 @@ class _Matter(GHandler):
         for i, iid in enumerate(wanted):
             if wanted.index(iid) != i:
                 raise _rej("INVALID_INPUT", f"/payload/{self.items_field}/{i}", f"duplicate item {iid}")
-            if not iid.replace("_", "").replace("-", "").isalnum():
-                raise _rej("INVALID_INPUT", f"/payload/{self.items_field}/{i}", "item IDs are [A-Za-z0-9_-]")
+            if not valid_item_id(iid):
+                raise _rej("INVALID_INPUT", f"/payload/{self.items_field}/{i}",
+                           f"item ID {iid!r}: use only letters, digits, '_' and '-' (it becomes a link target inside "
+                           "the PDF, EPUB and DOCX)")
         creative = [i for i in wanted if i not in self.logic_items]
         generated, resource, transform = {}, None, "LOGIC"
         if creative:
