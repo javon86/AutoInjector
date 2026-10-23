@@ -30,7 +30,6 @@ import importlib.util
 import json
 import os
 import platform
-import shutil
 import sqlite3
 import sys
 import time
@@ -981,7 +980,7 @@ def environment(store) -> dict:
             "os": f"{platform.system()} {platform.release()}", "machine": platform.machine(),
             "sqlite": sqlite3.sqlite_version, "jsonschema": js,
             "anthropic_package": importlib.util.find_spec("anthropic") is not None,
-            "epubcheck_available": bool(shutil.which("epubcheck")) or bool(hc.EXTERNAL_VALIDATORS.get("epubcheck")),
+            "epubcheck_available": hc.epubcheck_available(),
             "data_dir": str(store.data_dir)}
 
 

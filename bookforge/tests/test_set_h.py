@@ -489,7 +489,11 @@ def test_h09_epub_unknown_without_epubcheck_and_docx(h):
     man = imported(h, "RELEASE_MANIFEST", dict(b.manifest_data(), export_refs=[b.g11, epub, docx]))
     payload = {"export_refs": [b.g11, epub, docx], "expected_manifest_ref": man}
     r = create(h, "H09", payload)
-    assert statuses(r) == "UNKNOWN" and "VALIDATOR_UNAVAILABLE" in rules(r, "UNKNOWN")
+    # BF-22: without EPUBCheck the EPUB is still checked here; the report says plainly that the official check
+    # did not run (MINOR UNKNOWN) instead of holding every release at UNKNOWN forever.
+    assert statuses(r) == "PASS" and "VALIDATOR_UNAVAILABLE" in rules(r, "UNKNOWN")
+    f = next(f for f in r["result"]["findings"] if f["rule_id"] == "VALIDATOR_UNAVAILABLE")
+    assert f["severity"] == "MINOR" and "not checked by EPUBCheck" in f["message"] and "epubcheck.jar" in f["message"]
     assert "epubcheck=unavailable" in r["result"]["checker_version"]
     hc.EXTERNAL_VALIDATORS["epubcheck"] = lambda data: (True, "epubcheck-fake 0", [])
     r = create(h, "H09", payload)
@@ -878,13 +882,20 @@ def test_h10_blocks_without_authorization_unknown_reports_and_missing_reasons(h)
     found = rules(r, "UNKNOWN")
     assert r["result"]["status"] == "BLOCKED"
     assert {"PUBLICATION_AUTHORIZATION", "NO_OBLIGATION_REASON_MISSING"} <= found  # H03 + H04 lack reasons
-    # an UNKNOWN required report blocks (EPUB without EPUBCheck)
+    # an EPUB without EPUBCheck no longer holds the release (BF-22): H09 passes with a MINOR UNKNOWN note
     b2 = Book(h, required_checks=("H09",))
     epub = fx_descriptor(h, "G12", build_epub(), EPUB_MIME)
     man = imported(h, "RELEASE_MANIFEST", dict(b2.manifest_data(), export_refs=[b2.g11, epub],
                                                publication_authorization_ref=k09(h, [b2.g11, epub] + b2.sources)))
     h09 = create(h, "H09", {"export_refs": [b2.g11, epub], "expected_manifest_ref": man})
-    assert statuses(h09) == "UNKNOWN"
+    assert statuses(h09) == "PASS" and "VALIDATOR_UNAVAILABLE" in rules(h09, "UNKNOWN")
+    h.validate(h09["output_refs"][0])
+    r = h10(h, b2, [h09["output_refs"][0]], manifest=man)
+    assert "REPORT_STATUS" not in rules(r)
+    # ... but a failing official check does
+    hc.EXTERNAL_VALIDATORS["epubcheck"] = lambda data: (False, "epubcheck-fake 0", ["ERROR(RSC-005): bad"])
+    h09 = create(h, "H09", {"export_refs": [b2.g11, epub], "expected_manifest_ref": man})
+    assert statuses(h09) == "FAIL"
     h.validate(h09["output_refs"][0])
     r = h10(h, b2, [h09["output_refs"][0]], manifest=man)
     assert r["result"]["status"] == "BLOCKED" and "REPORT_STATUS" in rules(r)

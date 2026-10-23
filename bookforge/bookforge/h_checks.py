@@ -6,8 +6,10 @@ derived from the exact bytes handed in. Each checker returns plain "issue" dicts
     {"rule": str, "severity": INFO|MINOR|MAJOR|BLOCKING, "decision": PASS|FAIL|UNKNOWN,
      "message": str}
 
-which set_h turns into contract Findings. A missing external validator (EPUBCheck) is
-reported as UNKNOWN VALIDATOR_UNAVAILABLE, never as PASS.
+which set_h turns into contract Findings. EPUBCheck (the official EPUB validator, Java) runs when
+it is installed - see epubcheck_command() for where it is looked for. When it is not installed the
+EPUB is still fully checked here and the report says plainly "not checked by EPUBCheck" as a MINOR
+UNKNOWN VALIDATOR_UNAVAILABLE finding: never a PASS, but it does not block a release forever.
 
 Covered formats
   PDF   header/EOF/startxref, classic xref tables and xref streams (with PNG predictors),
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import posixpath
 import re
 import shutil
@@ -34,6 +37,7 @@ import tempfile
 import zipfile
 import zlib
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
@@ -758,7 +762,21 @@ def interpret_page(doc: PdfDocument, page: dict) -> tuple[list[Mark], list[dict]
     return marks, issues
 
 
-def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
+def _clip_box(bbox, clip):
+    """Visible part of a mark's bbox inside the current clipping box (None when fully clipped away)."""
+    if clip is None:
+        return bbox
+    x0, y0 = max(bbox[0], clip[0]), max(bbox[1], clip[1])
+    x1, y1 = min(bbox[2], clip[2]), min(bbox[3], clip[3])
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth, clip=None):
+    """Interpret one content stream. Clipping paths (W/W* then a painting operator) are tracked as the
+    bounding box of the clip path in default user space (conservative for non-rectangular paths), so
+    a COVER-fit image drawn larger than its clipped box is measured by what is actually visible."""
     if depth > 8:
         issues.append(issue("PDF_FORM_DEPTH", "form XObject nesting too deep", "MAJOR", "UNKNOWN"))
         return
@@ -771,6 +789,13 @@ def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
     tm = tlm = IDENTITY
     res_fonts = doc.get(resources, "Font", {}) or {}
     res_xobj = doc.get(resources, "XObject", {}) or {}
+    path_pts: list = []
+    pending_clip = False
+
+    def add_mark(kind, bbox, exact, origin=None):
+        vis = _clip_box(bbox, clip)
+        if vis is not None:
+            marks.append(Mark(kind, vis, exact, origin))
 
     def show(s):
         nonlocal tm
@@ -793,7 +818,7 @@ def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
         m = _mul(tm, ctm)
         pts = [_apply(m, x, y + ts["rise"]) for x in (0.0, width) for y in (lo, hi)]
         if codes:
-            marks.append(Mark("TEXT", _bbox_of(pts), exact, _apply(m, 0.0, ts["rise"])))
+            add_mark("TEXT", _bbox_of(pts), exact, _apply(m, 0.0, ts["rise"]))
         tm = _mul((1.0, 0.0, 0.0, 1.0, width, 0.0), tm)
 
     while True:
@@ -815,11 +840,29 @@ def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
                         issues.append(issue("PDF_INLINE_IMAGE", "unterminated inline image", "MAJOR", "UNKNOWN"))
                         return
                     lex.pos = end.end()
-                    marks.append(Mark("IMAGE", _bbox_of([_apply(ctm, x, y) for x in (0, 1) for y in (0, 1)]), True))
+                    add_mark("IMAGE", _bbox_of([_apply(ctm, x, y) for x in (0, 1) for y in (0, 1)]), True)
                 elif op == "q":
-                    stack.append(ctm)
+                    stack.append((ctm, clip))
                 elif op == "Q":
-                    ctm = stack.pop() if stack else ctm
+                    ctm, clip = stack.pop() if stack else (ctm, clip)
+                elif op == "re" and len(a) >= 4:
+                    x, y, w, h = (float(v) for v in a[-4:])
+                    path_pts.extend(_apply(ctm, px, py) for px in (x, x + w) for py in (y, y + h))
+                elif op in ("m", "l") and len(a) >= 2:
+                    path_pts.append(_apply(ctm, float(a[-2]), float(a[-1])))
+                elif op == "c" and len(a) >= 6:
+                    vals = [float(v) for v in a[-6:]]
+                    path_pts.extend(_apply(ctm, vals[k], vals[k + 1]) for k in (0, 2, 4))
+                elif op in ("v", "y") and len(a) >= 4:
+                    vals = [float(v) for v in a[-4:]]
+                    path_pts.extend(_apply(ctm, vals[k], vals[k + 1]) for k in (0, 2))
+                elif op in ("W", "W*"):
+                    pending_clip = True
+                elif op in ("n", "S", "s", "f", "F", "f*", "B", "B*", "b", "b*"):
+                    if pending_clip and path_pts:
+                        box = _bbox_of(path_pts)
+                        clip = _clip_box(box, clip) or (box[0], box[1], box[0], box[1])
+                    path_pts, pending_clip = [], False
                 elif op == "cm" and len(a) >= 6:
                     ctm = _mul(tuple(float(x) for x in a[-6:]), ctm)
                 elif op == "BT":
@@ -876,8 +919,7 @@ def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
                     if isinstance(xo, Stream):
                         sub = doc.get(xo, "Subtype")
                         if sub == "Image":
-                            marks.append(Mark("IMAGE", _bbox_of([_apply(ctm, x, y) for x in (0, 1)
-                                                                 for y in (0, 1)]), True))
+                            add_mark("IMAGE", _bbox_of([_apply(ctm, x, y) for x in (0, 1) for y in (0, 1)]), True)
                         elif sub == "Form":
                             mtx = doc.get(xo, "Matrix", list(IDENTITY))
                             fm = tuple(float(doc.resolve(x)) for x in mtx)
@@ -888,7 +930,7 @@ def _run_content(doc, content: bytes, resources, ctm, marks, issues, depth):
                                                     "UNKNOWN"))
                             else:
                                 _run_content(doc, sub_content, doc.get(xo, "Resources", resources), _mul(fm, ctm),
-                                             marks, issues, depth + 1)
+                                             marks, issues, depth + 1, clip)
                     else:
                         issues.append(issue("PDF_XOBJECT_MISSING", f"XObject /{a[-1]} is not defined", "MAJOR"))
             except (TypeError, ValueError, IndexError) as exc:
@@ -1179,33 +1221,90 @@ NS = {
     "epub": "http://www.idpf.org/2007/ops",
 }
 
-# External validator hook: name -> callable(bytes) -> (ok: bool, version: str, messages: list[str]).
-# The default looks for a local `epubcheck` executable; tests may install a fake explicitly.
+# External validator hook: name -> callable(bytes) -> (ok: bool, version: str, messages: list[str]), or
+# None when the tool is absent. Tests may install a fake; the default runs the real EPUBCheck when found.
 EXTERNAL_VALIDATORS: dict = {}
+
+# Where EPUBCheck is looked for, in order:
+#   1. BOOKFORGE_EPUBCHECK = path to epubcheck.jar (run with Java) or to an `epubcheck` program;
+#   2. a jar placed in the app folder: bookforge/tools/epubcheck/epubcheck.jar, or the unzipped
+#      release folder bookforge/tools/epubcheck-<version>/epubcheck.jar;
+#   3. an `epubcheck` program on PATH (e.g. installed with a package manager).
+# A jar needs Java: `java` on PATH or JAVA_HOME/bin/java.
+EPUBCHECK_ENV = "BOOKFORGE_EPUBCHECK"
+TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
+EPUBCHECK_HELP = ("to add the official check, install Java and EPUBCheck (https://www.w3.org/publishing/epubcheck/): "
+                  "unzip the EPUBCheck release into bookforge/tools/ (so bookforge/tools/epubcheck-<version>/"
+                  "epubcheck.jar exists) or set BOOKFORGE_EPUBCHECK to the path of epubcheck.jar")
+
+
+def _java() -> str | None:
+    home = os.environ.get("JAVA_HOME")
+    if home:
+        for name in ("java", "java.exe"):
+            exe = os.path.join(home, "bin", name)
+            if os.path.isfile(exe):
+                return exe
+    return shutil.which("java")
+
+
+def epubcheck_command() -> tuple[list[str] | None, str]:
+    """(command prefix to run EPUBCheck, plain-language note). The command is None when it is not usable."""
+    candidates: list[Path] = []
+    env = os.environ.get(EPUBCHECK_ENV, "").strip()
+    if env:
+        candidates.append(Path(env))
+    candidates.append(TOOLS_DIR / "epubcheck" / "epubcheck.jar")
+    if TOOLS_DIR.is_dir():
+        candidates += sorted(TOOLS_DIR.glob("epubcheck*/epubcheck.jar"), reverse=True)
+    for c in candidates:
+        if not c.is_file():
+            if env and c == Path(env):
+                return None, f"{EPUBCHECK_ENV} points to {env}, which does not exist"
+            continue
+        if c.suffix.lower() == ".jar":
+            java = _java()
+            if java is None:
+                return None, f"EPUBCheck is at {c} but Java is not installed (java not on PATH, JAVA_HOME unset)"
+            return [java, "-jar", str(c)], f"EPUBCheck jar {c}"
+        return [str(c)], f"EPUBCheck program {c}"
+    exe = shutil.which("epubcheck")
+    if exe:
+        return [exe], f"EPUBCheck program {exe}"
+    return None, "EPUBCheck is not installed"
+
+
+def epubcheck_available() -> bool:
+    if "epubcheck" in EXTERNAL_VALIDATORS:
+        return EXTERNAL_VALIDATORS["epubcheck"] is not None
+    return epubcheck_command()[0] is not None
 
 
 def _system_epubcheck(data: bytes):
-    exe = shutil.which("epubcheck")
-    if not exe:
+    cmd, _note = epubcheck_command()
+    if cmd is None:
         return None
     with tempfile.TemporaryDirectory() as td:
-        path = posixpath.join(td, "candidate.epub")
+        path = os.path.join(td, "candidate.epub")
         with open(path, "wb") as fh:
             fh.write(data)
         try:
-            ver = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=60)
-            res = subprocess.run([exe, path], capture_output=True, text=True, timeout=600)
+            ver = subprocess.run(cmd + ["--version"], capture_output=True, text=True, timeout=120)
+            res = subprocess.run(cmd + [path], capture_output=True, text=True, timeout=600)
         except (OSError, subprocess.SubprocessError) as exc:
-            return False, "epubcheck", [f"epubcheck could not run: {exc}"]
-        version = (ver.stdout or ver.stderr).strip().splitlines()[0] if (ver.stdout or ver.stderr) else "epubcheck"
+            return False, "epubcheck", [f"EPUBCheck could not run: {exc}"]
+        lines = (ver.stdout + "\n" + ver.stderr).splitlines()
+        version = next((ln.strip() for ln in lines if ln.strip().lower().startswith("epubcheck")), "EPUBCheck")
         msgs = [ln for ln in (res.stdout + res.stderr).splitlines() if ln.startswith(("ERROR", "FATAL"))]
+        if res.returncode != 0 and not msgs:
+            msgs = [f"EPUBCheck exited with code {res.returncode}: " + (res.stderr or res.stdout).strip()[-400:]]
         return res.returncode == 0 and not msgs, version, msgs
 
 
 def run_epubcheck(data: bytes):
-    fn = EXTERNAL_VALIDATORS.get("epubcheck")
-    if fn is not None:
-        return fn(data)
+    if "epubcheck" in EXTERNAL_VALIDATORS:
+        fn = EXTERNAL_VALIDATORS["epubcheck"]
+        return fn(data) if fn is not None else None
     return _system_epubcheck(data)
 
 
@@ -1364,8 +1463,11 @@ def epub_check(data: bytes, *, run_external: bool = True) -> tuple[list[dict], E
     if run_external:
         res = run_epubcheck(data)
         if res is None:
-            issues.append(issue("VALIDATOR_UNAVAILABLE", "EPUBCheck is not available; EPUB conformance is UNKNOWN",
-                                "BLOCKING", "UNKNOWN"))
+            _cmd, why = epubcheck_command()
+            if "epubcheck" in EXTERNAL_VALIDATORS:
+                why = "EPUBCheck is not installed"
+            issues.append(issue("VALIDATOR_UNAVAILABLE", f"not checked by EPUBCheck ({why}). BookForge's own EPUB "
+                                f"checks above still ran; {EPUBCHECK_HELP}.", "MINOR", "UNKNOWN"))
         else:
             passed, ver, msgs = res
             info.validator = ver
@@ -1457,6 +1559,14 @@ def docx_check(data: bytes) -> tuple[list[dict], DocxInfo]:
         for k, v in el.attrib.items():
             if k.startswith(f"{{{R_NS}}}") and v not in rel_ids:
                 issues.append(issue("DOCX_RELS", f"{el.tag.split('}')[-1]} references unknown relationship {v!r}"))
+    body = doc.find(f"{{{W}}}body")
+    for para in body.iter(f"{{{W}}}p"):
+        st = para.find(f"{{{W}}}pPr/{{{W}}}pStyle")
+        lvl = para.find(f"{{{W}}}pPr/{{{W}}}outlineLvl")
+        if (st is not None and st.get(f"{{{W}}}val", "").lower().startswith("heading")) or lvl is not None:
+            text = "".join(t.text or "" for t in para.iter(f"{{{W}}}t")).strip()
+            if text:
+                info.headings.append(text)
     for b in doc.iter(f"{{{W}}}bookmarkStart"):
         if b.get(f"{{{W}}}name"):
             info.bookmarks.add(b.get(f"{{{W}}}name"))
