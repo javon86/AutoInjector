@@ -8,6 +8,7 @@ content bytes (section 10), so ACCEPT/LOCK never change a record's content hash.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sqlite3
@@ -22,6 +23,8 @@ from typing import Any, Callable, Iterator
 from . import CONTRACT_VERSION
 from .canonical import canonical_bytes, make_reference, sha256_bytes
 from .errors import BookforgeError
+
+log = logging.getLogger("bookforge.store")
 
 SCHEMA_VERSION = 1
 
@@ -131,21 +134,43 @@ def utcnow() -> str:
 _os = os
 _DB_ERROR = sqlite3.DatabaseError
 TMP_MARK = ".tmp-"
+# Windows: another program (antivirus, the search indexer, a backup tool) may hold a file open for a moment, and
+# replacing it then fails with PermissionError. Retry for up to about two seconds before giving up.
+REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8)
+
+
+def _windows() -> bool:
+    return getattr(_os, "name", os.name) == "nt"
 
 
 def _fsync_fd_path(path: Path, dir_ok: bool = False):
-    """fsync a file (or, where the platform allows it, a directory) so a power cut cannot lose it."""
+    """fsync a file (or, where the platform allows it, a directory) so a power cut cannot lose it.
+
+    Windows' fsync (FlushFileBuffers) needs a handle with WRITE access, so the file is opened read-write (binary)
+    where possible. On Windows a flush that still fails is best effort (logged): NTFS journals its metadata and the
+    data was already written and closed; a directory cannot be opened there at all. On other systems a failed file
+    fsync is a real I/O error and is raised."""
+    binary = getattr(_os, "O_BINARY", 0)
     try:
-        fd = _os.open(str(path), _os.O_RDONLY)
-    except OSError:
+        try:
+            fd = _os.open(str(path), _os.O_RDWR | binary)
+        except IsADirectoryError:
+            fd = _os.open(str(path), _os.O_RDONLY | binary)
+        except PermissionError:
+            if dir_ok and _windows():
+                raise
+            fd = _os.open(str(path), _os.O_RDONLY | binary)  # a read-only file (or a folder): fsync still works on POSIX
+    except OSError as exc:
         if dir_ok:
-            return  # Windows cannot open directories; NTFS journals the rename itself
+            log.debug("cannot open folder %s to flush it (%s); the system journals the rename", path, exc)
+            return
         raise
     try:
         _os.fsync(fd)
-    except OSError:
-        if not dir_ok:
+    except OSError as exc:
+        if not (dir_ok or _windows()):
             raise
+        log.debug("could not flush %s to disk (%s); continuing (best effort on this system)", path, exc)
     finally:
         _os.close(fd)
 
@@ -162,6 +187,21 @@ def tmp_name(path: Path) -> Path:
     return path.with_name(f"{path.name}{TMP_MARK}{uuid.uuid4().hex[:8]}")
 
 
+def replace_file(src: str | os.PathLike, dst: str | os.PathLike):
+    """``os.replace`` that survives Windows' sharing violations: when another program briefly holds ``dst`` open
+    (antivirus, indexer) the rename fails with PermissionError, so it is retried a few times before giving up."""
+    for delay in REPLACE_RETRY_DELAYS:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            if not _windows():
+                raise
+            log.debug("%s is busy (%s); retrying in %.2f s", dst, exc, delay)
+            time.sleep(delay)
+    os.replace(src, dst)
+
+
 def durable_copy(src: str | os.PathLike, dst: str | os.PathLike):
     """Copy src over dst atomically and durably (temp file in dst's folder, fsync, rename, fsync folder)."""
     dst = Path(dst)
@@ -169,7 +209,7 @@ def durable_copy(src: str | os.PathLike, dst: str | os.PathLike):
     try:
         shutil.copyfile(src, tmp)
         fsync_file(tmp)
-        os.replace(tmp, dst)
+        replace_file(tmp, dst)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -180,7 +220,8 @@ def write_private(path: str | os.PathLike, data: bytes):
     """Write a secret file that is never readable by others, not even for a moment.
 
     The temp file is created with mode 0600 in one step (O_CREAT|O_EXCL), written, fsynced and renamed over the
-    target, so there is no window in which a world-readable file holds the secret."""
+    target, so there is no window in which a world-readable file holds the secret. (On Windows the mode only
+    controls the read-only flag; the file inherits the private ACL of the user's profile folder.)"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = tmp_name(path)
@@ -192,10 +233,15 @@ def write_private(path: str | os.PathLike, data: bytes):
             while view:
                 n = _os.write(fd, view)
                 view = view[n:]
-            _os.fsync(fd)
+            try:
+                _os.fsync(fd)
+            except OSError as exc:
+                if not _windows():
+                    raise
+                log.debug("could not flush %s to disk (%s); continuing", tmp, exc)
         finally:
             _os.close(fd)
-        _os.replace(tmp, path)
+        replace_file(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -704,11 +750,16 @@ class Tx:
         if not path.exists():
             tmp = tmp_name(path)
             try:
-                with open(tmp, "wb") as fh:
+                with open(tmp, "xb") as fh:  # a fresh, never-shared temp name (O_EXCL)
                     fh.write(data)
                     fh.flush()
-                    _os.fsync(fh.fileno())
-                os.replace(tmp, path)
+                    try:
+                        _os.fsync(fh.fileno())
+                    except OSError as exc:
+                        if not _windows():
+                            raise
+                        log.debug("could not flush %s to disk (%s); continuing", tmp, exc)
+                replace_file(tmp, path)
             except OSError as exc:
                 tmp.unlink(missing_ok=True)
                 raise BookforgeError("INTERNAL_ERROR", "/body", "BookForge could not save the file (is the disk full "

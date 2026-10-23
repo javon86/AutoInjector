@@ -17,7 +17,8 @@ Prose conventions (approved C chapter text is plain Unicode): the first non-blan
 "# Title" names the chapter; "## Text" is a sub-heading; a line consisting only of
 "***", "* * *" or "#" is a scene break; every other non-blank line is one paragraph.
 Inside a paragraph *italic*, **bold** and _italic_ are emphasis (rendered in every format,
-never printed literally); a backslash before * or _ keeps it literal.
+never printed literally); a backslash before * or _ keeps it literal. Characters that are not part
+of a real emphasis pair are never dropped: f*ck, 5*3, ****, __init__.py and URLs stay as written.
 Stable anchors: chapter heading = section ID; paragraphs <section>-p<n>; sub-headings
 <section>-s<n> (1-based, recomputed deterministically from the approved text).
 
@@ -41,10 +42,8 @@ LOGIC_BACK = ("colophon",)
 _ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff\ufeff\ufffe\uffff]")
 # Breaking whitespace: every Unicode space except the no-break ones (they bind words together).
 _BREAKING_WS = re.compile("[^\\S\u00a0\u202f\u2007\u2060]+")
-# Inline emphasis: ***x***, **x**, *x*, _x_ (delimiters hug non-space text; \* / \_ are literal).
-_EMPH = re.compile(r"(?<!\\)(\*\*\*|\*\*|\*|_)(?=\S)(.+?)(?<=\S)(?<!\\)\1(?!\*)")
-_ESCAPED = re.compile(r"\\([*_])")
-_STYLE = {"***": "bi", "**": "b", "*": "i", "_": "i"}
+# Inline emphasis (``inline_runs``): ***x***, **x**, *x*, _x_; \* / \_ are literal.
+_GUARD_ = frozenset("_/")  # _x_ touching these on the outside is part of a name, path or URL, not emphasis
 _CHAPTER_PREFIX = re.compile(r"^(chapter|ch\.)\s+(\d+|[ivxlcdm]+)\b\s*[:.\-\u2013\u2014]?\s*", re.IGNORECASE)
 
 
@@ -65,35 +64,157 @@ def squash(text: str) -> str:
     return " ".join(w for w in _BREAKING_WS.split(text) if w)
 
 
-def inline_runs(text: str, style: str = "") -> list[tuple[str, str]]:
-    """Split simple Markdown-style emphasis into [(text, style)] runs (markers removed)."""
+def _is_punct(ch: str) -> bool:
+    return unicodedata.category(ch)[0] in "PS"
+
+
+def _word_dot(text: str, i: int, step: int) -> bool:
+    """text[i] is a '.' that sits inside a word or name (file.py, example.com), not a sentence end."""
+    j = i + step
+    return text[i] == "." and 0 <= j < len(text) and text[j].isalnum()
+
+
+def _emphasis(text: str) -> tuple[list[tuple[str, str]], set[int]]:
+    """Parse emphasis; returns ([(text, style)], indexes of the characters removed from ``text``).
+
+    CommonMark-style delimiter runs, matched with a stack (linear time): a run of * or _ can open emphasis when
+    it is left-flanking (it hugs the text after it) and close it when it is right-flanking; _ never opens or
+    closes inside a word. Extra rules keep ordinary prose intact: a single *...* pair whose outer neighbours are
+    both letters/digits (f*ck … sh*t, 5*3 … 2*4) is not emphasis, a run of only * between spaces is text
+    (****, Rating: ***), and _..._ is not emphasis when it touches _, /, a letter/digit or a dot inside a name
+    on the outside (__init__.py, example.com/_drafts_/v2). A backslash before * or _ keeps it literal (the
+    backslash is dropped). Nothing else is ever removed or changed."""
+    n = len(text)
+    pieces: list = []  # str | delimiter dict, in text order
+    removed: set[int] = set()
+    buf: list[str] = []
+    i = 0
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n and text[i + 1] in "*_":
+            buf.append(text[i + 1])
+            removed.add(i)
+            i += 2
+            continue
+        if ch not in "*_":
+            buf.append(ch)
+            i += 1
+            continue
+        j = i
+        while j < n and text[j] == ch:
+            j += 1
+        if buf:
+            pieces.append("".join(buf))
+            buf = []
+        before = text[i - 1] if i > 0 else " "
+        after = text[j] if j < n else " "
+        left = not after.isspace() and (not _is_punct(after) or before.isspace() or _is_punct(before))
+        right = not before.isspace() and (not _is_punct(before) or after.isspace() or _is_punct(after))
+        if ch == "*":
+            can_open, can_close = left, right
+            guard_before = before.isalnum()
+            guard_after = after.isalnum()
+        else:
+            can_open = left and (not right or _is_punct(before))
+            can_close = right and (not left or _is_punct(after))
+            guard_before = before.isalnum() or before in _GUARD_ or (i > 0 and _word_dot(text, i - 1, -1))
+            guard_after = after.isalnum() or after in _GUARD_ or (j < n and _word_dot(text, j, 1))
+        pieces.append({"ch": ch, "start": i, "len": j - i, "left": j - i, "open": can_open, "close": can_close,
+                       "gb": guard_before, "ga": guard_after, "closes": [], "opens": []})
+        i = j
+    if buf:
+        pieces.append("".join(buf))
+
+    stack: list[dict] = []  # delimiter runs that may still open
+    bottom: dict[tuple, int] = {}  # closer kind -> stack depth below which no opener can match it (linear time)
+    for d in pieces:
+        if isinstance(d, str):
+            continue
+        while d["close"] and d["left"] > 0:
+            key = (d["ch"], d["open"], d["len"] % 3, d["left"] >= 2, d["ga"])
+            k = len(stack) - 1
+            stop = bottom.get(key, 0)
+            found = -1
+            while k >= stop:
+                o = stack[k]
+                if o["ch"] == d["ch"] and not (  # CommonMark's "rule of 3" for runs that can both open and close
+                        (o["close"] or d["open"]) and (o["len"] + d["len"]) % 3 == 0
+                        and not (o["len"] % 3 == 0 and d["len"] % 3 == 0)):
+                    use = 2 if o["left"] >= 2 and d["left"] >= 2 else 1
+                    if d["ch"] == "_":
+                        ok = not (o["gb"] or d["ga"])
+                    else:
+                        ok = use == 2 or not (o["gb"] and d["ga"])
+                    if ok:
+                        found = k
+                        break
+                k -= 1
+            if found < 0:
+                bottom[key] = len(stack)
+                break
+            o = stack[found]
+            o["left"] -= use
+            d["left"] -= use
+            style = "b" if use == 2 else "i"
+            o["opens"].append(style)  # innermost first
+            d["closes"].append(style)
+            del stack[found + 1:]  # runs between the pair can no longer open anything
+            if o["left"] == 0:
+                stack.pop()
+            for kk, v in bottom.items():
+                if v > len(stack):
+                    bottom[kk] = len(stack)
+        if d["open"] and d["left"] > 0:
+            stack.append(d)
+
     runs: list[tuple[str, str]] = []
-    pos = 0
-    while True:
-        m = _EMPH.search(text, pos)
-        while m is not None and m.group(1) == "_" and (
-                (m.start() > 0 and text[m.start() - 1].isalnum()) or
-                (m.end() < len(text) and text[m.end()].isalnum())):
-            m = _EMPH.search(text, m.start() + 1)  # snake_case words are not emphasis
-        if m is None:
-            break
-        if m.start() > pos:
-            runs.append((text[pos:m.start()], style))
-        inner = _STYLE[m.group(1)]
-        merged = "bi" if {inner, style} == {"i", "b"} or "bi" in (inner, style) else (inner or style)
-        runs.extend(inline_runs(m.group(2), merged))
-        pos = m.end()
-    if pos < len(text):
-        runs.append((text[pos:], style))
+    em = strong = 0
+
+    def emit(t: str):
+        st = ("b" if strong else "") + ("i" if em else "")
+        if runs and runs[-1][1] == st:
+            runs[-1] = (runs[-1][0] + t, st)
+        else:
+            runs.append((t, st))
+
+    for d in pieces:
+        if isinstance(d, str):
+            emit(d)
+            continue
+        used_close = sum(2 if s_ == "b" else 1 for s_ in d["closes"])
+        used_open = sum(2 if s_ == "b" else 1 for s_ in d["opens"])
+        for s_ in d["closes"]:
+            if s_ == "b":
+                strong -= 1
+            else:
+                em -= 1
+        literal = d["len"] - used_close - used_open
+        if literal:
+            emit(d["ch"] * literal)
+        removed.update(range(d["start"], d["start"] + used_close))
+        removed.update(range(d["start"] + used_close + literal, d["start"] + d["len"]))
+        for s_ in reversed(d["opens"]):
+            if s_ == "b":
+                strong += 1
+            else:
+                em += 1
+    return [(t, st) for t, st in runs if t], removed
+
+
+def inline_runs(text: str, style: str = "") -> list[tuple[str, str]]:
+    """Split simple Markdown-style emphasis into [(text, style)] runs (markers removed; style "" | "i" | "b" | "bi").
+
+    ``style`` is added to every run (text that is already italic or bold as a whole)."""
+    runs, _removed = _emphasis(text)
+    if not style:
+        return runs
     out: list[tuple[str, str]] = []
     for t, st in runs:
-        t = _ESCAPED.sub(r"\1", t) if not style else t
-        if not t:
-            continue
-        if out and out[-1][1] == st:
-            out[-1] = (out[-1][0] + t, st)
+        merged = "bi" if "bi" in (st, style) or {st, style} == {"i", "b"} else (st or style)
+        if out and out[-1][1] == merged:
+            out[-1] = (out[-1][0] + t, merged)
         else:
-            out.append((t, st))
+            out.append((t, merged))
     return out
 
 

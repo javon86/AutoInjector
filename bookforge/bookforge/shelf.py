@@ -3,7 +3,9 @@
 A finished book is a project/branch whose guided book path recorded exports (``book_path:<pid>:<branch>``
 settings key, written by ``BookPath.a_export``). Each file is re-read from the asset store and its SHA-256 is
 compared with the export descriptor (``read_binary`` refuses bytes that do not match their content hash), so a
-missing or changed file shows as not verified. Test books (self-test / workflow test) are left out.
+missing or changed file shows as not verified. Test books (self-test / workflow test) are left out. Archived
+books are included with ``archived: true`` when asked (the Shelf lists them under "Archived": their downloads
+live there, and archiving only hides a book from the book list).
 """
 from __future__ import annotations
 
@@ -23,7 +25,8 @@ def _is_test(settings_json: str) -> bool:
     return isinstance(s, dict) and bool(s.get("workflow_test") or s.get("selftest"))
 
 
-def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str | None = None) -> list[dict]:
+def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str | None = None,
+                   include_archived: bool = False) -> list[dict]:
     store = app.store
     rows = store.query("SELECT key, value, updated_at FROM settings WHERE key LIKE 'book_path:%'")
     out = []
@@ -37,7 +40,7 @@ def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str
             continue
         _, pid, branch = r["key"].split(":", 2)
         proj = store.project(pid)
-        if proj is None or proj["archived"] or _is_test(proj["settings"]):
+        if proj is None or (proj["archived"] and not include_archived) or _is_test(proj["settings"]):
             continue
         if principal and not store.has_project_access(principal, pid):
             continue
@@ -77,6 +80,13 @@ def finished_books(app, *, verify: bool = True, limit: int = 200, principal: str
         out.append({"project_id": pid, "branch_id": branch, "title": prof.get("title") or proj["name"],
                     "author": prof.get("author") or "", "genre": prof.get("genre") or "", "exported_at": newest,
                     "files": files, "all_verified": all(f.get("verified") for f in files),
-                    "made_by_run": (json.loads(proj["settings"] or "{}") or {}).get("made_by_run")})
+                    "made_by_run": (json.loads(proj["settings"] or "{}") or {}).get("made_by_run"),
+                    "archived": bool(proj["archived"])})
     out.sort(key=lambda b: b["exported_at"] or "", reverse=True)
     return out[:limit]
+
+
+def shelf(app, *, principal: str | None = None) -> dict:
+    """The Shelf page: finished books, and separately the archived ones (still downloadable)."""
+    books = finished_books(app, verify=True, principal=principal, include_archived=True)
+    return {"books": [b for b in books if not b["archived"]], "archived": [b for b in books if b["archived"]]}

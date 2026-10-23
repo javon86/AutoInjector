@@ -766,7 +766,7 @@ function deleteBook(p) {
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Delete a book' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, `⚠️ This deletes “${p.name}” and everything in it`),
-      h('p', null, 'The book disappears from BookForge. A safety backup is made first; until the automatic backups rotate it out, restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
+      h('p', null, 'The book disappears from BookForge. A safety backup is made first and kept (it is never rotated out); restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
     h('div', { class: 'field' }, h('label', { for: word.id }, 'Type the book\'s name to confirm'), word),
     out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
   });
@@ -6132,22 +6132,29 @@ async function viewShelf(main) {
   let out;
   try { out = await api('GET', '/shelf'); } catch (e) { clear(holder).appendChild(problemBox(toProblem(e, { step: 'My finished books' }), { retry: () => route() })); return; }
   clear(holder);
-  if (!out.books.length) {
+  const archived = out.archived || [];
+  if (!out.books.length && !archived.length) {
     holder.appendChild(stateBox('empty', 'No finished book yet', h('p', null, 'Export a book from 📘 Make my book, or press ⚡ Make a book for me and let the AI make one.')));
     return;
   }
-  const grid = h('ul', { class: 'shelf' });
-  for (const b of out.books) {
-    grid.appendChild(h('li', { class: `shelf-book${b.all_verified ? '' : ' damaged'}` },
+  if (out.books.length) holder.appendChild(h('ul', { class: 'shelf' }, out.books.map(shelfBook)));
+  else holder.appendChild(h('p', { class: 'muted' }, 'No finished book in your book list: the ones below are archived.'));
+  if (archived.length) {
+    holder.appendChild(h('h2', { id: 'shelf-archived' }, '🗄 Archived'));
+    holder.appendChild(h('p', { class: 'small muted' }, 'Books you archived are hidden from your book list, but their files stay here to download.'));
+    holder.appendChild(h('ul', { class: 'shelf', 'aria-labelledby': 'shelf-archived' }, archived.map(shelfBook)));
+  }
+}
+
+function shelfBook(b) {
+  return h('li', { class: `shelf-book${b.all_verified ? '' : ' damaged'}${b.archived ? ' archived' : ''}` },
       h('div', { class: 'sb-cover', 'aria-hidden': 'true' }, h('span', null, (b.title || '?').slice(0, 1))),
       h('div', { class: 'sb-main' }, h('h2', null, b.title), h('p', { class: 'small muted' }, [b.author, b.genre].filter(Boolean).join(' · ') || ' '),
         h('p', { class: 'small' }, `Exported ${fmtTime(b.exported_at)}`, b.made_by_run ? h('span', { class: 'muted' }, ' · made with ⚡') : null),
         h('div', { class: 'downloads' }, b.files.map(f => f.verified
           ? h('button', { type: 'button', class: 'primary small', 'data-format': f.format, onclick: () => downloadFile(b.project_id, b.branch_id, f, b.title) }, `⬇ ${f.format}`, h('span', { class: 'sr-ok', title: 'Fingerprint checked' }, ' ✔'))
           : h('span', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: true }, f.format), hazard({ code: 'HASH_MISMATCH', message: `The ${f.format} file is missing or changed.`, where: { book: b.title, set: 'G', step: 'Export my book', op: f.op } }, { open: link('p', b.project_id, b.branch_id, 'book'), openLabel: '📘 Export again' }, { small: true })))),
-        h('a', { class: 'small', href: link('p', b.project_id, b.branch_id, 'book') }, 'Open the book'))));
-  }
-  holder.appendChild(grid);
+        h('a', { class: 'small', href: link('p', b.project_id, b.branch_id, 'book') }, 'Open the book')));
 }
 
 /* ======================================================================= Settings: backups (S9), AI retry (S10), diagnostics (S8) */

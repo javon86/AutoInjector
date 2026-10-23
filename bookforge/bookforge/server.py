@@ -39,7 +39,7 @@ from .selftest import SelfTestRunner
 from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
-from .shelf import finished_books
+from .shelf import shelf as shelf_page
 from .status_push import StatusPusher
 from .store import Store, new_id, utcnow, write_private
 from .workflow_test import WorkflowTestRunner
@@ -155,6 +155,7 @@ class App:
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
         self.health = HealthService(self)
+        self.backups.on_restored.append(self.health.forget)  # a restored database must be checked afresh
         self.port: int | None = None
         self._last_project: dict | None = None
 
@@ -554,7 +555,7 @@ class App:
                 self.changed()
                 return 200, out
         if parts == ["shelf"] and method == "GET":
-            return 200, {"books": finished_books(self, verify=True, principal=principal)}
+            return 200, shelf_page(self, principal=principal)
         if parts == ["settings", "ai-retry"]:
             if method == "GET":
                 cur = self.store.get_setting("ai_retry") or {}
@@ -1007,13 +1008,17 @@ class App:
                 raise ApiError(409, "VERSION_CONFLICT", "/project_id", f"wait until {why} is finished, then delete")
             safety = self.backups.backup("before-delete")  # refuses (disk full…) before anything is removed
             removed = self.store.delete_project(pid)
+        try:
+            self.assist.forget_project(pid)  # its Bible Builder reports no longer carry the book's name
+        except Exception:  # noqa: BLE001 - the book is deleted either way
+            log.exception("could not tidy Bible Builder reports of deleted project %s", pid)
         if self._last_project and self._last_project.get("project_id") == pid:
             self._last_project = None
         self.changed()
         log.info("deleted project %s (%d asset files; safety backup %s)", pid, removed, safety.get("name"))
         return {"deleted": pid, "safety_backup": safety.get("name"), "assets_removed": removed,
-                "message": f"“{p['name']}” was deleted. Until the automatic backups rotate it out, restoring the "
-                           f"backup {safety.get('name')} brings it back."}
+                "message": f"“{p['name']}” was deleted. Restoring the backup {safety.get('name')} brings it "
+                           "back (that safety copy is kept: automatic rotation never removes it)."}
 
 
 def make_handler(app: App):
