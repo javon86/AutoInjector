@@ -922,7 +922,7 @@ button.mab-cta:hover, .mab-cta:hover { background: #ffe066; filter: none; }
 .bk-keep { gap: 6px; margin: 0; }
 .bk-keep label { font-weight: 600; }
 .mab-btn > span[aria-hidden="true"], .mab-cta-bolt { display: inline-grid; place-items: center; width: 1.45em; height: 1.45em; border-radius: 50%;
-  background: #1d1600; font-size: .85em; }
+  background: #1d1600; color: #ffd426; font-size: .85em; line-height: 1; }
 
 /* top bar stays on one line at 1280px: shorter selects, icon-only Jump/Settings, no duplicate "Books" inside a book */
 .topbar-context #project-select { max-width: 10rem; min-width: 6rem; }

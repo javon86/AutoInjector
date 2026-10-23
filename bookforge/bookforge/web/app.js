@@ -142,6 +142,10 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
 }
+/** "⚡ label" for the yellow ⚡ buttons: the bolt sits in a dark disc, else a yellow emoji vanishes on the yellow button. */
+function boltLabel(label) {
+  return [h('span', { class: 'mab-cta-bolt', 'aria-hidden': 'true' }, '⚡'), ' ', label];
+}
 function badge(icon, label, cls, title) {
   return h('span', { class: `badge ${cls}`, title },
     h('span', { class: 'ico', 'aria-hidden': 'true' }, icon), label);
@@ -567,7 +571,7 @@ async function viewHome(main) {
   renderTop([]);
   if (!S.projects.length) { await viewStart(main); return; }
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Your books'),
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me'),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me')),
       h('a', { class: 'btn big', href: '#/start' }, '🚀 Start a new book'), h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'))));
   const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Your projects'));
   if (!S.projects.length) {
@@ -713,7 +717,7 @@ async function viewOverview(main) {
       h('a', { class: 'btn', href: plink('journal') }, '📜 Book journal'), h('a', { class: 'btn', href: '#/shelf' }, '📚 Finished books'))));
   main.appendChild(h('section', { class: 'card mab-card' },
     h('div', null, h('h2', null, '⚡ Make a book for me'), h('p', { class: 'small' }, 'Let your AI make a whole NEW book in one go — you watch every step, can pause or cancel, and get PDF, EPUB and Word at the end. This book is not touched.')),
-    h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me')));
+    h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me'))));
   main.appendChild(profileCard());
   if (!totals) {
     main.appendChild(stateBox('empty', 'This branch has no records yet',
@@ -4359,7 +4363,7 @@ async function viewStart(main) {
     const list = h('div', { class: 'wz-ai', role: 'radiogroup', 'aria-labelledby': 'wz-h' });
     const opt = (value, label, detail, disabled) => {
       const id = uid('wzai');
-      return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'radio', name: 'wz-ai', id, value, checked: (w.ai || '') === value, disabled, onchange: () => { w.ai = value; save(); } }),
+      return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'radio', name: 'wz-ai', id, value, checked: (w.ai || '') === value, disabled, onchange: () => { w.ai = value; w.aiPicked = true; save(); } }),
         h('label', { for: id }, h('strong', null, label), detail ? h('span', { class: 'hint' }, detail) : null));
     };
     list.appendChild(opt('', 'Automatic', 'Use the best AI that is ready each time.'));
@@ -4378,9 +4382,13 @@ async function viewStart(main) {
         if (usable && st.cls !== 'b-bad') ready++;
         list.appendChild(opt(s.slot_id, `${s.slot_id} · ${slotName(s)}`, `${st.icon} ${st.word} — ${st.now}`, !usable));
       }
-      if (!ready) list.appendChild(h('p', { class: 'notice small' }, 'No AI is ready right now. You can still start: the book path will fill in forms for you to write, and you can connect an AI later.'));
+      if (!ready) {
+        // BF-14: with no AI ready, "Automatic" would only fail later; preselect Manual (unless the author picked)
+        if (!w.aiPicked && (w.ai || '') === '') { w.ai = 'manual'; save(); const auto = list.querySelector('input[value=""]'); if (auto) auto.checked = false; }
+        list.appendChild(h('p', { class: 'notice small' }, 'No AI is ready right now, so “Manual” is selected: you write each part yourself, and you can connect an AI later (Settings). Choose “Automatic” only if you will connect an AI before you start.'));
+      }
     } catch (e) { list.lastChild.replaceWith(h('p', { class: 'small' }, 'Could not check the AI slots (they can be set up later).')); }
-    list.appendChild(opt('manual', 'Manual — I’ll write it myself', 'No AI is used; BookForge prepares each form for you to fill in.'));
+    list.appendChild(opt('manual', 'Manual — I’ll write it myself', 'No AI is used; “📘 Make my book” opens an empty form for each step for you to fill in.'));
   } else if (w.step === 3) {
     const ai = w.ai !== 'manual';
     const num = (key, label, max, hint) => {
@@ -4393,9 +4401,17 @@ async function viewStart(main) {
       return h('div', { class: 'check-row wz-opt' }, h('input', { type: 'checkbox', id, checked: !!w.make[key], onchange: ev => { w.make[key] = ev.target.checked; save(); } }),
         h('label', { for: id }, h('strong', null, label), h('span', { class: 'hint' }, hint)));
     };
+    if (!ai) {
+      // BF-14: manual mode makes nothing up front, so don't ask for counts it would ignore; say what happens instead
+      card.append(h('h2', { id: 'wz-h' }, '3. What happens next'),
+        h('p', null, 'You chose to write it yourself, so nothing is made for you now.'),
+        h('p', null, '“📘 Make my book” walks you through the book one step at a time: your characters and places, the premise, the plot, the chapter outline, then each chapter. Press “Do the next step” and it opens an empty form for that step; you write it, save it and approve it.'),
+        h('p', { class: 'small muted' }, 'You can connect an AI at any time in Settings and let it help with the remaining steps.'), err,
+        nav(() => goStep(2), () => goStep(4)));
+      return;
+    }
     card.append(h('h2', { id: 'wz-h' }, '3. What do you want me to make?'),
-      h('p', { class: 'muted' }, ai ? 'Your AI drafts these; you read and approve each one. Nothing becomes part of the book until you approve it.'
-        : 'You chose to write it yourself, so these become ready-to-fill forms in “Make my book”.'),
+      h('p', { class: 'muted' }, 'Your AI drafts these; you read and approve each one. Nothing becomes part of the book until you approve it.'),
       num('A01', 'Characters', 10, 'Main cast, made to fit your idea (0 = none now).'),
       num('A04', 'Places', 10, 'Towns, rooms, landmarks.'),
       num('A03', 'World', 1, 'The world or setting as a whole (0 or 1).'),
@@ -4406,8 +4422,9 @@ async function viewStart(main) {
   } else {
     const p = w.profile;
     const aiLabel = w.ai === 'manual' ? 'I write it myself (no AI)' : w.ai || 'Automatic';
-    const makeList = [w.make.A01 ? `${w.make.A01} character(s)` : null, w.make.A04 ? `${w.make.A04} place(s)` : null, w.make.A03 ? 'the world' : null,
-      w.make.premise ? 'a premise' : null, w.make.outline ? 'the plot and chapter outline' : null].filter(Boolean);
+    const makeList = w.ai === 'manual' ? ['nothing now: you write each step yourself in “📘 Make my book”']
+      : [w.make.A01 ? `${w.make.A01} character(s)` : null, w.make.A04 ? `${w.make.A04} place(s)` : null, w.make.A03 ? 'the world' : null,
+        w.make.premise ? 'a premise' : null, w.make.outline ? 'the plot and chapter outline' : null].filter(Boolean);
     const go4 = h('button', { type: 'button', class: 'primary big' }, '🚀 Create my book');
     card.append(h('h2', { id: 'wz-h' }, '4. Ready?'),
       h('dl', { class: 'kv' }, h('dt', null, 'Title'), h('dd', null, p.title || '—'), h('dt', null, 'Author'), h('dd', null, p.author || '—'),
@@ -4454,7 +4471,7 @@ async function viewBook(main) {
     crumbs(['Your books', '#/'], [S.project.name, plink()], 'Make my book'), h('h1', null, '📘 Make my book')),
   h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
-    h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, '⚡ Make a book for me'))));
+    h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, boltLabel('Make a book for me')))));
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -5886,7 +5903,7 @@ function renderHealth() {
       h('span', { class: 'hl-ico', 'aria-hidden': 'true' }, { ok: '✔', info: 'ℹ', warn: '⚠️', problem: '⚠️' }[c.status] || '•'),
       h('div', { class: 'hl-main' }, h('div', { class: 'row' }, h('strong', null, c.title),
         ['warn', 'problem'].includes(c.status) ? hazard({ code: c.code || (c.status === 'problem' ? 'FAILED' : 'BLOCKED'), message: c.detail, fix: c.fix, where: { step: `Health › ${c.title}` } }, healthAction(c)) : null),
-      h('p', { class: 'small' }, c.detail), c.fix ? h('p', { class: 'small' }, h('strong', null, 'How to fix it: '), c.fix) : null)))),
+      h('p', { class: 'small' }, c.detail), c.fix ? h('p', { class: 'small' }, h('strong', null, c.status === 'info' ? 'Tip: ' : 'How to fix it: '), c.fix) : null)))),
     h('div', { class: 'row form-actions' }, h('button', { type: 'button', class: 'primary', onclick: () => refreshHealth(true) }, '🔁 Run checks now'),
       h('button', { type: 'button', 'data-testid': 'copy-diag', onclick: () => copyDiagnostics() }, '📋 Copy diagnostics'),
       h('button', { type: 'button', onclick: () => copyDiagnostics({ download: true }) }, '⬇ Download diagnostics')),

@@ -119,6 +119,11 @@ class HealthService:
 
     def c_backups(self, force):
         last = self.app.backups.latest()
+        if not last and self.app.store.query_one("SELECT 1 FROM projects LIMIT 1") is None:
+            # a fresh install: nothing to back up yet, so nothing is wrong (BF-14)
+            return {"id": "backups", "title": "Backups", "status": "info",
+                    "detail": "No backup yet: there is no book to back up. BookForge backs up automatically once "
+                              "you start one.", "fix": None}
         if not last:
             return {"id": "backups", "title": "Backups", "status": "warn", "detail": "No backup yet.",
                     "fix": "Press 💾 Back up now (Settings → Backups). BookForge also backs up automatically each day "
@@ -189,9 +194,11 @@ class HealthService:
                                     fix="Start the AutoInjector desktop app, open and log in to the site's pane, then "
                                         "press Test connection in Settings."))
         if not configured:
-            out.append({"id": "slots", "title": "AI slots", "status": "warn", "detail": "No AI is set up.",
-                        "fix": "Open Settings: connect AutoInjector or add an Anthropic API key (or keep writing "
-                               "yourself).", "action": "settings", "code": "CAPABILITY_UNAVAILABLE"})
+            # not set up is a choice, not a fault: you can write everything yourself (BF-14)
+            out.append({"id": "slots", "title": "AI slots", "status": "info",
+                        "detail": "No AI is set up: you write the creative steps yourself.",
+                        "fix": "To let an AI help, open Settings: connect AutoInjector or add an Anthropic API key.",
+                        "action": "settings"})
         return out
 
     def c_bridge(self, force):

@@ -24,6 +24,9 @@ def submit(page):
 
 def test_manual_path_forms(make_context, server):
     page = open_app(make_context(), server, "#/start")
+    # BF-14: a fresh install (no book, no AI) is not a 💛 health warning: those are just not set up yet
+    page.wait_for_function("() => document.querySelector('#health-btn').dataset.state !== 'unknown'", timeout=15000)
+    assert page.get_attribute("#health-btn", "data-state") == "ok", page.get_attribute("#health-btn", "title")
     # wizard on a server without AI: step 2 says so and offers Manual
     page.fill("#wz-title", "Hand Made")
     page.fill("#wz-idea", "A keeper vanishes; his apprentice searches the harbor.")
@@ -32,10 +35,17 @@ def test_manual_path_forms(make_context, server):
     page.get_by_text("Manual — I’ll write it myself").wait_for()
     page.wait_for_function("() => !document.querySelector('#main .wz-card .spinner')", timeout=10000)
     assert "No AI is ready" in page.inner_text("#main .wz-card")
+    # BF-14: with no AI ready, Manual is preselected (not "Automatic"), and the page says why
+    assert page.locator("#main input[name=wz-ai][value=manual]").is_checked()
+    assert not page.locator('#main input[name=wz-ai][value=""]').is_checked()
+    assert "“Manual” is selected" in page.inner_text("#main .wz-card")
     page.get_by_text("Manual — I’ll write it myself").click()
     page.get_by_role("button", name="Next ▶").click()
     settle(page)
-    assert "ready-to-fill forms" in page.inner_text("#main .wz-card")
+    # BF-14: manual mode does not promise ready-made forms nor ask for counts it would ignore
+    step3 = page.inner_text("#main .wz-card")
+    assert "ready-to-fill" not in step3 and "nothing is made for you now" in step3, step3
+    assert page.locator("#main .wz-card input[type=number]").count() == 0
     page.get_by_role("button", name="Next ▶").click()
     settle(page)
     assert "I write it myself (no AI)" in page.inner_text("#main .wz-card")
@@ -44,6 +54,12 @@ def test_manual_path_forms(make_context, server):
     settle(page)
     pid = page.url.split("#/p/")[1].split("/")[0]
     assert book_top(page) == (1, "Characters and places")
+    # BF-14: the ⚡ on the yellow button sits in a dark disc (a yellow emoji on yellow was invisible)
+    bolt = page.locator("#main .mab-cta .mab-cta-bolt").first
+    assert bolt.inner_text() == "⚡"
+    assert bolt.evaluate("e => getComputedStyle(e).backgroundColor") == "rgb(29, 22, 0)"
+    assert page.locator("#main .mab-cta").first.get_attribute("class") and \
+        page.get_by_role("button", name="Make a book for me").count() >= 1
 
     # Do the next step -> the A01 form
     page.locator("#main .book-top button", has_text="Do the next step").click()

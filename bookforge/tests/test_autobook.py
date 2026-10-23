@@ -358,7 +358,7 @@ def test_health_checks(tmp_path):
     h = app.health.run(force=True)
     ids = {c["id"] for c in h["checks"]}
     assert {"database", "disk", "backups", "slot-AI-1", "bridge", "exports", "jobs"} <= ids
-    assert {c["id"]: c for c in h["checks"]}["backups"]["status"] == "warn"  # no backup yet
+    assert {c["id"]: c for c in h["checks"]}["backups"]["status"] == "info"  # no backup yet, but no book either
     run = run_book(app)
     h = app.health.run(force=True)
     by = {c["id"]: c for c in h["checks"]}
@@ -374,6 +374,21 @@ def test_health_checks(tmp_path):
     assert h["overall"] == "problem"
     # cached between calls unless forced
     assert app.health.run() is app.health.run()
+
+
+def test_fresh_install_health_is_calm(tmp_path):
+    # BF-14: things that are simply not set up yet are information, not a 💛 warning
+    app = make_app(tmp_path)
+    h = app.health.run(force=True)
+    by = {c["id"]: c for c in h["checks"]}
+    assert by["backups"]["status"] == "info" and "no book" in by["backups"]["detail"]
+    assert by["slots"]["status"] == "info" and by["slots"]["fix"]
+    assert h["overall"] == "ok", [(c["id"], c["status"]) for c in h["checks"]]
+    # once a book exists, having no backup of it is worth a look again
+    st, _ = app.route("POST", "/api/projects", {}, {"name": "B", "profile": {"title": "B"}}, "author", {})
+    assert st in (200, 201)
+    assert app.backups.latest() is None
+    assert {c["id"]: c for c in app.health.run(force=True)["checks"]}["backups"]["status"] == "warn"
 
 
 def test_diagnostics_contain_no_secrets_or_book_text(tmp_path):
