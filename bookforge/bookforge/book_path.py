@@ -794,8 +794,7 @@ class BookPath:
         ref = self.mem.get("title_rules")
         if not self.ref_ok(ref, approved=False):
             ref = self.import_profile("TITLE_RULES", dict(CHAPTER_TITLE_RULES), "Chapter headings")
-            self.mem["title_rules"] = ref
-            self.save()
+            self.remember(lambda m: m.__setitem__("title_rules", ref))
         return ref
 
     def _appr(self, ref):
