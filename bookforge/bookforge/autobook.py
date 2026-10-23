@@ -38,12 +38,12 @@ from datetime import datetime, timezone
 
 from . import h_checks as hc
 from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_brief
-from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, get_profile, problems, save_profile
+from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get_profile, problems, save_profile
 from .requests import candidate_payload
 from .engine import Engine
 from .errors import BookforgeError
 from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_word, wait_and_retry
-from .providers import ProviderRegistry
+from .providers import PinnedProviders  # noqa: F401 - re-exported (older imports)
 from .review import REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
 log = logging.getLogger("bookforge.autobook")
@@ -94,6 +94,13 @@ BUSY_FIX = ("The AI stayed busy or unreachable for a long time. Check Settings �
             "running and the site logged in?), then press 🔁 Try again.")
 CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what BookForge refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
+STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
+             "that. Press 🔁 Try again: the AI writes it again from the current, approved inputs.")
+AUTHOR_CHECKS_FIX = ("This is your own edited version, so BookForge keeps it and does not ask the AI to replace it. "
+                     "✏️ Edit it so the checks pass (see what was refused below), then press Continue.")
+AUTHOR_STALE_FIX = ("Your edited version was made from a plan or other inputs that changed since, so it is out of date "
+                    "and editing it cannot fix that. BookForge keeps it (the AI does not replace your text). Open the "
+                    "book, approve the current version of what it was made from, and make this step again there.")
 BOOK_GONE_FIX = ("This run cannot continue. Start a new ⚡ Make a book for me, or restore a backup that still has "
                  "this book.")
 NEW_BOOK_NAME = "New book (being made…)"
@@ -131,30 +138,6 @@ def digest(problems_: list, limit: int = 6) -> list[str]:
         more = len(msgs) - 1
         out.append(msgs[0][:300] + (f" (and {more} more like this)" if more else ""))
     return out[:limit]
-
-
-class PinnedProviders(ProviderRegistry):
-    """The author's AI slots, optionally limited to one slot the author picked for this run. Shares the base
-    registry's busy counters, so concurrency limits stay correct."""
-
-    def __init__(self, base: ProviderRegistry, slot_id: str | None):
-        self._base = base
-        super().__init__(base.store, base.secret_path)
-        self._active = base._active
-        self._lock = base._lock
-        self.pinned = slot_id
-
-    @property
-    def test_adapter(self):
-        return getattr(self._base, "test_adapter", None)
-
-    @test_adapter.setter
-    def test_adapter(self, value):  # the base registry owns it
-        pass
-
-    def eligible(self, project_id, capability, needed_tokens, operation=None):
-        out = super().eligible(project_id, capability, needed_tokens, operation if not self.pinned else None)
-        return [s for s in out if s["slot_id"] == self.pinned] if self.pinned else out
 
 
 def _elapsed(start_iso: str | None, end_iso: str | None = None) -> int:
@@ -699,10 +682,12 @@ class AutoBookService(_Runner):
 
     @staticmethod
     def _refused(ref, label: str, probs: list, chapter_id: str | None = None) -> ChecksRefused:
+        rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
+        stale = bool(rules) and rules <= {"STALE", "SOURCE_PIN", "INPUT_NOT_VALIDATED"}
         return ChecksRefused("CHECKS_REFUSED", f"BookForge's checks refused the {label}: " + plain_problem(probs),
-                             CHECKS_FIX, record_id=ref["record_id"], version=ref.get("version"),
-                             module_id=ref["module_id"], details=digest(probs), chapter_id=chapter_id,
-                             options=["edit", "retry"])
+                             STALE_FIX if stale else CHECKS_FIX, record_id=ref["record_id"],
+                             version=ref.get("version"), module_id=ref["module_id"], details=digest(probs),
+                             chapter_id=chapter_id, options=["retry"] if stale else ["edit", "retry"])
 
     def _review_until_approved(self, run, st, rid: str, label: str, chapter_id: str | None = None):
         """BookForge's checks, then AI review -> approve under consent, or fix (max 2) -> review again; else pause
@@ -851,29 +836,53 @@ class AutoBookService(_Runner):
             tx.execute("UPDATE projects SET name=? WHERE project_id=? AND name=?", (title, pid, NEW_BOOK_NAME))
 
     def _s_canon(self, run, st):
-        bp = self.bp(run)
         canon_ops = ("A01", "A04", "A03")
-        have = [r for op in canon_ops for r in bp.heads(op) if not r.get("stale")]
-        # Make what is missing: everything on the first pass; after a stop or a refused save only the sections
-        # with no entry yet (e.g. the places were saved but no main character).
         counts = CANON_COUNTS[run["settings"]["length"]]
-        missing = {op: n for op, n in counts.items() if not any(r["module_id"] == op for r in have)}
-        if "A01" in missing or not have:
-            self._bible(run, st, missing or counts)
+        # Entries BookForge's checks refused and set aside, per section, that the Bible Builder must make again.
+        remake = run.setdefault("canon_remake", {})
+        made_missing = False  # the missing sections get one Bible Builder pass per step run (never a loop)
+        while True:
             bp = self.bp(run)
             have = [r for op in canon_ops for r in bp.heads(op) if not r.get("stale")]
-        if not any(r["module_id"] == "A01" for r in have):
-            raise StepProblem("INVALID_INPUT", "The AI did not make a main character that BookForge could save.",
-                              "Press 🔁 Try again (the AI makes new characters).")
-        todo = [r for r in have if r["lifecycle"] in REVIEWABLE and r.get("approved_version") != r["version"]
-                and not r.get("stale")]
-        todo.sort(key=lambda r: (["A03", "A04", "A01"].index(r["module_id"]), r.get("created_at") or ""))
-        for i, r in enumerate(todo):
-            name = safe_title(self.app.engine.contracts, r)
-            st["items"] = [{"id": x["record_id"], "label": safe_title(self.app.engine.contracts, x),
-                            "state": "done" if j < i else "running" if j == i else "pending"}
-                           for j, x in enumerate(todo)]
-            self._review_until_approved(run, st, r["record_id"], f"entry “{name}”")
+            # Make what is missing: everything on the first pass; after a stop or a refused save only the sections
+            # with no entry yet (e.g. the places were saved but no main character), plus the entries set aside
+            # because the checks refused them.
+            missing = {op: n for op, n in counts.items() if not any(r["module_id"] == op for r in have)}
+            want = {} if made_missing else dict(missing or ({} if have else counts))
+            for op, n in remake.items():
+                want[op] = max(want.get(op, 0), int(n))
+            if want:
+                made_missing = made_missing or bool(missing) or not have
+                self._bible(run, st, want)
+                run["canon_remake"] = remake = {}
+                self.save(run)
+                bp = self.bp(run)
+                have = [r for op in canon_ops for r in bp.heads(op) if not r.get("stale")]
+            if not any(r["module_id"] == "A01" for r in have):
+                raise StepProblem("INVALID_INPUT", "The AI did not make a main character that BookForge could save.",
+                                  "Press 🔁 Try again (the AI makes new characters).")
+            todo = [r for r in have if r["lifecycle"] in REVIEWABLE and r.get("approved_version") != r["version"]
+                    and not r.get("stale")]
+            todo.sort(key=lambda r: (["A03", "A04", "A01"].index(r["module_id"]), r.get("created_at") or ""))
+            redo = None
+            for i, r in enumerate(todo):
+                name = safe_title(self.app.engine.contracts, r)
+                st["items"] = [{"id": x["record_id"], "label": safe_title(self.app.engine.contracts, x),
+                                "state": "done" if j < i else "running" if j == i else "pending"}
+                               for j, x in enumerate(todo)]
+                try:
+                    self._review_until_approved(run, st, r["record_id"], f"entry “{name}”")
+                except ChecksRefused as exc:
+                    # Bounded per section: at most MAX_FIXES new entries, then the run pauses for the author
+                    # (🔁 Try again gives MAX_FIXES more). The author's own edit is never replaced (paused instead).
+                    self._redo_refused(run, st, r["record_id"], f"redo:canon:{r['module_id']}", f"entry “{name}”",
+                                       exc)
+                    redo = r["module_id"]
+                    break
+            if redo is None:
+                break
+            remake[redo] = int(remake.get(redo, 0)) + 1
+            self.save(run)
         n = len(self.bp(run).approved("A01"))
         st["items"] = [dict(x, state="done") for x in st.get("items") or []]
         st["message"] = f"{n} character(s) and {len(self.bp(run).approved('A04'))} place(s) approved"
@@ -903,7 +912,10 @@ class AutoBookService(_Runner):
         run_err = (sess.runs[-1].get("error") if sess.runs else None) or {}
         codes = {e.get("code") for e in errs} | ({run_err.get("code")} if run_err else set())
         good = [i["key"] for i in items if i["status"] == "done" and i.get("valid") is not False]
-        if not any(sess.items[k]["op"] == "A01" for k in good):
+        # A main character is required when this pass makes characters; a pass that only makes again a refused
+        # place or group needs at least one usable entry.
+        need = (lambda k: sess.items[k]["op"] == "A01") if "A01" in counts else (lambda k: True)
+        if not any(need(k) for k in good):
             if "TIMEOUT" in codes:
                 raise StepProblem("TIMEOUT", "The AI did not answer in time while making the characters.", TIMEOUT_FIX)
             busy = codes & set(BUSY_CODES)
@@ -914,23 +926,54 @@ class AutoBookService(_Runner):
             raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
                               f"The characters could not be made: {msg}", "Press 🔁 Try again.")
         out = sess.create(good, {})
+        for c in out["created"]:
+            self._made(run, c["ref"])
         self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Bible Builder)",
                    slot=sess.runs[-1].get("slot") if sess.runs else None)
         if out["errors"]:
             self.event(run, "note", f"{len(out['errors'])} entr(y/ies) could not be saved and were skipped",
                        code=out["errors"][0].get("code"))
 
+    @staticmethod
+    def _made(run, ref: dict):
+        """Remember that this run's AI made exactly this revision (so only AI text is ever redone)."""
+        run.setdefault("made", {})[ref["record_id"]] = ref["version"]
+
+    def _ai_made(self, run, rec: dict) -> bool:
+        """True when this exact revision was written by the AI (an AI create, or an AI fix the run asked for); False
+        for the author's own text (a manual candidate or an edit). Only AI text is ever set aside and redone."""
+        if run.get("made", {}).get(rec["record_id"]) == rec["version"]:
+            return True  # this run's AI made exactly this revision (Bible Builder entries, AI drafts)
+        try:
+            kind = self.app.review.made_by(run["project_id"], run["branch_id"], rec,
+                                           self.app.review.fixes(run["project_id"], run["branch_id"]))["kind"]
+        except Exception:  # noqa: BLE001 - when in doubt, never throw the author's text away
+            log.exception("make-a-book run %s: could not tell who wrote %s", run["id"], rec.get("record_id"))
+            return False
+        return kind in ("ai", "ai_fix")
+
     def _redo_refused(self, run, st, rid: str, key: str, label: str, exc: ChecksRefused):
-        """Set a draft BookForge's checks refused aside so the AI writes it again (told what was wrong: the B11
-        prompt lists the earlier outline's refusals); after MAX_FIXES attempts the run pauses for the author."""
+        """Set an AI draft BookForge's checks refused aside so the AI writes it again (told what was wrong: the B11
+        prompt lists the earlier outline's refusals); after MAX_FIXES attempts the run pauses for the author. The
+        author's own version (an edit made while the run was paused) is never set aside: the run pauses for the
+        author instead (CHECKS_REFUSED, Edit only), without asking the AI."""
+        bp = self.bp(run)
+        rec = bp.rec(rid)
+        if rec is not None and not self._ai_made(run, rec):
+            stale = exc.problem.get("fix") == STALE_FIX
+            exc.problem.update(message=exc.problem["message"].replace("BookForge's checks refused the",
+                                                                      "BookForge's checks refused your edited", 1),
+                               fix=AUTHOR_STALE_FIX if stale else AUTHOR_CHECKS_FIX, options=["edit"],
+                               authored_by="author")
+            self.event(run, "problem", f"BookForge's checks refused your edited {label}; it is kept for you to fix "
+                                       "(the AI was not asked to replace it)", record_id=rid, code="CHECKS_REFUSED")
+            raise exc
         counts = run.setdefault("fix_counts", {})
         n = int(counts.get(key, 0))
         if n >= MAX_FIXES:
             exc.problem["message"] += f" The AI wrote it {n + 1} times."
             raise exc
         counts[key] = n + 1
-        bp = self.bp(run)
-        rec = bp.rec(rid)
         if rec is not None:
             bp.set_aside(rec, f"BookForge's checks refused it; the AI writes the {label} again")
         st["message"] = f"The AI is writing the {label} again (attempt {n + 2} of {MAX_FIXES + 1})"
@@ -954,6 +997,7 @@ class AutoBookService(_Runner):
                 self.save(run)
                 ref = self.ai_create(run, bp, op, bp.payload_for(op), label)
                 rid = ref["record_id"]
+                self._made(run, ref)
                 self.event(run, "ai", f"The AI wrote the {label}", record_id=rid, module_id=op)
             try:
                 self._review_until_approved(run, st, rid, label)
@@ -1006,6 +1050,7 @@ class AutoBookService(_Runner):
                     payload = bp.prepare_chapter(cid)
                     ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
                     rid = ref["record_id"]
+                    self._made(run, ref)
                     self.event(run, "ai", f"The AI wrote chapter {cid}", record_id=rid, module_id="C02")
                 try:
                     rec = self._review_until_approved(run, st, rid, f"chapter {cid}", chapter_id=cid)
@@ -1205,8 +1250,19 @@ class WriteAllService(_Runner):
                 self.save(job)
                 bp = BookPath(self.app.engine, job["principal"], job["project_id"], job["branch_id"])
                 try:
-                    payload = bp.prepare_chapter(item["id"])
-                    ref = self.ai_create(job, bp, "C02", payload, f"chapter {item['id']}")
+                    # The same per-chapter lock as the book page's "write this chapter": decide and write as one
+                    # step, and look again now (the author may have written or approved it since Write-all started).
+                    with _step_lock(f"{bp.key}:C02:{item['id']}"):
+                        outline = bp.outline()
+                        _ctx, latest, appr = bp.chapter_prose(outline, item["id"]) if outline else (None, None, None)
+                        if appr or (latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale")):
+                            item.update(state="done", note="already approved" if appr else
+                                        "already written — waits for your approval")
+                            self.event(job, "skip", f"{item['label']} was already written; not written again")
+                            self.save(job)
+                            continue
+                        payload = bp.prepare_chapter(item["id"])
+                        ref = self.ai_create(job, bp, "C02", payload, f"chapter {item['id']}")
                 except StepError as exc:
                     if "already approved" in exc.message:
                         item.update(state="done", note="already approved")
