@@ -133,14 +133,16 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   a run now approves chapters after the editor under the run consent instead of the auto-approve label; (d) the
   rewrite only covers chapters (C02) — premise/plot/outline get notes only; (e) "keep" notes that are not exact quotes
   cannot be checked by BookForge after a rewrite (only quotes are).
-- **Desktop e2e flake seen during Section 2 (desktop-app, not changed here).** `tests/campaign/bridge/
+- ~~**Desktop e2e flake seen during Section 2 (desktop-app, not changed here).** `tests/campaign/bridge/
   test_bridge_e2e_autoinjector.py` failed in 3 of ~10 runs with the Section 2 code (passes alone 6/7, baseline 4/4 +
   one full run): after the forced TIMEOUT and Resume, the run's pre-run check-in to Gemini and the re-sent chapter
   overlap, and AutoInjector logs `untagged-reply-accepted … a check-in answer` for Gemini's chapter reply, so the
   BookForge request never gets its answer and the run is still "running" when the 170 s budget ends. The editor adds
   ~5 s of AI calls per run, which shifts timing; the race itself is in the desktop app's check-in/reply matching
   (P18.1/P18.5). Fix there: a reply that answers a pending BookForge request (or contains JSON) must not be taken as a
-  check-in answer.
+  check-in answer.~~ **Resolved:** a check-in now owns a reply only if the Relay Trace says it answers the check-in's
+  own [MSG #] (and nothing else) and it holds the word as a whole word (it used to match any reply containing the
+  word, e.g. "harbor" in a chapter); bridge requests and check-ins no longer interleave; e2e 10/10 passes.
 - **P18 limits to know:** while a teach step runs, nothing else is typed into that AI (sends return
   `SITE_REPAIRING`); the teach step learns "Enter" when the user presses Enter instead of a Send button; a learned
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace

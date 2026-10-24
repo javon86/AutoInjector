@@ -618,6 +618,15 @@ function pickNumber() { return String(1000 + crypto.randomInt(9000)); }
 const PROBE_PHRASE = 'reply with only this word';
 const TEACH_PHRASE = 'repeat this number';
 function probeText(word) { return `Reply with only this word: ${word}`; }
+// Does `text` hold `word` as a whole word (case-insensitive)? "harbor" is in
+// "the harbor." but not in "harbormaster" — a chapter that merely contains the
+// letters must never pass for a check-in answer.
+function containsWord(text, word) {
+  const w = String(word == null ? '' : word).trim();
+  if (!w) return false;
+  const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try { return new RegExp(`(^|[^\\p{L}\\p{N}_])${esc}($|[^\\p{L}\\p{N}_])`, 'iu').test(String(text == null ? '' : text)); } catch (_) { return false; }
+}
 
 // Learned selectors (persisted by main.js): { version, sites: { site: { role: { selector, how, learnedAt, version } } } }
 function sanitizeLearned(raw, sites, isBadSelector) {
@@ -655,11 +664,11 @@ function createSelfRepair(deps) {
     autoChecks: true // false: no automatic check-ins at all (startup / after a failure); on-demand ones still run
   }, d.options || {});
   const S = {};
-  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null };
+  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0 };
   const events = [];
   const createdAt = now(); // periodic check-ins count from app start (the start-up one is separate)
-  const awaiting = {}; // site -> { word, resolve, captured }
-  const recent = {};   // site -> [{ word, until }]  (late check-in replies are still owned)
+  const awaiting = {}; // site -> check-in record { word, resolve, captured, token (token.seq = its [MSG #]), typed, withdrawn, displaced, orphaned }
+  const recent = {};   // site -> [{ word, until, a }]  (a late answer to a recent check-in's OWN message is still owned)
   const teachCtl = {}; // site -> { cancel: bool }
 
   function event(kind, fields) {
@@ -703,7 +712,13 @@ function createSelfRepair(deps) {
   }
   const overrides = (site) => { try { return (typeof d.overrides === 'function' && d.overrides(site)) || {}; } catch (_) { return {}; } };
 
-  // ---- ownership of check-in / teach replies (pollSite asks) ----------------------
+  // ---- ownership of check-in / teach replies (main.js's capture path asks) ----------
+  // A reply belongs to a check-in ONLY when the Relay Trace says it answers the
+  // check-in's own [MSG #] (answers = the [MSG #] numbers it answers, relay-trace.js
+  // answersOf / wouldAnswer) AND it holds the check-in's word as a whole word. A
+  // reply that also answers any other message (an older BookForge prompt, a relay,
+  // the user's message) belongs to that message's owner. Anything else goes
+  // wherever it would go without check-ins.
   function wordsFor(site) {
     const out = [];
     if (awaiting[site]) out.push(awaiting[site].word);
@@ -712,20 +727,69 @@ function createSelfRepair(deps) {
     for (const r of recent[site] || []) if (r.until > now()) out.push(r.word);
     return out;
   }
-  // Is this reply text the answer to a check-in / teach message here? (never the
-  // user's message itself, which also holds the word but also the instruction)
-  function expects(site, text) {
-    const t = String(text || '').toLowerCase();
-    if (!t || t.indexOf(PROBE_PHRASE) !== -1 || t.indexOf(TEACH_PHRASE) !== -1) return false;
-    return wordsFor(site).some((w) => t.indexOf(String(w).toLowerCase()) !== -1);
+  function seqOf(a) { return a && a.token && a.token.seq != null ? String(a.token.seq) : null; }
+  function checkinsOf(site) {
+    const out = [];
+    if (awaiting[site]) out.push(awaiting[site]);
+    for (const r of recent[site] || []) if (r.until > now() && r.a && !out.includes(r.a)) out.push(r.a);
+    return out;
   }
+  function isCheckinSeq(site, q) { return checkinsOf(site).some((a) => seqOf(a) === String(q)); }
+  function ownerOf(site, text, answers) {
+    if (!S[site]) return null;
+    const t = String(text || '');
+    const low = t.toLowerCase();
+    // never the user's / app's message itself (it holds the word AND the instruction)
+    if (!t || low.indexOf(PROBE_PHRASE) !== -1 || low.indexOf(TEACH_PHRASE) !== -1) return null;
+    const ans = Array.isArray(answers) ? answers.map(String) : null;
+    if (ans) {
+      for (const a of checkinsOf(site)) {
+        const seq = seqOf(a);
+        if (!seq || !containsWord(t, a.word)) continue;
+        if (ans.includes(seq)) {
+          // it also answers a message that is not a check-in (an older BookForge
+          // prompt / relay / the user's message, or one typed after it): that
+          // owner comes first — a check-in never takes a reply that may be theirs
+          if (ans.some((q) => q !== seq && !isCheckinSeq(site, q))) continue;
+          return { kind: 'checkin', a };
+        }
+        // the check-in's message was taken by a reply that belonged to an older
+        // message (batched in the Relay Trace): its real answer now answers nothing
+        if (!ans.length && a.orphaned) return { kind: 'checkin', a };
+      }
+    }
+    // the teach message is typed by the user (no [MSG #]); its answer must not
+    // answer any message the app sent (other than a check-in)
+    const tc = S[site].teach;
+    if (tc && tc.active && containsWord(t, tc.number) && (!ans || ans.every((q) => isCheckinSeq(site, q)))) return { kind: 'teach' };
+    return null;
+  }
+  // Is this reply the answer to a check-in / teach message here?
+  function expects(site, text, answers) { return !!ownerOf(site, text, answers); }
   function onCaptured(site, turn) {
     if (!S[site] || !turn) return false;
-    const text = String(turn.text || '');
-    if (!expects(site, text)) return false;
-    const a = awaiting[site];
-    if (a && text.toLowerCase().indexOf(a.word.toLowerCase()) !== -1 && !a.captured) { a.captured = true; try { a.resolve(true); } catch (_) {} }
+    const own = ownerOf(site, turn.text, turn.answers);
+    if (!own) { noteForeignReply(site, turn.answers); return false; }
+    const a = own.a;
+    if (a && !a.captured) { a.captured = true; try { a.resolve(true); } catch (_) {} }
     return true;
+  }
+  // A reply that is NOT a check-in answer was captured. When the Relay Trace says
+  // it also answered a check-in's message (an older message's reply, batched),
+  // that check-in was displaced: it must not be failed (or the AI marked broken)
+  // because of it — its own answer may still come, otherwise it is re-sent later.
+  function noteForeignReply(site, answers) {
+    if (!S[site] || !Array.isArray(answers) || !answers.length) return false;
+    const ans = answers.map(String);
+    if (ans.every((q) => isCheckinSeq(site, q))) return false; // only check-in messages: an answer without its word, not a displacement
+    let hit = false;
+    for (const a of checkinsOf(site)) {
+      const seq = seqOf(a);
+      if (!seq || a.captured || !ans.includes(seq)) continue;
+      a.displaced = true; a.orphaned = true; hit = true;
+      event('displaced', { site, outcome: 'OTHER_REPLY' });
+    }
+    return hit;
   }
   function awaitingReply(site) { return !!awaiting[site] || !!(S[site] && S[site].teach && S[site].teach.active); }
   function teachActive(site) { return !!(S[site] && S[site].teach && S[site].teach.active); }
@@ -742,7 +806,7 @@ function createSelfRepair(deps) {
     const sc = word ? await page(site, buildScanScript(site, d.SITES, overrides(site), word, PROBE_PHRASE)) : null;
     return {
       loadFailed: !!rs.loadFailed, signals: sig.codes || [], send: sendRes,
-      read: { textLen: Number(rs.textLen || 0), generating: !!rs.generating, generatingMs: Number(rs.generatingMs || 0), hasWord: !!(word && String(rs.text || '').toLowerCase().indexOf(word.toLowerCase()) !== -1) },
+      read: { textLen: Number(rs.textLen || 0), generating: !!rs.generating, generatingMs: Number(rs.generatingMs || 0), hasWord: !!(word && containsWord(rs.text, word)) },
       page: sc && sc.ok ? { wordOnPage: !!sc.wordOnPage, userBubble: !!sc.userBubble } : {},
       captured: !!captured, stuckMs: opt.stuckMs
     };
@@ -757,13 +821,15 @@ function createSelfRepair(deps) {
     const sig = await signalsOf(site);
     const user = (sig.codes || []).map((c) => c.code).find((c) => USER_ONLY.has(c));
     if (user) return { ok: false, code: user, word: null, signals: sig.codes };
+    // a bridge request asked for this AI while the cheap checks ran: don't send
+    if (x.yieldReq) return { ok: false, displaced: true, word: null };
     const word = pickWord(wordsFor(site));
     let resolve; const got = new Promise((r) => { resolve = r; });
-    const a = { word, resolve, captured: false };
+    const token = { cancelled: false, typing: false, seq: null }; // seq: stamped by the host with the check-in's [MSG #]
+    const a = { word, resolve, captured: false, token, typed: false, withdrawn: false, displaced: false, orphaned: false };
     awaiting[site] = a;
-    (recent[site] = (recent[site] || []).filter((r) => r.until > now())).push({ word, until: now() + opt.recentWordsMs });
+    (recent[site] = (recent[site] || []).filter((r) => r.until > now())).push({ word, until: now() + opt.recentWordsMs, a });
     event('probe', { site, reason, step: 'check' });
-    const token = { cancelled: false, typing: false };
     let sendRes;
     try {
       const sendP = Promise.resolve(d.sendProbe(site, probeText(word), token));
@@ -772,21 +838,30 @@ function createSelfRepair(deps) {
       if (sendRes && sendRes.timedOut) { token.cancelled = true; sendRes = await sendP.catch(() => ({ ok: false, error: 'CANCELLED' })); }
     } catch (e) { sendRes = { ok: false, error: 'EXCEPTION' }; }
     sendRes = sendRes && typeof sendRes === 'object' ? { ok: !!sendRes.ok, error: sendRes.error || null, verified: sendRes.verified } : { ok: false, error: 'UNKNOWN' };
+    if (sendRes.ok) a.typed = true;
     try {
+      // withdrawn before it was typed, to make way for a BookForge request: not a failure
+      if (a.withdrawn && !sendRes.ok && !a.captured) return { ok: false, displaced: true, word };
       if (sendRes.ok || a.captured) {
         const t0 = now();
         let quietSince = 0;
         while (!a.captured && now() - t0 < opt.probeTimeoutMs) {
           const r = await Promise.race([got, sleep(opt.pollStepMs).then(() => false)]);
           if (r === true || a.captured) break;
+          // another owner's reply took the check-in's message and a bridge request waits: stop now
+          if (a.displaced && x.yieldReq) break;
           // early stop: the reader already shows the answer but nothing took it
+          // (not when another owner's reply took the check-in's message: that reply
+          // may merely mention the word)
           const rs = readState(site);
-          const hasWord = String(rs.text || '').toLowerCase().indexOf(word) !== -1;
+          const hasWord = !a.displaced && containsWord(rs.text, word);
           if (hasWord && !rs.generating) { if (!quietSince) quietSince = now(); if (now() - quietSince >= opt.earlyQuietMs) break; }
           else quietSince = 0;
         }
       }
       if (a.captured) return { ok: true, word };
+      // its message was answered by a reply that belonged to someone else: no verdict
+      if (a.displaced) return { ok: false, displaced: true, word };
       const ev = await evidence(site, word, sendRes, false);
       return { ok: false, code: classify(ev), word, send: sendRes.ok ? 'ok' : sendRes.error };
     } finally { if (awaiting[site] === a) delete awaiting[site]; }
@@ -795,6 +870,7 @@ function createSelfRepair(deps) {
   function markOk(site, how) {
     const x = S[site];
     x.lastProbeOkAt = now();
+    x.displacedCount = 0;
     const wasBad = x.state !== 'ok' && x.state !== 'unknown';
     if (wasBad) x.fixedAt = now();
     setState(site, 'ok', null);
@@ -858,11 +934,26 @@ function createSelfRepair(deps) {
     if (!x) return { skipped: 'unknown_site' };
     if (x.running) return { skipped: 'checking' };
     if (x.teach && x.teach.active) return { skipped: 'teaching' };
-    x.running = true; x.step = 'check'; x.pending = null;
+    x.running = true; x.step = 'check'; x.pending = null; x.yieldReq = false;
+    const prev = { state: x.state, problem: x.problem };
     emit(site);
+    // No verdict: the check-in made way for a BookForge request, or another owner's
+    // reply took its message. The AI's state stays as it was (never "broken" for
+    // this); with automatic check-ins on, it is sent again later, when the AI is
+    // free (at most twice in a row) — otherwise it just ends quietly.
+    const deferred = (why) => {
+      if (x.state !== prev.state || x.problem !== prev.problem) setState(site, prev.state, prev.problem);
+      x.displacedCount = (x.displacedCount || 0) + 1;
+      const again = !!opt.autoChecks && x.displacedCount <= 2;
+      if (again) x.pending = { reason: 're-check', at: now() };
+      event('result', { site, outcome: 'DEFERRED', reason: why });
+      emit(site, { kind: 'deferred', reason: why });
+      return { ok: false, deferred: true, reason: why, state: x.state, again };
+    };
     try {
       let r = await probeOnce(site, reason);
       if (r.ok) return markOk(site, 'check-in');
+      if (r.displaced) return deferred(x.yieldReq ? 'bookforge' : 'other-reply');
       let code = r.code;
       event('detect', { site, code, reason });
       if (USER_ONLY.has(code)) { note(site, 'signals', code, 'FOUND'); return needsUser(site, code); }
@@ -875,6 +966,7 @@ function createSelfRepair(deps) {
         if (done.has(step)) continue;
         done.add(step);
         if (step === 'give_up') break;
+        if (x.yieldReq) return deferred('bookforge'); // a BookForge request waits for this AI: repair later
         if (step === 'teach') { x.running = false; x.step = null; startTeach(site, code, { auto: true }); return { ok: false, state: 'needs_user', problem: code, teach: true }; }
         x.step = step; emit(site);
         const out = await runStep(site, step, code, r);
@@ -883,6 +975,7 @@ function createSelfRepair(deps) {
         x.step = 'check'; emit(site);
         r = await probeOnce(site, `after-${step}`);
         if (r.ok) { note(site, step, code, 'FIXED'); return markOk(site, step); }
+        if (r.displaced) return deferred(x.yieldReq ? 'bookforge' : 'other-reply');
         note(site, 'check', r.code, 'STILL_FAILING');
         if (USER_ONLY.has(r.code)) return needsUser(site, r.code);
         if (r.code !== code) { code = r.code; setState(site, 'repairing', code); ladder = (LADDERS[code] || LADDERS.UNKNOWN).filter((s) => !done.has(s)); }
@@ -891,8 +984,29 @@ function createSelfRepair(deps) {
     } catch (e) {
       event('error', { site, outcome: 'EXCEPTION' });
       return broken(site, 'UNKNOWN');
-    } finally { x.running = false; x.step = null; emit(site); }
+    } finally { x.running = false; x.step = null; x.yieldReq = false; emit(site); }
   }
+
+  // A BookForge request wants this AI (main.js calls this before typing the prompt).
+  // A check-in that is not typed yet is withdrawn; one already typed is left to
+  // settle (the caller waits, bounded, until busyWithSite() is false) and the
+  // repair steps after it are put off. Returns 'none' | 'withdrawn' | 'wait'.
+  function makeWay(site) {
+    const x = S[site];
+    if (!x) return 'none';
+    const a = awaiting[site];
+    if (!x.running && !a) return 'none';
+    x.yieldReq = true;
+    if (a && !a.typed && !a.captured && a.token && !a.token.typing && !a.withdrawn) {
+      a.withdrawn = true; a.token.cancelled = true;
+      event('yield', { site, outcome: 'WITHDRAWN' });
+      return 'withdrawn';
+    }
+    event('yield', { site, outcome: 'WAIT' });
+    return 'wait';
+  }
+  // A check-in (or its repair steps) is under way on this AI.
+  function busyWithSite(site) { const x = S[site]; return !!(x && (x.running || awaiting[site])); }
 
   // ---- P18.7 teach ----------------------------------------------------------------------------
   async function startTeach(site, code, o) {
@@ -969,6 +1083,7 @@ function createSelfRepair(deps) {
     let r;
     try { r = await probeOnce(site, 'after-teach'); } finally { x.running = false; x.step = null; }
     if (r.ok) { t.result = 'fixed'; note(site, 'teach', t.code, 'FIXED'); return markOk(site, 'teach'); }
+    if (r.displaced) { t.result = 'deferred'; if (opt.autoChecks) x.pending = { reason: 're-check', at: now() }; event('result', { site, outcome: 'DEFERRED', reason: 'after-teach' }); return { ok: false, deferred: true }; }
     t.result = 'failed';
     if (!t.missing.length) t.missing = ALT_ROLES[r.code] ? ALT_ROLES[r.code].filter((role) => role !== 'stop') : ['assistant'];
     note(site, 'check', r.code, 'STILL_FAILING');
@@ -1066,7 +1181,7 @@ function createSelfRepair(deps) {
 
   return {
     runCheck, probeMany, requestCheck, startup, tick, onPageChanged, noteWorking,
-    onCaptured, expects, awaitingReply, teachActive, startTeach, cancelTeach,
+    onCaptured, expects, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite,
     state: snap, snapshot: () => Object.fromEntries(sites.map((s) => [s, snap(s)])), health, isUsable,
     events: () => events.map((e) => Object.assign({}, e)), setIntervalMs, options: opt, lastTick: () => lastTick
   };
@@ -1077,5 +1192,5 @@ module.exports = {
   LEARNED_VERSION, MARKER, PROBE_PHRASE, TEACH_PHRASE, WORDS,
   describeProblem, signaturesFor, altsFor, pageKit, classify, createSelfRepair, sanitizeLearned,
   buildSignalScript, buildScanScript, buildAlternativesScript, buildLearnReplyScript, buildUnfreezeScript,
-  buildTeachStartScript, buildTeachPollScript, buildTeachStopScript, teachBanner, probeText, pickWord, pickNumber
+  buildTeachStartScript, buildTeachPollScript, buildTeachStopScript, teachBanner, probeText, pickWord, pickNumber, containsWord
 };

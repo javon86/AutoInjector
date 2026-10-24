@@ -246,16 +246,23 @@ function makeSite(opts) {
     for (const s of sels) { let l = []; try { l = sim.doc.querySelectorAll(s); } catch (_) {} if (l.length) return l[l.length - 1].textContent; }
     return "";
   };
-  sim.onSend = async (text) => {
+  sim.onSend = async (text, token) => {
     sim.sends++;
+    const seq = String(sim.sends).padStart(4, "0");
+    if (token) token.seq = seq; // the host stamps the check-in's [MSG #] (main.js sendTextTo)
+    sim.lastSeq = seq;
     if (o.sendError) return { ok: false, error: o.sendError };
+    if (o.sendDelayMs) { // queued behind something: a caller may withdraw it before it is typed
+      const t0 = Date.now();
+      while (Date.now() - t0 < o.sendDelayMs) { if (token && token.cancelled) return { ok: false, error: "CANCELLED" }; await sleep(5); }
+    }
     if (sim.generating) return { ok: false, error: "AI_BUSY" };
-    sim.block("human", `[MSG #00${sim.sends}]\n${text}`);
+    sim.block("human", `[MSG #${seq}]\n${text}`);
     const w = /Reply with only this word: ([a-z]+)/.exec(text);
     if (w && o.answer) setTimeout(() => {
       sim.block("bot", `[TO: USER]\n${w[1]}\n[FROM: CHATGPT]`);
       const seen = sim.readerText();
-      if (seen.includes(w[1]) && !o.neverCapture) { sim.capturedTexts.push(seen); sim.engine.onCaptured("chatgpt", { text: seen }); }
+      if (seen.includes(w[1]) && !o.neverCapture) { sim.capturedTexts.push(seen); sim.engine.onCaptured("chatgpt", { text: seen, answers: [seq] }); }
     }, 15);
     return { ok: true, verified: true };
   };
@@ -265,7 +272,7 @@ function makeSite(opts) {
     runPage: (_s, script) => runScript(script, sim.doc),
     reload: async () => { sim.reloads++; if (o.reloadFixes) { o.layout = "default"; sim.build(); } return { ok: sim.reloadOk }; },
     readState: () => ({ text: sim.readerText(), textLen: sim.readerText().length, generating: sim.generating, generatingMs: sim.generating ? 999999 : 0, loadFailed: !!o.loadFailed }),
-    sendProbe: (_s, text) => sim.onSend(text),
+    sendProbe: (_s, text, token) => sim.onSend(text, token),
     saveLearned: (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); },
     busyReason: () => sim.busy, isActive: () => true,
     log: (k, d) => sim.logs.push({ k, d }),
@@ -285,8 +292,10 @@ async function testEngine() {
   assert(h.state === "ok" && h.problem === null && typeof h.since === "number" && h.last_probe_ok_at === st.lastProbeOkAt, "contract v1.2 health fields");
   const word = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
   assert(textFree(sim, [word, "Reply with only"]), "logs, events and the snapshot never carry the check-in word or text");
-  assert(sim.engine.expects("chatgpt", `[TO: USER]\n${word}\n[FROM: CHATGPT]`) && !sim.engine.expects("chatgpt", `Reply with only this word: ${word}`), "a late answer to the check-in is still recognised (and the user's message never is)");
-  assert(sim.engine.onCaptured("chatgpt", { text: `${word}` }) === true && sim.engine.onCaptured("chatgpt", { text: "an unrelated reply" }) === false, "onCaptured owns check-in answers only");
+  const pseq = sim.lastSeq;
+  assert(sim.engine.expects("chatgpt", `[TO: USER]\n${word}\n[FROM: CHATGPT]`, [pseq]) && !sim.engine.expects("chatgpt", `Reply with only this word: ${word}`, [pseq]), "a late answer to the check-in's own [MSG #] is still recognised (and the user's message never is)");
+  assert(sim.engine.onCaptured("chatgpt", { text: `${word}`, answers: [pseq] }) === true && sim.engine.onCaptured("chatgpt", { text: "an unrelated reply", answers: [pseq] }) === false, "onCaptured owns check-in answers only");
+  assert(!sim.engine.expects("chatgpt", `[TO: USER]\n${word}\n[FROM: CHATGPT]`) && !sim.engine.expects("chatgpt", `${word}`, ["0999"]), "a reply whose [MSG #] is unknown, or that answers another message, is never a check-in answer — even with the word");
 
   console.log("\n== P18.4 engine: NO_REPLY_FOUND -> alternatives -> page search learns -> fixed ==");
   sim = makeSite({ layout: "changed" });
@@ -435,6 +444,84 @@ async function testEngine() {
   assert(sim.engine.state("chatgpt").state === "ok", "a normal reply that answers a delivered message marks a broken AI ok again");
 }
 
+async function testOwnership() {
+  console.log("\n== P18.1 ownership: a check-in waits, a BookForge reply arrives (the e2e flake) ==");
+  let sim = makeSite({ answer: false, options: { probeTimeoutMs: 400 } });
+  let run = sim.engine.runCheck("chatgpt", "bookforge");
+  await waitUntil(() => sim.sends === 1);
+  const probeSeq = sim.lastSeq;
+  const word = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
+  const bridgeSeq = String(Number(probeSeq) - 1).padStart(4, "0"); // the BookForge prompt typed BEFORE the check-in (late window)
+  // the check-in word is an ordinary word (say "harbor") and BookForge's chapter uses it
+  const chapter = `Chapter 2\nThe ${word.toUpperCase()} glowed at dusk over the ${word}, and Mara walked on.`;
+  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq, probeSeq]) === false, "a reply that answers the older BookForge prompt too is NOT a check-in answer, even with the word in it");
+  assert(sim.engine.onCaptured("chatgpt", { text: chapter, answers: [bridgeSeq, probeSeq] }) === false, "…onCaptured leaves it to its owner (the bridge)");
+  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq]) === false, "a reply that answers only the BookForge prompt is never a check-in answer");
+  assert(sim.engine.expects("chatgpt", chapter, [probeSeq, String(Number(probeSeq) + 1).padStart(4, "0")]) === false, "…nor one that also answers a message typed after the check-in (whose reply it may be)");
+  let r = await run;
+  let st = sim.engine.state("chatgpt");
+  assert(r.ok === false && r.deferred === true && st.state === "unknown" && !st.problem, `the check-in is not satisfied by it and gives no verdict — the AI is NOT marked broken (${st.state} ${st.problem})`);
+  assert(!sim.engine.events().some((e) => e.kind === "detect"), "no failure was detected/classified because of it");
+  assert(sim.engine.events().some((e) => e.kind === "displaced") && sim.engine.events().some((e) => e.kind === "result" && e.outcome === "DEFERRED"), "logged as displaced / deferred");
+  // its real answer still comes (it answers nothing now: its message was taken)
+  assert(sim.engine.expects("chatgpt", `[TO: USER]\n${word}\n[FROM: CHATGPT]`, []) === true, "the check-in's own late answer (its [MSG #] already taken) is still owned");
+  // …and the check-in is sent again once the AI is free
+  sim.o.answer = true;
+  await sim.engine.tick();
+  assert(await waitUntil(() => sim.engine.state("chatgpt").state === "ok"), "the check-in is re-sent when the AI is free and passes");
+  assert(sim.sends === 2, `re-sent once (${sim.sends} sends)`);
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 300, autoChecks: false } });
+  run = sim.engine.runCheck("chatgpt", "bookforge");
+  await waitUntil(() => sim.sends === 1);
+  sim.engine.noteForeignReply("chatgpt", ["0000", sim.lastSeq]);
+  r = await run;
+  sim.o.answer = true;
+  await sim.engine.tick();
+  await sleep(50);
+  assert(r.deferred && r.again === false && sim.sends === 1 && sim.engine.state("chatgpt").state === "unknown", "automatic check-ins off: a displaced check-in just ends quietly (not re-sent, no verdict)");
+
+  console.log("\n== P18.1 ownership: a reply without the word never satisfies a check-in ==");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 250, earlyQuietMs: 50 } });
+  run = sim.engine.runCheck("chatgpt", "x", { repair: false });
+  await waitUntil(() => sim.sends === 1);
+  const w2 = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
+  const s2 = sim.lastSeq;
+  assert(sim.engine.onCaptured("chatgpt", { text: "[TO: USER]\nSure! Here is a poem about the sea.\n[FROM: CHATGPT]", answers: [s2] }) === false, "its own [MSG #] but no word -> not owned");
+  assert(sim.engine.onCaptured("chatgpt", { text: `[TO: USER]\n${w2}master\n[FROM: CHATGPT]`, answers: [s2] }) === false, "the word only inside a longer word -> not owned (whole words only)");
+  assert(sim.engine.expects("chatgpt", `[TO: USER]\n${w2.toUpperCase()}.\n[FROM: CHATGPT]`, [s2]) === true, "…while the word itself, any case, with punctuation, is");
+  r = await run;
+  assert(r.ok === false && !r.deferred, `-> the check-in fails on its own terms (${r.state} ${r.problem})`);
+  assert(SR.containsWord("the Harbor.", "harbor") && !SR.containsWord("harbormaster", "harbor") && !SR.containsWord("", "harbor") && SR.containsWord("x 1234 y", "1234") && !SR.containsWord("12345", "1234"), "containsWord: whole word, case-insensitive");
+
+  console.log("\n== P18.1 makeWay: a BookForge request withdraws an untyped check-in / waits for a typed one ==");
+  sim = makeSite({ sendDelayMs: 300 });
+  run = sim.engine.runCheck("chatgpt", "bookforge");
+  await waitUntil(() => sim.engine.busyWithSite("chatgpt") && sim.sends === 1);
+  assert(sim.engine.makeWay("chatgpt") === "withdrawn", "not typed yet -> withdrawn");
+  r = await run;
+  st = sim.engine.state("chatgpt");
+  assert(r.deferred && r.reason === "bookforge" && st.state === "unknown" && !sim.engine.busyWithSite("chatgpt"), `deferred, no verdict, the AI is free for the request (${JSON.stringify(r)})`);
+  assert(!/Reply with only this word/.test(sim.doc.body.textContent), "nothing was typed");
+  assert(sim.engine.makeWay("chatgpt") === "none", "no check-in -> nothing to wait for");
+  sim = makeSite({ answer: false, options: { probeTimeoutMs: 5000 } });
+  run = sim.engine.runCheck("chatgpt", "bookforge");
+  await waitUntil(() => sim.sends === 1 && /Reply with only this word/.test(sim.doc.body.textContent));
+  await sleep(20);
+  assert(sim.engine.makeWay("chatgpt") === "wait" && sim.engine.busyWithSite("chatgpt"), "typed -> the request waits for it to settle");
+  const w3 = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
+  sim.engine.onCaptured("chatgpt", { text: w3, answers: [sim.lastSeq] });
+  r = await run;
+  assert(r.ok && !sim.engine.busyWithSite("chatgpt"), "its answer came -> settled (ok), the AI is free");
+  sim = makeSite({ layout: "changed", answer: false, options: { probeTimeoutMs: 150, earlyQuietMs: 50 } });
+  run = sim.engine.runCheck("chatgpt", "x");
+  await waitUntil(() => sim.sends === 1);
+  await sleep(20);
+  sim.engine.makeWay("chatgpt");
+  r = await run;
+  st = sim.engine.state("chatgpt");
+  assert(r.deferred && st.state === "unknown" && sim.reloads === 0, `a failed check-in with a request waiting: no repair steps (no reload), no verdict (${st.state}, ${st.tried.map((t) => t.step).join(",")})`);
+}
+
 function testLearnedStore() {
   console.log("\n== learned selectors: versioned, with timestamps, sanitized on load ==");
   const raw = { version: 1, sites: { chatgpt: { assistant: { selector: 'div[data-turn-role="model"]', how: "page-search", learnedAt: 123, version: 1 }, input: { selector: "span" }, send: { selector: 42 } }, evil: { assistant: { selector: "x" } } } };
@@ -452,6 +539,7 @@ function testLearnedStore() {
     await testPageSearch();
     await testTeachLearner();
     await testEngine();
+    await testOwnership();
     testLearnedStore();
   } catch (e) { failed++; console.log(`  FAIL - crashed: ${e && e.stack || e}`); }
   console.log(`\n${passed} passed, ${failed} failed`);
