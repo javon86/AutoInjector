@@ -142,6 +142,36 @@ anyone”). The editor gets these counts; you see them under **🔎 Pattern chec
 The editor's scores and notes are advice stored for exactly that version; the journal shows the verdicts and counts,
 never your text. What the editor checks is written in one plain file, `bookforge/editor_rubric.py`.
 
+## 🎭 Characters who are their own people, 🎬 scenes planned before writing
+
+- **Character sheet** (every character): what they **want**, what they really **need**, their **fear**, what they
+  **hide**, what they **wrongly believe**, what they do **under pressure**, what they would **never say out loud**, a
+  **private memory**, how they stand with each other main character (**tension, history**), **how far they can
+  change** — and for side characters **a wish of their own** that is not about the main character.
+- **Voice card** (every character): sentence **rhythm**, **register**, words from their **job, era and place**,
+  **favourite phrases**, words they would **never use**, **habits** in conversation, how they talk under **fear,
+  anger or grief**, what they **talk around**, and 2–3 **sample lines**.
+- The AI fills both when it makes characters (Bible Builder, ✨ Make up characters, ⚡ Make a book for me, Fill with AI
+  on the character form). Open a character (its record page) to read them as a card: **✏️ Change them** (every field
+  has an ⓘ), or **✨ Write them again with AI**. A Make-a-book run has a step **Character sheets and voices**; a
+  character without them gets them there. Changing a sheet never changes the approved character itself.
+- **Scene cards** (every chapter): before a chapter is written its scenes are planned — place and time, who is there,
+  what **each** of them wants in the scene and keeps hidden, an **obstacle from the book's world** (weather of the
+  place, equipment, an institution or rule, money, work, another person's interest — never a random accident), what
+  **changes**, what stays **unsaid**, and which part of the outline it serves. The chapter outline stays the plan of
+  the whole chapter. In ⚡ Make a book for me your writer AI plans them, **another AI checks** them (does every scene
+  have goals, a real obstacle and something unsaid?), the writer reworks them up to twice, and they are approved
+  under your run consent (⚠️ when the checker still had notes — it never holds up the book). On the book page each
+  chapter row shows **🎬 n scenes**; **✨ Write it with AI** plans them first when there are none. Open them to read,
+  change, check with AI, plan again or **✔ Approve** them.
+- **The writer** gets, in every chapter prompt: the scene cards, the voice cards of the characters in that chapter
+  (at most four in full, the others in one line), and the narrator's / point-of-view character's **name and planned
+  backstory** — so planned details reach the page.
+- **The editor** checks **Distinct voices** with the voice cards (“with the names hidden, can you tell who is
+  speaking?” — its notes quote the line that sounds like someone else) and, when a chapter has scene cards, **Scene
+  plan kept** (goals, the obstacle and the unsaid thing really on the page). The pattern check (no AI) adds a **voice
+  check**: per speaker words per line, questions, shared words, favourite phrases used and **never-words** used.
+
 ## ✍ Write all chapters
 
 On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after

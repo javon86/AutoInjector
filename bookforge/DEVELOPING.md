@@ -40,6 +40,13 @@ bookforge/
     editor_rubric.py       the AI editor's rubric (dimensions, questions, strictness) - the ONE editable place
     editor.py              🖋 AI editor: craft review (P4), rewrite proposals + exact apply (P5), restore; settings
                            editor_settings, advice keys craft_reviews / editor_proposals / editor_rewrites
+    characters.py          🎭 P7/P17 character sheets + voice cards: fields, cleaning, companion storage (settings
+                           characters:<pid>:<branch>, keyed by A01 record), AI generation, bounded voice brief,
+                           voice words for the pattern checker
+    scenes.py              🎬 P8 scene cards: fields, lint, light AI check, ScenePlanner (make/check/revise/save/approve),
+                           companion storage (settings scene_cards:<pid>:<branch>, keyed <outline rid>:<chapter id>)
+    chapter_brief.py       the C02 writing brief: POV name + planned backstory, voice cards of the characters present,
+                           scene cards, planned details, rules (set_c ChapterWriter puts it in context.writing_brief)
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
@@ -241,6 +248,54 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   `editorRunSummary`, `editorSettingsCard` (app.js); codes `EDITOR_*` in problems.js.
 * Tests: `tests/test_prose_audit.py`, `tests/test_editor.py`; the fake AI (`tests/autobook_fake.py`) answers editor
   and rewrite prompts from `editor_flags` (phrase -> replacement), `craft_script`, `rewrite_script`.
+
+## 🎭 Character sheets, voice cards (P7 / P17) and 🎬 scene cards (P8)
+
+* **Where the data lives (and why).** A01's OUTPUT is closed (`attributes` = identity/role/traits/appearance/
+  background/goals/constraints; `facts` are canon claims with registered predicates, protected-fact rules and
+  contradiction checks, copied into every C01 context). B05 needs an approved B03 and holds plan items; C12 is a text
+  style per chapter/project scope. B12 is the spec's scene planner, but C02 cannot pin it (bindings: `outline_ref`,
+  `context_ref` only), its plan items are kernel-checked canon plans (events ⊆ chapter, POV/location authority) and
+  goals/hidden agendas/obstacles/subtext have no registered predicates. So both are **companion data** like the
+  reviewer's verdicts and the editor's notes: settings `characters:<pid>:<branch>` (key: A01 record ID — a new version
+  of the character keeps its sheet) and `scene_cards:<pid>:<branch>` (key: `<outline record>:<chapter id>`, with the
+  outline version: cards made for an older outline revision are `out_of_date` and not used). Each entry has a version
+  counter (author saves send the version they edited → `VERSION_CONFLICT` instead of overwriting), `made_by`, the last
+  5 versions; scene entries also the light review of exactly that version and the approval (`author` or
+  `run_consent` + run id). Outbox: `characters.sheet_saved`, `scenes.saved`, `scenes.reviewed`, `scenes.approved`
+  (numbers/codes only; the journal lists them). Engine/store semantics are unchanged.
+* **AI.** `assist.propose` adds optional `character_sheet` / `voice_card` to the A01 proposal schema (+
+  `characters.COMPANION_TASK`); the result carries `companion`; `BibleSession.create` saves it for the new record; the
+  Fill-with-AI form saves it after Create (`PUT .../review/characters/{rid}` with `from_ai`). `characters.generate`
+  writes them for an existing character (`CHARACTER_TASK`, op roles A01). `ScenePlanner.make` (writer slot, roles of
+  C02, `PLAN_TASK`), `.check` (`ReviewService.plan_reviewer` → another AI, `REVIEW_TASK`; BookForge decides PASS only
+  when every scene passes goal / obstacle_from_world / unsaid and `lint` has no major problem), `make(revise=True)`
+  (earlier plan + notes; prefers the writer, avoids the checker).
+* **Prompts.** `ChapterWriter.preconditions` builds `chapter_brief.build(...)` (never raises) and stores only IDs and
+  numbers in `c_meta[...]["brief"]`; `ai_context` adds `writing_brief`, `ai_task` appends its rules. Voice cards: POV
+  first, ≤ `MAX_FULL` (4) full cards, the rest one line each, JSON ≤ `BRIEF_BUDGET` (7 000 chars). Present characters =
+  POV + scene-card names + names/IDs the outline chapter mentions (all characters when none can be told).
+* **Editor / pattern check.** `editor_rubric`: `voice_distinction` uses `context.voice_cards` and the pattern report's
+  voice stats and quotes the line that sounds like someone else; new `scene_plan` dimension only when the chapter has
+  usable scene cards (`dimensions_for(..., scene_cards=True)`). `prose_audit`: `stats["voices"]` (per speaker lines,
+  words per line, question/exclamation rate, top words, phrases/vocabulary used), `voice_sameness` (rhythm alike AND
+  shared-word share ≥ 0.25 minor / 0.40 major) and `voice_never_word` (`settings["voices"]` from
+  `characters.voice_words`).
+* **Runs.** New step `characters` (after canon): any approved character without a complete sheet gets one; a failure is
+  ⚠️ `CHARACTER_SHEET_FAILED` and the run goes on (TIMEOUT / busy / no AI pause as usual). In `chapters`, before C02:
+  `_scene_cards` = plan → check → rework (≤ `MAX_FIXES`) → `planner.approve(how="run_consent")` after
+  `_check_consent` (⚠️ `SCENES_NOTES` when still REVISE); failures other than TIMEOUT/busy → ⚠️ `SCENES_FAILED`, the
+  chapter is written from the outline. Older saved runs get the new step on resume (`_ensure_steps`). Write all
+  chapters plans missing scene cards first (no check, drafts).
+* **API** (under `/api/projects/{pid}/branches/{b}/review`): `GET characters`, `GET|PUT characters/{rid}` (`{sheet?,
+  voice?, version?}`), `POST characters/{rid}/ai` (202), `GET|PUT scenes/{chapter}` (`{cards, version?}`),
+  `POST scenes/{chapter}/ai` (202, `{revise?, check? = true}`), `POST scenes/{chapter}/check` (202),
+  `POST scenes/{chapter}/approve` (`{author_confirms: true, version}`). Jobs poll at `review/ai/{job}`. The book status
+  adds `canon.sheets {complete,total}` and per chapter `scenes` (numbers only). UI: `characterCard` (A01 record page),
+  `viewScenes` (`#/p/<pid>/<b>/scenes/<chapter>`), `scenesMini` (chapter page), `scenesBadge` (book rows, run window).
+* Tests: `tests/test_characters_scenes.py`; the fake AI answers sheets/voices (`VOICES`, `companion`), scene plans
+  (`scene_script`) and checks (`scene_verdicts`), `chapter_texts` for dialogue, a voice_distinction note from the
+  pattern report, and records every prompt (`prompts[kind] = [(task, context)]`).
 
 ## 🧪 Test workflow (workflow_test.py)
 

@@ -43,6 +43,7 @@ from pathlib import Path
 
 from . import CONTRACT_VERSION, __version__
 from . import plan_rules as pr
+from . import characters as chars_mod
 from . import providers as providers_mod
 from .canonical import json_pointer
 from .errors import BookforgeError
@@ -364,7 +365,8 @@ class Job:
                "valid": None, "error": self.error, "waiting": self.waiting}
         if self.result:
             out.update({k: self.result[k] for k in ("proposal", "findings", "removed_refs", "filled_fields",
-                                                     "kept_fields", "valid", "summary") if k in self.result})
+                                                     "kept_fields", "valid", "summary", "companion")
+                        if k in self.result})
         return out
 
 
@@ -657,7 +659,8 @@ class AssistService:
         return " ".join(parts)
 
     def propose(self, job: Job, *, prompt: str, current_values: dict | None = None, keep: bool = True,
-                context_refs: list | None = None, extra_context: dict | None = None) -> dict:
+                context_refs: list | None = None, extra_context: dict | None = None,
+                with_companion: bool = True) -> dict:
         """Ask the AI for a CREATE payload of job.op_id and check it without committing."""
         op_id, pid, branch = job.op_id, job.project_id, job.branch_id
         props = payload_schema(self.contracts, op_id).get("properties", {})
@@ -687,14 +690,24 @@ class AssistService:
         if extra_context:
             context.update(extra_context)
         schema = ai_schema(self.contracts, op_id)
+        companion = op_id == "A01" and with_companion
+        if companion:
+            # P7/P17: a character proposal also carries its sheet and voice card (companion data, not A01 fields)
+            schema = copy.deepcopy(schema)
+            # optional: a model that leaves them out still gives a usable character (the sheet is made later)
+            schema["properties"].update(chars_mod.COMPANION_SCHEMA["properties"])
         reask = None
         result = None
+        sheet = voice = None
         for attempt in range(2):
             job.check()
-            raw = self._call_ai(job, op_for_roles=op_id, task=self._task(op_id, keep, reask), schema=schema,
+            task = self._task(op_id, keep, reask) + (" " + chars_mod.COMPANION_TASK if companion else "")
+            raw = self._call_ai(job, op_for_roles=op_id, task=task, schema=schema,
                                 context=context, protected=protected)
             job.check()
             job.phase = "Checking the proposal"
+            if companion:
+                sheet, voice = chars_mod.split_companion(raw)
             result = self.check_proposal(job.principal, pid, branch, op_id, raw if isinstance(raw, dict) else {},
                                          user, keep)
             ai_errors = [f["message"] for f in result["findings"]
@@ -705,6 +718,8 @@ class AssistService:
             job.phase = f"Asking {job.slot_label} again (the first answer did not fit the form)"
         for f in result["findings"]:
             f.pop("_ai_field", None)
+        if companion and sheet is not None and voice is not None:
+            result["companion"] = {"character_sheet": sheet, "voice_card": voice}
         return result
 
     # ------------------------------------------------------------------ merge + checks (no commit)
@@ -1218,7 +1233,7 @@ class BibleSession:
                 items.append({x: it.get(x) for x in ("key", "op", "name", "subject_id", "role", "links", "status",
                                                      "proposal", "findings", "removed_refs", "error", "slot", "model",
                                                      "elapsed_ms", "created_ref", "create_error", "run", "summary",
-                                                     "valid", "message")})
+                                                     "valid", "message", "companion")})
             cur = self.current
             return {"session_id": self.id, "project_id": self.project_id, "branch_id": self.branch_id,
                     "idea": self.idea, "world_summary": self.world_summary, "slot_pref": self.slot_pref,
@@ -1537,7 +1552,7 @@ class BibleSession:
             self._ensure_name_fact(it, proposal)
             it.update(status="done", message="Ready to review", proposal=proposal, findings=result["findings"],
                       removed_refs=result["removed_refs"], valid=result["valid"],
-                      summary=summarize_payload(it["op"], proposal))
+                      summary=summarize_payload(it["op"], proposal), companion=result.get("companion"))
         except Cancelled:
             it.update(status="cancelled", message="Cancelled", error=_err("CANCELLED", "cancelled"))
         except BookforgeError as exc:
@@ -1622,6 +1637,14 @@ class BibleSession:
                                 it.get("slot"))
                 it.update(created_ref=ref, create_error=None, links_made=links_made, links_dropped=links_dropped,
                           removed_on_create=removed)
+                comp = it.get("companion") if it["op"] == "A01" else None
+                if isinstance(comp, dict) and comp.get("character_sheet") is not None:
+                    try:  # the AI's character sheet and voice card belong to the character just made (P7/P17)
+                        chars_mod.save_entry(svc.store, self.project_id, self.branch_id, ref["record_id"],
+                                             sheet=comp["character_sheet"], voice=comp.get("voice_card"), by="ai",
+                                             slot=it.get("slot"), name=it.get("name"), subject_id=it.get("subject_id"))
+                    except Exception:  # noqa: BLE001 - the character is saved; its sheet can be made again later
+                        log.exception("could not save the character sheet of %s", ref["record_id"])
                 created.append({"key": k, "op": it["op"], "name": it["name"], "ref": ref, "status": resp["status"],
                                 "findings": len(resp.get("findings") or []), "links_made": links_made,
                                 "links_dropped": links_dropped, "removed_refs": removed})

@@ -640,6 +640,7 @@ async function pickView(parts) {
     if (rest[0] === 'rec' && rest[1]) return m => viewRecord(m, rest[1], rest[2] ? parseInt(rest[2], 10) : null);
     if (rest[0] === 'edit' && rest[1]) return m => viewEdit(m, rest[1]);
     if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
+    if (rest[0] === 'scenes' && rest[1]) return m => viewScenes(m, rest[1]);
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -1145,6 +1146,7 @@ async function createSection(op, schema) {
   } else if (draft && draft.from_ai) {
     card.appendChild(stateBox('draft', `Filled by AI (${draft.from_ai.label || draft.from_ai.slot || 'AI'}) — please review`,
       h('p', null, 'Check every field below and change anything you like, then press Create. Nothing has been saved yet. ',
+        draft.companion ? '🎭 The AI’s character sheet and voice card are saved with the character when you press Create. ' : '',
         h('button', { type: 'button', class: 'link', onclick: () => {
           if (confirm('Clear the AI proposal from this form?')) { removeKey(draftKey); route(); }
         } }, 'Clear the form'))));
@@ -1206,7 +1208,16 @@ async function createSection(op, schema) {
       op, action: 'CREATE', payload, baseRef: null, manual, panel, keyStore, button: submitBtn,
       forms: [ctx, mctx], summary, schema,
       onManual: manualToggle ? () => { manualToggle.checked = true; manualToggle.dispatchEvent(new Event('change', { bubbles: true })); manualToggle.focus(); } : null,
-      onSuccess: () => { autosave.clear(); },
+      onSuccess: resp => {
+        autosave.clear();
+        const comp = draft && draft.companion;
+        const ref = resp && (resp.output_refs || [])[0];
+        if (op.id === 'A01' && comp && comp.character_sheet && ref) {   // P7/P17: the sheet belongs to the new character
+          api('PUT', bpath(`/review/characters/${encodeURIComponent(ref.record_id)}`), { body: { sheet: comp.character_sheet, voice: comp.voice_card || {}, from_ai: true, slot: (draft.from_ai || {}).slot } })
+            .then(() => toast('The character sheet and voice card were saved with the character'))
+            .catch(e => toast(`The character sheet could not be saved: ${(e && e.message) || e}`));
+        }
+      },
       onKeep: () => autosave.flush(),
     });
   });
@@ -2207,6 +2218,7 @@ async function viewRecord(main, rid, ver) {
     main.appendChild(recordReviewCard(cur));
   }
   if (isLatest && ['C02', 'B01', 'B03', 'B11'].includes(op.id) && cur.record_kind === 'OUTPUT') main.appendChild(editorCard(cur));
+  if (op.id === 'A01' && cur.record_kind === 'OUTPUT') main.appendChild(characterCard(cur));
 
   // Content
   const content = h('section', { class: 'card', 'aria-labelledby': 'content-h' }, h('h2', { id: 'content-h' }, 'Content'));
@@ -2471,12 +2483,13 @@ async function viewWrite(main, rid, mode) {
   if (!SIMPLE_OPS.includes(latest.module_id) || latest.record_kind !== 'OUTPUT') { await viewRecord(main, rid, null); return; }
   const isChapter = latest.module_id === 'C02';
   let label = isChapter ? 'Chapter' : 'Chapter outline';
+  let chapterRow = null;
   if (isChapter) {
     try {
       const book = await api('GET', bpath('/book'));
       const st = book.steps.find(x => x.id === 'chapters');
       const i = ((st && st.chapters) || []).findIndex(c => [c.prose, c.approved].some(r => r && r.record_id === rid));
-      if (i >= 0) label = chapterName(st.chapters[i], i);
+      if (i >= 0) { label = chapterName(st.chapters[i], i); chapterRow = st.chapters[i]; }
     } catch { /* "Chapter" is enough */ }
   }
   // the outline names characters and places by id: show and pick them by name
@@ -2503,6 +2516,8 @@ async function viewWrite(main, rid, mode) {
   // 🖋 the editor's craft notes for exactly this version (P4/P5/P6), below the text
   const edSlot = h('div');
   main.appendChild(edSlot);
+  // 🎬 the scene cards this chapter was (or will be) written from (P8)
+  if (chapterRow) main.appendChild(scenesMini(chapterRow.chapter_id, chapterRow.scenes));
   const back = () => h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book');
   const approveBtn = () => waiting ? h('button', { type: 'button', class: 'primary', onclick: () => approveThis() }, '✔ Approve this version') : null;
 
@@ -2525,7 +2540,8 @@ async function viewWrite(main, rid, mode) {
     card.appendChild(h('h2', { id: 'sd-h', class: 'visually-hidden' }, isChapter ? 'The chapter' : 'The chapters, one by one'));
     if (isChapter) {
       const { title: t, body } = splitChapter(latest.data.text);
-      card.append(t ? h('h2', { class: 'chapter-title' }, t) : null, proseBlock(body || '(This chapter has no text yet.)'));
+      if (t) card.append(h('h2', { class: 'chapter-title' }, t));
+      card.append(proseBlock(body || '(This chapter has no text yet.)'));
     } else {
       const ol = h('ol', { class: 'outline-read' });
       for (const [i, it] of (latest.data.chapters || []).entries()) {
@@ -3590,6 +3606,7 @@ function buildAssistPanel(opId, pid, branch, projectName) {
       (j.removed_refs || []).length ? stateBox('stale', `Removed ${j.removed_refs.length} link(s) the AI made up`,
         h('ul', null, j.removed_refs.map(r => h('li', null, `${r.module_id || '?'} ${r.record_id || ''} at ${r.path}: ${r.reason}`))),
         h('p', { class: 'small' }, 'Links are only kept when they point to real records in this project. Add the right ones in the form.')) : null,
+      j.companion ? h('p', { class: 'small', 'data-testid': 'ap-companion' }, '🎭 The AI also wrote a character sheet and a voice card. They are saved with the character when you press Create (you can change them on the character’s page).') : null,
       h('h3', null, 'Preview'), preview,
       (j.findings || []).length ? h('details', { open: blocking.length > 0 }, h('summary', null, `Checks (${j.findings.length})`), findingList(j.findings)) : h('p', { class: 'small muted' }, '✔ No problems found by the checks.'),
       h('details', null, h('summary', null, 'JSON'), h('pre', null, JSON.stringify(j.proposal, null, 2)))));
@@ -3602,7 +3619,7 @@ function buildAssistPanel(opId, pid, branch, projectName) {
 function useProposal(p, j) {
   p.setMin(true);
   fillNewForm(p.pid, p.branch, p.op, j.proposal,
-    { from_ai: { slot: j.slot, label: `${j.slot || ''}${j.slot_label ? ' · ' + j.slot_label : ''}`, job_id: j.job_id } },
+    { from_ai: { slot: j.slot, label: `${j.slot || ''}${j.slot_label ? ' · ' + j.slot_label : ''}`, job_id: j.job_id }, companion: j.companion || null },
     `${p.op} form filled from the AI proposal — review it and press Create`);
 }
 
@@ -3884,6 +3901,8 @@ function bbCard(it, byKey) {
       badge(st[0], st[1], st[2]), it.created_ref ? badge('✎', 'Draft created', 'b-info') : null, BB.edits[it.key] ? badge('✎', 'Edited', 'b-muted') : null),
     h('p', { class: 'small muted' }, `${it.key} · subject “${it.subject_id}”${it.elapsed_ms ? ` · ${fmtClock(it.elapsed_ms)}` : ''}${it.slot ? ` · ${it.slot}` : ''}`),
     it.role ? h('p', { class: 'small' }, it.role) : null,
+    it.companion ? h('p', { class: 'small', 'data-testid': 'bb-companion' }, '🎭 With a character sheet and a voice card',
+      (it.companion.voice_card && it.companion.voice_card.rhythm) ? h('span', { class: 'muted' }, ` — talks: ${it.companion.voice_card.rhythm}`) : null, ' (saved with the character)') : null,
     sum.summary ? h('p', { class: 'bb-summary' }, sum.summary.length > 220 ? sum.summary.slice(0, 217) + '…' : sum.summary) : null,
     (sum.key_facts || []).length ? h('ul', { class: 'bb-facts small' }, sum.key_facts.slice(0, 4).map(f => h('li', null, f))) : null,
     links.length ? h('p', { class: 'small' }, '↔ Links: ', links.map((l, i) => [i ? ', ' : '', `${l.name} (${l.key})`])) : null,
@@ -5144,6 +5163,9 @@ function renderBook(holder, book, redraw) {
     const acts = h('div', { class: 'row' });
     if (s.id === 'profile') acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => openProfileDialog(() => redraw()) }, s.state === 'done' ? 'Edit' : 'Fill in'));
     if (s.id === 'canon') {
+      if (s.sheets && s.sheets.total) li.appendChild(h('p', { class: 'small', 'data-testid': 'canon-sheets' }, `🎭 ${s.sheets.complete} of ${s.sheets.total} approved character${s.sheets.total === 1 ? '' : 's'} have a character sheet and a voice card`,
+        s.sheets.complete < s.sheets.total ? [' ', hazard({ code: 'CHARACTER_SHEET_MISSING' }, {}, { small: true }), ' ', h('a', { href: plink('op', 'A01') }, 'Open the characters')] : null,
+        ' ', infoTip('Character sheets and voice cards', ...TIP_SHEET())));
       acts.appendChild(h('button', { type: 'button', class: 'small ai-btn', disabled: !book.ai_ready, onclick: ev => openMakeDialog('A01', null, ev.currentTarget) }, '✨ Make up characters'));
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write one myself'));
       acts.appendChild(h('button', { type: 'button', class: 'small', onclick: ev => openBible(ev.currentTarget) }, '📖 Bible Builder'));
@@ -5176,12 +5198,15 @@ function renderBook(holder, book, redraw) {
         return h('li', { 'data-chapter': c.chapter_id }, h('strong', null, c.name), ` — ${c.objective || c.summary}`, ' ', badge(cb[0], cb[1], cb[2]),
           wc && (wc.approved_words || wc.draft_words) ? h('span', { class: 'small muted' }, ` ${Math.max(wc.approved_words, wc.draft_words)} words `) : ' ',
           c.prose ? h('a', { class: 'btn small', href: plink('write', (w ? c.approved : c.prose).record_id) }, '📖 Read') : null,
+          h('a', { class: 'btn small scenes-link', href: plink('scenes', c.chapter_id), 'data-testid': 'chapter-scenes', title: 'What each scene of this chapter is for: goals, an obstacle from the world, what stays unsaid' },
+            scenesBadge(c.scenes)),
+          c.scenes && (c.scenes.out_of_date || c.scenes.flagged) ? hazard({ code: c.scenes.out_of_date ? 'SCENES_OUT_OF_DATE' : 'SCENES_NOTES' }, {}, { small: true }) : null,
           w ? h('div', { class: 'chapter-revision' }, badge('✎', 'Your changes wait for approval', 'b-warn'), ' ',
             (w.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), h('ul', { class: 'small' }, w.problems.slice(0, 3).map(checkItem)), redoBox([w])] : null,
             h('a', { class: 'btn small', href: plink('write', w.record_id) }, '📖 Read the new version'), ' ',
             h('button', { type: 'button', class: 'small primary', onclick: () => approve([w], `the new version of ${c.name}`) }, '✔ Approve the new version')) : null,
           c.state !== 'done' && !(c.prose && ['DRAFT', 'VALIDATED'].includes(c.prose.lifecycle))
-            ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id }), `Your AI is writing ${c.name}… (web AIs can take a few minutes)`, 'chapters') }, '✨ Write it with AI') : null,
+            ? [book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => run(() => planScenesThenWrite(c, post), !c.scenes || c.scenes.out_of_date ? `Your AI plans the scenes of ${c.name}, then writes it… (web AIs can take a few minutes)` : `Your AI is writing ${c.name}… (web AIs can take a few minutes)`, 'chapters') }, '✨ Write it with AI') : null,
               h('button', { type: 'button', class: 'small', onclick: () => run(() => post('write_chapter', { chapter_id: c.chapter_id, manual: true }), 'Preparing the chapter form…', 'chapters') }, '✍️ Write it myself')] : null);
       })));
     }
@@ -5850,6 +5875,353 @@ function fixesBox(prop, info, msg, redraw, onSaved) {
 }
 
 /* ======================================================================= one-button pairing (#/pair) */
+/* ======================================================================= 🎭 character sheets + voice cards (P7/P17), 🎬 scene cards (P8)
+ * Companion data of a character (A01) and of an outline chapter: the server keeps them per book (review/characters,
+ * review/scenes). The AI fills them; the author reads them as a card and changes them in plain forms (ⓘ explains
+ * every field). Nothing here changes the character or the chapter records themselves. */
+function linesOf(s) { return String(s || '').split('\n').map(x => x.trim()).filter(Boolean); }
+function tipLabel(forId, label, help) {
+  return h('div', { class: 'lbl-row' }, h('label', { for: forId }, label), help ? infoTip(label, h('p', null, help)) : null);
+}
+function madeByLine(mb, version, at) {
+  if (!mb) return null;
+  const who = mb.kind === 'ai' ? `your AI${mb.slot ? ` (${mb.slot})` : ''}` : mb.kind === 'ai_fix' ? 'your AI (reworked)' : 'you';
+  return h('p', { class: 'small muted' }, `Version ${version || 1} · made by ${who}${at || mb.at ? ` · ${fmtWhen(at || mb.at)}` : ''}`);
+}
+/** Run an AI job of the review service (characters / scenes) and wait for it; returns the finished job or null. */
+async function runAiJob(path, body, progressEl, label) {
+  let job;
+  try { job = await api('POST', bpath(path), { body: body || {} }); }
+  catch (e) { clear(progressEl).appendChild(problemBox(toProblem(e, { book: S.project && S.project.name, step: label }), {}, `${label}: it could not start`)); return null; }
+  const line = h('span');
+  const stop = h('button', { type: 'button', class: 'small', onclick: async () => {
+    stop.disabled = true; try { await api('POST', bpath(`/review/ai/${encodeURIComponent(job.job_id)}/cancel`)); } catch { /* it ends anyway */ }
+  } }, 'Stop');
+  clear(progressEl).appendChild(h('div', { class: 'state loading', role: 'status' }, h('p', { class: 'row' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), line, stop),
+    h('p', { class: 'small' }, 'Web AIs can take a few minutes. You can keep working; this keeps running.')));
+  const show = j => { line.textContent = `${j.phase || label}… ${fmtClock(j.elapsed_ms || 0)}`; };
+  show(job);
+  while (!['done', 'error', 'cancelled'].includes(job.status)) {
+    await sleep(1000);
+    if (!document.contains(progressEl)) return null;   // the page changed: the job keeps running on the server
+    try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { continue; }
+    show(job);
+  }
+  clear(progressEl);
+  if (job.status === 'error') progressEl.appendChild(problemBox(toProblem(job.error || {}, { book: S.project && S.project.name, step: label }), {}, `${label}: it did not work`));
+  else if (job.status === 'cancelled') progressEl.appendChild(stateBox('empty', 'Stopped', h('p', null, 'Nothing was changed.')));
+  return job.status === 'done' ? job : null;
+}
+
+const TIP_SHEET = () => [
+  h('p', null, 'The character sheet says what this person wants, really needs, fears, hides and wrongly believes, what they do under pressure and what they would never say out loud.'),
+  h('p', null, 'The voice card says how they talk: rhythm, register, their own words, favourite phrases, words they would never use, habits, and how their speech changes under fear, anger or grief.'),
+  h('p', null, 'The writer gets the voice cards of the characters in each chapter, and the editor checks that every character sounds like themselves. Changing them here does not change the character’s approved record.')];
+
+function characterCard(cur) {
+  const rid = cur.record_id;
+  const body = h('div', null, loadingState('Loading the character sheet…'));
+  const msg = h('div', { 'aria-live': 'polite' });
+  const prog = h('div', { 'aria-live': 'polite' });
+  const card = h('section', { class: 'card char-card', 'aria-labelledby': 'cc-h', 'data-testid': 'character-card' },
+    h('div', { class: 'row space' }, h('h2', { id: 'cc-h' }, '🎭 Who they are and how they talk'), infoTip('Character sheet and voice card', ...TIP_SHEET())),
+    msg, prog, body);
+  let info = null;
+  const load = async () => {
+    try { info = await api('GET', bpath(`/review/characters/${encodeURIComponent(rid)}`)); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Character sheet' }), { retry: load })); return; }
+    reader();
+  };
+  const val = v => (v && String(v).trim()) ? v : h('span', { class: 'muted' }, '—');
+  const askAI = async () => {
+    if (info && info.entry) {
+      const ok = await choiceDialog('Write them again with AI?', h('p', null, 'Your AI writes a new character sheet and voice card for this character. The current ones are kept in the history (the last 5 versions).'), [{ id: 'yes', label: '✨ Yes, write them again' }]);
+      if (ok !== 'yes') return;
+    }
+    clear(msg);
+    const j = await runAiJob(`/review/characters/${encodeURIComponent(rid)}/ai`, {}, prog, 'Writing the sheet and voice');
+    if (j) { toast('The AI wrote the character sheet and voice card'); await load(); }
+  };
+  const reader = () => {
+    clear(body);
+    const e = info.entry;
+    const F = info.fields;
+    if (!e) {
+      body.appendChild(stateBox('empty', 'No character sheet or voice card yet',
+        h('p', null, hazard({ code: 'CHARACTER_SHEET_MISSING' }), ' Without them the writer cannot give this character their own way of talking.')));
+    } else {
+      const sheet = e.sheet || {}; const voice = e.voice || {};
+      const sDl = h('dl', { class: 'kv char-dl' }, h('dt', null, 'Main or side character'), h('dd', null, sheet.role === 'side' ? 'Side character' : sheet.role === 'main' ? 'Main character' : val('')));
+      for (const f of F.sheet) {
+        if (f.key === 'own_wish' && sheet.role !== 'side' && !sheet.own_wish) continue;
+        sDl.append(h('dt', null, f.label), h('dd', null, val(sheet[f.key])));
+      }
+      const rels = sheet.relationships || [];
+      const vDl = h('dl', { class: 'kv char-dl' });
+      for (const f of F.voice_text) vDl.append(h('dt', null, f.label), h('dd', null, val(voice[f.key])));
+      for (const f of F.voice_lists) {
+        const items = voice[f.key] || [];
+        vDl.append(h('dt', null, f.label), h('dd', null, items.length ? (f.key === 'samples'
+          ? h('ul', { class: 'samples' }, items.map(x => h('li', null, h('q', null, x))))
+          : h('ul', { class: 'chips' }, items.map(x => h('li', null, x)))) : val('')));
+      }
+      put(body, madeByLine(e.made_by, e.version, e.updated_at),
+        !info.complete ? h('p', { class: 'small notice' }, hazard({ code: 'CHARACTER_SHEET_MISSING' }, {}, { small: true }), ` Still empty: ${(info.missing || []).join(', ')}.`) : null,
+        h('div', { class: 'grid-2 char-grid' },
+          h('section', { 'aria-label': 'Character sheet' }, h('h3', null, 'Character sheet'), sDl,
+            rels.length ? [h('h4', null, 'With the other characters'), h('ul', { class: 'small rel-list' }, rels.map(r => h('li', null, h('strong', null, r.with), r.tension ? ` — tension: ${r.tension}` : '', r.history ? ` · history: ${r.history}` : '')))] : null),
+          h('section', { 'aria-label': 'Voice card' }, h('h3', null, 'Voice card'), vDl)));
+    }
+    body.appendChild(h('div', { class: 'form-actions' },
+      h('button', { type: 'button', class: 'primary', 'data-testid': 'char-edit', onclick: editor }, info.entry ? '✏️ Change them' : '✍️ Fill them in myself'),
+      h('button', { type: 'button', class: 'ai-btn', 'data-testid': 'char-ai', onclick: askAI }, info.entry ? '✨ Write them again with AI' : '✨ Write the sheet and voice with AI')));
+  };
+  const editor = () => {
+    clear(body); clear(msg);
+    const e = info.entry || {}; const sheet = e.sheet || {}; const voice = e.voice || {};
+    const F = info.fields;
+    const form = h('form', { novalidate: true, class: 'char-form' });
+    const role = h('select', { id: 'cc-role' }, h('option', { value: '' }, '— Not decided —'),
+      h('option', { value: 'main', selected: sheet.role === 'main' }, 'Main character'), h('option', { value: 'side', selected: sheet.role === 'side' }, 'Side character'));
+    const ins = {};
+    const fs1 = h('fieldset', { class: 'field' }, h('legend', null, 'Character sheet'),
+      h('div', { class: 'field' }, tipLabel('cc-role', 'Main or side character', 'A side character gets a wish of their own that is not about the main character.'), role));
+    for (const f of F.sheet) {
+      const t = h('textarea', { id: `cc-s-${f.key}`, rows: '2', 'data-key': f.key }); t.value = sheet[f.key] || '';
+      ins[`s:${f.key}`] = t;
+      fs1.appendChild(h('div', { class: 'field' }, tipLabel(t.id, f.label, f.help), t));
+    }
+    const relBox = h('div', { class: 'rel-rows' });
+    const relRow = r => {
+      const row = h('div', { class: 'grid-3 rel-row' });
+      const inputs = F.relationship.map(x => { const i = h('input', { type: 'text', 'aria-label': x.label, placeholder: x.label, 'data-k': x.key }); i.value = (r && r[x.key]) || ''; return i; });
+      row.append(...inputs, h('button', { type: 'button', class: 'small link', onclick: () => row.remove() }, 'Remove'));
+      relBox.appendChild(row);
+    };
+    (sheet.relationships || []).forEach(relRow);
+    fs1.appendChild(h('div', { class: 'field' }, h('div', { class: 'lbl-row' }, h('strong', null, 'With the other main characters'),
+      infoTip('Relationships', h('p', null, 'One row per other main character: their name, the tension between them, and their history.'))), relBox,
+    h('button', { type: 'button', class: 'small', onclick: () => relRow(null) }, '+ Add a relationship')));
+    const fs2 = h('fieldset', { class: 'field' }, h('legend', null, 'Voice card'));
+    for (const f of F.voice_text) {
+      const t = h('textarea', { id: `cc-v-${f.key}`, rows: '2' }); t.value = voice[f.key] || '';
+      ins[`v:${f.key}`] = t;
+      fs2.appendChild(h('div', { class: 'field' }, tipLabel(t.id, f.label, f.help), t));
+    }
+    for (const f of F.voice_lists) {
+      const t = h('textarea', { id: `cc-v-${f.key}`, rows: f.key === 'samples' ? '3' : '2', 'aria-describedby': `cc-v-${f.key}-h` }); t.value = (voice[f.key] || []).join('\n');
+      ins[`l:${f.key}`] = t;
+      fs2.appendChild(h('div', { class: 'field' }, tipLabel(t.id, f.label, f.help), t, h('span', { class: 'hint', id: `cc-v-${f.key}-h` }, `One per line (up to ${f.max}).`)));
+    }
+    const err = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'submit', class: 'primary', 'data-testid': 'char-save' }, '💾 Save');
+    form.append(fs1, fs2, err, h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: reader }, 'Cancel')));
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault(); clear(err);
+      const s = { role: role.value };
+      for (const f of F.sheet) s[f.key] = ins[`s:${f.key}`].value.trim();
+      s.relationships = [...relBox.querySelectorAll('.rel-row')].map(row => Object.fromEntries([...row.querySelectorAll('input')].map(i => [i.dataset.k, i.value.trim()]))).filter(r => r.with);
+      const v = {};
+      for (const f of F.voice_text) v[f.key] = ins[`v:${f.key}`].value.trim();
+      for (const f of F.voice_lists) v[f.key] = linesOf(ins[`l:${f.key}`].value).slice(0, f.max);
+      save.disabled = true; err.appendChild(loadingState('Saving…'));
+      try {
+        const out = await api('PUT', bpath(`/review/characters/${encodeURIComponent(rid)}`), { body: { sheet: s, voice: v, version: e.version || 0 } });
+        info.entry = out.entry; info.missing = out.missing; info.complete = out.complete;
+        toast(out.message || 'Saved'); reader();
+        clear(msg).appendChild(stateBox('ok', 'Saved', h('p', null, out.message || '')));
+      } catch (x) {
+        save.disabled = false;
+        clear(err).appendChild(problemBox(toProblem(x, { book: S.project.name, step: 'Character sheet' }), {}, 'Not saved — your text is kept in the form'));
+      }
+    });
+    body.appendChild(form);
+    role.focus();
+  };
+  load();
+  return card;
+}
+
+/* ----------------------------------------------------------------------- 🎬 scene cards */
+const SOURCE_WORD = { weather: 'weather', place: 'the place', equipment: 'equipment', institution: 'an institution', rule: 'a rule', money: 'money', work: 'work', person: 'another person', other: 'other' };
+function scenesBadge(sc) {
+  if (!sc) return badge('🎬', 'No scene cards yet', 'b-muted');
+  if (sc.out_of_date) return badge('⚠️', 'Scene cards out of date', 'b-warn');
+  const n = `${sc.scenes} scene${sc.scenes === 1 ? '' : 's'}`;
+  if (sc.status === 'approved') return badge('🎬', `${n} · approved${sc.flagged ? ' (checker had notes)' : ''}`, sc.flagged ? 'b-warn' : 'b-ok');
+  if (sc.verdict === 'REVISE') return badge('🎬', `${n} · checker has notes`, 'b-warn');
+  if (sc.verdict === 'PASS') return badge('🎬', `${n} · checked, waits for approval`, 'b-info');
+  return badge('🎬', `${n} · draft, not checked`, 'b-muted');
+}
+function sceneCardView(c, i) {
+  const goals = c.goals || [];
+  return h('li', { class: 'scene-card', 'data-scene': String(i + 1) },
+    h('h3', null, `Scene ${i + 1}`, c.place || c.time ? h('span', { class: 'muted small' }, ` — ${[c.place, c.time].filter(Boolean).join(', ')}`) : null),
+    h('dl', { class: 'kv' },
+      h('dt', null, 'Who is there'), h('dd', null, (c.characters || []).join(', ') || '—'),
+      h('dt', null, 'What each one wants here'), h('dd', null, goals.length ? h('ul', null, goals.map(g => h('li', null, h('strong', null, g.character), `: ${g.goal || '—'}`,
+        g.hidden_agenda ? h('span', { class: 'muted' }, ` (hides: ${g.hidden_agenda})`) : null))) : '—'),
+      h('dt', null, 'What gets in the way'), h('dd', null, c.obstacle || '—', c.obstacle_source ? h('span', { class: 'muted small' }, ` (from ${SOURCE_WORD[c.obstacle_source] || c.obstacle_source})`) : null),
+      h('dt', null, 'What changes by the end'), h('dd', null, c.change || '—'),
+      h('dt', null, 'What stays unsaid'), h('dd', null, c.unsaid || '—'),
+      h('dt', null, 'Outline beat it serves'), h('dd', null, c.beat || '—')));
+}
+/** The chapter page's short view of its scene cards (the full page is #/p/…/scenes/<chapter>). */
+function scenesMini(cid, sc) {
+  return h('section', { class: 'card scenes-mini', 'aria-labelledby': 'scm-h', 'data-testid': 'scenes-mini' },
+    h('div', { class: 'row space' }, h('h2', { id: 'scm-h' }, '🎬 Scene cards'), scenesBadge(sc)),
+    h('p', { class: 'small' }, sc ? 'The plan of this chapter’s scenes the writer followed: goals, an obstacle from the world, what changes and what stays unsaid. The editor checks the chapter against it.'
+      : 'This chapter has no scene cards yet. Plan them before the chapter is written (again), so every character pushes for their own goal and something from the world gets in the way.'),
+    sc && sc.out_of_date ? h('p', { class: 'small' }, hazard({ code: 'SCENES_OUT_OF_DATE' }, {}, { small: true }), ' Made for an older version of the outline.') : null,
+    h('a', { class: 'btn small', href: plink('scenes', cid) }, sc ? '🎬 Open the scene cards' : '🎬 Plan the scenes'));
+}
+
+async function viewScenes(main, cid) {
+  let info;
+  try { info = await api('GET', bpath(`/review/scenes/${encodeURIComponent(cid)}`)); }
+  catch (e) { main.appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Scene cards' }), { retry: () => route() }, 'Could not open the scene cards')); return; }
+  const ch = info.chapter || {};
+  const label = `Chapter ${ch.number || cid}`;
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], `${label}: scene cards`),
+    h('h1', null, `🎬 Scene cards — ${label}`)),
+  h('div', { class: 'row' }, infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
+    h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
+  main.appendChild(h('p', { class: 'notice small' }, h('strong', null, 'The outline says: '), plainText(ch.objective || ch.summary || '')));
+  const msg = h('div', { 'aria-live': 'polite' });
+  const prog = h('div', { 'aria-live': 'polite' });
+  const body = h('section', { class: 'card scenes-card', 'aria-label': 'Scene cards', 'data-testid': 'scene-cards' });
+  main.append(msg, prog, body);
+  const reload = async () => { try { info = await api('GET', bpath(`/review/scenes/${encodeURIComponent(cid)}`)); } catch { /* keep the old view */ } reader(); };
+  const plan = async revise => {
+    clear(msg);
+    const j = await runAiJob(`/review/scenes/${encodeURIComponent(cid)}/ai`, { revise: !!revise }, prog, revise ? 'Reworking the scenes' : 'Planning the scenes');
+    if (j) { const r = (j.results || [])[0] || {}; toast(r.message || 'Scene cards made'); await reload(); }
+  };
+  const check = async () => {
+    clear(msg);
+    const j = await runAiJob(`/review/scenes/${encodeURIComponent(cid)}/check`, {}, prog, 'Checking the scenes');
+    if (j) { await reload(); }
+  };
+  const approve = async () => {
+    const e = info.entry;
+    const ok = await choiceDialog('Approve these scene cards?', h('p', null, `You approve version ${e.version} of the scene cards of ${label}. The writer follows them when the chapter is written.`), [{ id: 'yes', label: '✔ Yes, I approve' }]);
+    if (ok !== 'yes') return;
+    try {
+      const out = await api('POST', bpath(`/review/scenes/${encodeURIComponent(cid)}/approve`), { body: { author_confirms: true, version: e.version } });
+      toast(out.message); await reload();
+    } catch (x) { clear(msg).appendChild(problemBox(toProblem(x, { book: S.project.name, step: 'Scene cards' }), {}, 'Not approved')); }
+  };
+  const reader = () => {
+    clear(body);
+    const e = info.entry; const sm = info.summary;
+    if (!e) {
+      body.appendChild(stateBox('empty', 'No scene cards yet', h('p', null, 'Let your AI plan the scenes of this chapter (an independent AI then checks them), or write them yourself.')));
+    } else {
+      const rv = e.review && e.review.version === e.version ? e.review : null;
+      put(body, h('div', { class: 'row' }, scenesBadge(sm),
+        e.status === 'approved' ? h('span', { class: 'small muted' }, (e.approved || {}).how === 'run_consent' ? (e.approved.label || 'Approved under your Make-a-book consent') : 'Approved by you') : null,
+        sm && sm.out_of_date ? hazard({ code: 'SCENES_OUT_OF_DATE' }) : null,
+        e.flagged ? hazard({ code: 'SCENES_NOTES' }) : null),
+      madeByLine(e.made_by, e.version, e.updated_at));
+      if (rv) {
+        body.appendChild(h('div', { class: `rv-box ${rv.verdict === 'PASS' ? 'ok' : 'warn'}`, 'data-testid': 'scene-review' },
+          h('p', null, h('strong', null, rv.verdict === 'PASS' ? '✔ Checked: every scene has goals, a real obstacle and something unsaid' : '⚠️ The checker has notes'),
+            h('span', { class: 'small muted' }, ` · by ${rv.reviewer || rv.slot || 'an AI'}`), rv.independent === false ? h('span', { class: 'small words-warn' }, ` ⚠️ ${rv.warning || 'the same AI planned and checked them'}`) : null),
+          h('ul', { class: 'small' }, rv.scenes.map(s => h('li', null, `Scene ${s.scene}: `, s.goal ? '✔ goals' : '✕ goals', ' · ', s.obstacle_from_world ? '✔ obstacle from the world' : '✕ obstacle from the world', ' · ', s.unsaid ? '✔ something unsaid' : '✕ something unsaid',
+            s.note ? h('span', { class: 'muted' }, ` — ${s.note}`) : null))),
+          (rv.notes || []).length ? h('ul', { class: 'small' }, rv.notes.map(n => h('li', null, n))) : null));
+      }
+      if ((info.lint || []).length) body.appendChild(h('details', { class: 'small', open: info.lint.some(p => p.severity === 'major') }, h('summary', null, `BookForge’s own check (${info.lint.length})`),
+        h('ul', null, info.lint.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '', `Scene ${p.scene}: ${p.message}`)))));
+      body.appendChild(h('ol', { class: 'scene-list' }, e.cards.map(sceneCardView)));
+    }
+    const rvNow = e && e.review && e.review.version === e.version ? e.review : null;
+    body.appendChild(h('div', { class: 'form-actions' },
+      e && e.status !== 'approved' ? h('button', { type: 'button', class: 'primary', 'data-testid': 'scenes-approve', onclick: approve }, '✔ Approve these scene cards') : null,
+      h('button', { type: 'button', 'data-testid': 'scenes-edit', onclick: editor }, e ? '✏️ Change them' : '✍️ Write them myself'),
+      h('button', { type: 'button', class: 'ai-btn', 'data-testid': 'scenes-ai', onclick: () => plan(false) }, e ? '✨ Plan again with AI' : '✨ Plan the scenes with AI'),
+      rvNow && rvNow.verdict === 'REVISE' ? h('button', { type: 'button', class: 'ai-btn', onclick: () => plan(true) }, '✨ Rework with the checker’s notes') : null,
+      e ? h('button', { type: 'button', 'data-testid': 'scenes-check', onclick: check }, '🔎 Check with AI') : null,
+      h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book')));
+  };
+  const editor = () => {
+    clear(body); clear(msg);
+    const e = info.entry;
+    const cards = e ? JSON.parse(JSON.stringify(e.cards)) : [{ place: '', time: '', characters: [], goals: [], obstacle: '', obstacle_source: '', change: '', unsaid: '', beat: '' }];
+    const form = h('form', { novalidate: true, class: 'scenes-form' });
+    const list = h('div');
+    const F = Object.fromEntries((info.fields.card || []).map(f => [f.key, f]));
+    const tl = (id, key) => tipLabel(id, F[key].label, F[key].help);
+    const sceneBox = (c, idx) => {
+      const k = `sc${idx}-${Math.random().toString(36).slice(2, 7)}`;
+      const inp = (key, rows) => { const el = rows ? h('textarea', { id: `${k}-${key}`, rows: String(rows), 'data-key': key }) : h('input', { type: 'text', id: `${k}-${key}`, 'data-key': key }); el.value = c[key] || ''; return el; };
+      const place = inp('place'); const time = inp('time'); const who = h('input', { type: 'text', id: `${k}-characters`, 'data-key': 'characters', list: 'scene-people' }); who.value = (c.characters || []).join(', ');
+      const obstacle = inp('obstacle', 2); const change = inp('change', 2); const unsaid = inp('unsaid', 2); const beat = inp('beat', 2);
+      const src = h('select', { id: `${k}-source`, 'data-key': 'obstacle_source' }, h('option', { value: '' }, '— choose —'), (info.fields.sources || []).map(s => h('option', { value: s, selected: c.obstacle_source === s }, SOURCE_WORD[s] || s)));
+      const goalsBox = h('div', { class: 'goal-rows' });
+      const goalRow = g => {
+        const row = h('div', { class: 'grid-3 goal-row' });
+        const a = h('input', { type: 'text', 'aria-label': 'Character', placeholder: 'Character', 'data-k': 'character', list: 'scene-people' }); a.value = (g && g.character) || '';
+        const b = h('input', { type: 'text', 'aria-label': 'Their goal in this scene', placeholder: 'Their goal here', 'data-k': 'goal' }); b.value = (g && g.goal) || '';
+        const cc = h('input', { type: 'text', 'aria-label': 'Hidden agenda', placeholder: 'What they hide / really want', 'data-k': 'hidden_agenda' }); cc.value = (g && g.hidden_agenda) || '';
+        row.append(a, b, cc, h('button', { type: 'button', class: 'small link', onclick: () => row.remove() }, 'Remove'));
+        goalsBox.appendChild(row);
+      };
+      (c.goals || []).forEach(goalRow);
+      if (!(c.goals || []).length) goalRow(null);
+      const fs = h('fieldset', { class: 'field scene-edit' }, h('legend', null, `Scene ${idx + 1}`),
+        h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tl(place.id, 'place'), place), h('div', { class: 'field' }, tl(time.id, 'time'), time)),
+        h('div', { class: 'field' }, tl(who.id, 'characters'), who, h('span', { class: 'hint' }, 'Names, separated by commas.')),
+        h('div', { class: 'field' }, h('div', { class: 'lbl-row' }, h('strong', null, F.goals.label), infoTip(F.goals.label, h('p', null, F.goals.help))), goalsBox,
+          h('button', { type: 'button', class: 'small', onclick: () => goalRow(null) }, '+ Add a character’s goal')),
+        h('div', { class: 'field' }, tl(obstacle.id, 'obstacle'), obstacle), h('div', { class: 'field' }, tl(src.id, 'obstacle_source'), src),
+        h('div', { class: 'field' }, tl(change.id, 'change'), change), h('div', { class: 'field' }, tl(unsaid.id, 'unsaid'), unsaid),
+        h('div', { class: 'field' }, tl(beat.id, 'beat'), beat),
+        h('button', { type: 'button', class: 'small link', onclick: () => { fs.remove(); renumber(); } }, 'Remove this scene'));
+      fs.collect = () => ({ place: place.value.trim(), time: time.value.trim(), characters: who.value.split(',').map(x => x.trim()).filter(Boolean),
+        goals: [...goalsBox.querySelectorAll('.goal-row')].map(r => Object.fromEntries([...r.querySelectorAll('input')].map(i => [i.dataset.k, i.value.trim()]))).filter(g => g.character && (g.goal || g.hidden_agenda)),
+        obstacle: obstacle.value.trim(), obstacle_source: src.value, change: change.value.trim(), unsaid: unsaid.value.trim(), beat: beat.value.trim() });
+      return fs;
+    };
+    const renumber = () => [...list.children].forEach((fs, i) => { const lg = fs.querySelector('legend'); if (lg) lg.textContent = `Scene ${i + 1}`; });
+    cards.forEach((c, i) => list.appendChild(sceneBox(c, i)));
+    const err = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'submit', class: 'primary', 'data-testid': 'scenes-save' }, '💾 Save the scene cards');
+    form.append(h('datalist', { id: 'scene-people' }, (info.characters || []).map(n => h('option', { value: n }))), list,
+      h('button', { type: 'button', class: 'small', onclick: () => { if (list.children.length >= 6) { toast('At most 6 scenes'); return; } list.appendChild(sceneBox({}, list.children.length)); } }, '+ Add a scene'),
+      err, h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: reader }, 'Cancel')));
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault(); clear(err);
+      const out = [...list.children].map(fs => fs.collect());
+      if (!out.length) { err.appendChild(stateBox('failed', 'No scene', h('p', null, 'Add at least one scene.'))); return; }
+      save.disabled = true; err.appendChild(loadingState('Saving…'));
+      try {
+        const r = await api('PUT', bpath(`/review/scenes/${encodeURIComponent(cid)}`), { body: { cards: out, version: e ? e.version : 0 } });
+        toast(r.message); await reload();
+      } catch (x) { save.disabled = false; clear(err).appendChild(problemBox(toProblem(x, { book: S.project.name, step: 'Scene cards' }), {}, 'Not saved — your text is kept in the form')); }
+    });
+    body.appendChild(form);
+    const f = firstFocusable(form); if (f) f.focus();
+  };
+  reader();
+}
+/** Book page: plan the chapter's scenes with the AI first (no check), then write it. A plan that fails never stops
+ * the chapter: it is written from the outline. */
+async function planScenesThenWrite(c, post) {
+  if (!c.scenes || c.scenes.out_of_date) {
+    try {
+      let job = await api('POST', bpath(`/review/scenes/${encodeURIComponent(c.chapter_id)}/ai`), { body: { check: false } });
+      while (!['done', 'error', 'cancelled'].includes(job.status)) {
+        await sleep(1000);
+        try { job = await api('GET', bpath(`/review/ai/${encodeURIComponent(job.job_id)}`)); } catch { /* try again */ }
+      }
+      if (job.status !== 'done') noteClientError((job.error || {}).code || 'SCENES_FAILED', 'scene cards', (job.error || {}).message || 'not planned');
+    } catch (e) { noteClientError('SCENES_FAILED', 'scene cards', (e && e.message) || String(e)); }
+  }
+  return post('write_chapter', { chapter_id: c.chapter_id });
+}
+
 async function viewPair(main) {
   const info = S.pairing; S.pairing = null;
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '🔗 Connect to AutoInjector')));
@@ -6460,7 +6832,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor])]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note])]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -6487,6 +6859,12 @@ function renderRun() {
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
+          i.phase ? h('span', { class: 'small muted', 'data-testid': 'mb-item-phase' }, ` · ${i.phase}…`) : null,
+          i.note && s.id === 'characters' ? h('span', { class: 'small muted' }, ` · ${i.note === 'made now' || i.note === 'made with the character' ? `sheet and voice ${i.note}` : `⚠️ ${i.note}`}`) : null,
+          i.scenes ? h('span', { class: `small mb-sc${i.scenes.flagged || i.scenes.failed ? ' flagged' : ''}`, 'data-testid': 'mb-item-scenes' },
+            i.scenes.failed ? ` · ⚠️ scenes not planned (${i.scenes.failed})` : ` · 🎬 ${i.scenes.scenes} scene${i.scenes.scenes === 1 ? '' : 's'}`
+              + (i.scenes.flagged ? ' ⚠️ checker had notes' : i.scenes.verdict === 'PASS' ? ' ✔ checked' : '')
+              + (i.scenes.status === 'approved' ? ' · approved' : '')) : null,
           i.editor ? h('span', { class: `small mb-ed${i.editor.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-editor' },
             i.editor.flagged ? ' · ⚠️ editor still had notes' : ` · 🖋 editor: ${String(i.editor.verdict || '').toLowerCase()}`,
             i.editor.rounds ? ` (${i.editor.rounds} rewrite round${i.editor.rounds === 1 ? '' : 's'})` : '',
