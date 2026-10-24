@@ -692,6 +692,128 @@ class Store:
         return removed
 
 
+    # ------------------------------------------------------------------ copy one project out / in (P20 / P21)
+    # Tables copied by a book package, in insert order. ``grants`` is not copied (the importing author gets the owner
+    # grant of the new book); ``consumed_events`` belongs to the consumers, not to the book.
+    PACKAGE_TABLES = ("projects", "branches", "feature_manifests", "records", "binaries", "lifecycle", "heads",
+                      "receipts", "audit", "provenance", "dependency_edges", "checkpoints", "module_state",
+                      "approvals", "outbox")
+
+    def _columns(self, conn, table: str) -> list[str]:
+        return [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]  # noqa: S608 - fixed names
+
+    def export_project_rows(self, project_id: str) -> dict:
+        """Every row of one project (the tables in PACKAGE_TABLES), its settings (keys that name the project, plus
+        its jobs) and the asset file names its binaries use, read in ONE read transaction (a consistent snapshot).
+
+        Row values are kept as they are stored; BLOB columns (record content) become ``{"$blob": text}`` (UTF-8) or
+        ``{"$b64": ...}``. Nothing is changed. Returns {"tables": {table: [row dict]}, "settings": [{key, value}],
+        "assets": [file name], "schema_version"}."""
+        import base64  # noqa: PLC0415
+        out: dict = {"tables": {}, "settings": [], "assets": [], "schema_version": SCHEMA_VERSION}
+        with self.connection() as conn:
+            own = not conn.in_transaction
+            if own:
+                conn.execute("BEGIN")  # a deferred read transaction: one snapshot for every table (WAL)
+            try:
+                for t in self.PACKAGE_TABLES:
+                    cols = self._columns(conn, t)
+                    rows = []
+                    for r in conn.execute(f"SELECT * FROM {t} WHERE project_id=? ORDER BY rowid",  # noqa: S608
+                                          (project_id,)):
+                        row = {}
+                        for c in cols:
+                            v = r[c]
+                            if isinstance(v, (bytes, bytearray, memoryview)):
+                                b = bytes(v)
+                                try:
+                                    v = {"$blob": b.decode("utf-8")}
+                                except UnicodeDecodeError:
+                                    v = {"$b64": base64.b64encode(b).decode("ascii")}
+                            row[c] = v
+                        rows.append(row)
+                    out["tables"][t] = rows
+                seen = set()
+                for r in conn.execute("SELECT key, value FROM settings WHERE instr(key, ?) > 0 OR (key LIKE 'job:%' "
+                                      "AND CASE WHEN json_valid(value) THEN json_extract(value, '$.project_id') END "
+                                      "= ?) ORDER BY key", (project_id, project_id)):
+                    if r["key"] not in seen:
+                        seen.add(r["key"])
+                        out["settings"].append({"key": r["key"], "value": json.loads(r["value"])})
+                out["assets"] = sorted({r["storage_uri"].split("/")[-1] for r in out["tables"]["binaries"]})
+            finally:
+                if own:
+                    conn.execute("COMMIT")
+        return out
+
+    def write_asset(self, data: bytes, content_hash: str) -> str:
+        """Store asset bytes under their content address (``<sha256>.bin``), atomically; refuses bytes that do not
+        match ``content_hash``. An asset that is already there is kept. Returns the file name."""
+        if sha256_bytes(data) != content_hash:
+            raise BookforgeError("HASH_MISMATCH", "/assets", "a file's bytes do not match its fingerprint")
+        fname = f"{content_hash}.bin"
+        path = self.asset_dir / fname
+        if path.exists():
+            return fname
+        tmp = tmp_name(path)
+        try:
+            with open(tmp, "xb") as fh:
+                fh.write(data)
+                fh.flush()
+                try:
+                    _os.fsync(fh.fileno())
+                except OSError as exc:
+                    if not _windows():
+                        raise
+                    _flush_failed(tmp, exc)
+            replace_file(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        fsync_dir(self.asset_dir)
+        return fname
+
+    def import_project_rows(self, tables: dict, settings: list, *, principal_id: str) -> str:
+        """Insert one project's rows (as ``export_project_rows`` gives them, already rewritten for a NEW project id by
+        the caller) in ONE transaction, plus its settings, and grant ``principal_id`` the owner grant. Refuses a
+        project id that already exists (nothing is ever overwritten). Only known columns of known tables are written;
+        the asset files must already be stored (``write_asset``). Returns the project id."""
+        import base64  # noqa: PLC0415
+        projects = tables.get("projects") or []
+        if len(projects) != 1:
+            raise BookforgeError("INVALID_INPUT", "/projects", "a book package holds exactly one book")
+        pid = projects[0].get("project_id")
+        if not isinstance(pid, str) or not pid:
+            raise BookforgeError("INVALID_INPUT", "/projects/project_id", "the book has no id")
+        with self.transaction() as tx:
+            conn = tx.conn
+            if conn.execute("SELECT 1 FROM projects WHERE project_id=?", (pid,)).fetchone():
+                raise BookforgeError("VERSION_CONFLICT", "/project_id", "a book with this id already exists",
+                                     status="REJECTED")
+            for t in self.PACKAGE_TABLES:
+                cols = set(self._columns(conn, t))
+                for row in tables.get(t) or []:
+                    if not isinstance(row, dict) or row.get("project_id") != pid:
+                        raise BookforgeError("INVALID_INPUT", f"/{t}", "a row belongs to another book")
+                    keys = [k for k in row if k in cols]
+                    vals = []
+                    for k in keys:
+                        v = row[k]
+                        if isinstance(v, dict) and "$blob" in v:
+                            v = str(v["$blob"]).encode("utf-8")
+                        elif isinstance(v, dict) and "$b64" in v:
+                            v = base64.b64decode(v["$b64"])
+                        vals.append(v)
+                    conn.execute(f"INSERT INTO {t}({','.join(keys)}) VALUES({','.join('?' * len(keys))})",  # noqa: S608
+                                 tuple(vals))
+            tx.grant(principal_id, pid, "*", "*")
+            for s in settings or []:
+                conn.execute("INSERT INTO settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                             "value=excluded.value, updated_at=excluded.updated_at",
+                             (s["key"], json.dumps(s["value"]), utcnow()))
+        return pid
+
+
 class Tx:
     """Write helpers usable only inside Store.transaction()."""
 

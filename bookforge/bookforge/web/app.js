@@ -687,7 +687,11 @@ function renderTop(parts) {
   if (inProject) {
     add(links, link('p', S.pid, S.branch), 'Overview');
     links.appendChild(h('a', { href: link('p', S.pid, S.branch, 'book'), 'aria-current': here === link('p', S.pid, S.branch, 'book') ? 'page' : null }, '📘 Make my book'));
+    links.appendChild(h('button', { type: 'button', class: 'tb-btn tb-save', 'data-testid': 'tb-save', title: '💾 Save this book into its folder in your books folder', 'aria-label': 'Save this book', onclick: ev => quickSave(ev.currentTarget) },
+      h('span', { 'aria-hidden': 'true' }, '💾'), h('span', { class: 'tb-label' }, ' Save')));
   }
+  links.appendChild(h('button', { type: 'button', class: 'tb-btn tb-open', 'data-testid': 'tb-open', title: '📂 Open a saved book (from your books folder or a file)', 'aria-label': 'Open a saved book', onclick: ev => openSavedBookDialog(ev.currentTarget) },
+    h('span', { 'aria-hidden': 'true' }, '📂'), h('span', { class: 'tb-label' }, ' Open')));
   links.appendChild(h('a', { href: '#/settings', class: 'tb-settings', title: 'Settings', 'aria-current': here === '#/settings' ? 'page' : null },
     h('span', { class: 'tb-set-ico', 'aria-hidden': 'true' }, '⚙️ '), h('span', { class: 'tb-label' }, 'Settings')));
   // Less frequent pages live in the "More" menu so the bar stays on one line.
@@ -789,7 +793,8 @@ async function viewHome(main) {
   if (!S.projects.length) { await viewStart(main); return; }
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Your books'),
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary big mab-cta', onclick: ev => openMakeBook(ev.currentTarget) }, boltLabel('Make a book for me')),
-      h('a', { class: 'btn big', href: '#/start' }, '🚀 Start a new book'), h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'))));
+      h('a', { class: 'btn big', href: '#/start' }, '🚀 Start a new book'), h('a', { class: 'btn big', href: '#/shelf' }, '📚 My finished books'),
+      h('button', { type: 'button', class: 'big', 'data-testid': 'home-open', onclick: ev => openSavedBookDialog(ev.currentTarget) }, '📂 Open a saved book'))));
   const listCard = h('section', { class: 'card', 'aria-labelledby': 'proj-list-h' }, h('h2', { id: 'proj-list-h' }, 'Your projects'));
   if (!S.projects.length) {
     listCard.appendChild(stateBox('empty', 'No projects yet',
@@ -2872,6 +2877,7 @@ async function viewSettings(main) {
   main.appendChild(reviewerCard());
   main.appendChild(editorSettingsCard());
   main.appendChild(lengthSettingsCard());
+  main.appendChild(booksFolderCard());
   main.appendChild(backupsCard());
   main.appendChild(helpCard());
 }
@@ -5008,6 +5014,7 @@ async function viewBook(main) {
   h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
     h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, boltLabel('Make a book for me')))));
+  main.appendChild(bookSaveCard());
   const holder = h('div', null, loadingState('Checking where your book is…'));
   main.appendChild(holder);
   let book = null;
@@ -6849,7 +6856,7 @@ function toProblem(e, where) {
   let code; let message; let path = ''; let fix = null; let status = null;
   if (e instanceof ApiError) {
     const x = e.errors[0] || {};
-    code = x.code || `HTTP_${e.status}`; message = x.message || `HTTP ${e.status}`; path = x.path || ''; fix = x.fix || null; status = e.status;
+    code = x.problem || x.code || `HTTP_${e.status}`; message = x.message || `HTTP ${e.status}`; path = x.path || ''; fix = x.fix || null; status = e.status;
   } else if (e instanceof NetworkError) { code = 'NETWORK'; message = e.message; }
   else if (e && typeof e === 'object' && !(e instanceof Error) && (e.code || e.message)) { code = e.code; message = e.message; path = e.path || ''; fix = e.fix || null; }
   else { code = 'BROWSER'; message = (e && e.message) || String(e); }
@@ -7248,7 +7255,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -7347,7 +7354,7 @@ function renderRun() {
   const plBox = plannedRunSummary(r);
   if (doneBox && plBox) doneBox.appendChild(plBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, doneBox ? null : edBox, msg, ol, ctl, consent,
+  mbShell('⚡ Make a book for me', head, runBibleLine(r), phase, ais, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }
@@ -7643,7 +7650,9 @@ function shelfBook(b) {
         h('p', { class: 'small sb-report', 'data-testid': 'sb-report' }, b.report ? `📊 Report: overall ${b.report.overall ?? '–'}/10 · ${b.report.reviewers || 0} AI reviewer(s) · ${(b.report.words || 0).toLocaleString()} words` : '📊 No report yet', ' ',
           h('a', { class: 'btn small', href: link('p', b.project_id, b.branch_id, 'report') }, b.report ? '📊 Open the report' : '📊 Make the report'), ' ',
           h('a', { class: 'btn small', href: `#/compare?a=${encodeURIComponent(b.project_id)}` }, '⚖️ Compare'), ' ',
-          h('button', { type: 'button', class: 'small', onclick: ev => openVariantDialog(b.project_id, b.title, ev.currentTarget) }, '🧪 Variant')),
+          h('button', { type: 'button', class: 'small', onclick: ev => openVariantDialog(b.project_id, b.title, ev.currentTarget) }, '🧪 Variant'), ' ',
+          h('button', { type: 'button', class: 'small', 'data-testid': 'sb-rerun', onclick: ev => openRerunDialog({ project_id: b.project_id, branch_id: b.branch_id }, b.title, ev.currentTarget) }, '🔁 Rerun')),
+        h('p', { class: 'small sb-save' }, saveBox(b.project_id, b.branch_id, { testid: 'sb-save' })),
         h('div', { class: 'downloads' }, b.files.map(f => f.verified
           ? h('button', { type: 'button', class: 'primary small', 'data-format': f.format, onclick: () => downloadFile(b.project_id, b.branch_id, f, b.title) }, `⬇ ${f.format}`, h('span', { class: 'sr-ok', title: 'Fingerprint checked' }, ' ✔'))
           : h('span', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: true }, f.format), hazard({ code: 'HASH_MISMATCH', message: `The ${f.format} file is missing or changed.`, where: { book: b.title, set: 'G', step: 'Export my book', op: f.op } }, { open: link('p', b.project_id, b.branch_id, 'book'), openLabel: '📘 Export again' }, { small: true })))),
@@ -7908,6 +7917,267 @@ function bookSection5Card(book) {
         h('a', { class: 'btn small', href: `#/compare?a=${encodeURIComponent(S.pid)}` }, '⚖️ Compare')));
   })();
   return box;
+}
+
+/* ======================================================================= 💾 P20 save the book, 📂 P21 open a saved book / 🔁 rerun */
+const TIP_SAVE = () => [h('p', null, 'BookForge keeps every book inside itself. 💾 Save also writes a copy into your books folder: one folder per book with the finished book (PDF, EPUB, Word), every chapter as a text file, the book bible, the reports and the book’s log.'),
+  h('p', null, 'The file book.bookforge in that folder is the whole book in one file: 📂 Open a saved book brings it back as a new book (also on another computer), and 🔁 Rerun makes a new book from its book bible.'),
+  h('p', null, 'With auto-save on, BookForge saves by itself while a book is being made (at most every 2 minutes, and after each step) and when it is finished, paused or stopped.')];
+const TIP_RERUN = () => [h('p', null, 'The book bible is everything a book is built on: the book profile, the ending and style choices, the characters with their character sheets and voice cards, the places and world, the story rules and world texture, and the premise, main plot, chapter outline and scene cards.'),
+  h('p', null, '🔁 Rerun makes a NEW book from it: the same characters, world and (if you keep it) plan, with new chapters written by the AI. The book it came from is never changed.')];
+const BIBLE_PATH = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}`;
+/** “Saved to …” (or ⚠️ not saved) for the last save of a book. */
+function savedLine(st, { pid, branch } = {}) {
+  const last = st && st.last;
+  const job = st && st.job && st.job.state === 'running' ? st.job : null;
+  if (job) return h('span', { class: 'small', 'data-testid': 'saved-line' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ` 💾 Saving… ${job.phase || ''}`);
+  if (!last) return h('span', { class: 'small muted', 'data-testid': 'saved-line' }, '💾 Not saved to your books folder yet.');
+  if (!last.ok) {
+    return h('span', { class: 'small', 'data-testid': 'saved-line' }, hazard(Object.assign({ where: { step: '💾 Save the book' } }, last.problem || { code: 'SAVE_FAILED' }), { retry: pid ? () => runSave(pid, branch) : null, retryLabel: '💾 Save again', settings: true }, { small: true }),
+      ` Not saved at ${fmtTime(last.at)}: ${(last.problem && last.problem.message) || 'the save failed'}.`);
+  }
+  return h('span', { class: 'small', 'data-testid': 'saved-line' }, `💾 Saved to `, h('code', { class: 'save-path' }, last.path), ` · ${fmtTime(last.at)}${last.kind === 'auto' ? ' (automatic)' : ''}${last.finished ? '' : ' · progress (not finished)'}`);
+}
+/** 📂 Show the folder (this computer) or 📋 copy its path (another device). */
+function folderButton(path, local, pid, branch) {
+  if (!path) return null;
+  if (local === false) return h('button', { type: 'button', class: 'small', onclick: () => copyText(path, 'Folder path copied') }, '📋 Copy the folder path');
+  return h('button', { type: 'button', class: 'small', 'data-testid': 'show-folder', onclick: async ev => {
+    const b = ev.currentTarget; b.disabled = true;
+    try { const r = await api('POST', '/books-folder/show', { body: pid ? { project_id: pid, branch_id: branch || 'main' } : {} }); toast(`Opened ${r.path}`); }
+    catch (e) { const p = toProblem(e, { step: '📂 Show the folder' }); toast(`${p.title}: ${p.message}`); }
+    b.disabled = false;
+  } }, '📂 Open folder');
+}
+/** Save now and wait for it (at most 3 minutes); resolves with the save status. */
+async function runSave(pid, branch, onState) {
+  const path = `${BIBLE_PATH(pid, branch)}/save`;
+  await api('POST', path);
+  const t0 = Date.now();
+  let st = null;
+  while (Date.now() - t0 < 180000) {
+    await new Promise(r => setTimeout(r, 400));
+    st = await api('GET', path);
+    if (onState) onState(st);
+    if (!st.job || st.job.state !== 'running') break;
+  }
+  return st;
+}
+/** The 💾 Save button with its “Saved to …” line (book page, run window, shelf). */
+function saveBox(pid, branch, { label = '💾 Save', primary = false, testid = 'save-btn' } = {}) {
+  const line = h('span', { class: 'save-line', 'aria-live': 'polite' });
+  const extra = h('span', { class: 'row save-extra' });
+  const show = st => { put(clear(line), savedLine(st, { pid, branch })); put(clear(extra), st && st.last && st.last.ok ? folderButton(st.last.path, st.local, pid, branch) : null); };
+  const btn = h('button', { type: 'button', class: `small${primary ? ' primary' : ''}`, 'data-testid': testid, title: 'Save this book into its folder in your books folder (Settings › 📁 Where books are saved)', onclick: async () => {
+    btn.disabled = true;
+    try {
+      const st = await runSave(pid, branch, show);
+      show(st);
+      if (st && st.last && st.last.ok) toast(`Saved to ${st.last.path}`);
+    } catch (e) { put(clear(line), problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
+    btn.disabled = false;
+  } }, label);
+  (async () => { try { show(await api('GET', `${BIBLE_PATH(pid, branch)}/save`)); } catch { /* the line stays empty */ } })();
+  return h('span', { class: 'save-box row', 'data-testid': 'save-box' }, btn, line, extra);
+}
+/** Top bar 💾: save the open book, report in a toast (a problem opens a box). */
+async function quickSave(btn) {
+  if (!S.pid) return;
+  btn.disabled = true; toast('💾 Saving the book…');
+  try {
+    const st = await runSave(S.pid, S.branch);
+    if (st && st.last && st.last.ok) toast(`💾 Saved to ${st.last.path}`);
+    else modal('💾 The book was not saved', () => problemBox(toProblem(Object.assign({ where: { book: profileOf().title || S.project.name, step: '💾 Save the book' } }, (st && st.last && st.last.problem) || { code: 'SAVE_FAILED' })), { settings: true }));
+  } catch (e) { modal('💾 The book was not saved', () => problemBox(toProblem(e, { step: '💾 Save the book' }), { settings: true })); }
+  btn.disabled = false;
+}
+/** Settings › 📁 Where books are saved. */
+function booksFolderCard() {
+  const box = h('div', { 'aria-live': 'polite' });
+  const card = h('section', { class: 'card', 'aria-labelledby': 'bf-h', 'data-testid': 'books-folder' }, h('h2', { id: 'bf-h' }, '📁 Where books are saved ', infoTip('Saving books', ...TIP_SAVE())),
+    h('p', { class: 'small' }, 'Every book gets its own folder here: the finished book, the chapters, the book bible, the reports and the log. Pick a folder you back up (for example in Documents).'), box);
+  const load = async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/books-folder'); } catch (e) { put(clear(box), problemBox(toProblem(e, { step: 'Settings › Where books are saved' }), { retry: load })); return; }
+    const path = h('input', { type: 'text', id: 'bf-path', value: cur.path, spellcheck: 'false', autocomplete: 'off', 'aria-describedby': 'bf-path-h', class: 'bf-path' });
+    const auto = h('input', { type: 'checkbox', id: 'bf-auto', checked: !!cur.auto_save });
+    const out = h('div', { 'aria-live': 'polite' });
+    const save = async body => {
+      clearFieldProblems(card); clear(out);
+      try { await api('PUT', '/settings/books-folder', { body }); toast('Saved'); load(); }
+      catch (e) { const rest = showFieldErrors(e, { path, auto_save: auto }, { step: 'Settings › Where books are saved' }); if (rest.length) out.appendChild(problemBox(toProblem(e, { step: 'Settings › Where books are saved' }))); }
+    };
+    put(clear(box),
+      h('div', { class: 'field' }, h('label', { for: 'bf-path' }, 'Books folder'), path,
+        h('span', { class: 'hint', id: 'bf-path-h' }, `The full path of a folder on this computer. Default: ${cur.default_path}`)),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'small primary', 'data-testid': 'bf-save', onclick: () => save({ path: path.value.trim() }) }, 'Save'),
+        cur.custom ? h('button', { type: 'button', class: 'small', onclick: () => save({ path: '' }) }, '↩ Use the default folder') : null,
+        cur.local ? folderButton(cur.path, true) : h('button', { type: 'button', class: 'small', onclick: () => copyText(cur.path, 'Folder path copied') }, '📋 Copy the folder path')),
+      cur.writable ? h('p', { class: 'small', 'data-testid': 'bf-ok' }, '✔ BookForge can write there.') : h('div', null, problemBox(cur.problem || { code: 'SAVE_FOLDER_NOT_WRITABLE' })),
+      h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically while they are made and when they are finished (at most every 2 minutes)'),
+        h('button', { type: 'button', class: 'small', onclick: () => save({ auto_save: auto.checked }) }, 'Save')),
+      cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use BookForge from another device: folders can only be opened on the computer BookForge runs on.'),
+      out);
+  };
+  load();
+  return card;
+}
+/** Book page: 💾 saved copy, 📖 book bible, 🔁 rerun, and for an opened book ▶ continue / resume. */
+function bookSaveCard(redraw) {
+  const pid = S.pid; const branch = S.branch;
+  const title = profileOf().title || S.project.name;
+  const opened = h('div', { 'data-testid': 'opened-box' });
+  const card = h('section', { class: 'card save-card', 'aria-labelledby': 'sv-h', 'data-testid': 'book-save' },
+    h('h2', { id: 'sv-h' }, '💾 Saved copy and book bible ', infoTip('Saving books', ...TIP_SAVE())),
+    h('div', { class: 'row' }, saveBox(pid, branch, { primary: true, testid: 'book-save-btn' })),
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-btn', onclick: ev => openRerunDialog({ project_id: pid, branch_id: branch }, title, ev.currentTarget) }, '🔁 Rerun from the book bible'), infoTip('Rerun from the book bible', ...TIP_RERUN()),
+      h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'json', title) }, '⬇ book-bible.json'),
+      h('button', { type: 'button', class: 'small', onclick: () => downloadBible(pid, branch, 'md', title) }, '⬇ book-bible.md')),
+    opened);
+  (async () => {
+    let st;
+    try { st = await api('GET', `${BIBLE_PATH(pid, branch)}/save`); } catch { return; }
+    const o = st.opened || {};
+    if (o.finished) return;
+    const run = o.resumable_run;
+    put(clear(opened), h('div', { class: 'state ask opened-note' },
+      h('p', null, run ? `▶ This book’s Make-a-book run stopped (${run.phase || run.status}).` : `This book is not finished${o.next_step ? ` — next step: ${o.next_step}` : ''}.`),
+      h('div', { class: 'row' },
+        run ? h('button', { type: 'button', class: 'small', 'data-testid': 'resume-saved-run', onclick: async ev => {
+          ev.currentTarget.disabled = true;
+          try { const r = await api('POST', `/autobook/${encodeURIComponent(run.id)}/resume`); openMakeBook(ev.currentTarget, { runId: r.id }); }
+          catch (e) { opened.appendChild(problemBox(toProblem(e, { step: 'Resume the saved run' }))); }
+        } }, '▶ Resume the saved run') : null,
+        h('button', { type: 'button', class: 'small primary', 'data-testid': 'continue-book', onclick: ev => continueBook(pid, title, ev.currentTarget) }, '▶ Continue making this book'),
+        infoTip('Continue making this book', h('p', null, 'The AI does the steps that are left (reviewed and approved under your consent for that run). Everything already done — characters, plan, approved chapters — is kept and skipped.')))));
+  })();
+  return card;
+}
+async function downloadBible(pid, branch, fmt, title) {
+  try {
+    const blob = await api('GET', `${BIBLE_PATH(pid, branch)}/bible?format=${fmt}&download=1`, { blob: true });
+    const url = URL.createObjectURL(blob);
+    const a = h('a', { href: url, download: `${safeFileStem(title) || 'Book'} - book-bible.${fmt}` });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } catch (e) { const p = toProblem(e, { step: '📖 Book bible' }); toast(`${p.title}: ${p.message}`); }
+}
+async function continueBook(pid, title, opener) {
+  const ok = await choiceDialog('▶ Continue making this book?', h('div', null,
+    h('p', null, `The AI does the steps of “${title}” that are left. Pressing Continue is your consent for this run: the AI reviewer approves the drafts it passes, for this book and this run only (every approval is in the book journal).`),
+    h('p', { class: 'small' }, 'What is already done is kept and skipped.')), [{ id: 'go', label: '▶ Continue' }]);
+  if (ok !== 'go') return;
+  try {
+    const r = await api('POST', '/autobook', { body: { author_confirms: true, continue_project: pid } });
+    openMakeBook(opener, { runId: r.id });
+  } catch (e) { modal('▶ Continue making this book', () => problemBox(toProblem(e, { book: title, step: 'Continue making this book' }))); }
+}
+/** 🔁 Rerun from the book bible: what is reused, keep the plan?, consent, start. spec: {project_id}|{folder}|{bible_id}. */
+function openRerunDialog(spec, title, opener, summary = null) {
+  modal('🔁 Make a new book from the book bible', close => {
+    const body = h('div', { 'data-testid': 'rerun-dialog' }, loadingState('Reading the book bible…'));
+    const keep = h('input', { type: 'checkbox', id: 'rr-keep', checked: true });
+    const msg = h('div', { 'aria-live': 'polite' });
+    const draw = sm => {
+      put(clear(body),
+        h('p', null, `A NEW book is made from the book bible of “${sm.title || title || 'your book'}”. The book it comes from is not changed.`, ' ', infoTip('Rerun from the book bible', ...TIP_RERUN())),
+        h('ul', { class: 'small rr-what' },
+          h('li', null, `🎭 ${sm.characters.length} character(s)${sm.characters.length ? `: ${sm.characters.join(', ')}` : ''} — with ${sm.sheets} character sheet(s) and voice card(s)`),
+          h('li', null, `🌍 ${sm.canon} place(s) and world entr${sm.canon === 1 ? 'y' : 'ies'}, ${sm.story_rules} story rule(s), ${sm.world_texture} world detail(s)`),
+          h('li', null, sm.plan.length ? `🧭 The plan: ${sm.plan.map(p => ({ premise: 'premise', main_plot: 'main plot', outline: 'chapter outline' }[p] || p)).join(', ')}${sm.chapters ? ` (${sm.chapters} chapters)` : ''}${sm.scene_cards ? `, scene cards of ${sm.scene_cards} chapter(s)` : ''}` : '🧭 No plan saved: the AI writes a new premise, plot and outline'),
+          h('li', null, `📏 ${(LENGTH_INFO[sm.length] || [sm.length || 'Short story'])[0]}${sm.genre ? ` · ${sm.genre}` : ''}`)),
+        sm.plan.length ? h('div', { class: 'field row' }, keep, h('label', { for: 'rr-keep' }, ' Keep the same plan (premise, main plot, chapter outline and scene cards)'),
+          h('span', { class: 'hint' }, 'Untick it to let the AI write a new premise, plot and outline for the same characters and world.')) : null,
+        h('p', { class: 'small mb-consent' }, 'Pressing 🔁 Start is your consent for this run: the saved characters, places and plan come into the new book as drafts and the AI reviewer approves each one there under this consent (every approval is in the book journal). The chapters are written new.'),
+        msg,
+        h('div', { class: 'form-actions' }, h('button', { type: 'button', class: 'primary', 'data-testid': 'rerun-start', onclick: async ev => {
+          ev.currentTarget.disabled = true; clear(msg);
+          try {
+            const r = await api('POST', '/autobook', { body: { author_confirms: true, from_bible: spec, reuse_plan: !!(sm.plan.length && keep.checked) } });
+            close(); openMakeBook(opener, { runId: r.id });
+          } catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); ev.currentTarget.disabled = false; }
+        } }, '🔁 Start'), h('button', { type: 'button', onclick: close }, 'Cancel')));
+    };
+    (async () => {
+      if (summary) { draw(summary); return; }
+      try {
+        const r = spec.project_id ? await api('GET', `${BIBLE_PATH(spec.project_id, spec.branch_id)}/bible`)
+          : spec.folder ? await api('GET', `/books-folder/bible?folder=${encodeURIComponent(spec.folder)}`)
+            : await api('GET', `/books/bible/${encodeURIComponent(spec.bible_id)}`);
+        draw(r.summary);
+      } catch (e) { put(clear(body), problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); }
+    })();
+    return body;
+  });
+}
+/** 📂 Open a saved book: the books folder list (this computer) and an upload (.bookforge or book-bible.json). */
+function openSavedBookDialog(opener) {
+  modal('📂 Open a saved book', close => {
+    const list = h('div', { 'data-testid': 'open-list' }, loadingState('Looking in your books folder…'));
+    const msg = h('div', { 'aria-live': 'polite' });
+    const afterOpen = r => {
+      close();
+      if (r.kind === 'bible') { openRerunDialog({ bible_id: r.bible_id }, r.summary.title, opener, r.summary); return; }
+      toast(r.message || 'Opened');
+      go(link('p', r.project_id, r.branch_id || 'main', 'book'));
+    };
+    const load = async () => {
+      put(clear(list), loadingState('Looking in your books folder…'));
+      let out;
+      try { out = await api('GET', '/books-folder'); }
+      catch (e) { put(clear(list), problemBox(toProblem(e, { step: '📂 Open a saved book' }), { retry: load })); return; }
+      const rows = out.folders || [];
+      put(clear(list), h('p', { class: 'small' }, 'Books folder: ', h('code', null, out.path), ' ', h('button', { type: 'button', class: 'small', onclick: load }, '🔄 Refresh')),
+        rows.length ? h('ul', { class: 'record-list open-list' }, rows.map(f => h('li', { class: 'record-item', 'data-folder': f.name },
+          h('div', { class: 'r-main' }, h('span', { class: 'r-title' }, f.title),
+            h('div', { class: 'r-meta' }, `${f.saved_at ? `saved ${fmtTime(f.saved_at)}` : 'saved'} · ${f.finished ? '✔ finished' : '⏳ not finished'}${f.chapters ? ` · ${f.chapters} chapter(s)` : ''}${f.in_library ? ' · this book is also in Your books' : ''}`)),
+          h('div', { class: 'r-badges' },
+            f.has_package ? h('button', { type: 'button', class: 'small primary', 'data-testid': 'open-folder-btn', onclick: async ev => {
+              const b = ev.currentTarget; b.disabled = true; clear(msg);
+              try { afterOpen(await api('POST', '/books-folder/open', { body: { folder: f.name } })); }
+              catch (e) { msg.appendChild(problemBox(toProblem(e, { book: f.title, step: '📂 Open a saved book' }))); b.disabled = false; }
+            } }, '📂 Open') : null,
+            f.has_bible ? h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-folder-btn', onclick: () => { close(); openRerunDialog({ folder: f.name }, f.title, opener); } }, '🔁 Rerun') : null))))
+          : stateBox('empty', 'No saved book in this folder yet', h('p', null, '💾 Save a book first, or upload a book.bookforge file below.')));
+    };
+    const file = h('input', { type: 'file', id: 'open-file', accept: '.bookforge,.json,application/zip,application/json', 'data-testid': 'open-file' });
+    const up = h('button', { type: 'button', class: 'primary small', 'data-testid': 'open-upload', onclick: async () => {
+      clear(msg);
+      const f = file.files && file.files[0];
+      if (!f) { markFieldProblem(file, { code: 'MISSING_INPUT', message: 'Choose a book.bookforge or book-bible.json file first.' }, { step: '📂 Open a saved book', field: 'File' }); return; }
+      up.disabled = true; put(msg, loadingState(`Opening ${f.name}…`));
+      try { const fd = new FormData(); fd.append('file', f, f.name); const r = await api('POST', '/books/open', { raw: fd }); clear(msg); afterOpen(r); }
+      catch (e) { put(clear(msg), problemBox(toProblem(e, { step: '📂 Open a saved book', field: f.name }))); up.disabled = false; }
+    } }, '📂 Open this file');
+    load();
+    return h('div', { 'data-testid': 'open-dialog' },
+      h('p', null, 'A saved book opens as a NEW book: the books you have are never overwritten. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
+      h('h3', null, 'From your books folder'), list,
+      h('h3', null, 'From a file'),
+      h('div', { class: 'field' }, h('label', { for: 'open-file' }, 'A book.bookforge file (the whole book) or a book-bible.json (to make a new book from it)'), file),
+      h('div', { class: 'row' }, up), msg);
+  }, { wide: true });
+}
+/** Run window: 💾 where the book is saved (auto-save), with Save now. */
+function runSaveLine(r) {
+  if (!r.project_id) return null;
+  const sv = r.save || {};
+  return h('div', { class: 'small mb-save row', 'data-testid': 'mb-save' }, savedLine(sv, { pid: r.project_id, branch: r.branch_id || 'main' }),
+    sv.auto_save === false ? h('span', { class: 'muted' }, ' · auto-save is off (Settings › 📁 Where books are saved)') : (sv.last ? null : h('span', { class: 'muted' }, ' · saved automatically as it goes')),
+    h('button', { type: 'button', class: 'small', 'data-testid': 'mb-save-btn', onclick: async ev => {
+      const b = ev.currentTarget; b.disabled = true;
+      try { const st = await runSave(r.project_id, r.branch_id || 'main'); if (st && st.last && st.last.ok) toast(`Saved to ${st.last.path}`); }
+      catch (e) { const p = toProblem(e, { step: '💾 Save the book' }); toast(`${p.title}: ${p.message}`); }
+      b.disabled = false;
+    } }, '💾 Save now'));
+}
+/** Run window: a rerun from a book bible / continuing a book. */
+function runBibleLine(r) {
+  const s = r.settings || {};
+  if (s.bible) return h('p', { class: 'small mb-variant', 'data-testid': 'mb-bible' }, `🔁 A new book from the book bible of ${s.bible.source}${s.bible.reuse_plan ? ' (same plan)' : ' (new plan)'}: its canon is approved in the new book under your consent for this run.`);
+  if (s.continue) return h('p', { class: 'small mb-variant', 'data-testid': 'mb-continue' }, `▶ Continuing “${s.continue.title}”: the steps already done are kept.`);
+  return null;
 }
 
 /** Settings: long chapters (P15). */

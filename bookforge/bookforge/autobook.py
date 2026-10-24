@@ -493,7 +493,15 @@ class AutoBookService(_Runner):
             steps.append(s)
         out["steps"] = steps
         out["events"] = (run.get("events") or [])[-60:]
+        saver = getattr(self.app, "saver", None)
+        out["save"] = saver.brief(run.get("project_id"), run.get("branch_id") or "main") if saver else None
         return out
+
+    def _autosave(self, run, *, reason: str, force: bool = False):
+        """💾 P20: save the book's folder in the background (never blocks or fails the run)."""
+        saver = getattr(self.app, "saver", None)
+        if saver is not None and run.get("project_id"):
+            saver.auto(run["project_id"], run.get("branch_id") or "main", reason=reason, force=force)
 
     def start(self, principal: str, body) -> dict:
         body = body if isinstance(body, dict) else {}
@@ -501,17 +509,74 @@ class AutoBookService(_Runner):
             raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "pressing ⚡ Make a book for me is your "
                                  "consent for this run; it must be sent as author_confirms: true", status="REJECTED")
         settings = self._clean_settings(body)
+        bible = self._bible_settings(principal, body, settings)   # P21 🔁 rerun from a saved book bible
+        self._continue_settings(principal, body, settings)        # P21 ▶ continue an (opened) unfinished book
         if not self._ai_configured():
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", "no AI is connected — Make a book for me needs "
                                  "an AI", status="REJECTED")
         with self._lock:  # the check and the launch are one step: two presses at once start ONE run
-            return self._start_locked(principal, settings)
+            return self._start_locked(principal, settings, bible=bible)
 
-    def _start_locked(self, principal: str, settings: dict) -> dict:
+    # ------------------------------------------------------------------ P21: rerun from a book bible / continue a book
+    def _bible_settings(self, principal: str, body: dict, settings: dict) -> dict | None:
+        spec = body.get("from_bible")
+        if spec in (None, ""):
+            return None
+        if body.get("continue_project") or body.get("variant_of"):
+            raise BookforgeError("INVALID_INPUT", "/from_bible", "a rerun from a book bible makes a new book: it cannot "
+                                 "also continue a book or be a variant", status="REJECTED")
+        reuse = body.get("reuse_plan", True)
+        if not isinstance(reuse, bool):
+            raise BookforgeError("INVALID_INPUT", "/reuse_plan", "reuse_plan must be true or false", status="REJECTED")
+        bible, src = self.app.opener.resolve_bible(principal, spec)
+        prof = bible.get("profile") or {}
+        if body.get("length") in (None, "") and prof.get("length") in LENGTHS:
+            settings["length"] = prof["length"]
+        if not body.get("choices") and bible.get("choices"):
+            settings["choices"] = story_choices.clean(bible["choices"])
+        if body.get("pipeline") in (None, "", {}) and bible.get("pipeline"):
+            settings["pipeline"] = pipeline_mod.clean({"flags": (bible["pipeline"] or {}).get("flags") or {}})
+        if not settings.get("genre") and prof.get("genre"):
+            settings["genre"] = str(prof["genre"])[:120]
+        from . import book_bible  # noqa: PLC0415
+        settings["bible"] = {"title": str(prof.get("title") or "")[:200], "source": src[:300], "reuse_plan": reuse,
+                             "summary": book_bible.summary(bible)}
+        return bible
+
+    def _continue_settings(self, principal: str, body: dict, settings: dict):
+        pid = body.get("continue_project")
+        if pid in (None, ""):
+            return
+        if not isinstance(pid, str) or self.store.project(pid) is None or \
+                not self.store.has_project_access(principal, pid):
+            raise BookforgeError("NOT_FOUND", "/continue_project", "that book does not exist", status="REJECTED")
+        if body.get("variant_of"):
+            raise BookforgeError("INVALID_INPUT", "/continue_project", "continuing a book cannot also make a variant",
+                                 status="REJECTED")
+        prof = get_profile(self.store, pid)
+        if prof.get("length") in LENGTHS and body.get("length") in (None, ""):
+            settings["length"] = prof["length"]
+        if prof.get("choices") and not body.get("choices"):
+            settings["choices"] = story_choices.clean(prof["choices"])
+        if body.get("pipeline") in (None, "", {}):
+            settings["pipeline"] = pipeline_mod.clean({"flags": pipeline_mod.of_store(self.store, pid)})
+        title = prof.get("title") or self.store.project(pid)["name"]
+        settings["continue"] = {"project_id": pid, "title": str(title)[:200]}
+
+    def _bible_of(self, run) -> dict | None:
+        key = (run.get("settings") or {}).get("bible", {}).get("key")
+        v = self.store.get_setting(key) if key else None
+        return v if isinstance(v, dict) else None
+
+    def _start_locked(self, principal: str, settings: dict, bible: dict | None = None) -> dict:
         if self.active():
             raise BookforgeError("VERSION_CONFLICT", "/run", "a Make-a-book run is already working; pause or cancel "
                                  "it first (or wait for it to finish)", status="REJECTED")
         run_id = f"run-{uuid.uuid4().hex[:12]}"
+        if bible is not None:  # kept with the new book (deleted with it): the run reads it step by step
+            key = f"rerun_bible:proj-{run_id.split('-', 1)[-1]}"
+            self.store.set_setting(key, bible)
+            settings["bible"]["key"] = key
         at = now_iso()
         run = {"id": run_id, "kind": self.KIND, "status": "queued", "phase": "Starting", "principal": principal,
                "project_id": None, "branch_id": "main", "created_at": at, "started_at": at, "finished_at": None,
@@ -526,6 +591,21 @@ class AutoBookService(_Runner):
                          for sid, st, op, title, about in STEPS]}
         self.event(run, "start", "Make a book for me started (you pressed the button: consent for this run)",
                    step="backup")
+        if settings.get("continue"):
+            c = settings["continue"]
+            run.update(project_id=c["project_id"], title=c["title"])
+            run["consent"]["scope"] = f"this run only (continuing “{c['title']}”)"
+            run["consent"]["text"] = ("You pressed ▶ Continue making this book: the AI may approve drafts that its own "
+                                      "review passes, for this book and this run only.")
+            self.event(run, "project", f"Continuing “{c['title']}” from where it stopped: the steps already done are "
+                       "kept and skipped", step="backup")
+        if settings.get("bible"):
+            b = settings["bible"]
+            self.event(run, "note", f"🔁 A new book from the book bible of {b['source']}: the same profile, choices, "
+                       "characters (with their sheets and voice cards), places, story rules and world texture"
+                       + (", premise, plot and outline" if b.get("reuse_plan") else " (a new premise, plot and outline)")
+                       + ". They come into the NEW book as drafts and each one is reviewed and approved there under "
+                       "your consent for this run; the chapters are written new.", step="backup", code="BIBLE_RERUN")
         self.save(run)
         self._launch(run, self._run)
         return self.public(run)
@@ -785,6 +865,8 @@ class AutoBookService(_Runner):
                     st["message"] = "Done"
                 self.event(run, "done", f"{st['title']}: {st['message']}", step=sid)
                 self.save(run)
+                if sid != STEP_IDS[-1]:  # the last step is followed by the run's own save (below)
+                    self._autosave(run, reason=f"step {sid}")
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None,
                        phase="Your book is made — download it below")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
@@ -843,6 +925,8 @@ class AutoBookService(_Runner):
             health.set_listener(None)
             self._tl.run_id = None
             self._tl.engine = self._tl.assist = self._tl.review = None
+            # 💾 the run stopped (finished, paused, cancelled or a problem): save the book's folder now
+            self._autosave(run, reason=f"run {run.get('status')}", force=True)
 
     def _length_warning(self, run):
         """A made book far below the length the author chose is flagged (it is still made: the files are ready)."""
@@ -1390,6 +1474,8 @@ class AutoBookService(_Runner):
         pause the step."""
         bp = self.bp(run)
         pid, branch = run["project_id"], run["branch_id"]
+        if run["settings"].get("bible") and not run.get("bible_world_seeded"):
+            self._seed_world(run)
         parts = (("rules", "Story rules", story_rules.get_entry, story_rules.generate, "RULES_FAILED"),
                  ("texture", "World texture", texture_mod.get_entry, texture_mod.generate, "TEXTURE_FAILED"))
         items = {i["id"]: i for i in st.get("items") or []}
@@ -1526,6 +1612,22 @@ class AutoBookService(_Runner):
                 self._name_book(pid, f"{copy_['title']} (variant: {pre})"[:200])
             self.event(run, "project", f"Variant of “{copy_['title']}”: the same profile, idea and choices, made with "
                        f"{pipeline_mod.describe(s.get('pipeline')).lower()}")
+        if s.get("bible") and not get_profile(self.store, pid).get("idea"):
+            # P21 🔁: the same book profile as the saved book bible (its title, author, idea …)
+            b = self._bible_of(run) or {}
+            bp_ = dict(b.get("profile") or {})
+            bp_.pop("ai_slot", None)
+            bp_["title"] = str(bp_.get("title") or s["bible"].get("title") or "Untitled book")[:200]
+            bp_["idea"] = str(bp_.get("idea") or bp_["title"])[:4000]
+            if b.get("choices"):
+                bp_["choices"] = b["choices"]
+            with self.store.transaction():
+                save_profile(self.store, pid, bp_)
+                with self.store.transaction() as tx:
+                    tx.execute("UPDATE projects SET name=? WHERE project_id=? AND name=?",
+                               (f"{bp_['title']} (rerun)"[:200], pid, NEW_BOOK_NAME))
+            self.event(run, "project", f"🔁 The book profile of “{bp_['title']}” was taken from the saved book bible "
+                       "(a new, separate book)")
         prof = book_profile_brief(self.store, pid)
         if prof.get("title") and prof.get("idea"):
             self._name_book(pid, prof["title"])  # a stop between saving the profile and naming the book
@@ -1567,7 +1669,10 @@ class AutoBookService(_Runner):
             tx.execute("UPDATE projects SET name=? WHERE project_id=? AND name=?", (title, pid, NEW_BOOK_NAME))
 
     def _s_canon(self, run, st):
-        canon_ops = ("A01", "A04", "A03")
+        if run["settings"].get("bible") and not run.get("bible_seeded"):
+            self._seed_canon(run, st)  # P21 🔁: the saved characters, places and world, as drafts of this book
+        canon_ops = ("A01", "A04", "A03") + tuple(op for op in run.get("bible_ops") or () if op not in
+                                                  ("A01", "A04", "A03"))
         counts = CANON_COUNTS[run["settings"]["length"]]
         # Entries BookForge's checks refused and set aside, per section, that the Bible Builder must make again.
         remake = run.setdefault("canon_remake", {})
@@ -1579,6 +1684,8 @@ class AutoBookService(_Runner):
             # with no entry yet (e.g. the places were saved but no main character), plus the entries set aside
             # because the checks refused them.
             missing = {op: n for op, n in counts.items() if not any(r["module_id"] == op for r in have)}
+            if run.get("bible_seeded") and any(r["module_id"] == "A01" for r in have):
+                missing = {}  # P21 🔁: the book bible's canon is the book's canon (nothing new is invented)
             want = {} if made_missing else dict(missing or ({} if have else counts))
             for op, n in remake.items():
                 want[op] = max(want.get(op, 0), int(n))
@@ -1847,6 +1954,10 @@ class AutoBookService(_Runner):
                 st["message"] = "Approved"
                 return
             drafts = sorted(bp.drafts(op), key=lambda r: r.get("created_at") or "", reverse=True)
+            if not drafts:
+                rid = self._plan_from_bible(run, st, bp, op, label)  # P21 🔁: the saved premise / plot / outline
+                if rid:
+                    drafts = [bp.rec(rid)]
             if drafts:
                 rid = drafts[0]["record_id"]
             else:
@@ -1863,6 +1974,147 @@ class AutoBookService(_Runner):
                 continue
             st["message"] = "Written, reviewed and approved"
             return
+
+    # ------------------------------------------------------------------ P21 🔁 seeding a new book from a book bible
+    def _bible_refs(self, run) -> dict:
+        """old record ID (in the book bible) -> the current reference of the new book's record made from it."""
+        out = {}
+        bp = self.bp(run)
+        for old, new in (run.get("bible_map") or {}).items():
+            rec = bp.rec(new)
+            if rec:
+                out[old] = rec["ref"]
+        return out
+
+    def _seed_canon(self, run, st):
+        """Create the bible's Set A entries in the new book (drafts; the canon step reviews and approves each one
+        under the run consent), with their character sheets and voice cards. Resumable: made entries are remembered."""
+        from .book_bible import remap_refs  # noqa: PLC0415
+        b = self._bible_of(run) or {}
+        order = {"A03": 0, "A04": 1}
+        items = sorted(b.get("canon") or [], key=lambda c: order.get(c.get("module_id"), 2)) + list(
+            b.get("characters") or [])
+        mapping = run.setdefault("bible_map", {})
+        refs = self._bible_refs(run)
+        made, refused, ops = 0, [], set(run.get("bible_ops") or ())
+        st["message"] = "Putting the saved characters and places into the new book"
+        self.save(run)
+        for it in items:
+            self.check(run)
+            old, op = it.get("record_id"), it.get("module_id")
+            if not old or not op or old in mapping:
+                continue
+            payload = remap_refs(it.get("data") or {}, refs)
+            if not isinstance(payload.get("linked_refs"), list):
+                payload["linked_refs"] = []
+            bp = self.bp(run)
+            try:
+                r = bp.dispatch(op, "CREATE", payload=payload)
+            except BookforgeError as exc:
+                r = {"status": "REJECTED", "errors": exc.errors}
+            if r.get("status") == "DRAFT" and r.get("output_refs"):
+                ref = r["output_refs"][0]
+                mapping[old] = ref["record_id"]
+                refs[old] = ref
+                ops.add(op)
+                self._made(run, ref)
+                made += 1
+                if op == "A01" and (it.get("sheet") or it.get("voice")):
+                    try:
+                        chars_mod.save_entry(self.store, run["project_id"], run["branch_id"], ref["record_id"],
+                                             sheet=it.get("sheet") or {}, voice=it.get("voice") or {}, by="author",
+                                             name=it.get("name"))
+                    except Exception:  # noqa: BLE001 - the character is there; its sheet can be made again
+                        log.exception("could not copy the character sheet of %s", it.get("name"))
+            else:
+                refused.append(f"{it.get('name')}: {'; '.join(problems(r)[:2]) or r.get('status')}")
+            run["bible_ops"] = sorted(ops)
+            self.save(run)
+        run["bible_seeded"] = True
+        self.event(run, "bible", f"🔁 From the book bible: {made} character/place entr(y/ies) put into the new book as "
+                   "drafts (each is reviewed and approved here under your consent for this run)", step="canon")
+        if refused:
+            self.event(run, "note", "⚠️ Not taken from the book bible (BookForge's checks refused them; the AI makes "
+                       "what is missing): " + " · ".join(refused)[:300], step="canon", code="BIBLE_ENTRY_REFUSED")
+        self.save(run)
+
+    def _seed_world(self, run):
+        b = self._bible_of(run) or {}
+        pid, branch = run["project_id"], run["branch_id"]
+        notes = []
+        try:
+            if b.get("story_rules") and not story_rules.get_entry(self.store, pid, branch):
+                story_rules.save(self.store, pid, branch, story_rules.clean_rules(b["story_rules"]), by="author",
+                                 how="book_bible")
+                notes.append(f"{len(b['story_rules'])} story rule(s)")
+            if b.get("world_texture") and not texture_mod.get_entry(self.store, pid, branch):
+                texture_mod.save(self.store, pid, branch, texture_mod.clean_items(b["world_texture"]), by="author",
+                                 how="book_bible")
+                notes.append(f"{len(b['world_texture'])} world detail(s)")
+        except BookforgeError as exc:
+            self.event(run, "note", f"⚠️ The story rules / world texture of the book bible could not be used "
+                       f"({exc.code}); the AI makes new ones", step="world", code="BIBLE_ENTRY_REFUSED")
+        run["bible_world_seeded"] = True
+        if notes:
+            self.event(run, "bible", "🔁 From the book bible: " + " and ".join(notes), step="world")
+        self.save(run)
+
+    def _plan_from_bible(self, run, st, bp, op, label) -> str | None:
+        """P21 🔁 with "keep the plan": the saved premise / plot / outline as this book's draft (once per part; when
+        BookForge's checks refuse it, the AI writes it new)."""
+        s = run["settings"].get("bible") or {}
+        if not s.get("reuse_plan"):
+            return None
+        tried = run.setdefault("bible_plan_tried", [])
+        if op in tried:
+            return None
+        from .book_bible import PLAN_OPS, remap_refs  # noqa: PLC0415
+        part = ((self._bible_of(run) or {}).get("plan") or {}).get(PLAN_OPS[op])
+        tried.append(op)
+        self.save(run)
+        if not part or not isinstance(part.get("data"), dict):
+            return None
+        data = remap_refs(part["data"], self._bible_refs(run))
+        try:
+            r = bp.dispatch(op, "CREATE", payload=bp.payload_for(op), manual_candidate=data)
+        except (BookforgeError, StepError) as exc:
+            r = {"status": "REJECTED", "errors": getattr(exc, "errors", None) or [{"message": str(exc)}]}
+        if r.get("status") == "DRAFT" and r.get("output_refs"):
+            ref = r["output_refs"][0]
+            self._made(run, ref)
+            self.event(run, "bible", f"🔁 The {label} was taken from the book bible (it is reviewed and approved here "
+                       "under your consent for this run)", record_id=ref["record_id"], module_id=op)
+            return ref["record_id"]
+        self.event(run, "note", f"⚠️ The {label} of the book bible did not pass BookForge's checks in the new book "
+                   f"({'; '.join(problems(r)[:2]) or r.get('status')}); the AI writes a new one",
+                   code="BIBLE_PLAN_REFUSED", module_id=op)
+        return None
+
+    def _seed_scenes(self, run, outline, chapters):
+        s = run["settings"].get("bible") or {}
+        run["bible_scenes_seeded"] = True
+        if not s.get("reuse_plan") or not self._on(run, "scenes"):
+            self.save(run)
+            return
+        b = self._bible_of(run) or {}
+        cards = {c.get("chapter_id"): c.get("cards") for c in b.get("scene_cards") or []}
+        pid, branch = run["project_id"], run["branch_id"]
+        n = 0
+        for ch in chapters:
+            cid = ch["chapter_id"]
+            if not cards.get(cid) or scenes_mod.usable(scenes_mod.get_entry(self.store, pid, branch,
+                                                                           outline["record_id"], cid), outline):
+                continue
+            try:
+                scenes_mod.save_cards(self.store, pid, branch, outline, cid, scenes_mod.clean_cards(cards[cid]),
+                                      by="author", how="book_bible")
+                n += 1
+            except BookforgeError:
+                continue
+        if n:
+            self.event(run, "bible", f"🔁 From the book bible: the scene cards of {n} chapter(s) (checked and approved "
+                       "here before each chapter is written)", step="chapters")
+        self.save(run)
 
     def _s_premise(self, run, st):
         self._planning(run, st, "B01", "premise")
@@ -1885,6 +2137,8 @@ class AutoBookService(_Runner):
         if not chapters:
             raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters BookForge can write.",
                               "Press 🔁 Try again.")
+        if run["settings"].get("bible") and not run.get("bible_scenes_seeded"):
+            self._seed_scenes(run, outline, chapters)
         items = {i["id"]: i for i in st.get("items") or []}
         st["items"] = [items.get(c["chapter_id"]) or {"id": c["chapter_id"], "label": f"Chapter {c['chapter_id']}",
                                                        "state": "pending", "words": 0} for c in chapters]
@@ -1938,6 +2192,7 @@ class AutoBookService(_Runner):
             tm["chapter_s"] = (list(tm.get("chapter_s") or []) + [item["seconds"]])[-50:]
             done_n = sum(1 for i in st["items"] if i.get("state") == "done")
             run["eta"] = self._eta(run, done_n, len(chapters))
+            self._autosave(run, reason=f"chapter {cid} approved")
             lm = self._length_meta(run, (rec or {}).get("record_id") or rid)
             if lm:
                 item["length"] = lm
@@ -2267,6 +2522,8 @@ class WriteAllService(_Runner):
                             "for your approval")
                 self.event(job, "ai", f"The AI wrote {item['label'].lower()}", record_id=ref["record_id"])
                 self.save(job)
+                if getattr(self.app, "saver", None):
+                    self.app.saver.auto(job["project_id"], job["branch_id"], reason=f"{item['label']} written")
             job.update(status="done", finished_at=now_iso(), phase="All chapters are written — read and approve "
                        "them in Needs your approval", waiting=None)
         except (RunCancelled, RunPaused, Cancelled):
@@ -2291,6 +2548,8 @@ class WriteAllService(_Runner):
         finally:
             health.set_listener(None)
         self.save(job)
+        if getattr(self.app, "saver", None):
+            self.app.saver.auto(job["project_id"], job["branch_id"], reason=f"write all {job.get('status')}", force=True)
 
 
 def public_json(obj) -> str:

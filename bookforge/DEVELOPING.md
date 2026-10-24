@@ -61,6 +61,11 @@ bookforge/
     pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets
     book_report.py         📊 P13 book report: deterministic part, whole-book AI review, aggregation, Markdown/PDF
     compare.py             ⚖️ P14 blind comparison of two books / chapter versions
+    book_bible.py          📖 P20/P21 the book bible: build (versioned JSON), Markdown, clean (a file from outside),
+                           summary, remap_refs
+    book_package.py        📦 P20/P21 book.bookforge: build, read + check, transplant into a NEW project, import, verify
+    book_save.py           💾 P20 books folder settings, one folder per book, atomic writes, debounced auto-saves
+    book_open.py           📂 P21 books-folder list, open a folder / upload (package or book-bible.json), resolve_bible
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
@@ -448,6 +453,110 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * Tests: `tests/test_section5.py`; the fake AI answers `scene_text` (kind `scene_prose`), `continuation` (`expand`:
   empty unless `expand_text`), `book_scores` (`book_review`, `book_review_script`), `version_1/version_2` (`compare`:
   prefers the longer version, `compare_script`); `max_chapters` (default 6) caps B11.
+
+## 💾 Section 6: save the book (P20), 📂 open a saved book / 🔁 rerun (P21)
+
+* **Books folder** (`book_save.SaveService`, `app.saver`): settings key `books_folder` = {path?, auto_save?}; default
+  `%USERPROFILE%\Documents\BookForge Books` on Windows when that Documents folder exists, else `~/BookForge Books`
+  (`BOOKFORGE_BOOKS_DIR` overrides the default, `BOOKFORGE_AUTOSAVE=0` makes auto-save default to off — **tests/conftest.py
+  sets both**, so the suite never writes into a real Documents folder and only `tests/test_section6.py` saves).
+  `check_folder`: absolute, at most `MAX_PATH - 60` characters, writable (a probe file). API: `GET|PUT
+  /api/settings/books-folder {path ("" = default), auto_save}` (+ `writable`, `problem`, `local`).
+* **One folder per book**: named once `"<safe title ≤ 60> (<last 6 of the project id>)"` (`, <branch>` when not main),
+  remembered in `book_folder:<pid>:<branch>`; a new title keeps the folder; a folder whose marker names another book
+  gets a ` 2` suffix. `safe_name`: no `<>:"/\|?*`/control characters, no trailing dots/spaces, reserved names
+  (CON, PRN, AUX, NUL, COM1-9, LPT1-9) get a `_` prefix; the title cap shrinks until base + folder + 60 ≤ 200;
+  `save_now` refuses a longest path > `MAX_PATH` (200) with `SAVE_PATH_TOO_LONG`.
+* **Contents** (`collect`, read-only): `Book/` (BookPath export files re-read with `read_binary`, sha256 checked; out of
+  date ones named “(older version)”), `Chapters/NN - <title ≤ 40>.md` (`book_report.book_chapters`: approved text, else
+  newest draft marked DRAFT), `Book Bible/` (`book_bible.build` → JSON + `render_markdown`), `Reports/` (latest book
+  report MD/PDF, `Editor summary.md` from `craft_reviews`, `Planned to page.md` from `review.planned.book`), `Log/`
+  (`journal.render_markdown`, `run-events.json` = the book's autobook/write_all jobs: steps, states, times, problems,
+  `ai_per_step` from event slots, events without book text), `Progress/progress.json` (BookPath.status steps/next, words,
+  chapters, the latest run's state), `book.bookforge`, `README.txt`, `.bookforge-folder.json` (marker: project, files
+  written). Every text goes through `book_package.guard` (the saved API keys / connection keys and the access token →
+  `[redacted]`).
+* **Writes**: `write_atomic` = temp file in the same folder (`store.tmp_name`), flush + fsync, `store.replace_file`
+  (Windows sharing-violation retries); unchanged bytes are not rewritten; files listed in the old marker and no longer
+  produced are removed; nothing else in the folder is touched. `classify` maps OSError → `SAVE_DISK_FULL`
+  (ENOSPC/EDQUOT, winerror 39/112), `SAVE_PATH_TOO_LONG` (ENAMETOOLONG, 206), `SAVE_FOLDER_NOT_WRITABLE` (EACCES,
+  EPERM, EROFS, ENOENT, ENOTDIR, 3/5), else `SAVE_FAILED`.
+* **Background / automatic saves**: `start(pid, branch, kind)` (one thread per book; a running save is returned; a
+  manual press during a save runs once more after it) → `book_save:<pid>:<branch>` = {ok, at, kind, path, files, bytes,
+  finished, problem}. `auto(pid, branch, reason, force)` never raises and returns at once: auto-save off → nothing
+  (manual saves still work); `force` or the last save older than `interval_s` (120) → now; else one `threading.Timer`
+  for the rest of the interval (the newest state is saved then); busy → once more afterwards. Hooks: after every
+  Make-a-book step (`_autosave`), after each chapter, at the end of the run thread whatever the outcome (finished,
+  paused, cancelled, a problem: `force`), Write all chapters (each chapter; force at the end), the author's approvals
+  (`/review/approve`) and book steps (`book_act`; export forces), and `after_start` for runs found interrupted at
+  start-up. Test projects (self-test / workflow test) are never auto-saved. The run's public view carries
+  `save = saver.brief()`.
+* **API**: `POST .../branches/{b}/save` → 202 job; `GET .../save` → {path, books_folder, last, job, auto_save, local,
+  opened {finished, next_step, resumable_run}} (does not count as opening the book: no `touch_project`);
+  `GET .../bible?format=summary|json|md[&download=1]`; `POST /api/books-folder/show {project_id?}` (opens the folder in
+  Explorer/Finder/xdg-open via `saver.launch`, replaced in tests).
+* **Localhost only**: the HTTP handler sets `app.set_client(client_address[0])` around each route; `App.is_local()` is
+  true for 127.x, ::1, ::ffff:127.x and in-process calls. Listing the books folder, opening a folder, reading a folder's
+  bible and showing a folder in the file manager answer 403 `PERMISSION_DENIED` with `problem: OPEN_NOT_LOCAL`
+  otherwise (the UI offers 📋 Copy the folder path / an upload instead).
+* **Problem codes**: API refusals keep a kernel code (`errors.py` stays closed) and add `errors[0].problem` (the
+  problems.js code) and `fix`; `toProblem` in app.js prefers `problem`. New codes: `SAVE_FAILED`,
+  `SAVE_FOLDER_NOT_WRITABLE`, `SAVE_PATH_TOO_LONG`, `SAVE_DISK_FULL`, `OPEN_NOT_LOCAL`, `OPEN_FAILED`,
+  `OPEN_BAD_PACKAGE`, `OPEN_NEWER_VERSION`, `OPEN_TOO_LARGE`, `OPEN_NOT_FOUND`, `BIBLE_BAD`, `BIBLE_RERUN`,
+  `BIBLE_ENTRY_REFUSED`, `BIBLE_PLAN_REFUSED`.
+* **The book bible** (`book_bible.py`, `schema_version` 1, `kind: bookforge-book-bible`, `app_version`, `saved_at`,
+  `source`): profile (title … chapters), choices, pipeline, length plan; `characters` (A01: data + sheet + voice,
+  approved version else newest draft with `approved: false`), `canon` (every other Set A head), `protected_facts`
+  (from `protected_fact_flags`), `plan` {premise B01, main_plot B03, outline B11} (OUTPUT data), `scene_cards` of the
+  current outline, `story_rules`, `world_texture`. `clean(raw)` (≤ 8 MB) refuses a newer schema (`OPEN_NEWER_VERSION`)
+  or anything else (`BIBLE_BAD`) and cleans every part with the book's own cleaners (`clean_profile`,
+  `story_choices.clean`, `pipeline.clean`, `clean_sheet/voice`, `scenes.clean_cards`, `story_rules.clean_rules`,
+  `texture.clean_items`).
+* **The package** (`book_package.py`, zip, `schema_version` 1): `manifest.json` (format, versions incl.
+  `store_schema_version`, project id, title, counts, `files` = sha256 of every entry), `book/tables.json`
+  (`Store.export_project_rows`: every row of the project in `Store.PACKAGE_TABLES`, one read transaction; BLOBs as
+  `{"$blob": text}`), `book/settings.json` (settings whose key contains the project id + its autobook/write_all jobs;
+  never `book_folder:`, `book_save:`, `rerun_bible:`), `assets/<sha256>.bin`, `book-bible.json`. `read` checks size
+  (512 MB file, 1 GB unpacked, 50 000 entries), safe names, the manifest, every checksum, every JSON record's
+  content hash, every binary's asset and refuses newer versions.
+* **Opening = a NEW book** (`transplant` + `Store.import_project_rows` + `Store.write_asset`, both new store helpers:
+  insert-only, one transaction, refuse an existing project id or a row of another book; the importer gets the owner
+  grant): new project id; new ids for audit, provenance, events, approvals, edges, checkpoints and the jobs
+  (`_new_id` keeps the prefix); record IDs/versions are kept. Records hash their project id, so JSON records are
+  rewritten in dependency order (a record's content names the hashes it refers to) and every old hash → new hash is
+  replaced everywhere (later records, lifecycle, audit, provenance, approvals, receipts, edges, module state, outbox
+  with its `payload_hash`, feature manifests with their `content_hash`, settings such as the path memory). Imported
+  runs that were live become `interrupted` (“Opened from a saved book — press ▶ Resume”). The project name gets
+  “ (opened)” (“ (opened 2)” …) only when that name exists; the profile title is unchanged (so the exports stay
+  current). `verify` re-hashes every record and file; a failing import is removed again (`OPEN_FAILED`).
+  Known limit: an approval's `action_hash` (a hash over the action as it was signed) keeps its old value (history).
+* **API**: `GET /api/books-folder` (folders with `book.bookforge` and/or `Book Bible/book-bible.json`: title, saved_at,
+  finished, chapters, `in_library`), `POST /api/books-folder/open {folder}` (a plain folder name inside the books
+  folder, never a path), `GET /api/books-folder/bible?folder=`, `POST /api/books/open` (multipart/form-data, raw bytes
+  or a JSON body; ≤ `MAX_BODY` 64 MB): a zip → package import (201 {kind: package, project_id, name, finished,
+  next_step, resumable_run}), JSON → bible kept as `bible_upload:<id>` (newest 5) → {kind: bible, bible_id, summary};
+  `GET /api/books/bible/{id}`.
+* **Continue / rerun** (`AutoBookService`): `POST /api/autobook {author_confirms, continue_project}` = a run on that
+  existing book (`run.project_id` preset, consent scope “continuing …”; every step is an idempotent ensure, so done
+  work is skipped). `{author_confirms, from_bible: {project_id[, branch_id]} | {folder} | {bible_id}, reuse_plan}`
+  (`OpenService.resolve_bible`) = a NEW book: the bible is stored as `rerun_bible:<pid>` (deleted with the book), the
+  run takes its length, choices, pipeline and genre; `_s_profile` saves its profile (book named “<title> (rerun)”);
+  `_seed_canon` creates its Set A entries as drafts (A03, A04, others, then A01; `linked_refs` remapped by old record ID
+  with `book_bible.remap_refs`; sheets/voices saved) and the canon step reviews and approves them under the run
+  consent (no Bible Builder while an A01 exists; extra Set A ops join `canon_ops`); `_seed_world` saves the rules and
+  texture (the outline step may still update the rules for the plan); with `reuse_plan`, `_plan_from_bible` creates
+  B01/B03/B11 with `manual_candidate` = the saved OUTPUT (once each; refused → event `BIBLE_PLAN_REFUSED` and the AI
+  writes it) and `_seed_scenes` saves the scene cards for the new outline (checked and approved before each chapter).
+  Events `BIBLE_RERUN` (start, with the consent wording), `bible`, `BIBLE_ENTRY_REFUSED`.
+* **UI** (app.js): `booksFolderCard` (Settings), `saveBox` / `savedLine` / `runSave` / `folderButton`, `quickSave` (top
+  bar 💾 while a book is open), `bookSaveCard` (book page: save, 🔁, ⬇ bible, ▶ continue / resume for an unfinished
+  book), `runSaveLine` + `runBibleLine` (run window), shelf `sb-save` / `sb-rerun`, `openSavedBookDialog` (top bar 📂 /
+  Your books), `openRerunDialog`, `continueBook`.
+* Tests: `tests/test_section6.py` (folder layout and contents after a fake-AI run, secrets/prompts absent incl. inside
+  the package, debounce + forced saves + pause, atomic writes with an injected ENOSPC, title change keeps the folder,
+  Windows-unsafe titles and long paths, package round trip on the same and another data folder, continue an unfinished
+  opened book and resume its imported run, damaged/newer/foreign packages refused, store helpers never overwrite,
+  rerun with and without the plan, a book-bible.json upload (multipart) and refusals, localhost-only routes over HTTP).
 
 ## 🧪 Test workflow (workflow_test.py)
 

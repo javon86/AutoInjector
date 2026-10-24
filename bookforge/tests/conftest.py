@@ -1,12 +1,18 @@
 """Shared pytest fixtures: a fresh store/engine/project per test and a dispatch helper."""
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+# 💾 P20: the test suite never saves into the real Documents folder, and auto-save is off unless a test turns it on
+# (tests/test_section6.py does, with its own books folder per test).
+os.environ.setdefault("BOOKFORGE_BOOKS_DIR", str(Path(tempfile.gettempdir()) / f"bookforge-test-books-{os.getpid()}"))
+os.environ.setdefault("BOOKFORGE_AUTOSAVE", "0")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

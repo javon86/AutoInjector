@@ -236,6 +236,43 @@ never your text. What the editor checks is written in one plain file, `bookforge
   checks it). The run window shows **⏳ about N min left** (from this run's measured times). Settings → **📏 Long
   chapters**: words per AI answer, continuation rounds, what counts as far too short.
 
+## 💾 Your books folder: save, open again, make again
+
+**Where books are saved.** Every book gets its own folder in your *books folder*: on Windows
+`Documents\BookForge Books` (elsewhere `BookForge Books` in your home folder). Change it in **Settings → 📁 Where books
+are saved** (BookForge checks that it can write there; **📂 Open folder** shows it in Explorer). A book's folder is
+called “*Book title* (abc123)” and keeps that name even when you rename the book.
+
+**What is in a book's folder** (a `README.txt` in each folder says the same):
+
+| Folder / file | What it holds |
+|---|---|
+| `Book/` | the finished book: PDF, EPUB and Word (once it is exported) |
+| `Chapters/` | every chapter as a text file (`01 - Title.md` …); a chapter not approved yet says **DRAFT** at the top |
+| `Book Bible/` | everything the book is built on: profile, ending and style choices, characters with their sheets and voice cards, places and world, premise, plot, outline, scene cards, story rules, world texture — `book-bible.md` to read, `book-bible.json` for BookForge |
+| `Reports/` | the book report (Markdown and PDF), the editor's and the planned-to-page summaries |
+| `Log/` | the book journal and `run-events.json` (every step of the run, which AI did what, times, problems — never keys or prompts) |
+| `Progress/` | `progress.json`: what is done and what comes next |
+| `book.bookforge` | the **whole book in one file** (every version and file, with checksums) — to open it again, also on another computer |
+
+**Saving.** Press **💾 Save** on the book page, in the top bar (while a book is open), on a book of 📚 My finished
+books or in the ⚡ run window; it says **Saved to …** with the folder (or ⚠️ with what to do, for example when the disk
+is full or the folder cannot be written). With **auto-save** (on unless you switch it off in Settings) BookForge saves
+by itself while a book is made — after each step and chapter, at most every 2 minutes — and at once when it is
+finished, paused or stopped. BookForge only ever replaces the files it wrote itself; your own files in the folder stay.
+
+**📂 Open a saved book** (top bar or Your books): pick a book from your books folder, or upload its `book.bookforge`.
+It always opens as a **new** book (“… (opened)” when you already have one with that title) — nothing is overwritten.
+An unfinished book shows **▶ Continue making this book** (the AI does the steps that are left; what is done is kept),
+and **▶ Resume the saved run** when its run was stopped half-way.
+
+**🔁 Rerun from the book bible** (book page, 📚 My finished books, or 🔁 in the 📂 folder list): a **new** book with
+the same profile, choices, characters (with sheets and voice cards), places, story rules and world texture — and, if
+you keep the tick, the same premise, plot, outline and scene cards — with **new chapters**. You can also upload just a
+`book-bible.json` (for example one you edited by hand) to make a new book from it. Pressing 🔁 Start is your consent
+for that run: the saved characters and plan come into the new book as drafts and the AI reviewer approves each one
+there (the run window and the book journal say so).
+
 ## ✍ Write all chapters
 
 On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after

@@ -131,6 +131,34 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ---
 
+## Section 6 — Saving books and covers  (requested after the first five sections)
+
+- [x] **P20** 💾 Save the book: one folder per book (in a chosen books folder) holding the finished book
+  (PDF/EPUB/DOCX), the book bible (profile, choices, characters with sheets and voice cards, places/world,
+  premise, plot, outline, scene cards, story rules, world texture), the chapters as text, the book report,
+  and the book's log (journal, run events, AutoInjector-free); saves automatically when a book finishes and
+  as progress while it is being made; a Save button on the book page and the run window.
+  *(bookforge/book_save.py: Settings › 📁 Where books are saved (default Documents\BookForge Books on Windows, ~/BookForge
+  Books elsewhere; writable check; 📂 Open folder on this computer only); one folder per book “<title> (<id>)” kept
+  when the title changes (`book_folder:<pid>:<branch>`); Book/, Chapters/ (DRAFT marked), Book Bible/ (book_bible.py:
+  versioned JSON + Markdown), Reports/, Log/ (journal + run-events.json), Progress/, README.txt and book.bookforge
+  (book_package.py: every row, version and file of the book with checksums); atomic writes, Windows-safe names, paths
+  ≤ 200; auto-save (default on) after each run step / chapter / approval at most every 2 minutes and at once when a run
+  finishes, pauses, is cancelled or stops; ⚠️ SAVE_* codes, never blocks a run; no keys, tokens or prompts (checked);
+  💾 on the book page, top bar, shelf and run window.)*
+- [x] **P21** 📂 Open a saved book / rerun: load a saved folder back into BookForge (as a new book), continue
+  an unfinished one, or rerun it from its book bible (same characters, world and plan; new chapters).
+  *(bookforge/book_open.py + book_package.py: 📂 Open a saved book (top bar / Your books): the books-folder list (this
+  computer only) or an upload of book.bookforge / book-bible.json; checksums, record hashes and schema_version checked
+  (OPEN_BAD_PACKAGE / OPEN_NEWER_VERSION); always a NEW book (new ids, every content hash recomputed, “(opened)” only
+  when the title exists); ▶ Continue making this book (a run on that book that skips what is done) and ▶ Resume the
+  saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
+  sheets, voices, rules, texture and — optionally — premise/plot/outline/scene cards come from the bible and are
+  approved inside it under the run consent; new chapters.)*
+- [ ] **P19** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
+  AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
+  PDF/EPUB/DOCX; print-ready cover size and spine.
+
 ## Problems to come back to
 
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
@@ -270,6 +298,26 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   conversation section (BookForge's prompts are never stored by the app). Path redaction covers home-folder paths
   (`~`, `/home/x`, `/Users/x`, `C:\Users\x`); a path outside any home folder (e.g. `D:\Private\…`) is kept, and a
   file name with spaces after the last folder may keep its last word. Not yet tried in a real BookForge run.
+- **P20 / P21 — not tried on a real Windows computer.** Tested on Linux (unit, fake-AI runs, Playwright 27/27). On
+  the first Windows run check: (1) the default folder is `%USERPROFILE%\Documents\BookForge Books` — when Documents is
+  redirected (OneDrive “Back up my folders”, a company policy) the real Documents known folder may be elsewhere; BookForge
+  does not call `SHGetKnownFolderPath` (it falls back to `~\BookForge Books` only when `%USERPROFILE%\Documents` is
+  missing) — change it in Settings if so; (2) 📂 Open folder uses `os.startfile`; (3) antivirus or the search indexer may
+  hold a file open: `replace_file` retries for about 2 s, then the save is ⚠️ SAVE_FAILED (the next save tries again);
+  (4) paths are kept ≤ 200 characters by shortening the title; a very deep books folder is refused (SAVE_PATH_TOO_LONG).
+- **P20 / P21 design choices to confirm:** (a) a book's folder keeps its first name when the title changes (stable,
+  never moved behind the author's back); (b) every save rewrites only changed files, but `book.bookforge` changes on
+  every step, so a progress save of a long novel rewrites a package of several MB each time (at most every 2 minutes);
+  (c) the package holds every version of every record and file (exact restore) — opening a saved book on the same
+  computer copies all of it again as a new book; (d) an opened book's project name gets “(opened)” only when the name
+  exists, its profile title stays (so its exports stay current); (e) an approval's `action_hash` (a hash over the signed
+  action) keeps its old value in an opened book — history only, never re-checked for engine approvals, but an
+  H-set waiver checked again later would not match (`j_approvals.waiver_action_hash`); (f) an imported unfinished run
+  can be resumed with its original consent record (pressing ▶ Resume is a new author action; ▶ Continue starts a new
+  run with a new consent instead); (g) a 🔁 rerun keeps the saved story rules but the outline step still asks the AI
+  for rule updates for the plan (one call, accepted under the run consent); (h) uploads are limited to 64 MB
+  (`MAX_BODY`): a larger book must be copied into the books folder and opened from the list; (i) auto-save is off in
+  the test suite by default (`BOOKFORGE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

@@ -41,6 +41,8 @@ from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
 from .shelf import shelf as shelf_page
 from .book_report import ReportService
+from .book_save import SaveService
+from .book_open import OpenService
 from .compare import CompareService
 from .status_push import StatusPusher
 from .store import Store, new_id, utcnow, write_private
@@ -161,8 +163,28 @@ class App:
         self.compare = CompareService(self)    # ⚖️ P14 blind comparisons
         self.health = HealthService(self)
         self.backups.on_restored.append(self.health.forget)  # a restored database must be checked afresh
+        self.saver = SaveService(self)         # 💾 P20 one folder per book in the books folder
+        self.opener = OpenService(self)        # 📂 P21 open a saved book / 🔁 rerun from its book bible
+        self._client = threading.local()       # the address of the request being answered (localhost-only routes)
         self.port: int | None = None
         self._last_project: dict | None = None
+        if self.interrupted:  # runs that were working when BookForge stopped: save how far they got
+            threading.Thread(target=self.saver.after_start, name="bookforge-save-interrupted", daemon=True).start()
+
+    # ------------------------------------------------------------------ 💾/📂 which computer asks
+    def set_client(self, host: str | None):
+        self._client.host = host
+
+    def is_local(self) -> bool:
+        """True when the request being answered comes from this computer (or is an in-process call). Opening folders
+        in the file manager and listing the books folder are only for the computer BookForge runs on."""
+        host = getattr(self._client, "host", None)
+        if host is None:
+            return True
+        h = str(host).lower()
+        if h.startswith("::ffff:"):
+            h = h[7:]
+        return h == "::1" or h == "localhost" or h.startswith("127.")
 
     # ------------------------------------------------------------------ AutoInjector status link
     def base_url(self) -> str:
@@ -398,6 +420,8 @@ class App:
             return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
         if parts and parts[0] == "workflow-test":
             return self.route_workflow(method, parts, query, body)
+        if parts and parts[0] in ("books", "books-folder") or parts[:2] == ["settings", "books-folder"]:
+            return self.route_books(method, parts, query, body, principal, headers)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
                                   "story-choices", "lengths", "pipeline", "compare"):
             return self.route_ops(method, parts, query, body, principal)
@@ -434,8 +458,9 @@ class App:
             if len(parts) >= 4 and parts[2] == "branches":
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
-                self.touch_project(pid, branch)
                 rest = parts[4:]
+                if rest != ["save"]:  # the shelf asks every book's save state: that is not "opening" the book
+                    self.touch_project(pid, branch)
                 if rest and rest[0] == "review":
                     return self.route_review(method, rest[1:], query, body, principal, pid, branch)
                 if rest == ["manifest"] and method == "GET":
@@ -455,6 +480,12 @@ class App:
                     return self.journal(pid, branch, query)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
+                if rest == ["save"] and method == "POST":  # 💾 P20 save the book now
+                    return 202, self.saver.start(pid, branch, kind="manual", reason="you pressed 💾 Save")
+                if rest == ["save"] and method == "GET":
+                    return 200, dict(self.saver.status(pid, branch), opened=self.opener.opened(pid, branch))
+                if rest == ["bible"] and method == "GET":  # 📖 the book bible (summary, or the file)
+                    return self.bible(pid, branch, query)
                 if rest and rest[0] == "book" and len(rest) >= 2 and rest[1] == "write-all":
                     return self.route_write_all(method, rest[2:], principal, pid, branch)
                 if rest == ["uploads"] and method == "POST":
@@ -489,9 +520,60 @@ class App:
                 self.backups.try_backup(f"before-{action}")  # S9: automatic backup before big steps
             tok = self.work.begin(pid, op, title)
             try:
-                return BookPath(self.engine, principal, pid, branch).act(action, body)
+                out = BookPath(self.engine, principal, pid, branch).act(action, body)
             finally:
                 self.work.end(tok)
+            if action in ("approve", "assemble", "export", "check", "write_chapter", "create"):
+                self.saver.auto(pid, branch, reason=f"book step {action}", force=action == "export")
+            return out
+
+    # ------------------------------------------------------------------ 💾 P20 save / 📂 P21 open
+    def route_books(self, method, parts, query, body, principal, headers):
+        sv, op = self.saver, self.opener
+        if parts == ["settings", "books-folder"]:
+            if method == "GET":
+                return 200, dict(sv.check(), local=self.is_local())
+            if method == "PUT":
+                return 200, dict(sv.save_settings(body if isinstance(body, dict) else {}), local=self.is_local())
+        if parts == ["books-folder"] and method == "GET":
+            return 200, op.folders()
+        if parts == ["books-folder", "show"] and method == "POST":
+            b = body if isinstance(body, dict) else {}
+            pid = b.get("project_id")
+            if pid is not None:
+                if not isinstance(pid, str):
+                    raise ApiError(400, "INVALID_INPUT", "/project_id", "project_id must be text")
+                self._require_access(principal, pid)
+            return 200, sv.open_folder(pid, b.get("branch_id") or "main")
+        if parts == ["books-folder", "open"] and method == "POST":
+            b = body if isinstance(body, dict) else {}
+            return 201, op.open_folder(principal, b.get("folder"))
+        if parts == ["books-folder", "bible"] and method == "GET":
+            from . import book_bible  # noqa: PLC0415
+            name = (query.get("folder") or [None])[0]
+            return 200, {"folder": name, "summary": book_bible.summary(op.folder_bible(name))}
+        if parts == ["books", "open"] and method == "POST":
+            return 201, op.upload(principal, body, headers)
+        if len(parts) == 3 and parts[:2] == ["books", "bible"] and method == "GET":
+            from . import book_bible  # noqa: PLC0415
+            b, _src = op.resolve_bible(principal, {"bible_id": parts[2]})
+            return 200, {"bible_id": parts[2], "summary": book_bible.summary(b)}
+        raise ApiError(404, "NOT_FOUND", "/" + "/".join(parts), "no such endpoint")
+
+    def bible(self, pid, branch, query):
+        from . import book_bible  # noqa: PLC0415
+        b = book_bible.build(self, pid, branch)
+        fmt = (query.get("format") or ["summary"])[0]
+        if fmt == "summary":
+            return 200, {"summary": book_bible.summary(b)}
+        if fmt not in ("json", "md"):
+            raise ApiError(400, "INVALID_INPUT", "/format", "format: summary, json or md")
+        disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+        if fmt == "json":
+            return 200, ("__binary__", "application/json; charset=utf-8",
+                         json.dumps(b, ensure_ascii=False, indent=2).encode("utf-8"), "book-bible.json", disposition)
+        return 200, ("__binary__", "text/markdown; charset=utf-8", book_bible.render_markdown(b).encode("utf-8"),
+                     "book-bible.md", disposition)
 
     # ------------------------------------------------------------------ 📊 P13 book report
     def route_report(self, method, rest, query, body, principal, pid, branch):
@@ -754,7 +836,9 @@ class App:
             if rest == ["summary"] and method == "GET":
                 return 200, rv.summary(principal, pid, branch)
             if rest == ["approve"] and method == "POST":
-                return 200, rv.approve(principal, pid, branch, body)
+                out = rv.approve(principal, pid, branch, body)
+                self.saver.auto(pid, branch, reason="approval")  # 💾 progress save (at most every 2 minutes)
+                return 200, out
             if rest == ["settings"] and method == "GET":
                 return 200, rv.settings(pid)
             if rest == ["settings"] and method == "PUT":
@@ -1244,7 +1328,11 @@ def make_handler(app: App):
                 if raw:
                     ctype = (self.headers.get("Content-Type") or "").split(";")[0]
                     body = parse_json_body(raw) if ctype == "application/json" else raw
-                status, payload = app.route(method, url.path, parse_qs(url.query), body, principal, self.headers)
+                app.set_client(self.client_address[0] if self.client_address else "")
+                try:
+                    status, payload = app.route(method, url.path, parse_qs(url.query), body, principal, self.headers)
+                finally:
+                    app.set_client(None)
                 if isinstance(payload, tuple) and payload and payload[0] == "__binary__":
                     _, mime, data, name = payload[:4]
                     disposition = payload[4] if len(payload) > 4 else "inline"
