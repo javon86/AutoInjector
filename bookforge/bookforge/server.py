@@ -584,6 +584,11 @@ class App:
                 return 200, self.review.reviewer_settings()
             if method == "PUT":
                 return 200, self.review.save_reviewer_settings(body)
+        if parts == ["settings", "editor"]:
+            if method == "GET":
+                return 200, self.review.editor.settings()
+            if method == "PUT":
+                return 200, self.review.editor.save_settings(body)
         if parts == ["settings", "ai-retry"]:
             if method == "GET":
                 cur = self.store.get_setting("ai_retry") or {}
@@ -622,8 +627,9 @@ class App:
             raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
         if kind == "assist":
             new = self.assist.start_assist(principal, dict(r))
-        elif kind in ("review_review", "review_fix"):
-            fn = self.review.start_review if r.get("kind") == "review" else self.review.start_fix
+        elif kind in ("review_review", "review_fix", "review_editor", "review_editor_fix"):
+            fn = {"review": self.review.start_review, "fix": self.review.start_fix, "editor": self.review.start_editor,
+                  "editor_fix": self.review.start_editor_fix}.get(r.get("kind"), self.review.start_fix)
             b = {"record_ids": r.get("record_ids"), "slot_id": r.get("slot_id")} if r.get("kind") == "review" else \
                 {"record_id": (r.get("record_ids") or [None])[0], "slot_id": r.get("slot_id")}
             new = fn(principal, r["project_id"], r["branch_id"], b)
@@ -673,6 +679,14 @@ class App:
                 return 202, rv.start_review(principal, pid, branch, body)
             if rest == ["fix"] and method == "POST":
                 return 202, rv.start_fix(principal, pid, branch, body)
+            if rest == ["editor"] and method == "POST":
+                return 202, rv.start_editor(principal, pid, branch, body)
+            if rest == ["editor", "fix"] and method == "POST":
+                return 202, rv.start_editor_fix(principal, pid, branch, body)
+            if rest == ["editor", "apply"] and method == "POST":
+                return 200, rv.apply_editor_fix(principal, pid, branch, body)
+            if len(rest) == 2 and rest[0] == "editor" and method == "GET":
+                return 200, rv.editor_info(principal, pid, branch, rest[1])
             if len(rest) == 2 and rest[0] == "ai" and method == "GET":
                 return 200, rv.get_job(principal, rest[1])
             if len(rest) == 3 and rest[0] == "ai" and rest[2] == "cancel" and method == "POST":

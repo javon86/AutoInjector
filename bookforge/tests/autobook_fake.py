@@ -5,6 +5,12 @@ the Bible Builder world sketch and its Set A proposals, premise B01, main plot B
 the outline asks for), chapter prose C02 (with objective assessments for the requested chapter), story events,
 AI review verdicts (scriptable) and AI fixes (the draft returned with a revised sentence, references untouched).
 Scripted failures (BookforgeError instances) are raised before answering, in order.
+
+The AI editor (P4) and the writer's targeted rewrite (P5) are answered deterministically too: ``editor_flags`` maps
+a phrase to its replacement. A craft review flags (major, subtext score 4) every sentence of the chapter that holds
+one of those phrases and keeps the chapter's first sentence; with no flagged phrase it passes (all scores 8). A
+rewrite request replaces the phrase inside each flagged sentence. ``craft_script`` / ``rewrite_script`` hold whole
+answers (dicts, or callables(ctx) -> dict) used first, one per call.
 """
 from __future__ import annotations
 
@@ -63,6 +69,10 @@ class BookFakeAI:
         self.delay = 0.0
         self.lock = threading.Lock()
         self.kinds: list[str] = []
+        self.editor_flags: dict[str, str] = {}   # phrase -> replacement (P4/P5)
+        self.craft_script: list = []             # scripted editor answers, one per craft review
+        self.rewrite_script: list = []           # scripted writer answers, one per rewrite request
+        self.craft_contexts: list[dict] = []     # what the editor was sent (tests check the pattern report etc.)
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -100,6 +110,19 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "scores" in props:  # 🖋 the AI editor (craft review)
+            with self.lock:
+                self.craft_contexts.append(ctx)
+                scripted = self.craft_script.pop(0) if self.craft_script else None
+            if scripted is not None:
+                return "craft", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "craft", self._craft(ctx, list((props["scores"].get("properties") or {}).keys()))
+        if "replacements" in props:  # ✍ the writer reworks the flagged passages
+            with self.lock:
+                scripted = self.rewrite_script.pop(0) if self.rewrite_script else None
+            if scripted is not None:
+                return "rewrite", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "rewrite", self._rewrite(ctx)
         if "verdict" in props:
             with self.lock:
                 v = self.verdicts.pop(0) if self.verdicts else self.default_verdict
@@ -163,6 +186,42 @@ class BookFakeAI:
         if "events" in props:
             return "events", {"events": []}
         return "generic", self._from_schema(schema)
+
+    @staticmethod
+    def sentences(text):
+        import re  # noqa: PLC0415
+        return [x.strip() for x in re.findall(r"[^.!?]+[.!?]+", text or "") if x.strip()]
+
+    def _craft(self, ctx, dims):
+        text = ctx.get("chapter_text") or ctx.get("draft_json") or ""
+        body = text.split("\n", 1)[1] if text.startswith("#") and "\n" in text else text
+        flagged = []
+        for s in self.sentences(body):
+            for ph in self.editor_flags:
+                if ph in s and s not in [f[0] for f in flagged]:
+                    flagged.append((s, ph))
+        first = (self.sentences(body) or [""])[0]
+        scores = {d: 8 for d in dims}
+        findings = []
+        for i, (s, ph) in enumerate(flagged):
+            scores["subtext"] = 4 if "subtext" in scores else scores.get("subtext")
+            findings.append({"id": f"f{i + 1}", "dimension": "subtext" if "subtext" in dims else dims[0],
+                             "severity": "major", "passage": s[:200],
+                             "why": f"“{ph}” tells the reader what to think instead of showing it.",
+                             "suggestion": "Show it through what the characters do.", "keep_nearby": []})
+        scores = {k: v for k, v in scores.items() if v is not None}
+        return {"scores": scores, "findings": findings, "keep": [first[:200]] if first else [],
+                "verdict": "REVISE" if findings else "PASS"}
+
+    def _rewrite(self, ctx):
+        out = []
+        for f in ctx.get("findings") or []:
+            p = f.get("passage") or ""
+            for ph, rep in self.editor_flags.items():
+                if ph in p:
+                    out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(ph, rep)})
+                    break
+        return {"replacements": out}
 
     def _canon_ids(self, ctx):
         pov, loc = "mara-vell", "gullhaven-harbor"

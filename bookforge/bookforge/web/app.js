@@ -2206,6 +2206,7 @@ async function viewRecord(main, rid, ver) {
   if (isLatest && S.opsById[op.id] && ['DRAFT', 'VALIDATED'].includes(cur.lifecycle) && cur.record_kind === 'OUTPUT') {
     main.appendChild(recordReviewCard(cur));
   }
+  if (isLatest && ['C02', 'B01', 'B03', 'B11'].includes(op.id) && cur.record_kind === 'OUTPUT') main.appendChild(editorCard(cur));
 
   // Content
   const content = h('section', { class: 'card', 'aria-labelledby': 'content-h' }, h('h2', { id: 'content-h' }, 'Content'));
@@ -2499,6 +2500,9 @@ async function viewWrite(main, rid, mode) {
   }
   const card = h('section', { class: 'card simple-doc', 'aria-labelledby': 'sd-h' });
   main.appendChild(card);
+  // 🖋 the editor's craft notes for exactly this version (P4/P5/P6), below the text
+  const edSlot = h('div');
+  main.appendChild(edSlot);
   const back = () => h('a', { class: 'btn', href: plink('book') }, '◀ Back to Make my book');
   const approveBtn = () => waiting ? h('button', { type: 'button', class: 'primary', onclick: () => approveThis() }, '✔ Approve this version') : null;
 
@@ -2649,6 +2653,7 @@ async function viewWrite(main, rid, mode) {
   };
   const stored = loadJSON(draftKey, null);
   if (mode === 'edit' || (stored && stored.v)) await editor(); else reader();
+  edSlot.appendChild(editorCard(latest, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
 }
 
 /* ======================================================================= views: manifest */
@@ -2842,6 +2847,7 @@ async function viewSettings(main) {
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
+  main.appendChild(editorSettingsCard());
   main.appendChild(backupsCard());
   main.appendChild(helpCard());
 }
@@ -5562,19 +5568,27 @@ function reviewRow(it, { reload, msg, prog, picker }) {
     const job = await runReviewJob(() => api('POST', bpath('/review/ai'), { body: { record_ids: [it.record_id], slot_id: picker.value() } }), prog, { label: `Reviewing “${it.title}”` });
     if (job) { clear(msg).appendChild(jobSummary(job)); await reload(true); } else aiBtn.disabled = false;
   } }, '🤖 AI review');
+  const edBtn = it.editable ? h('button', { type: 'button', class: 'small', 'data-testid': 'rv-editor', onclick: async () => {
+    edBtn.disabled = true; clear(msg);
+    const job = await runReviewJob(() => api('POST', bpath('/review/editor'), { body: { record_id: it.record_id } }), prog, { label: `The editor is reading “${it.title}”` });
+    if (!job) { edBtn.disabled = false; return; }
+    if (job.status === 'error') clear(msg).appendChild(problemBox(toProblem(job.error || { code: 'FAILED' }, { step: 'Editor review' })));
+    else { const c = ((job.results || [])[0] || {}).craft; if (c) clear(msg).appendChild(stateBox(c.verdict === 'PASS' ? 'ok' : 'stale', `Editor: ${c.verdict === 'PASS' ? 'pass' : 'revise'} — ${(c.counts || {}).major || 0} major / ${(c.counts || {}).minor || 0} minor note(s)`, h('p', { class: 'small' }, h('a', { href: plink('review', 'step', it.record_id) }, 'Open it to see the notes and the editor’s fixes')))); }
+    await reload(true);
+  } }, '🖋 Editor review') : null;
   return h('li', { class: 'record-item rv-item', 'data-record': it.record_id },
     h('div', { class: 'r-main' },
       h('a', { class: 'r-title', href: simpleHref(it) }, plainText(it.title)),
       h('div', { class: 'r-meta' }, `${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
       reviewWho(it.review, it.made_by),
       details),
-    h('div', { class: 'r-badges' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review)),
+    h('div', { class: 'r-badges' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review), craftBadge(it.craft)),
     h('div', { class: 'row rv-buttons' },
       h('a', { class: 'btn small', href: plink('review', 'step', it.record_id) }, 'Open'),
       approveBtn,
       h('a', { class: 'btn small', href: simpleEditHref(it) }, '✏️ Edit'),
       h('button', { type: 'button', class: 'small', onclick: () => { RV.skipped.add(it.record_id); reload(false); } }, '⏭ Skip'),
-      aiBtn));
+      aiBtn, edBtn));
 }
 async function renderReviewStep(holder, q, startId, load) {
   clear(holder);
@@ -5649,6 +5663,7 @@ async function renderReviewStep(holder, q, startId, load) {
       aiBtn),
     h('div', { class: 'rv-ai-pick' }, picker.field), prog, msg,
     verdictBox(it.review, it, { onFix: fix, onEdit: () => go(simpleEditHref(it)) }),
+    it.editable ? editorCard(it, { onSaved: () => stay(it.record_id) }) : null,
     h('h3', null, 'What it says'), content,
     h('p', { class: 'small' }, h('a', { href: plink('rec', it.record_id) }, 'Open the full record page (history, sources, findings)'))));
   try {
@@ -5689,6 +5704,149 @@ function recordReviewCard(cur) {
   };
   draw();
   return box;
+}
+
+/* ======================================================================= 🖋 the AI editor (P4 craft review, P5 fixes, P6 patterns) */
+const ED_DIMS = { subtext: 'Subtext', character_agency: 'Characters with their own goals', voice_distinction: 'Distinct voices',
+  world_friction: 'Obstacles from the world', theme_restraint: 'Theme carried, not stated', prose_variety: 'Varied prose, no tics',
+  tension_stakes: 'Real stakes', ending_openness: 'An ending that is earned', protected_mysteries: 'Protected mysteries kept', other: 'Other' };
+const ED_MIN = { gentle: 5, normal: 6, strict: 7 };
+function craftBadge(c) {
+  if (!c) return null;
+  const pass = c.verdict === 'PASS';
+  const n = (c.counts || {});
+  return h('span', { 'data-testid': 'rv-craft' }, badge(pass ? '🖋' : '✎', `Editor: ${pass ? 'pass' : 'revise'}${typeof c.avg_score === 'number' ? ` · avg ${c.avg_score}` : ''}`,
+    pass ? 'b-ok' : 'b-warn', `${n.major || 0} major / ${n.minor || 0} minor note(s)${c.reviewer ? ` · editor ${c.reviewer}` : ''}${c.independent === false ? ` — ${NOT_INDEPENDENT}` : ''}`));
+}
+function scoreBars(c) {
+  const min = ED_MIN[c.strictness] || 6;
+  return h('div', { class: 'ed-scores', 'data-testid': 'ed-scores', role: 'list', 'aria-label': 'Editor scores from 1 to 10' },
+    Object.entries(c.scores || {}).map(([k, v]) => h('div', { class: `ed-score${v < min ? ' low' : ''}`, role: 'listitem' },
+      h('span', { class: 'ed-dim' }, ED_DIMS[k] || k),
+      h('span', { class: 'ed-bar', 'aria-hidden': 'true' }, h('span', { class: 'ed-fill', style: `width:${Math.max(0, Math.min(10, v)) * 10}%` })),
+      h('span', { class: 'ed-num' }, `${v}/10`, v < min ? h('span', { class: 'visually-hidden' }, ' (low)') : null))));
+}
+function findingItem(f) {
+  return h('li', { class: `ed-finding sev-${f.severity}`, 'data-finding': f.id },
+    h('div', { class: 'row' }, badge(f.severity === 'major' ? '⚠️' : '•', f.severity === 'major' ? 'major' : 'minor', f.severity === 'major' ? 'b-warn' : 'b-muted'),
+      h('strong', null, f.label || ED_DIMS[f.dimension] || f.dimension), tech(`#${f.id}`)),
+    f.passage ? h('blockquote', { class: 'ed-quote' }, `“${f.passage}”`, f.found === false ? h('span', { class: 'small muted' }, ' (not found word for word in the text)') : null) : null,
+    f.why ? h('p', { class: 'small' }, h('strong', null, 'Why: '), f.why) : null,
+    f.suggestion ? h('p', { class: 'small' }, h('strong', null, 'Try: '), f.suggestion) : null,
+    (f.keep_nearby || []).length ? h('p', { class: 'small muted' }, 'Keep nearby: ', f.keep_nearby.map(k => `“${k}”`).join(' · ')) : null);
+}
+function patternBox(p, open = false) {
+  if (!p) return null;
+  const s = p.summary || {};
+  const shown = (p.findings || []).filter(f => f.severity !== 'info').slice(0, 10);
+  return h('details', { class: 'ed-pattern', 'data-testid': 'ed-pattern', open },
+    h('summary', null, `🔎 Pattern check (no AI): ${s.major || 0} major · ${s.minor || 0} minor · ${p.words} words`),
+    shown.length ? h('ul', { class: 'small' }, shown.map(f => h('li', null, badge(f.severity === 'major' ? '⚠️' : '•', f.severity, f.severity === 'major' ? 'b-warn' : 'b-muted'), ' ',
+      h('strong', null, f.label), ` — ${f.detail || `${f.count}×`}`,
+      (f.passages || []).length ? h('ul', null, f.passages.slice(0, 3).map(x => h('li', { class: 'muted' }, `¶${x.paragraph}: “${x.excerpt}”`))) : null,
+      h('div', { class: 'muted' }, f.advice)))) : h('p', { class: 'small muted' }, 'No repeated tics above the thresholds.'));
+}
+function craftView(c, settings) {
+  const pass = c.verdict === 'PASS';
+  return h('div', { class: 'ed-craft', 'data-testid': 'ed-craft' },
+    h('p', { class: 'row' }, craftBadge(c), h('span', { class: 'small muted' }, `version ${c.version} · ${fmtTime(c.at)} · strictness ${c.strictness}`)),
+    h('p', { class: `small rv-who${c.independent === false ? ' not-independent' : ''}` }, `🖋 editor ${c.reviewer || c.slot_label || 'AI'}`, c.writer ? ` · written by ${c.writer}` : '',
+      c.independent === false ? [' ', h('strong', { class: 'rv-warn' }, `⚠️ ${NOT_INDEPENDENT}`)] : null),
+    !pass && (c.verdict_why || []).length ? h('p', { class: 'small' }, h('strong', null, 'Why it needs another look: '), c.verdict_why.join('; ')) : null,
+    scoreBars(c),
+    (c.findings || []).length ? [h('h3', null, `What the editor would change (${c.findings.length})`), h('ol', { class: 'ed-findings', 'data-testid': 'ed-findings' }, c.findings.map(findingItem))]
+      : h('p', { class: 'small' }, 'The editor has no notes on this version.'),
+    (c.keep || []).length ? h('div', { class: 'ed-keep' }, h('strong', null, '✔ Keep (works well): '), h('ul', { class: 'small' }, c.keep.map(k => h('li', null, k)))) : null,
+    settings && !settings.enabled ? h('p', { class: 'small muted' }, 'The editor is switched off in Settings for Make-a-book runs; you can still ask it here.') : null);
+}
+/** Chapter page / review step: the editor's scores and notes for exactly this version, and its fixes. */
+function editorCard(cur, { onSaved } = {}) {
+  const box = h('section', { class: 'card ed-card', 'aria-labelledby': `ed-h-${cur.record_id}`, 'data-testid': 'editor-card' },
+    h('h2', { id: `ed-h-${cur.record_id}` }, '🖋 Editor'));
+  const body = h('div', null, loadingState('Looking for the editor’s notes…'));
+  const prog = h('div', { 'aria-live': 'polite' });
+  const msg = h('div', { 'aria-live': 'polite' });
+  put(box, body, prog, msg);
+  const draw = async () => {
+    let info;
+    try { info = await api('GET', bpath(`/review/editor/${encodeURIComponent(cur.record_id)}`)); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Editor' }), { retry: draw })); return; }
+    clear(body);
+    const latest = info.latest_version;
+    const c = (info.craft || {})[String(latest)];
+    const startReview = async ev => {
+      if (ev && ev.currentTarget) ev.currentTarget.disabled = true;
+      clear(msg);
+      const job = await runReviewJob(() => api('POST', bpath('/review/editor'), { body: { record_id: cur.record_id } }), prog, { label: 'The editor is reading' });
+      if (!job) return;
+      if (job.status === 'error') clear(msg).appendChild(problemBox(toProblem(job.error || { code: 'FAILED', message: 'The editor review did not finish' }, { book: S.project.name, step: 'Editor review' }), { retry: startReview }));
+      draw();
+    };
+    const getFixes = async ev => {
+      if (ev && ev.currentTarget) ev.currentTarget.disabled = true;
+      clear(msg);
+      const job = await runReviewJob(() => api('POST', bpath('/review/editor/fix'), { body: { record_id: cur.record_id } }), prog, { label: 'The writer is reworking the flagged passages' });
+      if (!job) return;
+      if (job.status === 'error') clear(msg).appendChild(problemBox(toProblem(job.error || { code: 'FAILED', message: 'The writer could not rework the passages' }, { book: S.project.name, step: 'Editor’s fixes' }), { retry: getFixes }));
+      draw();
+    };
+    if (info.rewrite) body.appendChild(h('p', { class: 'notice small', 'data-testid': 'ed-made-from' }, `✍ Made from version ${info.rewrite.from_version} with the editor’s fixes (${(info.rewrite.applied || []).length} passage(s) rewritten${(info.rewrite.unresolved || []).length ? `, ${(info.rewrite.unresolved || []).length} not` : ''}).`));
+    if (c) body.appendChild(craftView(c, info.settings));
+    else {
+      const older = Object.keys(info.craft || {}).map(Number).filter(v => v < latest).sort((a, b) => b - a)[0];
+      body.appendChild(h('p', { class: 'small' }, info.editable
+        ? 'A second reader for craft, not only consistency: subtext, characters with their own goals, distinct voices, obstacles from the world, theme, repeated tics, stakes and the ending. Each note quotes the exact passage. It is advice — you decide.'
+        : 'The editor reads chapters, the premise, the main plot and the chapter outline.'));
+      if (older) body.appendChild(h('p', { class: 'small muted' }, `The editor read version ${older}; this is version ${latest}.`));
+    }
+    body.appendChild(patternBox(info.pattern));
+    const prop = info.proposal;
+    if (prop && c) body.appendChild(fixesBox(prop, info, msg, () => draw(), onSaved));
+    if (info.editable) {
+      body.appendChild(h('div', { class: 'row' },
+        h('button', { type: 'button', class: c ? '' : 'primary', 'data-testid': 'ed-review', onclick: startReview }, c ? '🔁 Editor review again' : '🖋 Editor review'),
+        info.fixable && c && (c.findings || []).length && !prop ? h('button', { type: 'button', class: 'primary', 'data-testid': 'ed-fix', onclick: getFixes }, '✍ Apply editor’s fixes') : null,
+        info.fixable && c && prop ? h('button', { type: 'button', class: 'small', onclick: getFixes }, '🔁 Ask the writer again') : null));
+    }
+  };
+  draw();
+  return box;
+}
+/** The writer's replacements, before → after per passage; the author ticks the ones to use. */
+function fixesBox(prop, info, msg, redraw, onSaved) {
+  const ok = (prop.items || []).filter(i => i.ok);
+  const bad = (prop.items || []).filter(i => !i.ok);
+  const boxes = {};
+  const save = h('button', { type: 'button', class: 'primary', 'data-testid': 'ed-apply', disabled: !ok.length }, `💾 Save the chosen changes as a new version`);
+  const sec = h('section', { class: 'ed-fixes', 'data-testid': 'ed-fixes', 'aria-label': 'The editor’s fixes' },
+    h('h3', null, `✍ The editor’s fixes (by ${prop.writer || prop.slot_label || 'the writer'})`),
+    h('p', { class: 'small muted' }, 'Only the flagged passages change. Untick a change you do not want. Saving makes a new version for you to approve; nothing else in the chapter changes.'),
+    ok.length ? h('ol', { class: 'ed-diffs' }, ok.map(i => {
+      const id = uid('edfx');
+      boxes[i.finding_id] = h('input', { type: 'checkbox', id, checked: true, 'data-finding': i.finding_id });
+      return h('li', { class: 'ed-diff' },
+        h('div', { class: 'check-row' }, boxes[i.finding_id], h('label', { for: id }, h('strong', null, `Use this change`), ` — ${ED_DIMS[i.dimension] || i.dimension || ''}${i.why ? `: ${i.why}` : ''}`)),
+        h('div', { class: 'ed-before' }, h('span', { class: 'ed-tag' }, 'Before'), h('del', null, i.original)),
+        h('div', { class: 'ed-after' }, h('span', { class: 'ed-tag' }, 'After'), h('ins', null, i.replacement)));
+    })) : null,
+    bad.length ? h('div', { class: 'words-warn', role: 'note', 'data-testid': 'ed-unresolved' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
+      h('strong', null, `${bad.length} note(s) could not be fixed word for word, so nothing was guessed there:`),
+      h('ul', { class: 'small' }, bad.map(i => h('li', null, `${ED_DIMS[i.dimension] || 'Note'}${i.passage ? ` (“${i.passage.slice(0, 80)}”)` : ''}: ${i.message || i.reason}`)))) : null,
+    h('div', { class: 'row' }, save));
+  save.addEventListener('click', async () => {
+    const accept = Object.entries(boxes).filter(([, b]) => b.checked).map(([k]) => k);
+    if (!accept.length) { clear(msg).appendChild(stateBox('failed', 'No change is ticked', h('p', null, 'Tick at least one change, or leave the chapter as it is.'))); return; }
+    save.disabled = true; clear(msg).appendChild(loadingState('Saving the new version…'));
+    try {
+      const out = await api('POST', bpath('/review/editor/apply'), { body: { record_id: info.record_id, version: info.latest_version, accept } });
+      clear(msg).appendChild(stateBox('ok', out.message, (out.keep_lost || []).length ? h('p', { class: 'words-warn' }, `⚠️ ${out.keep_lost.length} passage(s) the editor said to keep are gone.`) : null));
+      toast(`Saved as version ${out.version}`);
+      S.details[info.record_id] = null;
+      try { await refreshRecords(); } catch { /* best effort */ }
+      if (onSaved) onSaved(out); else redraw();
+    } catch (e) { clear(msg).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Editor’s fixes' }), {})); save.disabled = false; }
+  });
+  return sec;
 }
 
 /* ======================================================================= one-button pairing (#/pair) */
@@ -6302,7 +6460,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, (s.items || []).map(i => i.state)]), (r.files || []).length, r.ais, r.review_summary]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor])]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -6326,8 +6484,13 @@ function renderRun() {
             settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
+        s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
-          h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null))) : null));
+          h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
+          i.editor ? h('span', { class: `small mb-ed${i.editor.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-editor' },
+            i.editor.flagged ? ' · ⚠️ editor still had notes' : ` · 🖋 editor: ${String(i.editor.verdict || '').toLowerCase()}`,
+            i.editor.rounds ? ` (${i.editor.rounds} rewrite round${i.editor.rounds === 1 ? '' : 's'})` : '',
+            typeof i.editor.avg === 'number' ? ` · avg ${i.editor.avg}` : '') : null))) : null));
     ol.appendChild(li);
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
@@ -6373,10 +6536,25 @@ function renderRun() {
     doneBox.appendChild(h('p', { class: rs.same_ai ? 'words-warn' : 'small', 'data-testid': 'mb-review-summary' }, rs.same_ai ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🧐 ',
       `AI reviews: ${rs.independent || 0} by a different AI than the writer` + (rs.same_ai ? `, ${rs.same_ai} by the same AI. ${NOT_INDEPENDENT}.` : '.')));
   }
+  const edBox = editorRunSummary(r);
+  if (doneBox && edBox) doneBox.appendChild(edBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, msg, ol, ctl, consent,
+  mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, doneBox ? null : edBox, msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
+}
+
+/** Run window: what the editor did in this run; ⚠️ chapters it still had notes on (approved under the run consent). */
+function editorRunSummary(r) {
+  const es = r.editor_summary;
+  if (!es || !es.reviewed) return null;
+  const fl = es.flagged || [];
+  return h('div', { class: fl.length ? 'words-warn' : 'small', 'data-testid': 'mb-editor-summary' },
+    h('p', null, fl.length ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🖋 ',
+      `Editor: ${es.reviewed} chapter(s) read, ${es.passed} passed, ${es.rounds} rewrite round(s), ${es.kept} rewrite(s) kept, ${es.rejected} not kept.`),
+    fl.length ? [h('p', null, h('strong', null, 'The editor still had notes on: '), 'these chapters were approved under your run consent anyway (the book was not held up). Open each one to read the notes and use 🖋 Editor / ✍ Apply editor’s fixes if you like.'),
+      h('ul', { class: 'small' }, fl.map(f => h('li', null, h('strong', null, f.label || f.chapter_id), f.reason ? ` — ${f.reason}` : '',
+        (f.notes || []).length ? h('ul', null, f.notes.slice(0, 4).map(n => h('li', null, `${n.severity === 'major' ? '⚠️ ' : ''}${n.label || ''}${n.passage ? ` (“${n.passage}”)` : ''}${n.why ? `: ${n.why}` : ''}`))) : null)))] : null);
 }
 
 /* ======================================================================= ✍ Write all chapters (S2) */
@@ -6518,7 +6696,7 @@ async function loadJobs() {
 }
 
 /* ======================================================================= 📜 book journal (R11) */
-const JR_ICON = { ai: '🤖', ai_review: '🧐', ai_fix: '🛠', approval: '✅', problem: '⚠️', retry: '⏳', pause: '⏸', resume: '▶', backup: '💾', export: '📦', run: '⚡', step: '•', setting: '⚙️', import: '📥', cancel: '✖', note: 'ℹ' };
+const JR_ICON = { ai: '🤖', ai_review: '🧐', ai_fix: '🛠', editor: '🖋', approval: '✅', problem: '⚠️', retry: '⏳', pause: '⏸', resume: '▶', backup: '💾', export: '📦', run: '⚡', step: '•', setting: '⚙️', import: '📥', cancel: '✖', note: 'ℹ' };
 const APPROVAL_LABEL = { author: 'by you', standing_auto_approve: 'auto-approve (your setting)', run_consent: 'Make-a-book consent', workflow_test: 'workflow test' };
 async function viewJournal(main) {
   const q = new URLSearchParams((location.hash.split('?')[1]) || '');
@@ -6691,6 +6869,33 @@ function reviewerCard() {
     put(box, h('div', { class: 'field' }, h('label', { for: 'rva-slot' }, 'Reviewer AI'), sel,
       h('span', { class: 'hint', id: 'rva-hint' }, 'A chosen AI is used only when it did not write the draft and works right now; otherwise BookForge picks another one automatically.')),
     h('div', { class: 'row' }, save));
+  })();
+  return card;
+}
+/** Settings › Editor (P4/P5): on/off, rewrite rounds 0-3, strictness. */
+function editorSettingsCard() {
+  const box = h('div');
+  const card = h('section', { class: 'card', 'aria-labelledby': 'eds-h', 'data-testid': 'editor-settings' }, h('h2', { id: 'eds-h' }, '🖋 Editor'),
+    h('p', { class: 'small' }, 'After the AI reviewer checked that a chapter fits the plan, a second AI — never the one that wrote it, when another AI works — reads it like an editor: subtext, characters with their own goals, distinct voices, obstacles from the world, theme, repeated tics (counted by BookForge without AI), stakes and the ending. In ⚡ Make a book for me the writer then reworks only the flagged passages; a rewrite is kept only when nothing got worse. The editor never holds up the book: when its rounds are used up, the chapter is approved under your run consent and marked ⚠️.'), box);
+  (async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/editor'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Editor' }))); return; }
+    const on = h('input', { type: 'checkbox', id: 'eds-on', checked: !!cur.enabled });
+    const rounds = h('select', { id: 'eds-rounds', 'aria-describedby': 'eds-r-h' }, [0, 1, 2, 3].map(n => h('option', { value: String(n) }, n === 0 ? '0 — notes only, no rewrites' : `${n} round${n === 1 ? '' : 's'}${n === 2 ? ' (default)' : ''}`)));
+    rounds.value = String(cur.rounds);
+    const strict = h('select', { id: 'eds-strict', 'aria-describedby': 'eds-s-h' }, Object.entries(cur.strictness_choices || { gentle: '', normal: '', strict: '' }).map(([k, about]) => h('option', { value: k }, `${k[0].toUpperCase()}${k.slice(1)}${k === 'normal' ? ' (default)' : ''} — ${about}`)));
+    strict.value = cur.strictness;
+    const out = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'eds-save', onclick: async () => {
+      clearFieldProblems(card); clear(out);
+      try { await api('PUT', '/settings/editor', { body: { enabled: on.checked, rounds: parseInt(rounds.value, 10), strictness: strict.value } }); toast('Saved'); }
+      catch (e) { const rest = showFieldErrors(e, { enabled: on, rounds, strictness: strict }, { step: 'Settings › Editor' }); if (rest.length) out.appendChild(problemBox(e)); }
+    } }, 'Save');
+    put(box, h('div', { class: 'check-row field' }, on, h('label', { for: 'eds-on' }, h('strong', null, 'Editor on'), ' (in Make a book for me; the 🖋 Editor review button always works)')),
+      h('div', { class: 'grid-2' },
+        h('div', { class: 'field' }, h('label', { for: 'eds-rounds' }, 'Editor rounds per chapter'), rounds, h('span', { class: 'hint', id: 'eds-r-h' }, 'How many times the writer may rework the editor’s notes in a run.')),
+        h('div', { class: 'field' }, h('label', { for: 'eds-strict' }, 'Strictness'), strict, h('span', { class: 'hint', id: 'eds-s-h' }, 'When the editor’s scores and notes count as “revise”.'))),
+      h('div', { class: 'row' }, save), out);
   })();
   return card;
 }

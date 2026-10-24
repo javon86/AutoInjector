@@ -316,6 +316,15 @@ class ReviewService:
         self.on_change = on_change
         self._lock = threading.RLock()
         self._jobs: dict[str, ReviewJob] = {}
+        self._editor = None
+
+    @property
+    def editor(self):
+        """The AI editor (craft review and targeted rewrites, editor.py) working with this service's AIs."""
+        if self._editor is None:
+            from .editor import EditorService  # noqa: PLC0415
+            self._editor = EditorService(self)
+        return self._editor
 
     # ------------------------------------------------------------------ helpers
     def _changed(self):
@@ -339,6 +348,12 @@ class ReviewService:
         """Who wrote exactly this revision: {kind: ai|ai_fix|you|auto, label, slot}. ``slot`` is the AI slot when
         an AI wrote it (from the AI-fix note, the provenance of the AI call, or the Bible Builder writer note)."""
         fix = fixes.get(_rkey(rec["record_id"], rec["version"]))
+        if fix and fix.get("restored_from"):
+            return {"kind": "ai", "label": f"{self.slot_label(fix.get('slot')) or 'AI'} (version {fix['restored_from']} "
+                    "again — the editor's rewrite was not kept)", "slot": fix.get("slot")}
+        if fix and fix.get("editor"):
+            return {"kind": "ai_fix", "label": f"Editor's fixes, written by {self.slot_label(fix.get('slot')) or 'AI'}",
+                    "slot": fix.get("slot")}
         if fix:
             return {"kind": "ai_fix", "label": f"AI fix by {self.slot_label(fix.get('slot')) or 'AI'} (you asked for it)",
                     "slot": fix.get("slot")}
@@ -468,8 +483,11 @@ class ReviewService:
         if not hist:
             raise BookforgeError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
         out = {str(r["version"]): rv[_rkey(rid, r["version"])] for r in hist if _rkey(rid, r["version"]) in rv}
+        cr = self.editor.crafts(pid, branch)
+        craft = {str(r["version"]): cr[_rkey(rid, r["version"])] for r in hist if _rkey(rid, r["version"]) in cr}
         q = {i["record_id"] for i in self.queue(principal, pid, branch)["items"]}
-        return {"record_id": rid, "reviews": out, "in_queue": rid in q, "latest_version": hist[-1]["version"]}
+        return {"record_id": rid, "reviews": out, "craft": craft, "in_queue": rid in q,
+                "latest_version": hist[-1]["version"]}
 
     # ------------------------------------------------------------------ queue
     def queue(self, principal, pid, branch, *, status: dict | None = None) -> dict:
@@ -521,6 +539,7 @@ class ReviewService:
                 if key not in newest_chapter or (r.get("created_at") or "") >= newest_chapter[key][0]:
                     newest_chapter[key] = (r.get("created_at") or "", r["record_id"])
         reviews, fixes = self.reviews(pid, branch), self.fixes(pid, branch)
+        crafts = self.editor.crafts(pid, branch)
         writers = self.store.get_setting(f"ai_writers:{pid}:{branch}") or {}
         items = []
         for r in recs:
@@ -556,6 +575,8 @@ class ReviewService:
                 "lifecycle": r["lifecycle"], "created_at": r.get("created_at"),
                 "approved_version": r.get("approved_version"), "made_by": self.made_by(pid, branch, r, fixes, writers),
                 "review": rv, "in_book_path": in_path, "ref": r["ref"],
+                "craft": self.editor.summary(crafts.get(_rkey(r["record_id"], r["version"]))),
+                "editable": r["module_id"] in ("C02", "B01", "B03", "B11"),
                 "_order": (PROCESS.index(group_set) if group_set in PROCESS else len(PROCESS),
                            order.index(r["module_id"]) if r["module_id"] in order else 99, r.get("created_at") or "",
                            r["record_id"])})
@@ -669,6 +690,99 @@ class ReviewService:
         slot = self.assist._check_slot(body.get("slot_id"))
         return self._start(ReviewJob("fix", principal, pid, branch, [rid], slot), self._run_fix)
 
+    # ------------------------------------------------------------------ 🖋 the AI editor (editor.py, P4/P5)
+    def start_editor(self, principal, pid, branch, body) -> dict:
+        """🖋 Editor review: craft review of one draft (chapter, premise, main plot or outline) -> 202 job."""
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        rid = body.get("record_id")
+        if not isinstance(rid, str) or not rid:
+            raise BookforgeError("MISSING_INPUT", "/record_id", "which draft should the editor read?", status="REJECTED")
+        rec = self._head(pid, branch, rid)
+        if rec is None:
+            raise BookforgeError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
+        if rec["module_id"] not in ("C02", "B01", "B03", "B11"):
+            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
+                                 "and chapter outline", status="REJECTED")
+        slot = self.assist._check_slot(body.get("slot_id"))
+        return self._start(ReviewJob("editor", principal, pid, branch, [rid], slot), self._run_editor)
+
+    def start_editor_fix(self, principal, pid, branch, body) -> dict:
+        """✍ Get the editor's fixes: the writer AI proposes replacements for the flagged passages -> 202 job. Nothing
+        changes in the book until the author applies the ones they accept."""
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        rid = body.get("record_id")
+        if not isinstance(rid, str) or not rid:
+            raise BookforgeError("MISSING_INPUT", "/record_id", "which chapter should be fixed?", status="REJECTED")
+        fids = body.get("finding_ids")
+        if fids is not None and (not isinstance(fids, list) or not all(isinstance(x, str) for x in fids)):
+            raise BookforgeError("INVALID_INPUT", "/finding_ids", "finding_ids: a list of the editor's note ids",
+                                 status="REJECTED")
+        rec = self._head(pid, branch, rid)
+        if rec is None:
+            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
+        if rec["module_id"] != "C02":
+            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor's fixes can be applied to chapters only",
+                                 status="REJECTED")
+        if not self.editor.crafts(pid, branch).get(_rkey(rid, rec["version"])):
+            raise BookforgeError("INVALID_INPUT", "/record_id", "ask the editor to review this version first "
+                                 "(🖋 Editor review)", status="REJECTED")
+        slot = self.assist._check_slot(body.get("slot_id"))
+        job = ReviewJob("editor_fix", principal, pid, branch, [rid], slot)
+        job.finding_ids = fids
+        return self._start(job, self._run_editor_fix)
+
+    def apply_editor_fix(self, principal, pid, branch, body) -> dict:
+        """Apply the fixes the author accepted (exact text replacement) -> a new DRAFT version of the chapter."""
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        rid = body.get("record_id")
+        if not isinstance(rid, str) or not rid:
+            raise BookforgeError("MISSING_INPUT", "/record_id", "which chapter?", status="REJECTED")
+        out = self.editor.apply(principal, pid, branch, rid, body.get("version"), body.get("accept"))
+        self._changed()
+        return out
+
+    def editor_info(self, principal, pid, branch, rid) -> dict:
+        """Everything the chapter page shows about the editor for this record: craft reviews per version, the
+        stored fixes for the newest version, the pattern report (P6) of the newest version and the settings."""
+        self._access(principal, pid, branch)
+        hist = self.store.history(pid, branch, rid)
+        if not hist:
+            raise BookforgeError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
+        ed = self.editor
+        head = hist[-1]
+        cr, props, rw = ed.crafts(pid, branch), ed.proposals(pid, branch), ed.rewrites(pid, branch)
+        try:
+            pattern = ed.pattern(pid, branch, head)
+        except Exception:  # noqa: BLE001 - the counts are a hint; never break the page
+            log.exception("pattern check failed for %s", rid)
+            pattern = None
+        return {"record_id": rid, "module_id": head["module_id"], "latest_version": head["version"],
+                "editable": head["module_id"] in ("C02", "B01", "B03", "B11"),
+                "fixable": head["module_id"] == "C02",
+                "craft": {str(r["version"]): cr[_rkey(rid, r["version"])] for r in hist if _rkey(rid, r["version"]) in cr},
+                "proposal": props.get(_rkey(rid, head["version"])),
+                "rewrite": rw.get(_rkey(rid, head["version"])), "pattern": pattern, "settings": ed.settings()}
+
+    def _run_editor(self, job: ReviewJob):
+        rid = job.record_ids[0]
+        job.current = rid
+        craft = self.editor.craft_one(job, rid)
+        job.results.append({"record_id": rid, "ok": True, "version": craft["version"], "craft": craft})
+        job.done = 1
+
+    def _run_editor_fix(self, job: ReviewJob):
+        rid = job.record_ids[0]
+        job.current = rid
+        prop = self.editor.propose(job, rid, finding_ids=getattr(job, "finding_ids", None))
+        job.results.append({"record_id": rid, "ok": True, "version": prop["version"], "proposal": prop,
+                            "message": f"The writer suggested {prop['applied']} change(s)"
+                                       + (f"; {prop['unresolved']} note(s) could not be fixed word for word"
+                                          if prop["unresolved"] else "") + ". Choose which to use."})
+        job.done = 1
+
     def _persist(self, job: ReviewJob):
         done = {r.get("record_id") for r in job.results if r.get("ok")}
         left = [r for r in job.record_ids if r not in done]
@@ -779,7 +893,7 @@ class ReviewService:
         return {"verdict": raw["verdict"], "reasons": strings(raw.get("reasons")),
                 "suggested_changes": strings(raw.get("suggested_changes")), "confidence": conf}
 
-    def review_one(self, job: ReviewJob, rid: str) -> dict:
+    def review_one(self, job: ReviewJob, rid: str, *, auto: bool = True) -> dict:
         pid, branch = job.project_id, job.branch_id
         rec = self._head(pid, branch, rid)
         if rec is None:
@@ -816,7 +930,8 @@ class ReviewService:
                                                                "writer_slot": writer.get("slot"),
                                                                "independent": not same})
         out = {"record_id": rid, "version": rec["version"], "ok": True, "review": stored, "auto_approved": False}
-        auto = self.maybe_auto_approve(job.principal, pid, branch, rec, stored)
+        # ``auto=False``: a Make-a-book run sends this draft to the editor first and approves it itself afterwards.
+        auto = self.maybe_auto_approve(job.principal, pid, branch, rec, stored) if auto else None
         if auto is not None:
             out["auto_approved"] = bool(auto.get("ok"))
             out["auto_approve"] = auto
