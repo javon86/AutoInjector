@@ -129,20 +129,32 @@ async function main() {
       () => { const b = document.getElementById('activity-log'); return !!(b && /ui-click/.test(b.textContent) && /extract/i.test(b.textContent)); },
       { timeout: 6000 }).then(() => true).catch(() => false);
     assert(loggedClick, 'clicking a button writes a ui-click line into the Activity Log');
+    // P16: the click opened the Extract dialog (nothing saved yet) — Cancel it.
+    const dialogOpen = await controls.waitForFunction(
+      () => { const m = document.getElementById('extract-modal'); const c = document.getElementById('ex-counts'); return !!(m && m.classList.contains('on') && c && /Will save:/.test(c.textContent)); },
+      { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(dialogOpen, 'Extract All opens the Extract dialog with a preview (counts) first');
+    assert(await controls.evaluate(() => !document.getElementById('ex-scope-all').checked), 'the dialog never defaults to Everything');
+    await shot(controls, 'extract-dialog');
+    await controls.click('#btn-extract-cancel');
 
     console.log('\n== ⤓ Extract All writes the conversation + activity log to a text file ==');
     await controls.click('#btn-extract-all');
+    await controls.waitForFunction(() => { const c = document.getElementById('ex-counts'); return !!(c && /Will save:/.test(c.textContent)); }, { timeout: 6000 }).catch(() => {});
+    await controls.click('#btn-extract-save'); // the safe default (no BookForge book here: the last 24 hours)
     const wroteLog = await controls.waitForFunction(
       () => { const s = document.getElementById('extract-status'); return !!(s && /Saved/.test(s.textContent)); },
       { timeout: 8000 }).then(() => true).catch(() => false);
     assert(wroteLog, 'clicking Extract All reports the saved file in the status line');
     if (outRoot) {
       const logsDir = pathMod.join(outRoot, 'logs');
-      const files = fs.existsSync(logsDir) ? fs.readdirSync(logsDir).filter((f) => f.endsWith('.txt')) : [];
-      assert(files.length >= 1, `a .txt extract was written into output/logs (${files.length})`);
+      const files = fs.existsSync(logsDir) ? fs.readdirSync(logsDir).filter((f) => /^AutoInjector log - last 24 h - .*\.txt$/.test(f)) : [];
+      assert(files.length >= 1, `a .txt extract named by its scope was written into output/logs (${files.length})`);
       if (files.length) {
-        const body = fs.readFileSync(pathMod.join(logsDir, files[0]), 'utf8');
+        const newest = files.map((f) => pathMod.join(logsDir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+        const body = fs.readFileSync(newest, 'utf8');
         assert(/AI CONVERSATION/.test(body) && /ACTIVITY \/ TROUBLESHOOTING/.test(body), 'the extract file contains BOTH the conversation and the activity/error sections');
+        assert(/WHAT IS IN THIS FILE/.test(body) && /Scope: +Time range/.test(body), 'its header states the scope');
       }
     }
     await shot(controls, 'control-panel-extracted');

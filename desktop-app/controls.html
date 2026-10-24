@@ -233,6 +233,29 @@
     #cap-modal .foot { display:flex; align-items:center; gap:10px; margin-top:14px; }
     #cap-modal .foot .spacer { flex:1; }
 
+    /* ---- P16: Extract dialog — choose what goes in the file, preview, Save/Cancel. ---- */
+    #extract-modal { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; padding:14px; }
+    #extract-modal.on { display:flex; }
+    #extract-modal .sheet { background:#12161c; border:1px solid #2c3440; border-radius:12px; max-width:640px; width:100%; max-height:92vh; overflow:auto; padding:14px 16px; font-size:12.5px; }
+    #extract-modal h3 { margin:0 0 3px; font-size:15px; }
+    #extract-modal .sub { opacity:.72; font-size:12px; margin:0 0 10px; }
+    .ex-scope { display:block; border:1px solid #232a33; background:#0e1216; border-radius:9px; padding:8px 10px; margin:0 0 7px; cursor:pointer; }
+    .ex-scope.sel { border-color:#4a7de0; background:#101a2a; }
+    .ex-scope.disabled { opacity:.5; cursor:not-allowed; }
+    .ex-scope .t { font-weight:600; }
+    .ex-scope .why { display:block; opacity:.72; font-size:11.5px; margin:2px 0 0 22px; }
+    .ex-scope .opts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0 0 22px; }
+    .ex-scope .opts select, .ex-scope .opts input { font-size:12px; max-width:100%; min-width:0; }
+    .ex-warn { display:block; color:#ffb4b4; font-size:11.5px; margin:3px 0 0 22px; }
+    .ex-scope.sel .ex-warn { color:#ff8a8f; font-weight:600; }
+    #ex-include { display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 8px; }
+    #ex-counts { font-size:12px; margin:4px 0 6px; }
+    #ex-counts b { color:#e6edf5; }
+    #ex-preview { background:#0a0d11; border:1px solid #232a33; border-radius:8px; padding:8px 9px; font-size:11px; line-height:1.35; max-height:210px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
+    #extract-modal .foot { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    #extract-modal .foot .spacer { flex:1; }
+    #ex-file { opacity:.7; font-size:11px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+
     /* ---- Butler chat/activity log: system vs butler vs each AI vs to-ME. A
        message addressed to ME is its own colour AND 2× the size (defaults —
        tweak freely). ---- */
@@ -911,7 +934,7 @@
           <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
           <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
           <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
-          <button id="btn-extract-all" title="Extract the whole conversation AND all activity/errors to one text file in the program's logs folder" aria-label="Extract all: save the conversation and the activity/error log to a text file">⤓ Extract All</button>
+          <button id="btn-extract-all" title="Save the AI conversation and the activity/error log to a text file in the program's logs folder — you choose what goes in (this BookForge book only, a time range, or everything) and see a preview first" aria-label="Extract: choose what to save (this book only, a time range, or everything) and save it to a text file">⤓ Extract All</button>
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
         </div>
@@ -1538,6 +1561,53 @@
         <span style="opacity:.7; font-size:11.5px;">Full detail is in the Activity Log at the bottom.</span>
         <span class="spacer"></span>
         <button id="btn-cap-modal-close" class="primary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- P16: Extract — choose what goes into the file (safe default), preview it, then Save. -->
+  <div id="extract-modal" role="dialog" aria-modal="true" aria-labelledby="extract-modal-title">
+    <div class="sheet">
+      <h3 id="extract-modal-title">⤓ Extract a log</h3>
+      <p class="sub">Choose what goes into the file. It is saved in the program's logs folder — nothing is sent anywhere.</p>
+      <div id="ex-scopes" role="radiogroup" aria-label="What to include">
+        <label class="ex-scope" id="ex-scope-book-row">
+          <input type="radio" name="ex-scope" value="book" id="ex-scope-book"> <span class="t">📖 This BookForge book only</span>
+          <span class="why" id="ex-book-why">Only the AIs' replies to BookForge's requests for this book, and the activity of those requests. Your other conversations are left out.</span>
+          <span class="opts"><select id="ex-book" aria-label="Which book"></select></span>
+        </label>
+        <label class="ex-scope" id="ex-scope-time-row">
+          <input type="radio" name="ex-scope" value="time" id="ex-scope-time"> <span class="t">🕒 Time range</span>
+          <span class="why">Everything that happened between two times.</span>
+          <span class="opts">
+            <select id="ex-preset" aria-label="Time range">
+              <option value="hour">Last hour</option>
+              <option value="today">Today</option>
+              <option value="day" selected>Last 24 hours</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <span id="ex-custom" hidden>
+              <input type="datetime-local" id="ex-from" aria-label="From"> → <input type="datetime-local" id="ex-to" aria-label="To">
+            </span>
+          </span>
+        </label>
+        <label class="ex-scope" id="ex-scope-all-row">
+          <input type="radio" name="ex-scope" value="everything" id="ex-scope-all"> <span class="t">🗂 Everything</span>
+          <span class="ex-warn">⚠ Includes all conversations, including older private ones.</span>
+        </label>
+      </div>
+      <div id="ex-include" aria-label="Sections">
+        <label><input type="checkbox" id="ex-inc-conv" checked> AI conversation text</label>
+        <label><input type="checkbox" id="ex-inc-act" checked> Activity log</label>
+        <label><input type="checkbox" id="ex-inc-relay" checked> Relay trace</label>
+      </div>
+      <div id="ex-counts" aria-live="polite">Loading preview…</div>
+      <pre id="ex-preview" aria-label="Preview of the first lines"></pre>
+      <div class="foot">
+        <span id="ex-file"></span>
+        <span class="spacer"></span>
+        <button id="btn-extract-cancel">Cancel</button>
+        <button id="btn-extract-save" class="primary">⤓ Save</button>
       </div>
     </div>
   </div>

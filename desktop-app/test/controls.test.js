@@ -62,7 +62,10 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     runTuner: async () => { calls.push({ fn: "runTuner" }); return tunerRunResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
     clearTranscript: noop, togglePin: noop, reloadSite: noop,
-    extractAllLogs: async () => { calls.push({ fn: "extractAllLogs" }); return { ok: true, file: "/tmp/AutoInjector/output/logs/autoinjector-extract-x.txt", messages: 3, logEntries: 5 }; },
+    extractAllLogs: async (opts) => { calls.push({ fn: "extractAllLogs", opts }); return { ok: true, file: "/tmp/AutoInjector/output/logs/My Book - AutoInjector log - x.txt", messages: 3, logEntries: 5, scope: (opts && opts.scope) || "book", book: { id: "p1", title: "My Book" } }; },
+    // P16: the Extract dialog's options + preview.
+    extractOptions: async () => { calls.push({ fn: "extractOptions" }); return calls._exOptions || { ok: true, connected: true, books: [{ id: "p1", title: "My Book", requests: 4, lastAt: Date.now(), current: true }, { id: "p0", title: "Older Book", requests: 2, lastAt: Date.now() - 86400000, current: false }], default: { scope: "book", bookId: "p1", include: { conversation: true, activity: true, relay: true } }, totals: { messages: 50, events: 300 } }; },
+    extractPreview: async (opts) => { calls.push({ fn: "extractPreview", opts }); return { ok: true, scope: opts.scope, counts: { messages: opts.scope === "everything" ? 50 : 3, events: 5, relayMessages: 4 }, redactions: 1, fileName: "My Book - AutoInjector log - x.txt", preview: "AutoInjector — Extract (this BookForge book only)\nWHAT IS IN THIS FILE" }; },
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -1754,16 +1757,65 @@ async function testCapabilityPanelsWired() {
 }
 
 async function testExtractAllButton() {
-  console.log("\n== Extract All: the Activity/Troubleshooting panel has a button that saves everything to a file ==");
+  console.log("\n== P16: ⤓ Extract All opens a dialog (book only by default), previews, and saves only on Save ==");
   const api = makeApi();
   const dom = await loadWindow(api);
-  const btn = dom.window.document.getElementById("btn-extract-all");
+  const doc = dom.window.document;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const btn = doc.getElementById("btn-extract-all");
   assert(btn, "the '⤓ Extract All' button is present in the Activity / Troubleshooting header");
   click(dom, "btn-extract-all");
-  await new Promise((r) => setTimeout(r, 20));
-  assert(api.calls.some((c) => c.fn === "extractAllLogs"), "clicking Extract All calls extractAllLogs (dumps conversation + errors)");
-  const status = dom.window.document.getElementById("extract-status");
+  await wait(40);
+  const modal = doc.getElementById("extract-modal");
+  assert(modal && modal.classList.contains("on"), "clicking it opens the Extract dialog");
+  assert(!api.calls.some((c) => c.fn === "extractAllLogs"), "nothing is saved just by opening the dialog");
+  assert(doc.getElementById("ex-scope-book").checked && doc.getElementById("ex-book").value === "p1", "default: 'This BookForge book only', the current book");
+  assert(doc.getElementById("ex-book").options.length === 2 && /My Book \(current\) — 4 requests/.test(doc.getElementById("ex-book").options[0].textContent), "the book picker lists the known books with request counts");
+  assert(doc.getElementById("ex-inc-conv").checked && doc.getElementById("ex-inc-act").checked && doc.getElementById("ex-inc-relay").checked, "conversation text, activity log and relay trace are on by default");
+  assert(/Includes all conversations, including older private ones/.test(doc.getElementById("ex-scope-all-row").textContent), "Everything carries the private-conversations warning");
+  assert(/Will save: 3 AI messages · 5 activity events/.test(doc.getElementById("ex-counts").textContent), `the preview shows the counts (${doc.getElementById("ex-counts").textContent})`);
+  assert(/WHAT IS IN THIS FILE/.test(doc.getElementById("ex-preview").textContent) && /My Book - AutoInjector log/.test(doc.getElementById("ex-file").textContent), "and the first lines + the file name");
+  const pv = api.calls.filter((c) => c.fn === "extractPreview").pop();
+  assert(pv && pv.opts.scope === "book" && pv.opts.bookId === "p1", "the preview asked for the book scope");
+
+  // Switch to Everything -> a new preview; then Cancel saves nothing.
+  const all = doc.getElementById("ex-scope-all");
+  all.checked = true; all.dispatchEvent(new dom.window.Event("change"));
+  await wait(200);
+  assert(doc.getElementById("ex-scope-all-row").classList.contains("sel") && /50 AI messages/.test(doc.getElementById("ex-counts").textContent), "choosing Everything re-previews it");
+  click(dom, "btn-extract-cancel");
+  await wait(20);
+  assert(!modal.classList.contains("on") && !api.calls.some((c) => c.fn === "extractAllLogs") && /cancelled/.test(doc.getElementById("extract-status").textContent), "Cancel closes the dialog and saves nothing");
+
+  // Reopen: the default is safe again (not Everything); a time preset; Save.
+  click(dom, "btn-extract-all");
+  await wait(40);
+  assert(doc.getElementById("ex-scope-book").checked, "reopening starts from the safe default again, not Everything");
+  const preset = doc.getElementById("ex-preset");
+  preset.value = "hour"; preset.dispatchEvent(new dom.window.Event("change"));
+  await wait(200);
+  assert(doc.getElementById("ex-scope-time").checked, "picking a time preset selects 'Time range'");
+  doc.getElementById("ex-inc-relay").checked = false;
+  click(dom, "btn-extract-save");
+  await wait(30);
+  const sv = api.calls.find((c) => c.fn === "extractAllLogs");
+  assert(sv && sv.opts.scope === "time" && sv.opts.preset === "hour" && sv.opts.include.relay === false && sv.opts.include.conversation === true, `Save sends the chosen scope + sections (${JSON.stringify(sv && sv.opts)})`);
+  assert(!modal.classList.contains("on"), "the dialog closes on Save");
+  const status = doc.getElementById("extract-status");
   assert(status && /Saved 3 messages \+ 5 log entries/.test(status.textContent), "it shows where the file was saved, with the message + log counts");
+
+  // No book known -> the book choice is disabled and the default is a time range.
+  const api2 = makeApi();
+  api2.calls._exOptions = { ok: true, connected: false, books: [], default: { scope: "time", preset: "day" }, totals: {} };
+  const dom2 = await loadWindow(api2);
+  click(dom2, "btn-extract-all");
+  await wait(40);
+  const d2 = dom2.window.document;
+  assert(d2.getElementById("ex-scope-book").disabled && d2.getElementById("ex-scope-time").checked && d2.getElementById("ex-preset").value === "day", "no book recorded: book choice disabled, default 'Last 24 hours'");
+  click(dom2, "btn-extract-save");
+  await wait(30);
+  const sv2 = api2.calls.find((c) => c.fn === "extractAllLogs");
+  assert(sv2 && sv2.opts.scope === "time" && sv2.opts.preset === "day", "one-click Save uses that safe default");
 }
 
 main().catch((e) => {

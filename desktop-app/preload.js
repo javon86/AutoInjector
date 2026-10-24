@@ -26,7 +26,9 @@ contextBridge.exposeInMainWorld("api", {
   onPromptsChanged: (cb) => ipcRenderer.on("prompts-changed", (_e, payload) => cb(payload)),
   getState: () => ipcRenderer.invoke("state:get"),
   clearTranscript: () => ipcRenderer.invoke("transcript:clear"),
-  extractAllLogs: () => ipcRenderer.invoke("logs:extract-all"),
+  extractAllLogs: (opts) => ipcRenderer.invoke("logs:extract-all", opts), // P16: opts = { scope, bookId, preset, from, to, include }; none = the safe default
+  extractOptions: () => ipcRenderer.invoke("logs:extract-options"),
+  extractPreview: (opts) => ipcRenderer.invoke("logs:extract-preview", opts),
   downloadAllLogs: () => ipcRenderer.invoke("logs:download-all"),
   togglePin: (id) => ipcRenderer.invoke("transcript:toggle-pin", id),
   reloadSite: (site) => ipcRenderer.invoke("site:reload", site),
