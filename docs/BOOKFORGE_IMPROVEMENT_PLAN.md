@@ -131,6 +131,19 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ---
 
+## Section 6 — Saving books and covers  (requested after the first five sections)
+
+- [ ] **P20** 💾 Save the book: one folder per book (in a chosen books folder) holding the finished book
+  (PDF/EPUB/DOCX), the book bible (profile, choices, characters with sheets and voice cards, places/world,
+  premise, plot, outline, scene cards, story rules, world texture), the chapters as text, the book report,
+  and the book's log (journal, run events, AutoInjector-free); saves automatically when a book finishes and
+  as progress while it is being made; a Save button on the book page and the run window.
+- [ ] **P21** 📂 Open a saved book / rerun: load a saved folder back into BookForge (as a new book), continue
+  an unfinished one, or rerun it from its book bible (same characters, world and plan; new chapters).
+- [ ] **P19** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
+  AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
+  PDF/EPUB/DOCX; print-ready cover size and spine.
+
 ## Problems to come back to
 
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
