@@ -591,6 +591,7 @@ async function route() {
     if (parts[0] === 'p' && parts.length >= 3) {
       await ensureProject(parts[1], parts[2]);
       await loadGuide();
+      await loadChoicesInfo();   // labels of the ending and style choices (profile card, book page); cached, never throws
       refreshTask();
     } else if (parts[0] !== 'settings') {
       // Home: keep the context of the last project only for the top bar.
@@ -641,6 +642,7 @@ async function pickView(parts) {
     if (rest[0] === 'edit' && rest[1]) return m => viewEdit(m, rest[1]);
     if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
     if (rest[0] === 'scenes' && rest[1]) return m => viewScenes(m, rest[1]);
+    if (rest[0] === 'world') return viewWorld;
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -691,6 +693,7 @@ function renderTop(parts) {
   add(more, '#/shelf', '📚 My finished books');
   if (inProject) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
+    add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -2670,6 +2673,8 @@ async function viewWrite(main, rid, mode) {
   const stored = loadJSON(draftKey, null);
   if (mode === 'edit' || (stored && stored.v)) await editor(); else reader();
   edSlot.appendChild(editorCard(latest, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
+  // ✅ planned to page (P11): what the plan says must be in this chapter, and whether it is
+  if (isChapter && chapterRow) edSlot.appendChild(plannedCard(rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
 }
 
 /* ======================================================================= views: manifest */
@@ -4794,11 +4799,13 @@ function profileFields(prof, prefix) {
   f.idea.value = prof.idea || '';
   return { el, get: () => Object.fromEntries(Object.entries(f).map(([k, c]) => [k, c.value.trim()])), f };
 }
-function openProfileDialog(onSaved) {
+async function openProfileDialog(onSaved) {
   if (!S.project) return;
+  await loadChoicesInfo();
   const prof = profileOf();
   modal('📝 Book profile', close => {
     const pf = profileFields(prof, uid('pf'));
+    const cf = choicesFields(prof.choices, 'pfc');
     const out = h('div', { 'aria-live': 'polite' });
     const save = h('button', { type: 'submit', class: 'primary' }, 'Save profile');
     return h('form', { novalidate: true, onsubmit: async ev => {
@@ -4811,6 +4818,7 @@ function openProfileDialog(onSaved) {
         return;
       }
       save.disabled = true;
+      if (CH.info) body.choices = cf.get();
       try {
         const saved = await api('PUT', `/projects/${encodeURIComponent(S.pid)}/profile`, { body });
         S.project.profile = saved;
@@ -4823,7 +4831,7 @@ function openProfileDialog(onSaved) {
         save.disabled = false;
       }
     } }, h('p', { class: 'small muted' }, 'This is what your book is. The AI reads it every time it helps, and the title and author go on the title page and into the exported files.'),
-    pf.el, out, h('div', { class: 'form-actions' }, save));
+    pf.el, cf.el, out, h('div', { class: 'form-actions' }, save));
   }, { wide: true });
 }
 function profileCard() {
@@ -4837,7 +4845,11 @@ function profileCard() {
       row('Title', prof.title), row('Author', prof.author), row('Genre', prof.genre), row('For', prof.audience),
       row('Length', prof.length ? `${LENGTH_INFO[prof.length][0]} (${LENGTH_INFO[prof.length][1]})` : ''),
       row('Tone', prof.tone), row('Idea', prof.idea),
-      row('AI', prof.ai_slot === 'manual' ? 'I write it myself (no AI)' : prof.ai_slot ? prof.ai_slot : 'Automatic — the best ready AI')));
+      row('AI', prof.ai_slot === 'manual' ? 'I write it myself (no AI)' : prof.ai_slot ? prof.ai_slot : 'Automatic — the best ready AI'),
+      row('Ending and style', choicesSummary(prof.choices).length ? h('ul', { class: 'small plain-list', 'data-testid': 'profile-choices' }, choicesSummary(prof.choices).map(x => h('li', null, x))) : 'Let the AI choose')),
+    Object.keys(effectiveMatrix(prof.choices || {})).length ? h('details', { class: 'small more-ending' }, h('summary', null, 'More ending options'),
+      h('dl', { class: 'kv' }, Object.entries(effectiveMatrix(prof.choices)).map(([r, v]) => [h('dt', null, r.replace(/_/g, ' ')), h('dd', null, v)])),
+      h('button', { type: 'button', class: 'small', onclick: () => openProfileDialog() }, 'Change them')) : null);
 }
 
 /* ======================================================================= start wizard */
@@ -4861,11 +4873,13 @@ async function viewStart(main) {
     h('button', { type: 'button', class: 'primary', onclick: next }, nextLabel));
   const goStep = n => { w.step = n; save(); route(); };
   if (w.step === 1) {
+    await loadChoicesInfo();
     const pf = profileFields(w.profile, 'wz');
-    const keep = () => { w.profile = Object.assign(w.profile, pf.get()); save(); };
-    pf.el.addEventListener('input', keep); pf.el.addEventListener('change', keep);
+    const cf = choicesFields(w.profile.choices, 'wz');
+    const keep = () => { w.profile = Object.assign(w.profile, pf.get()); if (CH.info) w.profile.choices = cf.get(); save(); };
+    pf.el.addEventListener('input', keep); pf.el.addEventListener('change', keep); cf.el.addEventListener('change', keep);
     card.append(h('h2', { id: 'wz-h' }, '1. Tell me about your book'),
-      h('p', { class: 'muted' }, 'Only the title is needed now; everything can be changed later.'), pf.el, err,
+      h('p', { class: 'muted' }, 'Only the title is needed now; everything can be changed later.'), pf.el, cf.el, err,
       nav(null, () => {
         keep(); clear(err);
         if (!w.profile.title) { err.appendChild(stateBox('failed', 'Give your book a title (a working title is fine)')); pf.f.title.focus(); return; }
@@ -4944,6 +4958,7 @@ async function viewStart(main) {
         h('dt', null, 'Genre / for'), h('dd', null, [p.genre, p.audience].filter(Boolean).join(' · ') || '—'),
         h('dt', null, 'Length'), h('dd', null, p.length ? LENGTH_INFO[p.length][0] : '—'), h('dt', null, 'Tone'), h('dd', null, p.tone || '—'),
         h('dt', null, 'Idea'), h('dd', null, p.idea || '—'), h('dt', null, 'AI'), h('dd', null, aiLabel),
+        h('dt', null, 'Ending and style'), h('dd', { 'data-testid': 'wz-choices' }, choicesSummary(p.choices).join(' · ') || 'Let the AI choose'),
         h('dt', null, 'To make'), h('dd', null, makeList.join(', ') || 'nothing yet')),
       h('p', { class: 'small muted' }, 'This creates the book with PDF, EPUB and Word (DOCX) output, then opens “📘 Make my book”, which walks you through every step.'),
       err, h('div', { class: 'form-actions' }, h('button', { type: 'button', onclick: () => goStep(3) }, '◀ Back'), go4));
@@ -5235,6 +5250,7 @@ function renderBook(holder, book, redraw) {
     ol.appendChild(li);
   }
   holder.appendChild(ol);
+  if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
   if (S.pendingBookStep) {
     const want = S.pendingBookStep; S.pendingBookStep = null;
     const st = book.steps.find(x => x.id === want.id);
@@ -5734,7 +5750,8 @@ function recordReviewCard(cur) {
 /* ======================================================================= 🖋 the AI editor (P4 craft review, P5 fixes, P6 patterns) */
 const ED_DIMS = { subtext: 'Subtext', character_agency: 'Characters with their own goals', voice_distinction: 'Distinct voices',
   world_friction: 'Obstacles from the world', theme_restraint: 'Theme carried, not stated', prose_variety: 'Varied prose, no tics',
-  tension_stakes: 'Real stakes', ending_openness: 'An ending that is earned', protected_mysteries: 'Protected mysteries kept', other: 'Other' };
+  tension_stakes: 'Real stakes', ending_openness: 'An ending that is earned', protected_mysteries: 'Protected mysteries kept', scene_plan: 'Scene plan kept',
+  story_rules: 'Story rules kept', rules_bounded: 'Story rules bounded', planned_to_page: 'Planned but not on the page', other: 'Other' };
 const ED_MIN = { gentle: 5, normal: 6, strict: 7 };
 function craftBadge(c) {
   if (!c) return null;
@@ -5844,7 +5861,8 @@ function fixesBox(prop, info, msg, redraw, onSaved) {
   const boxes = {};
   const save = h('button', { type: 'button', class: 'primary', 'data-testid': 'ed-apply', disabled: !ok.length }, `💾 Save the chosen changes as a new version`);
   const sec = h('section', { class: 'ed-fixes', 'data-testid': 'ed-fixes', 'aria-label': 'The editor’s fixes' },
-    h('h3', null, `✍ The editor’s fixes (by ${prop.writer || prop.slot_label || 'the writer'})`),
+    h('h3', null, (prop.items || []).length && (prop.items || []).every(i => i.dimension === 'planned_to_page')
+      ? `✍ Planned items worked in (by ${prop.writer || prop.slot_label || 'the writer'})` : `✍ The editor’s fixes (by ${prop.writer || prop.slot_label || 'the writer'})`),
     h('p', { class: 'small muted' }, 'Only the flagged passages change. Untick a change you do not want. Saving makes a new version for you to approve; nothing else in the chapter changes.'),
     ok.length ? h('ol', { class: 'ed-diffs' }, ok.map(i => {
       const id = uid('edfx');
@@ -5957,6 +5975,7 @@ function characterCard(cur) {
         sDl.append(h('dt', null, f.label), h('dd', null, val(sheet[f.key])));
       }
       const rels = sheet.relationships || [];
+      if (F.must_show) sDl.append(h('dt', null, F.must_show.label), h('dd', { 'data-testid': 'char-must-show' }, (sheet.must_show || []).length ? h('ul', { class: 'chips' }, sheet.must_show.map(x => h('li', null, x))) : val('')));
       const vDl = h('dl', { class: 'kv char-dl' });
       for (const f of F.voice_text) vDl.append(h('dt', null, f.label), h('dd', null, val(voice[f.key])));
       for (const f of F.voice_lists) {
@@ -5991,6 +6010,11 @@ function characterCard(cur) {
       ins[`s:${f.key}`] = t;
       fs1.appendChild(h('div', { class: 'field' }, tipLabel(t.id, f.label, f.help), t));
     }
+    let mustShow = null;
+    if (F.must_show) {
+      mustShow = h('textarea', { id: 'cc-s-must_show', rows: '2', 'aria-describedby': 'cc-s-must_show-h' }); mustShow.value = (sheet.must_show || []).join('\n');
+      fs1.appendChild(h('div', { class: 'field' }, tipLabel(mustShow.id, F.must_show.label, F.must_show.help), mustShow, h('span', { class: 'hint', id: 'cc-s-must_show-h' }, `One per line (up to ${F.must_show.max}).`)));
+    }
     const relBox = h('div', { class: 'rel-rows' });
     const relRow = r => {
       const row = h('div', { class: 'grid-3 rel-row' });
@@ -6020,6 +6044,7 @@ function characterCard(cur) {
       ev.preventDefault(); clear(err);
       const s = { role: role.value };
       for (const f of F.sheet) s[f.key] = ins[`s:${f.key}`].value.trim();
+      if (mustShow) s.must_show = linesOf(mustShow.value).slice(0, F.must_show.max);
       s.relationships = [...relBox.querySelectorAll('.rel-row')].map(row => Object.fromEntries([...row.querySelectorAll('input')].map(i => [i.dataset.k, i.value.trim()]))).filter(r => r.with);
       const v = {};
       for (const f of F.voice_text) v[f.key] = ins[`v:${f.key}`].value.trim();
@@ -6220,6 +6245,383 @@ async function planScenesThenWrite(c, post) {
     } catch (e) { noteClientError('SCENES_FAILED', 'scene cards', (e && e.message) || String(e)); }
   }
   return post('write_chapter', { chapter_id: c.chapter_id });
+}
+
+/* ======================================================================= Section 4: 🎚️ ending and style (P12),
+ * 📏 story rules (P9), 🧺 world texture (P10), ✅ planned to page (P11).
+ * Choices live in the book profile; rules, texture and planned checks are companion data of the book on the server
+ * (review/world, review/planned). The AI drafts; the author reads, changes, accepts or rejects. */
+const CH = { info: null };
+async function loadChoicesInfo() {
+  if (!CH.info) { try { CH.info = await api('GET', '/story-choices'); } catch { CH.info = null; } }
+  return CH.info;
+}
+function choiceWord(key, value) {
+  const c = ((CH.info || {}).choices || []).find(x => x.key === key);
+  const o = c && c.options.find(x => x.value === value);
+  return o ? o.label : value;
+}
+/** The effective ending-state matrix of a choice set (same rules as story_choices.matrix on the server). */
+function effectiveMatrix(ch) {
+  const info = CH.info; if (!info || !ch) return {};
+  const out = Object.assign({}, (info.presets || {})[ch.ending] || {});
+  if (ch.explain) out.mystery = (info.explain_to_mystery || {})[ch.explain];
+  Object.assign(out, ch.matrix || {});
+  return out;
+}
+function choicesSummary(ch) {
+  ch = ch || {};
+  const info = CH.info;
+  const out = [];
+  for (const c of (info && info.choices) || []) if (ch[c.key]) out.push(`${c.label}: ${choiceWord(c.key, ch[c.key])}`);
+  if (!info) for (const [k, v] of Object.entries(ch)) if (typeof v === 'string') out.push(`${k}: ${v}`);
+  if (ch.matrix && Object.keys(ch.matrix).length) out.push(`Ending options changed: ${Object.entries(ch.matrix).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(', ')}`);
+  return out;
+}
+/** Ending and style choices as form fields (🚀 wizard, profile dialog, ⚡ quick settings). Everything defaults to
+ * "Let the AI choose"; "More ending options" edits single rows of the ending-state matrix. */
+function choicesFields(cur, prefix) {
+  cur = cur || {};
+  const info = CH.info;
+  if (!info) return { el: h('p', { class: 'small muted' }, 'The ending and style choices could not be loaded (reload the page to try again).'), get: () => cur };
+  const sel = {};
+  const field = c => {
+    const id = `${prefix}-ch-${c.key}`;
+    const s = h('select', { id, 'data-choice': c.key }, h('option', { value: '' }, 'Let the AI choose'),
+      c.options.map(o => h('option', { value: o.value, selected: cur[c.key] === o.value }, o.label)));
+    sel[c.key] = s;
+    return h('div', { class: 'field' }, tipLabel(id, c.label, `${c.help} ${c.options.map(o => `${o.label}: ${o.about}.`).join(' ')}`), s);
+  };
+  const main = info.choices.slice(0, 3).map(field);
+  const style = info.choices.slice(3).map(field);
+  const mx = {};
+  const preview = h('p', { class: 'small muted', 'data-testid': `${prefix}-matrix-preview` });
+  const mrows = info.matrix.map(r => {
+    const id = `${prefix}-mx-${r.key}`;
+    const s = h('select', { id, 'data-row': r.key }, h('option', { value: '' }, 'From the ending choice'),
+      r.values.map(v => h('option', { value: v, selected: (cur.matrix || {})[r.key] === v }, v)));
+    mx[r.key] = s;
+    return h('div', { class: 'field' }, tipLabel(id, r.label, r.help), s);
+  });
+  const get = () => {
+    const out = {};
+    for (const [k, s] of Object.entries(sel)) if (s.value) out[k] = s.value;
+    const m = {};
+    for (const [k, s] of Object.entries(mx)) if (s.value) m[k] = s.value;
+    if (Object.keys(m).length) out.matrix = m;
+    return out;
+  };
+  const showPreview = () => {
+    const m = effectiveMatrix(get());
+    preview.textContent = Object.keys(m).length ? `The ending will be: ${Object.entries(m).map(([r, v]) => `${r.replace(/_/g, ' ')} ${v}`).join(' · ')}`
+      : 'No ending chosen: the AI decides how the story ends.';
+  };
+  const el = h('fieldset', { class: 'field choices-box', 'data-testid': `${prefix}-choices` },
+    h('legend', null, '🎚️ Ending and style (optional)'),
+    h('p', { class: 'small muted' }, 'All optional — “Let the AI choose” leaves it to the story. The AI follows what you choose when it plans and writes, and the editor checks the ending against it.'),
+    h('div', { class: 'grid-3' }, main),
+    h('details', { class: 'style-knobs' }, h('summary', null, 'Style: dialogue, pace, humor'), h('div', { class: 'grid-3' }, style)),
+    h('details', { class: 'more-ending', 'data-testid': `${prefix}-more-ending` }, h('summary', null, 'More ending options'),
+      h('p', { class: 'small muted' }, 'How the ending leaves each part of the story. Each simple choice above sets these; change a single row here if you want something else.'),
+      h('div', { class: 'grid-3' }, mrows), preview));
+  el.addEventListener('change', showPreview);
+  showPreview();
+  return { el, get };
+}
+
+/* ----------------------------------------------------------------------- 📏 story rules + 🧺 world texture page */
+const RULE_ICON = { hard_rule: '⚖️', seen: '👁️', belief: '🙏', mystery: '❔' };
+const KIND_ICON = { work: '🛠️', weather: '🌊', institution: '🏛️', people: '🧑', economy: '💰' };
+const CAUSE_WORD = { obstacle: 'gets in the way', skill: 'shows skill', cost: 'costs something' };
+async function viewWorld(main) {
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], 'Story rules and world'),
+    h('h1', null, '🌍 Story rules and world')),
+  h('div', { class: 'row' }, infoTip('Story rules and world',
+    h('p', null, 'The story rules say what is law in this book’s world (a hard rule), what people have only seen happen, what characters believe, and which mysteries must stay unexplained — each with its limits.'),
+    h('p', null, 'The world texture lists concrete details of work, weather, institutions, local people and money, each with what it can cause. Scene plans take their obstacles from it; a detail is used only if it causes something, shows skill or gets in the way.'),
+    h('p', null, 'The writer, the editor and the reviewers get them. Changing them here never changes your approved records.')))));
+  const msg = h('div', { 'aria-live': 'polite' });
+  const prog = h('div', { 'aria-live': 'polite' });
+  const rulesBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wr-h', 'data-testid': 'rules-card' });
+  const texBox = h('section', { class: 'card world-card', 'aria-labelledby': 'wt-h', 'data-testid': 'texture-card' });
+  main.append(msg, prog, rulesBox, texBox);
+  let info;
+  const where = { book: S.project.name, step: 'Story rules and world' };
+  const load = async () => {
+    try { info = await api('GET', bpath('/review/world')); }
+    catch (e) { clear(msg).appendChild(problemBox(toProblem(e, where), { retry: load }, 'Could not load the story rules')); return; }
+    drawRules(); drawTexture();
+  };
+  const ai = async (what, body, label) => {
+    clear(msg);
+    const j = await runAiJob(`/review/world/${what}/ai`, body || {}, prog, label);
+    if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); await load(); }
+  };
+  /* --- rules */
+  const drawRules = () => {
+    const e = info.rules; const F = info.fields.rules;
+    const catLabel = Object.fromEntries(F.categories.map(c => [c.key, c.label]));
+    const lintBy = {};
+    for (const p of info.rules_lint || []) (lintBy[p.rule] = lintBy[p.rule] || []).push(p);
+    clear(rulesBox).appendChild(h('div', { class: 'row space' }, h('h2', { id: 'wr-h' }, '📏 Story rules'),
+      infoTip('Story rules', ...F.categories.map(c => h('p', null, h('strong', null, `${RULE_ICON[c.key]} ${c.label}: `), c.help)))));
+    if (!e) {
+      rulesBox.appendChild(stateBox('empty', 'No story rules yet', h('p', null, 'Let your AI draft them from your characters, places and plan, or write them yourself.')));
+    } else {
+      rulesBox.appendChild(madeByLine(e.made_by, e.version, e.updated_at));
+      if ((info.rules_changed || []).length) rulesBox.appendChild(h('p', { class: 'notice small', 'data-testid': 'rules-changed' }, hazard({ code: 'RULES_OUT_OF_DATE' }, {}, { small: true }),
+        ` Changed since they were made: ${info.rules_changed.join(', ')}. `, info.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', onclick: () => ai('rules', { update: true }, 'Suggesting updates') }, '✨ Suggest updates') : null));
+      if (info.mystery_mode) rulesBox.appendChild(h('p', { class: 'small muted' }, `Your book profile says the mysteries are ${info.mystery_mode === 'protected' ? 'left unexplained (protected)' : info.mystery_mode === 'explained' ? 'explained by the end' : 'hinted at, never fully explained'}.`));
+      for (const c of F.categories) {
+        const rs = (e.rules || []).filter(r => r.category === c.key);
+        if (!rs.length) continue;
+        rulesBox.appendChild(h('h3', { class: 'rule-cat' }, `${RULE_ICON[c.key]} ${c.label}`, ' ', infoTip(c.label, h('p', null, c.help))));
+        rulesBox.appendChild(h('ul', { class: 'rule-list' }, rs.map(r => h('li', { class: `rule rule-${r.category}${r.status === 'retired' ? ' retired' : ''}`, 'data-rule': r.id },
+          h('p', null, h('strong', null, r.text), r.status === 'retired' ? h('span', { class: 'muted small' }, ' (retired)') : null,
+            (lintBy[r.id] || []).map(p => [' ', hazard({ code: 'RULE_NOT_BOUNDED', message: p.message }, {}, { small: true })])),
+          h('p', { class: 'small' }, h('span', { class: 'muted' }, 'Limits: '), r.scope || h('em', { class: 'muted' }, 'none stated'),
+            r.stated_by ? [h('span', { class: 'muted' }, ' · stated by '), r.stated_by] : null, r.source ? [h('span', { class: 'muted' }, ' · from '), r.source] : null)))));
+      }
+      const props = (e.proposals || {}).items || [];
+      if (props.length) rulesBox.appendChild(proposalBox(e, props, catLabel));
+    }
+    rulesBox.appendChild(h('div', { class: 'form-actions' },
+      h('button', { type: 'button', class: e ? '' : 'primary', 'data-testid': 'rules-edit', onclick: rulesForm }, e ? '✏️ Change them' : '✍️ Write them myself'),
+      info.ai_ready ? h('button', { type: 'button', class: 'ai-btn', 'data-testid': 'rules-ai', onclick: () => ai('rules', { update: !!e }, e ? 'Suggesting updates' : 'Drafting the story rules') }, e ? '✨ Suggest updates with AI' : '✨ Draft with AI') : null));
+  };
+  const proposalBox = (e, props, catLabel) => {
+    const boxes = {};
+    const act = { add: '➕ New rule', change: '✏️ Change', retire: '🗄 Retire' };
+    const box = h('section', { class: 'rule-proposals', 'data-testid': 'rule-proposals' }, h('h3', null, `✨ Suggested updates (${props.length})`),
+      h('p', { class: 'small muted' }, 'The AI compared the rules with your current characters and plan. Tick what to use; nothing changes until you press the button.'),
+      h('ol', null, props.map(p => {
+        const id = uid('rp');
+        boxes[p.id] = h('input', { type: 'checkbox', id, checked: true, 'data-proposal': p.id });
+        return h('li', { class: 'check-row' }, boxes[p.id], h('label', { for: id }, h('strong', null, act[p.action] || p.action), ` · ${catLabel[p.rule.category] || p.rule.category}: ${p.rule.text}`,
+          p.rule.scope ? h('span', { class: 'small muted' }, ` (limits: ${p.rule.scope})`) : null));
+      })));
+    const decide = async all => {
+      const ids = Object.entries(boxes).filter(([, b]) => all === false ? false : b.checked).map(([k]) => k);
+      try {
+        const out = await api('POST', bpath('/review/world/rules/proposals'), { body: { author_confirms: true, version: e.version, accept: ids, reject: Object.keys(boxes).filter(k => !ids.includes(k)) } });
+        toast(out.message); await load();
+      } catch (x) { clear(msg).appendChild(problemBox(toProblem(x, where), {}, 'Not changed')); }
+    };
+    box.appendChild(h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary small', 'data-testid': 'rules-accept', onclick: () => decide(true) }, '✔ Use the ticked suggestions'),
+      h('button', { type: 'button', class: 'small', onclick: () => decide(false) }, '✖ Reject them all')));
+    return box;
+  };
+  const rulesForm = () => {
+    const e = info.rules; const F = info.fields.rules;
+    clear(rulesBox).appendChild(h('h2', { id: 'wr-h' }, '📏 Story rules — change them'));
+    const list = h('div', { class: 'rule-rows' });
+    const FL = Object.fromEntries(F.fields.map(f => [f.key, f]));
+    const row = r => {
+      const k = uid('rr');
+      const cat = h('select', { id: `${k}-cat`, 'data-k': 'category' }, F.categories.map(c => h('option', { value: c.key, selected: (r || {}).category === c.key }, `${RULE_ICON[c.key]} ${c.label}`)));
+      const t = h('textarea', { id: `${k}-text`, rows: '2', 'data-k': 'text' }); t.value = (r || {}).text || '';
+      const sc = h('textarea', { id: `${k}-scope`, rows: '2', 'data-k': 'scope' }); sc.value = (r || {}).scope || '';
+      const so = h('input', { type: 'text', id: `${k}-source`, 'data-k': 'source' }); so.value = (r || {}).source || '';
+      const sb = h('input', { type: 'text', id: `${k}-stated_by`, 'data-k': 'stated_by' }); sb.value = (r || {}).stated_by || '';
+      const st = h('select', { id: `${k}-status`, 'data-k': 'status' }, h('option', { value: 'active', selected: (r || {}).status !== 'retired' }, 'In use'), h('option', { value: 'retired', selected: (r || {}).status === 'retired' }, 'Retired (kept for history)'));
+      const fs = h('fieldset', { class: 'field rule-edit', 'data-id': (r || {}).id || '' }, h('legend', null, 'Rule'),
+        h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(cat.id, 'Kind of rule', F.categories.map(c => `${c.label}: ${c.help}`).join(' ')), cat),
+          h('div', { class: 'field' }, tipLabel(st.id, 'Status', 'Retired rules are kept for history but not used.'), st)),
+        h('div', { class: 'field' }, tipLabel(t.id, FL.text.label, FL.text.help), t),
+        h('div', { class: 'field' }, tipLabel(sc.id, FL.scope.label, FL.scope.help), sc),
+        h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(so.id, FL.source.label, FL.source.help), so),
+          h('div', { class: 'field' }, tipLabel(sb.id, FL.stated_by.label, FL.stated_by.help), sb)),
+        h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this rule'));
+      fs.collect = () => Object.assign({ id: fs.dataset.id }, Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])));
+      list.appendChild(fs);
+    };
+    ((e && e.rules) || []).forEach(row);
+    if (!list.children.length) row({ category: 'hard_rule' });
+    const err = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'submit', class: 'primary', 'data-testid': 'rules-save' }, '💾 Save the story rules');
+    const form = h('form', { novalidate: true }, list, h('button', { type: 'button', class: 'small', onclick: () => row({ category: 'hard_rule' }) }, '+ Add a rule'), err,
+      h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: drawRules }, 'Cancel')));
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault(); clear(err);
+      const rules = [...list.children].map(fs => fs.collect()).filter(r => r.text);
+      if (!rules.length) { err.appendChild(stateBox('failed', 'No rule', h('p', null, 'Write at least one rule.'))); return; }
+      save.disabled = true; err.appendChild(loadingState('Saving…'));
+      try { const out = await api('PUT', bpath('/review/world/rules'), { body: { rules, version: e ? e.version : 0 } }); toast(out.message); await load(); }
+      catch (x) { save.disabled = false; clear(err).appendChild(problemBox(toProblem(x, where), {}, 'Not saved — your text is kept in the form')); }
+    });
+    rulesBox.appendChild(form);
+    const f = firstFocusable(form); if (f) f.focus();
+  };
+  /* --- texture */
+  const drawTexture = () => {
+    const e = info.texture; const F = info.fields.texture;
+    const usage = {}; for (const u of ((info.texture_usage || {}).items || [])) usage[u.id] = u;
+    const probs = {}; for (const p of info.texture_problems || []) probs[p.item] = p;
+    clear(texBox).appendChild(h('div', { class: 'row space' }, h('h2', { id: 'wt-h' }, '🧺 World texture'),
+      infoTip('World texture', h('p', null, 'Concrete details of this world, each with what it can cause: an obstacle (it gets in the way), a skill moment, or a cost.'),
+        h('p', null, 'Scene plans take their obstacles from this list; the writer gets a few per chapter; BookForge counts how often each detail is on the page.'))));
+    if (!e) {
+      texBox.appendChild(stateBox('empty', 'No world details yet', h('p', null, 'Let your AI draft them from your places, world and characters, or add them yourself.')));
+    } else {
+      const tu = info.texture_usage;
+      put(texBox, madeByLine(e.made_by, e.version, e.updated_at),
+        tu ? h('p', { class: 'small', 'data-testid': 'texture-usage' }, `In the chapters so far: ${tu.used} of ${tu.items.length} detail(s) used`, tu.unused ? `, ${tu.unused} never used` : '', tu.overused ? `, ⚠️ ${tu.overused} used too often` : '', '.') : null);
+      for (const k of F.kinds) {
+        const items = (e.items || []).filter(i => i.kind === k.key);
+        if (!items.length) continue;
+        texBox.appendChild(h('h3', null, `${KIND_ICON[k.key] || '•'} ${k.label}`, ' ', infoTip(k.label, h('p', null, k.help))));
+        texBox.appendChild(h('ul', { class: 'texture-list' }, items.map(i => {
+          const u = usage[i.id];
+          return h('li', { 'data-item': i.id }, h('strong', null, i.detail), ' ', badge(i.causes === 'obstacle' ? '🚧' : i.causes === 'skill' ? '🛠️' : '💸', CAUSE_WORD[i.causes] || i.causes, 'b-info'),
+            i.effect ? h('span', { class: 'small' }, ` — ${i.effect}`) : null,
+            probs[i.id] ? [' ', hazard({ code: 'INVALID_INPUT', message: probs[i.id].message }, {}, { small: true })] : null,
+            u ? h('span', { class: 'small muted' }, u.used ? ` · on the page ${u.count}× (${u.chapters.join(', ')})` : ' · not used yet') : null,
+            u && !u.used && tu && tu.words > 0 ? [' ', hazard({ code: 'TEXTURE_UNUSED' }, {}, { small: true })] : null,
+            u && u.overused ? [' ', hazard({ code: 'TEXTURE_OVERUSED' }, {}, { small: true })] : null);
+        })));
+      }
+    }
+    texBox.appendChild(h('div', { class: 'form-actions' },
+      h('button', { type: 'button', class: e ? '' : 'primary', 'data-testid': 'texture-edit', onclick: textureForm }, e ? '✏️ Change them' : '✍️ Add them myself'),
+      info.ai_ready ? h('button', { type: 'button', class: 'ai-btn', 'data-testid': 'texture-ai', onclick: () => ai('texture', {}, 'Drafting the world texture') }, e ? '✨ Draft again with AI' : '✨ Draft with AI') : null));
+  };
+  const textureForm = () => {
+    const e = info.texture; const F = info.fields.texture;
+    const FL = Object.fromEntries(F.fields.map(f => [f.key, f]));
+    clear(texBox).appendChild(h('h2', { id: 'wt-h' }, '🧺 World texture — change it'));
+    const list = h('div');
+    const row = it => {
+      const k = uid('tx');
+      const kind = h('select', { id: `${k}-kind`, 'data-k': 'kind' }, F.kinds.map(x => h('option', { value: x.key, selected: (it || {}).kind === x.key }, `${KIND_ICON[x.key]} ${x.label}`)));
+      const causes = h('select', { id: `${k}-causes`, 'data-k': 'causes' }, F.causes.map(x => h('option', { value: x.key, selected: (it || {}).causes === x.key }, x.label)));
+      const d = h('textarea', { id: `${k}-detail`, rows: '2', 'data-k': 'detail' }); d.value = (it || {}).detail || '';
+      const ef = h('textarea', { id: `${k}-effect`, rows: '2', 'data-k': 'effect' }); ef.value = (it || {}).effect || '';
+      const w = h('input', { type: 'text', id: `${k}-words`, 'data-k': 'words' }); w.value = ((it || {}).words || []).join(', ');
+      const fs = h('fieldset', { class: 'field texture-edit', 'data-id': (it || {}).id || '' }, h('legend', null, 'Detail'),
+        h('div', { class: 'grid-2' }, h('div', { class: 'field' }, tipLabel(kind.id, 'Kind', F.kinds.map(x => `${x.label}: ${x.help}`).join(' ')), kind),
+          h('div', { class: 'field' }, tipLabel(causes.id, 'What it does in a scene', 'Gets in the way (an obstacle), shows someone’s skill, or costs something (time, money, pride, a relationship).'), causes)),
+        h('div', { class: 'field' }, tipLabel(d.id, FL.detail.label, FL.detail.help), d),
+        h('div', { class: 'field' }, tipLabel(ef.id, FL.effect.label, FL.effect.help), ef),
+        h('div', { class: 'field' }, tipLabel(w.id, FL.words.label, FL.words.help), w),
+        h('button', { type: 'button', class: 'small link', onclick: () => fs.remove() }, 'Remove this detail'));
+      fs.collect = () => { const o = Object.fromEntries([...fs.querySelectorAll('[data-k]')].map(x => [x.dataset.k, x.value.trim()])); o.words = o.words.split(',').map(x => x.trim()).filter(Boolean); o.id = fs.dataset.id; return o; };
+      list.appendChild(fs);
+    };
+    ((e && e.items) || []).forEach(row);
+    if (!list.children.length) row({ kind: 'work', causes: 'obstacle' });
+    const err = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'submit', class: 'primary', 'data-testid': 'texture-save' }, '💾 Save the world texture');
+    const form = h('form', { novalidate: true }, list, h('button', { type: 'button', class: 'small', onclick: () => row({ kind: 'work', causes: 'obstacle' }) }, '+ Add a detail'), err,
+      h('div', { class: 'form-actions' }, save, h('button', { type: 'button', onclick: drawTexture }, 'Cancel')));
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault(); clear(err);
+      const items = [...list.children].map(fs => fs.collect()).filter(i => i.detail);
+      if (!items.length) { err.appendChild(stateBox('failed', 'No detail', h('p', null, 'Add at least one detail.'))); return; }
+      save.disabled = true; err.appendChild(loadingState('Saving…'));
+      try { const out = await api('PUT', bpath('/review/world/texture'), { body: { items, version: e ? e.version : 0 } }); toast(out.message); await load(); }
+      catch (x) { save.disabled = false; clear(err).appendChild(problemBox(toProblem(x, where), {}, 'Not saved — your text is kept in the form')); }
+    });
+    texBox.appendChild(form);
+    const f = firstFocusable(form); if (f) f.focus();
+  };
+  rulesBox.appendChild(loadingState('Loading the story rules…'));
+  await load();
+}
+
+/* ----------------------------------------------------------------------- ✅ planned to page */
+const PLANNED_ICON = { on_page: '✔', unclear: '❓', missing: '⚠️' };
+/** The chapter page's checklist: what the plan says must reach the page, and whether it did. */
+function plannedCard(rid, { onSaved } = {}) {
+  const box = h('section', { class: 'card planned-card', 'aria-labelledby': `pl-h-${rid}`, 'data-testid': 'planned-card' },
+    h('div', { class: 'row space' }, h('h2', { id: `pl-h-${rid}` }, '✅ Planned to page'),
+      infoTip('Planned to page', h('p', null, 'What the plan says must reach the reader in this chapter: the outline beat, each scene’s obstacle and change, the point-of-view character’s name (in their first chapter) and the “must show” details of the character sheets.'),
+        h('p', null, 'BookForge first looks for the words; then an AI that did not write the chapter checks what is unclear. ✨ Fix with AI asks the writer to work only the missing items into the right passages — you choose what to keep.'))));
+  const body = h('div', null, loadingState('Checking what was planned…'));
+  const prog = h('div', { 'aria-live': 'polite' });
+  const msg = h('div', { 'aria-live': 'polite' });
+  put(box, body, prog, msg);
+  const where = { book: S.project.name, step: 'Planned to page' };
+  const draw = async () => {
+    let info;
+    try { info = await api('GET', bpath(`/review/planned/${encodeURIComponent(rid)}`)); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, where), { retry: draw })); return; }
+    const items = (info.stored && info.stored.items) || info.items;
+    const c = (info.stored && info.stored.counts) || info.counts;
+    const open = items.filter(i => i.required && i.status !== 'on_page');
+    clear(body).appendChild(h('p', { class: 'small', 'data-testid': 'planned-summary' }, open.length
+      ? [hazard({ code: 'PLANNED_MISSING' }, {}, { small: true }), ` ${open.length} planned item(s) are not on the page (version ${info.version}).`]
+      : `✔ Everything required is on the page (${c.on_page} of ${c.items} item(s) found).`,
+    info.stored && info.stored.ai ? h('span', { class: 'muted' }, ` Checked by ${info.stored.ai.reviewer || 'an AI'}.`) : h('span', { class: 'muted' }, ' BookForge’s word check (no AI yet).'),
+    info.stored && info.stored.ai && info.stored.ai.independent === false ? h('span', { class: 'words-warn' }, ` ⚠️ ${info.stored.ai.warning}`) : null));
+    body.appendChild(h('ul', { class: 'planned-list' }, items.map(i => h('li', { class: `pl-${i.status}${i.required ? '' : ' optional'}`, 'data-status': i.status },
+      h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
+      i.required ? null : h('span', { class: 'small muted' }, ' (nice to have)'),
+      i.status !== 'on_page' && i.required ? [' ', hazard({ code: 'PLANNED_MISSING', message: i.label }, {}, { small: true })] : null,
+      i.quote ? h('span', { class: 'small muted' }, ` — “${i.quote.slice(0, 90)}”`) : null))));
+    let edInfo = null;
+    try { edInfo = await api('GET', bpath(`/review/editor/${encodeURIComponent(rid)}`)); } catch { /* no fixes to show */ }
+    const prop = edInfo && edInfo.proposal && (edInfo.proposal.items || []).some(x => x.dimension === 'planned_to_page') ? edInfo.proposal : null;
+    if (prop && (prop.items || []).some(x => x.ok)) body.appendChild(fixesBox(prop, edInfo, msg, () => draw(), onSaved));
+    else if (prop) body.appendChild(h('p', { class: 'small muted', 'data-testid': 'planned-last-try' }, hazard({ code: 'PLANNED_UNRESOLVED' }, {}, { small: true }),
+      ` The writer’s last attempt (${fmtWhen(prop.at)}) could not be placed word for word, so nothing was changed. Press ✨ Fix with AI to ask again.`));
+    body.appendChild(h('div', { class: 'row' },
+      h('button', { type: 'button', 'data-testid': 'planned-check', onclick: async () => {
+        clear(msg); const j = await runAiJob(`/review/planned/${encodeURIComponent(rid)}/check`, {}, prog, 'Checking the planned items');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Checked'); draw(); }
+      } }, '🔎 Check again with AI'),
+      open.length ? h('button', { type: 'button', class: 'primary ai-btn', 'data-testid': 'planned-fix', onclick: async () => {
+        clear(msg); const j = await runAiJob(`/review/planned/${encodeURIComponent(rid)}/fix`, {}, prog, 'The writer is working the planned items in');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); draw(); }
+      } }, '✨ Fix with AI') : null));
+  };
+  draw();
+  return box;
+}
+/** Book page: the story rules / world card and the whole book's planned-to-page list. */
+function bookSection4Card() {
+  const box = h('section', { class: 'card s4-card', 'aria-labelledby': 's4-h', 'data-testid': 'book-s4' },
+    h('h2', { id: 's4-h' }, '🌍 Rules, world and the plan on the page'));
+  const body = h('div', null, loadingState('Loading…'));
+  box.appendChild(body);
+  (async () => {
+    let w = null; let p = null;
+    try { [w, p] = await Promise.all([api('GET', bpath('/review/world')), api('GET', bpath('/review/planned'))]); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, { book: S.project.name, step: 'Story rules and world' }), {})); return; }
+    const nRules = w.rules ? (w.rules.rules || []).filter(r => r.status !== 'retired').length : 0;
+    const nTex = w.texture ? (w.texture.items || []).length : 0;
+    const unbounded = (w.rules_lint || []).filter(x => ['UNBOUNDED_EXCEPTION', 'NO_LIMITS'].includes(x.code)).length;
+    clear(body).appendChild(h('p', null, h('a', { class: 'btn small', href: plink('world'), 'data-testid': 'open-world' }, '🌍 Story rules and world'), ' ',
+      `${nRules} story rule(s), ${nTex} world detail(s)`,
+      unbounded ? [' ', hazard({ code: 'RULE_NOT_BOUNDED', message: `${unbounded} rule(s) have no limits` }, { open: plink('world'), openLabel: 'Open the rules' }, { small: true })] : null,
+      (w.rules_changed || []).length ? [' ', hazard({ code: 'RULES_OUT_OF_DATE' }, { open: plink('world'), openLabel: 'Open the rules' }, { small: true })] : null,
+      !w.rules ? h('span', { class: 'small muted' }, ' — no rules yet') : null));
+    const ch = choicesSummary(profileOf().choices);
+    body.appendChild(h('p', { class: 'small' }, h('strong', null, '🎚️ Ending and style: '), ch.length ? ch.join(' · ') : 'Let the AI choose', ' ',
+      h('button', { type: 'button', class: 'small link', onclick: () => openProfileDialog() }, 'Change')));
+    const written = (p.chapters || []).filter(r => r.written);
+    if (!written.length) { body.appendChild(h('p', { class: 'small muted' }, '✅ Planned to page: no chapter is written yet.')); return; }
+    const miss = p.missing || [];
+    body.appendChild(h('div', { 'data-testid': 'book-planned' },
+      h('p', { class: 'small' }, miss.length || (p.names_never_on_page || []).length ? [hazard({ code: 'PLANNED_MISSING' }, {}, { small: true }), ` Planned but not on the page: ${miss.length} item(s) in ${new Set(miss.map(m => m.chapter_id)).size} chapter(s).`]
+        : `✅ Everything planned is on the page in the ${written.length} written chapter(s).`),
+      (p.names_never_on_page || []).length ? h('p', { class: 'small words-warn' }, `⚠️ Never named in the book: ${p.names_never_on_page.join(', ')}`) : null,
+      miss.length ? h('ul', { class: 'small planned-list' }, miss.slice(0, 12).map(m => h('li', null, '⚠️ ', h('a', { href: plink('write', m.record_id) }, `Chapter ${m.number}`), `: ${m.label}`))) : null));
+  })();
+  return box;
+}
+/** Run window: what the planned-to-page check found in this run. */
+function plannedRunSummary(r) {
+  const ps = r.planned_summary;
+  if (!ps || !ps.checked) return null;
+  const fl = ps.flagged || [];
+  const book = ps.book || {};
+  return h('div', { class: fl.length ? 'words-warn' : 'small', 'data-testid': 'mb-planned-summary' },
+    h('p', null, fl.length ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '✅ ',
+      `Planned to page: ${ps.checked} chapter(s) checked, ${ps.fixed || 0} fix(es) kept.`),
+    fl.length ? [h('p', null, h('strong', null, 'Planned but not on the page: '), 'these chapters were approved under your run consent anyway. Open each one and use ✅ Planned to page → ✨ Fix with AI.'),
+      h('ul', { class: 'small' }, fl.map(f => h('li', null, h('strong', null, f.label || f.chapter_id), (f.missing || []).length ? `: ${f.missing.slice(0, 4).join('; ')}` : '')))] : null,
+    (book.names || []).length ? h('p', { class: 'small' }, `⚠️ Never named in the book: ${book.names.join(', ')}`) : null);
 }
 
 async function viewPair(main) {
@@ -6731,6 +7133,8 @@ async function renderMakeSetup() {
   const slot = h('select', { id: 'mb-slot' }, h('option', { value: '' }, 'Automatic — the best ready AI'));
   fields.genre = genre; fields.idea = idea; fields.slot_id = slot;
   const lengthBox = h('fieldset', { class: 'field', id: 'mb-length' }, h('legend', null, 'Length'), lengths);
+  await loadChoicesInfo();
+  const cf = choicesFields({}, 'mb');
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -6743,7 +7147,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea)),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   mbShell('⚡ Make a book for me', form);
   startAll.addEventListener('click', () => go(true));
@@ -6760,6 +7164,7 @@ async function renderMakeSetup() {
     if (!auto) {
       body.genre = genre.value.trim(); body.idea = idea.value.trim(); body.slot_id = slot.value || null;
       const l = form.querySelector('input[name="mb-len"]:checked'); body.length = l ? l.value : 'short_story';
+      if (CH.info) body.choices = cf.get();
     }
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Starting…'));
@@ -6832,7 +7237,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note])]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -6857,6 +7262,7 @@ function renderRun() {
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
         s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         s.editor_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.editor_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-editor-note' }, '🖋 ', s.editor_note) : null,
+        s.planned_note ? h('p', { class: `small mb-review-note${/⚠️/.test(s.planned_note) ? ' not-independent' : ''}`, 'data-testid': 'mb-planned-note' }, '✅ ', s.planned_note) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null,
           i.phase ? h('span', { class: 'small muted', 'data-testid': 'mb-item-phase' }, ` · ${i.phase}…`) : null,
@@ -6868,7 +7274,11 @@ function renderRun() {
           i.editor ? h('span', { class: `small mb-ed${i.editor.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-editor' },
             i.editor.flagged ? ' · ⚠️ editor still had notes' : ` · 🖋 editor: ${String(i.editor.verdict || '').toLowerCase()}`,
             i.editor.rounds ? ` (${i.editor.rounds} rewrite round${i.editor.rounds === 1 ? '' : 's'})` : '',
-            typeof i.editor.avg === 'number' ? ` · avg ${i.editor.avg}` : '') : null))) : null));
+            typeof i.editor.avg === 'number' ? ` · avg ${i.editor.avg}` : '') : null,
+          i.note && ['world', 'planned'].includes(s.id) ? h('span', { class: 'small muted' }, ` · ${i.state === 'failed' ? '⚠️ ' : ''}${i.note}`) : null,
+          i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
+            i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
+            i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));
     ol.appendChild(li);
   }
   const msg = h('div', { class: 'mb-msg', 'aria-live': 'polite' });
@@ -6916,6 +7326,8 @@ function renderRun() {
   }
   const edBox = editorRunSummary(r);
   if (doneBox && edBox) doneBox.appendChild(edBox);
+  const plBox = plannedRunSummary(r);
+  if (doneBox && plBox) doneBox.appendChild(plBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
   mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, doneBox ? null : edBox, msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);

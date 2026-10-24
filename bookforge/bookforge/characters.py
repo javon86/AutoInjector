@@ -63,6 +63,10 @@ SHEET_FIELDS = (
     ("own_wish", "Their own wish", "Side characters: something they want for themselves that is NOT about the main "
                                    "character (their own price, plan or need)."),
 )
+# P11: details that must reach the page somewhere in the book (each is checked by the planned-to-page check)
+MUST_SHOW = ("must_show", "Must reach the page", "Details the reader must see somewhere in the book (e.g. the "
+             "narrator's name said aloud, a past event). BookForge checks that each one is on the page.")
+MUST_SHOW_MAX = 5
 REL_FIELDS = (("with", "With"), ("tension", "Tension between them"), ("history", "Their history"))
 VOICE_TEXT = (
     ("rhythm", "Sentence rhythm", "Short and blunt, long and wandering, clipped questions, lists…"),
@@ -98,6 +102,7 @@ def field_info() -> dict:
     """Labels and ⓘ help for the character page (the UI never hard-codes them)."""
     return {"sheet": [{"key": k, "label": label, "help": hlp} for k, label, hlp in SHEET_FIELDS],
             "relationship": [{"key": k, "label": label} for k, label in REL_FIELDS],
+            "must_show": {"key": MUST_SHOW[0], "label": MUST_SHOW[1], "help": MUST_SHOW[2], "max": MUST_SHOW_MAX},
             "voice_text": [{"key": k, "label": label, "help": hlp} for k, label, hlp in VOICE_TEXT],
             "voice_lists": [{"key": k, "label": label, "help": hlp, "max": n} for k, label, hlp, n, _m in VOICE_LISTS],
             "roles": list(ROLES)}
@@ -114,7 +119,8 @@ SHEET_SCHEMA = {
     "properties": dict({"role": {"type": "string", "enum": list(ROLES)}}, **{k: _str() for k in SHEET_KEYS},
                        relationships={"type": "array", "maxItems": 8, "items": {
                            "type": "object", "additionalProperties": False, "required": ["with", "tension", "history"],
-                           "properties": {"with": _str(), "tension": _str(), "history": _str()}}}),
+                           "properties": {"with": _str(), "tension": _str(), "history": _str()}}},
+                       must_show={"type": "array", "maxItems": MUST_SHOW_MAX, "items": _str()}),
 }
 VOICE_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": list(VOICE_KEYS),
@@ -129,9 +135,11 @@ COMPANION_TASK = (
     "side), wants (their conscious goal), needs (what they actually need), fear, secret (what they hide), "
     "false_belief, stress (what they do under pressure), never_say (what they would never say out loud), "
     "private_memory (one concrete memory), relationships (one per other main character: with = that character's "
-    "exact name, tension, history), change_limits (how far they can credibly change, and what they will not change) "
-    "and own_wish (for a side character a wish of their own that is NOT about the main character; empty for the main "
-    "character). Give them wants that can collide with the others' — they do not exist to help or absolve anyone. "
+    "exact name, tension, history), change_limits (how far they can credibly change, and what they will not change), "
+    "own_wish (for a side character a wish of their own that is NOT about the main character; empty for the main "
+    "character) and must_show (1-3 concrete details the reader must see somewhere in the book — for the narrator / "
+    "main character always their name said or written on the page and one backstory detail). Give them wants that can collide with the others' — they do not exist "
+    "to help or absolve anyone. "
     "voice_card: rhythm, register, vocabulary (words from their job, era and place), phrases (favourite phrases and "
     "tics), never_words, habits (in conversation), under_pressure (how speech changes under fear, anger, grief), "
     "talks_around (what they never name directly) and samples (2-3 short lines in their voice that do not name "
@@ -162,6 +170,17 @@ def clean_sheet(raw) -> dict:
         if len(rels) >= 8:
             break
     out["relationships"] = rels
+    ms = raw.get("must_show")
+    if isinstance(ms, str):
+        ms = [x for x in re.split(r"[;\n]", ms) if x.strip()]
+    items = []
+    for v in ms if isinstance(ms, list) else []:
+        c = _clip(v, 160)
+        if c and c not in items:
+            items.append(c)
+        if len(items) >= MUST_SHOW_MAX:
+            break
+    out["must_show"] = items
     return out
 
 

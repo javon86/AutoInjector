@@ -373,12 +373,13 @@ def test_pinned_run_still_gets_an_independent_reviewer(tmp_path):
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"))
     run = run_book(app, {"slot_id": "AI-2"})
     assert run["status"] == "done", (run["phase"], run.get("problem"))
-    writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review")}
+    writes = {s for s, k in fake.per_slot if k not in ("review", "fail", "craft", "scene_review", "planned")}
     reviews = {s for s, k in fake.per_slot if k == "review"}
     crafts = {s for s, k in fake.per_slot if k == "craft"}
     assert writes == {"AI-2"} and reviews == {"AI-1"}
     assert crafts == {"AI-1"}  # the editor (P4) is independent of the pinned writer too
     assert {s for s, k in fake.per_slot if k == "scene_review"} == {"AI-1"}  # so is the scene-card checker (P8)
+    assert {s for s, k in fake.per_slot if k == "planned"} == {"AI-1"}  # and the planned-to-page checker (P11)
 
 
 # ============================================================================================ real adapter

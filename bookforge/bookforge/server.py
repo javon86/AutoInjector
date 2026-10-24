@@ -394,7 +394,8 @@ class App:
             return 200, ("__binary__", mime, path.read_bytes(), path.name, disposition)
         if parts and parts[0] == "workflow-test":
             return self.route_workflow(method, parts, query, body)
-        if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings"):
+        if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
+                                  "story-choices"):
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
@@ -584,6 +585,9 @@ class App:
                 return 200, self.review.reviewer_settings()
             if method == "PUT":
                 return 200, self.review.save_reviewer_settings(body)
+        if parts == ["story-choices"] and method == "GET":  # P12: labels, ⓘ help and the ending matrix
+            from .story_choices import field_info as choices_info  # noqa: PLC0415
+            return 200, choices_info()
         if parts == ["settings", "editor"]:
             if method == "GET":
                 return 200, self.review.editor.settings()
@@ -627,6 +631,15 @@ class App:
             raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
         if kind == "assist":
             new = self.assist.start_assist(principal, dict(r))
+        elif kind in ("review_world_rules", "review_world_texture"):
+            new = self.review.start_world_ai(principal, r["project_id"], r["branch_id"], kind.rsplit("_", 1)[-1],
+                                             {"slot_id": r.get("slot_id")})
+        elif kind in ("review_planned_check", "review_planned_fix"):
+            rid = (r.get("record_ids") or [None])[0]
+            if not rid:
+                raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
+            new = self.review.start_planned(principal, r["project_id"], r["branch_id"], rid,
+                                            {"slot_id": r.get("slot_id")}, fix=kind.endswith("fix"))
         elif kind in ("review_characters", "review_scenes", "review_scenes_check"):
             rid = (r.get("record_ids") or [None])[0]
             fn = {"characters": self.review.start_character_ai, "scenes": self.review.start_scenes_ai,
@@ -720,6 +733,24 @@ class App:
                 return 202, rv.start_scenes_check(principal, pid, branch, rest[1], body)
             if len(rest) == 3 and rest[0] == "scenes" and rest[2] == "approve" and method == "POST":
                 return 200, rv.approve_scenes(principal, pid, branch, rest[1], body)
+            # 📏 story rules (P9) and 🧺 world texture (P10)
+            if rest == ["world"] and method == "GET":
+                return 200, rv.world_info(principal, pid, branch)
+            if rest == ["world", "rules"] and method == "PUT":
+                return 200, rv.save_rules(principal, pid, branch, body)
+            if rest == ["world", "rules", "proposals"] and method == "POST":
+                return 200, rv.decide_rule_proposals(principal, pid, branch, body)
+            if rest == ["world", "texture"] and method == "PUT":
+                return 200, rv.save_texture(principal, pid, branch, body)
+            if len(rest) == 3 and rest[0] == "world" and rest[2] == "ai" and method == "POST":
+                return 202, rv.start_world_ai(principal, pid, branch, rest[1], body)
+            # ✅ planned-to-page check (P11)
+            if rest == ["planned"] and method == "GET":
+                return 200, rv.planned_book(principal, pid, branch)
+            if len(rest) == 2 and rest[0] == "planned" and method == "GET":
+                return 200, rv.planned_info(principal, pid, branch, rest[1])
+            if len(rest) == 3 and rest[0] == "planned" and rest[2] in ("check", "fix") and method == "POST":
+                return 202, rv.start_planned(principal, pid, branch, rest[1], body, fix=rest[2] == "fix")
         except BookforgeError as exc:
             from .assist import FIX  # noqa: PLC0415
             for e in exc.errors:

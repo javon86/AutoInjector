@@ -202,6 +202,36 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    + (p.get("label") or "approved"), "outcome": "APPROVED", "approval": how,
                    "problem": {"code": "SCENES_NOTES", "message": "the scene checker still had notes"}
                    if p.get("flagged") else None}
+        elif et == "rules.saved":
+            ent = {"kind": "world", "step": _step(contracts, "A03"), "who": "AI" if p.get("by") == "ai" else "you",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"Story rules: version {p.get('version')} ({p.get('rules', 0)} rule(s), {p.get('how') or 'made'})",
+                   "outcome": "SUCCESS"}
+        elif et == "rules.proposed":
+            ent = {"kind": "world", "step": _step(contracts, "A03"), "who": "AI",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"Story rules: the AI suggested {p.get('proposals', 0)} update(s) ({p.get('add', 0)} new, "
+                   f"{p.get('change', 0)} changed, {p.get('retire', 0)} retired)", "outcome": "SUCCESS"}
+        elif et == "rules.proposals_decided":
+            how = p.get("how") or "author"
+            ent = {"kind": "approval", "step": _step(contracts, "A03"), "who": "you" if how == "author" else "BookForge",
+                   "what": f"Story rules updates: {p.get('accepted', 0)} accepted, {p.get('rejected', 0)} rejected"
+                   + (f" (under your Make-a-book-for-me consent, run {p.get('run_id')})" if p.get("run_id") else ""),
+                   "outcome": "APPROVED", "approval": how}
+        elif et == "texture.saved":
+            ent = {"kind": "world", "step": _step(contracts, "A04"), "who": "AI" if p.get("by") == "ai" else "you",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"World texture: version {p.get('version')} ({p.get('items', 0)} detail(s), "
+                   f"{p.get('how') or 'made'})", "outcome": "SUCCESS"}
+        elif et == "planned.checked":
+            miss = int(p.get("missing") or 0) + int(p.get("unclear") or 0)
+            same = p.get("independent") is False
+            ent = {"kind": "planned", "step": _step(contracts, "C02"), "who": "AI" if p.get("ai_slot") else "BookForge",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"Planned to page, chapter {p.get('chapter_id')} v{p.get('version')}: {p.get('on_page', 0)} "
+                   f"of {p.get('items', 0)} item(s) on the page" + (f", ⚠️ {miss} required missing" if miss else "")
+                   + (f" ⚠️ {NOT_INDEPENDENT}" if same else ""), "outcome": "PROBLEM" if miss else "SUCCESS",
+                   "problem": {"code": "PLANNED_MISSING", "message": "planned but not on the page"} if miss else None}
         elif et == "review.ai_fix":
             ent = {"kind": "ai_fix", "step": _step(contracts, p.get("module_id")), "who": "AI",
                    "ai": {"slot": p.get("ai_slot")}, "what": f"AI fix: new version {p.get('to_version')} of "

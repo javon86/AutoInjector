@@ -11,6 +11,12 @@ a phrase to its replacement. A craft review flags (major, subtext score 4) every
 one of those phrases and keeps the chapter's first sentence; with no flagged phrase it passes (all scores 8). A
 rewrite request replaces the phrase inside each flagged sentence. ``craft_script`` / ``rewrite_script`` hold whole
 answers (dicts, or callables(ctx) -> dict) used first, one per call.
+
+Section 4: the story-rules ledger (``RULES``; an update answer adds one rule and changes another), the world-texture
+list (``TEXTURE``; scene plans then take their obstacles from it and name the texture ids), the planned-to-page checker
+(an item is on the page when a sentence of the chapter holds one of its words; ``planned_script`` overrides), the
+writer's fix of planned items (``planned_fix``: the anchor sentence gets the item appended) and editor notes for story
+rules (``rule_flags``: phrase -> dimension, e.g. a sentence that explains a protected mystery).
 """
 from __future__ import annotations
 
@@ -77,6 +83,31 @@ VOICES = {
 }
 SCENE_PLACES = ["the lamp room of the old light", "the net sheds on the harbour wall", "the reef at low tide"]
 
+# Section 4 (P9/P10): the fake's story rules and world texture
+RULES = [
+    {"id": "", "category": "hard_rule", "text": "The great lamp lights only when the brass key turns in the door.",
+     "scope": "only at the Old Light; once per night; the key does nothing anywhere else", "source": "The Old Light",
+     "stated_by": "the canon"},
+    {"id": "", "category": "seen", "text": "Boats turn for home when the lamp blazes.", "scope": "",
+     "source": "chapter 3 of the outline", "stated_by": "the narrator"},
+    {"id": "", "category": "belief", "text": "Harbour folk believe the drowned keepers guide the light.",
+     "scope": "a superstition; never confirmed", "source": "Gullhaven Harbor", "stated_by": "Nessa Crane"},
+    {"id": "", "category": "mystery", "text": "Who the stranger on the reef was.", "scope": "", "source": "the premise",
+     "stated_by": "the canon"},
+]
+TEXTURE = [
+    {"kind": "work", "detail": "Keepers trim the wick with brass scissors before dusk", "causes": "skill",
+     "effect": "Mara's trimming shows years of practice", "words": ["wick", "brass scissors"]},
+    {"kind": "weather", "detail": "The evening tide floods the lighthouse steps", "causes": "obstacle",
+     "effect": "the way up is cut off for an hour", "words": ["tide", "flooded steps"]},
+    {"kind": "institution", "detail": "The harbour board seals any building it inspects", "causes": "obstacle",
+     "effect": "a door Mara needs is sealed for a day", "words": ["harbour board", "seal"]},
+    {"kind": "people", "detail": "Nessa Crane wants a herring for every answer", "causes": "cost",
+     "effect": "information costs Mara her supper", "words": ["herring"]},
+    {"kind": "economy", "detail": "Lamp oil is rationed by the board", "causes": "cost",
+     "effect": "every night lit costs oil Mara cannot spare", "words": ["lamp oil", "ration"]},
+]
+
 
 def voice_for(name):
     v = VOICES.get(name)
@@ -96,7 +127,8 @@ def sheet_for(name, others=()):
             "relationships": [{"with": o, "tension": "owes them money", "history": "grew up on the same quay"}
                               for o in others if o != name][:3],
             "change_limits": "can learn to ask for help; will never leave the coast",
-            "own_wish": f"{name} wants a boat of their own" if side else ""}
+            "own_wish": f"{name} wants a boat of their own" if side else "",
+            "must_show": [] if side else ["Her master taught her to read the tide-tables by candlelight"]}
 
 
 class BookFakeAI:
@@ -120,6 +152,11 @@ class BookFakeAI:
         self.scene_verdicts: list = []           # scripted scene-plan checks ("PASS"/"REVISE" or dicts), one per call
         self.scene_script: list = []             # scripted scene plans (dicts or callables(ctx)), one per call
         self.chapter_texts: dict[str, str] = {}  # chapter id -> the prose the fake writer returns for it
+        self.rules_script: list = []             # scripted story-rules answers (P9), one per call
+        self.texture_script: list = []           # scripted world-texture answers (P10), one per call
+        self.planned_script: list = []           # scripted planned-to-page checks (P11), one per call
+        self.planned_fix = False                 # P11: the writer works missing planned items into the anchor
+        self.rule_flags: dict[str, str] = {}     # phrase -> editor dimension (P9 story_rules / protected_mysteries)
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -165,12 +202,33 @@ class BookFakeAI:
             if scripted is not None:
                 return "craft", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "craft", self._craft(ctx, list((props["scores"].get("properties") or {}).keys()))
+        if "replacements" in props and ctx.get("findings") and all(
+                f.get("dimension") == "planned_to_page" for f in ctx["findings"]):  # ✅ P11: work planned items in
+            return "planned_rewrite", self._rewrite(ctx)
         if "replacements" in props:  # ✍ the writer reworks the flagged passages
             with self.lock:
                 scripted = self.rewrite_script.pop(0) if self.rewrite_script else None
             if scripted is not None:
                 return "rewrite", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "rewrite", self._rewrite(ctx)
+        if "rules" in props and "notes" in props:  # 📏 the story-rules ledger (P9)
+            with self.lock:
+                scripted = self.rules_script.pop(0) if self.rules_script else None
+            if scripted is not None:
+                return "rules", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "rules", self._rules(ctx)
+        if "texture" in props:  # 🧺 the world-texture list (P10)
+            with self.lock:
+                scripted = self.texture_script.pop(0) if self.texture_script else None
+            if scripted is not None:
+                return "texture", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "texture", {"texture": copy.deepcopy(TEXTURE)}
+        if "items" in props and "planned" in ctx:  # ✅ the planned-to-page checker (P11)
+            with self.lock:
+                scripted = self.planned_script.pop(0) if self.planned_script else None
+            if scripted is not None:
+                return "planned", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "planned", self._planned(ctx)
         if "scenes" in props and "verdict" in props:  # 🎬 the light check of a scene plan (P8)
             with self.lock:
                 v = self.scene_verdicts.pop(0) if self.scene_verdicts else "PASS"
@@ -270,6 +328,7 @@ class BookFakeAI:
         other = next((p for p in people if p != pov), None)
         cast = [pov] + ([other] if other else [])
         fix = bool(ctx.get("review_notes"))
+        tex = [t for t in ctx.get("world_texture") or [] if t.get("causes") == "obstacle"]
         scenes = []
         for i in range(2):
             scenes.append({"place": SCENE_PLACES[(num - 1 + i) % 3], "time": "dusk" if i else "before dawn",
@@ -277,9 +336,11 @@ class BookFakeAI:
                            "goals": [{"character": c, "goal": f"{c} wants the keeper's log" if c == pov else
                                       f"{c} wants payment for what they know",
                                       "hidden_agenda": f"{c} hides the stranger's letter"} for c in cast],
-                           "obstacle": ("the harbour board has sealed the lamp room" if fix or i else
+                           "obstacle": (tex[i % len(tex)]["detail"] if tex else
+                                        "the harbour board has sealed the lamp room" if fix or i else
                                         "the evening tide floods the steps"),
                            "obstacle_source": "institution" if fix or i else "weather",
+                           **({"texture": [tex[i % len(tex)]["id"]]} if tex else {}),
                            "change": f"{pov} learns who signed the log" if i else f"{pov} loses the lantern",
                            "unsaid": f"{pov} suspects her master left on purpose",
                            "beat": str(ch.get("objective") or "the chapter objective")[:120]})
@@ -323,6 +384,16 @@ class BookFakeAI:
                                  "suggestion": f"Let {pair['b']} say it in their own rhythm and words (voice card).",
                                  "keep_nearby": []})
                 break
+        # P9: a sentence that explains a protected mystery / states a belief as fact
+        for s_ in self.sentences(body):
+            for ph, dim in self.rule_flags.items():
+                if ph in s_ and dim in dims and not any(f["passage"] == s_[:200] for f in findings):
+                    scores[dim] = 3
+                    findings.append({"id": f"f{len(findings) + 1}", "dimension": dim, "severity": "major",
+                                     "passage": s_[:200], "why": "This breaks the story rules: "
+                                     + ("it explains a protected mystery." if dim == "protected_mysteries" else
+                                        "a belief is stated as confirmed fact."),
+                                     "suggestion": "Keep it unexplained / keep it a belief.", "keep_nearby": []})
         scores = {k: v for k, v in scores.items() if v is not None}
         return {"scores": scores, "findings": findings, "keep": [first[:200]] if first else [],
                 "verdict": "REVISE" if findings else "PASS"}
@@ -331,11 +402,52 @@ class BookFakeAI:
         out = []
         for f in ctx.get("findings") or []:
             p = f.get("passage") or ""
+            if f.get("dimension") == "planned_to_page":
+                if self.planned_fix:
+                    sug = str(f.get("suggestion") or "")
+                    what = sug.split("): ", 1)[-1]
+                    if "the name “" in what:
+                        what = "Her name was " + what.split("the name “", 1)[1].split("”")[0]
+                    what = what.strip().rstrip(".")
+                    out.append({"finding_id": f["id"], "original": p,
+                                "replacement": p + " " + what[:1].upper() + what[1:] + "."})
+                continue
+            ruled = next((ph for ph in self.rule_flags if ph in p and f.get("dimension") in ("story_rules",
+                                                                                           "protected_mysteries")), None)
+            if ruled:
+                out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(ruled, "nobody knew")})
+                continue
             for ph, rep in self.editor_flags.items():
                 if ph in p:
                     out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(ph, rep)})
                     break
         return {"replacements": out}
+
+    def _rules(self, ctx):
+        rules = copy.deepcopy(RULES)
+        cur = ctx.get("current_rules")
+        if cur:  # an update for the plan: keep the ids, change the seen effect's scope, add one rule
+            by_text = {r["text"]: r["id"] for r in cur}
+            for r in rules:
+                r["id"] = by_text.get(r["text"], "")
+                if r["category"] == "seen":
+                    r["scope"] = "only on clear nights"
+            rules.append({"id": "", "category": "hard_rule", "text": "The harbour board can seal a building for one "
+                          "day only.", "scope": "one day; only buildings it inspected", "source": "the main plot",
+                          "stated_by": "the canon"})
+        return {"rules": rules, "notes": [] if cur else ["The seen effect has no limits yet."]}
+
+    def _planned(self, ctx):
+        text = ctx.get("chapter_text") or ""
+        sents = self.sentences(text)
+        out = []
+        for it in ctx.get("planned") or []:
+            what = str(it.get("what") or "")
+            import re  # noqa: PLC0415
+            ws = [w.lower() for w in re.findall(r"[A-Za-z]{5,}", what.replace("the name ", ""))]
+            hit = next((x for x in sents if ws and sum(1 for w in ws if w in x.lower()) >= max(1, len(ws) // 2)), None)
+            out.append({"id": it["id"], "on_page": bool(hit), "quote": (hit or "")[:200]})
+        return {"items": out}
 
     def _canon_ids(self, ctx):
         pov, loc = "mara-vell", "gullhaven-harbor"

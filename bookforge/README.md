@@ -51,7 +51,7 @@ paragraph; 2) which **AI** to use (each slot with its current status, Automatic,
 write it myself*); 3) **what to make** (characters, places, the world, premise, plot and outline);
 4) review and **Create my book**. With an AI it starts drafting the characters and places right away.
 
-The **book profile** is shown (and editable) on the Overview. The AI reads it every time it helps,
+Step 1 also has the optional **🎚️ Ending and style** choices (see below). The **book profile** is shown (and editable) on the Overview. The AI reads it every time it helps,
 and the title and author go on the title page and into the exported files. It is stored with the
 project (API: `GET/PUT /api/projects/{id}/profile`).
 
@@ -171,6 +171,43 @@ never your text. What the editor checks is written in one plain file, `bookforge
   speaking?” — its notes quote the line that sounds like someone else) and, when a chapter has scene cards, **Scene
   plan kept** (goals, the obstacle and the unsaid thing really on the page). The pattern check (no AI) adds a **voice
   check**: per speaker words per line, questions, shared words, favourite phrases used and **never-words** used.
+
+## 🌍 Story rules, world texture, the plan on the page, ending and style
+
+- **🎚️ Ending and style (book profile, all optional).** In the 🚀 wizard, the book profile (Edit) and ⚡ Make a book's quick
+  settings you can choose the **ending** (neat / bittersweet / open / dark), **how much is explained** (explain
+  everything / hint / leave the mysteries), **darkness and peril** (gentle / some danger / real danger) and the style —
+  **dialogue** (little / some / lots), **pace** (slow / medium / fast), **humor** (none / some). Everything defaults to
+  **Let the AI choose**. Inside, the ending is an *ending-state* table — external plot complete/incomplete, the main
+  decision made/deferred/reversed, relationships reconciled/damaged/ambiguous, guilt resolved/reduced/persistent/
+  displaced, social consequences settled/pending, the mystery explained/bounded/protected, future identity
+  known/uncertain; each simple choice fills it in, and **More ending options** lets you change single rows. The premise,
+  plot and outline prompts, the scene plans (peril shapes the obstacles), every chapter prompt (the ending table only in
+  the last chapter) and the editor (what it expects of the ending and the mysteries, and how strict it is about them)
+  follow your choices.
+- **📏 Story rules** (More ▾ → 🌍 Story rules and world, or the book page): what is **law** in this world (a hard rule),
+  what people have only **seen happen**, what characters **believe**, and which **mysteries must stay unexplained** —
+  each with its **limits** (where, when, how often, at what cost), where it comes from and who states it. Your AI drafts
+  them from your characters, places and plan; when those change, **✨ Suggest updates** lists changes you accept or
+  reject one by one (⚠️ when the rules may be out of date). A rule or exception without limits gets ⚠️ *not bounded*.
+  The writer never breaks a hard rule, never turns a belief or mystery into fact; the editor (**Story rules kept**) and
+  the AI reviewer flag violations with the exact passage; plot and outline reviews say when an exception is used but
+  not bounded. “Leave the mysteries” in the profile keeps every mystery unexplained; “explain everything” lets the last
+  chapter explain them.
+- **🧺 World texture**: concrete details of work and trade, weather and sea, institutions, local people and money — each
+  with what it can **cause** (it gets in the way, shows skill, or costs something). Scene plans take their obstacles from
+  it, the writer gets a few per chapter, and a detail is used only if it causes something, shows skill or gets in the
+  way. BookForge counts how often each one is on the page (⚠️ never used / used too often).
+- **✅ Planned to page**: on every chapter page a checklist of what the plan says must reach the reader — the outline
+  beat, each scene's obstacle and change, the narrator's / point-of-view character's **name** (in their first chapter)
+  and the **must show** details of the character sheets — with ✔ / ⚠️. BookForge looks for the words first, then an AI
+  that did not write the chapter checks what is unclear. **✨ Fix with AI** asks the writer to work only the missing items
+  into the right passages; you see before → after and save a new version. The book page lists what is still missing in
+  the whole book. In ⚡ Make a book it runs after the editor (one fix round, kept only if the reviewer passes it); what is
+  still missing is marked ⚠️ and listed in the run summary — it never holds up the book.
+- ⚡ **Make a book for me** has two new steps: **Story rules and world texture** (after the character sheets; the rules
+  are updated for the plan after the outline, accepted under your run consent) and **Planned details on the page**
+  (before the book is put together).
 
 ## ✍ Write all chapters
 

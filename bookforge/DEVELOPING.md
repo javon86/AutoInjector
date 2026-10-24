@@ -46,7 +46,16 @@ bookforge/
     scenes.py              🎬 P8 scene cards: fields, lint, light AI check, ScenePlanner (make/check/revise/save/approve),
                            companion storage (settings scene_cards:<pid>:<branch>, keyed <outline rid>:<chapter id>)
     chapter_brief.py       the C02 writing brief: POV name + planned backstory, voice cards of the characters present,
-                           scene cards, planned details, rules (set_c ChapterWriter puts it in context.writing_brief)
+                           scene cards, planned details, story rules, world texture, must-show details, story choices,
+                           rules (set_c ChapterWriter puts it in context.writing_brief)
+    story_choices.py       🎚️ P12 ending and style choices (book profile ``choices``), the ending-state matrix, briefs,
+                           planner/scene rules, editor notes and threshold changes (relax)
+    story_rules.py         📏 P9 story-rules ledger: categories, cleaning, "bounded?" lint, companion storage (settings
+                           story_rules:<pid>:<branch>), AI draft / update as proposals, bounded briefs
+    texture.py             🧺 P10 world-texture list: kinds/causes, companion storage (world_texture:<pid>:<branch>), AI
+                           draft, scene/chapter briefs, deterministic usage counts (lemma match)
+    planned.py             ✅ P11 planned-to-page check: planned items per chapter, word check, independent AI check,
+                           findings for the P5 rewrite (fix), book-level list (settings planned_checks:<pid>:<branch>)
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
@@ -296,6 +305,88 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * Tests: `tests/test_characters_scenes.py`; the fake AI answers sheets/voices (`VOICES`, `companion`), scene plans
   (`scene_script`) and checks (`scene_verdicts`), `chapter_texts` for dialogue, a voice_distinction note from the
   pattern report, and records every prompt (`prompts[kind] = [(task, context)]`).
+
+## 🌍 Section 4: story rules (P9), world texture (P10), planned to page (P11), ending and style (P12)
+
+* **Where the data lives (and why).** *Choices* are author data of the book, so they live in the book profile
+  (``book_profile:<pid>``, key ``choices`` = {ending, explain, darkness, dialogue, pace, humor, matrix?}; cleaned by
+  ``story_choices.clean`` inside ``book_path.clean_profile``; "" = let the AI choose). The *ledger* and the *texture list*
+  are companion data like the character sheets and scene cards: the spec's canon (A03 physical rules, A09 powers with
+  costs/limits/exceptions, A08 beliefs, FACT/BELIEF/PLAN/UNKNOWN assertion types) is where the AI reads them FROM
+  (``story_rules.canon_view``), but a ledger row has no home there — A facts are canon claims re-approved on every edit
+  (and make chapters stale), "seen to happen" / "protected mystery" have no assertion type (UNKNOWN ≠ "must stay
+  unexplained"), scope/limits and "stated by" have no field, B08 needs the ``mystery`` feature and an approved plot. A
+  texture item is a writing resource (detail + what it can cause + match words), not a canon claim. So: settings
+  ``story_rules:<pid>:<branch>`` and ``world_texture:<pid>:<branch>`` = one entry each {version, rules|items, made_by,
+  updated_at, basis (canon hash + approved B01/B03/B11 versions it was made from), history (5), proposals (rules)};
+  author saves send the version they edited (``VERSION_CONFLICT`` otherwise); outbox ``rules.saved``,
+  ``rules.proposed``, ``rules.proposals_decided`` (``how`` author|run_consent), ``texture.saved`` (numbers only; the
+  journal lists them). Planned checks are advice per record version like craft reviews: ``planned_checks:<pid>:<branch>``
+  keyed ``<rid>:<version>`` (outbox ``planned.checked``, counts only); ``editor.restore`` copies them with the reviews.
+  Character sheets gained ``must_show`` (≤ 5 items; optional in the AI schema). Engine/store semantics are unchanged.
+* **P12 flow.** ``story_choices.matrix(choices)`` = ``PRESETS[ending]`` → ``explain`` sets the mystery row
+  (explain→explained, hint→bounded, leave→protected) → ``choices.matrix`` row overrides. ``brief()`` (≤ ``BRIEF_MAX``
+  1 600 chars) goes into ``assist.book_profile_brief`` (so every AI context with the profile has ``story_choices``), into
+  ``set_b.PlanHandler`` (B01 without the matrix, B03/B11 with it; ``rules()`` appended to the task), into the scene
+  planner (``scene_rules``: peril shapes obstacles, pace the scene count) and the C02 brief (matrix only in the last
+  chapter). The editor gets ``editor_notes`` (appended to the dimension questions) and ``relax`` (per-dimension change of
+  the minimum score in ``editor.decide``: explained mysteries −2, protected +1, gentle peril −1 on tension_stakes, open
+  ending +1 on ending_openness; stored on the craft as ``relaxed``). ``GET /api/story-choices`` = labels, ⓘ help, the
+  matrix rows and presets (UI ``choicesFields`` in the wizard, the profile dialog and ⚡ quick settings; ``POST
+  /api/autobook`` takes ``choices``).
+* **P9 flow.** ``story_rules.generate(assist, job, bp, update=)``: no ledger → saved (made_by ai, ``apply_choices``:
+  "explain" adds "may be explained at the end" to mysteries' scope); a ledger → the AI returns the complete list with ids,
+  ``propose()`` stores add/change/retire proposals (an AI id that is not a ledger id is always NEW), the author decides
+  (``decide_proposals``, needs ``author_confirms``). ``lint`` = the deterministic "bounded?" check (``UNBOUNDED_EXCEPTION``
+  major: an exception word and no scope; ``NO_LIMITS``; ``BELIEF_NO_HOLDER``; ``DUPLICATE``). Uses: ``plan_brief`` (≤ 3 500
+  chars, + ``not_bounded``) in B03/B11 prompts and their consistency review / planning editor (new dimension
+  ``rules_bounded``), ``chapter_rules`` (≤ 12 rules, ≤ 2 500 chars: mysteries and hard rules first, then beliefs/seen by
+  word overlap) in the C02 brief, ``editor_view`` (rules + ``protected_mysteries`` + a note when mysteries may be
+  explained in the last chapter) for the editor (new dimension ``story_rules``; ``protected_mysteries`` reads it) and the
+  C02 consistency review (``REVIEW_TASK`` checks the rules when given).
+* **P10 flow.** ``texture.generate`` (roles of A04) saves the list; ``scene_brief`` (≤ 3 500 chars) goes to
+  ``ScenePlanner._context`` as ``world_texture`` with ``TEXTURE_PLAN`` appended to the plan task; a card may name the ids
+  it used (optional ``texture`` in ``CARD_SCHEMA``); ``chapter_brief`` (≤ 4 items, ≤ 1 200 chars, the cards' ids first)
+  goes to the writer with ``texture.RULE``; the editor's ``world_friction`` reads it. ``usage``/``book_usage``: lemma match
+  of each item's words (plural/-ed/-ing/possessive stripped; phrases as token sequences); ``prose_audit`` gets
+  ``settings["texture"]`` → ``stats["texture"]`` and a minor ``texture_overused`` finding (≥ 5 times and > 6 per 1 000
+  words); the world page shows used/unused per item over the whole book.
+* **P11 flow.** ``planned.planned_items(bp, outline, chapter)`` (≤ 16): beat (outline objective), POV name (required in
+  the first chapter of that POV), per scene card obstacle + change (+ the POV's goal, optional), the sheets' must-show
+  items spread over the chapters where that character is POV or present (``_must_show_assignment``; the C02 brief lists
+  them as ``must_show``), the brief's planned details (optional). ``check_text``: names as words; text items on_page at ≥ 50 %
+  of their content-word lemmas, unclear ≥ 25 %, else missing. ``PlannedChecker.check(job, rid)``: + ONE independent AI
+  call (``plan_reviewer``: never the writer when another AI works; ``CHECK_TASK``, ≤ 12 items, chapter ≤ 60 000 chars) for
+  open items; an AI "yes" counts only with a quote found in the text. ``propose_fix``: ``findings_for`` anchors each
+  open required item at an exact, unique sentence (best word overlap; never two items on one sentence) → findings with
+  dimension ``planned_to_page`` → ``editor.propose(craft=pseudo)`` → the author applies via ``/review/editor/apply``
+  (or the run via ``editor.apply(how="run")``). ``book()``: per chapter counts (stored AI check or word check), the
+  missing list and POV names that never appear in the book.
+* **Runs** (``autobook``): new steps ``world`` (after ``characters``: ledger + texture once; failure → ⚠️
+  ``RULES_FAILED`` / ``TEXTURE_FAILED``, TIMEOUT/busy/no AI pause) and ``planned`` (after ``chapters``: book-level report,
+  ⚠️ ``PLANNED_MISSING``, never blocks); after the outline step ``_update_rules`` asks for proposals when the plan changed
+  and accepts them under the run consent (``_check_consent``). In ``_review_until_approved`` (C02) after the editor pass:
+  ``_planned_pass`` = check → while open items and rounds left (``planned.ROUNDS`` = 1; 0 when Settings › Editor rounds is
+  0) → propose + apply → VALIDATE + consistency review + check again → kept only if checks pass, the reviewer says
+  APPROVE and fewer items are open, else ``editor.restore`` (events ``PLANNED_FIX_KEPT`` / ``PLANNED_FIX_REJECTED`` /
+  ``PLANNED_UNRESOLVED``); still open → ⚠️ ``PLANNED_MISSING``; chapter items get ``planned``; ``run["planned"]``,
+  ``run["planned_summary"]`` {checked, fixed, flagged, book}. Older saved runs get both steps on resume.
+* **API** (under ``/api/projects/{pid}/branches/{b}/review``): ``GET world`` (rules, lint, ``rules_changed``, texture,
+  problems, ``texture_usage``, ``mystery_mode``, fields), ``PUT world/rules {rules, version}``, ``POST world/rules/proposals
+  {author_confirms, version, accept?, reject?}``, ``PUT world/texture {items, version}``, ``POST world/{rules|texture}/ai
+  {update?, note?}`` (202), ``GET planned`` (book), ``GET planned/{rid}`` (word check of the newest version + stored
+  check), ``POST planned/{rid}/check`` (202), ``POST planned/{rid}/fix`` (202 → proposal at ``editor/{rid}``).
+  UI: ``viewWorld`` (``#/p/<pid>/<b>/world``, More ▾), ``plannedCard`` (chapter page), ``bookSection4Card`` (book page),
+  ``choicesFields`` / ``choicesSummary`` (wizard, profile card + dialog, ⚡ setup), run window ``planned_note``, item
+  ``planned`` and ``plannedRunSummary``; problems.js ``RULES_*``, ``RULE_NOT_BOUNDED``, ``TEXTURE_*``, ``PLANNED_*``.
+* **Prompt budget (characters of JSON added per prompt).** Chapter (C02) brief: story rules ≤ 2 500, texture ≤ 1 200,
+  must-show ≤ 5 × 160, choices ≤ 1 600 (on top of Section 3's voice cards ≤ 7 000 and scene cards) → the whole brief stays
+  under ~22 000. Scene planning: texture ≤ 3 500 + peril/pace one sentence each. Plot/outline + their review: rules
+  ≤ 3 500. Editor: rules ≤ 3 500 + ≤ 8 mysteries + texture ≤ 1 200. Ledger draft: canon view ≤ 12 000 + plan view ≤ 6 000.
+  Texture draft: the scenes' world view (≤ 30 records) + ≤ 10 characters. Planned check: chapter ≤ 60 000 + ≤ 12 items.
+* Tests: ``tests/test_world_planned.py``; the fake AI answers rules (``RULES``, an update adds/changes one), texture
+  (``TEXTURE``; scene plans then take obstacles from it), the planned checker (a sentence with the item's words), the
+  planned fix (``planned_fix``; kind ``planned_rewrite``) and rule violations (``rule_flags``).
 
 ## 🧪 Test workflow (workflow_test.py)
 
