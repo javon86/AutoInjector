@@ -157,6 +157,10 @@ class BookFakeAI:
         self.planned_script: list = []           # scripted planned-to-page checks (P11), one per call
         self.planned_fix = False                 # P11: the writer works missing planned items into the anchor
         self.rule_flags: dict[str, str] = {}     # phrase -> editor dimension (P9 story_rules / protected_mysteries)
+        self.max_chapters = 6                    # B11: at most this many chapters (P15 tests raise it)
+        self.expand_text = False                 # P15: the writer's continuation adds a paragraph (default: nothing)
+        self.book_review_script: list = []       # P13: scripted whole-book reviews (dicts or callables(ctx))
+        self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -195,6 +199,22 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "scene_text" in props:  # 📏 P15: one scene of a long chapter
+            return "scene_prose", self._scene_prose(ctx, props)
+        if "continuation" in props:  # 📏 P15: expand a chapter far under its target
+            return "expand", self._expand(ctx)
+        if "book_scores" in props:  # 📊 P13: whole-book review
+            with self.lock:
+                scripted = self.book_review_script.pop(0) if self.book_review_script else None
+            if scripted is not None:
+                return "book_review", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "book_review", self._book_review(ctx, props)
+        if "version_1" in props and "version_2" in props:  # ⚖️ P14: blind comparison
+            with self.lock:
+                scripted = self.compare_script.pop(0) if self.compare_script else None
+            if scripted is not None:
+                return "compare", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "compare", self._compare(ctx, props)
         if "scores" in props:  # 🖋 the AI editor (craft review)
             with self.lock:
                 self.craft_contexts.append(ctx)
@@ -304,7 +324,7 @@ class BookFakeAI:
         if "chapters" in props:
             req = ctx.get("request_payload") or {}
             n = ((req.get("target_length") or {}).get("value")) or 3
-            n = max(1, min(int(n), 6))
+            n = max(1, min(int(n), self.max_chapters))
             pov, loc = self._canon_ids(ctx)
             return "B11", {"chapters": [plan_item(f"ch{i + 1}", i, OBJECTIVES[i % 3], pov, loc) for i in range(n)],
                            "unresolved_threads": []}
@@ -313,12 +333,67 @@ class BookFakeAI:
             cid = req.get("chapter_id") or "ch1"
             num = int(cid[2:]) if cid[2:].isdigit() else 1
             paras = CHAPTER_TEXT[((num - 1) % 3) + 1]
+            if num > 3:  # chapters past the third get their own sentence (the content check refuses duplicates)
+                paras = [p + f" That was night {num} of the search." for p in paras]
             text = self.chapter_texts.get(cid) or "\n\n".join(paras)
             return "C02", {"text": text,
                            "objective_assessments": [{"item_id": cid, "decision": "PASS", "message": "reached"}]}
         if "events" in props:
             return "events", {"events": []}
         return "generic", self._from_schema(schema)
+
+    def _scene_prose(self, ctx, props):
+        sw = ctx.get("scene_writing") or {}
+        req = ctx.get("request_payload") or {}
+        cid = req.get("chapter_id") or "ch1"
+        num = int(cid[2:]) if cid[2:].isdigit() else 1
+        paras = CHAPTER_TEXT[((num - 1) % 3) + 1]
+        i = int(sw.get("scene") or 1)
+        card = sw.get("card") or {}
+        body = paras[(i - 1) % len(paras)] + (f" At {card['place']} the {card.get('time') or 'hour'} pressed on."
+                                               if card.get("place") else f" Scene {i} went on.")
+        text = (f"# Part of {cid}\n\n" if sw.get("first") else "") + body
+        out = {"scene_text": text}
+        if "objective_assessments" in props:
+            out["objective_assessments"] = [{"item_id": cid, "decision": "PASS", "message": "reached"}]
+        return out
+
+    def _expand(self, ctx):
+        if not self.expand_text:
+            return {"continuation": ""}
+        n = int(ctx.get("words_so_far") or 0)
+        return {"continuation": f"The night went on, and Mara counted the cost of every step she had taken so far: "
+                                f"the oil, the herring, the hours at the sheds, the questions nobody answered "
+                                f"({n} words in, she still had the brass key and no one to give it to)."}
+
+    BOOK_DIMS_DEFAULT = 7
+
+    def _book_review(self, ctx, props):
+        dims = list((props["book_scores"].get("properties") or {}).keys())
+        book = ctx.get("book") or {}
+        chs = book.get("chapters") or []
+        text = " ".join(str(c.get("text") or c.get("opening") or "") for c in chs)
+        quote = (self.sentences(text) or [""])[0][:160]
+        return {"book_scores": {d: (9 if d in ("atmosphere", "premise") else 5 if d in ("peril_uncertainty", "subtext")
+                                    else 7) for d in dims},
+                "strengths": [{"point": "The fog-bound harbour is vivid.", "quote": quote}],
+                "weaknesses": [{"point": "Helpers hand Mara what she needs.", "quote": "Only old Nessa at the net sheds "
+                                "would talk"}, {"point": "An invented line.", "quote": "This sentence is not in the "
+                                                                               "book at all."}],
+                "try_next": ["Let Nessa ask a real price."], "summary": "Atmospheric but too cooperative."}
+
+    def _compare(self, ctx, props):
+        dims = list((props["version_1"].get("properties") or {}).keys())
+        v1 = " ".join(str(c.get("text") or c.get("opening") or "") for c in (ctx.get("version_1") or {}).get(
+            "chapters") or [])
+        v2 = " ".join(str(c.get("text") or c.get("opening") or "") for c in (ctx.get("version_2") or {}).get(
+            "chapters") or [])
+        # deterministic: the longer version is "better" by one point everywhere
+        better = "version_1" if len(v1) >= len(v2) else "version_2"
+        s1 = {d: 7 + (1 if better == "version_1" else 0) for d in dims}
+        s2 = {d: 7 + (1 if better == "version_2" else 0) for d in dims}
+        return {"version_1": s1, "version_2": s2, "preferred": better,
+                "reasons": [f"{better.replace('_', ' ').title()} has more concrete obstacles."]}
 
     def _scenes(self, ctx):
         ch = ctx.get("chapter") or {}

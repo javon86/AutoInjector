@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 
 from . import characters as chars_mod
 from . import h_checks as hc
+from . import lengths as lengths_mod
+from . import pipeline as pipeline_mod
 from . import planned as planned_mod
 from . import scenes as scenes_mod
 from . import story_choices
@@ -64,9 +66,9 @@ log = logging.getLogger("bookforge.autobook")
 MAX_FIXES = 2
 MAX_EVENTS = 400
 RELEASE = ["MANUSCRIPT_PDF", "EPUB_REFLOWABLE", "EDITABLE_DOCX"]
-CANON_COUNTS = {"short_story": {"A01": 2, "A04": 1}, "novella": {"A01": 3, "A04": 2, "A03": 1},
-                "novel": {"A01": 4, "A04": 3, "A03": 1}}
-CHAPTERS_FOR = {"short_story": 3, "novella": 8, "novel": 24}
+CANON_COUNTS = {"short_story": {"A01": 2, "A04": 1}, "novelette": {"A01": 3, "A04": 2},
+                "novella": {"A01": 3, "A04": 2, "A03": 1}, "novel": {"A01": 4, "A04": 3, "A03": 1}}
+CHAPTERS_FOR = {k: v["default_chapters"] for k, v in lengths_mod.PRESETS.items()}  # P15 length presets
 SET_NAMES = {"A": "Universe & Characters", "B": "Story Planning", "C": "Writing", "G": "Assemble & Export",
              "H": "Quality Checks", "I": "Storage & Context"}
 
@@ -91,8 +93,13 @@ STEPS = [
     ("assemble", "G", "G01", "Put the book together", "Order, manuscript, typography, pages and contents."),
     ("export", "G", "G11", "Export PDF, EPUB and Word", "Makes the three files and re-reads each one."),
     ("check", "H", "H05", "Content check", "Every chapter is in the book once and in order."),
+    ("report", "H", None, "Book report", "Scores, strengths and weaknesses with quotes, the editor's and the "
+     "planned-to-page findings, word counts and which AI did what — the whole book is read by the AIs that did not "
+     "write it. (Never holds up the book.)"),
 ]
 STEP_IDS = [s[0] for s in STEPS]
+# P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
+STEP_FLAGS = {"characters": "voices", "world": "rules", "planned": "planned"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -127,11 +134,11 @@ NEW_BOOK_NAME = "New book (being made…)"
 
 
 class RunPaused(Exception):
-    pass
+    control = True  # a pause/cancel of the run: never swallowed as "this reviewer failed"
 
 
 class RunCancelled(Exception):
-    pass
+    control = True
 
 
 class StepProblem(Exception):
@@ -422,6 +429,24 @@ class _Runner:
             log.exception("could not record a failover")
 
 
+class _TimedProviders(PinnedProviders):
+    """The run's AI registry, timing every AI call made through it (P15 ETA; numbers only)."""
+
+    def __init__(self, base, slot_id, sink):
+        super().__init__(base, slot_id)
+        self._sink = sink
+
+    def _generate_on(self, *a, **kw):
+        t0 = time.monotonic()
+        try:
+            return super()._generate_on(*a, **kw)
+        finally:
+            try:
+                self._sink(time.monotonic() - t0)
+            except Exception:  # noqa: BLE001 - a timing hint never breaks a call
+                pass
+
+
 # ====================================================================== Make a book for me
 class AutoBookService(_Runner):
     KIND = "autobook"
@@ -596,7 +621,8 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ settings
     def _clean_settings(self, body) -> dict:
-        out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {}}
+        out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {},
+               "pipeline": pipeline_mod.clean(None)}
         # P12: ending and style choices (all optional; empty = let the AI choose)
         out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")
@@ -607,10 +633,28 @@ class AutoBookService(_Runner):
         ln = body.get("length")
         if ln not in (None, ""):
             if ln not in LENGTHS:
-                raise BookforgeError("INVALID_INPUT", "/length", "length: short_story, novella or novel",
+                raise BookforgeError("INVALID_INPUT", "/length", "length: short_story, novelette, novella or novel",
                                      status="REJECTED")
             out["length"] = ln
         out["slot_id"] = AssistService._check_slot(body.get("slot_id"))
+        # P14: the pipeline switches of this run (default: everything on) and an optional "variant of" another book
+        out["pipeline"] = pipeline_mod.clean(body.get("pipeline"))
+        vo = body.get("variant_of")
+        if vo not in (None, ""):
+            pid = vo.get("project_id") if isinstance(vo, dict) else vo
+            if not isinstance(pid, str) or not pid or len(pid) > 80:
+                raise BookforgeError("INVALID_INPUT", "/variant_of", "variant_of: the book (project_id) to make a "
+                                     "variant of", status="REJECTED")
+            src = get_profile(self.store, pid) if self.store.project(pid) is not None else {}
+            if not src.get("title") and not src.get("idea"):
+                raise BookforgeError("NOT_FOUND", "/variant_of", "that book has no profile (title and idea) to make a "
+                                     "variant of", status="REJECTED")
+            out["variant_of"] = {"project_id": pid, "title": str(src.get("title") or "")[:200]}
+            # the same book: its length and choices unless this run names its own
+            if ln in (None, "") and src.get("length") in LENGTHS:
+                out["length"] = src["length"]
+            if not body.get("choices") and isinstance(src.get("choices"), dict):
+                out["choices"] = story_choices.clean(src["choices"])
         idea = body.get("idea")
         if idea not in (None, ""):
             if not isinstance(idea, str) or len(idea) > 2000:
@@ -621,15 +665,57 @@ class AutoBookService(_Runner):
     # ------------------------------------------------------------------ services bound to this run's AI choice
     def _services(self, run):
         slot = run["settings"].get("slot_id")
-        providers = PinnedProviders(self.app.engine.providers, slot)
+        sink = lambda secs: self._timed(run, secs)  # noqa: E731 - P15: measured AI call times (ETA)
+        providers = _TimedProviders(self.app.engine.providers, slot, sink)
         engine = Engine(self.store, self.app.engine.contracts, providers=providers)
         assist = AssistService(engine, run["principal"], retry_busy=True)
         assist.retry_policy = self.retry_policy
+        once = assist._call_ai_once
+
+        def timed_once(job, **kw):
+            # calls that leave the pinned registry (another AI reviews: cross_pin) are timed here, the rest below
+            if not getattr(job, "cross_pin", False):
+                return once(job, **kw)
+            t0 = time.monotonic()
+            try:
+                return once(job, **kw)
+            finally:
+                sink(time.monotonic() - t0)
+        assist._call_ai_once = timed_once  # type: ignore[method-assign]
         review = ReviewService(engine, assist, run["principal"], work=self.app.work, on_change=self.app.changed)
         return engine, assist, review
 
+    @staticmethod
+    def _timed(run, secs: float):
+        t = run.setdefault("timing", {"calls": 0, "call_s": 0.0})
+        t["calls"] = int(t.get("calls") or 0) + 1
+        t["call_s"] = round(float(t.get("call_s") or 0.0) + max(0.0, float(secs)), 3)
+
+    def _eta(self, run, done: int, total: int) -> dict | None:
+        """P15: time left, estimated from this run's measured times: the average chapter so far for the chapters
+        left, plus a few measured AI calls for the steps after the chapters (report) and ~5 s per BookForge step."""
+        t = run.get("timing") or {}
+        per = t.get("chapter_s") or []
+        if not per or total <= 0:
+            return None
+        avg_ch = sum(per) / len(per)
+        avg_call = (float(t.get("call_s") or 0) / int(t["calls"])) if t.get("calls") else 0.0
+        after = 3 * avg_call + 5 * sum(1 for s in run["steps"] if s["id"] in ("planned", "format", "assemble", "export",
+                                                                                "check", "report")
+                                      and s["state"] not in ("done", "skipped"))
+        left = max(0, total - done) * avg_ch + after
+        return {"seconds_left": int(round(left)), "per_chapter_s": round(avg_ch, 1),
+                "avg_call_s": round(avg_call, 2), "calls": int(t.get("calls") or 0), "chapters_left": total - done,
+                "at": now_iso()}
+
     def bp(self, run) -> BookPath:
         return BookPath(self._engine, run["principal"], run["project_id"], run["branch_id"])
+
+    @staticmethod
+    def _on(run, flag: str) -> bool:
+        """P14: is this pipeline switch on for the run (runs saved before the switches existed: everything on)?"""
+        flags = ((run.get("settings") or {}).get("pipeline") or {}).get("flags") or {}
+        return bool(flags.get(flag, True))
 
     def _job(self, run, kind, op=None) -> Job:
         job = Job(kind, run["principal"], run["project_id"], run["branch_id"], op, run["settings"].get("slot_id"))
@@ -680,6 +766,13 @@ class AutoBookService(_Runner):
                 if st["state"] in ("done", "skipped"):
                     continue
                 self.check(run)
+                flag = STEP_FLAGS.get(sid)
+                if flag and not self._on(run, flag):  # P14: this part of the pipeline is switched off for the run
+                    st.update(state="skipped", message=f"Off in this run's pipeline ({pipeline_mod.LABELS[flag]})",
+                              finished_at=now_iso())
+                    self.event(run, "skip", f"{st['title']}: switched off in this run's pipeline", step=sid)
+                    self.save(run)
+                    continue
                 run["current"] = sid
                 st.update(state="running", started_at=st.get("started_at") or now_iso(), finished_at=None,
                           problem=None, message="Working…")
@@ -856,7 +949,8 @@ class AutoBookService(_Runner):
             rj = ReviewJob("review", run["principal"], run["project_id"], run["branch_id"], [rid], None)
             for k in ("started", "status", "retry_busy", "check", "on_wait"):
                 setattr(rj, k, getattr(job, k))
-            editor_next = head["module_id"] == "C02" and self._editor_settings(run).get("enabled")
+            editor_next = head["module_id"] == "C02" and self._editor_settings(run).get("enabled") and \
+                self._on(run, "editor")
             try:
                 res = self._review.review_one(rj, rid, auto=not editor_next)
             except BookforgeError as exc:
@@ -878,7 +972,7 @@ class AutoBookService(_Runner):
                     why += " · editor: " + ("PASS" if ed.get("verdict") == "PASS" and not ed.get("flagged") else
                                             "still had notes (rounds used up or rewrite not kept)" if ed.get("flagged")
                                             else "not run")
-                if head["module_id"] == "C02":
+                if head["module_id"] == "C02" and self._on(run, "planned"):
                     head = self._planned_pass(run, st, rid, label, chapter_id)
                     pl = (run.get("planned") or {}).get(rid) or {}
                     if pl.get("flagged"):
@@ -1333,6 +1427,8 @@ class AutoBookService(_Runner):
         """After the plan is approved: the AI suggests updates of the story rules for it; they are accepted under the
         run consent (bounded: one AI call). Never blocks the book."""
         pid, branch = run["project_id"], run["branch_id"]
+        if not self._on(run, "rules"):
+            return
         entry = story_rules.get_entry(self.store, pid, branch)
         bp = self.bp(run)
         if not entry or not story_rules.changed_since(entry, story_rules.basis(bp)):
@@ -1399,19 +1495,37 @@ class AutoBookService(_Runner):
             # run finds that book again on Resume instead of making a second one.
             pid = "proj-" + run["id"].split("-", 1)[-1]
             if self.store.project(pid) is None:
+                extra = {"variant_of": s["variant_of"]["project_id"]} if s.get("variant_of") else {}
                 self._engine.bootstrap_project(run["principal"], NEW_BOOK_NAME, project_id=pid,
-                                               settings={"made_by_run": run["id"]},
+                                               settings=dict({"made_by_run": run["id"]}, **extra),
                                                features={"character_arcs": False}, release_profiles=list(RELEASE))
                 self.event(run, "project", "A new, separate book was created (your other books are not touched)")
             run["project_id"] = pid
             self.save(run)
         pid = run["project_id"]
+        if pipeline_mod.info_of(self.store, pid) is None:  # P14: the book remembers the switches it was made with
+            pipeline_mod.save(self.store, pid, s.get("pipeline") or pipeline_mod.clean(None), run_id=run["id"],
+                              variant_of=(s.get("variant_of") or {}).get("project_id"))
         if not get_profile(self.store, pid).get("length"):
             first = {"length": s["length"], "chapters": CHAPTERS_FOR[s["length"]], "ai_slot": s.get("slot_id") or "",
                      "genre": s.get("genre") or ""}
             if s.get("choices"):
                 first["choices"] = s["choices"]
             save_profile(self.store, pid, first)
+        if s.get("variant_of") and not get_profile(self.store, pid).get("idea"):
+            # P14: a variant is the same book (profile, idea, choices) made again with other pipeline switches
+            src = get_profile(self.store, s["variant_of"]["project_id"])
+            copy_ = {k: str(src.get(k) or "")[:n] for k, n in (("title", 200), ("author", 200), ("genre", 120),
+                                                                ("audience", 120), ("tone", 200), ("idea", 4000))
+                     if src.get(k)}
+            if not copy_.get("title"):
+                copy_["title"] = "Untitled book"
+            pre = (s.get("pipeline") or {}).get("preset") or "full"
+            with self.store.transaction():
+                save_profile(self.store, pid, copy_)
+                self._name_book(pid, f"{copy_['title']} (variant: {pre})"[:200])
+            self.event(run, "project", f"Variant of “{copy_['title']}”: the same profile, idea and choices, made with "
+                       f"{pipeline_mod.describe(s.get('pipeline')).lower()}")
         prof = book_profile_brief(self.store, pid)
         if prof.get("title") and prof.get("idea"):
             self._name_book(pid, prof["title"])  # a stop between saving the profile and naming the book
@@ -1783,7 +1897,8 @@ class AutoBookService(_Runner):
                 item.update(state="done", words=len(((appr.get("data") or {}).get("text") or "").split()))
                 continue
             item["state"] = "running"
-            st["message"] = f"Chapter {idx + 1} of {len(chapters)}"
+            st["message"] = f"Chapter {idx + 1} of {len(chapters)}" + self._eta_words(run)
+            t_chapter = time.monotonic()
             self.save(run)
             while True:
                 bp = self.bp(run)
@@ -1792,11 +1907,12 @@ class AutoBookService(_Runner):
                     rid = latest["record_id"]
                 else:
                     try:
-                        self._scene_cards(run, st, cid, item)
+                        if self._on(run, "scenes"):
+                            self._scene_cards(run, st, cid, item)
                     except StepProblem:
                         item["state"] = "paused"
                         raise
-                    st["message"] = f"Chapter {idx + 1} of {len(chapters)}"
+                    st["message"] = f"Chapter {idx + 1} of {len(chapters)}" + self._eta_words(run)
                     run["phase"] = st["message"]
                     self.save(run)
                     payload = bp.prepare_chapter(cid)
@@ -1816,7 +1932,15 @@ class AutoBookService(_Runner):
                 except StepProblem:
                     item["state"] = "paused"
                     raise
-            item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()))
+            item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()),
+                        seconds=round(time.monotonic() - t_chapter, 1))
+            tm = run.setdefault("timing", {"calls": 0, "call_s": 0.0})
+            tm["chapter_s"] = (list(tm.get("chapter_s") or []) + [item["seconds"]])[-50:]
+            done_n = sum(1 for i in st["items"] if i.get("state") == "done")
+            run["eta"] = self._eta(run, done_n, len(chapters))
+            lm = self._length_meta(run, (rec or {}).get("record_id") or rid)
+            if lm:
+                item["length"] = lm
             pl = (run.get("planned") or {}).get((rec or {}).get("record_id") or rid)
             if pl:
                 item["planned"] = {"missing": len(pl.get("missing") or []), "flagged": bool(pl.get("flagged")),
@@ -1829,7 +1953,33 @@ class AutoBookService(_Runner):
                                   "min": ed.get("min_score"), "reviewer": ed.get("reviewer")}
             self.save(run)
         words = sum(i.get("words") or 0 for i in st["items"])
-        st["message"] = f"{len(chapters)} chapter(s) written and approved · {words} words"
+        target = lengths_mod.of_book(self.store, run["project_id"], len(chapters))
+        st["message"] = f"{len(chapters)} chapter(s) written and approved · {words:,} words (target about " \
+                        f"{target['book_words']:,})"
+        run["eta"] = None
+
+    @staticmethod
+    def _eta_words(run) -> str:
+        eta = run.get("eta") or {}
+        left = eta.get("seconds_left")
+        if left is None:
+            return ""
+        return f" · about {max(1, round(left / 60))} min left" if left >= 90 else f" · about {max(1, left)} s left"
+
+    def _length_meta(self, run, rid: str) -> dict | None:
+        """How the approved chapter was written (P15: whole / scene by scene, expansion rounds) — numbers only."""
+        try:
+            rec = self.bp(run).rec(rid)
+            hist = self.store.history(run["project_id"], run["branch_id"], rid)
+            first = hist[0] if hist else rec
+            meta = self.store.get_state(run["project_id"], run["branch_id"], "c_meta", first["record_id"]) or {}
+            info = meta.get("length") or {}
+            if not info:
+                return None
+            return {"mode": info.get("mode"), "scenes": info.get("scenes"), "target": info.get("target_words"),
+                    "expanded": info.get("expanded_words"), "rounds": info.get("expand_rounds")}
+        except Exception:  # noqa: BLE001 - display only
+            return None
 
     def _approve_step_items(self, run, step_id, why):
         bp = self.bp(run)
@@ -1901,6 +2051,48 @@ class AutoBookService(_Runner):
             return bp.a_export({})
         except StepProblem as exc:
             return {"ok": False, "message": exc.problem.get("message"), "problems": exc.problem.get("details") or []}
+
+    def _s_report(self, run, st):
+        """P13: the book report of the finished book, with the whole-book review by every working AI that did not
+        write most of it (independent). Never blocks the book: a failure is a ⚠️ note (REPORT_FAILED); a reviewer that
+        fails is listed in the report."""
+        rp = getattr(self.app, "reports", None)
+        if rp is None:
+            st["message"] = "Not available"
+            return
+        st["message"] = "The other AIs are reading the whole book"
+        run["phase"] = st["message"]
+        self.save(run)
+
+        def progress(i, n, s):
+            st["message"] = f"{s['name']} is reading the whole book ({i + 1} of {n})"
+            run["phase"] = st["message"]
+            self.save(run)
+        try:
+            rep = rp.make(run["principal"], run["project_id"], run["branch_id"], assist=self._assist,
+                          review=self._review, ai=True, made_by="run", run_id=run["id"],
+                          check=lambda: self.check(run), on_progress=progress)
+        except (RunPaused, RunCancelled, Cancelled):
+            raise
+        except Exception as exc:  # noqa: BLE001 - a report must never stop the book
+            log.exception("book report failed in run %s", run["id"])
+            code = exc.code if isinstance(exc, BookforgeError) else type(exc).__name__
+            st["message"] = f"⚠️ The report could not be made ({code}); make it on the book's 📊 report page"
+            self.event(run, "note", st["message"], step="report", code="REPORT_FAILED")
+            return
+        agg = rep.get("aggregate") or {}
+        run["report"] = {"id": rep["id"], "overall": agg.get("overall"), "reviewers": agg.get("reviewers"),
+                         "independent": agg.get("independent"), "disagreements": agg.get("disagreements") or [],
+                         "words": (rep.get("words") or {}).get("total"), "warnings": rep.get("warnings") or []}
+        if agg.get("reviewers"):
+            st["message"] = (f"{agg['reviewers']} AI(s) read the whole book · overall {agg.get('overall')}/10"
+                             + (f" · ⚠️ they disagree on {', '.join(agg['disagreements'])}" if agg.get("disagreements")
+                                else ""))
+        else:
+            st["message"] = "⚠️ Report made without an AI review: no independent AI was working (📨 Ask the other AIs " \
+                            "on the report page later)"
+            self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
+        self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
 
     def _s_check(self, run, st):
         out = self.bp(run).a_check({})
@@ -2005,8 +2197,8 @@ class WriteAllService(_Runner):
         check, change and approve on the chapter's scene page). A failure is noted and the chapter is written from
         the outline; TIMEOUT / a busy AI stop like a chapter would."""
         outline = bp.outline()
-        if not outline:
-            return
+        if not outline or not pipeline_mod.on(self.store, job["project_id"], "scenes"):
+            return  # P14: a book made without scene cards is written on without them
         entry = scenes_mod.get_entry(self.store, job["project_id"], job["branch_id"], outline["record_id"], item["id"])
         if scenes_mod.usable(entry, outline):
             return

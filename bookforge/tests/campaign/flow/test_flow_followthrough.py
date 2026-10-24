@@ -86,7 +86,7 @@ def test_make_a_book_every_step_follows_through(tmp_path):
     # profile -> stored, project named after it, used for the chapter target
     prof = get_profile(app.store, pid)
     assert prof["title"] == run["title"] == "The Keeper of Gullhaven" and prof["author"] == "Rowan Ashby"
-    assert prof["genre"] == "Mystery" and prof["length"] == "novella" and prof["chapters"] == 8
+    assert prof["genre"] == "Mystery" and prof["length"] == "novella" and prof["chapters"] == 12  # P15 preset
     assert app.store.project(pid)["name"] == prof["title"]
 
     # canon -> approved; nothing left as a stray draft
@@ -108,22 +108,22 @@ def test_make_a_book_every_step_follows_through(tmp_path):
 
     # outline: chapter count == target; every POV/location resolves to approved canon (no dangling ids)
     facts = outline_facts(b11[0])
-    assert len(facts) == 8
+    assert len(facts) == 12  # P15: novella preset (was 8)
     assert all(f["plan.pov_id"] in chars and f["plan.location_id"] in places for f in facts)
     outline_ids = [c["chapter_id"] for c in bp.outline_chapters(b11[0])]
-    assert outline_ids == [f"ch{i}" for i in range(1, 9)]
+    assert outline_ids == [f"ch{i}" for i in range(1, 13)]
 
     # chapters: exactly one context and one prose record per outline chapter, the prose follows the objective
     c01 = app.store.list_records(pid, "main", "C01", "OUTPUT")
     c02 = app.store.list_records(pid, "main", "C02", "OUTPUT")
-    assert len(c01) == 8 and len(c02) == 8
+    assert len(c01) == 12 and len(c02) == 12
     chapters = fk.approved_chapters(app, pid)
     assert [cid for cid, _ in chapters] == outline_ids
     for cid, rec in chapters:
         assert rec is not None and rec["lifecycle"] == "APPROVED"
         assert rec["data"]["text"].startswith(f"[{cid}/p1] {fk.objective_marker(cid)}")
     assert ai.chapter_versions == {cid: 1 for cid in outline_ids}  # each chapter written once
-    assert len({rec["record_id"] for _c, rec in chapters}) == 8
+    assert len({rec["record_id"] for _c, rec in chapters}) == 12
 
     # assembly uses exactly those approved chapter revisions, in outline order
     asm = bp.mem["assembly"]

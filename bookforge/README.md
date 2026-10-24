@@ -46,7 +46,7 @@ elsewhere `~/.local/share/bookforge`). The server only listens on `127.0.0.1`.
 
 The first time you open BookForge (and any time from **🚀 New book** in the top bar) a short
 **Start a new book** wizard asks, in plain words: 1) your **book profile** — title, author or pen
-name, genre, who it is for, length (short story / novella / novel), tone and your idea in a
+name, genre, who it is for, length (short story / novelette / novella / novel), tone and your idea in a
 paragraph; 2) which **AI** to use (each slot with its current status, Automatic, or *Manual — I'll
 write it myself*); 3) **what to make** (characters, places, the world, premise, plot and outline);
 4) review and **Create my book**. With an AI it starts drafting the characters and places right away.
@@ -209,6 +209,33 @@ never your text. What the editor checks is written in one plain file, `bookforge
   are updated for the plan after the outline, accepted under your run consent) and **Planned details on the page**
   (before the book is put together).
 
+## 📊 Book report, ⚖️ compare versions and 📏 longer books
+
+- **📊 Book report.** When a ⚡ run finishes (its last step), or from the book page, the shelf or **📊 Book report**,
+  BookForge makes a quality report of the book: scores from 1 to 10 for atmosphere, premise, plot continuity,
+  structure, prose clarity, world distinctiveness, character differentiation, psychological complexity, realism, rule
+  rigor, peril and uncertainty, subtext and the ending; **strengths and weaknesses with quotes** (⚠️ when a quote is not
+  in the book word for word); what the editor, the planned-to-page check and the pattern check found across all
+  chapters; words per chapter against the length; **which AI wrote, reviewed and edited what**; and **what to try
+  next**. The whole book is read by every working AI that did **not** write most of it (independent); BookForge shows
+  the middle score (median) per dimension and ⚠️ where the AIs are 3 or more points apart. A short book is sent whole;
+  a long one as a digest of every chapter (opening, a middle passage, ending). **📨 Ask the other AIs to review this
+  book** lets you choose AIs (the writer is marked ⚠️ not independent). **⬇ Markdown** and **⬇ PDF** download it as
+  “<Book title> - BookForge report - <date>”. Reports are kept per book version (⚠️ when a chapter changed since).
+- **🧪 Variants and ⚖️ compare.** ⚡ quick settings → *Pipeline (advanced)*: switch off the editor, scene cards, voice
+  cards, story rules or the planned-to-page check (preset **Baseline** = all off, like the first automatic book).
+  **🧪 Make a variant** (book page, report, shelf) makes the same book — same profile, idea and choices — again with
+  other switches. **⚖️ Compare** (shelf, book page, `#/compare`) gives two books or two chapter versions to your AIs
+  **blind**: each sees “Version 1” and “Version 2” in its own random order, scores both and picks one; then BookForge
+  reveals which was which and shows a table with the median scores and the winner per dimension.
+- **📏 Lengths.** Short story (~3,000–5,000 words, 3–5 chapters), novelette (~10,000–15,000, 5–8), novella
+  (~20,000–40,000, 8–15) and novel (~60,000–90,000, 20–35). The outline gets the chapter count and words per chapter,
+  the scene plan the number of scenes and words per scene, every chapter prompt its word target. Chapters longer than
+  about 2,500 words are **written scene by scene** (one AI answer per scene) so web AIs never hit their reply limit; a
+  chapter that comes back far too short is **continued once within its scene plan** — never padded (the editor still
+  checks it). The run window shows **⏳ about N min left** (from this run's measured times). Settings → **📏 Long
+  chapters**: words per AI answer, continuation rounds, what counts as far too short.
+
 ## ✍ Write all chapters
 
 On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after
@@ -255,7 +282,7 @@ it), and refuses while a run is working. Keys are never part of a backup.
 ## 📝 Word count and 📚 My finished books
 
 Make my book, the Overview and the Current task card show how many words the book has (approved and in drafts)
-against a target from its length (short story ~5,000, novella ~25,000, novel ~80,000), with a progress bar; each
+against a target from its length (short story ~4,000, novelette ~12,000, novella ~30,000, novel ~75,000), with a progress bar; each
 chapter shows its own count. **📚 My finished books** (More menu, Your books, Overview) lists every exported book
 across your projects, newest first, with its formats and download buttons; each file is checked against its
 fingerprint first (a damaged one shows a ⚠️ with *Export again*).

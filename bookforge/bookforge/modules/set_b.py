@@ -674,8 +674,10 @@ class PlanHandler(OperationHandler):
         try:
             from .. import story_choices  # noqa: PLC0415
             from .. import story_rules  # noqa: PLC0415
+            from .. import pipeline  # noqa: PLC0415
             choices = story_choices.of_store(ctx.store, ctx.project_id)
-            rules = story_rules.plan_brief(ctx.store, ctx.project_id, ctx.branch_id)
+            rules = story_rules.plan_brief(ctx.store, ctx.project_id, ctx.branch_id) \
+                if pipeline.on(ctx.store, ctx.project_id, "rules") else None  # P14: rules switched off
             return choices or None, rules or None
         except Exception:  # noqa: BLE001 - guidance is best effort
             return None, None
@@ -690,7 +692,27 @@ class PlanHandler(OperationHandler):
             out += (" Follow the story rules (context.story_rules): never break a hard rule; keep beliefs as beliefs "
                     "and protected mysteries unexplained; every exception, special object or power the plan uses must "
                     "stay inside a stated limit (scope).")
-        return (out + " ") if out else ""
+        if self.op_id == "B11":
+            lr = self._length_rule(ctx)
+            if lr:
+                out += " " + lr
+        return (out.strip() + " ") if out.strip() else ""
+
+    @staticmethod
+    def _length_rule(ctx: Context) -> str:
+        """P15: the book's length preset as one sentence for the outline (never raises)."""
+        try:
+            from .. import lengths  # noqa: PLC0415
+            from ..book_path import get_profile  # noqa: PLC0415
+            prof = get_profile(ctx.store, ctx.project_id)
+            if not prof.get("length"):
+                return ""
+            target = ctx.payload.get("target_length") if isinstance(ctx.payload, dict) else None
+            if isinstance(target, dict) and target.get("unit") == "chapters" and isinstance(target.get("value"), int):
+                prof = dict(prof, chapters=target["value"])
+            return lengths.outline_rule(prof, ctx.store)
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            return ""
 
     @staticmethod
     def _earlier_refusals(ctx: Context, limit: int = 3) -> list[str]:

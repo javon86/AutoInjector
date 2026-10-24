@@ -13,10 +13,15 @@
 * ``world_texture`` (P10): a few world details (the ones its scene cards use first), each with what it can cause.
 * ``must_show`` (P11): "must reach the page" details of the character sheets assigned to this chapter.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
+* ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
+
+P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
+scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
 * ``rules``: how to use all of this, in plain sentences.
 
 Prompt budget of the brief (characters of JSON): voice cards ≤ 7 000, scene cards ≤ 6 × ~1 500, story rules ≤ 2 500,
-world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600 — about 22 000 at most, typically 6 000–10 000.
+world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600, length ≤ 400 — about 22 000 at most, typically
+6 000–10 000.
 
 Pure reads of the store (records and companion settings); never calls an AI, never raises (a missing brief must never
 stop a chapter from being written).
@@ -87,6 +92,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
     try:
         if not outline or not isinstance(outline.get("data"), dict):
             return None, meta
+        from . import pipeline as pipeline_mod  # noqa: PLC0415
+        flags = pipeline_mod.of_store(store, pid)  # P14: a book made with parts of the pipeline switched off
         item = _chapter_item(outline, chapter_id) or {}
         facts = [f for f in item.get("facts") or [] if isinstance(f, dict)]
         fv = {f.get("predicate"): f.get("value") for f in facts if f.get("subject_id") == chapter_id}
@@ -95,7 +102,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         pov_id = fv.get("plan.pov_id")
         pov = next((c for c in cs if pov_id and pov_id in (c["subject_id"], c["record_id"])), None)
         entry = scenes_mod.get_entry(store, pid, branch, outline["record_id"], chapter_id)
-        cards = scenes_mod.brief_cards(entry) if scenes_mod.usable(entry, outline) else []
+        cards = scenes_mod.brief_cards(entry) if scenes_mod.usable(entry, outline) and flags["scenes"] else []
         names = [n for c in cards for n in (c.get("characters") or [])] + \
             [g.get("character") for c in cards for g in (c.get("goals") or [])]
         texts = [str(fv.get("plan.objective") or ""), str(item.get("summary") or "")] + \
@@ -108,7 +115,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             present.insert(0, pov)
         if not present:
             present = list(cs)
-        vb = chars_mod.voice_brief(store, pid, branch, present, first=pov["record_id"] if pov else None)
+        vb = chars_mod.voice_brief(store, pid, branch, present, first=pov["record_id"] if pov else None) \
+            if flags["voices"] else {"cards": [], "others": [], "summarized": False}
         char_ids = {c["subject_id"] for c in cs} | {c["record_id"] for c in cs}
         planned = []
         for f in facts:
@@ -121,7 +129,15 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
         extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
+        if not flags["rules"]:
+            extra.pop("story_rules", None)
+            extra.pop("world_texture", None)
+        if not flags["planned"]:
+            extra.pop("must_show", None)
         brief.update({k: v for k, v in extra.items() if v})
+        length = _length(store, pid, outline)
+        if length:
+            brief["length"] = length
         rules = []
         if cards:
             rules.append(RULES["scenes"])
@@ -139,10 +155,13 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         if brief.get("must_show"):
             rules.append(RULES["must_show"])
         rules += extra.get("choice_rules") or []
+        if length:
+            from . import lengths as lengths_mod  # noqa: PLC0415
+            rules.append(lengths_mod.rule(length))
         brief.pop("choice_rules", None)
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
-                or extra.get("world_texture") or extra.get("story_choices")):
+                or extra.get("world_texture") or extra.get("story_choices") or length):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
@@ -150,11 +169,29 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     if cards else None, pov=pov["record_id"] if pov else None,
                     story_rules=len(brief.get("story_rules") or []), texture=len(brief.get("world_texture") or []),
                     must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
+                    length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
+                    pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
         log.exception("could not build the writing brief of chapter %s", chapter_id)
         return None, meta
+
+
+def _length(store, pid: str, outline: dict) -> dict | None:
+    """P15: the chapter's word target, scenes and words per scene (from the book's length preset and the number of
+    chapters in this outline). Never raises."""
+    try:
+        from . import lengths as lengths_mod  # noqa: PLC0415
+        proj = store.project(pid)
+        st = json.loads(proj["settings"] or "{}") if proj else {}
+        if isinstance(st, dict) and (st.get("selftest") or st.get("workflow_test")):
+            return None  # 🧪 Test everything / the workflow test: one call per chapter, as before (a smoke test)
+        n = len((outline.get("data") or {}).get("chapters") or []) or None
+        return lengths_mod.of_book(store, pid, n)
+    except Exception:  # noqa: BLE001
+        log.exception("could not add the length to the brief")
+        return None
 
 
 def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, cards: list, texts: list) -> dict:

@@ -35,7 +35,11 @@ from .requests import build_request, candidate_payload
 
 PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "length": 20, "tone": 200,
                   "idea": 4000, "ai_slot": 20, "chapters": 3}
-LENGTHS = {"short_story": ("Short story", 1, 3), "novella": ("Novella", 6, 10), "novel": ("Novel", 20, 30)}
+# P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
+from .lengths import ORDER as _LENGTH_ORDER, PRESETS as _LENGTH_PRESETS  # noqa: E402
+LENGTHS = {k: (_LENGTH_PRESETS[k]["label"], _LENGTH_PRESETS[k]["default_chapters"], _LENGTH_PRESETS[k]["chapters"][1])
+           for k in _LENGTH_ORDER}
+LENGTH_CHOICES = "short_story, novelette, novella or novel"
 AI_SLOT_CHOICES = ("", "AI-1", "AI-2", "AI-3", "manual")
 FORMAT_KEYS = ("font_file", "font", "page", "pdf_profile", "epub_profile", "docx_profile", "metadata", "toc_style")
 # Assembly records the author approves, in dependency order: chapter order (G02), chapter title rules (G06) and
@@ -46,7 +50,7 @@ ASSEMBLY = ("G02", "G06", "G08", "G01", "G05", "G04", "G07")
 # (the C02 prose task asks for it); a chapter without one is headed "Chapter 3".
 CHAPTER_TITLE_RULES = {"pattern": "Chapter {number}: {title}", "include_number": True}
 # Rough word targets for the profile length (the progress bar, and the "much shorter than planned" warning).
-WORD_TARGETS = {"short_story": 5000, "novella": 25000, "novel": 80000}
+WORD_TARGETS = {k: _LENGTH_PRESETS[k]["target"] for k in _LENGTH_ORDER}
 # A written book with fewer words than this share of its target is flagged as far below its length.
 SHORT_SHARE = 0.25
 # Profile fields that must not be blank once given (the wizard insists on a title; so does the profile dialog).
@@ -105,7 +109,7 @@ def clean_profile(body) -> dict:
         if len(v) > PROFILE_FIELDS[k]:
             raise _err("INVALID_INPUT", f"/{k}", f"{k} is limited to {PROFILE_FIELDS[k]} characters")
         if k == "length" and v and v not in LENGTHS:
-            raise _err("INVALID_INPUT", "/length", "length: short_story, novella or novel")
+            raise _err("INVALID_INPUT", "/length", f"length: {LENGTH_CHOICES}")
         if k == "ai_slot" and v not in AI_SLOT_CHOICES:
             raise _err("INVALID_INPUT", "/ai_slot", "AI choice: empty (automatic), AI-1, AI-2, AI-3 or manual")
         out[k] = v
@@ -136,9 +140,9 @@ def save_profile(store, pid: str, body) -> dict:
 
 
 def chapter_target(prof: dict) -> int:
-    if isinstance(prof.get("chapters"), int):
-        return prof["chapters"]
-    return LENGTHS.get(prof.get("length") or "", (None, 3, 3))[1] or 3
+    """How many chapters the outline should have: the profile's own number, else the length preset's default (P15)."""
+    from .lengths import chapter_count  # noqa: PLC0415
+    return chapter_count(prof)
 
 
 # ---------------------------------------------------------------------------------- path
@@ -681,9 +685,12 @@ class BookPath:
             self.remember(lambda m: m.setdefault("contexts", {}).__setitem__(key, ref["record_id"]))
             ctx = self.rec(ref["record_id"])
         prof = self.profile
+        from .lengths import chapter_plan  # noqa: PLC0415
+        lp = chapter_plan(prof, len(chapters), self.store)
         instruction = (f"Write chapter {cid}: {chapters[cid]['objective']}".strip()
                        + (f". Tone: {prof['tone']}" if prof.get("tone") else "")
-                       + (f". Audience: {prof['audience']}" if prof.get("audience") else ""))[:2000]
+                       + (f". Audience: {prof['audience']}" if prof.get("audience") else "")
+                       + f". Length: about {lp['target_words']:,} words")[:2000]
         return {"chapter_id": cid, "outline_ref": outline["ref"], "context_ref": ctx["ref"], "instruction": instruction}
 
     def a_write_chapter(self, body):
@@ -737,7 +744,8 @@ class BookPath:
             draft_total += d
             approved_total += a
         length = self.profile.get("length") or ""
-        target = WORD_TARGETS.get(length, WORD_TARGETS["short_story"])
+        from .lengths import book_target  # noqa: PLC0415
+        target = book_target(self.profile, self.store)
         best = sum(max(r["draft_words"], r["approved_words"]) for r in rows)
         written = bool(rows) and all(r["approved_words"] or r["draft_words"] for r in rows)
         short = bool(target and written and best < target * SHORT_SHARE)

@@ -40,6 +40,8 @@ from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
 from .review import ReviewService, WorkTracker
 from .shelf import shelf as shelf_page
+from .book_report import ReportService
+from .compare import CompareService
 from .status_push import StatusPusher
 from .store import Store, new_id, utcnow, write_private
 from .workflow_test import WorkflowTestRunner
@@ -155,6 +157,8 @@ class App:
                                      after_restore=self._after_restore)
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
+        self.reports = ReportService(self)     # 📊 P13 book reports + whole-book AI reviews
+        self.compare = CompareService(self)    # ⚖️ P14 blind comparisons
         self.health = HealthService(self)
         self.backups.on_restored.append(self.health.forget)  # a restored database must be checked afresh
         self.port: int | None = None
@@ -395,7 +399,7 @@ class App:
         if parts and parts[0] == "workflow-test":
             return self.route_workflow(method, parts, query, body)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
-                                  "story-choices"):
+                                  "story-choices", "lengths", "pipeline", "compare"):
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
@@ -449,6 +453,8 @@ class App:
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
                 if rest == ["journal"] and method == "GET":
                     return self.journal(pid, branch, query)
+                if rest and rest[0] == "report":
+                    return self.route_report(method, rest[1:], query, body, principal, pid, branch)
                 if rest and rest[0] == "book" and len(rest) >= 2 and rest[1] == "write-all":
                     return self.route_write_all(method, rest[2:], principal, pid, branch)
                 if rest == ["uploads"] and method == "POST":
@@ -486,6 +492,31 @@ class App:
                 return BookPath(self.engine, principal, pid, branch).act(action, body)
             finally:
                 self.work.end(tok)
+
+    # ------------------------------------------------------------------ 📊 P13 book report
+    def route_report(self, method, rest, query, body, principal, pid, branch):
+        from . import book_report as br  # noqa: PLC0415
+        rp = self.reports
+        if rest == [] and method == "GET":
+            return 200, rp.overview(principal, pid, branch)
+        if rest == [] and method == "POST":
+            return 202, rp.start(principal, pid, branch, body if isinstance(body, dict) else {})
+        if len(rest) == 2 and rest[0] == "job" and method == "GET":
+            return 200, rp.job(principal, rest[1])
+        if len(rest) == 1 and method == "GET":
+            rep = rp.get(pid, branch, rest[0])
+            fmt = (query.get("format") or ["json"])[0]
+            if fmt not in ("json", "md", "pdf"):
+                raise ApiError(400, "INVALID_INPUT", "/format", "format: json, md or pdf")
+            if fmt == "json":
+                return 200, rep
+            disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+            name = br.file_name(rep.get("title"), rep.get("at"), fmt)
+            if fmt == "md":
+                return 200, ("__binary__", "text/markdown; charset=utf-8", br.render_markdown(rep).encode("utf-8"),
+                             name, disposition)
+            return 200, ("__binary__", "application/pdf", br.render_pdf(rep), name, disposition)
+        raise ApiError(404, "NOT_FOUND", "/report", "no such endpoint")
 
     # ------------------------------------------------------------------ S2 write all chapters
     def route_write_all(self, method, rest, principal, pid, branch):
@@ -585,6 +616,28 @@ class App:
                 return 200, self.review.reviewer_settings()
             if method == "PUT":
                 return 200, self.review.save_reviewer_settings(body)
+        if parts == ["lengths"] and method == "GET":  # P15: the length presets
+            from .lengths import lengths_table  # noqa: PLC0415
+            return 200, lengths_table()
+        if parts == ["pipeline"] and method == "GET":  # P14: the pipeline switches and presets
+            from .pipeline import field_info as pipeline_info  # noqa: PLC0415
+            return 200, pipeline_info()
+        if parts == ["settings", "length"]:
+            from . import lengths as lengths_mod  # noqa: PLC0415
+            if method == "GET":
+                return 200, dict(lengths_mod.settings(self.store), limits=lengths_mod.LIMITS)
+            if method == "PUT":
+                return 200, lengths_mod.save_settings(self.store, body)
+        if head == "compare":  # ⚖️ P14 blind comparisons
+            cs = self.compare
+            if parts == ["compare"] and method == "GET":
+                return 200, {"items": cs.list(principal)}
+            if parts == ["compare"] and method == "POST":
+                return 202, cs.start(principal, body)
+            if len(parts) == 3 and parts[1] == "job" and method == "GET":
+                return 200, cs.job(principal, parts[2])
+            if len(parts) == 2 and method == "GET":
+                return 200, cs.get(principal, parts[1])
         if parts == ["story-choices"] and method == "GET":  # P12: labels, ⓘ help and the ending matrix
             from .story_choices import field_info as choices_info  # noqa: PLC0415
             return 200, choices_info()
@@ -629,6 +682,17 @@ class App:
         r = j.get("resume")
         if not r:
             raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
+        if kind == "book_review":
+            new = self.reports.start(principal, r["project_id"], r["branch_id"], {k: r.get(k) for k in (
+                "slots", "ai", "report_id") if r.get(k) is not None})
+            j["status"], j["resumed_as"] = "resumed", new.get("id")
+            self.jobstore.save(j)
+            return {"kind": kind, "job": new}
+        if kind == "compare":
+            new = self.compare.start(principal, r.get("body") or {})
+            j["status"], j["resumed_as"] = "resumed", new.get("id")
+            self.jobstore.save(j)
+            return {"kind": kind, "job": new}
         if kind == "assist":
             new = self.assist.start_assist(principal, dict(r))
         elif kind in ("review_world_rules", "review_world_texture"):
@@ -1184,7 +1248,8 @@ def make_handler(app: App):
                 if isinstance(payload, tuple) and payload and payload[0] == "__binary__":
                     _, mime, data, name = payload[:4]
                     disposition = payload[4] if len(payload) > 4 else "inline"
-                    return self._send(200, data, mime, {"Content-Disposition": f'{disposition}; filename="{name}"'})
+                    return self._send(200, data, mime, {"Content-Disposition": content_disposition(disposition,
+                                                                                                    name)})
                 self._send(status, payload)
             except ApiError as exc:
                 app.errors.add(exc.status, method, url.path, exc.body.get("errors"))
@@ -1239,6 +1304,15 @@ def make_handler(app: App):
 
 
 PING_CHALLENGE_RE = re.compile(r"^[0-9a-f]{16,64}$")
+
+
+def content_disposition(disposition: str, name: str) -> str:
+    """A file name any title can have: an ASCII fallback plus the UTF-8 name (RFC 6266 / 5987)."""
+    from urllib.parse import quote as _q  # noqa: PLC0415
+    ascii_name = re.sub(r'[^A-Za-z0-9 ._()\-]+', "_", name).strip() or "download"
+    if ascii_name == name:
+        return f'{disposition}; filename="{name}"'
+    return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{_q(name, safe='')}"
 
 
 def ping_proof(token: str, challenge: str) -> str:

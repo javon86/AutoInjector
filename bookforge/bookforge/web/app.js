@@ -633,6 +633,7 @@ async function pickView(parts) {
   if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'pair') return viewPair;
   if (parts[0] === 'shelf') return viewShelf;
+  if ((parts[0] || '').split('?')[0] === 'compare') return m => viewCompare(m, parts[1] ? parts[1].split('?')[0] : null);
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
     if (!rest.length) return viewOverview;
@@ -643,6 +644,7 @@ async function pickView(parts) {
     if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
     if (rest[0] === 'scenes' && rest[1]) return m => viewScenes(m, rest[1]);
     if (rest[0] === 'world') return viewWorld;
+    if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -2869,6 +2871,7 @@ async function viewSettings(main) {
   main.appendChild(retryCard());
   main.appendChild(reviewerCard());
   main.appendChild(editorSettingsCard());
+  main.appendChild(lengthSettingsCard());
   main.appendChild(backupsCard());
   main.appendChild(helpCard());
 }
@@ -4766,7 +4769,12 @@ function modal(title, build, { wide = false } = {}) {
 const AUDIENCES = ['Children (5-8)', 'Middle grade (8-12)', 'Young adult (12-18)', 'Adult', 'Everyone'];
 const GENRES = ['Fantasy', 'Science fiction', 'Mystery', 'Thriller', 'Romance', 'Horror', 'Historical', 'Literary', 'Adventure', 'Comedy', 'Children’s picture book'];
 const TONES = ['Cozy and warm', 'Dark and tense', 'Funny', 'Epic', 'Hopeful', 'Bittersweet', 'Spooky'];
-const LENGTH_INFO = { short_story: ['Short story', 'about 1-3 chapters'], novella: ['Novella', 'about 6-10 chapters'], novel: ['Novel', 'about 20-30 chapters'] };
+// P15 length presets (lengths.py holds the same numbers; GET /api/lengths)
+const LENGTH_INFO = { short_story: ['Short story', 'about 3,000–5,000 words, 3–5 chapters'], novelette: ['Novelette', 'about 10,000–15,000 words, 5–8 chapters'],
+  novella: ['Novella', 'about 20,000–40,000 words, 8–15 chapters'], novel: ['Novel', 'about 60,000–90,000 words, 20–35 chapters'] };
+const LENGTH_TIP = () => [h('p', null, 'The length sets how many chapters the outline plans and how many words each chapter and scene should have. The writer gets the target in every chapter prompt.'),
+  h('p', null, 'Long chapters (more than about 2,500 words — a novel’s) are written scene by scene, one AI answer per scene, so web AIs never hit their reply limit. A chapter that comes back far too short is continued once within its scene plan — never padded: the editor still checks it.'),
+  h('p', null, 'A novel takes many AI answers (about 25 chapters × scenes, reviews and the editor): the run window shows how long it will still take.')];
 const PROFILE_HELP = {
   title: 'The working title. You can change it any time.', author: 'Your name or pen name, printed on the title page.',
   genre: 'What kind of story it is — it guides the AI’s choices.', audience: 'Who will read it; the AI matches the words and themes to them.',
@@ -4793,7 +4801,7 @@ function profileFields(prof, prefix) {
     field('author', 'Author or pen name', h('input', { type: 'text', value: prof.author || '', maxlength: '200' })),
     field('genre', 'Genre', h('input', { type: 'text', value: prof.genre || '', list: `${prefix}-genres`, maxlength: '120' }), dl(`${prefix}-genres`, GENRES)),
     field('audience', 'Who is it for?', aud),
-    field('length', 'Length', lengthSel),
+    field('length', 'Length', lengthSel, infoTip('Length', ...LENGTH_TIP())),
     field('tone', 'Tone', h('input', { type: 'text', value: prof.tone || '', list: `${prefix}-tones`, maxlength: '200' }), dl(`${prefix}-tones`, TONES)),
     field('idea', 'Your idea in a paragraph', h('textarea', { rows: '4', maxlength: '4000' }, prof.idea || '')));
   f.idea.value = prof.idea || '';
@@ -5251,6 +5259,7 @@ function renderBook(holder, book, redraw) {
   }
   holder.appendChild(ol);
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
+  holder.appendChild(bookSection5Card(book));
   if (S.pendingBookStep) {
     const want = S.pendingBookStep; S.pendingBookStep = null;
     const st = book.steps.find(x => x.id === want.id);
@@ -7132,7 +7141,8 @@ async function renderMakeSetup() {
   });
   const slot = h('select', { id: 'mb-slot' }, h('option', { value: '' }, 'Automatic — the best ready AI'));
   fields.genre = genre; fields.idea = idea; fields.slot_id = slot;
-  const lengthBox = h('fieldset', { class: 'field', id: 'mb-length' }, h('legend', null, 'Length'), lengths);
+  const lengthBox = h('fieldset', { class: 'field', id: 'mb-length' }, h('legend', null, 'Length ', infoTip('Length', ...LENGTH_TIP())), lengths);
+  const pipe = await pipelineFields('mb');
   await loadChoicesInfo();
   const cf = choicesFields({}, 'mb');
   fields.length = lengthBox.querySelector('input');
@@ -7147,7 +7157,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   mbShell('⚡ Make a book for me', form);
   startAll.addEventListener('click', () => go(true));
@@ -7165,6 +7175,7 @@ async function renderMakeSetup() {
       body.genre = genre.value.trim(); body.idea = idea.value.trim(); body.slot_id = slot.value || null;
       const l = form.querySelector('input[name="mb-len"]:checked'); body.length = l ? l.value : 'short_story';
       if (CH.info) body.choices = cf.get();
+      const pl = pipe.get(); if (pl) body.pipeline = pl;
     }
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Starting…'));
@@ -7237,14 +7248,17 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
   const done = r.steps.filter(s => s.state === 'done').length;
   const head = h('div', { class: 'mb-head' },
     h('div', null, h('p', { class: 'mb-book' }, r.title ? `“${r.title}”` : 'A new book', r.settings && r.settings.length ? h('span', { class: 'muted small' }, ` · ${(LENGTH_INFO[r.settings.length] || [''])[0]}`) : null),
-      h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, r.finished_at)))))),
+      h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, r.finished_at)))),
+        r.eta && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` },
+          `⏳ ${etaWords(r.eta.seconds_left)} left · ${r.eta.chapters_left} chapter(s) to go`) : null),
+      runVariantLine(r)),
     h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
   const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
     ['running', 'queued'].includes(r.status) ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, ' ',
@@ -7276,6 +7290,9 @@ function renderRun() {
             i.editor.rounds ? ` (${i.editor.rounds} rewrite round${i.editor.rounds === 1 ? '' : 's'})` : '',
             typeof i.editor.avg === 'number' ? ` · avg ${i.editor.avg}` : '') : null,
           i.note && ['world', 'planned'].includes(s.id) ? h('span', { class: 'small muted' }, ` · ${i.state === 'failed' ? '⚠️ ' : ''}${i.note}`) : null,
+          i.length ? h('span', { class: 'small muted', 'data-testid': 'mb-item-length' }, i.length.mode === 'scene_by_scene' ? ` · 📏 written scene by scene (${i.length.scenes})` : '',
+            i.length.target ? ` · target ~${Number(i.length.target).toLocaleString()}` : '', i.length.expanded ? ` · continued +${i.length.expanded} words` : '',
+            i.length.target && i.words && i.words < i.length.target * 0.6 ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${i.words} of about ${i.length.target} words` }, {}, { small: true })] : null) : null,
           i.planned ? h('span', { class: `small mb-pl${i.planned.flagged ? ' flagged' : ''}`, 'data-testid': 'mb-item-planned' },
             i.planned.flagged ? ` · ⚠️ ${i.planned.missing} planned item(s) not on the page` : ' · ✅ plan on the page',
             i.planned.fixed ? ` (${i.planned.fixed} fix kept)` : '') : null))) : null));
@@ -7311,7 +7328,8 @@ function renderRun() {
       h('div', { class: 'downloads' }, h('strong', null, '⬇ Download: '), (r.files || []).map(f => h('button', { type: 'button', class: 'primary', 'data-format': f.format, onclick: () => downloadFile(r.project_id, r.branch_id || 'main', f, r.title) }, `${f.format}`))),
       h('div', { class: 'row' }, h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, '📘 Open the book'),
         h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'journal'), onclick: () => closeMakeBook() }, '📜 Book journal'),
-        h('a', { class: 'btn', href: '#/shelf', onclick: () => closeMakeBook() }, '📚 My finished books')));
+        h('a', { class: 'btn', href: '#/shelf', onclick: () => closeMakeBook() }, '📚 My finished books')),
+      runReportBox(r));
   }
   const rs = r.review_summary || {};
   const ais = aiStrip(r.ais, r.probe && r.probe.state === 'running' ? 'Checking the AIs' : 'AIs');
@@ -7332,6 +7350,64 @@ function renderRun() {
   mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, doneBox ? null : edBox, msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
+}
+
+function etaWords(sec) {
+  if (sec == null) return '';
+  if (sec < 90) return `about ${Math.max(1, Math.round(sec))} s`;
+  const m = Math.round(sec / 60);
+  return m < 90 ? `about ${m} min` : `about ${Math.floor(m / 60)} h ${m % 60} min`;
+}
+/** Run window: the pipeline switches (P14) and "variant of" when the run is not the default full pipeline. */
+function runVariantLine(r) {
+  const p = (r.settings || {}).pipeline;
+  const v = (r.settings || {}).variant_of;
+  if ((!p || p.preset === 'full') && !v) return null;
+  return h('p', { class: 'small mb-variant', 'data-testid': 'mb-variant' }, '🧪 ',
+    p && p.preset !== 'full' ? `${p.preset === 'baseline' ? 'Baseline pipeline' : 'Custom pipeline'}: ${Object.entries(p.flags || {}).filter(([, on]) => !on).map(([k]) => PIPE_WORD[k] || k).join(', ')} off` : 'Full pipeline',
+    v ? ` · a variant of “${v.title || 'another book'}” (same profile, idea and choices)` : '');
+}
+const PIPE_WORD = { editor: 'editor', scenes: 'scene cards', voices: 'voice cards', rules: 'story rules', planned: 'planned check' };
+/** Run window, when done: the book report made at the end of the run (P13). */
+function runReportBox(r) {
+  const rp = r.report;
+  if (!r.project_id) return null;
+  const href = link('p', r.project_id, r.branch_id || 'main', 'report');
+  return h('div', { class: rp && rp.reviewers ? 'small' : 'words-warn', 'data-testid': 'mb-report' },
+    h('p', null, '📊 ', rp && rp.reviewers ? `Book report: ${rp.reviewers} AI(s) read the whole book${rp.independent < rp.reviewers ? ` (${rp.reviewers - rp.independent} not independent ⚠️)` : ''} — overall ${rp.overall}/10.`
+      : 'Book report made without an AI review (no independent AI was working).',
+    (rp && (rp.disagreements || []).length) ? ` ⚠️ They disagree on ${rp.disagreements.join(', ')}.` : '', ' ',
+    h('a', { class: 'btn small primary', href, onclick: () => closeMakeBook() }, '📊 Open the book report')));
+}
+/** 🧪 Pipeline switches (P14): preset + the five switches, each with ⓘ. get() -> null (full, the default) or {preset, flags}. */
+const PIPE = { info: null };
+async function pipelineFields(prefix, cur = null) {
+  if (!PIPE.info) { try { PIPE.info = await api('GET', '/pipeline'); } catch { PIPE.info = null; } }
+  const info = PIPE.info;
+  if (!info) return { el: h('p', { class: 'small muted' }, 'The pipeline switches could not be loaded.'), get: () => null };
+  const flags = Object.assign({}, info.presets.full.flags, (cur && cur.flags) || {});
+  const preset = h('select', { id: `${prefix}-pipe-preset`, 'data-testid': `${prefix}-pipe-preset` },
+    ['full', 'baseline', 'custom'].map(k => h('option', { value: k }, (info.presets[k] || { label: 'Custom — choose below' }).label)));
+  const boxes = {};
+  const rows = info.flags.map(f => {
+    const id = `${prefix}-pipe-${f.key}`;
+    boxes[f.key] = h('input', { type: 'checkbox', id, checked: !!flags[f.key], 'data-flag': f.key });
+    return h('div', { class: 'check-row' }, boxes[f.key], h('label', { for: id }, f.label), infoTip(f.label, h('p', null, f.help)));
+  });
+  const sync = () => { const p = preset.value; if (p !== 'custom') for (const [k, b] of Object.entries(boxes)) b.checked = info.presets[p].flags[k]; };
+  const guess = () => { const on = Object.fromEntries(Object.entries(boxes).map(([k, b]) => [k, b.checked]));
+    preset.value = Object.values(on).every(Boolean) ? 'full' : Object.values(on).every(x => !x) ? 'baseline' : 'custom'; };
+  preset.addEventListener('change', sync);
+  for (const b of Object.values(boxes)) b.addEventListener('change', guess);
+  guess();
+  const el = h('details', { class: 'field pipe-box', 'data-testid': `${prefix}-pipeline` }, h('summary', null, '🧪 Pipeline (advanced, for comparing versions)'),
+    h('p', { class: 'small muted' }, 'Everything is on by default. Switch parts off to make a “baseline” version and then ⚖️ compare it blind with a full one.'),
+    h('div', { class: 'field' }, h('label', { for: `${prefix}-pipe-preset` }, 'Preset ', infoTip('Pipeline presets', h('p', null, 'Full: every part of BookForge’s writing pipeline. Baseline: the editor, scene cards, voice cards, story rules and the planned-to-page check are off — the writer gets the outline, the context and your ending and style choices only (like the first automatic book).'))), preset),
+    h('div', { class: 'pipe-flags' }, rows));
+  return { el, get: () => {
+    const f = Object.fromEntries(Object.entries(boxes).map(([k, b]) => [k, b.checked]));
+    return Object.values(f).every(Boolean) ? null : { flags: f };
+  } };
 }
 
 /** Run window: what the editor did in this run; ⚠️ chapters it still had notes on (approved under the run consent). */
@@ -7461,7 +7537,8 @@ function renderHealth() {
     h('p', { class: 'small muted' }, 'Diagnostics never contain your keys, prompts or book text — safe to send when asking for help.'),
     jobsBox);
 }
-const JOB_KIND = { autobook: '⚡ Make a book for me', write_all: '✍ Write all chapters', assist: '✨ Fill with AI', review_review: '🧐 AI review', review_fix: '🛠 AI fix', bible: '📖 Bible Builder' };
+const JOB_KIND = { autobook: '⚡ Make a book for me', write_all: '✍ Write all chapters', assist: '✨ Fill with AI', review_review: '🧐 AI review', review_fix: '🛠 AI fix', bible: '📖 Bible Builder',
+  book_review: '📊 Book report', compare: '⚖️ Compare versions' };
 async function loadJobs() {
   const box = document.getElementById('jobs-box') || h('div', { id: 'jobs-box' });
   let out;
@@ -7536,7 +7613,7 @@ async function viewJournal(main) {
 async function viewShelf(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], 'My finished books'), h('h1', null, '📚 My finished books')),
     h('button', { type: 'button', class: 'primary', onclick: ev => openMakeBook(ev.currentTarget) }, '⚡ Make a book for me')));
-  main.appendChild(h('p', { class: 'muted' }, 'Every book you exported, newest first. Each file is checked against its fingerprint before you download it.'));
+  main.appendChild(h('p', { class: 'muted' }, 'Every book you exported, newest first. Each file is checked against its fingerprint before you download it. 📊 Each book has a quality report; ⚖️ compare two books blind (for example a book and its 🧪 variant).'));
   const holder = h('div', null, loadingState('Checking your finished books…'));
   main.appendChild(holder);
   let out;
@@ -7560,11 +7637,303 @@ function shelfBook(b) {
   return h('li', { class: `shelf-book${b.all_verified ? '' : ' damaged'}${b.archived ? ' archived' : ''}` },
       h('div', { class: 'sb-cover', 'aria-hidden': 'true' }, h('span', null, (b.title || '?').slice(0, 1))),
       h('div', { class: 'sb-main' }, h('h2', null, b.title), h('p', { class: 'small muted' }, [b.author, b.genre].filter(Boolean).join(' · ') || ' '),
-        h('p', { class: 'small' }, `Exported ${fmtTime(b.exported_at)}`, b.made_by_run ? h('span', { class: 'muted' }, ' · made with ⚡') : null),
+        h('p', { class: 'small' }, `Exported ${fmtTime(b.exported_at)}`, b.made_by_run ? h('span', { class: 'muted' }, ' · made with ⚡') : null,
+          b.pipeline && b.pipeline.preset !== 'full' ? h('span', { class: 'muted', 'data-testid': 'sb-pipeline' }, ` · 🧪 ${b.pipeline.label}`) : null,
+          b.variant_of ? h('span', { class: 'muted' }, ' · a variant') : null),
+        h('p', { class: 'small sb-report', 'data-testid': 'sb-report' }, b.report ? `📊 Report: overall ${b.report.overall ?? '–'}/10 · ${b.report.reviewers || 0} AI reviewer(s) · ${(b.report.words || 0).toLocaleString()} words` : '📊 No report yet', ' ',
+          h('a', { class: 'btn small', href: link('p', b.project_id, b.branch_id, 'report') }, b.report ? '📊 Open the report' : '📊 Make the report'), ' ',
+          h('a', { class: 'btn small', href: `#/compare?a=${encodeURIComponent(b.project_id)}` }, '⚖️ Compare'), ' ',
+          h('button', { type: 'button', class: 'small', onclick: ev => openVariantDialog(b.project_id, b.title, ev.currentTarget) }, '🧪 Variant')),
         h('div', { class: 'downloads' }, b.files.map(f => f.verified
           ? h('button', { type: 'button', class: 'primary small', 'data-format': f.format, onclick: () => downloadFile(b.project_id, b.branch_id, f, b.title) }, `⬇ ${f.format}`, h('span', { class: 'sr-ok', title: 'Fingerprint checked' }, ' ✔'))
           : h('span', { class: 'row' }, h('button', { type: 'button', class: 'small', disabled: true }, f.format), hazard({ code: 'HASH_MISMATCH', message: `The ${f.format} file is missing or changed.`, where: { book: b.title, set: 'G', step: 'Export my book', op: f.op } }, { open: link('p', b.project_id, b.branch_id, 'book'), openLabel: '📘 Export again' }, { small: true })))),
         h('a', { class: 'small', href: link('p', b.project_id, b.branch_id, 'book') }, 'Open the book')));
+}
+
+/* ======================================================================= 📊 P13 book report, ⚖️ P14 compare, 🧪 variants */
+const TIP_REPORT = () => [h('p', null, 'When a book is finished BookForge makes a quality report: scores per dimension, strengths and weaknesses with quotes from the book, what the editor, the planned-to-page check and the pattern check found across all chapters, word counts against the length, which AI wrote and reviewed what, and what to try next.'),
+  h('p', null, 'The whole book is read by every working AI that did not write most of it (an independent opinion). BookForge takes the middle score (median) of the reviewers per dimension and marks ⚠️ where they are 3 or more points apart. A short book is sent whole; a long one as a digest of every chapter (its opening, a middle passage and its ending).')];
+async function downloadReport(pid, branch, rep, fmt) {
+  try {
+    const blob = await api('GET', `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch)}/report/${encodeURIComponent(rep.id)}?format=${fmt}&download=1`, { blob: true });
+    const name = `${safeFileStem(rep.title) || 'Book'} - BookForge report - ${(rep.at || '').slice(0, 10)}.${fmt}`;
+    const url = URL.createObjectURL(blob);
+    const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast(`Downloading ${name}`);
+  } catch (e) { showGlobalProblem(toProblem(e, { step: `Download the report (${fmt.toUpperCase()})` })); }
+}
+async function pollQualityJob(path, progressEl) {
+  for (;;) {
+    let j;
+    try { j = await api('GET', path); } catch (e) { throw e; }
+    if (progressEl) clear(progressEl).appendChild(h('p', { class: 'small' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' ', j.phase || 'Working…',
+      j.total ? h('span', { class: 'muted' }, ` (${j.done || 0} of ${j.total})`) : null));
+    if (!['queued', 'running'].includes(j.status)) return j;
+    await new Promise(r => setTimeout(r, 900));
+  }
+}
+function scoreCell(v, cls = '') { return h('td', { class: `num ${cls}` }, v == null ? '–' : String(v)); }
+async function viewReport(main) {
+  const title = profileOf().title || S.project.name;
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null,
+    crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], 'Book report'),
+    h('h1', null, '📊 Book report')), h('div', { class: 'row' }, infoTip('Book report', ...TIP_REPORT()))));
+  const holder = h('div', { 'aria-live': 'polite' }, loadingState('Loading the report…'));
+  main.appendChild(holder);
+  let ov;
+  const load = async () => {
+    try { ov = await api('GET', bpath('/report')); } catch (e) { clear(holder).appendChild(problemBox(toProblem(e, { book: title, step: 'Book report' }), { retry: load })); return; }
+    draw();
+  };
+  const run = async (body, btn) => {
+    const prog = holder.querySelector('.rp-progress') || h('div', { class: 'rp-progress' });
+    if (btn) btn.disabled = true;
+    try {
+      const j = await api('POST', bpath('/report'), { body });
+      const end = await pollQualityJob(bpath(`/report/job/${encodeURIComponent(j.id)}`), prog);
+      if (end.status !== 'done') { clear(prog).appendChild(problemBox(Object.assign({ code: (end.error || {}).code || 'INTERNAL_ERROR', message: (end.error || {}).message || end.phase }, { where: { book: title, step: 'Book report' } }), { retry: () => run(body) })); return; }
+      toast('The report is ready'); announce('The report is ready');
+      await load();
+    } catch (e) { clear(prog).appendChild(problemBox(toProblem(e, { book: title, step: 'Book report' }), { retry: () => run(body) })); }
+    finally { if (btn) btn.disabled = false; }
+  };
+  function askBox(rep) {
+    const opts = ov.reviewers || [];
+    const boxes = opts.map(o => {
+      const id = `rp-ai-${o.slot_id}`;
+      const cb = h('input', { type: 'checkbox', id, value: o.slot_id, checked: o.working && o.independent, disabled: !o.working });
+      return h('div', { class: 'check-row' }, cb, h('label', { for: id }, h('strong', null, o.name), ` — ${o.working ? o.word || 'working' : o.word || 'not working'}`,
+        o.wrote_most ? h('span', { class: 'small words-warn' }, ' ⚠️ wrote most of this book: not independent') : null));
+    });
+    const prog = h('div', { class: 'rp-progress' });
+    const btn = h('button', { type: 'button', class: 'primary', 'data-testid': 'rp-ask', onclick: () => {
+      const slots = boxes.map(b => b.querySelector('input')).filter(c => c.checked).map(c => c.value);
+      if (!slots.length) { clear(prog).appendChild(problemBox({ code: 'MISSING_INPUT', message: 'Choose at least one AI.', where: { book: title, step: 'Ask the other AIs' } })); return; }
+      run({ slots, report_id: rep && !ov.stale ? rep.id : undefined }, btn);
+    } }, '📨 Ask the other AIs to review this book');
+    return h('section', { class: 'card', 'aria-labelledby': 'rp-ask-h', 'data-testid': 'rp-ask-card' }, h('h2', { id: 'rp-ask-h' }, '📨 Ask the other AIs'),
+      h('p', { class: 'small' }, 'Each chosen AI reads the whole book (or, for a long book, a digest of every chapter) and scores it. Ticked by default: the working AIs that did not write most of the book.'),
+      opts.length ? h('div', { class: 'rp-ais' }, boxes) : h('p', { class: 'small muted' }, 'No AI is connected (Settings).'), h('div', { class: 'row' }, btn), prog);
+  }
+  function draw() {
+    clear(holder);
+    const rep = ov.latest;
+    const actions = h('div', { class: 'row rp-actions' },
+      h('button', { type: 'button', class: rep ? '' : 'primary', 'data-testid': 'rp-make', disabled: !ov.written, onclick: ev => run({ ai: true }, ev.currentTarget) }, rep ? '📊 Make a new report' : '📊 Make the report'),
+      rep ? h('button', { type: 'button', 'data-testid': 'rp-md', onclick: () => downloadReport(S.pid, S.branch, rep, 'md') }, '⬇ Markdown') : null,
+      rep ? h('button', { type: 'button', 'data-testid': 'rp-pdf', onclick: () => downloadReport(S.pid, S.branch, rep, 'pdf') }, '⬇ PDF') : null,
+      h('button', { type: 'button', onclick: ev => openVariantDialog(S.pid, title, ev.currentTarget) }, '🧪 Make a variant'),
+      h('a', { class: 'btn', href: `#/compare?a=${encodeURIComponent(S.pid)}` }, '⚖️ Compare with another book'));
+    holder.appendChild(actions);
+    holder.appendChild(h('div', { class: 'rp-progress' }));
+    if (ov.job) { const prog = holder.querySelector('.rp-progress'); pollQualityJob(bpath(`/report/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {}); }
+    if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (📘 Make my book), then make the report.'))); return; }
+    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: BookForge counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
+    if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
+    for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, w));
+    const agg = rep.aggregate || {};
+    const wd = rep.words || {};
+    const reviews = (rep.reviews || []).filter(r => r.status === 'done');
+    holder.appendChild(h('section', { class: 'card rp-summary', 'data-testid': 'rp-summary' }, h('h2', null, `“${rep.title}”`),
+      h('p', { class: 'small muted' }, `Made ${fmtTime(rep.at)} · ${rep.version.chapters.length} chapter(s) · ${rep.book_mode === 'digest' ? 'sent to the AIs as a per-chapter digest' : 'sent to the AIs whole'}${rep.run_id ? ` · Make-a-book run ${rep.run_id}` : ''}`),
+      h('div', { class: 'rp-kpis' },
+        h('div', { class: 'kpi' }, h('strong', null, agg.overall != null ? `${agg.overall}/10` : '–'), h('span', { class: 'small' }, 'overall (median of each dimension, averaged)')),
+        h('div', { class: 'kpi' }, h('strong', null, `${agg.reviewers || 0}`), h('span', { class: 'small' }, `AI reviewer(s), ${agg.independent || 0} independent`)),
+        h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`)))));
+    if ((agg.dimensions || []).some(d => d.n)) {
+      const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
+        h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent ? '' : ' ⚠️')))),
+        h('tbody', null, agg.dimensions.filter(d => d.n).map(d => h('tr', { class: d.median <= 5 ? 'low' : d.median >= 8 ? 'high' : '' },
+          h('th', { scope: 'row' }, d.label, d.disagree ? [' ', hazard({ code: 'REPORT_DISAGREE', message: `${d.label}: from ${d.min} to ${d.max}` }, {}, { small: true })] : null),
+          scoreCell(d.median, 'strong'), h('td', { class: 'num small' }, `${d.min}–${d.max}`), reviews.map(r => scoreCell((d.by || {})[r.slot]))))));
+      holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'Scores (whole book)'), h('div', { class: 'table-wrap' }, t)));
+    }
+    const pts = kind => reviews.flatMap(r => (r[kind] || []).map(p => h('li', null, p.point, p.quote ? [' — ', h('q', null, p.quote), p.verified ? null : [' ', hazard({ code: 'QUOTE_NOT_FOUND' }, {}, { small: true })]] : null, h('span', { class: 'small muted' }, ` (${r.name})`))));
+    if (reviews.length) {
+      holder.appendChild(h('div', { class: 'grid-2' },
+        h('section', { class: 'card', 'data-testid': 'rp-strengths' }, h('h2', null, '👍 Strengths'), h('ul', null, pts('strengths'))),
+        h('section', { class: 'card', 'data-testid': 'rp-weaknesses' }, h('h2', null, '👎 Weaknesses'), h('ul', null, pts('weaknesses')))));
+      holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'What the reviewers said'), reviews.map(r => h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), ': ', r.summary || ''))));
+    }
+    holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),
+      (rep.try_next || []).length ? h('ul', null, rep.try_next.map(t => h('li', null, t.text, h('span', { class: 'small muted' }, ` (${t.from})`)))) : h('p', { class: 'small muted' }, 'Nothing stands out. Try ⚖️ comparing a variant to see what the pipeline changes.')));
+    const ed = rep.editor || {}; const pl = rep.planned || {}; const pa = rep.patterns || {};
+    holder.appendChild(h('div', { class: 'grid-2' },
+      h('section', { class: 'card', 'data-testid': 'rp-editor' }, h('h2', null, '🖋 Editor across the chapters'),
+        ed.read ? [h('p', { class: 'small' }, `${ed.read} of ${ed.of} chapter(s) read · ${ed.major} major / ${ed.minor} minor note(s)`, (ed.flagged_chapters || []).length ? ` · ⚠️ still had notes on chapter(s) ${ed.flagged_chapters.join(', ')}` : ''),
+          h('ul', { class: 'small' }, (ed.dimensions || []).map(d => h('li', null, `${d.label}: ${d.average}/10`))),
+          (ed.notes || []).length ? h('details', null, h('summary', null, 'Notes'), h('ul', { class: 'small' }, ed.notes.map(n => h('li', null, `Chapter ${n.chapter}: “${n.passage}” — ${n.why}`)))) : null]
+          : h('p', { class: 'small muted' }, 'The editor did not read these chapter versions.')),
+      h('section', { class: 'card', 'data-testid': 'rp-planned' }, h('h2', null, '✅ Planned to page and 🔎 patterns'),
+        h('p', { class: 'small' }, pl.missing ? [hazard({ code: 'PLANNED_MISSING' }, { open: plink('book'), openLabel: '📘 Open the book' }, { small: true }), ` ${pl.missing} planned item(s) not on the page`] : '✔ Everything planned is on the page.'),
+        (pl.items || []).length ? h('ul', { class: 'small' }, pl.items.map(m => h('li', null, `Chapter ${m.number || m.chapter_id}: ${m.label}`))) : null,
+        (pa.findings || []).length ? h('ul', { class: 'small' }, pa.findings.map(f => h('li', null, `${f.label}: ${f.count} (${f.per_1000} per 1 000 words)`, f.example ? h('span', { class: 'muted' }, ` — “${f.example}”`) : null))) : h('p', { class: 'small muted' }, 'No strong repeated habits.'))));
+    const us = rep.usage || {};
+    holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-words' }, h('h2', null, '📝 Words and 🤖 who did what'),
+      h('p', { class: 'small' }, `Most of the book was written by ${us.writer || 'the author'}.`, us.same_ai_reviews ? h('span', { class: 'words-warn' }, ` ⚠️ ${us.same_ai_reviews} chapter review(s) by the writer itself.`) : null),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' }, h('thead', null, h('tr', null, ['Chapter', 'Words', 'Written by', 'Reviewed by', 'Editor'].map(x => h('th', null, x)))),
+        h('tbody', null, (wd.chapters || []).map((c, i) => { const u = (us.chapters || [])[i] || {};
+          return h('tr', null, h('th', { scope: 'row' }, `${c.number}${c.title ? ` · ${c.title}` : ''}`), h('td', { class: 'num' }, c.words.toLocaleString(), c.under ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${c.words} of about ${wd.per_chapter_target} words` }, {}, { small: true })] : null),
+            h('td', null, u.writer || '–'), h('td', null, u.reviewer || '–', u.review_independent === false ? ' ⚠️' : ''), h('td', null, u.editor || '–', u.editor_independent === false ? ' ⚠️' : '')); }))))));
+    holder.appendChild(askBox(rep));
+    if ((ov.reports || []).length > 1) holder.appendChild(h('details', { class: 'card' }, h('summary', null, `Earlier reports (${ov.reports.length - 1})`),
+      h('ul', { class: 'small' }, ov.reports.slice(1).map(r => h('li', null, `${fmtTime(r.at)} · overall ${r.overall ?? '–'} · ${r.reviewers || 0} reviewer(s)`)))));
+  }
+  await load();
+}
+
+/** 🧪 Make a variant: the same book (profile, idea, choices) made again with other pipeline switches. */
+async function openVariantDialog(pid, title, opener) {
+  const pf = await pipelineFields('var', { flags: (PIPE.info || { presets: { baseline: { flags: {} } } }).presets.baseline.flags });
+  modal('🧪 Make a variant of this book', close => {
+    const err = h('div', { 'aria-live': 'polite' });
+    const go = h('button', { type: 'button', class: 'primary', 'data-testid': 'var-start', onclick: async () => {
+      clear(err); go.disabled = true;
+      const p = pf.get();
+      try {
+        const run = await api('POST', '/autobook', { body: { author_confirms: true, variant_of: { project_id: pid }, pipeline: p || { preset: 'full' } } });
+        close(); MB.run = run; await openMakeBook(opener, { runId: run.id });
+      } catch (e) { err.appendChild(problemBox(toProblem(e, { book: title, step: 'Make a variant' }))); go.disabled = false; }
+    } }, '⚡ Make the variant');
+    const box = h('div', null, h('p', null, `A new, separate book made from the same profile, idea and ending choices as “${title}”, with the pipeline switches you choose below. Then ⚖️ compare the two blind.`),
+      h('div', { class: 'consent-box', role: 'note' }, h('strong', null, '✋ Your consent for this run: '), 'pressing Make the variant starts a ⚡ Make a book for me run — the AI reviewer may approve the drafts it passes, for this one new book only. Your other books are never touched.'),
+      pf.el, err, h('div', { class: 'form-actions' }, go));
+    const d = pf.el; if (d.tagName === 'DETAILS') d.open = true;
+    return box;
+  });
+}
+
+const CMP = { books: null };
+async function viewCompare(main, cid) {
+  main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], ['My finished books', '#/shelf'], cid ? ['Compare versions', '#/compare'] : 'Compare versions', ...(cid ? ['Result'] : [])),
+    h('h1', null, '⚖️ Compare versions')), h('div', { class: 'row' }, infoTip('Compare versions',
+    h('p', null, 'Two books (for example a book and its 🧪 variant made with another pipeline) or two versions of a chapter are read by your AIs “blind”: each AI sees them as Version 1 and Version 2 in a random order and never learns which is which. Each scores both on the dimensions and picks the one it prefers.'),
+    h('p', null, 'Afterwards BookForge reveals which version was which and shows the median scores and the winner per dimension. An AI that wrote one of the versions is marked ⚠️ not independent.')))));
+  const holder = h('div', { 'aria-live': 'polite' });
+  main.appendChild(holder);
+  if (cid) return compareResult(holder, cid);
+  let shelf, list;
+  try { [shelf, list] = await Promise.all([api('GET', '/shelf'), api('GET', '/compare')]); } catch (e) { holder.appendChild(problemBox(toProblem(e, { step: 'Compare versions' }), { retry: () => route() })); return; }
+  const books = shelf.books || [];
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const opt = (sel, pick) => { for (const b of books) sel.appendChild(h('option', { value: b.project_id, selected: b.project_id === pick }, `${b.title}${b.pipeline && b.pipeline.preset && b.pipeline.preset !== 'full' ? ` (${b.pipeline.preset})` : ''} — ${fmtTime(b.exported_at)}`)); return sel; };
+  const selA = opt(h('select', { id: 'cmp-a' }), q.get('a') || (books[0] || {}).project_id);
+  const selB = opt(h('select', { id: 'cmp-b' }), q.get('b') || (books.find(b => b.project_id !== (q.get('a') || (books[0] || {}).project_id)) || {}).project_id);
+  const scope = h('select', { id: 'cmp-scope' }, h('option', { value: 'book' }, 'The whole books'), h('option', { value: 'chapter' }, 'One chapter of each'));
+  const chA = h('select', { id: 'cmp-cha' }); const chB = h('select', { id: 'cmp-chb' });
+  const chRow = h('div', { class: 'grid-2', hidden: true }, h('div', { class: 'field' }, h('label', { for: 'cmp-cha' }, 'Chapter of A'), chA), h('div', { class: 'field' }, h('label', { for: 'cmp-chb' }, 'Chapter of B'), chB));
+  const fillCh = async (sel, pid) => {
+    clear(sel);
+    try { const b = await api('GET', `/projects/${encodeURIComponent(pid)}/branches/main/book`);
+      for (const c of ((b.steps || []).find(s => s.id === 'chapters') || {}).chapters || []) {
+        const r = c.approved || c.prose; if (!r) continue;
+        sel.appendChild(h('option', { value: `${r.record_id}@${r.version}` }, `${c.label || `Chapter ${c.chapter_id}`} (version ${r.version})`)); }
+    } catch { /* the chapter list is optional */ }
+  };
+  scope.addEventListener('change', async () => { chRow.hidden = scope.value !== 'chapter'; if (!chRow.hidden) { await fillCh(chA, selA.value); await fillCh(chB, selB.value); } });
+  selA.addEventListener('change', () => { if (!chRow.hidden) fillCh(chA, selA.value); });
+  selB.addEventListener('change', () => { if (!chRow.hidden) fillCh(chB, selB.value); });
+  const err = h('div', { 'aria-live': 'polite' });
+  const prog = h('div');
+  const go = h('button', { type: 'button', class: 'primary', 'data-testid': 'cmp-start', onclick: async () => {
+    clear(err); clearFieldProblems(form);
+    const body = { scope: scope.value, a: { project_id: selA.value }, b: { project_id: selB.value } };
+    if (scope.value === 'chapter') {
+      const [ra, va] = (chA.value || '').split('@'); const [rb, vb] = (chB.value || '').split('@');
+      body.a.record_id = ra; body.a.version = va ? parseInt(va, 10) : undefined; body.b.record_id = rb; body.b.version = vb ? parseInt(vb, 10) : undefined;
+    }
+    go.disabled = true;
+    try {
+      const j = await api('POST', '/compare', { body });
+      const end = await pollQualityJob(`/compare/job/${encodeURIComponent(j.id)}`, prog);
+      if (end.status !== 'done') { clear(prog).appendChild(problemBox({ code: (end.error || {}).code || 'COMPARE_FAILED', message: (end.error || {}).message || end.phase, where: { step: 'Compare versions' } }, { retry: () => go.click() })); return; }
+      go2(`#/compare/${encodeURIComponent(end.comparison_id)}`);
+    } catch (e) {
+      const rest = showFieldErrors(e, { a: selA, b: selB, scope }, { step: 'Compare versions' });
+      if (rest.length || !(e instanceof ApiError)) err.appendChild(problemBox(toProblem(e, { step: 'Compare versions' })));
+    } finally { go.disabled = false; }
+  } }, '⚖️ Compare blind');
+  const go2 = hash => { location.hash = hash; };
+  const form = h('section', { class: 'card', 'data-testid': 'cmp-form' }, h('h2', null, 'Compare two versions'),
+    books.length < 2 && !books.length ? h('p', { class: 'small muted' }, 'You need finished books to compare. Make one with ⚡, then a 🧪 variant of it.') : null,
+    h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'cmp-a' }, 'Version A'), selA), h('div', { class: 'field' }, h('label', { for: 'cmp-b' }, 'Version B'), selB)),
+    h('div', { class: 'field' }, h('label', { for: 'cmp-scope' }, 'What to compare'), scope), chRow,
+    h('p', { class: 'small muted' }, 'The AIs that did not write either version are asked first (up to three). They only see “Version 1” and “Version 2”.'),
+    err, h('div', { class: 'row' }, go), prog);
+  holder.appendChild(form);
+  if ((list.items || []).length) holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'Earlier comparisons'),
+    h('ul', { class: 'small', 'data-testid': 'cmp-list' }, list.items.map(x => h('li', null, h('a', { href: `#/compare/${encodeURIComponent(x.id)}` }, `${x.a.title} vs ${x.b.title}`), ` · ${x.scope} · ${fmtTime(x.at)} · winner: ${x.winner === 'tie' ? 'tie' : x.winner === 'A' ? x.a.title : x.winner === 'B' ? x.b.title : '–'}`)))));
+}
+async function compareResult(holder, cid) {
+  let r;
+  try { r = await api('GET', `/compare/${encodeURIComponent(cid)}`); } catch (e) { holder.appendChild(problemBox(toProblem(e, { step: 'Compare versions' }), { retry: () => route() })); return; }
+  const ag = r.aggregate || {};
+  const name = side => `${side} · “${r[side.toLowerCase()].title}”`;
+  const win = ag.winner === 'tie' ? 'A tie' : ag.winner ? `${name(ag.winner)} wins` : 'No result';
+  holder.appendChild(h('section', { class: 'card cmp-head', 'data-testid': 'cmp-result' }, h('h2', null, `🏆 ${win}`),
+    h('p', { class: 'small muted' }, `${r.scope === 'book' ? 'Whole books' : 'One chapter each'} · ${fmtTime(r.at)} · ${ag.reviewers || 0} AI reviewer(s), ${ag.independent || 0} independent`),
+    h('div', { class: 'grid-2' }, ['A', 'B'].map(sd => { const x = r[sd.toLowerCase()]; return h('div', { class: `cmp-side cmp-${sd}` }, h('strong', null, name(sd)), h('p', { class: 'small' }, `🧪 ${x.pipeline || ''}`), h('p', { class: 'small muted' }, `${(x.words || 0).toLocaleString()} words · median average ${(ag.average || {})[sd] ?? '–'}/10 · preferred by ${(ag.votes || {})[sd] || 0}`), x.project_id ? h('a', { class: 'small', href: link('p', x.project_id, x.branch_id || 'main', 'report') }, '📊 its report') : null); }))));
+  for (const w of r.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, /independent/.test(w) ? [hazard({ code: 'COMPARE_NOT_INDEPENDENT', message: w }, {}, { small: true }), ' '] : null, w));
+  const t = h('table', { class: 'rp-table', 'data-testid': 'cmp-table' }, h('caption', { class: 'small' }, 'Median scores of the reviewers (1-10) and the winner per dimension.'),
+    h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'A'), h('th', null, 'B'), h('th', null, 'Winner'))),
+    h('tbody', null, (ag.dimensions || []).filter(d => d.n).map(d => h('tr', { class: `win-${d.winner}` }, h('th', { scope: 'row' }, d.label), scoreCell(d.a, d.winner === 'A' ? 'strong' : ''), scoreCell(d.b, d.winner === 'B' ? 'strong' : ''),
+      h('td', null, d.winner === 'tie' ? '= tie' : `${d.winner} (+${Math.abs(d.diff)})`)))));
+  holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'Per dimension'), h('div', { class: 'table-wrap' }, t),
+    h('p', { class: 'small' }, `Dimensions won: A ${(ag.wins || {}).A || 0} · B ${(ag.wins || {}).B || 0} · tie ${(ag.wins || {}).tie || 0}`)));
+  holder.appendChild(h('section', { class: 'card', 'data-testid': 'cmp-reveal' }, h('h2', null, '🔓 Who saw what (revealed)'),
+    h('ul', null, (r.reviews || []).map(x => h('li', null, h('strong', null, x.name), x.status !== 'done' ? [' — ', hazard({ code: 'COMPARE_FAILED', message: `${x.name}: ${x.error}` }, {}, { small: true }), ` could not compare (${x.error})`]
+      : [` saw Version 1 = ${x.mapping.version_1}, Version 2 = ${x.mapping.version_2}; preferred ${x.revealed.preferred === 'tie' ? 'neither (tie)' : x.revealed.preferred || '–'}`, x.independent ? '' : ` ⚠️ wrote ${(x.wrote || []).join(' and ')}`,
+        (x.answer.reasons || []).length ? h('ul', { class: 'small' }, x.answer.reasons.map(t2 => h('li', null, t2))) : null])))));
+  holder.appendChild(h('p', null, h('a', { class: 'btn', href: '#/compare' }, '⚖️ Another comparison')));
+}
+
+/** Book page: 📊 report, 🧪 variant, ⚖️ compare (P13/P14) and 📏 length (P15). */
+function bookSection5Card(book) {
+  const title = profileOf().title || S.project.name;
+  const box = h('section', { class: 'card s5-card', 'aria-labelledby': 's5-h', 'data-testid': 'book-s5' },
+    h('h2', { id: 's5-h' }, '📊 Report, variants and length ', infoTip('Book report', ...TIP_REPORT())));
+  const prof = profileOf();
+  const L = LENGTH_INFO[prof.length || 'short_story'] || LENGTH_INFO.short_story;
+  box.appendChild(h('p', { class: 'small' }, h('strong', null, '📏 Length: '), `${L[0]} — ${L[1]}`, ' ', infoTip('Length', ...LENGTH_TIP())));
+  const body = h('div', null);
+  box.appendChild(body);
+  (async () => {
+    let ov = null;
+    try { ov = await api('GET', bpath('/report')); } catch { ov = null; }
+    const rep = ov && ov.latest;
+    put(body, h('p', { class: 'small' }, rep ? [`Latest report ${fmtTime(rep.at)}: overall ${rep.aggregate.overall ?? '–'}/10 from ${rep.aggregate.reviewers || 0} AI reviewer(s)`, ov.stale ? [' ', hazard({ code: 'REPORT_STALE' }, { open: plink('report'), openLabel: '📊 Open the report' }, { small: true })] : null] : 'No report yet.'),
+      h('div', { class: 'row' }, h('a', { class: 'btn small primary', href: plink('report'), 'data-testid': 'open-report' }, rep ? '📊 Book report' : '📊 Make the book report'),
+        h('button', { type: 'button', class: 'small', 'data-testid': 'make-variant', onclick: ev => openVariantDialog(S.pid, title, ev.currentTarget) }, '🧪 Make a variant'),
+        h('a', { class: 'btn small', href: `#/compare?a=${encodeURIComponent(S.pid)}` }, '⚖️ Compare')));
+  })();
+  return box;
+}
+
+/** Settings: long chapters (P15). */
+function lengthSettingsCard() {
+  const box = h('div');
+  const card = h('section', { class: 'card', 'aria-labelledby': 'lns-h', 'data-testid': 'length-settings' }, h('h2', { id: 'lns-h' }, '📏 Long chapters ', infoTip('Long chapters', ...LENGTH_TIP())),
+    h('p', { class: 'small' }, 'How BookForge writes chapters longer than one AI answer, and what it does when a chapter comes back far too short.'), box);
+  (async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/length'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Long chapters' }))); return; }
+    const per = h('input', { type: 'number', id: 'lns-per', min: '300', max: '8000', step: '100', value: String(cur.per_call_words), 'aria-describedby': 'lns-per-h' });
+    const rounds = h('select', { id: 'lns-rounds', 'aria-describedby': 'lns-r-h' }, [0, 1, 2, 3].map(n => h('option', { value: String(n), selected: n === cur.expand_rounds }, n === 0 ? '0 — never continue' : `${n}${n === 1 ? ' (default)' : ''}`)));
+    const share = h('select', { id: 'lns-share', 'aria-describedby': 'lns-s-h' }, [0.4, 0.5, 0.6, 0.7, 0.8].map(v => h('option', { value: String(v), selected: Math.abs(v - cur.under_share) < 0.001 }, `${Math.round(v * 100)} %${v === 0.6 ? ' (default)' : ''}`)));
+    const out = h('div', { 'aria-live': 'polite' });
+    const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'lns-save', onclick: async () => {
+      clearFieldProblems(card); clear(out);
+      try { await api('PUT', '/settings/length', { body: { per_call_words: parseInt(per.value, 10), expand_rounds: parseInt(rounds.value, 10), under_share: parseFloat(share.value) } }); toast('Saved'); }
+      catch (e) { const rest = showFieldErrors(e, { per_call_words: per, expand_rounds: rounds, under_share: share }, { step: 'Settings › Long chapters' }); if (rest.length) out.appendChild(problemBox(e)); }
+    } }, 'Save');
+    put(box, h('div', { class: 'grid-3' },
+      h('div', { class: 'field' }, h('label', { for: 'lns-per' }, 'Words per AI answer'), per, h('span', { class: 'hint', id: 'lns-per-h' }, 'A chapter longer than this is written scene by scene (one answer per scene). Web AIs write about 2,500 words reliably.')),
+      h('div', { class: 'field' }, h('label', { for: 'lns-rounds' }, 'Continue a short chapter'), rounds, h('span', { class: 'hint', id: 'lns-r-h' }, 'How many times the writer may continue a chapter that came back far too short (within its scene plan, never padding).')),
+      h('div', { class: 'field' }, h('label', { for: 'lns-share' }, '“Far too short” means below'), share, h('span', { class: 'hint', id: 'lns-s-h' }, 'Of the chapter’s word target.'))),
+    h('div', { class: 'row' }, save), out);
+  })();
+  return card;
 }
 
 /* ======================================================================= Settings: backups (S9), AI retry (S10), diagnostics (S8) */
