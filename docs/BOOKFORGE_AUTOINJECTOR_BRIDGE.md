@@ -1,4 +1,4 @@
-# BookForge ⇄ AutoInjector bridge (contract v1.1)
+# BookForge ⇄ AutoInjector bridge (contract v1.2)
 
 Lets BookForge's three AI slots (AI-1..AI-3) use the ChatGPT, Claude and Gemini web
 sessions that the AutoInjector **desktop app** already drives, with no API keys.
@@ -33,9 +33,10 @@ BookForge (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0
 ## Endpoints
 
 ### `GET /v1/health`
-`200 {"ok": true, "bridge_version": "1.1", "sites": {"chatgpt": {"ready": bool, "busy": bool},
-"claude": {...}, "gemini": {...}}}` — `ready` = the pane exists and is loaded;
-`busy` = a bridge request is in flight for that site.
+`200 {"ok": true, "bridge_version": "1.2", "sites": {"chatgpt": {"ready": bool, "busy": bool, "state": …,
+"problem": …, "since": …, "last_probe_ok_at": …}, "claude": {...}, "gemini": {...}}}` — `ready` = the pane exists,
+is loaded and its message box is on the page (and, since v1.2, its self-repair state is `ok`/`unknown`);
+`busy` = a bridge request is in flight for that site. The v1.2 fields are described below.
 
 ### `POST /v1/complete`
 Request:
@@ -172,6 +173,82 @@ BookForge sends this whenever something changes and at least every ~30 s while i
   `{kind: "status"}` ("BookForge sent an update on your book"), and only for the first status,
   the first after a 90 s gap, and the first after a pairing.
 
+## Contract v1.2 additions — self-repair (backward compatible)
+
+v1.2 adds the AutoInjector self-repair (plan Section 1, P18.1–P18.8; `desktop-app/self-repair.js`).
+`bridge_version` is `"1.2"`; nothing earlier changes meaning. A v1.1 client simply ignores the new fields.
+
+**Check-ins.** AutoInjector sends each Active AI a tiny message — `[MSG #n]` + `Reply with only this word: <word>`
++ the usual reply-envelope line — at start (once its page has loaded), every 20 minutes while the AI is idle
+(configurable in the panel: off/10/20/30/60 min) and on demand (🩺 Check now, or `POST /v1/probe`). Never while the
+user typed in that pane within the last 2 minutes or its message box holds text, while it is writing, waiting for a
+reply, getting another message, answering BookForge, or during a test. A check-in's answer is owned by the
+self-repair: it is not shown in the conversation, never relayed to another AI, never nagged about tags.
+
+**States per AI** (`state`): `unknown` (no check-in yet) · `ok` (the last check-in was answered) · `repairing`
+(a check-in failed and an automatic fix is running) · `needs_user` (only the user can fix it — logged out, a
+captcha, a usage limit — or the user is being asked to show AutoInjector the page) · `broken` (every automatic
+fix failed). `problem` is one code, exactly one of: `TYPE_FAILED`, `SEND_NOT_CONFIRMED`, `NO_REPLY_FOUND`,
+`FALSE_DUPLICATE`, `STUCK_GENERATING`, `LOGGED_OUT`, `CAPTCHA`, `USAGE_LIMIT`, `NETWORK_ERROR`, `PAGE_ERROR`,
+`UNKNOWN` (or `null`). `since` = when the current state began (epoch ms, `null` while `unknown`);
+`last_probe_ok_at` = the last answered check-in (epoch ms or `null`). Malformed values are never sent (an
+unknown state becomes `unknown`, a malformed problem `null`).
+
+### `GET /v1/health` (changed)
+Each site additionally has `"state"`, `"problem"`, `"since"`, `"last_probe_ok_at"`. `ready` keeps its v1 meaning
+but is `false` whenever `state` is not `"ok"`/`"unknown"`.
+
+### `POST /v1/probe` (new, Bearer)
+Body (optional; empty body or `{}` = every Active AI): `{"sites": ["chatgpt", "claude", "gemini"]}` (≤ 10 names,
+duplicates collapsed, body ≤ 4 KiB). Starts check-ins and answers at once:
+`202 {"ok": true, "started": ["claude"], "skipped": {"chatgpt": "busy"}}`. Results appear later in `/v1/health`
+(`state`, `last_probe_ok_at`). Skip reasons: `inactive`, `busy`, `typing`, `checking` (one is already running),
+`teaching`, `bookforge` (a bridge request is in flight there), `waiting`, `sending`, `test`, `not_ready`,
+`unsupported` (a host without self-repair). Errors: 401 (key), 400 `BAD_REQUEST` (not JSON / not an object /
+`sites` not a list of strings), 404 `UNKNOWN_SITE`, 413 `TOO_LARGE`. Each started/skipped AI is an activity
+event `{kind: "probe", site, outcome: STARTED|SKIPPED}`.
+
+### `POST /v1/complete` (changed)
+To a site whose `state` is `repairing`, `needs_user` or `broken`: `503` with
+`{"ok": false, "error": "SITE_NOT_READY", "message": "...", "ambiguous": false, "state": "needs_user", "problem": "LOGGED_OUT"}`
+— nothing is typed; BookForge routes the work to another AI. (This check comes after the cache / join / `409
+SITE_BUSY` checks; `ok`/`unknown` behave exactly as in v1.1.)
+
+### What the desktop does on a failure (informative)
+Classifier evidence: page signals from one table (`PAGE_SIGNATURES`: log-in URLs/buttons/texts, captcha frames
+and texts, usage-limit and error notices — notices only, never a reply's own words), the send result, what the
+reply reader sees, and whether the check-in word is on the page outside the user's message. Repair ladders:
+`TYPE_FAILED`/`SEND_NOT_CONFIRMED` → built-in alternative selectors → reload → teach step;
+`NO_REPLY_FOUND` → alternatives → page search (find the word in a new block, derive + verify a stable selector,
+save it) → reload → teach; `FALSE_DUPLICATE` → a fresh check-in → page search → reload → teach;
+`STUCK_GENERATING` → press Stop, wait, send once more → reload → broken; `PAGE_ERROR`/`NETWORK_ERROR` → reload →
+fresh page → broken; `LOGGED_OUT`/`CAPTCHA`/`USAGE_LIMIT` → `needs_user` with what to do, a cheap signature
+re-check every 60 s (and whenever the page changes), one check-in once the signature is gone. Every step after a
+fix attempt is confirmed by a new check-in. Learned selectors are stored per site (versioned, with the time and
+how they were learned) and used before the built-in ones. The teach step asks the user to type
+`Repeat this number: ####` into the AI (a pop-up in the panel and a banner in the AI's window) and learns the
+message box, how it was sent, the user's message and the reply from where the number appears. A BookForge
+request that times out / fails, or an AI whose reply stalls, gets a check-in once it is free.
+
+**P18.5 (no more false duplicates).** A reply captured while a prompt's send script was still confirming it (the
+AI answered during a `SEND_NOT_CONFIRMED` retry — the Gemini case of the first real run) now answers that prompt:
+the Relay Trace counts a message being typed into an idle AI as the one a capture answers, the host hands the
+bridge the `[MSG #]` number as soon as it is stamped (`cancelToken.seq`), and the bridge also remembers a declined
+reply briefly so a send that confirms a moment later still collects its answer. A reply whose words equal the
+previous one is new when the AI was seen writing (≥ 2 reads) after the message went out.
+
+**Logging (P18.10).** Detections, steps and results are logged as `self-repair` events with site, step, code and
+outcome only, listed in the panel's AI cards (⚠️ pop-over: "What AutoInjector already tried") and in 📋 Copy
+diagnostics — never the check-in word, prompts, replies or the key. The `capture-stalled` log line no longer
+carries the reply's last characters.
+
+### Fake host (tests)
+`test/fixtures/fake-bridge-host.js --site-state chatgpt=needs_user:LOGGED_OUT,gemini=repairing:NO_REPLY_FOUND`
+pins states (SIGUSR1 clears them); `POST /v1/probe` makes the other sites `ok` after `--delay-ms`.
+`test/fixtures/fake-chat.html` answers check-ins (`Reply with only this word: X` → X) and teach prompts
+(`Repeat this number: 1234` → 1234), so the real-Chromium e2e (`bookforge-e2e.test.js`) passes BookForge's
+pre-run check-in.
+
 ## Status, activity and the link test (desktop side, informative)
 
 * `status()` (bookforge-bridge.js) additionally reports `lastContactAt` (any authenticated
@@ -238,6 +315,12 @@ BookForge sends this whenever something changes and at least every ~30 s while i
   `bookforge-bridge.js` (via `fake-bridge-host.js`, three fake panes): connect-all-three,
   health, a creative operation end to end, roles routing, invalid-then-valid re-ask,
   timeout -> user decision with nothing saved, busy, wrong token.
+* v1.2: `desktop-app/test/bookforge-bridge-v12.test.js` (health fields, cleaning, `/v1/probe` incl. errors and a
+  v1.1 host, 503 `{state, problem}`, the P18.5 ownership incl. the exact Gemini reply, fake host `--site-state`),
+  `test/self-repair.test.js` (classifier, signals, alternatives, page search, teach learner, engine flows),
+  `test/self-repair-main.test.js` (real main.js: the Gemini regression end to end, identical answers, check-ins
+  hidden + not relayed, page search repair, needs_user → 503, diagnostics without text) and the real-Electron
+  `test/e2e/self-repair.e2e.js`.
 * NOT tested: the live ChatGPT/Claude/Gemini websites (needs your logged-in sessions).
 
 ## Known limitations
@@ -269,3 +352,19 @@ BookForge sends this whenever something changes and at least every ~30 s while i
 4. Create a project, open B01 Premise, fill idea/goals and Create. Watch the Claude pane
    receive the prompt; BookForge should show a DRAFT premise. If it reports TIMEOUT or a
    JSON error, note which site and what the pane showed.
+
+## BookForge side of v1.2 (notes from BookForge, P18.9)
+
+* BookForge reads `state`/`problem`/`since`/`last_probe_ok_at` from `GET /v1/health` (cached 15 s per bridge) and
+  skips a slot whose site is `repairing`, `needs_user` or `broken`; `ok` and `unknown` (or a bridge without these
+  fields) keep the old behaviour. Timestamps may be epoch seconds, epoch milliseconds or ISO 8601.
+* Before a Make-a-book run, Write all chapters and the workflow test BookForge sends `POST /v1/probe` once with the
+  sites of its AutoInjector slots and polls `/v1/health` every 2 s for at most 60 s. A probed site counts as
+  answered when its state is `needs_user`/`broken`, or `ok` with `last_probe_ok_at` (or `since`) not older than the
+  probe; `repairing`/`unknown` keep it waiting. A 404 on `/v1/probe` is treated as an older bridge.
+* A `503 SITE_NOT_READY` with `state`/`problem` moves the call to another working slot at once (no same-site
+  retries); without `state` it is treated as `broken` for this call.
+* Problem codes BookForge has plain words for (bookforge/web/problems.js `SITE_PROBLEMS`; others are shown as the
+  code in plain letters): the self-repair codes `TYPE_FAILED`, `SEND_NOT_CONFIRMED`, `NO_REPLY_FOUND`,
+  `FALSE_DUPLICATE`, `STUCK_GENERATING`, `LOGGED_OUT`, `CAPTCHA`, `USAGE_LIMIT`, `NETWORK_ERROR`, `PAGE_ERROR`,
+  `UNKNOWN`, plus a few older names. Codes must match `[A-Za-z][A-Za-z0-9_.:-]{0,63}`; anything else is ignored.

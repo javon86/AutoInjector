@@ -8,6 +8,7 @@ process.env.AUTOINJECTOR_POLL_MS = "50";
 process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = "30";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = "50";
 process.env.AUTOINJECTOR_BRIDGE = "0";
+process.env.AUTOINJECTOR_CHECKIN = process.env.AUTOINJECTOR_CHECKIN || "0"; // P18: no automatic check-ins in this harness (test/self-repair-main.test.js covers them)
 process.env.AUTOINJECTOR_BOOKFORGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
 process.env.AUTOINJECTOR_BOOKFORGE_APP_URL = `http://127.0.0.1:${Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT) + 1}/api/ping`;
 process.env.AUTOINJECTOR_BOOKFORGE_DIR = require("path").join(require("os").tmpdir(), "no-bookforge-here-" + process.pid);
@@ -92,11 +93,13 @@ async function main() {
   const PROMPT = "SECRET PROMPT: write chapter one about the lighthouse";
   const REPLY = "SECRET REPLY: the lighthouse keeper woke";
   reg("claude").webContents.sentLog = [];
+  // The pane must have been read once (its message box seen) before it counts as ready.
+  await waitUntil(async () => { const h = await request("GET", "/v1/health", PLANTED); return h.json && h.json.sites && h.json.sites.claude.ready; });
   const p = request("POST", "/v1/complete", PLANTED, { site: "claude", prompt: PROMPT, request_id: "bf-diag-1", timeout_ms: 30000 });
   await waitUntil(() => reg("claude").webContents.sentLog[0]);
   reg("claude").webContents.currentText = `[TO: USER]\n${REPLY}\n[FROM: CLAUDE]`;
   r = await p;
-  assert(r.status === 200 && r.json.text === REPLY, "round trip answered");
+  assert(r.status === 200 && r.json.text === REPLY, `round trip answered (${r.status} ${r.json && r.json.error})`);
   const BF_APP_PORT = PORT + 1;
   const fakeBf = http.createServer((req, res) => {
     if (req.url === "/api/ping") { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ app: "bookforge", version: "0.9.0" })); }

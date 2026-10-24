@@ -40,7 +40,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   function noteSend({ seq, target, from = null, kind = "program", sourceTurnId = null, text = "" }) {
     if (seq == null) return;
     const m = { seq: String(seq), target, from, kind, sourceTurnId, at: now(), hash: hashBody(text), chars: String(text || "").length,
-      result: null, error: null, attempts: null, typedOver: false, provenAt: null, startedAt: null, answeredAt: null, answerTurn: null, batched: false, duplicateOf: null, overtakenBy: null };
+      result: null, error: null, attempts: null, typedOver: false, typingAt: null, typingIdle: false, provenAt: null, startedAt: null, answeredAt: null, answerTurn: null, batched: false, duplicateOf: null, overtakenBy: null };
     // Same body to the same AI within a short window = a duplicate delivery.
     for (let i = msgs.length - 1; i >= 0; i--) {
       const p = msgs[i];
@@ -50,6 +50,20 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
     add(m);
     if (sourceTurnId != null && turns.has(sourceTurnId)) turns.get(sourceTurnId).handoffs.push({ to: target, seq: m.seq });
   }
+
+  // P18.5: the send script started typing this message. When the AI was idle
+  // and owed nothing else, a reply captured before the send script confirms the
+  // message (a slow confirm, a retry) can only be the answer to it.
+  function noteTyping(seq) {
+    const m = bySeq.get(String(seq)); if (!m || m.typingAt) return;
+    m.typingAt = now();
+    m.typingIdle = !writing[m.target] && waiting(m.target).length === 0;
+  }
+  // P18.5: the AI was seen writing after a message to it went out that has no
+  // reply yet — a new reply with the same words as the last one is still new.
+  function openStarted(site) { return waiting(site).some((m) => !!m.startedAt); }
+  // P18.5: was this message's reply already captured (possibly before its send confirmed)?
+  function isAnswered(seq) { const m = bySeq.get(String(seq)); return !!(m && m.answeredAt); }
 
   function noteSendResult(seq, res) {
     const m = bySeq.get(String(seq)); if (!m) return;
@@ -98,6 +112,9 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   function noteCapture(site, turnId, { none = false, rateLimited = false } = {}) {
     writing[site] = false; // a reply is only captured once the AI has finished it
     let open = waiting(site);
+    // P18.5: nothing delivered is open, but a message is being typed / confirmed
+    // right now into an idle AI: this reply answers it.
+    if (!open.length) open = msgs.filter((m) => m.target === site && !m.result && m.typingAt && m.typingIdle && !m.answeredAt);
     let lastStarted = -1;
     open.forEach((m, i) => { if (m.startedAt) lastStarted = i; });
     const tail = open.slice(lastStarted + 1);
@@ -180,11 +197,11 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   }
 
   function reset() { msgs = []; bySeq.clear(); turns.clear(); }
-  return { noteSend, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, report, reset, _msgs: () => msgs };
+  return { noteSend, noteTyping, openStarted, isAnswered, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, report, reset, _msgs: () => msgs };
 }
 
 const LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
-const HELD_TEXT = { "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice", "bookforge": "answer to a BookForge request (handed to BookForge)" };
+const HELD_TEXT = { "check-in": "an automatic check-in (kept out of the conversation)", "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice", "bookforge": "answer to a BookForge request (handed to BookForge)" };
 
 function formatReport(r, { label = (s) => LABEL[s] || s, timeFmt = (t) => new Date(t).toLocaleTimeString() } = {}) {
   const L = [];

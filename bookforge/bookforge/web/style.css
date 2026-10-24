@@ -953,3 +953,12 @@ html:not(.show-tech) .tech { display: none !important; }
 .tech { color: var(--text-muted); font-size: .85em; }
 .tech-block { margin-top: 8px; }
 .tech-toggle[aria-pressed="true"] { background: var(--surface-2); }
+
+/* P18.9 / P3.1 / P3.2: which AIs work, who wrote and who reviewed */
+.ai-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; font-size: .92em; }
+.ai-chip.badge { display: inline-block; white-space: normal; line-height: 1.5; }
+.ai-chip .ico { margin-right: 4px; }
+.ai-chip .ai-why { font-size: .9em; opacity: .9; }
+.rv-who, .mb-review-note { margin: 2px 0; color: var(--muted, inherit); }
+.rv-who.not-independent, .mb-review-note.not-independent { color: var(--warn); }
+.rv-warn { font-weight: 600; }

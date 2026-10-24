@@ -43,8 +43,8 @@ from .requests import candidate_payload
 from .engine import Engine
 from .errors import BookforgeError
 from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_word, wait_and_retry
-from .providers import PinnedProviders  # noqa: F401 - re-exported (older imports)
-from .review import REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
+from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
+from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
 log = logging.getLogger("bookforge.autobook")
 
@@ -167,6 +167,8 @@ class _Runner:
         self._ctl: dict[str, dict] = {}
         self._cache: dict[str, dict] = {}
         self.retry_policy: RetryPolicy | None = None  # tests inject a fast policy
+        self.probe_timeout_s = PROBE_WAIT_S  # before a run: wait at most this long for the AIs' check-in
+        self.probe_poll_s = PROBE_POLL_S
 
     # ------------------------------------------------------------------ persistence
     def get(self, run_id: str) -> dict | None:
@@ -331,7 +333,73 @@ class _Runner:
         else:
             run["status"] = "running"
             run["phase"] = "Trying the AI again"
+        self.refresh_ais(run)
         self.save(run)
+
+    # ------------------------------------------------------------------ which AIs work (P18.9)
+    @staticmethod
+    def _ai_row(st: dict) -> dict:
+        checking = bool(st.get("pending")) and st["state"] in ("ok", "unknown")
+        return {"slot_id": st["slot_id"], "name": st["name"], "state": "checking" if checking else st["state"],
+                "word": "being checked" if checking else st.get("word"), "problem": st.get("problem"),
+                "working": bool(st.get("working")) and not st.get("pending")}
+
+    def refresh_ais(self, run: dict):
+        """The run window's "which AIs work" list, from the cached bridge view (cheap: at most one read per 15 s)."""
+        try:
+            prov = self.app.engine.providers
+            run["ais"] = [self._ai_row(prov.slot_status(s)) for s in prov.ai_slots()]
+        except Exception:  # noqa: BLE001 - a display hint must never break the run
+            log.exception("could not read the AI states")
+
+    def probe_ais(self, run: dict):
+        """Before the run works: ask AutoInjector to check in with each site (bridge v1.2 /v1/probe) and wait up to
+        ``probe_timeout_s`` (60 s) so the run starts knowing which AIs work; progress shows in the run window."""
+        prov = self.app.engine.providers
+        if not prov.ai_slots():
+            return
+        run["phase"] = "Checking which AIs work…"
+        run["probe"] = {"state": "running", "started_at": now_iso()}
+        self.save(run)
+
+        def progress(statuses, elapsed):
+            run["ais"] = [self._ai_row(x) for x in statuses]
+            waiting = [x["name"] for x in statuses if x.get("pending")]
+            run["phase"] = (f"Checking which AIs work… ({int(elapsed)} s; waiting for {', '.join(waiting)})"
+                            if waiting else "Checking which AIs work…")
+            self.save(run)
+        statuses = prov.probe_and_wait(timeout_s=self.probe_timeout_s, poll_s=self.probe_poll_s, on_progress=progress,
+                                       check=lambda: self.check(run))
+        run["ais"] = [self._ai_row(x) for x in statuses]
+        working = [a for a in run["ais"] if a["working"]]
+        run["probe"] = {"state": "done", "at": now_iso(), "working": len(working), "total": len(run["ais"])}
+        words = "; ".join(f"{a['name']}: {a['word']}" + (f" ⚠️ {a['problem']}" if a.get("problem") and not a["working"]
+                                                          else "") for a in run["ais"])
+        self.event(run, "probe", f"AIs checked — {words}", step=run.get("current") or "backup")
+        if len(working) == 1 and len(run["ais"]) >= 1:
+            self.event(run, "note", f"Only {working[0]['name']} works right now: it writes AND reviews ⚠️ "
+                       f"({NOT_INDEPENDENT.split(' — ')[0].lower()} until another AI works again)",
+                       code="REVIEW_NOT_INDEPENDENT")
+        self.save(run)
+
+    def on_failover(self, run: dict, info: dict):
+        """A call moved to another AI because one was not working (P18.9): tell the author in the run window."""
+        try:
+            gone = []
+            for f in info.get("from") or []:
+                st = f.get("state")
+                word = {"repairing": "is being repaired", "needs_user": "needs you", "broken": "is not working"}.get(
+                    st or "", "did not answer")
+                gone.append(f"{f.get('from_name') or f.get('name') or f.get('from') or f.get('slot_id')} {word}"
+                            + (f" ({f['problem']})" if f.get("problem") else ""))
+            msg = f"{'; '.join(gone) or 'An AI was not working'} — this went to {info.get('to_name')} instead"
+            self.event(run, "failover", msg, code="AI_MOVED", slot=info.get("to"))
+            run.setdefault("failovers", 0)
+            run["failovers"] += 1
+            self.refresh_ais(run)
+            self.save(run)
+        except Exception:  # noqa: BLE001 - display only
+            log.exception("could not record a failover")
 
 
 # ====================================================================== Make a book for me
@@ -559,7 +627,10 @@ class AutoBookService(_Runner):
         self._tl.run_id = run_id
         run["status"] = "running"
         self.save(run)
+        health = self.app.engine.providers.health
+        health.set_listener(lambda info: self.on_failover(run, info))
         try:
+            self.probe_ais(run)
             if run.get("project_id") and self.store.project(run["project_id"]) is None:
                 run["current"] = run.get("current") or "profile"
                 raise StepProblem("NOT_FOUND", "This run's book no longer exists: it was removed (for example by "
@@ -574,6 +645,7 @@ class AutoBookService(_Runner):
                 st.update(state="running", started_at=st.get("started_at") or now_iso(), finished_at=None,
                           problem=None, message="Working…")
                 run["phase"] = f"{st['title']}…"
+                self.refresh_ais(run)
                 self.save(run)
                 getattr(self, f"_s_{sid}")(run, st)
                 st.update(state="done", finished_at=now_iso())
@@ -584,6 +656,11 @@ class AutoBookService(_Runner):
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None,
                        phase="Your book is made — download it below")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
+            rs = run.get("review_summary") or {}
+            if rs.get("same_ai"):
+                self.event(run, "note", f"⚠️ {NOT_INDEPENDENT}: {rs['same_ai']} of {rs['same_ai'] + rs.get('independent', 0)}"
+                           " AI review(s) were made by the AI that wrote the draft (only one AI worked then)",
+                           code="REVIEW_NOT_INDEPENDENT")
             self._length_warning(run)
             self.save(run)
         except RunPaused:
@@ -618,6 +695,7 @@ class AutoBookService(_Runner):
                                       "message": f"BookForge hit an unexpected problem ({type(exc).__name__}).",
                                       "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."})
         finally:
+            health.set_listener(None)
             self._tl.run_id = None
             self._tl.engine = self._tl.assist = self._tl.review = None
 
@@ -716,8 +794,9 @@ class AutoBookService(_Runner):
             run["phase"] = st["message"]
             self.save(run)
             job = self._job(run, "review", head["module_id"])
-            rj = ReviewJob("review", run["principal"], run["project_id"], run["branch_id"], [rid],
-                           run["settings"].get("slot_id"))
+            # The reviewer is chosen automatically: a working AI other than the one that wrote the draft (P3.1),
+            # even when the run writes with the one AI the author picked.
+            rj = ReviewJob("review", run["principal"], run["project_id"], run["branch_id"], [rid], None)
             for k in ("started", "status", "retry_busy", "check", "on_wait"):
                 setattr(rj, k, getattr(job, k))
             try:
@@ -725,8 +804,9 @@ class AutoBookService(_Runner):
             except BookforgeError as exc:
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
-            self.event(run, "review", f"AI review of the {label}: {verdict}", verdict=verdict, slot=rj.slot,
-                       record_id=rid)
+            self._note_review(run, st, label, res["review"])
+            self.event(run, "review", f"AI review of the {label}: {verdict} · {st['review_note']}", verdict=verdict,
+                       slot=rj.slot, record_id=rid, independent=res["review"].get("independent"))
             if res.get("auto_approved"):
                 self.event(run, "approve", f"{label}: approved by your standing auto-approve setting",
                            approval="standing_auto_approve", record_id=rid)
@@ -764,6 +844,21 @@ class AutoBookService(_Runner):
                 self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass BookForge's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
+
+    def _note_review(self, run, st, label: str, review: dict):
+        """"written by X · reviewed by Y" on the step, and the run's count of independent / same-AI reviews (P3.2)."""
+        writer = review.get("writer") or "the author"
+        note = f"written by {writer} · reviewed by {review.get('reviewer') or review.get('slot') or 'the AI'}"
+        same = review.get("independent") is False
+        if same:
+            note += f" ⚠️ {NOT_INDEPENDENT}"
+        st["review_note"] = note
+        st["review_independent"] = not same
+        rs = run.setdefault("review_summary", {"independent": 0, "same_ai": 0})
+        rs["same_ai" if same else "independent"] = int(rs.get("same_ai" if same else "independent", 0)) + 1
+        if same:
+            rs["warning"] = NOT_INDEPENDENT
+            self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} ({label}: {writer})", code="REVIEW_NOT_INDEPENDENT")
 
     def _ai_problem(self, exc: BookforgeError, what: str, **extra):
         e = exc.errors[0] if exc.errors else {}
@@ -1245,7 +1340,10 @@ class WriteAllService(_Runner):
 
     def _run(self, job_id):
         job = self.get(job_id)
+        health = self.app.engine.providers.health
+        health.set_listener(lambda info: self.on_failover(job, info))
         try:
+            self.probe_ais(job)
             for item in job["items"]:
                 if item["state"] == "done":
                     continue
@@ -1304,6 +1402,8 @@ class WriteAllService(_Runner):
             job.update(status="error", problem={"code": "INTERNAL_ERROR", "message": f"Unexpected problem "
                                                 f"({type(exc).__name__})", "fix": "Press 🔁 Try again."},
                        phase="⚠️ Unexpected problem", waiting=None)
+        finally:
+            health.set_listener(None)
         self.save(job)
 
 

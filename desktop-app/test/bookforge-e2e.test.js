@@ -128,6 +128,7 @@ async function main() {
 
   Object.assign(process.env, {
     AUTOINJECTOR_BRIDGE: "0",
+    AUTOINJECTOR_CHECKIN: process.env.AUTOINJECTOR_CHECKIN || "0", // P18: no automatic check-ins here
     AUTOINJECTOR_POLL_MS: process.env.AUTOINJECTOR_POLL_MS || "150",
     AUTOINJECTOR_STABLE_MS: process.env.AUTOINJECTOR_STABLE_MS || "300",
     AUTOINJECTOR_RETRY_BACKOFF_MS: process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || "300",

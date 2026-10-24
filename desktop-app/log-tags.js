@@ -64,6 +64,8 @@ const EXACT = {
   'ui-click': 'user', 'ui-panel': 'user', 'role-changed': 'user', 'reload': 'user',
   'regenerate': 'user', 'inspect-opened': 'user', 'new-chat-all': 'user', 'new-chat-error': 'user',
   'zoom-changed': 'user', 'window-collapse-changed': 'user',
+  // P18 self-repair (check-ins, automatic fixes, teach step) — about the web AIs
+  'self-repair': 'chat', 'checkin-reply': 'chat', 'selector-learned': 'chat', 'selector-learned-cleared': 'chat',
 };
 
 // Manager sub-categories that belong to a topical tag instead of "manager".

@@ -109,7 +109,7 @@ async function main() {
 
   console.log("health");
   r = await request(port, "GET", "/v1/health");
-  assert(r.status === 200 && r.json.ok === true && r.json.bridge_version === "1.1", "health 200 with bridge_version 1.1 (contract v1.1, backward compatible)");
+  assert(r.status === 200 && r.json.ok === true && r.json.bridge_version === "1.2", "health 200 with bridge_version 1.2 (contract v1.2, backward compatible)");
   assert(["chatgpt", "claude", "gemini"].every((s) => r.json.sites[s] && r.json.sites[s].ready === true && r.json.sites[s].busy === false), "health lists every site ready/not busy");
   r = await request(port, "GET", "/v1/nope");
   assert(r.status === 404 && r.json.error === "NOT_FOUND", "404 NOT_FOUND for unknown path");
@@ -507,7 +507,7 @@ async function main() {
     res = await pair({ code: code.toLowerCase() === code ? code.toUpperCase() : code.toLowerCase(), client: "bookforge" });
     assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID", "wrong code (case matters) -> 401");
     res = await pair({ code, client: "bookforge" });
-    assert(res.status === 200 && res.json.ok === true && res.json.token === TOKEN && res.json.bridge_version === "1.1", "right code, no Authorization header -> 200 with the connection key + bridge_version 1.1");
+    assert(res.status === 200 && res.json.ok === true && res.json.token === TOKEN && res.json.bridge_version === "1.2", "right code, no Authorization header -> 200 with the connection key + bridge_version 1.2");
     res = await pair({ code, client: "bookforge" });
     assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID" && !res.text.includes(TOKEN), "a code works only once (second use -> 401, no key)");
     assert(P.status().pairing.pending === false && P.status().pairing.lastPairedAt === clock, "status() records when pairing happened");

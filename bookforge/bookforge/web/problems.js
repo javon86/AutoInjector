@@ -36,6 +36,9 @@ export const PROBLEMS = {
   REVIEW_NOT_PASSED: { title: 'The AI reviewer is not happy yet', what: 'The AI reviewer still asks for changes after two AI fixes.', fix: 'Decide: ✔ Approve anyway (your own approval), ✏️ Edit it yourself and continue, or 🔁 Try again (two more AI fixes).', action: 'retry' },
   INTERRUPTED: { title: 'Interrupted', what: 'BookForge was closed or restarted while this was running.', fix: 'Press ▶ Resume to continue where it stopped.', action: 'retry' },
   CANCELLED: { title: 'Cancelled', what: 'You stopped this.', fix: 'Start it again when you are ready.', action: 'retry' },
+  SITE_NOT_READY: { title: 'An AI is being repaired', what: 'AutoInjector says this AI’s window is not working right now (it is being repaired, needs you, or is broken).', fix: 'BookForge sends the work to the AIs that work and uses this one again when it works. If it says it needs you, open AutoInjector and look at that AI’s window.', action: 'settings' },
+  AI_MOVED: { title: 'Work moved to another AI', what: 'One AI was not working, so BookForge gave this step to another AI that works.', fix: 'Nothing to do. BookForge uses the first AI again when it works.', action: 'none' },
+  REVIEW_NOT_INDEPENDENT: { title: 'Reviews are not independent', what: 'Only one AI worked, so the same AI wrote and reviewed this draft. A second opinion catches more.', fix: 'Fix the other AIs in AutoInjector (or connect another AI in Settings); later reviews then use a different AI. You can also read the draft yourself.', action: 'settings' },
   SITE_BUSY: { title: 'The AI site is busy', what: 'The AI’s web window is busy with another request.', fix: 'BookForge waits and retries automatically. Keep the AutoInjector window open.', action: 'retry' },
   STALE: { title: 'Out of date', what: 'Something this was built from has changed, so it needs a new version.', fix: 'Open it and make a new version (✏️ Edit, or ask the AI to redo it).', action: 'open' },
   BLOCKED: { title: 'Waiting for an earlier step', what: 'This step needs an earlier step to be done (and approved) first.', fix: 'Do the earlier step first; the checklist shows which one.', action: 'none' },
@@ -55,6 +58,43 @@ export const PROBLEMS = {
   HTTP_502: { title: 'The AI bridge is not available', what: 'A helper program did not answer properly.', fix: 'Check AutoInjector, then try again.', action: 'settings' },
   HTTP_503: { title: 'Not available right now', what: 'A service is temporarily unavailable.', fix: 'Wait a moment and try again.', action: 'retry' },
   BROWSER: { title: 'The page hit a problem', what: 'Something unexpected happened in this page.', fix: 'Reload the page. If it keeps happening, press 📋 Copy diagnostics.', action: 'reload' },
+};
+
+// ---------------------------------------------------------------- AutoInjector site problems (bridge v1.2 "problem")
+// Why an AI's window is not working, as AutoInjector reports it in /v1/health and SITE_NOT_READY answers.
+export const SITE_PROBLEMS = {
+  // the codes AutoInjector's self-repair reports (desktop-app/self-repair.js, P18.2)
+  TYPE_FAILED: 'message box could not be found or typed into — AutoInjector is trying other ways',
+  SEND_NOT_CONFIRMED: 'message was typed but did not go out — AutoInjector is looking for the Send button',
+  NO_REPLY_FOUND: 'answered, but the answer was not found on the page — AutoInjector is looking for it',
+  FALSE_DUPLICATE: 'gave a new answer that was mistaken for an old one — AutoInjector is fixing the check',
+  STUCK_GENERATING: 'seems stuck while writing — AutoInjector is unfreezing it',
+  LOGGED_OUT: 'is logged out — log in to it in AutoInjector',
+  CAPTCHA: 'shows an “are you human?” check — complete it in AutoInjector',
+  USAGE_LIMIT: 'reached its usage limit — wait until it resets (AutoInjector checks again by itself)',
+  NETWORK_ERROR: 'page did not load (no internet, or the site is down)',
+  PAGE_ERROR: 'page shows an error (“something went wrong”) — AutoInjector is reloading it',
+  UNKNOWN: 'did not answer a check-in and AutoInjector could not tell why',
+  // older / other names
+  SIGNED_OUT: 'is logged out — log in to it in AutoInjector',
+  RATE_LIMIT: 'says “too many requests” — it waits a little',
+  TYPING_FAILED: 'message box could not be found or typed into — AutoInjector is trying other ways',
+  SEND_FAILED: 'could not get the message sent — AutoInjector is trying other ways',
+  INPUT_NOT_FOUND: 'message box was not found on the page — AutoInjector is looking for it',
+  REPLY_NOT_FOUND: 'answered, but the answer was not found on the page — AutoInjector is looking for it',
+  PANE_NOT_READY: 'window is not open or not loaded — open it in AutoInjector',
+  NEEDS_TEACHING: 'needs to be shown where to type and read — use “Teach” in AutoInjector',
+};
+/** Plain words for a site problem code ("LOGGED_OUT" -> "is logged out — log in to it in AutoInjector"). */
+export function siteProblemWords(code) {
+  if (!code) return '';
+  const c = String(code).toUpperCase();
+  return SITE_PROBLEMS[c] || `has a problem AutoInjector calls “${c.replace(/_/g, ' ').toLowerCase()}”`;
+}
+/** One AI's state in plain words + icon: state ok|repairing|needs_user|broken|checking|unknown. */
+export const AI_STATE = {
+  ok: ['✔', 'working', 'b-ok'], repairing: ['🔧', 'being repaired', 'b-warn'], needs_user: ['⚠️', 'needs you', 'b-bad'],
+  broken: ['⚠️', 'not working', 'b-bad'], checking: ['⏳', 'being checked', 'b-info'], unknown: ['○', 'not checked yet', 'b-muted'],
 };
 
 const FALLBACK = { title: 'Something went wrong', what: 'BookForge could not finish this.', fix: 'Press 🔁 Try again. If it keeps happening, press 📋 Copy diagnostics.', action: 'retry' };

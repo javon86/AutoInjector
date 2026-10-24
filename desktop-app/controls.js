@@ -2729,6 +2729,10 @@ const BF_INFO = {
     "Not loaded / Didn't load — the window is missing, still loading, or its page failed to load. Open it and wait until the page has finished loading. A ⚠️ marker offers 🔁 Reload.",
     "Signed out? / No message box — the page loaded but there is no message box: log in, or (if the site changed its page) use 🎯 to pick the box.",
     "Busy — it's answering a BookForge question right now. Leave that window alone until it finishes.",
+    "🔧 Repairing… — a check-in failed and AutoInjector is fixing it by itself (other known ways to find things, searching the page for the reply, reloading the window). BookForge uses your other AIs meanwhile.",
+    "⚠️ Needs you — only you can fix it (log in, the “are you human?” check, a usage limit) or AutoInjector asks you to show it the page (🎓). Click the ⚠️ for exactly what to do; it re-checks by itself.",
+    "✕ Not working — AutoInjector tried everything it can. Click the ⚠️ to see what was tried, then 🎓 show it the page, 🎯 pick the part, or reload.",
+    "Check-ins: every so often (and when you press 🩺 Check now) AutoInjector sends each idle AI a tiny message — “Reply with only this word: …” — to make sure it still answers. Never while you're typing in it or it's busy, and never passed on to the other AIs.",
     "Not active — tick that AI as Active in this app if you want BookForge to use it.",
     "Under each status you see the result of its last request and when it happened."]],
   test: ["The connection check", [
@@ -2850,6 +2854,13 @@ const BF_CODES = {
   NO_CLIPBOARD: { sev: "warn", title: "Couldn't use the clipboard", what: () => "Copying didn't work on this computer.", fix: () => ["Use “Show key” and copy it by hand (or select the text shown).", "Press 🔁 Try again."], retry: null },
   TOKEN_UNAVAILABLE: { sev: "err", title: "Couldn't read the connection key", what: () => "The key file couldn't be read or made.", fix: () => ["Press 🔁 Try again.", "If it repeats, press 🔗 Connect BookForge — it makes the key for you."], retry: null },
   DIAGNOSTICS_FAILED: { sev: "warn", title: "Couldn't put the diagnostics together", what: () => "The app couldn't build the summary.", fix: () => ["Press 🔁 Try again."], retry: null },
+  // P18 self-repair
+  AI_NEEDS_YOU: { sev: "warn", title: (c) => `${c.L || "This AI"} needs you`,
+    what: (c) => c.say || `${c.L || "This AI"} needs you before it can work again.`,
+    fix: (c) => (Array.isArray(c.fix) && c.fix.length ? c.fix : [`Open ${c.L || "the AI"}'s window and follow what it shows.`, "AutoInjector checks again by itself."]), retry: null },
+  AI_BROKEN: { sev: "err", title: (c) => `${c.L || "This AI"} isn't working`,
+    what: (c) => `${c.say || "A check-in failed."} AutoInjector tried to fix it by itself but couldn't. BookForge uses your other AIs meanwhile.`,
+    fix: (c) => [`Press 🎓 Show AutoInjector and follow the pop-up (you type one short line into ${c.L || "the AI"}).`, `Or use 🎯 on ${c.L || "the AI"}'s pane to pick the part that's wrong (message box, Send button or a reply).`, "Or press 🔄 Reload, then 🩺 Check again."], retry: null },
   // the panel itself
   IPC_FAILED: { sev: "err", title: "The app didn't answer", what: (c) => `${c.where || "This action"} didn't get an answer from the main app.`, fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: null },
   IPC_MISSING: { sev: "err", title: "This part of the app isn't available", what: (c) => `${c.where || "This action"} isn't available in this version of the app.`, fix: () => ["Restart AutoInjector. If it still happens, update AutoInjector."], retry: null },
@@ -2977,18 +2988,31 @@ const BF_OUTCOME = {
 // Why an AI window isn't ready, as a short pill word (main sends problem + problemSay).
 const BF_NOT_READY_WORD = { SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…", CHECKING: "Checking…" };
 function bfNotReadyWord(x) { return BF_NOT_READY_WORD[x && x.problem] || "Not loaded"; }
+const BF_REPAIR_STEP = { check: "checking in", alternatives: "trying other known ways", page_search: "searching the page", retry: "checking in again", unfreeze: "pressing Stop", reload: "reloading the window", reload_home: "opening a fresh page", teach: "waiting for you" };
+function bfRepairOf(x) { return (x && x.repair) || {}; }
 function bfAiView(s, site) {
   const x = (s.sites && s.sites[site]) || {};
+  const R = bfRepairOf(x);
   let pill = [bfNotReadyWord(x), "err", "✕", "bad"];
   if (!x.active) pill = ["Not active", "off", "–", "off"];
+  else if (R.teach && R.teach.active) pill = ["Needs you", "warn", "🎓", "needs"];
+  else if (R.state === "repairing") pill = ["Repairing…", "work", "🔧", "repair"];
+  else if (R.state === "needs_user") pill = ["Needs you", "warn", "⚠️", "needs"];
+  else if (R.state === "broken") pill = ["Not working", "err", "✕", "bad"];
   else if (x.inFlight) pill = [x.inFlight.selftest ? "Testing" : "Busy", "work", "✍️", "work"];
-  else if (x.ready) pill = ["Ready", "ok", "✔", "ok"];
+  else if (x.ready) pill = [R.running ? "Checking…" : "Ready", "ok", R.running ? "🩺" : "✔", "ok"];
   let last;
-  if (x.inFlight) last = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
+  if (x.active && R.teach && R.teach.active) last = `Show AutoInjector the page — see the box above (number ${R.teach.number})`;
+  else if (x.active && (R.state === "repairing" || R.state === "needs_user" || R.state === "broken")) last = `${R.say || "A check-in failed."}${R.running && R.step ? ` Now: ${BF_REPAIR_STEP[R.step] || R.step}…` : ""}`;
+  else if (x.inFlight) last = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
   else if (x.active && !x.ready && x.problemSay) last = `Not ready: ${x.problemSay}`;
   else if (x.last) { const f = BF_OUTCOME[x.last.outcome]; last = `${f ? f(x.last) : x.last.outcome}${x.last.selftest ? " (test)" : ""} · ${bfAgo(x.last.at)}`; }
   else last = "No requests yet";
-  return { x, pill, last };
+  let check = "";
+  if (x.active && R.state === "ok" && R.fixedAt && bfNow() - R.fixedAt < 10 * 60000) check = `✔ Fixed ${bfAgo(R.fixedAt)} — working again`;
+  else if (x.active && R.lastProbeOkAt) check = `Check-in OK ${bfAgo(R.lastProbeOkAt)}`;
+  else if (x.active && R.running) check = "Checking in…";
+  return { x, pill, last, check };
 }
 function bfRenderAis(s) {
   bfKeyed(el("bf-ais"), BF_SITES, (k) => k, (site) => {
@@ -2996,7 +3020,7 @@ function bfRenderAis(s) {
     card.dataset.site = site;
     const top = bfNode("div", "bf-ai-top");
     top.append(bfNode("span", "bf-ai-name"), bfNode("span", "bf-pill"));
-    card.append(top, bfNode("div", "bf-ai-last"));
+    card.append(top, bfNode("div", "bf-ai-last"), bfNode("div", "bf-ai-check"));
     return card;
   }, (card, site) => {
     const v = bfAiView(s, site);
@@ -3004,6 +3028,7 @@ function bfRenderAis(s) {
     bfSetText(card.querySelector(".bf-ai-name"), bfLabel(site, s));
     const p = card.querySelector(".bf-pill"); p.dataset.tone = v.pill[1]; bfSetText(p, `${v.pill[2]} ${v.pill[0]}`);
     const last = card.querySelector(".bf-ai-last"); bfSetText(last, v.last); last.title = v.last;
+    const chk = card.querySelector(".bf-ai-check"); if (chk) { bfSetText(chk, v.check || ""); chk.title = v.check || ""; }
   });
 }
 
@@ -3361,6 +3386,16 @@ function bfProblemsFor(s, d, rows) {
     const x = (s.sites && s.sites[site]) || {};
     if (!x.active) continue;
     const L = bfLabel(site, s);
+    // P18: the self-repair says this AI needs the user / couldn't be fixed — one ⚠️ that lists what was tried.
+    const R = bfRepairOf(x);
+    if ((R.state === "needs_user" || R.state === "broken") && !(R.teach && R.teach.active)) {
+      const code = R.state === "needs_user" && R.fix ? "AI_NEEDS_YOU" : "AI_BROKEN";
+      add(`repair:${site}`, code, `Your AIs → ${L}`, [`ai:${site}`, `chip:ready:${site}`, `row:ready:${site}`], { L, site, say: R.say, fix: R.fix, tried: R.tried || [], problem: R.problem, repair: true },
+        { tech: `self-repair ${site}: state=${R.state} problem=${R.problem || "?"}${R.since ? ` since ${bfAgo(R.since)}` : ""}`, retryRun: () => bfCheckIn([site]), retryLabel: `Check ${L} again now` });
+      mark(`ready:${site}`);
+      continue;
+    }
+    if (R.state === "repairing" || (R.teach && R.teach.active)) continue; // being handled — the pill says so
     if (!x.ready && !x.inFlight) { add(`pane:${site}`, "SITE_NOT_READY", `Your AIs → ${L}`, [`ai:${site}`, `chip:ready:${site}`, `row:ready:${site}`], { L, site }, { tech: `pane ${site}: ready=false` }); mark(`ready:${site}`); continue; }
     const l = x.last;
     if (l && !l.selftest && ["TIMEOUT", "SEND_FAILED", "SITE_NOT_READY", "LATE_EXPIRED"].includes(l.outcome) && bfNow() - l.at < 10 * 60000 && !x.inFlight)
@@ -3498,6 +3533,11 @@ function bfOpenProblem(marker) {
     body.appendChild(bfSec("What happened", info.what ? info.what(p.ctx) : (p.ctx.msg || "")));
     const steps = info.fix ? info.fix(p.ctx) : [];
     if (steps.length) { const ol = bfNode("ol"); for (const s of steps) ol.appendChild(bfNode("li", null, s)); body.appendChild(bfSec("How to fix", ol)); }
+    if (p.ctx && Array.isArray(p.ctx.tried) && p.ctx.tried.length) {
+      const ul = bfNode("ul");
+      for (const t of p.ctx.tried.slice(-8)) ul.appendChild(bfNode("li", null, `${bfTime(t.at)} — ${t.say || t.step}: ${bfTriedOutcome(t.outcome)}`));
+      body.appendChild(bfSec("What AutoInjector already tried", ul));
+    }
     const det = bfNode("details");
     det.appendChild(bfNode("summary", null, "Technical details"));
     det.appendChild(bfNode("code", null, `${p.code}${p.tech ? ` · ${p.tech}` : ""}`));
@@ -3509,6 +3549,18 @@ function bfOpenProblem(marker) {
       b.type = "button";
       b.onclick = bfSafe(async () => { bfCloseInfo(false); if (p.transient) { bf.actionProblems.delete(p.transient); if (p.transient === "__ui") bf.uiError = null; } await retry.run(); }, "retry");
       acts.appendChild(b);
+    }
+    if (p.ctx && p.ctx.repair && p.ctx.site) {
+      if (!p.ctx.fix) { // (log in / captcha / limit: only the user can fix those — no teach step)
+        const tb = bfNode("button", null, "🎓 Show AutoInjector");
+        tb.type = "button"; tb.title = `Type one short line into ${p.ctx.L}'s message box so AutoInjector can learn where things are`;
+        tb.onclick = bfSafe(async () => { bfCloseInfo(false); await bfTeachStart(p.ctx.site); }, "teach");
+        acts.appendChild(tb);
+      }
+      const rb = bfNode("button", null, `🔄 Reload ${p.ctx.L}`);
+      rb.type = "button";
+      rb.onclick = bfSafe(async () => { bfCloseInfo(false); await bfRepairReload(p.ctx.site, p.ctx.L); }, "reload");
+      acts.appendChild(rb);
     }
     if (p.extraRetry && BF_RETRY[p.extraRetry] && (!retry || p.extraRetry !== (p.retryOverride || info.retry))) {
       const r2 = BF_RETRY[p.extraRetry];
@@ -3614,6 +3666,142 @@ function bfIsPanelError(stack, file) { return /\b(bf[A-Z]\w*|bookforge\w*)\b/.te
 window.addEventListener("error", (ev) => { try { const st = ev && ev.error && ev.error.stack; if (bfIsPanelError(st || ev.message, ev.filename)) bfReportUiError(ev.error || ev.message, "panel"); } catch (_) {} });
 window.addEventListener("unhandledrejection", (ev) => { try { const r = ev && ev.reason; if (bfIsPanelError(r && r.stack)) bfReportUiError(r, "panel"); } catch (_) {} });
 
+// --- P18 self-repair: check-ins and the teach step ----------------------------------
+// The AI cards show ok / 🔧 repairing / ⚠️ needs you / ✕ not working (from the main
+// process' self-repair, s.sites[x].repair); the ⚠️ pop-over lists what was tried; the
+// 🎓 teach box (above the panel body, never a dialog — the AI panes must stay
+// visible) walks the user through "Repeat this number: ####". No page text here.
+const BF_TRIED_WORD = { FOUND: "found it on the page", FIXED: "✔ fixed it", RETRY: "checked again", NONE_WORKED: "none of them worked", NOT_FOUND: "nothing found", LEARNED: "learned where replies are", RELOADED: "reloaded", RELOAD_FAILED: "the reload failed", PRESSED_STOP: "pressed Stop", NO_STOP_BUTTON: "no Stop button found", STILL_FAILING: "still not answering", NO_WORD: "no answer to search for", WORD_NOT_FOUND: "the answer isn't on the page", NO_STABLE_SELECTOR: "couldn't pin it down", TIMEOUT: "no reply in time", CANCELLED: "cancelled", NOTHING_LEARNED: "couldn't learn anything" };
+function bfPartWords(list) { return String(list || "").replace(/assistant/g, "replies").replace(/input/g, "message box").replace(/send/g, "Send button").replace(/stop/g, "Stop button").replace(/\+/g, ", "); }
+function bfTriedOutcome(o) {
+  const t = String(o || "");
+  if (t.startsWith("FOUND:")) return `found another way (${bfPartWords(t.slice(6))})`;
+  if (t.startsWith("LEARNED:")) return `learned ${bfPartWords(t.slice(8))}`;
+  return BF_TRIED_WORD[t] || t.toLowerCase().replace(/_/g, " ");
+}
+const BF_TEACH_WHAT = { TYPE_FAILED: "message box", SEND_NOT_CONFIRMED: "Send button", NO_REPLY_FOUND: "replies", FALSE_DUPLICATE: "replies" };
+const BF_TEACH_PART = { input: "the message box", send: "the Send button", assistant: "the replies" };
+const BF_TEACH_PHASES = ["type", "typed", "sent", "wait_reply", "wait_reply_nouser", "done"];
+bf.teachDismissed = {};
+// The teach box shows the active teach step, or the latest finished one (until closed).
+function bfTeachSite(s) {
+  let best = null;
+  for (const site of BF_SITES) {
+    const R = bfRepairOf((s.sites || {})[site]);
+    const t = R.teach;
+    if (!t) continue;
+    if (t.active) return { site, R, t };
+    if (bf.teachDismissed[site] === t.startedAt || t.result === "cancelled") continue;
+    if (bfNow() - t.startedAt > 15 * 60000) continue;
+    if (!best || t.startedAt > best.t.startedAt) best = { site, R, t };
+  }
+  return best;
+}
+function bfRenderTeach(s) {
+  const box = el("bf-teach");
+  if (!box) return;
+  const cur = bfTeachSite(s);
+  if (!cur) { box.hidden = true; delete box.dataset.key; return; }
+  const { site, R, t } = cur;
+  const L = bfLabel(site, s);
+  const confirming = !t.active && !t.result;
+  const key = JSON.stringify([site, t.startedAt, t.phase, t.active, t.result, t.learned, t.missing, R.state]);
+  box.hidden = false;
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  const title = el("bf-teach-title"), text = el("bf-teach-text"), steps = el("bf-teach-steps"), acts = el("bf-teach-actions");
+  if (!title || !text || !steps || !acts) return;
+  text.textContent = ""; steps.textContent = ""; acts.textContent = "";
+  const btn = (label, fn, cls, tip) => { const b = bfNode("button", cls || null, label); b.type = "button"; if (tip) b.title = tip; b.onclick = bfSafe(fn, "teach"); acts.appendChild(b); return b; };
+  const close = () => { bf.teachDismissed[site] = t.startedAt; bfRenderAll(); };
+  delete box.dataset.tone;
+  if (t.result === "fixed") {
+    box.dataset.tone = "ok";
+    title.textContent = `✔ Fixed — ${L} is working again`;
+    text.textContent = "Thank you! AutoInjector learned where things are on the page and a new check-in worked. There is nothing else to do.";
+    btn("Close", close, "bf-primary");
+    return;
+  }
+  if (t.active || confirming) {
+    const what = BF_TEACH_WHAT[t.code] || "message box or replies";
+    title.textContent = `🎓 Help AutoInjector with ${L}`;
+    text.append(`AutoInjector can't find ${L}'s ${what}. Please type `);
+    const say = bfNode("span", "bf-teach-say", `Repeat this number: ${t.number}`);
+    say.title = "Type exactly this (you can also select it and copy it)";
+    text.append(say, ` into ${L}'s message box and press Send.`);
+    const lr = t.learned || {};
+    const ph = String(t.phase || "type");
+    const at = BF_TEACH_PHASES.indexOf(ph);
+    const past = (p) => at >= BF_TEACH_PHASES.indexOf(p);
+    const row = (label, ok, waiting) => { const li = bfNode("li"); li.dataset.st = ok ? "ok" : waiting ? "wait" : ""; li.append(bfNode("span", "ic", ok ? "✔" : waiting ? "…" : "○"), bfNode("span", null, label)); steps.appendChild(li); };
+    row("You type the number", past("typed") || !!lr.input, ph === "type");
+    row("You press Send", past("sent"), ph === "typed");
+    row("Your message shows", !!lr.user || past("wait_reply"), ph === "sent");
+    row(`${L} answers`, ph === "done" || confirming, ph === "wait_reply" || ph === "wait_reply_nouser");
+    if (confirming) row("Checking that it works…", false, true);
+    if (t.active) btn("Cancel", async () => { await bfCall(`teach-cancel-${site}`, "selfRepairTeachCancel", [site], { where: "Cancel the teach step", anchor: `ai:${site}` }); bfMsg(`Cancelled — nothing was changed for ${L}.`); bookforgeRefresh(); }, null, "Stop — nothing is changed");
+    return;
+  }
+  // finished without fixing it
+  box.dataset.tone = "err";
+  const missing = Array.isArray(t.missing) ? t.missing.filter((m) => BF_TEACH_PART[m]) : [];
+  if (t.result === "timeout") {
+    title.textContent = `${L}: the number didn't show up in time`;
+    text.textContent = `AutoInjector waited a few minutes but didn't see the number in ${L}'s window. Nothing was changed. You can try again — type it exactly as shown, then press Send.`;
+  } else {
+    title.textContent = `${L} still isn't working`;
+    text.textContent = missing.length
+      ? `AutoInjector couldn't learn ${missing.map((m) => BF_TEACH_PART[m]).join(", ")}. Use 🎯 to point at ${missing.length === 1 ? "it" : "them"} yourself: click the button, then click that part in ${L}'s window.`
+      : `AutoInjector learned the page, but a new check-in still didn't work. Try again, or reload ${L}'s window.`;
+    for (const m of missing) btn(`🎯 Pick ${BF_TEACH_PART[m]}`, async () => { const r = await bfCall(`pick-${site}-${m}`, "pickSelector", [site, m], { where: `🎯 Pick ${BF_TEACH_PART[m]}`, anchor: `ai:${site}` }); bfMsg(r && r.ok ? `✓ Saved — checking ${L} again now.` : `Nothing was picked (${(r && r.error) || "no click"}).`, r && r.ok ? null : "err"); if (r && r.ok) bfCheckIn([site]); }, "bf-primary", `Click this, then click ${BF_TEACH_PART[m]} in ${L}'s window`);
+  }
+  btn("🎓 Try again", () => bfTeachStart(site), missing.length ? null : "bf-primary");
+  btn(`🔄 Reload ${L}`, () => bfRepairReload(site, L));
+  btn("Close", close);
+}
+async function bfTeachStart(site) {
+  const L = bfLabel(site, bf.snap || {});
+  const r = await bfCall(`teach-${site}`, "selfRepairTeachStart", [site], { where: `🎓 Show AutoInjector ${L}`, anchor: `ai:${site}`, retryRun: () => bfTeachStart(site), retryLabel: "Try again" });
+  if (r && r.ok) { delete bf.teachDismissed[site]; bfMsg(`See the box above: type the number into ${L}'s message box and press Send.`); }
+  else if (r) bfMsg(r.error === "INACTIVE" ? `${L} isn't Active — tick it first.` : r.error === "CHECKING" ? `AutoInjector is checking ${L} right now — try again in a moment.` : `Couldn't start (${r.error || "error"}).`, "err");
+  bookforgeRefresh();
+}
+const BF_SKIP_WORD = { busy: "is busy", typing: "— you're typing there", inactive: "isn't Active", checking: "is already being checked", teaching: "is waiting for you", bookforge: "is answering BookForge", waiting: "is still answering", sending: "is getting a message", test: "is in a test", relay: "is in a relay", recent: "was just used", not_ready: "isn't loaded" };
+async function bfCheckIn(sites) {
+  const r = await bfCall("checkin", "selfRepairProbe", [sites || null], { where: "🩺 Check now", anchor: "#bf-checkin-anchor", retryRun: () => bfCheckIn(sites), retryLabel: "Check again" });
+  if (!r || r.ok === false) return;
+  const skipped = Object.entries(r.skipped || {}).map(([x, why]) => `${bfLabel(x, bf.snap || {})} ${BF_SKIP_WORD[why] || `(${why})`}`);
+  bfMsg(`${(r.started || []).length ? `Checking in with ${r.started.map((x) => bfLabel(x, bf.snap || {})).join(", ")}…` : "No check-in started."}${skipped.length ? ` Not now: ${skipped.join("; ")}.` : ""}`);
+  bookforgeRefresh();
+}
+async function bfRepairReload(site, L) {
+  const r = await bfCall(`reload-${site}`, "selfRepairReload", [site], { where: `Reloading ${L || site}`, anchor: `ai:${site}` });
+  bfMsg(r && r.ok ? `Reloaded ${L || site} — checking it again…` : `Couldn't reload ${L || site}.`, r && r.ok ? null : "err");
+  bookforgeRefresh();
+}
+function bfRenderCheckinSetting(s) {
+  const sel = el("bf-checkin-every");
+  if (!sel || !s.selfRepair || document.activeElement === sel) return;
+  const v = String(s.selfRepair.intervalMin);
+  if (!Array.from(sel.options).some((o) => o.value === v)) { const o = document.createElement("option"); o.value = v; o.textContent = `every ${v} min`; sel.appendChild(o); }
+  if (sel.value !== v) sel.value = v;
+}
+if (el("btn-bf-checkin")) el("btn-bf-checkin").onclick = bfSafe(() => bfCheckIn(null), "checkin");
+if (el("bf-checkin-every")) el("bf-checkin-every").onchange = bfSafe(async (e) => {
+  const v = Number(e.target.value);
+  const r = await bfCall("checkin-every", "selfRepairSettings", [{ intervalMin: v }], { where: "Check-ins", anchor: "#bf-checkin-anchor" });
+  if (r && r.ok) bfMsg(v ? `✓ AutoInjector checks in with idle AIs every ${v >= 60 ? "hour" : `${v} minutes`}.` : "✓ Automatic check-ins are off (🩺 Check now still works).");
+  bookforgeRefresh();
+}, "checkin-every");
+// Live repair updates (state changes, teach progress) re-render at once.
+if (window.api && window.api.onSelfRepair) window.api.onSelfRepair((p) => {
+  try {
+    if (!p || !p.site || !bf.snap || !bf.snap.sites || !bf.snap.sites[p.site]) return;
+    bf.snap.sites[p.site].repair = p.repair;
+    bfRenderAll();
+  } catch (e) { bfReportUiError(e, "self-repair update"); }
+});
+
 // --- render ------------------------------------------------------------------------
 function bookforgeRender(s) {
   if (!s || !s.ok) return;
@@ -3639,6 +3827,8 @@ function bfRenderAll() {
     bfText("bf-next", d.next);
     bfRenderConnect(s, d);
     bfRenderAis(s);
+    bfRenderTeach(s);
+    bfRenderCheckinSetting(s);
     const rows = bfConnRows(s, d);
     bfRenderChecks(s, d, rows);
     bfRenderNow(s, d);

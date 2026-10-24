@@ -364,6 +364,10 @@ class App:
             return 200, self.pair_autoinjector(body if isinstance(body, dict) else {})
         if len(parts) == 2 and parts[0] == "slots" and method == "PUT":
             return 200, self.engine.providers.configure_slot(parts[1], body or {})
+        if parts == ["slots", "states"] and method == "GET":
+            # Which AIs work right now (bridge v1.2 state, cached 15 s): {slots: [{slot_id, name, state, word, ...}]}
+            prov = self.engine.providers
+            return 200, {"slots": [prov.slot_status(s) for s in prov.ai_slots()]}
         if len(parts) == 3 and parts[0] == "slots" and parts[2] == "health" and method == "GET":
             return 200, self.engine.providers.health_check(parts[1])
         if parts == ["selftest"] and method == "POST":
@@ -575,6 +579,11 @@ class App:
                 return 200, out
         if parts == ["shelf"] and method == "GET":
             return 200, shelf_page(self, principal=principal)
+        if parts == ["settings", "reviewer-ai"]:
+            if method == "GET":
+                return 200, self.review.reviewer_settings()
+            if method == "PUT":
+                return 200, self.review.save_reviewer_settings(body)
         if parts == ["settings", "ai-retry"]:
             if method == "GET":
                 cur = self.store.get_setting("ai_retry") or {}

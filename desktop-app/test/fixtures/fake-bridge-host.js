@@ -36,6 +36,13 @@
  *                       Each SIGUSR2 (not on Windows) makes a new code and rewrites P.
  *     --status-file P   (contract v1.1) whenever BookForge POSTs /v1/status, write the bridge's
  *                       sanitized view of it (status().bookforge, JSON) to file P.
+ *     --site-state LIST (contract v1.2) pin self-repair states, e.g.
+ *                       "chatgpt=needs_user:LOGGED_OUT,gemini=repairing:NO_REPLY_FOUND" (state[:PROBLEM]).
+ *                       Pinned sites show that state in /v1/health (ready:false unless ok/unknown) and
+ *                       get 503 SITE_NOT_READY {state, problem} from /v1/complete. Other sites start
+ *                       "unknown"; POST /v1/probe marks them "ok" (last_probe_ok_at = now) after --delay-ms.
+ *                       Each SIGUSR1 (not on Windows) clears every pinned state (-> "ok"), so a test can
+ *                       watch an AI recover.
  *   Env equivalents: AUTOINJECTOR_BOOKFORGE_PORT, AUTOINJECTOR_BOOKFORGE_TOKEN, FAKE_BRIDGE_MODE,
  *   FAKE_BRIDGE_DELAY_MS, FAKE_BRIDGE_TIME_SCALE. CLI flags win over env.
  *
@@ -191,6 +198,11 @@ async function startFakeHost(options = {}) {
   const token = options.token || DEFAULT_TOKEN;
   const delayMs = Number.isFinite(options.delayMs) ? options.delayMs : 50;
   const notReady = new Set(options.notReady || []);
+  // contract v1.2: self-repair states per site ({ state, problem, since, last_probe_ok_at })
+  const siteStates = {};
+  for (const s of SITES) siteStates[s] = { state: 'unknown', problem: null, since: null, last_probe_ok_at: null };
+  for (const [s, v] of Object.entries(options.siteStates || {})) if (siteStates[s]) siteStates[s] = { state: v.state, problem: v.problem || null, since: Date.now(), last_probe_ok_at: null, pinned: true };
+  const probesStarted = [];
   const responder = options.responder || null;
   const recordFile = options.recordFile || null;
   const prompts = []; // { site, request_id, prompt }
@@ -203,6 +215,17 @@ async function startFakeHost(options = {}) {
     host: '127.0.0.1',
     getToken: () => token,
     siteReady: (s) => !notReady.has(s),
+    siteState: (s) => siteStates[s],
+    startProbe: (want) => {
+      const started = []; const skipped = {};
+      for (const s of want || SITES) {
+        if (notReady.has(s)) { skipped[s] = 'not_ready'; continue; }
+        started.push(s);
+        probesStarted.push(s);
+        if (!siteStates[s].pinned) setTimeout(() => { siteStates[s] = { state: 'ok', problem: null, since: Date.now(), last_probe_ok_at: Date.now() }; }, delayMs);
+      }
+      return { started, skipped };
+    },
     timeScale: options.timeScale || 1,
     logger: options.verbose ? (kind, detail) => process.stderr.write(`[bridge] ${kind} ${JSON.stringify(detail)}\n`) : undefined,
     sendToSite: async (site, text, meta) => {
@@ -259,8 +282,22 @@ async function startFakeHost(options = {}) {
     token,
     prompts,
     bridge,
+    siteStates,
+    probesStarted,
+    clearSiteStates: () => { for (const s of SITES) if (siteStates[s].pinned) siteStates[s] = { state: 'ok', problem: null, since: Date.now(), last_probe_ok_at: Date.now() }; },
     stop: () => bridge.stop()
   };
+}
+
+// "chatgpt=needs_user:LOGGED_OUT,gemini=repairing" -> { chatgpt: { state, problem }, ... }
+function parseSiteStates(spec) {
+  const out = {};
+  for (const part of String(spec || '').split(',').map((x) => x.trim()).filter(Boolean)) {
+    const m = /^(chatgpt|claude|gemini)=(ok|repairing|needs_user|broken|unknown)(?::([A-Z][A-Z0-9_]{1,40}))?$/.exec(part);
+    if (!m) throw new Error(`bad --site-state entry ${part}`);
+    out[m[1]] = { state: m[2], problem: m[3] || null };
+  }
+  return out;
 }
 
 function parseArgs(argv) {
@@ -279,6 +316,7 @@ function parseArgs(argv) {
     else if (a === '--verbose') out.verbose = true;
     else if (a === '--pairing-code-file') out.pairingCodeFile = next();
     else if (a === '--status-file') out.statusFile = next();
+    else if (a === '--site-state') out.siteStates = parseSiteStates(next());
     else if (a === '--help' || a === '-h') out.help = true;
     else throw new Error(`unknown argument ${a}`);
   }
@@ -301,6 +339,7 @@ async function cli() {
     delayMs: args.delayMs != null ? args.delayMs : env.FAKE_BRIDGE_DELAY_MS ? Number(env.FAKE_BRIDGE_DELAY_MS) : 50,
     timeScale: args.timeScale != null ? args.timeScale : env.FAKE_BRIDGE_TIME_SCALE ? Number(env.FAKE_BRIDGE_TIME_SCALE) : 1,
     notReady: args.notReady || [],
+    siteStates: args.siteStates || {},
     recordFile: args.recordFile || null,
     verbose: !!args.verbose
   };
@@ -325,12 +364,13 @@ async function cli() {
     }, 50);
     t.unref();
   }
+  if (process.platform !== 'win32') process.on('SIGUSR1', () => host.clearSiteStates());
   process.stdout.write(`READY ${host.port}\n`);
   const shutdown = () => { host.stop().then(() => process.exit(0), () => process.exit(0)); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
 
-module.exports = { startFakeHost, extractSchema, sampleFromSchema, defaultResponder };
+module.exports = { startFakeHost, extractSchema, sampleFromSchema, defaultResponder, parseSiteStates };
 
 if (require.main === module) cli();

@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import logging
 import threading
 import time
 import traceback
@@ -44,6 +45,8 @@ PROFILE = {"title": "Workflow test book", "author": "BookForge workflow test", "
            "audience": "Adult", "length": "short_story", "chapters": 1, "tone": "Cozy and warm",
            "idea": "A lighthouse keeper's apprentice searches a foggy harbor for her missing master."}
 RELEASE = ["MANUSCRIPT_PDF", "EPUB_REFLOWABLE", "EDITABLE_DOCX"]
+
+log = logging.getLogger("bookforge.workflow_test")
 
 ROWS = [
     {"id": "ai", "title": "AI connection", "ai": True, "needs": [],
@@ -113,6 +116,8 @@ class WorkflowTestRunner:
         self.slots_info: list = []
         self.ai_problem = None
         self.engine = None
+        self.ais: list = []
+        self.probe_timeout_s = 60.0
 
     @staticmethod
     def _blank(r):
@@ -128,7 +133,8 @@ class WorkflowTestRunner:
         with self._lock:
             return {"running": self.running, "current": self.current, "stopping": self._stop and self.running,
                     "project": self.project, "rows": [dict(self.rows[i]) for i in ROW_IDS], "report": self.report,
-                    "order": ROW_IDS}
+                    "order": ROW_IDS, "ais": [{k: a.get(k) for k in ("slot_id", "name", "state", "word", "problem",
+                                                                   "working")} for a in self.ais]}
 
     def start(self, body) -> dict | None:
         body = body if isinstance(body, dict) else {}
@@ -295,6 +301,22 @@ class WorkflowTestRunner:
 
     # ------------------------------------------------------------------ AI gating
     def _health(self):
+        # P18.9: ask AutoInjector to check in with every site first (bridge v1.2 /v1/probe; at most 60 s), so the
+        # test knows which AIs work; an older bridge is simply read.
+        self.ais = []
+
+        class _Stopped(Exception):
+            pass
+
+        def check():
+            if self._stop:
+                raise _Stopped()
+        try:
+            self.ais = self.base_providers.probe_and_wait(timeout_s=self.probe_timeout_s, check=check)
+        except _Stopped:
+            pass
+        except Exception:  # noqa: BLE001 - the check-in is a help, never a reason to fail the test
+            log.exception("workflow test: AI check-in failed")
         ready, info = set(), []
         fake = getattr(self.base_providers, "test_adapter", None) is not None
         for s in self.base_providers.slots():
@@ -402,7 +424,10 @@ class WorkflowTestRunner:
                              "Start the AutoInjector desktop app, open and log in to the site's pane, then press Test "
                              "connection in Settings (or press Connect in AutoInjector again). " + AI_SETUP_FIX)
         self._mode = "AI"
-        return f"{len(self.ai_ready)} AI slot(s) ready: " + " · ".join(lines)
+        states = [f"{a['name']}: {a['word']}" + (f" ({a['problem']})" if a.get("problem") else "")
+                  for a in getattr(self, "ais", None) or [] if a.get("source") in ("bridge", "test")]
+        return f"{len(self.ai_ready)} AI slot(s) ready: " + " · ".join(lines) + (
+            " · AutoInjector check-in: " + "; ".join(states) if states else "")
 
     def row_premise(self):
         return self._creative("B01", "premise", {

@@ -151,7 +151,9 @@ class HealthService:
         prov = self.app.engine.providers
         sid = s["slot_id"]
         cached = self._slot_cache.get(sid)
-        if cached and time.monotonic() - cached[0] < SLOT_TTL_S and not (force and time.monotonic() - cached[0] > 10):
+        # A site being repaired is looked at again sooner (15 s), so the panel shows when it works again.
+        ttl = SLOT_TTL_S if not cached or cached[1].get("ok") else 15.0
+        if cached and time.monotonic() - cached[0] < ttl and not (force and time.monotonic() - cached[0] > 10):
             return cached[1]
         h = prov.health_check(sid)
         self._slot_cache[sid] = (time.monotonic(), h)
@@ -191,7 +193,22 @@ class HealthService:
                                     code="CAPABILITY_UNAVAILABLE", action="settings"))
                     continue
                 h = self._slot_health(s, force)
-                if h.get("ok"):
+                state = h.get("state")
+                if state in ("repairing", "needs_user", "broken"):
+                    word = {"repairing": "being repaired by AutoInjector", "needs_user": "waiting for you in AutoInjector",
+                            "broken": "not working"}[state]
+                    fix = {"repairing": "Nothing to do: AutoInjector is fixing it by itself. Meanwhile BookForge sends "
+                                        "the work to the AIs that work, and uses this one again when it is fixed.",
+                           "needs_user": f"Open AutoInjector and look at the {site} window (for example: log in, solve "
+                                         "the check, or wait for the usage limit). BookForge uses the other AIs "
+                                         "meanwhile and checks again by itself.",
+                           "broken": f"Open AutoInjector and check the {site} window, or press its repair/teach "
+                                     "button. BookForge uses the other AIs meanwhile."}[state]
+                    out.append(dict(base, status="warn", detail=f"{site} through AutoInjector: {word}"
+                                    + (f" ({h.get('problem')})." if h.get("problem") else "."),
+                                    code=h.get("problem") or "SITE_NOT_READY", fix=fix, state=state,
+                                    problem=h.get("problem")))
+                elif h.get("ok"):
                     busy = " (busy right now)" if h.get("site_busy") else ""
                     out.append(dict(base, status="ok", detail=f"{site} through AutoInjector: ready{busy}.", fix=None))
                 else:
@@ -214,7 +231,8 @@ class HealthService:
             return {"id": "bridge", "title": "AutoInjector link", "status": "info",
                     "detail": "Not connected (only needed for the AutoInjector web AIs).", "fix": None}
         pusher = self.app.pusher
-        ok_slots = [s for s in ai if (self._slot_cache.get(s["slot_id"]) or (0, {}))[1].get("ok")]
+        ok_slots = [s for s in ai if (self._slot_cache.get(s["slot_id"]) or (0, {}))[1].get("ok")
+                    or (self._slot_cache.get(s["slot_id"]) or (0, {}))[1].get("error") == "SITE_NOT_READY"]
         stopped = any(t.stopped for t in getattr(pusher, "_targets", {}).values())
         if stopped:
             return {"id": "bridge", "title": "AutoInjector link", "status": "warn",

@@ -7,6 +7,7 @@ process.env.AUTOINJECTOR_POLL_MS = "50";
 process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = "30";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = "50";
 process.env.AUTOINJECTOR_BRIDGE = "0"; // keep main's separate service bridge off in this test
+process.env.AUTOINJECTOR_CHECKIN = process.env.AUTOINJECTOR_CHECKIN || "0"; // P18: no automatic check-ins in this harness (test/self-repair-main.test.js covers them)
 process.env.AUTOINJECTOR_BOOKFORGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
 process.env.AUTOINJECTOR_BF_LINKTEST_MS = "15000"; // link-test reply limit (contract min is 10000)
 // Point the link test's "is BookForge running?" check at a port nothing listens on.
@@ -228,7 +229,7 @@ async function main() {
   assert(!JSON.stringify(st).includes(m ? m[1] : "@@") && !JSON.stringify(st).includes(after), "the snapshot never carries the pairing code or the key");
   const code = m ? m[1] : "";
   r = await request("POST", "/v1/pair", null, { code, client: "bookforge" });
-  assert(r.status === 200 && r.json.token === after && r.json.bridge_version === "1.1", "BookForge trades the code for the key via POST /v1/pair (no Authorization)");
+  assert(r.status === 200 && r.json.token === after && r.json.bridge_version === "1.2", "BookForge trades the code for the key via POST /v1/pair (no Authorization)");
   r = await request("POST", "/v1/pair", null, { code, client: "bookforge" });
   assert(r.status === 401, "the code works only once");
   st = await call("bookforge:status");

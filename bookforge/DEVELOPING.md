@@ -125,6 +125,43 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   reuses an already running BookForge on the same data folder, or moves to the next free port.
   `POST /api/slots/connect-autoinjector` and `GET /api/slots/{id}/health` serve the Settings page.
 
+## AIs that break: failover (P18.9) and writer ≠ reviewer (P3.1 / P3.2)
+
+* **Slot health** (`providers.SlotHealth`, one per registry, shared by `PinnedProviders` / `SelfTestProviders`):
+  `ProviderRegistry.site_state(slot)` reads the bridge's `GET /v1/health` (contract v1.2: per site `state`
+  ok|repairing|needs_user|broken|unknown, `problem`, `since`, `last_probe_ok_at`), cached `HEALTH_TTL_S` = 15 s per
+  bridge+key (fetch failures cached too). A v1.1 bridge (no `state`) or an unreadable bridge gives `unknown`, which
+  never makes a slot unavailable. Test fakes may implement `site_state(slot)` and `probe(slot_ids)`.
+* `eligible()` skips slots whose state is repairing/needs_user/broken and sorts a slot whose last call failed with
+  UPSTREAM_UNAVAILABLE (`health.mark_failed`, `FAIL_HOLD_S` = 15 s) last. `unavailable()` lists the skipped ones;
+  when nothing else fits, `generate()` / `AssistService._choose_slot` raise UPSTREAM_UNAVAILABLE (`down_error`,
+  a busy code) so the work **waits and retries** (jobs.wait_and_retry) instead of failing.
+* **Failover:** `generate()` without an explicit slot tries the eligible slots in order (role slots first, then any
+  other working slot); UPSTREAM_UNAVAILABLE (incl. 503 SITE_NOT_READY, which no longer gets the quick same-slot
+  retries when the bridge says why) moves the call to the next slot. `AssistService._call_ai_once` does the same
+  for automatic jobs (review, fix, profile, Bible Builder). A slot the author/run explicitly picked never moves (it
+  waits). TIMEOUT is unchanged (ambiguous → author decides; a run step pauses). `health.set_listener(fn)`
+  (thread-local) hears `{"event": "failover", "from": [...], "to", "to_name"}`; runs log it as event `failover`.
+* **Probe before a run:** `probe_and_wait(timeout_s=60, poll_s=2)` → `POST /v1/probe {"sites"}` per bridge (404 =
+  older bridge: just read health; env `BOOKFORGE_PRERUN_CHECKIN=0` skips the POST), then re-reads health until every probed site has a result (ok with
+  `last_probe_ok_at`/`since` after the start, needs_user or broken) or the time is up. Make-a-book, Write all
+  chapters (`_Runner.probe_ais`, run fields `probe`, `ais` = [{slot_id, name, state, word, problem, working}]) and
+  the workflow test (`ais` in its status) call it. `GET /api/slots/states` returns `slot_status()` per AI slot;
+  `health_check()` / ❤️ Health show the state (warn with the problem code).
+* **Writer ≠ reviewer:** `ReviewService.writer_of(rec)` = AI-fix note, provenance `ai_slot`, or the Bible Builder
+  note (`assist.note_writer`, settings `ai_writers:<pid>:<branch>`). `review_one` without a picked slot calls
+  `plan_reviewer`: `job.avoid_slots = [writer]`, `job.avoid_families = {slot_family(writer)}` (site, or "claude" for
+  the API), `job.prefer_slots = [Settings reviewer]` (`GET/PUT /api/settings/reviewer-ai {slot: auto|AI-1..3}`),
+  `job.cross_pin = True` (a run pinned to one writer AI still gets another reviewer; gated self-test registries are
+  never bypassed). Deterministic order: preferred slot → eligible order with a different family first → any other
+  working slot → (another AI just busy: wait) → the writer itself. `_run_fix` prefers the writer and avoids the
+  reviewer. Stored verdicts add `writer_slot, writer, reviewer, independent, warning`; outbox `review.ai_verdict`
+  adds `writer_slot, independent` (never text). Runs keep `review_summary {independent, same_ai, warning}` and each
+  step's `review_note`; the journal adds `reviews` and ⚠️ entries. UI: `aiStrip`, `reviewWho` (app.js),
+  `SITE_PROBLEMS` / `siteProblemWords` / `AI_STATE` (problems.js).
+* Tests: `tests/test_failover_review.py` (SlotFake with scripted site states; `V12Bridge` HTTP fake for the real
+  adapter; the v1 `FakeBridge` as the older bridge).
+
 ## Review queue, Current task, AI reviewer (review.py)
 
 * `GET /api/projects/{pid}/branches/{b}/review` -> `{items, count, current_task, settings, ai_ready, book}`. Items are

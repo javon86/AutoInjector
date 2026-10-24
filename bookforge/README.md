@@ -95,6 +95,19 @@ then show *Interrupted — ▶ Resume*).
 Claude (busy) — retrying in 30 s”*. A slow answer (time-out) is never retried automatically, because the first
 answer may still arrive: the step pauses with a ⚠️ and **🔁 Try again**.
 
+**When one AI breaks, the others take over.** Before a run starts (and before ✍ Write all chapters and 🧪 Test
+workflow) BookForge asks AutoInjector to check in with every AI (up to a minute) and the window shows **AIs:**
+*✔ AI-1 · Claude — working · 🔧 AI-3 · Gemini — being repaired · ⚠️ AI-2 · ChatGPT — needs you (logged out)*.
+An AI that AutoInjector is repairing, that needs you (logged out, “are you human?” check, usage limit) or that is
+broken is skipped: its work goes to an AI that works (the run notes *“… is being repaired — this went to AI-2 ·
+ChatGPT instead”*), and it is used again as soon as it works. If no AI works, the step waits and tries again.
+
+**Writer ≠ reviewer.** The AI reviewer is always a different working AI from the one that wrote the draft (a
+different site first; Settings → *Reviewer AI* can name one), and each step shows *“written by AI-1 · Claude ·
+reviewed by AI-3 · Gemini”*. An AI fix after *revise* goes back to the AI that wrote it. When only one AI works it
+reviews its own writing, and the run window, the review queue, the journal and the run summary say ⚠️ *“Reviews are
+not independent — the same AI wrote and reviewed this”*.
+
 ## ✍ Write all chapters
 
 On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after
@@ -303,7 +316,9 @@ next step in plain words — and the ⓘ buttons explain AutoInjector, the conne
 stored in the local secret file like an API key and is never shown again. Each slot
 may list `roles` (operation IDs such as `C02` or set letters such as `B`) to route that work to
 it. Automating these sites' web interfaces may be against their terms of service; use at your
-own risk. Contract: `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`.
+own risk. Contract: `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`. With AutoInjector's self-repair (bridge 1.2) the
+strip and the ❤️ Health panel also show *🔧 Being repaired*, *Needs you* (with the reason, e.g. logged out) or *Not
+working*; meanwhile BookForge sends the work to the other AIs.
 
 BookForge's default port is **8780** (8765 is used by AutoInjector's extension bridge).
 

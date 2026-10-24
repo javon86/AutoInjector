@@ -21,6 +21,11 @@
  *     wrapPrompt(site, text)?            -> text   (adds the [FROM: <SITE>] reply-envelope instruction)
  *     now()?, logger(kind, detail)?, sites?, timeScale?, bodyTimeLimitMs?,
  *     onEvent(event)?                    -> called for every activity event (see below)
+ *     siteState(site)?                   -> (v1.2) { state, problem, since, last_probe_ok_at } from
+ *                                           the self-repair engine (self-repair.js); default "unknown"
+ *     startProbe(sites|null)?            -> (v1.2) { started: [site], skipped: { site: reason } } —
+ *                                           starts check-ins (null = every active AI); results show
+ *                                           up later in /v1/health
  *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields),
  *          createPairingCode() -> string, bookforgeStatus() -> object|null }
  *
@@ -79,6 +84,21 @@
  *                    BF_STATUS_STALE_MS). Its content never goes to the activity
  *                    ring — only a "status received" event.
  *
+ * Contract v1.2 (backward compatible) adds self-repair:
+ *   GET /v1/health   each site also has state ("ok"|"repairing"|"needs_user"|
+ *                    "broken"|"unknown"), problem (a code or null), since and
+ *                    last_probe_ok_at (epoch ms or null); ready is false whenever
+ *                    state is not "ok"/"unknown".
+ *   POST /v1/probe   (Bearer) {"sites": [...]} (optional; default every active AI)
+ *                    -> 202 {"ok": true, "started": [...], "skipped": {site: reason}}.
+ *   POST /v1/complete to a site whose state is repairing / needs_user / broken
+ *                    -> 503 SITE_NOT_READY with "state" and "problem".
+ *   P18.5: a reply captured while the prompt's send attempt was still running
+ *   (the send script hadn't confirmed yet) is owned when the Relay Trace says it
+ *   answers the prompt's [MSG #] — main.js puts the number on cancelToken.seq as
+ *   soon as it is stamped — and a declined reply is remembered briefly so a send
+ *   that confirms a moment later still collects its answer.
+ *
  * timeScale (default 1) multiplies every real wait (request timeout and the
  * post-504 late window). It exists only so tests / the fake host can exercise
  * timeout behaviour quickly; validation of timeout_ms still uses the contract's
@@ -89,7 +109,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1.1';
+const BRIDGE_VERSION = '1.2';
 const DEFAULT_PORT = 17891;
 const DEFAULT_SITES = ['chatgpt', 'claude', 'gemini'];
 const MAX_BODY_BYTES = 1024 * 1024; // 1 MiB (413 above this)
@@ -129,7 +149,15 @@ const OUTCOME_HTTP = {
   BAD_REQUEST: 400, UNKNOWN_SITE: 404, NOT_FOUND: 404, UNAUTHORIZED: 401,
   PAIRED: 200, PAIRING_CODE_INVALID: 401, PAIRING_CODE_EXPIRED: 410, TOO_MANY_ATTEMPTS: 429, NOT_READY: 503
 };
-const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error'];
+const EVENT_FIELDS = ['site', 'request_id', 'outcome', 'elapsed_ms', 'http_status', 'port', 'error', 'state', 'problem'];
+// --- contract v1.2: self-repair states ---
+const SITE_STATES = ['ok', 'repairing', 'needs_user', 'broken', 'unknown'];
+const NOT_USABLE_STATES = new Set(['repairing', 'needs_user', 'broken']);
+const PROBLEM_RE = /^[A-Z][A-Z0-9_]{1,40}$/;
+const RECENT_DECLINED_MS = 2 * 60 * 1000; // P18.5: declined captures kept this long for a send that confirms late
+const MAX_PROBE_BODY_BYTES = 4096;
+// v1.2 "skipped" reasons a check-in can report (anything else becomes "busy").
+const PROBE_SKIP_REASONS = new Set(['inactive', 'busy', 'typing', 'checking', 'teaching', 'bookforge', 'relay', 'test', 'waiting', 'sending', 'recent', 'not_ready', 'unknown_site', 'unsupported', 'off']);
 
 // --- envelope helpers ---------------------------------------------------------
 // Mirrors main.js's withEnvelope() text; main.js passes its own wrapper anyway.
@@ -272,12 +300,20 @@ function createBridge(opts) {
   const timeScale = Number(o.timeScale) > 0 ? Number(o.timeScale) : 1;
   const bodyTimeLimitMs = Number(o.bodyTimeLimitMs) > 0 ? Number(o.bodyTimeLimitMs) : BODY_TIME_LIMIT_MS;
   if (typeof sendToSite !== 'function') throw new Error('bookforge-bridge: sendToSite is required');
+  // v1.2: the self-repair state of a site (always a well-formed object).
+  function stateOf(site) {
+    let r = null;
+    try { r = typeof o.siteState === 'function' ? o.siteState(site) : null; } catch (_) { r = null; }
+    const st = r && SITE_STATES.includes(r.state) ? r.state : 'unknown';
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null);
+    return { state: st, problem: r && typeof r.problem === 'string' && PROBLEM_RE.test(r.problem) ? r.problem : null, since: num(r && r.since), last_probe_ok_at: num(r && r.last_probe_ok_at) };
+  }
 
   // --- activity: counters, last contact, per-site last result, event ring ----
   // Text-free by construction: recordEvent() copies only whitelisted scalar
   // fields (EVENT_FIELDS), so no caller can leak prompt/reply text or a key.
   const events = [];
-  const counters = { requests: 0, answered: 0, timeouts: 0, failed: 0, busy: 0, rejected: 0, unauthorized: 0, health_checks: 0, pair_attempts: 0, status_updates: 0 };
+  const counters = { requests: 0, answered: 0, timeouts: 0, failed: 0, busy: 0, rejected: 0, unauthorized: 0, health_checks: 0, pair_attempts: 0, status_updates: 0, probes: 0 };
   const siteLast = {};
   let lastContactAt = null;
   let lastExternalContactAt = null;
@@ -399,7 +435,7 @@ function createBridge(opts) {
   function begin(site, prompt, requestId) {
     let resolve;
     const outcome = new Promise((r) => { resolve = r; });
-    const cancelToken = { cancelled: false, typing: false };
+    const cancelToken = { cancelled: false, typing: false, seq: null }; // seq: set by the host as soon as the [MSG #] is stamped (P18.5)
     const entry = {
       site, requestId, startedAt: now(), seq: null, typed: false, typedAt: null, phase: 'sending',
       outcome, resolve, done: false, lateTimer: null, lateWindowMs: 0, promptChars: prompt.length,
@@ -419,6 +455,10 @@ function createBridge(opts) {
         if (r.seq != null) entry.seq = String(r.seq);
         if (entry.phase === 'sending') entry.phase = 'waiting';
         log('sent', { site, request_id: requestId, seq: entry.seq });
+        // P18.5: its answer may already have been captured while the send was
+        // still being confirmed (the AI answered during a retry). Take it now.
+        const early = takeDeclined(site, entry.seq);
+        if (early) ownTurn(entry, early);
         return;
       }
       if (entry.done) return;
@@ -487,19 +527,60 @@ function createBridge(opts) {
     });
   }
 
-  // BF-01: own a captured reply only if it answers THIS request's typed prompt.
-  function onCaptured(turn) {
-    if (!turn || typeof turn.site !== 'string') return false;
-    const entry = active.get(turn.site);
-    if (!entry || entry.done || !entry.typed) return false; // nothing typed yet: it can't be our answer
-    if (Array.isArray(turn.answers)) {
-      if (entry.seq == null || !turn.answers.map(String).includes(entry.seq)) return false;
-    } else if (typeof turn.ts === 'number' && entry.typedAt != null && turn.ts < entry.typedAt) return false;
+  // P18.5: replies declined while a send was still being confirmed, kept briefly
+  // (site -> [{ answers, text, at }]) so a send that confirms a moment later can
+  // still collect its own answer. Only replies whose Relay Trace answers are known.
+  const declined = new Map();
+  function rememberDeclined(turn) {
+    if (!Array.isArray(turn.answers) || !turn.answers.length) return;
+    const t = now();
+    const list = (declined.get(turn.site) || []).filter((x) => t - x.at < RECENT_DECLINED_MS);
+    list.push({ answers: turn.answers.map(String), text: String(turn.text == null ? '' : turn.text), at: t });
+    while (list.length > 5) list.shift();
+    declined.set(turn.site, list);
+  }
+  function takeDeclined(site, seq) {
+    if (seq == null) return null;
+    const t = now();
+    const list = (declined.get(site) || []).filter((x) => t - x.at < RECENT_DECLINED_MS);
+    const i = list.findIndex((x) => x.answers.includes(String(seq)));
+    if (i < 0) { declined.set(site, list); return null; }
+    const hit = list.splice(i, 1)[0];
+    declined.set(site, list);
+    return hit;
+  }
+  function ownTurn(entry, turn) {
     const text = stripEnvelope(turn.text);
     const elapsed = now() - entry.startedAt;
     const body = { ok: true, site: entry.site, request_id: entry.requestId, text, seq: entry.seq, reply_to: entry.seq, elapsed_ms: elapsed };
     log('outcome', { site: entry.site, request_id: entry.requestId, outcome: entry.phase === 'late' ? 'LATE_REPLY_STORED' : 'OK', chars: text.length, elapsed_ms: elapsed });
     finish(entry, { status: 200, body });
+  }
+
+  // BF-01: own a captured reply only if it answers THIS request's typed prompt.
+  // P18.5: "typed" includes a prompt whose send is still being confirmed when the
+  // Relay Trace already says this reply answers its [MSG #] (cancelToken.seq).
+  function onCaptured(turn) {
+    if (!turn || typeof turn.site !== 'string') return false;
+    const entry = active.get(turn.site);
+    if (!entry || entry.done) return false;
+    if (!entry.typed) {
+      const pendingSeq = entry.cancelToken && entry.cancelToken.seq != null ? String(entry.cancelToken.seq) : null;
+      if (pendingSeq && Array.isArray(turn.answers) && turn.answers.map(String).includes(pendingSeq)) {
+        entry.typed = true;
+        entry.typedAt = now();
+        entry.seq = pendingSeq;
+        if (entry.phase === 'sending') entry.phase = 'waiting';
+        log('sent', { site: entry.site, request_id: entry.requestId, seq: entry.seq });
+        ownTurn(entry, turn);
+        return true;
+      }
+      return false; // nothing typed yet: it can't be our answer
+    }
+    if (Array.isArray(turn.answers)) {
+      if (entry.seq == null || !turn.answers.map(String).includes(entry.seq)) { rememberDeclined(turn); return false; }
+    } else if (typeof turn.ts === 'number' && entry.typedAt != null && turn.ts < entry.typedAt) return false;
+    ownTurn(entry, turn);
     return true;
   }
 
@@ -514,7 +595,10 @@ function createBridge(opts) {
     for (const s of sites) {
       let ready = false;
       try { ready = !!siteReady(s); } catch (_) { ready = false; }
-      out[s] = { ready, busy: active.has(s) };
+      const st = stateOf(s);
+      // v1.2: ready stays as before, but is false whenever the AI is being repaired / needs you / is broken.
+      if (NOT_USABLE_STATES.has(st.state)) ready = false;
+      out[s] = Object.assign({ ready, busy: active.has(s) }, st);
     }
     return out;
   }
@@ -620,6 +704,37 @@ function createBridge(opts) {
     return send(res, 200, { ok: true });
   }
 
+  // POST /v1/probe (v1.2) — start check-ins; answers at once with 202.
+  function handleProbe(raw, res, tooLarge) {
+    if (tooLarge) return send(res, 413, errBody('TOO_LARGE', `probe body is over ${MAX_PROBE_BODY_BYTES} bytes`, false));
+    let body = {};
+    const txt = raw.toString('utf8').trim();
+    if (txt) {
+      try { body = JSON.parse(txt); } catch (_) { return refuse(res, 400, 'BAD_REQUEST', 'body must be JSON'); }
+    }
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return refuse(res, 400, 'BAD_REQUEST', 'body must be a JSON object');
+    let want = null;
+    if (body.sites !== undefined && body.sites !== null) {
+      if (!Array.isArray(body.sites) || body.sites.length > 10 || body.sites.some((x) => typeof x !== 'string')) return refuse(res, 400, 'BAD_REQUEST', 'sites must be a list of site names');
+      const unknown = body.sites.find((x) => !sites.includes(x));
+      if (unknown !== undefined) return refuse(res, 404, 'UNKNOWN_SITE', `unknown site; expected one of ${sites.join('|')}`);
+      want = Array.from(new Set(body.sites));
+    }
+    counters.probes++;
+    let r = null;
+    if (typeof o.startProbe === 'function') {
+      try { r = o.startProbe(want); } catch (_) { r = null; }
+    }
+    const started = []; const skipped = {};
+    if (r && typeof r === 'object') {
+      for (const s of Array.isArray(r.started) ? r.started : []) if (sites.includes(s) && !started.includes(s)) started.push(s);
+      if (r.skipped && typeof r.skipped === 'object') for (const [s, why] of Object.entries(r.skipped)) if (sites.includes(s) && !started.includes(s)) skipped[s] = PROBE_SKIP_REASONS.has(why) ? why : 'busy';
+    } else for (const s of want || sites) skipped[s] = 'unsupported';
+    for (const s of started) recordEvent('probe', { site: s, outcome: 'STARTED', http_status: 202 });
+    for (const [s, why] of Object.entries(skipped)) recordEvent('probe', { site: s, outcome: 'SKIPPED', error: why, http_status: 202 });
+    return send(res, 202, { ok: true, started, skipped });
+  }
+
   async function handleComplete(raw, res) {
     let body;
     try { body = JSON.parse(raw.toString('utf8')); } catch (_) {
@@ -661,6 +776,14 @@ function createBridge(opts) {
           ? `${site} is answering another bridge request (request ${busy.requestId}, typed as [MSG #${busy.seq}])`
           : `another bridge request for ${site} (request ${busy.requestId}) is waiting to be typed`;
       return refuse(res, 409, 'SITE_BUSY', why, site, requestId);
+    }
+    const sst = stateOf(site);
+    if (NOT_USABLE_STATES.has(sst.state)) {
+      log('outcome', { site, request_id: requestId, outcome: 'SITE_NOT_READY', state: sst.state, problem: sst.problem || undefined });
+      let why = null;
+      try { why = siteProblem(site); } catch (_) { why = null; }
+      const words = { repairing: 'is being repaired automatically', needs_user: 'needs the user (see AutoInjector)', broken: "isn't working and couldn't be repaired automatically" }[sst.state];
+      return send(res, 503, Object.assign(errBody('SITE_NOT_READY', `${site} ${words}${sst.problem ? ` (${sst.problem})` : ''}${why ? `: ${String(why).slice(0, 200)}` : ''} — use another AI meanwhile`, false), { state: sst.state, problem: sst.problem }));
     }
     let ready = false;
     try { ready = !!siteReady(site); } catch (_) { ready = false; }
@@ -757,7 +880,7 @@ function createBridge(opts) {
       return sendAndClose(res, 401, errBody('UNAUTHORIZED', 'missing or wrong bearer token', false));
     }
     noteContact(req.headers['x-autoinjector-selftest'] === '1');
-    const limit = url === '/v1/status' ? MAX_STATUS_BYTES : MAX_BODY_BYTES;
+    const limit = url === '/v1/status' ? MAX_STATUS_BYTES : url === '/v1/probe' ? MAX_PROBE_BODY_BYTES : MAX_BODY_BYTES;
     readBody(req, res, limit, (raw, size, tooLarge) => {
       Promise.resolve().then(async () => {
         if (url === '/v1/health' && req.method === 'GET') {
@@ -771,6 +894,7 @@ function createBridge(opts) {
           }
           return handleComplete(raw, res);
         }
+        if (url === '/v1/probe' && req.method === 'POST') return handleProbe(raw, res, tooLarge);
         if (url === '/v1/status' && req.method === 'POST') {
           if (tooLarge) return send(res, 413, errBody('TOO_LARGE', `status body is over ${MAX_STATUS_BYTES} bytes`, false));
           return handleStatus(raw, res, size);
@@ -858,6 +982,9 @@ function describeEvent(ev, label) {
     case 'start_failed': return { say: `The bridge couldn't start (${e.error || 'unknown error'})`, tone: 'error' };
     case 'pair_code': return { say: 'Made a one-time pairing code and opened BookForge to connect', tone: 'info' };
     case 'status': return { say: 'BookForge sent an update on your book', tone: 'ok' };
+    case 'probe': return e.outcome === 'STARTED'
+      ? { say: `BookForge asked for a check-in of ${L}`, tone: 'info' }
+      : { say: `BookForge asked for a check-in of ${L} — not now (${e.error || 'busy'})`, tone: 'info' };
     case 'pair': switch (e.outcome) {
       case 'PAIRED': return { say: 'BookForge picked up the connection key (paired)', tone: 'ok' };
       case 'PAIRING_CODE_EXPIRED': return { say: 'A pairing code was used too late (codes last 2 minutes) — press Connect again', tone: 'warn' };
@@ -900,6 +1027,7 @@ module.exports = {
   CACHE_TTL_MS,
   EVENT_RING_SIZE,
   SELFTEST_ID_PREFIX,
+  SITE_STATES,
   sanitizeBookforgeStatus,
   generatePairingCode,
   PAIR_CODE_LEN,

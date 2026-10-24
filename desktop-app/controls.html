@@ -698,6 +698,25 @@
     .bf-ai .bf-pill { padding:2px 6px; }
     .bf-ai-last { font-size:12px; color:var(--bf-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .bf-ai[data-st="work"] { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--bf-work) 45%, transparent); }
+    .bf-ai[data-st="repair"] { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--bf-work) 55%, transparent); background:#141325; }
+    .bf-ai[data-st="needs"] { border-color:#7a6127; background:#1f1a10; }
+    .bf-ai[data-st="bad"] { border-color:#6b2c30; background:#1d1214; }
+    .bf-ai-check { font-size:12px; color:var(--bf-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .bf-ai-check:empty { display:none; }
+    .bf-checkin { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#cfc8f5; text-transform:none; letter-spacing:0; font-weight:600; }
+    .bf-checkin select { font-size:12px; padding:1px 3px; background:#17172a; color:#e6e4f5; border:1px solid #33334a; border-radius:6px; }
+    /* P18.7 teach step card */
+    .bf-teach { margin-top:6px; padding:8px 11px; border-radius:9px; border:1px solid #6d5ce0; border-left:4px solid var(--bf-wait); background:linear-gradient(180deg, #221d40, #19162e); color:#f1efff; }
+    .bf-teach[data-tone="ok"] { border-color:#3fae72; border-left-color:var(--bf-ok); background:linear-gradient(180deg, #16301f, #122418); }
+    .bf-teach[data-tone="err"] { border-color:#6b2c30; border-left-color:var(--bf-err); background:#1d1214; }
+    .bf-teach h3 { margin:0 0 4px; font-size:13.5px; }
+    .bf-teach-text { margin:0 0 5px; font-size:13px; line-height:1.45; }
+    .bf-teach-text .bf-teach-say { display:inline-block; font:700 14px/1.3 ui-monospace, Consolas, monospace; background:#0e0e18; border:1px dashed #a18bff; border-radius:6px; padding:2px 8px; margin:2px 2px; color:#fff; user-select:all; }
+    .bf-teach-steps { list-style:none; margin:0 0 6px; padding:0; display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12.5px; }
+    .bf-teach-steps li { display:inline-flex; align-items:center; gap:5px; color:#cfcde0; }
+    .bf-teach-steps li .ic { font-weight:700; width:14px; text-align:center; }
+    .bf-teach-steps li[data-st="ok"] .ic { color:var(--bf-ok); } .bf-teach-steps li[data-st="wait"] .ic { color:var(--bf-wait); } .bf-teach-steps li[data-st="bad"] .ic { color:var(--bf-err); }
+    .bf-teach-actions { display:flex; flex-wrap:wrap; gap:6px; }
     .bf-ai[data-st="off"] { opacity:.65; }
 
     /* connection check: one row of chips; full list on demand / on failure */
@@ -1339,6 +1358,14 @@
         </span>
         <button class="collapse-btn" id="btn-collapse-bookforge" type="button" aria-expanded="true" aria-controls="bookforge-body" title="Collapse to a slim status bar" aria-label="Collapse to a slim status bar">▾</button>
       </div>
+      <!-- P18.7 teach step: shown while AutoInjector needs the user to show it an AI's page.
+           Not a dialog (a dialog would hide the AI panes, and the user must type in one). -->
+      <section id="bf-teach" class="bf-teach" role="region" aria-live="polite" aria-labelledby="bf-teach-title" hidden>
+        <h3 id="bf-teach-title"></h3>
+        <p id="bf-teach-text" class="bf-teach-text"></p>
+        <ol id="bf-teach-steps" class="bf-teach-steps"></ol>
+        <div id="bf-teach-actions" class="bf-teach-actions"></div>
+      </section>
       <div id="bookforge-body">
         <!-- what's happening + the next step, one line -->
         <div id="bf-connect-msg" class="bf-line" role="status" aria-live="polite">
@@ -1351,7 +1378,8 @@
         <div class="bf-strip">
           <!-- the three AIs, side by side -->
           <section class="bf-card" id="bf-ais-card" aria-labelledby="bf-ais-h">
-            <h3 id="bf-ais-h">🤖 Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button></h3>
+            <h3 id="bf-ais-h">🤖 Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button>
+              <span class="bf-h3-extra"><label class="bf-checkin" title="AutoInjector sends each idle AI a tiny check-in message (“Reply with only this word: …”) this often, and fixes what it can by itself. Check-ins never go to an AI that is busy or that you are typing in, and are never passed on to the other AIs.">Check-ins <select id="bf-checkin-every" aria-label="How often to check in with each AI"><option value="0">off</option><option value="10">every 10 min</option><option value="20" selected>every 20 min</option><option value="30">every 30 min</option><option value="60">every hour</option></select></label><span class="bf-anchor" id="bf-checkin-anchor"><button id="btn-bf-checkin" type="button" title="Check in with every Active AI now (a tiny automatic message), and fix what can be fixed">🩺 Check now</button></span></span></h3>
             <div class="bf-ais" id="bf-ais"></div>
           </section>
           <!-- connection check: chips; the full list opens on click or when something fails -->
