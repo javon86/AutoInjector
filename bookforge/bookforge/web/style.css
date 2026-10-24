@@ -1056,3 +1056,19 @@ ul.samples q { font-style: italic; }
 .mb-variant, .sb-report { overflow-wrap: anywhere; }
 .s5-card p { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .rp-kpis { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------- 💾 P20 save the book, 📂 P21 open / 🔁 rerun */
+.topbar-links .tb-btn { margin: 0 2px; padding: 4px 8px; font-size: .92rem; }
+.save-box { flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.save-line { min-width: 0; overflow-wrap: anywhere; }
+.save-path { overflow-wrap: anywhere; word-break: break-all; font-size: .85em; }
+.save-card .row { flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.opened-note { margin-top: 10px; }
+.mb-save { flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 6px 0; }
+.open-list .r-main { min-width: 0; overflow-wrap: anywhere; }
+.bf-path { width: 100%; max-width: 46rem; }
+.rr-what { margin: 6px 0 10px; }
+@media (max-width: 640px) {
+  .save-box > button, .open-list .r-badges button { flex: 0 0 auto; }
+  .open-list .record-item { flex-wrap: wrap; }
+}
