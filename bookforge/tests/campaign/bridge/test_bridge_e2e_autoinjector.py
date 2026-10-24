@@ -47,11 +47,6 @@ def e2e(tmp_path_factory):
     out = tmp_path_factory.mktemp("bf-e2e") / "run.json"
     env = dict(os.environ, SEED="1", QUIRKS="default", FAULTS="steal,timeout", OUT=str(out), BOOKFORGE_ROOT=str(ROOT))
     env.pop("BF_BRIDGE_IMPL", None)
-    # The e2e's fake chat sites answer only BookForge prompts and side questions, not AutoInjector's check-in
-    # ("Reply with only this word: …"): a check-in BookForge asks for before the run (POST /v1/probe, P18.9) fails
-    # there and ~90 s later the desktop marks every site "repairing", so the run would wait. Until the fake sites
-    # answer check-ins, BookForge skips its pre-run check-in here (it is tested in tests/test_failover_review.py).
-    env["BOOKFORGE_PRERUN_CHECKIN"] = "0"
     proc = subprocess.run(["node", str(E2E)], cwd=str(APP), env=env, capture_output=True, text=True, timeout=420)
     if not out.exists():
         pytest.fail(f"the e2e run produced no result (exit {proc.returncode}):\n{proc.stdout[-3000:]}\n{proc.stderr[-2000:]}")

@@ -27,6 +27,9 @@ function createPaneHealth({ sites, now = () => Date.now(), stallMs = DEFAULT_STA
     }
   }
   function onCapture(site) { const p = s[site]; if (p) { p.capturedAt = now(); p.stallLogged = false; } }
+  // P18.5: the reply to the message just sent was captured BEFORE its send result
+  // came in (the AI answered while the send was still being confirmed).
+  function onAnsweredEarly(site) { const p = s[site]; if (p) { p.capturedAt = Math.max(now(), p.sentAt + 1); p.stallLogged = false; } }
   // What the read script saw on the last poll: { textLen, generating, hasEndTag, tail }
   function onRead(site, info) { const p = s[site]; if (p) { p.read = info || null; p.readAt = now(); } }
   // TR-08: result of the read-only page check (automation.buildProbeScript).
@@ -90,7 +93,7 @@ function createPaneHealth({ sites, now = () => Date.now(), stallMs = DEFAULT_STA
   }
 
   function snapshot() { const o = {}; for (const site of Object.keys(s)) o[site] = evaluate(site); return o; }
-  return { onSendResult, onCapture, onRead, onProbe, messageBox, evaluate, newStalls, snapshot };
+  return { onSendResult, onCapture, onAnsweredEarly, onRead, onProbe, messageBox, evaluate, newStalls, snapshot };
 }
 
 module.exports = { createPaneHealth, DEFAULT_STALL_MS };

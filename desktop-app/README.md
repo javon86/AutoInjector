@@ -537,7 +537,7 @@ is making progress again.
 Lets BookForge (the book-writing tool in this repo) use the ChatGPT, Claude and
 Gemini panes as its AI slots, with no API keys. **Caution:** automating these
 sites' web UIs may be against their terms of service — use at your own risk.
-The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.1, normative).
+The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.2, normative).
 
 **The BookForge panel** is compact (about a quarter of its old height when
 connected) and every ⓘ explains its part in plain words (Esc or a click outside closes it):
@@ -634,6 +634,31 @@ took, refused keys/codes) is kept, folded away at the bottom. Only loopback
   `test/bookforge-link-test.test.js`. `test/fixtures/fake-bridge-host.js` runs the
   real bridge with fake panes for cross-process tests (see its header for the CLI,
   incl. `--pairing-code-file` and `--status-file`).
+
+### AIs that repair themselves (check-ins, self-repair, teach step)
+
+AutoInjector checks that each Active AI still answers by sending it a tiny **check-in**
+(“Reply with only this word: marigold”): once when its page has loaded, every 20 minutes
+while it is idle (BookForge panel → 🤖 Your AIs → *Check-ins*: off / 10 / 20 / 30 / 60 min),
+when you press **🩺 Check now**, and when BookForge asks before a book. Never while you are
+typing in that AI or it is busy. Check-ins and their answers are not shown in the
+conversation and never passed on to the other AIs.
+
+When a check-in fails, the AI's card says **🔧 Repairing…** and AutoInjector works out why
+(can't type / message not sent / can't find replies / reply taken as old / stuck writing /
+logged out / “are you human?” check / usage limit / page error) and fixes what it can by
+itself: other known ways to find the message box, Send button and replies; searching the
+page for the check-in word to learn where replies appear; reloading the window; pressing
+Stop on a stuck AI. If that doesn't work it asks you (**🎓**) to type
+`Repeat this number: 4827` into that AI and press Send — a box in the panel and a banner in
+the AI's window walk you through it — and learns the page from that. **✔ Fixed** when it
+works again. Logged out, captcha and usage limits show **⚠️ Needs you** with exactly what to
+do; it notices by itself when you've done it. Click any ⚠️ to see what was already tried.
+What it learned is saved per AI (`learnedSelectors` in the state file); a 🎯 pick of your
+own always wins. Everything it does is in the activity log and 📋 Copy diagnostics (codes
+only, never message text). Set `AUTOINJECTOR_CHECKIN=0` to switch the automatic check-ins
+off. Details: `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.2) and `self-repair.js`.
+Real ChatGPT/Claude/Gemini pages couldn't be tested here — only realistic fake pages.
 
 ## Picking up where you left off
 

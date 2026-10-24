@@ -10,6 +10,7 @@
 // local service bridge would try to open a real TCP port on app-ready, which is
 // an unrelated side effect here — disable it (service-bridge.test.js covers it).
 process.env.AUTOINJECTOR_BRIDGE = "0";
+process.env.AUTOINJECTOR_CHECKIN = process.env.AUTOINJECTOR_CHECKIN || "0"; // P18: no automatic check-ins in this harness (test/self-repair-main.test.js covers them)
 process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || "50";
 process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || "80";
 process.env.AUTOINJECTOR_RETRY_BACKOFF_MS = process.env.AUTOINJECTOR_RETRY_BACKOFF_MS || "150";

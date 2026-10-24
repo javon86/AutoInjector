@@ -27,6 +27,19 @@
             | random (seeded pick of the other AIs or ALL)
     nofrom  chance (0-1) a reply forgets its [FROM:] tag (default 0.2)
     speed   timing multiplier (default 1; 2 = everything twice as slow)
+    layout  (P18 self-repair) default | changed | alt
+              changed  reply and user blocks use markup that matches NONE of the
+                       app's reply selectors (selectors.js) nor its built-in
+                       alternatives -> only the page search (P18.4) can find them
+              alt      ChatGPT-like article[data-turn="assistant"] blocks, which only
+                       the built-in alternative list (P18.3) knows
+    page    (P18 self-repair) chat (default) | login | limit | error
+              login    a signed-out page: no message box, "Log in" / "Sign up"
+              limit    the chat, plus a usage-limit banner (role=alert)
+              error    no message box, an "Something went wrong" alert
+  Check-ins: "Reply with only this word: X" is answered with X (tagged). A typed
+  "Repeat this number: 1234" (the teach step, no [MSG #]) is answered with the
+  number, untagged — like a real AI would.
   Quirks:
     rich         rich editor: keeps its OWN text state, changed only through
                  beforeinput / paste; raw DOM writes are wiped; Send posts the
@@ -65,6 +78,8 @@
   const PLAN = Q.get("plan") || "rr";
   const NOFROM_RATE = Q.has("nofrom") ? Number(Q.get("nofrom")) : 0.2;
   const SPEED = Number(Q.get("speed")) || 1;
+  const LAYOUT = (Q.get("layout") || "default").toLowerCase();
+  const PAGE = (Q.get("page") || "chat").toLowerCase();
   const ALL_QUIRKS = ["rich", "disabledsend", "stop", "stream", "redraw", "hiddensend", "wrapper", "slowclear", "nofrom"];
   const SITE_DEFAULTS = {
     chatgpt: ["rich", "disabledsend", "stop", "stream", "hiddensend", "wrapper", "slowclear", "nofrom"],
@@ -99,6 +114,28 @@
   // ---- DOM, per site -----------------------------------------------------
   const log = document.getElementById("log");
   const area = document.getElementById("composer-area");
+  if (PAGE === "login" || PAGE === "error") {
+    // No chat at all: a sign-in page, or an error page.
+    area.remove();
+    if (PAGE === "login") {
+      const box = document.createElement("div");
+      box.innerHTML = '<h1>Welcome back</h1><p>Log in or sign up to continue.</p><button data-testid="login-button">Log in</button> <a href="/signup">Sign up</a>';
+      log.appendChild(box);
+    } else {
+      const box = document.createElement("div");
+      box.setAttribute("role", "alert");
+      box.textContent = "Something went wrong. Try reloading the page.";
+      log.appendChild(box);
+    }
+    window.__fake = { site: SITE, page: PAGE, idle: () => true, dump: () => ({ site: SITE, page: PAGE, posted: [], replies: [] }) };
+    return;
+  }
+  if (PAGE === "limit") {
+    const b = document.createElement("div");
+    b.setAttribute("role", "alert");
+    b.textContent = "You've reached your usage limit. Your limit resets at 5:00 PM.";
+    document.body.insertBefore(b, log);
+  }
   let ed, sendBtn, stopBtn = null;
   function el(tag, attrs, parent) {
     const n = document.createElement(tag);
@@ -198,11 +235,13 @@
     if (generating) { F.ignoredPosts++; return; } // a real page won't take a message mid-reply
     F.posted.push({ text, at: Date.now() });
     let u;
-    if (SITE === "chatgpt") { u = el("div", { "data-message-author-role": "user" }, log); el("div", { class: "user-text", text }, u); }
+    if (LAYOUT === "changed") { u = el("div", { class: "convo-turn human-turn", "data-turn-role": "human" }, log); el("div", { class: "ask-body user-text", text }, u); }
+    else if (LAYOUT === "alt") { u = el("article", { "data-turn": "user" }, log); el("div", { class: "ask-body user-text", text }, u); }
+    else if (SITE === "chatgpt") { u = el("div", { "data-message-author-role": "user" }, log); el("div", { class: "user-text", text }, u); }
     else if (SITE === "claude") { u = el("div", { "data-testid": "user-message", class: "user-text", text }, log); }
     else { u = el("user-query", {}, log); el("div", { class: "query-text user-text", text }, u); }
     if (has("slowclear")) setTimeout(() => clearComposer(text), between(500, 1500)); else clearComposer(text);
-    if (/^\[MSG #\d+\]/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
+    if (/^\[MSG #\d+\]/.test(text) || /Repeat this number:\s*\d{4}/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
   }
 
   // ---- the fake AI ---------------------------------------------------------
@@ -218,7 +257,7 @@
     const to = (hook && hook.to) || planTarget(k);
     const token = NAME + "-R" + k;
     const lines = hook && Array.isArray(hook.lines)
-      ? ["[TO: " + to + "]"].concat(hook.lines.map((l) => String(l).split("{TOKEN}").join(token)))
+      ? (hook.bare ? [] : ["[TO: " + to + "]"]).concat(hook.lines.map((l) => String(l).split("{TOKEN}").join(token)))
       : ["[TO: " + to + "]", "Reply " + k + " from " + NAME + " to " + inReplyTo + ", token " + token + ". " + sentence(), sentence() + " " + sentence()];
     let tagged = !(has("nofrom") && k > 1 && rFrom() < NOFROM_RATE);
     if (hook && typeof hook.tagged === "boolean") tagged = hook.tagged;
@@ -226,7 +265,9 @@
   }
   function mkBlock() {
     let md;
-    if (SITE === "chatgpt") { const b = el("div", { "data-message-author-role": "assistant" }, log); md = el("div", { class: "markdown" }, b); }
+    if (LAYOUT === "changed") { const b = el("div", { class: "convo-turn bot-turn", "data-turn-role": "model" }, log); md = el("div", { class: "answer-body" }, b); }
+    else if (LAYOUT === "alt") { const b = el("article", { "data-turn": "assistant" }, log); md = el("div", { class: "answer-body" }, b); }
+    else if (SITE === "chatgpt") { const b = el("div", { "data-message-author-role": "assistant" }, log); md = el("div", { class: "markdown" }, b); }
     else if (SITE === "claude") { const b = el("div", { class: "font-claude-message" }, log); md = el("div", { class: "standard-markdown" }, b); }
     else { const b = el("model-response", {}, log); const mc = el("message-content", {}, b); md = el("div", { class: "markdown" }, mc); }
     return md;
@@ -252,7 +293,11 @@
     if (/NO ENDING TAG RECEIVED/.test(msg) && lastReply) r = Object.assign({}, lastReply, { tagged: true, resend: true, inReplyTo: "#" + seq, delayMs: 0 });
     else {
       let hook = null;
-      if (typeof window.__fakeHook === "function") { try { hook = await window.__fakeHook(msg); } catch (_) { hook = null; } }
+      const pw = /Reply with only this word:\s*([A-Za-z]+)/.exec(msg);   // P18.1 check-in
+      const tn = /Repeat this number:\s*(\d{4})/.exec(msg);             // P18.7 teach step
+      if (pw) hook = { lines: [pw[1]], to: "USER", tagged: true };
+      else if (tn) hook = { lines: [tn[1]], to: "USER", tagged: false, bare: true };
+      else if (typeof window.__fakeHook === "function") { try { hook = await window.__fakeHook(msg); } catch (_) { hook = null; } }
       r = newReply("#" + seq, hook);
     }
     lastReply = r;

@@ -180,5 +180,14 @@ contextBridge.exposeInMainWorld("api", {
   bookforgeLinkTestRun: () => ipcRenderer.invoke("bookforge:linktest-run"),
   bookforgeLinkTestStop: () => ipcRenderer.invoke("bookforge:linktest-stop"),
   bookforgeOpenLinkTestReport: (file) => ipcRenderer.invoke("bookforge:linktest-open-report", { file }),
-  onBookforgeLinkTestProgress: (cb) => ipcRenderer.on("bookforge-linktest-progress", (_e, payload) => cb(payload))
+  onBookforgeLinkTestProgress: (cb) => ipcRenderer.on("bookforge-linktest-progress", (_e, payload) => cb(payload)),
+  // P18 self-repair: check-ins, the teach step, settings (never any page text)
+  selfRepairStatus: () => ipcRenderer.invoke("selfrepair:status"),
+  selfRepairProbe: (sites) => ipcRenderer.invoke("selfrepair:probe", { sites: Array.isArray(sites) ? sites : null }),
+  selfRepairTeachStart: (site) => ipcRenderer.invoke("selfrepair:teach-start", { site }),
+  selfRepairTeachCancel: (site) => ipcRenderer.invoke("selfrepair:teach-cancel", { site }),
+  selfRepairReload: (site) => ipcRenderer.invoke("selfrepair:reload", { site }),
+  selfRepairForgetLearned: (site) => ipcRenderer.invoke("selfrepair:forget-learned", { site }),
+  selfRepairSettings: (patch) => ipcRenderer.invoke("selfrepair:settings", patch || {}),
+  onSelfRepair: (cb) => ipcRenderer.on("self-repair", (_e, payload) => cb(payload))
 });

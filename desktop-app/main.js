@@ -46,6 +46,7 @@ const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
 const bookforgeLinkTest = require("./bookforge-link-test"); // 🧪 Test BookForge link (real round trips through the bridge's own HTTP API)
+const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/BOOKFORGE_IMPROVEMENT_PLAN.md Section 1)
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -210,6 +211,8 @@ const state = {
   nextPromptId: 1,
   sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
+  learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
+  selfRepair: { intervalMin: 20, startup: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
   nextLoginId: 1,
   managerConfig: {
@@ -244,6 +247,7 @@ for (const site of SITE_IDS) {
   state.enabled[site] = true;
   state.customRole[site] = "";
   state.selectorOverrides[site] = {};
+  state.learnedSelectors[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -645,6 +649,8 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
+        selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
@@ -728,6 +734,14 @@ function loadPersistedState() {
         }
       }
     }
+  }
+  if (snap.learnedSelectors) {
+    try { state.learnedSelectors = selfRepairLib.sanitizeLearned(snap.learnedSelectors, SITE_IDS, isBareTagSelector); } catch (_) {}
+  }
+  if (snap.selfRepair && typeof snap.selfRepair === "object") {
+    const n = Number(snap.selfRepair.intervalMin);
+    if (Number.isFinite(n) && n >= 0 && n <= 24 * 60) state.selfRepair.intervalMin = Math.round(n);
+    state.selfRepair.startup = snap.selfRepair.startup !== false;
   }
   if (snap.savedLogins && typeof snap.savedLogins === "object") {
     let maxId = 0;
@@ -861,6 +875,11 @@ const settleKey = (s) => String(s || "").replace(/\s+/g, "");
 // M1: the AI was seen writing since the last capture (the Relay Trace then
 // counts the messages it was answering as started).
 const wroteSinceCapture = {};
+const genReads = {};        // P18.5: reads that saw the AI writing since its last capture
+const generatingSince = {}; // P18: when the current "writing" phase began (0 = not writing)
+const lastRead = {};        // P18: the last read per pane { text, textLen, generating, composerEmpty, inputFound, at } (memory only)
+const lastActivityAt = {};  // P18: last send/capture per pane (check-ins wait for a quiet AI)
+const lastUserInputAt = {}; // P18: last real keyboard/mouse input the user gave a pane (Electron before-input-event)
 // M1: a second identical NONE reply is swallowed without a capture. When it is
 // really a new reply — the AI was seen writing since the last capture and, on
 // a page whose reply blocks can be counted, a new block appeared — close the
@@ -880,6 +899,7 @@ function closeUncapturedReply(site) {
 }
 function markCaptured(site) {
   wroteSinceCapture[site] = false;
+  genReads[site] = 0;
   try { delete unreadableWarned[site]; } catch (_) {} // TR-31: a later fragment is logged again
   capturedCount[site] = readCount[site] != null ? readCount[site] : null;
   tagSeenAt[site] = 0;
@@ -887,6 +907,25 @@ function markCaptured(site) {
   broadcastHealth();
   const c = state.captured[site];
   try { relayTrace.noteCapture(site, c ? c.id : null, { none: !!(c && (isNoneSkip(String(c.text || "")) || parseRoundtableTag(String(c.text || "")).tag === "NONE")), rateLimited: !!(c && c.isRateLimited) }); } catch (_) {}
+}
+// Where each AI pane starts. AUTOINJECTOR_SITE_URL_<SITE> (e.g. _CHATGPT) swaps in a
+// test page — only a file:// URL or a loopback http address is accepted (the
+// real-Electron e2e tests load test/fixtures/fake-chat.html this way).
+function siteUrlOverride(site) {
+  const v = String(process.env[`AUTOINJECTOR_SITE_URL_${String(site).toUpperCase()}`] || "").trim();
+  return /^(file:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/)/i.test(v) ? v : null;
+}
+function siteHome(site) { return siteUrlOverride(site) || SITES[site].home; }
+function siteNewChat(site) { return siteUrlOverride(site) || SITES[site].newChat || SITES[site].home; }
+// P18: the selectors the page scripts use — the user's 🎯 picks, with anything the
+// self-repair LEARNED (and proved with a check-in) on top. A learned reply selector
+// is read strictly (automation.js STRICT) so a stale built-in match can't win.
+function effectiveOverrides(site) {
+  const out = { ...(state.selectorOverrides[site] || {}) };
+  const learned = state.learnedSelectors[site] || {};
+  for (const role of ["input", "send", "assistant", "stop"]) if (learned[role] && learned[role].selector) out[role] = learned[role].selector;
+  if (learned.assistant && learned.assistant.selector) out.assistantStrict = true;
+  return out;
 }
 // TR-08: a read-only page check (sends nothing) a few seconds after each pane
 // loads, so a signed-out pane or a site that changed its page shows up on the
@@ -897,7 +936,7 @@ async function probePane(site) {
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return null;
   let r;
-  try { r = await view.webContents.executeJavaScript(buildProbeScript(site, state.selectorOverrides[site])); }
+  try { r = await view.webContents.executeJavaScript(buildProbeScript(site, effectiveOverrides(site))); }
   catch (e) { r = { ok: false, error: String(e) }; }
   if (!r || typeof r !== "object" || !r.input) r = { ok: false, error: (r && r.error) || "NO_RESULT" };
   paneHealth.onProbe(site, r);
@@ -909,7 +948,10 @@ async function probePane(site) {
 // off the page, and refresh the lights (stalls are time-based).
 function healthTick() {
   for (const st of paneHealth.newStalls()) {
-    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, tail: st.read.tail, nodeInfo: st.read.nodeInfo || undefined } : null });
+    // P18.10: never the reply text — length, flags and the reason only.
+    logEvent("capture-stalled", { site: st.site, minutes: st.minutes, reason: st.reason, read: st.read ? { textLen: st.read.textLen, generating: st.read.generating, hasEndTag: st.read.hasEndTag, nodeInfo: st.read.nodeInfo || undefined } : null });
+    // P18.2: a stalled AI gets a check-in (and repairs) once it is free.
+    try { selfRepair.requestCheck(st.site, "stalled"); } catch (_) {}
   }
   broadcastHealth();
 }
@@ -1002,7 +1044,7 @@ function createWindow() {
   for (const site of SITE_IDS) {
     const view = new WebContentsView({ webPreferences: { partition: `persist:${site}` } });
     win.contentView.addChildView(view);
-    view.webContents.loadURL(SITES[site].home);
+    view.webContents.loadURL(siteHome(site));
     siteViews[site] = view;
     // Every AI page starts at 60% (DEFAULT_PANE_ZOOM) so more of the chat fits.
     // Re-applied after each page load, since a navigation can reset zoom; the
@@ -1014,7 +1056,15 @@ function createWindow() {
           delete paneLoadFailed[site];
           try { view.webContents.setZoomFactor(paneZoom[site] || DEFAULT_PANE_ZOOM); } catch (_) {}
           setTimeout(() => { probePane(site).catch(() => {}); }, PROBE_DELAY_MS);
+          // P18.8: a user-only problem (logged out, captcha, limit) may be gone now.
+          try { selfRepair.onPageChanged(site); } catch (_) {}
+          // P18.1: one check-in per AI once its page has loaded (the first load only).
+          if (CHECKINS_ENABLED && state.selfRepair.startup !== false) setTimeout(() => { try { selfRepair.startup(site); } catch (_) {} }, PROBE_DELAY_MS + CHECKIN_STARTUP_DELAY_MS);
         });
+        try { view.webContents.on("did-navigate", () => { try { selfRepair.onPageChanged(site); } catch (_) {} }); } catch (_) {}
+        // P18.1: the user's own typing/clicking in a pane (real input events only —
+        // the app's own typing is synthetic and never fires this): no check-in then.
+        try { view.webContents.on("before-input-event", () => { lastUserInputAt[site] = Date.now(); }); } catch (_) {}
         // A page that failed to load (no network, site down) is not ready for
         // BookForge until a later load finishes. -3 = a load replaced by another.
         view.webContents.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
@@ -1048,6 +1098,7 @@ function createWindow() {
 
   setInterval(() => { for (const site of SITE_IDS) pollSite(site); sequenceWatchdog(); managerWatchdog(); }, POLL_MS);
   setInterval(healthTick, 5000);
+  setInterval(() => { selfRepair.tick().catch(() => {}); }, CHECKIN_TICK_MS); // P18.1/P18.8: periodic check-ins and user-fix re-checks
 }
 
 // A small, on-demand third window for creating/editing one Prompt Library
@@ -1494,6 +1545,13 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     logEvent("send-error", { target, error: "NO_VIEW" });
     return { ok: false, error: "NO_VIEW" };
   }
+  // P18.7: while the user is teaching AutoInjector this AI's page, nothing else is
+  // typed into it (only the self-repair's own confirming check-in).
+  if (!opts.probe && selfRepair && selfRepair.teachActive(target)) {
+    logEvent("send-error", { target, from: fromSite || null, error: "SITE_REPAIRING", note: "you are showing AutoInjector this AI's page right now — try again when that is done" });
+    broadcast("send-error", { target, error: "SITE_REPAIRING" });
+    return { ok: false, error: "SITE_REPAIRING" };
+  }
   const label = fromSite ? SITES[fromSite]?.label : null;
   const roleClause = state.customRole[target] ? `(You're playing the role of: ${state.customRole[target]}. Keep that in mind in your reply.)\n\n` : "";
   // Addressing-aware frame: a tag-routed relay tells the receiver whether it was
@@ -1507,7 +1565,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // here would double it up.
   // opts.bridge (BookForge) is verbatim too: its prompt reaches the AI exactly as
   // BookForge wrote it, plus only the [MSG #] line (BF-16).
-  const framed = opts.raw || opts.bridge ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
+  // opts.probe (P18.1 check-in) is verbatim too.
+  const framed = opts.raw || opts.bridge || opts.probe ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
   // Program-kept running message number, stamped on EVERY outgoing send as a
   // 4-digit [MSG #0001] header (the AIs don't count anything — the app does). It
   // gives each message a single continuous id across all three panes so a model
@@ -1522,12 +1581,15 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // BookForge bridge sends (opts.bridge) are a program's own request/answer, not a
   // new turn of the user's conversation: they must never re-arm the AI-to-AI hop
   // limit (BF-03).
-  if (!fromSite && !opts.automatic && !opts.bridge) resetAutoHops("program-send");
+  if (!fromSite && !opts.automatic && !opts.bridge && !opts.probe) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
+  // P18.5: the sender (BookForge bridge) learns this message's number at once, so a
+  // reply captured while the send is still being confirmed can be matched to it.
+  if (opts.cancelToken && typeof opts.cancelToken === "object") { try { opts.cancelToken.seq = seq; } catch (_) {} }
   saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
   let prompt = `[MSG #${seq}]\n${framed}`;
   let flagged = false; // TR-30: the missing-[FROM:] flag was added to this message
-  try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : opts.automatic ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
+  try { relayTrace.noteSend({ seq, target, from: fromSite || null, kind: fromSite ? "relay" : (opts.automatic || opts.probe) ? "auto" : "program", sourceTurnId: opts.sourceTurnId != null ? opts.sourceTurnId : null, text: prompt }); } catch (_) {}
 
   // A failed send gets up to SEND_RETRY_ATTEMPTS total tries, with a short
   // pause between each, before it's ever reported as a failure -- a real
@@ -1563,7 +1625,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       // TR-30 + TR-22: its last reply had no [FROM:] tag and was accepted just
       // now — this message carries the flag and the full rules at its top.
       // Never on a BookForge prompt (BF-16): it goes in exactly as written.
-      if ((gate === "accepted" || gate === "accepted-noto") && !flagged && !opts.bridge) {
+      if ((gate === "accepted" || gate === "accepted-noto") && !flagged && !opts.bridge && !opts.probe) {
         flagged = true;
         prompt = `[MSG #${seq}]\n${composeEnvelopeReminder(target, gate === "accepted-noto" ? "accepted-missing-both" : "accepted-missing-from")}\n\n— NEW MESSAGE BELOW —\n\n${framed}`;
       }
@@ -1572,7 +1634,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       } else {
         if (token) token.typing = true;
         try {
-          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, state.selectorOverrides[target], { markerBaseline }), true);
+          if (attempt === 1 || markerBaseline == null) { try { relayTrace.noteTyping(seq); } catch (_) {} } // P18.5
+          r = await view.webContents.executeJavaScript(buildSendScript(target, prompt, effectiveOverrides(target), { markerBaseline }), true);
         } catch (e) {
           r = { ok: false, error: String(e) };
         } finally {
@@ -1622,6 +1685,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // [MSG #] header must not make every send look unique.
   recordLedgerEntry({ source: fromSite || null, target, text: framed, ok: res && res.ok, error: res && res.error, attempts, seq });
   paneHealth.onSendResult(target, res);
+  // P18.5: its reply was already captured while the send was still being confirmed
+  // (the AI answered during a retry): nothing is owed, so the pane isn't "waiting"
+  // and its health must not report "no reply / matches one already captured".
+  let answeredEarly = false;
+  try { answeredEarly = !!(res && res.ok && relayTrace.isAnswered(seq)); } catch (_) {}
+  if (answeredEarly) paneHealth.onAnsweredEarly(target);
   broadcastHealth();
   try { relayTrace.noteSendResult(seq, { ...(res || {}), attempts }); } catch (_) {}
   // A BookForge prompt the AI is already answering: count it as started now
@@ -1660,11 +1729,15 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       saveStateDebounced();
     }
   } else {
-    state.lastSentTo[target] = framed; // stored WITHOUT the [MSG #] header so Regenerate re-stamps a fresh number
-    state.waiting[target] = true;
-    state.waitingSince[target] = Date.now();
+    lastActivityAt[target] = Date.now();
+    if (!opts.probe) state.lastSentTo[target] = framed; // stored WITHOUT the [MSG #] header so Regenerate re-stamps a fresh number (never a check-in)
+    if (!answeredEarly) {
+      state.waiting[target] = true;
+      state.waitingSince[target] = Date.now();
+    }
     broadcast("sent", { target, from: fromSite || null, ts: Date.now(), seq });
-    broadcast("waiting-changed", { site: target, waiting: true });
+    if (!answeredEarly) broadcast("waiting-changed", { site: target, waiting: true });
+    else logEvent("reply-before-confirm", { target, seq, note: "its answer was captured while the send was still being confirmed (P18.5)" });
     logEvent("sent", { target, from: fromSite || null, attempts, selfRecovered: attempts > 1, seq, verified: res.verified === true, method: res.method || null });
     if (res.verified === false) logEvent("send-unverified", { target, seq, severity: "warn", note: "the box emptied but this message's number never showed in the chat" });
   }
@@ -3617,7 +3690,7 @@ async function pollSite(site) {
   state.busy[site] = true;
   let forcedAccept = false; // TR-30: an untagged finished reply accepted because a send must type over it
   try {
-    const res = await view.webContents.executeJavaScript(buildReadScript(site, state.selectorOverrides[site]));
+    const res = await view.webContents.executeJavaScript(buildReadScript(site, effectiveOverrides(site)));
     // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
     // hide it — drop them before any completion check sees the text (TR-17).
     let text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
@@ -3639,6 +3712,11 @@ async function pollSite(site) {
     }
     if (generating || !hasEndTag(text)) tagSeenAt[site] = 0; // the settle ceiling restarts with each new tagged reply
     paneHealth.onRead(site, { textLen: text.length, generating, hasEndTag: hasEndTag(text), tail: text.slice(-160), nodeInfo: (res && res.nodeInfo) || null, inputFound: res && typeof res.inputFound === "boolean" ? res.inputFound : undefined });
+    // P18: what the reader saw last (kept in memory only — never logged), for the
+    // self-repair's evidence and its "is the user typing?" check.
+    lastRead[site] = { text, textLen: text.length, generating, composerEmpty: res && typeof res.composerEmpty === "boolean" ? res.composerEmpty : null, inputFound: res && typeof res.inputFound === "boolean" ? res.inputFound : null, at: Date.now() };
+    if (generating) { genReads[site] = (genReads[site] || 0) + 1; if (!generatingSince[site]) generatingSince[site] = Date.now(); }
+    else generatingSince[site] = 0;
     // Publish generation-state transitions (drives the UI dot and the service
     // bridge's "generation" event) — the definitive "are they still speaking?".
     if (state.generating[site] !== generating) {
@@ -3714,11 +3792,19 @@ async function pollSite(site) {
       // Still streaming, OR finished-but-forgot-the-tag. Track quiet time; only
       // act once the pane has gone quiet past the watchdog window.
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
+      // P18.1/P18.7: the answer to a check-in / the teach message needs no tag —
+      // take it once it has held still (never nag the AI about it).
+      if (selfRepair && selfRepair.expects(site, text) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS) {
+        acceptedUntaggedRaw[site] = text;
+        text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
+        forcedAccept = true;
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "a check-in answer — no tag needed" });
+      }
       // TR-30: a send is about to type into this pane, and its finished reply
       // has no [FROM:] tag. Typing now would bury it for good, so accept it as
       // finished (it has held still and the page isn't writing) and relay it;
       // the sender's message tells the AI about the missing tag.
-      if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+      else if (forceAcceptUntagged.has(site) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
@@ -3768,7 +3854,12 @@ async function pollSite(site) {
     // A new reply block on the page means a new reply even if its words match
     // the last one (TR-17); otherwise identical text is the reply we already have.
     const newBlock = capturedCount[site] != null && readCount[site] != null && readCount[site] > capturedCount[site];
-    if (already && already.text === text && !newBlock) return; // no new completed reply
+    // P18.5: a reply that answers a message sent since the last capture is new even
+    // when its words equal the last reply's: the AI was seen writing (for at least
+    // two reads, so a Stop-button flicker doesn't count) after that message went out.
+    let answersNew = false;
+    try { answersNew = !!(wroteSinceCapture[site] && (genReads[site] || 0) >= 2 && relayTrace.openStarted(site)); } catch (_) { answersNew = false; }
+    if (already && already.text === text && !newBlock && !answersNew) return; // no new completed reply
     // TR-17: the same reply re-drawn (spacing / citation chips changed) is not a
     // new reply — never capture or relay it twice. Remember the new raw text so
     // the next poll doesn't see it as new either.
@@ -3776,7 +3867,7 @@ async function pollSite(site) {
     // Applies on the baseline AND during House Rules stages; only the bare-token
     // self-tests / Tuner / test runs are left alone.
     const redrawCheck = !(selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site));
-    if (redrawCheck && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
+    if (redrawCheck && !answersNew && already && sameBlock && Date.now() - (already.ts || 0) < REPLY_REVISION_MS && sameReplyText(already.text, text)) {
       state.captured[site] = { ...already, text, ts: Date.now() }; // a later re-draw is measured from this one
       if (forcedAccept) state.captured[site].rawText = acceptedUntaggedRaw[site];
       logEvent("reply-redrawn", { site, chars: text.length, note: "same reply re-drawn by the page — not captured or relayed again" });
@@ -3831,6 +3922,23 @@ async function pollSite(site) {
     // transcript and broadcast live. [TO: NONE] means "nothing to add" and
     // is swallowed entirely, never reaching the transcript. (stageActive was
     // already computed for the completion gate above.)
+    // P18.1/P18.7: the answer to a check-in (or to the teach message) belongs to the
+    // self-repair: never shown in the conversation, never relayed, never nagged.
+    if (selfRepair && selfRepair.expects(site, text)) {
+      const turnId = state.nextTurnId++;
+      state.captured[site] = { id: turnId, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, checkIn: true };
+      markCaptured(site);
+      lastActivityAt[site] = Date.now();
+      try { relayTrace.noteHeld(turnId, "check-in"); } catch (_) {}
+      if (state.waiting[site]) {
+        state.waiting[site] = false;
+        state.waitingSince[site] = null;
+        broadcast("waiting-changed", { site, waiting: false });
+      }
+      try { selfRepair.onCaptured(site, { text }); } catch (_) {}
+      logEvent("checkin-reply", { site, chars: text.length });
+      return;
+    }
     let roundtableTag = null;
     let roundtableExplicit = false;
     ftRecordCapture(site, forcedAccept ? acceptedUntaggedRaw[site] : text); // 🧪 Feature Test: keep the RAW reply (tags and all) while a test runs
@@ -3921,6 +4029,9 @@ async function pollSite(site) {
     // "already captured this" check; otherwise store the turn as-is.
     state.captured[site] = (text !== turn.text) ? { ...turn, text } : turn;
     markCaptured(site);
+    lastActivityAt[site] = Date.now();
+    // P18: a normal reply that answers a delivered message proves this AI works.
+    try { const ans = relayTrace.answersOf(turn.id); if (selfRepair && ans && ans.length) selfRepair.noteWorking(site); } catch (_) {}
     state.noTagReprompts[site] = 0; // a valid reply landed — clear any missing-tag nudge streak
     if (roundtableExplicit) state.noToReminders[site] = 0;
     pushTranscriptTurn(turn);
@@ -4760,7 +4871,7 @@ ipcMain.handle("site:reload", (_evt, site) => {
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
   const view = siteViews[site];
   if (!view) return { ok: false, error: "NO_VIEW" };
-  view.webContents.loadURL(SITES[site].home);
+  view.webContents.loadURL(siteHome(site));
   state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
   state.captured[site] = null;
   state.noTagReprompts[site] = 0;
@@ -4786,7 +4897,7 @@ ipcMain.handle("sites:new-chat-all", () => {
     const view = siteViews[site];
     if (!view) { results[site] = false; continue; }
     try {
-      view.webContents.loadURL(SITES[site].newChat || SITES[site].home);
+      view.webContents.loadURL(siteNewChat(site));
       state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
       state.captured[site] = null;
       state.noTagReprompts[site] = 0;
@@ -4890,7 +5001,10 @@ ipcMain.handle("selector:pick", async (_evt, { site, role }) => {
       return { ok: false, error: problems[0], reasons: problems };
     }
     state.selectorOverrides[site] = { ...state.selectorOverrides[site], [role]: res.selector };
+    // P18: your own pick wins over anything the self-repair learned for that part.
+    if (state.learnedSelectors[site] && state.learnedSelectors[site][role]) { const l = { ...state.learnedSelectors[site] }; delete l[role]; state.learnedSelectors[site] = l; }
     saveStateDebounced();
+    try { selfRepair.requestCheck(site, "after-pick"); } catch (_) {}
     logEvent("selector-picked", { site, role, selector: res.selector, tag: res.tag || null, sample: res.sample || null });
   } else {
     logEvent("selector-pick-error", { site, role, error: (res && res.error) || "unknown" });
@@ -4904,6 +5018,7 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
   const next = { ...state.selectorOverrides[site] };
   delete next[role];
   state.selectorOverrides[site] = next;
+  if (state.learnedSelectors[site] && state.learnedSelectors[site][role]) { const l = { ...state.learnedSelectors[site] }; delete l[role]; state.learnedSelectors[site] = l; } // P18: "Clear" clears what was learned too
   saveStateDebounced();
   logEvent("selector-override-cleared", { site, role });
   return { ok: true };
@@ -5980,6 +6095,179 @@ function bookforgeSiteProblem(site) {
   return null;
 }
 function bookforgeSiteReady(site) { return !bookforgeSiteProblem(site); }
+
+// --- P18 self-repair: check-ins, failure classifier, automatic fixes, teach step ---
+// The engine lives in self-repair.js (pure, unit-tested); these are its hands on the
+// panes. Nothing here ever logs or broadcasts prompt/reply text — only codes, sites,
+// steps, outcomes and CSS selectors.
+const CHECKIN_TICK_MS = Number(process.env.AUTOINJECTOR_CHECKIN_TICK_MS) || 15000;
+const CHECKIN_USER_IDLE_MS = Number(process.env.AUTOINJECTOR_CHECKIN_USER_IDLE_MS) || 120000; // no check-in within 2 min of the user touching that pane
+const CHECKIN_STARTUP_DELAY_MS = Number(process.env.AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS) || 6000; // after the page check that follows a load
+const CHECKINS_ENABLED = process.env.AUTOINJECTOR_CHECKIN !== "0"; // tests / power users can switch the automatic ones off (on-demand still works)
+const PAGE_SCRIPT_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PAGE_SCRIPT_TIMEOUT_MS) || 15000;
+const RELOAD_WAIT_MS = Number(process.env.AUTOINJECTOR_RELOAD_WAIT_MS) || 45000;
+const LEARNED_ROLES = new Set(["input", "send", "assistant", "stop", "user"]);
+async function selfRepairRunPage(site, script) {
+  const view = siteViews[site];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve({ ok: false, error: "SCRIPT_TIMEOUT" }), PAGE_SCRIPT_TIMEOUT_MS); });
+  try {
+    const r = await Promise.race([Promise.resolve(view.webContents.executeJavaScript(script, true)), timeout]);
+    return r && typeof r === "object" ? r : { ok: false, error: "NO_RESULT" };
+  } catch (e) { return { ok: false, error: "SCRIPT_FAILED" }; }
+  finally { clearTimeout(timer); }
+}
+async function selfRepairReload(site, { home = false } = {}) {
+  const view = siteViews[site];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false };
+  const wc = view.webContents;
+  const loaded = new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), RELOAD_WAIT_MS);
+    try { wc.once("did-finish-load", () => { clearTimeout(t); resolve(true); }); } catch (_) { clearTimeout(t); resolve(false); }
+  });
+  let url = "";
+  try { url = wc.getURL(); } catch (_) {}
+  let onSite = false;
+  try { const h = new URL(siteHome(site)); const u = new URL(url); onSite = h.protocol === "file:" ? u.protocol === "file:" && u.pathname === h.pathname : u.hostname === h.hostname; } catch (_) {}
+  try {
+    if (home) wc.loadURL(siteNewChat(site));
+    else if (onSite && typeof wc.reload === "function") wc.reload();
+    else wc.loadURL(onSite ? url : siteHome(site));
+  } catch (_) { return { ok: false }; }
+  state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false };
+  if (home) { state.captured[site] = null; capturedCount[site] = null; }
+  logEvent("reload", { site, by: "self-repair", freshPage: !!home });
+  const ok = await loaded;
+  return { ok: ok && !paneLoadFailed[site] };
+}
+// Why a check-in should NOT go to this AI right now (null = go ahead). level:
+// "periodic" (strict), "startup", or "demand" (BookForge / the user asked).
+function selfRepairBusy(site, level) {
+  if (!state.enabled[site]) return "inactive";
+  const view = siteViews[site];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return "not_ready";
+  try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return "not_ready"; } catch (_) {}
+  if (state.generating[site] || state.stopShown[site]) return "busy";
+  if (sendQueues[site]) return "sending";
+  try { const st = bookforgeBridge && bookforgeBridge.status(); if (st && st.active && st.active[site]) return "bookforge"; } catch (_) {}
+  if (selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site) || ftState.running || bbState.running || bfLinkTest.running) return "test";
+  if (Date.now() - (lastUserInputAt[site] || 0) < CHECKIN_USER_IDLE_MS) return "typing";
+  const lr = lastRead[site];
+  if (lr && lr.composerEmpty === false && Date.now() - lr.at < 30000) return "typing";
+  const waitingFor = state.waiting[site] && state.waitingSince[site] ? Date.now() - state.waitingSince[site] : 0;
+  if (waitingFor && waitingFor < (level === "demand" ? 3 * 60000 : 10 * 60000)) return "waiting";
+  if (level !== "demand") {
+    if ((state.hr && state.hr.active) || (state.sequence && state.sequence.active) || (state.manager && ["waiting", "running", "thinking", "executing"].includes(state.manager.status))) return "relay";
+    if (Date.now() - (lastActivityAt[site] || 0) < (level === "periodic" ? 5 * 60000 : 20000)) return "recent";
+  }
+  return null;
+}
+function selfRepairSaveLearned(site, role, selector, how) {
+  if (!SITES[site] || !LEARNED_ROLES.has(role)) return false;
+  const sel = String(selector || "").trim();
+  if (!sel || sel.length > 300 || isBareTagSelector(sel)) return false;
+  state.learnedSelectors[site] = { ...(state.learnedSelectors[site] || {}), [role]: { selector: sel, how: String(how || "learned").slice(0, 20), learnedAt: Date.now(), version: selfRepairLib.LEARNED_VERSION } };
+  saveStateDebounced();
+  logEvent("selector-learned", { site, role, how, selector: sel });
+  return true;
+}
+const SELF_REPAIR_SAY = {
+  fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
+  needs_user: (L, ev) => ({ say: `⚠️ ${L} needs you: ${selfRepairLib.describeProblem(ev && ev.code, L).say}`, tone: "warn" }),
+  broken: (L, ev) => ({ say: `✕ ${L} isn't working and couldn't be fixed automatically (${(ev && ev.code) || "UNKNOWN"}) — BookForge will use your other AIs`, tone: "error" }),
+  teach: (L, ev) => (ev && ev.phase === "type" ? { say: `🎓 AutoInjector needs your help with ${L} — see the pop-up`, tone: "warn" } : null)
+};
+const selfRepair = selfRepairLib.createSelfRepair({
+  sites: SITE_IDS,
+  SITES,
+  label: (s) => siteLabel(s),
+  overrides: (s) => effectiveOverrides(s),
+  runPage: selfRepairRunPage,
+  reload: selfRepairReload,
+  readState: (s) => {
+    const lr = lastRead[s] || {};
+    return { text: lr.text || "", textLen: lr.textLen || 0, generating: !!state.generating[s], generatingMs: generatingSince[s] ? Date.now() - generatingSince[s] : 0, loadFailed: !!paneLoadFailed[s], inputFound: lr.inputFound };
+  },
+  sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined })),
+  saveLearned: selfRepairSaveLearned,
+  busyReason: selfRepairBusy,
+  isActive: (s) => !!state.enabled[s],
+  log: (kind, detail) => logEvent(kind, Object.assign({}, detail, /BROKEN|NEEDS_USER|STILL_FAILING|TIMEOUT|EXCEPTION/.test(String(detail && detail.outcome)) ? { severity: "warn" } : {})),
+  onChange: (site, snap, ev) => {
+    broadcast("self-repair", { site, repair: snap, event: ev || null });
+    const f = ev && SELF_REPAIR_SAY[ev.kind];
+    const line = f ? f(siteLabel(site), ev) : null;
+    if (line) { try { bookforgeNoteActivity({ kind: "repair", site, outcome: String(ev.kind).toUpperCase(), say: line.say, tone: line.tone }); } catch (_) {} }
+  },
+  options: {
+    intervalMs: (CHECKINS_ENABLED ? state.selfRepair.intervalMin : 0) * 60000,
+    probeTimeoutMs: Number(process.env.AUTOINJECTOR_PROBE_TIMEOUT_MS) || 90000,
+    sendTimeoutMs: Number(process.env.AUTOINJECTOR_PROBE_SEND_TIMEOUT_MS) || 45000,
+    earlyQuietMs: Number(process.env.AUTOINJECTOR_PROBE_EARLY_MS) || 10000,
+    teachTimeoutMs: Number(process.env.AUTOINJECTOR_TEACH_TIMEOUT_MS) || 4 * 60000,
+    teachPollMs: Number(process.env.AUTOINJECTOR_TEACH_POLL_MS) || 800,
+    reloadSettleMs: Number(process.env.AUTOINJECTOR_RELOAD_SETTLE_MS) || 4000,
+    unfreezeWaitMs: Number(process.env.AUTOINJECTOR_UNFREEZE_WAIT_MS) || 3000,
+    needsUserRecheckMs: Number(process.env.AUTOINJECTOR_NEEDS_USER_RECHECK_MS) || 60000,
+    pollStepMs: Math.max(100, Math.min(1000, POLL_MS)),
+    autoChecks: CHECKINS_ENABLED
+  }
+});
+function selfRepairApplySettings() { selfRepair.setIntervalMs((CHECKINS_ENABLED ? state.selfRepair.intervalMin : 0) * 60000); }
+function selfRepairStatus() {
+  return {
+    ok: true, settings: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, automatic: CHECKINS_ENABLED },
+    sites: Object.fromEntries(SITE_IDS.map((s) => [s, Object.assign({ label: siteLabel(s), active: !!state.enabled[s], learned: Object.fromEntries(Object.entries(state.learnedSelectors[s] || {}).map(([r, v]) => [r, { how: v.how, learnedAt: v.learnedAt }])) }, selfRepair.state(s))])),
+    events: selfRepair.events().slice(-30)
+  };
+}
+ipcMain.handle("selfrepair:status", () => selfRepairStatus());
+ipcMain.handle("selfrepair:probe", (_evt, payload) => {
+  const want = payload && Array.isArray(payload.sites) ? payload.sites.filter((s) => SITES[s]) : null;
+  const r = selfRepair.probeMany(want && want.length ? want : null, "you-asked", "demand");
+  logEvent("self-repair", { step: "check", reason: "you-asked", outcome: `started:${r.started.length}` });
+  return Object.assign({ ok: true }, r);
+});
+ipcMain.handle("selfrepair:teach-start", (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!state.enabled[site]) return { ok: false, error: "INACTIVE" };
+  return selfRepair.startTeach(site, null, { auto: false });
+});
+ipcMain.handle("selfrepair:teach-cancel", (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  return selfRepair.cancelTeach(site);
+});
+ipcMain.handle("selfrepair:reload", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const r = await selfRepairReload(site, {});
+  if (r.ok) selfRepair.requestCheck(site, "after-reload");
+  return r;
+});
+ipcMain.handle("selfrepair:forget-learned", (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  state.learnedSelectors[site] = {};
+  saveStateDebounced();
+  logEvent("selector-learned-cleared", { site });
+  return { ok: true };
+});
+ipcMain.handle("selfrepair:settings", (_evt, payload) => {
+  const p = payload || {};
+  if (p.intervalMin !== undefined) {
+    const n = Number(p.intervalMin);
+    if (!Number.isFinite(n) || n < 0 || n > 24 * 60) return { ok: false, error: "BAD_INTERVAL" };
+    state.selfRepair.intervalMin = Math.round(n);
+  }
+  if (p.startup !== undefined) state.selfRepair.startup = !!p.startup;
+  selfRepairApplySettings();
+  saveStateDebounced();
+  logEvent("self-repair", { step: "settings", outcome: `every:${state.selfRepair.intervalMin}min` });
+  return selfRepairStatus();
+});
 let bookforgeStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
 function startBookforgeBridge() {
   if (bookforgeBridge) return Promise.resolve({ ok: true });
@@ -5998,6 +6286,9 @@ async function startBookforgeBridgeNow() {
     siteReady: bookforgeSiteReady,
     siteProblem: (s) => { const p = bookforgeSiteProblem(s); return p ? p.say : null; },
     wrapPrompt: (site, text) => withEnvelope(text, site),
+    // contract v1.2: self-repair state per AI, and on-demand check-ins
+    siteState: (s) => selfRepair.health(s),
+    startProbe: (list) => selfRepair.probeMany(list, "bookforge", "demand"),
     sendToSite: async (site, text, meta) => {
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
       // await) once the view exists, so reading it first gives this send's
@@ -6011,7 +6302,11 @@ async function startBookforgeBridgeNow() {
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
     logger: (kind, detail) => logEvent(`bookforge-${kind}`, detail),
     // Text-free activity events -> the panel's live feed (+ "bookforge-activity" broadcast).
-    onEvent: (ev) => bookforgeNoteActivity(ev)
+    onEvent: (ev) => {
+      bookforgeNoteActivity(ev);
+      // P18.2: a real request that failed starts a check-in of that AI once it is free.
+      if (ev && ev.kind === "outcome" && !ev.selftest && ev.site && ["TIMEOUT", "LATE_EXPIRED", "SEND_FAILED"].includes(ev.outcome)) selfRepair.requestCheck(ev.site, `bookforge-${String(ev.outcome).toLowerCase()}`);
+    }
   });
   bridge.setToken = (t) => { currentToken = t; };
   try {
@@ -6071,7 +6366,10 @@ function bookforgeStatusSnapshotBase() {
   for (const s of SITE_IDS) {
     const base = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
     const problem = bookforgeSiteProblem(s);
+    const repair = selfRepair.state(s); // P18: ok | repairing | needs_user | broken | unknown (+ what was tried, the teach step)
     sites[s] = Object.assign({}, base, {
+      ready: !!base.ready && selfRepair.isUsable(s),
+      repair,
       problem: problem ? problem.code : null,
       problemSay: problem ? problem.say : null,
       label: siteLabel(s),
@@ -6097,6 +6395,7 @@ function bookforgeStatusSnapshotBase() {
     linkTest: { running: bfLinkTest.running, lastReport: bfLinkTest.lastReport, lastSummary: bfLinkTest.lastSummary },
     sites,
     bookforge: bfStatus,
+    selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
@@ -6133,7 +6432,14 @@ function bookforgeHealth(snap) {
   add("status_fresh", fresh ? "ok" : "warn", fresh ? "fresh" : b ? "stale" : conn.connected ? "connected, no status yet" : "no status yet");
   const active = SITE_IDS.filter((s) => snap.sites && snap.sites[s] && snap.sites[s].active);
   if (!active.length) add("panes", "warn", "no AI is Active");
-  for (const s of active) { const x = snap.sites[s]; add(`pane:${s}`, x.ready || x.inFlight ? "ok" : "bad", x.inFlight ? "busy" : x.ready ? "ready" : "not loaded"); }
+  for (const s of active) {
+    const x = snap.sites[s];
+    const rs = x.repair && x.repair.state;
+    if (rs === "repairing") { add(`pane:${s}`, "warn", "repairing itself"); continue; }
+    if (rs === "needs_user") { add(`pane:${s}`, "bad", "needs you"); continue; }
+    if (rs === "broken") { add(`pane:${s}`, "bad", "not working"); continue; }
+    add(`pane:${s}`, x.ready || x.inFlight ? "ok" : "bad", x.inFlight ? "busy" : x.ready ? "ready" : "not loaded");
+  }
   let level = "ok";
   if (!snap.enabled) level = "off";
   else if (checks.some((c) => c.level === "bad")) level = "bad";
@@ -6172,6 +6478,17 @@ function bookforgeDiagnostics(extra) {
     const last = x.last ? `${bfSafeCode(x.last.outcome)} ${Math.round((x.last.elapsed_ms || 0) / 1000)}s ${ago(x.last.at)}${x.last.selftest ? " (test)" : ""}` : "none";
     L.push(`AI ${s}: active ${x.active ? "yes" : "no"} · ready ${x.ready ? "yes" : "no"} · busy ${x.busy || x.inFlight ? "yes" : "no"} · last ${last}`);
   }
+  // P18.10: the self-repair, per AI — codes, steps and outcomes only (never page text).
+  L.push(`Check-ins: every ${state.selfRepair.intervalMin ? `${state.selfRepair.intervalMin} min` : "— (off)"} · at start ${state.selfRepair.startup !== false ? "yes" : "no"}${CHECKINS_ENABLED ? "" : " · automatic check-ins disabled (AUTOINJECTOR_CHECKIN=0)"}`);
+  for (const s of SITE_IDS) {
+    const r = selfRepair.state(s) || {};
+    const learned = Object.entries(state.learnedSelectors[s] || {}).map(([role, v]) => `${role}(${bfSafeCode(v.how)} ${ago(v.learnedAt)})`).join(" ");
+    L.push(`Self-repair ${s}: state ${bfSafeCode(r.state || "unknown")}${r.problem ? ` · problem ${bfSafeCode(r.problem)}` : ""}${r.since ? ` · since ${ago(r.since)}` : ""} · last check-in OK ${ago(r.lastProbeOkAt)}${r.running ? ` · now: ${bfSafeCode(r.step || "check")}` : ""}${r.teach && r.teach.active ? ` · teach step ${bfSafeCode(r.teach.phase)}` : ""}${learned ? ` · learned ${learned}` : ""}`);
+    const tried = (r.tried || []).slice(-8);
+    if (tried.length) L.push(`  tried: ${tried.map((t) => `${bfSafeCode(t.step)}=${bfSafeCode(String(t.outcome).split(":")[0])}${t.code ? `(${bfSafeCode(t.code)})` : ""}`).join(", ")}`);
+  }
+  const repairEvents = selfRepair.events().filter((e) => e.kind !== "probe").slice(-12);
+  if (repairEvents.length) L.push(`Recent self-repair events: ${repairEvents.map((e) => [new Date(e.at).toISOString().slice(11, 19), bfSafeCode(e.kind), e.site ? bfSafeCode(e.site) : "", e.step ? bfSafeCode(e.step) : "", e.code ? bfSafeCode(e.code) : "", e.outcome ? bfSafeCode(String(e.outcome).split(":")[0]) : ""].filter(Boolean).join(" ")).join(" | ")}`);
   const k = snap.counters;
   L.push(k ? `Counters: requests ${k.requests} · answered ${k.answered} · timeouts ${k.timeouts} · refused (wrong key) ${k.unauthorized}` : "Counters: (bridge not running)");
   const ls = bfLinkTest.lastSummary;
@@ -6529,6 +6846,7 @@ ipcMain.handle("bookforge:open-url", async (_evt, payload) => {
 
 app.whenReady().then(() => {
   loadPersistedState();
+  selfRepairApplySettings(); // P18.1: the saved check-in interval
   try { const s = dbService.init(userDataDir()); logEvent("db-init", { available: s.available, reason: s.reason }); }
   catch (e) { logEvent("db-init-error", { error: String(e) }); }
   try {

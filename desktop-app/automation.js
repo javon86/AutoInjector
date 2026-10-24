@@ -47,7 +47,7 @@ function buildSendScript(site, text, overrides, sendOpts) {
     text,
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    STOP_CANDIDATES: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
     ASSISTANT_CANDIDATES: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     PAUSE_MARKERS: ov.pauseMarkers || cfg.PAUSE_MARKERS || DEFAULT_PAUSE_MARKERS,
     // The [MSG #0042] header main.js stamps on every send. It is unique per send,
@@ -396,8 +396,12 @@ function buildReadScript(site, overrides) {
     ASSISTANT_CANDIDATES: ovAssistant ? [ovAssistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
     DEFAULT_ASSISTANT: cfg.ASSISTANT_CANDIDATES,
     OVERRIDE: ovAssistant,
+    // P18.4/P18.7: a reply selector the self-repair LEARNED (and proved with a
+    // check-in) is read on its own when it matches — the built-in ones that
+    // stopped working must not win over it with some stale element.
+    STRICT: !!(ovAssistant && ov.assistantStrict),
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
-    STOP_CANDIDATES: cfg.STOP_CANDIDATES || [],
+    STOP_CANDIDATES: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
   });
 
@@ -424,9 +428,11 @@ function buildReadScript(site, overrides) {
       try { return !!el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("disabled") !== null; } catch (_) { return false; }
     }
 
-    const all = [];
-    for (const sel of CFG.ASSISTANT_CANDIDATES) {
-      document.querySelectorAll(sel).forEach((n) => all.push(n));
+    let all = [];
+    if (CFG.STRICT) { try { all = Array.from(document.querySelectorAll(CFG.OVERRIDE)); } catch (_) { all = []; } }
+    const strictHit = all.length > 0;
+    if (!strictHit) for (const sel of CFG.ASSISTANT_CANDIDATES) {
+      try { document.querySelectorAll(sel).forEach((n) => all.push(n)); } catch (_) {}
     }
     let node = all.length ? all[all.length - 1] : null;
     let text = node ? (node.innerText || node.textContent || "") : "";
@@ -436,7 +442,7 @@ function buildReadScript(site, overrides) {
     // what the override read, the override is reading a fragment: use the
     // whole reply instead.
     let fragmentFixed = false;
-    if (CFG.OVERRIDE && text.trim()) {
+    if (CFG.OVERRIDE && text.trim() && !strictHit) {
       let full = null;
       for (const sel of CFG.DEFAULT_ASSISTANT) {
         try { const list = document.querySelectorAll(sel); if (list.length) { full = list[list.length - 1]; break; } } catch (_) {}
@@ -555,7 +561,7 @@ function buildReadScript(site, overrides) {
     // After a fragment fix the override's matches are paragraphs, not replies:
     // count with the built-in selectors, or report "unknown" after a climb.
     let count = 0;
-    const countWith = fragmentFixed === "defaults" ? CFG.DEFAULT_ASSISTANT : CFG.ASSISTANT_CANDIDATES;
+    const countWith = strictHit ? [CFG.OVERRIDE] : fragmentFixed === "defaults" ? CFG.DEFAULT_ASSISTANT : CFG.ASSISTANT_CANDIDATES;
     for (const sel of countWith) {
       try { const n = document.querySelectorAll(sel).length; if (n) { count = n; break; } } catch (_) {}
     }
@@ -773,7 +779,7 @@ function buildProbeScript(site, overrides) {
     INPUT: usableOverride(ov.input) ? [ov.input, ...cfg.INPUT_CANDIDATES] : cfg.INPUT_CANDIDATES,
     SEND: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     ASSISTANT: usableOverride(ov.assistant) ? [ov.assistant, ...cfg.ASSISTANT_CANDIDATES] : cfg.ASSISTANT_CANDIDATES,
-    STOP: cfg.STOP_CANDIDATES || [],
+    STOP: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
   });
   return `
   (() => {

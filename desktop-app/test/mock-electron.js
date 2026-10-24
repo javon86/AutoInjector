@@ -101,6 +101,12 @@ class FakeWebContents extends EventEmitter {
   once(evt, cb) { if (evt === "did-finish-load") setImmediate(cb); return this; }
   async executeJavaScript(script) {
     if (this.evaluator) return this.evaluator(script);
+    // P18 self-repair page scripts: run them for real against a fake page when the
+    // test gave one (test/fake-dom.js), else say there is no page DOM here.
+    if (script.includes("__AUTOINJECTOR_SELFREPAIR__")) {
+      if (this.selfRepairPage) return require("./fake-dom").runScript(script, this.selfRepairPage);
+      return { ok: false, error: "NO_FAKE_DOM" };
+    }
     if (script.includes("__AUTOINJECTOR_PICK__")) {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });
@@ -123,9 +129,11 @@ class FakeWebContents extends EventEmitter {
       // _busyCount: report AI_BUSY (the AI is still writing) this many times first (TR-25)
       if (this._busyCount > 0) { this._busyCount--; return { ok: false, error: "AI_BUSY" }; }
       const failThisAttempt = this._sendFailQueue.length ? this._sendFailQueue.shift() : this._forceSendFail;
+      if (typeof this.onSendAttempt === "function") { try { this.onSendAttempt(extractSentText(script), failThisAttempt); } catch (_) {} } // P18.5 tests: the page reacts while the send is still being confirmed
+      if (this._sendDelayAfterQueue && this._sendDelayAfterQueue.length) { const d = this._sendDelayAfterQueue.shift(); if (d) await new Promise((r) => setTimeout(r, d)); }
       if (failThisAttempt) return { ok: false, error: "SEND_NOT_CONFIRMED" };
       this.sentLog.push({ text: extractSentText(script), ts: Date.now() });
-      return { ok: true };
+      return { ok: true, verified: this._verified === undefined ? undefined : this._verified };
     }
     // Read script: report the latest reply text plus the site's generating state.
     // `generating`/`sendReady` default to "done" so existing tests are unaffected;
