@@ -408,11 +408,18 @@ class BookPath:
         # canon
         a01 = self.approved("A01")
         d01 = self.drafts("A01") + self.drafts("A04") + self.drafts("A03")  # what the wizard drafts
+        try:  # P7/P17: how many characters have a sheet and a voice card the writer can use
+            from . import characters as chars_mod  # noqa: PLC0415
+            ents = chars_mod.all_entries(self.store, self.pid, self.branch)
+            sheets = {"complete": sum(1 for r in a01 if chars_mod.complete(ents.get(r["record_id"]))),
+                      "total": len(a01)}
+        except Exception:  # noqa: BLE001 - a count must never break the checklist
+            sheets = None
         step("canon", "Characters and places", "At least one approved main character (Set A); approve the places "
              "and world you want to use too. More canon can come any time.",
              "done" if a01 else ("needs_you" if d01 else ("ai_can" if ai else "needs_you")),
              op="A01", action="make" if ai else "new", approve=[item(r) for r in d01][:12],
-             count=len(a01))
+             count=len(a01), sheets=sheets)
         # planning
         prev_ok = True
         for sid, op, title, about, need in (
@@ -430,6 +437,11 @@ class BookPath:
         # chapters
         outline = self.outline()
         chapters = []
+        try:  # P8: the scene cards of each chapter (numbers only)
+            from . import scenes as scenes_mod  # noqa: PLC0415
+            scene_entries = scenes_mod.all_entries(self.store, self.pid, self.branch) if outline else {}
+        except Exception:  # noqa: BLE001 - never break the checklist
+            scenes_mod, scene_entries = None, {}
         if outline:
             for ch in self.outline_chapters(outline):
                 ctx, latest, appr = self.chapter_prose(outline, ch["chapter_id"])
@@ -444,9 +456,11 @@ class BookPath:
                 st = ("needs_you" if revision else "done" if appr else
                       "needs_you" if latest and latest["lifecycle"] in ("DRAFT", "VALIDATED")
                       else "ai_can" if ai else "needs_you")
+                sc = scenes_mod.summary(scene_entries.get(scenes_mod.ekey(outline["record_id"], ch["chapter_id"])),
+                                        outline) if scenes_mod else None
                 chapters.append(dict(ch, state=st, context_id=ctx["record_id"] if ctx else None,
                                      prose=item(latest, ch["chapter_id"]) if latest else None,
-                                     approved=item(appr) if appr else None, revision_waiting=revision))
+                                     approved=item(appr) if appr else None, revision_waiting=revision, scenes=sc))
         all_written = bool(chapters) and all(c["state"] == "done" for c in chapters)
         # The book is put together from APPROVED chapter texts only: a waiting revision of an approved chapter keeps
         # the chapters step open (Approve) without stopping the author from re-assembling the approved book.

@@ -37,6 +37,8 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from . import chapter_brief
+from . import characters as chars_mod
 from . import editor_rubric as rubric
 from . import prose_audit
 from . import providers as providers_mod
@@ -379,12 +381,31 @@ class EditorService:
         return out
 
     def pattern(self, pid, branch, rec, strictness=None) -> dict | None:
-        """The P6 pattern report for a chapter draft (None for other drafts)."""
+        """The P6 pattern report for a chapter draft (None for other drafts), with the voice check (P17) against the
+        characters' voice cards."""
         if rec["module_id"] != "C02":
             return None
         text = (rec.get("data") or {}).get("text") or ""
         st = strictness or self.settings()["strictness"]
-        return prose_audit.audit(text, chapter=None, settings={"strictness": st}, names=self.names(pid, branch))
+        try:
+            voices = chars_mod.voice_words(self.store, pid, branch)
+        except Exception:  # noqa: BLE001 - the voice words are a hint
+            log.exception("could not read the voice cards")
+            voices = {}
+        return prose_audit.audit(text, chapter=None, settings={"strictness": st, "voices": voices},
+                                 names=self.names(pid, branch))
+
+    def brief(self, pid, branch, info, principal="author") -> dict | None:
+        """The chapter's writing brief (voice cards of the characters present, scene cards) for the editor."""
+        if not info.get("chapter_id"):
+            return None
+        try:
+            outline = BookPath(self.engine, principal, pid, branch).outline()
+            brief, _meta = chapter_brief.build(self.store, pid, branch, outline, info["chapter_id"])
+            return brief
+        except Exception:  # noqa: BLE001 - context is best effort
+            log.exception("could not build the chapter brief for the editor")
+            return None
 
     def _voices(self, pid, branch) -> list[dict]:
         out = []
@@ -398,18 +419,32 @@ class EditorService:
                 continue
             data = rec.get("data") or {}
             attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
-            out.append({"name": str(data.get("concept") or "")[:80],
-                        "sheet": {k: _clip(v, 300) for k, v in list(attrs.items())[:12] if isinstance(v, str)}})
+            entry = chars_mod.get_entry(self.store, pid, branch, r["record_id"]) or {}
+            row = {"name": str(data.get("concept") or "")[:80],
+                   "sheet": {k: _clip(v, 300) for k, v in list(attrs.items())[:12] if isinstance(v, str)}}
+            if entry.get("voice"):
+                row["voice_card"] = {k: v for k, v in entry["voice"].items() if v}
+            if entry.get("sheet"):
+                row["character_sheet"] = {k: entry["sheet"].get(k) for k in ("wants", "fear", "secret", "never_say",
+                                                                             "stress") if entry["sheet"].get(k)}
+            out.append(row)
             if len(out) >= 12:
                 break
         return out
 
-    def _context(self, pid, branch, rec, report, info) -> tuple[dict, list]:
+    def _context(self, pid, branch, rec, report, info, brief=None) -> tuple[dict, list]:
         approved, _d, protected = canon_context(self.engine, pid, branch, max_approved=40, max_drafts=0)
         ctx = {"book_profile": book_profile_brief(self.store, pid), "canon": {"approved_records": approved},
                "characters": self._voices(pid, branch), "protected_facts": protected[:40]}
         data = rec.get("data") or {}
         if rec["module_id"] == "C02":
+            if brief:
+                ctx["voice_cards"] = {"cards": brief.get("voice_cards") or [],
+                                      "others": brief.get("other_voices") or []}
+                if brief.get("scene_cards"):
+                    ctx["scene_cards"] = brief["scene_cards"]
+                if brief.get("pov"):
+                    ctx["pov"] = brief["pov"]
             ctx["chapter_text"] = str(data.get("text") or "")[:MAX_TEXT_CHARS]
             ctx["outline"] = {k: info.get(k) for k in ("chapter_id", "number", "of", "last", "objective", "previous",
                                                        "next")}
@@ -432,7 +467,8 @@ class EditorService:
                                  "and chapter outline", status="REJECTED")
         st = self.settings()
         info = chapter or (self.chapter_info(pid, branch, rec, job.principal) if rec["module_id"] == "C02" else {})
-        dims = rubric.dimensions_for(rec["module_id"], bool(info.get("last")))
+        brief = self.brief(pid, branch, info, job.principal) if rec["module_id"] == "C02" else None
+        dims = rubric.dimensions_for(rec["module_id"], bool(info.get("last")), bool((brief or {}).get("scene_cards")))
         report = self.pattern(pid, branch, rec, st["strictness"])
         writer = rv.writer_of(pid, branch, rec)
         rv.plan_reviewer(job, writer)  # the editor is never the writer when another AI works (P3.1)
@@ -441,7 +477,7 @@ class EditorService:
         job.phase = f"The editor is reading “{title}”"
         tok = rv.work.begin(pid, rec["module_id"], f"The editor is reading {title}")
         try:
-            ctx, protected = self._context(pid, branch, rec, report, info)
+            ctx, protected = self._context(pid, branch, rec, report, info, brief)
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=rubric.task_text(rec["module_id"], dims),
                                        schema=_schema(dims), context=ctx, protected=protected)
         finally:

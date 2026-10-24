@@ -6,7 +6,9 @@ so a page reload shows it and a BookForge restart shows it as "interrupted — R
 
     safety backup -> book profile (the AI invents title, genre, audience, tone, idea, pen name)
     -> characters and places (A01/A04/A03 through the Bible Builder: world sketch + proposals, created as drafts)
-    -> premise B01 -> main plot B03 -> chapter outline B11 -> every chapter (C01 context + C02 prose)
+    -> character sheets and voice cards (P7/P17: made with the characters, or made now for any without)
+    -> premise B01 -> main plot B03 -> chapter outline B11 -> every chapter (scene cards planned by the writer and
+    checked by an independent AI (P8), then C01 context + C02 prose)
     -> book format (I01 profiles) -> backup + assembly (G02/G01/G05/G04/G07) -> backup + exports (G11 PDF,
     G12 EPUB, G13 DOCX - all three release profiles are switched on for this book) -> content check H05.
 
@@ -36,7 +38,9 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from . import characters as chars_mod
 from . import h_checks as hc
+from . import scenes as scenes_mod
 from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_brief
 from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get_profile, problems, save_profile
 from .requests import candidate_payload
@@ -64,6 +68,8 @@ STEPS = [
     ("profile", None, None, "Invent the book", "The AI invents the title, genre, readers, tone and the idea."),
     ("canon", "A", "A01", "Characters and places", "The AI drafts the main characters and places (Bible Builder); "
      "each one is reviewed and approved under your consent."),
+    ("characters", "A", "A01", "Character sheets and voices", "What each character wants, needs, fears and hides, "
+     "and how each one talks (a voice card each); the writer gets them in every chapter."),
     ("premise", "B", "B01", "Premise", "What the book is about in one or two sentences."),
     ("plot", "B", "B03", "Main plot", "The main storyline built from the premise and the characters."),
     ("outline", "B", "B11", "Chapter outline", "The chapter-by-chapter plan."),
@@ -624,8 +630,24 @@ class AutoBookService(_Runner):
     def _step(self, run, sid) -> dict:
         return next(s for s in run["steps"] if s["id"] == sid)
 
+    @staticmethod
+    def _ensure_steps(run):
+        """A run saved by an older BookForge (resumed after an update) gets the steps added since, in order."""
+        have = {s["id"]: s for s in run.get("steps") or []}
+        if all(sid in have for sid in STEP_IDS):
+            return
+        out = []
+        for sid, st, op, title, about in STEPS:
+            if sid in have:
+                out.append(have[sid])
+                continue
+            out.append({"id": sid, "set": st, "op": op, "title": title, "about": about, "state": "pending",
+                        "message": "", "started_at": None, "finished_at": None, "problem": None, "items": []})
+        run["steps"] = out
+
     def _run(self, run_id: str):
         run = self.get(run_id)
+        self._ensure_steps(run)
         self._tl.engine, self._tl.assist, self._tl.review = self._services(run)
         self._tl.run_id = run_id
         run["status"] = "running"
@@ -748,13 +770,18 @@ class AutoBookService(_Runner):
                    phase="Cancelled. The book made so far stays in Your books.")
 
     # ------------------------------------------------------------------ approvals under the run consent
-    def _approve(self, run, ref, *, why: str, verdict: str | None = None, slot: str | None = None) -> dict:
-        """Approve exactly this revision under the author's consent for THIS run (never outside one)."""
+    def _check_consent(self, run, project_id):
+        """Approvals under the run consent happen only inside the live thread of the run the author started, while it
+        runs, for that run's own book."""
         if (getattr(self, "_thread_run", None) != run["id"] or threading.current_thread() is not
                 self._threads.get(run["id"]) or not run.get("consent") or run.get("status") not in ("running", "waiting")
-                or ref.get("project_id") != run.get("project_id")):
+                or project_id != run.get("project_id")):
             raise BookforgeError("PERMISSION_DENIED", "/consent", "approvals under the Make-a-book consent happen only "
                                  "inside the run the author started, for that run's own book", status="REJECTED")
+
+    def _approve(self, run, ref, *, why: str, verdict: str | None = None, slot: str | None = None) -> dict:
+        """Approve exactly this revision under the author's consent for THIS run (never outside one)."""
+        self._check_consent(run, ref.get("project_id"))
         bp = self.bp(run)
         res = bp.approve_ref(ref)
         label = f"Approved under your Make-a-book-for-me consent, run {run['id']}"
@@ -1222,6 +1249,132 @@ class AutoBookService(_Runner):
         st["items"] = [dict(x, state="done") for x in st.get("items") or []]
         st["message"] = f"{n} character(s) and {len(self.bp(run).approved('A04'))} place(s) approved"
 
+    def _s_characters(self, run, st):
+        """P7/P17: every approved character has a sheet and a voice card (made with the character by the Bible
+        Builder; any character without one gets it now from the writer AI). Never blocks the book: a character whose
+        sheet cannot be made is flagged ⚠️ and the run goes on (only TIMEOUT / a busy or missing AI pause it)."""
+        bp = self.bp(run)
+        pid, branch = run["project_id"], run["branch_id"]
+        people = bp.approved("A01")
+        st["items"] = [{"id": r["record_id"], "label": safe_title(self.app.engine.contracts, r), "state": "pending"}
+                       for r in people]
+        made = failed = 0
+        for item, rec in zip(st["items"], people):
+            self.check(run)
+            entry = chars_mod.get_entry(self.store, pid, branch, rec["record_id"])
+            if chars_mod.complete(entry):
+                item.update(state="done", note="made with the character")
+                continue
+            item["state"] = "running"
+            st["message"] = f"The AI is writing the sheet and voice of “{item['label']}”"
+            run["phase"] = st["message"]
+            self.save(run)
+            rj = self._sub_job(run, "characters", rec["record_id"], run["settings"].get("slot_id"))
+            try:
+                chars_mod.generate(self._assist, rj, pid, branch, rec["record_id"])
+            except BookforgeError as exc:
+                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                    item["state"] = "paused"
+                    self._ai_problem(exc, f"writing the sheet and voice of “{item['label']}”")
+                failed += 1
+                item.update(state="failed", note=exc.code)
+                self.event(run, "note", f"⚠️ The sheet and voice of “{item['label']}” could not be made ({exc.code}); "
+                           "the book goes on — make them on the character's page", code="CHARACTER_SHEET_FAILED",
+                           record_id=rec["record_id"])
+                self.save(run)
+                continue
+            made += 1
+            item.update(state="done", note="made now")
+            self.event(run, "characters", f"The AI wrote the sheet and voice card of “{item['label']}”",
+                       slot=rj.slot, record_id=rec["record_id"])
+            self.save(run)
+        ok = sum(1 for i in st["items"] if i["state"] == "done")
+        st["message"] = f"{ok} of {len(people)} character(s) have a sheet and a voice card" + (
+            f" ({made} made now)" if made else "") + (f" · ⚠️ {failed} could not be made" if failed else "")
+
+    def _scene_cards(self, run, st, cid: str, item: dict):
+        """P8: before a chapter is written, the writer AI plans its scenes and an independent AI checks them (goal,
+        obstacle from the world, something unsaid); REVISE -> the writer reworks them (max MAX_FIXES), then they are
+        approved under the run consent (⚠️ flagged when the checker still had notes). Never blocks the book: only a
+        TIMEOUT or a busy/missing AI pauses the step; any other failure writes the chapter from the outline alone."""
+        bp = self.bp(run)
+        outline = bp.outline()
+        pid, branch = run["project_id"], run["branch_id"]
+        planner = self._review.scenes
+        label = f"chapter {cid}"
+        entry = scenes_mod.get_entry(self.store, pid, branch, outline["record_id"], cid)
+        if scenes_mod.usable(entry, outline) and entry.get("status") == "approved":
+            item["scenes"] = scenes_mod.summary(entry, outline)
+            return
+        counts = run.setdefault("fix_counts", {})
+        key = f"scenes:{outline['record_id']}:{cid}"
+        try:
+            if not scenes_mod.usable(entry, outline):
+                st["message"] = f"The AI is planning the scenes of {label}"
+                item["phase"] = "planning scenes"
+                run["phase"] = st["message"]
+                self.save(run)
+                rj = self._sub_job(run, "scenes", cid, run["settings"].get("slot_id"))
+                entry = planner.make(rj, cid)
+                self.event(run, "scenes", f"The AI planned {len(entry['cards'])} scene(s) for {label}", slot=rj.slot)
+            while True:
+                self.check(run)
+                st["message"] = f"An AI is checking the scenes of {label}"
+                item["phase"] = "checking scenes"
+                run["phase"] = st["message"]
+                self.save(run)
+                cj = self._sub_job(run, "scenes_check", cid)
+                res = planner.check(cj, cid)
+                self.event(run, "scenes", f"Scene check of {label}: {res['verdict']} · by {res.get('reviewer')}"
+                           + (f" — {'; '.join(res['why'])}" if res.get("why") else ""), verdict=res["verdict"],
+                           slot=cj.slot, independent=res.get("independent"))
+                if res.get("independent") is False:
+                    self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} (the scenes of {label})",
+                               code="REVIEW_NOT_INDEPENDENT")
+                if res["verdict"] == "PASS":
+                    flagged = False
+                    break
+                n = int(counts.get(key, 0))
+                if n >= MAX_FIXES:
+                    flagged = True
+                    self.event(run, "note", f"⚠️ The scene checker still had notes on {label} after {MAX_FIXES} "
+                               "reworks; the scenes are used as they are", code="SCENES_NOTES")
+                    break
+                counts[key] = n + 1
+                st["message"] = f"The AI is reworking the scenes of {label} ({n + 1} of {MAX_FIXES})"
+                item["phase"] = "reworking scenes"
+                run["phase"] = st["message"]
+                self.save(run)
+                rj = self._sub_job(run, "scenes", cid, run["settings"].get("slot_id"))
+                entry = planner.make(rj, cid, revise=True)
+                self.event(run, "scenes", f"The AI reworked the scenes of {label} ({n + 1} of {MAX_FIXES})",
+                           slot=rj.slot)
+            self._check_consent(run, pid)
+            text = f"Approved under your Make-a-book-for-me consent, run {run['id']}" + (
+                " (the checker still had notes)" if flagged else "")
+            entry = planner.approve(run["principal"], pid, branch, cid, version=res["version"], how="run_consent",
+                                    run_id=run["id"], flagged=flagged, label=text)
+            self.event(run, "scenes", f"Scene cards of {label}: {text}", approval="run_consent",
+                       code="SCENES_NOTES" if flagged else None)
+            item["scenes"] = scenes_mod.summary(entry, outline)
+        except BookforgeError as exc:
+            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                self._ai_problem(exc, f"planning the scenes of {label}", chapter_id=cid)
+            if exc.code == "PERMISSION_DENIED":
+                raise
+            item["scenes"] = dict(scenes_mod.summary(
+                scenes_mod.get_entry(self.store, pid, branch, outline["record_id"], cid), outline) or {},
+                failed=exc.code)
+            self.event(run, "note", f"⚠️ The scenes of {label} could not be planned or checked ({exc.code}); the "
+                       "chapter is written from the outline" + (" and the unchecked scene cards" if
+                                                                scenes_mod.usable(scenes_mod.get_entry(
+                                                                    self.store, pid, branch, outline["record_id"],
+                                                                    cid), outline) else ""),
+                       code="SCENES_FAILED")
+        finally:
+            item.pop("phase", None)
+            self.save(run)
+
     def _bible(self, run, st, counts):
         prof = book_profile_brief(self.store, run["project_id"])
         sess = BibleSession(self._assist, run["principal"], run["project_id"], run["branch_id"],
@@ -1382,6 +1535,14 @@ class AutoBookService(_Runner):
                 if latest and latest["lifecycle"] in REVIEWABLE and not latest.get("stale"):
                     rid = latest["record_id"]
                 else:
+                    try:
+                        self._scene_cards(run, st, cid, item)
+                    except StepProblem:
+                        item["state"] = "paused"
+                        raise
+                    st["message"] = f"Chapter {idx + 1} of {len(chapters)}"
+                    run["phase"] = st["message"]
+                    self.save(run)
                     payload = bp.prepare_chapter(cid)
                     ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
                     rid = ref["record_id"]
@@ -1578,6 +1739,37 @@ class WriteAllService(_Runner):
         self._launch(job, self._run)
         return self.public(job)
 
+    def _plan_scenes(self, job, bp, item):
+        """P8 outside runs: a chapter without scene cards gets them from the writer AI first (a draft the author can
+        check, change and approve on the chapter's scene page). A failure is noted and the chapter is written from
+        the outline; TIMEOUT / a busy AI stop like a chapter would."""
+        outline = bp.outline()
+        if not outline:
+            return
+        entry = scenes_mod.get_entry(self.store, job["project_id"], job["branch_id"], outline["record_id"], item["id"])
+        if scenes_mod.usable(entry, outline):
+            return
+        from .review import ReviewJob  # noqa: PLC0415
+        rj = ReviewJob("scenes", job["principal"], job["project_id"], job["branch_id"], [item["id"]], None)
+        rj.started, rj.status, rj.retry_busy = time.time(), "running", True
+        rj.check = lambda: self.check(job)  # type: ignore[method-assign]
+        rj.on_wait = lambda info: self.on_wait(job, info)
+        job["phase"] = f"Planning the scenes of {item['label'].lower()}"
+        self.save(job)
+        try:
+            e = self.app.review.scenes.make(rj, item["id"])
+            item["scenes"] = scenes_mod.summary(e, outline)
+            self.event(job, "scenes", f"The AI planned {len(e['cards'])} scene(s) for {item['label'].lower()} "
+                       "(not checked yet)", slot=rj.slot)
+        except BookforgeError as exc:
+            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
+                raise StepProblem(exc.code, f"The AI did not answer while planning the scenes of "
+                                  f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else BUSY_FIX,
+                                  chapter_id=item["id"]) from None
+            self.event(job, "note", f"⚠️ The scenes of {item['label'].lower()} could not be planned ({exc.code}); it "
+                       "is written from the outline", code="SCENES_FAILED")
+        self.save(job)
+
     def _run(self, job_id):
         job = self.get(job_id)
         health = self.app.engine.providers.health
@@ -1604,6 +1796,7 @@ class WriteAllService(_Runner):
                             self.event(job, "skip", f"{item['label']} was already written; not written again")
                             self.save(job)
                             continue
+                        self._plan_scenes(job, bp, item)
                         payload = bp.prepare_chapter(item["id"])
                         ref = self.ai_create(job, bp, "C02", payload, f"chapter {item['id']}")
                 except StepError as exc:

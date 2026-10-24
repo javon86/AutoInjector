@@ -40,7 +40,7 @@ STEP_KIND = {"backup": "backup", "export": "export", "wait": "retry", "retry": "
              "resume": "resume", "problem": "problem", "cancel": "cancel", "review": "ai_review", "fix": "ai_fix",
              "fix_done": "ai_fix", "fix_failed": "problem", "approve": "approval", "start": "run",
              "finished": "run", "ai": "ai", "done": "step", "project": "run", "note": "note", "failover": "note",
-             "probe": "note", "editor": "editor", "rewrite": "editor"}
+             "probe": "note", "editor": "editor", "rewrite": "editor", "scenes": "scenes", "characters": "characters"}
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 SAFE_TEXT = re.compile(r"[\x00-\x1f]")
 
@@ -176,6 +176,32 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    f"{p.get('restored_from')} is back as v{p.get('to_version')} ({p.get('why')})",
                    "outcome": "REJECTED", "problem": {"code": "EDITOR_REWRITE_REJECTED",
                                                       "message": "the rewrite was not better, so it was not kept"}}
+        elif et == "characters.sheet_saved":
+            ent = {"kind": "characters", "step": _step(contracts, "A01"), "who": "AI" if p.get("by") == "ai" else "you",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"Character sheet and voice card of {p.get('record_id')}: version {p.get('version')} "
+                   f"({p.get('sheet_fields', 0)} sheet field(s), {p.get('voice_fields', 0)} voice field(s), "
+                   f"{p.get('relationships', 0)} relationship(s))", "outcome": "SUCCESS"}
+        elif et == "scenes.saved":
+            ent = {"kind": "scenes", "step": _step(contracts, "C02"), "who": "AI" if p.get("by") == "ai" else "you",
+                   "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
+                   "what": f"Scene cards of chapter {p.get('chapter_id')}: version {p.get('version')} "
+                   f"({p.get('scenes', 0)} scene(s), {p.get('how') or 'made'})", "outcome": "SUCCESS"}
+        elif et == "scenes.reviewed":
+            same = p.get("independent") is False
+            ent = {"kind": "ai_review", "step": _step(contracts, "C02"), "who": "AI",
+                   "ai": {"slot": p.get("ai_slot"), "writer_slot": p.get("writer_slot")},
+                   "what": f"Scene check of chapter {p.get('chapter_id')} v{p.get('version')}: {p.get('verdict')}"
+                   + (f" ({p.get('failing')} scene(s) to rework)" if p.get("failing") else "")
+                   + (f" ⚠️ {NOT_INDEPENDENT}" if same else ""), "outcome": p.get("verdict"),
+                   "warning": NOT_INDEPENDENT if same else None}
+        elif et == "scenes.approved":
+            how = p.get("how") or "author"
+            ent = {"kind": "approval", "step": _step(contracts, "C02"), "who": "you" if how == "author" else "BookForge",
+                   "what": f"Scene cards of chapter {p.get('chapter_id')} v{p.get('version')}: "
+                   + (p.get("label") or "approved"), "outcome": "APPROVED", "approval": how,
+                   "problem": {"code": "SCENES_NOTES", "message": "the scene checker still had notes"}
+                   if p.get("flagged") else None}
         elif et == "review.ai_fix":
             ent = {"kind": "ai_fix", "step": _step(contracts, p.get("module_id")), "who": "AI",
                    "ai": {"slot": p.get("ai_slot")}, "what": f"AI fix: new version {p.get('to_version')} of "

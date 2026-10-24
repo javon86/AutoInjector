@@ -986,3 +986,29 @@ html:not(.show-tech) .tech { display: none !important; }
 .ed-after ins { background: var(--ok-soft); text-decoration: none; }
 .mb-ed.flagged { color: var(--warn); font-weight: 600; }
 @media (max-width: 600px) { .ed-score { grid-template-columns: 1fr 3em; } .ed-score .ed-bar { grid-column: 1 / -1; grid-row: 2; } }
+
+/* 🎭 character sheets + voice cards (P7/P17) and 🎬 scene cards (P8) */
+.lbl-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.lbl-row label { margin: 0; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 6px 8px; align-items: center; margin-bottom: 6px; }
+@media (max-width: 640px) { .grid-3 { grid-template-columns: minmax(0, 1fr); } .grid-3 .link { justify-self: start; } }
+.char-card h3, .scenes-card h3 { margin: 12px 0 6px; }
+.char-dl dd { white-space: pre-wrap; }
+.char-grid > section { min-width: 0; }
+ul.samples { margin: 0; padding-left: 1.2em; }
+ul.samples q { font-style: italic; }
+.rel-list { margin: 4px 0 0; padding-left: 1.2em; }
+.char-form fieldset, .scenes-form fieldset { min-width: 0; }
+.scene-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 12px; }
+.scene-card { border: 1px solid var(--border); border-left: 4px solid var(--set-C); border-radius: var(--radius); padding: 8px 12px; background: var(--surface-2); min-width: 0; }
+.scene-card h3 { margin: 0 0 6px; font-size: 1rem; }
+.scene-edit { border-left: 4px solid var(--set-C); }
+.rv-box { padding: 8px 12px; border-radius: var(--radius); margin: 8px 0; border: 1px solid var(--border); }
+.rv-box.ok { background: var(--ok-soft); }
+.rv-box.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.rv-box ul { margin: 4px 0; padding-left: 1.2em; }
+.scenes-link { padding: 2px 6px; }
+.scenes-link .badge { margin: 0; }
+.mb-sc.flagged { color: var(--warn); font-weight: 600; }
+.char-dl ul.chips { list-style: none; padding: 0; margin: 0; }
+.char-dl ul.chips li { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 999px; padding: 1px 10px; font-size: .9rem; }

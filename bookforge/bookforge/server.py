@@ -627,6 +627,13 @@ class App:
             raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
         if kind == "assist":
             new = self.assist.start_assist(principal, dict(r))
+        elif kind in ("review_characters", "review_scenes", "review_scenes_check"):
+            rid = (r.get("record_ids") or [None])[0]
+            fn = {"characters": self.review.start_character_ai, "scenes": self.review.start_scenes_ai,
+                  "scenes_check": self.review.start_scenes_check}.get(r.get("kind"))
+            if fn is None or not rid:
+                raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
+            new = fn(principal, r["project_id"], r["branch_id"], rid, {"slot_id": r.get("slot_id")})
         elif kind in ("review_review", "review_fix", "review_editor", "review_editor_fix"):
             fn = {"review": self.review.start_review, "fix": self.review.start_fix, "editor": self.review.start_editor,
                   "editor_fix": self.review.start_editor_fix}.get(r.get("kind"), self.review.start_fix)
@@ -693,6 +700,26 @@ class App:
                 return 200, rv.cancel_job(principal, rest[1])
             if len(rest) == 2 and rest[0] == "record" and method == "GET":
                 return 200, rv.record_reviews(principal, pid, branch, rest[1])
+            # 🎭 character sheets and voice cards (P7/P17)
+            if rest == ["characters"] and method == "GET":
+                return 200, rv.characters_info(principal, pid, branch)
+            if len(rest) == 2 and rest[0] == "characters" and method == "GET":
+                return 200, rv.character_info(principal, pid, branch, rest[1])
+            if len(rest) == 2 and rest[0] == "characters" and method == "PUT":
+                return 200, rv.save_character(principal, pid, branch, rest[1], body)
+            if len(rest) == 3 and rest[0] == "characters" and rest[2] == "ai" and method == "POST":
+                return 202, rv.start_character_ai(principal, pid, branch, rest[1], body)
+            # 🎬 scene cards (P8)
+            if len(rest) == 2 and rest[0] == "scenes" and method == "GET":
+                return 200, rv.scenes_info(principal, pid, branch, rest[1])
+            if len(rest) == 2 and rest[0] == "scenes" and method == "PUT":
+                return 200, rv.save_scenes(principal, pid, branch, rest[1], body)
+            if len(rest) == 3 and rest[0] == "scenes" and rest[2] == "ai" and method == "POST":
+                return 202, rv.start_scenes_ai(principal, pid, branch, rest[1], body)
+            if len(rest) == 3 and rest[0] == "scenes" and rest[2] == "check" and method == "POST":
+                return 202, rv.start_scenes_check(principal, pid, branch, rest[1], body)
+            if len(rest) == 3 and rest[0] == "scenes" and rest[2] == "approve" and method == "POST":
+                return 200, rv.approve_scenes(principal, pid, branch, rest[1], body)
         except BookforgeError as exc:
             from .assist import FIX  # noqa: PLC0415
             for e in exc.errors:

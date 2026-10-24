@@ -20,6 +20,11 @@ What is counted (each check has a plain label, a threshold per 1 000 words or a 
                      words ("just", "very", "softly", "something" ...); names of characters are ignored.
 * ``dialogue_share`` how much of the dialogue each speaker has (stats; a finding when one voice has nearly all of it).
 * ``reassurance``    lines that take the risk away ("It won't hurt anyone", "don't worry", "you're safe").
+* ``voice_sameness`` (P17) two speakers who sound alike: similar words per line and question rate AND a high share of
+                     the same content words (per-speaker stats in ``stats["voices"]``: lines, words per line, question
+                     and exclamation rate, top words, use of their voice card's favourite phrases and vocabulary).
+* ``voice_never_word`` (P17) a speaker uses a word their voice card says they would never use
+                     (``settings["voices"] = {name: {phrases, never_words, vocabulary, aliases}}``).
 
 Output: ``{"words", "paragraphs", "sentences", "findings": [...], "stats": {...}, "summary": {"major", "minor",
 "info"}, "strictness"}``. Each finding: ``{"id", "check", "label", "severity": info|minor|major, "count",
@@ -102,7 +107,11 @@ THRESHOLDS = {
     "watch_word": {"min": 4, "minor": 3.0, "major": 6.0},
     "dialogue_share": {"min": 6, "minor": 0.85, "major": 0.95},     # one speaker's share of dialogue words
     "reassurance": {"min": 1, "minor": 1.0, "major": 2.5},
+    "voice_sameness": {"min": 3, "minor": 0.25, "major": 0.40},     # lines per speaker; share of shared content words
+    "voice_never_word": {"min": 1, "minor": 1.0, "major": 3.0},     # uses of a never-word (count, not per 1 000)
 }
+VOICE_LINE_RATIO = 0.25   # words per line within 25% of each other ...
+VOICE_QUESTION_GAP = 0.20  # ... and question rates within 20 points: the rhythm looks alike
 LABELS = {
     "gesture": "Repeated gesture or stillness phrase",
     "not_parallel": "Negative parallelism (“Not X. Not Y.”)",
@@ -116,6 +125,8 @@ LABELS = {
     "watch_word": "Filler word used often",
     "dialogue_share": "One speaker has almost all the dialogue",
     "reassurance": "Reassurance that removes the risk",
+    "voice_sameness": "Two characters sound alike",
+    "voice_never_word": "A character uses a word they would never use",
 }
 ADVICE = {
     "gesture": "Vary or cut the repeated gesture; let a specific action or a line of dialogue carry the moment.",
@@ -130,6 +141,8 @@ ADVICE = {
     "watch_word": "Cut the filler word where the sentence works without it.",
     "dialogue_share": "Give the other characters their own lines, wishes and resistance.",
     "reassurance": "Keep the risk real: let the reassurance be wrong, doubted or refused, or cut it.",
+    "voice_sameness": "Give each of them their own rhythm, words and habits (see their voice cards).",
+    "voice_never_word": "Change the word to one this character would use (their voice card's vocabulary).",
 }
 
 _PARA_SPLIT = re.compile(r"\n\s*\n")
@@ -209,7 +222,7 @@ def _thresholds(strictness: str, overrides: dict | None) -> dict:
         v = dict(v, **((overrides or {}).get(k) or {}))
         if k == "uniform_length":  # lower is worse: strict raises the bar, gentle lowers it
             out[k] = dict(v, minor=round(v["minor"] / f, 3), major=round(v["major"] / f, 3))
-        elif k in ("said_bookism", "dialogue_share"):
+        elif k in ("said_bookism", "dialogue_share", "voice_sameness"):
             out[k] = dict(v, minor=min(0.99, round(v["minor"] * (1 + (f - 1) / 2), 3)),
                           major=min(0.995, round(v["major"] * (1 + (f - 1) / 2), 3)))
         else:
@@ -315,6 +328,7 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
     tags = Counter()
     bookism_hits = []
     speakers: Counter = Counter()
+    lines_by: dict[str, list] = defaultdict(list)
     dialogue_words = 0
     for cid, pi, par in pars:
         for m in _QUOTE.finditer(par):
@@ -343,6 +357,7 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
                 mb = before[-1] if before else None
                 if mb and mb.end() >= len(head) - 1:
                     who, verb = mb.group(1), mb.group(2)
+            q_raw = m.group(1)
             if verb and (verb in PLAIN_TAGS or verb in BOOKISMS):
                 tags["plain" if verb in PLAIN_TAGS else "bookism"] += 1
                 if verb in BOOKISMS:
@@ -351,6 +366,7 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
                 who = who if who and who[0].isupper() and who not in ("He", "She", "They", "I", "We") else None
             if who and who[0].isupper() and who not in ("He", "She", "They", "I", "We"):
                 speakers[who] += len(words(q))
+                lines_by[who].append((cid, pi, par, m.start(), m.end(), q_raw))
     simple("named_emotion", emo, f"{len(emo)} line(s) of dialogue name a feeling")
     simple("reassurance", reas, f"{len(reas)} line(s) take the risk away")
     n_tags = tags["plain"] + tags["bookism"]
@@ -377,6 +393,11 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
                          severity="minor" if share >= t["major"] else "info")
             f["share"] = round(share, 3)
             findings.append(f)
+
+    # -- voices (P17): who sounds like whom, and never-words from the voice cards
+    v_stats, v_findings = _voices(lines_by, settings.get("voices") or {}, thr, ignore, loc)
+    stats["voices"] = v_stats
+    findings.extend(v_findings)
 
     # -- sentence lengths
     sent_lists = [(cid, pi, par, sentences(par)) for cid, pi, par in pars]
@@ -467,6 +488,87 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
             "strictness": strictness}
 
 
+def _voices(lines_by: dict, cards: dict, thr: dict, ignore: set, loc) -> tuple[dict, list]:
+    """Per-speaker dialogue statistics, look-alike speaker pairs and never-words (deterministic, no AI)."""
+    alias = {}
+    for name, card in (cards or {}).items():
+        for a in [name] + list((card or {}).get("aliases") or []):
+            if isinstance(a, str) and a.strip():
+                alias.setdefault(a.strip().lower(), name)
+    per: dict[str, list] = defaultdict(list)
+    for who, lines in lines_by.items():
+        per[alias.get(who.lower(), who)].extend(lines)
+    speakers, vocab = {}, {}
+    findings = []
+    never_hits = []
+    for name, lines in sorted(per.items()):
+        wl = [[_norm_q(w.lower()).strip("'") for w in words(q)] for *_x, q in lines]
+        n = len(lines)
+        content = Counter(w for ws in wl for w in ws if len(w) >= 3 and w not in STOP and w not in ignore)
+        vocab[name] = set(content)
+        card = (cards or {}).get(name) or {}
+        joined = " ".join(_norm_q(q.lower()) for *_x, q in lines)
+        row = {"lines": n, "words": sum(len(ws) for ws in wl),
+               "words_per_line": round(sum(len(ws) for ws in wl) / max(n, 1), 1),
+               "questions": round(sum(1 for *_x, q in lines if "?" in q) / max(n, 1), 2),
+               "exclamations": round(sum(1 for *_x, q in lines if "!" in q) / max(n, 1), 2),
+               "top_words": [w for w, _c in content.most_common(5)], "has_card": bool(card)}
+        if card:
+            row["phrases_used"] = sum(1 for ph in card.get("phrases") or [] if isinstance(ph, str) and ph.strip()
+                                      and _norm_q(ph.lower()).strip(" .!?") in joined)
+            row["vocabulary_used"] = sum(1 for w in card.get("vocabulary") or [] if isinstance(w, str) and w.strip()
+                                         and re.search(r"\b" + re.escape(_norm_q(w.lower())) + r"\b", joined))
+            for w in card.get("never_words") or []:
+                if not isinstance(w, str) or not w.strip():
+                    continue
+                pat = re.compile(r"\b" + re.escape(_norm_q(w.lower().strip())) + r"\b")
+                for cid, pi, par, a, b, q in lines:
+                    if pat.search(_norm_q(q.lower())):
+                        never_hits.append((name, w.strip(), loc(cid, pi, par, a, b)))
+        speakers[name] = row
+    pairs = []
+    t = thr["voice_sameness"]
+    names = [x for x in sorted(speakers) if speakers[x]["lines"] >= t["min"]]
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            sa, sb = speakers[a], speakers[b]
+            union = vocab[a] | vocab[b]
+            overlap = len(vocab[a] & vocab[b]) / len(union) if union else 0.0
+            wl_a, wl_b = sa["words_per_line"], sb["words_per_line"]
+            alike = (abs(wl_a - wl_b) <= VOICE_LINE_RATIO * max(wl_a, wl_b, 1)
+                     and abs(sa["questions"] - sb["questions"]) <= VOICE_QUESTION_GAP)
+            pairs.append({"a": a, "b": b, "overlap": round(overlap, 3), "rhythm_alike": alike,
+                          "similar": bool(alike and overlap >= t["minor"])})
+    similar = [p for p in pairs if p["similar"]]
+    if similar:
+        worst = max(similar, key=lambda p: p["overlap"])
+        examples = []
+        for p in similar[:2]:
+            for who in (p["a"], p["b"]):
+                cid, pi, par, a, b, _q = per[who][0]
+                examples.append(loc(cid, pi, par, a, b))
+        detail = "; ".join(f"{p['a']} and {p['b']}: {speakers[p['a']]['words_per_line']} vs "
+                           f"{speakers[p['b']]['words_per_line']} words per line, "
+                           f"{round(speakers[p['a']]['questions'] * 100)}% vs {round(speakers[p['b']]['questions'] * 100)}"
+                           f"% questions, {round(p['overlap'] * 100)}% shared words" for p in similar[:3])
+        f = _finding("voice_sameness", len(similar), 0, t, examples, detail,
+                     severity="major" if worst["overlap"] >= t["major"] else "minor")
+        f["share"] = worst["overlap"]
+        f["pairs"] = [{k: p[k] for k in ("a", "b", "overlap")} for p in similar[:6]]
+        findings.append(f)
+    if never_hits:
+        t = thr["voice_never_word"]
+        n = len(never_hits)
+        if n >= t["min"]:
+            sev = _sev(n, t)
+            if sev:
+                f = _finding("voice_never_word", n, 0, t, [h[2] for h in never_hits],
+                             "; ".join(f"{who} says “{w}”" for who, w, _l in never_hits[:4]), severity=sev)
+                f["words"] = [{"speaker": who, "word": w} for who, w, _l in never_hits[:8]]
+                findings.append(f)
+    return {"speakers": speakers, "pairs": pairs, "cards": sum(1 for x in speakers.values() if x["has_card"])}, findings
+
+
 def brief(report: dict, limit: int = 12) -> dict:
     """The part of a pattern report the AI editor gets (no long text): counts, rates and short excerpts."""
     return {"words": report.get("words"), "summary": report.get("summary"), "strictness": report.get("strictness"),
@@ -475,7 +577,9 @@ def brief(report: dict, limit: int = 12) -> dict:
                          for f in (report.get("findings") or [])[:limit] if f["severity"] != "info"
                          or f["check"] in ("gesture", "named_emotion", "reassurance")],
             "sentence_stats": (report.get("stats") or {}).get("sentences"),
-            "dialogue": (report.get("stats") or {}).get("dialogue")}
+            "dialogue": (report.get("stats") or {}).get("dialogue"),
+            "voices": {k: v for k, v in ((report.get("stats") or {}).get("voices") or {}).items()
+                       if k in ("speakers", "pairs")}}
 
 
 def counts_only(report: dict) -> dict:

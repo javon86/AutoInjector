@@ -59,13 +59,24 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ## Section 3 — Characters who are their own people  (Phase 3a)
 
-- [ ] **P7** Richer character sheets: wants, needs, fears, secrets, false belief, stress behaviour,
+- [x] **P7** Richer character sheets: wants, needs, fears, secrets, false belief, stress behaviour,
   what they would never say; side characters get their own wish.
-- [ ] **P17** Voice cards: how each character talks (rhythm, vocabulary, favourite/never words,
+  *(bookforge/characters.py: + private memory, relationships (tension/history) and limits of change; companion data
+  `characters:<pid>:<branch>` per A01 record; made with the character (Bible Builder / Make a book / Fill with AI) or
+  on request; character page card + edit form with ⓘ; Make-a-book step "Character sheets and voices"; the consistency
+  reviewer of a character sees its sheet.)*
+- [x] **P17** Voice cards: how each character talks (rhythm, vocabulary, favourite/never words,
   habits, job/era in their words, speech under pressure, what they talk around). Voice test in the
   editor: with names hidden, can you tell who is speaking?
-- [ ] **P8** Scene cards before writing: each character's goal and hidden agenda, an obstacle from
+  *(Voice cards of the characters present in every C02 prompt (≤ 4 full + one line each, ≤ 7 000 chars); P6 voice
+  check (per-speaker stats, look-alike pairs, never-words); editor `voice_distinction` uses the cards and quotes the
+  line that sounds like another character.)*
+- [x] **P8** Scene cards before writing: each character's goal and hidden agenda, an obstacle from
   the world, what changes, what stays unsaid.
+  *(bookforge/scenes.py + chapter_brief.py: writer AI plans, another AI checks (light rubric), rework ≤ 2, approved
+  under the run consent; book page row 🎬, scene cards page (read/edit/check/plan again/approve), chapter page card,
+  run window; writer follows them, editor `scene_plan` dimension checks them. P11-lite: the POV/narrator's name and
+  planned backstory are in every chapter prompt.)*
 
 ## Section 4 — A world with rules and texture  (Phase 3b + 4a)
 
@@ -143,6 +154,27 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   check-in answer.~~ **Resolved:** a check-in now owns a reply only if the Relay Trace says it answers the check-in's
   own [MSG #] (and nothing else) and it holds the word as a whole word (it used to match any reply containing the
   word, e.g. "harbor" in a chapter); bridge requests and check-ins no longer interleave; e2e 10/10 passes.
+- **P7 / P17 / P8 — not tried with real AIs.** Tested with the deterministic fake AI (unit, Make-a-book end to end,
+  Playwright), not with Claude/ChatGPT/Gemini. On the first real book check: (1) do web AIs fill the optional
+  `character_sheet` / `voice_card` of the A01 proposal? If they leave them out, the run's "Character sheets and voices"
+  step makes them (one extra call per character) — fine, just slower; (2) are the voice cards really different from
+  each other (the first book's problem was one shared calm register) — read them on the character pages; (3) are the
+  scene checker's verdicts useful or does it pass everything (then tighten `scenes.REVIEW_TASK`) / send everything back
+  (then each chapter costs up to 6 extra calls: plan, check, 2 × rework + check); (4) the chapter prompt grows by up to
+  ~15 000 characters (brief) — watch web AIs' length limits on long books.
+- **P7/P17/P8 design choices to confirm:** (a) sheets, voice cards and scene cards are companion data in settings (like
+  AI verdicts and editor notes), not A01 facts or B12 records — see DEVELOPING.md for why (A01 attributes are closed,
+  facts are canon claims re-approved on every edit; C02 cannot pin a B12 and B12 plan items are kernel-checked plans
+  without fields for goals/subtext); consequence: they are not versioned records, not in exports, and approving
+  scene cards is a companion status (`approved.how = author | run_consent`), not a kernel ACCEPT; (b) outside runs a
+  chapter is written with its newest scene cards even when they are not approved (draft) — approval is the author's
+  signal, not a gate; (c) scene cards belong to one outline revision: a new outline version makes them out of date
+  (not used) until planned again; (d) Write all chapters plans missing scene cards without the AI check.
+- **P17 [!] voice heuristics are approximate.** Speakers are only recognised from tags with a capitalised name ("…,"
+  Mara said); pronoun tags are ignored, so short chapters may have no voice stats. `voice_sameness` thresholds
+  (words per line within 25 %, questions within 20 points, shared content words ≥ 25 % / 40 %) are first guesses
+  calibrated on crafted text only; check them on the Lamplighter dialogue (`prose_audit.audit(text, settings={"voices":
+  characters.voice_words(...)})`).
 - **P18 limits to know:** while a teach step runs, nothing else is typed into that AI (sends return
   `SITE_REPAIRING`); the teach step learns "Enter" when the user presses Enter instead of a Send button; a learned
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace

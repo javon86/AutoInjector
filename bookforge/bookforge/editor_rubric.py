@@ -19,7 +19,11 @@ DIMENSIONS = [
      "the help or the information the plot needs?"),
     ("voice_distinction", "Distinct voices",
      "With the names hidden, could a reader tell who is speaking? Each character has their own rhythm, vocabulary, "
-     "habits and things they talk around."),
+     "habits and things they talk around. Compare the dialogue with the characters' voice cards (context.voice_cards: "
+     "rhythm, register, vocabulary, favourite phrases, words they would never use, habits, speech under pressure) and "
+     "the pattern report's voice statistics (context.pattern_report.voices). For every line that sounds like another "
+     "character (or like nobody in particular, the shared calm explaining register), quote exactly that line as the "
+     "passage and say in why whose voice it sounds like and what this character would say instead."),
     ("world_friction", "Obstacles from the world",
      "Does the world get in the way through things that already belong to it — work, weather of this place, money, "
      "rules, institutions, distances, other people's interests — so that progress costs something?"),
@@ -39,6 +43,11 @@ DIMENSIONS = [
     ("protected_mysteries", "Protected mysteries kept",
      "Are the book's protected facts and mysteries (context.protected_facts) kept — not contradicted, not explained or "
      "revealed earlier than the plan says?"),
+    ("scene_plan", "Scene plan kept",
+     "(Only when context.scene_cards is given.) Does every planned scene happen on the page: does each character "
+     "present push for their own goal, does the obstacle from the world actually get in the way and cost something, "
+     "does the planned change happen, and does the 'unsaid' stay unsaid? Quote the passage where a scene's goal or "
+     "obstacle should be but is missing, is solved too easily, or where the unsaid thing is said out loud."),
 ]
 LABELS = {k: label for k, label, _q in DIMENSIONS}
 QUESTIONS = {k: q for k, _label, q in DIMENSIONS}
@@ -79,18 +88,23 @@ STRICTNESS = {
 }
 
 
-def dimensions_for(module_id: str, last_chapter: bool = False) -> list[str]:
+def dimensions_for(module_id: str, last_chapter: bool = False, scene_cards: bool = False) -> list[str]:
+    """The dimensions scored for a draft: the full chapter rubric (the ending only for the last chapter, the scene plan
+    only when the chapter has scene cards), or the lighter planning rubric."""
     if module_id == "C02":
-        return [d for d in CHAPTER if d != "ending_openness" or last_chapter]
+        return [d for d in CHAPTER if d != "ending_openness" or last_chapter] + (["scene_plan"] if scene_cards else [])
     return list(PLANNING.get(module_id, PLANNING["B01"]))
 
 
 def task_text(module_id: str, dims: list[str]) -> str:
     what = "chapter (context.chapter_text)" if module_id == "C02" else "planning draft (context.draft_json)"
     rubric = " ".join(f"[{d}] {QUESTIONS[d]}" for d in dims)
+    extra = (" the characters' voice cards (context.voice_cards), the chapter's scene cards (context.scene_cards) "
+             "when there are any," if module_id == "C02" else "")
     return (f"Task: {PRINCIPLES} Read the {what} with the book profile (context.book_profile), the characters and "
-            "places (context.canon), the plan for this part (context.outline) and the deterministic pattern report "
-            f"(context.pattern_report, counts made by BookForge). Score each of these dimensions from 1 to 10: {rubric} "
+            f"places (context.canon),{extra} the plan for this part (context.outline) and the deterministic pattern "
+            "report (context.pattern_report, counts made by BookForge). Score each of these dimensions from 1 to 10: "
+            f"{rubric} "
             f"Return scores for exactly these keys: {', '.join(dims)}. findings: up to 12, each with id (f1, f2, …), "
             f"dimension (one of the keys), {SEVERITY_WORDS} passage (exact quote), why, suggestion, keep_nearby (short "
             f"exact quotes near the passage that must survive a rewrite, may be empty). keep: up to 10 things that work. "

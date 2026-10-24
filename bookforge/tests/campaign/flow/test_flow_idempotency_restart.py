@@ -164,7 +164,8 @@ def test_refused_outline_is_written_again_by_the_ai_not_resubmitted(tmp_path):
     second = [c for k, c in ai.contexts if k == "B11"][1]
     assert "TARGET_LENGTH" in json.dumps(second.get("previous_attempt_problems")), second.keys()
     assert second["allowed"]["chapter_count"] == 3 and second["allowed"]["pov_ids"]
-    assert any(e["kind"] == "fix" and "refused" in e["message"] for e in run["events"])
+    # the whole event list (the public view keeps the last 60; runs also log the scene-card steps now)
+    assert any(e["kind"] == "fix" and "refused" in e["message"] for e in app.autobook.get(run["id"])["events"])
 
 
 def test_try_again_after_a_refused_outline_lets_the_ai_fix_it(tmp_path):

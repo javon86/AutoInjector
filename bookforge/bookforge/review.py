@@ -317,6 +317,7 @@ class ReviewService:
         self._lock = threading.RLock()
         self._jobs: dict[str, ReviewJob] = {}
         self._editor = None
+        self._scenes = None
 
     @property
     def editor(self):
@@ -325,6 +326,14 @@ class ReviewService:
             from .editor import EditorService  # noqa: PLC0415
             self._editor = EditorService(self)
         return self._editor
+
+    @property
+    def scenes(self):
+        """🎬 Scene cards (scenes.py, P8) planned and checked with this service's AIs."""
+        if self._scenes is None:
+            from .scenes import ScenePlanner  # noqa: PLC0415
+            self._scenes = ScenePlanner(self)
+        return self._scenes
 
     # ------------------------------------------------------------------ helpers
     def _changed(self):
@@ -879,6 +888,160 @@ class ReviewService:
             ctx.update(extra)
         return ctx, protected
 
+    def _companion_extra(self, pid, branch, rec) -> dict | None:
+        """A character draft is reviewed together with its sheet and voice card (P7/P17)."""
+        if rec["module_id"] != "A01":
+            return None
+        from . import characters as chars_mod  # noqa: PLC0415
+        e = chars_mod.get_entry(self.store, pid, branch, rec["record_id"])
+        if not e:
+            return None
+        return {"character_sheet": e.get("sheet"), "voice_card": e.get("voice")}
+
+    # ------------------------------------------------------------------ 🎭 characters: sheets and voice cards (P7/P17)
+    def _a01(self, pid, branch, rid):
+        head = self._head(pid, branch, rid) if isinstance(rid, str) and rid else None
+        if head is None or head["module_id"] != "A01":
+            raise BookforgeError("NOT_FOUND", "/record_id", "this character does not exist in this book",
+                                 status="REJECTED")
+        return head
+
+    def characters_info(self, principal, pid, branch) -> dict:
+        from . import characters as chars_mod  # noqa: PLC0415
+        self._access(principal, pid, branch)
+        return {"characters": chars_mod.public(self.store, pid, branch), "fields": chars_mod.field_info()}
+
+    def character_info(self, principal, pid, branch, rid) -> dict:
+        from . import characters as chars_mod  # noqa: PLC0415
+        self._access(principal, pid, branch)
+        self._a01(pid, branch, rid)
+        e = chars_mod.get_entry(self.store, pid, branch, rid) or {}
+        return {"record_id": rid, "entry": e or None, "missing": chars_mod.missing(e), "complete": chars_mod.complete(e),
+                "fields": chars_mod.field_info()}
+
+    def save_character(self, principal, pid, branch, rid, body) -> dict:
+        """The author saves a character's sheet and/or voice card (version check: never overwrite a newer one)."""
+        from . import characters as chars_mod  # noqa: PLC0415
+        self._access(principal, pid, branch)
+        head = self._a01(pid, branch, rid)
+        body = body if isinstance(body, dict) else {}
+        sheet, voice = body.get("sheet"), body.get("voice")
+        for k, v in (("sheet", sheet), ("voice", voice)):
+            if v is not None and not isinstance(v, dict):
+                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k} must be an object of fields", status="REJECTED")
+        base = body.get("version")
+        if base is not None and (not isinstance(base, int) or isinstance(base, bool) or base < 0):
+            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
+        name, subject = chars_mod._name_and_subject(head)
+        by = "ai" if body.get("from_ai") is True else "author"
+        slot = body.get("slot") if by == "ai" and body.get("slot") in ("AI-1", "AI-2", "AI-3") else None
+        e = chars_mod.save_entry(self.store, pid, branch, rid, sheet=sheet, voice=voice, by=by, slot=slot, name=name,
+                                 subject_id=subject, base_version=base)
+        self._changed()
+        return {"ok": True, "entry": e, "missing": chars_mod.missing(e), "complete": chars_mod.complete(e),
+                "message": f"Saved (version {e['version']}). The writer uses it for the next chapters."}
+
+    def start_character_ai(self, principal, pid, branch, rid, body) -> dict:
+        self._access(principal, pid, branch)
+        self._a01(pid, branch, rid)
+        body = body if isinstance(body, dict) else {}
+        note = body.get("note")
+        if note is not None and (not isinstance(note, str) or len(note) > 1000):
+            raise BookforgeError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
+        job = ReviewJob("characters", principal, pid, branch, [rid], self.assist._check_slot(body.get("slot_id")))
+        job.note = note
+        return self._start(job, self._run_character)
+
+    def _run_character(self, job: ReviewJob):
+        from . import characters as chars_mod  # noqa: PLC0415
+        rid = job.record_ids[0]
+        job.current = rid
+        e = chars_mod.generate(self.assist, job, job.project_id, job.branch_id, rid, note=getattr(job, "note", None))
+        job.results.append({"record_id": rid, "ok": True, "version": e["version"], "entry": e,
+                            "message": "The AI wrote the character sheet and voice card. Read them and change "
+                                       "anything you like."})
+        job.done = 1
+
+    # ------------------------------------------------------------------ 🎬 scene cards (P8)
+    def scenes_info(self, principal, pid, branch, chapter_id) -> dict:
+        self._access(principal, pid, branch)
+        return self.scenes.info(principal, pid, branch, chapter_id)
+
+    def save_scenes(self, principal, pid, branch, chapter_id, body) -> dict:
+        self._access(principal, pid, branch)
+        e = self.scenes.save(principal, pid, branch, chapter_id, body)
+        self._changed()
+        return {"ok": True, "entry": e, "message": f"Saved as version {e['version']} of the scene cards. Approve them, "
+                                                   "or ask an AI to check them."}
+
+    def approve_scenes(self, principal, pid, branch, chapter_id, body) -> dict:
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        if body.get("author_confirms") is not True:
+            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit confirmation "
+                                 "(author_confirms: true)", status="REJECTED")
+        ver = body.get("version")
+        if ver is not None and (not isinstance(ver, int) or isinstance(ver, bool)):
+            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you looked at", status="REJECTED")
+        e = self.scenes.approve(principal, pid, branch, chapter_id, version=ver, how="author",
+                                label="Scene cards approved by the author")
+        self._changed()
+        return {"ok": True, "entry": e, "message": "Scene cards approved: the writer follows them for this chapter."}
+
+    def start_scenes_ai(self, principal, pid, branch, chapter_id, body) -> dict:
+        """🎬 Plan the scenes with the AI (the writer slot), then (check: true, the default) let an independent AI
+        check them with the light rubric. Nothing is approved here."""
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        if not isinstance(chapter_id, str) or not chapter_id:
+            raise BookforgeError("MISSING_INPUT", "/chapter_id", "which chapter?", status="REJECTED")
+        for k in ("revise", "check"):
+            if k in body and not isinstance(body[k], bool):
+                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k}: true or false", status="REJECTED")
+        self.scenes.info(principal, pid, branch, chapter_id)  # the chapter exists in the approved outline
+        job = ReviewJob("scenes", principal, pid, branch, [chapter_id], self.assist._check_slot(body.get("slot_id")))
+        job.revise, job.check_after = body.get("revise") is True, body.get("check", True) is not False
+        return self._start(job, self._run_scenes)
+
+    def start_scenes_check(self, principal, pid, branch, chapter_id, body) -> dict:
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        info = self.scenes.info(principal, pid, branch, chapter_id)
+        if not info.get("entry"):
+            raise BookforgeError("INVALID_INPUT", "/chapter_id", "this chapter has no scene cards yet: plan them first",
+                                 status="REJECTED")
+        job = ReviewJob("scenes_check", principal, pid, branch, [chapter_id],
+                        self.assist._check_slot(body.get("slot_id")))
+        return self._start(job, self._run_scenes_check)
+
+    def _run_scenes(self, job: ReviewJob):
+        cid = job.record_ids[0]
+        job.current = cid
+        e = self.scenes.make(job, cid, revise=getattr(job, "revise", False))
+        out = {"record_id": cid, "chapter_id": cid, "ok": True, "version": e["version"], "entry": e,
+               "message": f"The AI planned {len(e['cards'])} scene(s)."}
+        if getattr(job, "check_after", True):
+            check = ReviewJob("scenes_check", job.principal, job.project_id, job.branch_id, [cid], None)
+            for k in ("started", "status", "retry_busy", "check"):
+                setattr(check, k, getattr(job, k))
+            try:
+                res = self.scenes.check(check, cid)
+                out["review"] = res
+                out["message"] += f" An AI checked them: {res['verdict']}."
+            except BookforgeError as exc:
+                out["review_error"] = _err_of(exc)
+                out["message"] += " The check did not work; press 🔎 Check with AI to try again."
+        job.results.append(out)
+        job.done = 1
+
+    def _run_scenes_check(self, job: ReviewJob):
+        cid = job.record_ids[0]
+        job.current = cid
+        res = self.scenes.check(job, cid)
+        job.results.append({"record_id": cid, "chapter_id": cid, "ok": True, "version": res["version"],
+                            "review": res, "message": f"Checked: {res['verdict']}."})
+        job.done = 1
+
     @staticmethod
     def clean_verdict(raw) -> dict:
         if not isinstance(raw, dict) or raw.get("verdict") not in VERDICTS:
@@ -907,7 +1070,7 @@ class ReviewService:
         job.phase = f"AI is reviewing “{title}”"
         tok = self.work.begin(pid, rec["module_id"], f"AI is reviewing {title}")
         try:
-            ctx, protected = self._context(pid, branch, rec)
+            ctx, protected = self._context(pid, branch, rec, self._companion_extra(pid, branch, rec))
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=REVIEW_TASK, schema=REVIEW_SCHEMA,
                                        context=ctx, protected=protected)
         finally:

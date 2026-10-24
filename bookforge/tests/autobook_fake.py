@@ -57,6 +57,48 @@ NAMES = {"A01": ["Mara Vell", "Tom Reed", "Nessa Crane", "Ilse Marrow"], "A04": 
          "A03": ["The Grey Coast"]}
 
 
+# P17: every character talks their own way (the fake's voice cards are clearly different from each other)
+VOICES = {
+    "Mara Vell": {"rhythm": "short, blunt sentences; questions she answers herself", "register": "plain, working",
+                  "vocabulary": ["wick", "lens", "log", "tide-table"], "phrases": ["Fair enough."],
+                  "never_words": ["perhaps", "darling"], "habits": ["answers a question with a question"],
+                  "under_pressure": "goes quiet, then one hard question", "talks_around": "her master's absence",
+                  "samples": ["Who signed the log?", "Fair enough. Then show me the reef."]},
+    "Tom Reed": {"rhythm": "long, wandering sentences that circle back", "register": "old-fashioned, educated",
+                 "vocabulary": ["fathom", "almanac", "providence"], "phrases": ["as the old keepers said"],
+                 "never_words": ["okay", "yeah"], "habits": ["changes the subject to the weather"],
+                 "under_pressure": "lectures, piles up clauses", "talks_around": "the stranger on the reef",
+                 "samples": ["As the old keepers said, a lamp that is watched never fails, and yet here we are."]},
+    "Nessa Crane": {"rhythm": "clipped whispers, half-sentences", "register": "slangy harbour talk",
+                    "vocabulary": ["nets", "gutting knife", "the Point"], "phrases": ["mind yourself"],
+                    "never_words": ["indeed", "providence"], "habits": ["jokes when nervous", "asks a price"],
+                    "under_pressure": "laughs too loud, names a price", "talks_around": "what she saw that night",
+                    "samples": ["Mind yourself. Talk costs a herring, love."]},
+}
+SCENE_PLACES = ["the lamp room of the old light", "the net sheds on the harbour wall", "the reef at low tide"]
+
+
+def voice_for(name):
+    v = VOICES.get(name)
+    if v is None:
+        v = {"rhythm": f"{name}'s own measured rhythm", "register": "plain", "vocabulary": [f"{name.split()[0]}-word"],
+             "phrases": [f"{name.split()[0]} says so"], "never_words": ["whatever"], "habits": ["goes quiet"],
+             "under_pressure": "stammers", "talks_around": "money", "samples": [f"{name} will not say it."]}
+    return copy.deepcopy(v)
+
+
+def sheet_for(name, others=()):
+    side = name not in ("Mara Vell",)
+    return {"role": "side" if side else "main", "wants": f"{name} wants the light kept on their own terms",
+            "needs": f"{name} needs to admit what happened", "fear": f"{name} fears the harbour board",
+            "secret": f"{name} kept the stranger's letter", "false_belief": f"{name} believes the sea forgives",
+            "stress": "lies, then bargains", "never_say": "I was afraid", "private_memory": "a burned logbook page",
+            "relationships": [{"with": o, "tension": "owes them money", "history": "grew up on the same quay"}
+                              for o in others if o != name][:3],
+            "change_limits": "can learn to ask for help; will never leave the coast",
+            "own_wish": f"{name} wants a boat of their own" if side else ""}
+
+
 class BookFakeAI:
     def __init__(self, verdicts=None, default_verdict="APPROVE"):
         self.calls: list[dict] = []
@@ -73,6 +115,11 @@ class BookFakeAI:
         self.craft_script: list = []             # scripted editor answers, one per craft review
         self.rewrite_script: list = []           # scripted writer answers, one per rewrite request
         self.craft_contexts: list[dict] = []     # what the editor was sent (tests check the pattern report etc.)
+        self.companion = True                    # P7/P17: character proposals carry a sheet and a voice card
+        self.prompts: dict[str, list] = {}       # answer kind -> [(task text, context)] (prompt checks in tests)
+        self.scene_verdicts: list = []           # scripted scene-plan checks ("PASS"/"REVISE" or dicts), one per call
+        self.scene_script: list = []             # scripted scene plans (dicts or callables(ctx)), one per call
+        self.chapter_texts: dict[str, str] = {}  # chapter id -> the prose the fake writer returns for it
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -100,6 +147,7 @@ class BookFakeAI:
             time.sleep(self.delay)
         kind, out = self._answer(ctx, props, schema)
         with self.lock:
+            self.prompts.setdefault(kind, []).append((system, ctx))
             pending = self.kind_failures.get(kind)
             if pending:
                 exc = pending.pop(0)
@@ -123,6 +171,28 @@ class BookFakeAI:
             if scripted is not None:
                 return "rewrite", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
             return "rewrite", self._rewrite(ctx)
+        if "scenes" in props and "verdict" in props:  # 🎬 the light check of a scene plan (P8)
+            with self.lock:
+                v = self.scene_verdicts.pop(0) if self.scene_verdicts else "PASS"
+            if isinstance(v, dict):
+                return "scene_review", copy.deepcopy(v)
+            n = len(ctx.get("scene_cards") or [])
+            ok = v == "PASS"
+            return "scene_review", {"verdict": v, "scenes": [{"scene": i + 1, "goal": True, "obstacle_from_world": ok,
+                                                             "unsaid": True, "note": "" if ok else
+                                                             "The fog is weather out of nowhere: use the harbour board."}
+                                                            for i in range(n)],
+                                    "notes": [] if ok else ["Let the obstacle come from the harbour board."]}
+        if "scenes" in props:  # 🎬 the writer plans a chapter's scenes (P8)
+            with self.lock:
+                scripted = self.scene_script.pop(0) if self.scene_script else None
+            if scripted is not None:
+                return "scenes", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "scenes", self._scenes(ctx)
+        if "character_sheet" in props and "concept" not in props:  # P7/P17 for an existing character
+            name = (ctx.get("character") or {}).get("name") or "Someone"
+            others = [o.get("name") for o in ctx.get("other_characters") or []]
+            return "sheet", {"character_sheet": sheet_for(name, others), "voice_card": voice_for(name)}
         if "verdict" in props:
             with self.lock:
                 v = self.verdicts.pop(0) if self.verdicts else self.default_verdict
@@ -160,6 +230,10 @@ class BookFakeAI:
                                      for k in (props["attributes"].get("properties") or {})}
             if "facts" in props:
                 out["facts"] = [fact(sid, "entity.name", name)]
+            if "character_sheet" in props and self.companion:
+                others = [i.get("name") for i in ctx.get("builder_items") or [] if i.get("section") == "A01"]
+                out["character_sheet"] = sheet_for(name, others)
+                out["voice_card"] = voice_for(name)
             return "canon", out
         if "premise" in props:
             return "B01", {"premise": "An apprentice keeper searches a fog-bound harbor for her vanished master.",
@@ -181,11 +255,35 @@ class BookFakeAI:
             cid = req.get("chapter_id") or "ch1"
             num = int(cid[2:]) if cid[2:].isdigit() else 1
             paras = CHAPTER_TEXT[((num - 1) % 3) + 1]
-            return "C02", {"text": "\n\n".join(paras),
+            text = self.chapter_texts.get(cid) or "\n\n".join(paras)
+            return "C02", {"text": text,
                            "objective_assessments": [{"item_id": cid, "decision": "PASS", "message": "reached"}]}
         if "events" in props:
             return "events", {"events": []}
         return "generic", self._from_schema(schema)
+
+    def _scenes(self, ctx):
+        ch = ctx.get("chapter") or {}
+        num = int(ch.get("number") or 1)
+        people = [c.get("name") for c in ctx.get("characters") or [] if c.get("name")] or ["Mara Vell"]
+        pov = ch.get("pov") or people[0]
+        other = next((p for p in people if p != pov), None)
+        cast = [pov] + ([other] if other else [])
+        fix = bool(ctx.get("review_notes"))
+        scenes = []
+        for i in range(2):
+            scenes.append({"place": SCENE_PLACES[(num - 1 + i) % 3], "time": "dusk" if i else "before dawn",
+                           "characters": cast,
+                           "goals": [{"character": c, "goal": f"{c} wants the keeper's log" if c == pov else
+                                      f"{c} wants payment for what they know",
+                                      "hidden_agenda": f"{c} hides the stranger's letter"} for c in cast],
+                           "obstacle": ("the harbour board has sealed the lamp room" if fix or i else
+                                        "the evening tide floods the steps"),
+                           "obstacle_source": "institution" if fix or i else "weather",
+                           "change": f"{pov} learns who signed the log" if i else f"{pov} loses the lantern",
+                           "unsaid": f"{pov} suspects her master left on purpose",
+                           "beat": str(ch.get("objective") or "the chapter objective")[:120]})
+        return {"scenes": scenes}
 
     @staticmethod
     def sentences(text):
@@ -209,6 +307,22 @@ class BookFakeAI:
                              "severity": "major", "passage": s[:200],
                              "why": f"“{ph}” tells the reader what to think instead of showing it.",
                              "suggestion": "Show it through what the characters do.", "keep_nearby": []})
+        # P17: two speakers the pattern report finds alike -> a voice_distinction finding quoting the line
+        voices = ((ctx.get("pattern_report") or {}).get("voices") or {})
+        for pair in voices.get("pairs") or []:
+            if not pair.get("similar") or "voice_distinction" not in dims:
+                continue
+            import re  # noqa: PLC0415
+            who = pair["b"].split()[0]
+            m = re.search(r'[“"]([^”"]{8,200})[,.?!]?[”"],? ' + re.escape(who) + r'\b', body)
+            if m:
+                scores["voice_distinction"] = 4
+                findings.append({"id": f"f{len(findings) + 1}", "dimension": "voice_distinction", "severity": "major",
+                                 "passage": m.group(1)[:200],
+                                 "why": f"With the names hidden this line of {pair['b']} sounds like {pair['a']}.",
+                                 "suggestion": f"Let {pair['b']} say it in their own rhythm and words (voice card).",
+                                 "keep_nearby": []})
+                break
         scores = {k: v for k, v in scores.items() if v is not None}
         return {"scores": scores, "findings": findings, "keep": [first[:200]] if first else [],
                 "verdict": "REVISE" if findings else "PASS"}

@@ -525,7 +525,29 @@ class ChapterWriter(ProseWriter):
                           or cmeta.get("outline_ref") != ctx.payload["outline_ref"]):
                 raise BookforgeError("INVALID_INPUT", "/payload/context_ref", "context package was built for a "
                                      "different chapter or outline revision", status="REJECTED")
+        if ctx.manual_candidate is None:
+            # The writing brief (P7/P8/P17/P11-lite): voice cards of the characters present, the scene cards, the
+            # POV character's name and planned backstory. Read once here; only IDs and numbers go into the meta.
+            from ..chapter_brief import build as build_brief  # noqa: PLC0415
+            brief, info = build_brief(ctx.store, ctx.project_id, ctx.branch_id, ctx.field_record("outline_ref"),
+                                      ctx.payload["chapter_id"])
+            ctx.writing_brief = brief
+            meta["brief"] = info
         return meta
+
+    def ai_context(self, ctx: Context) -> dict:
+        out = super().ai_context(ctx)
+        brief = getattr(ctx, "writing_brief", None)
+        if brief:
+            out["writing_brief"] = brief
+        return out
+
+    def ai_task(self, ctx: Context) -> str:
+        task = super().ai_task(ctx)
+        brief = getattr(ctx, "writing_brief", None)
+        if brief and brief.get("rules"):
+            task += (" context.writing_brief is the plan for HOW to write this chapter: " + " ".join(brief["rules"]))
+        return task
 
 
 @register("C03")
