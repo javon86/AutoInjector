@@ -84,6 +84,19 @@ console.log('\n== TR-30: repeats you sent and reminders are not app duplicates; 
   assert(rr.anomalies.some((a) => a.seq === '0005' && /typed while its reply was still on the page/.test(a.what)), 'a message typed over an uncaptured reply is flagged, even though a later reply was captured');
 }
 
+console.log('\n== P18.1: wouldAnswer() predicts answersOf() without recording ==');
+{
+  let c3 = 0;
+  const R = createRelayTrace({ now: () => c3, noReplyMs: 600000 });
+  R.noteSend({ seq: '0010', target: 'gemini', kind: 'program', text: 'chapter please' }); R.noteSendResult('0010', { ok: true, verified: true });
+  c3 += 1000; R.noteSend({ seq: '0011', target: 'gemini', kind: 'auto', text: 'Reply with only this word: harbor' }); R.noteSendResult('0011', { ok: true, verified: true });
+  const before = R.wouldAnswer('gemini');
+  assert(before.join() === '0010,0011' && R.wouldAnswer('gemini').join() === '0010,0011', 'the older BookForge prompt and the check-in are both open (asking twice changes nothing)');
+  assert(R.openMessages('gemini').map((m) => `${m.seq}:${m.kind}`).join() === '0010:program,0011:auto', 'openMessages lists what is owed, with its kind (no text)');
+  c3 += 1000; R.noteCapture('gemini', 7);
+  assert(R.answersOf(7).join() === before.join() && R.wouldAnswer('gemini').length === 0, 'noteCapture records exactly what wouldAnswer said');
+}
+
 console.log('\n== cap + reset ==');
 const S = createRelayTrace({ now: () => 0, maxMessages: 5 });
 for (let i = 0; i < 9; i++) S.noteSend({ seq: String(i), target: 'claude', text: `x${i}` });

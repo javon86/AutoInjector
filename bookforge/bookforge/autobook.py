@@ -44,6 +44,8 @@ from .engine import Engine
 from .errors import BookforgeError
 from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_word, wait_and_retry
 from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
+from .editor import judge_rewrite, keep_quotes_of, lost_keeps
+from .editor_rubric import LABELS as EDITOR_LABELS
 from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
 log = logging.getLogger("bookforge.autobook")
@@ -472,6 +474,7 @@ class AutoBookService(_Runner):
                "project_id": None, "branch_id": "main", "created_at": at, "started_at": at, "finished_at": None,
                "settings": settings, "current": None, "waiting": None, "problem": None, "decision": None,
                "pause_reason": None, "files": [], "title": None, "fix_counts": {}, "events": [],
+               "editor_settings": self._editor_snapshot(), "editor": {},
                "consent": {"by": principal, "at": at, "run_id": run_id, "scope": "this run only (one new book)",
                            "text": "You pressed ⚡ Make a book for me: the AI may approve drafts that its own review "
                                    "passes, for this new book and this run only."},
@@ -656,6 +659,13 @@ class AutoBookService(_Runner):
             run.update(status="done", finished_at=now_iso(), current=None, waiting=None,
                        phase="Your book is made — download it below")
             self.event(run, "finished", "Your book is made: PDF, EPUB and Word files are ready")
+            es = run.get("editor_summary") or {}
+            if es.get("reviewed"):
+                fl = es.get("flagged") or []
+                self.event(run, "note", f"Editor: {es['reviewed']} chapter(s) read, {es.get('passed', 0)} passed, "
+                           f"{es.get('kept', 0)} rewrite(s) kept, {es.get('rejected', 0)} not kept"
+                           + (f" — ⚠️ still had notes on {', '.join(str(f.get('label')) for f in fl)}" if fl else ""),
+                           code="EDITOR_NOTES" if fl else None)
             rs = run.get("review_summary") or {}
             if rs.get("same_ai"):
                 self.event(run, "note", f"⚠️ {NOT_INDEPENDENT}: {rs['same_ai']} of {rs['same_ai'] + rs.get('independent', 0)}"
@@ -799,8 +809,9 @@ class AutoBookService(_Runner):
             rj = ReviewJob("review", run["principal"], run["project_id"], run["branch_id"], [rid], None)
             for k in ("started", "status", "retry_busy", "check", "on_wait"):
                 setattr(rj, k, getattr(job, k))
+            editor_next = head["module_id"] == "C02" and self._editor_settings(run).get("enabled")
             try:
-                res = self._review.review_one(rj, rid)
+                res = self._review.review_one(rj, rid, auto=not editor_next)
             except BookforgeError as exc:
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
@@ -813,7 +824,14 @@ class AutoBookService(_Runner):
                 return bp.rec(rid)
             head = bp.rec(rid)
             if verdict == "APPROVE":
-                self._approve(run, head["ref"], why=f"AI review: APPROVE ({label})", verdict="APPROVE", slot=rj.slot)
+                why = f"AI review: APPROVE ({label})"
+                if editor_next:
+                    head = self._editor_pass(run, st, rid, label, chapter_id)
+                    ed = (run.get("editor") or {}).get(rid) or {}
+                    why += " · editor: " + ("PASS" if ed.get("verdict") == "PASS" and not ed.get("flagged") else
+                                            "still had notes (rounds used up or rewrite not kept)" if ed.get("flagged")
+                                            else "not run")
+                self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 return bp.rec(rid)
             n = int(counts.get(rid, 0))
             if n >= MAX_FIXES:
@@ -844,6 +862,223 @@ class AutoBookService(_Runner):
                 self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass BookForge's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
+
+    # ------------------------------------------------------------------ 🖋 the editor inside a run (P4 / P5)
+    def _editor_snapshot(self) -> dict:
+        try:
+            es = self.app.review.editor.settings()
+        except Exception:  # noqa: BLE001 - the default editor settings
+            log.exception("could not read the editor settings")
+            es = {"enabled": True, "rounds": 2, "strictness": "normal"}
+        return {k: es[k] for k in ("enabled", "rounds", "strictness")}
+
+    def _editor_settings(self, run) -> dict:
+        if not run.get("editor_settings"):
+            run["editor_settings"] = self._editor_snapshot()
+        return run["editor_settings"]
+
+    def _sub_job(self, run, kind: str, rid: str, slot=None) -> ReviewJob:
+        job = self._job(run, kind, "C02")
+        rj = ReviewJob(kind, run["principal"], run["project_id"], run["branch_id"], [rid], slot)
+        for k in ("started", "status", "retry_busy", "check", "on_wait"):
+            setattr(rj, k, getattr(job, k))
+        return rj
+
+    def _editor_pass(self, run, st, rid: str, label: str, chapter_id: str | None) -> dict:
+        """The editor reads the chapter (its consistency review passed); REVISE -> the writer rewrites only the
+        flagged passages -> pattern check + consistency review + editor again on the new version -> the rewrite is
+        kept only when nothing got worse, else the earlier text is restored. At most ``rounds`` rewrites; when the
+        editor still has notes, the chapter is approved under the run consent and marked ⚠️ (never blocks the book).
+        Returns the head revision to approve."""
+        es = self._editor_settings(run)
+        head = self.bp(run).rec(rid)
+        if not es.get("enabled") or head["module_id"] != "C02":
+            return head
+        ed = run.setdefault("editor", {}).setdefault(rid, {"chapter_id": chapter_id, "label": label, "rounds": 0,
+                                                           "history": [], "kept": 0, "rejected": 0})
+        if ed.get("done_version") == head["version"]:
+            return head
+        ed.update(flagged=False, notes=[], flag_reason=None, error=None)
+        craft = self._craft(run, st, rid, label, ed, ed["rounds"])
+        while True:
+            self.check(run)
+            head = self.bp(run).rec(rid)
+            if craft is None:
+                return self._editor_flag(run, st, ed, None, head, "the editor could not read it", "EDITOR_FAILED")
+            if craft["verdict"] == "PASS":
+                ed.update(verdict="PASS", flagged=False, done_version=head["version"], notes=[])
+                st["editor_note"] = self._editor_line(ed)
+                self._editor_summary(run)
+                self.save(run)
+                return head
+            if ed["rounds"] >= int(es.get("rounds") or 0):
+                return self._editor_flag(run, st, ed, craft, head, f"{ed['rounds']} editor round(s) used up"
+                                         if ed["rounds"] else "editor rounds are set to 0", "EDITOR_NOTES")
+            ed["rounds"] += 1
+            n, total = ed["rounds"], int(es.get("rounds") or 0)
+            st["message"] = f"The writer is reworking the editor's notes on the {label} (round {n} of {total})"
+            run["phase"] = st["message"]
+            self.save(run)
+            made = self._editor_rewrite(run, rid, label, craft, ed, n)
+            if made is None:
+                return self._editor_flag(run, st, ed, craft, self.bp(run).rec(rid),
+                                         ed.get("flag_reason") or "the writer's changes could not be applied",
+                                         "EDITOR_NOTES")
+            applied, old = made
+            ok, code, why, new_craft = self._regression(run, st, rid, label, ed, n, old, craft, applied)
+            ed["history"].append({"round": n, "rewrite": "kept" if ok else "not kept", "code": code,
+                                  "applied": len(applied), "at": now_iso()})
+            if ok:
+                ed["kept"] = int(ed.get("kept", 0)) + 1
+                self._made(run, self.bp(run).rec(rid)["ref"])
+                self.event(run, "editor", f"Editor's rewrite of the {label} kept (round {n}): {why}", record_id=rid,
+                           code="EDITOR_REWRITE_KEPT")
+                craft = new_craft
+                continue
+            ed["rejected"] = int(ed.get("rejected", 0)) + 1
+            try:
+                ref = self._review.editor.restore(run["principal"], run["project_id"], run["branch_id"], rid, old, code)
+                self._made(run, ref)
+            except BookforgeError as exc:
+                raise StepProblem(exc.code, f"The editor's rewrite of the {label} was not good enough and the earlier "
+                                  "text could not be put back.", "Press 🔁 Try again.", record_id=rid,
+                                  chapter_id=chapter_id) from None
+            self.event(run, "note", f"⚠️ The editor's rewrite of the {label} was not kept (round {n}): {why}; the "
+                       "earlier text is used", code="EDITOR_REWRITE_REJECTED", record_id=rid)
+            return self._editor_flag(run, st, ed, craft, self.bp(run).rec(rid), f"rewrite not kept — {why}",
+                                     "EDITOR_NOTES")
+
+    def _craft(self, run, st, rid, label, ed, round_no):
+        st["message"] = f"The editor is reading the {label}" + (f" again (after round {round_no})" if round_no else "")
+        run["phase"] = st["message"]
+        self.save(run)
+        rj = self._sub_job(run, "editor", rid)
+        try:
+            craft = self._review.editor.craft_one(rj, rid, round_no=round_no)
+        except BookforgeError as exc:
+            ed["error"] = exc.code
+            self.event(run, "note", f"⚠️ The editor could not read the {label} ({exc.code}); the book goes on without "
+                       "the editor's opinion on it", code="EDITOR_FAILED", record_id=rid)
+            self.save(run)
+            return None
+        low = min(craft["scores"].items(), key=lambda kv: kv[1])
+        ed.update(verdict=craft["verdict"], scores=craft["scores"], min_score=craft["min_score"],
+                  avg_score=craft["avg_score"], counts=craft["counts"], reviewer=craft.get("reviewer"),
+                  independent=craft.get("independent"), version=craft["version"])
+        ed["history"].append({"round": round_no, "version": craft["version"], "verdict": craft["verdict"],
+                              "avg": craft["avg_score"], "min": craft["min_score"], "major": craft["counts"]["major"],
+                              "minor": craft["counts"]["minor"], "editor": craft.get("reviewer"),
+                              "patterns": (craft.get("pattern") or {}).get("summary"), "at": now_iso()})
+        self.event(run, "editor", f"Editor ({craft.get('reviewer') or 'AI'}) on the {label}: {craft['verdict']} · "
+                   f"{craft['counts']['major']} major / {craft['counts']['minor']} minor note(s) · lowest "
+                   f"{EDITOR_LABELS.get(low[0], low[0])} {low[1]}", verdict=craft["verdict"], record_id=rid,
+                   slot=rj.slot, independent=craft.get("independent"))
+        if craft.get("independent") is False:
+            self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} (the editor of the {label} is the AI that wrote it)",
+                       code="REVIEW_NOT_INDEPENDENT")
+        st["editor_note"] = self._editor_line(ed)
+        self.save(run)
+        return craft
+
+    def _editor_rewrite(self, run, rid, label, craft, ed, n):
+        """The writer rewrites only the flagged passages; applied exactly through the normal UPDATE. Returns
+        (applied [with their passages], the old revision) or None (nothing could be applied; noted)."""
+        editor = self._review.editor
+        old = self.bp(run).rec(rid)
+        rj = self._sub_job(run, "editor_fix", rid, run["settings"].get("slot_id"))
+        try:
+            prop = editor.propose(rj, rid, craft=craft)
+        except BookforgeError as exc:
+            ed["flag_reason"] = f"the writer could not rework the notes ({exc.code})"
+            self.event(run, "note", f"⚠️ The writer could not rework the editor's notes on the {label} ({exc.code})",
+                       code="EDITOR_FAILED", record_id=rid)
+            return None
+        if not prop["applied"]:
+            ed["flag_reason"] = "the writer's changes did not match the chapter word for word"
+            self.event(run, "note", f"⚠️ None of the writer's changes to the {label} matched the text word for word "
+                       f"({prop['unresolved']} note(s) unresolved); nothing was guessed", code="EDITOR_UNRESOLVED",
+                       record_id=rid)
+            return None
+        try:
+            out = editor.apply(run["principal"], run["project_id"], run["branch_id"], rid, old["version"], None,
+                               proposal=prop, round_no=n, how="run")
+        except BookforgeError as exc:
+            ed["flag_reason"] = f"the rewritten chapter was refused ({exc.code})"
+            self.event(run, "note", f"⚠️ The rewritten {label} did not pass BookForge's checks, so it was not saved",
+                       code="EDITOR_FAILED", record_id=rid)
+            return None
+        byf = {f["id"]: f for f in craft.get("findings") or []}
+        applied = [dict(a, passage=(byf.get(a["finding_id"]) or {}).get("passage")) for a in out["applied"]]
+        ed["unresolved"] = len(out["unresolved"])
+        self.event(run, "rewrite", f"The writer reworked {len(applied)} passage(s) of the {label} (round {n}"
+                   + (f"; {len(out['unresolved'])} note(s) could not be matched word for word" if out["unresolved"]
+                      else "") + ")", record_id=rid)
+        self.save(run)
+        return applied, old
+
+    def _regression(self, run, st, rid, label, ed, n, old, old_craft, applied):
+        """Check the rewrite like a new draft: BookForge's checks, the consistency reviewer, the pattern checker and
+        the editor; keep it only when nothing got worse (editor.judge_rewrite)."""
+        bp = self.bp(run)
+        new = bp.rec(rid)
+        v = bp.dispatch(new["module_id"], "VALIDATE", base_ref=new["ref"], payload=candidate_payload(new["ref"], None))
+        checks_ok = v["status"] in ("VALIDATED", "APPROVED")
+        cons, new_craft = None, None
+        if checks_ok:
+            st["message"] = f"AI is reviewing the rewritten {label}"
+            run["phase"] = st["message"]
+            self.save(run)
+            rj = self._sub_job(run, "review", rid)
+            try:
+                res = self._review.review_one(rj, rid, auto=False)
+                cons = res["review"]["verdict"]
+                self._note_review(run, st, label, res["review"])
+            except BookforgeError as exc:
+                self.event(run, "note", f"⚠️ The rewritten {label} could not be reviewed ({exc.code})",
+                           code="EDITOR_FAILED", record_id=rid)
+            if cons == "APPROVE":
+                new_craft = self._craft(run, st, rid, label, ed, n)
+        old_text = str((old.get("data") or {}).get("text") or "")
+        new_text = str((self.bp(run).rec(rid).get("data") or {}).get("text") or "")
+        lost = lost_keeps(old_text, new_text, keep_quotes_of(old_craft, old_text))
+        ok, code, why = judge_rewrite(old_craft, new_craft, consistency=cons, checks_ok=checks_ok, keep_lost=lost,
+                                      applied=applied, new_text=new_text)
+        return ok, code, why, new_craft
+
+    def _editor_flag(self, run, st, ed, craft, head, why: str, code: str) -> dict:
+        notes = []
+        for f in (craft or {}).get("findings") or []:
+            notes.append({"id": f["id"], "label": f.get("label"), "severity": f.get("severity"),
+                          "why": str(f.get("why") or "")[:200], "passage": str(f.get("passage") or "")[:80]})
+        ed.update(flagged=True, done_version=head["version"], notes=notes[:6], flag_reason=why, code=code)
+        self.event(run, "note", f"⚠️ Editor still had notes on the {ed.get('label')} ({why}); it is approved under "
+                   "your run consent — see the run summary", code="EDITOR_NOTES", record_id=head["record_id"])
+        st["editor_note"] = self._editor_line(ed)
+        self._editor_summary(run)
+        self.save(run)
+        return head
+
+    @staticmethod
+    def _editor_line(ed: dict) -> str:
+        bits = [f"editor: {ed.get('verdict') or '…'}"]
+        if ed.get("avg_score") is not None:
+            bits.append(f"avg {ed['avg_score']}, lowest {ed.get('min_score')}")
+        if ed.get("rounds"):
+            bits.append(f"{ed['rounds']} rewrite round(s)")
+        if ed.get("reviewer"):
+            bits.append(f"by {ed['reviewer']}")
+        return " · ".join(bits) + (" ⚠️ still had notes" if ed.get("flagged") else "")
+
+    def _editor_summary(self, run):
+        eds = list((run.get("editor") or {}).values())
+        run["editor_summary"] = {
+            "reviewed": sum(1 for e in eds if e.get("history")), "passed": sum(1 for e in eds if e.get("verdict") ==
+                                                                               "PASS" and not e.get("flagged")),
+            "rounds": sum(int(e.get("rounds") or 0) for e in eds), "kept": sum(int(e.get("kept") or 0) for e in eds),
+            "rejected": sum(int(e.get("rejected") or 0) for e in eds),
+            "flagged": [{"chapter_id": e.get("chapter_id"), "label": e.get("label"), "reason": e.get("flag_reason"),
+                         "notes": e.get("notes") or []} for e in eds if e.get("flagged")],
+            "settings": run.get("editor_settings")}
 
     def _note_review(self, run, st, label: str, review: dict):
         """"written by X · reviewed by Y" on the step, and the run's count of independent / same-AI reviews (P3.2)."""
@@ -1165,6 +1400,11 @@ class AutoBookService(_Runner):
                     item["state"] = "paused"
                     raise
             item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()))
+            ed = (run.get("editor") or {}).get((rec or {}).get("record_id") or rid)
+            if ed:
+                item["editor"] = {"verdict": ed.get("verdict"), "rounds": ed.get("rounds", 0),
+                                  "flagged": bool(ed.get("flagged")), "avg": ed.get("avg_score"),
+                                  "min": ed.get("min_score"), "reviewer": ed.get("reviewer")}
             self.save(run)
         words = sum(i.get("words") or 0 for i in st["items"])
         st["message"] = f"{len(chapters)} chapter(s) written and approved · {words} words"

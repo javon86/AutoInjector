@@ -109,8 +109,8 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   // reply. A newer message typed while the AI was idle is answered by this
   // reply even if it came faster than one poll (no writing edge was seen) —
   // an older started message whose reply was never captured must not take it.
-  function noteCapture(site, turnId, { none = false, rateLimited = false } = {}) {
-    writing[site] = false; // a reply is only captured once the AI has finished it
+  // The messages a reply captured from `site` right now would answer (oldest first).
+  function openFor(site) {
     let open = waiting(site);
     // P18.5: nothing delivered is open, but a message is being typed / confirmed
     // right now into an idle AI: this reply answers it.
@@ -119,6 +119,17 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
     open.forEach((m, i) => { if (m.startedAt) lastStarted = i; });
     const tail = open.slice(lastStarted + 1);
     if (lastStarted >= 0 && tail.length && tail.every((m) => m.typedOver)) open = open.slice(0, lastStarted + 1);
+    return open;
+  }
+  // P18.1: the [MSG #] numbers a reply captured from `site` now would answer —
+  // the same rule noteCapture() applies, without recording anything (so the
+  // capture path can tell whose reply it is before it decides how to take it).
+  // Messages to `site` still owed a reply, oldest first: { seq, kind, at } (no text).
+  function openMessages(site) { return waiting(site).map((m) => ({ seq: m.seq, kind: m.kind, at: m.at })); }
+  function wouldAnswer(site) { return openFor(site).map((m) => m.seq); }
+  function noteCapture(site, turnId, { none = false, rateLimited = false } = {}) {
+    writing[site] = false; // a reply is only captured once the AI has finished it
+    const open = openFor(site);
     const t = { site, at: now(), answers: open.map((m) => m.seq), handoffs: [], held: none ? "nothing-to-add" : rateLimited ? "rate-limited" : null };
     open.forEach((m, i) => { m.answeredAt = t.at; m.answerTurn = turnId; m.batched = i < open.length - 1; if (!m.startedAt) m.startedAt = t.at; });
     if (turnId != null) turns.set(turnId, t);
@@ -197,7 +208,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   }
 
   function reset() { msgs = []; bySeq.clear(); turns.clear(); }
-  return { noteSend, noteTyping, openStarted, isAnswered, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, report, reset, _msgs: () => msgs };
+  return { noteSend, noteTyping, openStarted, isAnswered, noteSendResult, noteGenerating, noteIdle, noteCapture, noteHandoff, noteHeld, answersOf, wouldAnswer, openMessages, report, reset, _msgs: () => msgs };
 }
 
 const LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };

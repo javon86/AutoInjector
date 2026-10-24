@@ -40,7 +40,7 @@ STEP_KIND = {"backup": "backup", "export": "export", "wait": "retry", "retry": "
              "resume": "resume", "problem": "problem", "cancel": "cancel", "review": "ai_review", "fix": "ai_fix",
              "fix_done": "ai_fix", "fix_failed": "problem", "approve": "approval", "start": "run",
              "finished": "run", "ai": "ai", "done": "step", "project": "run", "note": "note", "failover": "note",
-             "probe": "note"}
+             "probe": "note", "editor": "editor", "rewrite": "editor"}
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 SAFE_TEXT = re.compile(r"[\x00-\x1f]")
 
@@ -152,6 +152,30 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    "warning": NOT_INDEPENDENT if same else None}
             if "independent" in p:
                 review_counts["same_ai" if same else "independent"] += 1
+        elif et == "editor.craft_review":
+            sc = p.get("scores") or {}
+            low = min(sc.items(), key=lambda kv: kv[1]) if sc else None
+            same = p.get("independent") is False
+            ent = {"kind": "editor", "step": _step(contracts, p.get("module_id")), "who": "AI",
+                   "ai": {"slot": p.get("ai_slot"), "writer_slot": p.get("writer_slot")},
+                   "what": f"Editor: {p.get('verdict')} ({p.get('record_id')} v{p.get('version')})"
+                   + (f", round {p.get('round')}" if p.get("round") else "")
+                   + f" · {p.get('major', 0)} major / {p.get('minor', 0)} minor note(s)"
+                   + (f" · lowest score {low[0].replace('_', ' ')} {low[1]}" if low else "")
+                   + (f" ⚠️ {NOT_INDEPENDENT}" if same else ""),
+                   "outcome": p.get("verdict"), "scores": sc, "warning": NOT_INDEPENDENT if same else None}
+        elif et == "editor.rewrite":
+            ent = {"kind": "editor", "step": _step(contracts, p.get("module_id")), "who": "AI",
+                   "ai": {"slot": p.get("ai_slot")},
+                   "what": f"Editor's fixes applied: version {p.get('to_version')} of {p.get('record_id')} "
+                   f"({p.get('applied', 0)} passage(s) rewritten, {p.get('unresolved', 0)} not)"
+                   + (" by you" if p.get("how") == "author" else " inside the run"), "outcome": "SUCCESS"}
+        elif et == "editor.rewrite_rejected":
+            ent = {"kind": "editor", "step": _step(contracts, p.get("module_id")), "who": "BookForge",
+                   "what": f"The editor's rewrite (v{p.get('rejected_version')}) was not kept — version "
+                   f"{p.get('restored_from')} is back as v{p.get('to_version')} ({p.get('why')})",
+                   "outcome": "REJECTED", "problem": {"code": "EDITOR_REWRITE_REJECTED",
+                                                      "message": "the rewrite was not better, so it was not kept"}}
         elif et == "review.ai_fix":
             ent = {"kind": "ai_fix", "step": _step(contracts, p.get("module_id")), "who": "AI",
                    "ai": {"slot": p.get("ai_slot")}, "what": f"AI fix: new version {p.get('to_version')} of "
@@ -206,9 +230,11 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                        "outcome": ev.get("verdict") or ("PROBLEM" if kind == "problem" else None),
                        "approval": None, "run_id": j.get("id"),
                        "problem": {"code": ev.get("code"), "message": ev.get("message")}
-                       if kind in ("problem",) or (kind == "retry" and ev.get("code")) else None}
-                if ent["kind"] in ("ai", "ai_review", "ai_fix") and ev.get("kind") in ("review", "fix", "fix_done"):
-                    continue  # the verdict/fix itself comes from the activity log
+                       if kind in ("problem",) or (kind == "retry" and ev.get("code"))
+                       or ev.get("code") in ("EDITOR_NOTES", "EDITOR_REWRITE_REJECTED") else None}
+                if ent["kind"] in ("ai", "ai_review", "ai_fix", "editor") and ev.get("kind") in (
+                        "review", "fix", "fix_done", "editor", "rewrite"):
+                    continue  # the verdict/fix/editor review itself comes from the activity log
                 if ent["kind"] == "ai" and ev.get("module_id"):
                     continue  # the record creation comes from the audit log with its AI slot
                 ent["_key"] = key
@@ -275,7 +301,7 @@ class _Monotonic:
 
 ICON = {"ai": "🤖", "ai_review": "🧐", "ai_fix": "🛠", "approval": "✅", "problem": "⚠️", "retry": "⏳",
         "pause": "⏸", "resume": "▶", "backup": "💾", "export": "📦", "run": "⚡", "step": "•", "setting": "⚙",
-        "import": "📥", "cancel": "✖", "note": "ℹ"}
+        "import": "📥", "cancel": "✖", "note": "ℹ", "editor": "🖋"}
 
 
 def render_markdown(j: dict) -> str:

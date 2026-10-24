@@ -962,3 +962,27 @@ html:not(.show-tech) .tech { display: none !important; }
 .rv-who, .mb-review-note { margin: 2px 0; color: var(--muted, inherit); }
 .rv-who.not-independent, .mb-review-note.not-independent { color: var(--warn); }
 .rv-warn { font-weight: 600; }
+
+/* 🖋 the AI editor (P4/P5/P6): scores, notes, pattern check, before/after fixes */
+.ed-card .ed-scores { display: grid; gap: 4px; margin: 8px 0; max-width: 640px; }
+.ed-score { display: grid; grid-template-columns: minmax(150px, 15em) 1fr 3.5em; gap: 8px; align-items: center; font-size: .9em; }
+.ed-bar { height: 10px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.ed-fill { display: block; height: 100%; background: var(--ok); }
+.ed-score.low .ed-fill { background: var(--warn-line); }
+.ed-score.low .ed-num, .ed-score.low .ed-dim { color: var(--warn); font-weight: 600; }
+.ed-num { text-align: right; font-variant-numeric: tabular-nums; }
+.ed-findings { padding-left: 1.2em; }
+.ed-finding { margin: 8px 0; }
+.ed-finding.sev-major { border-left: 3px solid var(--warn-line); padding-left: 8px; }
+.ed-quote { margin: 4px 0; padding: 4px 10px; border-left: 3px solid var(--border); font-family: var(--font-prose); background: var(--surface-2); }
+.ed-keep ul { margin: 2px 0 6px; }
+.ed-pattern { margin: 8px 0; }
+.ed-pattern summary { cursor: pointer; font-weight: 600; }
+.ed-diffs { padding-left: 1.2em; }
+.ed-diff { margin: 10px 0; }
+.ed-before, .ed-after { display: grid; grid-template-columns: 4.5em 1fr; gap: 6px; margin: 3px 0; font-family: var(--font-prose); }
+.ed-tag { font-family: var(--font); font-size: .8em; font-weight: 700; color: var(--text-muted); }
+.ed-before del { background: var(--bad-soft); text-decoration-color: var(--bad); }
+.ed-after ins { background: var(--ok-soft); text-decoration: none; }
+.mb-ed.flagged { color: var(--warn); font-weight: 600; }
+@media (max-width: 600px) { .ed-score { grid-template-columns: 1fr 3em; } .ed-score .ed-bar { grid-column: 1 / -1; grid-row: 2; } }

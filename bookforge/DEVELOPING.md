@@ -34,6 +34,12 @@ bookforge/
                            BookPath.status()), approvals via BookPath.a_approve/approve_ref, AI reviewer + "fix"
                            jobs through AssistService._call_ai, opt-in auto-approve (settings review_settings:<pid>),
                            WorkTracker ("working on")
+    prose_audit.py         P6 pattern checker (no AI): repeated gestures, "Not X. Not Y.", triads, moral paragraph
+                           endings, named emotions, said-bookisms, sentence-length uniformity, same openings, overused
+                           words, dialogue share, reassurance; audit()/audit_book(), thresholds per 1 000 words
+    editor_rubric.py       the AI editor's rubric (dimensions, questions, strictness) - the ONE editable place
+    editor.py              🖋 AI editor: craft review (P4), rewrite proposals + exact apply (P5), restore; settings
+                           editor_settings, advice keys craft_reviews / editor_proposals / editor_rewrites
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
@@ -189,6 +195,52 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   `ReviewService.maybe_auto_approve` approves only when the setting is on AND the verdict for exactly that version is
   APPROVE; outbox `review.auto_approved` (with consent by/at and label) or `review.auto_approve_failed`; on/off changes
   are logged as `review.auto_approve_on/off`.
+
+## 🖋 The AI editor (editor.py, editor_rubric.py, prose_audit.py — P4 / P5 / P6)
+
+* **P6 pattern checker** `prose_audit.audit(text, chapter=, settings={strictness, gestures, watch_words, thresholds},
+  names=)` / `audit_book([(chapter_id, text)])` -> `{words, paragraphs, sentences, findings: [{id, check, label,
+  severity: info|minor|major, count, per_1000, threshold, detail, advice, passages: [{chapter, paragraph (from 1),
+  excerpt (<= 80 chars)}]}], stats, summary, strictness}`. Thresholds per 1 000 words (`THRESHOLDS`, minimum counts
+  first), shares for tags/speakers, coefficient of variation for sentence length; strictness scales them (gentle
+  1.5x, strict 0.7x). `brief()` is what the editor gets, `counts_only()` has no text (journal/events). Pure Python,
+  a few ms per chapter.
+* **P4 craft review** `EditorService.craft_one(job, rid)` (job: `review.ReviewJob`; `ReviewService.editor` is the
+  service bound to the same engine/AIs). Context: chapter text (or the planning draft's JSON for B01/B03/B11, lighter
+  rubric `editor_rubric.PLANNING`), book profile, approved canon + character sheets, protected facts, the outline
+  place (`chapter_info`: number, of, last, objective, neighbours) and `prose_audit.brief`. Slot choice =
+  `ReviewService.plan_reviewer` (editor != writer, P3.1). Schema `{scores, findings[{id, dimension, severity, passage,
+  why, suggestion, keep_nearby}], keep, verdict}`; `clean_craft` clips scores 1-10, drops unknown dimensions, marks
+  whether each passage is in the text, and BookForge's own `decide()` sets PASS/REVISE from `editor_rubric.STRICTNESS`
+  (normal: any major or any score < 6) — the AI's verdict is kept as `ai_verdict`. Stored as ADVICE in
+  `craft_reviews:<pid>:<branch>` (`<rid>:<version>`); outbox `editor.craft_review` (scores and counts, no text).
+  Set F records were not used: F findings are anchored patch proposals that enter the approval queue and need an
+  approval reference; a scored opinion has no field there and an accepted rewrite is a normal C02 UPDATE anyway.
+* **P5 targeted rewrite** `propose(job, rid, craft=, finding_ids=)` asks the WRITER (`prefer_slots=[writer]`,
+  `avoid_slots=[editor]`) for `{replacements: [{finding_id, original, replacement}]}`; `apply_replacements` uses an
+  original only when it occurs exactly once, overlaps the finding's passage, is not far longer than it, changes
+  something and keeps every keep quote; everything else is unresolved (`NOT_FOUND`, `AMBIGUOUS`, `NOT_AT_PASSAGE`,
+  `TOO_LONG`, `KEEP_LOST`, `NO_CHANGE`, `NO_REPLACEMENT`). Stored in `editor_proposals`. `apply(principal, pid, branch,
+  rid, version, accept)` re-applies exactly the accepted ones to that version and saves a DRAFT through
+  `BookPath.dispatch(UPDATE)` (canon checks run); notes `ai_fixes` (`editor: true`) and `editor_rewrites`; outbox
+  `editor.rewrite`. `restore()` saves an earlier revision's data again (copying its consistency and craft reviews,
+  same content) with outbox `editor.rewrite_rejected`.
+* **Runs** (`AutoBookService._editor_pass`, C02 only, settings snapshot `run["editor_settings"]`): after an APPROVE
+  consistency verdict (review_one `auto=False`) -> craft -> PASS: approve; REVISE and rounds left -> propose + apply ->
+  `_regression` (VALIDATE, consistency review, craft) -> `judge_rewrite` (keep only if checks pass, consistency
+  APPROVE, no keep quote lost, average not lower and no dimension down by more than 1, flagged passages gone, no more
+  major findings) -> else `restore`. Rounds used up / rewrite not kept / editor failed -> approve under the run
+  consent and flag (`run["editor"][rid]`, `run["editor_summary"]`, chapter item `editor`, events `EDITOR_NOTES`,
+  `EDITOR_REWRITE_REJECTED`, `EDITOR_FAILED`, `EDITOR_UNRESOLVED`). Never a StepProblem except when the earlier text
+  cannot be restored.
+* **API:** `GET/PUT /api/settings/editor {enabled, rounds 0-3, strictness}`; `POST .../review/editor {record_id}`
+  (202 job), `POST .../review/editor/fix {record_id, finding_ids?}` (202 job, proposal), `POST .../review/editor/apply
+  {record_id, version, accept: [finding ids]}` (200, new version; 409 when the version moved), `GET
+  .../review/editor/{rid}` (craft per version, proposal and rewrite of the newest version, pattern report, settings).
+  Queue items carry `craft` (numbers only) and `editable`. UI: `editorCard`, `fixesBox`, `craftBadge`,
+  `editorRunSummary`, `editorSettingsCard` (app.js); codes `EDITOR_*` in problems.js.
+* Tests: `tests/test_prose_audit.py`, `tests/test_editor.py`; the fake AI (`tests/autobook_fake.py`) answers editor
+  and rewrite prompts from `editor_flags` (phrase -> replacement), `craft_script`, `rewrite_script`.
 
 ## 🧪 Test workflow (workflow_test.py)
 

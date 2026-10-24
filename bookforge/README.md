@@ -108,6 +108,40 @@ reviewed by AI-3 · Gemini”*. An AI fix after *revise* goes back to the AI tha
 reviews its own writing, and the run window, the review queue, the journal and the run summary say ⚠️ *“Reviews are
 not independent — the same AI wrote and reviewed this”*.
 
+## 🖋 The editor (craft, not only consistency)
+
+The AI reviewer checks that a draft fits the plan and the canon. The **editor** reads it like a demanding human
+editor, after that review: **subtext** (are feelings shown rather than announced?), **characters with their own
+goals** (do side characters resist, bargain, refuse?), **distinct voices**, **obstacles from the world**, **theme
+carried, not stated**, **varied prose, no tics**, **real stakes**, **an earned ending** (last chapter only) and
+**protected mysteries kept**. Each dimension gets a score from 1 to 10, and every note quotes the exact passage, says
+why and suggests a change; the editor also lists what works and must be **kept**. Friction must come from the
+characters and the world, never from random accidents. The editor is never the AI that wrote the chapter when
+another AI works (⚠️ otherwise, as for reviews).
+
+Before the editor reads, BookForge's own **pattern check** (no AI) counts repeated habits: stillness and gesture
+phrases (“went very still”, “for a long time”, “looked at”…), “Not X. Not Y.”, lists of three, paragraphs that end on
+a moral, feelings named in dialogue (“I'm afraid”, “half of me”), fancy dialogue tags, sentences of the same length or
+the same opening, overused words, who has the dialogue, and reassurance that removes the risk (“It won't hurt
+anyone”). The editor gets these counts; you see them under **🔎 Pattern check** on the chapter page.
+
+- **In ⚡ Make a book for me** (on by default): a chapter whose editor says *revise* goes back to the AI that wrote
+  it, which rewrites **only the flagged passages**. BookForge applies each change word for word (a change that does
+  not match the text exactly, or would remove a passage to keep, is left out — never guessed), saves a new version
+  and checks it again: BookForge's checks, the consistency reviewer, the pattern check and the editor. The rewrite is
+  kept only if nothing got worse; otherwise the earlier text is put back. At most **2 rounds** per chapter; if the
+  editor still has notes then, the chapter is approved under your run consent anyway and marked ⚠️ *“editor still
+  had notes”* — the run summary lists those chapters and notes. The editor never holds up the whole book.
+- **On a chapter page / in Needs your approval:** **🖋 Editor review** shows the scores bar, the notes and what to
+  keep. **✍ Apply editor's fixes** asks the writer for the changes and shows **before → after** for each passage;
+  untick what you do not want and **💾 Save the chosen changes as a new version** (you approve it as usual). The
+  premise, main plot and outline can be read by the editor too (a lighter rubric, notes only).
+- **Settings → 🖋 Editor:** on/off (for runs), **Editor rounds** 0–3 (0 = notes only), **Strictness** gentle /
+  normal / strict (when scores and notes count as *revise*: normal = any major note or any score below 6).
+
+The editor's scores and notes are advice stored for exactly that version; the journal shows the verdicts and counts,
+never your text. What the editor checks is written in one plain file, `bookforge/editor_rubric.py`.
+
 ## ✍ Write all chapters
 
 On Make my book, once the outline is approved, **✍ Write all chapters** writes every unwritten chapter one after

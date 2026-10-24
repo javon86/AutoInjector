@@ -906,7 +906,16 @@ function markCaptured(site) {
   paneHealth.onCapture(site);
   broadcastHealth();
   const c = state.captured[site];
+  const answers = relayWouldAnswer(site);
   try { relayTrace.noteCapture(site, c ? c.id : null, { none: !!(c && (isNoneSkip(String(c.text || "")) || parseRoundtableTag(String(c.text || "")).tag === "NONE")), rateLimited: !!(c && c.isRateLimited) }); } catch (_) {}
+  // P18.1: a reply that is not a check-in answer but took a check-in's [MSG #]
+  // (it answered an older message too) displaces that check-in — no verdict from it.
+  if (!(c && c.checkIn) && answers && answers.length) { try { selfRepair.noteForeignReply(site, answers); } catch (_) {} }
+}
+// The [MSG #] numbers a reply captured from `site` right now would answer (the
+// Relay Trace's ownership rule, without recording anything); null = unknown.
+function relayWouldAnswer(site) {
+  try { return relayTrace.wouldAnswer(site); } catch (_) { return null; }
 }
 // Where each AI pane starts. AUTOINJECTOR_SITE_URL_<SITE> (e.g. _CHATGPT) swaps in a
 // test page — only a file:// URL or a loopback http address is accepted (the
@@ -3793,8 +3802,11 @@ async function pollSite(site) {
       // act once the pane has gone quiet past the watchdog window.
       if (text !== pend.text) { state.pending[site] = { text, sinceTs: Date.now(), reprompted: false }; return; }
       // P18.1/P18.7: the answer to a check-in / the teach message needs no tag —
-      // take it once it has held still (never nag the AI about it).
-      if (selfRepair && selfRepair.expects(site, text) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS) {
+      // take it once it has held still (never nag the AI about it). Only a reply
+      // that answers the check-in's OWN [MSG #] and holds its word counts; any
+      // other reply (a BookForge chapter that happens to use the word) is left
+      // to the handling below, exactly as without check-ins.
+      if (selfRepair && selfRepair.expects(site, text, relayWouldAnswer(site)) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
@@ -3924,7 +3936,10 @@ async function pollSite(site) {
     // already computed for the completion gate above.)
     // P18.1/P18.7: the answer to a check-in (or to the teach message) belongs to the
     // self-repair: never shown in the conversation, never relayed, never nagged.
-    if (selfRepair && selfRepair.expects(site, text)) {
+    // Ownership is by [MSG #] (the Relay Trace) plus the check-in's word: a reply
+    // that answers an older message (a BookForge prompt, a relay) goes to its owner.
+    const checkinAnswers = relayWouldAnswer(site);
+    if (selfRepair && selfRepair.expects(site, text, checkinAnswers)) {
       const turnId = state.nextTurnId++;
       state.captured[site] = { id: turnId, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, checkIn: true };
       markCaptured(site);
@@ -3935,7 +3950,7 @@ async function pollSite(site) {
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
-      try { selfRepair.onCaptured(site, { text }); } catch (_) {}
+      try { selfRepair.onCaptured(site, { text, answers: checkinAnswers }); } catch (_) {}
       logEvent("checkin-reply", { site, chars: text.length });
       return;
     }
@@ -6104,6 +6119,9 @@ const CHECKIN_TICK_MS = Number(process.env.AUTOINJECTOR_CHECKIN_TICK_MS) || 1500
 const CHECKIN_USER_IDLE_MS = Number(process.env.AUTOINJECTOR_CHECKIN_USER_IDLE_MS) || 120000; // no check-in within 2 min of the user touching that pane
 const CHECKIN_STARTUP_DELAY_MS = Number(process.env.AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS) || 6000; // after the page check that follows a load
 const CHECKINS_ENABLED = process.env.AUTOINJECTOR_CHECKIN !== "0"; // tests / power users can switch the automatic ones off (on-demand still works)
+const CHECKIN_YIELD_MAX_MS = Number(process.env.AUTOINJECTOR_CHECKIN_YIELD_MS) || 60000; // a BookForge request waits at most this long for a check-in to settle
+const CHECKIN_OWED_DEMAND_MS = 3 * 60000; // an unanswered message to an AI blocks an asked-for check-in this long…
+const CHECKIN_OWED_MS = 10 * 60000;       // …and an automatic one this long
 const PAGE_SCRIPT_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PAGE_SCRIPT_TIMEOUT_MS) || 15000;
 const RELOAD_WAIT_MS = Number(process.env.AUTOINJECTOR_RELOAD_WAIT_MS) || 45000;
 const LEARNED_ROLES = new Set(["input", "send", "assistant", "stop", "user"]);
@@ -6151,6 +6169,15 @@ function selfRepairBusy(site, level) {
   if (state.generating[site] || state.stopShown[site]) return "busy";
   if (sendQueues[site]) return "sending";
   try { const st = bookforgeBridge && bookforgeBridge.status(); if (st && st.active && st.active[site]) return "bookforge"; } catch (_) {}
+  if (bookforgeAwaitingReply(site)) return "bookforge"; // a typed BookForge prompt (incl. its late window) owes its answer
+  if (forceAcceptUntagged.has(site)) return "sending";
+  // A message the app typed into this AI (a relay, the user's, a BookForge prompt)
+  // that still owes its reply: a check-in now would make whose reply is whose
+  // ambiguous. (After this long the AI is taken as not answering it.)
+  try {
+    const owed = relayTrace.openMessages(site).filter((m) => m.kind !== "auto");
+    if (owed.some((m) => Date.now() - m.at < (level === "demand" ? CHECKIN_OWED_DEMAND_MS : CHECKIN_OWED_MS))) return "waiting";
+  } catch (_) {}
   if (selftestInFlight.has(site) || tunerInFlight.active || testRunInFlight.has(site) || ftState.running || bbState.running || bfLinkTest.running) return "test";
   if (Date.now() - (lastUserInputAt[site] || 0) < CHECKIN_USER_IDLE_MS) return "typing";
   const lr = lastRead[site];
@@ -6162,6 +6189,22 @@ function selfRepairBusy(site, level) {
     if (Date.now() - (lastActivityAt[site] || 0) < (level === "periodic" ? 5 * 60000 : 20000)) return "recent";
   }
   return null;
+}
+// A BookForge request is about to type into `site`: let a check-in there settle
+// first (withdrawn if not typed yet), for at most CHECKIN_YIELD_MAX_MS.
+async function selfRepairMakeWay(site, token) {
+  let how = "none";
+  try { how = selfRepair.makeWay(site); } catch (_) { return "none"; }
+  if (how === "none") return how;
+  const t0 = Date.now();
+  logEvent("checkin-yield", { site, how, note: "a BookForge request waits for this AI's check-in to settle" });
+  while (Date.now() - t0 < CHECKIN_YIELD_MAX_MS && !(token && token.cancelled)) {
+    let busyNow = false;
+    try { busyNow = selfRepair.busyWithSite(site); } catch (_) {}
+    if (!busyNow) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return how;
 }
 function selfRepairSaveLearned(site, role, selector, how) {
   if (!SITES[site] || !LEARNED_ROLES.has(role)) return false;
@@ -6290,6 +6333,11 @@ async function startBookforgeBridgeNow() {
     siteState: (s) => selfRepair.health(s),
     startProbe: (list) => selfRepair.probeMany(list, "bookforge", "demand"),
     sendToSite: async (site, text, meta) => {
+      // P18.1: a check-in on this AI never interleaves with a BookForge prompt — one
+      // not typed yet is withdrawn, one typed is left to settle (bounded) first.
+      const ct = meta && meta.cancelToken ? meta.cancelToken : null;
+      await selfRepairMakeWay(site, ct);
+      if (ct && ct.cancelled) return { ok: false, error: "CANCELLED", seq: null };
       // sendTextTo() stamps state.nextMsgSeq synchronously (before its first
       // await) once the view exists, so reading it first gives this send's
       // exact [MSG #] number without changing sendTextTo's return shape.
