@@ -127,11 +127,14 @@ def _find_passage(text: str, passage: str) -> tuple[int, int] | None:
 
 
 # ====================================================================== pure helpers (unit-tested)
-def decide(scores: dict, findings: list, strictness: str) -> tuple[str, list[str]]:
-    """BookForge's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness)."""
+def decide(scores: dict, findings: list, strictness: str, relax: dict | None = None) -> tuple[str, list[str]]:
+    """BookForge's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness).
+    ``relax``: per-dimension change of the minimum score from the author's story choices (P12, e.g. "explain the
+    mysteries" lowers the bar of protected_mysteries by 2)."""
     thr = rubric.STRICTNESS.get(strictness) or rubric.STRICTNESS["normal"]
+    relax = relax or {}
     why = []
-    low = sorted(d for d, v in scores.items() if isinstance(v, int) and v < thr["min_score"])
+    low = sorted(d for d, v in scores.items() if isinstance(v, int) and v < thr["min_score"] + int(relax.get(d, 0)))
     if low:
         why.append("score below " + str(thr["min_score"]) + ": " + ", ".join(f"{rubric.LABELS.get(d, d)} {scores[d]}"
                                                                           for d in low))
@@ -144,7 +147,7 @@ def decide(scores: dict, findings: list, strictness: str) -> tuple[str, list[str
     return ("REVISE" if why else "PASS"), why
 
 
-def clean_craft(raw, dims: list[str], text: str, strictness: str) -> dict:
+def clean_craft(raw, dims: list[str], text: str, strictness: str, relax: dict | None = None) -> dict:
     """Validate and normalise the editor's answer; raise INTERNAL_ERROR when it is not a usable review."""
     if not isinstance(raw, dict) or not isinstance(raw.get("scores"), dict):
         raise BookforgeError("INTERNAL_ERROR", "/scores", "the editor's answer was not a valid craft review (no "
@@ -180,7 +183,7 @@ def clean_craft(raw, dims: list[str], text: str, strictness: str) -> dict:
             "found": bool(loc) and text.find(passage) >= 0, "located": bool(loc)})
     keep = [str(k).strip()[:PASSAGE_MAX] for k in (raw.get("keep") or []) if isinstance(k, str) and k.strip()]
     keep = keep[:MAX_KEEP]
-    verdict, why = decide(scores, findings, strictness)
+    verdict, why = decide(scores, findings, strictness, relax)
     vals = list(scores.values())
     return {"verdict": verdict, "verdict_why": why,
             "ai_verdict": raw.get("verdict") if raw.get("verdict") in ("PASS", "REVISE") else None,
@@ -392,7 +395,12 @@ class EditorService:
         except Exception:  # noqa: BLE001 - the voice words are a hint
             log.exception("could not read the voice cards")
             voices = {}
-        return prose_audit.audit(text, chapter=None, settings={"strictness": st, "voices": voices},
+        try:  # P10: count how often each world-texture detail is on the page
+            from . import texture as texture_mod  # noqa: PLC0415
+            tex = texture_mod.items_of(texture_mod.get_entry(self.store, pid, branch))
+        except Exception:  # noqa: BLE001
+            tex = []
+        return prose_audit.audit(text, chapter=None, settings={"strictness": st, "voices": voices, "texture": tex},
                                  names=self.names(pid, branch))
 
     def brief(self, pid, branch, info, principal="author") -> dict | None:
@@ -432,12 +440,31 @@ class EditorService:
                 break
         return out
 
-    def _context(self, pid, branch, rec, report, info, brief=None) -> tuple[dict, list]:
+    def guidance(self, pid, branch, module_id, info) -> dict:
+        """P9/P12: the story rules (editor view or plan brief) and the author's choices (never raises)."""
+        out = {"choices": {}, "rules": None}
+        try:
+            from . import story_choices, story_rules  # noqa: PLC0415
+            out["choices"] = story_choices.of_store(self.store, pid)
+            if module_id == "C02":
+                out["rules"] = story_rules.editor_view(self.store, pid, branch, last=bool(info.get("last")),
+                                                       mystery_mode=story_choices.mystery_mode(out["choices"]))
+            elif module_id in ("B03", "B11"):
+                out["rules"] = story_rules.plan_brief(self.store, pid, branch)
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            log.exception("could not read the story rules / choices for the editor")
+        return out
+
+    def _context(self, pid, branch, rec, report, info, brief=None, guide=None) -> tuple[dict, list]:
         approved, _d, protected = canon_context(self.engine, pid, branch, max_approved=40, max_drafts=0)
         ctx = {"book_profile": book_profile_brief(self.store, pid), "canon": {"approved_records": approved},
                "characters": self._voices(pid, branch), "protected_facts": protected[:40]}
+        if (guide or {}).get("rules"):
+            ctx["story_rules"] = guide["rules"]
         data = rec.get("data") or {}
         if rec["module_id"] == "C02":
+            if brief and brief.get("world_texture"):
+                ctx["world_texture"] = brief["world_texture"]
             if brief:
                 ctx["voice_cards"] = {"cards": brief.get("voice_cards") or [],
                                       "others": brief.get("other_voices") or []}
@@ -468,7 +495,11 @@ class EditorService:
         st = self.settings()
         info = chapter or (self.chapter_info(pid, branch, rec, job.principal) if rec["module_id"] == "C02" else {})
         brief = self.brief(pid, branch, info, job.principal) if rec["module_id"] == "C02" else None
-        dims = rubric.dimensions_for(rec["module_id"], bool(info.get("last")), bool((brief or {}).get("scene_cards")))
+        guide = self.guidance(pid, branch, rec["module_id"], info)
+        dims = rubric.dimensions_for(rec["module_id"], bool(info.get("last")), bool((brief or {}).get("scene_cards")),
+                                     story_rules=bool(guide["rules"]))
+        from . import story_choices  # noqa: PLC0415
+        notes, relax = story_choices.editor_notes(guide["choices"]), story_choices.relax(guide["choices"])
         report = self.pattern(pid, branch, rec, st["strictness"])
         writer = rv.writer_of(pid, branch, rec)
         rv.plan_reviewer(job, writer)  # the editor is never the writer when another AI works (P3.1)
@@ -477,15 +508,18 @@ class EditorService:
         job.phase = f"The editor is reading “{title}”"
         tok = rv.work.begin(pid, rec["module_id"], f"The editor is reading {title}")
         try:
-            ctx, protected = self._context(pid, branch, rec, report, info, brief)
-            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=rubric.task_text(rec["module_id"], dims),
+            ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
+            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"],
+                                       task=rubric.task_text(rec["module_id"], dims, notes),
                                        schema=_schema(dims), context=ctx, protected=protected)
         finally:
             rv.work.end(tok)
         job.check()
         text = str((rec.get("data") or {}).get("text") or "") if rec["module_id"] == "C02" else \
             json.dumps(rec.get("data"), ensure_ascii=False)
-        craft = clean_craft(raw, dims, text, st["strictness"])
+        craft = clean_craft(raw, dims, text, st["strictness"], relax)
+        if relax:
+            craft["relaxed"] = relax
         editor = rv._slot(job.slot)
         same = bool(writer.get("slot")) and (job.slot == writer["slot"] or providers_mod.slot_family(editor)
                                              == providers_mod.slot_family(rv._slot(writer["slot"])))
@@ -655,7 +689,7 @@ class EditorService:
         writer = rv.writer_of(pid, branch, old)
         rv._put(f"ai_fixes:{pid}:{branch}", _rkey(rid, new["version"]),
                 {"slot": writer.get("slot"), "from_version": head["version"], "restored_from": old["version"], "at": at})
-        for key in (f"ai_reviews:{pid}:{branch}", f"craft_reviews:{pid}:{branch}"):
+        for key in (f"ai_reviews:{pid}:{branch}", f"craft_reviews:{pid}:{branch}", f"planned_checks:{pid}:{branch}"):
             prev = (self.store.get_setting(key) or {}).get(_rkey(rid, old["version"]))
             if prev:
                 rv._put(key, _rkey(rid, new["version"]), dict(prev, version=new["version"],

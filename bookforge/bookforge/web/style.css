@@ -1012,3 +1012,28 @@ ul.samples q { font-style: italic; }
 .mb-sc.flagged { color: var(--warn); font-weight: 600; }
 .char-dl ul.chips { list-style: none; padding: 0; margin: 0; }
 .char-dl ul.chips li { background: var(--accent-soft); border: 1px solid var(--border); border-radius: 999px; padding: 1px 10px; font-size: .9rem; }
+
+/* ---- Section 4: ending and style choices, story rules, world texture, planned to page ---- */
+.choices-box .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+@media (max-width: 640px) { .choices-box .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+.choices-box select { width: 100%; min-width: 0; }
+.choices-box details { margin-top: 6px; }
+.more-ending summary, .style-knobs summary { cursor: pointer; font-weight: 600; }
+.plain-list { margin: 0; padding-left: 1.1em; }
+.world-card h3 { margin: 12px 0 4px; font-size: 1rem; }
+.rule-list, .texture-list, .planned-list { list-style: none; padding: 0; margin: 0 0 8px; }
+.rule-list > li, .texture-list > li { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; margin-bottom: 6px; background: var(--surface-2); min-width: 0; overflow-wrap: anywhere; }
+.rule-list > li p { margin: 2px 0; }
+.rule-hard_rule { border-left: 4px solid var(--set-A) !important; }
+.rule-seen { border-left: 4px solid var(--set-E) !important; }
+.rule-belief { border-left: 4px solid var(--set-B) !important; }
+.rule-mystery { border-left: 4px solid var(--set-J) !important; }
+.rule.retired { opacity: .6; }
+.rule-proposals { border: 1px dashed var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 8px 0; }
+.rule-proposals ol { padding-left: 1.2em; }
+.rule-edit, .texture-edit { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 8px; min-width: 0; }
+.planned-list > li { padding: 3px 0; overflow-wrap: anywhere; }
+.planned-list > li.pl-missing { color: var(--warn); font-weight: 600; }
+.planned-list > li.optional { opacity: .8; }
+.mb-pl.flagged { color: var(--warn); font-weight: 600; }
+.s4-card p { overflow-wrap: anywhere; }

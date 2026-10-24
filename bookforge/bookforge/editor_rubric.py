@@ -26,7 +26,10 @@ DIMENSIONS = [
      "passage and say in why whose voice it sounds like and what this character would say instead."),
     ("world_friction", "Obstacles from the world",
      "Does the world get in the way through things that already belong to it — work, weather of this place, money, "
-     "rules, institutions, distances, other people's interests — so that progress costs something?"),
+     "rules, institutions, distances, other people's interests — so that progress costs something? Use the book's "
+     "world-texture list when given (context.world_texture: details with what each can cause): a detail is used well "
+     "only if it causes something, shows a character's skill or gets in the way; quote a detail used as mere "
+     "decoration, or work that is named instead of shown through procedure and tools."),
     ("theme_restraint", "Theme carried, not stated",
      "Is the theme carried by events and images, or is it stated through many channels at once (narrator, dialogue, "
      "symbol and paragraph endings all saying the same thing — the \"anvil chorus\")?"),
@@ -41,8 +44,20 @@ DIMENSIONS = [
      "(Last chapter only.) Is the resolution earned and does it cost something, or does it absolve everyone and tie "
      "every thread too neatly? A good ending may leave a question open or a loss unrepaired."),
     ("protected_mysteries", "Protected mysteries kept",
-     "Are the book's protected facts and mysteries (context.protected_facts) kept — not contradicted, not explained or "
-     "revealed earlier than the plan says?"),
+     "Are the book's protected facts and mysteries (context.protected_facts and context.story_rules"
+     ".protected_mysteries) kept — not contradicted, not explained or revealed earlier than the plan says? Quote the "
+     "passage that explains or solves a protected mystery (also a narrator's guess presented as the answer)."),
+    ("story_rules", "Story rules kept",
+     "(Only when context.story_rules is given.) Does the chapter keep the story-rules ledger: no hard rule broken, "
+     "every rule used inside its scope and limits (an exception used beyond its stated limits is a finding), a belief "
+     "never turned into confirmed fact (a narrator's inference does not become established truth just because a later "
+     "scene needs it), something seen to happen shown without inventing its cause? Quote exactly the passage that "
+     "breaks a rule and name the rule in why."),
+    ("rules_bounded", "Story rules bounded",
+     "(Planning drafts, only when context.story_rules is given.) Is every exception, special object, power or "
+     "convenient rule the plan relies on bounded by a stated limit (context.story_rules: scope; "
+     "context.story_rules.not_bounded lists what BookForge found unbounded)? Flag an exception that is used but not "
+     "bounded, and a belief or mystery the plan treats as fact."),
     ("scene_plan", "Scene plan kept",
      "(Only when context.scene_cards is given.) Does every planned scene happen on the page: does each character "
      "present push for their own goal, does the obstacle from the world actually get in the way and cost something, "
@@ -50,6 +65,8 @@ DIMENSIONS = [
      "obstacle should be but is missing, is solved too easily, or where the unsaid thing is said out loud."),
 ]
 LABELS = {k: label for k, label, _q in DIMENSIONS}
+# Notes that are not scored by the editor but use the same rewrite machinery (P11: planned but not on the page)
+LABELS["planned_to_page"] = "Planned but not on the page"
 QUESTIONS = {k: q for k, _label, q in DIMENSIONS}
 
 # Which dimensions apply to which kind of draft. Chapters get the full rubric (ending_openness only for the last
@@ -88,19 +105,26 @@ STRICTNESS = {
 }
 
 
-def dimensions_for(module_id: str, last_chapter: bool = False, scene_cards: bool = False) -> list[str]:
+def dimensions_for(module_id: str, last_chapter: bool = False, scene_cards: bool = False,
+                   story_rules: bool = False) -> list[str]:
     """The dimensions scored for a draft: the full chapter rubric (the ending only for the last chapter, the scene plan
-    only when the chapter has scene cards), or the lighter planning rubric."""
+    only when the chapter has scene cards, the story rules only when the book has a rules ledger), or the lighter
+    planning rubric (plot and outline: "are the rules bounded?" when there is a ledger)."""
     if module_id == "C02":
-        return [d for d in CHAPTER if d != "ending_openness" or last_chapter] + (["scene_plan"] if scene_cards else [])
-    return list(PLANNING.get(module_id, PLANNING["B01"]))
+        return [d for d in CHAPTER if d != "ending_openness" or last_chapter] + (["scene_plan"] if scene_cards else []) \
+            + (["story_rules"] if story_rules else [])
+    return list(PLANNING.get(module_id, PLANNING["B01"])) + (["rules_bounded"] if story_rules and module_id in
+                                                             ("B03", "B11") else [])
 
 
-def task_text(module_id: str, dims: list[str]) -> str:
+def task_text(module_id: str, dims: list[str], notes: dict | None = None) -> str:
+    """``notes``: extra expectations per dimension (P12: the author's ending, explanation and peril choices)."""
     what = "chapter (context.chapter_text)" if module_id == "C02" else "planning draft (context.draft_json)"
-    rubric = " ".join(f"[{d}] {QUESTIONS[d]}" for d in dims)
+    notes = notes or {}
+    rubric = " ".join(f"[{d}] {QUESTIONS[d]}" + (f" {notes[d]}" if notes.get(d) else "") for d in dims)
     extra = (" the characters' voice cards (context.voice_cards), the chapter's scene cards (context.scene_cards) "
-             "when there are any," if module_id == "C02" else "")
+             "when there are any, the story rules and world texture (context.story_rules, context.world_texture) when "
+             "given," if module_id == "C02" else " the story rules (context.story_rules) when given,")
     return (f"Task: {PRINCIPLES} Read the {what} with the book profile (context.book_profile), the characters and "
             f"places (context.canon),{extra} the plan for this part (context.outline) and the deterministic pattern "
             "report (context.pattern_report, counts made by BookForge). Score each of these dimensions from 1 to 10: "

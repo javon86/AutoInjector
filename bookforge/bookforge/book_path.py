@@ -82,6 +82,10 @@ def clean_profile(body) -> dict:
         raise _err("INVALID_INPUT", "", "the book profile must be a JSON object")
     out = {}
     for k, v in body.items():
+        if k == "choices":  # P12 ending and style choices (story_choices.py); {} clears them
+            from .story_choices import clean as clean_choices  # noqa: PLC0415
+            out[k] = clean_choices(v)
+            continue
         if k not in PROFILE_FIELDS:
             continue  # unknown fields are ignored, not stored
         if k == "chapters":

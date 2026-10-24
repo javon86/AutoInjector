@@ -7,8 +7,11 @@ so a page reload shows it and a BookForge restart shows it as "interrupted — R
     safety backup -> book profile (the AI invents title, genre, audience, tone, idea, pen name)
     -> characters and places (A01/A04/A03 through the Bible Builder: world sketch + proposals, created as drafts)
     -> character sheets and voice cards (P7/P17: made with the characters, or made now for any without)
-    -> premise B01 -> main plot B03 -> chapter outline B11 -> every chapter (scene cards planned by the writer and
-    checked by an independent AI (P8), then C01 context + C02 prose)
+    -> story rules and world texture (P9/P10: drafted from the canon and the profile)
+    -> premise B01 -> main plot B03 -> chapter outline B11 (then the story rules are updated for the plan: the AI's
+    suggestions are accepted under the run consent) -> every chapter (scene cards planned by the writer and
+    checked by an independent AI (P8), then C01 context + C02 prose; after the editor, the planned-to-page check
+    (P11) with at most one targeted fix) -> planned details on the page (whole book, a report)
     -> book format (I01 profiles) -> backup + assembly (G02/G01/G05/G04/G07) -> backup + exports (G11 PDF,
     G12 EPUB, G13 DOCX - all three release profiles are switched on for this book) -> content check H05.
 
@@ -40,7 +43,11 @@ from datetime import datetime, timezone
 
 from . import characters as chars_mod
 from . import h_checks as hc
+from . import planned as planned_mod
 from . import scenes as scenes_mod
+from . import story_choices
+from . import story_rules
+from . import texture as texture_mod
 from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_brief
 from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get_profile, problems, save_profile
 from .requests import candidate_payload
@@ -70,11 +77,16 @@ STEPS = [
      "each one is reviewed and approved under your consent."),
     ("characters", "A", "A01", "Character sheets and voices", "What each character wants, needs, fears and hides, "
      "and how each one talks (a voice card each); the writer gets them in every chapter."),
+    ("world", "A", "A03", "Story rules and world texture", "What is law in this world, what is only seen, believed "
+     "or must stay a mystery — and concrete details of work, weather, institutions and people that can get in the "
+     "way."),
     ("premise", "B", "B01", "Premise", "What the book is about in one or two sentences."),
     ("plot", "B", "B03", "Main plot", "The main storyline built from the premise and the characters."),
     ("outline", "B", "B11", "Chapter outline", "The chapter-by-chapter plan."),
     ("chapters", "C", "C02", "Write every chapter", "Context (C01) and prose (C02) for each chapter, reviewed and "
      "approved one by one."),
+    ("planned", "C", "C02", "Planned details on the page", "Every chapter is checked: did the outline beats, the "
+     "scene goals and obstacles and the planned character details reach the page? (Never holds up the book.)"),
     ("format", "I", "I01", "Book format", "Page size, font and PDF/EPUB/DOCX settings."),
     ("assemble", "G", "G01", "Put the book together", "Order, manuscript, typography, pages and contents."),
     ("export", "G", "G11", "Export PDF, EPUB and Word", "Makes the three files and re-reads each one."),
@@ -584,7 +596,9 @@ class AutoBookService(_Runner):
 
     # ------------------------------------------------------------------ settings
     def _clean_settings(self, body) -> dict:
-        out = {"genre": "", "length": "short_story", "slot_id": None, "idea": ""}
+        out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {}}
+        # P12: ending and style choices (all optional; empty = let the AI choose)
+        out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")
         if g not in (None, ""):
             if not isinstance(g, str) or len(g.strip()) > 120:
@@ -688,6 +702,12 @@ class AutoBookService(_Runner):
                            f"{es.get('kept', 0)} rewrite(s) kept, {es.get('rejected', 0)} not kept"
                            + (f" — ⚠️ still had notes on {', '.join(str(f.get('label')) for f in fl)}" if fl else ""),
                            code="EDITOR_NOTES" if fl else None)
+            ps = run.get("planned_summary") or {}
+            if ps.get("checked"):
+                fl = ps.get("flagged") or []
+                self.event(run, "note", f"Planned to page: {ps['checked']} chapter(s) checked, {ps.get('fixed', 0)} "
+                           "fix(es) kept" + (f" — ⚠️ still missing in {', '.join(str(f.get('label')) for f in fl)}"
+                                             if fl else ""), code="PLANNED_MISSING" if fl else None)
             rs = run.get("review_summary") or {}
             if rs.get("same_ai"):
                 self.event(run, "note", f"⚠️ {NOT_INDEPENDENT}: {rs['same_ai']} of {rs['same_ai'] + rs.get('independent', 0)}"
@@ -858,6 +878,11 @@ class AutoBookService(_Runner):
                     why += " · editor: " + ("PASS" if ed.get("verdict") == "PASS" and not ed.get("flagged") else
                                             "still had notes (rounds used up or rewrite not kept)" if ed.get("flagged")
                                             else "not run")
+                if head["module_id"] == "C02":
+                    head = self._planned_pass(run, st, rid, label, chapter_id)
+                    pl = (run.get("planned") or {}).get(rid) or {}
+                    if pl.get("flagged"):
+                        why += " · ⚠️ planned details not all on the page"
                 self._approve(run, head["ref"], why=why, verdict="APPROVE", slot=rj.slot)
                 return bp.rec(rid)
             n = int(counts.get(rid, 0))
@@ -1107,6 +1132,233 @@ class AutoBookService(_Runner):
                          "notes": e.get("notes") or []} for e in eds if e.get("flagged")],
             "settings": run.get("editor_settings")}
 
+    # ------------------------------------------------------------------ ✅ planned-to-page check inside a run (P11)
+    def _planned_pass(self, run, st, rid: str, label: str, chapter_id: str | None) -> dict:
+        """After the editor: did what was planned reach the page? Deterministic check, then one independent AI check
+        of what is unclear or missing; missing items go to the writer as targeted findings (P5 machinery) for at
+        most ``planned.ROUNDS`` round(s); the fix is kept only if BookForge's checks and the consistency reviewer
+        pass it and fewer items are missing, else the earlier text is put back. Never blocks the book: what is still
+        missing is flagged ⚠️ (PLANNED_MISSING) and listed in the run summary. Returns the head revision."""
+        bp = self.bp(run)
+        head = bp.rec(rid)
+        pl = run.setdefault("planned", {}).setdefault(rid, {"chapter_id": chapter_id, "label": label, "rounds": 0,
+                                                            "history": []})
+        if pl.get("done_version") == head["version"]:
+            return head
+        checker = self._review.planned
+        st["message"] = f"Checking that the plan of the {label} reached the page"
+        run["phase"] = st["message"]
+        self.save(run)
+        try:
+            res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=pl["rounds"])
+        except BookforgeError as exc:
+            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                self._ai_problem(exc, f"checking the planned details of the {label}", record_id=rid,
+                                 chapter_id=chapter_id)
+            pl.update(error=exc.code, done_version=head["version"])
+            self.event(run, "note", f"⚠️ The planned-to-page check of the {label} did not work ({exc.code}); the book "
+                       "goes on", code="PLANNED_CHECK_FAILED", record_id=rid)
+            self._planned_summary(run)
+            self.save(run)
+            return head
+        # Settings › Editor › rounds 0 means "notes only": then the planned items are only flagged, not rewritten.
+        es = self._editor_settings(run)
+        max_rounds = 0 if es.get("enabled") and int(es.get("rounds") or 0) == 0 else planned_mod.ROUNDS
+        while self._open(res) and pl["rounds"] < max_rounds:
+            pl["rounds"] += 1
+            n = pl["rounds"]
+            old = bp.rec(rid)
+            st["message"] = f"The writer is working the missing planned details into the {label}"
+            run["phase"] = st["message"]
+            self.save(run)
+            try:
+                prop = checker.propose_fix(self._sub_job(run, "planned_fix", rid, run["settings"].get("slot_id")),
+                                           rid, res)
+            except BookforgeError as exc:
+                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                    self._ai_problem(exc, f"working the planned details into the {label}", record_id=rid,
+                                     chapter_id=chapter_id)
+                pl["history"].append({"round": n, "fix": "failed", "code": exc.code, "at": now_iso()})
+                break
+            if not prop["applied"]:
+                pl["history"].append({"round": n, "fix": "nothing applied", "at": now_iso()})
+                self.event(run, "note", f"⚠️ None of the writer's changes for the planned details of the {label} "
+                           "matched the text word for word; nothing was guessed", code="PLANNED_UNRESOLVED",
+                           record_id=rid)
+                break
+            try:
+                self._review.editor.apply(run["principal"], run["project_id"], run["branch_id"], rid, old["version"],
+                                          None, proposal=prop, round_no=n, how="run")
+            except BookforgeError as exc:
+                pl["history"].append({"round": n, "fix": "refused", "code": exc.code, "at": now_iso()})
+                break
+            new = bp.rec(rid)
+            v = bp.dispatch(new["module_id"], "VALIDATE", base_ref=new["ref"],
+                            payload=candidate_payload(new["ref"], None))
+            cons, new_res = None, None
+            if v["status"] in ("VALIDATED", "APPROVED"):
+                try:
+                    r2 = self._review.review_one(self._sub_job(run, "review", rid), rid, auto=False)
+                    cons = r2["review"]["verdict"]
+                    self._note_review(run, st, label, r2["review"])
+                    if cons == "APPROVE":
+                        new_res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=n)
+                except BookforgeError as exc:
+                    if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
+                        self._ai_problem(exc, f"checking the reworked {label}", record_id=rid, chapter_id=chapter_id)
+                    cons = cons or f"failed ({exc.code})"
+            ok = new_res is not None and self._open(new_res) < self._open(res)
+            pl["history"].append({"round": n, "fix": "kept" if ok else "not kept", "applied": prop["applied"],
+                                  "consistency": cons, "at": now_iso()})
+            if ok:
+                res = new_res
+                self._made(run, bp.rec(rid)["ref"])
+                pl["fixed"] = int(pl.get("fixed") or 0) + 1
+                self.event(run, "planned", f"Planned details worked into the {label} (round {n}): "
+                           f"{prop['applied']} passage(s) changed", record_id=rid, code="PLANNED_FIX_KEPT")
+                continue
+            try:
+                ref = self._review.editor.restore(run["principal"], run["project_id"], run["branch_id"], rid, old,
+                                                  "PLANNED_FIX")
+                self._made(run, ref)
+            except BookforgeError as exc:
+                raise StepProblem(exc.code, f"The fix for the planned details of the {label} was not good enough and "
+                                  "the earlier text could not be put back.", "Press 🔁 Try again.", record_id=rid,
+                                  chapter_id=chapter_id) from None
+            self.event(run, "note", f"⚠️ The fix for the planned details of the {label} was not kept (consistency: "
+                       f"{cons or 'not reviewed'}); the earlier text is used", code="PLANNED_FIX_REJECTED",
+                       record_id=rid)
+            break
+        head = bp.rec(rid)
+        missing = [i for i in res["items"] if i.get("required") and i["status"] != "on_page"]
+        pl.update(done_version=head["version"], counts=res["counts"], flagged=bool(missing),
+                  missing=[i["label"][:160] for i in missing][:8], ai=bool(res.get("ai")))
+        if missing:
+            self.event(run, "note", f"⚠️ Planned but not on the page in the {label}: "
+                       + "; ".join(i["label"][:80] for i in missing[:4]) + (" …" if len(missing) > 4 else ""),
+                       code="PLANNED_MISSING", record_id=rid)
+        st["planned_note"] = self._planned_line(run)
+        self._planned_summary(run)
+        self.save(run)
+        return head
+
+    @staticmethod
+    def _open(res: dict) -> int:
+        return int(res["counts"]["missing"]) + int(res["counts"]["unclear"])
+
+    @staticmethod
+    def _planned_line(run) -> str:
+        ps = run.get("planned") or {}
+        fl = sum(1 for p in ps.values() if p.get("flagged"))
+        return f"planned on the page: {len(ps) - fl} of {len(ps)} chapter(s) complete" + (
+            f" ⚠️ {fl} with missing items" if fl else "")
+
+    def _planned_summary(self, run):
+        ps = list((run.get("planned") or {}).values())
+        old = run.get("planned_summary") or {}
+        run["planned_summary"] = {
+            "checked": sum(1 for p in ps if p.get("done_version")), "fixed": sum(int(p.get("fixed") or 0) for p in ps),
+            "flagged": [{"chapter_id": p.get("chapter_id"), "label": p.get("label"), "missing": p.get("missing") or []}
+                        for p in ps if p.get("flagged")], "book": old.get("book")}
+
+    def _s_planned(self, run, st):
+        """The whole book before it is put together: a report (never blocks the book)."""
+        try:
+            res = self._review.planned.book(run["principal"], run["project_id"], run["branch_id"])
+        except Exception as exc:  # noqa: BLE001 - a report must never stop the book
+            log.exception("planned-to-page book check failed")
+            st["message"] = f"⚠️ The check could not run ({type(exc).__name__}); the book goes on"
+            self.event(run, "note", st["message"], step="planned", code="PLANNED_CHECK_FAILED")
+            return
+        self._planned_summary(run)
+        run["planned_summary"]["book"] = {"missing": res["counts"]["missing"], "names": res["names_never_on_page"],
+                                          "items": [{"chapter_id": m["chapter_id"], "label": m["label"][:160]}
+                                                    for m in res["missing"]][:20]}
+        st["items"] = [{"id": r["chapter_id"], "label": f"Chapter {r['chapter_id']}",
+                        "state": "done" if r.get("written") and not (r.get("counts") or {}).get("missing") else
+                        "failed" if r.get("written") else "pending",
+                        "note": f"{(r.get('counts') or {}).get('missing', 0)} planned item(s) missing"
+                        if r.get("written") and (r.get("counts") or {}).get("missing") else ""}
+                       for r in res["chapters"]]
+        n = res["counts"]["missing"]
+        if n:
+            st["message"] = f"⚠️ {n} planned item(s) are not on the page — see the list; the book goes on"
+            self.event(run, "note", st["message"] + (": names never on the page: " + ", ".join(
+                res["names_never_on_page"]) if res["names_never_on_page"] else ""), step="planned",
+                code="PLANNED_MISSING")
+        else:
+            st["message"] = "Everything planned is on the page"
+
+    # ------------------------------------------------------------------ 📏 story rules and 🧺 world texture (P9/P10)
+    def _s_world(self, run, st):
+        """Draft the story-rules ledger and the world-texture list (once; the author's own lists are kept). Never
+        blocks the book: a failure is ⚠️ (RULES_FAILED / TEXTURE_FAILED); only TIMEOUT / a busy or missing AI
+        pause the step."""
+        bp = self.bp(run)
+        pid, branch = run["project_id"], run["branch_id"]
+        parts = (("rules", "Story rules", story_rules.get_entry, story_rules.generate, "RULES_FAILED"),
+                 ("texture", "World texture", texture_mod.get_entry, texture_mod.generate, "TEXTURE_FAILED"))
+        items = {i["id"]: i for i in st.get("items") or []}
+        st["items"] = [items.get(k) or {"id": k, "label": label, "state": "pending"} for k, label, *_ in parts]
+        for item, (k, label, get, gen, code) in zip(st["items"], parts):
+            self.check(run)
+            if get(self.store, pid, branch):
+                if item["state"] != "done":
+                    item.update(state="done", note="made earlier")
+                continue
+            item["state"] = "running"
+            st["message"] = f"The AI is writing the {label.lower()}"
+            run["phase"] = st["message"]
+            self.save(run)
+            rj = self._sub_job(run, f"world_{k}", k, run["settings"].get("slot_id"))
+            try:
+                e = gen(self._assist, rj, bp)
+            except BookforgeError as exc:
+                if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                    item["state"] = "paused"
+                    self._ai_problem(exc, f"writing the {label.lower()}")
+                item.update(state="failed", note=exc.code)
+                self.event(run, "note", f"⚠️ The {label.lower()} could not be made ({exc.code}); the book goes on — "
+                           "make it on the book's 🌍 World rules page", code=code)
+                self.save(run)
+                continue
+            n = len(e.get("rules") or e.get("items") or [])
+            item.update(state="done", note=f"{n} made")
+            self.event(run, "world", f"The AI wrote the {label.lower()} ({n})", slot=rj.slot)
+            self.save(run)
+        ok = [i["label"] for i in st["items"] if i["state"] == "done"]
+        st["message"] = (", ".join(ok) + " ready") if ok else "⚠️ Neither could be made (the book goes on)"
+
+    def _update_rules(self, run, st):
+        """After the plan is approved: the AI suggests updates of the story rules for it; they are accepted under the
+        run consent (bounded: one AI call). Never blocks the book."""
+        pid, branch = run["project_id"], run["branch_id"]
+        entry = story_rules.get_entry(self.store, pid, branch)
+        bp = self.bp(run)
+        if not entry or not story_rules.changed_since(entry, story_rules.basis(bp)):
+            return
+        st["message"] = "The AI is updating the story rules for the plan"
+        run["phase"] = st["message"]
+        self.save(run)
+        rj = self._sub_job(run, "world_rules", "rules", run["settings"].get("slot_id"))
+        try:
+            e = story_rules.generate(self._assist, rj, bp, update=True)
+        except BookforgeError as exc:
+            if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
+                self._ai_problem(exc, "updating the story rules for the plan")
+            self.event(run, "note", f"⚠️ The story rules could not be updated for the plan ({exc.code}); the book goes "
+                       "on with the earlier rules", code="RULES_FAILED")
+            return
+        items = (e.get("proposals") or {}).get("items") or []
+        if not items:
+            self.event(run, "world", "The story rules already fit the plan (no change)")
+            return
+        self._check_consent(run, pid)
+        e = story_rules.decide_proposals(self.store, pid, branch, accept=None, version=e["version"], by="ai",
+                                         run_id=run["id"])
+        self.event(run, "world", f"Story rules updated for the plan: {len(items)} suggestion(s) accepted under your "
+                   f"Make-a-book-for-me consent, run {run['id']}", approval="run_consent", slot=rj.slot)
+
     def _note_review(self, run, st, label: str, review: dict):
         """"written by X · reviewed by Y" on the step, and the run's count of independent / same-AI reviews (P3.2)."""
         writer = review.get("writer") or "the author"
@@ -1155,8 +1407,11 @@ class AutoBookService(_Runner):
             self.save(run)
         pid = run["project_id"]
         if not get_profile(self.store, pid).get("length"):
-            save_profile(self.store, pid, {"length": s["length"], "chapters": CHAPTERS_FOR[s["length"]],
-                                           "ai_slot": s.get("slot_id") or "", "genre": s.get("genre") or ""})
+            first = {"length": s["length"], "chapters": CHAPTERS_FOR[s["length"]], "ai_slot": s.get("slot_id") or "",
+                     "genre": s.get("genre") or ""}
+            if s.get("choices"):
+                first["choices"] = s["choices"]
+            save_profile(self.store, pid, first)
         prof = book_profile_brief(self.store, pid)
         if prof.get("title") and prof.get("idea"):
             self._name_book(pid, prof["title"])  # a stop between saving the profile and naming the book
@@ -1503,6 +1758,7 @@ class AutoBookService(_Runner):
 
     def _s_outline(self, run, st):
         self._planning(run, st, "B11", "chapter outline")
+        self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
         st["message"] = f"{n} chapter(s) planned and approved"
 
@@ -1561,6 +1817,11 @@ class AutoBookService(_Runner):
                     item["state"] = "paused"
                     raise
             item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()))
+            pl = (run.get("planned") or {}).get((rec or {}).get("record_id") or rid)
+            if pl:
+                item["planned"] = {"missing": len(pl.get("missing") or []), "flagged": bool(pl.get("flagged")),
+                                   "fixed": int(pl.get("fixed") or 0), "on_page": (pl.get("counts") or {}).get(
+                                       "on_page"), "items": (pl.get("counts") or {}).get("items")}
             ed = (run.get("editor") or {}).get((rec or {}).get("record_id") or rid)
             if ed:
                 item["editor"] = {"verdict": ed.get("verdict"), "rounds": ed.get("rounds", 0),

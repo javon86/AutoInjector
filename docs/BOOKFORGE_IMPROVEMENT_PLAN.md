@@ -80,12 +80,30 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ## Section 4 — A world with rules and texture  (Phase 3b + 4a)
 
-- [ ] **P9** Story-rules ledger: hard rules / things seen to happen / beliefs / protected mysteries.
-- [ ] **P10** World-texture list (work, weather, institutions, locals); a detail is used only if it
+- [x] **P9** Story-rules ledger: hard rules / things seen to happen / beliefs / protected mysteries.
+  *(bookforge/story_rules.py: category, scope/limits, source, stated by, status; companion data
+  `story_rules:<pid>:<branch>`; the AI drafts it from the rule-bearing canon (A03/A09/A08/A17/…) + profile + plan, later
+  suggests updates as proposals the author accepts/rejects (a run accepts them under its consent after the outline);
+  deterministic "bounded?" lint with ⚠️; bounded rules in the plot/outline prompts and reviews (new planning dimension
+  `rules_bounded`), the C02 brief (never break a hard rule, never turn a belief/mystery into fact), the editor (new
+  dimension `story_rules`, protected mysteries) and the consistency review; 🌍 page with edit/ⓘ.)*
+- [x] **P10** World-texture list (work, weather, institutions, locals); a detail is used only if it
   causes something, shows skill or gets in the way.
-- [ ] **P11** Planned-to-page check (e.g. a narrator's planned name and backstory never shown).
-- [ ] **P12** Ending and style choices in the book profile (neat / bittersweet / open; how much is
+  *(bookforge/texture.py: kind, detail, causes obstacle/skill/cost, effect, match words; companion data
+  `world_texture:<pid>:<branch>`; scene planning takes obstacles from it (cards name the ids), the writer gets ≤ 4 per
+  chapter, `world_friction` reads it; deterministic usage counts (pattern check `texture_overused`, unused/overused on
+  the 🌍 page).)*
+- [x] **P11** Planned-to-page check (e.g. a narrator's planned name and backstory never shown).
+  *(bookforge/planned.py: beat, scene obstacles/changes, POV name, sheets' new "must show" items, planned details; word
+  check, then one independent AI check; ✅ checklist on the chapter page and the book page with ⚠️; ✨ Fix with AI = the
+  missing items as anchored findings for the P5 rewrite; in Make a book after the editor (1 round, kept only if checks +
+  reviewer pass and fewer items are open), never blocks: ⚠️ + run summary; a book-level report step before assembly.)*
+- [x] **P12** Ending and style choices in the book profile (neat / bittersweet / open; how much is
   explained; how dark), all optional with good defaults.
+  *(bookforge/story_choices.py: ending neat/bittersweet/open/dark, explain/hint/leave, gentle/some/real danger, dialogue,
+  pace, humor; "Let the AI choose" by default; the ending-state matrix is the internal form (presets + mystery row +
+  row overrides under "More ending options"); wizard, profile card/dialog, ⚡ quick settings; feeds premise/plot/outline,
+  scene cards, chapter prompts (matrix in the last chapter), editor questions and thresholds, the ledger's mysteries.)*
 
 ## Section 5 — Proof, reports and longer books  (Phase 4b + 5)
 
@@ -175,6 +193,30 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   (words per line within 25 %, questions within 20 points, shared content words ≥ 25 % / 40 %) are first guesses
   calibrated on crafted text only; check them on the Lamplighter dialogue (`prose_audit.audit(text, settings={"voices":
   characters.voice_words(...)})`).
+- **P9 / P10 / P11 / P12 — not tried with real AIs.** Tested with the deterministic fake AI (unit, Make-a-book end to end,
+  Playwright 37/37), not with Claude/ChatGPT/Gemini. On the first real book check: (1) is the ledger short and sharp (4-12
+  rules) and are the hard rules really bounded (⚠️ *not bounded* on the 🌍 page)? If the AI writes vague rules, tighten
+  `story_rules.RULES_TASK`; (2) do the AI's updates after the outline keep the ids (otherwise every update shows as
+  retire + add; harmless but noisy); (3) does the editor's `story_rules` dimension catch "a narrator's inference becomes
+  confirmed metaphysics" — read its notes on the last chapters; (4) are texture details really used as obstacles (🌍 page
+  usage: many "never used" means the writer ignores them); (5) the planned-to-page word check is strict on scene
+  obstacles/changes (paraphrases are "unclear" until the AI checker confirms them with a quote): if most chapters end
+  ⚠️ in runs, make `scene_change` optional in `planned.planned_items` or lower the word share; (6) the ending matrix in
+  the last chapter's prompt vs. what the editor scores: check that an "open" ending is not reconciled anyway.
+- **P9–P12 design choices to confirm:** (a) the ledger and the texture list are companion data (settings), not A/B
+  records — see DEVELOPING.md (canon is read FROM, not written TO; no assertion type for "protected mystery"; edits must not
+  make chapters stale); consequence: not versioned records, not in exports; (b) outside runs the ledger is NOT updated
+  automatically when the plan changes: the 🌍 page shows ⚠️ *may be out of date* and **✨ Suggest updates** (an automatic
+  AI call on every approval would spend AI work without the author asking); in runs the update is automatic and accepted
+  under the run consent; (c) the planned-to-page check in runs fixes chapter-level items before approval (1 round) and the
+  book-level step only REPORTS (fixing an already approved chapter late in the run would need a second approval and a
+  new assembly); the book page's list links each missing item to its chapter's ✨ Fix with AI; (d) "must show" is a new
+  optional field of the character sheet (the AI is asked to fill it; the narrator's name is always checked anyway);
+  (e) Settings › Editor › rounds 0 also turns the planned fix into notes only; (f) the choices are stored in the book
+  profile, so `book_profile_brief` carries them into every AI context that has the profile (reviewer, sheets, scenes).
+- **P11 [!] word check heuristics are English-only.** Content words ≥ 4 letters, crude suffix stripping (`texture.lemma`);
+  names count when the full name or one part (≥ 3 letters) appears. Non-English books will see more "unclear" items
+  (the AI checker then decides).
 - **P18 limits to know:** while a teach step runs, nothing else is typed into that AI (sends return
   `SITE_REPAIRING`); the teach step learns "Enter" when the user presses Enter instead of a Send button; a learned
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace

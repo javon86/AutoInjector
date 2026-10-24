@@ -232,7 +232,15 @@ def book_profile_brief(store, pid: str) -> dict:
         prof = get_profile(store, pid)
     except Exception:  # noqa: BLE001 - context is best effort
         return {}
-    return {k: prof[k] for k in ("title", "genre", "audience", "length", "tone", "idea") if prof.get(k)}
+    out = {k: prof[k] for k in ("title", "genre", "audience", "length", "tone", "idea") if prof.get(k)}
+    try:  # P12: the author's ending and style choices (only the ones made; "let the AI choose" says nothing)
+        from . import story_choices  # noqa: PLC0415
+        sc = story_choices.brief(story_choices.of_profile(prof))
+        if sc:
+            out["story_choices"] = sc
+    except Exception:  # noqa: BLE001 - context is best effort
+        pass
+    return out
 
 
 

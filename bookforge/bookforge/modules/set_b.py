@@ -664,7 +664,33 @@ class PlanHandler(OperationHandler):
                "previous_attempt_problems is given, an earlier outline was refused for those reasons: avoid them. "
                if self.op_id == "B11" else
                "use null for an undecided POV/location rather than guessing. ")
-            + "Never contradict protected facts. Return only JSON matching the output schema.")
+            + "Never contradict protected facts. " + self._guidance_rules(ctx) + "Return only JSON matching the output "
+            "schema.")
+
+    @staticmethod
+    def _guidance(ctx: Context) -> tuple[dict | None, list | None]:
+        """P12/P9 guidance read from the author's companion data (never raises): the ending and style choices of the
+        book profile and the story rules ledger (bounded)."""
+        try:
+            from .. import story_choices  # noqa: PLC0415
+            from .. import story_rules  # noqa: PLC0415
+            choices = story_choices.of_store(ctx.store, ctx.project_id)
+            rules = story_rules.plan_brief(ctx.store, ctx.project_id, ctx.branch_id)
+            return choices or None, rules or None
+        except Exception:  # noqa: BLE001 - guidance is best effort
+            return None, None
+
+    def _guidance_rules(self, ctx: Context) -> str:
+        if self.op_id not in ("B01", "B03", "B11"):
+            return ""
+        from .. import story_choices  # noqa: PLC0415
+        choices, rules = self._guidance(ctx)
+        out = " ".join(story_choices.rules(choices or {}, ending=self.op_id != "B01"))
+        if rules and self.op_id in ("B03", "B11"):
+            out += (" Follow the story rules (context.story_rules): never break a hard rule; keep beliefs as beliefs "
+                    "and protected mysteries unexplained; every exception, special object or power the plan uses must "
+                    "stay inside a stated limit (scope).")
+        return (out + " ") if out else ""
 
     @staticmethod
     def _earlier_refusals(ctx: Context, limit: int = 3) -> list[str]:
@@ -707,6 +733,14 @@ class PlanHandler(OperationHandler):
             problems = self._earlier_refusals(ctx)
             if problems:
                 base["previous_attempt_problems"] = problems
+        if self.op_id in ("B01", "B03", "B11"):
+            from .. import story_choices  # noqa: PLC0415
+            choices, rules = self._guidance(ctx)
+            sc = story_choices.brief(choices or {}, ending=self.op_id != "B01")
+            if sc:
+                base["story_choices"] = sc
+            if rules and self.op_id in ("B03", "B11"):
+                base["story_rules"] = rules
         base["predicate_conventions"] = pr.registry_brief(ctx.contracts.predicate_registry)
         base["selected_features"] = (ctx.manifest or {}).get("features") or {}
         return base

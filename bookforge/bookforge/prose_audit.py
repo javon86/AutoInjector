@@ -127,6 +127,7 @@ LABELS = {
     "reassurance": "Reassurance that removes the risk",
     "voice_sameness": "Two characters sound alike",
     "voice_never_word": "A character uses a word they would never use",
+    "texture_overused": "A world detail used too often",
 }
 ADVICE = {
     "gesture": "Vary or cut the repeated gesture; let a specific action or a line of dialogue carry the moment.",
@@ -143,6 +144,8 @@ ADVICE = {
     "reassurance": "Keep the risk real: let the reassurance be wrong, doubted or refused, or cut it.",
     "voice_sameness": "Give each of them their own rhythm, words and habits (see their voice cards).",
     "voice_never_word": "Change the word to one this character would use (their voice card's vocabulary).",
+    "texture_overused": "Use the detail where it causes something, shows skill or gets in the way; cut the repeats "
+                        "and bring in other details of the world-texture list.",
 }
 
 _PARA_SPLIT = re.compile(r"\n\s*\n")
@@ -479,6 +482,27 @@ def audit_book(chapters, *, settings: dict | None = None, names=()) -> dict:
                 findings.append(_finding(check, c, rate, t, where(w), f"“{w}” {c}× ({round(rate, 1)} per 1 000 words)",
                                          key=w, severity=sev))
 
+    # -- world texture (P10): how often each detail of the book's texture list is on the page (deterministic)
+    if settings.get("texture"):
+        from .texture import usage as texture_usage  # noqa: PLC0415
+        tu = texture_usage("\n\n".join(par for _c, _p, par in pars), settings["texture"])
+        stats["texture"] = tu
+        for row in tu["items"]:
+            if row["overused"]:
+                it = next((x for x in settings["texture"] if x.get("id") == row["id"]), {})
+                hits = []
+                for cid, pi, par in pars:
+                    for w in it.get("words") or []:
+                        m = re.search(r"\b" + re.escape(w.lower()), par.lower())
+                        if m:
+                            hits.append(loc(cid, pi, par, m.start(), m.end()))
+                            break
+                    if len(hits) >= MAX_PASSAGES:
+                        break
+                findings.append(_finding("texture_overused", row["count"], row["per_1000"], {"min": 5},
+                                         hits, f"“{row['detail'][:60]}” {row['count']}×", key=row["id"],
+                                         severity="minor"))
+
     order = {"major": 0, "minor": 1, "info": 2}
     findings.sort(key=lambda f: (order[f["severity"]], -f["count"], f["id"]))
     summary = Counter(f["severity"] for f in findings)
@@ -578,6 +602,8 @@ def brief(report: dict, limit: int = 12) -> dict:
                          or f["check"] in ("gesture", "named_emotion", "reassurance")],
             "sentence_stats": (report.get("stats") or {}).get("sentences"),
             "dialogue": (report.get("stats") or {}).get("dialogue"),
+            "texture": {k: v for k, v in ((report.get("stats") or {}).get("texture") or {}).items()
+                        if k in ("used", "unused", "overused")} or None,
             "voices": {k: v for k, v in ((report.get("stats") or {}).get("voices") or {}).items()
                        if k in ("speakers", "pairs")}}
 

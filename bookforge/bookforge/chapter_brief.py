@@ -8,7 +8,15 @@
   told), bounded by ``characters.voice_brief`` (full cards for at most 4, one line each for the rest, a hard size).
 * ``scene_cards``: the chapter's scene cards (P8) when they were made for this outline revision.
 * ``planned_details``: outline facts of this chapter that concern a character (planned names and details).
+* ``story_rules`` (P9): the story-rules ledger entries this chapter needs (hard rules and protected mysteries first,
+  then beliefs / things seen to happen its plan mentions), bounded by ``story_rules.chapter_rules``.
+* ``world_texture`` (P10): a few world details (the ones its scene cards use first), each with what it can cause.
+* ``must_show`` (P11): "must reach the page" details of the character sheets assigned to this chapter.
+* ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``rules``: how to use all of this, in plain sentences.
+
+Prompt budget of the brief (characters of JSON): voice cards ≤ 7 000, scene cards ≤ 6 × ~1 500, story rules ≤ 2 500,
+world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600 — about 22 000 at most, typically 6 000–10 000.
 
 Pure reads of the store (records and companion settings); never calls an AI, never raises (a missing brief must never
 stop a chapter from being written).
@@ -39,6 +47,13 @@ RULES = {
             "when it fits — through action or memory, not a summary."),
     "planned": ("Planned details in context.writing_brief.planned_details belong in this chapter: make them reach "
                 "the page."),
+    "story_rules": ("Story rules (context.writing_brief.story_rules): never break a hard rule and keep every rule "
+                    "inside its scope and limits — an exception the story uses must stay within the stated limits; a "
+                    "belief stays what a character believes (the narrator never confirms it as fact, even when a later "
+                    "scene needs it); something seen to happen is shown, its cause is not explained; a protected "
+                    "mystery stays unexplained (nobody explains it, not even the narrator)."),
+    "must_show": ("These details must reach the page in this chapter (context.writing_brief.must_show): show each one "
+                  "through action, dialogue or memory — a name must be written on the page."),
 }
 
 
@@ -105,6 +120,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 break
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
+        extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
+        brief.update({k: v for k, v in extra.items() if v})
         rules = []
         if cards:
             rules.append(RULES["scenes"])
@@ -114,15 +131,56 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(RULES["pov"])
         if planned:
             rules.append(RULES["planned"])
+        if brief.get("story_rules"):
+            rules.append(RULES["story_rules"])
+        if brief.get("world_texture"):
+            from .texture import RULE as TEXTURE_RULE  # noqa: PLC0415
+            rules.append(TEXTURE_RULE)
+        if brief.get("must_show"):
+            rules.append(RULES["must_show"])
+        rules += extra.get("choice_rules") or []
+        brief.pop("choice_rules", None)
         brief["rules"] = rules
-        if not (cards or vb["cards"] or vb["others"] or pov or planned):
+        if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
+                or extra.get("world_texture") or extra.get("story_choices")):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
                     scene_cards={"version": entry["version"], "status": entry.get("status"), "scenes": len(cards)}
                     if cards else None, pov=pov["record_id"] if pov else None,
+                    story_rules=len(brief.get("story_rules") or []), texture=len(brief.get("world_texture") or []),
+                    must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
         log.exception("could not build the writing brief of chapter %s", chapter_id)
         return None, meta
+
+
+def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, cards: list, texts: list) -> dict:
+    """Story rules (P9), world texture (P10), must-show details (P11) and story choices (P12) for one chapter; each
+    part is optional and never raises."""
+    out = {}
+    try:
+        from . import story_choices, story_rules  # noqa: PLC0415
+        from . import texture as texture_mod  # noqa: PLC0415
+        from .book_path import BookPath  # noqa: PLC0415
+        order = [c["chapter_id"] for c in BookPath.outline_chapters(None, outline)]
+        last = bool(order) and order[-1] == chapter_id
+        choices = story_choices.of_store(store, pid)
+        card_text = " ".join(json.dumps(c, ensure_ascii=False) for c in cards or [])
+        out["story_rules"] = story_rules.chapter_rules(story_rules.get_entry(store, pid, branch), *texts, card_text,
+                                                       mystery_mode=story_choices.mystery_mode(choices), last=last)
+        out["world_texture"] = texture_mod.chapter_brief(texture_mod.get_entry(store, pid, branch), cards, *texts)
+        out["story_choices"] = story_choices.brief(choices, ending=last)
+        out["choice_rules"] = story_choices.rules(choices, ending=last)
+    except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter
+        log.exception("could not add the story rules / texture / choices to the brief")
+    try:
+        from . import planned as planned_mod  # noqa: PLC0415
+        shim = planned_mod.shim(store, pid, branch)
+        assigned = planned_mod._must_show_assignment(store, pid, branch, planned_mod.chapters_info(shim, outline))
+        out["must_show"] = [f"{who}: {it}" for who, it in assigned.get(chapter_id, [])][:planned_mod.MUST_SHOW_BRIEF]
+    except Exception:  # noqa: BLE001
+        log.exception("could not add the must-show details to the brief")
+    return out
