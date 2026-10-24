@@ -1,7 +1,7 @@
 // Bookforge browser workspace. Vanilla ES module, no network access beyond this local server.
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
-import { plainCheck, problemFor, slugName } from './problems.js';
+import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -332,6 +332,29 @@ function boltLabel(label) {
 function badge(icon, label, cls, title) {
   return h('span', { class: `badge ${cls}`, title },
     h('span', { class: 'ico', 'aria-hidden': 'true' }, icon), label);
+}
+/** Which AIs work right now (P18.9): ✔ working · 🔧 being repaired · ⚠️ needs you / not working · ⏳ being checked. */
+function aiStrip(ais, label = 'AIs') {
+  if (!ais || !ais.length) return null;
+  return h('div', { class: 'ai-strip', role: 'status', 'aria-label': 'Which AIs work right now', 'data-testid': 'ai-strip' },
+    h('strong', null, `${label}: `),
+    ais.map(a => {
+      const w = AI_STATE[a.state] || AI_STATE.unknown;
+      const why = a.problem && !a.working ? siteProblemWords(a.problem) : '';
+      return h('span', { class: `ai-chip badge ${w[2]}`, 'data-ai': a.slot_id, 'data-state': a.state, title: why ? `${a.name} ${why}` : null },
+        h('span', { class: 'ico', 'aria-hidden': 'true' }, w[0]), `${a.name} — ${a.word || w[1]}`,
+        why ? h('span', { class: 'ai-why' }, ` (${a.problem}: ${why})`) : null);
+    }));
+}
+const NOT_INDEPENDENT = 'Reviews are not independent — the same AI wrote and reviewed this';
+/** "written by AI-1 · Claude · reviewed by AI-2 · ChatGPT", with ⚠️ when the same AI did both (P3.1 / P3.2). */
+function reviewWho(rv, madeBy) {
+  if (!rv) return null;
+  const writer = rv.writer || (madeBy && madeBy.label) || 'the author';
+  const reviewer = rv.reviewer || rv.slot_label || rv.slot || 'the AI';
+  return h('p', { class: `small rv-who${rv.independent === false ? ' not-independent' : ''}`, 'data-testid': 'rv-who' },
+    `✍ written by ${writer} · 🧐 reviewed by ${reviewer}`,
+    rv.independent === false ? h('span', { class: 'rv-warn', role: 'note' }, h('span', { 'aria-hidden': 'true' }, ' ⚠️ '), rv.warning || NOT_INDEPENDENT) : null);
 }
 function lifecycleBadge(lc) { const b = LIFECYCLE[lc] || ['?', lc, 'b-muted']; return badge(b[0], b[1], b[2]); }
 function statusBadge(st) { const b = STATUS[st] || ['?', st, 'b-muted']; return badge(b[0], b[1], b[2]); }
@@ -2818,6 +2841,7 @@ async function viewSettings(main) {
   main.appendChild(autoInjectorCard(main));
   for (const s of slots) main.appendChild(slotForm(s));
   main.appendChild(retryCard());
+  main.appendChild(reviewerCard());
   main.appendChild(backupsCard());
   main.appendChild(helpCard());
 }
@@ -3242,6 +3266,12 @@ function slotStage(s, health) {
   }
   if (!s.has_credentials) return { icon: '⚠︎', word: 'Needs connection key', cls: 'b-warn', now: `Set to use ${site} through AutoInjector, but no connection key is saved.`, next: 'In AutoInjector: BookForge bridge panel → Copy connection key, then paste it into “Connect AutoInjector” above.' };
   if (!health) return { icon: '…', word: 'Checking', cls: 'b-info', now: 'Asking AutoInjector whether it is running…', next: 'Wait a moment.' };
+  if (['repairing', 'needs_user', 'broken'].includes(health.state)) {
+    const why = health.problem ? ` (${health.problem}: ${siteProblemWords(health.problem)})` : '';
+    if (health.state === 'repairing') return { icon: '🔧', word: 'Being repaired', cls: 'b-warn', now: `AutoInjector says ${site} is not working right now and is fixing it by itself${why}.`, next: 'Nothing to do. Meanwhile BookForge sends the work to the AIs that work, and uses this one again when it is fixed.' };
+    if (health.state === 'needs_user') return { icon: '⚠︎', word: 'Needs you', cls: 'b-bad', now: `AutoInjector says ${site} needs you${why}.`, next: `Open AutoInjector and look at the ${site} window. BookForge uses the other AIs meanwhile and checks again by itself.` };
+    return { icon: '✕', word: 'Not working', cls: 'b-bad', now: `AutoInjector says ${site} is not working${why}.`, next: `Open AutoInjector and check the ${site} window (or use its repair/teach button). BookForge uses the other AIs meanwhile.` };
+  }
   if (health.ok && (health.site_busy || s.active_jobs > 0)) return { icon: '◔', word: 'Busy', cls: 'b-warn', now: `Connected. ${site} is working on another request right now.`, next: 'Nothing to fix — wait for it to finish. BookForge sends one request at a time per site.' };
   if (health.ok) return { icon: '✔', word: 'Connected · Ready', cls: 'b-ok', now: `Connected to AutoInjector. ${site} is logged in and free.`, next: 'Ready to use. Try “Test everything” with “Use my AI slots too”.' };
   const err = health.error;
@@ -5336,7 +5366,7 @@ const RV = { skipped: new Set(), slot: '', seq: 0 };
 function verdictBadge(rv) {
   if (!rv) return null;
   const b = VERDICT[rv.verdict] || ['?', rv.verdict, 'b-muted'];
-  return badge(b[0], b[1], b[2], rv.slot_label ? `Reviewed by ${rv.slot_label}` : null);
+  return badge(b[0], b[1], b[2], rv.slot_label ? `Reviewed by ${rv.reviewer || rv.slot_label}${rv.writer ? ` · written by ${rv.writer}` : ''}${rv.independent === false ? ` — ${NOT_INDEPENDENT}` : ''}` : null);
 }
 function reviewFromQueue(q) {
   S.task = Object.assign({}, S.task && S.task.project_id === S.pid ? S.task : {}, {
@@ -5536,6 +5566,7 @@ function reviewRow(it, { reload, msg, prog, picker }) {
     h('div', { class: 'r-main' },
       h('a', { class: 'r-title', href: simpleHref(it) }, plainText(it.title)),
       h('div', { class: 'r-meta' }, `${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
+      reviewWho(it.review, it.made_by),
       details),
     h('div', { class: 'r-badges' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review)),
     h('div', { class: 'row rv-buttons' },
@@ -5611,6 +5642,7 @@ async function renderReviewStep(holder, q, startId, load) {
     h('p', { class: 'small muted' }, `Draft ${idx + 1} of ${shown.length} · ${it.group}`),
     h('h2', { id: 'rv-step-h', class: 'wrap-anywhere' }, plainText(it.title)),
     h('p', { class: 'row small' }, lifecycleBadge(it.lifecycle), verdictBadge(it.review), ` ${it.module_id} ${it.op_name} · v${it.version} · made by ${it.made_by.label} · ${fmtTime(it.created_at)}`),
+    reviewWho(it.review, it.made_by),
     h('div', { class: 'row rv-big' }, approveBtn,
       h('button', { type: 'button', class: 'big', onclick: () => { RV.skipped.add(it.record_id); go2(it.record_id, false); } }, '⏭ Skip'),
       h('a', { class: 'btn big', href: simpleEditHref(it) }, '✏️ Edit'),
@@ -6270,7 +6302,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, (s.items || []).map(i => i.state)]), (r.files || []).length]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, (s.items || []).map(i => i.state)]), (r.files || []).length, r.ais, r.review_summary]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -6293,6 +6325,7 @@ function renderRun() {
           s.problem ? hazard(Object.assign({}, s.problem), { retry: () => runAction('resume', {}, 'Trying again'), retryLabel: '🔁 Try again', extra: runDecision(s.problem),
             settings: ['CAPABILITY_UNAVAILABLE', 'UPSTREAM_UNAVAILABLE'].includes(s.problem.code) }) : null),
         h('p', { class: 'small mb-msg-line' }, s.message || s.about),
+        s.review_note ? h('p', { class: `small mb-review-note${s.review_independent === false ? ' not-independent' : ''}`, 'data-testid': 'mb-review-note' }, '🧐 ', s.review_note) : null,
         (s.items || []).length ? h('ul', { class: 'mb-items' }, s.items.map(i => h('li', { class: `st-${i.state}` },
           h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label, i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null))) : null));
     ol.appendChild(li);
@@ -6329,8 +6362,19 @@ function renderRun() {
         h('a', { class: 'btn', href: link('p', r.project_id, r.branch_id || 'main', 'journal'), onclick: () => closeMakeBook() }, '📜 Book journal'),
         h('a', { class: 'btn', href: '#/shelf', onclick: () => closeMakeBook() }, '📚 My finished books')));
   }
+  const rs = r.review_summary || {};
+  const ais = aiStrip(r.ais, r.probe && r.probe.state === 'running' ? 'Checking the AIs' : 'AIs');
+  const working = (r.ais || []).filter(a => a.working);
+  const indep = rs.same_ai || (r.ais && r.ais.length && working.length === 1 && !(r.probe && r.probe.state === 'running') && !['done', 'cancelled'].includes(r.status))
+    ? h('p', { class: 'words-warn mb-indep', role: 'note', 'data-testid': 'mb-not-independent' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
+      rs.same_ai ? `${NOT_INDEPENDENT} (${rs.same_ai} of ${rs.same_ai + (rs.independent || 0)} reviews so far).` : `Only ${working[0].name} works right now, so it will review its own writing: reviews are not independent (the same AI writes and reviews).`,
+      h('span', { class: 'small' }, ' When another AI works again, it reviews instead.')) : null;
+  if (doneBox && (rs.independent || rs.same_ai)) {
+    doneBox.appendChild(h('p', { class: rs.same_ai ? 'words-warn' : 'small', 'data-testid': 'mb-review-summary' }, rs.same_ai ? h('span', { 'aria-hidden': 'true' }, '⚠️ ') : '🧐 ',
+      `AI reviews: ${rs.independent || 0} by a different AI than the writer` + (rs.same_ai ? `, ${rs.same_ai} by the same AI. ${NOT_INDEPENDENT}.` : '.')));
+  }
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ Make a book for me', head, phase, doneBox, msg, ol, ctl, consent,
+  mbShell('⚡ Make a book for me', head, phase, ais, indep, doneBox, msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }
@@ -6348,6 +6392,7 @@ function writeAllBox(book, redraw) {
       h('span', { class: 'small muted' }, `${j.done} of ${j.total} · ${fmtElapsed(j.elapsed_ms)}`)),
     h('progress', { max: String(j.total || 1), value: String(j.done || 0), 'aria-label': `${j.done} of ${j.total} chapters written` }),
     j.waiting ? h('p', { class: 'small' }, '⏳ ', j.waiting.message) : h('p', { class: 'small muted' }, j.phase || ''),
+    running ? aiStrip(j.ais) : null,
     h('ul', { class: 'mb-items' }, j.items.map(i => h('li', { class: `st-${i.state}` }, h('span', { 'aria-hidden': 'true' }, STEP_ICON[i.state] || '○'), ' ', i.label,
       i.words ? h('span', { class: 'muted' }, ` · ${i.words} words`) : null, i.note ? h('span', { class: 'muted small' }, ` — ${i.note}`) : null,
       i.state === 'failed' && j.problem ? [' ', hazard(Object.assign({}, j.problem, { where: Object.assign({ book: profileOf().title || S.project.name }, j.problem.where || {}) }), { retry: () => waAct('resume') })] : null))),
@@ -6624,6 +6669,28 @@ function retryCard() {
     put(box, h('div', { class: 'check-row field' }, on, h('label', { for: 'rt-on' }, 'Wait and retry when the AI is busy')),
       h('div', { class: 'grid-2' }, h('div', { class: 'field' }, h('label', { for: 'rt-delays' }, 'Waiting times (seconds)'), delays, h('span', { class: 'hint', id: 'rt-d-h' }, 'For example 15, 30, 60, 120 — the last one repeats.')),
         h('div', { class: 'field' }, h('label', { for: 'rt-total' }, 'Give up after (seconds)'), total)), h('div', { class: 'row' }, save));
+  })();
+  return card;
+}
+/** Settings › Reviewer AI (P3.1): automatic = always a different AI from the one that wrote the draft. */
+function reviewerCard() {
+  const box = h('div');
+  const card = h('section', { class: 'card', 'aria-labelledby': 'rva-h' }, h('h2', { id: 'rva-h' }, '🧐 Reviewer AI'),
+    h('p', { class: 'small' }, 'The AI reviewer reads each draft before it is approved. A different AI from the one that wrote it notices more, so BookForge picks another AI that works. When only one AI works, it reviews its own writing and BookForge shows ⚠️ “reviews are not independent”.'), box);
+  (async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/reviewer-ai'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Reviewer AI' }))); return; }
+    const sel = h('select', { id: 'rva-slot', 'aria-describedby': 'rva-hint' },
+      h('option', { value: 'auto' }, 'Automatic (a different AI from the writer)'),
+      ['AI-1', 'AI-2', 'AI-3'].map(x => h('option', { value: x }, `${x} when it did not write the draft`)));
+    sel.value = cur.slot || 'auto';
+    const save = h('button', { type: 'button', class: 'small primary', onclick: async () => {
+      try { await api('PUT', '/settings/reviewer-ai', { body: { slot: sel.value } }); toast('Saved'); }
+      catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Reviewer AI' }))); }
+    } }, 'Save');
+    put(box, h('div', { class: 'field' }, h('label', { for: 'rva-slot' }, 'Reviewer AI'), sel,
+      h('span', { class: 'hint', id: 'rva-hint' }, 'A chosen AI is used only when it did not write the draft and works right now; otherwise BookForge picks another one automatically.')),
+    h('div', { class: 'row' }, save));
   })();
   return card;
 }

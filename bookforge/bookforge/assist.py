@@ -43,6 +43,7 @@ from pathlib import Path
 
 from . import CONTRACT_VERSION, __version__
 from . import plan_rules as pr
+from . import providers as providers_mod
 from .canonical import json_pointer
 from .errors import BookforgeError
 from .jobs import RetryPolicy, slot_word, wait_and_retry
@@ -286,6 +287,24 @@ def summarize_payload(op_id: str, payload: dict) -> dict:
             "key_facts": [_fact_line(f) for f in facts[:5] if "subject_id" in f and "assertion_type" in f]}
 
 
+def note_writer(store, pid: str, branch: str, record_id: str, version: int, slot: str | None):
+    """Remember which AI slot wrote exactly this revision when the kernel cannot tell (a Bible Builder proposal is
+    saved as the author's candidate). Settings key ``ai_writers:<pid>:<branch>``; used to pick a different AI as
+    reviewer (P3.1). Never holds text."""
+    if not slot or slot not in ("AI-1", "AI-2", "AI-3"):
+        return
+    key = f"ai_writers:{pid}:{branch}"
+    try:
+        cur = store.get_setting(key) or {}
+        cur[f"{record_id}:{version}"] = {"slot": slot, "at": _iso()}
+        if len(cur) > 2000:
+            for k in sorted(cur, key=lambda k: cur[k].get("at") or "")[:len(cur) - 2000]:
+                cur.pop(k, None)
+        store.set_setting(key, cur)
+    except Exception:  # noqa: BLE001 - a hint for the reviewer choice, never a reason to fail
+        log.exception("could not note the writer of %s", record_id)
+
+
 class _AICtx:
     """The minimum providers.generate needs (it never touches storage)."""
 
@@ -321,6 +340,14 @@ class Job:
         self.calls = 0
         self.waiting: dict | None = None   # {"code", "attempt", "retry_in_s", "retry_at", "message"} while waiting
         self.retry_busy: bool | None = None  # None: the service default (AssistService.retry_busy)
+        # Automatic choice only (no slot_pref): soft preferences. prefer_slots are tried first when they work;
+        # avoid_slots / avoid_families are used only when no other AI works (writer != reviewer, P3.1);
+        # cross_pin lets the choice use every slot even when the engine is pinned to the book's AI.
+        self.prefer_slots: list[str] = []
+        self.avoid_slots: list[str] = []
+        self.avoid_families: set = set()
+        self.cross_pin = False
+        self.failovers: list[dict] = []    # calls moved to another AI because one was not working (P18.9)
 
     def check(self):
         if self.cancelled:
@@ -441,9 +468,43 @@ class AssistService:
             return False
         return bool(s.get("healthy", True)) and ("*" in s["authorized_projects"] or pid in s["authorized_projects"])
 
-    def _choose_slot(self, job: Job, op_for_roles: str, needed: int) -> dict:
-        """Explicit pick or auto; waits (status 'queued') while the only usable slots are busy."""
+    def _providers(self, job: Job):
+        """The registry a job chooses from: the engine's (maybe pinned to the book's AI), or with ``cross_pin``
+        the shared base registry (the AI reviewer may be another AI than the one the book is written with)."""
         prov = self.engine.providers
+        if getattr(job, "cross_pin", False) and isinstance(prov, providers_mod.PinnedProviders):
+            return prov._base  # never past a gate (the self-test / workflow test registries stay gated)
+        return prov
+
+    def _soft_pick(self, job: Job, prov, op_for_roles: str, needed: int, exclude) -> tuple[dict | None, bool]:
+        """Automatic choice with the job's soft preferences. Returns (slot, wait): wait=True when the only fitting
+        AIs other than the avoided one are just busy (wait for them rather than reuse the avoided one)."""
+        elig_op = [x for x in prov.eligible(job.project_id, "text", needed, op_for_roles) if x["slot_id"] not in exclude]
+        avoid, fams = set(job.avoid_slots or []), set(job.avoid_families or set())
+        if not job.prefer_slots and not avoid and not fams:
+            return (elig_op[0] if elig_op else None), False
+        elig_all = [x for x in prov.eligible(job.project_id, "text", needed, None) if x["slot_id"] not in exclude]
+        for p in job.prefer_slots or []:
+            hit = next((x for x in elig_all if x["slot_id"] == p and p not in avoid), None)
+            if hit:
+                return hit, False
+        rank = (lambda x: providers_mod.slot_family(x) in fams)
+        for pool in (elig_op, elig_all):
+            others = sorted([x for x in pool if x["slot_id"] not in avoid], key=rank)  # stable: keeps K11 order
+            if others:
+                return others[0], False
+        # Only the avoided AI is free: if another working AI is merely busy, wait for it.
+        for x in prov.slots():
+            if (x["slot_id"] not in avoid and x["slot_id"] not in exclude and self._usable(x, job.project_id)
+                    and x["active_jobs"] >= x["max_concurrent"] and prov.available(x)):
+                return None, True
+        return ((elig_op or elig_all or [None])[0]), False
+
+    def _choose_slot(self, job: Job, op_for_roles: str, needed: int, exclude=()) -> dict:
+        """Explicit pick or auto; waits (status 'queued') while the only usable slots are busy. A slot whose site
+        is being repaired is skipped; when every fitting AI is being repaired the call waits and tries again
+        (UPSTREAM_UNAVAILABLE). ``exclude``: slots that already failed in this call."""
+        prov = self._providers(job)
         waited_since = time.monotonic()
         while True:
             job.check()
@@ -456,17 +517,22 @@ class AssistService:
                 elig = [x for x in prov.eligible(job.project_id, "text", needed, None) if x["slot_id"] == s["slot_id"]]
                 if elig:
                     return elig[0]
+                if not prov.available(s):
+                    raise prov.down_error([s])
                 busy = s["active_jobs"] >= s["max_concurrent"]
                 if not busy:
                     raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", f"{job.slot_pref} cannot take this job "
                                          "(unhealthy, missing the text capability, or context limit too small)")
             else:
-                elig = prov.eligible(job.project_id, "text", needed, op_for_roles)
-                if elig:
-                    return elig[0]
-                usable = [x for x in slots if self._usable(x, job.project_id)]
+                pick, wait = self._soft_pick(job, prov, op_for_roles, needed, set(exclude))
+                if pick:
+                    return pick
+                usable = [x for x in slots if self._usable(x, job.project_id) and x["slot_id"] not in exclude]
                 busy = [x for x in usable if x["active_jobs"] >= x["max_concurrent"]]
-                if not usable or not busy:
+                down = [x for x in usable if not prov.available(x)]
+                if usable and not busy and down and not wait:
+                    raise prov.down_error(down)
+                if not usable or (not busy and not wait):
                     raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "no AI slot is connected and ready")
             if time.monotonic() - waited_since > SLOT_WAIT_S:
                 raise BookforgeError("RATE_LIMITED", "", "the AI stayed busy with other jobs for 10 minutes")
@@ -505,10 +571,16 @@ class AssistService:
 
     def _call_ai_once(self, job: Job, *, op_for_roles: str, task: str, schema: dict, context: dict,
                       protected: list) -> dict:
-        prov = self.engine.providers
+        prov = self._providers(job)
         needed = len(json.dumps(context, ensure_ascii=False)) // 3 + 2000
-        for _ in range(3):
-            slot = self._choose_slot(job, op_for_roles, needed)
+        failed: list[str] = []  # slots that were not working in THIS call (P18.9: move to the next working AI)
+        for _ in range(3 + len(providers_mod.SLOT_IDS)):
+            try:
+                slot = self._choose_slot(job, op_for_roles, needed, exclude=failed)
+            except BookforgeError as exc:
+                if failed and exc.code in ("CAPABILITY_UNAVAILABLE",):
+                    raise prov.down_error([s for s in prov.slots() if s["slot_id"] in failed]) from None
+                raise
             job.slot, job.slot_label = slot["slot_id"], self._slot_label(slot)
             job.model = f"web:{slot.get('site')}" if slot["adapter_id"] == "autoinjector" else slot.get("model")
             job.status = "running"
@@ -526,10 +598,29 @@ class AssistService:
                     s = next(x for x in prov.slots() if x["slot_id"] == slot["slot_id"])
                     if exc.code == "CAPABILITY_UNAVAILABLE" and s["active_jobs"] >= s["max_concurrent"]:
                         continue  # another operation grabbed the slot first: wait for it again
+                    if exc.code == "UPSTREAM_UNAVAILABLE" and not job.slot_pref and \
+                            self._other_ai(job, prov, op_for_roles, needed, failed + [slot["slot_id"]]):
+                        failed.append(slot["slot_id"])
+                        job.failovers.append({"from": slot["slot_id"], "from_name": providers_mod.slot_name(slot),
+                                              "code": exc.code, "state": getattr(exc, "site_state", None),
+                                              "problem": getattr(exc, "site_problem", None)})
+                        log.warning("AI slot %s not working (%s); trying another AI", slot["slot_id"],
+                                    getattr(exc, "site_problem", None) or exc.code)
+                        continue
                     raise
+            if failed:
+                prov.health.notify({"event": "failover", "from": [f for f in job.failovers
+                                                                  if f["from"] in failed],
+                                    "to": slot["slot_id"], "to_name": providers_mod.slot_name(slot),
+                                    "operation": op_for_roles})
             job.model = resource.get("model") or job.model
             return data
         raise BookforgeError("RATE_LIMITED", "", "the AI slot stayed busy")
+
+    def _other_ai(self, job: Job, prov, op_for_roles: str, needed: int, exclude: list) -> bool:
+        """Is there another AI (not in ``exclude``) this call could move to right now?"""
+        return bool(prov.eligible(job.project_id, "text", needed, None) and
+                    [x for x in prov.eligible(job.project_id, "text", needed, None) if x["slot_id"] not in exclude])
 
     def _slot_sem(self, slot) -> threading.Semaphore:
         with self._lock:
@@ -1526,6 +1617,9 @@ class BibleSession:
             resp = svc.engine.dispatch(req, self.principal)
             if resp["status"] == "DRAFT" and resp["output_refs"]:
                 ref = resp["output_refs"][0]
+                if k not in edits and it.get("slot"):
+                    note_writer(svc.store, self.project_id, self.branch_id, ref["record_id"], ref["version"],
+                                it.get("slot"))
                 it.update(created_ref=ref, create_error=None, links_made=links_made, links_dropped=links_dropped,
                           removed_on_create=removed)
                 created.append({"key": k, "op": it["op"], "name": it["name"], "ref": ref, "status": resp["status"],

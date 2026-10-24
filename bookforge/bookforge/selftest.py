@@ -146,6 +146,7 @@ class SelfTestProviders(ProviderRegistry):
     def __init__(self, base: ProviderRegistry):
         self._base = base
         super().__init__(base.store, base.secret_path)
+        self.health = base.health  # the same view of which AIs work right now
         self.ai_on = False
         self.ready: set[str] = set()
 

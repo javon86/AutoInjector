@@ -39,7 +39,9 @@ ACTION_WORDS = {"CREATE": "made", "UPDATE": "made a new version of", "ACCEPT": "
 STEP_KIND = {"backup": "backup", "export": "export", "wait": "retry", "retry": "retry", "pause": "pause",
              "resume": "resume", "problem": "problem", "cancel": "cancel", "review": "ai_review", "fix": "ai_fix",
              "fix_done": "ai_fix", "fix_failed": "problem", "approve": "approval", "start": "run",
-             "finished": "run", "ai": "ai", "done": "step", "project": "run", "note": "note"}
+             "finished": "run", "ai": "ai", "done": "step", "project": "run", "note": "note", "failover": "note",
+             "probe": "note"}
+NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 SAFE_TEXT = re.compile(r"[\x00-\x1f]")
 
 
@@ -131,6 +133,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         ent["_key"] = clock(a["recorded_at"])
         entries.append(ent)
     clock = _Monotonic()
+    review_counts = {"independent": 0, "same_ai": 0}
     for e in events:
         et = e["event_type"]
         try:
@@ -139,9 +142,16 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             p = {}
         ent = None
         if et == "review.ai_verdict":
+            same = p.get("independent") is False
+            who_wrote = f"written by {p.get('writer_slot')}" if p.get("writer_slot") else None
             ent = {"kind": "ai_review", "step": _step(contracts, p.get("module_id")), "who": "AI",
-                   "ai": {"slot": p.get("ai_slot")}, "what": f"AI review: {p.get('verdict')} "
-                   f"({p.get('record_id')} v{p.get('version')})", "outcome": p.get("verdict")}
+                   "ai": {"slot": p.get("ai_slot"), "writer_slot": p.get("writer_slot")},
+                   "what": f"AI review: {p.get('verdict')} ({p.get('record_id')} v{p.get('version')})"
+                   + (f" · {who_wrote} · reviewed by {p.get('ai_slot')}" if who_wrote else "")
+                   + (f" ⚠️ {NOT_INDEPENDENT}" if same else ""), "outcome": p.get("verdict"),
+                   "warning": NOT_INDEPENDENT if same else None}
+            if "independent" in p:
+                review_counts["same_ai" if same else "independent"] += 1
         elif et == "review.ai_fix":
             ent = {"kind": "ai_fix", "step": _step(contracts, p.get("module_id")), "who": "AI",
                    "ai": {"slot": p.get("ai_slot")}, "what": f"AI fix: new version {p.get('to_version')} of "
@@ -227,6 +237,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         counts[x["kind"]] = counts.get(x["kind"], 0) + 1
     return {"project_id": pid, "branch_id": branch, "title": prof.get("title") or (proj["name"] if proj else pid),
             "entries": entries[-limit:], "count": len(entries), "counts": counts,
+            "reviews": dict(review_counts, warning=NOT_INDEPENDENT if review_counts["same_ai"] else None),
             "filters": {"step": step, "problems": problems_only}}
 
 
@@ -273,6 +284,10 @@ def render_markdown(j: dict) -> str:
     if j["filters"].get("step") or j["filters"].get("problems"):
         out.append(f"- Filter: step {j['filters'].get('step') or 'all'}"
                    + (", problems only" if j["filters"].get("problems") else ""))
+    rv = j.get("reviews") or {}
+    if rv.get("independent") or rv.get("same_ai"):
+        out.append(f"- AI reviews: {rv.get('independent', 0)} by a different AI than the writer, "
+                   f"{rv.get('same_ai', 0)} by the same AI" + (f" — ⚠️ {rv['warning']}" if rv.get("warning") else ""))
     out += ["- This journal never contains keys, prompts, AI replies or your book's text.", "",
             "| When (UTC) | What happened | Step | Who | Outcome |", "|---|---|---|---|---|"]
     for e in j["entries"]:

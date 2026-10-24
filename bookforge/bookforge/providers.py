@@ -48,6 +48,142 @@ ROLE_RE = re.compile(r"^[A-K](?:[0-9]{2})?$")
 PAIR_CODE_RE = re.compile(r"^[A-Za-z0-9-]{8,32}$")
 PAIR_EXPIRED = ("the pairing code expired or was already used — press Connect again in AutoInjector")
 
+# Bridge contract v1.2: each site reports a state. A slot whose site is being repaired, waits for the user (logged
+# out, captcha, usage limit) or is broken is temporarily unavailable: work goes to the AIs that work (P18.9).
+SITE_STATES = ("ok", "repairing", "needs_user", "broken", "unknown")
+UNAVAILABLE_STATES = ("repairing", "needs_user", "broken")
+STATE_WORDS = {"ok": "working", "repairing": "being repaired", "needs_user": "needs you", "broken": "not working",
+               "unknown": "not checked yet"}
+SITE_NAMES = {"claude": "Claude", "chatgpt": "ChatGPT", "gemini": "Gemini"}
+HEALTH_TTL_S = 15.0   # a bridge's /v1/health answer is reused this long (never hammer the bridge)
+FAIL_HOLD_S = 15.0    # a slot whose call just failed (unreachable / site not ready) is tried last this long
+PROBE_WAIT_S = 60.0   # before a run: how long BookForge waits for the bridge's check-in results
+PROBE_POLL_S = 2.0
+
+
+def slot_name(slot: dict) -> str:
+    """Plain name of a slot for the author: "AI-2 · ChatGPT", "AI-1 · Claude (API)", "AI-3"."""
+    sid = slot.get("slot_id") or "AI"
+    if slot.get("adapter_id") == "autoinjector" and slot.get("site"):
+        return f"{sid} · {SITE_NAMES.get(slot['site'], slot['site'])}"
+    if slot.get("adapter_id") == "anthropic":
+        return f"{sid} · Claude (API)"
+    return sid
+
+
+def slot_family(slot: dict | None) -> str | None:
+    """Which AI really answers in a slot: the web site for AutoInjector, "claude" for the Anthropic API, else the
+    slot itself. Two slots of the same family are the same AI, so one cannot independently review the other."""
+    if not slot:
+        return None
+    if slot.get("adapter_id") == "autoinjector" and slot.get("site"):
+        return str(slot["site"])
+    if slot.get("adapter_id") == "anthropic":
+        return "claude"
+    return slot.get("slot_id")
+
+
+def _epoch_s(v) -> float | None:
+    """A bridge timestamp (epoch seconds or milliseconds, or ISO 8601) as epoch seconds."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) / 1000.0 if v > 1e11 else float(v)
+    if isinstance(v, str) and v.strip():
+        from datetime import datetime  # noqa: PLC0415
+        try:
+            return datetime.fromisoformat(v.strip().replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _clean_code(v) -> str | None:
+    """A bridge problem code, kept only if it looks like a code (never free text from the bridge)."""
+    if isinstance(v, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}", v.strip()):
+        return v.strip().upper()
+    return None
+
+
+def normalize_site_info(info) -> dict:
+    """One site's entry of /v1/health (v1.2 fields when present; a v1.1 bridge has only ready/busy -> "unknown",
+    which never makes a slot unavailable, so an older bridge behaves exactly as before)."""
+    info = info if isinstance(info, dict) else {}
+    st = info.get("state")
+    has_state = isinstance(st, str) and bool(st)
+    state = st if has_state and st in SITE_STATES else "unknown"
+    return {"state": state, "problem": _clean_code(info.get("problem")), "since": info.get("since"),
+            "last_probe_ok_at": info.get("last_probe_ok_at"),
+            "ready": info.get("ready") if isinstance(info.get("ready"), bool) else None,
+            "busy": info.get("busy") if isinstance(info.get("busy"), bool) else None,
+            "reports_state": has_state}
+
+
+class SlotHealth:
+    """Process-wide view of which AI slots work right now (shared by a registry and its pinned/gated views).
+
+    * bridge answers: one GET /v1/health per bridge (and key) at most every ``ttl_s`` seconds; failures to fetch
+      are cached too, so a dead bridge is never hammered;
+    * recent failures: a slot whose call just failed with UPSTREAM_UNAVAILABLE is tried LAST for ``hold_s`` seconds
+      (not excluded: with one AI the work still waits and retries on it as before);
+    * a thread-local listener hears "this call moved to another AI" (a Make-a-book run shows it)."""
+
+    def __init__(self, ttl_s: float = HEALTH_TTL_S, hold_s: float = FAIL_HOLD_S):
+        self.ttl_s, self.hold_s = ttl_s, hold_s
+        self._lock = threading.Lock()
+        self._bridge: dict = {}
+        self._failed: dict[str, dict] = {}
+        self._tl = threading.local()
+
+    def bridge(self, key, fetch, fresh: bool = False) -> tuple[dict | None, str | None]:
+        now = time.monotonic()
+        with self._lock:
+            hit = self._bridge.get(key)
+        if hit and not fresh and now - hit[0] < self.ttl_s:
+            return hit[1], hit[2]
+        try:
+            payload, err = fetch(), None
+        except BookforgeError as exc:
+            payload, err = None, exc.code
+        except Exception:  # noqa: BLE001 - a health read must never break work
+            payload, err = None, "UPSTREAM_UNAVAILABLE"
+        with self._lock:
+            self._bridge[key] = (time.monotonic(), payload, err)
+        return payload, err
+
+    def forget_bridges(self):
+        with self._lock:
+            self._bridge.clear()
+
+    def mark_failed(self, slot_id: str, code: str, state: str | None = None, problem: str | None = None):
+        with self._lock:
+            self._failed[slot_id] = {"at": time.monotonic(), "wall": time.time(), "code": code,
+                                     "state": state if state in UNAVAILABLE_STATES else None, "problem": problem}
+            self._bridge.clear()  # look again at the bridge's view after the hold
+
+    def failed(self, slot_id: str) -> dict | None:
+        with self._lock:
+            f = self._failed.get(slot_id)
+            if f and time.monotonic() - f["at"] > self.hold_s:
+                self._failed.pop(slot_id, None)
+                return None
+            return dict(f) if f else None
+
+    def clear(self, slot_id: str):
+        with self._lock:
+            self._failed.pop(slot_id, None)
+
+    def set_listener(self, fn):
+        self._tl.listener = fn
+
+    def notify(self, info: dict):
+        fn = getattr(self._tl, "listener", None)
+        if fn:
+            try:
+                fn(info)
+            except Exception:  # noqa: BLE001 - progress display only
+                log.exception("failover listener failed")
+
 DEFAULT_SLOT = {
     "adapter_id": "none",            # none | anthropic | manual | autoinjector
     "model": DEFAULT_MODEL,
@@ -454,6 +590,18 @@ class AutoInjectorAdapter:
                                       "typed twice).")
             return BookforgeError("TIMEOUT", "", "the web site did not answer before the timeout; it may still be "
                                   "answering" + detail)
+        if code == 503 and body.get("error") == "SITE_NOT_READY":
+            # v1.2: the bridge says why (state + problem code); v1.1 says only "not ready".
+            state = body.get("state") if body.get("state") in SITE_STATES else None
+            problem = _clean_code(body.get("problem"))
+            word = STATE_WORDS.get(state or "", "not ready")
+            err = BookforgeError("UPSTREAM_UNAVAILABLE", "", f"{SITE_NAMES.get(site, site)} is {word} in AutoInjector"
+                                 + (f" ({problem})" if problem else "") + "; BookForge uses another AI that works, "
+                                 "or waits and tries again")
+            err.site_state = state or "broken"
+            err.site_problem = problem
+            err.bridge_v12 = state is not None
+            return err
         if code in (502, 503):
             return BookforgeError("UPSTREAM_UNAVAILABLE", "", f"the web site pane is not available "
                                   f"(HTTP {code}){detail}")
@@ -465,16 +613,31 @@ class AutoInjectorAdapter:
         return BookforgeError("INTERNAL_ERROR", "", f"AutoInjector bridge error (HTTP {code})")
 
     # ------------------------------------------------------------------ health
+    def health_raw(self, timeout_s: float = 3.0) -> dict:
+        """GET /v1/health as the bridge answered it (only the parts BookForge uses)."""
+        out = self._call("GET", "/v1/health", None, timeout_s)
+        sites = out.get("sites") if isinstance(out.get("sites"), dict) else {}
+        return {"ok": bool(out.get("ok")), "bridge_version": out.get("bridge_version"),
+                "sites": {k: v for k, v in sites.items() if isinstance(k, str) and isinstance(v, dict)}}
+
     def health(self, site: str | None = None) -> dict:
-        """GET /v1/health. Returns {ok, sites, site, site_ready, site_busy, message}; raises
-        classified BookforgeError on transport/auth problems."""
+        """GET /v1/health. Returns {ok, sites, site, site_ready, site_busy, state, problem, message}; raises
+        classified BookforgeError on transport/auth problems. ``state`` is the v1.2 site state ("unknown" from an
+        older bridge)."""
         out = self._call("GET", "/v1/health", None, 5.0)
         sites = out.get("sites") if isinstance(out.get("sites"), dict) else {}
         info = sites.get(site) if site else None
         ready = bool(info.get("ready")) if isinstance(info, dict) else None
         busy = bool(info.get("busy")) if isinstance(info, dict) else None
+        norm = normalize_site_info(info) if isinstance(info, dict) else normalize_site_info({})
+        name = SITE_NAMES.get(site or "", site)
         if site and info is None:
             msg = f"bridge reachable, but it does not report the site '{site}'"
+        elif site and norm["state"] in UNAVAILABLE_STATES:
+            msg = (f"bridge reachable; {name} is {STATE_WORDS[norm['state']]}"
+                   + (f" ({norm['problem']})" if norm["problem"] else "")
+                   + ("; AutoInjector is fixing it by itself" if norm["state"] == "repairing" else
+                      "; it needs you in AutoInjector" if norm["state"] == "needs_user" else ""))
         elif site and not ready:
             msg = f"bridge reachable; the {site} pane is not ready (open and log in to it in AutoInjector)"
         elif site and busy:
@@ -483,9 +646,24 @@ class AutoInjectorAdapter:
             msg = f"bridge reachable; {site} is ready"
         else:
             msg = "bridge reachable"
-        return {"ok": bool(out.get("ok")) and (ready is not False if site else True),
-                "bridge_version": out.get("bridge_version"), "sites": sites, "site": site,
-                "site_ready": ready, "site_busy": busy, "message": msg}
+        ok = bool(out.get("ok")) and (ready is not False and norm["state"] not in UNAVAILABLE_STATES if site else True)
+        return {"ok": ok, "bridge_version": out.get("bridge_version"), "sites": sites, "site": site,
+                "site_ready": ready, "site_busy": busy, "state": norm["state"], "problem": norm["problem"],
+                "since": norm["since"], "last_probe_ok_at": norm["last_probe_ok_at"], "message": msg}
+
+    def probe(self, sites: list[str]) -> dict | None:
+        """POST /v1/probe {"sites": [...]} (v1.2): the bridge sends each site a tiny check-in; results appear in
+        /v1/health. Returns {started, skipped}, or None when the bridge is older and has no /v1/probe."""
+        try:
+            out = self._call("POST", "/v1/probe", {"sites": [s for s in sites if s in AUTOINJECTOR_SITES]}, 10.0)
+        except BookforgeError as exc:
+            if exc.code == "CAPABILITY_UNAVAILABLE" and "does not offer" in (exc.errors[0].get("message") or ""):
+                return None  # 404: a v1.0/v1.1 bridge
+            raise
+        started = [s for s in out.get("started") or [] if s in AUTOINJECTOR_SITES]
+        skipped = out.get("skipped") if isinstance(out.get("skipped"), dict) else {}
+        return {"started": started, "skipped": {k: _clean_code(v) or "SKIPPED" for k, v in skipped.items()
+                                                if k in AUTOINJECTOR_SITES}}
 
     # ------------------------------------------------------------------ generation
     @staticmethod
@@ -642,6 +820,7 @@ class ProviderRegistry:
                                 or (Path.home() / ".bookforge" / "secrets.json"))
         self._active: dict[str, int] = {s: 0 for s in SLOT_IDS}
         self._lock = threading.Lock()
+        self.health = SlotHealth()  # which AIs work right now (shared with pinned / gated views)
         self.test_adapter = None  # injectable fake adapter for tests
 
     # ------------------------------------------------------------------ configuration
@@ -751,10 +930,151 @@ class ProviderRegistry:
         base = {"slot_id": slot_id, "site": slot.get("site"), "bridge_url": slot.get("bridge_url")}
         try:
             adapter = AutoInjectorAdapter(self._api_key(slot_id), slot.get("bridge_url") or DEFAULT_BRIDGE_URL)
-            return dict(base, **adapter.health(slot.get("site")), error=None)
+            out = dict(base, **adapter.health(slot.get("site")), error=None)
         except BookforgeError as exc:
             return dict(base, ok=False, error=exc.code, message=exc.errors[0]["message"], sites={},
-                        site_ready=None, site_busy=None)
+                        site_ready=None, site_busy=None, state="unknown", problem=None)
+        if out.get("state") in UNAVAILABLE_STATES:
+            out["error"] = "SITE_NOT_READY"
+        return out
+
+    # ------------------------------------------------------------------ which AIs work right now (P18.9)
+    def site_state(self, slot: dict, fresh: bool = False) -> dict:
+        """The bridge-reported state of a slot's site (v1.2), cached ``health.ttl_s`` seconds per bridge.
+        {state: ok|repairing|needs_user|broken|unknown, problem, since, last_probe_ok_at, source}. Slots that do not
+        use the bridge are "ok"; a bridge that cannot be read or is older than v1.2 gives "unknown" (never makes a
+        slot unavailable). Test fakes may provide ``site_state(slot)``."""
+        out = {"state": "ok", "problem": None, "since": None, "last_probe_ok_at": None, "source": "none"}
+        ta = self.test_adapter
+        if ta is not None:
+            fn = getattr(ta, "site_state", None)
+            if callable(fn):
+                try:
+                    info = normalize_site_info(fn(slot) or {})
+                except Exception:  # noqa: BLE001 - a fake that fails reads as "unknown"
+                    info = normalize_site_info({})
+                if not info["reports_state"]:
+                    info["state"] = "ok"
+                out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at")}, source="test")
+            return out
+        if slot.get("adapter_id") != "autoinjector":
+            return out
+        token = self._api_key(slot["slot_id"])
+        if not token or slot.get("site") not in AUTOINJECTOR_SITES:
+            return dict(out, state="unknown", source="not_connected")
+        url = slot.get("bridge_url") or DEFAULT_BRIDGE_URL
+        key = (url, hashlib.sha256(token.encode("utf-8")).hexdigest()[:16])
+        try:
+            adapter = AutoInjectorAdapter(token, url)
+        except BookforgeError:
+            return dict(out, state="unknown", source="bridge_error", error="INVALID_INPUT")
+        payload, err = self.health.bridge(key, adapter.health_raw, fresh=fresh)
+        if err or not payload:
+            return dict(out, state="unknown", source="bridge_error", error=err or "UPSTREAM_UNAVAILABLE")
+        info = normalize_site_info((payload.get("sites") or {}).get(slot["site"]))
+        out.update({k: info[k] for k in ("state", "problem", "since", "last_probe_ok_at")},
+                   source="bridge" if info["reports_state"] else "bridge_v1", ready=info["ready"], busy=info["busy"],
+                   bridge_version=payload.get("bridge_version"))
+        return out
+
+    def slot_status(self, slot: dict, fresh: bool = False) -> dict:
+        """site_state plus the last failed call (if recent) and a plain word, for the UI and run windows."""
+        st = self.site_state(slot, fresh=fresh)
+        failed = self.health.failed(slot["slot_id"])
+        state = st["state"]
+        problem = st.get("problem")
+        if failed and state in ("ok", "unknown") and failed.get("state"):
+            state, problem = failed["state"], failed.get("problem") or problem
+        return {"slot_id": slot["slot_id"], "name": slot_name(slot), "site": slot.get("site"),
+                "adapter_id": slot.get("adapter_id"), "state": state, "problem": problem,
+                "word": STATE_WORDS.get(state, state), "working": state not in UNAVAILABLE_STATES,
+                "recent_failure": ({"code": failed.get("code"), "problem": failed.get("problem")} if failed else None),
+                "source": st.get("source"), "since": st.get("since"), "last_probe_ok_at": st.get("last_probe_ok_at")}
+
+    def available(self, slot: dict) -> bool:
+        return self.site_state(slot)["state"] not in UNAVAILABLE_STATES
+
+    def ai_slots(self) -> list[dict]:
+        """Slots that can do AI work (any adapter except none; manual only with a test adapter)."""
+        return [s for s in self.slots() if s["adapter_id"] in ("anthropic", "autoinjector")
+                or (s["adapter_id"] == "manual" and self.test_adapter is not None)]
+
+    def down_error(self, slots: list[dict]) -> BookforgeError:
+        """UPSTREAM_UNAVAILABLE (a busy code: the work waits and tries again) naming the AIs being repaired."""
+        parts = []
+        for s in slots:
+            st = self.slot_status(s)
+            word = st["word"] if not st["working"] else "not answering"
+            parts.append(f"{st['name']} is {word}" + (f" ({st['problem']})" if st.get("problem") else ""))
+        return BookforgeError("UPSTREAM_UNAVAILABLE", "", "no AI that can take this works right now: "
+                              + "; ".join(parts) + ". BookForge waits and tries again when one works.")
+
+    def probe_and_wait(self, timeout_s: float = PROBE_WAIT_S, poll_s: float = PROBE_POLL_S, on_progress=None,
+                       check=None, sleep=None) -> list[dict]:
+        """Before a run: ask the bridge to check in with every AutoInjector site (POST /v1/probe, v1.2), then read
+        /v1/health every ``poll_s`` seconds until each probed site has a result (working, needs you, broken) or
+        ``timeout_s`` passed. Never raises for bridge problems; an older bridge without /v1/probe is just read once.
+        Returns slot_status() of every AI slot (with ``pending`` while a check-in had no result yet)."""
+        sleep = sleep or time.sleep
+        slots = self.ai_slots()
+        t0 = time.time()
+        probed: set[str] = set()
+        ta = self.test_adapter
+        if os.environ.get("BOOKFORGE_PRERUN_CHECKIN") == "0":
+            pass  # check-ins switched off (e.g. a test harness whose fake sites cannot answer them): just read
+        elif ta is not None:
+            fn = getattr(ta, "probe", None)
+            if callable(fn):
+                try:
+                    probed = set(fn([s["slot_id"] for s in slots]) or [])
+                except Exception:  # noqa: BLE001
+                    log.exception("test probe failed")
+        else:
+            groups: dict = {}
+            for s in slots:
+                token = self._api_key(s["slot_id"])
+                if s["adapter_id"] != "autoinjector" or not token or s.get("site") not in AUTOINJECTOR_SITES:
+                    continue
+                g = groups.setdefault((s.get("bridge_url") or DEFAULT_BRIDGE_URL, token), [])
+                g.append(s)
+            for (url, token), group in groups.items():
+                try:
+                    res = AutoInjectorAdapter(token, url).probe(sorted({s["site"] for s in group}))
+                except BookforgeError as exc:
+                    log.info("bridge probe at %s not possible: %s", url, exc.code)
+                    continue
+                if res is None:
+                    continue  # older bridge: no check-in, its health answer is all there is
+                for s in group:
+                    if s["site"] in res["started"]:
+                        probed.add(s["slot_id"])
+        out: list[dict] = []
+        while True:
+            self.health.forget_bridges()
+            out = []
+            for s in slots:
+                st = self.slot_status(s)
+                pending = False
+                if s["slot_id"] in probed:
+                    ok_at = _epoch_s(st.get("last_probe_ok_at"))
+                    since = _epoch_s(st.get("since"))
+                    if st["state"] in ("repairing", "unknown"):
+                        pending = True
+                    elif st["state"] == "ok" and not ((ok_at and ok_at >= t0 - 2) or (since and since >= t0 - 2)):
+                        pending = True
+                out.append(dict(st, pending=pending))
+            elapsed = time.time() - t0
+            if on_progress:
+                try:
+                    on_progress(out, elapsed)
+                except Exception:  # noqa: BLE001 - progress display only
+                    log.exception("probe progress callback failed")
+            if not any(x["pending"] for x in out) or elapsed >= timeout_s:
+                break
+            if check:
+                check()
+            sleep(min(poll_s, max(0.05, timeout_s - elapsed)))
+        return out
 
     def _secrets(self) -> dict:
         try:
@@ -790,7 +1110,11 @@ class ProviderRegistry:
                  operation: str | None = None) -> list[dict]:
         """Eligible slots in selection order. Roles: when any eligible slot's roles name the
         operation (exact ID or its set letter), only those slots remain; otherwise normal order
-        (lowest estimated cost, then active load, then slot ID). K11 applies the same rule."""
+        (lowest estimated cost, then active load, then slot ID). K11 applies the same rule.
+
+        P18.9: a slot whose site the AutoInjector bridge reports as repairing / needs_user / broken is skipped
+        while that lasts; a slot whose last call failed (unreachable, site not ready) is put last for a short
+        while, so the work goes to an AI that works and comes back when it recovers."""
         out = []
         for s in self.slots():
             if s["adapter_id"] in ("none", "manual") and self.test_adapter is None:
@@ -805,10 +1129,27 @@ class ProviderRegistry:
                 continue
             if needed_tokens > s["context_limit_tokens"]:
                 continue
+            if not self.available(s):
+                continue
             out.append(s)
         if operation and any(role_matches(s["roles"], operation) for s in out):
             out = [s for s in out if role_matches(s["roles"], operation)]
-        out.sort(key=lambda s: (needed_tokens * s["input_cost_minor_per_mtok"], s["active_jobs"], s["slot_id"]))
+        out.sort(key=lambda s: (self.health.failed(s["slot_id"]) is not None,
+                                needed_tokens * s["input_cost_minor_per_mtok"], s["active_jobs"], s["slot_id"]))
+        return out
+
+    def unavailable(self, project_id: str, capability: str, needed_tokens: int) -> list[dict]:
+        """Connected slots that would be eligible except that their site is being repaired / needs the user."""
+        out = []
+        for s in self.slots():
+            if s["adapter_id"] == "none" or (s["adapter_id"] == "manual" and self.test_adapter is None):
+                continue
+            if not s["healthy"] or capability not in s["capabilities"] or needed_tokens > s["context_limit_tokens"]:
+                continue
+            if "*" not in s["authorized_projects"] and project_id not in s["authorized_projects"]:
+                continue
+            if not self.available(s):
+                out.append(s)
         return out
 
     # ------------------------------------------------------------------ generation
@@ -830,17 +1171,56 @@ class ProviderRegistry:
                 raise BookforgeError("NOT_FOUND", "/slot_id", "slots are AI-1, AI-2 and AI-3 only", status="REJECTED")
             candidates = [s for s in self.eligible(ctx.project_id, capability, needed, None) if s["slot_id"] == slot_id]
             if not candidates:
+                down = [s for s in self.unavailable(ctx.project_id, capability, needed) if s["slot_id"] == slot_id]
+                if down:
+                    raise self.down_error(down)  # being repaired: wait and try again (an explicit pick never moves)
                 raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", f"{slot_id} is not available right now "
                                      "(not set up, busy, unhealthy or its context limit is too small)")
+            order = candidates[:1]
         else:
             candidates = self.eligible(ctx.project_id, capability, needed, operation)
+            # Roles where possible; if every role slot fails, any other working slot (P18.9).
+            seen = {s["slot_id"] for s in candidates}
+            order = candidates + [s for s in self.eligible(ctx.project_id, capability, needed, None)
+                                  if s["slot_id"] not in seen] if candidates else []
         if not candidates:
             any_connected = any(s["connected"] for s in self.slots())
             if any_connected and all(needed > s["context_limit_tokens"] for s in self.slots() if s["connected"]):
                 raise BookforgeError("CONTEXT_TOO_LARGE", "/payload", f"mandatory context (~{needed} tokens) exceeds "
                                      "every connected slot; split the job on scene/pass boundaries")
+            down = self.unavailable(ctx.project_id, capability, needed)
+            if down:
+                raise self.down_error(down)
             raise BookforgeError("CAPABILITY_UNAVAILABLE", "", f"no connected AI slot offers '{capability}'")
-        slot = candidates[0]
+        failed: list[dict] = []
+        last: BookforgeError | None = None
+        for i, slot in enumerate(order):
+            if i and self._active.get(slot["slot_id"], 0) >= int(slot["max_concurrent"]):
+                continue  # became busy meanwhile: never overfill a slot when moving work
+            try:
+                data, resource = self._generate_on(ctx, slot, system, user, output_schema, needed)
+            except BookforgeError as exc:
+                if exc.code != "UPSTREAM_UNAVAILABLE":
+                    raise
+                self.health.mark_failed(slot["slot_id"], exc.code, getattr(exc, "site_state", None),
+                                        getattr(exc, "site_problem", None))
+                last = exc
+                failed.append({"slot_id": slot["slot_id"], "name": slot_name(slot), "code": exc.code,
+                               "state": getattr(exc, "site_state", None), "problem": getattr(exc, "site_problem", None)})
+                if slot_id is None and i + 1 < len(order):
+                    log.warning("AI slot %s unavailable (%s); moving this call to the next working slot",
+                                slot["slot_id"], getattr(exc, "site_problem", None) or exc.code)
+                    continue
+                raise
+            self.health.clear(slot["slot_id"])
+            if failed:
+                self.health.notify({"event": "failover", "from": failed, "to": slot["slot_id"],
+                                    "to_name": slot_name(slot), "operation": operation})
+            return data, resource
+        raise last or BookforgeError("CAPABILITY_UNAVAILABLE", "", f"no connected AI slot offers '{capability}'")
+
+    def _generate_on(self, ctx, slot: dict, system: str, user: str, output_schema: dict, needed: int):
+        """One generation on exactly this slot (cost reservation, busy counter, adapter retries)."""
         schema = _sanitize_schema(copy.deepcopy(output_schema))
         adapter = self.adapter(slot)
         if adapter is None:
@@ -951,6 +1331,8 @@ class ProviderRegistry:
                 return adapter.submit(slot, system, user, schema)
             except BookforgeError as exc:
                 last = exc
+                if exc.code == "UPSTREAM_UNAVAILABLE" and getattr(exc, "site_state", None):
+                    raise  # the bridge says the site is not ready: move on (another slot, or wait), no quick retry
                 if exc.code == "TIMEOUT" and slot.get("adapter_id") == "autoinjector":
                     raise BookforgeError("TIMEOUT", "", f"the {slot.get('site')} web session did not answer in time; "
                                          "it may still be answering. Retrying the same request reuses its reply "
@@ -981,6 +1363,7 @@ class PinnedProviders(ProviderRegistry):
         super().__init__(base.store, base.secret_path)
         self._active = base._active
         self._lock = base._lock
+        self.health = base.health
         self.pinned = slot_id
 
     @property
