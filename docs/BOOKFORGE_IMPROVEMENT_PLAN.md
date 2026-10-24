@@ -107,11 +107,26 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ## Section 5 — Proof, reports and longer books  (Phase 4b + 5)
 
-- [ ] **P13** Automatic book report when a book is done (scores, strengths, weaknesses) and a button to
+- [x] **P13** Automatic book report when a book is done (scores, strengths, weaknesses) and a button to
   send the book to the other AIs for review.
-- [ ] **P14** Compare versions: old vs new pipeline, rated blind by the other AIs.
-- [ ] **P15** Novella and novel lengths with word targets per chapter and scene.
-- [ ] **P16** AutoInjector "Extract this book only" (the full extract mixed in unrelated private
+  *(bookforge/book_report.py: words vs the length targets, editor / planned-to-page / pattern findings across chapters,
+  who wrote / reviewed / edited what, whole-book review by every working AI that did not write most of the book — 13
+  criteria, strengths and weaknesses with quotes checked against the book, median per dimension and ⚠️ disagreement,
+  what to try next; whole book ≤ 60 000 chars, else a per-chapter digest; stored per book version; last run step
+  "Book report" (never blocks); 📊 report page with ⬇ Markdown / PDF and 📨 Ask the other AIs; shelf and book page.)*
+- [x] **P14** Compare versions: old vs new pipeline, rated blind by the other AIs.
+  *(bookforge/pipeline.py: run switches editor / scenes / voices / rules / planned, presets full and baseline, honoured
+  by the run, the chapter brief, the outline prompt and Write all chapters; 🧪 Make a variant = the same profile, idea
+  and choices made again with other switches; bookforge/compare.py: two books or two chapter versions, each reviewer
+  sees "Version 1 / Version 2" in its own random order (mapping recorded, no IDs/titles/pipeline names in the prompt),
+  BookForge reveals the mapping: median per dimension, winner per dimension, votes; ⚖️ compare page from the shelf.)*
+- [x] **P15** Novella and novel lengths with word targets per chapter and scene.
+  *(bookforge/lengths.py: short story / novelette / novella / novel presets with words, chapters and scenes per chapter
+  → B11 target_length + a length sentence, scene cards (scene count, words per scene), chapter prompts (target words);
+  bookforge/long_chapter.py: chapters above 2 500 words written scene by scene (one AI call per scene, continuity from
+  the previous scene's end), a chapter far under target continued in bounded rounds (never padding); ETA in the run
+  window from measured times; Settings › 📏 Long chapters; a 25-chapter novel runs end to end in the tests.)*
+- [x] **P16** AutoInjector "Extract this book only" (the full extract mixed in unrelated private
   conversations).
 
 ---
@@ -217,8 +232,45 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **P11 [!] word check heuristics are English-only.** Content words ≥ 4 letters, crude suffix stripping (`texture.lemma`);
   names count when the full name or one part (≥ 3 letters) appears. Non-English books will see more "unclear" items
   (the AI checker then decides).
+- **P13 / P14 / P15 — not tried with real AIs.** Tested with the deterministic fake AI (unit, Make-a-book end to end incl.
+  a 25-chapter novel, Playwright 41/41), not with Claude/ChatGPT/Gemini. On the first real book check: (1) do web AIs
+  quote the book word for word in the report (many ⚠️ "quote not found" = they paraphrase); (2) are the whole-book
+  scores spread or all 7s (then sharpen `book_report.REVIEW_TASK`); (3) a 60 000-character book prompt plus the schema
+  may exceed a web AI's input box — lower `book_report.WHOLE_MAX_CHARS` / `DIGEST_MAX_CHARS` if the bridge refuses it;
+  (4) does a web AI really write ~750 words per scene call, and does the continuation add story or repeat (the
+  "new text only" filter drops repeated sentences, the pattern check sees the rest); (5) the ETA is an average of the
+  chapters so far — the first chapter (scene planning, more fixes) makes it pessimistic at first.
+- **P14 [!] blind comparison limits.** Each reviewer sees both versions in one prompt (≤ 30 000 characters each, a
+  digest beyond that), so long books are judged on excerpts; position bias is only averaged out across reviewers (each
+  gets its own random order), not removed — with one AI the result is one opinion (the page says so). Chapter titles
+  and character names are content and stay in the text (two different books can be recognised by them, but not which
+  pipeline made which). A variant re-runs the whole Bible Builder, so its characters differ from the original: the
+  comparison measures the pipeline plus that variance — compare several pairs before drawing conclusions.
+- **P15 [!] long chapters and AI fixes.** Scene-by-scene writing and the continuation happen inside one C02 CREATE (one
+  record, every check unchanged), but the consistency reviewer's "Ask AI to fix it" (`ReviewService._run_fix`) still asks
+  for the whole chapter back in one answer: a 3 000-word novel chapter may hit a web AI's reply limit there (the editor's
+  rewrite is fine — it only returns the changed passages). A failed scene call loses the scenes already written for that
+  chapter (the run retries the chapter). The short-story target changed from 5 000 to 4 000 words
+  (`tests/test_autobook.py` updated); books without an explicit chapter count now get the preset's default (short
+  story 3 instead of 1).
+- **P13–P15 design choices to confirm:** (a) reports and comparisons are advice in settings (`book_reports:<pid>:<b>`,
+  `comparisons`), not records, like editor notes; (b) the run's report step asks only independent AIs (none → a report
+  without AI part and ⚠️); 📨 may ask the writer too, marked ⚠️; (c) a report belongs to the approved chapter versions —
+  a new draft does not make it stale, a new approval does; (d) variants keep the original's title (the book list shows
+  "(variant: baseline)").
 - **P18 limits to know:** while a teach step runs, nothing else is typed into that AI (sends return
   `SITE_REPAIRING`); the teach step learns "Enter" when the user presses Enter instead of a Send button; a learned
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace
   .test.js` (not in the unit list) compares against origin/main's relay-trace and already fails there on one
   pre-existing case, unrelated to P18.
+- **P16 limits to know:** "This BookForge book only" relies on BookForge pushing `/v1/status` with `project {id,
+  title}` before its requests; requests made before any status go to an unnamed book, and a request is filed under the
+  project that was current when it *started* (a book switch mid-request is not split). Replies captured before P16 have
+  no book tag, so older runs can only be extracted by time range / Everything. Only the AIs' replies are in the
+  conversation section (BookForge's prompts are never stored by the app). Path redaction covers home-folder paths
+  (`~`, `/home/x`, `/Users/x`, `C:\Users\x`); a path outside any home folder (e.g. `D:\Private\…`) is kept, and a
+  file name with spaces after the last folder may keep its last word. Not yet tried in a real BookForge run.
+- **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
+  changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
+  (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the
+  campaign bridge e2e or mark it as a separate job).

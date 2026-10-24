@@ -1037,3 +1037,22 @@ ul.samples q { font-style: italic; }
 .planned-list > li.optional { opacity: .8; }
 .mb-pl.flagged { color: var(--warn); font-weight: 600; }
 .s4-card p { overflow-wrap: anywhere; }
+
+/* Section 5: 📊 book report, ⚖️ compare, 🧪 pipeline, 📏 length */
+.rp-actions, .rp-ais { margin-bottom: 8px; gap: 6px; flex-wrap: wrap; }
+.rp-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.rp-kpis .kpi { display: flex; flex-direction: column; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.rp-kpis .kpi strong { font-size: 1.4rem; }
+.rp-table td.num, .rp-table th.num { text-align: center; white-space: nowrap; }
+.rp-table td.strong { font-weight: 700; }
+.rp-table tr.low th[scope="row"] { border-left: 4px solid var(--warn, #b45309); }
+.rp-table tr.high th[scope="row"] { border-left: 4px solid var(--ok, #15803d); }
+.rp-table caption { text-align: left; margin-bottom: 4px; }
+.cmp-side { padding: 8px 10px; border-radius: 8px; background: var(--surface-2); overflow-wrap: anywhere; }
+.cmp-head h2 { margin-top: 0; }
+.pipe-box summary { cursor: pointer; font-weight: 600; }
+.pipe-flags .check-row { align-items: center; }
+.mb-eta { color: var(--info, #1d4ed8); }
+.mb-variant, .sb-report { overflow-wrap: anywhere; }
+.s5-card p { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .rp-kpis { grid-template-columns: minmax(0, 1fr); } }

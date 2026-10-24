@@ -100,7 +100,7 @@ def test_make_a_book_end_to_end_with_fake_ai(tmp_path):
     assert not outbox(app, pid, "review.approved_by_author")
     bp = BookPath(app.engine, "author", pid, "main")
     status = bp.status()
-    assert status["next"] is None and status["words"]["words"] > 100 and status["words"]["target_words"] == 5000
+    assert status["next"] is None and status["words"]["words"] > 100 and status["words"]["target_words"] == 4000  # P15: short story target 3-5k (4 000)
     manifest = app.store.feature_manifest(pid, "main")
     assert set(manifest["release_profiles"]) >= {"MANUSCRIPT_PDF", "EPUB_REFLOWABLE", "EDITABLE_DOCX"}
     # automatic backups: before the run, before assembling, before exporting

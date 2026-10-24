@@ -393,6 +393,8 @@ class ProseWriter(OperationHandler):
                                                   [bundle_ref], bundle, findings, [], [prose_ref], [], None)} \
             if bundle_ref else {"status": "PENDING", "error": pending}
 
+        meta.update(getattr(ctx, "meta_extra", None) or {})  # e.g. P15: how a long chapter was written (numbers)
+
         def commit(tx):
             row = tx.execute("SELECT content_hash FROM records WHERE project_id=? AND branch_id=? AND record_id=? "
                              "AND version=1", (ctx.project_id, ctx.branch_id, rid)).fetchone()
@@ -421,10 +423,7 @@ class ProseWriter(OperationHandler):
         _, item = self.plan_item(ctx)
         context["plan_item"] = item
         try:
-            out, resource = ctx.ai_generate(task=self.ai_task(ctx) + " Assess each plan objective of the unit "
-                                            "(PASS/FAIL/UNKNOWN) in objective_assessments.",
-                                            output_schema=PROSE_TASK_SCHEMA, context=context,
-                                            protected_facts=protected)
+            out, resource = self.ai_prose(ctx, context, protected)
         except BookforgeError as exc:
             if exc.code == "CAPABILITY_UNAVAILABLE":
                 raise BookforgeError("CAPABILITY_UNAVAILABLE", "/payload", f"{ctx.op_id} prose needs an AI slot; "
@@ -448,6 +447,13 @@ class ProseWriter(OperationHandler):
                              "message": str(a.get("message") or "objective assessment")[:2000] or "assessment",
                              "evidence": [], "source_refs": plan_ref, "confidence": None})
         return {"text": text, "candidate_events": [], "findings": findings}, "AI", resource
+
+    ASSESS_NOTE = " Assess each plan objective of the unit (PASS/FAIL/UNKNOWN) in objective_assessments."
+
+    def ai_prose(self, ctx: Context, context: dict, protected: list) -> tuple[dict, dict]:
+        """The AI call(s) that write the prose: one call (C02 overrides this for long chapters, P15)."""
+        return ctx.ai_generate(task=self.ai_task(ctx) + self.ASSESS_NOTE, output_schema=PROSE_TASK_SCHEMA,
+                               context=context, protected_facts=protected)
 
     # ---------------------------------------------------------------- VALIDATE / ACCEPT
     def _review_items(self, ctx: Context, record: dict) -> tuple[list[dict], bool]:
@@ -548,6 +554,18 @@ class ChapterWriter(ProseWriter):
         if brief and brief.get("rules"):
             task += (" context.writing_brief is the plan for HOW to write this chapter: " + " ".join(brief["rules"]))
         return task
+
+    def ai_prose(self, ctx: Context, context: dict, protected: list) -> tuple[dict, dict]:
+        """P15: a chapter longer than one AI reply is written scene by scene, and a chapter far under its word target
+        gets bounded continuation rounds (long_chapter.py). Short chapters: one call, as before."""
+        from ..long_chapter import write as write_long  # noqa: PLC0415
+        brief = getattr(ctx, "writing_brief", None) or {}
+        out, resource, info = write_long(ctx.ai_generate, task=self.ai_task(ctx), context=context, protected=protected,
+                                         plan=brief.get("length"), cards=brief.get("scene_cards") or [],
+                                         prose_schema=PROSE_TASK_SCHEMA, assess_note=self.ASSESS_NOTE)
+        if brief.get("length"):
+            ctx.meta_extra = {"length": info}
+        return out, resource
 
 
 @register("C03")

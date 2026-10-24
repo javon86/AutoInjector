@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from . import pipeline as pipeline_mod
 from .book_path import EXPORT_FOR, get_profile
 
 FORMAT_EXT = {"PDF": "pdf", "EPUB": "epub", "DOCX": "docx"}
@@ -77,7 +78,16 @@ def finished_books(app, *, verify: bool = True, limit: int | None = 200, princip
         if not files:
             continue
         files.sort(key=lambda f: ["PDF", "EPUB", "DOCX"].index(f["format"]) if f["format"] in FORMAT_EXT else 9)
+        psettings = json.loads(proj["settings"] or "{}") or {}
+        pinfo = pipeline_mod.info_of(store, pid)
+        try:  # P13: the newest book report (numbers only)
+            report = app.reports.summary(pid, branch) if getattr(app, "reports", None) else None
+        except Exception:  # noqa: BLE001 - a hint on the shelf never breaks it
+            report = None
         out.append({"project_id": pid, "branch_id": branch, "title": prof.get("title") or proj["name"],
+                    "name": proj["name"], "report": report,
+                    "pipeline": {"preset": pinfo.get("preset"), "label": pipeline_mod.describe(pinfo)} if pinfo else None,
+                    "variant_of": psettings.get("variant_of"),
                     "author": prof.get("author") or "", "genre": prof.get("genre") or "", "exported_at": newest,
                     "files": files, "all_verified": all(f.get("verified") for f in files),
                     "made_by_run": (json.loads(proj["settings"] or "{}") or {}).get("made_by_run"),

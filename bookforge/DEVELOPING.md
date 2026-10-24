@@ -56,6 +56,11 @@ bookforge/
                            draft, scene/chapter briefs, deterministic usage counts (lemma match)
     planned.py             ✅ P11 planned-to-page check: planned items per chapter, word check, independent AI check,
                            findings for the P5 rewrite (fix), book-level list (settings planned_checks:<pid>:<branch>)
+    lengths.py             📏 P15 length presets (words, chapters, scenes per chapter), chapter_plan, long-chapter settings
+    long_chapter.py        📏 P15 scene-by-scene writing of long chapters + bounded continuation (used by set_c C02)
+    pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets
+    book_report.py         📊 P13 book report: deterministic part, whole-book AI review, aggregation, Markdown/PDF
+    compare.py             ⚖️ P14 blind comparison of two books / chapter versions
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
     status_push.py         status summary pushed to the AutoInjector bridge (POST /v1/status; incl. words {total, target})
     jobs.py                JobStore (persisted background work, settings keys job:<id>; mark_interrupted at start-up),
@@ -387,6 +392,62 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * Tests: ``tests/test_world_planned.py``; the fake AI answers rules (``RULES``, an update adds/changes one), texture
   (``TEXTURE``; scene plans then take obstacles from it), the planned checker (a sentence with the item's words), the
   planned fix (``planned_fix``; kind ``planned_rewrite``) and rule violations (``rule_flags``).
+
+## 📊 Section 5: book report (P13), compare versions (P14), longer books (P15)
+
+* **P15 lengths** (`lengths.py`): `PRESETS` (short_story 3–5k/3–5 ch, novelette 10–15k/5–8, novella 20–40k/8–15, novel
+  60–90k/20–35; target, default chapters, scenes). `book_path.LENGTHS` / `WORD_TARGETS` / `chapter_target` derive from
+  it (a profile without `chapters` gets the preset default). `chapter_plan(prof, n_chapters, store)` → target words,
+  `min_words` (= `under_share` × target), scenes, words per scene, `scene_by_scene` (target > `per_call_words`),
+  `expand_rounds`. Settings key `length_settings` (`GET/PUT /api/settings/length`; `scale` = test mode shrinking all
+  targets), `GET /api/lengths`. Fed into: B11 (`target_length` + `set_b._length_rule`), scene planning
+  (`scenes._context` scene_hint/target_words/words_per_scene + `LENGTH_PLAN`), the C02 brief (`length` + `lengths.rule`)
+  and the C01/C02 instruction ("Length: about N words").
+* **Long chapters** (`long_chapter.write`, called by `set_c.ChapterWriter.ai_prose`, inside the one C02 CREATE): whole
+  chapter = one call (old behaviour); scene by scene = one call per scene card (`SCENE_SCHEMA` {scene_text}, the last
+  also returns objective_assessments; context `scene_writing` with the previous scene's end ≤ 1 500 chars and the story
+  so far ≤ 8 lines), joined with `***`; continuation (`EXPAND_SCHEMA` {continuation}, chapter end ≤ 6 000 chars) while
+  under `min_words`, at most `expand_rounds`; `new_text_only` drops titles and repeated sentences; a failed
+  continuation is noted (`expand_error`), never raised. `ProseWriter.create` merges `ctx.meta_extra` into `c_meta`
+  (`length`: mode, calls, scenes, expand rounds, words — numbers only).
+* **ETA**: the run's providers are `_TimedProviders` (PinnedProviders timing `_generate_on`) and the run's
+  `assist._call_ai_once` times cross-pinned calls → `run["timing"]` {calls, call_s, chapter_s}; `_eta()` = average
+  chapter × chapters left + 3 average calls + 5 s per remaining BookForge step → `run["eta"]`, the chapters step message
+  and `[data-testid=mb-eta]`.
+* **P14 pipeline switches** (`pipeline.py`): `POST /api/autobook {pipeline: {preset|flags}, variant_of: {project_id}}`;
+  stored in `run.settings.pipeline` and the book's `pipeline:<pid>`. Honoured: steps `characters`/`world`/`planned`
+  skipped (`STEP_FLAGS`, state `skipped`), `_update_rules`, the editor pass, `_planned_pass`, `_scene_cards`,
+  `WriteAllService._plan_scenes`, `chapter_brief.build` (no scene cards / voice cards / rules+texture / must-show),
+  `set_b._guidance` (no rules). A variant copies title, author, genre, audience, tone, idea, length and choices; the
+  project is named "<title> (variant: <preset>)"; project setting `variant_of`. `GET /api/pipeline`.
+* **P13 report** (`book_report.ReportService`, `app.reports`): `book_chapters` (approved text, else newest draft),
+  `version_key` (hash of the chapter revisions), `deterministic` (words, editor crafts of those versions, planned.book,
+  prose_audit.audit_book, usage via `writer_of` + stored verdicts/crafts), reviewers = working AIs of another family than
+  the majority writer (`pick`), one `assist._call_ai` per reviewer (explicit slot, `cross_pin`, no busy wait;
+  schema `book_scores`/strengths/weaknesses/try_next/summary), `clean_review` + `verify_quote`, `aggregate` (median,
+  range, disagree ≥ 3), `try_next`, `_warnings`. Stored in `book_reports:<pid>:<branch>` (10 kept), outbox
+  `quality.book_report` (numbers). Budget: whole ≤ `WHOLE_MAX_CHARS` 60 000, else `book_view` digest ≤
+  `DIGEST_MAX_CHARS` 48 000 (per chapter opening 45 % / middle 25 % / closing 30 % of its share) + profile ≤ 1 600 +
+  numbers. Chunked review was not chosen (N+1 calls per reviewer, loses the whole-book view). API under
+  `/api/projects/{pid}/branches/{b}/report`: `GET` (overview: latest, stale, reviewers, job), `POST {ai?, slots?,
+  report_id?}` → 202 job (JobStore kind `book_review`, resumable), `GET job/{id}`, `GET {rid}?format=json|md|pdf
+  &download=1` (`file_name`: "<title> - BookForge report - <date>"; `server.content_disposition` adds the UTF-8 name).
+  Run step `report` (`_s_report`, independent AIs only; failures ⚠️ `REPORT_FAILED`, none → `REPORT_NOT_INDEPENDENT`).
+  The shelf adds `report`, `pipeline`, `variant_of`. PDF: `render_pdf` = the Markdown through `exporters.layout.paginate`
+  + `exporters.pdf.render_pdf` (Helvetica, cp1252-safe text).
+* **P14 compare** (`compare.CompareService`, `app.compare`): `POST /api/compare {a, b, scope: book|chapter, slots?}`
+  (chapter: `{project_id, record_id, version?}`) → 202 job kind `compare`; `GET /api/compare`, `GET /api/compare/{id}`,
+  `GET /api/compare/job/{id}`. Per reviewer `secrets.SystemRandom().choice` decides which side is Version 1; context is
+  only `{version_1, version_2, dimensions}` (texts via `side_view`, ≤ `SIDE_MAX_CHARS` 30 000 each); `reveal` maps back;
+  `aggregate` = median per side and dimension, winner per dimension, votes, overall winner. Stored in setting
+  `comparisons` (30 kept), outbox `quality.compared` in both books.
+* **UI**: `viewReport` (`#/p/<pid>/<b>/report`), `viewCompare` / `compareResult` (`#/compare[?a=&b=]`, `#/compare/<id>`),
+  `openVariantDialog`, `pipelineFields`, `bookSection5Card`, `lengthSettingsCard`, run window `runVariantLine`,
+  `runReportBox`, ETA and per-chapter `mb-item-length`; `LENGTH_INFO`/`LENGTH_TIP`; problems.js `REPORT_*`,
+  `QUOTE_NOT_FOUND`, `COMPARE_*`, `BOOK_TOO_SHORT`, `CHAPTER_UNDER_TARGET`, `LENGTH_EXPAND_FAILED`.
+* Tests: `tests/test_section5.py`; the fake AI answers `scene_text` (kind `scene_prose`), `continuation` (`expand`:
+  empty unless `expand_text`), `book_scores` (`book_review`, `book_review_script`), `version_1/version_2` (`compare`:
+  prefers the longer version, `compare_script`); `max_chapters` (default 6) caps B11.
 
 ## 🧪 Test workflow (workflow_test.py)
 

@@ -108,6 +108,10 @@ TEXTURE_PLAN = (
     "World texture: take each obstacle (and any skill moment) from context.world_texture when one fits — a detail "
     "is used only if it causes something, shows skill or gets in the way — and list the ids you used in texture.")
 
+# P15: added to PLAN_TASK from the book's length preset
+LENGTH_PLAN = ("Length: the chapter will be about {target} words, so plan about {scenes} scenes of about {each} words "
+               "each — each with enough goals, resistance and consequence to fill that length without padding.")
+
 REVIEW_TASK = (
     "Task: check the scene plan of one chapter (context.scene_cards) with a light rubric. For every scene (scene = its "
     "number from 1) answer: goal — does every character present have a goal of their own in this scene (not only "
@@ -432,6 +436,13 @@ class ScenePlanner:
         chapter = {k: plan[k] for k in ("chapter_id", "number", "of", "objective", "summary", "previous", "next")}
         chapter.update(pov=pov["name"] if pov else None, place_id=plan["location_id"],
                        scene_hint="2-3" if words < 40 else "3-4")
+        try:  # P15: the length preset sets how many scenes and how long each one is
+            from . import lengths  # noqa: PLC0415
+            lp = lengths.of_book(self.store, pid, plan.get("of"))
+            chapter.update(scene_hint=str(lp["scenes"]), target_words=lp["target_words"],
+                           words_per_scene=lp["words_per_scene"])
+        except Exception:  # noqa: BLE001 - a hint only
+            log.exception("could not add the length to the scene context")
         people = []
         for c in cs[:12]:
             e = entries.get(c["record_id"]) or {}
@@ -457,6 +468,10 @@ class ScenePlanner:
     @staticmethod
     def _task(base: str, ctx: dict) -> str:
         extra = []
+        ch = ctx.get("chapter") or {}
+        if ch.get("target_words"):
+            extra.append(LENGTH_PLAN.format(scenes=ch.get("scene_hint"), target=f"{ch['target_words']:,}",
+                                             each=f"{ch.get('words_per_scene') or 0:,}"))
         if ctx.get("world_texture"):
             extra.append(TEXTURE_PLAN)
         extra += ctx.get("peril_and_pace") or []
