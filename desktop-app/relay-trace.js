@@ -154,11 +154,23 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
 
   function median(a) { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }
 
-  function report() {
+  // P16: report(filter) covers only part of the trace — { seqs: Set|array of
+  // [MSG #] numbers (null = all), from, to (epoch ms, null = open) } — so a
+  // scoped Extract (one BookForge book, a time range) traces only its messages.
+  function report(filter) {
+    const f = filter || {};
+    const seqSet = f.seqs ? new Set(Array.from(f.seqs, String)) : null;
+    const from = Number.isFinite(f.from) ? f.from : null;
+    const to = Number.isFinite(f.to) ? f.to : null;
+    const inRange = (t) => (from == null || t >= from) && (to == null || t <= to);
+    const scoped = !!(seqSet || from != null || to != null);
+    const keepMsg = (m) => (!seqSet || seqSet.has(m.seq)) && inRange(m.at);
+    const keepTurn = (t) => (!seqSet || t.answers.some((s) => seqSet.has(s))) && inRange(t.at);
     const at = now();
     const sites = {};
     const anomalies = [];
     for (const m of msgs) {
+      if (scoped && !keepMsg(m)) continue;
       const s = sites[m.target] || (sites[m.target] = { sent: 0, proven: 0, sentUnchecked: 0, unproven: 0, failed: 0, cancelled: 0, started: 0, answered: 0, waiting: 0, noReply: 0, duplicates: 0, retried: 0, replyMs: [], proveMs: [], errors: {} });
       s.sent++;
       if (m.result === "proven") s.proven++;
@@ -195,7 +207,10 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
     }
     // What happened to each captured reply.
     const out = { forwarded: 0, toButlerOrTerminal: 0, held: {}, notPassedOn: 0 };
+    let replies = 0;
     for (const t of turns.values()) {
+      if (scoped && !keepTurn(t)) continue;
+      replies++;
       const ai = t.handoffs.filter((h) => h.seq != null).length;
       const other = t.handoffs.length - ai;
       if (ai) out.forwarded++;
@@ -204,7 +219,8 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
       if (!t.handoffs.length && !t.held) out.notPassedOn++;
     }
     anomalies.sort((a, b) => a.at - b.at);
-    return { since: startedAt, at, messages: msgs.length, replies: turns.size, sites, replyOutcomes: out, anomalies };
+    const messages = scoped ? msgs.filter(keepMsg).length : msgs.length;
+    return { since: from != null ? Math.max(from, startedAt) : startedAt, at: to != null ? Math.min(to, at) : at, messages, replies: scoped ? replies : turns.size, sites, replyOutcomes: out, anomalies };
   }
 
   function reset() { msgs = []; bySeq.clear(); turns.clear(); }

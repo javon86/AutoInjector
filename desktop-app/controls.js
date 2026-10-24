@@ -4138,17 +4138,127 @@ el("btn-clear").onclick = async () => {
   if (res?.ok) renderTranscript([]);
 };
 
-// Extract All: save the whole conversation + the full activity/error log to one
-// text file in the program's logs folder (main writes it; nothing is truncated).
-el("btn-extract-all").onclick = async () => {
+// ⤓ Extract (P16): the button opens a small dialog that asks what goes into the
+// file — "This BookForge book only" (the default when a book is known), a time
+// range, or Everything (with a warning) — shows the counts and the first lines,
+// and saves only on "Save". main builds the text (log-extract.js) and redacts it.
+const exState = { opts: null, timer: null, seq: 0, open: false };
+function exPad(n) { return String(n).padStart(2, "0"); }
+function exLocalInput(ms) { const d = new Date(ms); return `${d.getFullYear()}-${exPad(d.getMonth() + 1)}-${exPad(d.getDate())}T${exPad(d.getHours())}:${exPad(d.getMinutes())}`; }
+function exShortDate(ms) { try { return ms ? new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""; } catch (_) { return ""; } }
+function exScope() { const r = document.querySelector('input[name="ex-scope"]:checked'); return r ? r.value : "time"; }
+function exGather() {
+  const scope = exScope();
+  const o = { scope, include: { conversation: !!el("ex-inc-conv").checked, activity: !!el("ex-inc-act").checked, relay: !!el("ex-inc-relay").checked } };
+  if (scope === "book") o.bookId = el("ex-book").value || null;
+  if (scope === "time") {
+    const preset = el("ex-preset").value;
+    if (preset === "custom") {
+      const f = Date.parse(el("ex-from").value), t = Date.parse(el("ex-to").value);
+      o.from = Number.isFinite(f) ? f : Date.now() - 3600000;
+      o.to = Number.isFinite(t) ? t : Date.now();
+    } else o.preset = preset;
+  }
+  return o;
+}
+function exSyncUi() {
+  const scope = exScope();
+  for (const [id, v] of [["ex-scope-book-row", "book"], ["ex-scope-time-row", "time"], ["ex-scope-all-row", "everything"]]) {
+    const row = el(id); if (row) row.classList.toggle("sel", scope === v);
+  }
+  const custom = el("ex-custom"); if (custom) custom.hidden = el("ex-preset").value !== "custom";
+}
+async function exRefreshPreview() {
+  exSyncUi();
+  const my = ++exState.seq;
+  const counts = el("ex-counts");
+  const opts = exGather();
+  let r;
+  try { r = await window.api.extractPreview(opts); } catch (e) { r = { ok: false, error: e && e.message ? e.message : String(e) }; }
+  if (my !== exState.seq || !exState.open) return; // a newer choice is already being previewed
+  const save = el("btn-extract-save");
+  if (!r || !r.ok) {
+    counts.textContent = r && r.error === "NO_BOOK" ? "No BookForge book has been recorded yet — choose a time range instead." : `Preview failed: ${(r && r.error) || "unknown error"}`;
+    el("ex-preview").textContent = "";
+    el("ex-file").textContent = "";
+    if (save) save.disabled = true;
+    return;
+  }
+  if (save) save.disabled = false;
+  const c = r.counts || {};
+  const parts = [];
+  parts.push(opts.include.conversation ? `<b>${c.messages}</b> AI message${c.messages === 1 ? "" : "s"}` : "no AI messages");
+  parts.push(opts.include.activity ? `<b>${c.events}</b> activity event${c.events === 1 ? "" : "s"}` : "no activity log");
+  parts.push(opts.include.relay ? `relay trace (${c.relayMessages == null ? "?" : c.relayMessages} sent)` : "no relay trace");
+  counts.innerHTML = `Will save: ${parts.join(" · ")}${r.redactions ? ` · ${r.redactions} secret${r.redactions === 1 ? "" : "s"}/path${r.redactions === 1 ? "" : "s"} redacted` : ""}`;
+  el("ex-preview").textContent = r.preview || "";
+  el("ex-file").textContent = r.fileName ? `File: ${r.fileName}` : "";
+  el("ex-file").title = r.fileName || "";
+  exState.opts = opts;
+}
+function exPreviewSoon() { clearTimeout(exState.timer); exState.timer = setTimeout(exRefreshPreview, 120); }
+function exClose(note) {
+  exState.open = false;
+  const m = el("extract-modal"); if (m) m.classList.remove("on");
+  const status = el("extract-status"); if (status && note) status.textContent = note;
+  const btn = el("btn-extract-all"); if (btn) { btn.disabled = false; try { btn.focus(); } catch (_) {} }
+}
+async function exOpen() {
+  const m = el("extract-modal");
+  const status = el("extract-status");
+  if (!m || !window.api.extractOptions) return exSaveDirect();
+  exState.open = true;
+  m.classList.add("on");
+  el("ex-counts").textContent = "Loading preview…";
+  el("ex-preview").textContent = "";
+  let o = null;
+  try { o = await window.api.extractOptions(); } catch (_) { o = null; }
+  if (!exState.open) return;
+  const books = (o && o.ok && Array.isArray(o.books)) ? o.books : [];
+  const sel = el("ex-book");
+  sel.innerHTML = "";
+  for (const b of books) {
+    const opt = document.createElement("option");
+    opt.value = b.id;
+    opt.textContent = `${b.title}${b.current ? " (current)" : ""} — ${b.requests} request${b.requests === 1 ? "" : "s"}${b.lastAt ? `, last ${exShortDate(b.lastAt)}` : ""}`;
+    sel.appendChild(opt);
+  }
+  const bookRow = el("ex-scope-book-row");
+  const bookRadio = el("ex-scope-book");
+  bookRadio.disabled = !books.length;
+  sel.disabled = !books.length;
+  if (sel.parentElement) sel.parentElement.hidden = !books.length; // no empty picker when no book is known
+  bookRow.classList.toggle("disabled", !books.length);
+  el("ex-book-why").textContent = books.length
+    ? "Only the AIs' replies to BookForge's requests for this book, and the activity of those requests. Your other conversations are left out."
+    : "No BookForge book has been recorded yet (BookForge hasn't sent this app any requests).";
+  const def = (o && o.default) || { scope: "time", preset: "day" };
+  // Never "Everything" by default — the safe one-click choice is the book, else a time range.
+  const scope = def.scope === "book" && books.length ? "book" : "time";
+  if (scope === "book" && def.bookId) sel.value = def.bookId;
+  el("ex-preset").value = def.preset || "day";
+  el(scope === "book" ? "ex-scope-book" : "ex-scope-time").checked = true;
+  const inc = def.include || {};
+  el("ex-inc-conv").checked = inc.conversation !== false;
+  el("ex-inc-act").checked = inc.activity !== false;
+  el("ex-inc-relay").checked = inc.relay !== false;
+  const now = Date.now();
+  el("ex-from").value = exLocalInput(now - 3600000);
+  el("ex-to").value = exLocalInput(now);
+  if (status) status.textContent = "Choose what to extract…";
+  try { el("btn-extract-save").focus(); } catch (_) {}
+  await exRefreshPreview();
+}
+async function exSaveDirect(opts) {
   const status = el("extract-status");
   const btn = el("btn-extract-all");
   if (status) status.textContent = "Extracting…";
   if (btn) btn.disabled = true;
   try {
-    const res = await window.api.extractAllLogs();
+    const res = await window.api.extractAllLogs(opts);
     if (res && res.ok) {
-      if (status) { status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries → ${res.file}`; status.title = status.textContent; }
+      const what = res.scope === "book" ? `book “${res.book && res.book.title}” only` : res.scope === "everything" ? "everything" : "time range";
+      if (status) { status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries (${what}) → ${res.file}`; status.title = status.textContent; }
     } else if (status) {
       status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
     }
@@ -4157,7 +4267,21 @@ el("btn-extract-all").onclick = async () => {
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+el("btn-extract-all").onclick = () => exOpen();
+el("btn-extract-cancel").onclick = () => exClose("Extract cancelled — nothing was saved.");
+el("btn-extract-save").onclick = async () => {
+  const opts = exGather();
+  exClose(null);
+  await exSaveDirect(opts);
 };
+for (const id of ["ex-scope-book", "ex-scope-time", "ex-scope-all", "ex-inc-conv", "ex-inc-act", "ex-inc-relay", "ex-book", "ex-preset", "ex-from", "ex-to"]) {
+  const x = el(id); if (x) x.addEventListener("change", exPreviewSoon);
+}
+for (const id of ["ex-preset", "ex-from", "ex-to"]) { const x = el(id); if (x) x.addEventListener("change", () => { el("ex-scope-time").checked = true; }); }
+{ const x = el("ex-book"); if (x) x.addEventListener("change", () => { if (!el("ex-scope-book").disabled) el("ex-scope-book").checked = true; }); }
+el("extract-modal").addEventListener("click", (e) => { if (e.target === el("extract-modal")) exClose("Extract cancelled — nothing was saved."); });
+el("extract-modal").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); exClose("Extract cancelled — nothing was saved."); } });
 
 (async () => {
   buildComposerButtons();

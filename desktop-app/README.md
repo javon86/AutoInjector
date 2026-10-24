@@ -749,6 +749,60 @@ on every entry, successful or not. Only a send that fails all 3 attempts is
 ever reported as `SEND_NOT_CONFIRMED` — at that point it's a real failure,
 not a timing fluke, and retrying further wouldn't change that.
 
+### ⤓ Extract: sharing a log without your other conversations (P16)
+
+**⤓ Extract All** (Activity / Troubleshooting) no longer dumps the app's whole
+history in one click. It opens a small dialog that asks what goes into the file:
+
+- **📖 This BookForge book only** — the default when BookForge has sent this app
+  requests for a book (BookForge connected, or the book was active in the last
+  24 hours). Only the AIs' replies to BookForge's requests *for that book*, the
+  activity events of those requests (by `request_id` / `[MSG #]`), BookForge bridge
+  events inside the book's run windows, and the Relay Trace for just those
+  messages. Your own conversations with the AIs — even ones during the run — and
+  other books are left out. A picker lists every recorded book.
+- **🕒 Time range** — last hour, today, last 24 hours (the default when no book is
+  known), or a custom from/to.
+- **🗂 Everything** — warns that it *includes all conversations, including older
+  private ones*. Never the default.
+
+Tick boxes choose the sections (AI conversation text, activity log, relay
+trace — all on by default). Before anything is written the dialog shows the
+counts and the first lines of the file; **Save** writes it, **Cancel** writes
+nothing. The file starts with a **WHAT IS IN THIS FILE** header (scope, book and
+project id, time range / run windows, request count, how many messages, events
+and traced messages) and is named after its scope, e.g.
+`The Lighthouse Keeper - AutoInjector log - 2026-10-24_11-30-00.txt` or
+`AutoInjector log - last 24 h - ….txt`.
+
+Every scope is **redacted**: the BookForge connection key, the service-bridge
+token, pairing codes made this session and any key/token/password in the app's
+settings are removed by value; API-key shapes (`sk-…`, `AIza…`, `ghp_…`, `xoxb-…`,
+`hf_…`, `AKIA…`), `Bearer …` values, `?code=`/`?token=`/`?key=` URL values and long
+hex/base64 strings right after a key/token/secret/password word are removed by
+pattern; your home folder is shown as `~`, the app's own folders stay
+(`~/…/AutoInjector/…`), and any other path under a home folder becomes
+`[private path]`. Ordinary prose, ids and numbers are left alone.
+
+How a reply is tied to a book: when BookForge pushes `/v1/status` with
+`project {id, title}`, the app records every bridge `request_id` that starts while
+that project is current (and its `[MSG #]` numbers); a captured reply the bridge
+owns is tagged with its request and project. That mapping (ids, sites and times
+only — no prompt or reply text) is kept in memory and in
+`bookforge-extract-books.json` next to the app state, so it survives a restart.
+Replies captured before this version have no tag, so they appear only in a time
+range / Everything extract.
+
+Code: `log-extract.js` (book tracker, scope selection, header, file name,
+redaction; pure Node), `relay-trace.js` `report({ seqs, from, to })`, main.js IPC
+`logs:extract-options`, `logs:extract-preview`, `logs:extract-all` (opts
+`{ scope, bookId, preset, from, to, include }`; no opts = the safe default).
+Tests: `test/log-extract.test.js` (scopes, header, file names, planted secrets and
+paths), `test/log-extract-main.test.js` (the real main.js: a private conversation
+weeks earlier, an unrelated chat and a second book are kept out of a book
+extract), `test/controls.test.js` (the dialog), and the e2e smoke test (opens the
+dialog, cancels, then saves the default).
+
 ### The delivery ledger: the program's own record of what actually happened
 
 Every send the app ever makes — Compose, Forward, a House Rules dispatch, a

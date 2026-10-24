@@ -45,6 +45,7 @@ const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
+const logExtract = require("./log-extract"); // P16: scoped Extract (this BookForge book / a time range / everything) + redaction
 const bookforgeLinkTest = require("./bookforge-link-test"); // 🧪 Test BookForge link (real round trips through the bridge's own HTTP API)
 const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/BOOKFORGE_IMPROVEMENT_PLAN.md Section 1)
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
@@ -4075,7 +4076,12 @@ async function pollSite(site) {
       try { owned = bookforgeBridge.onCaptured({ ...turn, answers }); } catch (e) { logEvent("bookforge-error", { site, error: String(e) }); }
       if (owned) {
         try { relayTrace.noteHeld(turn.id, "bookforge"); } catch (_) {}
-        logEvent("bookforge-owned-reply", { site, chars: turn.text.length });
+        // P16: remember which BookForge request (and so which book) this reply
+        // belongs to, so "Extract → This BookForge book only" can pick it out.
+        let req = null;
+        try { for (const s of (answers || [])) { const r = getBookTracker().requestBySeq(s); if (r && (!req || r.at > req.at)) req = r; } } catch (_) {}
+        if (req) { turn.bf = { requestId: req.requestId, projectId: req.projectId }; saveStateDebounced(); }
+        logEvent("bookforge-owned-reply", { site, chars: turn.text.length, request_id: req ? req.requestId : undefined });
         return;
       }
     }
@@ -4731,51 +4737,114 @@ ipcMain.handle("state:get", () => ({
 
 ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebounced(); return { ok: true }; });
 
-// "Extract All": dump the WHOLE conversation (what the AIs said) AND the full
-// activity/error log into one text file, saved into the program's own logs
-// folder (<AutoInjector app folder>/stuff and thing/logs). Pulled from in-memory state,
-// not the on-screen windows, so a long/streaming transcript is captured in full
-// and never cut off by what happens to be scrolled into view.
-function _ts(ms) { try { return new Date(ms).toLocaleString(); } catch (_) { return String(ms); } }
-function buildExtractText() {
-  const now = new Date();
-  const lines = [];
-  lines.push("AutoInjector — Extract All");
-  lines.push(`Generated: ${now.toLocaleString()}`);
-  lines.push(`AI messages: ${state.transcript.length} · Activity/errors: ${state.log.length}`);
-  lines.push(buildLine());
-  lines.push("");
-  lines.push("========================================");
-  lines.push("AI CONVERSATION (what the language models said)");
-  lines.push("========================================");
-  if (!state.transcript.length) lines.push("(no messages captured)");
-  for (const t of state.transcript) {
-    const who = t.label || (t.site ? (SITES[t.site] ? SITES[t.site].label : t.site) : "AI");
-    const tags = [];
-    if (t.roundtableTag) tags.push(`TO:${t.roundtableTag}`);
-    if (t.isRateLimited) tags.push("RATE-LIMITED");
-    if (t.isVerdict) tags.push("VERDICT");
-    lines.push(`[${_ts(t.ts)}] ${who}${tags.length ? " (" + tags.join(", ") + ")" : ""}:`);
-    lines.push(String(t.text == null ? "" : t.text));
-    lines.push("");
-  }
-  lines.push("========================================");
-  lines.push("RELAY TRACE (where every message went — see TR-13)");
-  lines.push("========================================");
-  try { lines.push(relayTraceLib.formatReport(relayTrace.report(), { label: siteLabel })); } catch (e) { lines.push(`(relay trace unavailable: ${e})`); }
-  lines.push("");
-  lines.push("========================================");
-  lines.push("ACTIVITY / TROUBLESHOOTING (errors and events)");
-  lines.push("========================================");
-  if (!state.log.length) lines.push("(no activity logged)");
-  for (const e of state.log) {
-    let detail = "";
-    try { detail = e.detail == null ? "" : (typeof e.detail === "string" ? e.detail : JSON.stringify(e.detail)); } catch (_) { detail = String(e.detail); }
-    lines.push(`[${_ts(e.ts)}] ${e.kind}${detail ? " — " + detail : ""}`);
-  }
-  lines.push("");
-  return lines.join("\n");
+// "Extract All" (P16: now scoped). Writes the AI conversation, the Relay Trace
+// and the activity/error log into one text file in the program's own logs folder
+// (<AutoInjector app folder>/stuff and thing/logs), pulled from in-memory state so
+// a long/streaming transcript is captured in full. What goes in is chosen in the
+// Extract dialog (log-extract.js): "This BookForge book only" (the safe default
+// when a book is known), a time range, or Everything (warned). Every scope is
+// redacted: known keys/tokens/pairing codes, API-key shapes, and private paths.
+let bookTracker = null;
+function getBookTracker() {
+  if (!bookTracker) bookTracker = logExtract.createBookTracker({ file: path.join(userDataDir(), "bookforge-extract-books.json") });
+  return bookTracker;
 }
+// Bridge activity -> the book tracker: a request belongs to the project BookForge
+// last reported (POST /v1/status) when it started. Ids and times only.
+function bookTrackerNote(ev, bridge) {
+  if (!ev || ev.selftest) return;
+  const tr = getBookTracker();
+  let st = null;
+  try { st = bridge && typeof bridge.bookforgeStatus === "function" ? bridge.bookforgeStatus() : null; } catch (_) {}
+  if (st && st.project && st.project.id) tr.noteStatus(st.project, st.receivedAt);
+  if (ev.kind === "request" && ev.request_id) tr.noteRequest(ev.request_id, ev.site, ev.at);
+  else if (ev.request_id) tr.noteActivity(ev.request_id, ev.at);
+}
+// Pairing codes made this session (in memory only) — an Extract must never contain one.
+const recentPairingCodes = [];
+function rememberPairingCode(code) { if (code) { recentPairingCodes.push(String(code)); if (recentPairingCodes.length > 20) recentPairingCodes.shift(); } }
+// Every secret the app knows: the BookForge connection key, the service-bridge
+// token, pairing codes, and any key/token/secret/password string in the settings.
+function knownSecrets() {
+  const out = [];
+  try { const t = bookforgeBridgeMod.readToken(userDataDir()); if (t) out.push(t); } catch (_) {}
+  try { const f = path.join(userDataDir(), "autoinjector-bridge-token.txt"); if (fs.existsSync(f)) out.push(fs.readFileSync(f, "utf8").trim()); } catch (_) {}
+  out.push(...recentPairingCodes);
+  const skip = new Set(["transcript", "log", "ledger", "managerLog", "captured", "prompts"]);
+  const walk = (v, key, depth) => {
+    if (depth > 4 || v == null) return;
+    if (typeof v === "string") { if (key && /key|token|secret|password|passwd/i.test(key) && v.trim().length >= 6) out.push(v.trim()); return; }
+    if (typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v)) { if (depth === 0 && skip.has(k)) continue; walk(x, k, depth + 1); }
+  };
+  try { walk(state, null, 0); } catch (_) {}
+  for (const k of Object.keys(process.env)) if (/^AUTOINJECTOR_.*(KEY|TOKEN|SECRET)/i.test(k) && process.env[k]) out.push(process.env[k]);
+  return out;
+}
+function extractRedaction() {
+  const appDirs = [];
+  try { appDirs.push(contentBaseFolder()); } catch (_) {}
+  try { if (outputManager.root()) appDirs.push(outputManager.root()); } catch (_) {}
+  try { appDirs.push(userDataDir()); } catch (_) {}
+  appDirs.push(__dirname);
+  let home = ""; try { home = require("os").homedir(); } catch (_) {}
+  return { secrets: knownSecrets(), home, appDirs };
+}
+function bookforgeConnectedNow() {
+  try { return !!bookforgeConnection(bookforgeStatusSnapshotBase()).connected; } catch (_) { return false; }
+}
+// What the dialog needs: the known books, the safe default and the totals.
+function extractOptions() {
+  const tr = getBookTracker();
+  const books = tr.books().filter((b) => b.requests > 0);
+  const connected = bookforgeConnectedNow();
+  const def = logExtract.defaultScope({ connected, books, now: Date.now() });
+  return {
+    ok: true, connected, books, current: tr.current(),
+    default: Object.assign({ include: { conversation: true, activity: true, relay: true } }, def),
+    totals: { messages: state.transcript.length, events: state.log.length,
+      oldestMessageAt: state.transcript.length ? state.transcript[0].ts : null }
+  };
+}
+// opts: { scope, bookId, preset, from, to, include } — missing scope = the safe default.
+function buildExtract(opts) {
+  const o = opts && typeof opts === "object" ? opts : {};
+  let scope = o.scope;
+  let bookId = o.bookId;
+  let preset = o.preset;
+  if (!["book", "time", "everything"].includes(scope)) {
+    const def = extractOptions().default;
+    scope = def.scope; bookId = def.bookId; preset = def.preset;
+  }
+  const tr = getBookTracker();
+  let book = null;
+  if (scope === "book") {
+    if (!bookId) { const cur = tr.books().find((b) => b.requests > 0); bookId = cur ? cur.id : null; }
+    book = bookId ? tr.book(String(bookId)) : null;
+    if (!book) return { ok: false, error: "NO_BOOK" };
+  }
+  const include = Object.assign({ conversation: true, activity: true, relay: true }, o.include || {});
+  for (const k of Object.keys(include)) include[k] = include[k] !== false;
+  const r = logExtract.buildExtract({
+    scope, preset, from: o.from, to: o.to, book, include,
+    transcript: state.transcript, log: state.log,
+    relayReport: (f) => { const rep = relayTrace.report(f); return { text: relayTraceLib.formatReport(rep, { label: siteLabel }), messages: rep.messages }; },
+    siteLabel, buildLine: buildLine(), now: Date.now(), redaction: extractRedaction()
+  });
+  return Object.assign({ ok: true }, r);
+}
+// The old unscoped text, for the "Download all logs" troubleshooting bundle (still redacted).
+function buildExtractText() { const r = buildExtract({ scope: "everything" }); return r.ok ? r.text : ""; }
+ipcMain.handle("logs:extract-options", () => {
+  try { return extractOptions(); } catch (e) { return { ok: false, error: String(e) }; }
+});
+ipcMain.handle("logs:extract-preview", (_evt, opts) => {
+  try {
+    const r = buildExtract(opts);
+    if (!r.ok) return r;
+    return { ok: true, scope: r.scope, counts: r.counts, redactions: r.redactions, fileName: r.fileName, preview: r.preview, header: r.header, from: r.from, to: r.to, book: r.book };
+  } catch (e) { return { ok: false, error: String(e) }; }
+});
 // TR-13: the Relay Trace on its own — { report, text }, or { save:true } to
 // write it to the logs folder and open it; { reset:true } starts a fresh trace.
 function saveRelayTraceReport() {
@@ -4795,13 +4864,14 @@ ipcMain.handle("trace:report", (_evt, { save, reset } = {}) => {
     return { ok: true, report, text, file };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
-ipcMain.handle("logs:extract-all", () => {
+ipcMain.handle("logs:extract-all", (_evt, opts) => {
   try {
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-    const file = outputManager.saveBuffer(outputManager.logsDir(), `autoinjector-extract-${stamp}.txt`, buildExtractText());
-    logEvent("extract-all", { file, messages: state.transcript.length, logEntries: state.log.length });
+    const r = buildExtract(opts);
+    if (!r.ok) { logEvent("extract-all-error", { error: r.error }); return r; }
+    const file = outputManager.saveBuffer(outputManager.logsDir(), r.fileName, r.text);
+    logEvent("extract-all", { scope: r.scope, book: r.book ? r.book.id : undefined, messages: r.counts.messages, logEntries: r.counts.events, redactions: r.redactions });
     try { if (shell && shell.showItemInFolder) shell.showItemInFolder(file); } catch (_) {}
-    return { ok: true, file, messages: state.transcript.length, logEntries: state.log.length };
+    return { ok: true, file, scope: r.scope, book: r.book, messages: r.counts.messages, logEntries: r.counts.events, redactions: r.redactions, from: r.from, to: r.to };
   } catch (e) { logEvent("extract-all-error", { error: String(e) }); return { ok: false, error: String(e) }; }
 });
 
@@ -6342,6 +6412,9 @@ async function startBookforgeBridgeNow() {
       // await) once the view exists, so reading it first gives this send's
       // exact [MSG #] number without changing sendTextTo's return shape.
       const seq = String(state.nextMsgSeq).padStart(4, "0");
+      // P16: note the [MSG #] before sending, so a reply captured while the send is
+      // still being confirmed can already be matched to this request (and its book).
+      try { if (meta && meta.request_id) getBookTracker().noteSeq(meta.request_id, seq); } catch (_) {}
       // bridge: verbatim, no hop-count reset, no tag flags (BF-03/BF-16);
       // cancelToken: the bridge withdraws it if its request times out first (BF-02).
       const res = await sendTextTo(site, text, null, { bridge: true, cancelToken: meta && meta.cancelToken ? meta.cancelToken : null });
@@ -6352,6 +6425,8 @@ async function startBookforgeBridgeNow() {
     // Text-free activity events -> the panel's live feed (+ "bookforge-activity" broadcast).
     onEvent: (ev) => {
       bookforgeNoteActivity(ev);
+      // P16: which book each BookForge request belongs to (ids and times only, no text).
+      try { bookTrackerNote(ev, bridge); } catch (_) {}
       // P18.2: a real request that failed starts a check-in of that AI once it is free.
       if (ev && ev.kind === "outcome" && !ev.selftest && ev.site && ["TIMEOUT", "LATE_EXPIRED", "SEND_FAILED"].includes(ev.outcome)) selfRepair.requestCheck(ev.site, `bookforge-${String(ev.outcome).toLowerCase()}`);
     }
@@ -6823,6 +6898,7 @@ async function bookforgeConnectNow() {
   if (!bookforgeBridge || typeof bookforgeBridge.createPairingCode !== "function") return bookforgeSetConnect("error", { step: "bridge", message: "The bridge isn't running. Press Connect again." });
   const startedAt = Date.now();
   const code = bookforgeBridge.createPairingCode();
+  rememberPairingCode(code); // P16: so an Extract can never contain it
   const bridgeUrl = `http://127.0.0.1:${bookforgeBridge.status().port}`;
   const url = `${found.base}#/pair?code=${encodeURIComponent(code)}&bridge=${encodeURIComponent(bridgeUrl)}`;
   try {
