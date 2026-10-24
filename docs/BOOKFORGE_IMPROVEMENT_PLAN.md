@@ -41,13 +41,21 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ## Section 2 — A real editor  (Phase 2)
 
-- [ ] **P4** Craft review after the consistency review: subtext, characters' own goals and
+- [x] **P4** Craft review after the consistency review: subtext, characters' own goals and
   resistance, distinct voices, obstacles from the world, over-stated theme, repeated patterns and
   gestures, too-neat ending, protected mysteries. Each finding points at the exact passage.
-- [ ] **P5** Targeted rewrite of only the flagged passages, with a "keep" list; afterwards check that
+  *(bookforge/editor.py + editor_rubric.py: scores 1-10 per dimension, findings with exact quotes, keep list; editor ≠
+  writer; BookForge decides PASS/REVISE by strictness; advice per record+version; chapter page, review queue, run
+  window, journal; premise/plot/outline with a lighter rubric on request.)*
+- [x] **P5** Targeted rewrite of only the flagged passages, with a "keep" list; afterwards check that
   nothing good was lost and no story rule was broken.
-- [ ] **P6** Pattern checker (no AI): counts repeated tics ("went very still", "not X, not Y, but Z",
+  *(The writer returns exact original → replacement pairs, applied word for word or left unresolved; new version via
+  the normal UPDATE; in runs: checks + consistency review + pattern check + editor again, kept only if nothing got
+  worse, else the earlier text is restored; max 2 rounds, then ⚠️ "editor still had notes" and the run goes on.
+  Outside runs: ✍ Apply editor's fixes with before/after per passage.)*
+- [x] **P6** Pattern checker (no AI): counts repeated tics ("went very still", "not X, not Y, but Z",
   moral paragraph endings, repeated gestures) and feeds them to the editor.
+  *(bookforge/prose_audit.py: 11 checks with passage locations, thresholds per 1 000 words, strictness.)*
 
 ## Section 3 — Characters who are their own people  (Phase 3a)
 
@@ -104,6 +112,35 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   written without access to the current live DOMs. The page search (P18.4) and the teach step (P18.7) don't depend
   on them, so a wrong list only costs one step; update the lists from a learned selector that worked
   (`learnedSelectors` in the state file / Copy diagnostics) once seen live.
+- **P4 / P5 / P6 — the editor's quality with real AIs is untested.** Everything was tested with the deterministic fake
+  AI (it flags a known phrase and returns a replacement) in unit tests, the full Make-a-book flow and Playwright — not
+  with Claude/ChatGPT/Gemini. To check on the first real book: (1) do the editor's quotes match the chapter word for
+  word (notes marked “not found word for word” and many “could not be fixed word for word” mean the AI paraphrases —
+  the rewrite then does nothing; tighten `editor_rubric.REWRITE_TASK` or allow whitespace-normalised matching);
+  (2) are the scores stable enough — `judge_rewrite` tolerates a 1-point drop per dimension but not a lower average,
+  AI noise may reject good rewrites (see `editor.rewrite_rejected` / SCORE_DROP in the journal); (3) does the editor
+  over-flag (strictness normal = any major note): if most chapters end ⚠️ "editor still had notes", try gentle;
+  (4) the editor context sends the whole chapter plus canon: very long chapters on web AIs may hit length limits.
+- **P6 [!] heuristics are English-only and approximate.** Dialogue tags, speakers, triads and "moral endings" are regex
+  heuristics (curly or straight double quotes; no single-quote dialogue). Thresholds are first guesses, calibrated
+  only on crafted texts paraphrasing the Lamplighter patterns (`tests/test_prose_audit.py`), not on the real book.
+  Run `prose_audit.audit_book` over the Lamplighter chapters and adjust `THRESHOLDS` / `GESTURES` if it under- or
+  over-reports.
+- **P4/P5 design choices to confirm:** (a) the editor's opinion is stored as advice (settings key), not as Set F
+  records (F records are anchored patch proposals that enter the approval queue and need an approval reference);
+  (b) a rewrite that is not kept is undone by saving the earlier text again as a NEW version (history keeps the
+  rejected rewrite; the copied reviews say `copied_from_version`); (c) when the author's standing auto-approve is on,
+  a run now approves chapters after the editor under the run consent instead of the auto-approve label; (d) the
+  rewrite only covers chapters (C02) — premise/plot/outline get notes only; (e) "keep" notes that are not exact quotes
+  cannot be checked by BookForge after a rewrite (only quotes are).
+- **Desktop e2e flake seen during Section 2 (desktop-app, not changed here).** `tests/campaign/bridge/
+  test_bridge_e2e_autoinjector.py` failed in 3 of ~10 runs with the Section 2 code (passes alone 6/7, baseline 4/4 +
+  one full run): after the forced TIMEOUT and Resume, the run's pre-run check-in to Gemini and the re-sent chapter
+  overlap, and AutoInjector logs `untagged-reply-accepted … a check-in answer` for Gemini's chapter reply, so the
+  BookForge request never gets its answer and the run is still "running" when the 170 s budget ends. The editor adds
+  ~5 s of AI calls per run, which shifts timing; the race itself is in the desktop app's check-in/reply matching
+  (P18.1/P18.5). Fix there: a reply that answers a pending BookForge request (or contains JSON) must not be taken as a
+  check-in answer.
 - **P18 limits to know:** while a teach step runs, nothing else is typed into that AI (sends return
   `SITE_REPAIRING`); the teach step learns "Enter" when the user presses Enter instead of a Send button; a learned
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace
