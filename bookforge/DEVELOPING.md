@@ -61,6 +61,8 @@ bookforge/
     pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets
     book_report.py         📊 P13 book report: deterministic part, whole-book AI review, aggregation, Markdown/PDF
     compare.py             ⚖️ P14 blind comparison of two books / chapter versions
+    scene_grid.py          🗂 P27 scene grid: chapters × scenes (scene cards, words + readability per scene, problems)
+    costs.py               ⏱ P28 AI calls and minutes per AI / per run / per book, estimate before a run (web/grid.js)
     book_bible.py          📖 P20/P21 the book bible: build (versioned JSON), Markdown, clean (a file from outside),
                            summary, remap_refs
     book_package.py        📦 P20/P21 book.bookforge: build, read + check, transplant into a NEW project, import, verify
