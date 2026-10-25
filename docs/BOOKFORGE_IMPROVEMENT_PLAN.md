@@ -480,7 +480,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - **Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
   test_wizard_to_downloaded_book` fails "stuck on Write the chapters: ✔ Done: Approved 1 of 1." on unmodified `main` too
   (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).
-- **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
-  changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
-  (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the
-  campaign bridge e2e or mark it as a separate job).
+- **GitHub checks don't cover BookForge.** *Addressed:* `.github/workflows/bookforge-tests.yml` runs on PRs and
+  pushes to main that touch `bookforge/**` (or the Node bridge files the cross-process tests use). Job `test`
+  installs `bookforge/requirements.txt` + `requirements-test.txt` on Python 3.13 with Node 22 and runs
+  `python -m pytest -q` in `bookforge/` (UI tests skip there: no Playwright); job `ui-test` installs Playwright +
+  Chromium and runs `tests/campaign/ui`. Still not on CI: the AutoInjector desktop-app bridge e2e
+  (`tests/campaign/bridge`, needs `desktop-app/node_modules`), EPUBCheck and LibreOffice checks (skipped there).
+  Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so BookForge-only PRs (Sections 3–5) were merged
+  on the full local suite.
