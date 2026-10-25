@@ -9,13 +9,16 @@ real ChatGPT, Claude and Gemini. Tick each box; if something fails, stop there a
 - [ ] Download / pull the latest `main` (GitHub Desktop: **Fetch origin → Pull**).
 - [ ] Close any old AutoInjector and Akọwe windows first.
 
-## 1. Start both apps
+## 1. Start AutoInjector — Akọwe starts with it
 
-- [ ] `desktop-app/run-windows.bat` → AutoInjector opens with the three AI panes.
+- [ ] `desktop-app/run-windows.bat` → AutoInjector opens with the three AI panes. (One launcher: Akọwe starts by
+      itself; you don't need `akowe/run-akowe.bat` any more — it is still there if you want Akọwe alone.)
 - [ ] Log in to **ChatGPT, Claude and Gemini** inside their panes (each once).
-- [ ] `akowe/run-akowe.bat` → Akọwe opens in your browser.
-- [ ] In AutoInjector press **Connect** next to Akọwe → Akọwe says it is connected (AI-1 Claude, AI-2 ChatGPT,
-      AI-3 Gemini).
+- [ ] Click the **📖 Akọwe** tab at the top → Akọwe's workspace shows inside AutoInjector (the first start can
+      take a minute or two while it prepares Python). If it says Python is missing: install Python 3.10+ from
+      python.org (tick "Add python.exe to PATH"), then press **Try again**.
+- [ ] The Akọwe panel in AutoInjector says **Connected** by itself — no Connect press (AI-1 Claude, AI-2 ChatGPT,
+      AI-3 Gemini). If it doesn't: press **🔗 Connect Akọwe**.
 
 ## 2. Check each AI works (one at a time)
 

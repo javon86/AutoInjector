@@ -29,6 +29,10 @@ module first.
 
 ## Run it (Windows)
 
+**Easiest: start AutoInjector** (`desktop-app/run-windows.bat`) — Akọwe starts with it and opens in its
+**📖 Akọwe** tab, signed in and connected to the AIs (same Python environment and data folder as below).
+The steps below run **Akọwe on its own** (optional; if AutoInjector already runs Akọwe, this just opens it).
+
 1. Double-click **`run-akowe.bat`** in this folder. If Python 3.10+ is missing, the window says
    so and opens python.org: install it, tick **"Add python.exe to PATH"**, then double-click again.
 2. The first start makes Akọwe's own Python environment (`%LOCALAPPDATA%\Akowe\venv`) and

@@ -27,7 +27,9 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
-- Last updated: 2026-10-25 (Section 7 and 8 done; first real test next).
+- **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
+  by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
+- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; first real test next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -303,7 +305,10 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ### Other ideas parked from earlier lists (not scheduled)
 
-- Merge Akọwe into the AutoInjector app (one app, one launcher).
+- [x] Merge Akọwe into the AutoInjector app (one app, one launcher) — DONE 2026-10-25: AutoInjector starts
+  Akọwe's server itself (reuses one already running; Python venv made like `run-akowe.bat`; restart on crash;
+  clean stop on quit), shows it in its **📖 Akọwe** tab (pop out / back) and pairs it with the bridge by itself.
+  `akowe/run-akowe.*` stay for running Akọwe alone. See `desktop-app/README.md` "Akọwe inside AutoInjector".
 - Print-ready PDF: embedded fonts, print-on-demand trim sizes, margins/bleed.
 - Official EPUB check installed by default (EPUBCheck needs Java).
 - Guided first-time tour; notifications when the AI finishes or needs approval; dark mode / larger text.

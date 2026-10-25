@@ -15,6 +15,10 @@ const path = require("path");
 // A fresh, isolated temp dir per test process — mirrors what app.getPath("userData")
 // gives a real Electron app, so persistence/debug-log code paths exercise real
 // file IO instead of being mocked away entirely.
+// main.js would start Akọwe's real server on app-ready (akowe-server.js); the mock-Electron
+// harnesses test main.js's own logic, so it stays off unless a test turns it on.
+if (process.env.AUTOINJECTOR_AKOWE_SERVER === undefined) process.env.AUTOINJECTOR_AKOWE_SERVER = "0";
+
 const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "autoinjector-test-"));
 
 const ipcHandlers = {};

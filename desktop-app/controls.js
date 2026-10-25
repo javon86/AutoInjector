@@ -1627,6 +1627,7 @@ if (window.api.onLedgerEntry) window.api.onLedgerEntry((led) => {
 window.api.onWindowCollapseChanged(({ which, collapsed }) => {
   if (which !== "automation") return;
   el("wrap").classList.toggle("window-collapsed", collapsed);
+  document.body.classList.toggle("window-collapsed", collapsed);
   el("btn-collapse-window").textContent = collapsed ? "›" : "⌄";
   el("btn-collapse-window").title = collapsed ? "Expand this window" : "Collapse this window to a titlebar";
 });
@@ -3088,9 +3089,9 @@ function bfDerive(s) {
   let next;
   if (bf.test.running) next = "The connection test is running — watch the chips. You can stop it any time.";
   else if (badKey && !connected) next = "Akọwe (or something else) tried an old or wrong key. Press “🔗 Connect Akọwe” to hand Akọwe the right one.";
-  else if (!connected && (phase === "waiting" || phase === "paired")) next = "Finish in the Akọwe page that opened in your browser. This panel ticks by itself when it's done.";
+  else if (!connected && (phase === "waiting" || phase === "paired")) next = bfInApp(s) ? "Akọwe is connecting by itself — this panel ticks when it's done." : "Finish in the Akọwe page that opened in your browser. This panel ticks by itself when it's done.";
   else if (!connected && phase === "not_running") next = "Start Akọwe, then press Connect Akọwe again.";
-  else if (!connected) next = "Press “🔗 Connect Akọwe”. It opens Akọwe in your browser and connects it — nothing to copy or paste.";
+  else if (!connected) next = bfInApp(s) ? "Press “🔗 Connect Akọwe” — it connects the Akọwe in the 📖 Akọwe tab, nothing to copy or paste." : "Press “🔗 Connect Akọwe”. It opens Akọwe in your browser and connects it — nothing to copy or paste.";
   else if (!activeSites.length) next = "Tick at least one AI (ChatGPT, Claude or Gemini) as Active in this app so Akọwe has someone to ask.";
   else if (notReady.length) next = `Open ${notReady.map((k) => bfLabel(k, s)).join(" and ")} and log in, so Akọwe can use ${notReady.length > 1 ? "them" : "it"}.`;
   else if (s.akowe && s.akowe.approvals && s.akowe.approvals.count > 0) next = "Akọwe is waiting for your OK — press ✅ Review & approve.";
@@ -3110,10 +3111,13 @@ function bfDerive(s) {
     const when = b && !b.stale ? `last update ${bfAgo(b.receivedAt)}` : `last contact ${bfAgo(s.lastExternalContactAt || (b && b.receivedAt))}`;
     return Object.assign(d, { key: "connected", pill: "✔ Connected", tone: "ok", title: "Akọwe is connected", sub: `can use your AIs · ${when}`, next });
   }
-  if (phase === "waiting" || phase === "paired") return Object.assign(d, { key: "waiting", pill: "📡 Connecting", tone: "wait", title: "Connecting to Akọwe…", sub: "finish in the Akọwe page in your browser", next });
+  if (phase === "waiting" || phase === "paired") return Object.assign(d, { key: "waiting", pill: "📡 Connecting", tone: "wait", title: "Connecting to Akọwe…", sub: bfInApp(s) ? "Akọwe runs inside AutoInjector — it connects by itself" : "finish in the Akọwe page in your browser", next });
   return Object.assign(d, { key: "waiting", pill: "📡 Not connected", tone: "wait", title: "Bridge is on — Akọwe isn't connected yet", sub: `listening on 127.0.0.1:${port} (this computer only)`, next });
 }
 
+// Akọwe runs inside AutoInjector (its server started or reused by AutoInjector, signed in):
+// Connect pairs it directly, nothing opens in the browser.
+function bfInApp(s) { return !!(s && s.server && s.server.ready && s.server.hasToken); }
 // --- 🔗 Connect: the message on the status line --------------------------------
 function bfConnectView(s, d) {
   const c = s.connect || {};
@@ -3127,6 +3131,7 @@ function bfConnectView(s, d) {
   switch (c.phase) {
     case "waiting": {
       const left = c.expiresAt ? Math.max(0, c.expiresAt - bfNow()) : 0;
+      if (bfInApp(s)) return { tone: "work", text: "Connecting the Akọwe that runs inside AutoInjector…" };
       return { tone: "work", text: `Akọwe opened in your browser — click Connect there if it asks (${bfClock(left)} left).` };
     }
     case "paired": return { tone: "work", text: "Akọwe has the key ✔ — waiting for its first update…" };
@@ -3137,7 +3142,7 @@ function bfConnectView(s, d) {
     case "no_status": return { tone: "warn", text: "Akọwe has the key, but hasn't reported back yet." };
     case "not_running": return { tone: "warn", text: "Akọwe isn't running.", start: !!c.canStartApp };
     case "expired": case "error": return { tone: "err", text: "Connecting didn't finish." };
-    default: return { tone: "", text: "One click: turns the bridge on, opens Akọwe in your browser and hands it the key." };
+    default: return { tone: "", text: bfInApp(s) ? "Akọwe runs inside AutoInjector (📖 Akọwe tab) and connects by itself. Connect does it again by hand." : "One click: turns the bridge on, opens Akọwe in your browser and hands it the key." };
   }
 }
 function bfRenderConnect(s, d) {
@@ -4841,3 +4846,108 @@ function wireFeatureTest() {
   };
 }
 try { wireFeatureTest(); } catch (e) { console.error("feature test init failed", e); }
+
+
+// ---- 📖 Akọwe tab: one app, one launcher ------------------------------------
+// AutoInjector starts Akọwe's server itself (main.js + akowe-server.js) and lays
+// the real Akọwe page over #akowe-slot when this tab shows. Here: the two tabs,
+// what the server is doing in plain words, and the buttons (Try again, Open
+// log, Get Python, Pop out / Bring back, Reload, Start with AutoInjector).
+function wireAkoweTab() {
+  const api = window.api || {};
+  if (!el("tab-app-akowe") || typeof api.akoweServerStatus !== "function") return;
+  let last = null;
+  const BUSY = ["checking", "finding_python", "preparing", "installing", "starting", "restarting"];
+  function setTab(which) {
+    const ak = which === "akowe";
+    document.body.dataset.appTab = ak ? "akowe" : "main";
+    el("tab-app-main").setAttribute("aria-selected", String(!ak));
+    el("tab-app-akowe").setAttribute("aria-selected", String(ak));
+    el("akowe-tab").hidden = !ak;
+    try { if (api.akoweTab) api.akoweTab(ak); } catch (_) {}
+    try { localStorage.setItem("akoweTab", ak ? "akowe" : "main"); } catch (_) {}
+  }
+  function btn(label, onClick, opts) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label;
+    if (opts && opts.id) b.id = opts.id;
+    if (opts && opts.primary) b.className = "primary";
+    b.onclick = onClick;
+    return b;
+  }
+  const tryAgain = () => btn("↻ Try again", async () => { render(await api.akoweServerRetry()); }, { id: "btn-akowe-retry", primary: true });
+  const openLog = () => btn("📄 Open log", () => api.akoweServerOpenLog(), { id: "btn-akowe-openlog" });
+  function render(st) {
+    if (!st || typeof st !== "object") return;
+    last = st;
+    const phase = st.phase || "idle";
+    const popped = !!(st.view && st.view.popped);
+    const tone = phase === "running" ? "ok" : phase === "failed" ? "error" : BUSY.includes(phase) ? "busy" : "off";
+    el("akowe-tab-dot").dataset.tone = tone;
+    el("akowe-autostart").checked = st.startWithApp !== false;
+    const where = st.port ? ` · port ${st.port}` : "";
+    const stateText = {
+      running: st.owned ? `✅ Akọwe is running${where}` : `✅ Using the Akọwe you started${where}`,
+      failed: "⚠ Akọwe isn't running", stopped: "⏹ Akọwe is stopped", idle: st.enabled ? "Akọwe" : "Akọwe doesn't start with AutoInjector",
+    }[phase] || `⏳ ${st.message || "Starting Akọwe…"}`;
+    el("akowe-tab-state").textContent = stateText;
+    el("btn-akowe-popout").textContent = popped ? "⇲ Bring back" : "⇱ Pop out";
+    el("btn-akowe-popout").disabled = phase !== "running" || !(st.view && (st.view.loaded || popped));
+    el("btn-akowe-reload").disabled = phase !== "running";
+    const notice = el("akowe-notice");
+    const title = el("akowe-notice-title"), text = el("akowe-notice-text"), small = el("akowe-notice-small"), acts = el("akowe-notice-actions");
+    acts.textContent = "";
+    notice.dataset.tone = tone;
+    small.textContent = "Everything else in AutoInjector works without Akọwe.";
+    if (phase === "running" && popped) {
+      title.textContent = "Akọwe is open in its own window";
+      text.textContent = "Close that window, or press Bring it back, to see Akọwe here again.";
+      acts.append(btn("⇲ Bring it back", () => api.akoweDock().then((r) => render(r && r.status)), { primary: true }));
+      small.textContent = "";
+    } else if (phase === "running") {
+      title.textContent = st.hasToken ? "Opening Akọwe…" : "Akọwe is running";
+      text.textContent = st.hasToken ? "Akọwe's page appears here in a moment." : (st.message || "AutoInjector can't sign in to this Akọwe. Use the link in Akọwe's own window.");
+      small.textContent = "";
+    } else if (phase === "failed") {
+      title.textContent = st.error === "NO_PYTHON" ? "Akọwe needs Python" : st.error === "NO_APP" ? "Akọwe wasn't found" : "Akọwe couldn't start";
+      text.textContent = st.message || "Something went wrong while starting Akọwe.";
+      if (st.error === "NO_PYTHON") acts.append(btn("⬇ Get Python", () => api.akoweServerGetPython(), { id: "btn-akowe-getpython", primary: true }), tryAgain());
+      else if (st.error === "NO_APP") acts.append(tryAgain());
+      else acts.append(tryAgain(), openLog());
+    } else if (phase === "stopped" || (phase === "idle" && !st.enabled)) {
+      title.textContent = st.enabled ? "Akọwe is stopped" : "Akọwe doesn't start with AutoInjector";
+      text.textContent = st.enabled ? "Press Start to run it again." : "“Start with AutoInjector” is off. Start it now, or turn that back on.";
+      acts.append(btn("▶ Start Akọwe now", async () => { render(await api.akoweServerRetry()); }, { id: "btn-akowe-start", primary: true }));
+    } else {
+      title.textContent = phase === "restarting" ? "Akọwe is restarting" : "Starting Akọwe…";
+      text.textContent = st.message || "Akọwe starts together with AutoInjector.";
+      small.textContent = "The first start can take a few minutes. Everything else in AutoInjector works meanwhile.";
+      if (phase === "restarting") acts.append(openLog());
+    }
+  }
+  el("tab-app-main").onclick = () => setTab("main");
+  el("tab-app-akowe").onclick = () => setTab("akowe");
+  el("btn-akowe-reload").onclick = async () => { if (api.akoweReload) render(await api.akoweReload()); };
+  el("btn-akowe-log").onclick = () => api.akoweServerOpenLog();
+  el("btn-akowe-popout").onclick = async () => {
+    const popped = !!(last && last.view && last.view.popped);
+    const r = popped ? await api.akoweDock() : await api.akowePopOut();
+    if (r && r.status) render(r.status);
+  };
+  el("akowe-autostart").onchange = async (e) => { render(await api.akoweServerSetAutostart(!!e.target.checked)); };
+  if (api.onAkoweServer) api.onAkoweServer((st) => render(st));
+  if (api.onAkoweTabShow) api.onAkoweTabShow(() => setTab("akowe"));
+  // Arrow keys move between the two tabs (tablist pattern).
+  el("app-tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const toAk = document.body.dataset.appTab !== "akowe";
+    setTab(toAk ? "akowe" : "main");
+    el(toAk ? "tab-app-akowe" : "tab-app-main").focus();
+    e.preventDefault();
+  });
+  let saved = "main";
+  try { saved = localStorage.getItem("akoweTab") || "main"; } catch (_) {}
+  setTab(saved === "akowe" ? "akowe" : "main");
+  Promise.resolve(api.akoweServerStatus()).then(render).catch(() => {});
+}
+try { wireAkoweTab(); } catch (e) { console.error("Akọwe tab init failed", e); }

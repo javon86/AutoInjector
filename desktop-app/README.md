@@ -62,6 +62,11 @@ need Chrome open with three tabs.
    window automatically.
 5. Every time after that, the same double-click just opens the app directly
    (a few seconds).
+6. **Akọwe starts with it.** The **📖 Akọwe** tab at the top of the window shows
+   Akọwe (the book workspace in `../akowe`), signed in and already connected to
+   the three AIs — no second launcher, nothing to press. It needs Python 3.10+
+   (see "Akọwe inside AutoInjector" below); without Python everything else still
+   works and the tab says what to install.
 
 That's the "one click" version — the launcher script handles installing and
 starting for you. Nothing gets installed system-wide; it all lives inside the
@@ -531,6 +536,55 @@ to a real ChatGPT/Claude/Gemini pane (`adjudicatorSite`, default Claude) —
 matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
+
+## Akọwe inside AutoInjector (one app, one launcher)
+
+Starting AutoInjector also starts Akọwe (`akowe-server.js`, setting **Start with
+AutoInjector** in the 📖 Akọwe tab, on by default):
+
+- **Reuse first** — if an Akọwe already answers on 127.0.0.1:8780–8799 (you
+  started `akowe/run-akowe.bat` yourself), AutoInjector uses that one and never
+  starts a second. Its access token is read from Akọwe's data folder and only used
+  when the ping proof (HMAC) says it belongs to that server. A hand-started Akọwe
+  is left running when AutoInjector quits; if it goes away, AutoInjector starts its own.
+- **Python** — `AUTOINJECTOR_AKOWE_PYTHON` if set; else the private environment
+  the launcher makes (Windows `%LOCALAPPDATA%\Akowe\venv`, elsewhere
+  `~/.local/share/akowe/venv`); if missing it is made the same way
+  `run-akowe.bat` does (`py -3` / `python` / `python3`, 3.10+, `-m venv`), and
+  `requirements.txt` is installed once (only when `jsonschema` is missing; needs
+  the internet once). The old `Bookforge` folder is moved over first, like the launcher.
+- **Start** — `python -m akowe --no-browser --host 127.0.0.1 --port <free port>`
+  from `../akowe` (port 8780, or the next free one), hidden, then a wait for
+  `GET /api/ping` (60 s, `AUTOINJECTOR_AKOWE_HEALTH_MS`). The start link
+  (`/#token=…`) is read from Akọwe's own "Open:" line and only ever given to the
+  Akọwe view — never logged (the server log hides it).
+- **Keep alive** — a crash restarts it after 2 s, 5 s, 15 s, 30 s; after 5 crashes
+  in a row it stops and the tab shows **↻ Try again** / **📄 Open log**
+  (`<stuff and thing>/logs/akowe-server.log`). Two minutes up resets the count.
+- **Quit** — AutoInjector stops its own Akọwe cleanly (Ctrl+C, a hard stop after 4 s).
+- **Problems** — no Python → "Akọwe needs Python 3.10 or newer" with **⬇ Get
+  Python** (python.org) and **↻ Try again**; port busy → the next free port; no
+  answer in time → **↻ Try again** + **📄 Open log**. AutoInjector's own start
+  never waits for Akọwe.
+- **The 📖 Akọwe tab** — a native view (like the AI panes) loaded from the start
+  link, so it is signed in. It can only show pages of that local server: any
+  other link opens in your browser. **⇱ Pop out** moves it to its own window
+  (closing that window, or **⇲ Bring back**, returns it), **↻ Reload** loads the
+  start page again. "📚 Open Akọwe" / "✅ Review & approve" in the panel open the
+  page in this tab.
+- **Connected by itself** — when the server is up, AutoInjector turns the bridge
+  on and pairs Akọwe directly (`POST /api/slots/pair-autoinjector` with a
+  one-time code; same as Connect, without the browser). It does not switch Akọwe's
+  AI slots if you gave them something else (an API key) — **🔗 Connect Akọwe**
+  still does it on request. Turning the **Bridge** switch off also stops the
+  automatic connect. Connect keeps its browser flow for a hand-started Akọwe
+  AutoInjector can't sign in to.
+- Logged with tags (System): `akowe-server-start / ready / reuse / crash /
+  restart / stop / failed / health-timeout`, `akowe-autopair`, `akowe-view-*` —
+  ports, exit codes and versions only. `AUTOINJECTOR_AKOWE_SERVER=0` turns the
+  whole thing off (the test harnesses do).
+
+`akowe/run-akowe.bat` / `run-akowe.sh` still work for running Akọwe alone (optional).
 
 ## Akọwe (experimental, bridge off by default)
 
@@ -1266,6 +1320,15 @@ Inspect button described above to get the real answer instead of guessing.
 ```bash
 npm test
 ```
+
+One app, one launcher (Akọwe started by AutoInjector): `test/akowe-server.test.js`
+(the server manager with fake child processes — start + health wait, reuse of a
+running Akọwe, crash restart with backoff and a limit, stop on quit, Python
+missing, the Windows venv bootstrap, busy ports, no answer), `test/akowe-tab.test.js`
+(the 📖 Akọwe tab's notices and buttons, jsdom) and `test/e2e/akowe-oneapp.e2e.js`
+(real Electron under xvfb starts the real `../akowe` server with `python3`, shows
+the signed-in workspace in the tab, pops out and back, pairs by itself, stops it on
+quit; then a run with no Python on PATH shows the notice).
 
 This mocks out Electron itself (`test/mock-electron.js`) — no browser, no display
 needed — and requires the real `main.js` against it, driving it through its

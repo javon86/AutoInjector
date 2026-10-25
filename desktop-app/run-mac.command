@@ -14,5 +14,7 @@ fi
 # preflight installs only what's missing and reports clearly if it can't.
 node scripts/ensure-deps.js || { echo "Could not finish installing dependencies - see the message above."; read -p "Press Enter to close..."; exit 1; }
 
-echo "Starting AutoInjector Desktop..."
+# This is the ONE launcher: AutoInjector starts Akowe (the book workspace in ../akowe) by itself and
+# shows it in its "Akowe" tab (needs Python 3.10+). ../akowe/run-akowe.sh is only for Akowe alone.
+echo "Starting AutoInjector Desktop (Akowe starts with it)..."
 npm start

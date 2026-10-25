@@ -14,6 +14,36 @@
       font-size:13px; font-weight:600;
     }
     #btn-collapse-window { font-size:13px; line-height:1; padding:3px 9px; }
+    /* One app: the 🤖 AutoInjector / 📖 Akọwe tabs in the title bar. The Akọwe tab is a slot the
+       real Akọwe page (a native view, like the AI panes) is laid over. */
+    #window-titlebar .wt-name { flex:0 0 auto; }
+    #app-tabs { display:flex; gap:4px; align-items:center; flex:1 1 auto; margin-left:14px; }
+    .app-tab { font-size:12.5px; padding:4px 12px; border-radius:7px; border:1px solid #2a2a2a; background:#151515; color:#cfcfcf; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+    .app-tab[aria-selected="true"] { background:#1f2a22; border-color:#3f6b4c; color:#e9fff0; }
+    .app-tab:focus-visible { outline:2px solid #7c5ce0; outline-offset:1px; }
+    .ak-dot { width:8px; height:8px; border-radius:50%; background:#666; display:inline-block; }
+    .ak-dot[data-tone="ok"] { background:#57c07a; }
+    .ak-dot[data-tone="busy"] { background:#e0b84a; animation:akpulse 1.2s ease-in-out infinite; }
+    .ak-dot[data-tone="error"] { background:#e05a5a; }
+    @keyframes akpulse { 50% { opacity:.35; } }
+    @media (prefers-reduced-motion: reduce) { .ak-dot { animation:none !important; } }
+    body[data-app-tab="akowe"] #wrap { display:none; }
+    body.window-collapsed #akowe-tab { display:none; }
+    #akowe-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; }
+    #akowe-tab[hidden] { display:none; }
+    #akowe-tab-bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:5px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #akowe-tab-bar .spacer { flex:1 1 auto; }
+    #akowe-tab-state { opacity:.85; }
+    #akowe-tab-bar button { font-size:12px; padding:3px 9px; }
+    #akowe-tab-bar label { display:inline-flex; align-items:center; gap:5px; cursor:pointer; }
+    #akowe-slot { flex:1 1 auto; min-height:0; position:relative; background:#0f0f0f; display:flex; align-items:center; justify-content:center; }
+    #akowe-notice { max-width:620px; margin:24px; padding:18px 20px; background:#171717; border:1px solid #2a2a2a; border-radius:10px; line-height:1.55; }
+    #akowe-notice[data-tone="error"] { border-color:#6b3a3a; }
+    #akowe-notice h3 { margin:0 0 8px; font-size:15px; }
+    #akowe-notice p { margin:0 0 10px; }
+    #akowe-notice .ak-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    #akowe-notice .ak-actions button { font-size:13px; padding:5px 12px; }
+    #akowe-notice .ak-small { font-size:12px; opacity:.75; }
 
     #wrap { display:flex; flex-direction:column; gap:12px; padding:12px 14px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
     #wrap.window-collapsed { display:none; }
@@ -925,8 +955,31 @@
 </head>
 <body>
   <div id="window-titlebar">
-    <span>AutoInjector Desktop — Automation</span>
+    <span class="wt-name">AutoInjector Desktop — Automation</span>
+    <div id="app-tabs" role="tablist" aria-label="What this window shows">
+      <button id="tab-app-main" class="app-tab" role="tab" aria-selected="true" aria-controls="wrap" title="The AIs, the butler and everything else">🤖 AutoInjector</button>
+      <button id="tab-app-akowe" class="app-tab" role="tab" aria-selected="false" aria-controls="akowe-tab" title="Akọwe, the book workspace — it starts with AutoInjector">📖 Akọwe <span id="akowe-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
+    </div>
     <button id="btn-collapse-window" title="Collapse this window to a titlebar" aria-label="Collapse this window to a titlebar">⌄</button>
+  </div>
+  <!-- 📖 Akọwe tab: AutoInjector runs Akọwe's server itself and lays the real Akọwe page over #akowe-slot. -->
+  <div id="akowe-tab" role="tabpanel" aria-labelledby="tab-app-akowe" hidden>
+    <div id="akowe-tab-bar">
+      <span id="akowe-tab-state" role="status" aria-live="polite">Akọwe</span>
+      <span class="spacer"></span>
+      <label title="Start Akọwe's server together with AutoInjector (you can also start it with akowe/run-akowe on its own)"><input type="checkbox" id="akowe-autostart" checked> Start with AutoInjector</label>
+      <button id="btn-akowe-reload" type="button" title="Load Akọwe's start page again">↻ Reload</button>
+      <button id="btn-akowe-popout" type="button" title="Open Akọwe in its own window (close that window to bring it back here)">⇱ Pop out</button>
+      <button id="btn-akowe-log" type="button" title="Open Akọwe's server log (no keys in it)">📄 Log</button>
+    </div>
+    <div id="akowe-slot">
+      <div id="akowe-notice" role="status" aria-live="polite">
+        <h3 id="akowe-notice-title">Starting Akọwe…</h3>
+        <p id="akowe-notice-text">Akọwe starts together with AutoInjector. The first start can take a few minutes while it prepares what it needs.</p>
+        <div class="ak-actions" id="akowe-notice-actions"></div>
+        <p class="ak-small" id="akowe-notice-small">Everything else in AutoInjector works while Akọwe starts.</p>
+      </div>
+    </div>
   </div>
   <div id="wrap">
     <div id="top-tab-strip"></div>

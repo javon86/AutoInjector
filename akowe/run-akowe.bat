@@ -6,6 +6,8 @@ REM  2. makes a private Python environment in %LOCALAPPDATA%\Akowe\venv
 REM  3. installs what Akowe needs (only the first time, quietly)
 REM  4. starts Akowe on a free port and opens your browser
 REM  The window stays open; close it to stop Akowe.
+REM  OPTIONAL: AutoInjector (desktop-app\run-windows.bat) starts Akowe by itself and shows it in its
+REM  "Akowe" tab. Use this file only to run Akowe on its own (if AutoInjector already runs it, this opens it).
 REM ==========================================================================
 setlocal EnableExtensions
 title Akowe
