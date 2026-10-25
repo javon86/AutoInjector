@@ -211,5 +211,19 @@ contextBridge.exposeInMainWorld("api", {
   selfRepairReload: (site) => ipcRenderer.invoke("selfrepair:reload", { site }),
   selfRepairForgetLearned: (site) => ipcRenderer.invoke("selfrepair:forget-learned", { site }),
   selfRepairSettings: (patch) => ipcRenderer.invoke("selfrepair:settings", patch || {}),
-  onSelfRepair: (cb) => ipcRenderer.on("self-repair", (_e, payload) => cb(payload))
+  onSelfRepair: (cb) => ipcRenderer.on("self-repair", (_e, payload) => cb(payload)),
+  // ==== 🎩 Alfred (alfred-main.js) — OFF by default; see docs/ALFRED.md ====
+  alfredStatus: () => ipcRenderer.invoke("alfred:status"),
+  alfredSetEnabled: (on) => ipcRenderer.invoke("alfred:set-enabled", { on: !!on }),
+  alfredSettings: (patch) => ipcRenderer.invoke("alfred:settings", patch || {}),
+  alfredAsk: (text) => ipcRenderer.invoke("alfred:ask", { text }),
+  alfredConfirm: (id, alwaysAllow) => ipcRenderer.invoke("alfred:confirm", { id, alwaysAllow: Array.isArray(alwaysAllow) ? alwaysAllow : [] }),
+  alfredReject: (id) => ipcRenderer.invoke("alfred:reject", { id }),
+  alfredCancel: () => ipcRenderer.invoke("alfred:cancel"),
+  alfredClear: () => ipcRenderer.invoke("alfred:clear"),
+  alfredTestAi: () => ipcRenderer.invoke("alfred:test-ai"),
+  alfredModels: () => ipcRenderer.invoke("alfred:models"),
+  alfredOpenPath: (path) => ipcRenderer.invoke("alfred:open-path", { path }),
+  onAlfred: (cb) => ipcRenderer.on("alfred", (_e, payload) => cb(payload))
+  // ==== end 🎩 Alfred ====
 });

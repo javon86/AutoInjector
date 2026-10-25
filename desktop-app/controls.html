@@ -960,6 +960,8 @@
       <button id="tab-app-main" class="app-tab" role="tab" aria-selected="true" aria-controls="wrap" title="The AIs, the butler and everything else">🤖 AutoInjector</button>
       <button id="tab-app-akowe" class="app-tab" role="tab" aria-selected="false" aria-controls="akowe-tab" title="Akọwe, the book workspace — it starts with AutoInjector">📖 Akọwe <span id="akowe-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
     </div>
+    <!-- 🎩 Alfred master switch (alfred-panel.js). Off by default: nothing else of Alfred exists until it is on. -->
+    <button id="btn-alfred-switch" type="button" role="switch" aria-checked="false" title="Alfred, your assistant who can use everything in the app (off by default)" style="font-size:12px;padding:3px 10px;margin-right:8px;border-radius:7px;border:1px solid #2a2a2a;background:#151515;color:#cfcfcf;cursor:pointer;">🎩 Alfred: Off</button>
     <button id="btn-collapse-window" title="Collapse this window to a titlebar" aria-label="Collapse this window to a titlebar">⌄</button>
   </div>
   <!-- 📖 Akọwe tab: AutoInjector runs Akọwe's server itself and lays the real Akọwe page over #akowe-slot. -->
@@ -1700,5 +1702,6 @@
   </div>
 
   <script src="controls.js"></script>
+  <script src="alfred-panel.js"></script><!-- 🎩 Alfred panel (off by default) -->
 </body>
 </html>

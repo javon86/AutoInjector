@@ -76,6 +76,7 @@ const MANAGER_CATEGORY_TAG = {
 // Prefix rules (checked after EXACT). First match wins, longest-first below.
 const PREFIX = [
   ['manager-', (k) => MANAGER_CATEGORY_TAG[k.slice('manager-'.length)] || 'manager'],
+  ['alfred-', () => 'manager'], // 🎩 Alfred (the butler grown up): tool runs, cards, notices — codes/titles only
   ['houserule-', () => 'roundtable'],
   ['sequence-', () => 'roundtable'],
   ['tuner-', () => 'roundtable'],
