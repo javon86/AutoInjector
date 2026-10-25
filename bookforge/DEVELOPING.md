@@ -61,6 +61,11 @@ bookforge/
     repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels
                            (settings repetition_labels:<pid>:<branch>)
     fact_checks.py         🔎 Section 7a glue: chapter/book views, editor context + keep list, fixes, run report, HTTP
+    continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
+                           AI tracking + run hooks (approved under the run consent), brief section, review context,
+                           routes /review/continuity, Reports/Continuity.md; physical_state.py (🌊 P32 extraction +
+                           checks), character_state.py (🫀 P35), ambiguity.py (🪞 P33 two readings,
+                           ambiguity:<pid>:<b>), version_ledger.py (🧾 P34, version_ledger:<pid>:<b>); web/continuity.js
     lengths.py             📏 P15 length presets (words, chapters, scenes per chapter), chapter_plan, long-chapter settings
     long_chapter.py        📏 P15 scene-by-scene writing of long chapters + bounded continuation (used by set_c C02)
     pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets

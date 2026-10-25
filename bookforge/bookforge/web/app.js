@@ -2,6 +2,7 @@
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
+import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -644,6 +645,7 @@ async function pickView(parts) {
     if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
     if (rest[0] === 'scenes' && rest[1]) return m => viewScenes(m, rest[1]);
     if (rest[0] === 'world') return viewWorld;
+    if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -700,6 +702,7 @@ function renderTop(parts) {
   if (inProject) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
+    add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
