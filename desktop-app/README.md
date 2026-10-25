@@ -537,6 +537,34 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
+## 🎩 Alfred — your assistant for the whole app (off by default)
+
+Alfred is the butler grown into an assistant who can use everything in AutoInjector: your Akọwe books
+(status, ⚡ Make a book for me, pause/resume, profile, characters, story rules, world details, a chapter
+rewrite with a note, the report, saving, opening pages), images (Stable Diffusion through the 🎨 Images
+module, character locks, the LoRA library), video (when a backend is set up), the three AI panes (send,
+read the latest reply, health, check-in) and the output folders / logs. Full guide, incl. installing a
+local model on Windows: **[docs/ALFRED.md](../docs/ALFRED.md)**.
+
+- **Switch:** **🎩 Alfred: Off / On** in the title bar. Off = the app behaves exactly as without him (no
+  calls, no panel). On = a panel on the right, on every tab (also over 📖 Akọwe and 🎨 Images).
+- **His AI:** a local model via Ollama (`http://127.0.0.1:11434/v1`, recommended `ollama pull qwen2.5:7b`),
+  or the connected AI (the butler/manager's API), or a web AI pane — ⚙ in his panel. If it can't be
+  reached he says so in plain words; everything else keeps working.
+- **Safety:** a fixed tool list (no free code); looking runs directly, anything that changes or creates
+  something shows an **"I will: …"** card and runs only after **✔ Do it** (optional "always allow" for
+  harmless ones like making an image). He never approves book drafts or gets around Akọwe's approvals.
+  Max 8 steps per request, ■ Stop, timeouts. Open Interpreter only if you tick it — and then always the
+  exact code first.
+- **Records:** every action → the Activity log (tool name + title + outcome; never your words, prompts or
+  keys) and, for books, the Akọwe journal; "What Alfred did" in the panel.
+- **Notices** (no AI involved): an AI pane broke / was fixed, a book run paused / needs you / finished,
+  an image finished — rate-limited.
+- **Everything else:** `app_info` / `app_control` reach every other control of the app (151 actions, the same
+  handlers as the buttons); `sd_call` reaches every Stable Diffusion method of the 🎨 Images module. A few things
+  are deliberately off-limits (passwords, keys, LAN switch, free command execution, window chrome) — see
+  `alfred-app-actions.js`. `test/alfred-coverage.test.js` proves the coverage and prints the table.
+
 ## 🎨 Images — Stable Diffusion (checkpoints, LoRAs, character locks)
 
 The **🎨 Images** tab (next to 🤖 AutoInjector and 📖 Akọwe in the title bar) makes pictures with

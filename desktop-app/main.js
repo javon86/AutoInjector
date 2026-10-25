@@ -19,6 +19,7 @@
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
 const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
+require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
@@ -7676,6 +7677,18 @@ ipcMain.handle("akowe-view:tab", (_evt, payload) => {
 ipcMain.handle("akowe-view:reload", () => { const ok = akoweLoadView(true); return Object.assign(akoweServerPublicStatus(), { ok }); });
 ipcMain.handle("akowe-view:pop-out", () => Object.assign(akowePopOut(), { status: akoweServerPublicStatus() }));
 ipcMain.handle("akowe-view:dock", () => Object.assign(akoweDock(), { status: akoweServerPublicStatus() }));
+
+// ==== 🎩 ALFRED HOOK (alfred-main.js / alfred.js / alfred-tools.js) — OFF by default ====
+// Alfred is the butler grown into an assistant that can use the whole app through a fixed tool
+// registry. Everything lives in the alfred-*.js files; this block only hands him the app's own
+// functions. Off = no AI calls, no polling, no UI beyond the 🎩 switch. See docs/ALFRED.md.
+const alfred = require("./alfred-main").installAlfred({
+  ipcMain, shell, state, siteIds: SITE_IDS, userDataDir, logEvent, broadcast, broadcastListeners,
+  akoweApi, akoweServerBase, akoweShowInTab, akoweLoadView,
+  sendTextTo, withEnvelope, selfRepair, selfRepairStatus, buildExtract,
+  outputManager, dbService, imageProvider, videoProvider, interpreterProvider, ollamaManager,
+});
+// ==== end 🎩 ALFRED HOOK ====
 
 app.whenReady().then(() => {
   loadPersistedState();

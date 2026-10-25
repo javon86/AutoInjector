@@ -24,12 +24,16 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **Now:** the FIRST REAL TEST on the user's PC — step by step in `docs/FIRST_REAL_TEST.md`. Waiting on the user's
   ChatGPT page check (`desktop-app/tools/chatgpt-page-check.js`) to hard-code ChatGPT's live selectors.
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
-- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
+- **🎩 Alfred (done 2026-10-25, B4 → app-wide):** the butler grown into the user's assistant for the whole app — chat
+  drawer on every tab, a fixed tool registry, "I will" cards before any change, proactive notices; OFF by default
+  (🎩 switch); a local model via Ollama or a connected AI. See `docs/ALFRED.md`.
+- **Back burner (later, by the user's call):** images + Stable Diffusion (B1: AutoInjector side done — 🎨 Images tab),
+  video (B2), covers and pictures (B3), Character Forge dossiers (B5).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; first real test next).
+- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; B5 parked; first real test next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -294,22 +298,37 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   pictures saved with their settings (Remake); the Model & LoRA library (Stability Matrix `Data/Models`,
   safetensors headers + Civitai/SM sidecars, base-model mismatch warnings, tags/collections/★/notes) and
   **character locks**; it can start Stability Matrix packages itself or install the official ComfyUI portable.
+  Full controls (2026-10-25): every A1111/Forge txt2img/img2img field can be reached (58 fields each, 0 unreachable).
+  This covers hires fix, the SDXL refiner, img2img and inpaint with a mask brush, ControlNet units, ADetailer, Extras
+  upscale, any settings-menu option, and raw extra fields. ComfyUI gets its built-in graph for the main features plus
+  saved workflows with named params. `capabilities()` lists 51 operations, and 🎩 Alfred can use all of them, each
+  one tested. See `STABLE_DIFFUSION_PLAN.md`.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
 - [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
-- [ ] **B4** 🧭 Local AI book manager (LATER — not started): a local LLM (runs on the user's PC) acts as
-  the project manager for the book. Akọwe still runs the book by itself; the manager rides alongside:
-  - **Guide:** explains in plain words what's happening, which step the book is on, what's next, and why.
-  - **Live changes:** the user says "change X" mid-run; the manager pauses at a safe point, makes the
-    change (bible, outline, character, chapter brief, settings), and resumes — with run consent and approvals.
-  - **Character helper:** builds character sheets and voice cards with the user by conversation.
-  - **Orchestrator:** watches progress, problems and AI health; can interrupt to add or fix things the
-    user asked for; keeps a log of every change it made.
-  - Ideas to expand: answers "where are we?" anytime, suggests fixes when a review fails, spots
-    continuity problems early, summarizes each chapter for the user, and works offline/free.
+- [x] **B4** 🧭 Local AI book manager — DONE 2026-10-25 as **🎩 Alfred (app-wide)**: not only a book manager but the
+  user's assistant for the whole of AutoInjector (books, images, video, the three AI panes, files/logs). A local LLM
+  through Ollama (or a connected AI / a web pane) with a FIXED tool registry (direct controls, no free code): book
+  status (checklist, steps, events, AI health, problems), ⚡ Make a book for me (the ✔ Do it on his card is the
+  consent for that one run), pause/resume/cancel, profile & story choices, character sheets / voice cards, story rules,
+  world details, a chapter rewrite with a note (the new version waits for the author's approval), open the book /
+  report / scene grid page, make the report, save the book. Read-only tools run directly; anything that changes
+  something shows an "I will: …" card first; he never approves drafts or gets around Akọwe's approvals. Every action
+  goes to the activity log (codes/titles only) and, for books, to the book journal (🎩 entries). Proactive notices
+  (book run paused / needs a decision / finished, an AI broke and was fixed, an image finished). OFF by default
+  (🎩 switch). Akọwe side: two small additive endpoints — `POST …/journal/note` (codes/titles only) and an optional
+  `note` on `POST …/review/fix`. See `docs/ALFRED.md`.
+  - Still open from the original B4 idea: "live changes" mid-run at a safe point (today: pause → change → resume, each
+    confirmed), chapter summaries for the user, continuity hints — later, by the user's call.
+- [ ] **B5** 🗂 Character Forge dossiers (LATER — not started): Deeper character/item/place/magic-system profiles like
+  the ChatGPT 'Character Forge' plugin (sample: Moki Vey dossier): extra sections (detailed appearance, fighting,
+  weapons, magic, skills, physical, knowledge, backstory timeline, storyline, continuity), category letters C P V A F
+  M K R S E on every entry so scenes only get the letters they need, 'invent the rest' with invented details as
+  proposals, illustrated dark/gold PDF per character/item/place/magic system; portrait + ten-view art waits for image
+  generation (upload your own meanwhile). Phases: 1 deeper profiles + letters, 2 dossier PDFs, 3 generated art.
 
 ### Other ideas parked from earlier lists (not scheduled)
 

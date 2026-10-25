@@ -250,6 +250,10 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             ent = {"kind": "import", "step": _step(contracts, "I01"), "who": "you",
                    "what": f"You uploaded a file ({p.get('mime_type')}, {p.get('byte_length')} bytes)",
                    "outcome": "SUCCESS"}
+        elif et == "assistant.action":  # 🎩 Alfred (AutoInjector's assistant) did something for the author
+            ent = {"kind": "assistant", "step": _step(contracts, None), "who": "Alfred (AutoInjector)",
+                   "what": f"Alfred: {SAFE_TEXT.sub(' ', str(p.get('title') or p.get('code') or 'an action'))[:160]}",
+                   "outcome": "SUCCESS", "code": p.get("code")}
         elif et == "manifest.changed":
             ent = {"kind": "setting", "step": _step(contracts, None), "who": "you",
                    "what": "Book features changed", "outcome": "SUCCESS"}
@@ -357,7 +361,7 @@ class _Monotonic:
 
 ICON = {"ai": "🤖", "ai_review": "🧐", "ai_fix": "🛠", "approval": "✅", "problem": "⚠️", "retry": "⏳",
         "pause": "⏸", "resume": "▶", "backup": "💾", "export": "📦", "run": "⚡", "step": "•", "setting": "⚙",
-        "import": "📥", "cancel": "✖", "note": "ℹ", "editor": "🖋"}
+        "import": "📥", "cancel": "✖", "note": "ℹ", "editor": "🖋", "assistant": "🎩"}
 
 
 def render_markdown(j: dict) -> str:
@@ -389,3 +393,27 @@ def render_markdown(j: dict) -> str:
 
 def _cell(v) -> str:
     return str(v).replace("|", "\\|").replace("\n", " ")
+
+
+NOTE_SOURCES = ("alfred",)
+NOTE_CODE = re.compile(r"[a-z][a-z0-9_]{0,39}")
+
+
+def add_note(store, pid: str, branch: str, body) -> dict:
+    """🎩 An assistant (AutoInjector's Alfred) records an action it did for this book. Codes and titles only —
+    never prompts, AI replies or book text: ``{"source": "alfred", "code": "edit_profile", "title": "Edit book
+    profile"}``. Additive: it only adds an ``assistant.action`` activity event, shown in the journal."""
+    from .errors import AkoweError  # noqa: PLC0415
+    b = body if isinstance(body, dict) else {}
+    if b.get("source") not in NOTE_SOURCES:
+        raise AkoweError("INVALID_INPUT", "/source", "source: alfred", status="REJECTED")
+    code = b.get("code")
+    if not isinstance(code, str) or not NOTE_CODE.fullmatch(code):
+        raise AkoweError("INVALID_INPUT", "/code", "code: the tool name (lower-case letters, digits, _)", status="REJECTED")
+    title = b.get("title")
+    if not isinstance(title, str) or not title.strip() or len(title) > 160:
+        raise AkoweError("INVALID_INPUT", "/title", "title: up to 160 characters", status="REJECTED")
+    with store.transaction() as tx:
+        event_id = tx.insert_outbox(pid, branch, "assistant.action",
+                                    {"source": b["source"], "code": code, "title": SAFE_TEXT.sub(" ", title.strip())})
+    return {"ok": True, "event_id": event_id}
