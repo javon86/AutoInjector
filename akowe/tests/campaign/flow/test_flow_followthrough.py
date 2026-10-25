@@ -11,7 +11,7 @@ import zipfile
 import pytest
 
 import flowkit as fk
-from bookforge.book_path import get_profile, save_profile
+from akowe.book_path import get_profile, save_profile
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +202,7 @@ def test_title_page_shows_profile_title_and_author(tmp_path):
 def test_make_my_book_over_http_follows_through(tmp_path):
     """The guided path the UI drives (POST .../book/<action>), with the AI writing, the author approving."""
     from http.server import ThreadingHTTPServer
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     from test_server import call
     ai = fk.TraceAI()
     app = fk.make_app(tmp_path, fake=ai)

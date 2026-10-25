@@ -34,9 +34,9 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.characters")
+log = logging.getLogger("akowe.characters")
 
 TEXT_MAX = 400
 ITEM_MAX = 120
@@ -65,7 +65,7 @@ SHEET_FIELDS = (
 )
 # P11: details that must reach the page somewhere in the book (each is checked by the planned-to-page check)
 MUST_SHOW = ("must_show", "Must reach the page", "Details the reader must see somewhere in the book (e.g. the "
-             "narrator's name said aloud, a past event). BookForge checks that each one is on the page.")
+             "narrator's name said aloud, a past event). Akọwe checks that each one is on the page.")
 MUST_SHOW_MAX = 5
 REL_FIELDS = (("with", "With"), ("tension", "Tension between them"), ("history", "Their history"))
 VOICE_TEXT = (
@@ -295,7 +295,7 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
     """Save a character's sheet and/or voice card (cleaned). ``by``: author | ai. ``base_version``: the version the
     author edited (a newer one saved meanwhile -> VERSION_CONFLICT, nothing overwritten)."""
     if sheet is None and voice is None:
-        raise BookforgeError("INVALID_INPUT", "/sheet", "send a character sheet or a voice card to save",
+        raise AkoweError("INVALID_INPUT", "/sheet", "send a character sheet or a voice card to save",
                              status="REJECTED")
     with _LOCK:
         with store.transaction() as tx:
@@ -304,7 +304,7 @@ def save_entry(store, pid: str, branch: str, rid: str, *, sheet=None, voice=None
             cur = cur if isinstance(cur, dict) else {}
             old = cur.get(rid) if isinstance(cur.get(rid), dict) else {}
             if base_version is not None and int(old.get("version") or 0) != base_version:
-                raise BookforgeError("VERSION_CONFLICT", "/version", f"this character's sheet changed since you opened "
+                raise AkoweError("VERSION_CONFLICT", "/version", f"this character's sheet changed since you opened "
                                      f"it (it is now version {old.get('version') or 0}); reload it, your text is kept "
                                      "in the form", status="REJECTED")
             new_sheet = clean_sheet(sheet) if sheet is not None else old.get("sheet") or clean_sheet({})
@@ -363,7 +363,7 @@ def generate(assist, job, pid: str, branch: str, rid: str, *, note: str | None =
     chars = canon_characters(assist.store, pid, branch)
     me = next((c for c in chars if c["record_id"] == rid), None)
     if me is None:
-        raise BookforgeError("NOT_FOUND", "/record_id", "this character does not exist (or was set aside)",
+        raise AkoweError("NOT_FOUND", "/record_id", "this character does not exist (or was set aside)",
                              status="REJECTED")
     entries = all_entries(assist.store, pid, branch)
     ctx = {"character": _canon_view(me), "book_profile": book_profile_brief(assist.store, pid),
@@ -376,7 +376,7 @@ def generate(assist, job, pid: str, branch: str, rid: str, *, note: str | None =
                           protected=[])
     sheet, voice = split_companion(raw)
     if sheet is None or voice is None:
-        raise BookforgeError("INTERNAL_ERROR", "/character_sheet", "the AI's answer had no usable character sheet and "
+        raise AkoweError("INTERNAL_ERROR", "/character_sheet", "the AI's answer had no usable character sheet and "
                              "voice card; nothing was changed")
     return save_entry(assist.store, pid, branch, rid, sheet=sheet, voice=voice, by="ai", slot=job.slot,
                       name=me["name"], subject_id=me["subject_id"])

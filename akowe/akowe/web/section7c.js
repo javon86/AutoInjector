@@ -121,7 +121,7 @@ export async function viewStyle(main, c) {
     clear(holder);
     const card = st.card;
     const lim = st.limits || {};
-    holder.appendChild(h('p', null, 'Paste or upload a few samples of your own writing. BookForge counts how you write (sentence length, rhythm, person and tense, dialogue, punctuation habits) and an AI describes your narrating voice. Books that use your style get this card in every chapter prompt, and the editor flags narration that drifts from it. Dialogue still follows each character’s own voice card.'));
+    holder.appendChild(h('p', null, 'Paste or upload a few samples of your own writing. Akọwe counts how you write (sentence length, rhythm, person and tense, dialogue, punctuation habits) and an AI describes your narrating voice. Books that use your style get this card in every chapter prompt, and the editor flags narration that drifts from it. Dialogue still follows each character’s own voice card.'));
     holder.appendChild(h('p', { class: 'small muted' }, `Up to ${lim.samples || 10} samples, at least ${lim.min_words || 150} words together (1 000–3 000 words of narration work best). Your samples stay on this computer and are only sent to the AI when you press ✨ Learn my style.`));
     const list = h('div', { class: 's7-samples', 'data-testid': 'style-samples' });
     for (const s of (card && card.samples) || []) sampleBox(s, list);

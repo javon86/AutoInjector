@@ -1,10 +1,10 @@
 """Set J (reconciliation): conflicts, ranking, ripple, multi-owner commit, revalidation."""
 from __future__ import annotations
 
-from bookforge.canonical import sha256_text
-from bookforge.j_approvals import waivable, waiver_action_hash, waiver_applies
-from bookforge.modules.set_j import classify, claims_of
-from bookforge.store import CrashInjected
+from akowe.canonical import sha256_text
+from akowe.j_approvals import waivable, waiver_action_hash, waiver_applies
+from akowe.modules.set_j import classify, claims_of
+from akowe.store import CrashInjected
 from conftest import errors_of
 from fj_fixtures import canon, fact, iso, k09, prose, rec, seed
 

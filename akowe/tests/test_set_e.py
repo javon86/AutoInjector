@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json
 
-from bookforge.c_events import extract_event_bundle
+from akowe.c_events import extract_event_bundle
 
 from conftest import PRINCIPAL, errors_of
 from test_set_c import (TEXT, accepted_chapter, build_world, character, fact, k09_approval, make_context, raw_events,

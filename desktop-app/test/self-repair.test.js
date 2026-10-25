@@ -403,7 +403,7 @@ async function testEngine() {
   sim = makeSite({ page: "limit" });
   await sim.engine.runCheck("chatgpt", "startup");
   assert(sim.engine.state("chatgpt").problem === "USAGE_LIMIT" && sim.engine.state("chatgpt").state === "needs_user", "usage limit -> needs_user USAGE_LIMIT");
-  assert(sim.engine.isUsable("chatgpt") === false, "a needs_user AI is not usable (BookForge gets 503)");
+  assert(sim.engine.isUsable("chatgpt") === false, "a needs_user AI is not usable (Akọwe gets 503)");
 
   console.log("\n== P18.6 engine: stuck generating -> press Stop, send once more ==");
   sim = makeSite();
@@ -433,7 +433,7 @@ async function testEngine() {
   assert(r.state === "broken" && r.ask === true && !st.teach && !sim.engine.teachActive("chatgpt"), `all automatic fixes failed -> "not working" with a notice for the user, and NO teach step started (${st.state}, teach ${!!st.teach})`);
   assert(st.askUser && st.nextCheckAt > Date.now() && sim.changes.some((c) => c.ev && c.ev.kind === "broken" && c.ev.ask === true), "the snapshot says the user was asked, and when the next re-check is");
   assert(sim.engine.events().filter((e) => e.kind === "ask_user").length === 1, "exactly one ask_user event");
-  assert(sim.engine.requestCheck("chatgpt", "stalled") === false && sim.engine.requestCheck("chatgpt", "bookforge-timeout") === false, "automatic reasons (a stall, a BookForge timeout) don't re-check a 'not working' AI at once");
+  assert(sim.engine.requestCheck("chatgpt", "stalled") === false && sim.engine.requestCheck("chatgpt", "akowe-timeout") === false, "automatic reasons (a stall, an Akọwe timeout) don't re-check a 'not working' AI at once");
   let sends0 = sim.sends;
   await sim.engine.tick(); await sleep(20);
   assert(sim.sends === sends0, "tick right away: no re-check before the first back-off");
@@ -522,10 +522,10 @@ async function testEngine() {
   console.log("\n== P18.1 scheduling: busy / typing / inactive are skipped; requests run when free ==");
   sim = makeSite();
   sim.busy = "typing";
-  let m = sim.engine.probeMany(null, "bookforge", "demand");
+  let m = sim.engine.probeMany(null, "akowe", "demand");
   assert(m.started.length === 0 && m.skipped.chatgpt === "typing" && sim.sends === 0, "the user is typing there -> skipped, nothing sent");
   sim.busy = null;
-  m = sim.engine.probeMany(["chatgpt"], "bookforge", "demand");
+  m = sim.engine.probeMany(["chatgpt"], "akowe", "demand");
   assert(m.started.join() === "chatgpt", "free -> started");
   await waitUntil(() => sim.engine.state("chatgpt").state === "ok");
   m = sim.engine.probeMany(["nope"], "x", "demand");
@@ -562,18 +562,18 @@ async function testEngine() {
 }
 
 async function testOwnership() {
-  console.log("\n== P18.1 ownership: a check-in waits, a BookForge reply arrives (the e2e flake) ==");
+  console.log("\n== P18.1 ownership: a check-in waits, an Akọwe reply arrives (the e2e flake) ==");
   let sim = makeSite({ answer: false, options: { probeTimeoutMs: 400 } });
-  let run = sim.engine.runCheck("chatgpt", "bookforge");
+  let run = sim.engine.runCheck("chatgpt", "akowe");
   await waitUntil(() => sim.sends === 1);
   const probeSeq = sim.lastSeq;
   const word = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
-  const bridgeSeq = String(Number(probeSeq) - 1).padStart(4, "0"); // the BookForge prompt typed BEFORE the check-in (late window)
-  // the check-in word is an ordinary word (say "harbor") and BookForge's chapter uses it
+  const bridgeSeq = String(Number(probeSeq) - 1).padStart(4, "0"); // the Akọwe prompt typed BEFORE the check-in (late window)
+  // the check-in word is an ordinary word (say "harbor") and Akọwe's chapter uses it
   const chapter = `Chapter 2\nThe ${word.toUpperCase()} glowed at dusk over the ${word}, and Mara walked on.`;
-  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq, probeSeq]) === false, "a reply that answers the older BookForge prompt too is NOT a check-in answer, even with the word in it");
+  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq, probeSeq]) === false, "a reply that answers the older Akọwe prompt too is NOT a check-in answer, even with the word in it");
   assert(sim.engine.onCaptured("chatgpt", { text: chapter, answers: [bridgeSeq, probeSeq] }) === false, "…onCaptured leaves it to its owner (the bridge)");
-  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq]) === false, "a reply that answers only the BookForge prompt is never a check-in answer");
+  assert(sim.engine.expects("chatgpt", chapter, [bridgeSeq]) === false, "a reply that answers only the Akọwe prompt is never a check-in answer");
   assert(sim.engine.expects("chatgpt", chapter, [probeSeq, String(Number(probeSeq) + 1).padStart(4, "0")]) === false, "…nor one that also answers a message typed after the check-in (whose reply it may be)");
   let r = await run;
   let st = sim.engine.state("chatgpt");
@@ -588,7 +588,7 @@ async function testOwnership() {
   assert(await waitUntil(() => sim.engine.state("chatgpt").state === "ok"), "the check-in is re-sent when the AI is free and passes");
   assert(sim.sends === 2, `re-sent once (${sim.sends} sends)`);
   sim = makeSite({ answer: false, options: { probeTimeoutMs: 300, autoChecks: false } });
-  run = sim.engine.runCheck("chatgpt", "bookforge");
+  run = sim.engine.runCheck("chatgpt", "akowe");
   await waitUntil(() => sim.sends === 1);
   sim.engine.noteForeignReply("chatgpt", ["0000", sim.lastSeq]);
   r = await run;
@@ -610,18 +610,18 @@ async function testOwnership() {
   assert(r.ok === false && !r.deferred, `-> the check-in fails on its own terms (${r.state} ${r.problem})`);
   assert(SR.containsWord("the Harbor.", "harbor") && !SR.containsWord("harbormaster", "harbor") && !SR.containsWord("", "harbor") && SR.containsWord("x 1234 y", "1234") && !SR.containsWord("12345", "1234"), "containsWord: whole word, case-insensitive");
 
-  console.log("\n== P18.1 makeWay: a BookForge request withdraws an untyped check-in / waits for a typed one ==");
+  console.log("\n== P18.1 makeWay: an Akọwe request withdraws an untyped check-in / waits for a typed one ==");
   sim = makeSite({ sendDelayMs: 300 });
-  run = sim.engine.runCheck("chatgpt", "bookforge");
+  run = sim.engine.runCheck("chatgpt", "akowe");
   await waitUntil(() => sim.engine.busyWithSite("chatgpt") && sim.sends === 1);
   assert(sim.engine.makeWay("chatgpt") === "withdrawn", "not typed yet -> withdrawn");
   r = await run;
   st = sim.engine.state("chatgpt");
-  assert(r.deferred && r.reason === "bookforge" && st.state === "unknown" && !sim.engine.busyWithSite("chatgpt"), `deferred, no verdict, the AI is free for the request (${JSON.stringify(r)})`);
+  assert(r.deferred && r.reason === "akowe" && st.state === "unknown" && !sim.engine.busyWithSite("chatgpt"), `deferred, no verdict, the AI is free for the request (${JSON.stringify(r)})`);
   assert(!/Reply with only this word/.test(sim.doc.body.textContent), "nothing was typed");
   assert(sim.engine.makeWay("chatgpt") === "none", "no check-in -> nothing to wait for");
   sim = makeSite({ answer: false, options: { probeTimeoutMs: 5000 } });
-  run = sim.engine.runCheck("chatgpt", "bookforge");
+  run = sim.engine.runCheck("chatgpt", "akowe");
   await waitUntil(() => sim.sends === 1 && /Reply with only this word/.test(sim.doc.body.textContent));
   await sleep(20);
   assert(sim.engine.makeWay("chatgpt") === "wait" && sim.engine.busyWithSite("chatgpt"), "typed -> the request waits for it to settle");

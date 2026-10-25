@@ -409,7 +409,7 @@ def for_chapter(book: dict, chapter_id: str) -> list[dict]:
 
 
 def brief(book: dict, chapter_id: str | None = None, limit: int = 8) -> dict:
-    """For the AI editor: the ages and years BookForge found and the findings (bounded)."""
+    """For the AI editor: the ages and years Akọwe found and the findings (bounded)."""
     fs = for_chapter(book, chapter_id) if chapter_id else book.get("findings") or []
     return {"story_year": book.get("story_year"),
             "ages": {n: sorted({r["age"] for r in rows if not r["past"]}) for n, rows in

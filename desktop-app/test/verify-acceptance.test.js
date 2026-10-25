@@ -1,14 +1,14 @@
-// test/verify-acceptance.test.js — ACCEPTANCE run: a real author using BookForge in a real browser while
-// BookForge talks to the AIs through the REAL AutoInjector bridge (main.js under mock-electron, the real
-// automation scripts typing into fake chat sites in Chromium, answered by BookForge's deterministic test AI).
+// test/verify-acceptance.test.js — ACCEPTANCE run: a real author using Akọwe in a real browser while
+// Akọwe talks to the AIs through the REAL AutoInjector bridge (main.js under mock-electron, the real
+// automation scripts typing into fake chat sites in Chromium, answered by Akọwe's deterministic test AI).
 //
-// This file is the harness (same machinery as test/bookforge-e2e.test.js, without the fault injection):
-//   - boots main.js, three fake chat pages, the fake-AI brain and the real BookForge server,
-//   - asks AutoInjector to Connect (bookforge:connect) and hands the #/pair link to the author driver,
-//   - runs the author driver (python, Playwright, drives the BookForge web UI like a person):
-//       bookforge/tests/campaign/verify/acceptance_driver.py
+// This file is the harness (same machinery as test/akowe-e2e.test.js, without the fault injection):
+//   - boots main.js, three fake chat pages, the fake-AI brain and the real Akọwe server,
+//   - asks AutoInjector to Connect (akowe:connect) and hands the #/pair link to the author driver,
+//   - runs the author driver (python, Playwright, drives the Akọwe web UI like a person):
+//       akowe/tests/campaign/verify/acceptance_driver.py
 //   - offers a small control server so the driver can ask AutoInjector things:
-//       GET /connect  -> a fresh pairing link        GET /status -> bookforge:status + Relay Trace report
+//       GET /connect  -> a fresh pairing link        GET /status -> akowe:status + Relay Trace report
 //
 // Run:  node test/verify-acceptance.test.js
 // Env:  HOLD=1         do not run the driver; print the control URL and wait (manual exploration)
@@ -24,9 +24,9 @@ const { spawn } = require("child_process");
 
 const SPEED = Number(process.env.SPEED) || 0.25;
 const HOLD = process.env.HOLD === "1";
-const BOOKFORGE_ROOT = path.resolve(process.env.BOOKFORGE_ROOT || path.join(__dirname, "..", "..", "bookforge"));
-const BRAIN = path.join(BOOKFORGE_ROOT, "tests", "campaign", "bridge", "fake_site_brain.py");
-const DRIVER = path.join(BOOKFORGE_ROOT, "tests", "campaign", "verify", "acceptance_driver.py");
+const AKOWE_ROOT = path.resolve(process.env.AKOWE_ROOT || path.join(__dirname, "..", "..", "akowe"));
+const BRAIN = path.join(AKOWE_ROOT, "tests", "campaign", "bridge", "fake_site_brain.py");
+const DRIVER = path.join(AKOWE_ROOT, "tests", "campaign", "verify", "acceptance_driver.py");
 const PY = process.env.PYTHON || "python3";
 const SITES = ["chatgpt", "claude", "gemini"];
 
@@ -47,7 +47,7 @@ async function waitUntil(fn, timeout, interval = 100) {
 async function main() {
   const [BRIDGE_PORT, BF_PORT, CTL_PORT] = [await freePort(), await freePort(), await freePort()];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "bf-accept-"));
-  const DATA = path.join(work, "bookforge-data");
+  const DATA = path.join(work, "akowe-data");
   fs.mkdirSync(DATA);
   const emptyDir = path.join(work, "no-launcher");
   fs.mkdirSync(emptyDir);
@@ -66,9 +66,9 @@ async function main() {
     AUTOINJECTOR_SEND_BUSY_POLL_MS: "150",
     AUTOINJECTOR_SEND_BUSY_WAIT_MS: "30000",
     AUTOINJECTOR_PROBE_DELAY_MS: "600000",
-    AUTOINJECTOR_BOOKFORGE_PORT: String(BRIDGE_PORT),
-    AUTOINJECTOR_BOOKFORGE_APP_URL: `http://127.0.0.1:${BF_PORT}/api/ping`,
-    AUTOINJECTOR_BOOKFORGE_DIR: emptyDir,
+    AUTOINJECTOR_AKOWE_PORT: String(BRIDGE_PORT),
+    AUTOINJECTOR_AKOWE_APP_URL: `http://127.0.0.1:${BF_PORT}/api/ping`,
+    AUTOINJECTOR_AKOWE_DIR: emptyDir,
   });
 
   const Module = require("module");
@@ -108,15 +108,15 @@ async function main() {
   });
   const ask = (prompt) => new Promise((resolve) => { const id = ++brainId; brainWait.set(id, resolve); brain.stdin.write(JSON.stringify({ id, prompt }) + "\n"); });
 
-  const bfLog = fs.openSync(path.join(work, "bookforge.log"), "w");
-  const bf = spawn(PY, ["-m", "bookforge", "--data-dir", DATA, "--no-browser", "--port", String(BF_PORT)],
-    { cwd: BOOKFORGE_ROOT, stdio: ["ignore", bfLog, bfLog], env: { ...process.env, BOOKFORGE_SECRETS: path.join(work, "secrets.json"), NO_PROXY: "*", no_proxy: "*", HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" } });
+  const bfLog = fs.openSync(path.join(work, "akowe.log"), "w");
+  const bf = spawn(PY, ["-m", "akowe", "--data-dir", DATA, "--no-browser", "--port", String(BF_PORT)],
+    { cwd: AKOWE_ROOT, stdio: ["ignore", bfLog, bfLog], env: { ...process.env, AKOWE_SECRETS: path.join(work, "secrets.json"), NO_PROXY: "*", no_proxy: "*", HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" } });
   children.push(bf);
   const ping = () => new Promise((resolve) => {
     const r = http.get({ host: "127.0.0.1", port: BF_PORT, path: "/api/ping", agent: false }, (res) => { res.resume(); resolve(res.statusCode === 200); });
     r.on("error", () => resolve(false));
   });
-  if (!(await waitUntil(ping, 30000, 250))) throw new Error(`BookForge did not start (see ${work}/bookforge.log)`);
+  if (!(await waitUntil(ping, 30000, 250))) throw new Error(`Akọwe did not start (see ${work}/akowe.log)`);
   const BF_TOKEN = fs.readFileSync(path.join(DATA, "local_token"), "utf8").trim();
 
   require(path.join(__dirname, "..", "main.js"));
@@ -156,18 +156,18 @@ async function main() {
 
   async function connectLink() {
     const before = opened.length;
-    await call("bookforge:connect");
+    await call("akowe:connect");
     const u = await waitUntil(() => opened.slice(before).find((x) => /#\/pair\?code=/.test(x)), 5000, 50);
     return u || null;
   }
   async function statusReport() {
-    const st = await call("bookforge:status");
+    const st = await call("akowe:status");
     const tr = (await call("trace:report", {})).report;
     const dumps = {};
     for (const s of SITES) dumps[s] = await pages[s].evaluate(() => { const d = window.__fake.dump(); return { posted: d.posted.length, replies: d.replies.length, stopClicks: d.stopClicks }; });
     const count = (k) => events.filter((e) => e.kind === k).length;
     return { status: st, trace: { messages: tr.messages, replies: tr.replies, sites: tr.sites, anomalies: tr.anomalies }, dumps, hook,
-      events: { sent: count("sent"), sendError: count("send-error"), sendRetry: count("send-retry"), bfOutcomes: events.filter((e) => e.kind === "bookforge-outcome").map((e) => e.detail.outcome) } };
+      events: { sent: count("sent"), sendError: count("send-error"), sendRetry: count("send-retry"), bfOutcomes: events.filter((e) => e.kind === "akowe-outcome").map((e) => e.detail.outcome) } };
   }
 
   const ctl = http.createServer(async (req, res) => {
@@ -195,18 +195,18 @@ async function main() {
       fs.writeFileSync(process.env.INFO_OUT || path.join(os.tmpdir(), "bf-accept-info.json"), JSON.stringify(info, null, 2));
       await stopped;
     } else {
-      const drv = spawn(PY, [DRIVER], { stdio: "inherit", cwd: BOOKFORGE_ROOT, env: { ...process.env, ACCEPT_INFO: JSON.stringify(info), NO_PROXY: "*", no_proxy: "*" } });
+      const drv = spawn(PY, [DRIVER], { stdio: "inherit", cwd: AKOWE_ROOT, env: { ...process.env, ACCEPT_INFO: JSON.stringify(info), NO_PROXY: "*", no_proxy: "*" } });
       children.push(drv);
       const code = await Promise.race([new Promise((r) => drv.on("exit", r)), stopped.then(() => -1)]);
       ok = code === 0;
       const rep = await statusReport();
-      console.log(`  AutoInjector at the end: phase=${rep.status.connect && rep.status.connect.phase} trace ${rep.trace.messages} messages / ${rep.trace.replies} replies, ${rep.trace.anomalies.length} anomalies; BookForge prompts answered by the fake AIs: ${rep.hook.bf}; brain errors ${rep.hook.brainErrors.length}`);
+      console.log(`  AutoInjector at the end: phase=${rep.status.connect && rep.status.connect.phase} trace ${rep.trace.messages} messages / ${rep.trace.replies} replies, ${rep.trace.anomalies.length} anomalies; Akọwe prompts answered by the fake AIs: ${rep.hook.bf}; brain errors ${rep.hook.brainErrors.length}`);
       for (const [s, x] of Object.entries(rep.trace.sites)) if (x.failed || x.unproven || x.noReply || x.duplicates) { ok = false; console.log(`  FAIL relay trace ${s}: ${JSON.stringify(x)}`); }
       if (rep.hook.brainErrors.length) { ok = false; console.log(`  FAIL brain errors: ${rep.hook.brainErrors.slice(0, 5).join(" | ")}`); }
     }
   } finally {
     await browser.close().catch(() => {});
-    try { await call("bookforge:set-enabled", { enabled: false }); } catch (_) {}
+    try { await call("akowe:set-enabled", { enabled: false }); } catch (_) {}
     ctl.close();
     cleanup();
   }

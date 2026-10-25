@@ -9,8 +9,8 @@ import json
 import pytest
 
 import flowkit as fk
-from bookforge.errors import BookforgeError
-from bookforge.jobs import BUSY_CODES, RetryPolicy
+from akowe.errors import AkoweError
+from akowe.jobs import BUSY_CODES, RetryPolicy
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +108,7 @@ def test_empty_profile_strings_get_safe_defaults(tmp_path):
     app = fk.make_app(tmp_path, fake=ai)
     run = fk.run_book(app)
     assert run["status"] == "done", run.get("problem")
-    from bookforge.book_path import get_profile
+    from akowe.book_path import get_profile
     prof = get_profile(app.store, run["project_id"])
     assert prof["title"] == "Untitled book" and prof["author"] and prof["idea"]
     ex = fk.export_files(app, run["project_id"], run["files"])
@@ -246,7 +246,7 @@ def test_reviewer_always_rejects_nothing_is_approved_then_cancel(tmp_path):
     assert set(run["problem"]["options"]) == {"approve_anyway", "edit", "retry"}
     out = app.autobook.cancel("author", run["id"])
     assert out["status"] == "cancelled" and not any(s["state"] in ("running", "paused") for s in out["steps"])
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.autobook.resume("author", run["id"])
     assert approved_ids(app, pid) == set()
 
@@ -256,11 +256,11 @@ def test_decide_on_a_cancelled_run_changes_nothing(tmp_path):
     run = fk.run_book(app)
     pid, rid = run["project_id"], run["problem"]["record_id"]
     app.autobook.cancel("author", run["id"])
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         app.autobook.decide("author", run["id"], {"action": "approve_anyway", "author_confirms": True})
     assert "cancelled" in str(exc.value)
     # an error answer must not have approved it (the run checks drafts with VALIDATE before the AI review, so a
-    # draft that passes BookForge's checks is VALIDATED - still waiting for approval)
+    # draft that passes Akọwe's checks is VALIDATED - still waiting for approval)
     assert fk.bp_of(app, pid).rec(rid)["lifecycle"] in ("DRAFT", "VALIDATED")
 
 
@@ -313,7 +313,7 @@ def _timeout_on_second_chapter():
     def c02(ctx, out):
         if (ctx.get("request_payload") or {}).get("chapter_id") == "ch2" and seen["n"] == 0:
             seen["n"] += 1
-            raise BookforgeError("TIMEOUT", "", "provider timed out")
+            raise AkoweError("TIMEOUT", "", "provider timed out")
         return out
     return c02
 
@@ -346,5 +346,5 @@ def test_timeout_mid_run_then_cancel_keeps_the_book_so_far(tmp_path):
     assert st["chapters"] == "cancelled" and st["format"] == "pending"
     assert approved_ids(app, pid) == before  # nothing approved after cancel
     assert app.store.project(pid) is not None and len(outputs(app, pid, "C02")) == 1
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.autobook.resume("author", run["id"])

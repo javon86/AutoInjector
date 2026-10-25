@@ -1,16 +1,16 @@
-"""REAL BookForge <-> REAL AutoInjector bridge end to end (campaign area "bridge").
+"""REAL Akọwe <-> REAL AutoInjector bridge end to end (campaign area "bridge").
 
-Runs the AutoInjector desktop app's node test ``desktop-app/test/bookforge-e2e.test.js`` once (module fixture):
-this BookForge server (``python -m bookforge``) is paired with AutoInjector's main.js through its own
+Runs the AutoInjector desktop app's node test ``desktop-app/test/akowe-e2e.test.js`` once (module fixture):
+this Akọwe server (``python -m akowe``) is paired with AutoInjector's main.js through its own
 pair-autoinjector API and makes a short story with ⚡ Make a book for me; the prompts go through the real bridge,
 sendTextTo/pollSite and the real automation scripts into three fake chat sites in Chromium, whose answers come from
-BookForge's own deterministic test AI (``fake_site_brain.py`` -> ``tests/autobook_fake.py``). Two disturbances
+Akọwe's own deterministic test AI (``fake_site_brain.py`` -> ``tests/autobook_fake.py``). Two disturbances
 are injected: a request that arrives while Claude answers the user's quick side question (``steal``) and a request
 that times out while Gemini answers a slow side question (``timeout``).
 
 Each check of that run is one test below; a known bridge bug would be a strict xfail (KNOWN), so it flips when fixed.
 
-Needs: node, the desktop-app checkout next to this BookForge (or AUTOINJECTOR_DESKTOP_APP=<path>) with its
+Needs: node, the desktop-app checkout next to this Akọwe (or AUTOINJECTOR_DESKTOP_APP=<path>) with its
 node_modules (playwright) and Chromium. Skipped otherwise, or with BF_E2E=0. ~1.5-2 min.
 """
 from __future__ import annotations
@@ -25,12 +25,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 APP = Path(os.environ.get("AUTOINJECTOR_DESKTOP_APP") or (ROOT.parent / "desktop-app"))
-E2E = APP / "test" / "bookforge-e2e.test.js"
+E2E = APP / "test" / "akowe-e2e.test.js"
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("BF_E2E") == "0" or not E2E.is_file() or shutil.which("node") is None
     or not (APP / "node_modules" / "playwright").exists(),
-    reason="needs the AutoInjector desktop-app (with node_modules) next to BookForge; BF_E2E=0 skips")
+    reason="needs the AutoInjector desktop-app (with node_modules) next to Akọwe; BF_E2E=0 skips")
 
 # check id -> why it is expected to fail with the bridge as shipped (strict: flips to XPASS when fixed). Empty: the
 # bridge bugs this run pinned (BF-01, BF-02, BF-03, BF-16, NEW-bridge-1 and their consequences) are fixed.
@@ -45,7 +45,7 @@ CHECKS = ["pair-link", "pair-bridge-url", "pair-api", "pair-no-key", "connected"
 @pytest.fixture(scope="module")
 def e2e(tmp_path_factory):
     out = tmp_path_factory.mktemp("bf-e2e") / "run.json"
-    env = dict(os.environ, SEED="1", QUIRKS="default", FAULTS="steal,timeout", OUT=str(out), BOOKFORGE_ROOT=str(ROOT))
+    env = dict(os.environ, SEED="1", QUIRKS="default", FAULTS="steal,timeout", OUT=str(out), AKOWE_ROOT=str(ROOT))
     env.pop("BF_BRIDGE_IMPL", None)
     proc = subprocess.run(["node", str(E2E)], cwd=str(APP), env=env, capture_output=True, text=True, timeout=420)
     if not out.exists():

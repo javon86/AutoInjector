@@ -1,4 +1,4 @@
-# Bookforge Set I - Brain Storage Context
+# Akọwe Set I - Brain Storage Context
 Revision BF-CLOSURE-1.1 | 15 operations | independent module
 
 This is the current specification. Historical source/addenda are not active instructions. Use Shared_Contract.md for wire formats, lifecycle, ownership, permissions, failures and record storage.

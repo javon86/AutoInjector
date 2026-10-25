@@ -11,9 +11,9 @@ import time
 
 import pytest
 
-from bookforge import providers as prov
-from bookforge.assist import AssistService, ai_schema, supports
-from bookforge.server import App, make_handler
+from akowe import providers as prov
+from akowe.assist import AssistService, ai_schema, supports
+from akowe.server import App, make_handler
 
 from test_autoinjector_adapter import BRIDGE_TOKEN, FakeBridge
 
@@ -385,7 +385,7 @@ def test_bible_item_failure_and_report_contents(h, svc):
     assert rep["runs"][0]["slot"] == "AI-1" and rep["runs"][0]["model"] == "fake-model"
     assert items["A01-1"]["slot"] == "AI-1" and items["A01-1"]["model"] == "fake-model"
     md = md_path.read_text()
-    for text in ("# BookForge Bible Builder report", "## Sections", "## Items", "Invented links removed",
+    for text in ("# Akọwe Bible Builder report", "## Sections", "## Items", "Invented links removed",
                  "A04-invented", "generated, not created", out["created"][0]["ref"]["record_id"]):
         assert text in md
     for secret in ("ZZIDEA", SECRET_REPLY, "JSON_SCHEMA", "author_request"):
@@ -464,7 +464,7 @@ def test_endpoints_need_auth_and_work_over_http(server, caplog):
     st, out = call(port, "POST", f"/api/bible-builder/{s['session_id']}/create", {"items": ["A04-1"]})
     assert st == 200 and out["created"][0]["ref"]["module_id"] == "A04"
     st, md = call(port, "GET", f"/api/bible-builder/{s['session_id']}/report?format=md&download=1")
-    assert st == 200 and md.startswith(b"# BookForge Bible Builder report")
+    assert st == 200 and md.startswith("# Akọwe Bible Builder report".encode("utf-8"))
     assert call(port, "GET", f"/api/bible-builder/{s['session_id']}/report?format=md", token=None)[0] == 401
     # prompts, ideas and replies never reach the logs
     assert "ZZPROMPT" not in caplog.text and SECRET_REPLY not in caplog.text and "ZZIDEA" not in caplog.text

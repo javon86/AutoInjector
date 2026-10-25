@@ -41,7 +41,9 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
-CHECKER_VERSION = "bookforge-h-checks/1.0.0"
+from . import legacy
+
+CHECKER_VERSION = "akowe-h-checks/1.0.0"
 
 MAX_DECODED_BYTES = 64 * 1024 * 1024
 MAX_ZIP_TOTAL = 512 * 1024 * 1024
@@ -1226,16 +1228,16 @@ NS = {
 EXTERNAL_VALIDATORS: dict = {}
 
 # Where EPUBCheck is looked for, in order:
-#   1. BOOKFORGE_EPUBCHECK = path to epubcheck.jar (run with Java) or to an `epubcheck` program;
-#   2. a jar placed in the app folder: bookforge/tools/epubcheck/epubcheck.jar, or the unzipped
-#      release folder bookforge/tools/epubcheck-<version>/epubcheck.jar;
+#   1. AKOWE_EPUBCHECK = path to epubcheck.jar (run with Java) or to an `epubcheck` program;
+#   2. a jar placed in the app folder: akowe/tools/epubcheck/epubcheck.jar, or the unzipped
+#      release folder akowe/tools/epubcheck-<version>/epubcheck.jar;
 #   3. an `epubcheck` program on PATH (e.g. installed with a package manager).
 # A jar needs Java: `java` on PATH or JAVA_HOME/bin/java.
-EPUBCHECK_ENV = "BOOKFORGE_EPUBCHECK"
+EPUBCHECK_ENV = "AKOWE_EPUBCHECK"
 TOOLS_DIR = Path(__file__).resolve().parent.parent / "tools"
 EPUBCHECK_HELP = ("to add the official check, install Java and EPUBCheck (https://www.w3.org/publishing/epubcheck/): "
-                  "unzip the EPUBCheck release into bookforge/tools/ (so bookforge/tools/epubcheck-<version>/"
-                  "epubcheck.jar exists) or set BOOKFORGE_EPUBCHECK to the path of epubcheck.jar")
+                  "unzip the EPUBCheck release into akowe/tools/ (so akowe/tools/epubcheck-<version>/"
+                  "epubcheck.jar exists) or set AKOWE_EPUBCHECK to the path of epubcheck.jar")
 
 
 def _java() -> str | None:
@@ -1251,7 +1253,7 @@ def _java() -> str | None:
 def epubcheck_command() -> tuple[list[str] | None, str]:
     """(command prefix to run EPUBCheck, plain-language note). The command is None when it is not usable."""
     candidates: list[Path] = []
-    env = os.environ.get(EPUBCHECK_ENV, "").strip()
+    env = (legacy.env("EPUBCHECK") or "").strip()  # AKOWE_EPUBCHECK, or the old BOOKFORGE_EPUBCHECK
     if env:
         candidates.append(Path(env))
     candidates.append(TOOLS_DIR / "epubcheck" / "epubcheck.jar")
@@ -1466,7 +1468,7 @@ def epub_check(data: bytes, *, run_external: bool = True) -> tuple[list[dict], E
             _cmd, why = epubcheck_command()
             if "epubcheck" in EXTERNAL_VALIDATORS:
                 why = "EPUBCheck is not installed"
-            issues.append(issue("VALIDATOR_UNAVAILABLE", f"not checked by EPUBCheck ({why}). BookForge's own EPUB "
+            issues.append(issue("VALIDATOR_UNAVAILABLE", f"not checked by EPUBCheck ({why}). Akọwe's own EPUB "
                                 f"checks above still ran; {EPUBCHECK_HELP}.", "MINOR", "UNKNOWN"))
         else:
             passed, ver, msgs = res

@@ -1,54 +1,54 @@
-// test/bookforge-e2e.test.js — REAL BookForge -> REAL AutoInjector main.js -> fake
-// chat sites in a REAL Chromium -> back to BookForge.
+// test/akowe-e2e.test.js — REAL Akọwe -> REAL AutoInjector main.js -> fake
+// chat sites in a REAL Chromium -> back to Akọwe.
 //
-// The integration that matters before shipping the BookForge bridge:
+// The integration that matters before shipping the Akọwe bridge:
 //
-//   BookForge server (python -m bookforge, its own HTTP API, "⚡ Make a book for me")
+//   Akọwe server (python -m akowe, its own HTTP API, "⚡ Make a book for me")
 //     -> its AutoInjector adapter (providers.py) -> POST /v1/complete
 //     -> [recording proxy, so every request / answer is ground truth]
-//     -> bookforge-bridge.js inside main.js (sendTextTo: [MSG #] numbering, the
+//     -> akowe-bridge.js inside main.js (sendTextTo: [MSG #] numbering, the
 //        AI_BUSY wait, the TR-28 capture-first gate, envelope, retries; pollSite
 //        capture; Relay Trace; hop limit; Auto routing)
 //     -> the REAL automation.js send/read scripts in three Playwright pages of
 //        test/fixtures/fake-chat.html (rich editor, Stop button, streaming,
 //        Gemini re-draw, hidden Send, wrapper, slow clear, missing [FROM:])
-//     -> the fake AI's answer, made by BookForge's own deterministic test AI
-//        (bookforge/tests/autobook_fake.py via tests/campaign/bridge/fake_site_brain.py)
+//     -> the fake AI's answer, made by Akọwe's own deterministic test AI
+//        (akowe/tests/autobook_fake.py via tests/campaign/bridge/fake_site_brain.py)
 //   and back.
 //
 // Every fake answer carries a reference line OUTSIDE its JSON object:
 //     REF <TOKEN> answers #<MSG seq it answers> p=<sha256(prompt it saw)[:12]>
-// (BookForge's extract_json_object() ignores prose around the object.) The
-// proxy knows, for each BookForge request, the prompt and the bridge's
-// [MSG #] seq, so "did BookForge get the answer to ITS OWN prompt" is exact.
+// (Akọwe's extract_json_object() ignores prose around the object.) The
+// proxy knows, for each Akọwe request, the prompt and the bridge's
+// [MSG #] seq, so "did Akọwe get the answer to ITS OWN prompt" is exact.
 //
 // Phases (one process = one main.js boot = one seed / quirk setting):
-//   A  pairing through BookForge's own API (bookforge:connect -> #/pair link ->
+//   A  pairing through Akọwe's own API (akowe:connect -> #/pair link ->
 //      POST /api/slots/pair-autoinjector), then normal AI-to-AI relaying while
-//      BookForge is idle (Auto routing, hop limit HOP_MAX).
+//      Akọwe is idle (Auto routing, hop limit HOP_MAX).
 //   B  "⚡ Make a book for me" (short story) across the three AIs (roles: AI-1
 //      claude = default, AI-2 chatgpt = set B, AI-3 gemini = set C), while
 //        - the user starts short side chats between the AIs (contention), and
-//        - one BookForge request is forced into a timeout: the proxy shortens
+//        - one Akọwe request is forced into a timeout: the proxy shortens
 //          its timeout_ms to 10 s and, just before forwarding it, the user asks
 //          that AI a question it takes ~16 s to answer (FAULTS=timeout), and
-//        - one BookForge request to Claude arrives while Claude answers the user's
+//        - one Akọwe request to Claude arrives while Claude answers the user's
 //          quick side question addressed to ChatGPT (FAULTS=steal).
 //      A TIMEOUT pause is answered with "Try again" like an author would.
 //   Checks: run completes; every 200 answer is the answer to that request's own
 //   prompt (BF-01); nothing typed for a request after its 504 (BF-02); bridge
 //   sends never reset the hop count (BF-03) and side chats stay within the hop
-//   limit; BookForge prompts reach the AI exactly as sent (BF-16); BookForge
+//   limit; Akọwe prompts reach the AI exactly as sent (BF-16); Akọwe
 //   stored the right chapter for each chapter; Relay Trace shows no losses;
-//   side-chat replies are never handed to BookForge and BookForge answers never
+//   side-chat replies are never handed to Akọwe and Akọwe answers never
 //   leak into other AIs; the exported book (PDF, EPUB, DOCX) is produced.
 //
-// Run:  node test/bookforge-e2e.test.js
+// Run:  node test/akowe-e2e.test.js
 // Env:  SEED=1 | SEEDS=1,2       seed (several = one child process each)
 //       QUIRKS=default|all|none  fake-site quirks (as test/stress.test.js)
-//       BF_BRIDGE_IMPL=path      load this file instead of ./bookforge-bridge.js
+//       BF_BRIDGE_IMPL=path      load this file instead of ./akowe-bridge.js
 //                                (e.g. the proposed BF-01 phase fix)
-//       BOOKFORGE_ROOT=path      BookForge checkout (default ../../bookforge)
+//       AKOWE_ROOT=path      Akọwe checkout (default ../../akowe)
 //       FAULTS=steal,timeout,contention  disturbances to inject (default all three; "none")
 //       SPEED=0.35  HOP_MAX=3  RUN_TIMEOUT_MS=170000  VERBOSE=1  OUT=file.json
 //       EXPECT_FAIL=BF-01,...    report-only: exit 0 when exactly these checks fail
@@ -68,7 +68,7 @@ if (process.env.SEEDS && !process.env.__BFE2E_CHILD) {
     const r = spawnSync(process.execPath, [__filename], { stdio: "inherit", env: { ...process.env, SEED: seed, __BFE2E_CHILD: "1" } });
     if (r.status !== 0) bad++;
   }
-  console.log(`\nBookForge e2e: ${seeds.length - bad}/${seeds.length} seeds passed`);
+  console.log(`\nAkọwe e2e: ${seeds.length - bad}/${seeds.length} seeds passed`);
   process.exit(bad ? 1 : 0);
 }
 
@@ -81,8 +81,8 @@ const RUN_TIMEOUT_MS = Number(process.env.RUN_TIMEOUT_MS) || 170000;
 const VERBOSE = process.env.VERBOSE === "1";
 const FAULTS = new Set(String(process.env.FAULTS || "steal,timeout,contention").split(",").map((s) => s.trim()).filter((s) => s && s !== "none"));
 const EXPECT_FAIL = new Set(String(process.env.EXPECT_FAIL || "").split(",").map((s) => s.trim()).filter(Boolean));
-const BOOKFORGE_ROOT = path.resolve(process.env.BOOKFORGE_ROOT || path.join(__dirname, "..", "..", "bookforge"));
-const BRAIN = path.join(BOOKFORGE_ROOT, "tests", "campaign", "bridge", "fake_site_brain.py");
+const AKOWE_ROOT = path.resolve(process.env.AKOWE_ROOT || path.join(__dirname, "..", "..", "akowe"));
+const BRAIN = path.join(AKOWE_ROOT, "tests", "campaign", "bridge", "fake_site_brain.py");
 const PY = process.env.PYTHON || "python3";
 const SLOW_MS = 16000;       // how long the "slow side question" keeps the AI busy
 const SHORT_TIMEOUT_MS = 10000; // the contract minimum timeout_ms
@@ -108,7 +108,7 @@ const ENVELOPE_RE = /\n\n\[Reply envelope required: start with \[TO: USER\] and 
 const REF_RE = /REF ([A-Z]+-R\d+) answers #(\d+) p=([0-9a-f]{12})/;
 const TOKEN_RE = /\b(CHATGPT|CLAUDE|GEMINI)-R(\d+)\b/;
 const seqOf = (t) => { const m = /^\[MSG #(\d+)\]/.exec(String(t || "")); return m ? m[1] : null; };
-// The BookForge prompt inside a message the page received: minus the [MSG #] line,
+// The Akọwe prompt inside a message the page received: minus the [MSG #] line,
 // any app text put in front of it, and the reply-envelope instruction at the end.
 function corePrompt(posted) {
   let s = String(posted || "").replace(/^\[MSG #\d+\]\n/, "");
@@ -121,7 +121,7 @@ async function main() {
   const t0 = Date.now();
   const [BRIDGE_PORT, BF_PORT, PROXY_PORT] = [await freePort(), await freePort(), await freePort()];
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "bf-e2e-"));
-  const DATA = path.join(work, "bookforge-data");
+  const DATA = path.join(work, "akowe-data");
   fs.mkdirSync(DATA);
   const emptyDir = path.join(work, "no-launcher");
   fs.mkdirSync(emptyDir);
@@ -140,9 +140,9 @@ async function main() {
     AUTOINJECTOR_SEND_BUSY_WAIT_MS: process.env.AUTOINJECTOR_SEND_BUSY_WAIT_MS || "30000",
     AUTOINJECTOR_PROBE_DELAY_MS: "600000",
     AUTOINJECTOR_MAX_AUTO_HOPS: String(HOP_MAX),
-    AUTOINJECTOR_BOOKFORGE_PORT: String(BRIDGE_PORT),
-    AUTOINJECTOR_BOOKFORGE_APP_URL: `http://127.0.0.1:${BF_PORT}/api/ping`,
-    AUTOINJECTOR_BOOKFORGE_DIR: emptyDir,
+    AUTOINJECTOR_AKOWE_PORT: String(BRIDGE_PORT),
+    AUTOINJECTOR_AKOWE_APP_URL: `http://127.0.0.1:${BF_PORT}/api/ping`,
+    AUTOINJECTOR_AKOWE_DIR: emptyDir,
   });
 
   // ---- main.js under the mock Electron (optionally with another bridge implementation)
@@ -152,7 +152,7 @@ async function main() {
   const originalLoad = Module._load;
   Module._load = function (request) {
     if (request === "electron") return require(mockElectronPath);
-    if (bridgeImpl && request === "./bookforge-bridge") return originalLoad.call(this, bridgeImpl, ...Array.prototype.slice.call(arguments, 1));
+    if (bridgeImpl && request === "./akowe-bridge") return originalLoad.call(this, bridgeImpl, ...Array.prototype.slice.call(arguments, 1));
     return originalLoad.apply(this, arguments);
   };
   const mockElectron = require(mockElectronPath);
@@ -171,7 +171,7 @@ async function main() {
   const cleanup = () => { for (const c of children) { try { c.kill("SIGTERM"); } catch (_) {} } };
   process.on("exit", cleanup);
 
-  // ---- the fake AIs' brain (BookForge's own deterministic test AI)
+  // ---- the fake AIs' brain (Akọwe's own deterministic test AI)
   const brain = spawn(PY, [BRAIN], { stdio: ["pipe", "pipe", "inherit"] });
   children.push(brain);
   const brainWait = new Map();
@@ -186,10 +186,10 @@ async function main() {
   });
   const ask = (prompt) => new Promise((resolve) => { const id = ++brainId; brainWait.set(id, resolve); brain.stdin.write(JSON.stringify({ id, prompt }) + "\n"); });
 
-  // ---- the real BookForge server
-  const bfLog = fs.openSync(path.join(work, "bookforge.log"), "w");
-  const bf = spawn(PY, ["-m", "bookforge", "--data-dir", DATA, "--no-browser", "--port", String(BF_PORT)],
-    { cwd: BOOKFORGE_ROOT, stdio: ["ignore", bfLog, bfLog], env: { ...process.env, BOOKFORGE_SECRETS: path.join(work, "secrets.json"), NO_PROXY: "*", no_proxy: "*", HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" } });
+  // ---- the real Akọwe server
+  const bfLog = fs.openSync(path.join(work, "akowe.log"), "w");
+  const bf = spawn(PY, ["-m", "akowe", "--data-dir", DATA, "--no-browser", "--port", String(BF_PORT)],
+    { cwd: AKOWE_ROOT, stdio: ["ignore", bfLog, bfLog], env: { ...process.env, AKOWE_SECRETS: path.join(work, "secrets.json"), NO_PROXY: "*", no_proxy: "*", HTTP_PROXY: "", HTTPS_PROXY: "", http_proxy: "", https_proxy: "" } });
   children.push(bf);
   function bfReq(method, p, body, token) {
     return new Promise((resolve, reject) => {
@@ -206,12 +206,12 @@ async function main() {
       r.end();
     });
   }
-  const up = await waitUntil(async () => { try { const r = await bfReq("GET", "/api/ping"); return r.status === 200 && r.json && r.json.app === "bookforge"; } catch (_) { return false; } }, 30000, 250);
-  if (!up) throw new Error(`BookForge did not start (see ${path.join(work, "bookforge.log")})`);
+  const up = await waitUntil(async () => { try { const r = await bfReq("GET", "/api/ping"); return r.status === 200 && r.json && r.json.app === "akowe"; } catch (_) { return false; } }, 30000, 250);
+  if (!up) throw new Error(`Akọwe did not start (see ${path.join(work, "akowe.log")})`);
   const BF_TOKEN = fs.readFileSync(path.join(DATA, "local_token"), "utf8").trim();
   const api = (method, p, body) => bfReq(method, p, body, BF_TOKEN);
 
-  // ---- recording proxy between BookForge and the bridge
+  // ---- recording proxy between Akọwe and the bridge
   const proxyLog = []; // /v1/complete: { i, site, request_id, timeout_ms, prompt, hash, sentAt, status, body, doneAt, fault }
   let faultHook = null; // async (rec, body) -> void (may change body)
   const proxy = http.createServer((req, res) => {
@@ -309,7 +309,7 @@ async function main() {
     await call("relay:hop-limit", { max: HOP_MAX });
     await call("routing:auto-all", {});
     const quirkList = await pages.chatgpt.evaluate(() => window.__fake.quirks.join(","));
-    console.log(`\n== BookForge e2e: seed=${SEED} quirks=${QUIRKS} (chatgpt: ${quirkList}) bridge=${bridgeImpl ? path.basename(bridgeImpl) : "bookforge-bridge.js"} faults=${[...FAULTS].join(",") || "none"} hop limit=${HOP_MAX} ==`);
+    console.log(`\n== Akọwe e2e: seed=${SEED} quirks=${QUIRKS} (chatgpt: ${quirkList}) bridge=${bridgeImpl ? path.basename(bridgeImpl) : "akowe-bridge.js"} faults=${[...FAULTS].join(",") || "none"} hop limit=${HOP_MAX} ==`);
 
     const idleAll = async () => (await Promise.all(SITES.map((s) => pages[s].evaluate(() => window.__fake.idle())))).every(Boolean);
     const sentLogs = () => events.filter((e) => e.kind === "sent" || e.kind === "send-error" || e.kind === "send-cancelled").length; // a withdrawn (BF-02) send ends as send-cancelled
@@ -328,34 +328,34 @@ async function main() {
       return false;
     }
 
-    // ================= A: pair through BookForge's own API =================
-    let st = await call("bookforge:connect");
+    // ================= A: pair through Akọwe's own API =================
+    let st = await call("akowe:connect");
     const link = opened.map((u) => /#\/pair\?code=([A-Za-z0-9]+)&bridge=([^&]+)$/.exec(u)).find(Boolean);
-    check("pair-link", st.connect && st.connect.phase === "waiting" && !!link, `Connect opens BookForge's #/pair link (phase=${st.connect && st.connect.phase})`, opened);
+    check("pair-link", st.connect && st.connect.phase === "waiting" && !!link, `Connect opens Akọwe's #/pair link (phase=${st.connect && st.connect.phase})`, opened);
     if (!link) throw new Error("no pairing link");
     const bridgeFromLink = decodeURIComponent(link[2]);
     check("pair-bridge-url", bridgeFromLink === `http://127.0.0.1:${BRIDGE_PORT}`, `the link names the bridge (${bridgeFromLink})`);
-    // What the #/pair page does: POST /api/slots/pair-autoinjector. We hand BookForge
+    // What the #/pair page does: POST /api/slots/pair-autoinjector. We hand Akọwe
     // the recording proxy in front of that bridge URL.
     const pr = await api("POST", "/api/slots/pair-autoinjector", { code: link[1], bridge_url: PROXY_URL });
     check("pair-api", pr.status === 200 && pr.json && pr.json.connected === true && (pr.json.slots || []).length === 3 && pr.json.slots.every((s) => s.ok),
-      `BookForge pairs and its three slots pass the health check (HTTP ${pr.status})`, [JSON.stringify(pr.json).slice(0, 400)]);
-    check("pair-no-key", !JSON.stringify(pr.json || {}).includes((await call("bookforge:reveal-token")).token), "the pairing answer never carries the key");
+      `Akọwe pairs and its three slots pass the health check (HTTP ${pr.status})`, [JSON.stringify(pr.json).slice(0, 400)]);
+    check("pair-no-key", !JSON.stringify(pr.json || {}).includes((await call("akowe:reveal-token")).token), "the pairing answer never carries the key");
     await api("PUT", "/api/slots/AI-2", { roles: ["B"] });
     await api("PUT", "/api/slots/AI-3", { roles: ["C"] });
     await api("PUT", "/api/settings/ai-retry", { delays_s: [2], max_total_s: 120 });
-    const connected = await waitUntil(async () => { const s = await call("bookforge:status"); return s.connect && s.connect.phase === "connected" ? s : null; }, 20000, 250);
-    check("connected", !!connected, `AutoInjector sees BookForge's status push -> 'Connected' (${connected ? connected.connect.phase : (await call("bookforge:status")).connect.phase})`);
+    const connected = await waitUntil(async () => { const s = await call("akowe:status"); return s.connect && s.connect.phase === "connected" ? s : null; }, 20000, 250);
+    check("connected", !!connected, `AutoInjector sees Akọwe's status push -> 'Connected' (${connected ? connected.connect.phase : (await call("akowe:status")).connect.phase})`);
 
-    // ================= A: normal relaying while BookForge is idle =================
+    // ================= A: normal relaying while Akọwe is idle =================
     const evA = events.length, capA = captures.length;
     await compose("chatgpt", `Warm-up ${SEED}: talk about relay reliability.`);
     const quietA = await quiet(3000, 60000);
     const relA = events.slice(evA).filter((e) => e.kind === "sent" && e.detail.from).length;
     const hopA = events.slice(evA).some((e) => e.kind === "hop-limit");
     check("idle-relay", quietA && relA >= 2 && relA <= HOP_MAX * FANOUT && hopA,
-      `normal AI-to-AI relaying while BookForge is idle: ${relA} relays, hop limit ${hopA ? "reached" : "NOT reached"}, ${captures.length - capA} replies captured`);
-    check("idle-no-bridge", proxyLog.length === 0, "no BookForge request was made while idle");
+      `normal AI-to-AI relaying while Akọwe is idle: ${relA} relays, hop limit ${hopA ? "reached" : "NOT reached"}, ${captures.length - capA} replies captured`);
+    check("idle-no-bridge", proxyLog.length === 0, "no Akọwe request was made while idle");
 
     // ================= B: ⚡ Make a book for me =================
     const evB = events.length;
@@ -364,12 +364,12 @@ async function main() {
     let stealTarget = null;   // the request that arrives while the AI answers a quick question
     faultHook = async (rec, body) => {
       if (FAULTS.has("steal") && !stealTarget && rec.site === "claude") {
-        // The user asks Claude a quick question (answered to ChatGPT) just before BookForge's prompt.
+        // The user asks Claude a quick question (answered to ChatGPT) just before Akọwe's prompt.
         stealTarget = rec; rec.fault = "steal";
         compose("claude", "QUICK SIDE QUESTION: one tip for ChatGPT about relays?");
         await waitUntil(() => pages.claude.evaluate(() => !window.__fake.idle()), 8000, 50);
       } else if (FAULTS.has("timeout") && !timeoutTarget && rec.site === "gemini") {
-        // The user asks Gemini something that takes it ~16 s, right before BookForge's prompt,
+        // The user asks Gemini something that takes it ~16 s, right before Akọwe's prompt,
         // and this request gets the contract's minimum timeout (10 s).
         timeoutTarget = rec; rec.fault = "timeout";
         body.timeout_ms = SHORT_TIMEOUT_MS; rec.timeout_ms = SHORT_TIMEOUT_MS;
@@ -418,10 +418,10 @@ async function main() {
     const dumps = {};
     for (const s of SITES) dumps[s] = await pages[s].evaluate(() => window.__fake.dump());
     const trace = (await call("trace:report", {})).report;
-    const bstat = await call("bookforge:status");
+    const bstat = await call("akowe:status");
 
     // ================= checks =================
-    console.log(`  run ${run.status} in ${(runMs / 1000).toFixed(1)} s · ${proxyLog.length} BookForge requests (${SITES.map((s) => `${s} ${proxyLog.filter((r) => r.site === s).length}`).join(", ")}) · pauses: ${decisions.map((d) => d.code).join(", ") || "none"} · side chats ${sideChats.length}`);
+    console.log(`  run ${run.status} in ${(runMs / 1000).toFixed(1)} s · ${proxyLog.length} Akọwe requests (${SITES.map((s) => `${s} ${proxyLog.filter((r) => r.site === s).length}`).join(", ")}) · pauses: ${decisions.map((d) => d.code).join(", ") || "none"} · side chats ${sideChats.length}`);
     check("run-done", run.status === "done", `the run completes (status=${run.status}, step=${run.current || "-"}${run.problem ? `, problem ${run.problem.code}: ${run.problem.message}` : ""})`,
       decisions.map((d) => `paused at ${d.step}: ${d.code} ${String(d.message).slice(0, 160)}`));
     const expectedPauses = timeoutTarget ? 1 : 0;
@@ -429,9 +429,9 @@ async function main() {
     check("no-unexpected-pauses", unexpectedPauses.length === 0, `no pauses other than the forced timeout (${decisions.length} pause(s), ${expectedPauses} expected)`,
       unexpectedPauses.map((d) => `${d.step}: ${d.code} ${String(d.message).slice(0, 200)}`));
     const used = new Set(proxyLog.map((r) => r.site));
-    check("three-ais", SITES.every((s) => used.has(s)), `BookForge used all three AIs (${[...used].join(", ")})`);
+    check("three-ais", SITES.every((s) => used.has(s)), `Akọwe used all three AIs (${[...used].join(", ")})`);
 
-    // posted messages that carry a BookForge prompt
+    // posted messages that carry an Akọwe prompt
     const posts = [];
     for (const s of SITES) for (const p of dumps[s].posted) posts.push({ site: s, at: p.at, text: p.text, seq: seqOf(p.text) });
     // (exact: a schema re-ask prompt starts with the original prompt, so "includes" would over-match)
@@ -443,13 +443,13 @@ async function main() {
       if (r.status !== 200 || !r.body) continue;
       const m = REF_RE.exec(r.body.text || "");
       const tok = TOKEN_RE.exec(r.body.text || "");
-      if (!m) wrong.push(`${r.request_id} -> ${r.site} #${r.body.seq}: got a reply that is not an answer to any BookForge prompt (${tok ? tok[0] : "no token"}: "${String(r.body.text).slice(0, 70).replace(/\n/g, " ")}")`);
+      if (!m) wrong.push(`${r.request_id} -> ${r.site} #${r.body.seq}: got a reply that is not an answer to any Akọwe prompt (${tok ? tok[0] : "no token"}: "${String(r.body.text).slice(0, 70).replace(/\n/g, " ")}")`);
       else if (m[2] !== String(r.body.seq)) wrong.push(`${r.request_id} -> ${r.site} #${r.body.seq}: got ${m[1]}, the answer to #${m[2]}`);
       if (m && m[3] !== r.hash) hashWrong.push(`${r.request_id} -> ${r.site}: answer was made for prompt p=${m[3]}, this request's prompt is p=${r.hash}`);
     }
-    check("BF-01", wrong.length === 0, `every answer BookForge received is the answer to its own [MSG #] (${proxyLog.filter((r) => r.status === 200).length} answers)`, wrong);
-    check("BF-01-prompt", hashWrong.length === 0, "every answer BookForge received was made for the prompt that request sent", hashWrong);
-    // Did BookForge KEEP a wrong answer? (a schema-valid wrong answer is not re-asked)
+    check("BF-01", wrong.length === 0, `every answer Akọwe received is the answer to its own [MSG #] (${proxyLog.filter((r) => r.status === 200).length} answers)`, wrong);
+    check("BF-01-prompt", hashWrong.length === 0, "every answer Akọwe received was made for the prompt that request sent", hashWrong);
+    // Did Akọwe KEEP a wrong answer? (a schema-valid wrong answer is not re-asked)
     const kept = [];
     for (const r of proxyLog) {
       if (r.status !== 200 || !r.body) continue;
@@ -457,12 +457,12 @@ async function main() {
       if (m && m[3] === r.hash) continue;
       const reask = r.request_id.replace(/-a(\d+)$/, (x, n) => `-a${Number(n) + 1}`);
       const reasked = proxyLog.some((x) => x.i > r.i && x.request_id === reask);
-      if (!reasked) kept.push(`${r.request_id} (${r.site}) — BookForge kept ${m ? `${m[1]} (made for p=${m[3]})` : "a non-answer"} and moved on`);
+      if (!reasked) kept.push(`${r.request_id} (${r.site}) — Akọwe kept ${m ? `${m[1]} (made for p=${m[3]})` : "a non-answer"} and moved on`);
     }
-    check("BF-01-stored", kept.length === 0, "BookForge never kept an answer that was made for another prompt", kept);
+    check("BF-01-stored", kept.length === 0, "Akọwe never kept an answer that was made for another prompt", kept);
 
-    // BF-02: nothing typed for a request after BookForge got its 504
-    // (a post that a LATER request with the same prompt got its 200 for — BookForge's "Try again" with a
+    // BF-02: nothing typed for a request after Akọwe got its 504
+    // (a post that a LATER request with the same prompt got its 200 for — Akọwe's "Try again" with a
     // new request_id after a 504 that said typed:false — is that request's own send, not a ghost)
     const claimedByLater = (r, p) => proxyLog.some((x) => x.i > r.i && x.site === r.site && x.prompt === r.prompt && x.status === 200 && x.body && String(x.body.seq) === p.seq);
     const ghosts = [];
@@ -478,7 +478,7 @@ async function main() {
     const timeouts = proxyLog.filter((x) => x.status === 504).length;
     if (timeoutTarget) check("timeout-forced", timeoutTarget.status === 504, `the forced timeout happened (${timeoutTarget.request_id}: HTTP ${timeoutTarget.status})`);
     check("BF-02", ghosts.length === 0, `no ghost sends after a 504 (${timeouts} timeout(s))`, ghosts);
-    // ... and the late window must not hand BookForge a reply that was not the answer (the slow side answer)
+    // ... and the late window must not hand Akọwe a reply that was not the answer (the slow side answer)
     if (timeoutTarget) {
       const later = proxyLog.filter((x) => x.i > timeoutTarget.i && x.request_id === timeoutTarget.request_id);
       const lateWrong = later.filter((x) => x.status === 200 && !REF_RE.test((x.body && x.body.text) || ""));
@@ -486,7 +486,7 @@ async function main() {
         lateWrong.map((x) => `${x.request_id} -> ${String(x.body.text).slice(0, 80)}`));
     }
 
-    // every BookForge prompt typed at most once per request id (no double typing)
+    // every Akọwe prompt typed at most once per request id (no double typing)
     const dupType = [];
     // (requests refused with 409 never reach the page; a prompt typed after its 504 is BF-02, counted there)
     for (const r of proxyLog) {
@@ -495,11 +495,11 @@ async function main() {
       const asked = reqs.filter((x) => x.status !== 504).length;
       if (n > asked) dupType.push(`${r.request_id}: prompt typed ${n}x into ${LABEL[r.site]} for ${asked} answered request(s)`);
     }
-    check("no-double-typing", dupType.length === 0, "no BookForge prompt is typed more often than BookForge asked", [...new Set(dupType)]);
+    check("no-double-typing", dupType.length === 0, "no Akọwe prompt is typed more often than Akọwe asked", [...new Set(dupType)]);
 
     // BF-03: bridge sends must not reset the hop count; side chats stay within the hop limit
     const progResets = events.filter((e) => e.kind === "hop-count-reset" && e.detail.reason === "program-send" && !e.duringCompose);
-    check("BF-03", progResets.length === 0, `BookForge sends never reset the AI-to-AI hop count (${progResets.length} reset(s) by a program send)`,
+    check("BF-03", progResets.length === 0, `Akọwe sends never reset the AI-to-AI hop count (${progResets.length} reset(s) by a program send)`,
       progResets.map((e) => `+${((e.ts - tB) / 1000).toFixed(1)} s reset at ${e.detail.hops} hop(s)${e.detail.wasPaused ? " (was paused at the limit)" : ""}`));
     const overHop = [];
     const marks = composes.filter((c) => c.ts >= tB).map((c) => c.ts).concat([Infinity]);
@@ -509,7 +509,7 @@ async function main() {
     }
     check("hop-limit", overHop.length === 0, "side chats during the run stay within the hop limit", overHop);
 
-    // BF-16: BookForge prompts reach the AI exactly as BookForge sent them
+    // BF-16: Akọwe prompts reach the AI exactly as Akọwe sent them
     const polluted = [];
     for (const r of proxyLog) for (const p of postsOf(r)) {
       const want = `[MSG #${p.seq}]\n${r.prompt}`;
@@ -520,16 +520,16 @@ async function main() {
       }
       if (!ENVELOPE_RE.test(p.text)) polluted.push(`${r.request_id} -> ${LABEL[r.site]} #${p.seq}: no reply-envelope instruction at the end`);
     }
-    check("BF-16", polluted.length === 0, "BookForge prompts reach the AI exactly as sent (only [MSG #] + the envelope instruction added)", [...new Set(polluted)]);
+    check("BF-16", polluted.length === 0, "Akọwe prompts reach the AI exactly as sent (only [MSG #] + the envelope instruction added)", [...new Set(polluted)]);
 
-    // side-chat replies never go to BookForge; BookForge answers never reach other AIs
+    // side-chat replies never go to Akọwe; Akọwe answers never reach other AIs
     const leaked = [];
-    for (const s of SITES) for (const p of dumps[s].posted) { const m = REF_RE.exec(p.text); if (m && !/JSON_SCHEMA:/.test(p.text)) leaked.push(`${m[1]} (a BookForge answer) was relayed into ${LABEL[s]} as #${seqOf(p.text)}`); }
-    check("no-leak", leaked.length === 0, "BookForge answers are never relayed to the other AIs", leaked);
+    for (const s of SITES) for (const p of dumps[s].posted) { const m = REF_RE.exec(p.text); if (m && !/JSON_SCHEMA:/.test(p.text)) leaked.push(`${m[1]} (an Akọwe answer) was relayed into ${LABEL[s]} as #${seqOf(p.text)}`); }
+    check("no-leak", leaked.length === 0, "Akọwe answers are never relayed to the other AIs", leaked);
     const stolen = proxyLog.filter((r) => r.status === 200 && r.body && !REF_RE.test(r.body.text || "") && TOKEN_RE.test(r.body.text || ""))
-      .map((r) => `${TOKEN_RE.exec(r.body.text)[0]} (${/slow, careful/.test(r.body.text) ? "the slow answer to the user's side question" : /quick tip/.test(r.body.text) ? "the quick answer to the user's side question, addressed to ChatGPT" : "a side-chat reply"}) was handed to BookForge as the answer to ${r.request_id}`);
-    check("no-steal", stolen.length === 0, "replies to the user / side chats are never handed to BookForge", stolen);
-    // side-chat replies captured while BookForge was busy still reach their addressees
+      .map((r) => `${TOKEN_RE.exec(r.body.text)[0]} (${/slow, careful/.test(r.body.text) ? "the slow answer to the user's side question" : /quick tip/.test(r.body.text) ? "the quick answer to the user's side question, addressed to ChatGPT" : "a side-chat reply"}) was handed to Akọwe as the answer to ${r.request_id}`);
+    check("no-steal", stolen.length === 0, "replies to the user / side chats are never handed to Akọwe", stolen);
+    // side-chat replies captured while Akọwe was busy still reach their addressees
     const routeMiss = [];
     for (const c of captures.filter((x) => x.ts >= tB)) {
       const tok = TOKEN_RE.exec(c.text || "");
@@ -538,8 +538,8 @@ async function main() {
       if (tag === "USER") continue;
       const heldHop = events.some((e) => e.kind === "hop-limit" && e.detail.site === c.site && e.ts >= c.ts - 50 && e.ts <= c.ts + 3000);
       const heldLoop = events.some((e) => e.kind === "loop-suppressed" && e.detail.site === c.site && Math.abs(e.ts - c.ts) < 1000);
-      const owned = events.some((e) => e.kind === "bookforge-owned-reply" && e.detail.site === c.site && Math.abs(e.ts - c.ts) < 200);
-      if (owned) { routeMiss.push(`${tok[0]} [TO: ${tag}] was swallowed by the bridge (taken as a BookForge answer), never relayed`); continue; }
+      const owned = events.some((e) => e.kind === "akowe-owned-reply" && e.detail.site === c.site && Math.abs(e.ts - c.ts) < 200);
+      if (owned) { routeMiss.push(`${tok[0]} [TO: ${tag}] was swallowed by the bridge (taken as an Akọwe answer), never relayed`); continue; }
       if (heldHop || heldLoop) continue;
       for (const t of SITES.filter((x) => x !== c.site)) if (!dumps[t].posted.some((p) => p.text.includes(tok[0]))) routeMiss.push(`${tok[0]} -> ${LABEL[t]}`);
     }
@@ -554,38 +554,38 @@ async function main() {
       if (x.waiting) lost.push(`${LABEL[s]}: ${x.waiting} message(s) still waiting for a reply at the end`);
       if (x.duplicates) lost.push(`${LABEL[s]}: ${x.duplicates} duplicate relay(s)`);
     }
-    // Anomalies that involve a BookForge prompt (or a BookForge prompt typed over an uncaptured reply)
+    // Anomalies that involve an Akọwe prompt (or an Akọwe prompt typed over an uncaptured reply)
     // fail the check; others (side-chat races between the [FROM:] nudge and a relay) are only listed.
     const bfSeqs = new Set(proxyLog.flatMap((r) => postsOf(r).map((p) => p.seq)));
     const sideNotes = [];
     for (const a of trace.anomalies) {
       const next = /#(\d+)/.exec(a.what);
-      const line = `#${a.seq} -> ${LABEL[a.target] || a.target}${bfSeqs.has(a.seq) ? " (BookForge prompt)" : ""}: ${a.what}${next && bfSeqs.has(next[1]) ? " (that next message was a BookForge prompt)" : ""}`;
+      const line = `#${a.seq} -> ${LABEL[a.target] || a.target}${bfSeqs.has(a.seq) ? " (Akọwe prompt)" : ""}: ${a.what}${next && bfSeqs.has(next[1]) ? " (that next message was an Akọwe prompt)" : ""}`;
       if (bfSeqs.has(a.seq) || (next && bfSeqs.has(next[1]))) lost.push(line); else sideNotes.push(line);
     }
-    check("relay-trace", lost.length === 0, `Relay Trace shows no losses for BookForge traffic (${trace.messages} messages, ${trace.replies} replies; ${sideNotes.length} side-chat anomaly(s))`, lost);
-    for (const n of sideNotes) console.log(`         note (side chat, not BookForge): ${n}`);
+    check("relay-trace", lost.length === 0, `Relay Trace shows no losses for Akọwe traffic (${trace.messages} messages, ${trace.replies} replies; ${sideNotes.length} side-chat anomaly(s))`, lost);
+    for (const n of sideNotes) console.log(`         note (side chat, not Akọwe): ${n}`);
     // 409 SITE_BUSY is the contract's answer while a timed-out request's late window holds the site.
     const lateBusy = (r) => r.status === 409 && proxyLog.some((x) => x.status === 504 && x.site === r.site && r.sentAt >= x.doneAt && r.sentAt - x.doneAt < 2 * (x.timeout_ms || 0) + 5000);
     const bfFails = proxyLog.filter((r) => r.status !== 200 && r.status !== 504 && !lateBusy(r)).map((r) => `${r.request_id} -> HTTP ${r.status} ${r.body ? r.body.error : ""}`);
     check("bridge-errors", bfFails.length === 0, `no bridge errors other than the forced timeout (${proxyLog.filter(lateBusy).length} x 409 SITE_BUSY during its late window)`, bfFails);
     // What the bridge stored in a timed-out request's late window (it answers a later retry with the SAME request_id).
     const lateStored = [];
-    for (const e of events.filter((x) => x.kind === "bookforge-outcome" && x.detail.outcome === "LATE_REPLY_STORED")) {
+    for (const e of events.filter((x) => x.kind === "akowe-outcome" && x.detail.outcome === "LATE_REPLY_STORED")) {
       const cap = captures.filter((c) => c.site === e.detail.site && Math.abs(c.ts - e.ts) < 500).pop();
       const req = proxyLog.find((r) => r.request_id === e.detail.request_id);
       const m = cap && REF_RE.exec(cap.text || "");
       if (!m || (req && m[3] !== req.hash)) {
         const tok = cap && TOKEN_RE.exec(cap.text || "");
         const typed = req ? postsOf(req).filter((p) => p.at > req.sentAt).map((p) => p.at) : [];
-        lateStored.push(`${e.detail.request_id} (${LABEL[e.detail.site]}): stored ${tok ? tok[0] : "a reply"} [TO: ${cap ? cap.tag : "?"}] "${String(cap ? cap.text : "").slice(0, 60)}" as its late answer${typed.length && cap ? ` — BookForge's prompt was typed only ${((Math.min(...typed) - cap.ts) / 1000).toFixed(1)} s later` : ""}`);
+        lateStored.push(`${e.detail.request_id} (${LABEL[e.detail.site]}): stored ${tok ? tok[0] : "a reply"} [TO: ${cap ? cap.tag : "?"}] "${String(cap ? cap.text : "").slice(0, 60)}" as its late answer${typed.length && cap ? ` — Akọwe's prompt was typed only ${((Math.min(...typed) - cap.ts) / 1000).toFixed(1)} s later` : ""}`);
       }
     }
     check("late-steal", lateStored.length === 0, "a timed-out request's late window only stores the answer to ITS prompt", lateStored);
     const brainErr = hookLog.filter((h) => h.kind === "brain-error");
-    check("fake-ai", brainErr.length === 0, "the fake AI could read every BookForge prompt it received", brainErr.map((h) => `${h.site} #${h.seq}: ${h.error}`));
+    check("fake-ai", brainErr.length === 0, "the fake AI could read every Akọwe prompt it received", brainErr.map((h) => `${h.site} #${h.seq}: ${h.error}`));
 
-    // BookForge stored the right chapter for each chapter + exported the book
+    // Akọwe stored the right chapter for each chapter + exported the book
     if (run.project_id) {
       const ex = await api("GET", `/api/projects/${run.project_id}/branches/main/export`);
       const recs = (ex.json && ex.json.records) || [];
@@ -614,13 +614,13 @@ async function main() {
     }
     const formats = (run.files || []).map((f) => `${f.format} ${f.bytes} B`);
     check("export", (run.files || []).length === 3 && run.files.every((f) => f.bytes > 0 && f.sha256), `the exported book is produced (${formats.join(", ") || "no files"})`);
-    check("bridge-status", bstat.enabled && bstat.listening && bstat.connect && bstat.connect.phase === "connected", `bridge still on and BookForge connected at the end (phase ${bstat.connect && bstat.connect.phase})`);
+    check("bridge-status", bstat.enabled && bstat.listening && bstat.connect && bstat.connect.phase === "connected", `bridge still on and Akọwe connected at the end (phase ${bstat.connect && bstat.connect.phase})`);
 
     console.log(`  per AI: ${SITES.map((s) => `${LABEL[s]} posted ${dumps[s].posted.length}, replies ${dumps[s].replies.length} (${dumps[s].replies.filter((r) => !r.tagged).length} untagged), stopClicks ${dumps[s].stopClicks}`).join(" · ")}`);
     const count = (k) => events.filter((e) => e.kind === k).length;
-    console.log(`  events: capture-first waits=${count("send-waiting-capture")} busy waits=${count("send-waiting-busy")} [FROM:] nudges=${count("endtag-missing")} send retries=${count("send-retry")} hop-limit holds=${count("hop-limit")} bridge-owned replies=${count("bookforge-owned-reply")} hop resets(program)=${progResets.length}`);
+    console.log(`  events: capture-first waits=${count("send-waiting-capture")} busy waits=${count("send-waiting-busy")} [FROM:] nudges=${count("endtag-missing")} send retries=${count("send-retry")} hop-limit holds=${count("hop-limit")} bridge-owned replies=${count("akowe-owned-reply")} hop resets(program)=${progResets.length}`);
     if (VERBOSE || fails.length) {
-      console.log("  BookForge requests:");
+      console.log("  Akọwe requests:");
       for (const r of proxyLog) {
         const m = REF_RE.exec((r.body && r.body.text) || "");
         const ps = postsOf(r).map((p) => `#${p.seq}@+${((p.at - r.sentAt) / 1000).toFixed(1)}s`).join(" ");
@@ -639,7 +639,7 @@ async function main() {
     return fails.length === 0;
   } finally {
     await browser.close().catch(() => {});
-    try { await call("bookforge:set-enabled", { enabled: false }); } catch (_) {}
+    try { await call("akowe:set-enabled", { enabled: false }); } catch (_) {}
     proxy.close();
     cleanup();
   }

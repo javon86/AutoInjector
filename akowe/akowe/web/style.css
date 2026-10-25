@@ -1,4 +1,4 @@
-/* Bookforge workspace. Colors are tokens (WCAG AA contrast against their backgrounds); dark theme follows the OS.
+/* Akọwe workspace. Colors are tokens (WCAG AA contrast against their backgrounds); dark theme follows the OS.
    Regions: dark top bar · tinted side bar (current task + sets) · light work area · colored state and set accents. */
 :root {
   --bg: #eceff3;

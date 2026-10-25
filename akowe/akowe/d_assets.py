@@ -6,7 +6,7 @@ operation (Shared Contract sections 9 and 10). The descriptor never points to it
 
 storage_uri scheme
 ------------------
-``bookforge-asset://<project>/<branch>/<sha256>.bin#<binary record_id>@v<version>``
+``akowe-asset://<project>/<branch>/<sha256>.bin#<binary record_id>@v<version>``
 
 The part before ``#`` is byte-for-byte the content-addressed ``storage_uri`` that the storage
 kernel writes into the binary's metadata (store.insert_binary_record), so any code that knows
@@ -20,9 +20,10 @@ from __future__ import annotations
 import re
 
 from .canonical import make_reference
-from .errors import BookforgeError
+from .errors import AkoweError
 
-URI_RE = re.compile(r"^bookforge-asset://(?P<project>[^/#]+)/(?P<branch>[^/#]+)/(?P<sha>[a-f0-9]{64})\.bin"
+# bookforge-asset:// = the same scheme written before the rename to Akọwe (still in older books' records)
+URI_RE = re.compile(r"^(?:akowe|bookforge)-asset://(?P<project>[^/#]+)/(?P<branch>[^/#]+)/(?P<sha>[a-f0-9]{64})\.bin"
                     r"#(?P<record_id>[^@#/]+)@v(?P<version>[1-9][0-9]*)$")
 
 IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff", "image/svg+xml",
@@ -31,7 +32,7 @@ IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/tiff
 
 def asset_uri(ref: dict) -> str:
     """Stable storage URI for a staged/stored binary Reference."""
-    return (f"bookforge-asset://{ref['project_id']}/{ref['branch_id']}/{ref['content_hash']}.bin"
+    return (f"akowe-asset://{ref['project_id']}/{ref['branch_id']}/{ref['content_hash']}.bin"
             f"#{ref['record_id']}@v{ref['version']}")
 
 
@@ -75,7 +76,7 @@ def check_binding(ctx, data: dict, module_id: str) -> tuple[dict | None, bytes |
     out = []
     parsed = parse_asset_uri(data.get("storage_uri", ""))
     if parsed is None:
-        out.append(ctx.finding("STORAGE_URI", "storage_uri is not a bookforge-asset URI naming a binary record "
+        out.append(ctx.finding("STORAGE_URI", "storage_uri is not an akowe-asset URI naming a binary record "
                                "revision", severity="BLOCKING"))
         return None, None, out
     if parsed["project"] != ctx.project_id or parsed["branch"] != ctx.branch_id:
@@ -102,7 +103,7 @@ def check_binding(ctx, data: dict, module_id: str) -> tuple[dict | None, bytes |
                                severity="BLOCKING", source_refs=[rec["ref"]]))
     try:
         blob = ctx.binary(rec)
-    except (BookforgeError, OSError) as exc:
+    except (AkoweError, OSError) as exc:
         out.append(ctx.finding("FILE_BYTES", f"stored bytes unreadable or corrupt: {exc}", severity="BLOCKING",
                                source_refs=[rec["ref"]]))
         return rec, None, out
@@ -116,7 +117,7 @@ def find_import(ctx, file_hash: str | None, *, pointer: str) -> dict | None:
     if file_hash:
         pinned = [r for r in pinned if r["content_hash"] == file_hash]
     if len(pinned) > 1 and len({r["content_hash"] for r in pinned}) > 1:
-        raise BookforgeError("INVALID_INPUT", "/input_refs", "several different uploaded images are pinned; "
+        raise AkoweError("INVALID_INPUT", "/input_refs", "several different uploaded images are pinned; "
                              "pin exactly one image import", status="REJECTED")
     if pinned:
         return pinned[0]
@@ -133,10 +134,10 @@ def load_import(ctx, rec: dict, mime_hint: str | None, pointer: str) -> tuple[by
     blob = ctx.binary(rec)
     sniffed = sniff_mime(blob)
     if sniffed is None:
-        raise BookforgeError("INVALID_INPUT", pointer, "uploaded file is not a supported image (PNG, JPEG, GIF, "
+        raise AkoweError("INVALID_INPUT", pointer, "uploaded file is not a supported image (PNG, JPEG, GIF, "
                              "WebP, TIFF, static SVG or PDF)", status="REJECTED")
     if mime_hint and mime_hint != sniffed:
-        raise BookforgeError("INVALID_INPUT", pointer.rsplit("/", 1)[0] + "/mime_type",
+        raise AkoweError("INVALID_INPUT", pointer.rsplit("/", 1)[0] + "/mime_type",
                              f"declared {mime_hint} but the uploaded bytes are {sniffed}", status="REJECTED")
     return blob, sniffed
 
@@ -158,10 +159,10 @@ def parse_dimensions(text: str, pointer: str) -> dict:
     """'170x260 mm' -> {width, height, unit}; units are explicit and dimensions positive."""
     m = DIM_RE.match(text or "")
     if not m:
-        raise BookforgeError("INVALID_INPUT", pointer, "dimensions must look like '<width>x<height> <unit>' with "
+        raise AkoweError("INVALID_INPUT", pointer, "dimensions must look like '<width>x<height> <unit>' with "
                              "unit mm, cm, in, pt or px", status="REJECTED")
     w, hgt = float(m.group(1)), float(m.group(2))
     if w <= 0 or hgt <= 0:
-        raise BookforgeError("INVALID_INPUT", pointer, "dimensions must be positive", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", pointer, "dimensions must be positive", status="REJECTED")
     num = lambda v: int(v) if v.is_integer() else v  # noqa: E731
     return {"width": num(w), "height": num(hgt), "unit": m.group(3)}

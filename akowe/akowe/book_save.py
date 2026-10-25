@@ -1,8 +1,8 @@
 """💾 Save the book (P20): one folder per book in the author's books folder.
 
 The books folder (Settings › 📁 Where books are saved, settings key ``books_folder`` = {path, auto_save}) defaults to
-``Documents\\BookForge Books`` on Windows (``%USERPROFILE%\\Documents``) and ``~/BookForge Books`` elsewhere
-(``BOOKFORGE_BOOKS_DIR`` overrides the default; ``BOOKFORGE_AUTOSAVE=0`` makes auto-save default to off — the test suite
+``Documents\\Akowe Books`` on Windows (``%USERPROFILE%\\Documents``) and ``~/Akowe Books`` elsewhere
+(``AKOWE_BOOKS_DIR`` overrides the default; ``AKOWE_AUTOSAVE=0`` makes auto-save default to off — the test suite
 uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)`` and remembered in the settings key
 ``book_folder:<pid>:<branch>``: later saves (and a new title) keep using it. Inside (see ``README_TEXT``):
 
@@ -12,12 +12,12 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
-    book.bookforge the complete re-importable package (book_package.py)
+    book.akowe the complete re-importable package (book_package.py)
     README.txt     what all this is, in plain words
-    .bookforge-folder.json   BookForge's marker (which book, which files it wrote: only those are ever replaced)
+    .akowe-folder.json   Akọwe's marker (which book, which files it wrote: only those are ever replaced)
 
 Every file is written atomically (a temp file in the same folder, then renamed over the old one); a file whose bytes
-did not change is not rewritten. A file BookForge wrote earlier that is no longer part of the save (a renamed chapter)
+did not change is not rewritten. A file Akọwe wrote earlier that is no longer part of the save (a renamed chapter)
 is removed — nothing else in the folder is ever touched. Windows rules: names never hold ``<>:"/\\|?*``, control
 characters, trailing dots/spaces or reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9), titles are shortened so every
 full path stays at most ``MAX_PATH`` (200) characters.
@@ -46,22 +46,22 @@ import time
 import uuid
 from pathlib import Path
 
-from . import __version__
+from . import __version__, legacy
 from . import book_bible
 from . import book_package
 from . import journal as journal_mod
 from .book_path import EXPORT_FOR, BookPath, get_profile
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import now_iso
 from .store import _flush_failed, _windows, replace_file, tmp_name
 
-log = logging.getLogger("bookforge.book_save")
+log = logging.getLogger("akowe.book_save")
 
 SETTINGS_KEY = "books_folder"
 MAX_PATH = 200
 INTERVAL_S = 120
-MARKER = ".bookforge-folder.json"
-PACKAGE = "book.bookforge"
+MARKER = ".akowe-folder.json"
+PACKAGE = "book.akowe"
 FOLDER_SCHEMA = 1
 RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]+')
@@ -75,11 +75,11 @@ FIX = {
     "SAVE_PATH_TOO_LONG": "Choose a books folder with a shorter path in Settings › 📁 Where books are saved (for "
                           "example C:\\Books), then press 💾 Save again.",
     "SAVE_FAILED": "Press 💾 Save again. If it keeps failing, press 📋 Copy diagnostics and send it to the developer.",
-    "OPEN_NOT_LOCAL": "Do this on the computer BookForge runs on, or copy the folder path and open it there.",
+    "OPEN_NOT_LOCAL": "Do this on the computer Akọwe runs on, or copy the folder path and open it there.",
 }
 README_TEXT = """\
-This folder holds one book made with BookForge: {title}
-Saved: {saved} (UTC) by BookForge {version}{state}
+This folder holds one book made with Akọwe: {title}
+Saved: {saved} (UTC) by Akọwe {version}{state}
 
 What is in here
 ---------------
@@ -90,26 +90,26 @@ Chapters/      Every chapter as a text file you can open with any editor (Markdo
 Book Bible/    Everything the book is built on: the book profile, ending and style choices,
                characters (with their character sheets and voice cards), places and world,
                premise, main plot, chapter outline, scene cards, story rules and world texture.
-               book-bible.md is for reading; book-bible.json is what BookForge reads back.
+               book-bible.md is for reading; book-bible.json is what Akọwe reads back.
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
-book.bookforge The whole book in one file (every version, every file, with checksums).
+book.akowe The whole book in one file (every version, every file, with checksums).
 
 How to open it again
 --------------------
-In BookForge press "📂 Open a saved book" and pick this folder (or upload book.bookforge).
+In Akọwe press "📂 Open a saved book" and pick this folder (or upload book.akowe).
 It opens as a NEW book; the book you had is never overwritten. An unfinished book
 can be continued from where it stopped.
 
 How to make the book again
 --------------------------
-Press "🔁 Rerun from the book bible": BookForge makes a new book with the same
+Press "🔁 Rerun from the book bible": Akọwe makes a new book with the same
 characters, world and plan, and writes new chapters.
 
-BookForge only replaces the files it wrote itself. Your own files in this folder are never touched.
+Akọwe only replaces the files it wrote itself. Your own files in this folder are never touched.
 """
 
 
@@ -123,28 +123,47 @@ class SaveProblem(Exception):
         return {"code": self.code, "message": self.message, "fix": FIX.get(self.code, FIX["SAVE_FAILED"])}
 
 
-def problem_error(code: str, message: str, *, kernel: str = "INVALID_INPUT", path: str = "") -> BookforgeError:
+def problem_error(code: str, message: str, *, kernel: str = "INVALID_INPUT", path: str = "") -> AkoweError:
     """A refusal the API sends with a kernel error code plus the plain problems.js code and its fix."""
-    exc = BookforgeError(kernel, path, message, status="REJECTED")
+    exc = AkoweError(kernel, path, message, status="REJECTED")
     exc.errors[0]["problem"] = code
     exc.errors[0]["fix"] = FIX.get(code) or exc.errors[0].get("fix")
     return exc
 
 
 # ====================================================================== names and paths
+def package_in(folder: Path) -> Path:
+    """The book package of a book folder: book.akowe, or book.bookforge when only that one exists (saved before the
+    rename; the next save writes book.akowe and removes the old one)."""
+    new = folder / PACKAGE
+    if not new.is_file() and (folder / legacy.OLD_PACKAGE).is_file():
+        return folder / legacy.OLD_PACKAGE
+    return new
+
+
+def read_marker(folder: Path):
+    """The folder's marker (.akowe-folder.json, or the .bookforge-folder.json of a save made before the rename)."""
+    for name in (MARKER, legacy.OLD_MARKER):
+        try:
+            return json.loads((folder / name).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError(str(folder / MARKER))
+
+
 def default_folder(windows: bool | None = None) -> Path:
-    env = os.environ.get("BOOKFORGE_BOOKS_DIR")
+    env = legacy.env("BOOKS_DIR")
     if env:
         return Path(env)
     if (os.name == "nt") if windows is None else windows:
         up = os.environ.get("USERPROFILE")
         if up and (Path(up) / "Documents").is_dir():
-            return Path(up) / "Documents" / "BookForge Books"
-    return Path.home() / "BookForge Books"
+            return legacy.default_books_folder(Path(up) / "Documents" / "Akowe Books")
+    return legacy.default_books_folder(Path.home() / "Akowe Books")  # keeps an existing "BookForge Books" folder
 
 
 def autosave_default() -> bool:
-    return os.environ.get("BOOKFORGE_AUTOSAVE", "1") not in ("0", "false", "no", "off")
+    return legacy.env("AUTOSAVE", "1") not in ("0", "false", "no", "off")
 
 
 def safe_name(text, cap: int = 60, fallback: str = "Book") -> str:
@@ -176,10 +195,10 @@ def classify(exc: BaseException) -> SaveProblem:
         if no == errno.ENAMETOOLONG or win == 206:
             return SaveProblem("SAVE_PATH_TOO_LONG", "a file name in the book's folder is too long for this computer")
         if no in (errno.EACCES, errno.EPERM, errno.EROFS, errno.ENOENT, errno.ENOTDIR) or win in (5, 3):
-            return SaveProblem("SAVE_FOLDER_NOT_WRITABLE", f"BookForge may not write into the books folder "
+            return SaveProblem("SAVE_FOLDER_NOT_WRITABLE", f"Akọwe may not write into the books folder "
                                f"({type(exc).__name__})")
         return SaveProblem("SAVE_FAILED", f"the book could not be saved ({type(exc).__name__})")
-    if isinstance(exc, BookforgeError):
+    if isinstance(exc, AkoweError):
         return SaveProblem("SAVE_FAILED", f"the book could not be read for saving ({exc.code}: "
                            f"{(exc.errors[0].get('message') if exc.errors else '')[:160]})")
     return SaveProblem("SAVE_FAILED", f"the book could not be saved ({type(exc).__name__})")
@@ -216,16 +235,16 @@ def write_atomic(path: Path, data: bytes) -> bool:
 
 
 def check_folder(path: Path) -> SaveProblem | None:
-    """Can BookForge write into this books folder (made when missing)? Also: is the path short enough?"""
+    """Can Akọwe write into this books folder (made when missing)? Also: is the path short enough?"""
     if not path.is_absolute():
         return SaveProblem("SAVE_FOLDER_NOT_WRITABLE", "the books folder must be a full path (for example "
-                           "C:\\Users\\You\\Documents\\BookForge Books)")
+                           "C:\\Users\\You\\Documents\\Akowe Books)")
     if len(str(path)) > MAX_PATH - 60:
         return SaveProblem("SAVE_PATH_TOO_LONG", f"the books folder's path is {len(str(path))} characters long; with "
                            f"the book's own folder and file names it would go over {MAX_PATH}")
     try:
         path.mkdir(parents=True, exist_ok=True)
-        probe = path / f".bookforge-write-test-{uuid.uuid4().hex[:8]}"
+        probe = path / f".akowe-write-test-{uuid.uuid4().hex[:8]}"
         probe.write_bytes(b"ok")
         probe.unlink()
     except OSError as exc:
@@ -240,7 +259,7 @@ def name_of(mapped) -> str | None:
 def launch(path: Path):
     """Show a folder in the computer's file manager (Explorer / Finder / the desktop's file manager)."""
     if os.name == "nt":
-        os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606 - a folder path BookForge made
+        os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606 - a folder path Akọwe made
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603,S607
     else:
@@ -287,7 +306,7 @@ class SaveService:
         cur = dict(cur) if isinstance(cur, dict) else {}
         if "auto_save" in body:
             if not isinstance(body["auto_save"], bool):
-                raise BookforgeError("INVALID_INPUT", "/auto_save", "auto_save must be true or false",
+                raise AkoweError("INVALID_INPUT", "/auto_save", "auto_save must be true or false",
                                      status="REJECTED")
             cur["auto_save"] = body["auto_save"]
         if "path" in body:
@@ -297,7 +316,7 @@ class SaveService:
                 target = default_folder()
             else:
                 if not isinstance(p, str) or len(p) > 400:
-                    raise BookforgeError("INVALID_INPUT", "/path", "the folder must be a path (text)", status="REJECTED")
+                    raise AkoweError("INVALID_INPUT", "/path", "the folder must be a path (text)", status="REJECTED")
                 target = Path(os.path.expandvars(os.path.expanduser(p.strip())))
             prob = check_folder(target)
             if prob:
@@ -325,7 +344,7 @@ class SaveService:
 
     def _owner_of(self, folder: Path) -> str | None:
         try:
-            m = json.loads((folder / MARKER).read_text(encoding="utf-8"))
+            m = read_marker(folder)
             return m.get("project_id") if isinstance(m, dict) else None
         except (OSError, ValueError):
             return None
@@ -460,8 +479,8 @@ class SaveService:
                     "run": {k: live.get(k) for k in ("id", "status", "phase", "current", "steps")} if live else None}
         text("Progress/progress.json", json.dumps(progress, ensure_ascii=False, indent=2))
         info["finished"] = finished
-        # book.bookforge
-        phase("Packing the whole book (book.bookforge)")
+        # book.akowe
+        phase("Packing the whole book (book.akowe)")
         files[PACKAGE] = book_package.build(app, pid, bible=bible)
         state = "\nState: finished — every step is done." if finished else \
             f"\nState: not finished yet — next step: {(steps.get(status.get('next')) or {}).get('title') or '?'}."
@@ -567,7 +586,7 @@ class SaveService:
             folder.mkdir(parents=True, exist_ok=True)
             old = []
             try:
-                m = json.loads((folder / MARKER).read_text(encoding="utf-8"))
+                m = read_marker(folder)  # (an old .bookforge-folder.json lists book.bookforge: replaced below)
                 old = [x for x in (m.get("files") or []) if isinstance(x, str)] if isinstance(m, dict) else []
             except (OSError, ValueError):
                 old = []
@@ -575,16 +594,20 @@ class SaveService:
             for rel, data in files.items():
                 if write_atomic(folder / rel, data):
                     written += 1
-            for rel in old:  # files BookForge wrote earlier that are not part of this save (a renamed chapter)
+            for rel in old:  # files Akọwe wrote earlier that are not part of this save (a renamed chapter)
                 if rel not in files and ".." not in rel.split("/") and not rel.startswith("/"):
                     try:
                         (folder / rel).unlink()
                     except FileNotFoundError:
                         pass
-            marker = {"app": "BookForge", "schema_version": FOLDER_SCHEMA, "project_id": pid, "branch_id": branch,
+            marker = {"app": "Akọwe", "schema_version": FOLDER_SCHEMA, "project_id": pid, "branch_id": branch,
                       "title": info["title"], "saved_at": now_iso(), "kind": kind, "finished": info.get("finished"),
                       "chapters": info["chapters"], "exports": info["exports"], "files": sorted(files)}
             write_atomic(folder / MARKER, json.dumps(marker, ensure_ascii=False, indent=2).encode("utf-8"))
+            try:
+                (folder / legacy.OLD_MARKER).unlink()  # the marker of a save made before the rename is replaced
+            except FileNotFoundError:
+                pass
         except OSError as exc:
             raise classify(exc) from None
         return {"ok": True, "path": str(folder), "folder": folder.name, "files": len(files), "written": written,
@@ -640,7 +663,7 @@ class SaveService:
                    "finished_at": None, "path": None, "problem": None}
             self._jobs[key] = job
             self._last[key] = time.monotonic()
-            th = threading.Thread(target=self._thread, args=(key, job), daemon=True, name=f"bookforge-save-{pid[-6:]}")
+            th = threading.Thread(target=self._thread, args=(key, job), daemon=True, name=f"akowe-save-{pid[-6:]}")
             self._threads[key] = th
             th.start()
             return dict(job)
@@ -728,7 +751,7 @@ class SaveService:
                     self._timers.pop(key, None)
 
     def after_start(self):
-        """Start-up: runs that were interrupted (BookForge closed while they worked) get a progress save."""
+        """Start-up: runs that were interrupted (Akọwe closed while they worked) get a progress save."""
         if not self.auto_on():
             return
         for j in self.app.jobstore.list(limit=60):
@@ -756,7 +779,7 @@ class SaveService:
     def open_folder(self, pid: str | None = None, branch: str = "main") -> dict:
         """Show the books folder (or one book's folder) in the file manager of THIS computer."""
         if not self.app.is_local():
-            raise problem_error("OPEN_NOT_LOCAL", "folders can only be opened on the computer BookForge runs on",
+            raise problem_error("OPEN_NOT_LOCAL", "folders can only be opened on the computer Akọwe runs on",
                                 kernel="PERMISSION_DENIED")
         path = self.book_folder(pid, branch) if pid else self.base()
         if not path.exists():

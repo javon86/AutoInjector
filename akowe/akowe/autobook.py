@@ -2,7 +2,7 @@
 
 A Make-a-book run creates a NEW book (it never touches an existing project) and walks the whole guided book path
 with the AI, in a background thread whose state is persisted (``JobStore``, kind ``autobook``) after every change,
-so a page reload shows it and a BookForge restart shows it as "interrupted — Resume":
+so a page reload shows it and an Akọwe restart shows it as "interrupted — Resume":
 
     safety backup -> book profile (the AI invents title, genre, audience, tone, idea, pen name)
     -> characters and places (A01/A04/A03 through the Bible Builder: world sketch + proposals, created as drafts)
@@ -22,7 +22,7 @@ run id, which new book) is stored with the run. Each creative draft is sent to t
 APPROVE -> approved under the run consent (outbox ``autobook.approved_under_consent``, label "Approved under your
 Make-a-book-for-me consent, run <id>"); REVISE/REJECT -> "Ask AI to fix it" (a new DRAFT revision through the
 normal UPDATE), at most twice, then reviewed again; still not passing -> the run pauses with a ⚠️ on that step
-and the author decides (approve anyway / edit it / try again). Deterministic BookForge outputs (book format,
+and the author decides (approve anyway / edit it / try again). Deterministic Akọwe outputs (book format,
 assembly records, the export approval manifest) are approved under the same consent without an AI opinion.
 ``_approve`` refuses anything that is not inside the live thread of a run the author started, for that run's
 own book - nothing is ever approved outside a run.
@@ -57,14 +57,14 @@ from .assist import AssistService, BibleSession, Cancelled, Job, book_profile_br
 from .book_path import EXPORT_FOR, LENGTHS, BookPath, StepError, _step_lock, get_profile, problems, save_profile
 from .requests import candidate_payload
 from .engine import Engine
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import BUSY_CODES, JobStore, RetryPolicy, busy_code, now_iso, slot_word, wait_and_retry
 from .providers import PROBE_POLL_S, PROBE_WAIT_S, PinnedProviders  # noqa: F401 - re-exported (older imports)
 from .editor import judge_rewrite, keep_quotes_of, lost_keeps
 from .editor_rubric import LABELS as EDITOR_LABELS
 from .review import NOT_INDEPENDENT, REVIEWABLE, ReviewJob, ReviewService, plain_problem, safe_title
 
-log = logging.getLogger("bookforge.autobook")
+log = logging.getLogger("akowe.autobook")
 
 MAX_FIXES = 2
 MAX_EVENTS = 400
@@ -117,25 +117,25 @@ PROFILE_SCHEMA = {
                    "audience": {"type": "string"}, "tone": {"type": "string"}, "idea": {"type": "string"}},
 }
 PROFILE_TASK = (
-    "Task: invent an ORIGINAL book for the author to make with BookForge. Use the author's wishes in "
+    "Task: invent an ORIGINAL book for the author to make with Akọwe. Use the author's wishes in "
     "context.wishes when given (genre, length, an idea) and choose everything else yourself. Return: title (a short, "
     "evocative working title), author (an invented pen name), genre, audience (who it is for, e.g. Adult, Young adult "
     "(12-18), Middle grade (8-12)), tone (a few words), idea (one paragraph of 3-5 sentences: who the main character "
     "is, where it happens, what goes wrong and what is at stake). No real people, no existing franchises. Return only "
     "the JSON object.")
 
-TIMEOUT_FIX = ("The AI did not answer in time, so BookForge paused here instead of guessing (the answer may still "
+TIMEOUT_FIX = ("The AI did not answer in time, so Akọwe paused here instead of guessing (the answer may still "
                "arrive). Check the AI's window (AutoInjector: is the site logged in and idle?), then press 🔁 Try again.")
 BUSY_FIX = ("The AI stayed busy or unreachable for a long time. Check Settings → Test connection (is AutoInjector "
             "running and the site logged in?), then press 🔁 Try again.")
-CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what BookForge refused. Or ✏️ Edit it "
+CHECKS_FIX = ("Press 🔁 Try again: the AI writes it again and is told exactly what Akọwe refused. Or ✏️ Edit it "
               "yourself so the checks pass, then press Continue.")
 STALE_FIX = ("It was made from a plan or other inputs that changed since, so it is out of date: editing it cannot fix "
              "that. Press 🔁 Try again: the AI writes it again from the current, approved inputs.")
-AUTHOR_CHECKS_FIX = ("This is your own edited version, so BookForge keeps it and does not ask the AI to replace it. "
+AUTHOR_CHECKS_FIX = ("This is your own edited version, so Akọwe keeps it and does not ask the AI to replace it. "
                      "✏️ Edit it so the checks pass (see what was refused below), then press Continue.")
 AUTHOR_STALE_FIX = ("Your edited version was made from a plan or other inputs that changed since, so it is out of date "
-                    "and editing it cannot fix that. BookForge keeps it (the AI does not replace your text). Open the "
+                    "and editing it cannot fix that. Akọwe keeps it (the AI does not replace your text). Open the "
                     "book, approve the current version of what it was made from, and make this step again there.")
 BOOK_GONE_FIX = ("This run cannot continue. Start a new ⚡ Make a book for me, or restore a backup that still has "
                  "this book.")
@@ -159,7 +159,7 @@ class StepProblem(Exception):
 
 
 class ChecksRefused(StepProblem):
-    """BookForge's own checks refused a draft (not the AI reviewer): approving it again cannot help, so the run asks
+    """Akọwe's own checks refused a draft (not the AI reviewer): approving it again cannot help, so the run asks
     the AI to write it again (told what was wrong), at most MAX_FIXES times, then pauses for the author."""
 
 
@@ -248,10 +248,10 @@ class _Runner:
     def _launch(self, run: dict, target):
         with self._lock:
             if self.alive(run["id"]):
-                raise BookforgeError("VERSION_CONFLICT", "/run", "this is already running", status="REJECTED")
+                raise AkoweError("VERSION_CONFLICT", "/run", "this is already running", status="REJECTED")
             self._ctl[run["id"]] = {"pause": False, "cancel": False}
             t = threading.Thread(target=self._wrap, args=(run["id"], target), daemon=True,
-                                 name=f"bookforge-{self.KIND}-{run['id'][-6:]}")
+                                 name=f"akowe-{self.KIND}-{run['id'][-6:]}")
             self._threads[run["id"]] = t
             t.start()
 
@@ -263,7 +263,7 @@ class _Runner:
             run = self.get(run_id)
             if run:
                 run["status"], run["phase"] = "paused", "Stopped by an unexpected problem — press Resume to try again"
-                run["problem"] = {"code": "INTERNAL_ERROR", "message": "BookForge hit an unexpected problem.",
+                run["problem"] = {"code": "INTERNAL_ERROR", "message": "Akọwe hit an unexpected problem.",
                                   "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."}
                 self.save(run)
         finally:
@@ -289,7 +289,7 @@ class _Runner:
     def owned(self, principal: str, run_id: str) -> dict:
         r = self.get(run_id)
         if r is None or r.get("principal") not in (None, principal):
-            raise BookforgeError("NOT_FOUND", "/run_id", "this run is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/run_id", "this run is not known", status="REJECTED")
         return r
 
     # ------------------------------------------------------------------ AI create through dispatch, with S10 retry
@@ -306,7 +306,7 @@ class _Runner:
                     getattr(bp.engine.providers, "pinned", None)):
                 code = "RATE_LIMITED"
             if code:
-                raise BookforgeError(code, "", (errs[0].get("message") if errs else "") or "the AI is busy")
+                raise AkoweError(code, "", (errs[0].get("message") if errs else "") or "the AI is busy")
             first = errs[0] if errs else {"code": r.get("status"), "message": r.get("status")}
             if first.get("code") == "TIMEOUT":
                 raise StepProblem("TIMEOUT", f"The AI did not answer in time while writing the {label}.", TIMEOUT_FIX,
@@ -325,7 +325,7 @@ class _Runner:
         try:
             return wait_and_retry(once, policy=self.policy(), check=lambda: self.check(run),
                                   on_wait=lambda info: self.on_wait(run, info), who=self._who(run))
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code in BUSY_CODES:
                 raise StepProblem(exc.code, exc.errors[0].get("message") or "the AI stayed busy", BUSY_FIX, op=op) \
                     from None
@@ -411,7 +411,7 @@ class _Runner:
                            + (f"To fix it: {a['fix'][0]}" if a.get("fix") else ""),
                            code="AI_NOT_READY" if at_start else "AI_STOPPED", slot=a["slot_id"])
             for a in back:
-                self.event(run, "note", f"✔ {a.get('ai') or a.get('slot_id')} works again — BookForge uses it again.",
+                self.event(run, "note", f"✔ {a.get('ai') or a.get('slot_id')} works again — Akọwe uses it again.",
                            code="AI_BACK", slot=a.get("slot_id"))
             run["ai_alerts"] = now
         except Exception:  # noqa: BLE001 - a display hint must never break the run
@@ -553,13 +553,13 @@ class AutoBookService(_Runner):
     def start(self, principal: str, body) -> dict:
         body = body if isinstance(body, dict) else {}
         if body.get("author_confirms") is not True:
-            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "pressing ⚡ Make a book for me is your "
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "pressing ⚡ Make a book for me is your "
                                  "consent for this run; it must be sent as author_confirms: true", status="REJECTED")
         settings = self._clean_settings(body)
         bible = self._bible_settings(principal, body, settings)   # P21 🔁 rerun from a saved book bible
         self._continue_settings(principal, body, settings)        # P21 ▶ continue an (opened) unfinished book
         if not self._ai_configured():
-            raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", "no AI is connected — Make a book for me needs "
+            raise AkoweError("CAPABILITY_UNAVAILABLE", "/slot_id", "no AI is connected — Make a book for me needs "
                                  "an AI", status="REJECTED")
         with self._lock:  # the check and the launch are one step: two presses at once start ONE run
             return self._start_locked(principal, settings, bible=bible)
@@ -570,11 +570,11 @@ class AutoBookService(_Runner):
         if spec in (None, ""):
             return None
         if body.get("continue_project") or body.get("variant_of"):
-            raise BookforgeError("INVALID_INPUT", "/from_bible", "a rerun from a book bible makes a new book: it cannot "
+            raise AkoweError("INVALID_INPUT", "/from_bible", "a rerun from a book bible makes a new book: it cannot "
                                  "also continue a book or be a variant", status="REJECTED")
         reuse = body.get("reuse_plan", True)
         if not isinstance(reuse, bool):
-            raise BookforgeError("INVALID_INPUT", "/reuse_plan", "reuse_plan must be true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/reuse_plan", "reuse_plan must be true or false", status="REJECTED")
         bible, src = self.app.opener.resolve_bible(principal, spec)
         prof = bible.get("profile") or {}
         if body.get("length") in (None, "") and prof.get("length") in LENGTHS:
@@ -596,9 +596,9 @@ class AutoBookService(_Runner):
             return
         if not isinstance(pid, str) or self.store.project(pid) is None or \
                 not self.store.has_project_access(principal, pid):
-            raise BookforgeError("NOT_FOUND", "/continue_project", "that book does not exist", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/continue_project", "that book does not exist", status="REJECTED")
         if body.get("variant_of"):
-            raise BookforgeError("INVALID_INPUT", "/continue_project", "continuing a book cannot also make a variant",
+            raise AkoweError("INVALID_INPUT", "/continue_project", "continuing a book cannot also make a variant",
                                  status="REJECTED")
         prof = get_profile(self.store, pid)
         if prof.get("length") in LENGTHS and body.get("length") in (None, ""):
@@ -617,7 +617,7 @@ class AutoBookService(_Runner):
 
     def _start_locked(self, principal: str, settings: dict, bible: dict | None = None) -> dict:
         if self.active():
-            raise BookforgeError("VERSION_CONFLICT", "/run", "a Make-a-book run is already working; pause or cancel "
+            raise AkoweError("VERSION_CONFLICT", "/run", "a Make-a-book run is already working; pause or cancel "
                                  "it first (or wait for it to finish)", status="REJECTED")
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         if bible is not None:  # kept with the new book (deleted with it): the run reads it step by step
@@ -670,7 +670,7 @@ class AutoBookService(_Runner):
     def resume(self, principal: str, run_id: str) -> dict:
         run = self.owned(principal, run_id)
         if run["status"] in ("done", "cancelled"):
-            raise BookforgeError("INVALID_INPUT", "/run_id", f"this run is {run['status']}", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/run_id", f"this run is {run['status']}", status="REJECTED")
         with self._lock:
             if self.alive(run_id):
                 if self._ctl.get(run_id, {}).get("pause"):
@@ -679,7 +679,7 @@ class AutoBookService(_Runner):
                     self.save(run)
                 return self.public(run)
             if self.active():
-                raise BookforgeError("VERSION_CONFLICT", "/run", "another Make-a-book run is working",
+                raise AkoweError("VERSION_CONFLICT", "/run", "another Make-a-book run is working",
                                      status="REJECTED")
             run["status"], run["phase"], run["problem"], run["pause_reason"] = "running", \
                 "Continuing where it stopped", None, None
@@ -710,29 +710,29 @@ class AutoBookService(_Runner):
         body = body if isinstance(body, dict) else {}
         action = body.get("action")
         if action not in ("approve_anyway", "retry", "edited"):
-            raise BookforgeError("INVALID_INPUT", "/action", "action: approve_anyway, retry or edited",
+            raise AkoweError("INVALID_INPUT", "/action", "action: approve_anyway, retry or edited",
                                  status="REJECTED")
         if self.alive(run_id):
-            raise BookforgeError("VERSION_CONFLICT", "/run", "the run is still working; pause it first",
+            raise AkoweError("VERSION_CONFLICT", "/run", "the run is still working; pause it first",
                                  status="REJECTED")
         if run.get("status") not in ("paused", "interrupted"):
             # Nothing may change behind an error answer: refuse before approving anything.
-            raise BookforgeError("INVALID_INPUT", "/run_id", f"this run is {run.get('status')}: there is nothing "
+            raise AkoweError("INVALID_INPUT", "/run_id", f"this run is {run.get('status')}: there is nothing "
                                  "to decide (nothing was changed)", status="REJECTED")
         prob = run.get("problem") or {}
         rid = prob.get("record_id")
         if action == "approve_anyway":
             if body.get("author_confirms") is not True:
-                raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit "
+                raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit "
                                      "confirmation (author_confirms: true)", status="REJECTED")
             if not rid:
-                raise BookforgeError("INVALID_INPUT", "/action", "there is no draft waiting for a decision",
+                raise AkoweError("INVALID_INPUT", "/action", "there is no draft waiting for a decision",
                                      status="REJECTED")
             out = self.app.review.approve(principal, run["project_id"], run["branch_id"],
                                           {"record_ids": [rid], "author_confirms": True, "how": "one"})
             res = out["results"][0] if out.get("results") else {"ok": False, "message": "not approved"}
             if not res.get("ok"):
-                raise BookforgeError("INVALID_INPUT", "/action", res.get("message") or "it could not be approved",
+                raise AkoweError("INVALID_INPUT", "/action", res.get("message") or "it could not be approved",
                                      status="REJECTED")
             self.event(run, "approve", "You approved it anyway (your own approval)", approval="author",
                        record_id=rid)
@@ -740,7 +740,7 @@ class AutoBookService(_Runner):
             counts = run.setdefault("fix_counts", {})
             counts[rid] = 0
             for k in [k for k in counts if k.startswith("redo:")]:
-                counts[k] = 0  # "Try again" gives the AI new attempts at a draft BookForge's checks refused
+                counts[k] = 0  # "Try again" gives the AI new attempts at a draft Akọwe's checks refused
             self.event(run, "retry", "You asked the AI to try again")
         else:
             self.event(run, "retry", "Continuing after your change" if action == "edited" else "Trying again")
@@ -775,19 +775,19 @@ class AutoBookService(_Runner):
         for k in ("beta_reader", "my_style"):  # P23 / P25 (Section 7c): optional, off unless asked for
             v = body.get(k, False)
             if not isinstance(v, bool):
-                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
             out[k] = v
         # P12: ending and style choices (all optional; empty = let the AI choose)
         out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")
         if g not in (None, ""):
             if not isinstance(g, str) or len(g.strip()) > 120:
-                raise BookforgeError("INVALID_INPUT", "/genre", "genre: up to 120 characters", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/genre", "genre: up to 120 characters", status="REJECTED")
             out["genre"] = g.strip()
         ln = body.get("length")
         if ln not in (None, ""):
             if ln not in LENGTHS:
-                raise BookforgeError("INVALID_INPUT", "/length", "length: short_story, novelette, novella or novel",
+                raise AkoweError("INVALID_INPUT", "/length", "length: short_story, novelette, novella or novel",
                                      status="REJECTED")
             out["length"] = ln
         out["slot_id"] = AssistService._check_slot(body.get("slot_id"))
@@ -800,11 +800,11 @@ class AutoBookService(_Runner):
         if vo not in (None, ""):
             pid = vo.get("project_id") if isinstance(vo, dict) else vo
             if not isinstance(pid, str) or not pid or len(pid) > 80:
-                raise BookforgeError("INVALID_INPUT", "/variant_of", "variant_of: the book (project_id) to make a "
+                raise AkoweError("INVALID_INPUT", "/variant_of", "variant_of: the book (project_id) to make a "
                                      "variant of", status="REJECTED")
             src = get_profile(self.store, pid) if self.store.project(pid) is not None else {}
             if not src.get("title") and not src.get("idea"):
-                raise BookforgeError("NOT_FOUND", "/variant_of", "that book has no profile (title and idea) to make a "
+                raise AkoweError("NOT_FOUND", "/variant_of", "that book has no profile (title and idea) to make a "
                                      "variant of", status="REJECTED")
             out["variant_of"] = {"project_id": pid, "title": str(src.get("title") or "")[:200]}
             # the same book: its length and choices unless this run names its own
@@ -815,7 +815,7 @@ class AutoBookService(_Runner):
         idea = body.get("idea")
         if idea not in (None, ""):
             if not isinstance(idea, str) or len(idea) > 2000:
-                raise BookforgeError("INVALID_INPUT", "/idea", "your idea: up to 2000 characters", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/idea", "your idea: up to 2000 characters", status="REJECTED")
             out["idea"] = idea.strip()
         return out
 
@@ -851,7 +851,7 @@ class AutoBookService(_Runner):
 
     def _eta(self, run, done: int, total: int) -> dict | None:
         """P15: time left, estimated from this run's measured times: the average chapter so far for the chapters
-        left, plus a few measured AI calls for the steps after the chapters (report) and ~5 s per BookForge step."""
+        left, plus a few measured AI calls for the steps after the chapters (report) and ~5 s per Akọwe step."""
         t = run.get("timing") or {}
         per = t.get("chapter_s") or []
         if not per or total <= 0:
@@ -890,7 +890,7 @@ class AutoBookService(_Runner):
 
     @staticmethod
     def _ensure_steps(run):
-        """A run saved by an older BookForge (resumed after an update) gets the steps added since, in order."""
+        """A run saved by an older Akọwe (resumed after an update) gets the steps added since, in order."""
         have = {s["id"]: s for s in run.get("steps") or []}
         if all(sid in have for sid in STEP_IDS):
             return
@@ -991,7 +991,7 @@ class AutoBookService(_Runner):
             self._pause_problem(run, {"code": exc.code or "INVALID_INPUT", "message": exc.message,
                                       "fix": "Press 🔁 Try again. If it fails again, open the book and do this step "
                                              "yourself.", "details": exc.problems[:6]})
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             code = exc.code
             fix = TIMEOUT_FIX if code == "TIMEOUT" else BUSY_FIX if code in BUSY_CODES else (
@@ -1004,7 +1004,7 @@ class AutoBookService(_Runner):
         except Exception as exc:  # noqa: BLE001 - shown as a ⚠️ on the step, logged here
             log.exception("make-a-book run %s: unexpected problem in step %s", run_id, run.get("current"))
             self._pause_problem(run, {"code": "INTERNAL_ERROR",
-                                      "message": f"BookForge hit an unexpected problem ({type(exc).__name__}).",
+                                      "message": f"Akọwe hit an unexpected problem ({type(exc).__name__}).",
                                       "fix": "Press 🔁 Try again. If it keeps happening, use 📋 Copy diagnostics."})
         finally:
             health.set_listener(None)
@@ -1058,7 +1058,7 @@ class AutoBookService(_Runner):
         if (getattr(self, "_thread_run", None) != run["id"] or threading.current_thread() is not
                 self._threads.get(run["id"]) or not run.get("consent") or run.get("status") not in ("running", "waiting")
                 or project_id != run.get("project_id")):
-            raise BookforgeError("PERMISSION_DENIED", "/consent", "approvals under the Make-a-book consent happen only "
+            raise AkoweError("PERMISSION_DENIED", "/consent", "approvals under the Make-a-book consent happen only "
                                  "inside the run the author started, for that run's own book", status="REJECTED")
 
     def _approve(self, run, ref, *, why: str, verdict: str | None = None, slot: str | None = None) -> dict:
@@ -1074,7 +1074,7 @@ class AutoBookService(_Runner):
                               "run_id": run["id"], "consent": {"by": run["consent"]["by"], "at": run["consent"]["at"]},
                               "why": why, "verdict": verdict, "ai_slot": slot, "ok": bool(res.get("ok")),
                               "label": label if res.get("ok") else "Approval under the run consent was refused by "
-                              "BookForge's checks"})
+                              "Akọwe's checks"})
         if not res.get("ok"):
             raise self._refused(ref, safe_title(self.app.engine.contracts, bp.rec(ref["record_id"]) or ref),
                                 res.get("problems") or [])
@@ -1086,13 +1086,13 @@ class AutoBookService(_Runner):
     def _refused(ref, label: str, probs: list, chapter_id: str | None = None) -> ChecksRefused:
         rules = {str(p).split(":", 1)[0].strip() for p in probs or []}
         stale = bool(rules) and rules <= {"STALE", "SOURCE_PIN", "INPUT_NOT_VALIDATED"}
-        return ChecksRefused("CHECKS_REFUSED", f"BookForge's checks refused the {label}: " + plain_problem(probs),
+        return ChecksRefused("CHECKS_REFUSED", f"Akọwe's checks refused the {label}: " + plain_problem(probs),
                              STALE_FIX if stale else CHECKS_FIX, record_id=ref["record_id"],
                              version=ref.get("version"), module_id=ref["module_id"], details=digest(probs),
                              chapter_id=chapter_id, options=["retry"] if stale else ["edit", "retry"])
 
     def _review_until_approved(self, run, st, rid: str, label: str, chapter_id: str | None = None):
-        """BookForge's checks, then AI review -> approve under consent, or fix (max 2) -> review again; else pause
+        """Akọwe's checks, then AI review -> approve under consent, or fix (max 2) -> review again; else pause
         for the author. A draft the checks refuse is not sent to the AI reviewer (ChecksRefused)."""
         bp = self.bp(run)
         counts = run.setdefault("fix_counts", {})
@@ -1106,7 +1106,7 @@ class AutoBookService(_Runner):
             v = bp.dispatch(head["module_id"], "VALIDATE", base_ref=head["ref"],
                             payload=candidate_payload(head["ref"], None))
             if v["status"] not in ("VALIDATED", "APPROVED"):
-                self.event(run, "problem", f"BookForge's checks refused the {label}", record_id=rid,
+                self.event(run, "problem", f"Akọwe's checks refused the {label}", record_id=rid,
                            code="CHECKS_REFUSED")
                 raise self._refused(head["ref"], label, problems(v), chapter_id)
             st["message"] = f"AI is reviewing the {label}"
@@ -1122,7 +1122,7 @@ class AutoBookService(_Runner):
                 self._on(run, "editor")
             try:
                 res = self._review.review_one(rj, rid, auto=not editor_next)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 self._ai_problem(exc, f"reviewing the {label}", record_id=rid, chapter_id=chapter_id)
             verdict = res["review"]["verdict"]
             self._note_review(run, st, label, res["review"])
@@ -1171,10 +1171,10 @@ class AutoBookService(_Runner):
             try:
                 self._review._run_fix(fj)
                 self.event(run, "fix_done", f"The AI made a new version of the {label}", record_id=rid)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code in ("TIMEOUT",) or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                     self._ai_problem(exc, f"fixing the {label}", record_id=rid, chapter_id=chapter_id)
-                self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass BookForge's checks; "
+                self.event(run, "fix_failed", f"The AI's fix of the {label} did not pass Akọwe's checks; "
                                               "nothing was saved", code=exc.code, record_id=rid)
             self.save(run)
 
@@ -1254,7 +1254,7 @@ class AutoBookService(_Runner):
             try:
                 ref = self._review.editor.restore(run["principal"], run["project_id"], run["branch_id"], rid, old, code)
                 self._made(run, ref)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 raise StepProblem(exc.code, f"The editor's rewrite of the {label} was not good enough and the earlier "
                                   "text could not be put back.", "Press 🔁 Try again.", record_id=rid,
                                   chapter_id=chapter_id) from None
@@ -1270,7 +1270,7 @@ class AutoBookService(_Runner):
         rj = self._sub_job(run, "editor", rid)
         try:
             craft = self._review.editor.craft_one(rj, rid, round_no=round_no, prev=prev)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             ed["error"] = exc.code
             self.event(run, "note", f"⚠️ The editor could not read the {label} ({exc.code}); the book goes on without "
                        "the editor's opinion on it", code="EDITOR_FAILED", record_id=rid)
@@ -1310,7 +1310,7 @@ class AutoBookService(_Runner):
         rj = self._sub_job(run, "editor_fix", rid, run["settings"].get("slot_id"))
         try:
             prop = editor.propose(rj, rid, craft=craft)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             ed["flag_reason"] = f"the writer could not rework the notes ({exc.code})"
             self.event(run, "note", f"⚠️ The writer could not rework the editor's notes on the {label} ({exc.code})",
                        code="EDITOR_FAILED", record_id=rid)
@@ -1324,9 +1324,9 @@ class AutoBookService(_Runner):
         try:
             out = editor.apply(run["principal"], run["project_id"], run["branch_id"], rid, old["version"], None,
                                proposal=prop, round_no=n, how="run")
-        except BookforgeError as exc:
+        except AkoweError as exc:
             ed["flag_reason"] = f"the rewritten chapter was refused ({exc.code})"
-            self.event(run, "note", f"⚠️ The rewritten {label} did not pass BookForge's checks, so it was not saved",
+            self.event(run, "note", f"⚠️ The rewritten {label} did not pass Akọwe's checks, so it was not saved",
                        code="EDITOR_FAILED", record_id=rid)
             return None
         byf = {f["id"]: f for f in craft.get("findings") or []}
@@ -1339,7 +1339,7 @@ class AutoBookService(_Runner):
         return applied, old
 
     def _regression(self, run, st, rid, label, ed, n, old, old_craft, applied):
-        """Check the rewrite like a new draft: BookForge's checks, the consistency reviewer, the pattern checker and
+        """Check the rewrite like a new draft: Akọwe's checks, the consistency reviewer, the pattern checker and
         the editor; keep it only when nothing got worse (editor.judge_rewrite)."""
         bp = self.bp(run)
         new = bp.rec(rid)
@@ -1355,7 +1355,7 @@ class AutoBookService(_Runner):
                 res = self._review.review_one(rj, rid, auto=False)
                 cons = res["review"]["verdict"]
                 self._note_review(run, st, label, res["review"])
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 self.event(run, "note", f"⚠️ The rewritten {label} could not be reviewed ({exc.code})",
                            code="EDITOR_FAILED", record_id=rid)
             if cons == "APPROVE":
@@ -1411,7 +1411,7 @@ class AutoBookService(_Runner):
     def _planned_pass(self, run, st, rid: str, label: str, chapter_id: str | None) -> dict:
         """After the editor: did what was planned reach the page? Deterministic check, then one independent AI check
         of what is unclear or missing; missing items go to the writer as targeted findings (P5 machinery) for at
-        most ``planned.ROUNDS`` round(s); the fix is kept only if BookForge's checks and the consistency reviewer
+        most ``planned.ROUNDS`` round(s); the fix is kept only if Akọwe's checks and the consistency reviewer
         pass it and fewer items are missing, else the earlier text is put back. Never blocks the book: what is still
         missing is flagged ⚠️ (PLANNED_MISSING) and listed in the run summary. Returns the head revision."""
         bp = self.bp(run)
@@ -1426,7 +1426,7 @@ class AutoBookService(_Runner):
         self.save(run)
         try:
             res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=pl["rounds"])
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                 self._ai_problem(exc, f"checking the planned details of the {label}", record_id=rid,
                                  chapter_id=chapter_id)
@@ -1449,7 +1449,7 @@ class AutoBookService(_Runner):
             try:
                 prop = checker.propose_fix(self._sub_job(run, "planned_fix", rid, run["settings"].get("slot_id")),
                                            rid, res)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                     self._ai_problem(exc, f"working the planned details into the {label}", record_id=rid,
                                      chapter_id=chapter_id)
@@ -1464,7 +1464,7 @@ class AutoBookService(_Runner):
             try:
                 self._review.editor.apply(run["principal"], run["project_id"], run["branch_id"], rid, old["version"],
                                           None, proposal=prop, round_no=n, how="run")
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 pl["history"].append({"round": n, "fix": "refused", "code": exc.code, "at": now_iso()})
                 break
             new = bp.rec(rid)
@@ -1478,7 +1478,7 @@ class AutoBookService(_Runner):
                     self._note_review(run, st, label, r2["review"])
                     if cons == "APPROVE":
                         new_res = checker.check(self._sub_job(run, "planned_check", rid), rid, round_no=n)
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
                         self._ai_problem(exc, f"checking the reworked {label}", record_id=rid, chapter_id=chapter_id)
                     cons = cons or f"failed ({exc.code})"
@@ -1496,7 +1496,7 @@ class AutoBookService(_Runner):
                 ref = self._review.editor.restore(run["principal"], run["project_id"], run["branch_id"], rid, old,
                                                   "PLANNED_FIX")
                 self._made(run, ref)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 raise StepProblem(exc.code, f"The fix for the planned details of the {label} was not good enough and "
                                   "the earlier text could not be put back.", "Press 🔁 Try again.", record_id=rid,
                                   chapter_id=chapter_id) from None
@@ -1609,7 +1609,7 @@ class AutoBookService(_Runner):
             rj = self._sub_job(run, f"world_{k}", k, run["settings"].get("slot_id"))
             try:
                 e = gen(self._assist, rj, bp)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the {label.lower()}")
@@ -1641,7 +1641,7 @@ class AutoBookService(_Runner):
         rj = self._sub_job(run, "world_rules", "rules", run["settings"].get("slot_id"))
         try:
             e = story_rules.generate(self._assist, rj, bp, update=True)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                 self._ai_problem(exc, "updating the story rules for the plan")
             self.event(run, "note", f"⚠️ The story rules could not be updated for the plan ({exc.code}); the book goes "
@@ -1672,7 +1672,7 @@ class AutoBookService(_Runner):
             rs["warning"] = NOT_INDEPENDENT
             self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} ({label}: {writer})", code="REVIEW_NOT_INDEPENDENT")
 
-    def _ai_problem(self, exc: BookforgeError, what: str, **extra):
+    def _ai_problem(self, exc: AkoweError, what: str, **extra):
         e = exc.errors[0] if exc.errors else {}
         if exc.code == "TIMEOUT":
             raise StepProblem("TIMEOUT", f"The AI did not answer in time while {what}.", TIMEOUT_FIX, **extra) from None
@@ -1693,7 +1693,7 @@ class AutoBookService(_Runner):
     def _s_profile(self, run, st):
         s = run["settings"]
         if not run.get("project_id"):
-            # The book's id comes from the run's id, so a BookForge stop between creating the book and saving the
+            # The book's id comes from the run's id, so an Akọwe stop between creating the book and saving the
             # run finds that book again on Resume instead of making a second one.
             pid = "proj-" + run["id"].split("-", 1)[-1]
             if self.store.project(pid) is None:
@@ -1764,14 +1764,14 @@ class AutoBookService(_Runner):
             raw = self._assist._call_ai(job, op_for_roles="B01", task=PROFILE_TASK, schema=PROFILE_SCHEMA,
                                         context={"wishes": wishes, "lengths": {k: v[0] for k, v in LENGTHS.items()}},
                                         protected=[])
-        except BookforgeError as exc:
+        except AkoweError as exc:
             self._ai_problem(exc, "inventing the book")
         raw = raw if isinstance(raw, dict) else {}
         prof = {k: str(raw.get(k) or "").strip() for k in ("title", "author", "genre", "audience", "tone", "idea")}
         if s.get("genre"):
             prof["genre"] = s["genre"]
         prof["title"] = prof["title"][:200] or "Untitled book"
-        prof["author"] = prof["author"][:200] or "BookForge author"
+        prof["author"] = prof["author"][:200] or "Akowe author"  # plain ASCII: the book fonts are WinAnsi
         prof["idea"] = (prof["idea"] or s.get("idea") or prof["title"])[:4000]
         for k, n in (("genre", 120), ("audience", 120), ("tone", 200)):
             prof[k] = prof[k][:n]
@@ -1792,7 +1792,7 @@ class AutoBookService(_Runner):
         canon_ops = ("A01", "A04", "A03") + tuple(op for op in run.get("bible_ops") or () if op not in
                                                   ("A01", "A04", "A03"))
         counts = CANON_COUNTS[run["settings"]["length"]]
-        # Entries BookForge's checks refused and set aside, per section, that the Bible Builder must make again
+        # Entries Akọwe's checks refused and set aside, per section, that the Bible Builder must make again
         # (older runs: a count per section), and by name (the same character made again, told what was refused:
         # a fresh world sketch would invent a different person, e.g. lose the main character named in the idea).
         remake = run.setdefault("canon_remake", {})
@@ -1823,7 +1823,7 @@ class AutoBookService(_Runner):
                 bp = self.bp(run)
                 have = [r for op in canon_ops for r in bp.heads(op) if not r.get("stale")]
             if not any(r["module_id"] == "A01" for r in have):
-                raise StepProblem("INVALID_INPUT", "The AI did not make a main character that BookForge could save.",
+                raise StepProblem("INVALID_INPUT", "The AI did not make a main character that Akọwe could save.",
                                   "Press 🔁 Try again (the AI makes new characters).")
             todo = [r for r in have if r["lifecycle"] in REVIEWABLE and r.get("approved_version") != r["version"]
                     and not r.get("stale")]
@@ -1876,7 +1876,7 @@ class AutoBookService(_Runner):
             rj = self._sub_job(run, "characters", rec["record_id"], run["settings"].get("slot_id"))
             try:
                 chars_mod.generate(self._assist, rj, pid, branch, rec["record_id"])
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                     item["state"] = "paused"
                     self._ai_problem(exc, f"writing the sheet and voice of “{item['label']}”")
@@ -1961,7 +1961,7 @@ class AutoBookService(_Runner):
             self.event(run, "scenes", f"Scene cards of {label}: {text}", approval="run_consent",
                        code="SCENES_NOTES" if flagged else None)
             item["scenes"] = scenes_mod.summary(entry, outline)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES or exc.code == "CAPABILITY_UNAVAILABLE":
                 self._ai_problem(exc, f"planning the scenes of {label}", chapter_id=cid)
             if exc.code == "PERMISSION_DENIED":
@@ -1996,8 +1996,8 @@ class AutoBookService(_Runner):
 
     def _bible(self, run, st, counts, named=None, strict: bool = True) -> dict:
         """The Bible Builder inside a run: a world sketch for ``counts`` plus the ``named`` entries (a name already
-        decided: the main character, or an entry BookForge refused that the AI makes again under the same name).
-        An entry BookForge's checks refuse (its form, or the save) is made again with the exact problems, at most
+        decided: the main character, or an entry Akọwe refused that the AI makes again under the same name).
+        An entry Akọwe's checks refuse (its form, or the save) is made again with the exact problems, at most
         MAX_FIXES times; what still fails is named in an event (never dropped silently). Returns {created, dropped}."""
         sess = self._bible_session(run)
         slot = run["settings"].get("slot_id")
@@ -2035,8 +2035,8 @@ class AutoBookService(_Runner):
             if strict:
                 refused = [sess.refusals(i) for i in items if sess.refusals(i)]
                 msg = (run_err.get("message") or (errs[0].get("message") if errs else None) or
-                       ("BookForge's checks refused them: " + "; ".join(digest(refused[0], 3)) if refused else
-                        "the AI's characters did not fit BookForge's forms"))
+                       ("Akọwe's checks refused them: " + "; ".join(digest(refused[0], 3)) if refused else
+                        "the AI's characters did not fit Akọwe's forms"))
                 raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
                                   f"The characters could not be made: {msg}", "Press 🔁 Try again.")
         out = sess.create(good, {}) if good else {"created": [], "errors": []}
@@ -2056,9 +2056,9 @@ class AutoBookService(_Runner):
                 ([f"{(it.get('error') or {}).get('code')}: {(it.get('error') or {}).get('message')}"]
                  if it.get("error") else ["no usable entry"])
             dropped[it["key"]] = {"op": it["op"], "name": it["name"], "details": digest(why)}
-            self.event(run, "note", f"⚠️ The entry “{it['name']}” could not be made: BookForge's checks refused it — "
+            self.event(run, "note", f"⚠️ The entry “{it['name']}” could not be made: Akọwe's checks refused it — "
                        + "; ".join(digest(why, 3))[:300] + ". The run goes on without it"
-                       + (" (BookForge checks the main characters before the outline)." if it["op"] == "A01" else "."),
+                       + (" (Akọwe checks the main characters before the outline)." if it["op"] == "A01" else "."),
                        code="CANON_ENTRY_REFUSED")
         return {"created": out["created"], "dropped": dropped}
 
@@ -2067,13 +2067,13 @@ class AutoBookService(_Runner):
         note = (protagonist.main_note(n["name"], n.get("why") or protagonist.IDEA_WHY) if n.get("main") else
                 f"Make the entry “{n['name']}” again: keep exactly this name and its role in the story.")
         if n.get("details"):
-            note += (" BookForge's checks refused the earlier entry: " + "; ".join(n["details"][:6])
+            note += (" Akọwe's checks refused the earlier entry: " + "; ".join(n["details"][:6])
                      + ". Fix exactly these problems.")
         return note
 
     @staticmethod
     def _fix_note(base: str | None, probs: list) -> str:
-        return ((base + " ") if base else "") + ("BookForge's checks refused your previous proposal of this entry: "
+        return ((base + " ") if base else "") + ("Akọwe's checks refused your previous proposal of this entry: "
                                                  + "; ".join(str(p)[:300] for p in probs[:8]) + ". Keep the same "
                                                  "name and role and return a corrected complete entry that fixes "
                                                  "exactly these problems.")
@@ -2089,7 +2089,7 @@ class AutoBookService(_Runner):
         return [f"{e['code']}: {e.get('message') or ''}"]
 
     def _fix_refused_items(self, run, sess, slot, notes: dict):
-        """(a) Entries whose proposal BookForge refuses are made again with the exact problems (max MAX_FIXES)."""
+        """(a) Entries whose proposal Akọwe refuses are made again with the exact problems (max MAX_FIXES)."""
         for key in list(sess.order):
             it = sess.items[key]
             for n in range(MAX_FIXES):
@@ -2097,7 +2097,7 @@ class AutoBookService(_Runner):
                 if not probs:
                     break
                 self.check(run)
-                self.event(run, "fix", f"BookForge's checks refused the proposed entry “{it['name']}”; asked the AI "
+                self.event(run, "fix", f"Akọwe's checks refused the proposed entry “{it['name']}”; asked the AI "
                            f"to make it again ({n + 1} of {MAX_FIXES}): " + "; ".join(digest(probs, 3))[:300],
                            code="CANON_ENTRY_REFUSED")
                 st_msg = f"The AI is making the entry “{it['name']}” again ({n + 1} of {MAX_FIXES})"
@@ -2107,7 +2107,7 @@ class AutoBookService(_Runner):
         self.check(run)
 
     def _fix_create_errors(self, run, sess, slot, notes: dict, out: dict) -> dict:
-        """(a) An entry BookForge refused to save is made again with the save's exact problem (max MAX_FIXES)."""
+        """(a) An entry Akọwe refused to save is made again with the save's exact problem (max MAX_FIXES)."""
         created, errors = list(out.get("created") or []), list(out.get("errors") or [])
         for n in range(MAX_FIXES):
             retry = [e for e in errors if e.get("key") in sess.items and e.get("code") != "MISSING_INPUT"]
@@ -2119,7 +2119,7 @@ class AutoBookService(_Runner):
                 it = sess.items[e["key"]]
                 probs = [f"{e.get('code')}: {e.get('message')}" + (f" (at {e['path']})" if e.get("path") else "")]
                 self.check(run)
-                self.event(run, "fix", f"BookForge refused to save the entry “{it['name']}”; asked the AI to make it "
+                self.event(run, "fix", f"Akọwe refused to save the entry “{it['name']}”; asked the AI to make it "
                            f"again ({n + 1} of {MAX_FIXES}): " + "; ".join(probs)[:300], code="CANON_ENTRY_REFUSED")
                 self.save(run)
                 sess._generate_item(it, slot, self._fix_note(notes.get(e["key"]), probs))
@@ -2151,7 +2151,7 @@ class AutoBookService(_Runner):
     def _ensure_main(self, run, st):
         """Before the outline: every main character (named in the book idea, proposed as main by the Bible Builder,
         or a viewpoint a refused outline needed) is approved canon. One that is not is made now (its draft reviewed,
-        or the AI makes the entry with BookForge's refusals, at most MAX_FIXES times); if that fails the run stops
+        or the AI makes the entry with Akọwe's refusals, at most MAX_FIXES times); if that fails the run stops
         here with a plain-English problem naming the character and the reasons (never goes on silently)."""
         bp = self.bp(run)
         for m in protagonist.missing(bp, main_names=run.get("main_names") or (), store=self.store):
@@ -2161,7 +2161,7 @@ class AutoBookService(_Runner):
         name, why = m["name"], m["why"]
         label = f"entry “{name}”"
         self.event(run, "note", f"⚠️ The main character “{name}” ({why}) is not in the approved characters: "
-                   "BookForge makes the entry now", code="PROTAGONIST_MISSING")
+                   "Akọwe makes the entry now", code="PROTAGONIST_MISSING")
         reasons = list(m.get("refused") or [])
         rid = (m.get("draft") or {}).get("record_id")
         tries = 0
@@ -2186,8 +2186,8 @@ class AutoBookService(_Runner):
                 if tries > MAX_FIXES:
                     self._no_main(name, why, reasons)
                 if rec is not None:
-                    self.bp(run).set_aside(rec, f"BookForge's checks refused it; the AI makes the {label} again")
-                self.event(run, "fix", f"BookForge's checks refused the {label}; asked the AI to make it again "
+                    self.bp(run).set_aside(rec, f"Akọwe's checks refused it; the AI makes the {label} again")
+                self.event(run, "fix", f"Akọwe's checks refused the {label}; asked the AI to make it again "
                            f"({tries} of {MAX_FIXES}): " + "; ".join(reasons)[:300], record_id=rid,
                            code="CANON_ENTRY_REFUSED")
                 rid = None
@@ -2198,13 +2198,13 @@ class AutoBookService(_Runner):
     @staticmethod
     def _no_main(name: str, why: str, reasons: list):
         raise StepProblem("PROTAGONIST_MISSING",
-                          f"The main character “{name}” ({why}) is not in the approved characters, and BookForge "
-                          "could not make the entry: " + (("BookForge's checks refused it — "
+                          f"The main character “{name}” ({why}) is not in the approved characters, and Akọwe "
+                          "could not make the entry: " + (("Akọwe's checks refused it — "
                                                            + "; ".join(digest(reasons, 3))[:400]) if reasons else
                                                           "the AI did not make a usable entry")
                           + ". The chapter outline needs this character, so the run stopped here.",
                           f"Press 🔁 Try again: the AI makes the entry “{name}” again and is told exactly what "
-                          "BookForge refused. Or open the book, make the character yourself (Characters and places → "
+                          "Akọwe refused. Or open the book, make the character yourself (Characters and places → "
                           "✍️ Write one myself), approve it, then press ▶ Resume.",
                           details=digest(reasons), character=name, options=["retry"])
 
@@ -2227,7 +2227,7 @@ class AutoBookService(_Runner):
         return kind in ("ai", "ai_fix")
 
     def _redo_refused(self, run, st, rid: str, key: str, label: str, exc: ChecksRefused):
-        """Set an AI draft BookForge's checks refused aside so the AI writes it again (told what was wrong: the B11
+        """Set an AI draft Akọwe's checks refused aside so the AI writes it again (told what was wrong: the B11
         prompt lists the earlier outline's refusals); after MAX_FIXES attempts the run pauses for the author. The
         author's own version (an edit made while the run was paused) is never set aside: the run pauses for the
         author instead (CHECKS_REFUSED, Edit only), without asking the AI."""
@@ -2235,11 +2235,11 @@ class AutoBookService(_Runner):
         rec = bp.rec(rid)
         if rec is not None and not self._ai_made(run, rec):
             stale = exc.problem.get("fix") == STALE_FIX
-            exc.problem.update(message=exc.problem["message"].replace("BookForge's checks refused the",
-                                                                      "BookForge's checks refused your edited", 1),
+            exc.problem.update(message=exc.problem["message"].replace("Akọwe's checks refused the",
+                                                                      "Akọwe's checks refused your edited", 1),
                                fix=AUTHOR_STALE_FIX if stale else AUTHOR_CHECKS_FIX, options=["edit"],
                                authored_by="author")
-            self.event(run, "problem", f"BookForge's checks refused your edited {label}; it is kept for you to fix "
+            self.event(run, "problem", f"Akọwe's checks refused your edited {label}; it is kept for you to fix "
                                        "(the AI was not asked to replace it)", record_id=rid, code="CHECKS_REFUSED")
             raise exc
         counts = run.setdefault("fix_counts", {})
@@ -2249,10 +2249,10 @@ class AutoBookService(_Runner):
             raise exc
         counts[key] = n + 1
         if rec is not None:
-            bp.set_aside(rec, f"BookForge's checks refused it; the AI writes the {label} again")
+            bp.set_aside(rec, f"Akọwe's checks refused it; the AI writes the {label} again")
         st["message"] = f"The AI is writing the {label} again (attempt {n + 2} of {MAX_FIXES + 1})"
         run["phase"] = st["message"]
-        self.event(run, "fix", f"BookForge's checks refused the {label}; asked the AI to write it again "
+        self.event(run, "fix", f"Akọwe's checks refused the {label}; asked the AI to write it again "
                                f"({n + 1} of {MAX_FIXES}): " + "; ".join(exc.problem.get("details") or [])[:300],
                    record_id=rid)
         self.save(run)
@@ -2320,7 +2320,7 @@ class AutoBookService(_Runner):
             bp = self.bp(run)
             try:
                 r = bp.dispatch(op, "CREATE", payload=payload)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 r = {"status": "REJECTED", "errors": exc.errors}
             if r.get("status") == "DRAFT" and r.get("output_refs"):
                 ref = r["output_refs"][0]
@@ -2344,7 +2344,7 @@ class AutoBookService(_Runner):
         self.event(run, "bible", f"🔁 From the book bible: {made} character/place entr(y/ies) put into the new book as "
                    "drafts (each is reviewed and approved here under your consent for this run)", step="canon")
         if refused:
-            self.event(run, "note", "⚠️ Not taken from the book bible (BookForge's checks refused them; the AI makes "
+            self.event(run, "note", "⚠️ Not taken from the book bible (Akọwe's checks refused them; the AI makes "
                        "what is missing): " + " · ".join(refused)[:300], step="canon", code="BIBLE_ENTRY_REFUSED")
         self.save(run)
 
@@ -2372,7 +2372,7 @@ class AutoBookService(_Runner):
                 if not repetition_mod.get_labels(self.store, pid, branch).get("labels"):
                     repetition_mod.save_labels(self.store, pid, branch, b["repeat_labels"], by="author")
                     notes.append(f"{len(b['repeat_labels'])} repeat label(s)")
-        except BookforgeError as exc:
+        except AkoweError as exc:
             self.event(run, "note", f"⚠️ The story rules / world texture of the book bible could not be used "
                        f"({exc.code}); the AI makes new ones", step="world", code="BIBLE_ENTRY_REFUSED")
         run["bible_world_seeded"] = True
@@ -2382,7 +2382,7 @@ class AutoBookService(_Runner):
 
     def _plan_from_bible(self, run, st, bp, op, label) -> str | None:
         """P21 🔁 with "keep the plan": the saved premise / plot / outline as this book's draft (once per part; when
-        BookForge's checks refuse it, the AI writes it new)."""
+        Akọwe's checks refuse it, the AI writes it new)."""
         s = run["settings"].get("bible") or {}
         if not s.get("reuse_plan"):
             return None
@@ -2398,7 +2398,7 @@ class AutoBookService(_Runner):
         data = remap_refs(part["data"], self._bible_refs(run))
         try:
             r = bp.dispatch(op, "CREATE", payload=bp.payload_for(op), manual_candidate=data)
-        except (BookforgeError, StepError) as exc:
+        except (AkoweError, StepError) as exc:
             r = {"status": "REJECTED", "errors": getattr(exc, "errors", None) or [{"message": str(exc)}]}
         if r.get("status") == "DRAFT" and r.get("output_refs"):
             ref = r["output_refs"][0]
@@ -2406,7 +2406,7 @@ class AutoBookService(_Runner):
             self.event(run, "bible", f"🔁 The {label} was taken from the book bible (it is reviewed and approved here "
                        "under your consent for this run)", record_id=ref["record_id"], module_id=op)
             return ref["record_id"]
-        self.event(run, "note", f"⚠️ The {label} of the book bible did not pass BookForge's checks in the new book "
+        self.event(run, "note", f"⚠️ The {label} of the book bible did not pass Akọwe's checks in the new book "
                    f"({'; '.join(problems(r)[:2]) or r.get('status')}); the AI writes a new one",
                    code="BIBLE_PLAN_REFUSED", module_id=op)
         return None
@@ -2430,7 +2430,7 @@ class AutoBookService(_Runner):
                 scenes_mod.save_cards(self.store, pid, branch, outline, cid, scenes_mod.clean_cards(cards[cid]),
                                       by="author", how="book_bible")
                 n += 1
-            except BookforgeError:
+            except AkoweError:
                 continue
         if n:
             self.event(run, "bible", f"🔁 From the book bible: the scene cards of {n} chapter(s) (checked and approved "
@@ -2458,7 +2458,7 @@ class AutoBookService(_Runner):
             raise StepProblem("NOT_FOUND", "There is no approved chapter outline.", "Press 🔁 Try again.")
         chapters = bp.outline_chapters(outline)
         if not chapters:
-            raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters BookForge can write.",
+            raise StepProblem("INVALID_INPUT", "The chapter outline has no chapters Akọwe can write.",
                               "Press 🔁 Try again.")
         if run["settings"].get("bible") and not run.get("bible_scenes_seeded"):
             self._seed_scenes(run, outline, chapters)
@@ -2578,7 +2578,7 @@ class AutoBookService(_Runner):
             return
         if s["state"] != "needs_you":
             bp.a_setup_format({})
-        self._approve_step_items(run, "format", "book format made by BookForge from the profile (deterministic)")
+        self._approve_step_items(run, "format", "book format made by Akọwe from the profile (deterministic)")
         st["message"] = "6 x 9 inch pages, Times 11 pt, PDF/EPUB/DOCX settings — approved"
 
     def _s_assemble(self, run, st):
@@ -2591,7 +2591,7 @@ class AutoBookService(_Runner):
             self.event(run, "backup", f"Backup before putting the book together ({b['name']})")
         if s["state"] != "needs_you":
             bp.a_assemble({})
-        self._approve_step_items(run, "assemble", "assembly made by BookForge from the approved chapters "
+        self._approve_step_items(run, "assemble", "assembly made by Akọwe from the approved chapters "
                                                   "(deterministic)")
         st["message"] = "The book is put together and approved"
 
@@ -2658,7 +2658,7 @@ class AutoBookService(_Runner):
             raise
         except Exception as exc:  # noqa: BLE001 - a report must never stop the book
             log.exception("book report failed in run %s", run["id"])
-            code = exc.code if isinstance(exc, BookforgeError) else type(exc).__name__
+            code = exc.code if isinstance(exc, AkoweError) else type(exc).__name__
             st["message"] = f"⚠️ The report could not be made ({code}); make it on the book's 📊 report page"
             self.event(run, "note", st["message"], step="report", code="REPORT_FAILED")
             return
@@ -2706,7 +2706,7 @@ class AutoBookService(_Runner):
 
 
 def verify_file(fmt: str, data: bytes) -> tuple[bool, str]:
-    """Re-read an exported file with BookForge's independent checkers (as the workflow test does)."""
+    """Re-read an exported file with Akọwe's independent checkers (as the workflow test does)."""
     try:
         if fmt == "PDF":
             doc, issues = hc.pdf_structure(data)
@@ -2738,9 +2738,9 @@ class WriteAllService(_Runner):
         bp = BookPath(self.app.engine, principal, pid, branch)
         outline = bp.outline()
         if not outline:
-            raise BookforgeError("INVALID_INPUT", "/outline", "approve the chapter outline first", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/outline", "approve the chapter outline first", status="REJECTED")
         if (bp.profile.get("ai_slot") or "") == "manual" or not self._ai_configured():
-            raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "no AI is connected (or the book profile says you "
+            raise AkoweError("CAPABILITY_UNAVAILABLE", "", "no AI is connected (or the book profile says you "
                                  "write it yourself)", status="REJECTED")
         items = []
         for ch in bp.outline_chapters(outline):
@@ -2816,7 +2816,7 @@ class WriteAllService(_Runner):
             item["scenes"] = scenes_mod.summary(e, outline)
             self.event(job, "scenes", f"The AI planned {len(e['cards'])} scene(s) for {item['label'].lower()} "
                        "(not checked yet)", slot=rj.slot)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "TIMEOUT" or exc.code in BUSY_CODES:
                 raise StepProblem(exc.code, f"The AI did not answer while planning the scenes of "
                                   f"{item['label'].lower()}.", TIMEOUT_FIX if exc.code == "TIMEOUT" else BUSY_FIX,

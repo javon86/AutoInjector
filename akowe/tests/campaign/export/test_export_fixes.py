@@ -9,10 +9,10 @@ import zipfile
 import pytest
 
 from bf_export_helpers import EPUBCHECK_JAR, META, PAGE, build_all, have_epubcheck, png, random_book, run_epubcheck
-from bookforge import h_checks as hc
-from bookforge.exporters import book as bookmod
-from bookforge.exporters import images as imgmod
-from bookforge.exporters.images import UnsupportedImage, load_image
+from akowe import h_checks as hc
+from akowe.exporters import book as bookmod
+from akowe.exporters import images as imgmod
+from akowe.exporters.images import UnsupportedImage, load_image
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 XHTML = "{http://www.w3.org/1999/xhtml}"
@@ -49,7 +49,7 @@ def test_emphasis_rendered_in_pdf_epub_docx():
 
 
 def test_justified_emphasis_lines_stay_inside_the_text_block():
-    from bookforge import h_checks
+    from akowe import h_checks
     text = "# T\n" + " ".join(f"word{i} *slanted{i}* and **heavy{i}**," for i in range(120))
     b = build_all([{"id": "C02-m2", "text": text}], toc=False)
     assert [i for i in h_checks.pdf_layout(b.pdf, PAGE, print_profile=False) if i["decision"] != "PASS"] == []

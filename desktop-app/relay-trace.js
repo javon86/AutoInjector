@@ -84,7 +84,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
         if (p.result && p.result !== "failed" && p.at < m.at) p.overtakenBy = m.seq;
       }
     }
-    // A send its caller withdrew before it was typed (a BookForge request that
+    // A send its caller withdrew before it was typed (an Akọwe request that
     // timed out while the AI was busy) never went out: not a failure, not waiting.
     else if (res && res.error === "CANCELLED") { m.result = "cancelled"; }
     else { m.result = "failed"; m.error = (res && res.error) || "unknown"; }
@@ -139,7 +139,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
   // A captured reply was handed to the Butler/terminal, or deliberately held.
   function noteHandoff(turnId, to) { const t = turns.get(turnId); if (t) t.handoffs.push({ to, seq: null }); }
   function noteHeld(turnId, reason) { const t = turns.get(turnId); if (t && !t.held) t.held = reason; }
-  // The [MSG #] numbers a captured reply answers (the BookForge bridge owns a
+  // The [MSG #] numbers a captured reply answers (the Akọwe bridge owns a
   // reply only when it answers the bridge's own prompt). null = unknown turn.
   function answersOf(turnId) { const t = turns.get(turnId); return t ? t.answers.slice() : null; }
 
@@ -156,7 +156,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
 
   // P16: report(filter) covers only part of the trace — { seqs: Set|array of
   // [MSG #] numbers (null = all), from, to (epoch ms, null = open) } — so a
-  // scoped Extract (one BookForge book, a time range) traces only its messages.
+  // scoped Extract (one Akọwe book, a time range) traces only its messages.
   function report(filter) {
     const f = filter || {};
     const seqSet = f.seqs ? new Set(Array.from(f.seqs, String)) : null;
@@ -228,7 +228,7 @@ function createRelayTrace({ now = () => Date.now(), maxMessages = 2000, noReplyM
 }
 
 const LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
-const HELD_TEXT = { "check-in": "an automatic check-in (kept out of the conversation)", "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice", "bookforge": "answer to a BookForge request (handed to BookForge)" };
+const HELD_TEXT = { "check-in": "an automatic check-in (kept out of the conversation)", "to-user": "addressed to you (kept with you)", "hop-limit": "hop limit reached (paused)", "loop-guard": "loop guard (same short reply repeating)", "relay-off": "Stop AIs Talking was on", "nothing-to-add": "AI said NONE (nothing to add)", "rate-limited": "rate-limit / usage-cap notice", "akowe": "answer to an Akọwe request (handed to Akọwe)" };
 
 function formatReport(r, { label = (s) => LABEL[s] || s, timeFmt = (t) => new Date(t).toLocaleTimeString() } = {}) {
   const L = [];

@@ -1,5 +1,5 @@
-"""python -m bookforge            -> start the local workspace server.
-python -m bookforge selftest   -> run the self-test ("Test everything") and write a report."""
+"""python -m akowe            -> start the local workspace server.
+python -m akowe selftest   -> run the self-test ("Test everything") and write a report."""
 import sys
 
 if len(sys.argv) > 1 and sys.argv[1] == "selftest":

@@ -638,7 +638,7 @@
     .badge-final-plan { color:#8ef0b0; }
     .badge-roundtable { color:#7fd4e0; font-weight:600; }
 
-    /* ---- BookForge bridge panel (compact): one header line, a strip of AIs +
+    /* ---- Akọwe bridge panel (compact): one header line, a strip of AIs +
        connection-check chips, "Now working on" | "Book checklist" side by side,
        folded activity log. Collapses to a slim one-line status bar.
        State is ALWAYS icon + words; colour only reinforces it.
@@ -719,13 +719,13 @@
     .bf-badge { display:inline-flex; align-items:center; gap:3px; font-size:12px !important; font-weight:700; padding:2px 8px !important; border-radius:999px !important; white-space:nowrap; }
     .bf-badge[data-tone="warn"] { background:#2a2110 !important; border:1px solid #7a6127 !important; color:#ffd98a; }
     .bf-badge[data-tone="hz"] { background:#2a2508 !important; border:1px solid #8a7414 !important; color:var(--bf-hz); }
-    .bf-panel[data-collapsed="1"] #bookforge-body, .bf-panel[data-collapsed="1"] .bf-full-only { display:none !important; }
+    .bf-panel[data-collapsed="1"] #akowe-body, .bf-panel[data-collapsed="1"] .bf-full-only { display:none !important; }
     .bf-panel[data-collapsed="1"] .bf-slim { display:inline-flex; }
     .bf-panel[data-collapsed="1"] .bf-head { min-height:24px; }
     .bf-panel[data-collapsed="1"] .bf-head-text { display:none; }
 
     /* ---------- body ---------- */
-    #bookforge-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+    #akowe-body { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
     .bf-line { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; padding:4px 9px; border-radius:8px; font-size:12.5px; background:#14141f; border:1px solid var(--bf-line); border-left:3px solid var(--bf-tone); color:#dcdaf0; }
     .bf-line[data-tone="ok"] { border-left-color:var(--bf-ok); } .bf-line[data-tone="warn"] { border-left-color:var(--bf-wait); background:#1c1810; }
     .bf-line[data-tone="err"] { border-left-color:var(--bf-err); background:#1f1214; } .bf-line[data-tone="work"] { border-left-color:var(--bf-work); }
@@ -968,7 +968,7 @@
           <button id="btn-open-phone" title="Connect an Android phone (or any phone) on the same Wi-Fi to watch the messages and send from your phone. The PC does all the work." aria-label="Connect a phone to view messages and send remotely">📱 Phone</button>
           <button id="btn-capability-test" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Results stream to the Activity Log below." aria-label="Run the butler capability test; results go to the Activity Log">🧪 Capability Test</button>
           <button id="btn-feature-test" title="Feature Test: walks every Active AI through every feature for real (reply, locker write/read/give/send/share, safety, routing) one step at a time, checks each result itself, and shows what works and what doesn't — plus a saved report of how each AI's replies actually end. Click again to stop." aria-label="Run the feature test on every active AI">🔬 Feature Test</button>
-          <button id="btn-extract-all" title="Save the AI conversation and the activity/error log to a text file in the program's logs folder — you choose what goes in (this BookForge book only, a time range, or everything) and see a preview first" aria-label="Extract: choose what to save (this book only, a time range, or everything) and save it to a text file">⤓ Extract All</button>
+          <button id="btn-extract-all" title="Save the AI conversation and the activity/error log to a text file in the program's logs folder — you choose what goes in (this Akọwe book only, a time range, or everything) and see a preview first" aria-label="Extract: choose what to save (this book only, a time range, or everything) and save it to a text file">⤓ Extract All</button>
           <button id="btn-silence" class="danger grid-full" title="Stop the AIs messaging each other — halts Auto, House Rules, Sequences and the Butler at once (keeps your participants checked)" aria-label="Stop the AIs messaging each other — halts all relay at once">🛑 Stop AIs Talking</button>
           <span id="extract-status" class="grid-full" style="font-size:11px; opacity:.8;"></span>
         </div>
@@ -1391,29 +1391,29 @@
       </div><!-- /systemai-body -->
     </div><!-- /butler-bar (col-systemai) -->
 
-    <div id="col-bookforge" class="col yc-panel bf-panel" data-bf-state="off" data-collapsed="0">
+    <div id="col-akowe" class="col yc-panel bf-panel" data-bf-state="off" data-collapsed="0">
       <!-- One header line: health dot · state pill · what's going on · Connect · Bridge · 📋 · ⓘ · ▾/▸.
-           Collapsed (▸) it IS the slim status bar: pill · current step · approvals · ⚠️ count · Open BookForge. -->
+           Collapsed (▸) it IS the slim status bar: pill · current step · approvals · ⚠️ count · Open Akọwe. -->
       <div class="yc-head bf-head">
-        <h2 id="bf-title" title="Show or hide the BookForge details">📚 BookForge <span class="bf-exp">EXPERIMENTAL</span></h2>
+        <h2 id="bf-title" title="Show or hide the Akọwe details">📚 Akọwe <span class="bf-exp">EXPERIMENTAL</span></h2>
         <button id="bf-health" class="bf-health" type="button" data-level="off" aria-label="Overall health: bridge off" title="Overall health"></button>
         <span id="bf-status" class="bf-pill" data-tone="off" role="status" aria-live="polite">⏻ Off</span>
         <span class="bf-anchor" id="bf-status-anchor"></span>
-        <span id="bf-head-text" class="bf-head-text" aria-live="polite">BookForge isn't connected</span>
+        <span id="bf-head-text" class="bf-head-text" aria-live="polite">Akọwe isn't connected</span>
         <span class="bf-slim" id="bf-slim">
           <span id="bf-slim-step" class="bf-slim-step"></span>
-          <button id="bf-slim-approvals" class="bf-badge" data-tone="warn" type="button" hidden title="Things waiting for your OK — open BookForge's approvals page">✅ 0</button>
+          <button id="bf-slim-approvals" class="bf-badge" data-tone="warn" type="button" hidden title="Things waiting for your OK — open Akọwe's approvals page">✅ 0</button>
           <button id="bf-slim-problems" class="bf-badge" data-tone="hz" type="button" hidden title="Problems — click to see where and how to fix">⚠️ 0</button>
-          <button id="btn-bf-slim-open" type="button" title="Open BookForge in your browser">📚 Open BookForge</button>
+          <button id="btn-bf-slim-open" type="button" title="Open Akọwe in your browser">📚 Open Akọwe</button>
         </span>
         <span class="spacer bf-full-only"></span>
         <span class="bf-head-actions bf-full-only">
-          <span class="bf-anchor" id="bf-connect-anchor"><button id="btn-bf-connect" class="bf-connect" title="Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste">🔗 Connect BookForge</button></span>
-          <span class="bf-anchor" id="bf-switch-anchor"><label id="bf-switch" class="bf-switch" title="Turn the bridge on or off. When it's off, BookForge can't use your AIs."><input type="checkbox" id="bf-enabled"> <span>Bridge</span></label></span>
+          <span class="bf-anchor" id="bf-connect-anchor"><button id="btn-bf-connect" class="bf-connect" title="Turns the bridge on, opens Akọwe in your browser and hands it the connection key — nothing to copy or paste">🔗 Connect Akọwe</button></span>
+          <span class="bf-anchor" id="bf-switch-anchor"><label id="bf-switch" class="bf-switch" title="Turn the bridge on or off. When it's off, Akọwe can't use your AIs."><input type="checkbox" id="bf-enabled"> <span>Bridge</span></label></span>
           <span class="bf-anchor" id="bf-diag-anchor"><button id="btn-bf-diag" class="bf-icon" type="button" title="📋 Copy diagnostics — a safe summary for asking for help (no key, codes, prompts or replies)" aria-label="Copy diagnostics">📋</button></span>
           <button class="bf-info" type="button" data-info="what" aria-expanded="false" aria-controls="bf-pop" aria-label="What is this?">ⓘ</button>
         </span>
-        <button class="collapse-btn" id="btn-collapse-bookforge" type="button" aria-expanded="true" aria-controls="bookforge-body" title="Collapse to a slim status bar" aria-label="Collapse to a slim status bar">▾</button>
+        <button class="collapse-btn" id="btn-collapse-akowe" type="button" aria-expanded="true" aria-controls="akowe-body" title="Collapse to a slim status bar" aria-label="Collapse to a slim status bar">▾</button>
       </div>
       <!-- P18.7 teach step: shown while AutoInjector needs the user to show it an AI's page.
            Not a dialog (a dialog would hide the AI panes, and the user must type in one). -->
@@ -1423,12 +1423,12 @@
         <ol id="bf-teach-steps" class="bf-teach-steps"></ol>
         <div id="bf-teach-actions" class="bf-teach-actions"></div>
       </section>
-      <div id="bookforge-body">
+      <div id="akowe-body">
         <!-- what's happening + the next step, one line -->
         <div id="bf-connect-msg" class="bf-line" role="status" aria-live="polite">
           <span id="bf-connect-text"></span>
-          <span><span class="bf-next-label">Next</span> <span id="bf-next">Press “🔗 Connect BookForge”.</span></span>
-          <span class="bf-anchor" id="bf-start-anchor"><button id="btn-bf-start-app" class="bf-primary" style="display:none;" title="Start BookForge (run-bookforge) for you, then connect">▶ Start BookForge for me</button></span>
+          <span><span class="bf-next-label">Next</span> <span id="bf-next">Press “🔗 Connect Akọwe”.</span></span>
+          <span class="bf-anchor" id="bf-start-anchor"><button id="btn-bf-start-app" class="bf-primary" style="display:none;" title="Start Akọwe (run-akowe) for you, then connect">▶ Start Akọwe for me</button></span>
           <span id="bf-msg" role="status" aria-live="polite"></span>
         </div>
 
@@ -1455,10 +1455,10 @@
         <ol class="bf-steps" id="bf-conn-steps" aria-label="Connection check (full list)" hidden></ol>
 
         <div class="bf-pair">
-          <!-- Now working on: BookForge's current step + approvals -->
+          <!-- Now working on: Akọwe's current step + approvals -->
           <section class="bf-card" id="bf-now-card" data-tone="off" aria-labelledby="bf-now-h">
             <h3 id="bf-now-h">✍️ Now working on <button class="bf-info" type="button" data-info="now" aria-expanded="false" aria-controls="bf-pop" aria-label="About Now working on">ⓘ</button></h3>
-            <div id="bf-now-empty" class="bf-empty">Connect BookForge to see what's happening.</div>
+            <div id="bf-now-empty" class="bf-empty">Connect Akọwe to see what's happening.</div>
             <div id="bf-now" hidden>
               <div class="bf-now-top"><span id="bf-now-step" class="bf-now-step"></span><span id="bf-now-state" class="bf-pill" data-tone="info"></span><span id="bf-now-working" class="bf-now-working" hidden></span></div>
               <div id="bf-now-msg" class="bf-now-msg"></div>
@@ -1467,8 +1467,8 @@
                 <span id="bf-approvals-list" class="bf-approvals-list"></span>
               </div>
               <div class="bf-now-actions">
-                <span class="bf-anchor" id="bf-approve-anchor"><button id="btn-bf-approve" class="bf-primary" style="display:none;" title="Open BookForge's approvals page in your browser">✅ Review &amp; approve</button></span>
-                <span class="bf-anchor" id="bf-goto-anchor"><button id="btn-bf-goto-task" title="Open the current step in BookForge">▶ Go to current task</button></span>
+                <span class="bf-anchor" id="bf-approve-anchor"><button id="btn-bf-approve" class="bf-primary" style="display:none;" title="Open Akọwe's approvals page in your browser">✅ Review &amp; approve</button></span>
+                <span class="bf-anchor" id="bf-goto-anchor"><button id="btn-bf-goto-task" title="Open the current step in Akọwe">▶ Go to current task</button></span>
               </div>
             </div>
             <div class="bf-stale" id="bf-now-stale" hidden><span id="bf-now-stale-text"></span></div>
@@ -1477,8 +1477,8 @@
           <!-- Book checklist: a compact stepper with k/n; the full list on demand -->
           <section class="bf-card" id="bf-book-card" aria-labelledby="bf-book-h">
             <h3 id="bf-book-h">📖 Book checklist <button class="bf-info" type="button" data-info="book" aria-expanded="false" aria-controls="bf-pop" aria-label="About the book checklist">ⓘ</button>
-              <span class="bf-h3-extra"><span class="bf-anchor" id="bf-open-anchor"><button id="btn-bf-open" title="Open BookForge in your browser">📚 Open BookForge</button></span></span></h3>
-            <div id="bf-book-empty" class="bf-empty">When BookForge is connected, your book's progress shows here.</div>
+              <span class="bf-h3-extra"><span class="bf-anchor" id="bf-open-anchor"><button id="btn-bf-open" title="Open Akọwe in your browser">📚 Open Akọwe</button></span></span></h3>
+            <div id="bf-book-empty" class="bf-empty">When Akọwe is connected, your book's progress shows here.</div>
             <div id="bf-book" hidden>
               <div class="bf-book-top">
                 <span id="bf-book-title" class="bf-book-title"></span>
@@ -1500,17 +1500,17 @@
           </details>
           <details class="bf-more" id="bf-other-ways">
             <summary>Other ways to connect</summary>
-            <p>Only needed if the one-click Connect doesn't work. The connection key is like a password that lets only your BookForge talk to this app. It never leaves your computer. <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></p>
+            <p>Only needed if the one-click Connect doesn't work. The connection key is like a password that lets only your Akọwe talk to this app. It never leaves your computer. <button class="bf-info" type="button" data-info="key" aria-expanded="false" aria-controls="bf-pop" aria-label="What is the connection key?">ⓘ</button></p>
             <div class="bf-key-row">
-              <span class="bf-anchor" id="bf-copy-anchor"><button id="btn-bf-copy" title="Copy the connection key, then paste it into BookForge (Settings → Connect AutoInjector)">📋 Copy connection key</button></span>
+              <span class="bf-anchor" id="bf-copy-anchor"><button id="btn-bf-copy" title="Copy the connection key, then paste it into Akọwe (Settings → Connect AutoInjector)">📋 Copy connection key</button></span>
               <span class="bf-anchor" id="bf-reveal-anchor"><button id="btn-bf-reveal" title="Show or hide the connection key on screen">Show key</button></span>
-              <span class="bf-anchor" id="bf-regen-anchor"><button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — BookForge disconnects until it gets the new key">Make a new key</button></span>
+              <span class="bf-anchor" id="bf-regen-anchor"><button id="btn-bf-regen" class="bf-danger" title="Throw the old key away and make a new one — Akọwe disconnects until it gets the new key">Make a new key</button></span>
               <button class="bf-info" type="button" data-info="buttons" aria-expanded="false" aria-controls="bf-pop" aria-label="Copy, Show and Make a new key — what's the difference?">ⓘ</button>
             </div>
             <div id="bf-token" style="display:none;" aria-label="Connection key"></div>
           </details>
           <span class="bf-caution">⚠ Use at your own risk (site terms) <button class="bf-info" type="button" data-info="tos" aria-expanded="false" aria-controls="bf-pop" aria-label="Is this allowed? (terms of service)">ⓘ</button>
-            · keep routing/autopilot off while BookForge works <button class="bf-info" type="button" data-info="routing" aria-expanded="false" aria-controls="bf-pop" aria-label="Why keep routing and autopilot off?">ⓘ</button></span>
+            · keep routing/autopilot off while Akọwe works <button class="bf-info" type="button" data-info="routing" aria-expanded="false" aria-controls="bf-pop" aria-label="Why keep routing and autopilot off?">ⓘ</button></span>
         </div>
       </div>
       <div id="bf-pop" class="bf-pop" role="dialog" aria-modal="false" aria-labelledby="bf-pop-title" tabindex="-1" hidden>
@@ -1606,8 +1606,8 @@
       <p class="sub">Choose what goes into the file. It is saved in the program's logs folder — nothing is sent anywhere.</p>
       <div id="ex-scopes" role="radiogroup" aria-label="What to include">
         <label class="ex-scope" id="ex-scope-book-row">
-          <input type="radio" name="ex-scope" value="book" id="ex-scope-book"> <span class="t">📖 This BookForge book only</span>
-          <span class="why" id="ex-book-why">Only the AIs' replies to BookForge's requests for this book, and the activity of those requests. Your other conversations are left out.</span>
+          <input type="radio" name="ex-scope" value="book" id="ex-scope-book"> <span class="t">📖 This Akọwe book only</span>
+          <span class="why" id="ex-book-why">Only the AIs' replies to Akọwe's requests for this book, and the activity of those requests. Your other conversations are left out.</span>
           <span class="opts"><select id="ex-book" aria-label="Which book"></select></span>
         </label>
         <label class="ex-scope" id="ex-scope-time-row">

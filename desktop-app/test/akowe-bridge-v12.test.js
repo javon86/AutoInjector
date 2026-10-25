@@ -1,15 +1,15 @@
-// test/bookforge-bridge-v12.test.js — contract v1.2 of the BookForge bridge
-// (docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md): self-repair states in GET /v1/health,
+// test/akowe-bridge-v12.test.js — contract v1.2 of the Akọwe bridge
+// (docs/AKOWE_AUTOINJECTOR_BRIDGE.md): self-repair states in GET /v1/health,
 // POST /v1/probe, 503 SITE_NOT_READY {state, problem} for an AI that is being
 // repaired / needs the user / is broken, plus the P18.5 bridge-side fix (a reply
 // captured while the prompt's send is still being confirmed is owned by number).
-// Also the fake host's --site-state option. Pure Node, the REAL bookforge-bridge.js.
-// Run with: node test/bookforge-bridge-v12.test.js
+// Also the fake host's --site-state option. Pure Node, the REAL akowe-bridge.js.
+// Run with: node test/akowe-bridge-v12.test.js
 "use strict";
 const http = require("http");
 const path = require("path");
 const { spawn } = require("child_process");
-const bridgeMod = require("../bookforge-bridge");
+const bridgeMod = require("../akowe-bridge");
 const { startFakeHost, parseSiteStates } = require("./fixtures/fake-bridge-host");
 
 let passed = 0, failed = 0;

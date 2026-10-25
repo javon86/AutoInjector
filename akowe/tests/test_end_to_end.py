@@ -21,8 +21,8 @@ from test_set_g import MD, import_profile, manifest_revision, parse_pdf, set_rel
 from test_set_h import finding as h_finding
 from test_set_h import manual as h_manual
 
-from bookforge.exporters.pdf import inspect_pdf
-from bookforge.spans import build_replacement, make_span
+from akowe.exporters.pdf import inspect_pdf
+from akowe.spans import build_replacement, make_span
 
 CH1 = ("Mara walked from the harbor to the lighthouse. The the lamp room was cold and dark, and the "
        "keeper's logbook lay open on the desk beside a cracked lantern.")

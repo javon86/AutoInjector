@@ -1,8 +1,8 @@
-"""Cross-process integration: real BookForge (Python) -> real AutoInjector bridge (Node).
+"""Cross-process integration: real Akọwe (Python) -> real AutoInjector bridge (Node).
 
 Spawns desktop-app/test/fixtures/fake-bridge-host.js, which runs the actual
-bookforge-bridge.js HTTP server with three fake site panes (no browser, no logins),
-and drives BookForge operations through engine.dispatch against it. Skipped when Node
+akowe-bridge.js HTTP server with three fake site panes (no browser, no logins),
+and drives Akọwe operations through engine.dispatch against it. Skipped when Node
 or the desktop app is not available.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-import bookforge.providers as prov
+import akowe.providers as prov
 
 REPO = Path(__file__).resolve().parents[2]
 HOST = REPO / "desktop-app" / "test" / "fixtures" / "fake-bridge-host.js"
@@ -154,11 +154,11 @@ def test_wrong_token_is_capability_unavailable(h, host_factory):
 
 
 def test_one_button_pairing_and_status_push_through_the_real_bridge(tmp_path, host_factory):
-    """Contract v1.1 end to end: real BookForge server <-> real bookforge-bridge.js (pair + status)."""
+    """Contract v1.1 end to end: real Akọwe server <-> real akowe-bridge.js (pair + status)."""
     import threading
     from http.server import ThreadingHTTPServer
 
-    from bookforge.server import App, make_handler
+    from akowe.server import App, make_handler
     from test_autoinjector_link import _book_with_chapter_draft
     from test_server import TOKEN as AUTHOR_TOKEN
     from test_server import call

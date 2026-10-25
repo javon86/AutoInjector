@@ -1,4 +1,4 @@
-// Clipboard helper for the Bookforge workspace: copy and paste with graceful fallbacks.
+// Clipboard helper for the Akọwe workspace: copy and paste with graceful fallbacks.
 //  * copyText(text, what)  - navigator.clipboard.writeText, else a hidden <textarea> +
 //                            document.execCommand('copy'); toasts "Copied …" or explains what to do.
 //  * readText(purpose)     - navigator.clipboard.readText, else (permission denied, http context,

@@ -19,7 +19,7 @@ and codes only — never card text. Prompts and replies are never logged.
 
 AI steps: ``make`` (the writer slot: the AI that writes the chapters, roles of C02), ``review`` (an independent
 reviewer, light rubric: does every scene have a goal for every character present, a real obstacle from the world and
-something unsaid?) and ``revise`` (the writer again, told the reviewer's notes). BookForge decides PASS / REVISE itself
+something unsaid?) and ``revise`` (the writer again, told the reviewer's notes). Akọwe decides PASS / REVISE itself
 from the deterministic ``lint`` and the reviewer's per-scene answers.
 """
 from __future__ import annotations
@@ -32,9 +32,9 @@ from datetime import datetime, timezone
 
 from . import characters as chars_mod
 from . import providers as providers_mod
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.scenes")
+log = logging.getLogger("akowe.scenes")
 
 MAX_SCENES = 6
 TEXT_MAX = 300
@@ -225,10 +225,10 @@ def lint(cards: list[dict], known_names: list[str] | None = None) -> list[dict]:
 
 
 def clean_review(raw, cards: list[dict], problems: list[dict]) -> dict:
-    """BookForge's own PASS / REVISE: PASS only when the reviewer passes every scene on all three questions and the
+    """Akọwe's own PASS / REVISE: PASS only when the reviewer passes every scene on all three questions and the
     deterministic check found no major problem."""
     if not isinstance(raw, dict) or raw.get("verdict") not in ("PASS", "REVISE"):
-        raise BookforgeError("INTERNAL_ERROR", "/verdict", "the reviewer's answer was not a valid scene check "
+        raise AkoweError("INTERNAL_ERROR", "/verdict", "the reviewer's answer was not a valid scene check "
                              "(verdict must be PASS or REVISE); nothing was changed")
     per = {}
     for s in raw.get("scenes") or []:
@@ -249,7 +249,7 @@ def clean_review(raw, cards: list[dict], problems: list[dict]) -> dict:
         why.append("scene(s) " + ", ".join(map(str, failing)) + " miss a goal, a real obstacle from the world or "
                    "something unsaid")
     if major:
-        why.append(f"{len(major)} problem(s) found by BookForge's own check")
+        why.append(f"{len(major)} problem(s) found by Akọwe's own check")
     if raw["verdict"] == "REVISE" and not why:
         why.append("the reviewer asked for changes")
     return {"verdict": verdict, "ai_verdict": raw["verdict"], "scenes": scenes, "notes": notes, "why": why,
@@ -294,14 +294,14 @@ def save_cards(store, pid: str, branch: str, outline: dict, chapter_id: str, car
                slot: str | None = None, base_version: int | None = None, how: str = "made") -> dict:
     """Store a new version of a chapter's scene cards (status draft: it waits for a check and an approval)."""
     if not cards:
-        raise BookforgeError("INVALID_INPUT", "/cards", "a scene plan needs at least one scene with something in it",
+        raise AkoweError("INVALID_INPUT", "/cards", "a scene plan needs at least one scene with something in it",
                              status="REJECTED")
     key = ekey(outline["record_id"], chapter_id)
 
     def change(old):
         old = old or {}
         if base_version is not None and int(old.get("version") or 0) != base_version:
-            raise BookforgeError("VERSION_CONFLICT", "/version", f"the scene cards changed since you opened them (they "
+            raise AkoweError("VERSION_CONFLICT", "/version", f"the scene cards changed since you opened them (they "
                                  f"are now version {old.get('version') or 0}); reload them — your text is kept in "
                                  "the form", status="REJECTED")
         hist = list(old.get("history") or [])
@@ -350,7 +350,7 @@ def chapter_plan(bp, outline: dict, chapter_id: str) -> dict:
     chs = bp.outline_chapters(outline)
     idx = next((i for i, c in enumerate(chs) if c["chapter_id"] == chapter_id), None)
     if idx is None:
-        raise BookforgeError("INVALID_INPUT", "/chapter_id", "that chapter is not in the approved outline",
+        raise AkoweError("INVALID_INPUT", "/chapter_id", "that chapter is not in the approved outline",
                              status="REJECTED")
     item = None
     for it in (outline.get("data") or {}).get("chapters") or []:
@@ -401,7 +401,7 @@ class ScenePlanner:
     def _outline(self, bp):
         outline = bp.outline()
         if not outline:
-            raise BookforgeError("INVALID_INPUT", "/outline", "approve the chapter outline first: scene cards plan "
+            raise AkoweError("INVALID_INPUT", "/outline", "approve the chapter outline first: scene cards plan "
                                  "one chapter of it", status="REJECTED")
         return outline
 
@@ -506,7 +506,7 @@ class ScenePlanner:
         job.check()
         cards = clean_cards(raw)
         if not cards:
-            raise BookforgeError("INTERNAL_ERROR", "/scenes", "the AI's scene plan had no usable scene; nothing was "
+            raise AkoweError("INTERNAL_ERROR", "/scenes", "the AI's scene plan had no usable scene; nothing was "
                                  "saved")
         return save_cards(self.store, pid, branch, outline, chapter_id, cards, by="ai", slot=job.slot,
                           how="revised" if revise else "made")
@@ -518,7 +518,7 @@ class ScenePlanner:
         outline = self._outline(bp)
         entry = get_entry(self.store, pid, branch, outline["record_id"], chapter_id)
         if not entry or not entry.get("cards"):
-            raise BookforgeError("INVALID_INPUT", "/chapter_id", "this chapter has no scene cards yet: plan them first",
+            raise AkoweError("INVALID_INPUT", "/chapter_id", "this chapter has no scene cards yet: plan them first",
                                  status="REJECTED")
         rv = self.review
         writer_slot = (entry.get("made_by") or {}).get("slot")
@@ -528,7 +528,7 @@ class ScenePlanner:
         problems = lint(entry["cards"], known)
         ctx = self._context(pid, branch, bp, outline, chapter_id)
         ctx["scene_cards"] = brief_cards(entry)
-        ctx["bookforge_check"] = [f"scene {p['scene']}: {p['message']}" for p in problems][:12]
+        ctx["akowe_check"] = [f"scene {p['scene']}: {p['message']}" for p in problems][:12]
         job.phase = f"An AI is checking the scene plan of chapter {ctx['chapter']['number']}"
         tok = rv.work.begin(pid, "C02", f"Checking the scenes of chapter {ctx['chapter']['number']}")
         try:
@@ -548,7 +548,7 @@ class ScenePlanner:
 
         def change(old):
             if not old or old.get("version") != entry["version"]:
-                raise BookforgeError("VERSION_CONFLICT", "/version", "the scene cards changed while they were being "
+                raise AkoweError("VERSION_CONFLICT", "/version", "the scene cards changed while they were being "
                                      "checked; check them again", status="REJECTED")
             old["review"] = res
             return old
@@ -566,11 +566,11 @@ class ScenePlanner:
         body = body if isinstance(body, dict) else {}
         cards = body.get("cards")
         if not isinstance(cards, list) or len(cards) > MAX_SCENES:
-            raise BookforgeError("INVALID_INPUT", "/cards", f"cards: a list of 1-{MAX_SCENES} scenes",
+            raise AkoweError("INVALID_INPUT", "/cards", f"cards: a list of 1-{MAX_SCENES} scenes",
                                  status="REJECTED")
         base = body.get("version")
         if base is not None and (not isinstance(base, int) or isinstance(base, bool)):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
         bp = self.bp(principal, pid, branch)
         outline = self._outline(bp)
         chapter_plan(bp, outline, chapter_id)
@@ -585,10 +585,10 @@ class ScenePlanner:
 
         def change(old):
             if not old or not old.get("cards"):
-                raise BookforgeError("INVALID_INPUT", "/chapter_id", "there are no scene cards to approve",
+                raise AkoweError("INVALID_INPUT", "/chapter_id", "there are no scene cards to approve",
                                      status="REJECTED")
             if version is not None and old.get("version") != version:
-                raise BookforgeError("VERSION_CONFLICT", "/version", f"the scene cards changed since you looked at "
+                raise AkoweError("VERSION_CONFLICT", "/version", f"the scene cards changed since you looked at "
                                      f"them (they are now version {old.get('version')}); open them again",
                                      status="REJECTED")
             old.update(status="approved", flagged=bool(flagged),

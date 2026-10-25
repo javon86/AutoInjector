@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge.store import CrashInjected, Store
+from akowe.store import CrashInjected, Store
 
 from conftest import PRINCIPAL, errors_of
 
@@ -147,7 +147,7 @@ def test_backup_restore_and_corruption(h, tmp_path):
     assert Store.verify_backup(dest) == []
     restored = Store.restore(dest, tmp_path / "restored")
     assert restored.query_one("SELECT COUNT(*) c FROM records")["c"] == 1
-    db = dest / "bookforge.sqlite3"
+    db = dest / "akowe.sqlite3"
     db.write_bytes(db.read_bytes() + b"x")
     assert Store.verify_backup(dest)
 

@@ -8,9 +8,9 @@ import types
 
 import pytest
 
-from bookforge import costs
-from bookforge import providers as prov_mod
-from bookforge import scene_grid
+from akowe import costs
+from akowe import providers as prov_mod
+from akowe import scene_grid
 
 from test_failover_review import SlotFake, make_app, run_book
 from test_server import TOKEN, call, server  # noqa: F401
@@ -156,7 +156,7 @@ def test_scene_rows_match_plan_and_page():
     page = [{"words": 900, "grade": 6.0, "dialogue_share": 0.3, "pace": "steady"},
             {"words": 80, "grade": 4.0, "dialogue_share": 0.0, "pace": "fast"}]
     cards = [_card(obstacle=""), _card(), _card()]
-    from bookforge import scenes as scenes_mod
+    from akowe import scenes as scenes_mod
     lint = scenes_mod.lint(cards, ["Mara"])
     checker = {2: {"scene": 2, "goal": True, "obstacle_from_world": False, "unsaid": True, "note": "a random storm"}}
     rows, probs = scene_grid.scene_rows(cards, page, written_any=True, lint=lint, checker=checker, pov="Mara",
@@ -182,8 +182,8 @@ def test_scene_rows_match_plan_and_page():
 def test_scene_grid_flags_an_out_of_date_plan_and_bad_cards(made):
     app, run = made
     pid = run["project_id"]
-    from bookforge import scenes as scenes_mod
-    from bookforge.book_path import BookPath
+    from akowe import scenes as scenes_mod
+    from akowe.book_path import BookPath
     bp = BookPath(app.engine, "author", pid, "main")
     outline = bp.outline()
     cid = bp.outline_chapters(outline)[0]["chapter_id"]

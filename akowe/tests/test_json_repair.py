@@ -1,4 +1,4 @@
-"""First real test: ChatGPT answered BookForge's editor and whole-book review with UNFENCED JSON; the chat page rendered
+"""First real test: ChatGPT answered Akọwe's editor and whole-book review with UNFENCED JSON; the chat page rendered
 it as Markdown, which strips the backslash from every \\" inside text — so quoted dialogue became ""Say my name…"" and
 every ChatGPT answer was refused (the editor never ran, the review failed with INTERNAL_ERROR). The parser now repairs
 text-quotes as a last resort, and the prompt asks for a ```json block."""
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from bookforge.providers import AutoInjectorAdapter, extract_json_object, repair_json_quotes
+from akowe.providers import AutoInjectorAdapter, extract_json_object, repair_json_quotes
 
 # shapes copied from the real replies (shortened)
 REVIEW = '''ChatGPT said:

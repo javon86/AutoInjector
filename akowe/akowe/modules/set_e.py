@@ -1,6 +1,6 @@
 """Set E handlers: accepted story state and continuity (E01-E12).
 
-All twelve operations share one deterministic engine (bookforge/e_state.py). A record's
+All twelve operations share one deterministic engine (akowe/e_state.py). A record's
 OUTPUT is {entity_id, snapshot, accepted_event_ids, superseded_event_ids, findings,
 affected_refs}; snapshot.facts is the state index and snapshot.links pins the predecessor
 snapshot, checkpoint, baseline and the C event bundles that supplied applied events.
@@ -33,7 +33,7 @@ import copy
 from ..c_events import PROSE_OPS, find_bundles
 from ..canonical import canonical_bytes, sha256_json, sha256_text
 from ..e_state import Projection, event_body, overlaps, same, sort_key
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from . import register
 from .base import Context, OperationHandler, Result
 
@@ -94,7 +94,7 @@ class StateTracker(OperationHandler):
         if field.endswith("_ref"):
             rec = ctx.field_record(field)
             if rec["record_kind"] != "OUTPUT":
-                raise BookforgeError("INVALID_INPUT", f"/payload/{field}", "must pin prose OUTPUT, not an event bundle",
+                raise AkoweError("INVALID_INPUT", f"/payload/{field}", "must pin prose OUTPUT, not an event bundle",
                                      status="REJECTED")
             return rec["record_id"]
         return ctx.payload[field]
@@ -134,7 +134,7 @@ class StateTracker(OperationHandler):
             seen.add((r["record_id"], r["version"]))
             if r["lifecycle"] not in APPROVED:
                 if strict:
-                    raise BookforgeError("APPROVAL_REQUIRED", path, f"baseline {r['module_id']} {r['record_id']} "
+                    raise AkoweError("APPROVAL_REQUIRED", path, f"baseline {r['module_id']} {r['record_id']} "
                                          f"v{r['version']} is {r['lifecycle']}; INITIALIZE needs approved A/B baseline")
                 findings.append(self._f(ctx, "UNAPPROVED_BASELINE", f"{path} is not approved canon; ignored",
                                         "MAJOR", "UNKNOWN", refs=[r["ref"]]))
@@ -256,7 +256,7 @@ class StateTracker(OperationHandler):
     # ---------------------------------------------------------------- CREATE
     def create(self, ctx: Context) -> Result:
         if ctx.manual_candidate is not None:
-            raise BookforgeError("INVALID_INPUT", "/manual_candidate", "E state is computed from accepted events; a "
+            raise AkoweError("INVALID_INPUT", "/manual_candidate", "E state is computed from accepted events; a "
                                  "caller cannot inject a state result", status="REJECTED")
         op, p = ctx.op_id, ctx.payload
         mode = p["mode"]
@@ -266,7 +266,7 @@ class StateTracker(OperationHandler):
         ledger = (ctx.get_state(LEDGER_NS, hkey) or {}).get("events", {})
         cur = ctx.field_record("current_snapshot_ref")
         if cur is not None and (cur["record_kind"] != "OUTPUT" or cur["data"]["entity_id"] != entity):
-            raise BookforgeError("INVALID_INPUT", "/payload/current_snapshot_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/current_snapshot_ref",
                                  f"current snapshot must be a {op} snapshot of {entity}", status="REJECTED")
         findings: list[dict] = []
         links: list[dict] = []
@@ -279,10 +279,10 @@ class StateTracker(OperationHandler):
 
         if mode == "INITIALIZE":
             if head_ref is not None:
-                raise BookforgeError("INVALID_INPUT", "/payload/mode", f"{hkey} already has an accepted head; use "
+                raise AkoweError("INVALID_INPUT", "/payload/mode", f"{hkey} already has an accepted head; use "
                                      "APPLY or REPLAY", status="REJECTED")
             if cur is not None:
-                raise BookforgeError("INVALID_INPUT", "/payload/current_snapshot_ref",
+                raise AkoweError("INVALID_INPUT", "/payload/current_snapshot_ref",
                                      "INITIALIZE starts without a current snapshot", status="REJECTED")
             recs = self.baseline_records(ctx, True, findings)
             baseline_refs = [r["ref"] for r in recs]
@@ -294,10 +294,10 @@ class StateTracker(OperationHandler):
                                         "snapshot", "INFO", "PASS", refs=baseline_refs))
         elif mode in ("APPLY", "REPLAY"):
             if head_ref is None:
-                raise BookforgeError("MISSING_INPUT", "/payload/current_snapshot_ref",
+                raise AkoweError("MISSING_INPUT", "/payload/current_snapshot_ref",
                                      f"{hkey} has no accepted head; INITIALIZE first")
             if cur["ref"] != head_ref:
-                raise BookforgeError("VERSION_CONFLICT", "/payload/current_snapshot_ref",
+                raise AkoweError("VERSION_CONFLICT", "/payload/current_snapshot_ref",
                                      f"stale snapshot {cur['record_id']} v{cur['version']}; the accepted head is "
                                      f"{head_ref['record_id']} v{head_ref['version']}", status="REJECTED")
             links.append(cur["ref"])
@@ -307,12 +307,12 @@ class StateTracker(OperationHandler):
                 start_accepted = list(cur["data"]["accepted_event_ids"])
             else:
                 if "superseded_event_ids" not in p:
-                    raise BookforgeError("MISSING_INPUT", "/payload/superseded_event_ids",
+                    raise AkoweError("MISSING_INPUT", "/payload/superseded_event_ids",
                                          "REPLAY needs superseded_event_ids")
                 accepted_now = cur["data"]["accepted_event_ids"]
                 for i, sid in enumerate(p["superseded_event_ids"]):
                     if sid not in accepted_now:
-                        raise BookforgeError("INVALID_INPUT", f"/payload/superseded_event_ids/{i}",
+                        raise AkoweError("INVALID_INPUT", f"/payload/superseded_event_ids/{i}",
                                              f"{sid} is not an accepted event of the current snapshot",
                                              status="REJECTED")
                 superseded_now = list(p["superseded_event_ids"])
@@ -322,10 +322,10 @@ class StateTracker(OperationHandler):
                     if (chk["record_kind"] != "OUTPUT" or chk["data"]["entity_id"] != entity
                             or chk["lifecycle"] not in APPROVED + ("SUPERSEDED",)
                             or not set(acc) <= set(accepted_now)):
-                        raise BookforgeError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint must be an "
+                        raise AkoweError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint must be an "
                                              f"accepted earlier {op} snapshot of {entity}", status="REJECTED")
                     if set(acc) & set(superseded_now):
-                        raise BookforgeError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint already contains "
+                        raise AkoweError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint already contains "
                                              "a superseded event; choose an earlier checkpoint or the baseline",
                                              status="REJECTED")
                     facts = chk["data"]["snapshot"]["facts"]
@@ -346,12 +346,12 @@ class StateTracker(OperationHandler):
                     if eid in start_accepted or eid in superseded_now:
                         continue
                     if eid not in ledger:
-                        raise BookforgeError("INVALID_INPUT", "/payload/current_snapshot_ref",
+                        raise AkoweError("INVALID_INPUT", "/payload/current_snapshot_ref",
                                              f"accepted event {eid} missing from the {op} ledger")
                     carried.append(ledger[eid])
         else:  # CHECK
             if not p["source_refs"]:
-                raise BookforgeError("MISSING_INPUT", "/payload/source_refs", "CHECK needs pinned manuscript/state/"
+                raise AkoweError("MISSING_INPUT", "/payload/source_refs", "CHECK needs pinned manuscript/state/"
                                      "canon source_refs")
             base = cur
             if base is None and head_ref is not None:
@@ -393,7 +393,7 @@ class StateTracker(OperationHandler):
             body = canonical_bytes(event_body(ev))
             if ev["event_id"] in seen:
                 if seen[ev["event_id"]] != body:
-                    raise BookforgeError("EVENT_CONFLICT", path + "/event_id", "event_id reused with different "
+                    raise AkoweError("EVENT_CONFLICT", path + "/event_id", "event_id reused with different "
                                          "content", status="REJECTED")
                 continue
             seen[ev["event_id"]] = body
@@ -404,7 +404,7 @@ class StateTracker(OperationHandler):
             if ev["event_id"] in known or accepted_before:
                 prior = ledger.get(ev["event_id"])
                 if prior is not None and canonical_bytes(event_body(prior)) != body:
-                    raise BookforgeError("EVENT_CONFLICT", path + "/event_id", f"{ev['event_id']} was accepted with "
+                    raise AkoweError("EVENT_CONFLICT", path + "/event_id", f"{ev['event_id']} was accepted with "
                                          "different content", status="REJECTED")
                 findings.append(self._f(ctx, "DUPLICATE_EVENT", f"{path}: {ev['event_id']} already accepted; "
                                         "applied once", "INFO", "PASS"))
@@ -416,7 +416,7 @@ class StateTracker(OperationHandler):
             seq.append(ev)
             new_ids.append(ev["event_id"])
         if checkpoint_keys and seq and min(sort_key(e) for e in seq) < max(checkpoint_keys):
-            raise BookforgeError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint does not precede the earliest "
+            raise AkoweError("INVALID_INPUT", "/payload/checkpoint_ref", "checkpoint does not precede the earliest "
                                  "affected event; replay from an earlier checkpoint or the baseline", status="REJECTED")
 
         # -- deterministic application
@@ -556,12 +556,12 @@ class StateTracker(OperationHandler):
         base = ctx.base
         derivs = self._derivations(ctx, ctx.payload)
         if not any(d["mode"] in ("APPLY", "REPLAY") and d["current_snapshot_ref"] == base["ref"] for d in derivs):
-            raise BookforgeError("INVALID_INPUT", "/payload", "unexplained state: UPDATE publishes only a CREATE "
+            raise AkoweError("INVALID_INPUT", "/payload", "unexplained state: UPDATE publishes only a CREATE "
                                  "candidate computed from this exact base snapshot", status="REJECTED")
         hkey = f"{ctx.op_id}:{base['data']['entity_id']}"
         head_ref = (ctx.get_state(HEAD_NS, hkey) or {}).get("ref")
         if head_ref != base["ref"]:
-            raise BookforgeError("VERSION_CONFLICT", "/base_ref", "base snapshot is no longer the accepted head",
+            raise AkoweError("VERSION_CONFLICT", "/base_ref", "base snapshot is no longer the accepted head",
                                  status="REJECTED")
         return Result(data=copy.deepcopy(ctx.payload), transform="LOGIC")
 

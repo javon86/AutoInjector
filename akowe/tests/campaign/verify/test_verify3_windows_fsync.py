@@ -12,9 +12,9 @@ import os
 
 import pytest
 
-import bookforge.store as store_mod
-from bookforge.backups import BackupManager
-from bookforge.store import Store, durable_copy, write_private
+import akowe.store as store_mod
+from akowe.backups import BackupManager
+from akowe.store import Store, durable_copy, write_private
 
 
 class WindowsLikeOS:

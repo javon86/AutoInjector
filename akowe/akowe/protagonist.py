@@ -1,12 +1,12 @@
 """Is the book's main character approved canon? (the first real book's "lost protagonist")
 
 The book profile's idea names the main character ("Odile Marsh is the last lamplighter…"), the Bible Builder marks
-one proposed character as main (character sheet role "main"), and a chapter outline BookForge refused names the
+one proposed character as main (character sheet role "main"), and a chapter outline Akọwe refused names the
 viewpoint characters it needed. When one of those has no approved A01 entry, every later step suffers: the outline
 has no POV ID for them, the writer drifts, the editor complains. ``missing`` finds them (deterministic, no AI); the
 Make-a-book run makes them before the outline, and the guided path shows a ⚠️ with a one-click "make it".
 
-Never logs or stores prose: only names (which are already shown on the page) and BookForge's own check messages.
+Never logs or stores prose: only names (which are already shown on the page) and Akọwe's own check messages.
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _subjects(rec: dict) -> set:
 
 
 def _pov_needs(bp) -> list[str]:
-    """Viewpoint subject IDs a chapter outline BookForge refused could not find in the canon (CANON_UNRESOLVED)."""
+    """Viewpoint subject IDs a chapter outline Akọwe refused could not find in the canon (CANON_UNRESOLVED)."""
     out = []
     for r in bp.heads("B11"):
         if r.get("approved_version"):
@@ -104,12 +104,12 @@ def _pov_needs(bp) -> list[str]:
 
 def missing(bp, *, main_names=(), store=None) -> list[dict]:
     """The main characters with no approved A01 entry: [{name, why, draft (an unapproved A01 draft of them, or
-    None), refused (BookForge's last refusal of a set-aside entry of them, or [])}]. Deterministic; never raises."""
+    None), refused (Akọwe's last refusal of a set-aside entry of them, or [])}]. Deterministic; never raises."""
     try:
         return _missing(bp, main_names, store)
     except Exception:  # noqa: BLE001 - a check must never break the page or the run
         import logging  # noqa: PLC0415
-        logging.getLogger("bookforge.protagonist").exception("could not check the main characters")
+        logging.getLogger("akowe.protagonist").exception("could not check the main characters")
         return []
 
 
@@ -164,12 +164,12 @@ def main_note(name: str, why: str) -> str:
 def make_for_book(assist, bp, name, *, max_fixes: int = 2) -> dict:
     """(c) The guided path's one-click "✨ Make <name>": the AI makes the A01 entry of a main character the canon is
     missing, under exactly that name (Bible Builder item: sheet and voice card included), as a DRAFT the author
-    approves. A proposal BookForge's checks refuse is made again with the exact problems (at most ``max_fixes``)."""
+    approves. A proposal Akọwe's checks refuse is made again with the exact problems (at most ``max_fixes``)."""
     from .assist import BibleSession, book_profile_brief  # noqa: PLC0415
-    from .errors import BookforgeError  # noqa: PLC0415
+    from .errors import AkoweError  # noqa: PLC0415
     from .jobs import BUSY_CODES  # noqa: PLC0415
     if not isinstance(name, str) or not name.strip() or len(name) > 120:
-        raise BookforgeError("INVALID_INPUT", "/name", "the character's name: 1 to 120 characters", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/name", "the character's name: 1 to 120 characters", status="REJECTED")
     name = name.strip()
     gap = next((m for m in missing(bp, store=bp.store) if same_person(name, m["name"])), None)
     if gap is None:
@@ -190,7 +190,7 @@ def make_for_book(assist, bp, name, *, max_fixes: int = 2) -> dict:
     it = sess.items[key]
     base = main_note(name, gap["why"])
     if gap.get("refused"):
-        base += " BookForge's checks refused the earlier entry: " + "; ".join(gap["refused"][:6]) + ". Fix exactly these."
+        base += " Akọwe's checks refused the earlier entry: " + "; ".join(gap["refused"][:6]) + ". Fix exactly these."
     note, probs = base, []
     for _n in range(max_fixes + 1):
         sess._generate_item(it, slot, note)
@@ -208,8 +208,8 @@ def make_for_book(assist, bp, name, *, max_fixes: int = 2) -> dict:
                                    "places — the chapter outline can then give them their chapters."}
             e = (out["errors"] or [{}])[0]
             probs = [f"{e.get('code')}: {e.get('message')}"]
-        note = (base + " BookForge's checks refused your previous proposal of this entry: " + "; ".join(probs[:8])
+        note = (base + " Akọwe's checks refused your previous proposal of this entry: " + "; ".join(probs[:8])
                 + ". Return a corrected complete entry that fixes exactly these problems.")
     return {"ok": False, "code": "PROTAGONIST_MISSING", "problems": probs[:6],
-            "message": f"BookForge's checks refused the AI's entry for “{name}” {max_fixes + 1} times. Press the "
+            "message": f"Akọwe's checks refused the AI's entry for “{name}” {max_fixes + 1} times. Press the "
                        "button again, or write the character yourself (Characters and places → ✍️ Write one myself)."}

@@ -1,4 +1,4 @@
-"""Re-running steps and restarting mid-run: pressing a step twice, "Try again" after a refusal, and a BookForge
+"""Re-running steps and restarting mid-run: pressing a step twice, "Try again" after a refusal, and an Akọwe
 restart (crash-consistent copy of the data folder taken while an AI call is in flight) must neither lose nor
 duplicate characters, plans or chapters, and the run must be able to finish."""
 from __future__ import annotations
@@ -9,8 +9,8 @@ import pytest
 
 import flowkit as fk
 from autobook_fake import fact
-from bookforge.book_path import save_profile
-from bookforge.engine import Engine
+from akowe.book_path import save_profile
+from akowe.engine import Engine
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +143,7 @@ def test_approved_steps_are_not_redone_by_their_actions(tmp_path):
 
 # ------------------------------------------------------------------------------------------- "Try again" loops
 def test_refused_outline_is_written_again_by_the_ai_not_resubmitted(tmp_path):
-    """NEW-flow-1: an outline BookForge's checks refuse (5 chapters for a 3-chapter book) is set aside and the AI
+    """NEW-flow-1: an outline Akọwe's checks refuse (5 chapters for a 3-chapter book) is set aside and the AI
     writes it again, told what was refused - the run is not stuck re-submitting the same draft."""
     state = {"n": 0}
 
@@ -198,7 +198,7 @@ def test_canon_step_recovers_when_the_main_character_was_not_saved(tmp_path, mon
 
     def flaky(self, req, principal, manual_candidate=None, **kw):
         if req.get("target_operation") == "A01" and req.get("action") == "CREATE" and state["on"]:
-            # e.g. the database was busy / BookForge stopped right after the place was saved
+            # e.g. the database was busy / Akọwe stopped right after the place was saved
             return {"status": "REJECTED", "errors": [{"code": "VERSION_CONFLICT", "path": "",
                                                       "message": "database is busy"}], "output_refs": []}
         return orig(self, req, principal, manual_candidate=manual_candidate, **kw)
@@ -219,8 +219,8 @@ def test_canon_step_recovers_when_the_main_character_was_not_saved(tmp_path, mon
 
 def test_resume_names_a_book_left_unnamed(tmp_path):
     """NEW-fault-6 (recovery): a book whose profile has its title but whose name is still the placeholder (stopped
-    between the two by an older BookForge) gets its name when the run resumes."""
-    from bookforge.autobook import NEW_BOOK_NAME  # noqa: PLC0415
+    between the two by an older Akọwe) gets its name when the run resumes."""
+    from akowe.autobook import NEW_BOOK_NAME  # noqa: PLC0415
     app = fk.make_app(tmp_path, fake=fk.TraceAI())
     run = fk.run_book(app)
     pid = run["project_id"]
@@ -249,7 +249,7 @@ def test_two_make_a_book_presses_at_once_start_one_run(tmp_path):
     """BF-17: the 'is a run already working?' check and the launch are one step, so two presses at the same moment
     start exactly one run (the other is refused), and the run's services stay with that run's thread."""
     import threading  # noqa: PLC0415
-    from bookforge.errors import BookforgeError  # noqa: PLC0415
+    from akowe.errors import AkoweError  # noqa: PLC0415
     ai = fk.TraceAI()
     ai.gate = threading.Event()
     app = fk.make_app(tmp_path, fake=ai)
@@ -260,7 +260,7 @@ def test_two_make_a_book_presses_at_once_start_one_run(tmp_path):
         barrier.wait()
         try:
             out.append(app.autobook.start("author", {"author_confirms": True})["id"])
-        except BookforgeError as exc:
+        except AkoweError as exc:
             out.append(exc.code)
     threads = [threading.Thread(target=press) for _ in range(4)]
     for t in threads:
@@ -284,8 +284,8 @@ CRASH_POINTS = [("profile", 1), ("sketch", 1), ("canon", 2), ("review", 1), ("B0
 
 @pytest.mark.parametrize("kind,nth", CRASH_POINTS, ids=[f"{k}-{n}" for k, n in CRASH_POINTS])
 def test_restart_while_the_ai_is_answering_then_resume(tmp_path, kind, nth):
-    """Copy the data folder (committed state only) while the nth `kind` AI call is in flight = BookForge stopped
-    there. A new BookForge on that copy shows the run interrupted; Resume finishes the book with nothing lost or
+    """Copy the data folder (committed state only) while the nth `kind` AI call is in flight = Akọwe stopped
+    there. A new Akọwe on that copy shows the run interrupted; Resume finishes the book with nothing lost or
     duplicated."""
     snap = tmp_path / "after-crash"
     seen = {"n": 0}

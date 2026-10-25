@@ -3,7 +3,7 @@
 One row per scene: chapter, scene number, POV (the outline chapter's point-of-view character), place and time, who is
 there, each one's goal, the obstacle and what changes (from the chapter's scene cards, scenes.py), the words of that
 scene on the page and its readability numbers (readability.py, P24: reading level, words per sentence, dialogue share,
-pace), and the problems BookForge already knows about. Built on demand from stored data (nothing is stored, no AI is
+pace), and the problems Akọwe already knows about. Built on demand from stored data (nothing is stored, no AI is
 asked); the browser page sorts and filters the rows, shows them as cards on a phone and prints cleanly.
 
 Where each part comes from:
@@ -36,7 +36,7 @@ from . import pipeline as pipeline_mod
 from . import readability
 from . import scenes as scenes_mod
 
-log = logging.getLogger("bookforge.scene_grid")
+log = logging.getLogger("akowe.scene_grid")
 
 SHORT_SCENE = 150       # words: a scene this short is flagged (readability's "thin scene")
 TEXT_MAX = 240          # characters of a card field on the grid (the full card is on the 🎬 scene page)

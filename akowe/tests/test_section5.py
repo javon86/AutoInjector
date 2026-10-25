@@ -12,14 +12,14 @@ from collections import Counter
 
 import pytest
 
-from bookforge import book_report as br
-from bookforge import compare as cmp_mod
-from bookforge import h_checks as hc
-from bookforge import lengths, long_chapter, pipeline
-from bookforge import providers as prov_mod
-from bookforge.book_path import BookPath, chapter_target, save_profile
-from bookforge.errors import BookforgeError
-from bookforge.server import content_disposition
+from akowe import book_report as br
+from akowe import compare as cmp_mod
+from akowe import h_checks as hc
+from akowe import lengths, long_chapter, pipeline
+from akowe import providers as prov_mod
+from akowe.book_path import BookPath, chapter_target, save_profile
+from akowe.errors import AkoweError
+from akowe.server import content_disposition
 
 from autobook_fake import BookFakeAI
 from test_autobook import make_app as make_one_ai_app
@@ -81,7 +81,7 @@ def test_length_settings_validated_and_scaled(tmp_path):
     s = lengths.settings(app.store)
     assert s["per_call_words"] == 1200 and s["expand_rounds"] == 2 and s["under_share"] == 0.6
     for bad in ({"per_call_words": 50}, {"expand_rounds": 9}, {"under_share": "x"}, {"expand_rounds": 1.5}):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             route(app, "PUT", "/api/settings/length", bad)
         assert x.value.code == "INVALID_INPUT"
     plan = lengths.chapter_plan({"length": "novella"}, None, app.store)
@@ -174,7 +174,7 @@ def test_chapter_far_under_target_is_continued_in_bounded_rounds(tmp_path):
 
 def test_failed_continuation_keeps_the_chapter(tmp_path):
     fake = BookFakeAI()
-    fake.fail_kind("expand", *[BookforgeError("TIMEOUT", "", "slow")] * 3)
+    fake.fail_kind("expand", *[AkoweError("TIMEOUT", "", "slow")] * 3)
     app = make_one_ai_app(tmp_path, fake=fake)
     run = run_book(app, {"length": "short_story"})
     assert run["status"] == "done", run.get("problem")
@@ -240,7 +240,7 @@ def test_pipeline_clean_and_presets():
     assert c["preset"] == "custom" and c["flags"]["editor"] is False and c["flags"]["scenes"] is True
     assert "editor" in pipeline.describe(c).lower()
     for bad in ({"preset": "fast"}, {"flags": {"magic": True}}, {"flags": {"editor": "no"}}, 7):
-        with pytest.raises(BookforgeError):
+        with pytest.raises(AkoweError):
             pipeline.clean(bad)
 
 
@@ -291,14 +291,14 @@ def test_variant_copies_the_profile_and_is_named(tmp_path):
     assert var["status"] == "done", var.get("problem")
     pid2 = var["project_id"]
     assert fake.kinds.count("profile") == n_profile  # the profile was copied, not invented again
-    from bookforge.book_path import get_profile  # noqa: PLC0415
+    from akowe.book_path import get_profile  # noqa: PLC0415
     p1, p2 = get_profile(app.store, pid1), get_profile(app.store, pid2)
     assert p2["title"] == "The Lantern Keeper" and p2["idea"] == p1["idea"] and p2["choices"] == {"ending": "bittersweet"}
     assert app.store.project(pid2)["name"] == "The Lantern Keeper (variant: baseline)"
     assert var["settings"]["variant_of"]["project_id"] == pid1
     shelf = {b["project_id"]: b for b in route(app, "GET", "/api/shelf")[1]["books"]}
     assert shelf[pid2]["variant_of"] == pid1 and shelf[pid2]["pipeline"]["preset"] == "baseline"
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.autobook.start("author", {"author_confirms": True, "variant_of": {"project_id": "nope"}})
     assert x.value.code == "NOT_FOUND"
 
@@ -362,7 +362,7 @@ def test_run_makes_the_report_with_independent_reviewers_only(tmp_path):
     pdf = br.render_pdf(rep)
     doc, issues = hc.pdf_structure(pdf)
     assert doc is not None and not [i for i in issues if i.get("decision") == "FAIL"]
-    assert br.file_name(rep["title"], rep["at"], "pdf") == f"The Keeper of Gullhaven - BookForge report - {rep['at'][:10]}.pdf"
+    assert br.file_name(rep["title"], rep["at"], "pdf") == f"The Keeper of Gullhaven - Akowe report - {rep['at'][:10]}.pdf"
     # shelf lists the report next to the book
     b = next(x for x in route(app, "GET", "/api/shelf")[1]["books"] if x["project_id"] == pid)
     assert b["report"]["id"] == rep["id"] and b["report"]["reviewers"] == 2
@@ -383,7 +383,7 @@ def test_report_without_an_independent_ai_says_so(tmp_path):
 
 def test_report_failure_never_blocks_the_book(tmp_path):
     fake = SlotFake()
-    fake.fail_kind("book_review", BookforgeError("INVALID_INPUT", "", "bad"), BookforgeError("TIMEOUT", "", "slow"))
+    fake.fail_kind("book_review", AkoweError("INVALID_INPUT", "", "bad"), AkoweError("TIMEOUT", "", "slow"))
     app = make_app(tmp_path, fake)
     run = run_book(app, {"slot_id": "AI-1"})
     assert run["status"] == "done"
@@ -415,12 +415,12 @@ def test_ask_other_ais_job_api_and_downloads(tmp_path):
     # downloads
     st, payload = route(app, "GET", f"{base}/{first}", query={"format": ["pdf"], "download": ["1"]})
     assert payload[0] == "__binary__" and payload[1] == "application/pdf" and payload[2][:4] == b"%PDF"
-    assert payload[3].endswith(".pdf") and "BookForge report" in payload[3] and payload[4] == "attachment"
+    assert payload[3].endswith(".pdf") and "Akowe report" in payload[3] and payload[4] == "attachment"
     st, payload = route(app, "GET", f"{base}/{first}", query={"format": ["md"]})
     assert payload[2].decode("utf-8").startswith("# The Keeper of Gullhaven")
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "GET", f"{base}/nope")
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         route(app, "POST", base, {"slots": ["AI-7"]})
     assert x.value.code == "INVALID_INPUT"
     # a new chapter version -> the stored report is for an older version (stale) and a new one is made
@@ -439,8 +439,8 @@ def test_ask_other_ais_job_api_and_downloads(tmp_path):
 
 
 def test_report_file_names_for_any_title():
-    assert br.file_name('A/B: "C"?', "2026-10-24T10:00:00Z", "md") == "A B C - BookForge report - 2026-10-24.md"
-    cd = content_disposition("attachment", "Über – Nacht - BookForge report - 2026-10-24.pdf")
+    assert br.file_name('A/B: "C"?', "2026-10-24T10:00:00Z", "md") == "A B C - Akowe report - 2026-10-24.md"
+    cd = content_disposition("attachment", "Über – Nacht - Akowe report - 2026-10-24.pdf")
     assert cd.startswith('attachment; filename="') and "filename*=UTF-8''%C3%9Cber" in cd
     cd.encode("latin-1")  # the header can always be sent
     assert content_disposition("inline", "plain.md") == 'inline; filename="plain.md"'
@@ -454,7 +454,7 @@ def test_report_http_download_with_unicode_title(server):  # noqa: F811
     pr.health.hold_s = 0.0
     for sid, site in (("AI-1", "claude"), ("AI-2", "chatgpt")):
         pr.configure_slot(sid, {"adapter_id": "autoinjector", "site": site})
-    from bookforge.jobs import RetryPolicy  # noqa: PLC0415
+    from akowe.jobs import RetryPolicy  # noqa: PLC0415
     app.autobook.retry_policy = app.assist.retry_policy = RetryPolicy([0.01], 1)
     app.autobook.probe_timeout_s, app.autobook.probe_poll_s = 1, 0.01
     run = run_book(app, {"slot_id": "AI-1"})
@@ -463,7 +463,7 @@ def test_report_http_download_with_unicode_title(server):  # noqa: F811
     rep = app.reports.make("author", pid, "main", ai=False)
     status, body, resp = call(port, "GET", f"/api/projects/{pid}/branches/main/report/{rep['id']}?format=pdf&download=1")
     assert status == 200 and body[:4] == b"%PDF"
-    assert "filename*=UTF-8''%C3%9Cnder%20the%20L%C3%A4mp%20-%20BookForge%20report" in resp.getheader(
+    assert "filename*=UTF-8''%C3%9Cnder%20the%20L%C3%A4mp%20-%20Akowe%20report" in resp.getheader(
         "Content-Disposition")
 
 
@@ -547,7 +547,7 @@ def test_compare_two_chapter_versions(tmp_path):
                       ({"a": {"project_id": pid}, "b": {"project_id": pid}}, "INVALID_INPUT"),
                       ({"a": {"project_id": "nope"}, "b": {"project_id": pid}}, "NOT_FOUND"),
                       ({"scope": "page", "a": {}, "b": {}}, "INVALID_INPUT")):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             app.compare.start("author", bad)
         assert x.value.code == code
 

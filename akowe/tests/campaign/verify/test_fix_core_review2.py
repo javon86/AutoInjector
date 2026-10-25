@@ -1,4 +1,4 @@
-"""Regression tests for the review2 / acceptance fixes in the BookForge core that the pinned verify tests do not
+"""Regression tests for the review2 / acceptance fixes in the Akọwe core that the pinned verify tests do not
 fully cover: an approved chapter's waiting revision (ACCEPT-4), retitle renames the book (ACCEPT-5), the AI chosen
 for the book (ACCEPT-2, pinned slot not set up / Automatic with roles), stuck AMBIGUOUS cost reservations, advice for
 out-of-date refusals, and a restore of a backup taken while a run was working."""
@@ -13,9 +13,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flow"))
 import flowkit as fk  # noqa: E402
 
-from bookforge import k_runtime as kr  # noqa: E402
-from bookforge.errors import BookforgeError  # noqa: E402
-from bookforge.book_path import refusal_advice, save_profile  # noqa: E402
+from akowe import k_runtime as kr  # noqa: E402
+from akowe.errors import AkoweError  # noqa: E402
+from akowe.book_path import refusal_advice, save_profile  # noqa: E402
 
 CONFIRM = {"author_confirms": True, "confirm": "RESTORE"}
 
@@ -71,7 +71,7 @@ def test_retitle_renames_the_book_and_other_profile_saves_do_not(tmp_path):
     assert app.store.project(pid)["name"] == "My working name"
     save_profile(app.store, pid, {"title": "Second Title"})
     assert app.store.project(pid)["name"] == "Second Title"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         save_profile(app.store, pid, {"title": "   "})  # refused: nothing renamed
     assert app.store.project(pid)["name"] == "Second Title"
 
@@ -114,12 +114,12 @@ def test_ambiguous_reservation_is_released_after_the_bounded_time(tmp_path, monk
     kr.settle(app.store, "author", pid, "main", account_id="acct", period="p",
               reservation_id=res["reservation_id"], actual=0, ambiguous=True)
     # still within the bounded time: the timed-out call may have run, so the cap stays held
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         kr.reserve(app.store, "author", pid, "main", account_id="acct", period="p", job_id="C02:req2:0", amount=80)
     assert exc.value.code == "QUOTA_EXCEEDED"
     later = kr.now() + timedelta(seconds=kr.AMBIGUOUS_RELEASE_SECONDS + 5)
     monkeypatch.setattr(kr, "now", lambda: later)
-    with caplog.at_level("WARNING", logger="bookforge.k_runtime"):
+    with caplog.at_level("WARNING", logger="akowe.k_runtime"):
         res2 = kr.reserve(app.store, "author", pid, "main", account_id="acct", period="p", job_id="C02:req3:0",
                           amount=80)
     assert res2 is not None

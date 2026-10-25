@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from .canonical import sha256_json
-from .errors import BookforgeError
+from .errors import AkoweError
 from .store import new_id, utcnow
 
 NS_JOBS = "K05.jobs"
@@ -28,7 +28,7 @@ NS_K09 = "K09.checkpoints"
 NS_K01 = "K01.project"
 NS_LEDGER = "K12.ledger"
 
-log = logging.getLogger("bookforge.k_runtime")
+log = logging.getLogger("akowe.k_runtime")
 
 LEASE_SECONDS = 60
 # A reservation kept AMBIGUOUS after a timed-out paid call (the provider may or may not have done the work) is
@@ -96,19 +96,19 @@ def check_k09_authorization(store, rec: dict, subject_ref: dict | None, path: st
     """A K09 authorization must be the CURRENT head, APPROVED, unexpired and bind the subject pin."""
     latest = store.get_record(rec["project_id"], rec["branch_id"], rec["record_id"])
     if latest is None or latest["version"] != rec["version"]:
-        raise BookforgeError("APPROVAL_REQUIRED", path, "authorization has a newer revision (revoked/expired?); "
+        raise AkoweError("APPROVAL_REQUIRED", path, "authorization has a newer revision (revoked/expired?); "
                              "pin the current K09 decision")
     data = rec.get("data") or {}
     if data.get("decision") != "APPROVED":
-        raise BookforgeError("APPROVAL_REQUIRED", path, f"authorization decision is {data.get('decision')}")
+        raise AkoweError("APPROVAL_REQUIRED", path, f"authorization decision is {data.get('decision')}")
     if not data.get("expiry") or parse_time(data["expiry"]) <= now():
-        raise BookforgeError("EXPIRED_APPROVAL", path, "authorization has expired")
+        raise AkoweError("EXPIRED_APPROVAL", path, "authorization has expired")
     binding = k09_checkpoint(store, rec["project_id"], rec["branch_id"], rec["record_id"]) or {}
     if subject_ref is not None:
         pins = {(r["record_id"], r["version"], r["content_hash"]) for r in binding.get("impact", {}).get(
             "source_versions", [])}
         if (subject_ref["record_id"], subject_ref["version"], subject_ref["content_hash"]) not in pins:
-            raise BookforgeError("APPROVAL_REQUIRED", path, "authorization does not bind this exact subject revision")
+            raise AkoweError("APPROVAL_REQUIRED", path, "authorization does not bind this exact subject revision")
     return binding
 
 
@@ -121,17 +121,17 @@ def configure_quota(store, principal_id: str, project_id: str, branch_id: str, *
                     limit: int, currency: str) -> dict:
     """Trusted quota configuration (an admin action). Keeps spent/reserved; never lowers below them silently."""
     if not store.has_scope(principal_id, project_id, branch_id, "K12:update"):
-        raise BookforgeError("PERMISSION_DENIED", "", "missing scope K12:update", status="REJECTED")
+        raise AkoweError("PERMISSION_DENIED", "", "missing scope K12:update", status="REJECTED")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
-        raise BookforgeError("INVALID_INPUT", "/limit", "limit is a non-negative integer of minor units",
+        raise AkoweError("INVALID_INPUT", "/limit", "limit is a non-negative integer of minor units",
                              status="REJECTED")
     if not (isinstance(currency, str) and len(currency) == 3 and currency.isupper()):
-        raise BookforgeError("INVALID_INPUT", "/currency", "ISO currency code required", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/currency", "ISO currency code required", status="REJECTED")
     key = ledger_key(account_id, period)
     with store.transaction() as tx:
         cur, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
         if cur and cur["currency"] != currency:
-            raise BookforgeError("INVALID_INPUT", "/currency", "ledger currency cannot change (no conversion)",
+            raise AkoweError("INVALID_INPUT", "/currency", "ledger currency cannot change (no conversion)",
                                  status="REJECTED")
         led = cur or {"account_id": account_id, "period": period, "currency": currency, "spent": 0,
                       "reserved": 0, "reservations": {}}
@@ -166,7 +166,7 @@ def reserve(store, principal_id, project_id, branch_id, *, account_id, period, j
     for this account/period. Raises QUOTA_EXCEEDED (work held, nothing reserved) when the quota is insufficient.
     """
     if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
-        raise BookforgeError("INVALID_INPUT", "/estimated_cost", "estimate is integer minor units", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/estimated_cost", "estimate is integer minor units", status="REJECTED")
     key = ledger_key(account_id, period)
     with store.transaction() as tx:
         led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
@@ -174,12 +174,12 @@ def reserve(store, principal_id, project_id, branch_id, *, account_id, period, j
             return None
         _release_expired(tx, project_id, branch_id, principal_id, key, led)
         if currency is not None and led["currency"] != currency:
-            raise BookforgeError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is in "
-                                 f"{led['currency']} but this work is priced in {currency}; BookForge does not "
+            raise AkoweError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is in "
+                                 f"{led['currency']} but this work is priced in {currency}; Akọwe does not "
                                  "convert currencies, so the work is held")
         if led["spent"] + led["reserved"] + amount > led["limit"]:
             left = max(0, led["limit"] - led["spent"] - led["reserved"])
-            raise BookforgeError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is reached: this "
+            raise AkoweError("QUOTA_EXCEEDED", "", f"the cost cap for {account_id} ({period}) is reached: this "
                                  f"AI call may cost up to {amount} and only {left} of {led['limit']} "
                                  f"{led['currency']} minor units remain. The work is held; raise the cap or wait for "
                                  "the next period, or write this part yourself.",
@@ -198,7 +198,7 @@ def reserve(store, principal_id, project_id, branch_id, *, account_id, period, j
 def _find_reservation(led: dict, reservation_id: str) -> dict:
     res = led["reservations"].get(reservation_id)
     if res is None:
-        raise BookforgeError("NOT_FOUND", "/reservation_id", "unknown reservation", status="REJECTED")
+        raise AkoweError("NOT_FOUND", "/reservation_id", "unknown reservation", status="REJECTED")
     return res
 
 
@@ -211,15 +211,15 @@ def settle(store, principal_id, project_id, branch_id, *, account_id, period, re
     the reservation until the provider status reconciles.
     """
     if not isinstance(actual, int) or isinstance(actual, bool) or actual < 0:
-        raise BookforgeError("INVALID_INPUT", "/actual", "actual usage is integer minor units", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/actual", "actual usage is integer minor units", status="REJECTED")
     key = ledger_key(account_id, period)
     with store.transaction() as tx:
         led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
         if led is None:
-            raise BookforgeError("NOT_FOUND", "/account_id", "quota not configured")
+            raise AkoweError("NOT_FOUND", "/account_id", "quota not configured")
         res = _find_reservation(led, reservation_id)
         if res["state"] not in ("RESERVED", "AMBIGUOUS"):
-            raise BookforgeError("VERSION_CONFLICT", "/reservation_id", f"reservation already {res['state']}",
+            raise AkoweError("VERSION_CONFLICT", "/reservation_id", f"reservation already {res['state']}",
                                  status="REJECTED")
         if ambiguous:
             res["state"] = "AMBIGUOUS"
@@ -285,10 +285,10 @@ def release_ambiguous(store, principal_id, project_id, branch_id, *, account_id,
     with store.transaction() as tx:
         led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
         if led is None:
-            raise BookforgeError("NOT_FOUND", "/account_id", "quota not configured")
+            raise AkoweError("NOT_FOUND", "/account_id", "quota not configured")
         res = _find_reservation(led, reservation_id)
         if res["state"] != "AMBIGUOUS":
-            raise BookforgeError("VERSION_CONFLICT", "/reservation_id", f"reservation is {res['state']}",
+            raise AkoweError("VERSION_CONFLICT", "/reservation_id", f"reservation is {res['state']}",
                                  status="REJECTED")
         _release(led, reservation_id, res, reason)
         tx.put_state(project_id, branch_id, NS_LEDGER, key, led, expected_revision=rev)
@@ -304,10 +304,10 @@ def cancel_reservation(store, principal_id, project_id, branch_id, *, account_id
     with store.transaction() as tx:
         led, rev = tx_read_state(tx, project_id, branch_id, NS_LEDGER, key)
         if led is None:
-            raise BookforgeError("NOT_FOUND", "/account_id", "quota not configured")
+            raise AkoweError("NOT_FOUND", "/account_id", "quota not configured")
         res = _find_reservation(led, reservation_id)
         if res["state"] != "RESERVED":
-            raise BookforgeError("VERSION_CONFLICT", "/reservation_id", f"reservation is {res['state']}",
+            raise AkoweError("VERSION_CONFLICT", "/reservation_id", f"reservation is {res['state']}",
                                  status="REJECTED")
         led["reserved"] -= res["amount"]
         led["spent"] += spent

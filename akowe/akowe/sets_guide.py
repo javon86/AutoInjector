@@ -2,7 +2,7 @@
 
 One table (SET_GUIDE) holds what each set is for, where it fits in the build order, which sets it
 depends on, the order its operations are normally worked through, and a few featured actions
-written from the set's "Set rules" in package/Specifications/Bookforge_Set_<X>_Final.md.
+written from the set's "Set rules" in package/Specifications/Akowe_Set_<X>_Final.md.
 
 Featured action types (the browser decides how to present them; nothing here runs anything):
   make  - "✨ Make some for me": ask an AI slot for proposals of ``op`` (Set A through the Bible

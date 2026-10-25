@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "export"))
 from bf_export_helpers import build_all, epub_blocks, docx_blocks, have_epubcheck, run_epubcheck  # noqa: E402
 
-from bookforge.exporters.images import load_image  # noqa: E402
+from akowe.exporters.images import load_image  # noqa: E402
 
 PIL = pytest.importorskip("PIL.Image")
 
@@ -56,7 +56,7 @@ def test_epubcheck_rich_book(tmp_path):
 
 
 def test_own_checks_pass_on_rich_book():
-    from bookforge import h_checks
+    from akowe import h_checks
     from bf_export_helpers import PAGE
     images = _imgs()
     placements = [{"anchor_id": "ch1-p1", "placement_id": "fig-1", "key": "pic1", "width_mm": 80, "height_mm": 60,

@@ -19,11 +19,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from bookforge import providers as prov_mod
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
-from bookforge.jobs import RetryPolicy
-from bookforge.server import App
+from akowe import providers as prov_mod
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
+from akowe.jobs import RetryPolicy
+from akowe.server import App
 
 from autobook_fake import BookFakeAI
 from test_autoinjector_adapter import B01_OUT, BRIDGE_TOKEN, FakeBridge
@@ -90,7 +90,7 @@ class SlotFake(BookFakeAI):
         if st != "ok" or sid in self.hidden:
             with self.lock:
                 self.per_slot.append((sid, "fail"))
-            exc = BookforgeError("UPSTREAM_UNAVAILABLE", "", f"{sid} is not ready")
+            exc = AkoweError("UPSTREAM_UNAVAILABLE", "", f"{sid} is not ready")
             if sid not in self.hidden:
                 exc.site_state, exc.site_problem = st, self.problems.get(sid)
             raise exc
@@ -182,7 +182,7 @@ def test_all_slots_repairing_waits_then_continues(tmp_path):
     fake.states = {"AI-1": "repairing"}
     app = make_app(tmp_path, fake, slots=("AI-1",))
     pr = app.engine.providers
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         pr.generate(SimpleNamespace(project_id="p", branch_id=None, op_id="B01",
                                     request={"request_id": "r1", "deadline": None}),
                     task="t", output_schema={"type": "object"}, context={}, capability="text", protected_facts=[])
@@ -205,7 +205,7 @@ def test_probe_before_run_shows_working_and_repairing_ais(tmp_path):
     fake = SlotFake()
     fake.states = {"AI-1": "unknown", "AI-2": "unknown", "AI-3": "unknown"}
     fake.after_probe = {"AI-1": "ok", "AI-2": "needs_user", "AI-3": "repairing"}
-    fake.after_probe_later = {"AI-3": "ok"}  # AI-3's repair finishes while BookForge waits for the check-in
+    fake.after_probe_later = {"AI-3": "ok"}  # AI-3's repair finishes while Akọwe waits for the check-in
     fake.problems = {"AI-2": "LOGGED_OUT", "AI-3": "NO_REPLY_FOUND"}
     app = make_app(tmp_path, fake)
     seen = []
@@ -298,7 +298,7 @@ def test_reviewer_is_a_different_slot_with_two_and_three_ais(tmp_path):
     ref4 = _draft_b01(app2, pid2)
     out = app2.review.review_sync("author", pid2, "main", ref4["record_id"])["review"]
     assert out["slot"] == "AI-2" and out["independent"]
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app2.review.save_reviewer_settings({"slot": "AI-9"})
 
 
@@ -330,7 +330,7 @@ def test_single_ai_reviews_itself_with_warning_everywhere(tmp_path):
     # the run summary at the end says it, and so does the journal
     assert any(e["kind"] == "note" and "AI review(s) were made by the AI that wrote" in e["message"]
                for e in run["events"])
-    from bookforge import journal
+    from akowe import journal
     j = journal.build(app, run["project_id"], "main")
     assert j["reviews"]["same_ai"] >= 1 and j["reviews"]["warning"]
     assert any(e.get("warning") for e in j["entries"] if e["kind"] == "ai_review")
@@ -361,7 +361,7 @@ def test_fix_moves_to_a_third_ai_when_the_writer_is_broken(tmp_path):
     rv = app.review.review_sync("author", pid, "main", ref["record_id"])["review"]
     assert rv["verdict"] == "REVISE" and rv["slot"] == "AI-2"
     fake.states["AI-1"] = "repairing"
-    from bookforge.review import ReviewJob
+    from akowe.review import ReviewJob
     job = ReviewJob("fix", "author", pid, "main", [ref["record_id"]], None)
     job.started = time.time()
     app.review._run_fix(job)
@@ -595,7 +595,7 @@ def test_states_and_reviewer_settings_endpoints(server):  # noqa: F811
 
 # ============================================================================================ cross-process
 def test_real_node_bridge_v12_states_probe_failover_and_recovery(h, tmp_path):
-    """Real BookForge -> real bookforge-bridge.js (desktop-app fake host with --site-state, contract v1.2)."""
+    """Real Akọwe -> real akowe-bridge.js (desktop-app fake host with --site-state, contract v1.2)."""
     import os
     import shutil
     import signal

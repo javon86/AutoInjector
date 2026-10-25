@@ -192,7 +192,7 @@ def build_epub(book: dict, *, modified: str, toc_entries: list[dict] | None = No
            f"<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" "
            f"xml:lang={quoteattr(lang)}>\n",
            "<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n",
-           f"<dc:identifier id=\"bookid\">{escape(meta.get('identifier', 'urn:bookforge:unknown'))}</dc:identifier>\n",
+           f"<dc:identifier id=\"bookid\">{escape(meta.get('identifier', 'urn:akowe:unknown'))}</dc:identifier>\n",
            f"<dc:title>{escape(meta.get('title', 'Untitled'))}</dc:title>\n",
            f"<dc:language>{escape(lang)}</dc:language>\n"]
     if meta.get("author"):

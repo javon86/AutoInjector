@@ -1,5 +1,5 @@
 """ACCEPT-1 (found by the acceptance run, desktop-app/test/verify-acceptance.test.js): after the author changes the
-book's title, BookForge marks the format out of date and offers "Make the format again" + "Export my book again".
+book's title, Akọwe marks the format out of date and offers "Make the format again" + "Export my book again".
 Following exactly those steps gives files whose METADATA carry the new title but whose visible TITLE PAGE (the first
 page of the PDF, the title-page section of the EPUB, the Title paragraph of the DOCX) still prints the OLD title:
 the title page is made by G08 (front matter, from the format metadata) during "Put the book together", and that step
@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flow"))
 import flowkit as fk  # noqa: E402
 
-from bookforge.book_path import save_profile  # noqa: E402
+from akowe.book_path import save_profile  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

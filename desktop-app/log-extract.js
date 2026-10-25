@@ -7,22 +7,23 @@
  * that says exactly what is in the file, and redacts secrets and private paths.
  *
  * Three scopes:
- *   book       "This BookForge book only": only AI replies the BookForge bridge
- *              owned for requests made while that book was BookForge's current
+ *   book       "This Akọwe book only": only AI replies the Akọwe bridge
+ *              owned for requests made while that book was Akọwe's current
  *              project, the activity events of those requests (by request_id /
- *              [MSG #] number) and other bookforge-* events inside the book's run
+ *              [MSG #] number) and other akowe-* events inside the book's run
  *              window(s), and the Relay Trace for those [MSG #] numbers.
  *   time       a from/to range (presets: last hour, today, last 24 h).
  *   everything the whole history (the dialog warns: includes all conversations,
  *              including older private ones).
  *
- * The book tracker (createBookTracker) remembers, per BookForge project
+ * The book tracker (createBookTracker) remembers, per Akọwe project
  * ({id, title} from POST /v1/status), which bridge request_ids happened while it
  * was current, when, on which AI, and their [MSG #] numbers. It holds NO prompt
  * or reply text and is persisted as a small JSON file next to the app state.
  */
 const fs = require('fs');
 const path = require('path');
+const legacy = require('./akowe-legacy'); // logs written before the rename BookForge -> Akọwe hold "bookforge-*" events
 
 const HOUR = 60 * 60 * 1000;
 const RUN_GAP_MS = 30 * 60 * 1000;      // a pause longer than this starts a new run window
@@ -95,7 +96,7 @@ function createBookTracker(opts) {
     if (title) p.title = title;
     return p;
   }
-  // BookForge said which book it is working on (POST /v1/status -> project).
+  // Akọwe said which book it is working on (POST /v1/status -> project).
   function noteStatus(project, at) {
     if (!project || typeof project !== 'object') return;
     const id = str(project.id, 100);
@@ -184,11 +185,11 @@ function createBookTracker(opts) {
     const requestIds = new Set(Object.keys(p.requests));
     const seqs = new Set();
     for (const r of Object.values(p.requests)) for (const s of r.seqs) seqs.add(s);
-    return { id: p.id, title: p.title || (p.id === UNKNOWN_PROJECT ? 'BookForge book (no title reported)' : p.id), requestIds, seqs, windows: windows(id), firstAt: p.firstAt, lastAt: p.lastAt };
+    return { id: p.id, title: p.title || (p.id === UNKNOWN_PROJECT ? 'Akọwe book (no title reported)' : p.id), requestIds, seqs, windows: windows(id), firstAt: p.firstAt, lastAt: p.lastAt };
   }
   function books() {
     return Object.values(data.projects)
-      .map((p) => ({ id: p.id, title: p.title || (p.id === UNKNOWN_PROJECT ? 'BookForge book (no title reported)' : p.id), requests: Object.keys(p.requests).length, firstAt: p.firstAt, lastAt: p.lastAt, current: !!(data.current && data.current.id === p.id) }))
+      .map((p) => ({ id: p.id, title: p.title || (p.id === UNKNOWN_PROJECT ? 'Akọwe book (no title reported)' : p.id), requests: Object.keys(p.requests).length, firstAt: p.firstAt, lastAt: p.lastAt, current: !!(data.current && data.current.id === p.id) }))
       .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
   }
   function current() { return data.current ? Object.assign({}, data.current) : null; }
@@ -207,7 +208,7 @@ function presetRange(preset, now) {
   if (preset === 'day') return { from: t - 24 * HOUR, to: t, label: 'the last 24 hours' };
   return null;
 }
-// The safe one-click default: the BookForge book when one is known (BookForge is
+// The safe one-click default: the Akọwe book when one is known (Akọwe is
 // connected, or the book was active in the last 24 h); otherwise the last 24 hours.
 // Never "everything".
 function defaultScope({ connected, books, now } = {}) {
@@ -243,7 +244,7 @@ function selectEntries({ scope, from, to, book, transcript, log }) {
     const rid = d && typeof d.request_id === 'string' ? d.request_id : null;
     if (rid) return book.requestIds.has(rid);
     if (d && d.seq != null && book.seqs.has(String(d.seq))) return true;
-    return typeof e.kind === 'string' && e.kind.startsWith('bookforge-') && Number.isFinite(e.ts) && inWindows(e.ts, wins);
+    return legacy.isAkoweEventKind(e.kind) && Number.isFinite(e.ts) && inWindows(e.ts, wins);
   };
   const first = wins.length ? wins[0][0] : null;
   const last = wins.length ? wins[wins.length - 1][1] : null;
@@ -336,7 +337,7 @@ function stamp(d) {
   return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}_${p(x.getHours())}-${p(x.getMinutes())}-${p(x.getSeconds())}`;
 }
 function scopeLabel(sel) {
-  if (sel.scope === 'book') return `This BookForge book only — "${sel.book ? sel.book.title : '?'}"`;
+  if (sel.scope === 'book') return `This Akọwe book only — "${sel.book ? sel.book.title : '?'}"`;
   if (sel.scope === 'time') return `Time range — ${sel.rangeLabel || `${fmtTs(sel.from)} to ${fmtTs(sel.to)}`}`;
   return 'Everything — includes all conversations, including older private ones';
 }
@@ -385,7 +386,7 @@ function buildExtract(p) {
   }
 
   const L = [];
-  L.push(`AutoInjector — Extract (${scope === 'book' ? 'this BookForge book only' : scope === 'time' ? 'time range' : 'EVERYTHING'})`);
+  L.push(`AutoInjector — Extract (${scope === 'book' ? 'this Akọwe book only' : scope === 'time' ? 'time range' : 'EVERYTHING'})`);
   L.push(`Generated: ${fmtTs(now)}`);
   if (p.buildLine) L.push(String(p.buildLine));
   L.push('');
@@ -393,11 +394,11 @@ function buildExtract(p) {
   L.push(`  Scope:            ${scopeLabel(info)}`);
   if (scope === 'book') {
     const wins = (p.book && p.book.windows) || [];
-    L.push(`  Book:             "${p.book ? p.book.title : '?'}"${p.book && p.book.id ? ` (BookForge project ${p.book.id})` : ''}`);
-    L.push(`  Time range:       ${wins.length ? `${fmtTs(sel.from)} to ${fmtTs(sel.to)}` : '(no BookForge requests recorded for this book)'}`);
+    L.push(`  Book:             "${p.book ? p.book.title : '?'}"${p.book && p.book.id ? ` (Akọwe project ${p.book.id})` : ''}`);
+    L.push(`  Time range:       ${wins.length ? `${fmtTs(sel.from)} to ${fmtTs(sel.to)}` : '(no Akọwe requests recorded for this book)'}`);
     L.push(`  Run windows:      ${wins.length ? wins.map(([a, b]) => `${fmtTs(a)} – ${fmtTs(b)}`).join('; ') : 'none'}`);
-    { const n = p.book ? p.book.requestIds.size : 0; L.push(`  Requests:         ${n} BookForge request${n === 1 ? '' : 's'} for this book`); }
-    L.push('  Included only:    the AIs\' replies to BookForge\'s requests for this book, those requests\' activity events and Relay Trace lines, and BookForge bridge events inside the run windows. Your own conversations with the AIs are NOT included.');
+    { const n = p.book ? p.book.requestIds.size : 0; L.push(`  Requests:         ${n} Akọwe request${n === 1 ? '' : 's'} for this book`); }
+    L.push('  Included only:    the AIs\' replies to Akọwe\'s requests for this book, those requests\' activity events and Relay Trace lines, and Akọwe bridge events inside the run windows. Your own conversations with the AIs are NOT included.');
   } else if (scope === 'time') {
     L.push(`  Time range:       ${fmtTs(sel.from)} to ${fmtTs(sel.to)} (${rangeLabel})`);
   } else {
@@ -418,7 +419,7 @@ function buildExtract(p) {
   else for (const t of sel.turns) {
     const who = t.label || (t.site ? label(t.site) : 'AI');
     const tags = [];
-    if (t.bf && t.bf.requestId) tags.push(`BookForge request ${t.bf.requestId}`);
+    if (t.bf && t.bf.requestId) tags.push(`Akọwe request ${t.bf.requestId}`);
     if (t.roundtableTag) tags.push(`TO:${t.roundtableTag}`);
     if (t.isRateLimited) tags.push('RATE-LIMITED');
     if (t.isVerdict) tags.push('VERDICT');

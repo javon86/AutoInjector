@@ -72,7 +72,7 @@ export async function viewContinuity(main, x) {
       !r.tracked ? h('span', { class: 'muted' }, 'Not tracked yet') :
         r.state_approved ? h('span', null, '✔ approved', (p || q).approved && (p || q).approved.how === 'run_consent' ? ' (Make-a-book consent)' : ' (by you)') : h('span', { class: 'words-warn' }, '⚠️ not approved yet — the writer does not use it'),
       stale ? h('span', { class: 'words-warn' }, ' · ⚠️ the chapter changed since it was tracked') : null,
-      p && p.made_by ? h('span', { class: 'muted' }, ` · read by ${p.made_by.ai ? 'an AI' : p.made_by.kind === 'author' ? 'you' : 'BookForge (no AI)'}`) : null));
+      p && p.made_by ? h('span', { class: 'muted' }, ` · read by ${p.made_by.ai ? 'an AI' : p.made_by.kind === 'author' ? 'you' : 'Akọwe (no AI)'}`) : null));
     if (p && (p.scenes || []).length) card.appendChild(h('div', null, h('h4', null, '🌊 Physical state'), h('ul', { class: 'small' }, p.scenes.map(sceneLine))));
     if (q && (q.scenes || []).length) card.appendChild(h('div', null, h('h4', null, '🫀 Characters'), h('ul', { class: 'small' }, q.scenes.map(peopleLine))));
     else if (r.tracked) card.appendChild(h('p', { class: 'small muted' }, '🫀 No character state: it needs an AI (or your own values).'));
@@ -88,7 +88,7 @@ export async function viewContinuity(main, x) {
   }
   function checksCard() {
     const all = [...(info.checks.physical || []), ...(info.checks.characters || [])];
-    return h('section', { class: 'card', 'data-testid': 'cont-checks' }, h('h2', null, '🔎 Questions from BookForge’s checks'),
+    return h('section', { class: 'card', 'data-testid': 'cont-checks' }, h('h2', null, '🔎 Questions from Akọwe’s checks'),
       all.length ? h('ul', { class: 'small' }, all.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '• ', p.number ? `Chapter ${p.number}${p.scene ? `, scene ${p.scene}` : ''}: ` : '', p.message)))
         : h('p', { class: 'small muted' }, 'No questions: counts go one way, the clock does not run backwards, every hazard matters later and every main character acts for their own goal.'));
   }

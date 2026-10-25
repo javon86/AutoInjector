@@ -13,12 +13,12 @@ import time
 
 import pytest
 
-from bookforge import editor as ed_mod
-from bookforge import editor_rubric, journal, planned as planned_mod, prose_audit, story_choices, story_rules
-from bookforge import texture as texture_mod
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
-from bookforge.review import ReviewJob
+from akowe import editor as ed_mod
+from akowe import editor_rubric, journal, planned as planned_mod, prose_audit, story_choices, story_rules
+from akowe import texture as texture_mod
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
+from akowe.review import ReviewJob
 
 from autobook_fake import RULES, TEXTURE
 from test_failover_review import SlotFake, make_app, no_provider_sleep, run_book  # noqa: F401
@@ -71,7 +71,7 @@ def test_choices_clean_matrix_brief_rules_and_relax():
     assert story_choices.clean(None) == {} and story_choices.clean({"ending": "", "pace": "ai"}) == {}
     for bad, path in (({"ending": "happy"}, "/choices/ending"), ({"matrix": {"guilt": "gone"}}, "/choices/matrix/guilt"),
                       ({"matrix": {"nope": "x"}}, "/choices/matrix/nope"), ("open", "/choices")):
-        with pytest.raises(BookforgeError) as e:
+        with pytest.raises(AkoweError) as e:
             story_choices.clean(bad)
         assert e.value.code == "INVALID_INPUT" and e.value.errors[0]["path"] == path
     ch = story_choices.clean({"ending": "bittersweet", "explain": "leave", "matrix": {"guilt": "displaced"}})
@@ -224,7 +224,7 @@ def test_make_a_book_end_to_end_with_rules_texture_planned_and_choices(tmp_path)
     _sys, sctx = fake.prompts["scenes"][0]
     assert sctx["world_texture"] and "context.world_texture" in _sys and "Peril level real" in _sys
     bp = BookPath(app.engine, "author", pid, "main")
-    from bookforge import scenes as scenes_mod
+    from akowe import scenes as scenes_mod
     card = scenes_mod.get_entry(app.store, pid, "main", bp.outline()["record_id"], "ch1")["cards"][0]
     tex = {i["id"]: i for i in texture_mod.get_entry(app.store, pid, "main")["items"]}
     assert card["texture"] and card["obstacle"] == tex[card["texture"][0]]["detail"]
@@ -277,11 +277,11 @@ def test_planned_missing_is_flagged_and_never_blocks(tmp_path):
     assert "⚠️" in steps(run)["planned"]["message"]
     # the checker failing never blocks the book either; a TIMEOUT pauses the step
     fake2 = SlotFake()
-    fake2.kind_failures["planned"] = [BookforgeError("INTERNAL_ERROR", "", "garbage")] * 3
+    fake2.kind_failures["planned"] = [AkoweError("INTERNAL_ERROR", "", "garbage")] * 3
     app2, fake2, run2 = book(tmp_path, fake2, name="d2")
     assert any(e.get("code") == "PLANNED_CHECK_FAILED" for e in run2["events"])
     fake3 = SlotFake()
-    fake3.kind_failures["planned"] = [BookforgeError("TIMEOUT", "", "slow")]
+    fake3.kind_failures["planned"] = [AkoweError("TIMEOUT", "", "slow")]
     app3 = make_app(tmp_path, fake3, slots=("AI-1", "AI-2"), name="d3")
     app3.review.editor.save_settings({"enabled": False})
     run3 = run_book(app3, {"slot_id": "AI-1"})
@@ -294,8 +294,8 @@ def test_planned_missing_is_flagged_and_never_blocks(tmp_path):
 
 def test_world_failures_never_block_the_book(tmp_path):
     fake = SlotFake()
-    fake.kind_failures["rules"] = [BookforgeError("INTERNAL_ERROR", "", "no")]
-    fake.kind_failures["texture"] = [BookforgeError("INTERNAL_ERROR", "", "no")]
+    fake.kind_failures["rules"] = [AkoweError("INTERNAL_ERROR", "", "no")]
+    fake.kind_failures["texture"] = [AkoweError("INTERNAL_ERROR", "", "no")]
     app, fake, run = book(tmp_path, fake)
     codes = {e.get("code") for e in run["events"]}
     assert {"RULES_FAILED", "TEXTURE_FAILED"} <= codes
@@ -305,7 +305,7 @@ def test_world_failures_never_block_the_book(tmp_path):
 
 
 def test_old_runs_get_the_section_4_steps():
-    from bookforge.autobook import STEP_IDS, AutoBookService
+    from akowe.autobook import STEP_IDS, AutoBookService
     run = {"steps": [{"id": s, "state": "done"} for s in ("backup", "profile", "canon", "characters", "premise")]}
     AutoBookService._ensure_steps(run)
     assert [s["id"] for s in run["steps"]] == STEP_IDS
@@ -327,12 +327,12 @@ def test_rules_author_edits_ai_proposals_and_decisions(tmp_path):
     out = rv.save_rules("author", pid, "main", {"rules": rules, "version": e["version"]})
     assert out["entry"]["version"] == e["version"] + 1 and out["entry"]["made_by"]["kind"] == "author"
     assert any(p["code"] == "UNBOUNDED_EXCEPTION" for p in out["lint"])
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rv.save_rules("author", pid, "main", {"rules": rules, "version": e["version"]})
     assert x.value.code == "VERSION_CONFLICT"
     for body, path in (({"rules": "x"}, "/rules"), ({"rules": [{"category": "x", "text": "y"}]}, "/rules/0/category"),
                        ({"rules": [{"category": "belief", "text": " "}]}, "/rules/0/text")):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             rv.save_rules("author", pid, "main", body)
         assert x.value.code == "INVALID_INPUT" and x.value.errors[0]["path"] == path
     # ✨ suggest updates: stored as proposals, nothing changes until the author decides
@@ -341,7 +341,7 @@ def test_rules_author_edits_ai_proposals_and_decisions(tmp_path):
     e2 = story_rules.get_entry(app.store, pid, "main")
     props = e2["proposals"]["items"]
     assert e2["version"] == out["entry"]["version"] and {p["action"] for p in props} >= {"add", "retire"}
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rv.decide_rule_proposals("author", pid, "main", {"accept": []})
     assert x.value.code == "APPROVAL_REQUIRED"
     first = props[0]["id"]
@@ -351,7 +351,7 @@ def test_rules_author_edits_ai_proposals_and_decisions(tmp_path):
     assert outbox(app, pid, "rules.proposals_decided")[-1] == {"version": d["entry"]["version"], "accepted": 1,
                                                                "rejected": len(props) - 1, "how": "author",
                                                                "run_id": None}
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rv.decide_rule_proposals("author", pid, "main", {"author_confirms": True})
     assert x.value.code == "INVALID_INPUT"
     # texture: author edit with a version check; ✨ again with AI
@@ -360,7 +360,7 @@ def test_rules_author_edits_ai_proposals_and_decisions(tmp_path):
                                                   "sells bait and gossip", "causes": "cost", "words": "bait"}],
                                                   "version": t["version"]})
     assert len(out["entry"]["items"]) == 3 and out["entry"]["items"][2]["words"] == ["bait"]
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rv.save_texture("author", pid, "main", {"items": [], "version": out["entry"]["version"]})
     assert x.value.code == "INVALID_INPUT"
     j = wait_job(app, rv.start_world_ai("author", pid, "main", "texture", {}))
@@ -452,7 +452,7 @@ def test_planned_missing_fix_with_ai_then_resolved(tmp_path):
     # the book-level list follows the approved text (the new version waits for approval)
     bk = rv.planned_book("author", pid, "main")
     assert bk["counts"]["chapters"] == 3 and isinstance(bk["missing"], list)
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rv.planned_info("author", pid, "main", "nope")
     assert x.value.code == "NOT_FOUND"
 
@@ -462,7 +462,7 @@ def test_planned_missing_fix_with_ai_then_resolved(tmp_path):
 def served(tmp_path):
     import threading
     from http.server import ThreadingHTTPServer
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     app, fake, run = book(tmp_path)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

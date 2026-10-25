@@ -6,7 +6,7 @@ prose, A canon or E state (Shared Contract sections 4 and 10).
 Anchored patch convention (all F operations)
 --------------------------------------------
 * Every finding cites exact evidence spans {record_ref, span_id, start, end, text_hash} with
-  Unicode code-point offsets into the pinned C prose record's data.text (bookforge/spans.py).
+  Unicode code-point offsets into the pinned C prose record's data.text (akowe/spans.py).
 * A textual patch has path "/text", target_ref = the exact manuscript pin, replacement = the new
   text for its anchor, and patch_id = the span_id of exactly one evidence span in the same
   record (the anchor). approval_ref names the authority under which the proposal is made: an
@@ -36,7 +36,7 @@ import re
 import statistics
 import unicodedata
 
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from ..j_approvals import APPROVAL_MODULES, approval_problem, check_approval
 from ..spans import (TEXT_PATH, anchored_patches, find_overlaps, make_span, occurrences, record_text, reanchor,
                      verify_span)
@@ -197,14 +197,14 @@ class FHandler(OperationHandler):
     def manuscript(self, ctx: Context) -> dict:
         ms = ctx.field_record("manuscript_ref")
         if ms is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/manuscript_ref", "manuscript_ref is required")
+            raise AkoweError("MISSING_INPUT", "/payload/manuscript_ref", "manuscript_ref is required")
         if ms["module_id"] not in PROSE_MODULES:
-            raise BookforgeError("INVALID_INPUT", "/payload/manuscript_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/payload/manuscript_ref/module_id",
                                  "manuscript_ref must pin C-owned prose; F proposals are never manuscripts",
                                  status="REJECTED")
         record_text(ms)
         if not is_current(ms):
-            raise BookforgeError("VERSION_CONFLICT", "/payload/manuscript_ref",
+            raise AkoweError("VERSION_CONFLICT", "/payload/manuscript_ref",
                                  f"manuscript {ms['record_id']} v{ms['version']} is stale "
                                  f"(head v{ms['approved_version'] or ms['latest_version']}); review the current "
                                  "revision", status="REJECTED")
@@ -313,9 +313,9 @@ class FHandler(OperationHandler):
         try:
             out, resource = ctx.ai_generate(task=task, output_schema=AI_ITEM_SCHEMA, context=context,
                                             protected_facts=terms)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "CAPABILITY_UNAVAILABLE":
-                raise BookforgeError("CAPABILITY_UNAVAILABLE", "/payload",
+                raise AkoweError("CAPABILITY_UNAVAILABLE", "/payload",
                                      f"{ctx.op_id} needs an AI slot for semantic review; configure AI-1..AI-3 or "
                                      "supply a manual candidate", unresolved=[f"{ctx.op_id}:manual_candidate"]) from exc
             raise
@@ -384,7 +384,7 @@ class FHandler(OperationHandler):
 
         def bad(code, msg, sev="BLOCKING"):
             if strict:
-                raise BookforgeError(code, "/manual_candidate" if ctx.manual_candidate is not None else "/payload",
+                raise AkoweError(code, "/manual_candidate" if ctx.manual_candidate is not None else "/payload",
                                      msg, status="REJECTED")
             out.append(ctx.finding(code, msg, severity=sev, decision="FAIL"))
 
@@ -397,7 +397,7 @@ class FHandler(OperationHandler):
             if key not in texts:
                 rec = ctx.engine.resolve_ref(ref, ctx.project_id, ctx.branch_id, "/record_ref")
                 if rec["module_id"] not in PROSE_MODULES:
-                    raise BookforgeError("INVALID_INPUT", "/record_ref", "evidence must cite C prose",
+                    raise AkoweError("INVALID_INPUT", "/record_ref", "evidence must cite C prose",
                                          status="REJECTED")
                 texts[key] = record_text(rec)
             return texts[key]
@@ -406,7 +406,7 @@ class FHandler(OperationHandler):
             for ev in f["evidence"]:
                 try:
                     reason = verify_span(text_of(ev["record_ref"]), ev)
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     reason = exc.errors[0]["message"]
                 if reason:
                     bad("HASH_MISMATCH", f"finding {f['id']} span {ev['span_id']}: {reason}")
@@ -425,11 +425,11 @@ class FHandler(OperationHandler):
                     prob = approval_problem(appr)
                     if prob:
                         bad(prob[0], f"patch {p['patch_id']}: {prob[1]}")
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 bad(exc.code, f"patch {p['patch_id']} approval_ref: {exc.errors[0]['message']}")
         try:
             pairs = anchored_patches(data)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             bad(exc.code, exc.errors[0]["message"])
             pairs = []
         overl = find_overlaps([(p["patch_id"], ev["start"], ev["end"]) for p, ev in pairs])
@@ -438,7 +438,7 @@ class FHandler(OperationHandler):
         for p, ev in pairs:
             try:
                 text = text_of(ev["record_ref"])
-            except BookforgeError:
+            except AkoweError:
                 continue
             if verify_span(text, ev):
                 continue
@@ -463,7 +463,7 @@ class FHandler(OperationHandler):
             return []
         try:
             rec = ctx.engine.resolve_ref(ref, ctx.project_id, ctx.branch_id, "/protected_ref")
-        except BookforgeError:
+        except AkoweError:
             return []
         return self.protected_terms(ctx, rec)
 
@@ -474,7 +474,7 @@ class FHandler(OperationHandler):
         terms = self._stored_terms(ctx, st)
         try:
             findings = self.check_output(ctx, data, None, terms, strict=False)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding(exc.code, exc.errors[0]["message"], severity="BLOCKING", decision="FAIL")]
         findings += self.check_currency(ctx, data)
         return findings
@@ -484,7 +484,7 @@ class FHandler(OperationHandler):
         out = []
         try:
             pairs = anchored_patches(data)
-        except BookforgeError:
+        except AkoweError:
             return out
         for p, ev in pairs:
             tgt = ctx.store.get_record(ctx.project_id, ctx.branch_id, p["target_ref"]["record_id"],
@@ -498,7 +498,7 @@ class FHandler(OperationHandler):
                                        f"is now v{head['version']}; anchor re-located at [{moved['start']},"
                                        f"{moved['end']}) - submit an UPDATE against the new pin",
                                        severity="BLOCKING", decision="FAIL"))
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 out.append(ctx.finding(exc.code if exc.code == "SPAN_CONFLICT" else "VERSION_CONFLICT",
                                        f"patch {p['patch_id']}: {exc.errors[0]['message']}", severity="BLOCKING",
                                        decision="FAIL"))
@@ -536,7 +536,7 @@ class FHandler(OperationHandler):
             existing = json.loads(row["value"])["claims"] if row else []
             conflicts = self._conflicts(existing, mine, record["record_id"])
             if conflicts:
-                raise BookforgeError("PATCH_OVERLAP", "/payload/candidate_ref",
+                raise AkoweError("PATCH_OVERLAP", "/payload/candidate_ref",
                                      f"concurrent accepted proposal overlaps: {conflicts[0]}", status="REJECTED")
             merged = [c for c in existing if c["owner"] != record["record_id"]] + mine
             tx.put_state(ctx.project_id, ctx.branch_id, CLAIMS_NS, key, {"claims": merged},
@@ -582,10 +582,10 @@ class TransitionEditor(FHandler):
     def precheck(self, ctx: Context, ms: dict) -> None:
         pos = ctx.payload["chapter_position"]
         if pos in ("first", "only") and "previous_chapter_ref" in ctx.payload:
-            raise BookforgeError("INVALID_INPUT", "/payload/previous_chapter_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/previous_chapter_ref",
                                  f"chapter_position {pos} has no previous chapter", status="REJECTED")
         if pos in ("last", "only") and "next_chapter_ref" in ctx.payload:
-            raise BookforgeError("INVALID_INPUT", "/payload/next_chapter_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/next_chapter_ref",
                                  f"chapter_position {pos} has no next chapter", status="REJECTED")
 
 
@@ -600,7 +600,7 @@ class LineEditor(FHandler):
 
     def precheck(self, ctx: Context, ms: dict) -> None:
         if ctx.payload.get("meaning_preservation") is not True:
-            raise BookforgeError("INVALID_INPUT", "/payload/meaning_preservation", "line edits must preserve meaning",
+            raise AkoweError("INVALID_INPUT", "/payload/meaning_preservation", "line edits must preserve meaning",
                                  status="REJECTED")
 
 
@@ -620,21 +620,21 @@ class FinalPolish(FHandler):
     def precheck(self, ctx: Context, ms: dict) -> None:
         appr_ms = ctx.field_record("approved_manuscript_ref")
         if appr_ms["lifecycle"] not in ("APPROVED", "LOCKED") or appr_ms["version"] != appr_ms["approved_version"]:
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approved_manuscript_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/approved_manuscript_ref",
                                  "final polish needs the approved manuscript head", unresolved=["C:accept"])
         if (ms["record_id"], ms["version"]) != (appr_ms["record_id"], appr_ms["version"]):
-            raise BookforgeError("VERSION_CONFLICT", "/payload/manuscript_ref",
+            raise AkoweError("VERSION_CONFLICT", "/payload/manuscript_ref",
                                  "manuscript_ref must pin the approved manuscript revision", status="REJECTED")
         canon = ctx.field_record("locked_canon_ref")
         if canon["lifecycle"] not in ("APPROVED", "LOCKED") or canon.get("stale"):
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/locked_canon_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/locked_canon_ref",
                                  "final polish needs approved/locked canon", unresolved=["A:accept"])
         blockers = ctx.field_record("unresolved_blockers")
         open_ = [f for f in list(blockers.get("findings") or []) + list((blockers.get("data") or {}).get("findings")
                                                                         or [])
                  if isinstance(f, dict) and f.get("severity") == "BLOCKING" and f.get("decision") in ("FAIL", "UNKNOWN")]
         if open_ or blockers.get("stale"):
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/unresolved_blockers",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/unresolved_blockers",
                                  f"{len(open_)} unresolved blocking finding(s) remain"
                                  + ("; blocker report is stale" if blockers.get("stale") else ""),
                                  unresolved=[f"{blockers['module_id']}:resolve_blockers"])

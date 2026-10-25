@@ -1,5 +1,5 @@
 """📖 P23 Beta reader: an AI reads the finished book as a member of its target audience and marks where it got
-confused, bored, or guessed a twist too early — each mark with a quote BookForge checks against the book.
+confused, bored, or guessed a twist too early — each mark with a quote Akọwe checks against the book.
 
 Who reads: the persona comes from the book profile (its audience — matched like readability.py: children, middle
 grade, young adult, adult — plus genre and tone): "a typical reader of this book who reads for pleasure, not an
@@ -14,7 +14,7 @@ the story rules or the scene cards (a beta reader must not know the twists in ad
 What it returns (``SCHEMA``): ``reactions`` (chapter, kind — confused / bored / guessed / hooked / moved / doubted —
 a quote and a note), ``interest`` per chapter (1-10 and "would keep reading"), ``guesses`` (what it guessed in which
 chapter, where the book revealed it, whether it came true), ``stop`` (would it finish the book; where it would stop
-and why) and a summary. BookForge cleans it: every quote is checked against the whole book (``verified``) and against
+and why) and a summary. Akọwe cleans it: every quote is checked against the whole book (``verified``) and against
 the chapter it names (``in_chapter``); chapters out of range are dropped. Then it derives findings without AI: the
 chapters with confusion, flat stretches (two or more chapters in a row at interest ≤ 5, or bored marks), twists
 guessed before their reveal, where the reader would stop, and quotes that are not in the book.
@@ -36,10 +36,10 @@ from . import book_report as br
 from . import readability
 from .assist import Cancelled, Job
 from .book_path import BookPath, get_profile
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import now_iso
 
-log = logging.getLogger("bookforge.beta_reader")
+log = logging.getLogger("akowe.beta_reader")
 
 KEY = "beta_reads:{pid}:{branch}"
 MAX_READS = 5
@@ -278,7 +278,7 @@ class BetaReaderService:
         if slot:
             want = [o for o in opts if o["slot_id"] == slot]
             if not want:
-                raise BookforgeError("INVALID_INPUT", "/slot_id", "choose an AI slot that is set up", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/slot_id", "choose an AI slot that is set up", status="REJECTED")
             return want[0]
         return next((o for o in opts if o["working"] and o["independent"]), None) or \
             next((o for o in opts if o["working"]), None)
@@ -292,7 +292,7 @@ class BetaReaderService:
         bp = BookPath(review.engine, principal, pid, branch)
         chapters = br.book_chapters(bp)
         if not chapters:
-            raise BookforgeError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
         prof = get_profile(self.store, pid)
         who = persona(prof)
         reader = self.pick(principal, pid, branch, chapters, slot)
@@ -320,7 +320,7 @@ class BetaReaderService:
                                   context=ctx, protected=[])
         except Cancelled:
             raise
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             out.update(status="failed", error=exc.code, message=_clip(e.get("message"), 200))
             self._save(pid, branch, out)
@@ -329,7 +329,7 @@ class BetaReaderService:
             if getattr(exc, "control", False):
                 raise
             log.error("beta read by %s failed: %s", reader["slot_id"], type(exc).__name__)
-            out.update(status="failed", error="INTERNAL_ERROR", message="BookForge hit an unexpected problem")
+            out.update(status="failed", error="INTERNAL_ERROR", message="Akọwe hit an unexpected problem")
             self._save(pid, branch, out)
             return out
         out.update(clean(raw, chapters), model=job.model, seconds=round(time.monotonic() - t0, 1))
@@ -351,18 +351,18 @@ class BetaReaderService:
         slot = AssistService._check_slot(slot)
         bp = BookPath(self.app.engine, principal, pid, branch)
         if not br.book_chapters(bp):
-            raise BookforgeError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/book", "this book has no written chapters yet", status="REJECTED")
         with self._lock:
             for j in self._jobs.values():
                 if j["project_id"] == pid and j["status"] in ("queued", "running"):
-                    raise BookforgeError("VERSION_CONFLICT", "/beta", "a beta reader is reading this book; wait for "
+                    raise AkoweError("VERSION_CONFLICT", "/beta", "a beta reader is reading this book; wait for "
                                          "it to finish", status="REJECTED")
             job = {"id": f"beta-job-{uuid.uuid4().hex[:12]}", "kind": "beta_read", "status": "queued",
                    "phase": "Starting", "principal": principal, "project_id": pid, "branch_id": branch,
                    "created_at": now_iso(), "read_id": None, "error": None, "slot": slot, "resume": None}
             self._jobs[job["id"]] = job
         self._persist(job)
-        threading.Thread(target=self._thread, args=(job,), name="bookforge-beta", daemon=True).start()
+        threading.Thread(target=self._thread, args=(job,), name="akowe-beta", daemon=True).start()
         return self.public(job)
 
     @staticmethod
@@ -378,7 +378,7 @@ class BetaReaderService:
     def job(self, principal, job_id) -> dict:
         j = self._jobs.get(job_id) or self.app.jobstore.get(job_id)
         if not j or j.get("principal") not in (None, principal) or j.get("kind") != "beta_read":
-            raise BookforgeError("NOT_FOUND", "/job_id", "this beta-reader job is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/job_id", "this beta-reader job is not known", status="REJECTED")
         return self.public(j)
 
     def _thread(self, job):
@@ -391,13 +391,13 @@ class BetaReaderService:
             else:
                 job.update(status="error", phase="Failed", read_id=r["id"],
                            error={"code": r.get("error") or "INTERNAL_ERROR", "message": r.get("message")})
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             job.update(status="error", phase="Failed", error={"code": exc.code, "message": e.get("message")})
         except Exception as exc:  # noqa: BLE001
             log.error("beta-reader job %s failed: %s", job["id"], type(exc).__name__)
             job.update(status="error", phase="Failed", error={"code": "INTERNAL_ERROR",
-                                                              "message": "BookForge hit an unexpected problem"})
+                                                              "message": "Akọwe hit an unexpected problem"})
         finally:
             job["finished_at"] = now_iso()
             self._persist(job)
@@ -439,7 +439,7 @@ def route(app, method: str, rest: list, body, principal: str, pid: str, branch: 
         return 202, svc.start(principal, pid, branch, body)
     if len(rest) == 3 and rest[1] == "job" and method == "GET":
         return 200, svc.job(principal, rest[2])
-    raise BookforgeError("NOT_FOUND", "/beta", "no such endpoint", status="REJECTED")
+    raise AkoweError("NOT_FOUND", "/beta", "no such endpoint", status="REJECTED")
 
 
 # ====================================================================== the Make-a-book step
@@ -459,7 +459,7 @@ def run_step(runner, run: dict, st: dict, control=()) -> None:
         if getattr(exc, "control", False):
             raise
         log.exception("beta read failed in run %s", run["id"])
-        code = exc.code if isinstance(exc, BookforgeError) else type(exc).__name__
+        code = exc.code if isinstance(exc, AkoweError) else type(exc).__name__
         st["message"] = f"⚠️ The beta reader could not read the book ({code}); ask one on the 📊 report page"
         runner.event(run, "note", st["message"], step="beta", code="BETA_FAILED")
         return

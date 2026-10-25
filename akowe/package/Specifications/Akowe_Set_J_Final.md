@@ -1,4 +1,4 @@
-# Bookforge Set J - Canon Refinement Reconciliation
+# Akọwe Set J - Canon Refinement Reconciliation
 Revision BF-CLOSURE-1.1 | 11 operations | independent module
 
 This is the current specification. Historical source/addenda are not active instructions. Use Shared_Contract.md for wire formats, lifecycle, ownership, permissions, failures and record storage.

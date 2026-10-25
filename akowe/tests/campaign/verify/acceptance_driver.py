@@ -1,5 +1,5 @@
-"""Author driver for desktop-app/test/verify-acceptance.test.js: a person using the BookForge web UI (Playwright,
-Chromium) while BookForge talks to the AIs through the REAL AutoInjector bridge.
+"""Author driver for desktop-app/test/verify-acceptance.test.js: a person using the Akọwe web UI (Playwright,
+Chromium) while Akọwe talks to the AIs through the REAL AutoInjector bridge.
 
 ACCEPT_INFO (json from the harness): bf_url, token, control (harness control server), shots.
 Phases (each timed): 0 pair through #/pair · 1 wizard + guided path + downloads + file checks · 2 ⚡ Make a book for me
@@ -24,7 +24,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
-from bookforge.exporters.book import parse_chapter  # noqa: E402
+from akowe.exporters.book import parse_chapter  # noqa: E402
 
 INFO = json.loads(os.environ["ACCEPT_INFO"])
 SHOTS = Path(INFO["shots"])
@@ -120,7 +120,7 @@ def next_steps(page, pid, limit=40, label=""):
     for _ in range(limit):
         ui, ab = book_top(page), api_book(pid)
         if (ui[0], ui[1], ui[2]) != ab[:3]:
-            check(f"agree{label}", False, f"page says {ui[:3]}, BookForge says {ab[:3]}")
+            check(f"agree{label}", False, f"page says {ui[:3]}, Akọwe says {ab[:3]}")
             break
         if ui[3] or not ui[2]:
             break
@@ -236,7 +236,7 @@ def main():
         dialogs = []
         page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
 
-        with Phase("0 · pair BookForge with AutoInjector (#/pair)"):
+        with Phase("0 · pair Akọwe with AutoInjector (#/pair)"):
             page.goto(INFO["bf_url"] + "#token=" + INFO["token"])
             page.wait_for_selector("#main h1")
             link = ctl("/connect")["link"]
@@ -443,7 +443,7 @@ def main():
         browser.close()
 
     rep = ctl("/status")
-    print(f"\nAutoInjector: phase={rep['status']['connect']['phase']} · posts {json.dumps(rep['dumps'])} · BookForge prompts {rep['hook']['bf']}")
+    print(f"\nAutoInjector: phase={rep['status']['connect']['phase']} · posts {json.dumps(rep['dumps'])} · Akọwe prompts {rep['hook']['bf']}")
     print("Timings: " + " · ".join(f"{n.split(' · ')[0]} {s:.0f}s" for n, s in TIMES))
     print(f"\n{len(FAILS)} check(s) failed: {', '.join(FAILS)}" if FAILS else "\nall checks passed")
     return len(FAILS)

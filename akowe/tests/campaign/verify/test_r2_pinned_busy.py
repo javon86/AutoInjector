@@ -15,9 +15,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flow"))
 import flowkit as fk  # noqa: E402
 
-from bookforge.autobook import StepProblem  # noqa: E402
-from bookforge.book_path import save_profile  # noqa: E402
-from bookforge.errors import BookforgeError  # noqa: E402
+from akowe.autobook import StepProblem  # noqa: E402
+from akowe.book_path import save_profile  # noqa: E402
+from akowe.errors import AkoweError  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +43,7 @@ def test_pinned_busy_slot_waits_instead_of_saying_no_ai(tmp_path):
         outcome = "made"
     except StepProblem as exc:
         outcome = exc.problem.get("code") if hasattr(exc, "problem") else str(exc)
-    except BookforgeError as exc:
+    except AkoweError as exc:
         outcome = exc.code  # a busy code after the (fast) retry budget = it waited, as for an unpinned book
     finally:
         with prov._lock:

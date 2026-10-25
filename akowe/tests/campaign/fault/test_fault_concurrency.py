@@ -12,11 +12,11 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from bookforge import providers as prov_mod
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
-from bookforge.jobs import RetryPolicy
-from bookforge.server import App, make_handler
+from akowe import providers as prov_mod
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
+from akowe.jobs import RetryPolicy
+from akowe.server import App, make_handler
 
 from autobook_fake import BookFakeAI
 from fault_helpers import TOKEN, call, check_store
@@ -219,7 +219,7 @@ def test_export_while_a_chapter_is_being_edited_uses_the_approved_text(tmp_path)
     errors = []
 
     def editor():
-        from bookforge.requests import build_request
+        from akowe.requests import build_request
         base = first
         while not stop.is_set():
             r = app.engine.dispatch(build_request(project_id=pid, branch_id="main", op_id="C02", action="UPDATE",
@@ -252,7 +252,7 @@ def test_restore_is_refused_while_a_manual_export_is_running(tmp_path, monkeypat
     empty = app.backups.backup("manual")  # before any book exists
     run = made_book(app)
     pid = run["project_id"]
-    from bookforge.modules import set_g
+    from akowe.modules import set_g
     started, release = threading.Event(), threading.Event()
     real = set_g.render_pdf
 
@@ -268,7 +268,7 @@ def test_restore_is_refused_while_a_manual_export_is_running(tmp_path, monkeypat
     refused = None
     try:
         app.backups.restore(empty["name"], CONFIRM)
-    except BookforgeError as exc:
+    except AkoweError as exc:
         refused = exc.code
     finally:
         release.set()
@@ -285,7 +285,7 @@ def test_restore_is_refused_while_make_a_book_runs(tmp_path):
     app.engine.providers.test_adapter.gate = threading.Event()
     r = app.autobook.start("author", {"author_confirms": True})
     try:
-        with pytest.raises(BookforgeError) as ei:
+        with pytest.raises(AkoweError) as ei:
             app.backups.restore(b["name"], CONFIRM)
         assert ei.value.code == "VERSION_CONFLICT"
     finally:

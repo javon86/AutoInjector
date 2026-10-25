@@ -19,7 +19,7 @@ from bf_export_helpers import (EPUBCHECK_JAR, docx_blocks, epub_blocks, epubchec
                                nows, pdf_pages_text, run_epubcheck)
 from conftest import PRINCIPAL, Harness, errors_of
 from test_set_g import Book, fixture_asset, png_bytes, set_release_profiles
-from bookforge import h_checks as hc
+from akowe import h_checks as hc
 
 CH_A = ("# The Harbour\n" + "\n".join(f"Line {i}: the tide came in over the stones — “slowly,” she said — & the "
                                       f"gulls <wheeled> above the café roofs." for i in range(60))
@@ -84,8 +84,8 @@ def full_chain(h, texts=(CH_A, CH_B, CH_C), *, art=False, cover=False):
 @pytest.fixture(scope="module")
 def chain(tmp_path_factory, contracts):
     """One full chain (art + cover + matter) shared by the read-only checks of this module."""
-    from bookforge.engine import Engine
-    from bookforge.store import Store
+    from akowe.engine import Engine
+    from akowe.store import Store
     tmp = tmp_path_factory.mktemp("chain")
     store = Store(tmp / "data")
     eng = Engine(store, contracts)
@@ -103,7 +103,7 @@ def chain_epubcheck(chain, tmp_path_factory):
 
 
 def chapter_paragraphs(texts):
-    from bookforge.exporters.book import parse_chapter
+    from akowe.exporters.book import parse_chapter
     out = []
     for i, t in enumerate(texts):
         _, blocks = parse_chapter(f"c{i}", t)
@@ -251,7 +251,7 @@ def test_exports_with_art_and_matter_are_byte_identical_on_rerun(chain):
 
 
 def test_shelf_fingerprints_match_files_and_detect_tampering(h):
-    from bookforge.shelf import finished_books
+    from akowe.shelf import finished_books
     b, out = full_chain(h)
     exports = {"MANUSCRIPT_PDF": {"descriptor": out["G11"][0]["output_refs"][0]},
                "EPUB_REFLOWABLE": {"descriptor": out["G12"][0]["output_refs"][0]},

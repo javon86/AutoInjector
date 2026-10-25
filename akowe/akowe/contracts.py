@@ -1,7 +1,7 @@
 """Loads the delivered contract package (schemas, registries, cases) offline.
 
 The package ships as package/contracts.zip (Contracts/ + Acceptance_Cases/ from the
-BookForge Final Build Plan). Schemas are parsed lazily per operation because the full
+Akọwe Final Build Plan). Schemas are parsed lazily per operation because the full
 set is ~70 MB of JSON. The bootstrap kernel loads these files before any I/K job runs.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError, validators
 
-from . import CONTRACT_VERSION
+from . import CONTRACT_VERSION, legacy
 from .canonical import json_pointer, sha256_bytes
 from .errors import error
 
@@ -43,15 +43,15 @@ def _min_length_not_blank(validator, min_length, instance, schema):
 
 # Marks a text alternative of a value union (oneOf/anyOf, e.g. a patch's replacement value): there a
 # space is content (a patch replacing two spaces by one), not a blank answer, so the blank rule skips it.
-BLANK_OK = "x-bookforge-blank-ok"
+BLANK_OK = "x-akowe-blank-ok"
 
 
 def _same_dialect(schema, _top=True):
-    """Prepare a loaded schema for BookforgeValidator (once, at load).
+    """Prepare a loaded schema for AkoweValidator (once, at load).
 
     * Drop nested "$schema": "<2020-12>" markers (the package embeds shared schemas whole). They
       change nothing about the meaning, but jsonschema switches to its stock validator class at such
-      a subschema, which would skip BookforgeValidator's own rules inside embedded references.
+      a subschema, which would skip AkoweValidator's own rules inside embedded references.
     * Mark the string alternatives of value unions with BLANK_OK (see above).
     """
     if isinstance(schema, dict):
@@ -70,16 +70,16 @@ def _same_dialect(schema, _top=True):
 
 
 # The validator class every contract check uses (Draft 2020-12 + the blank-text rule above).
-BookforgeValidator = validators.extend(Draft202012Validator, {"minLength": _min_length_not_blank})
+AkoweValidator = validators.extend(Draft202012Validator, {"minLength": _min_length_not_blank})
 
 
 class ContractPackage:
     def __init__(self, zip_path: str | os.PathLike | None = None):
-        self.zip_path = Path(zip_path or os.environ.get("BOOKFORGE_CONTRACTS_ZIP") or DEFAULT_ZIP)
+        self.zip_path = Path(zip_path or legacy.env("CONTRACTS_ZIP") or DEFAULT_ZIP)
         if not self.zip_path.exists():
             raise FileNotFoundError(
                 f"Contract package not found at {self.zip_path}. "
-                "Set BOOKFORGE_CONTRACTS_ZIP or restore bookforge/package/contracts.zip.")
+                "Set AKOWE_CONTRACTS_ZIP or restore akowe/package/contracts.zip.")
         self._zip = zipfile.ZipFile(self.zip_path)
         self._lock = threading.Lock()
         self.package_sha256 = sha256_bytes(self.zip_path.read_bytes())
@@ -126,7 +126,7 @@ class ContractPackage:
     def validator(self, op_id: str, name: str) -> Draft202012Validator:
         full = dict(self.schema(op_id))
         full["$ref"] = f"#/$defs/{name}"
-        return BookforgeValidator(full, format_checker=FormatChecker())
+        return AkoweValidator(full, format_checker=FormatChecker())
 
     @lru_cache(maxsize=64)
     def shared_schema(self, name: str) -> dict:
@@ -134,7 +134,7 @@ class ContractPackage:
 
     @lru_cache(maxsize=64)
     def shared_validator(self, name: str) -> Draft202012Validator:
-        return BookforgeValidator(self.shared_schema(name), format_checker=FormatChecker())
+        return AkoweValidator(self.shared_schema(name), format_checker=FormatChecker())
 
     def cases(self, op_id: str) -> list:
         return self._json(f"Acceptance_Cases/{op_id}.cases.json")
@@ -223,4 +223,4 @@ def get_package() -> ContractPackage:
         return _PACKAGE
 
 
-__all__ = ["ContractPackage", "BookforgeValidator", "get_package", "schema_errors", "ACTIONS", "SETS", "CONTRACT_VERSION"]
+__all__ = ["ContractPackage", "AkoweValidator", "get_package", "schema_errors", "ACTIONS", "SETS", "CONTRACT_VERSION"]

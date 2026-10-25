@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from bookforge import i_maintenance as im
-from bookforge import k_runtime as kr
-from bookforge.store import CrashInjected, Store
+from akowe import i_maintenance as im
+from akowe import k_runtime as kr
+from akowe.store import CrashInjected, Store
 
 from conftest import PRINCIPAL, errors_of
 
@@ -79,7 +79,7 @@ def test_i03_registry_rules(h):
     assert errors_of(h.create("I03", {"producer": "Z99", "consumer": "B01", "contract_version": "BF-IRB-1.0.0",
                                       "output_type": "x", "dependency_predicate": {
                                           "stage": "CREATE", "kind": "HARD", "feature": None, "paths": []}}))
-    from bookforge.modules.set_i import registry_revision
+    from akowe.modules.set_i import registry_revision
     assert registry_revision(h.store, h.project_id, "main") == 1
 
 
@@ -214,7 +214,7 @@ def test_i07_protected_first_and_budget(h):
     assert h.create("I10", {"candidate_ref": locked, "decision": "LOCK", "approver_id": PRINCIPAL, "reason": "canon",
                             "authorization_ref": None})["status"] == "DRAFT"
     locked = h.record(locked)["ref"]
-    from bookforge.modules.set_i import record_tokens
+    from akowe.modules.set_i import record_tokens
     need = record_tokens(h.record(req)) + record_tokens(h.record(locked))
     r = h.create("I07", {"task_ref": task, "token_budget": need + record_tokens(h.record(rel)),
                          "required_facts": [req], "retrieval_refs": [irr, rel, locked]})
@@ -441,9 +441,9 @@ def test_migration_rehearsal_isolated_and_promoted(h, tmp_path, monkeypatch):
     assert json.loads(pointer.read_text())["data_dir"] == rep["root"]
     # original is unchanged
     assert h.store.query_one("SELECT value FROM meta WHERE key='schema_version'")["value"] == "1"
-    # A Store refuses a database from a newer schema (NEW-fault-13); the BookForge that ships migration m-0002
+    # A Store refuses a database from a newer schema (NEW-fault-13); the Akọwe that ships migration m-0002
     # understands version 2, so open the promoted root as that version.
-    import bookforge.store as store_mod
+    import akowe.store as store_mod
     with pytest.raises(Exception):
         Store(rep["root"])
     monkeypatch.setattr(store_mod, "SCHEMA_VERSION", 2)

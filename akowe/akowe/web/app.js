@@ -1,4 +1,4 @@
-// Bookforge browser workspace. Vanilla ES module, no network access beyond this local server.
+// Akọwe browser workspace. Vanilla ES module, no network access beyond this local server.
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
@@ -137,13 +137,13 @@ function humanize(key) {
  * "🔧 Details" is switched on (html.show-tech, remembered in this browser) — for power users.
  */
 const PLAIN_EXEC = {
-  LOGIC: 'BookForge does it (no AI)',
+  LOGIC: 'Akọwe does it (no AI)',
   HYBRID: 'Your AI drafts it, or you write it yourself',
   AI: 'Your AI drafts it (you can also write it yourself)',
-  'LOGIC/HYBRID': 'BookForge does it, with your AI or you filling in the creative parts',
+  'LOGIC/HYBRID': 'Akọwe does it, with your AI or you filling in the creative parts',
   'AI/HYBRID': 'Your AI drafts it, or you write it yourself',
 };
-function plainExecution(ex) { return PLAIN_EXEC[ex] || 'BookForge does it'; }
+function plainExecution(ex) { return PLAIN_EXEC[ex] || 'Akọwe does it'; }
 /** One-line hints for the fields authors meet most; others get a hint from their name and kind (fieldHint). */
 const FIELD_HINT = {
   concept: 'Who or what this is, in a sentence or two (a name and a short description is enough).',
@@ -276,8 +276,8 @@ const PLAIN_ERR = {
   TIMEOUT: 'This took too long. Try again.',
   QUOTA_EXCEEDED: 'The AI is over its limit right now. Try again later.',
   UPSTREAM_UNAVAILABLE: 'The AI did not answer. Try again in a moment.',
-  UNSUPPORTED_CONTRACT: 'This version of BookForge does not understand that request.',
-  INTERNAL_ERROR: 'BookForge hit an unexpected problem. Try again; if it keeps happening, use 📋 Copy diagnostics.',
+  UNSUPPORTED_CONTRACT: 'This version of Akọwe does not understand that request.',
+  INTERNAL_ERROR: 'Akọwe hit an unexpected problem. Try again; if it keeps happening, use 📋 Copy diagnostics.',
 };
 /** Plain words for an error from the server (client-side form errors are already plain and kept as they are). */
 /** A backup whose files Windows would not flush to disk: it reads back right, but a power cut could still lose it. */
@@ -390,8 +390,8 @@ async function api(method, path, opts = {}) {
       credentials: 'same-origin' });
   } catch (e) {
     if (e && e.name === 'AbortError') throw e;
-    noteClientError('NETWORK', `${method} ${path.split('?')[0]}`, 'BookForge did not answer');
-    throw new NetworkError('Could not reach the Bookforge server. Check that it is still running, then retry.');
+    noteClientError('NETWORK', `${method} ${path.split('?')[0]}`, 'Akọwe did not answer');
+    throw new NetworkError('Could not reach the Akọwe server. Check that it is still running, then retry.');
   }
   if (res.status === 401) { showAuthProblem('The access token was missing or not accepted.'); throw new ApiError(401, null); }
   if (opts.blob) {
@@ -446,12 +446,12 @@ function showAuthProblem(detail) {
   clear($('#context-bar'));
   const main = clear($('#main'));
   main.appendChild(h('section', { class: 'state failed', 'aria-labelledby': 'auth-h' },
-    h('h1', { id: 'auth-h' }, 'Open Bookforge from its start link'),
+    h('h1', { id: 'auth-h' }, 'Open Akọwe from its start link'),
     h('p', null, detail || 'This page has no access token.'),
-    h('p', null, 'For privacy, the workspace only answers requests that carry the private token created when Bookforge starts. ' +
-      'Open the full link printed in the Bookforge console window or launcher (it looks like ',
+    h('p', null, 'For privacy, the workspace only answers requests that carry the private token created when Akọwe starts. ' +
+      'Open the full link printed in the Akọwe console window or launcher (it looks like ',
     h('code', null, 'http://127.0.0.1:8780/#token=…'), ').'),
-    h('p', null, 'The token is kept only for this browser tab. If you opened a new tab or restarted Bookforge, use the link again.')));
+    h('p', null, 'The token is kept only for this browser tab. If you opened a new tab or restarted Akọwe, use the link again.')));
   main.focus();
 }
 
@@ -617,7 +617,7 @@ async function route() {
     const here = parts[0] === 'p' && parts[3] === 'op' ? `${parts[1]}|${parts[2]}|${parts[4]}` : null;
     for (const [key, p] of AP.panels) if (key !== here && !p.min) p.setMin(true);
     const h1 = main.querySelector('h1');
-    document.title = h1 ? `${h1.textContent} – Bookforge` : 'Bookforge';
+    document.title = h1 ? `${h1.textContent} – Akọwe` : 'Akọwe';
     if (!main.contains(document.activeElement) || document.activeElement === document.body) main.focus({ preventScroll: true });
     window.scrollTo(0, 0);
     if (S.pendingFocus === 'new') {
@@ -876,7 +876,7 @@ function deleteBook(p) {
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Delete a book' }))); go2.disabled = false; }
     } },
     h('div', { class: 'state blocked' }, h('h3', null, `⚠️ This deletes “${p.name}” and everything in it`),
-      h('p', null, 'The book disappears from BookForge. A safety backup is made first and kept (it is never rotated out); restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
+      h('p', null, 'The book disappears from Akọwe. A safety backup is made first and kept (it is never rotated out); restoring that backup brings the book back. To only hide a book, use 🗄 Archive instead.')),
     h('div', { class: 'field' }, h('label', { for: word.id }, 'Type the book\'s name to confirm'), word),
     out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
   });
@@ -933,7 +933,7 @@ async function viewOverview(main) {
   main.appendChild(h('div', { class: 'page-head' },
     h('div', null, crumbs(['Your books', '#/'], p.name), h('h1', null, p.name)),
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'primary', 'aria-haspopup': 'dialog', onclick: ev => openJump(ev.currentTarget) }, '🔍 Jump to…'),
-      h('a', { class: 'btn', href: plink('manifest'), title: 'The feature manifest: which parts of BookForge this book uses' }, '🎛️ Book features'),
+      h('a', { class: 'btn', href: plink('manifest'), title: 'The feature manifest: which parts of Akọwe this book uses' }, '🎛️ Book features'),
       h('a', { class: 'btn', href: plink('progress') }, 'Progress'))));
   main.appendChild(h('div', { class: 'task-slot', 'data-where': 'page' }, taskCard('page')));
   const next = h('div');
@@ -1726,7 +1726,7 @@ function buildEnum(schema, value, ptr, label, required, ctx) {
 function buildConst(schema, ptr, label, ctx) {
   const id = ctx.id(ptr);
   const wrap = h('div', { class: 'field' }, h('span', { class: 'field-label', id }, label),
-    h('code', null, JSON.stringify(schema.const)), h('span', { class: 'hint' }, 'Set by BookForge (you cannot change it)'));
+    h('code', null, JSON.stringify(schema.const)), h('span', { class: 'hint' }, 'Set by Akọwe (you cannot change it)'));
   ctx.register(ptr, { ptr, wrap, control: null, errEl: null, label });
   return { el: wrap, get: () => schema.const };
 }
@@ -2529,7 +2529,7 @@ async function viewWrite(main, rid, mode) {
   if (waiting && approvedV) main.appendChild(h('p', { class: 'notice small' }, `This is a newer version. The approved one (version ${approvedV}) stays in the book until you approve this one.`));
   const blocking = (latest.findings || []).filter(f => f.severity === 'BLOCKING' && ['FAIL', 'UNKNOWN'].includes(f.decision));
   if (waiting && blocking.length) {
-    main.appendChild(stateBox('fix', 'BookForge’s checks found problems: change it below, or let the AI write it again',
+    main.appendChild(stateBox('fix', 'Akọwe’s checks found problems: change it below, or let the AI write it again',
       h('ul', null, blocking.slice(0, 6).map(f => checkItem(`${f.rule_id}: ${f.message}`)))));
   }
   const card = h('section', { class: 'card simple-doc', 'aria-labelledby': 'sd-h' });
@@ -2551,7 +2551,7 @@ async function viewWrite(main, rid, mode) {
       const out = await api('POST', bpath('/book/approve'), { body: { record_ids: [rid], versions: { [rid]: latest.version }, author_confirms: true } });
       const r = (out.results || [])[0] || {};
       if (r.ok) { toast(`${isChapter ? label : 'The chapter outline'} is approved`); S.details[rid] = null; try { await refreshRecords(); } catch { /* best effort */ } go(plink('book')); return; }
-      clear(msg).appendChild(stateBox('fix', 'Not approved yet: BookForge’s checks found problems', h('ul', null, (r.problems || []).map(checkItem)),
+      clear(msg).appendChild(stateBox('fix', 'Not approved yet: Akọwe’s checks found problems', h('ul', null, (r.problems || []).map(checkItem)),
         h('p', { class: 'small' }, h('strong', null, 'What to do: '), 'press ✏️ Change it and fix what the list says.')));
     } catch (e) { clear(msg).appendChild(problemBox(toProblem(e, { book: S.project.name, step: label }), { retry: approveThis })); }
   };
@@ -2877,9 +2877,9 @@ async function viewSettings(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, 'Settings: AI slots')));
   main.appendChild(h('section', { class: 'card', 'aria-labelledby': 'priv-h' }, h('h2', { id: 'priv-h' }, 'How AI slots are used'),
     h('ul', null,
-      h('li', null, 'Bookforge has exactly three AI slots: AI-1, AI-2 and AI-3. All are optional.'),
+      h('li', null, 'Akọwe has exactly three AI slots: AI-1, AI-2 and AI-3. All are optional.'),
       h('li', null, 'When a creative operation runs, its context package (only the records that operation needs from the current project) is sent to the one slot selected for that job — never to the other slots, and never with secrets or unrelated projects.'),
-      h('li', null, 'Without a connected slot, the creative steps can’t use an AI: BookForge opens the form for you to write that part yourself, then checks and stores it. Nothing leaves this computer when you write it yourself.', tech(h('code', null, 'CAPABILITY_UNAVAILABLE'), ' + manual candidate')),
+      h('li', null, 'Without a connected slot, the creative steps can’t use an AI: Akọwe opens the form for you to write that part yourself, then checks and stores it. Nothing leaves this computer when you write it yourself.', tech(h('code', null, 'CAPABILITY_UNAVAILABLE'), ' + manual candidate')),
       h('li', null, 'Deterministic (LOGIC) operations never use an AI slot.'),
       h('li', null, 'Roles route work: when a connected slot lists an operation ID (C02) or set letter (B) in its roles, that work goes only to such slots.'),
       h('li', null, 'API keys and AutoInjector connection keys are stored in the local secrets file on this computer, never in project data, exports, reports or logs. Key fields are write-only: a saved key is never shown again.'),
@@ -2905,7 +2905,7 @@ function autoInjectorCard(main) {
     ev.preventDefault(); clear(out);
     if (!token.value.trim()) {
       token.setAttribute('aria-invalid', 'true');
-      out.appendChild(stateBox('failed', 'Paste the connection key first', h('p', null, 'In AutoInjector: BookForge bridge panel → Copy connection key. Then paste it here.')));
+      out.appendChild(stateBox('failed', 'Paste the connection key first', h('p', null, 'In AutoInjector: Akọwe bridge panel → Copy connection key. Then paste it here.')));
       token.focus(); return;
     }
     token.removeAttribute('aria-invalid');
@@ -2925,12 +2925,12 @@ function autoInjectorCard(main) {
   h('p', null, 'Use the ChatGPT, Claude and Gemini sessions you are logged in to inside the AutoInjector desktop app — no API keys needed.'),
   h('ol', { class: 'steps-list' },
     h('li', null, 'Start the AutoInjector desktop app and log in to ChatGPT, Claude and/or Gemini there.'),
-    h('li', null, 'In AutoInjector: BookForge bridge panel → switch the bridge on → ', h('strong', null, 'Copy connection key'), '.'),
+    h('li', null, 'In AutoInjector: Akọwe bridge panel → switch the bridge on → ', h('strong', null, 'Copy connection key'), '.'),
     h('li', null, 'Paste the key below and press ', h('strong', null, 'Connect AutoInjector'), '. This sets AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini (you can change each slot below).'),
     h('li', null, 'Each slot below then shows where it’s at and the next step. Press ', h('strong', null, 'Test connection'), ' on a slot any time.')),
   h('div', { class: 'grid-2' },
     h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: token.id }, 'Connection key'), infoTip('What is the connection key?', ...TIP_KEY())), token,
-      h('span', { class: 'hint', id: `${p}-token-h` }, 'From AutoInjector: BookForge bridge panel → Copy connection key. Saved privately on this computer for all three slots; never shown again.')),
+      h('span', { class: 'hint', id: `${p}-token-h` }, 'From AutoInjector: Akọwe bridge panel → Copy connection key. Saved privately on this computer for all three slots; never shown again.')),
     h('div', { class: 'field' }, h('span', { class: 'label-row' }, h('label', { for: url.id }, 'AutoInjector address'), infoTip('What is the AutoInjector address?', ...TIP_URL())), url,
       h('span', { class: 'hint', id: `${p}-url-h` }, 'Only http://127.0.0.1 or http://localhost is accepted. Default ' + BRIDGE_DEFAULT + '.'))),
   out, h('div', { class: 'form-actions' }, btn));
@@ -3127,14 +3127,14 @@ function renderSelfTestIntro(st) {
   } }, 'Start the test');
   const last = st && st.last_report;
   const d = stShell('Test everything',
-    h('p', null, 'BookForge will make a small two-chapter book from start to finish, exactly the way you would: create a character and a place, plan the story, write two chapters, track what happens, fix a typo through an edit pass, lay out the book, export a PDF, EPUB and Word file, re-read those files, run the quality checks and approve the release.'),
+    h('p', null, 'Akọwe will make a small two-chapter book from start to finish, exactly the way you would: create a character and a place, plan the story, write two chapters, track what happens, fix a typo through an edit pass, lay out the book, export a PDF, EPUB and Word file, re-read those files, run the quality checks and approve the release.'),
     h('ul', null,
       h('li', null, h('strong', null, 'Your projects are not touched. '), 'Everything goes into a new, separate project called “Self-test <date time>”. You can open it afterwards and look at every record it made, or ignore it.'),
       h('li', null, h('strong', null, 'It takes about 5 seconds '), 'without AI. Each step is shown as it finishes, with ✔ Passed, ✕ Failed or – Skipped and what to do if something fails.'),
-      h('li', null, h('strong', null, 'You get a written report '), '(Markdown and JSON) saved in the “reports” folder next to your BookForge data. It never contains keys, passwords or AI conversations.')),
+      h('li', null, h('strong', null, 'You get a written report '), '(Markdown and JSON) saved in the “reports” folder next to your Akọwe data. It never contains keys, passwords or AI conversations.')),
     h('div', { class: 'check-row st-ai' }, aiBox,
       h('label', { for: 'st-use-ai' }, 'Use my AI slots too')),
-    h('p', { class: 'hint', id: 'st-use-ai-h' }, 'Off: nothing is sent anywhere — the creative steps use fixed text (“MANUAL (no AI)”). On: BookForge first checks each connected AI slot, then really sends two small prompts (a story premise and a short chapter, plus one “find the events” request) to your connected AI — for example ChatGPT, Claude or Gemini through AutoInjector, or the Anthropic API. Web sessions can take a minute or more per prompt. If no AI is ready, those steps are skipped with the reason and the rest still runs.'),
+    h('p', { class: 'hint', id: 'st-use-ai-h' }, 'Off: nothing is sent anywhere — the creative steps use fixed text (“MANUAL (no AI)”). On: Akọwe first checks each connected AI slot, then really sends two small prompts (a story premise and a short chapter, plus one “find the events” request) to your connected AI — for example ChatGPT, Claude or Gemini through AutoInjector, or the Anthropic API. Web sessions can take a minute or more per prompt. If no AI is ready, those steps are skipped with the reason and the rest still runs.'),
     last ? h('p', { class: 'small muted' }, 'Last test: ', stBadge(last.verdict === 'PASS' ? 'PASS' : 'FAIL'), ` ${last.counts.PASS} passed, ${last.counts.FAIL} failed, ${last.counts.SKIPPED} skipped · ${fmtTime(last.finished_at)} `,
       h('button', { type: 'button', class: 'link', onclick: () => renderSelfTestDone({ last_report: last, progress: null }) }, 'Show last result')) : null,
     out,
@@ -3208,7 +3208,7 @@ function renderSelfTestDone(st) {
   const rep = st.last_report;
   if (!rep) {
     const err = st.progress && st.progress.error;
-    return stShell('The test stopped', stateBox('failed', 'The test did not finish', h('p', null, err || 'No report was written. Run it again; if it keeps happening, check the BookForge console window.')),
+    return stShell('The test stopped', stateBox('failed', 'The test did not finish', h('p', null, err || 'No report was written. Run it again; if it keeps happening, check the Akọwe console window.')),
       h('div', { class: 'form-actions' }, h('button', { type: 'button', class: 'primary', onclick: () => renderSelfTestIntro(null) }, 'Try again')));
   }
   const ok = rep.verdict === 'PASS';
@@ -3234,14 +3234,14 @@ function renderSelfTestDone(st) {
         try {
           const blob = await api('GET', '/selftest/report?format=md&download=1', { blob: true });
           const url = URL.createObjectURL(blob);
-          const a = h('a', { href: url, download: (rep.files && rep.files.markdown) || 'bookforge-selftest.md' });
+          const a = h('a', { href: url, download: (rep.files && rep.files.markdown) || 'akowe-selftest.md' });
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(url), 2000);
           announce('Report downloaded');
         } catch (e) { clear(viewOut).appendChild(failedState('The report could not be downloaded', e)); }
       } }, 'Download report (.md)'),
       h('button', { type: 'button', onclick: () => renderSelfTestIntro(st) }, 'Run again')),
-    rep.files && rep.files.markdown ? h('p', { class: 'small muted' }, `Saved as ${rep.files.markdown} and ${rep.files.json} in the “reports” folder of your BookForge data.`) : null,
+    rep.files && rep.files.markdown ? h('p', { class: 'small muted' }, `Saved as ${rep.files.markdown} and ${rep.files.json} in the “reports” folder of your Akọwe data.`) : null,
     viewOut,
     h('h3', null, 'Steps'),
     h('ol', { class: 'st-steps' }, rep.steps.map(stStepItem)));
@@ -3291,12 +3291,12 @@ document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && openTip)
 
 const TIP_AUTOINJECTOR = () => [
   h('p', null, 'AutoInjector is a separate desktop app on this computer. You log in to ChatGPT, Claude and Gemini inside it, the same way you would in a browser.'),
-  h('p', null, 'When its “BookForge bridge” is switched on, BookForge can hand it a writing job; AutoInjector types it into the logged-in site and passes the answer back. No API key or extra subscription is needed.'),
+  h('p', null, 'When its “Akọwe bridge” is switched on, Akọwe can hand it a writing job; AutoInjector types it into the logged-in site and passes the answer back. No API key or extra subscription is needed.'),
   h('p', null, 'Both apps talk only on this computer (127.0.0.1); nothing is opened to the internet.')];
 const TIP_KEY = () => [
-  h('p', null, 'The connection key is a private password that AutoInjector makes so that only your BookForge can use it. It is not your ChatGPT, Claude or Gemini password.'),
-  h('p', null, h('strong', null, 'Where to find it: '), 'In AutoInjector: BookForge bridge panel → Copy connection key. Then paste it here and press Connect.'),
-  h('p', null, 'BookForge saves it in a private file on this computer (never in your projects, exports or reports) and never shows it again. If AutoInjector makes a new key, paste the new one here.')];
+  h('p', null, 'The connection key is a private password that AutoInjector makes so that only your Akọwe can use it. It is not your ChatGPT, Claude or Gemini password.'),
+  h('p', null, h('strong', null, 'Where to find it: '), 'In AutoInjector: Akọwe bridge panel → Copy connection key. Then paste it here and press Connect.'),
+  h('p', null, 'Akọwe saves it in a private file on this computer (never in your projects, exports or reports) and never shows it again. If AutoInjector makes a new key, paste the new one here.')];
 const TIP_TEST = () => [
   h('p', null, 'Test connection asks AutoInjector “are you there, and is this site logged in and free?”. It sends no book content and costs nothing.'),
   h('p', null, 'It tells you where things stand — not set up, ready, busy, or the exact problem — and what to do next.')];
@@ -3313,21 +3313,21 @@ function slotStage(s, health) {
       ? { icon: '✔', word: 'Ready', cls: 'b-ok', now: `Uses the Anthropic API (model ${s.model}). An API key is available.`, next: 'Nothing to do. Use “Test everything” with “Use my AI slots too” for a real end-to-end check.' }
       : { icon: '⚠︎', word: 'Needs API key', cls: 'b-warn', now: 'Set to the Anthropic API, but no API key is saved.', next: 'Paste an API key in “New API key” below and save.' };
   }
-  if (!s.has_credentials) return { icon: '⚠︎', word: 'Needs connection key', cls: 'b-warn', now: `Set to use ${site} through AutoInjector, but no connection key is saved.`, next: 'In AutoInjector: BookForge bridge panel → Copy connection key, then paste it into “Connect AutoInjector” above.' };
+  if (!s.has_credentials) return { icon: '⚠︎', word: 'Needs connection key', cls: 'b-warn', now: `Set to use ${site} through AutoInjector, but no connection key is saved.`, next: 'In AutoInjector: Akọwe bridge panel → Copy connection key, then paste it into “Connect AutoInjector” above.' };
   if (!health) return { icon: '…', word: 'Checking', cls: 'b-info', now: 'Asking AutoInjector whether it is running…', next: 'Wait a moment.' };
   if (['repairing', 'needs_user', 'broken'].includes(health.state)) {
     const why = health.problem ? ` (${health.problem}: ${siteProblemWords(health.problem)})` : '';
-    if (health.state === 'repairing') return { icon: '🔧', word: 'Being repaired', cls: 'b-warn', now: `AutoInjector says ${site} is not working right now and is fixing it by itself${why}.`, next: 'Nothing to do. Meanwhile BookForge sends the work to the AIs that work, and uses this one again when it is fixed.' };
-    if (health.state === 'needs_user') return { icon: '⚠︎', word: 'Needs you', cls: 'b-bad', now: `AutoInjector says ${site} needs you${why}.`, next: `Open AutoInjector and look at the ${site} window. BookForge uses the other AIs meanwhile and checks again by itself.` };
-    return { icon: '✕', word: 'Not working', cls: 'b-bad', now: `AutoInjector says ${site} is not working${why}.`, next: `Open AutoInjector and check the ${site} window (or use its repair/teach button). BookForge uses the other AIs meanwhile.` };
+    if (health.state === 'repairing') return { icon: '🔧', word: 'Being repaired', cls: 'b-warn', now: `AutoInjector says ${site} is not working right now and is fixing it by itself${why}.`, next: 'Nothing to do. Meanwhile Akọwe sends the work to the AIs that work, and uses this one again when it is fixed.' };
+    if (health.state === 'needs_user') return { icon: '⚠︎', word: 'Needs you', cls: 'b-bad', now: `AutoInjector says ${site} needs you${why}.`, next: `Open AutoInjector and look at the ${site} window. Akọwe uses the other AIs meanwhile and checks again by itself.` };
+    return { icon: '✕', word: 'Not working', cls: 'b-bad', now: `AutoInjector says ${site} is not working${why}.`, next: `Open AutoInjector and check the ${site} window (or use its repair/teach button). Akọwe uses the other AIs meanwhile.` };
   }
-  if (health.ok && (health.site_busy || s.active_jobs > 0)) return { icon: '◔', word: 'Busy', cls: 'b-warn', now: `Connected. ${site} is working on another request right now.`, next: 'Nothing to fix — wait for it to finish. BookForge sends one request at a time per site.' };
+  if (health.ok && (health.site_busy || s.active_jobs > 0)) return { icon: '◔', word: 'Busy', cls: 'b-warn', now: `Connected. ${site} is working on another request right now.`, next: 'Nothing to fix — wait for it to finish. Akọwe sends one request at a time per site.' };
   if (health.ok) return { icon: '✔', word: 'Connected · Ready', cls: 'b-ok', now: `Connected to AutoInjector. ${site} is logged in and free.`, next: 'Ready to use. Try “Test everything” with “Use my AI slots too”.' };
   const err = health.error;
   let next = 'Press Test connection again. If it keeps failing, restart the AutoInjector desktop app.';
   let now = health.message || 'The connection check failed.';
-  if (err === 'UPSTREAM_UNAVAILABLE') { now = `AutoInjector is not answering at ${s.bridge_url}.`; next = 'Start the AutoInjector desktop app and switch on its BookForge bridge, then press Test connection.'; }
-  else if (err === 'CAPABILITY_UNAVAILABLE') { now = 'AutoInjector did not accept the saved connection key (or does not offer this site).'; next = 'In AutoInjector: BookForge bridge panel → Copy connection key, paste it into “Connect AutoInjector” above, then Test connection.'; }
+  if (err === 'UPSTREAM_UNAVAILABLE') { now = `AutoInjector is not answering at ${s.bridge_url}.`; next = 'Start the AutoInjector desktop app and switch on its Akọwe bridge, then press Test connection.'; }
+  else if (err === 'CAPABILITY_UNAVAILABLE') { now = 'AutoInjector did not accept the saved connection key (or does not offer this site).'; next = 'In AutoInjector: Akọwe bridge panel → Copy connection key, paste it into “Connect AutoInjector” above, then Test connection.'; }
   else if (err === 'TIMEOUT') { now = 'AutoInjector did not answer in time.'; next = 'Check that the AutoInjector desktop app is running and not stuck, then Test connection.'; }
   else if (health.site_ready === false) { now = `AutoInjector is running, but the ${site} pane is not ready.`; next = `In AutoInjector, open the ${site} pane and log in, then Test connection.`; }
   return { icon: '✕', word: 'Error', cls: 'b-bad', now, next };
@@ -3437,7 +3437,7 @@ function errorWithFix(title, err, retry) {
 }
 function apiErrInfo(e) {
   const x = (e instanceof ApiError && e.errors[0]) || {};
-  return { code: x.code || 'NETWORK', message: x.message || (e && e.message) || String(e), fix: x.fix || (e instanceof NetworkError ? 'Check that BookForge is still running, then try again.' : '') };
+  return { code: x.code || 'NETWORK', message: x.message || (e && e.message) || String(e), fix: x.fix || (e instanceof NetworkError ? 'Check that Akọwe is still running, then try again.' : '') };
 }
 
 /* ======================================================================= Fill with AI panels */
@@ -3998,7 +3998,7 @@ function bbRenderReport() {
   for (const i of s.items) { if (i.status === 'done') counts.gen++; if (i.status === 'error') counts.fail++; if (i.created_ref) counts.made++; }
   const out = h('div', { 'aria-live': 'polite' });
   box.appendChild(h('h3', null, 'Report'));
-  box.appendChild(h('p', { class: 'small' }, `${s.runs.length} run(s): ${counts.gen} generated, ${counts.fail} failed, ${counts.made} created as drafts, ${counts.gen - counts.made} not created. Saved as ${s.report.markdown} in the “reports” folder of your BookForge data (no prompts, replies or keys).`));
+  box.appendChild(h('p', { class: 'small' }, `${s.runs.length} run(s): ${counts.gen} generated, ${counts.fail} failed, ${counts.made} created as drafts, ${counts.gen - counts.made} not created. Saved as ${s.report.markdown} in the “reports” folder of your Akọwe data (no prompts, replies or keys).`));
   box.appendChild(h('div', { class: 'row' },
     h('button', { type: 'button', class: 'small', onclick: async () => {
       clear(out).appendChild(loadingState('Loading the report…'));
@@ -4029,7 +4029,7 @@ const TIP_PICKER = () => [
 const TIP_BIBLE = () => [
   h('p', null, 'The Bible Builder drafts your story bible from a book idea: first a short “world sketch” with names and roles, then each entry in full, so names stay consistent and entries link to each other.'),
   h('p', null, 'Run one section or many, as often as you like; later runs build on earlier ones. You keep only what you tick, and it is saved as drafts for you to validate and accept.'),
-  h('p', null, 'A report of every run (which AI, what was made, what was kept) is saved in your BookForge reports folder.')];
+  h('p', null, 'A report of every run (which AI, what was made, what was kept) is saved in your Akọwe reports folder.')];
 
 /* ======================================================================= navigation helpers */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -4923,7 +4923,7 @@ async function viewStart(main) {
     list.appendChild(opt('', 'Automatic', 'Use the best AI that is ready each time.'));
     list.appendChild(h('p', { class: 'small muted' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), ' Checking your AI slots…'));
     card.append(h('h2', { id: 'wz-h' }, '2. Which AI should help?'),
-      h('p', { class: 'muted' }, 'BookForge can use up to three AIs (set them up in Settings). You can also write everything yourself.'), list,
+      h('p', { class: 'muted' }, 'Akọwe can use up to three AIs (set them up in Settings). You can also write everything yourself.'), list,
       h('p', { class: 'small' }, 'No AI yet? ', h('a', { href: '#/settings' }, 'Open Settings'), ' to connect AutoInjector or add an API key — your answers here are kept.'), err,
       nav(() => goStep(1), () => goStep(3)));
     try {
@@ -5057,7 +5057,7 @@ function waitingRevision(c) {
 /** Plain words for a step's own message ("B11 could not be created (BLOCKED)." is how the server says it). */
 function stepMessage(out, noun) {
   const m = plainText(out.message || '');
-  if (/^[A-K]\d\d could not be created/.test(m)) return [`The ${noun || 'draft'} could not be made: BookForge’s checks did not accept it.`, tech(h('code', null, m))];
+  if (/^[A-K]\d\d could not be created/.test(m)) return [`The ${noun || 'draft'} could not be made: Akọwe’s checks did not accept it.`, tech(h('code', null, m))];
   return [m || (out.ok ? 'Done' : 'Not done')];
 }
 function renderBook(holder, book, redraw) {
@@ -5127,7 +5127,7 @@ function renderBook(holder, book, redraw) {
     const ok = await choiceDialog('Approve as the author?', h('div', null,
       h('p', null, `You are approving ${what}. Approving makes it part of the book; later steps build on it. If you change it later, the steps built on it are marked to redo.`),
       h('pre', { class: 'small' }, names),
-      h('p', { class: 'small muted' }, 'Some steps need an explicit approval record; BookForge records one for exactly these versions because you confirm here.')),
+      h('p', { class: 'small muted' }, 'Some steps need an explicit approval record; Akọwe records one for exactly these versions because you confirm here.')),
     [{ id: 'yes', label: '✔ Yes, I approve' }]);
     if (ok !== 'yes') return;
     const versions = Object.fromEntries(items.filter(i => Number.isInteger(i.version)).map(i => [i.record_id, i.version]));
@@ -5135,7 +5135,7 @@ function renderBook(holder, book, redraw) {
   };
   let bbPending = null; let bbFirst = null;   // the wizard's Bible Builder entries not saved yet (canon step), when there are any
   const redoBox = (items) => {
-    // A draft BookForge's checks refuse cannot be approved by pressing approve again: offer to redo or edit it.
+    // A draft Akọwe's checks refuse cannot be approved by pressing approve again: offer to redo or edit it.
     const box = h('div', { class: 'refused-box' });
     for (const i of items) {
       const redo = i.redo;
@@ -5151,8 +5151,8 @@ function renderBook(holder, book, redraw) {
     if (s.id === 'profile') { openProfileDialog(() => redraw()); return; }
     if (s.approve && s.approve.length) {
       const ok = s.approve.filter(i => !(i.problems || []).length);
-      if (!ok.length) {   // every waiting draft is refused by BookForge's checks: approving again cannot help
-        clear(msg).appendChild(stateBox('failed', `BookForge’s checks found problems in ${STEP_NOUN[s.id] || s.title.toLowerCase()}: let the AI write it again, or edit it`,
+      if (!ok.length) {   // every waiting draft is refused by Akọwe's checks: approving again cannot help
+        clear(msg).appendChild(stateBox('failed', `Akọwe’s checks found problems in ${STEP_NOUN[s.id] || s.title.toLowerCase()}: let the AI write it again, or edit it`,
           h('ul', null, s.approve.flatMap(i => (i.problems || []).slice(0, 4).map(checkItem))), redoBox(s.approve),
           h('p', { class: 'small muted' }, 'Changed something it depends on since? ',
             h('button', { type: 'button', class: 'small', onclick: () => approve(s.approve, STEP_NOUN[s.id] || 'these drafts') }, '✔ Check again and approve'))));
@@ -5538,7 +5538,7 @@ function autoApproveCard(q, reload) {
     if (on) {
       const ok = await choiceDialog('Turn on auto-approve?', h('div', null,
         h('p', { class: 'notice' }, h('strong', null, '⚠︎ '), st.warning || ''),
-        h('p', null, 'This is your standing permission for this book. BookForge records who turned it on and when, and every automatic approval appears in Activity.')),
+        h('p', null, 'This is your standing permission for this book. Akọwe records who turned it on and when, and every automatic approval appears in Activity.')),
       [{ id: 'yes', label: '✔ Yes, auto-approve drafts that pass the AI review' }]);
       if (ok !== 'yes') { box.checked = false; return; }
     }
@@ -5600,7 +5600,7 @@ function renderReviewList(holder, q, load) {
   picker.sel.addEventListener('change', () => { RV.slot = picker.sel.value; });
   const approveAll = h('button', { type: 'button', class: 'primary', disabled: !shown.length, onclick: async () => {
     const ok = await choiceDialog(`Approve all ${shown.length} as the author?`, h('div', null,
-      h('p', null, 'You are approving these drafts. Approving makes them part of the book; later steps build on them. BookForge adds an extra approval record for exactly these versions where a step needs one, because you confirm here.'),
+      h('p', null, 'You are approving these drafts. Approving makes them part of the book; later steps build on them. Akọwe adds an extra approval record for exactly these versions where a step needs one, because you confirm here.'),
       h('ul', { class: 'small approve-list' }, shown.map(i => h('li', null, `${i.module_id} · ${i.title}`, i.review ? ` (AI: ${i.review.verdict.toLowerCase()})` : '')))),
     [{ id: 'yes', label: `✅ Yes, approve all ${shown.length}` }]);
     if (ok !== 'yes') return;
@@ -6225,7 +6225,7 @@ async function viewScenes(main, cid) {
             s.note ? h('span', { class: 'muted' }, ` — ${s.note}`) : null))),
           (rv.notes || []).length ? h('ul', { class: 'small' }, rv.notes.map(n => h('li', null, n))) : null));
       }
-      if ((info.lint || []).length) body.appendChild(h('details', { class: 'small', open: info.lint.some(p => p.severity === 'major') }, h('summary', null, `BookForge’s own check (${info.lint.length})`),
+      if ((info.lint || []).length) body.appendChild(h('details', { class: 'small', open: info.lint.some(p => p.severity === 'major') }, h('summary', null, `Akọwe’s own check (${info.lint.length})`),
         h('ul', null, info.lint.map(p => h('li', null, p.severity === 'major' ? '⚠️ ' : '', `Scene ${p.scene}: ${p.message}`)))));
       body.appendChild(h('ol', { class: 'scene-list' }, e.cards.map(sceneCardView)));
     }
@@ -6528,7 +6528,7 @@ async function viewWorld(main) {
     const probs = {}; for (const p of info.texture_problems || []) probs[p.item] = p;
     clear(texBox).appendChild(h('div', { class: 'row space' }, h('h2', { id: 'wt-h' }, '🧺 World texture'),
       infoTip('World texture', h('p', null, 'Concrete details of this world, each with what it can cause: an obstacle (it gets in the way), a skill moment, or a cost.'),
-        h('p', null, 'Scene plans take their obstacles from this list; the writer gets a few per chapter; BookForge counts how often each detail is on the page.'))));
+        h('p', null, 'Scene plans take their obstacles from this list; the writer gets a few per chapter; Akọwe counts how often each detail is on the page.'))));
     if (!e) {
       texBox.appendChild(stateBox('empty', 'No world details yet', h('p', null, 'Let your AI draft them from your places, world and characters, or add them yourself.')));
     } else {
@@ -6604,7 +6604,7 @@ function plannedCard(rid, { onSaved } = {}) {
   const box = h('section', { class: 'card planned-card', 'aria-labelledby': `pl-h-${rid}`, 'data-testid': 'planned-card' },
     h('div', { class: 'row space' }, h('h2', { id: `pl-h-${rid}` }, '✅ Planned to page'),
       infoTip('Planned to page', h('p', null, 'What the plan says must reach the reader in this chapter: the outline beat, each scene’s obstacle and change, the point-of-view character’s name (in their first chapter) and the “must show” details of the character sheets.'),
-        h('p', null, 'BookForge first looks for the words; then an AI that did not write the chapter checks what is unclear. ✨ Fix with AI asks the writer to work only the missing items into the right passages — you choose what to keep.'))));
+        h('p', null, 'Akọwe first looks for the words; then an AI that did not write the chapter checks what is unclear. ✨ Fix with AI asks the writer to work only the missing items into the right passages — you choose what to keep.'))));
   const body = h('div', null, loadingState('Checking what was planned…'));
   const prog = h('div', { 'aria-live': 'polite' });
   const msg = h('div', { 'aria-live': 'polite' });
@@ -6620,7 +6620,7 @@ function plannedCard(rid, { onSaved } = {}) {
     clear(body).appendChild(h('p', { class: 'small', 'data-testid': 'planned-summary' }, open.length
       ? [hazard({ code: 'PLANNED_MISSING' }, {}, { small: true }), ` ${open.length} planned item(s) are not on the page (version ${info.version}).`]
       : `✔ Everything required is on the page (${c.on_page} of ${c.items} item(s) found).`,
-    info.stored && info.stored.ai ? h('span', { class: 'muted' }, ` Checked by ${info.stored.ai.reviewer || 'an AI'}.`) : h('span', { class: 'muted' }, ' BookForge’s word check (no AI yet).'),
+    info.stored && info.stored.ai ? h('span', { class: 'muted' }, ` Checked by ${info.stored.ai.reviewer || 'an AI'}.`) : h('span', { class: 'muted' }, ' Akọwe’s word check (no AI yet).'),
     info.stored && info.stored.ai && info.stored.ai.independent === false ? h('span', { class: 'words-warn' }, ` ⚠️ ${info.stored.ai.warning}`) : null));
     body.appendChild(h('ul', { class: 'planned-list' }, items.map(i => h('li', { class: `pl-${i.status}${i.required ? '' : ' optional'}`, 'data-status': i.status },
       h('span', { 'aria-hidden': 'true' }, PLANNED_ICON[i.status] || '•'), ' ', i.label,
@@ -6697,7 +6697,7 @@ async function viewPair(main) {
   main.appendChild(h('div', { class: 'page-head' }, h('h1', null, '🔗 Connect to AutoInjector')));
   if (!info || !info.code) {
     main.appendChild(stateBox('empty', 'No pairing code here',
-      h('p', null, 'Press “Connect” in the AutoInjector desktop app: it opens this page with a one-time code and BookForge connects by itself. The code works once and only for about 2 minutes.'),
+      h('p', null, 'Press “Connect” in the AutoInjector desktop app: it opens this page with a one-time code and Akọwe connects by itself. The code works once and only for about 2 minutes.'),
       h('p', null, 'You can also paste a connection key in ', h('a', { href: '#/settings' }, 'Settings'), '.')));
     return;
   }
@@ -6706,7 +6706,7 @@ async function viewPair(main) {
   const bm = /^http:\/\/(127\.0\.0\.1|localhost)(?::(\d{1,5}))?\/?$/.exec(info.bridge || '');
   if (!bm) {
     main.appendChild(stateBox('failed', 'This connection link is not from AutoInjector',
-      h('p', null, 'It points BookForge at an address that is not on this computer, so BookForge did not connect.'),
+      h('p', null, 'It points Akọwe at an address that is not on this computer, so Akọwe did not connect.'),
       h('p', null, h('strong', null, 'What to do: '), 'Press Connect in the AutoInjector desktop app to get a new link.')));
     return;
   }
@@ -6717,8 +6717,8 @@ async function viewPair(main) {
   const confirmed = await new Promise(resolve => {
     const yes = h('button', { type: 'button', class: 'primary big', onclick: () => resolve(true) },
       usualPort ? 'Connect to AutoInjector' : `Connect to port ${bm[2] || '80'} anyway`);
-    holder.appendChild(stateBox('ask', 'Connect BookForge to AutoInjector?',
-      h('p', null, 'Only continue if you just pressed “Connect” in the AutoInjector desktop app. BookForge will then send its AI requests through AutoInjector.'),
+    holder.appendChild(stateBox('ask', 'Connect Akọwe to AutoInjector?',
+      h('p', null, 'Only continue if you just pressed “Connect” in the AutoInjector desktop app. Akọwe will then send its AI requests through AutoInjector.'),
       usualPort ? null : h('p', null, h('strong', null, 'Check first: '), `this link points at port ${bm[2] || '80'} on this computer, not AutoInjector's usual port (17891). Continue only if you changed AutoInjector's bridge port yourself.`),
       h('div', { class: 'row' }, yes, h('button', { type: 'button', onclick: () => resolve(false) }, 'Cancel'))));
     S.leaveHooks.push(() => resolve(false));
@@ -6739,7 +6739,7 @@ async function viewPair(main) {
       h('p', null, err.message),
       h('p', null, h('strong', null, 'What to do: '), err.code === 'EXPIRED_APPROVAL' || err.code === 'INVALID_INPUT'
         ? 'Press Connect again in AutoInjector. A new code is made each time.'
-        : 'Make sure the AutoInjector desktop app is running and its BookForge bridge is switched on, then press Connect again in AutoInjector.'),
+        : 'Make sure the AutoInjector desktop app is running and its Akọwe bridge is switched on, then press Connect again in AutoInjector.'),
       h('div', { class: 'row' }, h('a', { class: 'btn', href: '#/settings' }, 'Open Settings (connect with a key instead)'),
         h('button', { type: 'button', onclick: () => goCurrentTask() }, '▶ Go to my current task'))));
     return;
@@ -6881,7 +6881,7 @@ async function wfReport() {
     const text = await blob.text();
     const name = (WF.data && WF.data.report && WF.data.report.markdown) || 'workflow-test.md';
     modal('📄 Workflow test report', close => h('div', null,
-      h('p', { class: 'small muted' }, `Saved as ${name} in the “reports” folder of your BookForge data. No keys or prompts are in it.`),
+      h('p', { class: 'small muted' }, `Saved as ${name} in the “reports” folder of your Akọwe data. No keys or prompts are in it.`),
       h('pre', { class: 'st-report', tabindex: '0' }, text),
       h('div', { class: 'form-actions' },
         h('button', { type: 'button', onclick: () => {
@@ -7050,14 +7050,14 @@ async function copyDiagnostics({ download = false } = {}) {
     const full = Object.assign({}, rep); delete full.text;
     text = `${rep.text}\n${JSON.stringify(full, null, 2)}`;
   } catch (e) {
-    text = ['BookForge diagnostics (the BookForge program did not answer, so only this page\'s view is included)',
+    text = ['Akọwe diagnostics (the Akọwe program did not answer, so only this page\'s view is included)',
       `Generated: ${new Date().toISOString()}`, `Browser: ${client.user_agent}`, `Screen: ${client.screen}`,
-      `Problem reaching BookForge: ${toProblem(e).code}`, 'Recent problems on this page:',
+      `Problem reaching Akọwe: ${toProblem(e).code}`, 'Recent problems on this page:',
       ...CLIENT_ERRORS.slice(-15).map(x => `  ${x.at} ${x.code} ${x.where} ${x.message}`)].join('\n');
   }
   if (download) {
     const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-    const a = h('a', { href: url, download: 'bookforge-diagnostics.txt' }); document.body.appendChild(a); a.click(); a.remove();
+    const a = h('a', { href: url, download: 'akowe-diagnostics.txt' }); document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
     toast('Diagnostics downloaded (no keys, prompts or book text)');
     return text;
@@ -7136,7 +7136,7 @@ const RUN_WORD = { queued: ['…', 'Starting', 'b-info'], running: ['⏳', 'Work
   interrupted: ['⚠️', 'Interrupted', 'b-warn'] };
 /* ======================================================================= 🩺 P37.5 before a run: which AIs work, and how to fix the others */
 /**
- * Before a book run starts: BookForge asks AutoInjector (/v1/health) about every AI the run will use. When all work it
+ * Before a book run starts: Akọwe asks AutoInjector (/v1/health) about every AI the run will use. When all work it
  * returns at once ({skipped: []}). Otherwise a notice says which AI, what is wrong and how to fix it, with
  * 🔁 I fixed it — check again / ▶ Start without it / ✖ Cancel. Resolves {skipped: [slot ids]} or null (cancelled).
  */
@@ -7154,7 +7154,7 @@ async function aiPreflight({ slotId = null, what = 'the book' } = {}) {
       clear(d);
       const bad = (r.ais || []).filter(a => !a.ok);
       d.appendChild(h('h2', { id: 'aic-title' }, bad.length === 1 ? `⚠️ ${bad[0].title}` : `⚠️ ${bad.length} of your AIs aren’t working`));
-      d.appendChild(h('p', null, `Before ${what} starts, BookForge checked every AI the run will use (for writing, reviewing and editing).`));
+      d.appendChild(h('p', null, `Before ${what} starts, Akọwe checked every AI the run will use (for writing, reviewing and editing).`));
       d.appendChild(h('ul', { class: 'aic-list' }, (r.ais || []).map(a => h('li', { class: a.ok ? 'aic-ok' : 'aic-bad', 'data-slot': a.slot_id, 'data-testid': a.ok ? 'aic-ok' : 'aic-bad' },
         a.ok ? [h('strong', null, `✔ ${a.ai}`), ' works.']
           : [h('strong', null, `⚠️ ${a.title}`), h('p', { class: 'aic-what' }, a.what),
@@ -7264,7 +7264,7 @@ async function renderMakeSetup() {
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
   const form = h('form', { novalidate: true, class: 'mb-setup', onsubmit: ev => { ev.preventDefault(); go(false); } },
-    h('p', { class: 'lead' }, 'BookForge makes a whole new book for you with your AI — characters, plot, every chapter — and gives you a PDF, EPUB and Word file at the end. You can watch every step, pause or cancel any time.'),
+    h('p', { class: 'lead' }, 'Akọwe makes a whole new book for you with your AI — characters, plot, every chapter — and gives you a PDF, EPUB and Word file at the end. You can watch every step, pause or cancel any time.'),
     h('div', { class: 'consent-box', role: 'note' }, h('strong', null, '✋ Your consent for this run: '),
       'pressing Start lets the AI reviewer approve the drafts it checks and passes — for this one new book, in this run only. Drafts it does not pass are fixed by the AI (up to twice) or wait for your decision. Your other books are never touched. A backup is made first.'),
     h('details', { class: 'mb-quick', open: true }, h('summary', null, 'Quick settings (all optional)'),
@@ -7538,7 +7538,7 @@ async function pipelineFields(prefix, cur = null) {
   guess();
   const el = h('details', { class: 'field pipe-box', 'data-testid': `${prefix}-pipeline` }, h('summary', null, '🧪 Pipeline (advanced, for comparing versions)'),
     h('p', { class: 'small muted' }, 'Everything is on by default. Switch parts off to make a “baseline” version and then ⚖️ compare it blind with a full one.'),
-    h('div', { class: 'field' }, h('label', { for: `${prefix}-pipe-preset` }, 'Preset ', infoTip('Pipeline presets', h('p', null, 'Full: every part of BookForge’s writing pipeline. Baseline: the editor, scene cards, voice cards, story rules and the planned-to-page check are off — the writer gets the outline, the context and your ending and style choices only (like the first automatic book).'))), preset),
+    h('div', { class: 'field' }, h('label', { for: `${prefix}-pipe-preset` }, 'Preset ', infoTip('Pipeline presets', h('p', null, 'Full: every part of Akọwe’s writing pipeline. Baseline: the editor, scene cards, voice cards, story rules and the planned-to-page check are off — the writer gets the outline, the context and your ending and style choices only (like the first automatic book).'))), preset),
     h('div', { class: 'pipe-flags' }, rows));
   return { el, get: () => {
     const f = Object.fromEntries(Object.entries(boxes).map(([k, b]) => [k, b.checked]));
@@ -7623,7 +7623,7 @@ async function refreshHealth(force) {
   try { HL.last = await api('GET', `/health${force ? '?force=1' : ''}`); }
   catch (e) {
     const p = toProblem(e);
-    HL.last = { overall: 'problem', checked_at: new Date().toISOString(), checks: [{ id: 'server', title: 'The BookForge program', status: 'problem', code: p.code, detail: p.what, fix: p.fix }] };
+    HL.last = { overall: 'problem', checked_at: new Date().toISOString(), checks: [{ id: 'server', title: 'The Akọwe program', status: 'problem', code: p.code, detail: p.what, fix: p.fix }] };
   }
   updateHealthBtn();
   if (HL.open) renderHealth();
@@ -7662,7 +7662,7 @@ function renderHealth() {
   put(clear(d), h('div', { class: 'st-head' }, h('h2', { id: 'health-title' }, '❤️ Health'), h('button', { type: 'button', class: 'small', onclick: closeHealth }, '✕ Close')));
   if (!res) { d.appendChild(loadingState('Checking…')); d.appendChild(jobsBox); return; }
   const word = { ok: 'Everything looks fine.', warn: 'Mostly fine — something needs a look.', problem: 'Something needs fixing.' }[res.overall] || '';
-  put(d, h('p', { class: `hl-sum hl-${res.overall}` }, h('strong', null, word), h('span', { class: 'small muted' }, ` Checked ${fmtTime(res.checked_at)}. BookForge checks again every minute while this page is open.`)),
+  put(d, h('p', { class: `hl-sum hl-${res.overall}` }, h('strong', null, word), h('span', { class: 'small muted' }, ` Checked ${fmtTime(res.checked_at)}. Akọwe checks again every minute while this page is open.`)),
     h('ul', { class: 'hl-list' }, (res.checks || []).map(c => h('li', { class: `hl-row hl-${c.status}`, 'data-check': c.id },
       h('span', { class: 'hl-ico', 'aria-hidden': 'true' }, { ok: '✔', info: 'ℹ', warn: '⚠️', problem: '⚠️' }[c.status] || '•'),
       h('div', { class: 'hl-main' }, h('div', { class: 'row' }, h('strong', null, c.title),
@@ -7796,12 +7796,12 @@ function shelfBook(b) {
 }
 
 /* ======================================================================= 📊 P13 book report, ⚖️ P14 compare, 🧪 variants */
-const TIP_REPORT = () => [h('p', null, 'When a book is finished BookForge makes a quality report: scores per dimension, strengths and weaknesses with quotes from the book, what the editor, the planned-to-page check and the pattern check found across all chapters, word counts against the length, which AI wrote and reviewed what, and what to try next.'),
-  h('p', null, 'The whole book is read by every working AI that did not write most of it (an independent opinion). BookForge takes the middle score (median) of the reviewers per dimension and marks ⚠️ where they are 3 or more points apart. A short book is sent whole; a long one as a digest of every chapter (its opening, a middle passage and its ending).')];
+const TIP_REPORT = () => [h('p', null, 'When a book is finished Akọwe makes a quality report: scores per dimension, strengths and weaknesses with quotes from the book, what the editor, the planned-to-page check and the pattern check found across all chapters, word counts against the length, which AI wrote and reviewed what, and what to try next.'),
+  h('p', null, 'The whole book is read by every working AI that did not write most of it (an independent opinion). Akọwe takes the middle score (median) of the reviewers per dimension and marks ⚠️ where they are 3 or more points apart. A short book is sent whole; a long one as a digest of every chapter (its opening, a middle passage and its ending).')];
 async function downloadReport(pid, branch, rep, fmt) {
   try {
     const blob = await api('GET', `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch)}/report/${encodeURIComponent(rep.id)}?format=${fmt}&download=1`, { blob: true });
-    const name = `${safeFileStem(rep.title) || 'Book'} - BookForge report - ${(rep.at || '').slice(0, 10)}.${fmt}`;
+    const name = `${safeFileStem(rep.title) || 'Book'} - Akọwe report - ${(rep.at || '').slice(0, 10)}.${fmt}`;
     const url = URL.createObjectURL(blob);
     const a = h('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
@@ -7879,7 +7879,7 @@ async function viewReport(main) {
     holder.appendChild(h('div', { class: 'rp-progress' }));
     if (ov.job) { const prog = holder.querySelector('.rp-progress'); pollQualityJob(bpath(`/report/job/${encodeURIComponent(ov.job.id)}`), prog).then(load).catch(() => {}); }
     if (!ov.written) { holder.appendChild(stateBox('empty', 'No chapter is written yet', h('p', null, 'Write the chapters first (📘 Make my book), then make the report.'))); return; }
-    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: BookForge counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
+    if (!rep) { holder.appendChild(stateBox('empty', 'No report yet', h('p', null, 'Press 📊 Make the report: Akọwe counts and checks the book and asks the AIs that did not write it to read it.'))); holder.appendChild(askBox(null)); return; }
     if (ov.stale) holder.appendChild(h('p', { class: 'words-warn', role: 'note', 'data-testid': 'rp-stale' }, hazard({ code: 'REPORT_STALE' }, { retry: () => run({ ai: true }), retryLabel: '📊 Make a new report' }, { small: true }), ' This report is for an earlier version of the book: a chapter changed since.'));
     for (const w of rep.warnings || []) holder.appendChild(h('p', { class: /⚠️/.test(w) ? 'words-warn' : 'small muted', role: 'note' }, w));
     const agg = rep.aggregate || {};
@@ -7953,13 +7953,13 @@ async function viewReport(main) {
   await load();
 }
 
-/** P36: how generous each AI reviewer has been over time (vs the other reviewer and vs BookForge's pattern check). */
+/** P36: how generous each AI reviewer has been over time (vs the other reviewer and vs Akọwe's pattern check). */
 function leniencyCard(rows, about) {
   if (!(rows || []).length) return null;
   const sign = v => (v == null ? '–' : `${v > 0 ? '+' : ''}${v}`);
   return h('section', { class: 'card', 'data-testid': 'rp-leniency', 'aria-labelledby': 'rp-len-h' },
     h('h2', { id: 'rp-len-h' }, '🎯 How generous each AI reviewer is'),
-    h('p', { class: 'small' }, 'Points above (+) or below (−) the other reviewer of the same chapter or book, and above what BookForge’s own pattern check allows. Measured over all your books. ', about || ''),
+    h('p', { class: 'small' }, 'Points above (+) or below (−) the other reviewer of the same chapter or book, and above what Akọwe’s own pattern check allows. Measured over all your books. ', about || ''),
     h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' },
       h('thead', null, h('tr', null, ['AI', 'Reviews', 'Generosity', 'vs other reviewer', 'vs pattern check', 'Too-clean reviews', 'Scores lowered by'].map(x => h('th', null, x)))),
       h('tbody', null, rows.map(r => h('tr', { class: r.discount ? 'low' : '', 'data-family': r.family },
@@ -7996,7 +7996,7 @@ async function viewCompare(main, cid) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null, crumbs(['Your books', '#/'], ['My finished books', '#/shelf'], cid ? ['Compare versions', '#/compare'] : 'Compare versions', ...(cid ? ['Result'] : [])),
     h('h1', null, '⚖️ Compare versions')), h('div', { class: 'row' }, infoTip('Compare versions',
     h('p', null, 'Two books (for example a book and its 🧪 variant made with another pipeline) or two versions of a chapter are read by your AIs “blind”: each AI sees them as Version 1 and Version 2 in a random order and never learns which is which. Each scores both on the dimensions and picks the one it prefers.'),
-    h('p', null, 'Afterwards BookForge reveals which version was which and shows the median scores and the winner per dimension. An AI that wrote one of the versions is marked ⚠️ not independent.')))));
+    h('p', null, 'Afterwards Akọwe reveals which version was which and shows the median scores and the winner per dimension. An AI that wrote one of the versions is marked ⚠️ not independent.')))));
   const holder = h('div', { 'aria-live': 'polite' });
   main.appendChild(holder);
   if (cid) return compareResult(holder, cid);
@@ -8098,9 +8098,9 @@ function bookSection5Card(book) {
 }
 
 /* ======================================================================= 💾 P20 save the book, 📂 P21 open a saved book / 🔁 rerun */
-const TIP_SAVE = () => [h('p', null, 'BookForge keeps every book inside itself. 💾 Save also writes a copy into your books folder: one folder per book with the finished book (PDF, EPUB, Word), every chapter as a text file, the book bible, the reports and the book’s log.'),
-  h('p', null, 'The file book.bookforge in that folder is the whole book in one file: 📂 Open a saved book brings it back as a new book (also on another computer), and 🔁 Rerun makes a new book from its book bible.'),
-  h('p', null, 'With auto-save on, BookForge saves by itself while a book is being made (at most every 2 minutes, and after each step) and when it is finished, paused or stopped.')];
+const TIP_SAVE = () => [h('p', null, 'Akọwe keeps every book inside itself. 💾 Save also writes a copy into your books folder: one folder per book with the finished book (PDF, EPUB, Word), every chapter as a text file, the book bible, the reports and the book’s log.'),
+  h('p', null, 'The file book.akowe in that folder is the whole book in one file: 📂 Open a saved book brings it back as a new book (also on another computer), and 🔁 Rerun makes a new book from its book bible.'),
+  h('p', null, 'With auto-save on, Akọwe saves by itself while a book is being made (at most every 2 minutes, and after each step) and when it is finished, paused or stopped.')];
 const TIP_RERUN = () => [h('p', null, 'The book bible is everything a book is built on: the book profile, the ending and style choices, the characters with their character sheets and voice cards, the places and world, the story rules and world texture, and the premise, main plot, chapter outline and scene cards.'),
   h('p', null, '🔁 Rerun makes a NEW book from it: the same characters, world and (if you keep it) plan, with new chapters written by the AI. The book it came from is never changed.')];
 const BIBLE_PATH = (pid, branch) => `/projects/${encodeURIComponent(pid)}/branches/${encodeURIComponent(branch || 'main')}`;
@@ -8191,10 +8191,10 @@ function booksFolderCard() {
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'small primary', 'data-testid': 'bf-save', onclick: () => save({ path: path.value.trim() }) }, 'Save'),
         cur.custom ? h('button', { type: 'button', class: 'small', onclick: () => save({ path: '' }) }, '↩ Use the default folder') : null,
         cur.local ? folderButton(cur.path, true) : h('button', { type: 'button', class: 'small', onclick: () => copyText(cur.path, 'Folder path copied') }, '📋 Copy the folder path')),
-      cur.writable ? h('p', { class: 'small', 'data-testid': 'bf-ok' }, '✔ BookForge can write there.') : h('div', null, problemBox(cur.problem || { code: 'SAVE_FOLDER_NOT_WRITABLE' })),
+      cur.writable ? h('p', { class: 'small', 'data-testid': 'bf-ok' }, '✔ Akọwe can write there.') : h('div', null, problemBox(cur.problem || { code: 'SAVE_FOLDER_NOT_WRITABLE' })),
       h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically while they are made and when they are finished (at most every 2 minutes)'),
         h('button', { type: 'button', class: 'small', onclick: () => save({ auto_save: auto.checked }) }, 'Save')),
-      cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use BookForge from another device: folders can only be opened on the computer BookForge runs on.'),
+      cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use Akọwe from another device: folders can only be opened on the computer Akọwe runs on.'),
       out);
   };
   load();
@@ -8293,7 +8293,7 @@ function openRerunDialog(spec, title, opener, summary = null) {
     return body;
   });
 }
-/** 📂 Open a saved book: the books folder list (this computer) and an upload (.bookforge or book-bible.json). */
+/** 📂 Open a saved book: the books folder list (this computer) and an upload (.akowe or book-bible.json). */
 function openSavedBookDialog(opener) {
   modal('📂 Open a saved book', close => {
     const list = h('div', { 'data-testid': 'open-list' }, loadingState('Looking in your books folder…'));
@@ -8321,13 +8321,13 @@ function openSavedBookDialog(opener) {
               catch (e) { msg.appendChild(problemBox(toProblem(e, { book: f.title, step: '📂 Open a saved book' }))); b.disabled = false; }
             } }, '📂 Open') : null,
             f.has_bible ? h('button', { type: 'button', class: 'small', 'data-testid': 'rerun-folder-btn', onclick: () => { close(); openRerunDialog({ folder: f.name }, f.title, opener); } }, '🔁 Rerun') : null))))
-          : stateBox('empty', 'No saved book in this folder yet', h('p', null, '💾 Save a book first, or upload a book.bookforge file below.')));
+          : stateBox('empty', 'No saved book in this folder yet', h('p', null, '💾 Save a book first, or upload a book.akowe file below.')));
     };
-    const file = h('input', { type: 'file', id: 'open-file', accept: '.bookforge,.json,application/zip,application/json', 'data-testid': 'open-file' });
+    const file = h('input', { type: 'file', id: 'open-file', accept: '.akowe,.bookforge,.json,application/zip,application/json', 'data-testid': 'open-file' });
     const up = h('button', { type: 'button', class: 'primary small', 'data-testid': 'open-upload', onclick: async () => {
       clear(msg);
       const f = file.files && file.files[0];
-      if (!f) { markFieldProblem(file, { code: 'MISSING_INPUT', message: 'Choose a book.bookforge or book-bible.json file first.' }, { step: '📂 Open a saved book', field: 'File' }); return; }
+      if (!f) { markFieldProblem(file, { code: 'MISSING_INPUT', message: 'Choose a book.akowe or book-bible.json file first.' }, { step: '📂 Open a saved book', field: 'File' }); return; }
       up.disabled = true; put(msg, loadingState(`Opening ${f.name}…`));
       try { const fd = new FormData(); fd.append('file', f, f.name); const r = await api('POST', '/books/open', { raw: fd }); clear(msg); afterOpen(r); }
       catch (e) { put(clear(msg), problemBox(toProblem(e, { step: '📂 Open a saved book', field: f.name }))); up.disabled = false; }
@@ -8337,7 +8337,7 @@ function openSavedBookDialog(opener) {
       h('p', null, 'A saved book opens as a NEW book: the books you have are never overwritten. An unfinished book can be continued. ', infoTip('Opening saved books', ...TIP_SAVE())),
       h('h3', null, 'From your books folder'), list,
       h('h3', null, 'From a file'),
-      h('div', { class: 'field' }, h('label', { for: 'open-file' }, 'A book.bookforge file (the whole book) or a book-bible.json (to make a new book from it)'), file),
+      h('div', { class: 'field' }, h('label', { for: 'open-file' }, 'A book.akowe file (the whole book) or a book-bible.json (to make a new book from it)'), file),
       h('div', { class: 'row' }, up), msg);
   }, { wide: true });
 }
@@ -8366,7 +8366,7 @@ function runBibleLine(r) {
 function lengthSettingsCard() {
   const box = h('div');
   const card = h('section', { class: 'card', 'aria-labelledby': 'lns-h', 'data-testid': 'length-settings' }, h('h2', { id: 'lns-h' }, '📏 Long chapters ', infoTip('Long chapters', ...LENGTH_TIP())),
-    h('p', { class: 'small' }, 'How BookForge writes chapters longer than one AI answer, and what it does when a chapter comes back far too short.'), box);
+    h('p', { class: 'small' }, 'How Akọwe writes chapters longer than one AI answer, and what it does when a chapter comes back far too short.'), box);
   (async () => {
     let cur;
     try { cur = await api('GET', '/settings/length'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Long chapters' }))); return; }
@@ -8392,7 +8392,7 @@ function lengthSettingsCard() {
 function backupsCard() {
   const box = h('div', { 'aria-live': 'polite' });
   const card = h('section', { class: 'card', 'aria-labelledby': 'bk-h' }, h('h2', { id: 'bk-h' }, '💾 Backups'),
-    h('p', { class: 'small' }, 'BookForge backs up all your books automatically: once a day, before ⚡ Make a book for me, before putting a book together and before exporting. Only the newest ones are kept. Keys are never part of a backup.'), box);
+    h('p', { class: 'small' }, 'Akọwe backs up all your books automatically: once a day, before ⚡ Make a book for me, before putting a book together and before exporting. Only the newest ones are kept. Keys are never part of a backup.'), box);
   const load = async () => {
     let out;
     try { out = await api('GET', '/backups'); } catch (e) { clear(box).appendChild(problemBox(toProblem(e, { step: 'Settings › Backups' }), { retry: load })); return; }
@@ -8432,7 +8432,7 @@ function restoreBackup(b, reload) {
         close(); toast(`Your books were restored from the backup of ${fmtWhen(b.created_at)} (${b.label || 'Backup'}). A safety backup of how things were just before is listed under Backups.`); S.project = null; await loadProjects(); reload(); route();
       } catch (e) { clear(out).appendChild(problemBox(toProblem(e, { step: 'Restore a backup' }))); go2.disabled = false; }
     } },
-    h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. BookForge first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
+    h('div', { class: 'state blocked' }, h('h3', null, '⚠️ This replaces ALL your books'), h('p', null, `Every book goes back to how it was on ${fmtTime(b.created_at)}. Work done after that is replaced. Akọwe first saves a safety backup of how things are now, so you can undo this by restoring that safety backup.`)),
     h('div', { class: 'check-row field' }, tick, h('label', { for: tick.id }, 'I understand that all my books go back to this backup.')),
     h('div', { class: 'field' }, h('label', { for: word.id }, 'Type RESTORE to confirm'), word, h('span', { class: 'hint', id: 'rs-h' }, 'This extra step prevents accidents.')),
     out, h('div', { class: 'form-actions' }, go2, h('button', { type: 'button', onclick: close }, 'Cancel')));
@@ -8441,7 +8441,7 @@ function restoreBackup(b, reload) {
 function retryCard() {
   const box = h('div');
   const card = h('section', { class: 'card', 'aria-labelledby': 'rt-h' }, h('h2', { id: 'rt-h' }, '⏳ When the AI is busy'),
-    h('p', { class: 'small' }, 'If the AI is busy or cannot be reached, BookForge waits and tries again on its own, and shows “waiting for Claude (busy) — retrying in 30 s”. A slow answer (time-out) is never retried automatically, because the first answer may still arrive; you press 🔁 Try again.'), box);
+    h('p', { class: 'small' }, 'If the AI is busy or cannot be reached, Akọwe waits and tries again on its own, and shows “waiting for Claude (busy) — retrying in 30 s”. A slow answer (time-out) is never retried automatically, because the first answer may still arrive; you press 🔁 Try again.'), box);
   (async () => {
     let cur;
     try { cur = await api('GET', '/settings/ai-retry'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › When the AI is busy' }))); return; }
@@ -8465,7 +8465,7 @@ function retryCard() {
 function reviewerCard() {
   const box = h('div');
   const card = h('section', { class: 'card', 'aria-labelledby': 'rva-h' }, h('h2', { id: 'rva-h' }, '🧐 Reviewer AI'),
-    h('p', { class: 'small' }, 'The AI reviewer reads each draft before it is approved. A different AI from the one that wrote it notices more, so BookForge picks another AI that works. When only one AI works, it reviews its own writing and BookForge shows ⚠️ “reviews are not independent”.'), box);
+    h('p', { class: 'small' }, 'The AI reviewer reads each draft before it is approved. A different AI from the one that wrote it notices more, so Akọwe picks another AI that works. When only one AI works, it reviews its own writing and Akọwe shows ⚠️ “reviews are not independent”.'), box);
   (async () => {
     let cur;
     try { cur = await api('GET', '/settings/reviewer-ai'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Reviewer AI' }))); return; }
@@ -8478,7 +8478,7 @@ function reviewerCard() {
       catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Reviewer AI' }))); }
     } }, 'Save');
     put(box, h('div', { class: 'field' }, h('label', { for: 'rva-slot' }, 'Reviewer AI'), sel,
-      h('span', { class: 'hint', id: 'rva-hint' }, 'A chosen AI is used only when it did not write the draft and works right now; otherwise BookForge picks another one automatically.')),
+      h('span', { class: 'hint', id: 'rva-hint' }, 'A chosen AI is used only when it did not write the draft and works right now; otherwise Akọwe picks another one automatically.')),
     h('div', { class: 'row' }, save));
   })();
   return card;
@@ -8487,7 +8487,7 @@ function reviewerCard() {
 function editorSettingsCard() {
   const box = h('div');
   const card = h('section', { class: 'card', 'aria-labelledby': 'eds-h', 'data-testid': 'editor-settings' }, h('h2', { id: 'eds-h' }, '🖋 Editor'),
-    h('p', { class: 'small' }, 'After the AI reviewer checked that a chapter fits the plan, a second AI — never the one that wrote it, when another AI works — reads it like an editor: subtext, characters with their own goals, distinct voices, obstacles from the world, theme, repeated tics (counted by BookForge without AI), stakes and the ending. In ⚡ Make a book for me the writer then reworks only the flagged passages; a rewrite is kept only when nothing got worse. The editor never holds up the book: when its rounds are used up, the chapter is approved under your run consent and marked ⚠️.'), box);
+    h('p', { class: 'small' }, 'After the AI reviewer checked that a chapter fits the plan, a second AI — never the one that wrote it, when another AI works — reads it like an editor: subtext, characters with their own goals, distinct voices, obstacles from the world, theme, repeated tics (counted by Akọwe without AI), stakes and the ending. In ⚡ Make a book for me the writer then reworks only the flagged passages; a rewrite is kept only when nothing got worse. The editor never holds up the book: when its rounds are used up, the chapter is approved under your run consent and marked ⚠️.'), box);
   (async () => {
     let cur;
     try { cur = await api('GET', '/settings/editor'); } catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Settings › Editor' }))); return; }
@@ -8562,7 +8562,7 @@ function initNavigation() {
     if (r && r.name === 'AbortError') return;
     if (r instanceof ApiError && r.status === 401) return;  // the "open from the start link" page explains it
     showGlobalProblem(r);
-    try { console.warn('Bookforge: unhandled problem', r); } catch { /* ignore */ }
+    try { console.warn('Akọwe: unhandled problem', r); } catch { /* ignore */ }
   });
   window.addEventListener('error', ev => {
     if (!ev || (!ev.error && !ev.message)) return;
@@ -8591,7 +8591,7 @@ function boot() {
   });
   if (!S.token) {
     showAuthProblem(S.pairing
-      ? 'To finish connecting AutoInjector, BookForge needs to be opened from its start link once on this computer. Open BookForge from its window or desktop shortcut, then press Connect in AutoInjector again.'
+      ? 'To finish connecting AutoInjector, Akọwe needs to be opened from its start link once on this computer. Open Akọwe from its window or desktop shortcut, then press Connect in AutoInjector again.'
       : 'No access token was found in the address.');
     return;
   }
@@ -8649,7 +8649,7 @@ function termVerifyRow(term, after) {
 /** A select to relabel one repeated phrase (the author's label always wins). */
 function repeatLabel(r, version, after) {
   const sel = h('select', { class: 'small', 'aria-label': `Kind of repeat: ${r.phrase}` },
-    h('option', { value: '' }, 'Let BookForge decide'),
+    h('option', { value: '' }, 'Let Akọwe decide'),
     Object.entries(FACT_CLASS).map(([k, [ic, l]]) => h('option', { value: k, selected: r.source === 'author' && r.class === k }, `${ic} ${l}`)));
   sel.addEventListener('change', async () => {
     try {
@@ -8669,7 +8669,7 @@ function factFindingList(fs, testid) {
 function factsCard(rid, { onSaved } = {}) {
   const box = h('section', { class: 'card facts-card', 'aria-labelledby': `fc-h-${rid}`, 'data-testid': 'facts-card' },
     h('div', { class: 'row space' }, h('h2', { id: `fc-h-${rid}` }, '🔎 Timeline, trade facts and repeats'),
-      infoTip('Fact checks', h('p', null, 'BookForge reads the ages and years in the book and checks that they add up (born in 1850 + forty years old should be the story’s year).'),
+      infoTip('Fact checks', h('p', null, 'Akọwe reads the ages and years in the book and checks that they add up (born in 1850 + forty years old should be the story’s year).'),
         h('p', null, 'Trade facts: equipment, procedures and period words stay “research needed” until you mark them ✔ Verified or ✕ Wrong. An AI may suggest an answer, but only you can verify. A wick on a gas lamp is flagged on sight.'),
         h('p', null, 'Repeats are sorted before anything is cut: a character’s way of talking (voice) and motifs are kept; only accidental repeats and the excess of the others may be trimmed.'))));
   const body = h('div', null, loadingState('Checking ages, years, terms and repeats…'));

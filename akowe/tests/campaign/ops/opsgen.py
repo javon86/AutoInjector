@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import uuid
 
-from bookforge.store import new_id
+from akowe.store import new_id
 
 FIXTURE_ID = "fixture-record"
 

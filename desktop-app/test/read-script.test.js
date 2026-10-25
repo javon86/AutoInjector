@@ -153,7 +153,7 @@ console.log("\n== E03 regression: a finished reply with an EMPTY composer is NOT
 console.log("\n== a page with no message box (signed out) reports inputFound:false ==");
 {
   const r = runGen(`<h1>Welcome back</h1><button>Log in</button><button>Sign up</button>`);
-  assert(r.inputFound === false, "no message box on the page -> inputFound:false (BookForge won't call the pane Ready)");
+  assert(r.inputFound === false, "no message box on the page -> inputFound:false (Akọwe won't call the pane Ready)");
 }
 
 console.log("\n== no stop/send buttons matched -> falls back (not generating) ==");

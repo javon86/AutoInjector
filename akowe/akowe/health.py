@@ -99,16 +99,16 @@ class HealthService:
                 self._qc = qc
         except Exception as exc:  # noqa: BLE001
             return {"id": "database", "title": "Your books' database", "status": "problem",
-                    "detail": f"BookForge could not read or write its database ({type(exc).__name__}).",
-                    "fix": "Close other programs that might use the BookForge data folder, make sure the disk is not "
-                           "full, then restart BookForge. If it stays, restore the newest verified backup "
+                    "detail": f"Akọwe could not read or write its database ({type(exc).__name__}).",
+                    "fix": "Close other programs that might use the Akọwe data folder, make sure the disk is not "
+                           "full, then restart Akọwe. If it stays, restore the newest verified backup "
                            "(Settings → Backups).", "code": "INTERNAL_ERROR"}
         ms = int((time.monotonic() - t0) * 1000)
         if qc[1] != ["ok"]:
             return {"id": "database", "title": "Your books' database", "status": "problem", "code": "HASH_MISMATCH",
-                    "detail": "SQLite found damage inside the BookForge database file (quick_check: "
+                    "detail": "SQLite found damage inside the Akọwe database file (quick_check: "
                               f"{'; '.join(qc[1][:2])[:200]}).",
-                    "fix": "Stop working in BookForge, then restore the newest verified backup made before the damage "
+                    "fix": "Stop working in Akọwe, then restore the newest verified backup made before the damage "
                            "(Settings → Backups). Backups of a damaged database are marked as not verified.",
                     "action": "settings"}
         return {"id": "database", "title": "Your books' database", "status": "ok" if ok else "problem",
@@ -119,20 +119,20 @@ class HealthService:
         free = shutil.disk_usage(d).free
         status = "ok" if free >= LOW_DISK else "warn" if free >= VERY_LOW_DISK else "problem"
         return {"id": "disk", "title": "Free space for your books", "status": status,
-                "detail": f"{_human_bytes(free)} free on the disk that holds your BookForge data.",
+                "detail": f"{_human_bytes(free)} free on the disk that holds your Akọwe data.",
                 "fix": None if status == "ok" else "Free some disk space (empty the recycle bin, delete large files you "
-                "no longer need). BookForge needs room for exports and backups."}
+                "no longer need). Akọwe needs room for exports and backups."}
 
     def c_backups(self, force):
         last = self.app.backups.latest()
         if not last and self.app.store.query_one("SELECT 1 FROM projects LIMIT 1") is None:
             # a fresh install: nothing to back up yet, so nothing is wrong (BF-14)
             return {"id": "backups", "title": "Backups", "status": "info",
-                    "detail": "No backup yet: there is no book to back up. BookForge backs up automatically once "
+                    "detail": "No backup yet: there is no book to back up. Akọwe backs up automatically once "
                               "you start one.", "fix": None}
         if not last:
             return {"id": "backups", "title": "Backups", "status": "warn", "detail": "No backup yet.",
-                    "fix": "Press 💾 Back up now (Settings → Backups). BookForge also backs up automatically each day "
+                    "fix": "Press 💾 Back up now (Settings → Backups). Akọwe also backs up automatically each day "
                            "and before big steps.", "action": "backup"}
         age = _age_s(last.get("created_at"))
         days = (age or 0) / 86400
@@ -176,7 +176,7 @@ class HealthService:
                     out.append(dict(base, status="ok", detail="Anthropic API (test adapter).", fix=None))
                 elif importlib.util.find_spec("anthropic") is None:
                     out.append(dict(base, status="problem", detail="The 'anthropic' package is not installed.",
-                                    fix="Run: python -m pip install anthropic, then restart BookForge.",
+                                    fix="Run: python -m pip install anthropic, then restart Akọwe.",
                                     code="CAPABILITY_UNAVAILABLE", action="settings"))
                 elif not s.get("has_credentials"):
                     out.append(dict(base, status="problem", detail="No API key is saved for this slot.",
@@ -197,13 +197,13 @@ class HealthService:
                 if state in ("repairing", "needs_user", "broken"):
                     word = {"repairing": "being repaired by AutoInjector", "needs_user": "waiting for you in AutoInjector",
                             "broken": "not working"}[state]
-                    fix = {"repairing": "Nothing to do: AutoInjector is fixing it by itself. Meanwhile BookForge sends "
+                    fix = {"repairing": "Nothing to do: AutoInjector is fixing it by itself. Meanwhile Akọwe sends "
                                         "the work to the AIs that work, and uses this one again when it is fixed.",
                            "needs_user": f"Open AutoInjector and look at the {site} window (for example: log in, solve "
-                                         "the check, or wait for the usage limit). BookForge uses the other AIs "
+                                         "the check, or wait for the usage limit). Akọwe uses the other AIs "
                                          "meanwhile and checks again by itself.",
                            "broken": f"Open AutoInjector and check the {site} window, or press its repair/teach "
-                                     "button. BookForge uses the other AIs meanwhile."}[state]
+                                     "button. Akọwe uses the other AIs meanwhile."}[state]
                     out.append(dict(base, status="warn", detail=f"{site} through AutoInjector: {word}"
                                     + (f" ({h.get('problem')})." if h.get("problem") else "."),
                                     code=h.get("problem") or "SITE_NOT_READY", fix=fix, state=state,
@@ -236,13 +236,13 @@ class HealthService:
         stopped = any(t.stopped for t in getattr(pusher, "_targets", {}).values())
         if stopped:
             return {"id": "bridge", "title": "AutoInjector link", "status": "warn",
-                    "detail": "AutoInjector refused BookForge's connection key for status updates.",
-                    "fix": "In AutoInjector press Connect again (it gives BookForge a new key).", "action": "settings",
+                    "detail": "AutoInjector refused Akọwe's connection key for status updates.",
+                    "fix": "In AutoInjector press Connect again (it gives Akọwe a new key).", "action": "settings",
                     "code": "PERMISSION_DENIED"}
         if not ok_slots:
             return {"id": "bridge", "title": "AutoInjector link", "status": "problem",
                     "detail": "The AutoInjector bridge does not answer.", "code": "UPSTREAM_UNAVAILABLE",
-                    "fix": "Start the AutoInjector desktop app and switch its BookForge bridge on.", "action": "settings"}
+                    "fix": "Start the AutoInjector desktop app and switch its Akọwe bridge on.", "action": "settings"}
         detail = "Bridge reachable."
         status = "ok"
         if pusher.sent:
@@ -251,7 +251,7 @@ class HealthService:
             detail += f" Status updates are not getting through yet ({pusher.last_error})."
             status = "warn"
         return {"id": "bridge", "title": "AutoInjector link", "status": status, "detail": detail,
-                "fix": None if status == "ok" else "Keep AutoInjector open; BookForge retries on its own."}
+                "fix": None if status == "ok" else "Keep AutoInjector open; Akọwe retries on its own."}
 
     def c_exports(self, force):
         from .shelf import finished_books  # noqa: PLC0415
@@ -288,7 +288,7 @@ class HealthService:
                            "Cancel it.", "action": "jobs"}
         if interrupted:
             return {"id": "jobs", "title": "Background work", "status": "warn",
-                    "detail": f"{interrupted} job(s) were interrupted when BookForge stopped.",
+                    "detail": f"{interrupted} job(s) were interrupted when Akọwe stopped.",
                     "fix": "Open Background work and press ▶ Resume (or dismiss it).", "action": "jobs"}
         return {"id": "jobs", "title": "Background work", "status": "ok",
                 "detail": f"{live} running, nothing stuck.", "fix": None}

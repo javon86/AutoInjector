@@ -2,7 +2,7 @@
 so many (newer) archived books could push finished books off the Shelf. Each list now keeps its own newest books."""
 from __future__ import annotations
 
-from bookforge import shelf as shelf_mod
+from akowe import shelf as shelf_mod
 
 
 def test_archived_books_never_push_finished_ones_off_the_shelf(monkeypatch):

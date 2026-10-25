@@ -15,7 +15,7 @@ from datetime import timedelta
 
 from .. import k_runtime as kr
 from ..canonical import canonical_bytes
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from ..providers import role_matches
 from . import register
 from .base import Context, OperationHandler, Result
@@ -25,8 +25,8 @@ TERMINAL = ("FAILED", "CANCELLED", "COMPLETED")
 DERIVED = "is a derived decision; recompute it with CREATE instead of replacing it"
 
 
-def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> BookforgeError:
-    return BookforgeError(code, path, msg, status=status)
+def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> AkoweError:
+    return AkoweError(code, path, msg, status=status)
 
 
 def _state(ctx: Context, ns: str, key: str):
@@ -51,7 +51,7 @@ def _check_manifest(ctx: Context, supplied: dict, path: str = "/payload/feature_
     """The scheduling predicate is the TRUSTED stored manifest; a supplied copy must match it exactly."""
     stored = ctx.manifest
     if stored is None:
-        raise BookforgeError("MISSING_INPUT", path, "project has no feature manifest")
+        raise AkoweError("MISSING_INPUT", path, "project has no feature manifest")
     if supplied.get("project_id") != ctx.project_id or supplied.get("branch_id") != ctx.branch_id:
         raise _rej("INVALID_INPUT", path, "manifest belongs to another project/branch")
     if canonical_bytes(supplied) != canonical_bytes(stored):
@@ -182,7 +182,7 @@ class ModuleRouter(OperationHandler):
         reg_rec = ctx.field_record("operation_ref")
         reg = registration(ctx.store, ctx.project_id, ctx.branch_id, reg_rec["data"]["registration_id"])
         if reg is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
+            raise AkoweError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
         current = registry_revision(ctx.store, ctx.project_id, ctx.branch_id)
         if p["registry_revision"] != current:
             raise _rej("VERSION_CONFLICT", "/payload/registry_revision", f"registry is at revision {current}")
@@ -364,7 +364,7 @@ def verify_fence(store, project_id: str, branch_id: str, queue_id: str, attempt_
 
 def _fence(job: dict | None, ctrl: dict, attempt_id: str, fencing_token: int | None = None):
     if job is None:
-        raise BookforgeError("NOT_FOUND", "/payload/queue_id", "unknown queue job", status="REJECTED")
+        raise AkoweError("NOT_FOUND", "/payload/queue_id", "unknown queue job", status="REJECTED")
     if job["state"] != "LEASED" or job["attempt_id"] != attempt_id:
         raise _rej("LEASE_EXPIRED", "/payload/attempt_id", f"attempt {attempt_id} is fenced; current attempt is "
                    f"{job['attempt_id']} ({job['state']})")
@@ -391,7 +391,7 @@ class JobQueue(OperationHandler):
         reg_rec = ctx.field_record("operation_ref")
         reg = registration(ctx.store, ctx.project_id, ctx.branch_id, reg_rec["data"]["registration_id"])
         if reg is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
+            raise AkoweError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
         idx, idx_rev = _state(ctx, kr.NS_JOBIDX, p["job_id"])
         if idx and idx.get("active"):
             raise _rej("VERSION_CONFLICT", "/payload/job_id", f"job already queued as {idx['queue_id']}")
@@ -416,7 +416,7 @@ class JobQueue(OperationHandler):
             raise _rej("INVALID_INPUT", "/payload/queue_id", "queue_id is stable")
         job, jrev = _state(ctx, kr.NS_JOBS, p["queue_id"])
         if job is None:
-            raise BookforgeError("NOT_FOUND", "/payload/queue_id", "unknown queue job", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/payload/queue_id", "unknown queue job", status="REJECTED")
         ctrl, crev = kr.queue_control(ctx.store, ctx.project_id, ctx.branch_id)
         cur, new, now = job["state"], p["lease_state"], kr.now()
         if p["attempt_id"] != job["attempt_id"]:
@@ -441,7 +441,7 @@ class JobQueue(OperationHandler):
             elif new == "RETRYING":
                 dec, _ = _state(ctx, kr.NS_K07, f"{job['job_id']}|{job['attempt_id']}")
                 if not dec or dec["decision"] != "RETRY":
-                    raise BookforgeError("MISSING_INPUT", "/payload/lease_state",
+                    raise AkoweError("MISSING_INPUT", "/payload/lease_state",
                                          "RETRYING needs a K07 RETRY decision for this attempt")
                 job.update(state="RETRYING", lease_expires_at=None, next_attempt_at=dec["next_attempt_at"])
             elif new == "FAILED":
@@ -458,7 +458,7 @@ class JobQueue(OperationHandler):
                        lease_expires_at=kr.lease_expiry(now), leased_at=kr.iso(now), next_attempt_at=None)
         elif cur == "RETRYING" and new == "QUEUED":
             if job["next_attempt_at"] and kr.parse_time(job["next_attempt_at"]) > now:
-                raise BookforgeError("RATE_LIMITED", "/payload/lease_state",
+                raise AkoweError("RATE_LIMITED", "/payload/lease_state",
                                      f"retry not before {job['next_attempt_at']}")
             job["state"] = "QUEUED"
         else:
@@ -485,7 +485,7 @@ class JobQueue(OperationHandler):
                           and j["state"] == "LEASED" and j["generation"] == job["generation"]
                           and kr.parse_time(j["lease_expires_at"]) > t]
                 if len(leased) >= max_par:
-                    raise BookforgeError("RATE_LIMITED", "/payload/lease_state",
+                    raise AkoweError("RATE_LIMITED", "/payload/lease_state",
                                          f"max_parallel_jobs={max_par} leases already active")
             tx.put_state(pid, bid, kr.NS_JOBS, queue_id, job, expected_revision=jrev)
             if new in TERMINAL:
@@ -496,14 +496,14 @@ class JobQueue(OperationHandler):
 
     def _dispatch_checks(self, ctx: Context, job: dict, ctrl: dict):
         if ctrl["paused"]:
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/lease_state", "queue is paused; RESUME first (K10)")
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/lease_state", "queue is paused; RESUME first (K10)")
         if not ctx.store.has_scope(ctx.principal_id, ctx.project_id, ctx.branch_id, f"{job['operation']}:create"):
             raise _rej("PERMISSION_DENIED", "/payload/lease_state", f"missing scope {job['operation']}:create")
         for i, ref in enumerate(job["source_versions"]):
             rec = ctx.store.get_record(ctx.project_id, ctx.branch_id, ref["record_id"], ref["version"])
             if rec is None or rec["content_hash"] != ref["content_hash"] or rec["stale"] \
                     or rec["lifecycle"] in ("SUPERSEDED", "REJECTED"):
-                raise BookforgeError("VERSION_CONFLICT", f"/source_versions/{i}",
+                raise AkoweError("VERSION_CONFLICT", f"/source_versions/{i}",
                                      "a pinned source changed; submit a new logical request")
 
     def _check_completion(self, ctx: Context, job: dict):
@@ -521,7 +521,7 @@ class JobQueue(OperationHandler):
                 if cur is None or cur["stale"]:
                     continue
             return
-        raise BookforgeError("MISSING_INPUT", "/input_refs",
+        raise AkoweError("MISSING_INPUT", "/input_refs",
                              f"COMPLETED needs a current COMPLETE I12 record for {job['operation']} matching the "
                              "job's source pins (a worker claim is not evidence)")
 
@@ -546,7 +546,7 @@ class ModeController(OperationHandler):
             try:
                 kr.check_k09_authorization(ctx.store, rec, None, "/input_refs")
                 auths.append(rec)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 denied = exc.errors[0]["message"]
         if denied and not auths:
             return Result(data={"decision": "DENY", "hold_reason": f"authorization refused: {denied}"})
@@ -694,7 +694,7 @@ class ApprovalCheckpoints(OperationHandler):
             raise _rej("INVALID_INPUT", "/payload/decision", f"{cur} -> {new} is not allowed")
         cp, rev = _state(ctx, kr.NS_K09, base["approval_id"])
         if cp is None:
-            raise BookforgeError("NOT_FOUND", "/payload/approval_id", "checkpoint binding missing")
+            raise AkoweError("NOT_FOUND", "/payload/approval_id", "checkpoint binding missing")
         now = kr.now()
         if new in ("APPROVED", "REJECTED", "REVOKED"):
             self._authorize(ctx, cp)
@@ -845,7 +845,7 @@ class ResourceSelector(OperationHandler):
             msg = "; ".join(f"{k}: {v}" for k, v in sorted(reasons.items()))
             code = "QUOTA_EXCEEDED" if reasons and all("currency" in v for v in reasons.values()) \
                 else "CAPABILITY_UNAVAILABLE"
-            raise BookforgeError(code, "/payload/resource_registry", f"no eligible resource ({msg})",
+            raise AkoweError(code, "/payload/resource_registry", f"no eligible resource ({msg})",
                                  unresolved=[f"{p['job_id']}:resource"])
         eligible.sort(key=lambda r: (0 if r["resource_kind"] in ("CODE", "TOOL") else 1,
                                      r["estimated_cost_minor_units"], r["active_jobs"],
@@ -916,7 +916,7 @@ class CostController(OperationHandler):
         key = kr.ledger_key(q["account_id"], q["period"])
         led, rev = _state(ctx, kr.NS_LEDGER, key)
         if led is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/quota/account_id",
+            raise AkoweError("MISSING_INPUT", "/payload/quota/account_id",
                                  "quota/usage unknown in trusted storage; configure the ledger before reserving")
         if q["currency"] != led["currency"]:
             raise _rej("INVALID_INPUT", "/payload/quota/currency",

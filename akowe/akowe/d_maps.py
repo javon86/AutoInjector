@@ -21,7 +21,7 @@ from xml.sax.saxutils import escape, quoteattr
 
 from .canonical import sha256_bytes
 
-EXPORTER_VERSION = "bookforge-d12-svg/1.0.0"
+EXPORTER_VERSION = "akowe-d12-svg/1.0.0"
 UNITS = ("mm", "px", "world_units")
 
 

@@ -214,7 +214,7 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
     if meta.get("language"):
         cat_b += b" /Lang " + pdf_text_string(meta["language"])
     w.set(catalog, cat_b + b" >>")
-    info = b"<< /Producer (Bookforge PDF writer 1)"
+    info = b"<< /Producer (Akowe PDF writer 1)"
     for key, field in (("Title", "title"), ("Author", "author"), ("Subject", "identifier")):
         if meta.get(field):
             info += f" /{key} ".encode("ascii") + pdf_text_string(meta[field])
@@ -272,7 +272,7 @@ def render_cover_pdf(*, width: float, height: float, bleed: float, image: ImageI
     layout = Layout([page], [], {}, [])
     extra = {}
     if spine is not None:
-        extra["BookforgeSpine"] = f"x={num(spine[0])}pt width={num(spine[1])}pt"
+        extra["AkoweSpine"] = f"x={num(spine[0])}pt width={num(spine[1])}pt"
     return render_pdf(layout, page_width=width, page_height=height, bleed=bleed, meta=meta,
                       images={"cover": image}, extra_info=extra)
 

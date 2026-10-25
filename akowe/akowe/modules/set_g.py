@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 
 from .. import CONTRACT_VERSION
 from ..canonical import canonical_bytes, sha256_bytes
-from ..errors import BookforgeError, error
+from ..errors import AkoweError, error
 from ..exporters import book as bookmod
 from ..exporters.docx import build_docx, inspect_docx
 from ..exporters.epub import build_epub, inspect_epub
@@ -86,12 +86,12 @@ PROFILE_RULES = {
 }
 
 
-def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> BookforgeError:
-    return BookforgeError(code, path, msg, status=status)
+def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> AkoweError:
+    return AkoweError(code, path, msg, status=status)
 
 
-def _blocked(code: str, path: str, msg: str, **kw) -> BookforgeError:
-    return BookforgeError(code, path, msg, status="BLOCKED", **kw)
+def _blocked(code: str, path: str, msg: str, **kw) -> AkoweError:
+    return AkoweError(code, path, msg, status="BLOCKED", **kw)
 
 
 def _same_pin(a: dict, b: dict) -> bool:
@@ -143,15 +143,15 @@ def validate_bytes(ctx: Context, op: str, raw: bytes, mime: str | None = None) -
         v = [{"code": "INVALID_INPUT", "path": "", "message": m} for m in rep["errors"]]
         if rep["page_count"] < 1:
             v.append({"code": "INVALID_INPUT", "path": "", "message": "PDF has no pages"})
-        return v, "PDF-1.7 structure (bookforge-pdf-inspect 1)", rep
+        return v, "PDF-1.7 structure (akowe-pdf-inspect 1)", rep
     if op == "G12":
         rep = inspect_epub(raw)
         return ([{"code": "INVALID_INPUT", "path": "", "message": m} for m in rep["errors"]],
-                "EPUB-3.3 OCF/OPF/XHTML structure (bookforge-epub-inspect 1; EPUBCheck unavailable)", rep)
+                "EPUB-3.3 OCF/OPF/XHTML structure (akowe-epub-inspect 1; EPUBCheck unavailable)", rep)
     if op == "G13":
         rep = inspect_docx(raw)
         return ([{"code": "INVALID_INPUT", "path": "", "message": m} for m in rep["errors"]],
-                "OOXML WordprocessingML package (bookforge-docx-inspect 1)", rep)
+                "OOXML WordprocessingML package (akowe-docx-inspect 1)", rep)
     raise ValueError(op)
 
 
@@ -165,7 +165,7 @@ def check_descriptor(ctx: Context, op: str, data: dict) -> list[str]:
         out.append("artifact_type mismatch")
     try:
         binrec = ctx.record(aref)
-    except BookforgeError as exc:
+    except AkoweError as exc:
         return [f"artifact_ref unresolved: {exc.errors[0]['message']}"]
     if binrec["representation"] != "BINARY_ARTIFACT":
         return ["artifact_ref must point to a BINARY_ARTIFACT, never to a descriptor"]
@@ -178,7 +178,7 @@ def check_descriptor(ctx: Context, op: str, data: dict) -> list[str]:
     out.extend(f"artifact bytes: {v['path']} {v['message']}" for v in violations)
     try:
         rep = ctx.record(data.get("validation_report_ref"))
-    except BookforgeError as exc:
+    except AkoweError as exc:
         return out + [f"validation_report_ref unresolved: {exc.errors[0]['message']}"]
     if rep["module_id"] != "I04" or rep["record_kind"] != "OUTPUT":
         out.append("validation_report_ref must be an I04 validation record")
@@ -579,7 +579,7 @@ class ManuscriptCompiler(GHandler):
     def semantic(self, ctx, record):
         try:
             assemble(ctx, record, "/payload/candidate_ref")
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding("COMPILE_INPUTS", exc.errors[0]["message"], severity="BLOCKING",
                                 decision="UNKNOWN" if exc.status == "BLOCKED" else "FAIL")]
         return []
@@ -760,7 +760,7 @@ class _Matter(GHandler):
                     task=(f"Write the {self.side} matter items {creative} for the book '{md['title']}' by "
                           f"{md['author']}. Return JSON {{items:[{{item_id,title,text}}]}} only."),
                     output_schema=schema, context={"metadata": md, "requested_items": creative})
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code == "CAPABILITY_UNAVAILABLE":
                     raise _blocked("CAPABILITY_UNAVAILABLE", f"/payload/{self.items_field}",
                                    f"items {creative} need authored text: configure an AI slot or supply a manual "
@@ -857,7 +857,7 @@ class PageLayout(GHandler):
     def semantic(self, ctx, record):
         try:
             g04_context(ctx, record, "/payload/candidate_ref")
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding("PAGINATION_REPRODUCIBLE", exc.errors[0]["message"], severity="BLOCKING",
                                 decision="UNKNOWN" if exc.status == "BLOCKED" else "FAIL")]
         return []
@@ -1062,7 +1062,7 @@ class CoverLayout(GHandler):
         art, _ = self.artifact(ctx, record)
         try:
             cover = ctx.record(art["layout_asset_ref"])
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding("COVER_FILE", exc.errors[0]["message"], severity="BLOCKING")]
         if cover["module_id"] != "G10" or cover["representation"] != "BINARY_ARTIFACT":
             return [ctx.finding("COVER_FILE", "layout_asset_ref must pin a staged G10 cover file", severity="BLOCKING")]

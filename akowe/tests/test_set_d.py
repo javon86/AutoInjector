@@ -12,11 +12,11 @@ import unicodedata
 
 import pytest
 
-from bookforge import d_assets as da
-from bookforge import d_maps
-from bookforge.canonical import sha256_bytes
-from bookforge.errors import BookforgeError
-from bookforge.store import new_id
+from akowe import d_assets as da
+from akowe import d_maps
+from akowe.canonical import sha256_bytes
+from akowe.errors import AkoweError
+from akowe.store import new_id
 
 from conftest import errors_of
 
@@ -466,7 +466,7 @@ class FakeImageAdapter:
         self.submits += 1
         assert request["protected_facts"] and request["style"]["style_name"] == "Ink wash"
         if self.timeout_first and self.submits == 1:
-            raise BookforgeError("TIMEOUT", "", "provider timed out")
+            raise AkoweError("TIMEOUT", "", "provider timed out")
         if self.running_first and self.submits == 1:
             return {"status": "RUNNING", "provider_job_id": "job-1"}
         return {"status": "COMPLETED", "provider_job_id": f"job-{self.submits}", "image_bytes": PNG,
@@ -523,7 +523,7 @@ def test_provider_job_resumes_through_status_without_duplicate_charge(h):
 
 def test_resource_ids_helper():
     assert da.parse_dimensions("6 x 9 in", "/p") == {"width": 6, "height": 9, "unit": "in"}
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         da.parse_dimensions("6x9", "/p")
     ref = {"project_id": "p", "branch_id": "main", "owner": "D", "module_id": "D02", "record_id": "D02-ab",
            "version": 3, "content_hash": "a" * 64}

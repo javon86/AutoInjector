@@ -25,13 +25,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import CLOSURE_REVISION, CONTRACT_VERSION, __version__
-from . import ai_check, calibration, diagnostics, journal
+from . import ai_check, calibration, diagnostics, journal, legacy
 from .assist import AssistService, supports as assist_supports
 from .autobook import AutoBookService, WriteAllService
 from .backups import BackupManager
 from .canonical import sha256_bytes
 from .engine import Engine
-from .errors import BookforgeError, error
+from .errors import AkoweError, error
 from .health import HealthService
 from .jobs import JobStore, clean_retry_settings, DEFAULT_RETRY
 from .requests import build_request
@@ -49,8 +49,8 @@ from .status_push import StatusPusher
 from .store import Store, new_id, utcnow, write_private
 from .workflow_test import WorkflowTestRunner
 
-log = logging.getLogger("bookforge.server")
-# 8765 is taken by AutoInjector's extension bridge (server/fake_api_server.py), so BookForge uses 8780.
+log = logging.getLogger("akowe.server")
+# 8765 is taken by AutoInjector's extension bridge (server/fake_api_server.py), so Akọwe uses 8780.
 DEFAULT_PORT = 8780
 WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_BODY = 64 * 1024 * 1024
@@ -170,8 +170,8 @@ class App:
         self._client = threading.local()       # the address of the request being answered (localhost-only routes)
         self.port: int | None = None
         self._last_project: dict | None = None
-        if self.interrupted:  # runs that were working when BookForge stopped: save how far they got
-            threading.Thread(target=self.saver.after_start, name="bookforge-save-interrupted", daemon=True).start()
+        if self.interrupted:  # runs that were working when Akọwe stopped: save how far they got
+            threading.Thread(target=self.saver.after_start, name="akowe-save-interrupted", daemon=True).start()
 
     # ------------------------------------------------------------------ 💾/📂 which computer asks
     def set_client(self, host: str | None):
@@ -179,7 +179,7 @@ class App:
 
     def is_local(self) -> bool:
         """True when the request being answered comes from this computer (or is an in-process call). Opening folders
-        in the file manager and listing the books folder are only for the computer BookForge runs on."""
+        in the file manager and listing the books folder are only for the computer Akọwe runs on."""
         host = getattr(self._client, "host", None)
         if host is None:
             return True
@@ -289,7 +289,7 @@ class App:
         """No new writer may start while this is held (the caller then checks _restore_busy for running ones)."""
         with self._gate:
             if self._exclusive:
-                raise BookforgeError("VERSION_CONFLICT", "", f"{self._exclusive} is already running; wait for it",
+                raise AkoweError("VERSION_CONFLICT", "", f"{self._exclusive} is already running; wait for it",
                                      status="REJECTED")
             self._exclusive = what
         try:
@@ -302,9 +302,9 @@ class App:
         """Unauthenticated liveness answer for AutoInjector: identity and versions only, no project data.
 
         BF-08: with ?challenge=<16..64 hex chars> it also returns proof = HMAC-SHA256(access token, challenge),
-        so a second BookForge start can tell "my own data folder is already running here" without ever sending
+        so a second Akọwe start can tell "my own data folder is already running here" without ever sending
         the token to whatever answers on the port (the answer can't be faked or replayed without the token)."""
-        out = {"app": "bookforge", "version": __version__, "contract_version": CONTRACT_VERSION}
+        out = {"app": "akowe", "version": __version__, "contract_version": CONTRACT_VERSION}
         if isinstance(challenge, str) and PING_CHALLENGE_RE.match(challenge):
             out["proof"] = ping_proof(self.token, challenge)
         return out
@@ -536,7 +536,7 @@ class App:
                  "approve": "Approving", "make_character": "AI is making a main character"}
 
     def book_act(self, principal: str, pid: str, branch: str, action: str, body: dict) -> dict:
-        """A "Make my book" step; while it runs the status summary says what BookForge is working on."""
+        """A "Make my book" step; while it runs the status summary says what Akọwe is working on."""
         title = self.BOOK_WORK.get(action, "Working")
         op = body.get("op") if action == "create" else {"write_chapter": "C02", "setup_format": "I01",
                                                          "assemble": "G01", "export": "G11", "check": "H05",
@@ -734,7 +734,7 @@ class App:
                 text = diagnostics.render_text(rep) + "\n" + json.dumps(rep, indent=2, ensure_ascii=False)
                 disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
                 return 200, ("__binary__", "text/plain; charset=utf-8", text.encode("utf-8"),
-                             "bookforge-diagnostics.txt", disposition)
+                             "akowe-diagnostics.txt", disposition)
             return 200, dict(rep, text=diagnostics.render_text(rep))
         if head == "backups":
             bm = self.backups
@@ -881,7 +881,7 @@ class App:
         self.changed()
         url = next((s.get("bridge_url") for s in self.engine.providers.slots() if s["adapter_id"] == "autoinjector"), None)
         return {"connected": True, "bridge_url": url, "slots": slots,
-                "message": "BookForge is connected to AutoInjector: AI-1 = Claude, AI-2 = ChatGPT, AI-3 = Gemini."}
+                "message": "Akọwe is connected to AutoInjector: AI-1 = Claude, AI-2 = ChatGPT, AI-3 = Gemini."}
 
     def route_review(self, method: str, rest: list, query: dict, body, principal: str, pid: str, branch: str):
         """Review queue, approvals, AI review/fix jobs and the auto-approve setting (see review.py)."""
@@ -968,7 +968,7 @@ class App:
                 out = facts_route(rv, principal, pid, branch, rest, method, body)
                 if out is not None:
                     return out
-        except BookforgeError as exc:
+        except AkoweError as exc:
             from .assist import FIX  # noqa: PLC0415
             for e in exc.errors:
                 e.setdefault("fix", FIX.get(e.get("code"), FIX["INTERNAL_ERROR"]))
@@ -1005,7 +1005,7 @@ class App:
         """AI assist ("Fill with AI") and Bible Builder endpoints (proposals; see assist.py)."""
         try:
             return self._route_ai(method, parts, query, body, principal)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             from .assist import FIX  # noqa: PLC0415
             for e in exc.errors:  # every refusal carries a plain-English fix for the panel
                 code = "NOT_APPLICABLE" if str(e.get("path") or "").startswith("/feature_manifest") else e.get("code")
@@ -1340,7 +1340,7 @@ class App:
 
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
-        server_version = f"Bookforge/{__version__}"
+        server_version = f"Akowe/{__version__}"
 
         def log_message(self, fmt, *args):  # no request bodies/content in logs
             log.info("%s %s", self.command, self.path.split("?")[0])
@@ -1379,7 +1379,7 @@ def make_handler(app: App):
                     return self._static(url.path)
                 return self._send(405, {"errors": [error("INVALID_INPUT", url.path, "method not allowed")]})
             if url.path == "/api/ping" and method == "GET":
-                # No auth and no project data: lets AutoInjector see that BookForge is running.
+                # No auth and no project data: lets AutoInjector see that Akọwe is running.
                 return self._send(200, app.ping((parse_qs(url.query).get("challenge") or [None])[0]))
             try:
                 principal = app.authenticate(self.headers.get("Authorization"))
@@ -1411,7 +1411,7 @@ def make_handler(app: App):
             except ApiError as exc:
                 app.errors.add(exc.status, method, url.path, exc.body.get("errors"))
                 self._send(exc.status, exc.body)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 code = exc.code
                 status = {"NOT_FOUND": 404, "PERMISSION_DENIED": 403, "VERSION_CONFLICT": 409,
                           "RATE_LIMITED": 429, "CAPABILITY_UNAVAILABLE": 400}.get(code, 400)
@@ -1419,8 +1419,8 @@ def make_handler(app: App):
                 self._send(status, {"errors": exc.errors})
             except Exception as exc:  # noqa: BLE001 - structured answer for the client, details in the log only
                 log.error("unhandled error: %s\n%s", exc, traceback.format_exc())
-                errs = [error("INTERNAL_ERROR", "", "BookForge hit an unexpected problem; details are in the "
-                              "BookForge window/log")]
+                errs = [error("INTERNAL_ERROR", "", "Akọwe hit an unexpected problem; details are in the "
+                              "Akọwe window/log")]
                 app.errors.add(500, method, url.path, errs)
                 self._send(500, {"errors": errs})
 
@@ -1475,14 +1475,14 @@ def content_disposition(disposition: str, name: str) -> str:
 def ping_proof(token: str, challenge: str) -> str:
     import hashlib  # noqa: PLC0415
     import hmac  # noqa: PLC0415
-    return hmac.new(token.encode("utf-8"), f"bookforge-ping:{challenge}".encode("ascii"), hashlib.sha256).hexdigest()
+    return hmac.new(token.encode("utf-8"), f"akowe-ping:{challenge}".encode("ascii"), hashlib.sha256).hexdigest()
 
 
 def already_running(host: str, port: int, token: str) -> bool:
-    """True when a Bookforge with this data folder (same access token) already answers on host:port.
+    """True when an Akọwe with this data folder (same access token) already answers on host:port.
 
     BF-08: the token is never sent. We ask /api/ping (no auth) with a fresh random challenge and check its
-    HMAC proof, so another program on that port learns nothing and can't pass as this BookForge (which
+    HMAC proof, so another program on that port learns nothing and can't pass as this Akọwe (which
     would make us open the browser with the token in the address)."""
     import hmac  # noqa: PLC0415
     import http.client  # noqa: PLC0415
@@ -1499,33 +1499,50 @@ def already_running(host: str, port: int, token: str) -> bool:
     except (OSError, http.client.HTTPException, ValueError, UnicodeDecodeError):
         return False
     proof = data.get("proof") if isinstance(data, dict) else None
-    return (isinstance(proof, str) and data.get("app") == "bookforge"
+    return (isinstance(proof, str) and data.get("app") in ("akowe", legacy.OLD_APP_ID)
             and hmac.compare_digest(proof, ping_proof(token, challenge)))
 
 
 def default_data_dir() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return base / "Bookforge"
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "bookforge"
+        return base / "Akowe"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "akowe"
+
+
+def resolve_data_dir(given: str | None = None) -> str:
+    """--data-dir, else AKOWE_DATA (or the old BOOKFORGE_DATA), else the default folder — which takes over the
+    old BookForge data folder on the first start (legacy.migrate_data_dir: moved, or copied and marked)."""
+    return given or legacy.env("DATA") or str(legacy.migrate_data_dir(default_data_dir()))
+
+
+def _safe_console() -> None:
+    """Never crash on a console that cannot show a character (Akọwe's ọ on an old Windows code page)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="bookforge", description="Bookforge book production workspace")
-    ap.add_argument("--data-dir", default=os.environ.get("BOOKFORGE_DATA") or str(default_data_dir()))
+    _safe_console()
+    ap = argparse.ArgumentParser(prog="akowe", description="Akọwe book production workspace")
+    ap.add_argument("--data-dir", default=None, help="data folder (default: AKOWE_DATA or the per-user app folder)")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("BOOKFORGE_PORT", str(DEFAULT_PORT))))
+    ap.add_argument("--port", type=int, default=int(legacy.env("PORT", str(DEFAULT_PORT))))
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    args.data_dir = resolve_data_dir(args.data_dir)
     if args.host not in ("127.0.0.1", "localhost", "::1"):
         log.warning("Binding to %s exposes the workspace beyond this computer; keep the token private.", args.host)
     app = App(args.data_dir)
     port_given = any(a == "--port" or a.startswith("--port=") for a in (argv if argv is not None else sys.argv[1:])) \
-        or bool(os.environ.get("BOOKFORGE_PORT"))
+        or bool(legacy.env("PORT"))
     if not port_given and already_running(args.host, args.port, app.token):
         url = f"http://{args.host}:{args.port}/#token={app.token}"
-        print(f"Bookforge is already running. Opening it: {url}")
+        print(f"Akọwe is already running. Opening it: {url}")
         if not args.no_browser:
             webbrowser.open(url)
         return 0
@@ -1543,21 +1560,21 @@ def main(argv=None):
               f"start with --port 8790.", file=sys.stderr)
         return 2
     if httpd.server_address[1] != args.port:
-        print(f"Port {args.port} is busy, so Bookforge uses port {httpd.server_address[1]} instead.")
+        print(f"Port {args.port} is busy, so Akọwe uses port {httpd.server_address[1]} instead.")
     args.port = httpd.server_address[1]
     app.port = args.port
     app.pusher.start()  # sends status to AutoInjector only when a slot is connected to it
     # S9: one automatic backup per day, on the first start of the day (in the background).
-    threading.Thread(target=app.backups.daily_if_needed, name="bookforge-daily-backup", daemon=True).start()
+    threading.Thread(target=app.backups.daily_if_needed, name="akowe-daily-backup", daemon=True).start()
     url = f"http://{args.host}:{args.port}/#token={app.token}"
-    print(f"Bookforge {__version__} running. Data: {args.data_dir}")
+    print(f"Akọwe {__version__} running. Data: {args.data_dir}")
     print(f"Open: {url}")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("Stopping Bookforge.")
+        print("Stopping Akọwe.")
     finally:
         httpd.server_close()
     return 0

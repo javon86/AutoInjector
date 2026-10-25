@@ -1,8 +1,8 @@
 """A web AI wrote 'odile-marsh' as an outline's plan.pov_id instead of the character's canon ID, and the outline was
-refused (CANON_UNRESOLVED). BookForge now maps such a name-like ID to the ONE matching pinned canon record."""
+refused (CANON_UNRESOLVED). Akọwe now maps such a name-like ID to the ONE matching pinned canon record."""
 from __future__ import annotations
 
-from bookforge import plan_rules as pr
+from akowe import plan_rules as pr
 
 GOV = dict(pr.AUTHORITY, **{"plan.pov_id": ("A01",), "plan.location_id": ("A04",)})
 

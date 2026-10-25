@@ -12,13 +12,13 @@ Where the numbers come from (nothing new is asked of any AI; numbers only — ne
   not timed, but the book journal (journal.py) names the AI of every piece of AI work: those entries are counted per AI
   (what was written, reviewed, fixed, edited, checked).
 * **Tokens and money.** The provenance of each AI-written version holds the input/output tokens of that call; with
-  per-token prices set on a slot (Settings, K12 cost control) BookForge shows the money too. Web AIs through
+  per-token prices set on a slot (Settings, K12 cost control) Akọwe shows the money too. Web AIs through
   AutoInjector cost 0 and report no tokens, so only calls and minutes are shown for them.
 
 ``estimate`` (before a run): the number of AI calls a run of this length and pipeline makes (a model per step, the
 same order as autobook.STEPS; measured calls per step of earlier runs replace the model's guesses when there are
 some), times the measured average seconds per AI call of the last finished runs (a first guess of
-``DEFAULT_CALL_S`` without any), plus BookForge's own time between calls (the measured share, or ``OVERHEAD``). The
+``DEFAULT_CALL_S`` without any), plus Akọwe's own time between calls (the measured share, or ``OVERHEAD``). The
 result is a range: fixes, retries and waiting for a busy AI make runs longer, never shorter.
 """
 from __future__ import annotations
@@ -31,11 +31,11 @@ from datetime import datetime, timezone
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
 
-log = logging.getLogger("bookforge.costs")
+log = logging.getLogger("akowe.costs")
 
 UNKNOWN_AI = "?"            # calls of runs saved before P28 (no slot recorded)
 DEFAULT_CALL_S = 45.0        # first guess for one web AI answer, before any run was measured
-OVERHEAD = 1.15              # BookForge's own work between AI calls (saving, checks, backups), as a share
+OVERHEAD = 1.15              # Akọwe's own work between AI calls (saving, checks, backups), as a share
 RUNS_MEASURED = 10           # how many finished runs the averages look at
 RANGE = (0.8, 1.6)           # low / high around the expected value (fixes and waits only make a run longer)
 MIN_CALLS_FOR_AVG = 5        # a run with fewer measured calls says nothing about the average
@@ -115,7 +115,7 @@ def run_costs(run: dict, label=None) -> dict:
     calls, call_s = int(t.get("calls") or 0), float(t.get("call_s") or 0.0)
     by_ai = dict(t.get("by_ai") or {})
     seen = sum(int(v.get("calls") or 0) for v in by_ai.values())
-    if calls > seen:  # a run saved before P28 (or an older BookForge): the rest is not attributed
+    if calls > seen:  # a run saved before P28 (or an older Akọwe): the rest is not attributed
         rest = by_ai.setdefault(UNKNOWN_AI, {"calls": 0, "s": 0.0, "failed": 0})
         rest["calls"] = int(rest.get("calls") or 0) + calls - seen
         rest["s"] = round(float(rest.get("s") or 0) + max(0.0, call_s - sum(float(v.get("s") or 0)
@@ -262,7 +262,7 @@ def _labeler(app):
 
 # ====================================================================== estimate before a run
 def _measured(app, limit: int = RUNS_MEASURED) -> dict:
-    """Averages of the last finished runs: seconds per AI call, BookForge's overhead, calls per step (per chapter
+    """Averages of the last finished runs: seconds per AI call, Akọwe's overhead, calls per step (per chapter
     for the chapter steps)."""
     calls = secs = wall = 0.0
     steps: dict[str, list] = {}

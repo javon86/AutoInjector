@@ -39,10 +39,10 @@ from urllib.parse import quote
 from . import providers as providers_mod
 from .assist import (FIX, Cancelled, Job, _compact, _err, _err_of, book_profile_brief, canon_context, is_ref)
 from .book_path import BookPath, StepError, _title
-from .errors import BookforgeError
+from .errors import AkoweError
 from .sets_guide import SET_GUIDE
 
-log = logging.getLogger("bookforge.review")
+log = logging.getLogger("akowe.review")
 
 # Book-process order of the groups ("FORMAT" = the book-format imports of the guided path).
 PROCESS = ("A", "B", "C", "FORMAT", "G", "E", "F", "H", "D", "J", "I", "K")
@@ -160,8 +160,8 @@ def plain_problem(problems: list) -> str:
         if needle in text or needle.lower() in text.lower():
             return msg
     if not text:
-        return "It could not be approved. Open it to see BookForge's checks."
-    return "BookForge's checks found a problem: " + text[:300]
+        return "It could not be approved. Open it to see Akọwe's checks."
+    return "Akọwe's checks found a problem: " + text[:300]
 
 
 def safe_title(contracts, rec: dict) -> str:
@@ -177,7 +177,7 @@ def safe_title(contracts, rec: dict) -> str:
 
 
 class WorkTracker:
-    """What BookForge is working on right now (AI writing, reviewing, ...), per project. Titles only."""
+    """What Akọwe is working on right now (AI writing, reviewing, ...), per project. Titles only."""
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -218,7 +218,7 @@ class WorkTracker:
 # ====================================================================== current task
 STEP_TASK = {
     "profile": (None, None, "Fill in your book profile",
-                "Tell BookForge the title, author, genre, length and your idea, so every later step can use them."),
+                "Tell Akọwe the title, author, genre, length and your idea, so every later step can use them."),
     "canon": ("A", "A01", "Make your characters and places",
               "Your book needs at least one approved main character. {ai}"),
     "premise": ("B", "B01", "Write the premise", "The premise says in one or two sentences what your book is about. {ai}"),
@@ -398,7 +398,7 @@ class ReviewService:
             return {"kind": "ai", "label": f"{self.slot_label(w['slot'])} (Bible Builder)", "slot": w["slot"]}
         if not row or row["transform"] == "MANUAL":
             return {"kind": "you", "label": "You", "slot": None}
-        return {"kind": "auto", "label": "BookForge (automatic)", "slot": None}
+        return {"kind": "auto", "label": "Akọwe (automatic)", "slot": None}
 
     # ------------------------------------------------------------------ writer != reviewer (P3.1 / P3.2)
     def _slot(self, slot_id: str | None) -> dict | None:
@@ -421,7 +421,7 @@ class ReviewService:
         slot = cur.get("slot") if isinstance(cur, dict) and cur.get("slot") in REVIEWER_CHOICES else None
         return {"slot": slot, "choices": ["auto", "AI-1", "AI-2", "AI-3"],
                 "about": "Automatic: the AI reviewer is always a different working AI from the one that wrote the "
-                         "draft (when only one AI works, it reviews its own writing and BookForge says so with ⚠️). "
+                         "draft (when only one AI works, it reviews its own writing and Akọwe says so with ⚠️). "
                          "A chosen slot is used unless it wrote the draft or is not working."}
 
     def save_reviewer_settings(self, body) -> dict:
@@ -430,7 +430,7 @@ class ReviewService:
         if slot in ("", "auto"):
             slot = None
         if slot not in REVIEWER_CHOICES:
-            raise BookforgeError("INVALID_INPUT", "/slot", "Reviewer AI: auto, AI-1, AI-2 or AI-3", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/slot", "Reviewer AI: auto, AI-1, AI-2 or AI-3", status="REJECTED")
         self.store.set_setting("reviewer_ai", {"slot": slot, "at": _now_iso()})
         return self.reviewer_settings()
 
@@ -461,10 +461,10 @@ class ReviewService:
     def save_settings(self, principal: str, pid: str, branch: str, body) -> dict:
         self._access(principal, pid, branch)
         if not isinstance(body, dict) or not isinstance(body.get("auto_approve"), bool):
-            raise BookforgeError("INVALID_INPUT", "/auto_approve", "auto_approve must be true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/auto_approve", "auto_approve must be true or false", status="REJECTED")
         on = body["auto_approve"]
         if on and body.get("author_confirms") is not True:
-            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "turning on auto-approve needs your explicit "
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "turning on auto-approve needs your explicit "
                                  "confirmation (author_confirms: true)", status="REJECTED")
         with self._lock:
             cur = self.store.get_setting(f"review_settings:{pid}") or {}
@@ -501,7 +501,7 @@ class ReviewService:
         rv = self.reviews(pid, branch)
         hist = self.store.history(pid, branch, rid)
         if not hist:
-            raise BookforgeError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
         out = {str(r["version"]): rv[_rkey(rid, r["version"])] for r in hist if _rkey(rid, r["version"]) in rv}
         cr = self.editor.crafts(pid, branch)
         craft = {str(r["version"]): cr[_rkey(rid, r["version"])] for r in hist if _rkey(rid, r["version"]) in cr}
@@ -621,15 +621,15 @@ class ReviewService:
         self._access(principal, pid, branch)
         body = body if isinstance(body, dict) else {}
         if body.get("author_confirms") is not True:
-            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit confirmation "
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit confirmation "
                                  "(author_confirms: true)", status="REJECTED")
         ids = body.get("record_ids")
         if not isinstance(ids, list) or not ids or len(ids) > MAX_IDS or not all(isinstance(x, str) and x for x in ids):
-            raise BookforgeError("INVALID_INPUT", "/record_ids", f"list the drafts to approve (1-{MAX_IDS})",
+            raise AkoweError("INVALID_INPUT", "/record_ids", f"list the drafts to approve (1-{MAX_IDS})",
                                  status="REJECTED")
         versions = body.get("versions") or {}
         if not isinstance(versions, dict):
-            raise BookforgeError("INVALID_INPUT", "/versions", "versions must map record IDs to versions",
+            raise AkoweError("INVALID_INPUT", "/versions", "versions must map record IDs to versions",
                                  status="REJECTED")
         how = body.get("how") if body.get("how") in ("one", "all", "step", "workflow_test") else "one"
         results, todo, checked = [], [], {}
@@ -691,7 +691,7 @@ class ReviewService:
         if isinstance(ids, str):
             ids = [ids]
         if not isinstance(ids, list) or not ids or len(ids) > max_n or not all(isinstance(x, str) and x for x in ids):
-            raise BookforgeError("INVALID_INPUT", f"/{key}", f"list 1-{max_n} drafts", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"/{key}", f"list 1-{max_n} drafts", status="REJECTED")
         return list(dict.fromkeys(ids))
 
     def start_review(self, principal, pid, branch, body) -> dict:
@@ -706,7 +706,7 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         rid = body.get("record_id")
         if not isinstance(rid, str) or not rid:
-            raise BookforgeError("MISSING_INPUT", "/record_id", "which draft should the AI fix?", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/record_id", "which draft should the AI fix?", status="REJECTED")
         slot = self.assist._check_slot(body.get("slot_id"))
         return self._start(ReviewJob("fix", principal, pid, branch, [rid], slot), self._run_fix)
 
@@ -717,12 +717,12 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         rid = body.get("record_id")
         if not isinstance(rid, str) or not rid:
-            raise BookforgeError("MISSING_INPUT", "/record_id", "which draft should the editor read?", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/record_id", "which draft should the editor read?", status="REJECTED")
         rec = self._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
         if rec["module_id"] not in ("C02", "B01", "B03", "B11"):
-            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
+            raise AkoweError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
                                  "and chapter outline", status="REJECTED")
         slot = self.assist._check_slot(body.get("slot_id"))
         return self._start(ReviewJob("editor", principal, pid, branch, [rid], slot), self._run_editor)
@@ -734,19 +734,19 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         rid = body.get("record_id")
         if not isinstance(rid, str) or not rid:
-            raise BookforgeError("MISSING_INPUT", "/record_id", "which chapter should be fixed?", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/record_id", "which chapter should be fixed?", status="REJECTED")
         fids = body.get("finding_ids")
         if fids is not None and (not isinstance(fids, list) or not all(isinstance(x, str) for x in fids)):
-            raise BookforgeError("INVALID_INPUT", "/finding_ids", "finding_ids: a list of the editor's note ids",
+            raise AkoweError("INVALID_INPUT", "/finding_ids", "finding_ids: a list of the editor's note ids",
                                  status="REJECTED")
         rec = self._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
         if rec["module_id"] != "C02":
-            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor's fixes can be applied to chapters only",
+            raise AkoweError("INVALID_INPUT", "/record_id", "the editor's fixes can be applied to chapters only",
                                  status="REJECTED")
         if not self.editor.crafts(pid, branch).get(_rkey(rid, rec["version"])):
-            raise BookforgeError("INVALID_INPUT", "/record_id", "ask the editor to review this version first "
+            raise AkoweError("INVALID_INPUT", "/record_id", "ask the editor to review this version first "
                                  "(🖋 Editor review)", status="REJECTED")
         slot = self.assist._check_slot(body.get("slot_id"))
         job = ReviewJob("editor_fix", principal, pid, branch, [rid], slot)
@@ -759,7 +759,7 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         rid = body.get("record_id")
         if not isinstance(rid, str) or not rid:
-            raise BookforgeError("MISSING_INPUT", "/record_id", "which chapter?", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/record_id", "which chapter?", status="REJECTED")
         out = self.editor.apply(principal, pid, branch, rid, body.get("version"), body.get("accept"))
         self._changed()
         return out
@@ -770,7 +770,7 @@ class ReviewService:
         self._access(principal, pid, branch)
         hist = self.store.history(pid, branch, rid)
         if not hist:
-            raise BookforgeError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "record not found", status="REJECTED")
         ed = self.editor
         head = hist[-1]
         cr, props, rw = ed.crafts(pid, branch), ed.proposals(pid, branch), ed.rewrites(pid, branch)
@@ -815,7 +815,7 @@ class ReviewService:
         with self._lock:
             self._jobs[job.id] = job
         self._persist(job)
-        threading.Thread(target=self._thread, args=(job, fn), name=f"bookforge-{job.kind}", daemon=True).start()
+        threading.Thread(target=self._thread, args=(job, fn), name=f"akowe-{job.kind}", daemon=True).start()
         return job.public()
 
     def _thread(self, job: ReviewJob, fn):
@@ -828,7 +828,7 @@ class ReviewService:
                 job.phase = "Finished"
         except Cancelled:
             job.status, job.phase = "cancelled", "Stopped"
-        except BookforgeError as exc:
+        except AkoweError as exc:
             job.status, job.error, job.phase = "error", _err_of(exc), "Failed"
         except Exception as exc:  # noqa: BLE001 - surface, never crash the server
             log.error("review job %s failed: %s", job.id, type(exc).__name__)
@@ -847,14 +847,14 @@ class ReviewService:
     def get_job(self, principal, job_id) -> dict:
         j = self._jobs.get(job_id)
         if j is None or j.principal != principal:
-            raise BookforgeError("NOT_FOUND", "/job_id", "this review job is not known (it may have expired)",
+            raise AkoweError("NOT_FOUND", "/job_id", "this review job is not known (it may have expired)",
                                  status="REJECTED")
         return j.public()
 
     def cancel_job(self, principal, job_id) -> dict:
         j = self._jobs.get(job_id)
         if j is None or j.principal != principal:
-            raise BookforgeError("NOT_FOUND", "/job_id", "this review job is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/job_id", "this review job is not known", status="REJECTED")
         j.cancelled = True
         if j.status in ("queued", "running"):
             j.phase = "Stopping after the current answer…"
@@ -868,7 +868,7 @@ class ReviewService:
                 res = self.review_one(job, rid)
             except Cancelled:
                 raise
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 res = {"record_id": rid, "ok": False, "error": _err_of(exc)}
             job.results.append(res)
             job.done += 1
@@ -924,7 +924,7 @@ class ReviewService:
     def _a01(self, pid, branch, rid):
         head = self._head(pid, branch, rid) if isinstance(rid, str) and rid else None
         if head is None or head["module_id"] != "A01":
-            raise BookforgeError("NOT_FOUND", "/record_id", "this character does not exist in this book",
+            raise AkoweError("NOT_FOUND", "/record_id", "this character does not exist in this book",
                                  status="REJECTED")
         return head
 
@@ -950,10 +950,10 @@ class ReviewService:
         sheet, voice = body.get("sheet"), body.get("voice")
         for k, v in (("sheet", sheet), ("voice", voice)):
             if v is not None and not isinstance(v, dict):
-                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k} must be an object of fields", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", f"/{k}", f"{k} must be an object of fields", status="REJECTED")
         base = body.get("version")
         if base is not None and (not isinstance(base, int) or isinstance(base, bool) or base < 0):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
         name, subject = chars_mod._name_and_subject(head)
         by = "ai" if body.get("from_ai") is True else "author"
         slot = body.get("slot") if by == "ai" and body.get("slot") in ("AI-1", "AI-2", "AI-3") else None
@@ -969,7 +969,7 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         note = body.get("note")
         if note is not None and (not isinstance(note, str) or len(note) > 1000):
-            raise BookforgeError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
         job = ReviewJob("characters", principal, pid, branch, [rid], self.assist._check_slot(body.get("slot_id")))
         job.note = note
         return self._start(job, self._run_character)
@@ -1000,11 +1000,11 @@ class ReviewService:
         self._access(principal, pid, branch)
         body = body if isinstance(body, dict) else {}
         if body.get("author_confirms") is not True:
-            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit confirmation "
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "approving needs your explicit confirmation "
                                  "(author_confirms: true)", status="REJECTED")
         ver = body.get("version")
         if ver is not None and (not isinstance(ver, int) or isinstance(ver, bool)):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you looked at", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/version", "version: the version you looked at", status="REJECTED")
         e = self.scenes.approve(principal, pid, branch, chapter_id, version=ver, how="author",
                                 label="Scene cards approved by the author")
         self._changed()
@@ -1016,10 +1016,10 @@ class ReviewService:
         self._access(principal, pid, branch)
         body = body if isinstance(body, dict) else {}
         if not isinstance(chapter_id, str) or not chapter_id:
-            raise BookforgeError("MISSING_INPUT", "/chapter_id", "which chapter?", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/chapter_id", "which chapter?", status="REJECTED")
         for k in ("revise", "check"):
             if k in body and not isinstance(body[k], bool):
-                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k}: true or false", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: true or false", status="REJECTED")
         self.scenes.info(principal, pid, branch, chapter_id)  # the chapter exists in the approved outline
         job = ReviewJob("scenes", principal, pid, branch, [chapter_id], self.assist._check_slot(body.get("slot_id")))
         job.revise, job.check_after = body.get("revise") is True, body.get("check", True) is not False
@@ -1030,7 +1030,7 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         info = self.scenes.info(principal, pid, branch, chapter_id)
         if not info.get("entry"):
-            raise BookforgeError("INVALID_INPUT", "/chapter_id", "this chapter has no scene cards yet: plan them first",
+            raise AkoweError("INVALID_INPUT", "/chapter_id", "this chapter has no scene cards yet: plan them first",
                                  status="REJECTED")
         job = ReviewJob("scenes_check", principal, pid, branch, [chapter_id],
                         self.assist._check_slot(body.get("slot_id")))
@@ -1050,7 +1050,7 @@ class ReviewService:
                 res = self.scenes.check(check, cid)
                 out["review"] = res
                 out["message"] += f" An AI checked them: {res['verdict']}."
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 out["review_error"] = _err_of(exc)
                 out["message"] += " The check did not work; press 🔎 Check with AI to try again."
         job.results.append(out)
@@ -1066,7 +1066,7 @@ class ReviewService:
 
     # ------------------------------------------------------------------ 📏 story rules (P9) and 🧺 world texture (P10)
     def world_info(self, principal, pid, branch) -> dict:
-        """The story-rules ledger and the world-texture list of a book, with BookForge's own checks and usage."""
+        """The story-rules ledger and the world-texture list of a book, with Akọwe's own checks and usage."""
         from . import story_choices, story_rules  # noqa: PLC0415
         from . import texture as texture_mod  # noqa: PLC0415
         self._access(principal, pid, branch)
@@ -1103,18 +1103,18 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         rules = body.get("rules")
         if not isinstance(rules, list) or len(rules) > story_rules.MAX_RULES:
-            raise BookforgeError("INVALID_INPUT", "/rules", f"rules: a list of up to {story_rules.MAX_RULES} rules",
+            raise AkoweError("INVALID_INPUT", "/rules", f"rules: a list of up to {story_rules.MAX_RULES} rules",
                                  status="REJECTED")
         for i, r in enumerate(rules):
             if not isinstance(r, dict) or r.get("category") not in story_rules.CATEGORY_KEYS:
-                raise BookforgeError("INVALID_INPUT", f"/rules/{i}/category", "each rule needs a category: hard rule, "
+                raise AkoweError("INVALID_INPUT", f"/rules/{i}/category", "each rule needs a category: hard rule, "
                                      "seen to happen, belief or protected mystery", status="REJECTED")
             if not str(r.get("text") or "").strip():
-                raise BookforgeError("INVALID_INPUT", f"/rules/{i}/text", "each rule needs its text (one sentence)",
+                raise AkoweError("INVALID_INPUT", f"/rules/{i}/text", "each rule needs its text (one sentence)",
                                      status="REJECTED")
         base = body.get("version")
         if base is not None and (not isinstance(base, int) or isinstance(base, bool)):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
         e = story_rules.save(self.store, pid, branch, story_rules.clean_rules(rules), by="author", base_version=base,
                              keep_proposals=True)
         self._changed()
@@ -1126,7 +1126,7 @@ class ReviewService:
         self._access(principal, pid, branch)
         body = body if isinstance(body, dict) else {}
         if body.get("author_confirms") is not True:
-            raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "deciding on the suggested updates needs your "
+            raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "deciding on the suggested updates needs your "
                                  "confirmation (author_confirms: true)", status="REJECTED")
         e = story_rules.decide_proposals(self.store, pid, branch, accept=body.get("accept"), reject=body.get("reject"),
                                          version=body.get("version"))
@@ -1139,15 +1139,15 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         items = body.get("items")
         if not isinstance(items, list) or len(items) > texture_mod.MAX_ITEMS:
-            raise BookforgeError("INVALID_INPUT", "/items", f"items: a list of up to {texture_mod.MAX_ITEMS} details",
+            raise AkoweError("INVALID_INPUT", "/items", f"items: a list of up to {texture_mod.MAX_ITEMS} details",
                                  status="REJECTED")
         for i, it in enumerate(items):
             if not isinstance(it, dict) or not str(it.get("detail") or "").strip():
-                raise BookforgeError("INVALID_INPUT", f"/items/{i}/detail", "each detail needs its text",
+                raise AkoweError("INVALID_INPUT", f"/items/{i}/detail", "each detail needs its text",
                                      status="REJECTED")
         base = body.get("version")
         if base is not None and (not isinstance(base, int) or isinstance(base, bool)):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/version", "version: the version you edited", status="REJECTED")
         e = texture_mod.save(self.store, pid, branch, texture_mod.clean_items(items), by="author", base_version=base)
         self._changed()
         return {"ok": True, "entry": e, "message": f"Saved (version {e['version']}). Scene plans and chapters use it "
@@ -1158,12 +1158,12 @@ class ReviewService:
         self._access(principal, pid, branch)
         body = body if isinstance(body, dict) else {}
         if what not in ("rules", "texture"):
-            raise BookforgeError("NOT_FOUND", "/what", "rules or texture", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/what", "rules or texture", status="REJECTED")
         if "update" in body and not isinstance(body["update"], bool):
-            raise BookforgeError("INVALID_INPUT", "/update", "update: true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/update", "update: true or false", status="REJECTED")
         note = body.get("note")
         if note is not None and (not isinstance(note, str) or len(note) > 1000):
-            raise BookforgeError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/note", "note: up to 1000 characters", status="REJECTED")
         job = ReviewJob(f"world_{what}", principal, pid, branch, [what], self.assist._check_slot(body.get("slot_id")))
         job.update, job.note = body.get("update"), note
         return self._start(job, self._run_world)
@@ -1245,11 +1245,11 @@ class ReviewService:
         body = body if isinstance(body, dict) else {}
         if kind != "facts_research":
             if not isinstance(rid, str) or not rid:
-                raise BookforgeError("INVALID_INPUT", "/record_id", "which chapter?", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/record_id", "which chapter?", status="REJECTED")
             self.facts._chapter_rec(principal, pid, branch, rid)  # a chapter of the outline (404/400 now, not later)
         ids = body.get("ids")
         if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
-            raise BookforgeError("INVALID_INPUT", "/ids", "ids: a list of term ids", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/ids", "ids: a list of term ids", status="REJECTED")
         job = ReviewJob(kind, principal, pid, branch, [rid or "terms"], self.assist._check_slot(body.get("slot_id")))
         job.term_ids = ids
         return self._start(job, self._run_facts)
@@ -1279,7 +1279,7 @@ class ReviewService:
     @staticmethod
     def clean_verdict(raw) -> dict:
         if not isinstance(raw, dict) or raw.get("verdict") not in VERDICTS:
-            raise BookforgeError("INTERNAL_ERROR", "/verdict", "the AI's answer was not a valid review (verdict must be "
+            raise AkoweError("INTERNAL_ERROR", "/verdict", "the AI's answer was not a valid review (verdict must be "
                                  "APPROVE, REVISE or REJECT); nothing was changed")
 
         def strings(v):
@@ -1294,9 +1294,9 @@ class ReviewService:
         pid, branch = job.project_id, job.branch_id
         rec = self._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_ids", "this draft no longer exists", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_ids", "this draft no longer exists", status="REJECTED")
         if rec["lifecycle"] not in REVIEWABLE or rec.get("approved_version") == rec["version"]:
-            raise BookforgeError("INVALID_INPUT", "/record_ids", "this record is not waiting for approval any more",
+            raise AkoweError("INVALID_INPUT", "/record_ids", "this record is not waiting for approval any more",
                                  status="REJECTED")
         title = safe_title(self.contracts, rec)
         writer = self.writer_of(pid, branch, rec)
@@ -1356,7 +1356,7 @@ class ReviewService:
                              {"record_id": rec["record_id"], "version": rec["version"], "module_id": rec["module_id"],
                               "ok": bool(res.get("ok")), "verdict": "APPROVE", "ai_slot": review.get("slot"),
                               "consent": {"by": consent.get("by"), "at": consent.get("at")},
-                              "label": label if res.get("ok") else "Auto-approve was attempted but BookForge's checks "
+                              "label": label if res.get("ok") else "Auto-approve was attempted but Akọwe's checks "
                               "refused it; the draft stays in your list"})
         self._changed()
         return {"ok": bool(res.get("ok")), "label": label,
@@ -1379,7 +1379,7 @@ class ReviewService:
         job.current = rid
         rec = self._head(pid, branch, rid)
         if rec is None or rec["lifecycle"] not in REVIEWABLE:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "this draft is not waiting for approval any more",
+            raise AkoweError("INVALID_INPUT", "/record_id", "this draft is not waiting for approval any more",
                                  status="REJECTED")
         title = safe_title(self.contracts, rec)
         review = self.reviews(pid, branch).get(_rkey(rid, rec["version"])) or {}
@@ -1402,14 +1402,14 @@ class ReviewService:
             self.work.end(tok)
         job.check()
         if not isinstance(raw, dict):
-            raise BookforgeError("INTERNAL_ERROR", "", "the AI did not return a revised record; nothing was changed")
+            raise AkoweError("INTERNAL_ERROR", "", "the AI did not return a revised record; nothing was changed")
         payload = keep_refs(rec.get("data") or {}, raw)
         job.phase = "Saving the revised draft"
         bp = self.bp(job.principal, pid, branch)
         resp = bp.dispatch(rec["module_id"], "UPDATE", base_ref=rec["ref"], payload=payload)
         if resp["status"] != "DRAFT" or not resp.get("output_refs"):
             from .book_path import problems  # noqa: PLC0415
-            raise BookforgeError("INVALID_INPUT", "/payload", "the AI's revision did not pass BookForge's checks, so "
+            raise AkoweError("INVALID_INPUT", "/payload", "the AI's revision did not pass Akọwe's checks, so "
                                  "nothing was saved: " + "; ".join(problems(resp))[:400], status="REJECTED")
         new = resp["output_refs"][0]
         self._put(f"ai_fixes:{pid}:{branch}", _rkey(rid, new["version"]),

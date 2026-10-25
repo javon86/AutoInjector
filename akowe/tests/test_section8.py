@@ -14,11 +14,11 @@ import json
 
 import pytest
 
-from bookforge import ai_check
-from bookforge import calibration as cal
-from bookforge import editor as ed_mod
-from bookforge import editor_rubric as rubric
-from bookforge import prose_audit
+from akowe import ai_check
+from akowe import calibration as cal
+from akowe import editor as ed_mod
+from akowe import editor_rubric as rubric
+from akowe import prose_audit
 
 from autobook_fake import CHAPTER_TEXT
 from test_editor import chapter_book, outbox, wait_job
@@ -100,7 +100,7 @@ def test_caps_merge_discount_and_pattern_notes():
     assert cal.discount_of({"other_n": 3, "other_sum": 4.5}) == 1
     assert cal.discount_of({"other_n": 3, "other_sum": 30}) == 2
     assert cal.discount_of({"other_n": 2, "other_sum": -3, "audit_n": 2, "audit_sum": 0}) == 0
-    # BookForge's own pattern notes for a flagged review with nothing to rewrite
+    # Akọwe's own pattern notes for a flagged review with nothing to rewrite
     text = ("She went very still. He went very still. They went very still and waited. " * 6 + "\n\n") * 3
     rep = prose_audit.audit(text)
     notes = cal.audit_findings(rep, text, ["prose_variety", "subtext"])
@@ -112,7 +112,7 @@ def test_caps_merge_discount_and_pattern_notes():
 
 
 def test_leniency_record_and_table(tmp_path):
-    from bookforge.store import Store
+    from akowe.store import Store
     st = Store(tmp_path / "d")
     for _ in range(3):
         cal.record(st, "gemini", "Gemini", vs_other=2.0, vs_audit=1.0, flagged=True)
@@ -158,7 +158,7 @@ def test_too_clean_review_is_reasked_then_capped_and_cannot_pass(tmp_path):
     assert c["flagged"] and c["reasked"] == 1 and not c["two_reviewers"]
     # asked once more with the stricter prompt, to the same AI
     sys2, _ctx = fake.prompts["craft"][-1]
-    assert len(fake.prompts["craft"]) - prompts_before == 2 and "was not accepted by BookForge" in sys2
+    assert len(fake.prompts["craft"]) - prompts_before == 2 and "was not accepted by Akọwe" in sys2
     assert [s for s, k in fake.per_slot if k == "craft"][-2:] == ["AI-2", "AI-2"]
     # unproven 10s count as 7; with a note to work on the verdict is REVISE (never a silent PASS)
     assert max(craft["scores"].values()) <= cal.CAP and craft["verdict"] == "REVISE"
@@ -190,8 +190,8 @@ def test_reask_that_brings_proof_is_used(tmp_path):
 def test_flagged_review_without_notes_gets_pattern_notes(tmp_path):
     fake = SlotFake()
     app, pid, rid, ver, _ch = chapter_book(tmp_path, fake)
-    # a chapter full of tics, so BookForge's own pattern check has notes
-    from bookforge.book_path import BookPath
+    # a chapter full of tics, so Akọwe's own pattern check has notes
+    from akowe.book_path import BookPath
     bp = BookPath(app.engine, "author", pid, "main")
     head = app.review._head(pid, "main", rid)
     tic = ("She went very still. He went very still. They waited for a long moment and went very still. " * 5)
@@ -312,7 +312,7 @@ def test_alert_rows_new_and_back():
 def served_fake(tmp_path):
     from http.server import ThreadingHTTPServer
     import threading
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     fake = SlotFake()
     app = make_app(tmp_path, fake)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))

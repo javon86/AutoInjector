@@ -1,4 +1,4 @@
-"""AutoInjector link (BookForge side): one-button pairing and the status push, against an in-process fake bridge."""
+"""AutoInjector link (Akọwe side): one-button pairing and the status push, against an in-process fake bridge."""
 from __future__ import annotations
 
 import json
@@ -7,13 +7,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from bookforge.status_push import MAX_BODY, build_summary, encode
+from akowe.status_push import MAX_BODY, build_summary, encode
 
 from test_server import TOKEN, call, server  # noqa: F401
 
 PAIR_TOKEN = "paired-connection-key-0123456789abcdef"
 CODE = "AB12-CD34-EF56"
-CHAPTER_TEXT = "SECRET CHAPTER PROSE that must never leave BookForge"
+CHAPTER_TEXT = "SECRET CHAPTER PROSE that must never leave Akọwe"
 
 
 class FakeBridge:
@@ -97,7 +97,7 @@ def test_pair_success_connects_three_slots_and_never_returns_the_key(app_server,
     assert [(s["slot_id"], s["site"], s["ok"]) for s in out["slots"]] == [
         ("AI-1", "claude", True), ("AI-2", "chatgpt", True), ("AI-3", "gemini", True)]
     req = bridge.pair_requests[0]
-    assert req["body"] == {"code": CODE, "client": "bookforge"} and req["auth"] is None
+    assert req["body"] == {"code": CODE, "client": "akowe"} and req["auth"] is None
     slots = app.engine.providers.slots()
     assert all(s["adapter_id"] == "autoinjector" and s["has_credentials"] for s in slots)
     assert all(app.engine.providers._api_key(s["slot_id"]) == PAIR_TOKEN for s in slots)
@@ -152,8 +152,8 @@ def test_status_push_shape_size_titles_only_and_401(app_server, bridge):
     raw = bridge.status_bodies[-1]
     assert len(raw) < MAX_BODY
     body = json.loads(raw)
-    assert body["app"] == "bookforge" and body["version"] == 1
-    assert body["bookforge_url"] == f"http://127.0.0.1:{port}/"
+    assert body["app"] == "akowe" and body["version"] == 1
+    assert body["akowe_url"] == f"http://127.0.0.1:{port}/"
     assert body["project"] == {"id": pid, "title": "The Key"}
     t = body["current_task"]
     assert set(t) == {"set", "op", "title", "state", "message", "url"}

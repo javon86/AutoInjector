@@ -2,7 +2,7 @@
 // noteCapture change ("a reply counts only for the older open messages when the
 // newest wasn't seen being answered"). Runs every scenario against BOTH the new
 // relay-trace.js and origin/main's copy (if git can produce it) and asserts:
-//   - normal AutoInjector flows (BookForge OFF) give the SAME answer attribution
+//   - normal AutoInjector flows (Akọwe OFF) give the SAME answer attribution
 //     and the same anomalies as before;
 //   - the cases where they differ are listed explicitly (documented, not hidden).
 // Run: node test/verify-relay-trace.test.js
@@ -56,7 +56,7 @@ function differs(name, steps, expectNew, expectOld) {
   return n;
 }
 
-console.log('\n== normal flows (BookForge OFF): identical to main ==');
+console.log('\n== normal flows (Akọwe OFF): identical to main ==');
 same('single relay, generation seen', [{ send: '0001', to: 'claude' }, { t: 1000, gen: 'claude' }, { t: 5000, cap: 'claude', turn: 1 }]);
 same('single relay, fast reply (generation never seen)', [{ send: '0001', to: 'claude' }, { t: 900, cap: 'claude', turn: 1 }]);
 same('two relays typed before the AI started (batched)', [{ send: '0001', to: 'claude', from: 'chatgpt' }, { send: '0002', to: 'claude', from: 'gemini' }, { t: 1000, gen: 'claude' }, { t: 5000, cap: 'claude', turn: 1 }]);
@@ -72,7 +72,7 @@ same('three panes in a mesh round', [
 ]);
 same('missing-tag nudge, resend seen being written', [{ send: '0001', to: 'claude' }, { t: 500, gen: 'claude' }, { t: 3000 }, { send: '0002', to: 'claude', kind: 'auto' }, { t: 400, gen: 'claude' }, { t: 3000, cap: 'claude', turn: 1 }]);
 
-console.log('\n== where the new rule changes attribution (diagnostics only when BookForge is OFF) ==');
+console.log('\n== where the new rule changes attribution (diagnostics only when Akọwe is OFF) ==');
 // A message typed while the AI is still writing (no new idle->generating edge):
 // the reply on the page answers the OLDER one; the newer stays open for the next
 // reply. main marked both answered by the first reply and the second reply then
@@ -87,7 +87,7 @@ differs('typed while still writing, then answered', [
 // same-text reply treated as a re-draw) stays open + started. When the next
 // message is typed while the AI is idle and answered faster than one poll (no
 // writing edge seen), the captured reply must answer the NEW message too —
-// not leave it open (false "NO REPLY"; with BookForge ON the bridge prompt
+// not leave it open (false "NO REPLY"; with Akọwe ON the bridge prompt
 // would not own its own answer -> 504, then a LATE_REPLY_STORED mix-up).
 // The "keep the newest open" rule now applies only to messages typed while
 // the AI was still writing (the "typed while still writing" case above).

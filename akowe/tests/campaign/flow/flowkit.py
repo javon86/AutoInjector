@@ -22,12 +22,12 @@ for p in (str(TESTS), str(TESTS.parent)):
 
 from autobook_fake import BookFakeAI, fact  # noqa: E402
 
-from bookforge import providers as prov_mod  # noqa: E402
-from bookforge.book_path import BookPath  # noqa: E402
-from bookforge.exporters.book import parse_chapter  # noqa: E402
-from bookforge.jobs import RetryPolicy  # noqa: E402
-from bookforge.providers import AutoInjectorAdapter  # noqa: E402
-from bookforge.server import App  # noqa: E402
+from akowe import providers as prov_mod  # noqa: E402
+from akowe.book_path import BookPath  # noqa: E402
+from akowe.exporters.book import parse_chapter  # noqa: E402
+from akowe.jobs import RetryPolicy  # noqa: E402
+from akowe.providers import AutoInjectorAdapter  # noqa: E402
+from akowe.server import App  # noqa: E402
 
 TOKEN = "flow-test-token-0123456789"
 
@@ -171,8 +171,8 @@ def snapshot_data(app, src: Path, dst: Path):
     (dst / "assets").mkdir(exist_ok=True)
     for f in (src / "assets").iterdir():
         shutil.copy2(f, dst / "assets" / f.name)
-    s = sqlite3.connect(src / "bookforge.sqlite3", timeout=30)
-    d = sqlite3.connect(dst / "bookforge.sqlite3")
+    s = sqlite3.connect(src / "akowe.sqlite3", timeout=30)
+    d = sqlite3.connect(dst / "akowe.sqlite3")
     s.backup(d)
     d.close()
     s.close()

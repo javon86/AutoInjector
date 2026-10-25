@@ -1,25 +1,36 @@
-# BookForge ⇄ AutoInjector bridge (contract v1.2)
+# Akọwe ⇄ AutoInjector bridge (contract v1.2)
 
-Lets BookForge's three AI slots (AI-1..AI-3) use the ChatGPT, Claude and Gemini web
+> Formerly BookForge — renamed to Akọwe on 2026-10-25.
+
+Lets Akọwe's three AI slots (AI-1..AI-3) use the ChatGPT, Claude and Gemini web
 sessions that the AutoInjector **desktop app** already drives, with no API keys.
 Experimental: automating these sites' web UIs may be against their terms of service;
 the bridge is OFF by default and the user must turn it on.
 
+**Names from before the rename (compatibility).** Both sides now say `akowe`; the receivers still accept
+what a BookForge-era peer sends, and an existing pairing is kept: the bridge takes over a key file saved as
+`bookforge-bridge-token` as `akowe-bridge-token`; `POST /v1/status` accepts `"app": "bookforge"` and
+`"bookforge_url"` (stored as `"app": "akowe"` / `"akowe_url"`); `/api/ping` answering `"app": "bookforge"`
+still counts as Akọwe running; `AUTOINJECTOR_BOOKFORGE_*` and `BOOKFORGE_PORT` are read when the
+`AUTOINJECTOR_AKOWE_*` / `AKOWE_PORT` variable is not set; the saved setting `{"bookforge": {"enabled"}}` is read;
+log events written as `bookforge-*` still count as Akọwe events for Extract. (desktop-app/akowe-legacy.js,
+akowe/akowe/legacy.py.)
+
 ```
-BookForge (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0.1:17891)
-  providers.py adapter "autoinjector"        bookforge-bridge.js inside the Electron main process
+Akọwe (Python, :8780)  --HTTP-->  AutoInjector desktop bridge (Node, 127.0.0.1:17891)
+  providers.py adapter "autoinjector"        akowe-bridge.js inside the Electron main process
                                              -> sendTextTo(site, prompt) -> reply captured by [FROM: X] tag
 ```
 
 ## Transport and security
 
 * HTTP/1.1 on `127.0.0.1` only (never 0.0.0.0). Default port **17891**
-  (env `AUTOINJECTOR_BOOKFORGE_PORT` overrides). JSON bodies, UTF-8.
+  (env `AUTOINJECTOR_AKOWE_PORT` overrides). JSON bodies, UTF-8.
 * Every request needs `Authorization: Bearer <token>` — except `POST /v1/pair` (v1.1). In both apps' UIs the token is
-  called the **connection key** ("like a password that lets only your BookForge talk to
+  called the **connection key** ("like a password that lets only your Akọwe talk to
   this app; it never leaves your computer"). The token is a random
   >=24-byte URL-safe string generated on first enable, stored in the app's userData
-  directory (`bookforge-bridge-token`, mode 0600), shown/copyable in the desktop app's
+  directory (`akowe-bridge-token`, mode 0600), shown/copyable in the desktop app's
   controls UI, and replaceable there ("Make a new key"). Compare in constant time.
 * Bridge disabled -> server not listening (connection refused).
 * Reject request bodies over 1 MiB (413). Reject non-JSON (400).
@@ -62,7 +73,7 @@ Behavior:
    handling), and its missing `[FROM:]` tag is never nagged about.
 4. Success: `200 {"ok": true, "site", "request_id", "text": "<envelope-stripped reply>",
    "seq": "0007", "reply_to": "0007", "elapsed_ms": 1234}` — `seq` is the `[MSG #]` the
-   prompt was typed as, `reply_to` the one the reply answers. BookForge refuses a 200
+   prompt was typed as, `reply_to` the one the reply answers. Akọwe refuses a 200
    without `seq` or with `reply_to != seq`.
 5. Idempotency: results are cached by `request_id` for 15 minutes. Repeating a
    completed `request_id` returns the cached 200 response without re-sending. Repeating
@@ -88,7 +99,7 @@ Every 504 says `"typed": true|false`.
   `busy` until that answer is captured (stored under the request_id, so a retry with the
   same request_id returns it) or for `late_window_ms` = min(timeout_ms, 300 s), then frees
   (joiners then get a 504 with `late_expired: true`). A different request_id meanwhile gets
-  `409 SITE_BUSY` naming the pending request. BookForge's "Try again" re-uses the timed-out
+  `409 SITE_BUSY` naming the pending request. Akọwe's "Try again" re-uses the timed-out
   request_id for the same prompt, and its busy-retry budget (600 s) is twice the late window.
 
 ## Contract v1.1 additions (backward compatible)
@@ -100,10 +111,10 @@ New error codes: `PAIRING_CODE_INVALID` (401), `PAIRING_CODE_EXPIRED` (410),
 
 ### Pairing — one-click connect without copying the key
 
-1. In AutoInjector the user presses **🔗 Connect BookForge**. The desktop app turns the
-   bridge on if needed, checks BookForge with `GET http://127.0.0.1:<port>/api/ping`
-   (`<port>` = `BOOKFORGE_PORT` or 8780; with neither variable set it also tries
-   BookForge's fallback ports 8781..8799), makes a pairing code with the bridge's
+1. In AutoInjector the user presses **🔗 Connect Akọwe**. The desktop app turns the
+   bridge on if needed, checks Akọwe with `GET http://127.0.0.1:<port>/api/ping`
+   (`<port>` = `AKOWE_PORT` or 8780; with neither variable set it also tries
+   Akọwe's fallback ports 8781..8799), makes a pairing code with the bridge's
    `createPairingCode()` and opens the default browser at
 
    `http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<encodeURIComponent(bridge url)>`
@@ -112,13 +123,13 @@ New error codes: `PAIRING_CODE_INVALID` (401), `PAIRING_CODE_EXPIRED` (410),
    **The connection key is never put in a URL.**
 2. The code: 12 characters `[A-Za-z0-9]` (crypto random), valid **120 s**, **single use**.
    Only one code is live: making a new code invalidates any older unused one.
-3. BookForge's `#/pair` page asks the author to confirm first (and warns when the link's
-   bridge is not on port 17891; non-loopback bridges are refused), then BookForge's server
+3. Akọwe's `#/pair` page asks the author to confirm first (and warns when the link's
+   bridge is not on port 17891; non-loopback bridges are refused), then Akọwe's server
    calls (no Authorization header; `Content-Type: application/json` is required and a
    request carrying a browser `Origin` header is refused with 403 — neither counts toward
    the lockout below, so a web page cannot lock pairing):
 
-   `POST <bridge>/v1/pair` `{"code": "<CODE>", "client": "bookforge"}`
+   `POST <bridge>/v1/pair` `{"code": "<CODE>", "client": "akowe"}`
 
 | HTTP | body | when |
 |---|---|---|
@@ -129,7 +140,7 @@ New error codes: `PAIRING_CODE_INVALID` (401), `PAIRING_CODE_EXPIRED` (410),
 | 429 | `{"ok": false, "error": "TOO_MANY_ATTEMPTS", ...}` | 10 failed attempts (400/401/410) within 60 s lock pairing for 60 s — every attempt, even with the right code, gets 429 |
 | 503 | `{"ok": false, "error": "NOT_READY", ...}` | the bridge has no connection key (the code is not used up) |
 
-   BookForge stores the token exactly like a pasted key (the slot's write-only
+   Akọwe stores the token exactly like a pasted key (the slot's write-only
    `api_key`, never in project data) and should then post its first status (below).
    The code is compared in constant time. Neither the code (live or presented) nor
    the key is ever logged; each attempt is recorded in the activity ring only as
@@ -137,16 +148,16 @@ New error codes: `PAIRING_CODE_INVALID` (401), `PAIRING_CODE_EXPIRED` (410),
    Making a code records `{kind: "pair_code"}`.
 4. The desktop panel moves waiting → paired (on the 200) → **Connected ✔** (on the first
    `/v1/status` after pairing). No pairing within 120 s -> "press Connect again"; paired but
-   no status within 30 s -> "BookForge has the key but hasn't reported yet" (the AIs still work).
+   no status within 30 s -> "Akọwe has the key but hasn't reported yet" (the AIs still work).
 
-### `POST /v1/status` — what BookForge is doing (Bearer)
+### `POST /v1/status` — what Akọwe is doing (Bearer)
 
-BookForge sends this whenever something changes and at least every ~30 s while it runs
+Akọwe sends this whenever something changes and at least every ~30 s while it runs
 (the desktop marks a status **stale** after 90 s without a new one). Body (JSON, under
 32 KiB, otherwise 413 `TOO_LARGE`):
 
 ```json
-{"app": "bookforge", "version": 1, "bookforge_url": "http://127.0.0.1:8780/",
+{"app": "akowe", "version": 1, "akowe_url": "http://127.0.0.1:8780/",
  "project": {"id": "p-1", "title": "The Lantern Keeper"},
  "current_task": {"set": "B", "op": "B03", "title": "Main plot", "state": "running",
                   "message": "Drafting the main plot with Claude", "url": "http://127.0.0.1:8780/#/op/B03"},
@@ -156,7 +167,7 @@ BookForge sends this whenever something changes and at least every ~30 s while i
  "done": 1, "total": 9, "updated_at": "2026-10-17T10:00:05Z"}
 ```
 
-* `app` must be `"bookforge"` (else 400). Invalid JSON / not an object -> 400. Success -> `200 {"ok": true}`.
+* `app` must be `"akowe"` (else 400). Invalid JSON / not an object -> 400. Success -> `200 {"ok": true}`.
 * Sanitizing (the bridge never rejects for these, it just cleans): only the fields above are
   kept (anything else is dropped); strings have control characters removed and are capped
   (titles 200, `message` 500, `op`/`state` 40, `set` 20, ids 60–100); `approvals.items` max 20,
@@ -167,10 +178,10 @@ BookForge sends this whenever something changes and at least every ~30 s while i
 * Suggested `state` words (the panel maps synonyms): task — `running`, `waiting`,
   `needs_approval`, `done`, `error`, `idle`; checklist — `done`, `current`, `needs_approval`,
   `todo`, `blocked`, `skipped`.
-* The bridge keeps only the latest status (+ `receivedAt`) and exposes it as `status().bookforge`
+* The bridge keeps only the latest status (+ `receivedAt`) and exposes it as `status().akowe`
   (`null` until the first one) with `age_ms` and `stale` (`true` after 90 s). A status counts as
-  contact from BookForge. Its content never goes to the logs or the activity ring — only
-  `{kind: "status"}` ("BookForge sent an update on your book"), and only for the first status,
+  contact from Akọwe. Its content never goes to the logs or the activity ring — only
+  `{kind: "status"}` ("Akọwe sent an update on your book"), and only for the first status,
   the first after a 90 s gap, and the first after a pairing.
 
 ## Contract v1.2 additions — self-repair (backward compatible)
@@ -182,7 +193,7 @@ v1.2 adds the AutoInjector self-repair (plan Section 1, P18.1–P18.8; `desktop-
 + the usual reply-envelope line — at start (once its page has loaded), every 20 minutes while the AI is idle
 (configurable in the panel: off/10/20/30/60 min) and on demand (🩺 Check now, or `POST /v1/probe`). Never while the
 user typed in that pane within the last 2 minutes or its message box holds text, while it is writing, waiting for a
-reply, getting another message, answering BookForge, or during a test. A check-in's answer is owned by the
+reply, getting another message, answering Akọwe, or during a test. A check-in's answer is owned by the
 self-repair: it is not shown in the conversation, never relayed to another AI, never nagged about tags.
 
 **States per AI** (`state`): `unknown` (no check-in yet) · `ok` (the last check-in was answered) · `repairing`
@@ -203,7 +214,7 @@ Body (optional; empty body or `{}` = every Active AI): `{"sites": ["chatgpt", "c
 duplicates collapsed, body ≤ 4 KiB). Starts check-ins and answers at once:
 `202 {"ok": true, "started": ["claude"], "skipped": {"chatgpt": "busy"}}`. Results appear later in `/v1/health`
 (`state`, `last_probe_ok_at`). Skip reasons: `inactive`, `busy`, `typing`, `checking` (one is already running),
-`teaching`, `bookforge` (a bridge request is in flight there), `waiting`, `sending`, `test`, `not_ready`,
+`teaching`, `akowe` (a bridge request is in flight there), `waiting`, `sending`, `test`, `not_ready`,
 `unsupported` (a host without self-repair). Errors: 401 (key), 400 `BAD_REQUEST` (not JSON / not an object /
 `sites` not a list of strings), 404 `UNKNOWN_SITE`, 413 `TOO_LARGE`. Each started/skipped AI is an activity
 event `{kind: "probe", site, outcome: STARTED|SKIPPED}`.
@@ -211,7 +222,7 @@ event `{kind: "probe", site, outcome: STARTED|SKIPPED}`.
 ### `POST /v1/complete` (changed)
 To a site whose `state` is `repairing`, `needs_user` or `broken`: `503` with
 `{"ok": false, "error": "SITE_NOT_READY", "message": "...", "ambiguous": false, "state": "needs_user", "problem": "LOGGED_OUT"}`
-— nothing is typed; BookForge routes the work to another AI. (This check comes after the cache / join / `409
+— nothing is typed; Akọwe routes the work to another AI. (This check comes after the cache / join / `409
 SITE_BUSY` checks; `ok`/`unknown` behave exactly as in v1.1.)
 
 ### What the desktop does on a failure (informative)
@@ -227,7 +238,7 @@ re-check every 60 s (and whenever the page changes), one check-in once the signa
 fix attempt is confirmed by a new check-in. Learned selectors are stored per site (versioned, with the time and
 how they were learned) and used before the built-in ones. The teach step asks the user to type
 `Repeat this number: ####` into the AI (a pop-up in the panel and a banner in the AI's window) and learns the
-message box, how it was sent, the user's message and the reply from where the number appears. A BookForge
+message box, how it was sent, the user's message and the reply from where the number appears. An Akọwe
 request that times out / fails, or an AI whose reply stalls, gets a check-in once it is free.
 
 **P18.5 (no more false duplicates).** A reply captured while a prompt's send script was still confirming it (the
@@ -246,38 +257,38 @@ carries the reply's last characters.
 `test/fixtures/fake-bridge-host.js --site-state chatgpt=needs_user:LOGGED_OUT,gemini=repairing:NO_REPLY_FOUND`
 pins states (SIGUSR1 clears them); `POST /v1/probe` makes the other sites `ok` after `--delay-ms`.
 `test/fixtures/fake-chat.html` answers check-ins (`Reply with only this word: X` → X) and teach prompts
-(`Repeat this number: 1234` → 1234), so the real-Chromium e2e (`bookforge-e2e.test.js`) passes BookForge's
+(`Repeat this number: 1234` → 1234), so the real-Chromium e2e (`akowe-e2e.test.js`) passes Akọwe's
 pre-run check-in.
 
 ## Status, activity and the link test (desktop side, informative)
 
-* `status()` (bookforge-bridge.js) additionally reports `lastContactAt` (any authenticated
+* `status()` (akowe-bridge.js) additionally reports `lastContactAt` (any authenticated
   request), `lastExternalContactAt` (same, excluding the app's own link test), `counters`,
   the request in flight per site, each site's last result, and a ring buffer of the last 50
   events `{kind, site, request_id, outcome, elapsed_ms, http_status, at, selftest}` — never
   prompt/reply text, never the real or a presented key (fields are whitelisted). Wrong-key
   attempts are recorded as `unauthorized` events. main.js broadcasts each event to the
-  panel as `bookforge-activity` (with a fresh status snapshot); the 4 s refresh remains.
+  panel as `akowe-activity` (with a fresh status snapshot); the 4 s refresh remains.
 * The app's own link test marks itself with header `X-AutoInjector-Selftest: 1` and
-  request_ids `selftest-<stamp>-<site>`, so it never counts as "BookForge connected".
-  BookForge must not use that header or prefix.
-* **🧪 Test the connection** (bookforge-link-test.js; it ticks the panel's "Connection check" rows): bridge listening; key file present;
+  request_ids `selftest-<stamp>-<site>`, so it never counts as "Akọwe connected".
+  Akọwe must not use that header or prefix.
+* **🧪 Test the connection** (akowe-link-test.js; it ticks the panel's "Connection check" rows): bridge listening; key file present;
   wrong key -> 401; right key -> `/v1/health` 200; per Active AI: pane ready, then a real
   `POST /v1/complete` with a JSON_SCHEMA prompt whose reply must be one JSON object echoing
-  a random word; then `GET http://127.0.0.1:8780/api/ping` (`{"app":"bookforge",...}`;
-  SKIPPED with instructions when unreachable); then "BookForge is connected" (PASS when it has
+  a random word; then `GET http://127.0.0.1:8780/api/ping` (`{"app":"akowe",...}`;
+  SKIPPED with instructions when unreachable); then "Akọwe is connected" (PASS when it has
   talked to the bridge with the current key / sent a fresh status, otherwise SKIPPED with
-  "press Connect BookForge"). Reports: `<logs>/bookforge-link-test-<stamp>.md`
+  "press Connect Akọwe"). Reports: `<logs>/akowe-link-test-<stamp>.md`
   and `.json` (no key, no prompt text; last 80 chars of each reply).
 
-## BookForge side
+## Akọwe side
 
 * Slot `adapter_id: "autoinjector"`, extra slot fields `bridge_url`
   (default `http://127.0.0.1:17891`) and `site` (`chatgpt|claude|gemini`). The bridge
   token is saved through the slot's write-only `api_key` field (secret file, never in
   project data). Default mapping when connecting all three: AI-1=claude,
   AI-2=chatgpt, AI-3=gemini. Cost 0 minor units (web sessions, no per-use bill).
-* `request_id` = deterministic from BookForge's request_id + attempt, so a retry of the
+* `request_id` = deterministic from Akọwe's request_id + attempt, so a retry of the
   same logical call joins/reuses the bridge result instead of sending twice.
 * The adapter puts the system text, the context package and the JSON output schema in
   one prompt and requires a single JSON object answer. It extracts JSON (code fences
@@ -290,32 +301,32 @@ pre-run check-in.
 * "All three": each slot may declare `roles` (list of operation IDs or set letters,
   e.g. `["B", "C02"]`). When any eligible slot's roles match the operation, only those
   slots are used; otherwise normal cost/load/slot-id order applies.
-* BookForge default port moves 8765 -> **8780** (8765 collides with the extension's
+* Akọwe default port moves 8765 -> **8780** (8765 collides with the extension's
   bridge WebSocket in `AutoInjector/server/fake_api_server.py`).
 
 ## Tested so far
 
-* `desktop-app/test/bookforge-bridge.test.js` (164 checks, incl. activity/last-contact with
+* `desktop-app/test/akowe-bridge.test.js` (164 checks, incl. activity/last-contact with
   no text leakage; v1.1: pairing codes — format, single use, superseded, expiry 410, bad
   bodies, rate limit 429 and recovery, no key yet 503, codes/key never in status/events/logs;
   `/v1/status` — auth, whitelist, caps, loopback-only URLs, 400/413, staleness, events
   without content; the fake host's `--pairing-code-file` / `--status-file`) and
-  `bookforge-main.test.js` (73 checks, real main.js under the mock-Electron harness:
+  `akowe-main.test.js` (73 checks, real main.js under the mock-Electron harness:
   bridge-owned replies are not relayed, token never in state/log files, activity broadcasts,
-  a full link-test run with its reports; v1.1: Connect turns the bridge on, BookForge not
-  running -> instructions + "Start BookForge for me" really runs the launcher, Connect opens
+  a full link-test run with its reports; v1.1: Connect turns the bridge on, Akọwe not
+  running -> instructions + "Start Akọwe for me" really runs the launcher, Connect opens
   `#/pair?code=…&bridge=…` (mocked `shell.openExternal`, never the key), pair -> status ->
   "connected" in the snapshot, open-url refuses non-loopback URLs, a new key disconnects).
-* `desktop-app/test/bookforge-link-test.test.js` (64 checks): the link test against the real
+* `desktop-app/test/akowe-link-test.test.js` (64 checks): the link test against the real
   bridge with fake panes — pass, wrong key accepted, pane not ready, timeout, bad JSON,
-  BookForge not running, busy site, stop mid-run, reports contain no key/prompt, and the
-  optional "BookForge is connected" step.
-* `bookforge/tests/test_autoinjector_adapter.py` (Python adapter vs an in-process fake).
-* `bookforge/tests/test_bridge_cross_process.py`: real Python BookForge -> real Node
-  `bookforge-bridge.js` (via `fake-bridge-host.js`, three fake panes): connect-all-three,
+  Akọwe not running, busy site, stop mid-run, reports contain no key/prompt, and the
+  optional "Akọwe is connected" step.
+* `akowe/tests/test_autoinjector_adapter.py` (Python adapter vs an in-process fake).
+* `akowe/tests/test_bridge_cross_process.py`: real Python Akọwe -> real Node
+  `akowe-bridge.js` (via `fake-bridge-host.js`, three fake panes): connect-all-three,
   health, a creative operation end to end, roles routing, invalid-then-valid re-ask,
   timeout -> user decision with nothing saved, busy, wrong token.
-* v1.2: `desktop-app/test/bookforge-bridge-v12.test.js` (health fields, cleaning, `/v1/probe` incl. errors and a
+* v1.2: `desktop-app/test/akowe-bridge-v12.test.js` (health fields, cleaning, `/v1/probe` incl. errors and a
   v1.1 host, 503 `{state, problem}`, the P18.5 ownership incl. the exact Gemini reply, fake host `--site-state`),
   `test/self-repair.test.js` (classifier, signals, alternatives, page search, teach learner, engine flows),
   `test/self-repair-main.test.js` (real main.js: the Gemini regression end to end, identical answers, check-ins
@@ -325,46 +336,46 @@ pre-run check-in.
 
 ## Known limitations
 
-* If a pane is still finishing an earlier reply when BookForge sends, that earlier reply
+* If a pane is still finishing an earlier reply when Akọwe sends, that earlier reply
   can be captured as the answer. Let panes go idle before using the bridge.
 * Replies the app drops before capture (rate-limit notices, a bare NONE, an empty
   envelope, an exact duplicate of the previous reply) end as 504 TIMEOUT rather than a
   specific error.
-* A custom role set on a pane in AutoInjector is still prefixed to BookForge prompts.
-* One-click Connect needs a BookForge that has the `#/pair` page and `POST /v1/pair` client;
-  an older BookForge opens normally but never pairs (the panel then says "press Connect
+* A custom role set on a pane in AutoInjector is still prefixed to Akọwe prompts.
+* One-click Connect needs an Akọwe that has the `#/pair` page and `POST /v1/pair` client;
+  an older Akọwe opens normally but never pairs (the panel then says "press Connect
   again" after 2 minutes — use Other ways -> Copy connection key).
-* "Start BookForge for me" uses BookForge's own launcher, which also opens its own browser
-  tab, so you may briefly see two BookForge tabs. On macOS/Linux it runs in the background
-  (no terminal window); stop it from BookForge or with your system's tools.
+* "Start Akọwe for me" uses Akọwe's own launcher, which also opens its own browser
+  tab, so you may briefly see two Akọwe tabs. On macOS/Linux it runs in the background
+  (no terminal window); stop it from Akọwe or with your system's tools.
 
 ## First real run (on your PC)
 
 1. `git pull`, then start AutoInjector desktop (`desktop-app/run-windows.bat`) and log in
    to ChatGPT, Claude and Gemini in their panes. Turn routing/autopilot OFF.
-2. Start BookForge (`bookforge/run-bookforge.bat`, port 8780) — or skip this and let step 3
-   offer **▶ Start BookForge for me**.
-3. In AutoInjector's **BookForge** panel press **🔗 Connect BookForge**. Your browser opens
-   BookForge's pairing page; confirm there if it asks. The panel shows **Connected ✔** and
+2. Start Akọwe (`akowe/run-akowe.bat`, port 8780) — or skip this and let step 3
+   offer **▶ Start Akọwe for me**.
+3. In AutoInjector's **Akọwe** panel press **🔗 Connect Akọwe**. Your browser opens
+   Akọwe's pairing page; confirm there if it asks. The panel shows **Connected ✔** and
    "Now working on" / "Book checklist" fill in. (Fallback: **Other ways → 📋 Copy connection
-   key**, paste it in BookForge Settings -> Connect AutoInjector.) Then press **🧪 Test the
+   key**, paste it in Akọwe Settings -> Connect AutoInjector.) Then press **🧪 Test the
    connection**: every Active AI should PASS.
 4. Create a project, open B01 Premise, fill idea/goals and Create. Watch the Claude pane
-   receive the prompt; BookForge should show a DRAFT premise. If it reports TIMEOUT or a
+   receive the prompt; Akọwe should show a DRAFT premise. If it reports TIMEOUT or a
    JSON error, note which site and what the pane showed.
 
-## BookForge side of v1.2 (notes from BookForge, P18.9)
+## Akọwe side of v1.2 (notes from Akọwe, P18.9)
 
-* BookForge reads `state`/`problem`/`since`/`last_probe_ok_at` from `GET /v1/health` (cached 15 s per bridge) and
+* Akọwe reads `state`/`problem`/`since`/`last_probe_ok_at` from `GET /v1/health` (cached 15 s per bridge) and
   skips a slot whose site is `repairing`, `needs_user` or `broken`; `ok` and `unknown` (or a bridge without these
   fields) keep the old behaviour. Timestamps may be epoch seconds, epoch milliseconds or ISO 8601.
-* Before a Make-a-book run, Write all chapters and the workflow test BookForge sends `POST /v1/probe` once with the
+* Before a Make-a-book run, Write all chapters and the workflow test Akọwe sends `POST /v1/probe` once with the
   sites of its AutoInjector slots and polls `/v1/health` every 2 s for at most 60 s. A probed site counts as
   answered when its state is `needs_user`/`broken`, or `ok` with `last_probe_ok_at` (or `since`) not older than the
   probe; `repairing`/`unknown` keep it waiting. A 404 on `/v1/probe` is treated as an older bridge.
 * A `503 SITE_NOT_READY` with `state`/`problem` moves the call to another working slot at once (no same-site
   retries); without `state` it is treated as `broken` for this call.
-* Problem codes BookForge has plain words for (bookforge/web/problems.js `SITE_PROBLEMS`; others are shown as the
+* Problem codes Akọwe has plain words for (akowe/web/problems.js `SITE_PROBLEMS`; others are shown as the
   code in plain letters): the self-repair codes `TYPE_FAILED`, `SEND_NOT_CONFIRMED`, `NO_REPLY_FOUND`,
   `FALSE_DUPLICATE`, `STUCK_GENERATING`, `LOGGED_OUT`, `CAPTCHA`, `USAGE_LIMIT`, `NETWORK_ERROR`, `PAGE_ERROR`,
   `UNKNOWN`, plus a few older names. Codes must match `[A-Za-z][A-Za-z0-9_.:-]{0,63}`; anything else is ignored.

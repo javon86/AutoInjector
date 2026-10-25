@@ -17,11 +17,11 @@ import pytest
 
 from bf_export_helpers import (META, PAGE, build_all, docx_blocks, epub_blocks, in_order, nows, pdf_pages_text,
                                random_book)
-from bookforge import h_checks
-from bookforge.exporters import book as bookmod
-from bookforge.exporters.epub import inspect_epub
-from bookforge.exporters.layout import text_width, unencodable
-from bookforge.exporters.pdf import inspect_pdf
+from akowe import h_checks
+from akowe.exporters import book as bookmod
+from akowe.exporters.epub import inspect_epub
+from akowe.exporters.layout import text_width, unencodable
+from akowe.exporters.pdf import inspect_pdf
 
 SEEDS = list(range(8))
 
@@ -200,8 +200,8 @@ def test_scene_break_markers_and_dialogue():
 def test_bf06_control_chars_keep_epub_docx_well_formed(ch):
     from lxml import etree
     b = bookmod.build_book(META, [{"id": "C02-c1", "text": f"# T\nbad{ch}char"}])
-    from bookforge.exporters.docx import build_docx
-    from bookforge.exporters.epub import build_epub
+    from akowe.exporters.docx import build_docx
+    from akowe.exporters.epub import build_epub
     zf = zipfile.ZipFile(io.BytesIO(build_epub(b, modified="2026-01-01T00:00:00Z")))
     for n in zf.namelist():
         if n.endswith(".xhtml"):
@@ -210,7 +210,7 @@ def test_bf06_control_chars_keep_epub_docx_well_formed(ch):
 
 
 def test_bf06_noncharacters_keep_epub_well_formed():
-    from bookforge.exporters.epub import build_epub
+    from akowe.exporters.epub import build_epub
     b = bookmod.build_book(META, [{"id": "C02-c1", "text": "# T\nbad￿char"}])
     assert inspect_epub(build_epub(b, modified="2026-01-01T00:00:00Z"))["errors"] == []
 

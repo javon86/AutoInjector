@@ -77,7 +77,7 @@ def test_settings_connect_form(make_context, server, bridge):
 
 
 def test_pair_link_needs_confirmation_and_a_local_bridge(make_context, server, bridge):
-    """BF-07: a web page can open #/pair links; BookForge never pairs from the address alone."""
+    """BF-07: a web page can open #/pair links; Akọwe never pairs from the address alone."""
     page = open_app(make_context(), server)
     before = slots(server)  # (the server is shared with the tests above: compare, don't assume a fresh one)
     pair_calls = []

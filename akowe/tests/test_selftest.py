@@ -11,10 +11,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from bookforge import CONTRACT_VERSION, __version__
-from bookforge.selftest import FAIL, PASS, SKIPPED, SelfTest
-from bookforge.server import App, make_handler
-from bookforge.store import Store
+from akowe import CONTRACT_VERSION, __version__
+from akowe.selftest import FAIL, PASS, SKIPPED, SelfTest
+from akowe.server import App, make_handler
+from akowe.store import Store
 
 BRIDGE_KEY = "connection-key-SECRET-abcdefghijklmnop"
 APP_TOKEN = "app-token-selftest-xyz"
@@ -134,7 +134,7 @@ def test_manual_selftest_passes_and_writes_report(app, tmp_path):
     assert {e["format"] for e in rep["exports"]} == {"PDF", "EPUB", "DOCX"}
     assert all(len(e["sha256"]) == 64 and e["bytes"] > 100 for e in rep["exports"])
     md = open(rep["files"]["markdown"], encoding="utf-8").read()
-    for text in ("# BookForge self-test report", "## Summary", "## Exported files", "## Environment notes",
+    for text in ("# Akọwe self-test report", "## Summary", "## Exported files", "## Environment notes",
                  rep["package_sha256"], CONTRACT_VERSION):
         assert text in md
     assert rep["files"]["json"].startswith(str(tmp_path / "data" / "reports"))
@@ -231,7 +231,7 @@ def test_ping_needs_no_auth_and_leaks_nothing(server):
     app.engine.bootstrap_project(app.principal_id, "Secret Novel Title")
     status, body, resp = call(port, "GET", "/api/ping", token=None)
     assert status == 200
-    assert body == {"app": "bookforge", "version": __version__, "contract_version": CONTRACT_VERSION}
+    assert body == {"app": "akowe", "version": __version__, "contract_version": CONTRACT_VERSION}
     raw = json.dumps(body)
     assert "Secret Novel" not in raw and APP_TOKEN not in raw
     assert call(port, "GET", "/api/selftest", token=None)[0] == 401
@@ -269,7 +269,7 @@ def test_selftest_endpoints(server, monkeypatch):
     assert call(port, "GET", "/api/selftest/report?format=md", token="wrong")[0] == 401
     status, md, resp = call(port, "GET", "/api/selftest/report?format=md&download=1")
     assert status == 200 and resp.getheader("Content-Type").startswith("text/markdown")
-    assert resp.getheader("Content-Disposition").startswith("attachment") and md.startswith(b"# BookForge self-test")
+    assert resp.getheader("Content-Disposition").startswith("attachment") and md.startswith("# Akọwe self-test".encode("utf-8"))
     status, js, _ = call(port, "GET", "/api/selftest/report?format=json")
     assert status == 200 and js["verdict"] == "PASS"
     assert call(port, "GET", "/api/selftest/report?format=html")[0] == 400
@@ -290,7 +290,7 @@ def test_runner_summary_survives_restart(app, tmp_path):
 
 
 def test_cli_selftest(tmp_path, capsys):
-    from bookforge.selftest import main
+    from akowe.selftest import main
     assert main(["--data-dir", str(tmp_path / "cli")]) == 0
     out = capsys.readouterr().out
     assert "Result: PASS" in out and "selftest-" in out

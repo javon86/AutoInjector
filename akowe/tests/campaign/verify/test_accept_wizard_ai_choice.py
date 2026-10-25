@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "flow"))
 import flowkit as fk  # noqa: E402
 
-from bookforge.book_path import save_profile  # noqa: E402
+from akowe.book_path import save_profile  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +33,7 @@ def test_make_my_book_steps_use_the_ai_chosen_in_the_wizard(tmp_path):
     app.engine.providers.configure_slot("AI-2", {"adapter_id": "anthropic", "api_key": "sk-fake-flow-key-2"})
     from http.server import ThreadingHTTPServer  # noqa: PLC0415
     import threading  # noqa: PLC0415
-    from bookforge.server import make_handler  # noqa: PLC0415
+    from akowe.server import make_handler  # noqa: PLC0415
     from test_server import call  # noqa: PLC0415
     from autobook_fake import fact  # noqa: PLC0415
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))

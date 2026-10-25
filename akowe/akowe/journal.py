@@ -1,14 +1,14 @@
 """📜 Book journal (R11): a readable timeline of everything that happened to one book.
 
 Built on demand (nothing new is stored) from the kernel's audit log (who ran which step and with what outcome),
-the provenance of each new revision (which AI slot/model wrote it, or the author, or BookForge itself), the outbox
+the provenance of each new revision (which AI slot/model wrote it, or the author, or Akọwe itself), the outbox
 activity events (AI review verdicts, AI fixes, approvals and their kind, auto-approve changes, imports) and the
 events of background work for this book (Make-a-book runs and Write-all-chapters: retries, waits, pauses,
 problems, backups, exports).
 
 Entries: {at, kind, step: {set, op, name}, who, ai, what, outcome, approval, problem: {code, message}, run_id}.
 They never contain API keys, connection keys, prompts, AI replies or book text: only step names, record IDs,
-verdict words, error codes and BookForge's own messages.
+verdict words, error codes and Akọwe's own messages.
 
 Order: entries happen-before each other in the order they were stored (SQLite rowid for the audit log and the
 activity events, list order for a job's events), not in wall-clock text order: timestamps are normalised to
@@ -97,7 +97,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         ref = outs[0] if outs else {}
         op = a["operation_id"]
         ent = {"at": a["recorded_at"], "kind": "step", "step": _step(contracts, op), "who": "you" if a["principal_id"]
-               else "BookForge", "ai": None, "outcome": a["outcome"], "record_id": ref.get("record_id"),
+               else "Akọwe", "ai": None, "outcome": a["outcome"], "record_id": ref.get("record_id"),
                "version": ref.get("version"), "approval": None, "problem": None}
         name = _op_name(contracts, op) or op
         if a["action"] in ("CREATE", "UPDATE") and ref:
@@ -109,16 +109,16 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
             elif transform == "MANUAL":
                 ent["what"] = f"You wrote {name} ({ref.get('record_id')} v{ref.get('version')})"
             else:
-                ent["who"] = "BookForge"
-                ent["what"] = f"BookForge {ACTION_WORDS.get(a['action'], a['action'].lower())} {name} " \
+                ent["who"] = "Akọwe"
+                ent["what"] = f"Akọwe {ACTION_WORDS.get(a['action'], a['action'].lower())} {name} " \
                               f"({ref.get('record_id')} v{ref.get('version')})"
             ent["kind"] = "ai" if transform == "AI" else "step"
         elif a["action"] == "ACCEPT":
             kind, p = approval_of.get(ref.get("record_id"), ("author", {}))
             ent["kind"] = "approval"
             ent["approval"] = kind
-            ent["who"] = {"run_consent": "BookForge (your Make-a-book consent)",
-                          "standing_auto_approve": "BookForge (your auto-approve setting)",
+            ent["who"] = {"run_consent": "Akọwe (your Make-a-book consent)",
+                          "standing_auto_approve": "Akọwe (your auto-approve setting)",
                           "workflow_test": "Workflow test runner"}.get(kind, "you")
             if kind == "run_consent":
                 ent["run_id"] = p.get("run_id")
@@ -171,7 +171,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    f"({p.get('applied', 0)} passage(s) rewritten, {p.get('unresolved', 0)} not)"
                    + (" by you" if p.get("how") == "author" else " inside the run"), "outcome": "SUCCESS"}
         elif et == "editor.rewrite_rejected":
-            ent = {"kind": "editor", "step": _step(contracts, p.get("module_id")), "who": "BookForge",
+            ent = {"kind": "editor", "step": _step(contracts, p.get("module_id")), "who": "Akọwe",
                    "what": f"The editor's rewrite (v{p.get('rejected_version')}) was not kept — version "
                    f"{p.get('restored_from')} is back as v{p.get('to_version')} ({p.get('why')})",
                    "outcome": "REJECTED", "problem": {"code": "EDITOR_REWRITE_REJECTED",
@@ -197,7 +197,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    "warning": NOT_INDEPENDENT if same else None}
         elif et == "scenes.approved":
             how = p.get("how") or "author"
-            ent = {"kind": "approval", "step": _step(contracts, "C02"), "who": "you" if how == "author" else "BookForge",
+            ent = {"kind": "approval", "step": _step(contracts, "C02"), "who": "you" if how == "author" else "Akọwe",
                    "what": f"Scene cards of chapter {p.get('chapter_id')} v{p.get('version')}: "
                    + (p.get("label") or "approved"), "outcome": "APPROVED", "approval": how,
                    "problem": {"code": "SCENES_NOTES", "message": "the scene checker still had notes"}
@@ -214,7 +214,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    f"{p.get('change', 0)} changed, {p.get('retire', 0)} retired)", "outcome": "SUCCESS"}
         elif et == "rules.proposals_decided":
             how = p.get("how") or "author"
-            ent = {"kind": "approval", "step": _step(contracts, "A03"), "who": "you" if how == "author" else "BookForge",
+            ent = {"kind": "approval", "step": _step(contracts, "A03"), "who": "you" if how == "author" else "Akọwe",
                    "what": f"Story rules updates: {p.get('accepted', 0)} accepted, {p.get('rejected', 0)} rejected"
                    + (f" (under your Make-a-book-for-me consent, run {p.get('run_id')})" if p.get("run_id") else ""),
                    "outcome": "APPROVED", "approval": how}
@@ -226,7 +226,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         elif et == "planned.checked":
             miss = int(p.get("missing") or 0) + int(p.get("unclear") or 0)
             same = p.get("independent") is False
-            ent = {"kind": "planned", "step": _step(contracts, "C02"), "who": "AI" if p.get("ai_slot") else "BookForge",
+            ent = {"kind": "planned", "step": _step(contracts, "C02"), "who": "AI" if p.get("ai_slot") else "Akọwe",
                    "ai": {"slot": p.get("ai_slot")} if p.get("ai_slot") else None,
                    "what": f"Planned to page, chapter {p.get('chapter_id')} v{p.get('version')}: {p.get('on_page', 0)} "
                    f"of {p.get('items', 0)} item(s) on the page" + (f", ⚠️ {miss} required missing" if miss else "")
@@ -237,9 +237,9 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                    "ai": {"slot": p.get("ai_slot")}, "what": f"AI fix: new version {p.get('to_version')} of "
                    f"{p.get('record_id')} (it waits for approval)", "outcome": "SUCCESS"}
         elif et in ("review.auto_approve_failed", "autobook.approve_failed"):
-            ent = {"kind": "problem", "step": _step(contracts, p.get("module_id")), "who": "BookForge",
+            ent = {"kind": "problem", "step": _step(contracts, p.get("module_id")), "who": "Akọwe",
                    "what": p.get("label") or "An automatic approval was refused", "outcome": "REJECTED",
-                   "problem": {"code": "APPROVAL_REQUIRED", "message": "BookForge's checks refused the approval"}}
+                   "problem": {"code": "APPROVAL_REQUIRED", "message": "Akọwe's checks refused the approval"}}
         elif et in ("review.auto_approve_on", "review.auto_approve_off"):
             ent = {"kind": "setting", "step": _step(contracts, None), "who": "you", "what": p.get("label") or et,
                    "outcome": "SUCCESS"}
@@ -280,7 +280,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
                 if ev.get("kind") == "approve":
                     continue  # the approval itself is listed from the audit log with its kind
                 ent = {"at": _iso_fix(ev.get("at")), "kind": kind, "step": _step(contracts, op),
-                       "who": "AI" if kind in ("ai", "ai_review", "ai_fix") else "BookForge",
+                       "who": "AI" if kind in ("ai", "ai_review", "ai_fix") else "Akọwe",
                        "ai": {"slot": ev.get("slot")} if ev.get("slot") else None,
                        "what": f"{label}: {SAFE_TEXT.sub(' ', str(ev.get('message') or ''))[:300]}",
                        "outcome": ev.get("verdict") or ("PROBLEM" if kind == "problem" else None),
@@ -298,7 +298,7 @@ def build(app, pid: str, branch: str, *, step: str | None = None, problems_only:
         elif j.get("status") in ("error", "interrupted"):
             err = j.get("error") or {}
             entries.append({"at": _iso_fix(j.get("updated_at")), "kind": "problem", "step": _step(contracts, j.get("op")),
-                            "who": "BookForge", "ai": {"slot": j.get("slot")} if j.get("slot") else None,
+                            "who": "Akọwe", "ai": {"slot": j.get("slot")} if j.get("slot") else None,
                             "what": f"{label}: {j.get('status')}", "outcome": j.get("status"), "approval": None,
                             "problem": {"code": err.get("code") or j.get("status").upper(),
                                         "message": err.get("message") or j.get("phase")},

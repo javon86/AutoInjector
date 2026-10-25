@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge.server import App
+from akowe.server import App
 
 TOKEN = "verify3-token-0123456789"
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-WEB = Path(__file__).resolve().parents[3] / "bookforge" / "web" / "problems.js"
+WEB = Path(__file__).resolve().parents[3] / "akowe" / "web" / "problems.js"
 
 
 def plain(s: str) -> str:
@@ -40,7 +40,7 @@ def test_unknown_rule_keeps_what_is_wrong():
 
 @pytest.mark.parametrize("rule", ["STALE", "INPUT_STALE", "STALE_PIN", "SOURCE_PIN"])
 def test_out_of_date_rules_match_the_server_advice(rule):
-    from bookforge.book_path import refusal_advice
+    from akowe.book_path import refusal_advice
     t = plain(f"{rule}: input pins changed")
     assert "out of date" in t and "editing it cannot fix" in t and "Edit it so" not in t, t
     assert "editing it cannot fix" in refusal_advice([f"{'STALE' if rule != 'SOURCE_PIN' else rule}: x"], None)

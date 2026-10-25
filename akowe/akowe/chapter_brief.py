@@ -38,7 +38,7 @@ import logging
 from . import characters as chars_mod
 from . import scenes as scenes_mod
 
-log = logging.getLogger("bookforge.chapter_brief")
+log = logging.getLogger("akowe.chapter_brief")
 
 MAX_PLANNED = 10
 RULES = {

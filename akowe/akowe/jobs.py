@@ -2,8 +2,8 @@
 
 JobStore keeps a small JSON summary of every long-running piece of AI work in the existing ``settings`` table
 (key ``job:<id>``) - Make-a-book runs, "Write all chapters", assist ("Fill with AI") jobs, AI review/fix jobs and
-Bible Builder runs - so that a BookForge restart can show them again: finished work keeps its outcome, work that
-was running when BookForge stopped is shown as ``interrupted`` with a Resume button (``mark_interrupted`` runs once
+Bible Builder runs - so that an Akọwe restart can show them again: finished work keeps its outcome, work that
+was running when Akọwe stopped is shown as ``interrupted`` with a Resume button (``mark_interrupted`` runs once
 at start-up). No new table and no change to store.py: only ``Store.get_setting/set_setting`` and a read query.
 Entries never hold API keys, connection keys or AI replies; a resumable job may keep the author's own request
 (for example the Fill-with-AI prompt) because it is needed to run it again - it is never logged, never written
@@ -22,9 +22,9 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.jobs")
+log = logging.getLogger("akowe.jobs")
 
 PREFIX = "job:"
 MAX_KEPT = 300
@@ -32,7 +32,7 @@ KEEP_FINISHED_S = 14 * 24 * 3600
 LIVE = ("queued", "running", "waiting", "pausing")
 BUSY_CODES = ("UPSTREAM_UNAVAILABLE", "RATE_LIMITED")
 # After a 504 for a prompt it already typed, the AutoInjector bridge keeps that site reserved for the late answer
-# for at most this long (bookforge-bridge.js LATE_WINDOW_MAX_MS); meanwhile other requests to the site get
+# for at most this long (akowe-bridge.js LATE_WINDOW_MAX_MS); meanwhile other requests to the site get
 # 409 SITE_BUSY (-> RATE_LIMITED here). The default busy-retry budget is twice that, so they still get their turn.
 BRIDGE_LATE_WINDOW_S = 300
 DEFAULT_RETRY = {"enabled": True, "delays_s": [15, 30, 60, 120], "max_total_s": 2 * BRIDGE_LATE_WINDOW_S}
@@ -44,7 +44,7 @@ def now_iso() -> str:
 
 def is_busy_error(exc) -> bool:
     """An AI answer that means "try again later": unreachable/overloaded/rate limited/site busy (never TIMEOUT)."""
-    if not isinstance(exc, BookforgeError):
+    if not isinstance(exc, AkoweError):
         return False
     if exc.code in BUSY_CODES:
         return True
@@ -87,23 +87,23 @@ class RetryPolicy:
 
 def clean_retry_settings(body) -> dict:
     if not isinstance(body, dict):
-        raise BookforgeError("INVALID_INPUT", "", "the retry settings must be a JSON object", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "", "the retry settings must be a JSON object", status="REJECTED")
     out = dict(DEFAULT_RETRY)
     if "enabled" in body:
         if not isinstance(body["enabled"], bool):
-            raise BookforgeError("INVALID_INPUT", "/enabled", "enabled must be true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/enabled", "enabled must be true or false", status="REJECTED")
         out["enabled"] = body["enabled"]
     if "delays_s" in body:
         d = body["delays_s"]
         if (not isinstance(d, list) or not 1 <= len(d) <= 10 or
                 not all(isinstance(x, int) and not isinstance(x, bool) and 1 <= x <= 900 for x in d)):
-            raise BookforgeError("INVALID_INPUT", "/delays_s", "waiting times: 1 to 10 whole numbers of seconds "
+            raise AkoweError("INVALID_INPUT", "/delays_s", "waiting times: 1 to 10 whole numbers of seconds "
                                  "(1-900 each)", status="REJECTED")
         out["delays_s"] = d
     if "max_total_s" in body:
         m = body["max_total_s"]
         if not isinstance(m, int) or isinstance(m, bool) or not 10 <= m <= 3600:
-            raise BookforgeError("INVALID_INPUT", "/max_total_s", "the total waiting time is 10 to 3600 seconds",
+            raise AkoweError("INVALID_INPUT", "/max_total_s", "the total waiting time is 10 to 3600 seconds",
                                  status="REJECTED")
         out["max_total_s"] = m
     return out
@@ -128,14 +128,14 @@ def wait_and_retry(fn, *, policy: RetryPolicy, check=None, on_wait=None, who: st
     while True:
         try:
             return fn()
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if not policy.enabled or not is_busy_error(exc):
                 raise
             attempt += 1
             delay = policy.delay(attempt)
             if waited + delay > policy.max_total_s:
-                raise BookforgeError(exc.code, exc.errors[0].get("path") or "",
-                                     f"{who() if callable(who) else who} stayed busy or unreachable for {int(waited)} s, so BookForge stopped "
+                raise AkoweError(exc.code, exc.errors[0].get("path") or "",
+                                     f"{who() if callable(who) else who} stayed busy or unreachable for {int(waited)} s, so Akọwe stopped "
                                      f"waiting ({exc.errors[0].get('message')})", status=exc.status) from exc
             word = "busy" if exc.code == "RATE_LIMITED" else "not reachable"
             name = who() if callable(who) else who
@@ -213,7 +213,7 @@ class JobStore:
         for j in self.list(limit=MAX_KEPT):
             if j.get("status") in LIVE and j.get("id") not in keep:
                 j["status"] = "interrupted"
-                j["phase"] = phase or ("Interrupted — BookForge was closed or restarted while this was running. "
+                j["phase"] = phase or ("Interrupted — Akọwe was closed or restarted while this was running. "
                                        "Press Resume.")
                 j["interrupted_at"] = now_iso()
                 j["waiting"] = None

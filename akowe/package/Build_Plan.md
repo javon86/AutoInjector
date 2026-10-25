@@ -1,4 +1,4 @@
-# Bookforge build plan
+# Akọwe build plan
 Revision BF-IRB-1.0.0
 
 ## Entry point

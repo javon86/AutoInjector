@@ -1,5 +1,5 @@
 // test/log-extract.test.js — P16 scoped Extract (log-extract.js), pure Node:
-// the book tracker (which bridge requests belong to which BookForge project, and
+// the book tracker (which bridge requests belong to which Akọwe project, and
 // persistence), scope filtering (book only / time range / everything), the header,
 // the file name, redaction of planted secrets and paths, and the Relay Trace filter.
 // Run: node test/log-extract.test.js
@@ -24,7 +24,7 @@ function trackerFixture(file) {
   tr.noteRequest('bf-r2-gemini-c0-a0', 'gemini', T0 + 10 * MIN); tr.noteSeq('bf-r2-gemini-c0-a0', '0011'); tr.noteActivity('bf-r2-gemini-c0-a0', T0 + 20 * MIN);
   tr.noteRequest('selftest-xyz', 'claude', T0 + 11 * MIN); // the link test never counts
   tr.noteRequest('bf-r3-claude-c0-a0', 'claude', T0 + 4 * HOUR); tr.noteSeq('bf-r3-claude-c0-a0', '0014'); tr.noteActivity('bf-r3-claude-c0-a0', T0 + 4 * HOUR + 10 * MIN);
-  // Then BookForge switches to book B.
+  // Then Akọwe switches to book B.
   tr.noteStatus({ id: 'proj-b', title: 'Other Book' }, T0 + 5 * HOUR);
   tr.noteRequest('bf-r9-claude-c0-a0', 'claude', T0 + 5 * HOUR + MIN); tr.noteSeq('bf-r9-claude-c0-a0', '0020');
   t = T0 + 6 * HOUR;
@@ -33,7 +33,7 @@ function trackerFixture(file) {
 
 function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'logextract-'));
-  const file = path.join(dir, 'bookforge-extract-books.json');
+  const file = path.join(dir, 'akowe-extract-books.json');
 
   console.log('\n== the book tracker: requests belong to the project that was current ==');
   const tr = trackerFixture(file);
@@ -73,13 +73,13 @@ function main() {
   ];
   const log = [
     { ts: T0 - 20 * DAY, kind: 'captured', detail: { site: 'claude', chars: 80 } },
-    { ts: T0 + 1 * MIN, kind: 'bookforge-request', detail: { site: 'claude', request_id: 'bf-r1-claude-c0-a0', chars: 900 } },
+    { ts: T0 + 1 * MIN, kind: 'akowe-request', detail: { site: 'claude', request_id: 'bf-r1-claude-c0-a0', chars: 900 } },
     { ts: T0 + 1 * MIN + 1, kind: 'send-retry', detail: { target: 'claude', seq: '0010', attempt: 1 } },
     { ts: T0 + 2 * MIN, kind: 'captured', detail: { site: 'chatgpt', chars: 30 } },
-    { ts: T0 + 5 * MIN, kind: 'bookforge-outcome', detail: { site: 'claude', request_id: 'bf-r1-claude-c0-a0', outcome: 'OK' } },
-    { ts: T0 + 6 * MIN, kind: 'bookforge-listening', detail: { host: '127.0.0.1', port: 17891 } },
-    { ts: T0 + 5 * HOUR + MIN, kind: 'bookforge-request', detail: { site: 'claude', request_id: 'bf-r9-claude-c0-a0' } },
-    { ts: T0 + 3 * HOUR, kind: 'bookforge-error', detail: { error: 'between windows' } }
+    { ts: T0 + 5 * MIN, kind: 'akowe-outcome', detail: { site: 'claude', request_id: 'bf-r1-claude-c0-a0', outcome: 'OK' } },
+    { ts: T0 + 6 * MIN, kind: 'akowe-listening', detail: { host: '127.0.0.1', port: 17891 } },
+    { ts: T0 + 5 * HOUR + MIN, kind: 'akowe-request', detail: { site: 'claude', request_id: 'bf-r9-claude-c0-a0' } },
+    { ts: T0 + 3 * HOUR, kind: 'akowe-error', detail: { error: 'between windows' } }
   ];
   const book = tr.book('proj-a');
   const base = { transcript, log, siteLabel: (s) => s, buildLine: 'Build: v1.0.0', now: T0 + 6 * HOUR, relayReport: (f) => ({ text: `RELAY TRACE — seqs ${f.seqs ? Array.from(f.seqs).sort().join(',') : 'all'}`, messages: f.seqs ? f.seqs.size : 99 }) };
@@ -91,13 +91,13 @@ function main() {
   assert(!/UNRELATED_CHAT/.test(rb.text), 'an unrelated chat during the book\'s run window is NOT in (not bridge-owned)');
   assert(!/BOOK_B_TEXT/.test(rb.text) && !/bf-r9/.test(rb.text), 'the other project (book B) is NOT in');
   assert(rb.counts.messages === 3 && rb.counts.events === 4, `counts: 3 messages, 4 events (${JSON.stringify(rb.counts)})`);
-  assert(/bookforge-request — .*bf-r1/.test(rb.text) && /send-retry — .*"seq":"0010"/.test(rb.text) && /bookforge-listening/.test(rb.text), 'its request events, the send events of its [MSG #] and bridge events inside the window are in');
+  assert(/akowe-request — .*bf-r1/.test(rb.text) && /send-retry — .*"seq":"0010"/.test(rb.text) && /akowe-listening/.test(rb.text), 'its request events, the send events of its [MSG #] and bridge events inside the window are in');
   assert(!/between windows/.test(rb.text) && !/"chars":30/.test(rb.text), 'bridge events outside the run windows and unrelated captures are left out');
   assert(/RELAY TRACE — seqs 0010,0011,0014/.test(rb.text), 'the Relay Trace is limited to this book\'s [MSG #] numbers');
 
   console.log('\n== the header says exactly what is in the file ==');
-  assert(/WHAT IS IN THIS FILE/.test(rb.header) && /Scope: +This BookForge book only — "The Lighthouse Keeper"/.test(rb.header), 'scope + book title');
-  assert(/Book: +"The Lighthouse Keeper" \(BookForge project proj-a\)/.test(rb.header) && /Requests: +3 BookForge requests/.test(rb.header), 'project id and request count');
+  assert(/WHAT IS IN THIS FILE/.test(rb.header) && /Scope: +This Akọwe book only — "The Lighthouse Keeper"/.test(rb.header), 'scope + book title');
+  assert(/Book: +"The Lighthouse Keeper" \(Akọwe project proj-a\)/.test(rb.header) && /Requests: +3 Akọwe requests/.test(rb.header), 'project id and request count');
   assert(/Run windows: .*;/.test(rb.header) && /Time range: /.test(rb.header), 'time range and both run windows');
   assert(/AI conversation: +3 messages/.test(rb.header) && /Activity log: +4 events/.test(rb.header) && /Relay trace: +3 messages traced/.test(rb.header), 'per-section counts');
   assert(/Your own conversations with the AIs are NOT included/.test(rb.header) && /Redaction:/.test(rb.header), 'says what is excluded and that it is redacted');

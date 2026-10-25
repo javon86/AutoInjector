@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Callable
 
 from .canonical import iter_references, sha256_bytes
-from .errors import BookforgeError
+from . import legacy
+from .errors import AkoweError
 from .store import SCHEMA_VERSION, Store, new_id, utcnow
 
 COUNT_TABLES = ("records", "heads", "lifecycle", "receipts", "audit", "provenance", "outbox", "approvals",
@@ -84,12 +85,12 @@ def verify_restore(restored: Store, expected_counts: dict[str, int] | None = Non
 def backup_and_restore(store: Store, backup_dir, restore_dir, acl_checks=None) -> tuple[Store, dict]:
     """Snapshot, verify, restore into a NEW isolated root and verify it before promotion."""
     manifest = store.backup(backup_dir)
-    expected = table_counts(Path(backup_dir) / "bookforge.sqlite3")
+    expected = table_counts(legacy.db_in(backup_dir))
     restored = Store.restore(backup_dir, restore_dir)  # verifies DB + every asset hash first
     problems = verify_restore(restored, expected, acl_checks)
     if problems:
         restored.close()
-        raise BookforgeError("HASH_MISMATCH", "", "restore verification failed: " + "; ".join(problems[:5]))
+        raise AkoweError("HASH_MISMATCH", "", "restore verification failed: " + "; ".join(problems[:5]))
     return restored, {"manifest": manifest, "counts": expected}
 
 
@@ -101,7 +102,7 @@ def replay_outbox(store: Store, consumer: str, deliver: Callable[[dict], None]) 
                                (consumer, row["event_id"]))
         if seen is not None:
             if seen["payload_hash"] != row["payload_hash"]:
-                raise BookforgeError("EVENT_CONFLICT", "/event_id", f"event {row['event_id']} content changed")
+                raise AkoweError("EVENT_CONFLICT", "/event_id", f"event {row['event_id']} content changed")
         else:
             deliver({"event_id": row["event_id"], "event_type": row["event_type"],
                      "payload": json.loads(row["payload"])})
@@ -128,7 +129,7 @@ def rehearse_migration(store: Store, work_dir, *, migration_id: str, from_versio
     work = Path(work_dir)
     current = int(store.query_one("SELECT value FROM meta WHERE key='schema_version'")["value"])
     if current != from_version or to_version <= from_version:
-        raise BookforgeError("UNSUPPORTED_CONTRACT", "/schema_version",
+        raise AkoweError("UNSUPPORTED_CONTRACT", "/schema_version",
                              f"unsupported migration {from_version}->{to_version} (store is at {current})")
     copy_store, info = backup_and_restore(store, work / "snapshot", work / "migrated", acl_checks)
     before = info["counts"]

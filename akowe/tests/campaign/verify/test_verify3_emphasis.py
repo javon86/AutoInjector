@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge.exporters.book import para_block
+from akowe.exporters.book import para_block
 
 KEEP_LITERALLY = [
     "He said f*ck and sh*t, then left.",          # censored profanity: very common in fiction

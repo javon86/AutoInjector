@@ -20,11 +20,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from . import CONTRACT_VERSION
+from . import CONTRACT_VERSION, legacy
 from .canonical import canonical_bytes, make_reference, sha256_bytes
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.store")
+log = logging.getLogger("akowe.store")
 
 SCHEMA_VERSION = 1
 
@@ -148,7 +148,7 @@ _FLUSH_BEST_EFFORT = [0]  # how many file flushes failed and were let pass (Wind
 
 
 def _flush_failed(path, exc):
-    """Windows: a file flush (FlushFileBuffers) failed. The data was written and closed, so BookForge goes on, but it
+    """Windows: a file flush (FlushFileBuffers) failed. The data was written and closed, so Akọwe goes on, but it
     cannot promise the bytes reached the disk: logged as a warning and counted (backups then say "best effort")."""
     with _FLUSH_LOCK:
         _FLUSH_BEST_EFFORT[0] += 1
@@ -279,8 +279,8 @@ def _schema_of(value) -> int | None:
 
 
 def newer_schema_message(found) -> str:
-    return (f"this data was written by a newer BookForge (database version {found}; this BookForge understands "
-            f"version {SCHEMA_VERSION} and older). Update BookForge, then try again; nothing was changed.")
+    return (f"this data was written by a newer Akọwe (database version {found}; this Akọwe understands "
+            f"version {SCHEMA_VERSION} and older). Update Akọwe, then try again; nothing was changed.")
 
 
 def new_id(prefix: str) -> str:
@@ -297,7 +297,7 @@ class Store:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.asset_dir = self.data_dir / "assets"
         self.asset_dir.mkdir(exist_ok=True)
-        self.db_path = self.data_dir / "bookforge.sqlite3"
+        self.db_path = legacy.migrate_db_file(self.data_dir)  # an old bookforge.sqlite3 is renamed first
         self._local = threading.local()
         self.fault_hook: Callable[[str], None] | None = None
         with self.connection() as conn:
@@ -313,7 +313,7 @@ class Store:
 
     @staticmethod
     def _check_schema(conn):
-        """Refuse a database written by a newer BookForge before anything is written to it."""
+        """Refuse a database written by a newer Akọwe before anything is written to it."""
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meta'").fetchone():
             return
         row = conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
@@ -321,7 +321,7 @@ class Store:
             return
         v = _schema_of(row[0])
         if v is None or v > SCHEMA_VERSION:
-            raise BookforgeError("UNSUPPORTED_CONTRACT", "/schema_version", newer_schema_message(row[0]),
+            raise AkoweError("UNSUPPORTED_CONTRACT", "/schema_version", newer_schema_message(row[0]),
                                  status="REJECTED")
 
     def _sweep_partial_assets(self):
@@ -429,19 +429,19 @@ class Store:
         meta = rec.get("binary") or {}
         uri = meta.get("storage_uri")
         if not isinstance(uri, str) or not uri:
-            raise BookforgeError("NOT_FOUND", "/storage_uri", "this record has no stored file")
+            raise AkoweError("NOT_FOUND", "/storage_uri", "this record has no stored file")
         path = self.asset_dir / uri.split("/")[-1]
         try:
             data = path.read_bytes()
         except FileNotFoundError:
-            raise BookforgeError("NOT_FOUND", "/content_hash", "the stored file for this item is missing from the "
-                                 "BookForge data folder; restore a backup (Settings → Backups) to bring it back") \
+            raise AkoweError("NOT_FOUND", "/content_hash", "the stored file for this item is missing from the "
+                                 "Akọwe data folder; restore a backup (Settings → Backups) to bring it back") \
                 from None
         except OSError as exc:
-            raise BookforgeError("INTERNAL_ERROR", "/content_hash", "the stored file for this item could not be read "
-                                 f"({type(exc).__name__}); check the BookForge data folder and the disk") from None
+            raise AkoweError("INTERNAL_ERROR", "/content_hash", "the stored file for this item could not be read "
+                                 f"({type(exc).__name__}); check the Akọwe data folder and the disk") from None
         if sha256_bytes(data) != rec["content_hash"]:
-            raise BookforgeError("HASH_MISMATCH", "/content_hash", "stored artifact bytes do not match their hash")
+            raise AkoweError("HASH_MISMATCH", "/content_hash", "stored artifact bytes do not match their hash")
         return data
 
     def list_records(self, project_id: str, branch_id: str, module_id: str | None = None,
@@ -532,7 +532,7 @@ class Store:
         """
         dest = Path(dest_dir)
         dest.mkdir(parents=True, exist_ok=True)
-        db_copy = dest / "bookforge.sqlite3"
+        db_copy = dest / legacy.DB
         with self.connection() as conn:
             target = sqlite3.connect(db_copy)
             try:
@@ -560,7 +560,7 @@ class Store:
 
     @staticmethod
     def schema_problem(src_dir: str | os.PathLike) -> str | None:
-        """A plain-language reason when a snapshot comes from a newer BookForge (manifest or database)."""
+        """A plain-language reason when a snapshot comes from a newer Akọwe (manifest or database)."""
         src = Path(src_dir)
         try:
             manifest = json.loads((src / "manifest.json").read_text())
@@ -571,7 +571,7 @@ class Store:
             v = _schema_of(found)
             if v is None or v > SCHEMA_VERSION:
                 return newer_schema_message(found)
-        db = src / "bookforge.sqlite3"
+        db = legacy.db_in(src)  # a backup made before the rename holds bookforge.sqlite3
         if not db.exists():
             return None
         try:
@@ -604,7 +604,7 @@ class Store:
         if schema:
             return [schema]
         assets = manifest.get("assets") if isinstance(manifest.get("assets"), dict) else {}
-        db = src / "bookforge.sqlite3"
+        db = legacy.db_in(src)  # a backup made before the rename holds bookforge.sqlite3
         if not db.exists() or sha256_bytes(db.read_bytes()) != manifest.get("db_sha256"):
             problems.append("database hash mismatch")
         for name, digest in assets.items():
@@ -646,15 +646,15 @@ class Store:
         """Restore into a NEW isolated root; refuse promotion when verification fails."""
         schema = cls.schema_problem(src_dir)
         if schema:
-            raise BookforgeError("UNSUPPORTED_CONTRACT", "/schema_version", schema, status="REJECTED")
+            raise AkoweError("UNSUPPORTED_CONTRACT", "/schema_version", schema, status="REJECTED")
         problems = cls.verify_backup(src_dir)
         if problems:
-            raise BookforgeError("HASH_MISMATCH", "", "restore verification failed: " + "; ".join(problems[:5]))
+            raise AkoweError("HASH_MISMATCH", "", "restore verification failed: " + "; ".join(problems[:5]))
         src, dst = Path(src_dir), Path(new_data_dir)
         if dst.exists() and any(dst.iterdir()):
-            raise BookforgeError("INVALID_INPUT", "", "restore target must be a new empty directory")
+            raise AkoweError("INVALID_INPUT", "", "restore target must be a new empty directory")
         dst.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src / "bookforge.sqlite3", dst / "bookforge.sqlite3")
+        shutil.copy2(legacy.db_in(src), dst / legacy.DB)
         shutil.copytree(src / "assets", dst / "assets")
         return cls(dst)
 
@@ -750,7 +750,7 @@ class Store:
         """Store asset bytes under their content address (``<sha256>.bin``), atomically; refuses bytes that do not
         match ``content_hash``. An asset that is already there is kept. Returns the file name."""
         if sha256_bytes(data) != content_hash:
-            raise BookforgeError("HASH_MISMATCH", "/assets", "a file's bytes do not match its fingerprint")
+            raise AkoweError("HASH_MISMATCH", "/assets", "a file's bytes do not match its fingerprint")
         fname = f"{content_hash}.bin"
         path = self.asset_dir / fname
         if path.exists():
@@ -781,20 +781,20 @@ class Store:
         import base64  # noqa: PLC0415
         projects = tables.get("projects") or []
         if len(projects) != 1:
-            raise BookforgeError("INVALID_INPUT", "/projects", "a book package holds exactly one book")
+            raise AkoweError("INVALID_INPUT", "/projects", "a book package holds exactly one book")
         pid = projects[0].get("project_id")
         if not isinstance(pid, str) or not pid:
-            raise BookforgeError("INVALID_INPUT", "/projects/project_id", "the book has no id")
+            raise AkoweError("INVALID_INPUT", "/projects/project_id", "the book has no id")
         with self.transaction() as tx:
             conn = tx.conn
             if conn.execute("SELECT 1 FROM projects WHERE project_id=?", (pid,)).fetchone():
-                raise BookforgeError("VERSION_CONFLICT", "/project_id", "a book with this id already exists",
+                raise AkoweError("VERSION_CONFLICT", "/project_id", "a book with this id already exists",
                                      status="REJECTED")
             for t in self.PACKAGE_TABLES:
                 cols = set(self._columns(conn, t))
                 for row in tables.get(t) or []:
                     if not isinstance(row, dict) or row.get("project_id") != pid:
-                        raise BookforgeError("INVALID_INPUT", f"/{t}", "a row belongs to another book")
+                        raise AkoweError("INVALID_INPUT", f"/{t}", "a row belongs to another book")
                     keys = [k for k in row if k in cols]
                     vals = []
                     for k in keys:
@@ -906,13 +906,13 @@ class Tx:
                 replace_file(tmp, path)
             except OSError as exc:
                 tmp.unlink(missing_ok=True)
-                raise BookforgeError("INTERNAL_ERROR", "/body", "BookForge could not save the file (is the disk full "
+                raise AkoweError("INTERNAL_ERROR", "/body", "Akọwe could not save the file (is the disk full "
                                      f"or the data folder read-only? {type(exc).__name__})") from exc
             except BaseException:
                 tmp.unlink(missing_ok=True)
                 raise
             fsync_dir(self.store.asset_dir)
-        storage_uri = f"bookforge-asset://{project_id}/{branch_id}/{fname}"
+        storage_uri = f"akowe-asset://{project_id}/{branch_id}/{fname}"
         meta = {"record_id": record_id, "project_id": project_id, "branch_id": branch_id, "owner": module_id[0],
                 "module_id": module_id, "version": version, "mime_type": mime_type, "byte_length": len(data),
                 "storage_uri": storage_uri, "content_hash": content_hash, "source_refs": source_refs}
@@ -933,18 +933,18 @@ class Tx:
                                  (project_id, branch_id, record_id)).fetchone()
         if version == 1:
             if head is not None:
-                raise BookforgeError("VERSION_CONFLICT", "/base_ref", "record already exists", status="REJECTED")
+                raise AkoweError("VERSION_CONFLICT", "/base_ref", "record already exists", status="REJECTED")
         else:
             if head is None:
-                raise BookforgeError("NOT_FOUND", "/base_ref", "record not found")
+                raise AkoweError("NOT_FOUND", "/base_ref", "record not found")
             if head["module_id"] != module_id:
-                raise BookforgeError("INVALID_INPUT", "/base_ref/module_id", "ownership mismatch")
+                raise AkoweError("INVALID_INPUT", "/base_ref/module_id", "ownership mismatch")
             latest = head["latest_version"]
             if expected_latest is not None and latest != expected_latest:
-                raise BookforgeError("VERSION_CONFLICT", "/base_ref/version",
+                raise AkoweError("VERSION_CONFLICT", "/base_ref/version",
                                      f"stale base version {expected_latest}; head is {latest}", status="REJECTED")
             if version != latest + 1:
-                raise BookforgeError("VERSION_CONFLICT", "/base_ref/version", "revisions increase by exactly one",
+                raise AkoweError("VERSION_CONFLICT", "/base_ref/version", "revisions increase by exactly one",
                                      status="REJECTED")
 
     def _advance_head(self, project_id, branch_id, record_id, module_id, version, state, findings):
@@ -1019,7 +1019,7 @@ class Tx:
         existing = self.conn.execute("SELECT payload_hash FROM outbox WHERE event_id=?", (event_id,)).fetchone()
         if existing:
             if existing["payload_hash"] != payload_hash:
-                raise BookforgeError("EVENT_CONFLICT", "/event_id", "event_id reused with different content")
+                raise AkoweError("EVENT_CONFLICT", "/event_id", "event_id reused with different content")
             return event_id
         self.conn.execute("INSERT INTO outbox VALUES(?,?,?,?,?,?,?,NULL)",
                           (event_id, project_id, branch_id, event_type, json.dumps(payload), payload_hash, utcnow()))
@@ -1058,7 +1058,7 @@ class Tx:
                                 "AND key=?", (project_id, branch_id, namespace, key)).fetchone()
         current = row["revision"] if row else 0
         if expected_revision is not None and expected_revision != current:
-            raise BookforgeError("VERSION_CONFLICT", "", f"state {namespace}/{key} changed concurrently",
+            raise AkoweError("VERSION_CONFLICT", "", f"state {namespace}/{key} changed concurrently",
                                  status="REJECTED")
         self.conn.execute("INSERT INTO module_state VALUES(?,?,?,?,?,?,?) ON CONFLICT(project_id,branch_id,namespace,key) "
                           "DO UPDATE SET value=excluded.value, revision=excluded.revision, updated_at=excluded.updated_at",

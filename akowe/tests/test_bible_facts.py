@@ -2,7 +2,7 @@
 repeat labels, and a 🔁 rerun from the bible starts with them instead of an empty list."""
 from __future__ import annotations
 
-from bookforge import book_bible, repetition, terms
+from akowe import book_bible, repetition, terms
 
 from test_section6 import new_app, run_book
 

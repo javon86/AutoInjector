@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-APP = Path(__file__).resolve().parents[3] / "bookforge" / "web" / "app.js"
+APP = Path(__file__).resolve().parents[3] / "akowe" / "web" / "app.js"
 
 
 def roundtrip(text: str) -> dict:
@@ -50,7 +50,7 @@ def test_leading_scene_break_is_not_taken_for_a_title(text):
     ("# Title\r\n\r\nBody one.\r\n\r\nBody two.", "Title"),
 ])
 def test_title_rule_matches_the_exporter(text, title):
-    from bookforge.exporters.book import SCENE_BREAK  # noqa: F401 - the rule lives next to it in book.py
+    from akowe.exporters.book import SCENE_BREAK  # noqa: F401 - the rule lives next to it in book.py
     r = roundtrip(text)
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     exp = lines[0][2:].strip() if lines and lines[0].startswith("# ") and len(lines[0]) > 2 else ""

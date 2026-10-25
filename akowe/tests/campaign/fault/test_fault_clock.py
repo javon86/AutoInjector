@@ -5,10 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import bookforge.store as store_mod
-from bookforge import journal
-from bookforge.requests import build_request
-from bookforge.server import App
+import akowe.store as store_mod
+from akowe import journal
+from akowe.requests import build_request
+from akowe.server import App
 
 from fault_helpers import TOKEN
 

@@ -13,10 +13,10 @@ from collections import Counter
 
 import pytest
 
-from bookforge import beta_reader as beta
-from bookforge import chapter_brief
-from bookforge import style_card as sc
-from bookforge.errors import BookforgeError
+from akowe import beta_reader as beta
+from akowe import chapter_brief
+from akowe import style_card as sc
+from akowe.errors import AkoweError
 
 from test_failover_review import SlotFake, make_app, run_book
 
@@ -111,7 +111,7 @@ def test_beta_reader_in_a_run(tmp_path):
 
 def test_beta_failure_never_blocks_the_book(tmp_path):
     fake = SlotFake()
-    fake.fail_kind("beta", BookforgeError("INVALID_INPUT", "/x", "bad answer"))
+    fake.fail_kind("beta", AkoweError("INVALID_INPUT", "/x", "bad answer"))
     app = make_app(tmp_path, fake)
     run = run_book(app, {"slot_id": "AI-1", "beta_reader": True})
     assert run["status"] == "done", run.get("problem")
@@ -138,7 +138,7 @@ def test_beta_reader_api_and_job(tmp_path):
     code, ov = app.route("GET", base, {}, None, "author", {})
     assert ov["latest"]["id"] == j["read_id"] and ov["latest"]["reader"]["slot"] == "AI-3"
     assert not ov["stale"]
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.route("POST", base, {}, {"slot_id": 5}, "author", {})
 
 
@@ -156,13 +156,13 @@ def test_style_numbers():
 
 
 def test_sample_limits():
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         sc.clean_samples([])
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         sc.clean_samples(["Too short to learn from."])
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         sc.clean_samples([{"text": "x" * (sc.MAX_SAMPLE_CHARS + 1)}])
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         sc.clean_samples([SAMPLE] * (sc.MAX_SAMPLES + 1))
     out = sc.clean_samples([{"name": "Diary", "text": SAMPLE}, "  ", SAMPLE])
     assert [s["name"] for s in out] == ["Diary", "Sample 2"]
@@ -202,7 +202,7 @@ def test_style_card_api(tmp_path):
     app = make_app(tmp_path, SlotFake())
     code, out = app.route("GET", "/api/style-card", {}, None, "author", {})
     assert out["card"] is None
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.route("POST", "/api/style-card/learn", {}, {}, "author", {})
     out = _learn(app)
     card = out["card"]
@@ -232,7 +232,7 @@ def test_style_reaches_the_writer_and_the_editor(tmp_path):
     # the author can switch it off for the book
     code, out = app.route("PUT", f"/api/projects/{pid}/branches/main/style", {}, {"on": False}, "author", {})
     assert out["style"]["on"] is False and sc.brief_for(app.store, pid) is None
-    from bookforge.book_path import BookPath
+    from akowe.book_path import BookPath
     bp = BookPath(app.engine, "author", pid, "main")
     outline = bp.outline()
     cid = bp.outline_chapters(outline)[0]["chapter_id"]
@@ -255,5 +255,5 @@ def test_my_style_without_a_card_is_a_note(tmp_path):
 def test_run_settings_are_booleans(tmp_path):
     app = make_app(tmp_path, SlotFake())
     for k in ("beta_reader", "my_style"):
-        with pytest.raises(BookforgeError):
+        with pytest.raises(AkoweError):
             app.autobook.start("author", {"author_confirms": True, k: "yes"})

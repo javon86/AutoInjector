@@ -7,10 +7,10 @@ import types
 
 import pytest
 
-from bookforge import book_report as br
-from bookforge import h_checks as hc
-from bookforge import providers as prov_mod
-from bookforge import readability as rd
+from akowe import book_report as br
+from akowe import h_checks as hc
+from akowe import providers as prov_mod
+from akowe import readability as rd
 
 from test_failover_review import SlotFake, make_app, run_book
 

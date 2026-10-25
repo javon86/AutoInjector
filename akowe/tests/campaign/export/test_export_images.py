@@ -17,8 +17,8 @@ PIL = pytest.importorskip("PIL")
 from PIL import Image  # noqa: E402
 
 from bf_export_helpers import PAGE, build_all, jpeg, png  # noqa: E402
-from bookforge import h_checks  # noqa: E402
-from bookforge.exporters.images import UnsupportedImage, load_image  # noqa: E402
+from akowe import h_checks  # noqa: E402
+from akowe.exporters.images import UnsupportedImage, load_image  # noqa: E402
 
 CH = [{"id": "C02-img1", "text": "# Pictures\nPara one.\nPara two.\nPara three."}]
 

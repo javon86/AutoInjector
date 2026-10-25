@@ -28,7 +28,7 @@ from __future__ import annotations
 import copy
 from . import CONTRACT_VERSION
 from .canonical import canonical_bytes, make_reference, sha256_bytes, sha256_text
-from .errors import BookforgeError
+from .errors import AkoweError
 
 PROSE_OPS = ("C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11")
 EXTRACTION_NS = "c_extraction"
@@ -84,7 +84,7 @@ def predict_output_ref(ctx, result) -> dict:
     record_id, version, contract_version, data, source_refs}; source_refs as engine computes.
     """
     if not result.record_id:
-        raise BookforgeError("INTERNAL_ERROR", "", "prose record ID must be pre-allocated")
+        raise AkoweError("INTERNAL_ERROR", "", "prose record ID must be pre-allocated")
     source_refs = ctx.engine._source_refs(ctx, result)
     body = {"project_id": ctx.project_id, "branch_id": ctx.branch_id, "owner": ctx.op_id[0],
             "module_id": ctx.op_id, "record_id": result.record_id, "version": 1,
@@ -179,7 +179,7 @@ def build_bundle(ctx, prose_ref: dict, text: str, raw_events: list, *, op_id: st
     bundle = {"prose_ref": prose_ref, "events": events, "extraction_findings": findings}
     errs = ctx.contracts.check_shared(BUNDLE_KIND, bundle)
     if errs:
-        raise BookforgeError("INVALID_INPUT", errs[0]["path"],
+        raise AkoweError("INVALID_INPUT", errs[0]["path"],
                              f"event bundle invalid: {errs[0]['message']}", status="REJECTED")
     return bundle, findings
 
@@ -198,7 +198,7 @@ def ai_extract(ctx, text: str, *, op_id: str, hints: dict | None = None) -> tupl
     out, resource = ctx.ai_generate(task=task, output_schema=RAW_EVENT_SCHEMA, context=context)
     events = out.get("events") if isinstance(out, dict) else None
     if not isinstance(events, list):
-        raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "AI extraction returned no event list")
+        raise AkoweError("UPSTREAM_UNAVAILABLE", "", "AI extraction returned no event list")
     return events, resource
 
 
@@ -239,13 +239,13 @@ def extract_event_bundle(engine, principal_id: str, prose_ref: dict, *, events: 
     try:
         op = prose_ref.get("module_id")
         if op not in PROSE_OPS:
-            raise BookforgeError("INVALID_INPUT", "/prose_ref/module_id", "event bundles derive from C02-C11 prose",
+            raise AkoweError("INVALID_INPUT", "/prose_ref/module_id", "event bundles derive from C02-C11 prose",
                                  status="REJECTED")
         project_id, branch_id = prose_ref["project_id"], prose_ref["branch_id"]
         engine._authorize(principal_id, project_id, branch_id, f"{op}:create")
         rec = engine.resolve_ref(prose_ref, project_id, branch_id, "/prose_ref")
         if rec["record_kind"] != "OUTPUT":
-            raise BookforgeError("INVALID_INPUT", "/prose_ref", "a bundle is not prose; pin the prose record",
+            raise AkoweError("INVALID_INPUT", "/prose_ref", "a bundle is not prose; pin the prose record",
                                  status="REJECTED")
         key = extraction_key(prose_ref)
         state = engine.store.get_state(project_id, branch_id, EXTRACTION_NS, key)
@@ -261,9 +261,9 @@ def extract_event_bundle(engine, principal_id: str, prose_ref: dict, *, events: 
             try:
                 events, resource = ai_extract(ctx, text, op_id=op)
                 transform = "AI"
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code == "CAPABILITY_UNAVAILABLE":
-                    raise BookforgeError("CAPABILITY_UNAVAILABLE", "/events",
+                    raise AkoweError("CAPABILITY_UNAVAILABLE", "/events",
                                          "event extraction needs an AI slot or manual events",
                                          unresolved=[f"{op}:event_extraction"]) from exc
                 raise
@@ -291,6 +291,6 @@ def extract_event_bundle(engine, principal_id: str, prose_ref: dict, *, events: 
                              {"operation_id": op, "output_refs": refs, "audit_id": audit_id,
                               "request_id": request_id, "record_kind": BUNDLE_KIND})
         return response
-    except BookforgeError as exc:
+    except AkoweError as exc:
         return engine._error_response(request_id, attempt_id, exc.errors, exc.status, exc.findings, exc.unresolved)
 

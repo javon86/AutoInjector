@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import time
 
-from bookforge import prose_audit as pa
+from akowe import prose_audit as pa
 
 LAMPLIGHTER = """# The Last Round
 

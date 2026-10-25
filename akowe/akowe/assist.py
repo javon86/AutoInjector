@@ -46,13 +46,13 @@ from . import plan_rules as pr
 from . import characters as chars_mod
 from . import providers as providers_mod
 from .canonical import json_pointer
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import RetryPolicy, slot_word, wait_and_retry
 from .modules import get_handler
 from .modules.base import Context
 from .requests import build_request
 
-log = logging.getLogger("bookforge.assist")
+log = logging.getLogger("akowe.assist")
 
 A_OPS = tuple(f"A{i:02d}" for i in range(1, 19))
 REF_KEYS = ("project_id", "branch_id", "owner", "module_id", "record_id", "version", "content_hash")
@@ -118,7 +118,7 @@ def _err(code: str, message: str, fix: str | None = None, path: str = "") -> dic
     return {"code": code, "message": message, "fix": fix or FIX.get(code, FIX["INTERNAL_ERROR"]), "path": path}
 
 
-def _err_of(exc: BookforgeError) -> dict:
+def _err_of(exc: AkoweError) -> dict:
     e = exc.errors[0] if exc.errors else {"code": exc.code, "message": str(exc)}
     return _err(e.get("code") or exc.code, e.get("message") or exc.code, path=e.get("path") or "")
 
@@ -279,7 +279,7 @@ def canon_context(engine, pid: str, branch: str, *, max_approved: int = 80, max_
             for f in pr.protected_facts(data):
                 protected.append(dict(f, source=f"{rec['module_id']}:{rec['record_id']} v{rec['version']}"))
         elif r.get("stale") or rec["lifecycle"] in ("REJECTED", "SUPERSEDED"):
-            # a draft set aside (BookForge's checks refused it) is not canon: its name is free for the entry made again
+            # a draft set aside (Akọwe's checks refused it) is not canon: its name is free for the entry made again
             continue
         elif len(drafts) < max_drafts:
             drafts.append({"module_id": rec["module_id"], "record_id": rec["record_id"],
@@ -423,26 +423,26 @@ class AssistService:
     # ------------------------------------------------------------------ shared checks
     def _access(self, principal: str, pid, branch, op_id: str | None = None):
         if not isinstance(pid, str) or not pid or not isinstance(branch, str) or not branch:
-            raise BookforgeError("MISSING_INPUT", "/project_id", "project_id and branch_id are required",
+            raise AkoweError("MISSING_INPUT", "/project_id", "project_id and branch_id are required",
                                  status="REJECTED")
         if not self.store.has_project_access(principal, pid) or self.store.project(pid) is None:
-            raise BookforgeError("PERMISSION_DENIED", "/project_id", "no access to this project", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "/project_id", "no access to this project", status="REJECTED")
         if not self.store.branch_exists(pid, branch):
-            raise BookforgeError("NOT_FOUND", "/branch_id", "branch not found", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/branch_id", "branch not found", status="REJECTED")
         if op_id and not self.store.has_scope(principal, pid, branch, f"{op_id}:create"):
-            raise BookforgeError("PERMISSION_DENIED", "", f"missing scope {op_id}:create", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "", f"missing scope {op_id}:create", status="REJECTED")
 
     def _check_op(self, op_id):
         if not isinstance(op_id, str) or self.contracts.operation(op_id) is None:
-            raise BookforgeError("NOT_FOUND", "/target_operation", "unknown operation", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/target_operation", "unknown operation", status="REJECTED")
         if not supports(self.contracts, op_id):
-            raise BookforgeError("INVALID_INPUT", "/target_operation", f"{op_id} has no AI fill (Set A and creative "
+            raise AkoweError("INVALID_INPUT", "/target_operation", f"{op_id} has no AI fill (Set A and creative "
                                  "Set B planning modules only)", status="REJECTED")
 
     @staticmethod
     def _check_slot(slot_id):
         if slot_id not in (None, "", "auto", "AI-1", "AI-2", "AI-3"):
-            raise BookforgeError("INVALID_INPUT", "/slot_id", "slot_id must be AI-1, AI-2, AI-3 or null (auto)",
+            raise AkoweError("INVALID_INPUT", "/slot_id", "slot_id must be AI-1, AI-2, AI-3 or null (auto)",
                                  status="REJECTED")
         return None if slot_id in (None, "", "auto") else slot_id
 
@@ -525,7 +525,7 @@ class AssistService:
             if job.slot_pref:
                 s = next(x for x in slots if x["slot_id"] == job.slot_pref)
                 if not self._usable(s, job.project_id):
-                    raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id",
+                    raise AkoweError("CAPABILITY_UNAVAILABLE", "/slot_id",
                                          f"{job.slot_pref} is not set up for AI (adapter '{s['adapter_id']}')")
                 elig = [x for x in prov.eligible(job.project_id, "text", needed, None) if x["slot_id"] == s["slot_id"]]
                 if elig:
@@ -534,7 +534,7 @@ class AssistService:
                     raise prov.down_error([s])
                 busy = s["active_jobs"] >= s["max_concurrent"]
                 if not busy:
-                    raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slot_id", f"{job.slot_pref} cannot take this job "
+                    raise AkoweError("CAPABILITY_UNAVAILABLE", "/slot_id", f"{job.slot_pref} cannot take this job "
                                          "(unhealthy, missing the text capability, or context limit too small)")
             else:
                 pick, wait = self._soft_pick(job, prov, op_for_roles, needed, set(exclude))
@@ -546,9 +546,9 @@ class AssistService:
                 if usable and not busy and down and not wait:
                     raise prov.down_error(down)
                 if not usable or (not busy and not wait):
-                    raise BookforgeError("CAPABILITY_UNAVAILABLE", "", "no AI slot is connected and ready")
+                    raise AkoweError("CAPABILITY_UNAVAILABLE", "", "no AI slot is connected and ready")
             if time.monotonic() - waited_since > SLOT_WAIT_S:
-                raise BookforgeError("RATE_LIMITED", "", "the AI stayed busy with other jobs for 10 minutes")
+                raise AkoweError("RATE_LIMITED", "", "the AI stayed busy with other jobs for 10 minutes")
             job.status = "queued"
             job.phase = f"Waiting for {job.slot_pref or 'a free AI slot'} to finish another job"
             time.sleep(0.5)
@@ -590,7 +590,7 @@ class AssistService:
         for _ in range(3 + len(providers_mod.SLOT_IDS)):
             try:
                 slot = self._choose_slot(job, op_for_roles, needed, exclude=failed)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if failed and exc.code in ("CAPABILITY_UNAVAILABLE",):
                     raise prov.down_error([s for s in prov.slots() if s["slot_id"] in failed]) from None
                 raise
@@ -607,7 +607,7 @@ class AssistService:
                     data, resource = prov.generate(ctx, task=task, output_schema=schema, context=context,
                                                    capability="text", protected_facts=protected,
                                                    slot_id=slot["slot_id"])
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     s = next(x for x in prov.slots() if x["slot_id"] == slot["slot_id"])
                     if exc.code == "CAPABILITY_UNAVAILABLE" and s["active_jobs"] >= s["max_concurrent"]:
                         continue  # another operation grabbed the slot first: wait for it again
@@ -628,7 +628,7 @@ class AssistService:
                                     "operation": op_for_roles})
             job.model = resource.get("model") or job.model
             return data
-        raise BookforgeError("RATE_LIMITED", "", "the AI slot stayed busy")
+        raise AkoweError("RATE_LIMITED", "", "the AI slot stayed busy")
 
     def _other_ai(self, job: Job, prov, op_for_roles: str, needed: int, exclude: list) -> bool:
         """Is there another AI (not in ``exclude``) this call could move to right now?"""
@@ -682,8 +682,8 @@ class AssistService:
         for i, ref in enumerate(context_refs or []):
             try:
                 rec = self.engine.resolve_ref(ref, pid, branch, f"/context_refs/{i}")
-            except BookforgeError as exc:
-                raise BookforgeError(exc.code, f"/context_refs/{i}", "a context record does not resolve in this "
+            except AkoweError as exc:
+                raise AkoweError(exc.code, f"/context_refs/{i}", "a context record does not resolve in this "
                                      "project/branch", status="REJECTED") from None
             data = json.dumps(rec.get("data"), ensure_ascii=False)
             ctx_records.append({"module_id": rec["module_id"], "record_id": rec["record_id"], "ref": rec["ref"],
@@ -815,7 +815,7 @@ class AssistService:
                 return "not a complete reference"
             try:
                 self.engine.resolve_ref(ref, pid, branch, ptr)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 return exc.errors[0]["message"] if exc.errors else exc.code
             except Exception:  # noqa: BLE001 - malformed values
                 return "not a valid reference"
@@ -903,7 +903,7 @@ class AssistService:
         if isinstance(handler, CanonHandler) and not schema_errs:
             try:
                 handler._reject_intervals(payload, "")
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 findings.append(ctx.finding("FACT_INTERVAL", exc.errors[0]["message"] + f" ({exc.errors[0]['path']})",
                                             severity="BLOCKING", decision="FAIL"))
             try:
@@ -920,37 +920,37 @@ class AssistService:
     # ------------------------------------------------------------------ assist jobs (API)
     def start_assist(self, principal: str, body: dict) -> dict:
         if not isinstance(body, dict):
-            raise BookforgeError("INVALID_INPUT", "", "body must be a JSON object", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "", "body must be a JSON object", status="REJECTED")
         pid, branch, op_id = body.get("project_id"), body.get("branch_id") or "main", body.get("target_operation")
         self._check_op(op_id)
         self._access(principal, pid, branch, op_id)
         prompt = body.get("prompt")
         if not isinstance(prompt, str) or not prompt.strip():
-            raise BookforgeError("MISSING_INPUT", "/prompt", "type what you want the AI to create", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/prompt", "type what you want the AI to create", status="REJECTED")
         if len(prompt) > 8000:
-            raise BookforgeError("INVALID_INPUT", "/prompt", "the prompt is limited to 8000 characters",
+            raise AkoweError("INVALID_INPUT", "/prompt", "the prompt is limited to 8000 characters",
                                  status="REJECTED")
         slot = self._check_slot(body.get("slot_id"))
         cur = body.get("current_values") or {}
         refs = body.get("context_refs") or []
         if not isinstance(cur, dict):
-            raise BookforgeError("INVALID_INPUT", "/current_values", "current_values must be an object",
+            raise AkoweError("INVALID_INPUT", "/current_values", "current_values must be an object",
                                  status="REJECTED")
         if not isinstance(refs, list) or len(refs) > 20 or not all(isinstance(r, dict) for r in refs):
-            raise BookforgeError("INVALID_INPUT", "/context_refs", "context_refs must be up to 20 references",
+            raise AkoweError("INVALID_INPUT", "/context_refs", "context_refs must be up to 20 references",
                                  status="REJECTED")
         keep = body.get("keep_values", True)
         if not isinstance(keep, bool):
-            raise BookforgeError("INVALID_INPUT", "/keep_values", "keep_values must be true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/keep_values", "keep_values must be true or false", status="REJECTED")
         na = self._not_applicable(principal, pid, branch, op_id)
         if na:
-            raise BookforgeError("INVALID_INPUT", "/feature_manifest", f"this module is switched off: {na}",
+            raise AkoweError("INVALID_INPUT", "/feature_manifest", f"this module is switched off: {na}",
                                  status="REJECTED")
         with self._lock:
             self._purge()
             running = [j for j in self._jobs.values() if j.kind == "assist" and not j.finished]
             if len(running) >= MAX_RUNNING_JOBS:
-                raise BookforgeError("RATE_LIMITED", "", f"{MAX_RUNNING_JOBS} AI fills are already running; wait "
+                raise AkoweError("RATE_LIMITED", "", f"{MAX_RUNNING_JOBS} AI fills are already running; wait "
                                      "for one to finish", status="REJECTED")
             job = Job("assist", principal, pid, branch, op_id, slot)
             self._jobs[job.id] = job
@@ -976,7 +976,7 @@ class AssistService:
         except Cancelled:
             job.status, job.phase = "cancelled", "Cancelled"
             job.error = _err("CANCELLED", "you cancelled this request; nothing was saved")
-        except BookforgeError as exc:
+        except AkoweError as exc:
             job.status, job.phase, job.error = "error", "Stopped", _err_of(exc)
         except Exception as exc:  # noqa: BLE001
             log.exception("assist job %s failed", job.id)
@@ -992,13 +992,13 @@ class AssistService:
             self._purge()
             job = self._jobs.get(job_id)
         if job is None or job.principal != principal:
-            raise BookforgeError("NOT_FOUND", "/job_id", "no such AI job (it may have expired)", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/job_id", "no such AI job (it may have expired)", status="REJECTED")
         return job
 
     def get_assist(self, principal: str, job_id: str) -> dict:
         try:
             return self._job(principal, job_id).public()
-        except BookforgeError:
+        except AkoweError:
             saved = self.jobstore.get(job_id) if self.jobstore is not None else None
             if saved and saved.get("kind") == "assist" and saved.get("principal") in (None, principal):
                 return {"job_id": job_id, "status": saved.get("status"), "phase": saved.get("phase"),
@@ -1007,7 +1007,7 @@ class AssistService:
                         "slot_label": saved.get("slot_label"), "model": saved.get("model"),
                         "created_at": saved.get("created_at"), "elapsed_ms": 0, "proposal": None, "findings": [],
                         "removed_refs": [], "filled_fields": [], "kept_fields": [], "valid": None,
-                        "error": saved.get("error") or ({"code": "INTERRUPTED", "message": "BookForge was restarted "
+                        "error": saved.get("error") or ({"code": "INTERRUPTED", "message": "Akọwe was restarted "
                                                          "while this was running; press Resume to run it again.",
                                                          "fix": "Press Resume.", "path": ""}
                                                         if saved.get("status") == "interrupted" else None),
@@ -1035,14 +1035,14 @@ class AssistService:
 
     def create_bible(self, principal: str, body: dict) -> dict:
         if not isinstance(body, dict):
-            raise BookforgeError("INVALID_INPUT", "", "body must be a JSON object", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "", "body must be a JSON object", status="REJECTED")
         pid, branch = body.get("project_id"), body.get("branch_id") or "main"
         self._access(principal, pid, branch)
         idea = body.get("idea")
         if not isinstance(idea, str) or not idea.strip():
-            raise BookforgeError("MISSING_INPUT", "/idea", "describe your book idea first", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/idea", "describe your book idea first", status="REJECTED")
         if len(idea) > 8000:
-            raise BookforgeError("INVALID_INPUT", "/idea", "the idea is limited to 8000 characters", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/idea", "the idea is limited to 8000 characters", status="REJECTED")
         slot = self._check_slot(body.get("slot_id"))
         counts = body.get("counts")
         with self._lock:
@@ -1050,7 +1050,7 @@ class AssistService:
             if len(self._sessions) >= MAX_SESSIONS:
                 oldest = min((s for s in self._sessions.values() if not s.busy()), key=lambda s: s.touched, default=None)
                 if oldest is None:
-                    raise BookforgeError("RATE_LIMITED", "", "too many Bible Builder sessions are running",
+                    raise AkoweError("RATE_LIMITED", "", "too many Bible Builder sessions are running",
                                          status="REJECTED")
                 del self._sessions[oldest.id]
             sess = BibleSession(self, principal, pid, branch, idea.strip(), slot)
@@ -1066,23 +1066,23 @@ class AssistService:
         if g is None:
             return None
         if not isinstance(g, str):
-            raise BookforgeError("INVALID_INPUT", "/guidance", "guidance must be text", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/guidance", "guidance must be text", status="REJECTED")
         if len(g) > MAX_GUIDANCE:
-            raise BookforgeError("INVALID_INPUT", "/guidance", f"guidance is limited to {MAX_GUIDANCE} characters",
+            raise AkoweError("INVALID_INPUT", "/guidance", f"guidance is limited to {MAX_GUIDANCE} characters",
                                  status="REJECTED")
         return g.strip() or None
 
     def _parse_counts(self, sess: "BibleSession", counts) -> dict:
         if not isinstance(counts, dict):
-            raise BookforgeError("INVALID_INPUT", "/counts", "counts must map section IDs (A01-A18) to numbers",
+            raise AkoweError("INVALID_INPUT", "/counts", "counts must map section IDs (A01-A18) to numbers",
                                  status="REJECTED")
         enabled = {s["op"]: s for s in self.bible_sections(sess.project_id, sess.branch_id)}
         out = {}
         for k, v in counts.items():
             if k not in enabled:
-                raise BookforgeError("INVALID_INPUT", f"/counts/{k}", "sections are A01-A18", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", f"/counts/{k}", "sections are A01-A18", status="REJECTED")
             if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= MAX_SECTION_COUNT:
-                raise BookforgeError("INVALID_INPUT", f"/counts/{k}", f"how many: a whole number 0-{MAX_SECTION_COUNT}",
+                raise AkoweError("INVALID_INPUT", f"/counts/{k}", f"how many: a whole number 0-{MAX_SECTION_COUNT}",
                                      status="REJECTED")
             if v == 0:
                 continue
@@ -1091,7 +1091,7 @@ class AssistService:
                 continue
             out[k] = v
         if sum(out.values()) > MAX_RUN_ITEMS:
-            raise BookforgeError("INVALID_INPUT", "/counts", f"at most {MAX_RUN_ITEMS} items per run", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/counts", f"at most {MAX_RUN_ITEMS} items per run", status="REJECTED")
         return out
 
     def _session(self, principal: str, sid: str) -> "BibleSession":
@@ -1099,7 +1099,7 @@ class AssistService:
             self._purge()
             sess = self._sessions.get(sid)
         if sess is None or sess.principal != principal:
-            raise BookforgeError("NOT_FOUND", "/session_id", "no such Bible Builder session (it may have expired)",
+            raise AkoweError("NOT_FOUND", "/session_id", "no such Bible Builder session (it may have expired)",
                                  status="REJECTED")
         sess.touched = time.time()
         return sess
@@ -1122,7 +1122,7 @@ class AssistService:
         slot = self._check_slot(body.get("slot_id")) if "slot_id" in body else sess.slot_pref
         counts = self._parse_counts(sess, body.get("sections") if "sections" in body else body.get("counts"))
         if not counts:
-            raise BookforgeError("MISSING_INPUT", "/sections", "tick at least one section with a number above 0",
+            raise AkoweError("MISSING_INPUT", "/sections", "tick at least one section with a number above 0",
                                  status="REJECTED")
         sess.enqueue(counts, slot, self._guidance(body))
         return sess.public()
@@ -1132,9 +1132,9 @@ class AssistService:
         body = body if isinstance(body, dict) else {}
         key = body.get("item")
         if key not in sess.items:
-            raise BookforgeError("NOT_FOUND", "/item", "no such item in this session", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/item", "no such item in this session", status="REJECTED")
         if sess.items[key].get("created_ref"):
-            raise BookforgeError("INVALID_INPUT", "/item", "this item is already created as a draft record; edit "
+            raise AkoweError("INVALID_INPUT", "/item", "this item is already created as a draft record; edit "
                                  "that record instead", status="REJECTED")
         note = body.get("prompt") if isinstance(body.get("prompt"), str) else None
         slot = self._check_slot(body.get("slot_id")) if "slot_id" in body else sess.slot_pref
@@ -1152,15 +1152,15 @@ class AssistService:
         keys = body.get("items")
         edits = body.get("edits") or {}
         if not isinstance(keys, list) or not keys or not all(isinstance(k, str) for k in keys):
-            raise BookforgeError("MISSING_INPUT", "/items", "select at least one item to create", status="REJECTED")
+            raise AkoweError("MISSING_INPUT", "/items", "select at least one item to create", status="REJECTED")
         if not isinstance(edits, dict) or not all(isinstance(v, dict) for v in edits.values()):
-            raise BookforgeError("INVALID_INPUT", "/edits", "edits must map item keys to payload objects",
+            raise AkoweError("INVALID_INPUT", "/edits", "edits must map item keys to payload objects",
                                  status="REJECTED")
         unknown = [k for k in keys + list(edits) if k not in sess.items]
         if unknown:
-            raise BookforgeError("NOT_FOUND", "/items", f"unknown item {unknown[0]}", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/items", f"unknown item {unknown[0]}", status="REJECTED")
         if sess.busy():
-            raise BookforgeError("VERSION_CONFLICT", "/items", "wait for the running sections to finish first",
+            raise AkoweError("VERSION_CONFLICT", "/items", "wait for the running sections to finish first",
                                  status="REJECTED")
         return sess.create(keys, edits)
 
@@ -1380,9 +1380,9 @@ class BibleSession:
             sketch = self._sketch(job, counts, task.get("guidance"))
             run["sketch"], run["sketch_ms"] = "ok", int((time.time() - ts) * 1000)
             run["slot"], run["model"] = job.slot, job.model
-        except (Cancelled, BookforgeError, Exception) as exc:  # noqa: BLE001
+        except (Cancelled, AkoweError, Exception) as exc:  # noqa: BLE001
             err = (_err("CANCELLED", "cancelled") if isinstance(exc, Cancelled) else
-                   _err_of(exc) if isinstance(exc, BookforgeError) else
+                   _err_of(exc) if isinstance(exc, AkoweError) else
                    _err("INTERNAL_ERROR", f"{type(exc).__name__} while planning the sketch"))
             run["sketch"], run["error"] = "error", err
             for op_id in counts:
@@ -1543,7 +1543,7 @@ class BibleSession:
 
     def add_named(self, op_id: str, name: str, role: str = "") -> str:
         """One entry with a name that is already decided (the book's main character named in the idea, or an entry
-        BookForge's checks refused that the AI makes again): no world sketch, the name is kept exactly."""
+        Akọwe's checks refused that the AI makes again): no world sketch, the name is kept exactly."""
         with self._lock:
             key = self._new_item(op_id, str(name).strip()[:120], role, len(self.runs) + 1)
             self.items[key].pop("raw_links", None)
@@ -1551,13 +1551,13 @@ class BibleSession:
 
     @staticmethod
     def refusals(it: dict) -> list[str]:
-        """What BookForge's checks refuse in this entry's proposal (the form, or a fact interval the save refuses)."""
+        """What Akọwe's checks refuse in this entry's proposal (the form, or a fact interval the save refuses)."""
         if it.get("status") != "done":
             return []
         out = [f"{f.get('rule_id')}: {f.get('message')}" for f in it.get("findings") or []
                if f.get("rule_id") in ("SCHEMA", "FACT_INTERVAL") and f.get("decision") == "FAIL"]
         if it.get("valid") is False and not out:
-            out = ["SCHEMA: the entry does not fit BookForge's form"]
+            out = ["SCHEMA: the entry does not fit Akọwe's form"]
         return out
 
     # ------------------------------------------------------------------ one item
@@ -1597,7 +1597,7 @@ class BibleSession:
                       summary=summarize_payload(it["op"], proposal), companion=result.get("companion"))
         except Cancelled:
             it.update(status="cancelled", message="Cancelled", error=_err("CANCELLED", "cancelled"))
-        except BookforgeError as exc:
+        except AkoweError as exc:
             it.update(status="error", message="Failed", error=_err_of(exc))
         except Exception as exc:  # noqa: BLE001
             log.exception("bible item %s failed", it["key"])
@@ -1740,7 +1740,7 @@ class BibleSession:
                                  "generated": sum(1 for i in its if i["status"] == "done" or i["outcome"] == "created"),
                                  "failed": sum(1 for i in its if i["status"] == "error"),
                                  "created": sum(1 for i in its if i["outcome"] == "created"), "message": s["message"]})
-        return {"kind": "bible-builder", "session_id": self.id, "bookforge_version": __version__,
+        return {"kind": "bible-builder", "session_id": self.id, "akowe_version": __version__,
                 "contract_version": CONTRACT_VERSION, "written_at": _iso(),
                 "project": {"project_id": self.project_id, "name": proj["name"] if proj else None}
                 | ({} if proj else {"deleted": True}),
@@ -1777,8 +1777,8 @@ def _project_label(project: dict) -> str:
 
 def render_markdown(rep: dict) -> str:
     c = rep["counts"]
-    out = [f"# BookForge Bible Builder report", "",
-           f"- Written: {rep['written_at']}", f"- BookForge {rep['bookforge_version']}, contract {rep['contract_version']}",
+    out = [f"# Akọwe Bible Builder report", "",
+           f"- Written: {rep['written_at']}", f"- Akọwe {rep['akowe_version']}, contract {rep['contract_version']}",
            f"- Project: {_project_label(rep['project'])} ({rep['project']['project_id']}), branch {rep['branch_id']}",
            f"- Session: {rep['session_id']}", f"- Book idea: {rep['idea_chars']} characters (sha256 {rep['idea_sha256_16']}…;"
            " the text itself is not stored here)", f"- AI choice: {rep['slot_preference']}", "",

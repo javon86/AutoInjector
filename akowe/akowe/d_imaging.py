@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from .canonical import sha256_json
 from .d_assets import sniff_mime
-from .errors import BookforgeError, error
+from .errors import AkoweError, error
 from .modules.base import Result
 from .store import utcnow
 
@@ -63,7 +63,7 @@ def generate(ctx, request: dict):
     rh = _request_hash(ctx)
     cp = ctx.get_state(NAMESPACE, _key(ctx))
     if cp is not None and cp.get("request_hash") != rh:
-        raise BookforgeError("IDEMPOTENCY_CONFLICT", "/idempotency_key", "a provider job already ran under this "
+        raise AkoweError("IDEMPOTENCY_CONFLICT", "/idempotency_key", "a provider job already ran under this "
                              "key for different content; use a new idempotency key", status="REJECTED")
     if cp is not None and cp["status"] in ("SUBMITTED", "AMBIGUOUS"):
         if slot is None or slot["slot_id"] != cp["slot_id"]:
@@ -79,19 +79,19 @@ def generate(ctx, request: dict):
                          [f"user_decision:{ctx.op_id}:retry_ambiguous_generation", f"{ctx.op_id}:manual_image"])
         try:
             res = adapter.image_status(slot, job)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return _hold(ctx, "BLOCKED", exc.code, f"provider status lookup for job {job} failed: {exc}",
                          [f"provider_job:{job}"])
         return _finish(ctx, slot, cp, res, rh)
     if slot is None:
-        raise BookforgeError("CAPABILITY_UNAVAILABLE", "/payload", "no connected AI slot offers 'image'")
+        raise AkoweError("CAPABILITY_UNAVAILABLE", "/payload", "no connected AI slot offers 'image'")
     state = {"status": "SUBMITTED", "slot_id": slot["slot_id"], "adapter_id": slot["adapter_id"],
              "provider_job_id": None, "request_hash": rh, "submitted_at": utcnow(), "attempts": 1}
     if cp is not None:  # previous attempt confirmed FAILED by the provider: a new submission is safe
         state["attempts"] = cp.get("attempts", 1) + 1
     try:
         res = adapter.submit_image(slot, request)
-    except BookforgeError as exc:
+    except AkoweError as exc:
         if exc.code == "TIMEOUT":
             state["status"] = "AMBIGUOUS"
             _checkpoint(ctx, state)
@@ -117,11 +117,11 @@ def _finish(ctx, slot, state: dict, res: dict, rh: str):
         return _hold(ctx, "BLOCKED", "UPSTREAM_UNAVAILABLE", "the provider reported the image job as failed; "
                      "retry or supply the image manually", [f"{ctx.op_id}:manual_image"])
     if status != "COMPLETED" or not isinstance(res.get("image_bytes"), (bytes, bytearray)):
-        raise BookforgeError("INTERNAL_ERROR", "", "image provider returned an unclassified result")
+        raise AkoweError("INTERNAL_ERROR", "", "image provider returned an unclassified result")
     blob = bytes(res["image_bytes"])
     mime = sniff_mime(blob)
     if mime is None or (res.get("mime_type") and res["mime_type"] != mime):
-        raise BookforgeError("INTERNAL_ERROR", "", "image provider returned bytes that are not the declared image "
+        raise AkoweError("INTERNAL_ERROR", "", "image provider returned bytes that are not the declared image "
                              "type")
     state["status"] = "COMPLETED"
     _checkpoint(ctx, state)

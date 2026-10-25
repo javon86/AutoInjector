@@ -1,7 +1,7 @@
 """✅ Planned-to-page check (P11): did what was planned actually reach the page?
 
 In the first book the narrator's planned name and backstory never appeared in the text. So after a chapter is written
-(and for the whole book before it is put together) BookForge lists what was planned for it and checks the text:
+(and for the whole book before it is put together) Akọwe lists what was planned for it and checks the text:
 
 * the outline beat of the chapter (its objective);
 * each scene card's obstacle and change (and the POV character's goal in it);
@@ -30,10 +30,10 @@ from datetime import datetime, timezone
 
 from . import characters as chars_mod
 from . import scenes as scenes_mod
-from .errors import BookforgeError
+from .errors import AkoweError
 from .texture import lemma
 
-log = logging.getLogger("bookforge.planned")
+log = logging.getLogger("akowe.planned")
 
 MAX_ITEMS = 16          # planned items checked per chapter
 AI_MAX_ITEMS = 12       # items sent to the AI checker in one call
@@ -148,7 +148,7 @@ def planned_items(bp, outline, chapter_id: str) -> list[dict]:
     infos = chapters_info(bp, outline)
     me = next((c for c in infos if c["chapter_id"] == chapter_id), None)
     if me is None:
-        raise BookforgeError("INVALID_INPUT", "/chapter_id", "that chapter is not in the approved outline",
+        raise AkoweError("INVALID_INPUT", "/chapter_id", "that chapter is not in the approved outline",
                              status="REJECTED")
     items = []
 
@@ -309,13 +309,13 @@ class PlannedChecker:
         bp = self.bp(principal, pid, branch)
         outline = bp.outline()
         if not outline:
-            raise BookforgeError("INVALID_INPUT", "/outline", "approve the chapter outline first", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/outline", "approve the chapter outline first", status="REJECTED")
         rec = self.review._head(pid, branch, rid)
         if rec is None or rec["module_id"] != "C02":
-            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
         cid = self._chapter_of(bp, outline, rid)
         if cid is None:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "this chapter is not part of the approved outline",
+            raise AkoweError("INVALID_INPUT", "/record_id", "this chapter is not part of the approved outline",
                                  status="REJECTED")
         return bp, outline, rec, cid
 
@@ -378,14 +378,14 @@ class PlannedChecker:
         pid, branch = job.project_id, job.branch_id
         rec = self.review._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
         res = res or self.stored(pid, branch).get(f"{rid}:{rec['version']}")
         if not res:
             res = self.check(job, rid, ai=False)
         text = str((rec.get("data") or {}).get("text") or "")
         craft = self.pseudo_craft(res, text)
         if not craft["findings"]:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "nothing planned is missing from this version",
+            raise AkoweError("INVALID_INPUT", "/record_id", "nothing planned is missing from this version",
                                  status="REJECTED")
         return self.review.editor.propose(job, rid, craft=craft)
 

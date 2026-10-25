@@ -1,9 +1,9 @@
 """Set F (editing refinement): anchored findings/patch proposals, never manuscripts."""
 from __future__ import annotations
 
-from bookforge.canonical import sha256_text
-from bookforge.spans import build_replacement, make_span, reanchor
-from bookforge.errors import BookforgeError
+from akowe.canonical import sha256_text
+from akowe.spans import build_replacement, make_span, reanchor
+from akowe.errors import AkoweError
 from conftest import errors_of
 from fj_fixtures import canon, fact, k09, prose, rec, seed, use_ai
 
@@ -119,7 +119,7 @@ def test_f_stale_manuscript_version_conflict_and_reanchor(h):
     try:
         reanchor(m1["data"]["text"], "a  b  c", span)
         raise AssertionError("expected SPAN_CONFLICT")
-    except BookforgeError as exc:
+    except AkoweError as exc:
         assert exc.code == "SPAN_CONFLICT"
     assert ms2["version"] == 2
 
@@ -147,7 +147,7 @@ def test_f_concurrent_overlapping_edits_patch_overlap(h):
     try:
         build_replacement(rec(h, ms), [rec(h, a), rec(h, b)])
         raise AssertionError("expected PATCH_OVERLAP")
-    except BookforgeError as exc:
+    except AkoweError as exc:
         assert exc.code == "PATCH_OVERLAP"
 
 
@@ -197,7 +197,7 @@ def test_f07_repetition_exact_near_and_excluded(h):
 
 
 def test_f07_jaccard_edges_and_book_scope(h):
-    from bookforge.modules.set_f import jaccard
+    from akowe.modules.set_f import jaccard
     assert jaccard(set(), set()) == 1.0 and jaccard({"a"}, set()) == 0.0
     a = prose(h, "Silver rain falls on the quiet harbor tonight.")
     b = prose(h, "Silver rain falls on the quiet harbor tonight.")
@@ -340,13 +340,13 @@ def test_f_update_rechecks_anchors(h):
 
 def test_f12_c_acceptance_needs_authorization_for_exact_candidate(h):
     """C-side rule (documented flow): approval of the source/preview cannot authorize the changed text."""
-    from bookforge.j_approvals import check_approval
+    from akowe.j_approvals import check_approval
     ms = prose(h, "The end  came.", module_id="C11")
     candidate = prose(h, "The end came.", module_id="C11", record=rec(h, ms), lifecycle="DRAFT")
     for_source = rec(h, k09(h, [ms]))
     try:
         check_approval(for_source, "/payload/approval_ref", subject=candidate)
         raise AssertionError("source approval must not authorize the polished candidate")
-    except BookforgeError as exc:
+    except AkoweError as exc:
         assert exc.code == "APPROVAL_REQUIRED"
     check_approval(rec(h, k09(h, [candidate])), "/payload/approval_ref", subject=candidate)

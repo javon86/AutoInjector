@@ -1,12 +1,12 @@
 """📂 Open a saved book / 🔁 rerun from the book bible (P21).
 
-* ``folders()`` lists the book folders BookForge can read in the books folder (only on the computer BookForge runs
+* ``folders()`` lists the book folders Akọwe can read in the books folder (only on the computer Akọwe runs
   on: the request must come from this computer, ``App.is_local``).
-* ``open_folder(name)`` / ``upload(...)`` open a ``book.bookforge`` package as a NEW book (book_package.import_package);
+* ``open_folder(name)`` / ``upload(...)`` open a ``book.akowe`` package as a NEW book (book_package.import_package);
   an uploaded ``book-bible.json`` (or one in a folder) is checked (book_bible.clean) and kept for the 🔁 rerun dialog
   (settings ``bible_upload:<id>``, the newest ``KEEP_UPLOADS``).
 * ``resolve_bible(spec)`` gives the bible a 🔁 rerun starts from: ``{project_id}`` (built from a book in this
-  BookForge), ``{folder}`` (its ``Book Bible/book-bible.json``) or ``{bible_id}`` (uploaded).
+  Akọwe), ``{folder}`` (its ``Book Bible/book-bible.json``) or ``{bible_id}`` (uploaded).
 * ``opened(pid)``: what the book page offers for an opened book (an imported run that can be resumed, whether the
   book is finished).
 
@@ -25,31 +25,31 @@ from pathlib import Path
 
 from . import book_bible
 from . import book_package
-from .book_save import MARKER, PACKAGE, problem_error
-from .errors import BookforgeError
+from .book_save import package_in, problem_error, read_marker
+from .errors import AkoweError
 from .jobs import now_iso
 
-log = logging.getLogger("bookforge.book_open")
+log = logging.getLogger("akowe.book_open")
 
 KEEP_UPLOADS = 5
 MAX_FOLDERS = 500
 FOLDER_RE = re.compile(r"^[^/\\:*?\"<>|\x00-\x1f]{1,180}$")
 FIX = {
-    "OPEN_BAD_PACKAGE": "Use the book.bookforge file exactly as BookForge saved it (copy the whole book folder again "
+    "OPEN_BAD_PACKAGE": "Use the book.akowe file exactly as Akọwe saved it (copy the whole book folder again "
                         "from where it was saved), then try again.",
-    "OPEN_NEWER_VERSION": "Update BookForge on this computer to the newest version, then open the book again.",
+    "OPEN_NEWER_VERSION": "Update Akọwe on this computer to the newest version, then open the book again.",
     "OPEN_TOO_LARGE": "Copy the book's whole folder into your books folder (Settings › 📁 Where books are saved) and "
                       "open it from the list instead of uploading it.",
-    "OPEN_NOT_LOCAL": "Do this on the computer BookForge runs on, or upload the book.bookforge file instead.",
+    "OPEN_NOT_LOCAL": "Do this on the computer Akọwe runs on, or upload the book.akowe file instead.",
     "OPEN_NOT_FOUND": "Press 🔄 Refresh: the folder may have been moved or renamed. Check Settings › 📁 Where books are "
                       "saved.",
     "OPEN_FAILED": "Press 📂 Open a saved book and try again. If it keeps failing, press 📋 Copy diagnostics.",
-    "BIBLE_BAD": "Use a book-bible.json saved by BookForge (Book Bible folder). If you edited it, check that it is "
+    "BIBLE_BAD": "Use a book-bible.json saved by Akọwe (Book Bible folder). If you edited it, check that it is "
                  "still valid JSON (a missing comma or quote breaks it).",
 }
 
 
-def _err(code: str, message: str, *, kernel: str = "INVALID_INPUT", path: str = "") -> BookforgeError:
+def _err(code: str, message: str, *, kernel: str = "INVALID_INPUT", path: str = "") -> AkoweError:
     exc = problem_error(code, message, kernel=kernel, path=path)
     exc.errors[0]["fix"] = FIX.get(code) or exc.errors[0].get("fix")
     return exc
@@ -76,7 +76,7 @@ class OpenService:
 
     def _local(self):
         if not self.app.is_local():
-            raise _err("OPEN_NOT_LOCAL", "the books folder can only be listed and opened on the computer BookForge "
+            raise _err("OPEN_NOT_LOCAL", "the books folder can only be listed and opened on the computer Akọwe "
                        "runs on", kernel="PERMISSION_DENIED")
 
     def _folder(self, name) -> Path:
@@ -102,19 +102,20 @@ class OpenService:
             except OSError as exc:
                 raise _err("OPEN_FAILED", f"the books folder cannot be read ({type(exc).__name__})") from None
             for p in entries[:MAX_FOLDERS]:
-                has_pkg = (p / PACKAGE).is_file()
+                pkg = package_in(p)  # book.akowe, or the book.bookforge of a save made before the rename
+                has_pkg = pkg.is_file()
                 has_bible = (p / "Book Bible" / "book-bible.json").is_file()
                 if not has_pkg and not has_bible:
                     continue
                 mk = {}
                 try:
-                    mk = json.loads((p / MARKER).read_text(encoding="utf-8"))
+                    mk = read_marker(p)
                 except (OSError, ValueError):
                     mk = {}
                 mk = mk if isinstance(mk, dict) else {}
                 pid = mk.get("project_id") if isinstance(mk.get("project_id"), str) else None
                 try:
-                    size = (p / PACKAGE).stat().st_size if has_pkg else 0
+                    size = pkg.stat().st_size if has_pkg else 0
                 except OSError:
                     size = 0
                 out.append({"name": p.name, "title": str(mk.get("title") or p.name)[:200],
@@ -128,9 +129,9 @@ class OpenService:
     def open_folder(self, principal: str, name) -> dict:
         self._local()
         f = self._folder(name)
-        pkg = f / PACKAGE
+        pkg = package_in(f)
         if not pkg.is_file():
-            raise _err("OPEN_NOT_FOUND", f"the folder “{name}” has no book.bookforge (only its book bible): use 🔁 "
+            raise _err("OPEN_NOT_FOUND", f"the folder “{name}” has no book.akowe (only its book bible): use 🔁 "
                        "Rerun from the book bible instead", path="/folder")
         try:
             size = pkg.stat().st_size
@@ -138,7 +139,7 @@ class OpenService:
                 raise _err("OPEN_TOO_LARGE", "this book package is larger than 512 MB")
             data = pkg.read_bytes()
         except OSError as exc:
-            raise _err("OPEN_FAILED", f"book.bookforge cannot be read ({type(exc).__name__})") from None
+            raise _err("OPEN_FAILED", f"book.akowe cannot be read ({type(exc).__name__})") from None
         return self.import_bytes(principal, data, source=f"folder “{name}”")
 
     def import_bytes(self, principal: str, data: bytes, source: str = "upload") -> dict:
@@ -146,7 +147,7 @@ class OpenService:
             res = book_package.import_package(self.app, data, principal)
         except book_package.PackageProblem as exc:
             raise _err(exc.code, exc.message) from None
-        except BookforgeError:
+        except AkoweError:
             raise
         except Exception as exc:  # noqa: BLE001
             log.exception("opening a book package failed")
@@ -188,7 +189,7 @@ class OpenService:
             return self.import_bytes(principal, data, source=f"upload {name[:80]!r}")
         if data[:3] == b"\xef\xbb\xbf" or data.lstrip()[:1] == b"{":
             return self._bible_upload(data)
-        raise _err("OPEN_BAD_PACKAGE", "this file is neither a BookForge book (book.bookforge) nor a book bible "
+        raise _err("OPEN_BAD_PACKAGE", "this file is neither an Akọwe book (book.akowe) nor a book bible "
                    "(book-bible.json)")
 
     def _bible_upload(self, raw) -> dict:
@@ -228,14 +229,14 @@ class OpenService:
     def resolve_bible(self, principal: str, spec) -> tuple[dict, str]:
         """(cleaned bible, where it came from) for ``{project_id[, branch_id]}``, ``{folder}`` or ``{bible_id}``."""
         if not isinstance(spec, dict):
-            raise BookforgeError("INVALID_INPUT", "/from_bible", "from_bible: {project_id}, {folder} or {bible_id}",
+            raise AkoweError("INVALID_INPUT", "/from_bible", "from_bible: {project_id}, {folder} or {bible_id}",
                                  status="REJECTED")
         if spec.get("project_id"):
             pid = spec["project_id"]
             branch = spec.get("branch_id") or "main"
             if not isinstance(pid, str) or self.store.project(pid) is None or \
                     not self.store.has_project_access(principal, pid):
-                raise BookforgeError("NOT_FOUND", "/from_bible/project_id", "that book does not exist",
+                raise AkoweError("NOT_FOUND", "/from_bible/project_id", "that book does not exist",
                                      status="REJECTED")
             raw = book_bible.build(self.app, pid, branch)
             try:
@@ -252,5 +253,5 @@ class OpenService:
                 raise _err("OPEN_NOT_FOUND", "this uploaded book bible is not here any more: upload it again",
                            path="/from_bible/bible_id")
             return v["bible"], "an uploaded book bible"
-        raise BookforgeError("INVALID_INPUT", "/from_bible", "from_bible: {project_id}, {folder} or {bible_id}",
+        raise AkoweError("INVALID_INPUT", "/from_bible", "from_bible: {project_id}, {folder} or {bible_id}",
                              status="REJECTED")

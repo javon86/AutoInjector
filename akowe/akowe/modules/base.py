@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..canonical import canonical_bytes, make_reference, sha256_bytes, sha256_text
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from .. import CONTRACT_VERSION
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -130,8 +130,8 @@ class Context:
             "source_refs": list(source_refs or []), "confidence": confidence,
         }
 
-    def block(self, code: str, path: str, message: str, **kw) -> BookforgeError:
-        return BookforgeError(code, path, message, status=kw.pop("status", "BLOCKED"), **kw)
+    def block(self, code: str, path: str, message: str, **kw) -> AkoweError:
+        return AkoweError(code, path, message, status=kw.pop("status", "BLOCKED"), **kw)
 
     # ------------------------------------------------------------------ staging writes
     def _new_record_id(self, module_id: str) -> str:
@@ -196,7 +196,7 @@ class Context:
                     protected_facts: list | None = None) -> tuple[dict, dict]:
         """Run a creative/semantic task on the best eligible configured AI slot.
 
-        Returns (json_output, resource_info). Raises BookforgeError(CAPABILITY_UNAVAILABLE)
+        Returns (json_output, resource_info). Raises AkoweError(CAPABILITY_UNAVAILABLE)
         when no connected slot has the capability; callers then hold for manual input.
         """
         return self.engine.providers.generate(self, task=task, output_schema=output_schema, context=context,
@@ -245,7 +245,7 @@ class OperationHandler:
             return Result(data=data, transform="LOGIC")
         if self.creative or ctx.op["execution"] in ("AI", "HYBRID", "AI/HYBRID"):
             return self.generate(ctx, data, missing)
-        raise BookforgeError("MISSING_INPUT", "/payload/" + missing[0],
+        raise AkoweError("MISSING_INPUT", "/payload/" + missing[0],
                              f"cannot derive required output field '{missing[0]}' from the request")
 
     def generate(self, ctx: Context, partial: dict, missing: list[str]) -> Result:
@@ -255,9 +255,9 @@ class OperationHandler:
         try:
             generated, resource = ctx.ai_generate(
                 task=self.ai_task(ctx), output_schema=out_schema, context=context)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "CAPABILITY_UNAVAILABLE":
-                raise BookforgeError(
+                raise AkoweError(
                     "CAPABILITY_UNAVAILABLE", "/payload",
                     f"{ctx.op_id} needs an AI slot for {', '.join(missing)}; configure AI-1..AI-3 or "
                     "supply a manual candidate.", unresolved=[f"{ctx.op_id}:manual_candidate"]) from exc

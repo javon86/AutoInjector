@@ -2,14 +2,14 @@
 
 A comparison takes A and B — two finished books (e.g. a book and its variant made with other pipeline switches, see
 pipeline.py and the ``variant_of`` setting of ⚡ Make a book for me) or two chapters (two versions of one chapter, or
-chapters of two books). Each reviewer AI gets them as "Version 1" and "Version 2" in an order BookForge draws at
+chapters of two books). Each reviewer AI gets them as "Version 1" and "Version 2" in an order Akọwe draws at
 random for THAT reviewer (``secrets``) and records (``mapping``: {"version_1": "A"|"B", "version_2": ...}). The prompt
 holds nothing that tells the versions apart except their text: no project or record IDs, no run IDs, no titles of the
 books, no pipeline names, no dates, word counts only as part of the text view (both sides alike).
 
 Each reviewer scores both versions on the dimensions (whole book: book_report.DIMENSIONS; a chapter: the editor's
 chapter dimensions plus atmosphere and prose clarity), picks the preferred version (or a tie) and gives reasons. After
-all reviewers answered, BookForge reveals the mapping and aggregates per dimension: the median score of A and of B over
+all reviewers answered, Akọwe reveals the mapping and aggregates per dimension: the median score of A and of B over
 the reviewers, the winner (A / B / tie: the higher median), and the votes for the preferred version. Reviewers that
 wrote either version (same AI family as the writer of most of it) are marked ⚠️ not independent; by default only
 working AIs that wrote neither are asked (all working AIs when none is independent, with the ⚠️).
@@ -35,10 +35,10 @@ from . import providers as providers_mod
 from .assist import Cancelled, Job
 from .book_path import BookPath, get_profile
 from .editor_rubric import LABELS as ED_LABELS, QUESTIONS as ED_QUESTIONS
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import now_iso
 
-log = logging.getLogger("bookforge.compare")
+log = logging.getLogger("akowe.compare")
 
 SIDE_MAX_CHARS = 30000
 MAX_KEPT = 30
@@ -142,12 +142,12 @@ class CompareService:
     # ------------------------------------------------------------------ the two sides
     def _side(self, principal, spec, scope: str, path: str) -> dict:
         if not isinstance(spec, dict):
-            raise BookforgeError("INVALID_INPUT", path, "name a book: {project_id, branch_id?}", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", path, "name a book: {project_id, branch_id?}", status="REJECTED")
         pid, branch = spec.get("project_id"), spec.get("branch_id") or "main"
         if not isinstance(pid, str) or not pid or not isinstance(branch, str):
-            raise BookforgeError("INVALID_INPUT", f"{path}/project_id", "project_id is required", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"{path}/project_id", "project_id is required", status="REJECTED")
         if self.store.project(pid) is None or not self.store.has_project_access(principal, pid):
-            raise BookforgeError("NOT_FOUND", f"{path}/project_id", "that book is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", f"{path}/project_id", "that book is not known", status="REJECTED")
         bp = BookPath(self.app.engine, principal, pid, branch)
         prof = get_profile(self.store, pid)
         info = pipeline_mod.info_of(self.store, pid)
@@ -157,23 +157,23 @@ class CompareService:
         if scope == "book":
             chapters = br.book_chapters(bp)
             if not chapters:
-                raise BookforgeError("INVALID_INPUT", path, f"“{side['title']}” has no written chapters",
+                raise AkoweError("INVALID_INPUT", path, f"“{side['title']}” has no written chapters",
                                      status="REJECTED")
             side.update(chapters=chapters, words=sum(c["words"] for c in chapters), version_key=br.version_key(chapters))
             return side
         rid, ver = spec.get("record_id"), spec.get("version")
         if not isinstance(rid, str) or not rid:
-            raise BookforgeError("INVALID_INPUT", f"{path}/record_id", "which chapter (record_id)?", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"{path}/record_id", "which chapter (record_id)?", status="REJECTED")
         hist = self.store.history(pid, branch, rid)
         if not hist or hist[-1]["module_id"] != "C02":
-            raise BookforgeError("NOT_FOUND", f"{path}/record_id", "that chapter is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", f"{path}/record_id", "that chapter is not known", status="REJECTED")
         rec = hist[-1]
         if ver is not None:
             if not isinstance(ver, int) or isinstance(ver, bool):
-                raise BookforgeError("INVALID_INPUT", f"{path}/version", "version: a whole number", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", f"{path}/version", "version: a whole number", status="REJECTED")
             rec = next((r for r in hist if r["version"] == ver), None)
             if rec is None:
-                raise BookforgeError("NOT_FOUND", f"{path}/version", "that version is not known", status="REJECTED")
+                raise AkoweError("NOT_FOUND", f"{path}/version", "that version is not known", status="REJECTED")
         text = str((rec.get("data") or {}).get("text") or "")
         first = text.lstrip().split("\n", 1)[0]
         ch = {"chapter_id": rid, "number": 1, "title": first[2:].strip()[:120] if first.startswith("# ") else "",
@@ -205,7 +205,7 @@ class CompareService:
         if slots:
             pick = [o for o in opts if o["slot_id"] in slots]
             if not pick:
-                raise BookforgeError("INVALID_INPUT", "/slots", "choose AI slots that are set up", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/slots", "choose AI slots that are set up", status="REJECTED")
             return pick[:MAX_REVIEWERS]
         ind = [o for o in opts if o["working"] and o["independent"]]
         return (ind or [o for o in opts if o["working"]])[:MAX_REVIEWERS]
@@ -215,19 +215,19 @@ class CompareService:
         body = body if isinstance(body, dict) else {}
         scope = body.get("scope") or "book"
         if scope not in ("book", "chapter"):
-            raise BookforgeError("INVALID_INPUT", "/scope", "scope: book or chapter", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/scope", "scope: book or chapter", status="REJECTED")
         slots = body.get("slots")
         if slots is not None and (not isinstance(slots, list) or not all(s in providers_mod.SLOT_IDS for s in slots)):
-            raise BookforgeError("INVALID_INPUT", "/slots", "slots: a list of AI-1, AI-2, AI-3", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/slots", "slots: a list of AI-1, AI-2, AI-3", status="REJECTED")
         a = self._side(principal, body.get("a"), scope, "/a")
         b = self._side(principal, body.get("b"), scope, "/b")
         if scope == "book" and a["project_id"] == b["project_id"] and a["branch_id"] == b["branch_id"]:
-            raise BookforgeError("INVALID_INPUT", "/b", "choose two different books", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/b", "choose two different books", status="REJECTED")
         if scope == "chapter" and a["project_id"] == b["project_id"] and a.get("record_id") == b.get("record_id") \
                 and a.get("version") == b.get("version"):
-            raise BookforgeError("INVALID_INPUT", "/b", "choose two different chapter versions", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/b", "choose two different chapter versions", status="REJECTED")
         if not any(True for _ in self.app.engine.providers.ai_slots()):
-            raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slots", "no AI is connected — a comparison needs at least "
+            raise AkoweError("CAPABILITY_UNAVAILABLE", "/slots", "no AI is connected — a comparison needs at least "
                                  "one AI reviewer", status="REJECTED")
         job = {"id": f"cmp-{uuid.uuid4().hex[:12]}", "kind": "compare", "status": "queued", "phase": "Starting",
                "principal": principal, "project_id": a["project_id"], "branch_id": a["branch_id"],
@@ -236,7 +236,7 @@ class CompareService:
         with self._lock:
             self._jobs[job["id"]] = job
         self._persist(job)
-        threading.Thread(target=self._thread, args=(job, a, b, scope, slots), name="bookforge-compare",
+        threading.Thread(target=self._thread, args=(job, a, b, scope, slots), name="akowe-compare",
                          daemon=True).start()
         return self.public(job)
 
@@ -254,7 +254,7 @@ class CompareService:
     def job(self, principal, job_id) -> dict:
         j = self._jobs.get(job_id) or self.app.jobstore.get(job_id)
         if not j or j.get("principal") not in (None, principal) or j.get("kind") != "compare":
-            raise BookforgeError("NOT_FOUND", "/job_id", "this comparison job is not known", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/job_id", "this comparison job is not known", status="REJECTED")
         return self.public(j)
 
     def _thread(self, job, a, b, scope, slots):
@@ -264,13 +264,13 @@ class CompareService:
             job.update(status="done", phase="The comparison is ready", comparison_id=res["id"], finished_at=now_iso())
         except Cancelled:
             job.update(status="cancelled", phase="Stopped", finished_at=now_iso())
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             job.update(status="error", phase="Failed", error={"code": exc.code, "message": e.get("message")},
                        finished_at=now_iso())
         except Exception as exc:  # noqa: BLE001
             log.error("compare job %s failed: %s", job["id"], type(exc).__name__)
-            job.update(status="error", phase="Failed", error={"code": "INTERNAL_ERROR", "message": "BookForge hit an "
+            job.update(status="error", phase="Failed", error={"code": "INTERNAL_ERROR", "message": "Akọwe hit an "
                                                               "unexpected problem"}, finished_at=now_iso())
         finally:
             job["resume"] = None if job["status"] == "done" else job.get("resume")
@@ -286,7 +286,7 @@ class CompareService:
         fam_a, fam_b = self._writer_family(a), self._writer_family(b)
         picks = self.reviewers(fam_a, fam_b, slots)
         if not picks:
-            raise BookforgeError("CAPABILITY_UNAVAILABLE", "/slots", "no AI is working right now to review the two "
+            raise AkoweError("CAPABILITY_UNAVAILABLE", "/slots", "no AI is working right now to review the two "
                                  "versions; try again when one works", status="REJECTED")
         view = {"A": side_view(a["chapters"]), "B": side_view(b["chapters"])}
         rubric = " ".join(f"[{k}] {q}" for k, _l, q in dims)
@@ -318,7 +318,7 @@ class CompareService:
                     row.update(status="failed", error="INVALID_INPUT")
             except Cancelled:
                 raise
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 row.update(status="failed", error=exc.code)
             except Exception as exc:  # noqa: BLE001
                 log.error("comparison by %s failed: %s", s["slot_id"], type(exc).__name__)
@@ -383,4 +383,4 @@ class CompareService:
         for x in (self.store.get_setting(KEY) or {}).get("items") or []:
             if x["id"] == cid and x.get("principal") in (None, principal):
                 return {k: v for k, v in x.items() if k != "principal"}
-        raise BookforgeError("NOT_FOUND", "/comparison_id", "this comparison is not known", status="REJECTED")
+        raise AkoweError("NOT_FOUND", "/comparison_id", "this comparison is not known", status="REJECTED")

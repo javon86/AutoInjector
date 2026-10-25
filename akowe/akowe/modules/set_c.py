@@ -4,7 +4,7 @@ C01 is LOGIC: a deterministic context package from the pinned B11 outline plus a
 canon, accepted E state and approved C12 text style, with protected facts copied verbatim and
 a pinned output schema record. C02-C11 produce prose (AI slot or manual candidate) whose
 OUTPUT candidate_events is always []; extracted events go to a separate C-owned CEventBundle
-(see bookforge/c_events.py for the two commit paths). C12 is the text style controller; it is
+(see akowe/c_events.py for the two commit paths). C12 is the text style controller; it is
 never a visual style (D01).
 
 C owns the accepted manuscript: ACCEPT records the accepted prose ref for its chapter/scene/
@@ -20,7 +20,7 @@ import copy
 from ..c_events import (BUNDLE_KIND, EXTRACTION_NS, PROSE_OPS, ai_extract, build_bundle, extraction_key,
                         find_bundles, predict_output_ref)
 from ..canonical import canonical_bytes
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from ..providers import estimate_tokens
 from . import register
 from .base import Context, OperationHandler, Result
@@ -123,7 +123,7 @@ def approval_covers(store, appr: dict | None, ref: dict) -> bool:
 
 def _require_output(rec: dict | None, path: str):
     if rec is not None and rec["record_kind"] != "OUTPUT":
-        raise BookforgeError("INVALID_INPUT", path, f"{path.rsplit('/', 1)[-1]} must pin a producer OUTPUT record, "
+        raise AkoweError("INVALID_INPUT", path, f"{path.rsplit('/', 1)[-1]} must pin a producer OUTPUT record, "
                              f"not a {rec['record_kind']} (an event bundle is not a manuscript input)",
                              status="REJECTED")
 
@@ -151,7 +151,7 @@ class ChapterContextLoader(OperationHandler):
 
     def create(self, ctx: Context) -> Result:
         if ctx.manual_candidate is not None:
-            raise BookforgeError("INVALID_INPUT", "/manual_candidate", "C01 is deterministic; it accepts no manual "
+            raise AkoweError("INVALID_INPUT", "/manual_candidate", "C01 is deterministic; it accepts no manual "
                                  "context output", status="REJECTED")
         p = ctx.payload
         chapter_id = p["chapter_id"]
@@ -160,7 +160,7 @@ class ChapterContextLoader(OperationHandler):
         chapters = outline["data"]["chapters"]
         hit = find_item(chapters, chapter_id)
         if hit is None:
-            raise BookforgeError("INVALID_INPUT", "/payload/chapter_id", f"chapter {chapter_id!r} has no plan item "
+            raise AkoweError("INVALID_INPUT", "/payload/chapter_id", f"chapter {chapter_id!r} has no plan item "
                                  "(plan.item_id) in the pinned outline", status="REJECTED")
         idx, chapter = hit
         subjects = {chapter_id}
@@ -200,8 +200,8 @@ class ChapterContextLoader(OperationHandler):
             try:
                 rec = ctx.engine.resolve_ref(link, ctx.project_id, ctx.branch_id,
                                              f"/payload/outline_ref/chapters/{idx}/links/{i}")
-            except BookforgeError as exc:
-                raise BookforgeError("MISSING_INPUT", "/payload/outline_ref",
+            except AkoweError as exc:
+                raise AkoweError("MISSING_INPUT", "/payload/outline_ref",
                                      f"outline link {i} of chapter {chapter_id} does not resolve: "
                                      f"{exc.errors[0]['message']}") from exc
             if rec["record_kind"] != "OUTPUT" or rec["module_id"][0] not in "ACE":
@@ -263,7 +263,7 @@ class ChapterContextLoader(OperationHandler):
         if budget is None or count(facts) <= budget:
             return facts, count(facts)
         if count(mandatory) > budget:
-            raise BookforgeError("CONTEXT_TOO_LARGE", "/payload/chapter_id",
+            raise AkoweError("CONTEXT_TOO_LARGE", "/payload/chapter_id",
                                  f"mandatory/protected context (~{count(mandatory)} tokens) exceeds the largest "
                                  f"connected slot budget ({budget}); split the job on scene boundaries")
         kept = list(optional)
@@ -341,7 +341,7 @@ class ProseWriter(OperationHandler):
             return rec, None
         hit = find_item(items, self.unit_id(ctx))
         if hit is None:
-            raise BookforgeError("INVALID_INPUT", f"/payload/{self.unit_field}",
+            raise AkoweError("INVALID_INPUT", f"/payload/{self.unit_field}",
                                  f"{self.unit_id(ctx)!r} has no plan item in the pinned {rec['module_id']} plan",
                                  status="REJECTED")
         return rec, hit[1]
@@ -374,7 +374,7 @@ class ProseWriter(OperationHandler):
             raw, _res = ai_extract(ctx, data["text"], op_id=ctx.op_id, hints={"unit_id": meta["unit_id"]})
             bundle, findings = build_bundle(ctx, prose_ref, data["text"], raw, op_id=ctx.op_id)
             bundle_ref = ctx.stage_json(ctx.op_id, bundle, record_kind=BUNDLE_KIND, source_refs=[prose_ref])
-        except BookforgeError as exc:
+        except AkoweError as exc:
             pending = exc.errors[0]
         if bundle_ref:
             findings.append(ctx.finding("EVENT_BUNDLE", f"{len(bundle['events'])} candidate event(s) stored in "
@@ -399,7 +399,7 @@ class ProseWriter(OperationHandler):
             row = tx.execute("SELECT content_hash FROM records WHERE project_id=? AND branch_id=? AND record_id=? "
                              "AND version=1", (ctx.project_id, ctx.branch_id, rid)).fetchone()
             if row is None or row["content_hash"] != prose_ref["content_hash"]:
-                raise BookforgeError("INTERNAL_ERROR", "", "prose pin cited by the event bundle does not match the "
+                raise AkoweError("INTERNAL_ERROR", "", "prose pin cited by the event bundle does not match the "
                                      "stored prose record")
             tx.put_state(ctx.project_id, ctx.branch_id, META_NS, rid, meta)
             tx.put_state(ctx.project_id, ctx.branch_id, EXTRACTION_NS, key, state)
@@ -414,7 +414,7 @@ class ProseWriter(OperationHandler):
         if ctx.manual_candidate is not None:
             data = copy.deepcopy(ctx.manual_candidate)
             if not data["text"].strip():
-                raise BookforgeError("INVALID_INPUT", "/manual_candidate/text", "prose text must be nonempty",
+                raise AkoweError("INVALID_INPUT", "/manual_candidate/text", "prose text must be nonempty",
                                      status="REJECTED")
             return data, "MANUAL", None
         ctxrec = ctx.field_record("context_ref")
@@ -424,9 +424,9 @@ class ProseWriter(OperationHandler):
         context["plan_item"] = item
         try:
             out, resource = self.ai_prose(ctx, context, protected)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "CAPABILITY_UNAVAILABLE":
-                raise BookforgeError("CAPABILITY_UNAVAILABLE", "/payload", f"{ctx.op_id} prose needs an AI slot; "
+                raise AkoweError("CAPABILITY_UNAVAILABLE", "/payload", f"{ctx.op_id} prose needs an AI slot; "
                                      "configure AI-1..AI-3 or supply a manual candidate",
                                      unresolved=[f"{ctx.op_id}:manual_candidate"]) from exc
             raise
@@ -434,7 +434,7 @@ class ProseWriter(OperationHandler):
         if not isinstance(text, str) or not text.strip():
             # A content problem, not a connection problem: the AI answered, but with no text. INVALID_INPUT is not
             # busy-retried (re-asking a paid model in a loop) and tells the author what actually happened.
-            raise BookforgeError("INVALID_INPUT", "/text", "the AI answered with no chapter text (empty prose), so "
+            raise AkoweError("INVALID_INPUT", "/text", "the AI answered with no chapter text (empty prose), so "
                                  "nothing was saved; ask it again or write the chapter yourself", status="REJECTED")
         findings = []
         plan_ref = [ctx.field_record(self.plan_field)["ref"]] if self.plan_field and ctx.field_record(
@@ -529,7 +529,7 @@ class ChapterWriter(ProseWriter):
             cmeta = ctx.get_state(META_NS, ctxrec["record_id"]) or {}
             if cmeta and (cmeta.get("chapter_id") != ctx.payload["chapter_id"]
                           or cmeta.get("outline_ref") != ctx.payload["outline_ref"]):
-                raise BookforgeError("INVALID_INPUT", "/payload/context_ref", "context package was built for a "
+                raise AkoweError("INVALID_INPUT", "/payload/context_ref", "context package was built for a "
                                      "different chapter or outline revision", status="REJECTED")
         if ctx.manual_candidate is None:
             # The writing brief (P7/P8/P17/P11-lite): voice cards of the characters present, the scene cards, the
@@ -616,7 +616,7 @@ class ActionWriter(ProseWriter):
             rec = ctx.field_record(field)
             if p.get(flag) is True:
                 if rec is None:
-                    raise BookforgeError("MISSING_INPUT", f"/payload/{field}", f"{flag}=true requires {producer} rules")
+                    raise AkoweError("MISSING_INPUT", f"/payload/{field}", f"{flag}=true requires {producer} rules")
                 _require_output(rec, f"/payload/{field}")
                 rules.append(rec["ref"])
         meta["rule_refs"] = rules
@@ -658,7 +658,7 @@ class TransitionWriter(ProseWriter):
 
     def preconditions(self, ctx):
         if ctx.payload["from_scene_id"] == ctx.payload["to_scene_id"]:
-            raise BookforgeError("INVALID_INPUT", "/payload/to_scene_id", "a transition joins two different scenes",
+            raise AkoweError("INVALID_INPUT", "/payload/to_scene_id", "a transition joins two different scenes",
                                  status="REJECTED")
         return super().preconditions(ctx)
 
@@ -678,15 +678,15 @@ class BoundaryWriter(ProseWriter):
         outline = ctx.field_record("outline_ref")
         expected = expected_position(outline["data"]["chapters"], p["chapter_id"])
         if pos != expected:
-            raise BookforgeError("INVALID_INPUT", "/payload/chapter_position", f"outline places {p['chapter_id']} "
+            raise AkoweError("INVALID_INPUT", "/payload/chapter_position", f"outline places {p['chapter_id']} "
                                  f"as {expected}, not {pos}", status="REJECTED")
         neighbour = ctx.field_record(self.neighbour_field)
         if pos in self.forbidden_for and self.neighbour_field in p:
-            raise BookforgeError("INVALID_INPUT", f"/payload/{self.neighbour_field}",
+            raise AkoweError("INVALID_INPUT", f"/payload/{self.neighbour_field}",
                                  f"a {pos} chapter has no {self.neighbour_field.removesuffix('_ref')}",
                                  status="REJECTED")
         if pos not in self.forbidden_for and neighbour is None:
-            raise BookforgeError("MISSING_INPUT", f"/payload/{self.neighbour_field}",
+            raise AkoweError("MISSING_INPUT", f"/payload/{self.neighbour_field}",
                                  f"a {pos} chapter needs {self.neighbour_field}")
         if neighbour is not None and neighbour["module_id"][0] == "C":
             _require_output(neighbour, f"/payload/{self.neighbour_field}")
@@ -726,10 +726,10 @@ class RewriteWriter(ProseWriter):
         passage = ctx.field_record("passage_ref")
         _require_output(passage, "/payload/passage_ref")
         if ctx.payload["passage_id"] != passage["record_id"]:
-            raise BookforgeError("INVALID_INPUT", "/payload/passage_id", "passage_id must name the pinned passage "
+            raise AkoweError("INVALID_INPUT", "/payload/passage_id", "passage_id must name the pinned passage "
                                  "record (matching base text)", status="REJECTED")
         if not (passage["data"].get("text") or "").strip():
-            raise BookforgeError("INVALID_INPUT", "/payload/passage_ref", "passage has no base text to rewrite",
+            raise AkoweError("INVALID_INPUT", "/payload/passage_ref", "passage has no base text to rewrite",
                                  status="REJECTED")
         pmeta = ctx.get_state(META_NS, passage["record_id"]) or {}
         meta["passage_ref"] = passage["ref"]
@@ -792,7 +792,7 @@ class WritingStyleController(OperationHandler):
         result = super().create(ctx)
         data = result.data
         if data.get("style_goal") != ctx.payload["style_goal"]:
-            raise BookforgeError("INVALID_INPUT", "/manual_candidate/style_goal",
+            raise AkoweError("INVALID_INPUT", "/manual_candidate/style_goal",
                                  "style_goal must equal the requested style goal", status="REJECTED")
         if result.transform == "AI":
             prof = data.get("style_profile") or {}

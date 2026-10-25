@@ -24,7 +24,7 @@ def error(code: str, path: str = "", message: str | None = None) -> dict:
     }
 
 
-class BookforgeError(Exception):
+class AkoweError(Exception):
     """Raised inside the kernel/handlers to abort an action with one or more errors.
 
     status selects the response status; BLOCKED is used for missing dependencies,

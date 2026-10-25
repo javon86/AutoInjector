@@ -1,4 +1,4 @@
-# Bookforge Set G - Book Assembly
+# Akọwe Set G - Book Assembly
 Revision BF-CLOSURE-1.1 | 14 operations | independent module
 
 This is the current specification. Historical source/addenda are not active instructions. Use Shared_Contract.md for wire formats, lifecycle, ownership, permissions, failures and record storage.

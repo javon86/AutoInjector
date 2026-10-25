@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from bookforge import k_runtime as kr
-from bookforge.engine import Engine
-from bookforge.modules.set_k import tarjan_scc, verify_fence
-from bookforge.store import Store
+from akowe import k_runtime as kr
+from akowe.engine import Engine
+from akowe.modules.set_k import tarjan_scc, verify_fence
+from akowe.store import Store
 
 from conftest import PRINCIPAL, Harness, errors_of
 
@@ -553,7 +553,7 @@ def test_k12_quota_race_allows_at_most_one(h):
 
 
 def test_k12_crash_before_and_after_commit(h):
-    from bookforge.store import CrashInjected
+    from akowe.store import CrashInjected
     kr.configure_quota(h.store, PRINCIPAL, h.project_id, "main", account_id="acct", period="2026-10",
                        limit=100, currency="USD")
     req = h.request("K12", "CREATE", payload={"job_id": "j", "estimated_cost": 40,

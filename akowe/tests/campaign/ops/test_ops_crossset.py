@@ -10,8 +10,8 @@ import copy
 
 import pytest
 
-from bookforge import k_runtime as kr
-from bookforge.c_events import extract_event_bundle
+from akowe import k_runtime as kr
+from akowe.c_events import extract_event_bundle
 
 from conftest import PRINCIPAL, errors_of
 from fj_fixtures import canon, fact as fx_fact, k09

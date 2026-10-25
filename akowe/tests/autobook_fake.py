@@ -1,10 +1,10 @@
 """A deterministic fake AI for Make-a-book tests (and the UI test server).
 
-It answers every AI task BookForge sends by the shape of the requested output schema: the invented book profile,
+It answers every AI task Akọwe sends by the shape of the requested output schema: the invented book profile,
 the Bible Builder world sketch and its Set A proposals, premise B01, main plot B03, outline B11 (as many chapters as
 the outline asks for), chapter prose C02 (with objective assessments for the requested chapter), story events,
 AI review verdicts (scriptable) and AI fixes (the draft returned with a revised sentence, references untouched).
-Scripted failures (BookforgeError instances) are raised before answering, in order.
+Scripted failures (AkoweError instances) are raised before answering, in order.
 
 The AI editor (P4) and the writer's targeted rewrite (P5) are answered deterministically too: ``editor_flags`` maps
 a phrase to its replacement. A craft review flags (major, subtext score 4) every sentence of the chapter that holds
@@ -28,7 +28,7 @@ import copy
 import json
 import threading
 
-from bookforge.errors import BookforgeError
+from akowe.errors import AkoweError
 
 CHAPTER_TEXT = {
     1: ["The fog rolled in over Gullhaven before dawn, and Mara Vell climbed the hundred and twelve steps of the old "
@@ -140,7 +140,7 @@ class BookFakeAI:
         self.calls: list[dict] = []
         self.verdicts = list(verdicts or [])  # consumed one per review call
         self.default_verdict = default_verdict
-        self.failures: list[BookforgeError] = []  # raised before answering, one per call
+        self.failures: list[AkoweError] = []  # raised before answering, one per call
         self.kind_failures: dict[str, list] = {}  # answer kind -> errors raised instead of that answer
         self.gate = None  # threading.Event: when set to an unset Event, every call waits for it
         self.waiting = threading.Event()  # set once a call is blocked on the gate (tests wait on this, not a sleep)
@@ -167,7 +167,7 @@ class BookFakeAI:
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
         self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
         self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
-        # Character entries that break a BookForge check: name -> kinds, one consumed per proposal of that name
+        # Character entries that break an Akọwe check: name -> kinds, one consumed per proposal of that name
         # ("interval": a fact whose effective_to is not after effective_from (the save is refused); "authority": a
         # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
         # does not fit the form)).

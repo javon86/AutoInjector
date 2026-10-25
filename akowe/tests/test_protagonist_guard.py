@@ -1,9 +1,9 @@
 """The first real book lost its main character: the profile idea named "Odile Marsh", the Bible Builder proposed her,
-BookForge's own checks refused her entry, and the run went on with the side characters only (the outline had no POV
+Akọwe's own checks refused her entry, and the run went on with the side characters only (the outline had no POV
 ID for her, the writer and the editor drifted). These tests reproduce each way a proposed character could silently not
 reach approved canon, with the fake AI, and prove the fix:
 
-(a) an entry BookForge's checks refuse (its form, its save, or VALIDATE) is made again with the exact problems, under
+(a) an entry Akọwe's checks refuse (its form, its save, or VALIDATE) is made again with the exact problems, under
     the same name, at most twice; what still fails is named in an event (CANON_ENTRY_REFUSED);
 (b) before the outline the run checks that the main character (named in the idea / proposed as main / needed as a
     viewpoint) is approved canon, makes the entry when it is not, and otherwise stops with PROTAGONIST_MISSING;
@@ -16,10 +16,10 @@ import types
 
 import pytest
 
-from bookforge import assist as assist_mod
-from bookforge import protagonist
-from bookforge import providers as prov_mod
-from bookforge.book_path import BookPath, save_profile
+from akowe import assist as assist_mod
+from akowe import protagonist
+from akowe import providers as prov_mod
+from akowe.book_path import BookPath, save_profile
 
 import autobook_fake
 from autobook_fake import BookFakeAI, fact
@@ -97,7 +97,7 @@ def test_reproduce_and_fix_a_proposal_that_does_not_fit_the_form(tmp_path):
     fixes = events(run, "CANON_ENTRY_REFUSED", "fix")
     assert fixes and "Mara Vell" in fixes[0]["message"] and "SCHEMA" in fixes[0]["message"]
     asks = canon_requests(fake, "Mara Vell")
-    assert any("BookForge's checks refused your previous proposal" in a and "SCHEMA" in a for a in asks)
+    assert any("Akọwe's checks refused your previous proposal" in a and "SCHEMA" in a for a in asks)
     # the outline found her: no CANON_UNRESOLVED viewpoint, nothing for the guard to make
     assert not events(run, "PROTAGONIST_MISSING")
 

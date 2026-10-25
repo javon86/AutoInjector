@@ -20,8 +20,8 @@ import pytest
 from conftest import PRINCIPAL, errors_of
 from test_set_i01 import import_profile
 
-from bookforge import h_checks as hc
-from bookforge.canonical import sha256_text
+from akowe import h_checks as hc
+from akowe.canonical import sha256_text
 
 PDF_MIME = "application/pdf"
 EPUB_MIME = "application/epub+zip"

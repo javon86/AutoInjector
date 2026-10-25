@@ -1,10 +1,10 @@
-"""Status push to the AutoInjector desktop app (BookForge side of the shared contract).
+"""Status push to the AutoInjector desktop app (Akọwe side of the shared contract).
 
 When any AI slot uses the ``autoinjector`` adapter with a saved connection key, a daemon thread sends a small
 summary of where the most recently opened book stands to ``POST <bridge_url>/v1/status`` with
 ``Authorization: Bearer <key>``:
 
-    {"app": "bookforge", "version": 1, "bookforge_url": "http://127.0.0.1:<port>/",
+    {"app": "akowe", "version": 1, "akowe_url": "http://127.0.0.1:<port>/",
      "project": {"id", "title"} | null,
      "current_task": {"set", "op", "title", "state", "message", "url"},
      "working_on": {"op", "title", "started_at"} | null,
@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 
 from .providers import DEFAULT_BRIDGE_URL, validate_bridge_url
 
-log = logging.getLogger("bookforge.status_push")
+log = logging.getLogger("akowe.status_push")
 
 MAX_BODY = 32 * 1024
 MIN_GAP_S = 5.0
@@ -48,9 +48,9 @@ def build_summary(app, base_url: str) -> dict:
     """The status body for the most recently opened (non-test) book."""
     base = base_url.rstrip("/") + "/"
     last = app.last_project()
-    body = {"app": "bookforge", "version": 1, "bookforge_url": base, "project": None,
+    body = {"app": "akowe", "version": 1, "akowe_url": base, "project": None,
             "current_task": {"set": None, "op": None, "title": "Start a new book", "state": "needs_you",
-                             "message": "No book is open yet. Open BookForge and start a new book.",
+                             "message": "No book is open yet. Open Akọwe and start a new book.",
                              "url": base + "#/start"},
             "working_on": app.work.current(None), "approvals": {"count": 0, "items": [], "url": base + "#/"},
             "checklist": [], "done": 0, "total": 0, "updated_at": _now_iso()}
@@ -126,7 +126,7 @@ class StatusPusher:
     def start(self):
         if self._thread and self._thread.is_alive():
             return
-        self._thread = threading.Thread(target=self._loop, name="bookforge-status-push", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="akowe-status-push", daemon=True)
         self._thread.start()
 
     def stop(self):

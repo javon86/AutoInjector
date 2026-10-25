@@ -29,7 +29,8 @@ const dbService = require("./db-service");
 const ollamaManager = require("./ollama-manager");
 const outputManager = require("./output-manager");
 const secretStore = require("./secret-store");
-const bookforgeBridgeMod = require("./bookforge-bridge"); // BookForge bridge (pure Node HTTP server, OFF by default) — docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md
+const akoweLegacy = require("./akowe-legacy"); // names from before the rename BookForge -> Akọwe (2026-10-25): old settings key, key file, env vars
+const akoweBridgeMod = require("./akowe-bridge"); // Akọwe bridge (pure Node HTTP server, OFF by default) — docs/AKOWE_AUTOINJECTOR_BRIDGE.md
 const { createServiceBridge } = require("./service-bridge");
 const interpreterProvider = require("./interpreter-provider");
 const toolProvider = require("./tool-provider");
@@ -45,9 +46,9 @@ const logTags = require("./log-tags");
 const terminalProvider = require("./terminal-provider");
 const aiLockers = require("./ai-lockers");
 const featureTest = require("./feature-test");
-const logExtract = require("./log-extract"); // P16: scoped Extract (this BookForge book / a time range / everything) + redaction
-const bookforgeLinkTest = require("./bookforge-link-test"); // 🧪 Test BookForge link (real round trips through the bridge's own HTTP API)
-const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/BOOKFORGE_IMPROVEMENT_PLAN.md Section 1)
+const logExtract = require("./log-extract"); // P16: scoped Extract (this Akọwe book / a time range / everything) + redaction
+const akoweLinkTest = require("./akowe-link-test"); // 🧪 Test Akọwe link (real round trips through the bridge's own HTTP API)
+const selfRepairLib = require("./self-repair"); // P18: check-ins, failure classifier, automatic fixes, teach step (docs/AKOWE_IMPROVEMENT_PLAN.md Section 1)
 // AI-001: the manager API key is persisted only as sealed ciphertext. seal
 // replaces apiKey with apiKeyEnc for the state snapshot; open reverses it on
 // restore and migrates any legacy plaintext key.
@@ -233,7 +234,7 @@ const state = {
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
   voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
-  bookforge: { enabled: false }, // BookForge bridge (experimental) — persisted; OFF by default. See startBookforgeBridge().
+  akowe: { enabled: false }, // Akọwe bridge (experimental) — persisted; OFF by default. See startAkoweBridge().
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -661,7 +662,7 @@ function saveStateDebounced() {
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
-        bookforge: { enabled: !!state.bookforge.enabled }, // the bridge token itself lives in its own 0600 file, never here
+        akowe: { enabled: !!state.akowe.enabled }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -789,7 +790,7 @@ function loadPersistedState() {
     state.manager.maximumTurns = state.managerConfig.maximumTurns;
     state.manager.costLimit = state.managerConfig.costLimit;
   }
-  if (snap.bookforge && typeof snap.bookforge === "object") state.bookforge.enabled = snap.bookforge.enabled === true;
+  { const bfs = akoweLegacy.settingsFrom(snap); if (bfs) state.akowe.enabled = bfs.enabled === true; } // also the "bookforge" key saved before the rename
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
     state.hr.roundNum = snap.hr.roundNum || 0;
@@ -1107,7 +1108,7 @@ function createWindow() {
         // the app's own typing is synthetic and never fires this): no check-in then.
         try { view.webContents.on("before-input-event", () => { lastUserInputAt[site] = Date.now(); }); } catch (_) {}
         // A page that failed to load (no network, site down) is not ready for
-        // BookForge until a later load finishes. -3 = a load replaced by another.
+        // Akọwe until a later load finishes. -3 = a load replaced by another.
         view.webContents.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
           if (isMainFrame === false || code === -3) return;
           paneLoadFailed[site] = String(desc || `error ${code}`).slice(0, 60);
@@ -1505,7 +1506,7 @@ function gateMayPoll(site) {
 // (TR-30: its untagged finished reply was just captured; "-noto" = it had no
 // [TO:] tag either).
 async function waitForPendingCapture(target, seq, fromSite, { noForce = false, isCancelled = null } = {}) {
-  // A withdrawn send (BookForge bridge: its request timed out) stops waiting at once.
+  // A withdrawn send (Akọwe bridge: its request timed out) stops waiting at once.
   const stopped = () => (!!fromSite && !state.relayEnabled) || (!!isCancelled && isCancelled());
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const mayPoll = gateMayPoll(target);
@@ -1604,8 +1605,8 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // verbatim -- for callers (Regenerate) whose text is already the exact,
   // fully-framed string that was actually sent last time, so re-framing it
   // here would double it up.
-  // opts.bridge (BookForge) is verbatim too: its prompt reaches the AI exactly as
-  // BookForge wrote it, plus only the [MSG #] line (BF-16).
+  // opts.bridge (Akọwe) is verbatim too: its prompt reaches the AI exactly as
+  // Akọwe wrote it, plus only the [MSG #] line (BF-16).
   // opts.probe (P18.1 check-in) is verbatim too.
   const framed = opts.raw || opts.bridge || opts.probe ? text : roleClause + (label ? `[${label} ${frameVerb}]\n\n${text}` : text);
   // Program-kept running message number, stamped on EVERY outgoing send as a
@@ -1619,12 +1620,12 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   // turn, so the AI-to-AI hop count starts over. AI-driven sends (relays carry
   // fromSite; terminal results and missing-tag nudges are marked automatic)
   // don't reset it.
-  // BookForge bridge sends (opts.bridge) are a program's own request/answer, not a
+  // Akọwe bridge sends (opts.bridge) are a program's own request/answer, not a
   // new turn of the user's conversation: they must never re-arm the AI-to-AI hop
   // limit (BF-03).
   if (!fromSite && !opts.automatic && !opts.bridge && !opts.probe) resetAutoHops("program-send");
   const seq = String(state.nextMsgSeq++).padStart(4, "0");
-  // P18.5: the sender (BookForge bridge) learns this message's number at once, so a
+  // P18.5: the sender (Akọwe bridge) learns this message's number at once, so a
   // reply captured while the send is still being confirmed can be matched to it.
   if (opts.cancelToken && typeof opts.cancelToken === "object") { try { opts.cancelToken.seq = seq; } catch (_) {} }
   saveStateDebounced(); // TR-29: keep the counter if the app closes before anything else saves
@@ -1665,7 +1666,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
       if (gate === "stopped") { r = { ok: false, error: "RELAY_STOPPED" }; break; }
       // TR-30 + TR-22: its last reply had no [FROM:] tag and was accepted just
       // now — this message carries the flag and the full rules at its top.
-      // Never on a BookForge prompt (BF-16): it goes in exactly as written.
+      // Never on an Akọwe prompt (BF-16): it goes in exactly as written.
       if ((gate === "accepted" || gate === "accepted-noto") && !flagged && !opts.bridge && !opts.probe) {
         flagged = true;
         prompt = `[MSG #${seq}]\n${composeEnvelopeReminder(target, gate === "accepted-noto" ? "accepted-missing-both" : "accepted-missing-from")}\n\n— NEW MESSAGE BELOW —\n\n${framed}`;
@@ -1734,7 +1735,7 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   if (answeredEarly) paneHealth.onAnsweredEarly(target);
   broadcastHealth();
   try { relayTrace.noteSendResult(seq, { ...(res || {}), attempts }); } catch (_) {}
-  // A BookForge prompt the AI is already answering: count it as started now
+  // An Akọwe prompt the AI is already answering: count it as started now
   // (the page may have begun writing before the send script returned), so the
   // Relay Trace can tell its reply from an older one still on the page.
   if (opts.bridge && res && res.ok && state.generating[target]) { try { relayTrace.noteGenerating(target); } catch (_) {} }
@@ -3726,11 +3727,11 @@ async function handleHouseRuleCapture(turn) {
 
 // P37.4: is this reply a check-in / number-teach answer? Strictly (its [MSG #] or
 // word proves it), or loosely (short, holds a recent check-in word) when no
-// BookForge request is waiting for this AI's answer.
+// Akọwe request is waiting for this AI's answer.
 function probeReplyKindFor(site, text, answers) {
   let k = null;
   try { k = selfRepair.probeReplyKind(site, text, answers); } catch (_) { k = null; }
-  if (!k && !bookforgeAwaitingReply(site)) { try { k = selfRepair.probeReplyKind(site, text, answers, { loose: true }); } catch (_) { k = null; } }
+  if (!k && !akoweAwaitingReply(site)) { try { k = selfRepair.probeReplyKind(site, text, answers, { loose: true }); } catch (_) { k = null; } }
   return k;
 }
 async function pollSite(site) {
@@ -3845,7 +3846,7 @@ async function pollSite(site) {
       // P18.1/P18.7: the answer to a check-in / the teach message needs no tag —
       // take it once it has held still (never nag the AI about it). Only a reply
       // that answers the check-in's OWN [MSG #] and holds its word counts; any
-      // other reply (a BookForge chapter that happens to use the word) is left
+      // other reply (an Akọwe chapter that happens to use the word) is left
       // to the handling below, exactly as without check-ins.
       // P37.4: also a late check-in / number-teach answer the Relay Trace can't tie to
       // its [MSG #] — never nagged ("you forgot your tag") either.
@@ -3865,15 +3866,15 @@ async function pollSite(site) {
         forcedAccept = true;
         logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, severity: "warn", note: "no [FROM:] tag, but a new message had to go in — accepted it rather than lose it" });
       } else if (Date.now() - pend.sinceTs < NOTAG_QUIET_MS) return;
-      // BF-16: this pane owes the BookForge bridge an answer to a prompt it
-      // already typed. BookForge asks for bare JSON and never gets tag reminders,
+      // BF-16: this pane owes the Akọwe bridge an answer to a prompt it
+      // already typed. Akọwe asks for bare JSON and never gets tag reminders,
       // so once its reply has gone quiet it is taken as finished (the Relay
-      // Trace still decides whether it answers BookForge's prompt).
-      else if (!pend.reprompted && bookforgeAwaitingReply(site) && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
+      // Trace still decides whether it answers Akọwe's prompt).
+      else if (!pend.reprompted && akoweAwaitingReply(site) && !looksLikeRateLimit(text) && !isNoneSkip(text)) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
-        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "no [FROM:] tag on a reply while a BookForge prompt waits for its answer — taken as finished, no reminder sent" });
+        logEvent("untagged-reply-accepted", { site, chars: acceptedUntaggedRaw[site].length, note: "no [FROM:] tag on a reply while an Akọwe prompt waits for its answer — taken as finished, no reminder sent" });
       }
       // Quiet, no [FROM:] tag. A provider rate-limit/usage-cap notice never
       // carries our envelope and will never grow one, so let it fall through to
@@ -3980,7 +3981,7 @@ async function pollSite(site) {
     // P18.1/P18.7: the answer to a check-in (or to the teach message) belongs to the
     // self-repair: never shown in the conversation, never relayed, never nagged.
     // Ownership is by [MSG #] (the Relay Trace) plus the check-in's word: a reply
-    // that answers an older message (a BookForge prompt, a relay) goes to its owner.
+    // that answers an older message (an Akọwe prompt, a relay) goes to its owner.
     const checkinAnswers = relayWouldAnswer(site);
     // P37.4: a reply that is (very likely) a check-in / number-teach answer even when
     // it can't be proven (late, no word, its [MSG #] only a check-in's) is held the
@@ -4107,27 +4108,27 @@ async function pollSite(site) {
       broadcast("waiting-changed", { site, waiting: false });
     }
 
-    // BookForge bridge: a reply to a bridge request is OWNED by the bridge
+    // Akọwe bridge: a reply to a bridge request is OWNED by the bridge
     // (contract v1 rule 3) — it's shown in the transcript above, but none of the
     // relay machinery below (mesh, roundtable, House Rules, Prompt Sequence,
     // Manager) ever sees it. onCaptured() returns false when the bridge is off
     // or has nothing pending for this site, leaving normal handling untouched.
-    if (bookforgeBridge) {
+    if (akoweBridge) {
       let owned = false;
       // Ownership is by [MSG #] number (BF-01): the Relay Trace says which
       // messages this reply answers; the bridge takes it only if one of them is
       // the prompt it typed.
       let answers = null;
       try { answers = relayTrace.answersOf(turn.id); } catch (_) {}
-      try { owned = bookforgeBridge.onCaptured({ ...turn, answers }); } catch (e) { logEvent("bookforge-error", { site, error: String(e) }); }
+      try { owned = akoweBridge.onCaptured({ ...turn, answers }); } catch (e) { logEvent("akowe-error", { site, error: String(e) }); }
       if (owned) {
-        try { relayTrace.noteHeld(turn.id, "bookforge"); } catch (_) {}
-        // P16: remember which BookForge request (and so which book) this reply
-        // belongs to, so "Extract → This BookForge book only" can pick it out.
+        try { relayTrace.noteHeld(turn.id, "akowe"); } catch (_) {}
+        // P16: remember which Akọwe request (and so which book) this reply
+        // belongs to, so "Extract → This Akọwe book only" can pick it out.
         let req = null;
         try { for (const s of (answers || [])) { const r = getBookTracker().requestBySeq(s); if (r && (!req || r.at > req.at)) req = r; } } catch (_) {}
         if (req) { turn.bf = { requestId: req.requestId, projectId: req.projectId }; saveStateDebounced(); }
-        logEvent("bookforge-owned-reply", { site, chars: turn.text.length, request_id: req ? req.requestId : undefined });
+        logEvent("akowe-owned-reply", { site, chars: turn.text.length, request_id: req ? req.requestId : undefined });
         return;
       }
     }
@@ -4787,21 +4788,24 @@ ipcMain.handle("transcript:clear", () => { state.transcript = []; saveStateDebou
 // and the activity/error log into one text file in the program's own logs folder
 // (<AutoInjector app folder>/stuff and thing/logs), pulled from in-memory state so
 // a long/streaming transcript is captured in full. What goes in is chosen in the
-// Extract dialog (log-extract.js): "This BookForge book only" (the safe default
+// Extract dialog (log-extract.js): "This Akọwe book only" (the safe default
 // when a book is known), a time range, or Everything (warned). Every scope is
 // redacted: known keys/tokens/pairing codes, API-key shapes, and private paths.
 let bookTracker = null;
 function getBookTracker() {
-  if (!bookTracker) bookTracker = logExtract.createBookTracker({ file: path.join(userDataDir(), "bookforge-extract-books.json") });
+  if (!bookTracker) {
+    akoweLegacy.adoptFile(userDataDir(), akoweLegacy.OLD_EXTRACT_BOOKS_FILE, "akowe-extract-books.json"); // the book list saved before the rename
+    bookTracker = logExtract.createBookTracker({ file: path.join(userDataDir(), "akowe-extract-books.json") });
+  }
   return bookTracker;
 }
-// Bridge activity -> the book tracker: a request belongs to the project BookForge
+// Bridge activity -> the book tracker: a request belongs to the project Akọwe
 // last reported (POST /v1/status) when it started. Ids and times only.
 function bookTrackerNote(ev, bridge) {
   if (!ev || ev.selftest) return;
   const tr = getBookTracker();
   let st = null;
-  try { st = bridge && typeof bridge.bookforgeStatus === "function" ? bridge.bookforgeStatus() : null; } catch (_) {}
+  try { st = bridge && typeof bridge.akoweStatus === "function" ? bridge.akoweStatus() : null; } catch (_) {}
   if (st && st.project && st.project.id) tr.noteStatus(st.project, st.receivedAt);
   if (ev.kind === "request" && ev.request_id) tr.noteRequest(ev.request_id, ev.site, ev.at);
   else if (ev.request_id) tr.noteActivity(ev.request_id, ev.at);
@@ -4809,11 +4813,11 @@ function bookTrackerNote(ev, bridge) {
 // Pairing codes made this session (in memory only) — an Extract must never contain one.
 const recentPairingCodes = [];
 function rememberPairingCode(code) { if (code) { recentPairingCodes.push(String(code)); if (recentPairingCodes.length > 20) recentPairingCodes.shift(); } }
-// Every secret the app knows: the BookForge connection key, the service-bridge
+// Every secret the app knows: the Akọwe connection key, the service-bridge
 // token, pairing codes, and any key/token/secret/password string in the settings.
 function knownSecrets() {
   const out = [];
-  try { const t = bookforgeBridgeMod.readToken(userDataDir()); if (t) out.push(t); } catch (_) {}
+  try { const t = akoweBridgeMod.readToken(userDataDir()); if (t) out.push(t); } catch (_) {}
   try { const f = path.join(userDataDir(), "autoinjector-bridge-token.txt"); if (fs.existsSync(f)) out.push(fs.readFileSync(f, "utf8").trim()); } catch (_) {}
   out.push(...recentPairingCodes);
   const skip = new Set(["transcript", "log", "ledger", "managerLog", "captured", "prompts"]);
@@ -4836,14 +4840,14 @@ function extractRedaction() {
   let home = ""; try { home = require("os").homedir(); } catch (_) {}
   return { secrets: knownSecrets(), home, appDirs };
 }
-function bookforgeConnectedNow() {
-  try { return !!bookforgeConnection(bookforgeStatusSnapshotBase()).connected; } catch (_) { return false; }
+function akoweConnectedNow() {
+  try { return !!akoweConnection(akoweStatusSnapshotBase()).connected; } catch (_) { return false; }
 }
 // What the dialog needs: the known books, the safe default and the totals.
 function extractOptions() {
   const tr = getBookTracker();
   const books = tr.books().filter((b) => b.requests > 0);
-  const connected = bookforgeConnectedNow();
+  const connected = akoweConnectedNow();
   const def = logExtract.defaultScope({ connected, books, now: Date.now() });
   return {
     ok: true, connected, books, current: tr.current(),
@@ -6310,54 +6314,54 @@ function contentBaseFolder() {
   }
 }
 
-// --- BookForge bridge (experimental, OFF by default) ------------------------
-// docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md is normative. A loopback-only HTTP
-// server (bookforge-bridge.js, pure Node) lets BookForge send one prompt to one
+// --- Akọwe bridge (experimental, OFF by default) ------------------------
+// docs/AKOWE_AUTOINJECTOR_BRIDGE.md is normative. A loopback-only HTTP
+// server (akowe-bridge.js, pure Node) lets Akọwe send one prompt to one
 // pane and get the next captured reply back. Sends go through sendTextTo() —
 // so the per-pane send queue, retries, ledger and [MSG #] numbering all apply —
 // wrapped with withEnvelope() so the reply closes with [FROM: <SITE>]. The
 // matching capture is handed to the bridge from pollSite() and is never relayed.
-// The bearer token lives in userData/bookforge-bridge-token (mode 0600; on
+// The bearer token lives in userData/akowe-bridge-token (mode 0600; on
 // Windows chmod is a no-op and the per-user userData ACLs protect it) — never in
 // the state file, never logged, never in a URL.
-let bookforgeBridge = null;
-let bookforgeStartError = null;
+let akoweBridge = null;
+let akoweStartError = null;
 // Session activity feed for the panel: every text-free bridge event (see
-// bookforge-bridge.js recordEvent) plus a few app-side ones (key changed,
+// akowe-bridge.js recordEvent) plus a few app-side ones (key changed,
 // start failed, link test), each with a plain-English "say" line. Kept here
 // (not only in the bridge) so it survives turning the bridge off and on.
-const BOOKFORGE_ACTIVITY_MAX = 50;
-const bookforgeActivity = [];
-function bookforgeNoteActivity(ev) {
+const AKOWE_ACTIVITY_MAX = 50;
+const akoweActivity = [];
+function akoweNoteActivity(ev) {
   const e = Object.assign({}, ev);
   if (!e.at) e.at = Date.now();
-  if (!e.say) { const d = bookforgeBridgeMod.describeEvent(e, siteLabel); e.say = d.say; e.tone = e.tone || d.tone; }
-  bookforgeActivity.push(e);
-  if (bookforgeActivity.length > BOOKFORGE_ACTIVITY_MAX) bookforgeActivity.shift();
+  if (!e.say) { const d = akoweBridgeMod.describeEvent(e, siteLabel); e.say = d.say; e.tone = e.tone || d.tone; }
+  akoweActivity.push(e);
+  if (akoweActivity.length > AKOWE_ACTIVITY_MAX) akoweActivity.shift();
   // Deferred so a snapshot taken during start()/stop() sees the settled state.
-  setImmediate(() => { try { broadcast("bookforge-activity", { event: e, status: bookforgeStatusSnapshot() }); } catch (_) {} });
+  setImmediate(() => { try { broadcast("akowe-activity", { event: e, status: akoweStatusSnapshot() }); } catch (_) {} });
   return e;
 }
-function bookforgeBridgePort() {
-  const p = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
-  return Number.isInteger(p) && p > 0 && p < 65536 ? p : bookforgeBridgeMod.DEFAULT_PORT;
+function akoweBridgePort() {
+  const p = Number(akoweLegacy.aiEnv("PORT")); // AUTOINJECTOR_AKOWE_PORT (or the old AUTOINJECTOR_BOOKFORGE_PORT)
+  return Number.isInteger(p) && p > 0 && p < 65536 ? p : akoweBridgeMod.DEFAULT_PORT;
 }
 // True while the bridge's prompt to this site has been typed and its answer is
 // still due (pollSite then never nags that pane about missing tags).
-function bookforgeAwaitingReply(site) {
-  try { return !!(bookforgeBridge && typeof bookforgeBridge.awaitingReply === "function" && bookforgeBridge.awaitingReply(site)); } catch (_) { return false; }
+function akoweAwaitingReply(site) {
+  try { return !!(akoweBridge && typeof akoweBridge.awaitingReply === "function" && akoweBridge.awaitingReply(site)); } catch (_) { return false; }
 }
-// Why a pane can't take a BookForge prompt right now, in plain words (null =
+// Why a pane can't take an Akọwe prompt right now, in plain words (null =
 // it can). Not just "the window exists and isn't loading": a page that failed
 // to load, or one with no message box (signed out, or the site changed its
 // page — the TR-08 page check and every read look for it) is not ready.
-function bookforgeSiteProblem(site) {
+function akoweSiteProblem(site) {
   const view = siteViews[site];
   const L = siteLabel(site);
   if (!view || !view.webContents || view.webContents.isDestroyed()) return { code: "NO_PANE", say: `the ${L} window is missing` };
   try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return { code: "LOADING", say: `the ${L} page is still loading` }; }
   catch (_) { return { code: "NO_PANE", say: `the ${L} window is missing` }; }
-  try { if (selfRepair && selfRepair.teachActive(site)) return { code: "TEACHING", say: `a 🔢 number teach is running for ${L} — follow the box at the top of the BookForge panel` }; } catch (_) {}
+  try { if (selfRepair && selfRepair.teachActive(site)) return { code: "TEACHING", say: `a 🔢 number teach is running for ${L} — follow the box at the top of the Akọwe panel` }; } catch (_) {}
   if (paneLoadFailed[site]) return { code: "LOAD_FAILED", say: `the ${L} page didn't load (${paneLoadFailed[site]}) — reload it` };
   let box = { found: null, signedOut: false };
   try { box = paneHealth.messageBox(site); } catch (_) {}
@@ -6367,7 +6371,7 @@ function bookforgeSiteProblem(site) {
     : { code: "NO_MESSAGE_BOX", say: `${L}'s message box isn't on the page — open its window (log in, or use 🎯 if the site changed its page)` };
   return null;
 }
-function bookforgeSiteReady(site) { return !bookforgeSiteProblem(site); }
+function akoweSiteReady(site) { return !akoweSiteProblem(site); }
 
 // --- P18 self-repair: check-ins, failure classifier, automatic fixes, teach step ---
 // The engine lives in self-repair.js (pure, unit-tested); these are its hands on the
@@ -6377,7 +6381,7 @@ const CHECKIN_TICK_MS = Number(process.env.AUTOINJECTOR_CHECKIN_TICK_MS) || 1500
 const CHECKIN_USER_IDLE_MS = Number(process.env.AUTOINJECTOR_CHECKIN_USER_IDLE_MS) || 120000; // no check-in within 2 min of the user touching that pane
 const CHECKIN_STARTUP_DELAY_MS = Number(process.env.AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS) || 6000; // after the page check that follows a load
 const CHECKINS_ENABLED = process.env.AUTOINJECTOR_CHECKIN !== "0"; // tests / power users can switch the automatic ones off (on-demand still works)
-const CHECKIN_YIELD_MAX_MS = Number(process.env.AUTOINJECTOR_CHECKIN_YIELD_MS) || 60000; // a BookForge request waits at most this long for a check-in to settle
+const CHECKIN_YIELD_MAX_MS = Number(process.env.AUTOINJECTOR_CHECKIN_YIELD_MS) || 60000; // an Akọwe request waits at most this long for a check-in to settle
 const CHECKIN_OWED_DEMAND_MS = 3 * 60000; // an unanswered message to an AI blocks an asked-for check-in this long…
 const CHECKIN_OWED_MS = 10 * 60000;       // …and an automatic one this long
 const PAGE_SCRIPT_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PAGE_SCRIPT_TIMEOUT_MS) || 15000;
@@ -6418,7 +6422,7 @@ async function selfRepairReload(site, { home = false } = {}) {
   return { ok: ok && !paneLoadFailed[site] };
 }
 // Why a check-in should NOT go to this AI right now (null = go ahead). level:
-// "periodic" (strict), "startup", or "demand" (BookForge / the user asked).
+// "periodic" (strict), "startup", or "demand" (Akọwe / the user asked).
 function selfRepairBusy(site, level) {
   if (!state.enabled[site]) return "inactive";
   const view = siteViews[site];
@@ -6426,10 +6430,10 @@ function selfRepairBusy(site, level) {
   try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return "not_ready"; } catch (_) {}
   if (state.generating[site] || state.stopShown[site]) return "busy";
   if (sendQueues[site]) return "sending";
-  try { const st = bookforgeBridge && bookforgeBridge.status(); if (st && st.active && st.active[site]) return "bookforge"; } catch (_) {}
-  if (bookforgeAwaitingReply(site)) return "bookforge"; // a typed BookForge prompt (incl. its late window) owes its answer
+  try { const st = akoweBridge && akoweBridge.status(); if (st && st.active && st.active[site]) return "akowe"; } catch (_) {}
+  if (akoweAwaitingReply(site)) return "akowe"; // a typed Akọwe prompt (incl. its late window) owes its answer
   if (forceAcceptUntagged.has(site)) return "sending";
-  // A message the app typed into this AI (a relay, the user's, a BookForge prompt)
+  // A message the app typed into this AI (a relay, the user's, an Akọwe prompt)
   // that still owes its reply: a check-in now would make whose reply is whose
   // ambiguous. (After this long the AI is taken as not answering it.)
   try {
@@ -6448,14 +6452,14 @@ function selfRepairBusy(site, level) {
   }
   return null;
 }
-// A BookForge request is about to type into `site`: let a check-in there settle
+// An Akọwe request is about to type into `site`: let a check-in there settle
 // first (withdrawn if not typed yet), for at most CHECKIN_YIELD_MAX_MS.
 async function selfRepairMakeWay(site, token) {
   let how = "none";
   try { how = selfRepair.makeWay(site); } catch (_) { return "none"; }
   if (how === "none") return how;
   const t0 = Date.now();
-  logEvent("checkin-yield", { site, how, note: "a BookForge request waits for this AI's check-in to settle" });
+  logEvent("checkin-yield", { site, how, note: "an Akọwe request waits for this AI's check-in to settle" });
   while (Date.now() - t0 < CHECKIN_YIELD_MAX_MS && !(token && token.cancelled)) {
     let busyNow = false;
     try { busyNow = selfRepair.busyWithSite(site); } catch (_) {}
@@ -6476,7 +6480,7 @@ function selfRepairSaveLearned(site, role, selector, how) {
 const SELF_REPAIR_SAY = {
   fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "number" ? "✔ Saved — the number teach learned where things are" : ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
   needs_user: (L, ev) => ({ say: `⚠️ ${L} needs you: ${selfRepairLib.describeProblem(ev && ev.code, L).say}`, tone: "warn" }),
-  broken: (L, ev) => (ev && ev.ask ? { say: `⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself (${(ev && ev.code) || "UNKNOWN"}). Please use 🎯 on ${L}'s pane, or 🔢 “Do it for me with a number” — BookForge uses your other AIs meanwhile. (AutoInjector re-checks after 5, 15, then every 60 minutes.)`, tone: "error" } : { say: `✕ ${L} still isn't working (${(ev && ev.code) || "UNKNOWN"}) — BookForge uses your other AIs`, tone: "error" }),
+  broken: (L, ev) => (ev && ev.ask ? { say: `⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself (${(ev && ev.code) || "UNKNOWN"}). Please use 🎯 on ${L}'s pane, or 🔢 “Do it for me with a number” — Akọwe uses your other AIs meanwhile. (AutoInjector re-checks after 5, 15, then every 60 minutes.)`, tone: "error" } : { say: `✕ ${L} still isn't working (${(ev && ev.code) || "UNKNOWN"}) — Akọwe uses your other AIs`, tone: "error" }),
   teach: (L, ev) => (ev && ev.phase === "type" ? { say: `🔢 Number teach for ${L}: type the number shown into ${L}'s message box and press Send`, tone: "warn" }
     : ev && ev.phase === "asking" ? { say: `🔢 AutoInjector is asking ${L} to write the number backwards…`, tone: "info" }
     : ev && (ev.phase === "failed" || ev.phase === "timeout") ? { say: `🔢 Number teach for ${L} didn't finish${ev.part ? ` — the ${ev.part === "assistant" ? "reply area" : ev.part === "send" ? "Send button" : "message box"} part` : ""}. Use 🎯 for just that part.`, tone: "warn" } : null)
@@ -6512,7 +6516,7 @@ const selfRepair = selfRepairLib.createSelfRepair({
     broadcast("self-repair", { site, repair: snap, event: ev || null });
     const f = ev && SELF_REPAIR_SAY[ev.kind];
     const line = f ? f(siteLabel(site), ev) : null;
-    if (line) { try { bookforgeNoteActivity({ kind: "repair", site, outcome: String(ev.kind).toUpperCase(), say: line.say, tone: line.tone }); } catch (_) {} }
+    if (line) { try { akoweNoteActivity({ kind: "repair", site, outcome: String(ev.kind).toUpperCase(), say: line.say, tone: line.tone }); } catch (_) {} }
   },
   options: {
     intervalMs: (CHECKINS_ENABLED ? state.selfRepair.intervalMin : 0) * 60000,
@@ -6583,29 +6587,29 @@ ipcMain.handle("selfrepair:settings", (_evt, payload) => {
   logEvent("self-repair", { step: "settings", outcome: `every:${state.selfRepair.intervalMin}min` });
   return selfRepairStatus();
 });
-let bookforgeStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
-function startBookforgeBridge() {
-  if (bookforgeBridge) return Promise.resolve({ ok: true });
-  if (!bookforgeStarting) bookforgeStarting = startBookforgeBridgeNow().finally(() => { bookforgeStarting = null; });
-  return bookforgeStarting;
+let akoweStarting = null; // in-flight start, so a double toggle can't race two listeners onto the port
+function startAkoweBridge() {
+  if (akoweBridge) return Promise.resolve({ ok: true });
+  if (!akoweStarting) akoweStarting = startAkoweBridgeNow().finally(() => { akoweStarting = null; });
+  return akoweStarting;
 }
-async function startBookforgeBridgeNow() {
+async function startAkoweBridgeNow() {
   let token;
-  try { token = bookforgeBridgeMod.loadOrCreateToken(userDataDir()); }
-  catch (e) { bookforgeStartError = "TOKEN_WRITE_FAILED"; logEvent("bookforge-error", { error: "token write failed" }); bookforgeNoteActivity({ kind: "start_failed", error: bookforgeStartError }); return { ok: false, error: bookforgeStartError }; }
+  try { token = akoweBridgeMod.loadOrCreateToken(userDataDir()); }
+  catch (e) { akoweStartError = "TOKEN_WRITE_FAILED"; logEvent("akowe-error", { error: "token write failed" }); akoweNoteActivity({ kind: "start_failed", error: akoweStartError }); return { ok: false, error: akoweStartError }; }
   let currentToken = token;
-  const bridge = bookforgeBridgeMod.createBridge({
-    port: bookforgeBridgePort(),
+  const bridge = akoweBridgeMod.createBridge({
+    port: akoweBridgePort(),
     host: "127.0.0.1",
     getToken: () => currentToken,
-    siteReady: bookforgeSiteReady,
-    siteProblem: (s) => { const p = bookforgeSiteProblem(s); return p ? p.say : null; },
+    siteReady: akoweSiteReady,
+    siteProblem: (s) => { const p = akoweSiteProblem(s); return p ? p.say : null; },
     wrapPrompt: (site, text) => withEnvelope(text, site),
     // contract v1.2: self-repair state per AI, and on-demand check-ins
     siteState: (s) => selfRepair.health(s),
-    startProbe: (list) => selfRepair.probeMany(list, "bookforge", "demand"),
+    startProbe: (list) => selfRepair.probeMany(list, "akowe", "demand"),
     sendToSite: async (site, text, meta) => {
-      // P18.1: a check-in on this AI never interleaves with a BookForge prompt — one
+      // P18.1: a check-in on this AI never interleaves with an Akọwe prompt — one
       // not typed yet is withdrawn, one typed is left to settle (bounded) first.
       const ct = meta && meta.cancelToken ? meta.cancelToken : null;
       await selfRepairMakeWay(site, ct);
@@ -6623,74 +6627,74 @@ async function startBookforgeBridgeNow() {
       return { ok: !!(res && res.ok), error: res && res.error, seq: res && res.ok ? seq : null };
     },
     // Only site/request_id/chars/outcome/elapsed ever reach here (never text or the token).
-    logger: (kind, detail) => logEvent(`bookforge-${kind}`, detail),
-    // Text-free activity events -> the panel's live feed (+ "bookforge-activity" broadcast).
+    logger: (kind, detail) => logEvent(`akowe-${kind}`, detail),
+    // Text-free activity events -> the panel's live feed (+ "akowe-activity" broadcast).
     onEvent: (ev) => {
-      bookforgeNoteActivity(ev);
-      // P16: which book each BookForge request belongs to (ids and times only, no text).
+      akoweNoteActivity(ev);
+      // P16: which book each Akọwe request belongs to (ids and times only, no text).
       try { bookTrackerNote(ev, bridge); } catch (_) {}
       // P18.2: a real request that failed starts a check-in of that AI once it is free.
-      if (ev && ev.kind === "outcome" && !ev.selftest && ev.site && ["TIMEOUT", "LATE_EXPIRED", "SEND_FAILED"].includes(ev.outcome)) selfRepair.requestCheck(ev.site, `bookforge-${String(ev.outcome).toLowerCase()}`);
+      if (ev && ev.kind === "outcome" && !ev.selftest && ev.site && ["TIMEOUT", "LATE_EXPIRED", "SEND_FAILED"].includes(ev.outcome)) selfRepair.requestCheck(ev.site, `akowe-${String(ev.outcome).toLowerCase()}`);
     }
   });
   bridge.setToken = (t) => { currentToken = t; };
   try {
     await bridge.start();
   } catch (e) {
-    bookforgeStartError = (e && e.code) || String(e);
-    logEvent("bookforge-error", { error: bookforgeStartError, port: bookforgeBridgePort() });
-    bookforgeNoteActivity({ kind: "start_failed", error: String(bookforgeStartError).slice(0, 60), port: bookforgeBridgePort() });
-    return { ok: false, error: bookforgeStartError };
+    akoweStartError = (e && e.code) || String(e);
+    logEvent("akowe-error", { error: akoweStartError, port: akoweBridgePort() });
+    akoweNoteActivity({ kind: "start_failed", error: String(akoweStartError).slice(0, 60), port: akoweBridgePort() });
+    return { ok: false, error: akoweStartError };
   }
-  bookforgeStartError = null;
-  if (!state.bookforge.enabled) { await bridge.stop(); return { ok: false, error: "DISABLED" }; } // turned off while we were starting
-  bookforgeBridge = bridge;
+  akoweStartError = null;
+  if (!state.akowe.enabled) { await bridge.stop(); return { ok: false, error: "DISABLED" }; } // turned off while we were starting
+  akoweBridge = bridge;
   return { ok: true };
 }
-async function stopBookforgeBridge() {
-  if (bookforgeStarting) { try { await bookforgeStarting; } catch (_) {} }
-  const b = bookforgeBridge;
-  bookforgeBridge = null;
+async function stopAkoweBridge() {
+  if (akoweStarting) { try { await akoweStarting; } catch (_) {} }
+  const b = akoweBridge;
+  akoweBridge = null;
   if (b) { try { await b.stop(); } catch (_) {} }
 }
 // Last contact / counters / per-site last result outlive a bridge restart
 // within this session (the bridge object is recreated on every enable).
-const bookforgeCarry = { lastContactAt: null, lastExternalContactAt: null, siteLast: {}, bookforge: null, lastPairedAt: null };
-let bfKeyChangedAt = 0; // a new key makes any earlier BookForge contact/pairing count as "not connected"
-// "Is BookForge connected?" in one place (panel, Connect flow and the link test use it).
-function bookforgeConnection(snapBase) {
-  const b = snapBase.bookforge;
+const akoweCarry = { lastContactAt: null, lastExternalContactAt: null, siteLast: {}, akowe: null, lastPairedAt: null };
+let bfKeyChangedAt = 0; // a new key makes any earlier Akọwe contact/pairing count as "not connected"
+// "Is Akọwe connected?" in one place (panel, Connect flow and the link test use it).
+function akoweConnection(snapBase) {
+  const b = snapBase.akowe;
   const on = !!(snapBase.enabled && snapBase.listening);
   const contactOk = !!(snapBase.lastExternalContactAt && snapBase.lastExternalContactAt > bfKeyChangedAt);
   const statusFresh = !!(b && !b.stale && b.receivedAt > bfKeyChangedAt);
   return {
     connected: on && (contactOk || statusFresh),
-    paired: !!(bookforgeCarry.lastPairedAt && bookforgeCarry.lastPairedAt > bfKeyChangedAt),
+    paired: !!(akoweCarry.lastPairedAt && akoweCarry.lastPairedAt > bfKeyChangedAt),
     lastContactAt: snapBase.lastExternalContactAt || null,
     statusAt: b ? b.receivedAt : null,
     stale: b ? !!b.stale : null
   };
 }
-function bookforgeStatusSnapshotBase() {
-  const st = bookforgeBridge ? bookforgeBridge.status() : null;
+function akoweStatusSnapshotBase() {
+  const st = akoweBridge ? akoweBridge.status() : null;
   if (st) {
-    if (st.lastContactAt) bookforgeCarry.lastContactAt = st.lastContactAt;
-    if (st.lastExternalContactAt) bookforgeCarry.lastExternalContactAt = st.lastExternalContactAt;
-    Object.assign(bookforgeCarry.siteLast, st.siteLast || {});
-    if (st.bookforge) bookforgeCarry.bookforge = st.bookforge;
-    if (st.pairing && st.pairing.lastPairedAt) bookforgeCarry.lastPairedAt = st.pairing.lastPairedAt;
+    if (st.lastContactAt) akoweCarry.lastContactAt = st.lastContactAt;
+    if (st.lastExternalContactAt) akoweCarry.lastExternalContactAt = st.lastExternalContactAt;
+    Object.assign(akoweCarry.siteLast, st.siteLast || {});
+    if (st.akowe) akoweCarry.akowe = st.akowe;
+    if (st.pairing && st.pairing.lastPairedAt) akoweCarry.lastPairedAt = st.pairing.lastPairedAt;
   }
-  // BookForge's own progress report (contract v1.1 POST /v1/status), re-aged now so a
+  // Akọwe's own progress report (contract v1.1 POST /v1/status), re-aged now so a
   // report from before a bridge restart still shows, marked stale after 90 s.
   let bfStatus = null;
-  if (bookforgeCarry.bookforge) {
-    const age = Math.max(0, Date.now() - bookforgeCarry.bookforge.receivedAt);
-    bfStatus = Object.assign({}, bookforgeCarry.bookforge, { age_ms: age, stale: age > bookforgeBridgeMod.BF_STATUS_STALE_MS });
+  if (akoweCarry.akowe) {
+    const age = Math.max(0, Date.now() - akoweCarry.akowe.receivedAt);
+    bfStatus = Object.assign({}, akoweCarry.akowe, { age_ms: age, stale: age > akoweBridgeMod.BF_STATUS_STALE_MS });
   }
   const sites = {};
   for (const s of SITE_IDS) {
-    const base = st && st.sites[s] ? st.sites[s] : { ready: bookforgeSiteReady(s), busy: false };
-    const problem = bookforgeSiteProblem(s);
+    const base = st && st.sites[s] ? st.sites[s] : { ready: akoweSiteReady(s), busy: false };
+    const problem = akoweSiteProblem(s);
     const repair = selfRepair.state(s); // P18: ok | repairing | needs_user | broken | unknown (+ what was tried, the teach step)
     sites[s] = Object.assign({}, base, {
       ready: !!base.ready && selfRepair.isUsable(s),
@@ -6699,48 +6703,48 @@ function bookforgeStatusSnapshotBase() {
       problemSay: problem ? problem.say : null,
       label: siteLabel(s),
       active: !!(state.enabled && state.enabled[s]), // "Active" (checked) in the app
-      last: bookforgeCarry.siteLast[s] || null,
+      last: akoweCarry.siteLast[s] || null,
       inFlight: st && st.active && st.active[s] ? st.active[s] : null
     });
   }
   return {
     ok: true,
-    enabled: !!state.bookforge.enabled,
+    enabled: !!state.akowe.enabled,
     listening: !!(st && st.listening),
-    starting: !!bookforgeStarting,
+    starting: !!akoweStarting,
     host: "127.0.0.1",
-    port: st ? st.port : bookforgeBridgePort(),
-    error: bookforgeStartError,
-    tokenPresent: !!bookforgeBridgeMod.readToken(userDataDir()),
+    port: st ? st.port : akoweBridgePort(),
+    error: akoweStartError,
+    tokenPresent: !!akoweBridgeMod.readToken(userDataDir()),
     now: Date.now(),
-    lastContactAt: bookforgeCarry.lastContactAt,
-    lastExternalContactAt: bookforgeCarry.lastExternalContactAt,
+    lastContactAt: akoweCarry.lastContactAt,
+    lastExternalContactAt: akoweCarry.lastExternalContactAt,
     counters: st ? st.counters : null,
-    activity: bookforgeActivity.slice(-30),
+    activity: akoweActivity.slice(-30),
     linkTest: { running: bfLinkTest.running, lastReport: bfLinkTest.lastReport, lastSummary: bfLinkTest.lastSummary },
     sites,
-    bookforge: bfStatus,
+    akowe: bfStatus,
     selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false, automatic: CHECKINS_ENABLED }, // P18.1 check-in settings
     pairing: st && st.pairing ? { pending: st.pairing.pending, expiresAt: st.pairing.expiresAt, lastPairedAt: st.pairing.lastPairedAt, locked: st.pairing.locked } : null
   };
 }
-function bookforgeStatusSnapshot(opts) {
-  const snap = bookforgeStatusSnapshotBase();
-  snap.connection = bookforgeConnection(snap);
-  bookforgeConnectAdvance(snap);
+function akoweStatusSnapshot(opts) {
+  const snap = akoweStatusSnapshotBase();
+  snap.connection = akoweConnection(snap);
+  akoweConnectAdvance(snap);
   snap.connect = Object.assign({}, bfConnect);
   // L1: with the bridge OFF (the default) and the panel not expanded by the
   // author, never contact local services in the background — unless the author
-  // pressed Connect / the link test / Start BookForge (they check right away and
+  // pressed Connect / the link test / Start Akọwe (they check right away and
   // keep the status current from then on).
-  if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) bookforgeAppCheckSoon();
-  snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!bookforgeLauncher() };
-  snap.health = bookforgeHealth(snap);
+  if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) akoweAppCheckSoon();
+  snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
+  snap.health = akoweHealth(snap);
   return snap;
 }
 // Overall health for the panel's dot (green / amber / ⚠️ / grey when the bridge is off).
 // Each check: level "ok" | "warn" (not there yet / unknown) | "bad" (a real problem).
-function bookforgeHealth(snap) {
+function akoweHealth(snap) {
   const checks = [];
   const add = (id, level, why) => checks.push({ id, level, why });
   const on = !!(snap.enabled && snap.listening);
@@ -6750,9 +6754,9 @@ function bookforgeHealth(snap) {
   else add("bridge", "warn", "starting");
   add("key", snap.tokenPresent ? "ok" : "warn", snap.tokenPresent ? "present" : "missing");
   const app = snap.app || {};
-  const b = snap.bookforge;
+  const b = snap.akowe;
   const fresh = !!(b && !b.stale);
-  add("bookforge_reachable", app.running === true || fresh ? "ok" : "warn", app.running === true ? "ping ok" : fresh ? "status fresh" : app.running === false ? "no answer to ping" : "not checked yet");
+  add("akowe_reachable", app.running === true || fresh ? "ok" : "warn", app.running === true ? "ping ok" : fresh ? "status fresh" : app.running === false ? "no answer to ping" : "not checked yet");
   const conn = snap.connection || {};
   add("status_fresh", fresh ? "ok" : "warn", fresh ? "fresh" : b ? "stale" : conn.connected ? "connected, no status yet" : "no status yet");
   const active = SITE_IDS.filter((s) => snap.sites && snap.sites[s] && snap.sites[s].active);
@@ -6773,29 +6777,29 @@ function bookforgeHealth(snap) {
 }
 // 📋 Copy diagnostics: a SAFE plain-text summary for asking for help. Built only from
 // counters, readiness, outcome codes and ids — never the key, a pairing code, a prompt,
-// a reply, the book's title or BookForge's messages.
+// a reply, the book's title or Akọwe's messages.
 const BF_CODE_RE = /^[A-Za-z0-9_:.-]{1,48}$/;
 function bfSafeCode(v) { const t = String(v == null ? "" : v); return BF_CODE_RE.test(t) ? t : (t ? "OTHER" : ""); }
-function bookforgeDiagnostics(extra) {
-  const snap = bookforgeStatusSnapshot();
+function akoweDiagnostics(extra) {
+  const snap = akoweStatusSnapshot();
   const now = Date.now();
   const ago = (t) => (t ? `${Math.max(0, Math.round((now - t) / 1000))}s ago` : "never");
   let appVersion = "?"; try { appVersion = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
   const L = [];
-  L.push("AutoInjector — BookForge bridge diagnostics");
+  L.push("AutoInjector — Akọwe bridge diagnostics");
   L.push("(safe to share: no connection key, pairing codes, prompts, replies or book content)");
   L.push(`Generated: ${new Date(now).toISOString()}`);
   L.push(`App: AutoInjector ${appVersion} · Electron ${process.versions.electron || "?"} · Node ${process.versions.node} · ${process.platform} ${process.arch}`);
   L.push(`Bridge: ${snap.enabled ? "ON" : "OFF"} · listening ${snap.listening ? "yes" : "no"} · 127.0.0.1:${snap.port}${snap.error ? ` · start error ${bfSafeCode(snap.error)}` : ""}`);
   L.push(`Connection key: ${snap.tokenPresent ? "present (not shown)" : "missing"}`);
   const a = snap.app || {};
-  L.push(`BookForge app: ${a.running === true ? "running" : a.running === false ? "not answering" : "not checked yet"}${a.version ? ` · version ${bfSafeCode(a.version)}` : ""} · last ping ${ago(a.checkedAt)} · launcher ${a.launcherAvailable ? "found" : "not found"}`);
+  L.push(`Akọwe app: ${a.running === true ? "running" : a.running === false ? "not answering" : "not checked yet"}${a.version ? ` · version ${bfSafeCode(a.version)}` : ""} · last ping ${ago(a.checkedAt)} · launcher ${a.launcherAvailable ? "found" : "not found"}`);
   const c = snap.connection || {};
   const cp = snap.connect || {};
   L.push(`Connection: connected ${c.connected ? "yes" : "no"} · paired ${c.paired ? "yes" : "no"} · last contact ${ago(c.lastContactAt)} · connect phase ${bfSafeCode(cp.phase || "idle")}${cp.step ? ` (step ${bfSafeCode(cp.step)})` : ""}`);
-  const b = snap.bookforge;
-  if (b) L.push(`BookForge status: last update ${ago(b.receivedAt)}${b.stale ? " (STALE)" : ""} · task state ${bfSafeCode((b.current_task && b.current_task.state) || "none")} · approvals ${Number((b.approvals && b.approvals.count) || 0)} · progress ${Number(b.done) || 0}/${Number(b.total) || (Array.isArray(b.checklist) ? b.checklist.length : 0)}`);
-  else L.push("BookForge status: none received yet");
+  const b = snap.akowe;
+  if (b) L.push(`Akọwe status: last update ${ago(b.receivedAt)}${b.stale ? " (STALE)" : ""} · task state ${bfSafeCode((b.current_task && b.current_task.state) || "none")} · approvals ${Number((b.approvals && b.approvals.count) || 0)} · progress ${Number(b.done) || 0}/${Number(b.total) || (Array.isArray(b.checklist) ? b.checklist.length : 0)}`);
+  else L.push("Akọwe status: none received yet");
   const h = snap.health || {};
   L.push(`Health: ${String(h.level || "?").toUpperCase()} — ${(h.checks || []).map((x) => `${x.id}=${x.level}`).join(", ")}`);
   for (const s of SITE_IDS) {
@@ -6823,7 +6827,7 @@ function bookforgeDiagnostics(extra) {
     const bad = (bfLinkTest.lastSteps || []).filter((x) => x.status !== "pass");
     if (bad.length) L.push(`  not passed: ${bad.map((x) => `${bfSafeCode(x.id)}=${bfSafeCode(x.status)}${x.http_status ? `(HTTP ${Number(x.http_status)})` : ""}`).join(", ")}`);
   } else L.push(`Last link test: ${bfLinkTest.running ? "running now" : "never run this session"}`);
-  const probs = bookforgeActivity.filter((e) => e.tone === "warn" || e.tone === "error").slice(-10);
+  const probs = akoweActivity.filter((e) => e.tone === "warn" || e.tone === "error").slice(-10);
   L.push(`Recent problems (${probs.length}):`);
   for (const e of probs) {
     const bits = [new Date(e.at).toISOString().slice(11, 19), bfSafeCode(e.kind)];
@@ -6838,147 +6842,147 @@ function bookforgeDiagnostics(extra) {
   if (panel.length) L.push(`Panel problems shown: ${panel.join(", ")}`);
   return L.join("\n") + "\n";
 }
-ipcMain.handle("bookforge:status", (_evt, payload) => bookforgeStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
-ipcMain.handle("bookforge:diagnostics", (_evt, extra) => {
-  try { return { ok: true, text: bookforgeDiagnostics(extra) }; }
+ipcMain.handle("akowe:status", (_evt, payload) => akoweStatusSnapshot({ panelOpen: !!(payload && payload.panelOpen) }));
+ipcMain.handle("akowe:diagnostics", (_evt, extra) => {
+  try { return { ok: true, text: akoweDiagnostics(extra) }; }
   catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
 });
-ipcMain.handle("bookforge:copy-diagnostics", (_evt, extra) => {
+ipcMain.handle("akowe:copy-diagnostics", (_evt, extra) => {
   let text;
-  try { text = bookforgeDiagnostics(extra); } catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
+  try { text = akoweDiagnostics(extra); } catch (e) { return { ok: false, error: "DIAGNOSTICS_FAILED" }; }
   try {
     if (!clipboard || typeof clipboard.writeText !== "function") return { ok: false, error: "NO_CLIPBOARD", text };
     clipboard.writeText(text);
-    logEvent("bookforge-diagnostics-copied", { chars: text.length });
+    logEvent("akowe-diagnostics-copied", { chars: text.length });
     return { ok: true, text };
   } catch (e) { return { ok: false, error: "NO_CLIPBOARD", text }; }
 });
-ipcMain.handle("bookforge:set-enabled", async (_evt, payload) => {
+ipcMain.handle("akowe:set-enabled", async (_evt, payload) => {
   const enabled = !!(payload && payload.enabled);
-  state.bookforge.enabled = enabled;
+  state.akowe.enabled = enabled;
   saveStateDebounced();
   if (enabled) {
-    const r = await startBookforgeBridge();
-    logEvent("bookforge-enabled", { ok: r.ok, error: r.error || null, port: bookforgeBridgePort() });
+    const r = await startAkoweBridge();
+    logEvent("akowe-enabled", { ok: r.ok, error: r.error || null, port: akoweBridgePort() });
   } else {
-    await stopBookforgeBridge();
-    logEvent("bookforge-disabled", {});
+    await stopAkoweBridge();
+    logEvent("akowe-disabled", {});
   }
-  return bookforgeStatusSnapshot();
+  return akoweStatusSnapshot();
 });
 // The token goes to the clipboard from the main process; the renderer only
 // gets it back when the user explicitly asks to reveal it.
-ipcMain.handle("bookforge:copy-token", () => {
+ipcMain.handle("akowe:copy-token", () => {
   try {
-    const token = bookforgeBridgeMod.loadOrCreateToken(userDataDir());
+    const token = akoweBridgeMod.loadOrCreateToken(userDataDir());
     if (clipboard && typeof clipboard.writeText === "function") clipboard.writeText(token);
     else return { ok: false, error: "NO_CLIPBOARD" };
     return { ok: true };
   } catch (e) { return { ok: false, error: "TOKEN_UNAVAILABLE" }; }
 });
-ipcMain.handle("bookforge:reveal-token", () => {
-  try { return { ok: true, token: bookforgeBridgeMod.loadOrCreateToken(userDataDir()) }; }
+ipcMain.handle("akowe:reveal-token", () => {
+  try { return { ok: true, token: akoweBridgeMod.loadOrCreateToken(userDataDir()) }; }
   catch (e) { return { ok: false, error: "TOKEN_UNAVAILABLE" }; }
 });
-ipcMain.handle("bookforge:regenerate-token", () => {
+ipcMain.handle("akowe:regenerate-token", () => {
   try {
-    const t = bookforgeBridgeMod.regenerateToken(userDataDir());
-    if (bookforgeBridge && bookforgeBridge.setToken) bookforgeBridge.setToken(t); // takes effect immediately; the old token stops working
+    const t = akoweBridgeMod.regenerateToken(userDataDir());
+    if (akoweBridge && akoweBridge.setToken) akoweBridge.setToken(t); // takes effect immediately; the old token stops working
     bfKeyChangedAt = Date.now();
-    logEvent("bookforge-token-regenerated", {});
-    bookforgeNoteActivity({ kind: "key_changed" });
-    return bookforgeStatusSnapshot();
+    logEvent("akowe-token-regenerated", {});
+    akoweNoteActivity({ kind: "key_changed" });
+    return akoweStatusSnapshot();
   } catch (e) { return { ok: false, error: "TOKEN_WRITE_FAILED" }; }
 });
 
-// ---- 🧪 Test BookForge link: a REAL, documented end-to-end check -------------
-// Orchestration lives in bookforge-link-test.js (pure, unit-tested). Here we
+// ---- 🧪 Test Akọwe link: a REAL, documented end-to-end check -------------
+// Orchestration lives in akowe-link-test.js (pure, unit-tested). Here we
 // give it the real pieces: the bridge status, the key file, pane readiness and
 // Node's http client — so the round trips go through the bridge's own HTTP API
-// exactly like BookForge's do. Reports go to the logs folder as
-// bookforge-link-test-<stamp>.md / .json (no key, no prompt text).
+// exactly like Akọwe's do. Reports go to the logs folder as
+// akowe-link-test-<stamp>.md / .json (no key, no prompt text).
 const bfLinkTest = { running: false, stop: false, lastReport: null, lastSummary: null, lastSteps: null };
-// Where BookForge itself runs. Default http://127.0.0.1:8780 (BookForge's own
-// default); BOOKFORGE_PORT (the same variable BookForge reads) changes the port;
-// AUTOINJECTOR_BOOKFORGE_APP_URL (a full loopback .../api/ping URL) overrides both.
-// When neither is set, BookForge falls back to 8781..8799 if 8780 is busy, so
-// bookforgeFindApp() looks there too.
-const BOOKFORGE_APP_DEFAULT_PORT = 8780;
-function bookforgeAppPort() {
-  const p = Number(process.env.BOOKFORGE_PORT);
-  return Number.isInteger(p) && p > 0 && p < 65536 ? p : BOOKFORGE_APP_DEFAULT_PORT;
+// Where Akọwe itself runs. Default http://127.0.0.1:8780 (Akọwe's own
+// default); AKOWE_PORT (the same variable Akọwe reads) changes the port;
+// AUTOINJECTOR_AKOWE_APP_URL (a full loopback .../api/ping URL) overrides both.
+// When neither is set, Akọwe falls back to 8781..8799 if 8780 is busy, so
+// akoweFindApp() looks there too.
+const AKOWE_APP_DEFAULT_PORT = 8780;
+function akoweAppPort() {
+  const p = Number(akoweLegacy.appEnv("PORT")); // AKOWE_PORT (or the old BOOKFORGE_PORT)
+  return Number.isInteger(p) && p > 0 && p < 65536 ? p : AKOWE_APP_DEFAULT_PORT;
 }
-function bookforgeAppUrl() {
-  const u = String(process.env.AUTOINJECTOR_BOOKFORGE_APP_URL || "").trim();
+function akoweAppUrl() {
+  const u = akoweLegacy.aiEnv("APP_URL");
   if (/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u)) return u;
-  return `http://127.0.0.1:${bookforgeAppPort()}/api/ping`;
+  return `http://127.0.0.1:${akoweAppPort()}/api/ping`;
 }
-function bookforgeAppConfigured() { return !!(String(process.env.AUTOINJECTOR_BOOKFORGE_APP_URL || "").trim() || process.env.BOOKFORGE_PORT); }
-// GET <ping> -> { running, base, pingUrl, version, other }  (other = something answered that isn't BookForge)
-async function bookforgePing(pingUrl, timeoutMs) {
+function akoweAppConfigured() { return !!(akoweLegacy.aiEnv("APP_URL") || akoweLegacy.appEnv("PORT")); }
+// GET <ping> -> { running, base, pingUrl, version, other }  (other = something answered that isn't Akọwe)
+async function akowePing(pingUrl, timeoutMs) {
   let base = null;
   try { base = new URL(pingUrl).origin + "/"; } catch (_) { return { running: false, base: null, pingUrl, other: false }; }
   try {
-    const r = await bookforgeLinkTest.nodeHttp({ method: "GET", url: pingUrl, timeoutMs: timeoutMs || 3000 });
-    if (r.status === 200 && r.json && r.json.app === "bookforge") return { running: true, base, pingUrl, version: r.json.version || null, other: false };
+    const r = await akoweLinkTest.nodeHttp({ method: "GET", url: pingUrl, timeoutMs: timeoutMs || 3000 });
+    if (r.status === 200 && r.json && akoweLegacy.isAppId(r.json.app)) return { running: true, base, pingUrl, version: r.json.version || null, other: false };
     return { running: false, base, pingUrl, other: true, http_status: r.status };
   } catch (e) { return { running: false, base, pingUrl, other: false, error: (e && e.code) || "ERROR" }; }
 }
 // scan: also look on 8781..8799 (only when the user pressed Connect / the link
-// test / Start BookForge — never from the panel's background check, L1).
-async function bookforgeFindApp({ scan = true } = {}) {
+// test / Start Akọwe — never from the panel's background check, L1).
+async function akoweFindApp({ scan = true } = {}) {
   if (scan) bfApp.userAsked = true; // only the author's own actions scan (L1)
-  const first = await bookforgePing(bookforgeAppUrl(), 3000);
-  if (first.running || bookforgeAppConfigured() || !scan) return first;
+  const first = await akowePing(akoweAppUrl(), 3000);
+  if (first.running || akoweAppConfigured() || !scan) return first;
   const tries = [];
-  for (let p = BOOKFORGE_APP_DEFAULT_PORT + 1; p < BOOKFORGE_APP_DEFAULT_PORT + 20; p++) tries.push(bookforgePing(`http://127.0.0.1:${p}/api/ping`, 1500));
+  for (let p = AKOWE_APP_DEFAULT_PORT + 1; p < AKOWE_APP_DEFAULT_PORT + 20; p++) tries.push(akowePing(`http://127.0.0.1:${p}/api/ping`, 1500));
   const found = (await Promise.all(tries)).find((x) => x.running);
   return found || first;
 }
-// Cached "is BookForge running?" for the panel: refreshed in the background at most every 30 s.
+// Cached "is Akọwe running?" for the panel: refreshed in the background at most every 30 s.
 const bfApp = { running: null, base: null, version: null, checkedAt: 0, checking: false, userAsked: false };
-// "Ping BookForge at most every 30 s" (the panel's health dot); Connect and the
+// "Ping Akọwe at most every 30 s" (the panel's health dot); Connect and the
 // link test still check right away when the user presses them.
 const BF_APP_CHECK_MS = Number(process.env.AUTOINJECTOR_BF_APP_CHECK_MS) || 30000;
-function bookforgeAppCheckSoon(force) {
+function akoweAppCheckSoon(force) {
   if (bfApp.checking || (!force && Date.now() - bfApp.checkedAt < BF_APP_CHECK_MS)) return;
   bfApp.checking = true;
-  // Background check: BookForge's usual address, or the one Connect found.
-  const remembered = bfApp.base && !bookforgeAppConfigured() ? `${bfApp.base}api/ping` : null;
-  const check = remembered && remembered !== bookforgeAppUrl()
-    ? bookforgePing(remembered, 3000).then((r) => (r.running ? r : bookforgeFindApp({ scan: false })))
-    : bookforgeFindApp({ scan: false });
+  // Background check: Akọwe's usual address, or the one Connect found.
+  const remembered = bfApp.base && !akoweAppConfigured() ? `${bfApp.base}api/ping` : null;
+  const check = remembered && remembered !== akoweAppUrl()
+    ? akowePing(remembered, 3000).then((r) => (r.running ? r : akoweFindApp({ scan: false })))
+    : akoweFindApp({ scan: false });
   check.then((r) => {
     const changed = r.running !== bfApp.running || r.base !== bfApp.base;
     Object.assign(bfApp, { running: r.running, base: r.running ? r.base : bfApp.base || r.base, version: r.version || null, checkedAt: Date.now() });
-    if (changed) { try { broadcast("bookforge-activity", { event: null, status: bookforgeStatusSnapshot() }); } catch (_) {} }
+    if (changed) { try { broadcast("akowe-activity", { event: null, status: akoweStatusSnapshot() }); } catch (_) {} }
   }).catch(() => {}).finally(() => { bfApp.checking = false; });
 }
-async function runBookforgeLinkTestNow() {
+async function runAkoweLinkTestNow() {
   if (bfLinkTest.running) return { ok: false, error: "ALREADY_RUNNING" };
   const sites = SITE_IDS.filter((s) => state.enabled && state.enabled[s]);
   Object.assign(bfLinkTest, { running: true, stop: false });
-  const stamp = bookforgeLinkTest.stampNow();
-  logEvent("bookforge-linktest-start", { sites });
-  bookforgeNoteActivity({ kind: "linktest", say: "Link test started", tone: "info" });
-  broadcast("bookforge-linktest-progress", { status: "start", sites, stamp });
+  const stamp = akoweLinkTest.stampNow();
+  logEvent("akowe-linktest-start", { sites });
+  akoweNoteActivity({ kind: "linktest", say: "Link test started", tone: "info" });
+  broadcast("akowe-linktest-progress", { status: "start", sites, stamp });
   let r;
   try {
-    r = await bookforgeLinkTest.runLinkTest({
+    r = await akoweLinkTest.runLinkTest({
       sites,
       stamp,
       label: siteLabel,
-      getStatus: () => bookforgeStatusSnapshot(),
-      keyFileExists: () => fs.existsSync(bookforgeBridgeMod.tokenPath(userDataDir())),
-      readKey: () => bookforgeBridgeMod.readToken(userDataDir()),
-      siteReady: bookforgeSiteReady,
-      bookforgeUrl: await (async () => { try { const f = await bookforgeFindApp(); return f.running ? f.pingUrl : bookforgeAppUrl(); } catch (_) { return bookforgeAppUrl(); } })(),
-      getConnection: () => bookforgeStatusSnapshot().connection,
-      replyTimeoutMs: Number(process.env.AUTOINJECTOR_BF_LINKTEST_MS) || bookforgeLinkTest.DEFAULT_REPLY_TIMEOUT_MS,
+      getStatus: () => akoweStatusSnapshot(),
+      keyFileExists: () => fs.existsSync(akoweBridgeMod.tokenPath(userDataDir())),
+      readKey: () => akoweBridgeMod.readToken(userDataDir()),
+      siteReady: akoweSiteReady,
+      akoweUrl: await (async () => { try { const f = await akoweFindApp(); return f.running ? f.pingUrl : akoweAppUrl(); } catch (_) { return akoweAppUrl(); } })(),
+      getConnection: () => akoweStatusSnapshot().connection,
+      replyTimeoutMs: Number(process.env.AUTOINJECTOR_BF_LINKTEST_MS) || akoweLinkTest.DEFAULT_REPLY_TIMEOUT_MS,
       shouldStop: () => bfLinkTest.stop,
       onProgress: (p) => {
-        broadcast("bookforge-linktest-progress", p);
-        if (p.status !== "running") logEvent(p.status === "fail" ? "bookforge-linktest-step-fail" : "bookforge-linktest-step", { step: p.id, status: p.status, detail: p.detail });
+        broadcast("akowe-linktest-progress", p);
+        if (p.status !== "running") logEvent(p.status === "fail" ? "akowe-linktest-step-fail" : "akowe-linktest-step", { step: p.id, status: p.status, detail: p.detail });
       }
     });
   } catch (e) {
@@ -6987,183 +6991,185 @@ async function runBookforgeLinkTestNow() {
     bfLinkTest.running = false;
   }
   if (!r.ok) {
-    logEvent("bookforge-linktest-error", { error: r.error });
-    broadcast("bookforge-linktest-progress", { status: "done", ok: false, error: r.error });
+    logEvent("akowe-linktest-error", { error: r.error });
+    broadcast("akowe-linktest-progress", { status: "done", ok: false, error: r.error });
     return r;
   }
   let appVersion = "?"; try { appVersion = app.getVersion ? app.getVersion() : "?"; } catch (_) {}
   const meta = {
     appVersion,
-    bookforgeUrl: bookforgeAppUrl(),
+    akoweUrl: akoweAppUrl(),
     env: { os: `${process.platform} ${require("os").release()}`, arch: process.arch, node: process.versions.node, electron: process.versions.electron || null },
-    activity: bookforgeActivity.slice(-30).map((a) => ({ at: a.at, kind: a.kind, site: a.site, outcome: a.outcome, http_status: a.http_status, say: a.say }))
+    activity: akoweActivity.slice(-30).map((a) => ({ at: a.at, kind: a.kind, site: a.site, outcome: a.outcome, http_status: a.http_status, say: a.say }))
   };
   let file = null;
   let jsonFile = null;
   try {
     const dir = outputManager.logsDir();
-    file = path.join(dir, `bookforge-link-test-${stamp}.md`);
-    jsonFile = path.join(dir, `bookforge-link-test-${stamp}.json`);
-    fs.writeFileSync(file, bookforgeLinkTest.formatReport(r, meta));
-    fs.writeFileSync(jsonFile, JSON.stringify(bookforgeLinkTest.reportJson(r, meta), null, 2));
-  } catch (e) { logEvent("bookforge-linktest-report-error", { error: String(e) }); file = null; jsonFile = null; }
+    file = path.join(dir, `akowe-link-test-${stamp}.md`);
+    jsonFile = path.join(dir, `akowe-link-test-${stamp}.json`);
+    fs.writeFileSync(file, akoweLinkTest.formatReport(r, meta));
+    fs.writeFileSync(jsonFile, JSON.stringify(akoweLinkTest.reportJson(r, meta), null, 2));
+  } catch (e) { logEvent("akowe-linktest-report-error", { error: String(e) }); file = null; jsonFile = null; }
   const summary = { headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total, stopped: r.stopped, at: Date.now() };
   bfLinkTest.lastReport = file;
   bfLinkTest.lastSummary = summary;
   bfLinkTest.lastSteps = r.results.map((x) => ({ id: x.id, status: x.status, http_status: x.http_status || null })); // ids/outcomes only (diagnostics)
-  logEvent(r.failCount ? "bookforge-linktest-done-with-failures" : "bookforge-linktest-done", { passed: r.passCount, failed: r.failCount, skipped: r.skipCount, stopped: r.stopped, report: file });
-  bookforgeNoteActivity({ kind: "linktest", say: `Link test finished: ${r.passCount} passed, ${r.failCount} failed, ${r.skipCount} skipped`, tone: r.failCount ? "error" : "ok" });
+  logEvent(r.failCount ? "akowe-linktest-done-with-failures" : "akowe-linktest-done", { passed: r.passCount, failed: r.failCount, skipped: r.skipCount, stopped: r.stopped, report: file });
+  akoweNoteActivity({ kind: "linktest", say: `Link test finished: ${r.passCount} passed, ${r.failCount} failed, ${r.skipCount} skipped`, tone: r.failCount ? "error" : "ok" });
   const out = {
     ok: true, stopped: r.stopped, headline: r.headline, passCount: r.passCount, failCount: r.failCount, skipCount: r.skipCount, total: r.total,
     report: file, reportJson: jsonFile,
     steps: r.results.map((x) => ({ id: x.id, name: x.name, status: x.status, detail: x.detail, tip: x.tip || null, ms: x.ms }))
   };
-  broadcast("bookforge-linktest-progress", { status: "done", ok: true, summary: out });
+  broadcast("akowe-linktest-progress", { status: "done", ok: true, summary: out });
   return out;
 }
-ipcMain.handle("bookforge:linktest-run", async () => { try { return await runBookforgeLinkTestNow(); } catch (e) { bfLinkTest.running = false; return { ok: false, error: String(e) }; } });
-ipcMain.handle("bookforge:linktest-stop", () => { bfLinkTest.stop = true; logEvent("bookforge-linktest-stop-requested", {}); return { ok: true }; });
-ipcMain.handle("bookforge:linktest-open-report", async (_evt, { file } = {}) => {
+ipcMain.handle("akowe:linktest-run", async () => { try { return await runAkoweLinkTestNow(); } catch (e) { bfLinkTest.running = false; return { ok: false, error: String(e) }; } });
+ipcMain.handle("akowe:linktest-stop", () => { bfLinkTest.stop = true; logEvent("akowe-linktest-stop-requested", {}); return { ok: true }; });
+ipcMain.handle("akowe:linktest-open-report", async (_evt, { file } = {}) => {
   try {
     const f = String(file || "");
-    if (!f || path.dirname(f) !== outputManager.logsDir() || !bookforgeLinkTest.REPORT_NAME_RE.test(path.basename(f))) return { ok: false, error: "BAD_FILE" };
+    if (!f || path.dirname(f) !== outputManager.logsDir() || !akoweLinkTest.REPORT_NAME_RE.test(path.basename(f))) return { ok: false, error: "BAD_FILE" };
     const err = await shell.openPath(f);
     return err ? { ok: false, error: err } : { ok: true };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 
-// ---- 🔗 Connect BookForge: one click, no copy/paste (contract v1.1) ----------
-// 1. turn the bridge on if it's off; 2. check BookForge is running (GET
+// ---- 🔗 Connect Akọwe: one click, no copy/paste (contract v1.1) ----------
+// 1. turn the bridge on if it's off; 2. check Akọwe is running (GET
 // /api/ping); 3. make a one-time pairing code (2 minutes, single use) and open
-// BookForge in the default browser at
+// Akọwe in the default browser at
 //   http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<bridge url>
-// BookForge then trades the code for the key with POST /v1/pair — the
+// Akọwe then trades the code for the key with POST /v1/pair — the
 // connection key itself is NEVER put in a URL. 4. the panel watches for the
-// pairing and BookForge's first POST /v1/status, then shows "Connected ✔".
+// pairing and Akọwe's first POST /v1/status, then shows "Connected ✔".
 // Neither the code nor the key is ever logged.
 const BF_NO_STATUS_AFTER_MS = 30000; // paired, but no status this long after -> say so
 const bfConnect = { phase: "idle", message: null, startedAt: null, expiresAt: null, pairedAt: null, connectedAt: null, canStartApp: false, step: null, at: null };
 let bfConnectBusy = false;
-function bookforgeSetConnect(phase, extra) {
+function akoweSetConnect(phase, extra) {
   Object.assign(bfConnect, { message: null, step: null }, extra || {}, { phase, at: Date.now() });
-  logEvent("bookforge-connect", { phase, step: bfConnect.step || null }); // never the code or the key
+  logEvent("akowe-connect", { phase, step: bfConnect.step || null }); // never the code or the key
   return bfConnect;
 }
 // Move the Connect flow along from what the bridge has seen (called on every snapshot).
-function bookforgeConnectAdvance(snap) {
+function akoweConnectAdvance(snap) {
   const c = bfConnect;
   // Once connected, fall back to "idle" if the bridge goes off or a new key is made.
-  if (c.phase === "connected" && (!snap.enabled || !snap.listening || (c.connectedAt && c.connectedAt <= bfKeyChangedAt))) { bookforgeSetConnect("idle"); return; }
+  if (c.phase === "connected" && (!snap.enabled || !snap.listening || (c.connectedAt && c.connectedAt <= bfKeyChangedAt))) { akoweSetConnect("idle"); return; }
   if (!["waiting", "paired", "no_status"].includes(c.phase)) return;
   const t = Date.now();
-  if (!snap.enabled || !snap.listening) { bookforgeSetConnect("error", { step: "bridge", message: "The bridge was turned off while connecting. Press Connect again." }); return; }
+  if (!snap.enabled || !snap.listening) { akoweSetConnect("error", { step: "bridge", message: "The bridge was turned off while connecting. Press Connect again." }); return; }
   const pairedAt = snap.pairing && snap.pairing.lastPairedAt;
-  if (c.phase === "waiting" && pairedAt && pairedAt >= c.startedAt) { c.pairedAt = pairedAt; bookforgeSetConnect("paired", { pairedAt }); }
-  const b = snap.bookforge;
-  if ((c.phase === "paired" || c.phase === "no_status") && b && b.receivedAt >= c.pairedAt) { bookforgeSetConnect("connected", { connectedAt: b.receivedAt }); return; }
-  if (c.phase === "waiting" && t > c.expiresAt) bookforgeSetConnect("expired", { message: "BookForge didn't pick up the connection in time (the one-time code lasts 2 minutes). Press Connect again." });
-  else if (c.phase === "paired" && t - c.pairedAt > BF_NO_STATUS_AFTER_MS) bookforgeSetConnect("no_status", { message: "BookForge has the connection key, but hasn't sent its progress yet. Keep the BookForge page open. If this stays, update BookForge — the AIs still work either way." });
+  if (c.phase === "waiting" && pairedAt && pairedAt >= c.startedAt) { c.pairedAt = pairedAt; akoweSetConnect("paired", { pairedAt }); }
+  const b = snap.akowe;
+  if ((c.phase === "paired" || c.phase === "no_status") && b && b.receivedAt >= c.pairedAt) { akoweSetConnect("connected", { connectedAt: b.receivedAt }); return; }
+  if (c.phase === "waiting" && t > c.expiresAt) akoweSetConnect("expired", { message: "Akọwe didn't pick up the connection in time (the one-time code lasts 2 minutes). Press Connect again." });
+  else if (c.phase === "paired" && t - c.pairedAt > BF_NO_STATUS_AFTER_MS) akoweSetConnect("no_status", { message: "Akọwe has the connection key, but hasn't sent its progress yet. Keep the Akọwe page open. If this stays, update Akọwe — the AIs still work either way." });
 }
-// The BookForge launcher next to this app (../bookforge/run-bookforge.bat|.sh), if it exists.
-function bookforgeLauncher() {
-  const dir = String(process.env.AUTOINJECTOR_BOOKFORGE_DIR || "").trim() || path.join(__dirname, "..", "bookforge");
-  const f = path.join(dir, process.platform === "win32" ? "run-bookforge.bat" : "run-bookforge.sh");
-  try { return fs.statSync(f).isFile() ? f : null; } catch (_) { return null; }
+// The Akọwe launcher next to this app (../akowe/run-akowe.bat|.sh, or the
+// ../bookforge/run-bookforge.* of a checkout from before the rename), if it exists.
+function akoweLauncher() {
+  for (const f of akoweLegacy.launcherCandidates(__dirname, akoweLegacy.aiEnv("DIR"))) {
+    try { if (fs.statSync(f).isFile()) return f; } catch (_) {}
+  }
+  return null;
 }
-async function bookforgeConnectNow() {
+async function akoweConnectNow() {
   // 1. bridge on
-  if (!state.bookforge.enabled || !bookforgeBridge) {
-    state.bookforge.enabled = true;
+  if (!state.akowe.enabled || !akoweBridge) {
+    state.akowe.enabled = true;
     saveStateDebounced();
-    bookforgeSetConnect("starting_bridge");
-    const r = await startBookforgeBridge();
-    logEvent("bookforge-enabled", { ok: r.ok, error: r.error || null, port: bookforgeBridgePort(), via: "connect" });
-    if (!r.ok || !bookforgeBridge) {
-      const why = r.error === "EADDRINUSE" ? `another program is using port ${bookforgeBridgePort()} (often a second copy of AutoInjector) — close it and press Connect again` : `the bridge couldn't start (${r.error || "unknown error"})`;
-      return bookforgeSetConnect("error", { step: "bridge", message: `Couldn't connect: ${why}.` });
+    akoweSetConnect("starting_bridge");
+    const r = await startAkoweBridge();
+    logEvent("akowe-enabled", { ok: r.ok, error: r.error || null, port: akoweBridgePort(), via: "connect" });
+    if (!r.ok || !akoweBridge) {
+      const why = r.error === "EADDRINUSE" ? `another program is using port ${akoweBridgePort()} (often a second copy of AutoInjector) — close it and press Connect again` : `the bridge couldn't start (${r.error || "unknown error"})`;
+      return akoweSetConnect("error", { step: "bridge", message: `Couldn't connect: ${why}.` });
     }
   }
-  // 2. is BookForge running?
-  bookforgeSetConnect("checking");
-  const found = await bookforgeFindApp();
+  // 2. is Akọwe running?
+  akoweSetConnect("checking");
+  const found = await akoweFindApp();
   Object.assign(bfApp, { running: found.running, base: found.running ? found.base : bfApp.base || found.base, version: found.version || null, checkedAt: Date.now() });
   if (!found.running) {
-    const launcher = bookforgeLauncher();
-    const startWord = process.platform === "win32" ? "run-bookforge.bat" : "run-bookforge.sh";
-    return bookforgeSetConnect("not_running", {
-      step: "bookforge", canStartApp: !!launcher,
+    const launcher = akoweLauncher();
+    const startWord = process.platform === "win32" ? "run-akowe.bat" : "run-akowe.sh";
+    return akoweSetConnect("not_running", {
+      step: "akowe", canStartApp: !!launcher,
       message: found.other
-        ? `Something else is answering at ${found.base} — it isn't BookForge. Start BookForge with ${startWord} (or close the other program), then press Connect again.`
-        : `BookForge isn't running yet. Start BookForge with ${startWord}, then press Connect again.`
+        ? `Something else is answering at ${found.base} — it isn't Akọwe. Start Akọwe with ${startWord} (or close the other program), then press Connect again.`
+        : `Akọwe isn't running yet. Start Akọwe with ${startWord}, then press Connect again.`
     });
   }
   // 3. one-time code + open the browser (the key never goes into the URL)
-  if (!bookforgeBridge || typeof bookforgeBridge.createPairingCode !== "function") return bookforgeSetConnect("error", { step: "bridge", message: "The bridge isn't running. Press Connect again." });
+  if (!akoweBridge || typeof akoweBridge.createPairingCode !== "function") return akoweSetConnect("error", { step: "bridge", message: "The bridge isn't running. Press Connect again." });
   const startedAt = Date.now();
-  const code = bookforgeBridge.createPairingCode();
+  const code = akoweBridge.createPairingCode();
   rememberPairingCode(code); // P16: so an Extract can never contain it
-  const bridgeUrl = `http://127.0.0.1:${bookforgeBridge.status().port}`;
+  const bridgeUrl = `http://127.0.0.1:${akoweBridge.status().port}`;
   const url = `${found.base}#/pair?code=${encodeURIComponent(code)}&bridge=${encodeURIComponent(bridgeUrl)}`;
   try {
     if (!shell || typeof shell.openExternal !== "function") throw new Error("NO_SHELL");
     await shell.openExternal(url);
   } catch (e) {
-    return bookforgeSetConnect("error", { step: "browser", message: `Couldn't open your web browser. Open ${found.base} yourself, or use “Copy connection key” under “Other ways” and paste it into BookForge.` });
+    return akoweSetConnect("error", { step: "browser", message: `Couldn't open your web browser. Open ${found.base} yourself, or use “Copy connection key” under “Other ways” and paste it into Akọwe.` });
   }
-  return bookforgeSetConnect("waiting", { startedAt, expiresAt: startedAt + bookforgeBridgeMod.PAIR_CODE_TTL_MS, pairedAt: null, connectedAt: null, canStartApp: false });
+  return akoweSetConnect("waiting", { startedAt, expiresAt: startedAt + akoweBridgeMod.PAIR_CODE_TTL_MS, pairedAt: null, connectedAt: null, canStartApp: false });
 }
-ipcMain.handle("bookforge:connect", async () => {
-  if (bfConnectBusy) return Object.assign(bookforgeStatusSnapshot(), { busy: true });
+ipcMain.handle("akowe:connect", async () => {
+  if (bfConnectBusy) return Object.assign(akoweStatusSnapshot(), { busy: true });
   bfConnectBusy = true;
-  try { await bookforgeConnectNow(); }
-  catch (e) { bookforgeSetConnect("error", { step: "unknown", message: `Something went wrong while connecting (${String((e && e.message) || e).slice(0, 80)}). Press Connect again.` }); }
+  try { await akoweConnectNow(); }
+  catch (e) { akoweSetConnect("error", { step: "unknown", message: `Something went wrong while connecting (${String((e && e.message) || e).slice(0, 80)}). Press Connect again.` }); }
   finally { bfConnectBusy = false; }
-  return bookforgeStatusSnapshot();
+  return akoweStatusSnapshot();
 });
-// "Start BookForge for me": runs ../bookforge/run-bookforge.(bat|sh) detached, then
+// "Start Akọwe for me": runs ../akowe/run-akowe.(bat|sh) detached, then
 // waits (up to AUTOINJECTOR_BF_START_WAIT_MS, default 90 s — the first start installs
-// what BookForge needs) until /api/ping answers.
+// what Akọwe needs) until /api/ping answers.
 let bfAppStarting = false;
-ipcMain.handle("bookforge:start-app", async () => {
-  const launcher = bookforgeLauncher();
-  if (!launcher) return { ok: false, error: "NO_LAUNCHER", message: "Couldn't find BookForge next to this app. Start it yourself with run-bookforge.bat, then press Connect again." };
-  if (bfAppStarting) return { ok: false, error: "ALREADY_STARTING", message: "BookForge is already starting — give it a moment." };
+ipcMain.handle("akowe:start-app", async () => {
+  const launcher = akoweLauncher();
+  if (!launcher) return { ok: false, error: "NO_LAUNCHER", message: "Couldn't find Akọwe next to this app. Start it yourself with run-akowe.bat, then press Connect again." };
+  if (bfAppStarting) return { ok: false, error: "ALREADY_STARTING", message: "Akọwe is already starting — give it a moment." };
   bfAppStarting = true;
   try {
-    const pre = await bookforgeFindApp();
+    const pre = await akoweFindApp();
     if (pre.running) return { ok: true, running: true, already: true };
     const { spawn } = require("child_process");
     const dir = path.dirname(launcher);
     let child;
     try {
       child = process.platform === "win32"
-        ? spawn("cmd.exe", ["/d", "/s", "/c", `start "BookForge" "${launcher}"`], { cwd: dir, detached: true, stdio: "ignore", windowsVerbatimArguments: true })
+        ? spawn("cmd.exe", ["/d", "/s", "/c", `start "Akowe" "${launcher}"`], { cwd: dir, detached: true, stdio: "ignore", windowsVerbatimArguments: true })
         : spawn("sh", [launcher], { cwd: dir, detached: true, stdio: "ignore" });
-      child.on("error", (e) => logEvent("bookforge-app-start-error", { error: (e && e.code) || String(e) }));
+      child.on("error", (e) => logEvent("akowe-app-start-error", { error: (e && e.code) || String(e) }));
       child.unref();
     } catch (e) {
-      logEvent("bookforge-app-start-error", { error: (e && e.code) || String(e) });
-      return { ok: false, error: "SPAWN_FAILED", message: "Couldn't start BookForge. Start it yourself with run-bookforge.bat, then press Connect again." };
+      logEvent("akowe-app-start-error", { error: (e && e.code) || String(e) });
+      return { ok: false, error: "SPAWN_FAILED", message: "Couldn't start Akọwe. Start it yourself with run-akowe.bat, then press Connect again." };
     }
-    logEvent("bookforge-app-started", { launcher: path.basename(launcher) });
-    bookforgeNoteActivity({ kind: "app_start", say: "Starting BookForge for you…", tone: "info" });
+    logEvent("akowe-app-started", { launcher: path.basename(launcher) });
+    akoweNoteActivity({ kind: "app_start", say: "Starting Akọwe for you…", tone: "info" });
     const waitMs = Number(process.env.AUTOINJECTOR_BF_START_WAIT_MS) || 90000;
     const until = Date.now() + waitMs;
     while (Date.now() < until) {
       await new Promise((r) => setTimeout(r, Math.min(1500, Math.max(100, waitMs / 10))));
-      const f = await bookforgeFindApp();
+      const f = await akoweFindApp();
       if (f.running) { Object.assign(bfApp, { running: true, base: f.base, version: f.version || null, checkedAt: Date.now() }); return { ok: true, started: true, running: true }; }
     }
-    return { ok: true, started: true, running: false, message: "BookForge is still starting (the first start can take a few minutes). When its window says it is running, press Connect again." };
+    return { ok: true, started: true, running: false, message: "Akọwe is still starting (the first start can take a few minutes). When its window says it is running, press Connect again." };
   } finally { bfAppStarting = false; }
 });
-// Open a BookForge page in the browser (Review & approve, Go to current task,
-// Open BookForge). Only loopback http URLs; otherwise BookForge's own address.
-ipcMain.handle("bookforge:open-url", async (_evt, payload) => {
+// Open an Akọwe page in the browser (Review & approve, Go to current task,
+// Open Akọwe). Only loopback http URLs; otherwise Akọwe's own address.
+ipcMain.handle("akowe:open-url", async (_evt, payload) => {
   const raw = String((payload && payload.url) || "");
   let url = null;
   try { const u = new URL(raw); if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost") && !u.username && !u.password) url = u.href; } catch (_) {}
-  if (!url) url = bfApp.base || bookforgeAppUrl().replace(/api\/ping$/, "");
+  if (!url) url = bfApp.base || akoweAppUrl().replace(/api\/ping$/, "");
   try {
     if (!shell || typeof shell.openExternal !== "function") throw new Error("NO_SHELL");
     await shell.openExternal(url);
@@ -7202,10 +7208,10 @@ app.whenReady().then(() => {
   startServiceBridge();
   startManagedInterpreter();
   startManagedVoice();
-  // BookForge bridge: listens only if the user turned it on (persisted; default OFF).
-  if (state.bookforge.enabled) startBookforgeBridge().catch((e) => logEvent("bookforge-error", { error: String(e) }));
+  // Akọwe bridge: listens only if the user turned it on (persisted; default OFF).
+  if (state.akowe.enabled) startAkoweBridge().catch((e) => logEvent("akowe-error", { error: String(e) }));
 });
-app.on("will-quit", () => { stopBookforgeBridge(); });
+app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });
 app.on("before-quit", () => { try { if (terminal) terminal.stop(); } catch (_) {} try { if (lockers) lockers.stopAll(); } catch (_) {} try { serviceBridge.stop(); } catch (_) {} try { interpreterProvider.stopManaged(); } catch (_) {} try { voiceProvider.stopManaged(); } catch (_) {} try { ollamaManager.stopManaged(); } catch (_) {} });

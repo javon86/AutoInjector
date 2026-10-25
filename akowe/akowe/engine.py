@@ -26,12 +26,12 @@ from . import CONTRACT_VERSION
 from .canonical import (canonical_bytes, changed_pointers, iter_references, json_pointer, make_reference,
                         pointers_overlap, sha256_bytes, sha256_json)
 from .contracts import ACTIONS, ContractPackage, get_package
-from .errors import BookforgeError, error
+from .errors import AkoweError, error
 from .modules import get_handler
 from .modules.base import Context, Result
 from .store import Store, new_id, utcnow
 
-log = logging.getLogger("bookforge.engine")
+log = logging.getLogger("akowe.engine")
 
 STATUS_FROM_LIFECYCLE = {"DRAFT": "DRAFT", "VALIDATED": "VALIDATED", "APPROVED": "APPROVED",
                          "LOCKED": "APPROVED", "SUPERSEDED": "APPROVED", "REJECTED": "REJECTED"}
@@ -79,7 +79,7 @@ class Engine:
         attempt_id = new_id("attempt")
         try:
             return self._dispatch(request, principal_id, attempt_id, manual_candidate, evidence_origin)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return self._error_response(request_id, attempt_id, exc.errors, exc.status, exc.findings,
                                         exc.unresolved)
         except sqlite3.OperationalError as exc:
@@ -95,34 +95,34 @@ class Engine:
     # ================================================================== pipeline
     def _dispatch(self, request, principal_id, attempt_id, manual_candidate, evidence_origin) -> dict:
         if not isinstance(request, dict):
-            raise BookforgeError("INVALID_INPUT", "", "request must be a JSON object", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "", "request must be a JSON object", status="REJECTED")
         if "contract_version" in request and request["contract_version"] != CONTRACT_VERSION:
-            raise BookforgeError("UNSUPPORTED_CONTRACT", "/contract_version",
+            raise AkoweError("UNSUPPORTED_CONTRACT", "/contract_version",
                                  f"only {CONTRACT_VERSION} is accepted", status="REJECTED")
         op_id = request.get("target_operation")
         op = self.contracts.operation(op_id) if isinstance(op_id, str) else None
         if op is None:
-            raise BookforgeError("NOT_FOUND", "/target_operation", "unknown operation", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/target_operation", "unknown operation", status="REJECTED")
         action = request.get("action")
         if action not in op["modes"]:
-            raise BookforgeError("INVALID_INPUT", "/action", f"{op_id} does not support action {action!r}",
+            raise AkoweError("INVALID_INPUT", "/action", f"{op_id} does not support action {action!r}",
                                  status="REJECTED")
         errs = self.contracts.check(op_id, action, request)
         if errs:
             early = self._early_not_applicable(request, op, action, principal_id, attempt_id, errs)
             if early is not None:
                 return early
-            raise BookforgeError(errs[0]["code"], errs[0]["path"], errs[0]["message"], status="REJECTED",
+            raise AkoweError(errs[0]["code"], errs[0]["path"], errs[0]["message"], status="REJECTED",
                                  extra_errors=errs[1:])
         if evidence_origin == "FIXTURE":
             pass
         elif request["principal_id"] != principal_id:
-            raise BookforgeError("PERMISSION_DENIED", "/principal_id",
+            raise AkoweError("PERMISSION_DENIED", "/principal_id",
                                  "principal_id must match the authenticated principal", status="REJECTED")
         project_id, branch_id = request["project_id"], request["branch_id"]
         self._authorize(principal_id, project_id, branch_id, op["permission_scopes"][action])
         if _parse_time(request["deadline"]) <= _now():
-            raise BookforgeError("TIMEOUT", "/deadline", "deadline already passed before dispatch")
+            raise AkoweError("TIMEOUT", "/deadline", "deadline already passed before dispatch")
 
         request_hash = sha256_json({"action": action, "base_ref": request["base_ref"],
                                     "payload": request["payload"], "input_refs": request["input_refs"],
@@ -151,21 +151,21 @@ class Engine:
             return self._validate(ctx, handler, attempt_id, request_hash)
         if action == "ACCEPT":
             return self._accept(ctx, handler, attempt_id, request_hash)
-        raise BookforgeError("INVALID_INPUT", "/action", "unsupported action", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/action", "unsupported action", status="REJECTED")
 
     # ------------------------------------------------------------------ authorization
     def _authorize(self, principal_id: str, project_id: str, branch_id: str, scope: str):
         # Without any grant on the project we answer PERMISSION_DENIED and do not reveal existence.
         if not self.store.has_project_access(principal_id, project_id):
-            raise BookforgeError("PERMISSION_DENIED", "/project_id", "no access to this project", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "/project_id", "no access to this project", status="REJECTED")
         if self.store.project(project_id) is None:
-            raise BookforgeError("NOT_FOUND", "/project_id", "project not found", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/project_id", "project not found", status="REJECTED")
         if not self.store.branch_exists(project_id, branch_id):
-            raise BookforgeError("NOT_FOUND", "/branch_id", "branch not found", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/branch_id", "branch not found", status="REJECTED")
         if not self.store.has_project_access(principal_id, project_id, branch_id):
-            raise BookforgeError("PERMISSION_DENIED", "/branch_id", "no access to this branch", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "/branch_id", "no access to this branch", status="REJECTED")
         if not self.store.has_scope(principal_id, project_id, branch_id, scope):
-            raise BookforgeError("PERMISSION_DENIED", "", f"missing scope {scope}", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "", f"missing scope {scope}", status="REJECTED")
 
     # ------------------------------------------------------------------ idempotency
     def _check_receipt(self, project_id, branch_id, op_id, key, request_hash) -> dict | None:
@@ -173,7 +173,7 @@ class Engine:
         if row is None:
             return None
         if row["request_hash"] != request_hash:
-            raise BookforgeError("IDEMPOTENCY_CONFLICT", "/idempotency_key",
+            raise AkoweError("IDEMPOTENCY_CONFLICT", "/idempotency_key",
                                  "idempotency key reused with a different request", status="REJECTED")
         return json.loads(row["response"])
 
@@ -184,7 +184,7 @@ class Engine:
         if rule:
             rule_id, feature = rule
             if manifest is None or feature not in manifest.get("features", {}):
-                raise BookforgeError("MISSING_INPUT", "/feature_manifest/features/" + feature,
+                raise AkoweError("MISSING_INPUT", "/feature_manifest/features/" + feature,
                                      f"feature '{feature}' state is unknown; set it in the project feature manifest")
             if manifest["features"][feature] is not True:
                 return rule_id, f"{ctx.op_id} requires {feature}=true in feature manifest revision {manifest['revision']}"
@@ -206,7 +206,7 @@ class Engine:
         try:
             self._authorize(principal_id, request["project_id"], request["branch_id"],
                             op["permission_scopes"][action])
-        except BookforgeError:
+        except AkoweError:
             return None
         manifest = self.store.feature_manifest(request["project_id"], request["branch_id"])
         feature = rule[1]
@@ -230,30 +230,30 @@ class Engine:
     # ------------------------------------------------------------------ reference resolution
     def resolve_ref(self, ref: dict, project_id: str, branch_id: str, path: str) -> dict:
         if ref["owner"] != ref["module_id"][0]:
-            raise BookforgeError("INVALID_INPUT", path + "/owner", "owner must equal module_id[0]", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", path + "/owner", "owner must equal module_id[0]", status="REJECTED")
         if ref["project_id"] != project_id or ref["branch_id"] != branch_id:
-            raise BookforgeError("INVALID_INPUT", path, "foreign project/branch pin; use an explicit copy/merge "
+            raise AkoweError("INVALID_INPUT", path, "foreign project/branch pin; use an explicit copy/merge "
                                  "proposal for cross-branch content", status="REJECTED")
         rec = self.store.get_record(project_id, branch_id, ref["record_id"], ref["version"])
         if rec is None:
-            raise BookforgeError("NOT_FOUND", path, f"record {ref['record_id']} v{ref['version']} not found")
+            raise AkoweError("NOT_FOUND", path, f"record {ref['record_id']} v{ref['version']} not found")
         if rec["module_id"] != ref["module_id"]:
-            raise BookforgeError("INVALID_INPUT", path + "/module_id", "pinned module does not own this record",
+            raise AkoweError("INVALID_INPUT", path + "/module_id", "pinned module does not own this record",
                                  status="REJECTED")
         if rec["content_hash"] != ref["content_hash"]:
-            raise BookforgeError("HASH_MISMATCH", path + "/content_hash", "content hash does not match the pin",
+            raise AkoweError("HASH_MISMATCH", path + "/content_hash", "content hash does not match the pin",
                                  status="REJECTED")
         if rec["representation"] == "BINARY_ARTIFACT":
             self.store.read_binary(rec)  # verifies exact bytes
         elif rec["record_kind"] == "OUTPUT":
             errs = self.contracts.check(rec["module_id"], "OUTPUT", rec["data"])
             if errs:
-                raise BookforgeError("INVALID_INPUT", path, f"pinned record fails producer OUTPUT: {errs[0]['path']}",
+                raise AkoweError("INVALID_INPUT", path, f"pinned record fails producer OUTPUT: {errs[0]['path']}",
                                      status="REJECTED")
         elif rec["record_kind"] in SHARED_KIND_SCHEMAS:
             errs = self.contracts.check_shared(SHARED_KIND_SCHEMAS[rec["record_kind"]], rec["data"])
             if errs:
-                raise BookforgeError("INVALID_INPUT", path, f"pinned {rec['record_kind']} fails its schema",
+                raise AkoweError("INVALID_INPUT", path, f"pinned {rec['record_kind']} fails its schema",
                                      status="REJECTED")
         return rec
 
@@ -272,18 +272,18 @@ class Engine:
             binding = bindings.get(_ptr_template(ptr))
             if binding:
                 if rec["module_id"] not in binding["allowed_producers"]:
-                    raise BookforgeError("INVALID_INPUT", ptr + "/module_id",
+                    raise AkoweError("INVALID_INPUT", ptr + "/module_id",
                                          f"{rec['module_id']} is not a permitted producer for {binding['input_path']}",
                                          status="REJECTED")
                 kind = binding.get("required_record_kind")
                 if kind:
                     aux = (rec.get("data") or {}).get("auxiliary_record") or {}
                     if aux.get("record_kind") != kind:
-                        raise BookforgeError("INVALID_INPUT", ptr, f"requires an imported {kind} profile",
+                        raise AkoweError("INVALID_INPUT", ptr, f"requires an imported {kind} profile",
                                              status="REJECTED")
                     errs = self.contracts.check_shared(kind, aux.get("data"))
                     if errs:
-                        raise BookforgeError("INVALID_INPUT", ptr, f"{kind} data invalid at {errs[0]['path']}",
+                        raise AkoweError("INVALID_INPUT", ptr, f"{kind} data invalid at {errs[0]['path']}",
                                              status="REJECTED")
             ctx.resolved[ptr] = rec
         if req.get("base_ref"):
@@ -295,7 +295,7 @@ class Engine:
             errs = [dict(e, path="/manual_candidate" + e["path"])
                     for e in self.contracts.check(ctx.op_id, "OUTPUT", ctx.manual_candidate)]
             if errs:
-                raise BookforgeError(errs[0]["code"], errs[0]["path"], errs[0]["message"],
+                raise AkoweError(errs[0]["code"], errs[0]["path"], errs[0]["message"],
                                      status="REJECTED", extra_errors=errs[1:])
         result = handler.create(ctx)
         return self._publish(ctx, result, attempt_id, request_hash, version=1, record_id=result.record_id)
@@ -304,18 +304,18 @@ class Engine:
     def _update(self, ctx: Context, handler, attempt_id: str, request_hash: str) -> dict:
         base = ctx.base
         if base["module_id"] != ctx.op_id or base["record_kind"] != "OUTPUT":
-            raise BookforgeError("INVALID_INPUT", "/base_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/base_ref/module_id",
                                  f"UPDATE replaces {ctx.op_id} output records only", status="REJECTED")
         if base["version"] != base["latest_version"]:
-            raise BookforgeError("VERSION_CONFLICT", "/base_ref/version",
+            raise AkoweError("VERSION_CONFLICT", "/base_ref/version",
                                  f"stale base v{base['version']}; head is v{base['latest_version']}", status="REJECTED")
         head_lc = base["lifecycle"]
         if head_lc == "LOCKED" and not self._protected_change_authorized(ctx, base):
-            raise BookforgeError("LOCKED_FACT", "/base_ref", "record is LOCKED; a protected-change authorization "
+            raise AkoweError("LOCKED_FACT", "/base_ref", "record is LOCKED; a protected-change authorization "
                                  "(I10/K09 approval with scope OP:protected_change) is required", status="BLOCKED")
         try:
             result = handler.update(ctx)
-        except BookforgeError:
+        except AkoweError:
             # Another writer may have replaced the record while this handler read state the winner
             # had already moved on (e.g. two workers leasing one queue job). The root cause is then a
             # stale base, so say that (the caller re-reads and retries) rather than the symptom.
@@ -328,7 +328,7 @@ class Engine:
         head = self.store.query_one("SELECT latest_version FROM heads WHERE project_id=? AND branch_id=? AND record_id=?",
                                     (ctx.project_id, ctx.branch_id, base["record_id"]))
         if head is not None and head["latest_version"] != base["version"]:
-            raise BookforgeError("VERSION_CONFLICT", "/base_ref/version",
+            raise AkoweError("VERSION_CONFLICT", "/base_ref/version",
                                  f"stale base v{base['version']}; head is v{head['latest_version']}", status="REJECTED")
 
     def _protected_change_authorized(self, ctx: Context, base: dict) -> bool:
@@ -356,11 +356,11 @@ class Engine:
                                   result.errors or [error("MISSING_INPUT", "", "operation blocked")],
                                   self._source_refs(ctx, result), result.unresolved, None)
         if result.data is None:
-            raise BookforgeError("INTERNAL_ERROR", "", "handler returned no data")
+            raise AkoweError("INTERNAL_ERROR", "", "handler returned no data")
         errs = self.contracts.check(ctx.op_id, "OUTPUT", result.data)
         if errs:
             code = "INVALID_INPUT" if result.transform == "MANUAL" else "INTERNAL_ERROR"
-            raise BookforgeError(code, errs[0]["path"], f"result does not satisfy {ctx.op_id} OUTPUT: "
+            raise AkoweError(code, errs[0]["path"], f"result does not satisfy {ctx.op_id} OUTPUT: "
                                  f"{errs[0]['message']}", extra_errors=errs[1:])
         record_id = record_id or f"{ctx.op_id}-{uuid.uuid4().hex[:16]}"
         source_refs = self._source_refs(ctx, result)
@@ -459,7 +459,7 @@ class Engine:
                 else:
                     errs = []
                 if errs:
-                    raise BookforgeError("INTERNAL_ERROR", errs[0]["path"],
+                    raise AkoweError("INTERNAL_ERROR", errs[0]["path"],
                                          f"staged {s.module_id} {s.record_kind} invalid: {errs[0]['message']}")
                 ref = tx.insert_json_record(project_id=ctx.project_id, branch_id=ctx.branch_id, module_id=s.module_id,
                                             record_id=s.record_id, version=s.version, data=s.data,
@@ -468,7 +468,7 @@ class Engine:
                                             provenance_id=provenance_id, evidence_origin=ctx.evidence_origin,
                                             expected_latest=s.expected_latest, state=s.state)
             if ref != s.ref:
-                raise BookforgeError("INTERNAL_ERROR", "", "staged reference changed during commit")
+                raise AkoweError("INTERNAL_ERROR", "", "staged reference changed during commit")
             refs.append(ref)
         return refs
 
@@ -501,7 +501,7 @@ class Engine:
     def _read(self, ctx: Context, attempt_id: str, request_hash: str) -> dict:
         rec = ctx.base
         if rec["module_id"] != ctx.op_id:
-            raise BookforgeError("INVALID_INPUT", "/base_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/base_ref/module_id",
                                  f"{ctx.op_id} READ retrieves {ctx.op_id} records", status="REJECTED")
         findings = list(rec["findings"])
         if rec["lifecycle"] == "SUPERSEDED":
@@ -534,12 +534,12 @@ class Engine:
         cand = ctx.resolved.get("/payload/candidate_ref")
         base = ctx.base
         if cand is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/candidate_ref", "candidate_ref is required")
+            raise AkoweError("MISSING_INPUT", "/payload/candidate_ref", "candidate_ref is required")
         if cand["record_id"] != base["record_id"] or cand["version"] != base["version"]:
-            raise BookforgeError("INVALID_INPUT", "/payload/candidate_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/candidate_ref",
                                  "candidate_ref must pin the same revision as base_ref", status="REJECTED")
         if cand["module_id"] != ctx.op_id:
-            raise BookforgeError("INVALID_INPUT", "/payload/candidate_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/payload/candidate_ref/module_id",
                                  f"{ctx.op_id} validates its own records", status="REJECTED")
         return cand
 
@@ -553,7 +553,7 @@ class Engine:
         for parts, ref in iter_references(rec.get("data") or {}, ()):
             try:
                 self.resolve_ref(ref, ctx.project_id, ctx.branch_id, json_pointer(parts))
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 findings.append(ctx.finding("LINK_RESOLUTION", f"{json_pointer(parts)}: {exc.errors[0]['message']}",
                                             severity="BLOCKING", decision="FAIL"))
         for ref in rec["source_refs"]:
@@ -612,10 +612,10 @@ class Engine:
                 self._store_receipt(tx, ctx, request_hash, response)
             return response
         if rec["lifecycle"] in ("SUPERSEDED", "REJECTED"):
-            raise BookforgeError("INVALID_INPUT", "/payload/candidate_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/candidate_ref",
                                  f"candidate is {rec['lifecycle']} and cannot be accepted", status="REJECTED")
         if rec["version"] != rec["latest_version"]:
-            raise BookforgeError("VERSION_CONFLICT", "/payload/candidate_ref",
+            raise AkoweError("VERSION_CONFLICT", "/payload/candidate_ref",
                                  "a newer revision exists; accept the latest candidate", status="REJECTED")
         findings = self.run_validation(ctx, handler, rec) + self.accept_input_findings(ctx, rec)
         if self.blocking(findings):
@@ -631,7 +631,7 @@ class Engine:
         if approval_rec is not None:
             approval = self._check_approval(ctx, approval_rec, rec)
         elif handler.requires_explicit_approval(ctx, rec):
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/approval_ref",
                                  f"{ctx.op_id} acceptance needs a valid approval record for this exact candidate",
                                  unresolved=[f"{ctx.op_id}:approval"])
         gate = handler.accept_gate(ctx, rec, approval)
@@ -663,10 +663,10 @@ class Engine:
                     self._store_receipt(tx, ctx, request_hash, response)
                     return response
                 if current["version"] != current["latest_version"]:
-                    raise BookforgeError("VERSION_CONFLICT", "/payload/candidate_ref",
+                    raise AkoweError("VERSION_CONFLICT", "/payload/candidate_ref",
                                          "a newer revision was saved while this one was being approved; review and "
                                          "accept the latest candidate", status="REJECTED")
-                raise BookforgeError("INVALID_INPUT", "/payload/candidate_ref",
+                raise AkoweError("INVALID_INPUT", "/payload/candidate_ref",
                                      f"candidate became {current['lifecycle']} while it was being approved and "
                                      "cannot be accepted", status="REJECTED")
             tx.insert_approval(approval_body, ctx.project_id, ctx.branch_id)
@@ -697,7 +697,7 @@ class Engine:
         newer revision was saved, since `rec` was read (a concurrent DRAFT<->VALIDATED recheck is harmless)."""
         cur = self.store.get_record(ctx.project_id, ctx.branch_id, rec["record_id"], rec["version"])
         if cur is None:
-            raise BookforgeError("NOT_FOUND", "/payload/candidate_ref", "candidate no longer exists")
+            raise AkoweError("NOT_FOUND", "/payload/candidate_ref", "candidate no longer exists")
         if cur["lifecycle"] not in ("DRAFT", "VALIDATED") or cur["latest_version"] != rec["latest_version"]:
             return cur
         return None
@@ -764,30 +764,30 @@ class Engine:
         path = "/payload/approval_ref"
         latest = self.store.get_record(ctx.project_id, ctx.branch_id, approval_rec["record_id"])
         if latest is None or latest["version"] != approval_rec["version"]:
-            raise BookforgeError("APPROVAL_REQUIRED", path, "approval has a newer revision (revoked or "
+            raise AkoweError("APPROVAL_REQUIRED", path, "approval has a newer revision (revoked or "
                                  "superseded); pin the current decision")
         if approval_rec["module_id"] == "K09":
             from .k_runtime import check_k09_authorization
             check_k09_authorization(self.store, approval_rec, None, path)  # head, decision, expiry
             if rec is not None and not self._k09_binds(ctx, approval_rec, rec):
-                raise BookforgeError("APPROVAL_REQUIRED", path, "authorization does not bind this exact "
+                raise AkoweError("APPROVAL_REQUIRED", path, "authorization does not bind this exact "
                                      "candidate revision; prior approval cannot authorize changed output")
             data = approval_rec["data"]
             return {"source": approval_rec["ref"], "decision": data["decision"], "expiry": data["expiry"]}
         if approval_rec["module_id"] == "I10":
             body = (approval_rec.get("data") or {}).get("approval") or {}
             if body.get("revoked") or body.get("decision") != "APPROVED":
-                raise BookforgeError("APPROVAL_REQUIRED", path, f"approval decision is {body.get('decision')}")
+                raise AkoweError("APPROVAL_REQUIRED", path, f"approval decision is {body.get('decision')}")
             expiry = body.get("expires_at")
             if not expiry or _parse_time(expiry) <= _now():
-                raise BookforgeError("EXPIRED_APPROVAL", path, "approval has expired")
+                raise AkoweError("EXPIRED_APPROVAL", path, "approval has expired")
             subject = body.get("subject_ref") or {}
             if rec is not None and (subject.get("record_id"), subject.get("version"), subject.get("content_hash")) != (
                     rec["record_id"], rec["version"], rec["content_hash"]):
-                raise BookforgeError("APPROVAL_REQUIRED", path, "approval covers a different revision; prior "
+                raise AkoweError("APPROVAL_REQUIRED", path, "approval covers a different revision; prior "
                                      "approval cannot authorize changed output")
             return {"source": approval_rec["ref"], "decision": "APPROVED", "expiry": expiry}
-        raise BookforgeError("APPROVAL_REQUIRED", path, "approval_ref must be a K09 or I10 approval decision")
+        raise AkoweError("APPROVAL_REQUIRED", path, "approval_ref must be a K09 or I10 approval decision")
 
     def _k09_binds(self, ctx: Context, approval_rec: dict, rec: dict) -> bool:
         """A K09 decision covers the exact pin named in its stored binding or in its request's source pins."""
@@ -898,11 +898,11 @@ class Engine:
 
     def set_manifest(self, principal_id: str, project_id: str, branch_id: str, manifest: dict) -> dict:
         if not self.store.has_scope(principal_id, project_id, branch_id, "K02:create"):
-            raise BookforgeError("PERMISSION_DENIED", "", "missing scope K02:create", status="REJECTED")
+            raise AkoweError("PERMISSION_DENIED", "", "missing scope K02:create", status="REJECTED")
         manifest = dict(manifest, project_id=project_id, branch_id=branch_id, revision=1)
         errs = self.contracts.check_shared("FeatureManifest", manifest)
         if errs:
-            raise BookforgeError(errs[0]["code"], errs[0]["path"], errs[0]["message"], status="REJECTED")
+            raise AkoweError(errs[0]["code"], errs[0]["path"], errs[0]["message"], status="REJECTED")
         with self.store.transaction() as tx:
             stored = tx.put_feature_manifest(manifest)
             tx.insert_outbox(project_id, branch_id, "manifest.changed", {"revision": stored["revision"]})

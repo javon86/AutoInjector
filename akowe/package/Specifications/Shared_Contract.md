@@ -1,4 +1,4 @@
-# Bookforge consolidated implementation contract
+# Akọwe consolidated implementation contract
 Revision BF-IRB-1.0.0 | 12 October 2026
 
 ## 1. Baseline, scope and authority

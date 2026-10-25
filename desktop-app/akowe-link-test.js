@@ -1,6 +1,6 @@
 'use strict';
-// bookforge-link-test.js — the "🧪 Test BookForge link" self-test. It checks the
-// whole BookForge ⇄ AutoInjector path FOR REAL, the same way BookForge uses it:
+// akowe-link-test.js — the "🧪 Test Akọwe link" self-test. It checks the
+// whole Akọwe ⇄ AutoInjector path FOR REAL, the same way Akọwe uses it:
 // through the bridge's own loopback HTTP API with the real connection key, into
 // each Active AI's window and back — and documents every step.
 //
@@ -12,11 +12,11 @@
 //   right_key          GET /v1/health with the real key works (200)
 //   pane:<site>        for each Active AI: its window is loaded and free
 //   roundtrip:<site>   POST /v1/complete (request_id "selftest-<stamp>-<site>")
-//                      with a tiny JSON_SCHEMA prompt like BookForge sends; the
+//                      with a tiny JSON_SCHEMA prompt like Akọwe sends; the
 //                      reply must be one JSON object echoing a random word
-//   bookforge_running  GET http://127.0.0.1:8780/api/ping (optional; SKIPPED
-//                      with instructions when BookForge isn't running)
-//   bookforge_connected (only when deps.getConnection is given) BookForge has
+//   akowe_running  GET http://127.0.0.1:8780/api/ping (optional; SKIPPED
+//                      with instructions when Akọwe isn't running)
+//   akowe_connected (only when deps.getConnection is given) Akọwe has
 //                      the connection key and has talked to this app (paired /
 //                      sent a status). PASS or SKIPPED with instructions.
 //
@@ -27,8 +27,9 @@
 // unit-testable without Electron.
 const http = require('http');
 const crypto = require('crypto');
+const legacy = require('./akowe-legacy'); // an Akọwe from before the rename answers /api/ping with app "bookforge"
 
-const DEFAULT_BOOKFORGE_URL = 'http://127.0.0.1:8780/api/ping';
+const DEFAULT_AKOWE_URL = 'http://127.0.0.1:8780/api/ping';
 const DEFAULT_REPLY_TIMEOUT_MS = 180000;
 const ENDING_CHARS = 80;
 const WORDS = ['maple', 'harbor', 'lantern', 'meadow', 'copper', 'violet', 'pebble', 'falcon', 'orchard', 'cobalt',
@@ -39,24 +40,24 @@ const STEP_NAMES = {
   key_file: 'The connection key exists',
   wrong_key: 'A wrong connection key is refused',
   right_key: 'The right connection key is accepted',
-  bookforge_running: 'BookForge is running?',
-  bookforge_connected: 'BookForge is connected to this app',
+  akowe_running: 'Akọwe is running?',
+  akowe_connected: 'Akọwe is connected to this app',
 };
 const TIPS = {
   bridge_off: 'Tick “Turn the bridge on” in this panel, then run the test again.',
   port_in_use: 'Another program (often a second copy of AutoInjector) is using that port. Close it, then untick and tick “Turn the bridge on” again.',
-  bridge_error: 'Untick and tick “Turn the bridge on” again. If it keeps failing, restart AutoInjector and look in the Activity Log for “bookforge-error”.',
-  key_file: 'Turn the bridge off and on again — the app makes a new connection key automatically. Then copy it into BookForge again.',
+  bridge_error: 'Untick and tick “Turn the bridge on” again. If it keeps failing, restart AutoInjector and look in the Activity Log for “akowe-error”.',
+  key_file: 'Turn the bridge off and on again — the app makes a new connection key automatically. Then copy it into Akọwe again.',
   wrong_key: 'IMPORTANT: the bridge did not refuse a wrong key. Turn the bridge off and do not use it until this is fixed — report it.',
-  right_key: 'The bridge did not accept its own key. Click “Make a new key”, paste the new key into BookForge, and run the test again.',
+  right_key: 'The bridge did not accept its own key. Click “Make a new key”, paste the new key into Akọwe, and run the test again.',
   pane_missing: 'Tick this AI as Active in the app and let its window finish loading (log in if it asks), then run the test again.',
   roundtrip_timeout: 'Look at that AI’s window: is it still typing, showing an error, or asking you to log in? Its reply must end with its [FROM: NAME] tag so the app knows it has finished. Let it go idle, then test again.',
   roundtrip_send: 'The app could not type into that AI’s window. Make sure it is logged in and no pop-up is covering the message box, or run that pane’s own 🧪 Test, then test again.',
   roundtrip_not_ready: 'That AI’s window is not loaded. Reload it (or log in), wait until it is idle, then test again.',
   roundtrip_auth: 'The connection key changed while the test was running. Run the test again.',
-  roundtrip_json: 'The AI answered, but not with the one JSON object it was asked for. BookForge re-asks automatically when this happens, so occasional slips are OK; if it keeps happening, start a new chat in that AI’s window and test again.',
+  roundtrip_json: 'The AI answered, but not with the one JSON object it was asked for. Akọwe re-asks automatically when this happens, so occasional slips are OK; if it keeps happening, start a new chat in that AI’s window and test again.',
   roundtrip_word: 'The AI answered with JSON but did not repeat the test word — the reply may have come from an earlier message. Let the window go idle, then test again.',
-  roundtrip_other: 'Run the test again. If it keeps failing, look in the Activity Log for “bookforge-” lines.',
+  roundtrip_other: 'Run the test again. If it keeps failing, look in the Activity Log for “akowe-” lines.',
 };
 
 function stampNow(d) {
@@ -68,14 +69,14 @@ function fmtMs(ms) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// The test prompt: same shape BookForge's adapter sends (JSON_SCHEMA: block).
+// The test prompt: same shape Akọwe's adapter sends (JSON_SCHEMA: block).
 function buildPrompt(site, word) {
   const schema = {
     type: 'object', additionalProperties: false, required: ['ok', 'site', 'word'],
     properties: { ok: { type: 'boolean', const: true }, site: { type: 'string', const: site }, word: { type: 'string', const: word } },
   };
   return [
-    'AutoInjector link test (automatic — this app is checking its BookForge connection; this is not a task).',
+    'AutoInjector link test (automatic — this app is checking its Akọwe connection; this is not a task).',
     '',
     `Reply with exactly this JSON object: {"ok": true, "site": "${site}", "word": "${word}"}`,
     '',
@@ -101,7 +102,7 @@ function analyzeReply(text) {
   }
   const a = t.indexOf('{');
   const b = t.lastIndexOf('}');
-  if (a >= 0 && b > a && (obj = tryParse(t.slice(a, b + 1)))) return { obj, how: 'JSON with extra words around it (BookForge copes with this)' };
+  if (a >= 0 && b > a && (obj = tryParse(t.slice(a, b + 1)))) return { obj, how: 'JSON with extra words around it (Akọwe copes with this)' };
   return { obj: null, how: t ? 'no JSON object found in the reply' : 'an empty reply' };
 }
 
@@ -139,8 +140,8 @@ function nodeHttp({ method = 'GET', url, headers = {}, body, timeoutMs = 10000 }
 //   readKey() -> string                      the real connection key ('' if none)
 //   siteReady(site) -> bool
 //   http({ method, url, headers, body, timeoutMs }) -> Promise<{ status, json, text }>  (default: nodeHttp)
-//   bookforgeUrl (default http://127.0.0.1:8780/api/ping)
-//   getConnection() -> { connected, paired, lastContactAt, statusAt, stale }   (optional; adds bookforge_connected)
+//   akoweUrl (default http://127.0.0.1:8780/api/ping)
+//   getConnection() -> { connected, paired, lastContactAt, statusAt, stale }   (optional; adds akowe_connected)
 //   replyTimeoutMs (default 180000; clamped to the bridge's 10000..900000)
 //   onProgress({ id, name, site, index, total, status, detail })
 //   shouldStop() -> bool, now(), sleep(ms), pollMs, randomWord(), stamp
@@ -153,7 +154,7 @@ async function runLinkTest(deps) {
     shouldStop: () => false,
     label: (s) => s,
     http: nodeHttp,
-    bookforgeUrl: DEFAULT_BOOKFORGE_URL,
+    akoweUrl: DEFAULT_AKOWE_URL,
     replyTimeoutMs: DEFAULT_REPLY_TIMEOUT_MS,
     randomWord: () => WORDS[crypto.randomInt(WORDS.length)],
     siteReady: () => true,
@@ -165,9 +166,9 @@ async function runLinkTest(deps) {
 
   const plan = ['bridge_on', 'key_file', 'wrong_key', 'right_key'];
   for (const s of sites) plan.push(`pane:${s}`, `roundtrip:${s}`);
-  plan.push('bookforge_running');
+  plan.push('akowe_running');
   const checkConnection = typeof d.getConnection === 'function';
-  if (checkConnection) plan.push('bookforge_connected');
+  if (checkConnection) plan.push('akowe_connected');
   const total = plan.length;
   const results = [];
   let stopped = false;
@@ -221,7 +222,7 @@ async function runLinkTest(deps) {
   // 1. bridge on + listening
   if (!checkStop()) {
     const t0 = begin('bridge_on');
-    if (!st.enabled) record('bridge_on', 'fail', 'The bridge is turned off, so BookForge cannot reach this app.', t0, { tip: TIPS.bridge_off });
+    if (!st.enabled) record('bridge_on', 'fail', 'The bridge is turned off, so Akọwe cannot reach this app.', t0, { tip: TIPS.bridge_off });
     else if (!st.listening) {
       const inUse = st.error === 'EADDRINUSE';
       record('bridge_on', 'fail', inUse ? `Port ${port} is already being used by another program, so the bridge could not start.` : `The bridge is turned on but is not listening (${st.error || 'still starting'}).`, t0, { tip: inUse ? TIPS.port_in_use : TIPS.bridge_error });
@@ -245,7 +246,7 @@ async function runLinkTest(deps) {
       const out = await httpOrStop({ method: 'GET', url: `${base}/v1/health`, headers: { Authorization: `Bearer ${wrong}`, 'X-AutoInjector-Selftest': '1' }, timeoutMs: 8000 });
       if (out.stopped) record('wrong_key', 'skip', 'Stopped by you.', t0);
       else if (out.err) record('wrong_key', 'fail', `Could not reach the bridge (${out.err.code || out.err.message}).`, t0, { tip: TIPS.bridge_error, http_status: null });
-      else if (out.res.status === 401) record('wrong_key', 'pass', 'A made-up key was refused (HTTP 401), so only your BookForge can connect.', t0, { http_status: 401 });
+      else if (out.res.status === 401) record('wrong_key', 'pass', 'A made-up key was refused (HTTP 401), so only your Akọwe can connect.', t0, { http_status: 401 });
       else record('wrong_key', 'fail', `A made-up key was NOT refused (HTTP ${out.res.status}).`, t0, { tip: TIPS.wrong_key, http_status: out.res.status });
     }
   }
@@ -276,7 +277,7 @@ async function runLinkTest(deps) {
       const hs = health && health.sites ? health.sites[site] : null;
       if (hs && hs.ready === false) ready = false;
       if (!ready) record(`pane:${site}`, 'fail', `${L}'s window is missing or still loading.`, t0, { tip: TIPS.pane_missing });
-      else if (hs && hs.busy) { paneSkipReason = `${L} is busy answering a BookForge request right now.`; record(`pane:${site}`, 'skip', `${paneSkipReason} Run the test again when it's done.`, t0); }
+      else if (hs && hs.busy) { paneSkipReason = `${L} is busy answering an Akọwe request right now.`; record(`pane:${site}`, 'skip', `${paneSkipReason} Run the test again when it's done.`, t0); }
       else { paneOk = true; record(`pane:${site}`, 'pass', `${L}'s window is loaded and free.`, t0); }
     }
     if (checkStop()) break;
@@ -313,33 +314,33 @@ async function runLinkTest(deps) {
     } else if (res.status === 504) record(id, 'fail', `Sent, but ${L} had not finished answering after ${fmtMs(replyTimeoutMs)} (timed out).`, t0, Object.assign(extra, { tip: TIPS.roundtrip_timeout }));
     else if (res.status === 503) record(id, 'fail', `${L}'s window was not ready when the test asked.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_not_ready }));
     else if (res.status === 502) record(id, 'fail', `The test question could not be typed into ${L}'s window.`, t0, Object.assign(extra, { tip: TIPS.roundtrip_send }));
-    else if (res.status === 409) record(id, 'skip', `${L} is busy with a BookForge request right now — run the test again when it's done.`, t0, extra);
+    else if (res.status === 409) record(id, 'skip', `${L} is busy with an Akọwe request right now — run the test again when it's done.`, t0, extra);
     else if (res.status === 401) record(id, 'fail', 'The bridge refused the connection key during the test.', t0, Object.assign(extra, { tip: TIPS.roundtrip_auth }));
     else record(id, 'fail', `Unexpected answer from the bridge (HTTP ${res.status}${j.error ? `, ${j.error}` : ''}).`, t0, Object.assign(extra, { tip: TIPS.roundtrip_other }));
   }
-  // 6. is BookForge itself running? (optional)
+  // 6. is Akọwe itself running? (optional)
   if (!checkStop()) {
-    const t0 = begin('bookforge_running');
-    const url = d.bookforgeUrl || DEFAULT_BOOKFORGE_URL;
+    const t0 = begin('akowe_running');
+    const url = d.akoweUrl || DEFAULT_AKOWE_URL;
     const out = await httpOrStop({ method: 'GET', url, headers: {}, timeoutMs: 5000 });
     const where = (() => { try { const u = new URL(url); return `${u.hostname}:${u.port || 80}`; } catch (_) { return url; } })();
-    if (out.stopped) record('bookforge_running', 'skip', 'Stopped by you.', t0);
-    else if (out.err) record('bookforge_running', 'skip', `BookForge isn't running right now (nothing answered at ${where}). That's fine for this test — start BookForge (bookforge/run-bookforge.bat) and run the test again to check it too.`, t0, { url });
-    else if (out.res.status === 200 && out.res.json && out.res.json.app === 'bookforge') {
+    if (out.stopped) record('akowe_running', 'skip', 'Stopped by you.', t0);
+    else if (out.err) record('akowe_running', 'skip', `Akọwe isn't running right now (nothing answered at ${where}). That's fine for this test — start Akọwe (akowe/run-akowe.bat) and run the test again to check it too.`, t0, { url });
+    else if (out.res.status === 200 && out.res.json && legacy.isAppId(out.res.json.app)) {
       const v = out.res.json.version ? ` version ${out.res.json.version}` : '';
-      record('bookforge_running', 'pass', `BookForge${v} is running at ${where}.`, t0, { url, http_status: 200 });
-    } else record('bookforge_running', 'skip', `Something answered at ${where} (HTTP ${out.res.status}) but it didn't say it is BookForge — an older BookForge without /api/ping, or another program. Update BookForge, or check what uses that port.`, t0, { url, http_status: out.res.status });
+      record('akowe_running', 'pass', `Akọwe${v} is running at ${where}.`, t0, { url, http_status: 200 });
+    } else record('akowe_running', 'skip', `Something answered at ${where} (HTTP ${out.res.status}) but it didn't say it is Akọwe — an older Akọwe without /api/ping, or another program. Update Akọwe, or check what uses that port.`, t0, { url, http_status: out.res.status });
   }
-  // 7. is BookForge connected to this app? (optional; only when the caller can tell)
+  // 7. is Akọwe connected to this app? (optional; only when the caller can tell)
   if (checkConnection && !checkStop()) {
-    const t0 = begin('bookforge_connected');
+    const t0 = begin('akowe_connected');
     let c = {};
     try { c = d.getConnection() || {}; } catch (_) { c = {}; }
     const ago = (ts) => (ts ? `${fmtMs(Math.max(0, d.now() - ts))} ago` : '');
-    if (c.connected && c.statusAt && !c.stale) record('bookforge_connected', 'pass', `BookForge has the connection key and sent an update on your book ${ago(c.statusAt)}.`, t0);
-    else if (c.connected) record('bookforge_connected', 'pass', `BookForge has the connection key and last talked to this app ${ago(c.lastContactAt)}.`, t0);
-    else if (c.paired) record('bookforge_connected', 'skip', 'BookForge picked up the key but has not reported back yet. Keep BookForge open; if this stays, press “🔗 Connect BookForge” again.', t0);
-    else record('bookforge_connected', 'skip', 'BookForge is not connected yet. Press “🔗 Connect BookForge” in this panel — it opens BookForge and hands it the key in one click.', t0);
+    if (c.connected && c.statusAt && !c.stale) record('akowe_connected', 'pass', `Akọwe has the connection key and sent an update on your book ${ago(c.statusAt)}.`, t0);
+    else if (c.connected) record('akowe_connected', 'pass', `Akọwe has the connection key and last talked to this app ${ago(c.lastContactAt)}.`, t0);
+    else if (c.paired) record('akowe_connected', 'skip', 'Akọwe picked up the key but has not reported back yet. Keep Akọwe open; if this stays, press “🔗 Connect Akọwe” again.', t0);
+    else record('akowe_connected', 'skip', 'Akọwe is not connected yet. Press “🔗 Connect Akọwe” in this panel — it opens Akọwe and hands it the key in one click.', t0);
   }
   // Anything the stop cut short is recorded as skipped so the report is complete.
   if (stopped) {
@@ -353,7 +354,7 @@ async function runLinkTest(deps) {
   const trips = results.filter((r) => r.id.startsWith('roundtrip:'));
   let headline;
   if (stopped) headline = 'Test stopped before the end.';
-  else if (failCount === 0 && trips.length && trips.every((r) => r.status === 'pass')) headline = 'Everything works — BookForge can use your AIs.';
+  else if (failCount === 0 && trips.length && trips.every((r) => r.status === 'pass')) headline = 'Everything works — Akọwe can use your AIs.';
   else if (failCount === 0 && !sites.length) headline = 'The bridge works, but no AI is Active in the app, so nothing was sent.';
   else if (failCount === 0) headline = 'No problems found, but some checks were skipped.';
   else headline = `${failCount} problem${failCount === 1 ? '' : 's'} found — see “how to fix” below.`;
@@ -363,12 +364,12 @@ async function runLinkTest(deps) {
 const ICON = { pass: '✅ PASS', fail: '❌ FAIL', skip: '⚪ SKIPPED' };
 const cell = (s) => String(s == null ? '' : s).replace(/\|/g, '/').replace(/\r?\n/g, ' ');
 
-// meta: { appVersion, env: { os, arch, node, electron }, bookforgeUrl, activity: [{ at, say }], when }
+// meta: { appVersion, env: { os, arch, node, electron }, akoweUrl, activity: [{ at, say }], when }
 function formatReport(r, meta = {}) {
   const when = meta.when instanceof Date ? meta.when : new Date(r.startedAt || Date.now());
   const env = meta.env || {};
   const L = [];
-  L.push(`# BookForge link test — ${when.toLocaleString()}`, '');
+  L.push(`# Akọwe link test — ${when.toLocaleString()}`, '');
   L.push(`**${r.headline}**`, '');
   L.push(`${r.passCount} passed · ${r.failCount} failed · ${r.skipCount} skipped${r.stopped ? ' · stopped early' : ''} · took ${fmtMs((r.finishedAt || 0) - (r.startedAt || 0))}`, '');
   L.push('## Environment', '');
@@ -377,7 +378,7 @@ function formatReport(r, meta = {}) {
   L.push(`- Operating system: ${env.os || '?'}${env.arch ? ` (${env.arch})` : ''}`);
   if (env.electron || env.node) L.push(`- Electron ${env.electron || '?'} · Node ${env.node || '?'}`);
   L.push(`- Bridge: http://${(r.bridge && r.bridge.host) || '127.0.0.1'}:${(r.bridge && r.bridge.port) || '?'} (this computer only)`);
-  L.push(`- BookForge checked at: ${meta.bookforgeUrl || DEFAULT_BOOKFORGE_URL}`);
+  L.push(`- Akọwe checked at: ${meta.akoweUrl || DEFAULT_AKOWE_URL}`);
   L.push(`- AIs Active in the app: ${(r.sites || []).length ? r.sites.join(', ') : 'none'}`);
   L.push(`- Reply time limit per AI: ${fmtMs(r.replyTimeoutMs)}`, '');
   L.push('## Steps', '', '| # | Step | Result | What happened | Time |', '|---|---|---|---|---|');
@@ -410,11 +411,11 @@ function formatReport(r, meta = {}) {
 // The machine-readable twin of the Markdown report.
 function reportJson(r, meta = {}) {
   return {
-    kind: 'bookforge-link-test',
+    kind: 'akowe-link-test',
     version: 1,
     date: new Date(r.startedAt || Date.now()).toISOString(),
     app_version: meta.appVersion || null,
-    environment: Object.assign({ bridge_host: (r.bridge && r.bridge.host) || '127.0.0.1', bridge_port: (r.bridge && r.bridge.port) || null, bookforge_url: meta.bookforgeUrl || DEFAULT_BOOKFORGE_URL }, meta.env || {}),
+    environment: Object.assign({ bridge_host: (r.bridge && r.bridge.host) || '127.0.0.1', bridge_port: (r.bridge && r.bridge.port) || null, akowe_url: meta.akoweUrl || DEFAULT_AKOWE_URL }, meta.env || {}),
     headline: r.headline,
     stopped: !!r.stopped,
     counts: { passed: r.passCount, failed: r.failCount, skipped: r.skipCount, total: r.total },
@@ -430,6 +431,6 @@ function reportJson(r, meta = {}) {
   };
 }
 
-const REPORT_NAME_RE = /^bookforge-link-test-[0-9A-Za-z-]+\.(md|json)$/;
+const REPORT_NAME_RE = /^akowe-link-test-[0-9A-Za-z-]+\.(md|json)$/;
 
-module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_BOOKFORGE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS };
+module.exports = { runLinkTest, formatReport, reportJson, buildPrompt, analyzeReply, nodeHttp, stampNow, fmtMs, STEP_NAMES, TIPS, REPORT_NAME_RE, DEFAULT_AKOWE_URL, DEFAULT_REPLY_TIMEOUT_MS, ENDING_CHARS };

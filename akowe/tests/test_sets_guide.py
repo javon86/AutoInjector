@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge.assist import AssistService, supports
-from bookforge.sets_guide import FEATURED_TYPES, MAIN_PATH, SET_GUIDE, SET_IDS, sets_overview
+from akowe.assist import AssistService, supports
+from akowe.sets_guide import FEATURED_TYPES, MAIN_PATH, SET_GUIDE, SET_IDS, sets_overview
 
 from test_assist import FakeAI, ai_on, bible, idle
 from test_server import OTHER_TOKEN, call, server  # noqa: F401  (pytest fixture re-export)
-from bookforge.canonical import sha256_bytes
+from akowe.canonical import sha256_bytes
 
 
 def test_eleven_sets_cover_every_operation_exactly_once(contracts):

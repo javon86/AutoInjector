@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge.book_path import BookPath, clean_profile, get_profile, save_profile
-from bookforge.errors import BookforgeError
+from akowe.book_path import BookPath, clean_profile, get_profile, save_profile
+from akowe.errors import AkoweError
 
 from test_server import call, server  # noqa: F401
 
@@ -35,11 +35,11 @@ def approve(h, ids):
 
 
 def test_profile_validation_and_storage(h):
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         clean_profile({"length": "epic"})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         clean_profile({"title": 5})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         clean_profile({"chapters": 0})
     p = save_profile(h.store, h.project_id, {"title": " The Key ", "author": "Ann", "unknown": "x", "length": "novella"})
     assert p["title"] == "The Key" and "unknown" not in p and get_profile(h.store, h.project_id)["author"] == "Ann"
@@ -65,7 +65,7 @@ def test_make_my_book_manual_end_to_end(h):
     st = steps(bp())
     assert st["canon"]["state"] == "needs_you" and st["canon"]["approve"][0]["record_id"] == a01["record_id"]
     # approval needs the author's explicit confirmation
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         bp().act("approve", {"record_ids": [a01["record_id"]]})
     assert exc.value.code == "APPROVAL_REQUIRED"
     approve(h, [a01["record_id"]])

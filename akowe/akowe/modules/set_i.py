@@ -12,7 +12,7 @@ from .. import k_runtime as kr
 from ..canonical import (canonical_bytes, changed_pointers, iter_references, json_pointer, pointers_overlap,
                          resolve_pointer, sha256_json)
 from ..contracts import schema_errors
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from ..providers import estimate_tokens
 from . import register
 from .base import Context, OperationHandler, Result
@@ -35,20 +35,20 @@ class CanonDatabase(OperationHandler):
         p = ctx.payload
         owner_op = p["owner_operation"]
         if not ctx.store.has_scope(ctx.principal_id, ctx.project_id, ctx.branch_id, f"{owner_op}:create"):
-            raise BookforgeError("PERMISSION_DENIED", "/payload/owner_operation",
+            raise AkoweError("PERMISSION_DENIED", "/payload/owner_operation",
                                  f"not authorized to write canon for {owner_op}", status="REJECTED")
         if p["fact_type"] == "AUXILIARY":
             return self._auxiliary(ctx)
         src = ctx.field_record("source_ref")
         if src is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/source_ref", "source_ref is required for canon facts")
+            raise AkoweError("MISSING_INPUT", "/payload/source_ref", "source_ref is required for canon facts")
         if src["module_id"] != owner_op:
-            raise BookforgeError("INVALID_INPUT", "/payload/source_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/payload/source_ref/module_id",
                                  f"source must be a {owner_op} record (owner_operation)", status="REJECTED")
         for i, fact in enumerate(p["fact_payload"]["facts"]):
             frm, to = fact["effective_from"], fact["effective_to"]
             if frm is not None and to is not None and to <= frm:
-                raise BookforgeError("INVALID_INPUT", f"/payload/fact_payload/facts/{i}/effective_to",
+                raise AkoweError("INVALID_INPUT", f"/payload/fact_payload/facts/{i}/effective_to",
                                      "effective interval must satisfy to > from", status="REJECTED")
         state = self._approval_state(ctx)
         record_id = ctx.allocate_record_id()
@@ -59,27 +59,27 @@ class CanonDatabase(OperationHandler):
         aux = p["auxiliary_record"]
         errs = ctx.contracts.check_shared(aux["record_kind"], aux["data"])
         if errs:
-            raise BookforgeError(errs[0]["code"], "/payload/auxiliary_record/data" + errs[0]["path"],
+            raise AkoweError(errs[0]["code"], "/payload/auxiliary_record/data" + errs[0]["path"],
                                  errs[0]["message"], status="REJECTED")
         src = ctx.field_record("source_ref")
         if src is None:
             ev = p.get("import_evidence")
             if not ev:
-                raise BookforgeError("MISSING_INPUT", "/payload/import_evidence",
+                raise AkoweError("MISSING_INPUT", "/payload/import_evidence",
                                      "first AUXILIARY import needs import_evidence")
             if ev["principal_id"] != ctx.principal_id:
-                raise BookforgeError("PERMISSION_DENIED", "/payload/import_evidence/principal_id",
+                raise AkoweError("PERMISSION_DENIED", "/payload/import_evidence/principal_id",
                                      "import evidence must name the authenticated importer", status="REJECTED")
             if not HEX64.match(ev["source_sha256"]):
-                raise BookforgeError("INVALID_INPUT", "/payload/import_evidence/source_sha256",
+                raise AkoweError("INVALID_INPUT", "/payload/import_evidence/source_sha256",
                                      "source_sha256 must be the SHA-256 of the imported bytes", status="REJECTED")
         else:
             if src["module_id"] != "I01":
-                raise BookforgeError("INVALID_INPUT", "/payload/source_ref/module_id",
+                raise AkoweError("INVALID_INPUT", "/payload/source_ref/module_id",
                                      "a later auxiliary revision pins its prior I01 record", status="REJECTED")
             prior = (src.get("data") or {}).get("auxiliary_record") or {}
             if prior.get("record_kind") != aux["record_kind"]:
-                raise BookforgeError("INVALID_INPUT", "/payload/auxiliary_record/record_kind",
+                raise AkoweError("INVALID_INPUT", "/payload/auxiliary_record/record_kind",
                                      "auxiliary kinds are incompatible across revisions", status="REJECTED")
         state = self._approval_state(ctx)
         record_id = ctx.allocate_record_id()
@@ -91,10 +91,10 @@ class CanonDatabase(OperationHandler):
             return "DRAFT"
         appr = ctx.field_record("approval_ref")
         if appr is None:
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approval_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/approval_ref",
                                  "APPROVED canon requires a valid I10/K09 approval", status="BLOCKED")
         if appr["module_id"] not in ("I10", "K09"):
-            raise BookforgeError("INVALID_INPUT", "/payload/approval_ref/module_id",
+            raise AkoweError("INVALID_INPUT", "/payload/approval_ref/module_id",
                                  "approval_ref must be an I10 or K09 decision", status="REJECTED")
         # Same rules as ACCEPT: the current decision, APPROVED, unexpired and bound to this exact source
         # revision (an AUXILIARY first import has no source record, so only the decision itself is checked).
@@ -105,20 +105,20 @@ class CanonDatabase(OperationHandler):
         base = ctx.base
         data = dict(ctx.payload)
         if data.get("canon_id") != base["data"]["canon_id"]:
-            raise BookforgeError("INVALID_INPUT", "/payload/canon_id", "canon_id is the stable record ID",
+            raise AkoweError("INVALID_INPUT", "/payload/canon_id", "canon_id is the stable record ID",
                                  status="REJECTED")
         if data.get("revision") != base["version"] + 1:
-            raise BookforgeError("INVALID_INPUT", "/payload/revision", "revision must equal the new version",
+            raise AkoweError("INVALID_INPUT", "/payload/revision", "revision must equal the new version",
                                  status="REJECTED")
         old_aux = base["data"].get("auxiliary_record")
         new_aux = data.get("auxiliary_record")
         if (old_aux is None) != (new_aux is None) or (old_aux and old_aux["record_kind"] != new_aux["record_kind"]):
-            raise BookforgeError("INVALID_INPUT", "/payload/auxiliary_record",
+            raise AkoweError("INVALID_INPUT", "/payload/auxiliary_record",
                                  "auxiliary record kind cannot change", status="REJECTED")
         if new_aux:
             errs = ctx.contracts.check_shared(new_aux["record_kind"], new_aux["data"])
             if errs:
-                raise BookforgeError(errs[0]["code"], "/payload/auxiliary_record/data" + errs[0]["path"],
+                raise AkoweError(errs[0]["code"], "/payload/auxiliary_record/data" + errs[0]["path"],
                                      errs[0]["message"], status="REJECTED")
         return Result(data=data, transform="MANUAL")
 
@@ -162,8 +162,8 @@ def _rkey(ref: dict) -> tuple:
     return (ref["record_id"], ref["version"], ref["content_hash"])
 
 
-def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> BookforgeError:
-    return BookforgeError(code, path, msg, status=status)
+def _rej(code: str, path: str, msg: str, status: str = "REJECTED") -> AkoweError:
+    return AkoweError(code, path, msg, status=status)
 
 
 def _valid_pointer(p: str) -> bool:
@@ -294,7 +294,7 @@ def schema_document(store, project_id: str, branch_id: str, i02_record: dict) ->
     data = i02_record["data"]
     doc, _ = kr.read_state(store, project_id, branch_id, NS_I02_DOCS, data["schema_hash"])
     if doc is None or sha256_json(doc["json_schema"]) != data["schema_hash"]:
-        raise BookforgeError("VALIDATOR_UNAVAILABLE", "/payload/schema_ref",
+        raise AkoweError("VALIDATOR_UNAVAILABLE", "/payload/schema_ref",
                              "stored schema document is missing or does not match schema_hash")
     reg, _ = kr.read_state(store, project_id, branch_id, NS_I02, data["schema_id"])
     semver = next((v for v, e in (reg or {}).get("versions", {}).items()
@@ -352,7 +352,7 @@ class SchemaManager(_DerivedProjection):
     def validate(self, ctx: Context, record: dict) -> list[dict]:
         try:
             schema_document(ctx.store, ctx.project_id, ctx.branch_id, record)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding("SCHEMA_DOCUMENT", exc.errors[0]["message"], severity="BLOCKING")]
         return []
 
@@ -611,7 +611,7 @@ class ContextPackageBuilder(_DerivedProjection):
                 optional.append(rec)
         used = sum(record_tokens(r) for r in mandatory)
         if used > p["token_budget"]:
-            raise BookforgeError("CONTEXT_TOO_LARGE", "/payload/token_budget",
+            raise AkoweError("CONTEXT_TOO_LARGE", "/payload/token_budget",
                                  f"required/protected facts need ~{used} tokens > budget {p['token_budget']}; "
                                  "split the job on scene/pass boundaries (mandatory facts are never dropped)")
         task_words = _words(task)
@@ -695,12 +695,12 @@ class BackupCompletion(OperationHandler):
         mrec = ctx.field_record("missing_request_ref")
         st = missing_request(ctx, mrec)
         if st is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/missing_request_ref", "unknown missing request")
+            raise AkoweError("MISSING_INPUT", "/payload/missing_request_ref", "unknown missing request")
         if st["status"] != "OPEN":
             raise _rej("INVALID_INPUT", "/payload/missing_request_ref", f"request is {st['status']}")
         facts = p["candidate_value"]["facts"]
         if not p["evidence_refs"] and not any(f["source_refs"] for f in facts):
-            raise BookforgeError("MISSING_INPUT", "/payload/evidence_refs",
+            raise AkoweError("MISSING_INPUT", "/payload/evidence_refs",
                                  "a fallback candidate must cite evidence")
         for i, f in enumerate(facts):
             if f["effective_from"] is not None and f["effective_to"] is not None \
@@ -784,7 +784,7 @@ class ApprovalLockManager(_DerivedProjection):
             kr.check_k09_authorization(ctx.store, auth, cand["ref"], "/payload/authorization_ref")
             expires = auth["data"]["expiry"]
         elif needs_auth:
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/authorization_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/authorization_ref",
                                  f"{decision} of protected content needs a K09 authorization for this revision",
                                  unresolved=[f"K09:{cand['record_id']}@{cand['version']}"])
         if decision == "SUPERSEDE":
@@ -880,7 +880,7 @@ class CompletionTracker(_DerivedProjection):
         reg_rec = ctx.field_record("operation_ref")
         reg = registration(ctx.store, ctx.project_id, ctx.branch_id, reg_rec["data"]["registration_id"])
         if reg is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
+            raise AkoweError("MISSING_INPUT", "/payload/operation_ref", "registration details are missing")
         ev_rec = ctx.field_record("evidence_ref")
         if ev_rec["module_id"] != reg["producer"]:
             raise _rej("INVALID_INPUT", "/payload/evidence_ref/module_id",
@@ -937,7 +937,7 @@ class CompletionTracker(_DerivedProjection):
                     receipt = r
                     break
         if audit is None or receipt is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/evidence_ref",
+            raise AkoweError("MISSING_INPUT", "/payload/evidence_ref",
                                  "no durable commit receipt for this output pin; a worker's success claim is not "
                                  "evidence", unresolved=[f"commit:{rid}@{rec['version']}"])
         audit_ref = ctx.stage_json("I12", {"evidence_type": "COMMITTED_OUTPUT", "audit": _audit_row_dict(audit),
@@ -969,7 +969,7 @@ class CompletionTracker(_DerivedProjection):
         audit = next((r for r in rows if any(_rkey(x) == _rkey(rec["ref"]) for x in json.loads(r["input_refs"]))),
                      None)
         if audit is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/evidence_ref",
+            raise AkoweError("MISSING_INPUT", "/payload/evidence_ref",
                                  f"no {evidence_type} audit receipt for this pin")
         outcome = {"SUCCESS": "SUCCESS", "REJECTED": "REJECTED"}.get(audit["outcome"], "BLOCKED")
         evidence = {"evidence_type": evidence_type, "request_id": audit["request_id"],
@@ -1018,7 +1018,7 @@ class DependencyTracker(_DerivedProjection):
         if pred["kind"] == "HARD" and pred["stage"] == "CREATE":
             cycle = self._cycle(ctx, src["record_id"], tgt["record_id"])
             if cycle:
-                raise BookforgeError("DEPENDENCY_CYCLE", "/payload/predicate",
+                raise AkoweError("DEPENDENCY_CYCLE", "/payload/predicate",
                                      "HARD edge closes a cycle: " + " -> ".join(cycle))
         paths = pred["paths"] or [""]
         invalidated = []
@@ -1080,10 +1080,10 @@ class DataProvenance(_DerivedProjection):
         prov = ctx.store.query_one("SELECT * FROM provenance WHERE project_id=? AND branch_id=? AND record_id=? "
                                    "AND version=?", (ctx.project_id, ctx.branch_id, art["record_id"], art["version"]))
         if prov is None:
-            raise BookforgeError("MISSING_INPUT", "/payload/artifact_ref", "no stored provenance for this pin")
+            raise AkoweError("MISSING_INPUT", "/payload/artifact_ref", "no stored provenance for this pin")
         chain = p["transform_chain"]
         if not chain:
-            raise BookforgeError("MISSING_INPUT", "/payload/transform_chain", "transform chain is empty")
+            raise AkoweError("MISSING_INPUT", "/payload/transform_chain", "transform chain is empty")
         last = chain[-1]
         if last["operation"] != prov["operation_id"] or last["attempt_id"] != prov["attempt_id"]:
             raise _rej("INVALID_INPUT", f"/payload/transform_chain/{len(chain) - 1}",
@@ -1157,7 +1157,7 @@ class ContextCompression(_DerivedProjection):
             preserved.append(rec["ref"])
         used = estimate_tokens("\n".join(lines))
         if used > p["max_tokens"]:
-            raise BookforgeError("CONTEXT_TOO_LARGE", "/payload/max_tokens",
+            raise AkoweError("CONTEXT_TOO_LARGE", "/payload/max_tokens",
                                  f"protected facts need ~{used} tokens > {p['max_tokens']}; split the job "
                                  "(protected values are never compressed or dropped)")
         omissions, seen = [], set(prot_keys)

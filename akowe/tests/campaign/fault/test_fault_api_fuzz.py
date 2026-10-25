@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from bookforge.server import App, make_handler
+from akowe.server import App, make_handler
 
 from fault_helpers import TOKEN, call
 

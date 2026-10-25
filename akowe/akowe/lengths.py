@@ -87,7 +87,7 @@ def settings(store) -> dict:
 
 
 def save_settings(store, body) -> dict:
-    from .errors import BookforgeError  # noqa: PLC0415
+    from .errors import AkoweError  # noqa: PLC0415
     body = body if isinstance(body, dict) else {}
     cur = settings(store)
     for k, (lo, hi) in LIMITS.items():
@@ -95,9 +95,9 @@ def save_settings(store, body) -> dict:
             continue
         v = body[k]
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not lo <= v <= hi:
-            raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k}: a number from {lo} to {hi}", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: a number from {lo} to {hi}", status="REJECTED")
         if isinstance(DEFAULT_SETTINGS[k], int) and int(v) != v:
-            raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k}: a whole number", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: a whole number", status="REJECTED")
         cur[k] = type(DEFAULT_SETTINGS[k])(v)
     store.set_setting(SETTINGS_KEY, cur)
     return settings(store)

@@ -41,12 +41,12 @@ CONNECT_AI = ("Connect an AI to test this row for real: in AutoInjector press Co
               "Settings), or add an Anthropic API key in Settings. Then press Re-run.")
 TEST_TEXT = ("Mara walked from the harbor to the lighthouse in the fog. The lamp room was cold, and the keeper's "
              "logbook lay open beside a cracked lantern. She read the last line twice.")
-PROFILE = {"title": "Workflow test book", "author": "BookForge workflow test", "genre": "Mystery",
+PROFILE = {"title": "Workflow test book", "author": "Akowe workflow test", "genre": "Mystery",
            "audience": "Adult", "length": "short_story", "chapters": 1, "tone": "Cozy and warm",
            "idea": "A lighthouse keeper's apprentice searches a foggy harbor for her missing master."}
 RELEASE = ["MANUSCRIPT_PDF", "EPUB_REFLOWABLE", "EDITABLE_DOCX"]
 
-log = logging.getLogger("bookforge.workflow_test")
+log = logging.getLogger("akowe.workflow_test")
 
 ROWS = [
     {"id": "ai", "title": "AI connection", "ai": True, "needs": [],
@@ -58,20 +58,20 @@ ROWS = [
     {"id": "outline", "title": "Chapter outline (B11)", "ai": True, "needs": ["plot"],
      "about": "Your AI plans the chapters (a short test book); the test runner approves the outline."},
     {"id": "chapter", "title": "Chapter context and text (C01/C02)", "ai": True, "needs": ["outline"],
-     "about": "BookForge gathers the chapter context (no AI), then your AI writes the first chapter. It stays a "
+     "about": "Akọwe gathers the chapter context (no AI), then your AI writes the first chapter. It stays a "
               "draft for the next rows."},
     {"id": "review", "title": "AI review", "ai": True, "needs": ["chapter"],
      "about": "Your AI reviews the chapter draft and answers APPROVE, REVISE or REJECT with reasons. Auto-approve is "
               "off in the test book, so nothing is approved by this row."},
     {"id": "approvals", "title": "Approvals", "ai": False, "needs": ["chapter"],
-     "about": "Approves everything waiting in the test book's review queue with one “approve all” (BookForge adds the "
+     "about": "Approves everything waiting in the test book's review queue with one “approve all” (Akọwe adds the "
               "extra approval record a chapter needs), then checks the queue is empty."},
     {"id": "format", "title": "Book format", "ai": False, "needs": [],
      "about": "Makes the page size, font and PDF/EPUB/DOCX settings from the test book's profile and approves them."},
     {"id": "assemble", "title": "Assemble (G)", "ai": False, "needs": ["approvals", "format"],
      "about": "Puts the approved chapters in order, lays out the pages and the contents (G02/G01/G05/G04/G07)."},
     {"id": "export", "title": "Export PDF, EPUB and DOCX (G11/G12/G13)", "ai": False, "needs": ["assemble"],
-     "about": "Makes the three files and re-reads each one with BookForge's independent file checkers."},
+     "about": "Makes the three files and re-reads each one with Akọwe's independent file checkers."},
     {"id": "check", "title": "Content check (H05)", "ai": False, "needs": ["assemble"],
      "about": "Checks that every chapter is in the book exactly once and in order."},
 ]
@@ -143,8 +143,8 @@ class WorkflowTestRunner:
         if rows == "all":
             rows = list(ROW_IDS)
         if not isinstance(rows, list) or not rows or any(r not in ROW_IDS for r in rows):
-            from .errors import BookforgeError  # noqa: PLC0415
-            raise BookforgeError("INVALID_INPUT", "/rows", "rows must be \"all\" or a list of row IDs: "
+            from .errors import AkoweError  # noqa: PLC0415
+            raise AkoweError("INVALID_INPUT", "/rows", "rows must be \"all\" or a list of row IDs: "
                                  + ", ".join(ROW_IDS), status="REJECTED")
         rows = [r for r in ROW_IDS if r in rows]  # always in process order
         with self._lock:
@@ -153,7 +153,7 @@ class WorkflowTestRunner:
             self._stop = False
             for r in rows:
                 self.rows[r].update(status=RUNNING if r == rows[0] else self.rows[r]["status"])
-            self._thread = threading.Thread(target=self._run, args=(rows, fresh), name="bookforge-workflow-test",
+            self._thread = threading.Thread(target=self._run, args=(rows, fresh), name="akowe-workflow-test",
                                             daemon=True)
             self._thread.start()
         return self.status()
@@ -444,7 +444,7 @@ class WorkflowTestRunner:
         out = self._creative("B11", "chapter outline", {
             "chapters": [plan_item("ch1", 0, "Mara reaches the lighthouse")], "unresolved_threads": []}, "outline")
         n = len(self.bp().outline_chapters(self.bp().outline()))
-        expect(n >= 1, "the approved outline has no chapters BookForge can write", BUG_FIX)
+        expect(n >= 1, "the approved outline has no chapters Akọwe can write", BUG_FIX)
         if isinstance(out, tuple):
             return out[0] + f" It has {n} chapter(s).", out[1]
         return out
@@ -509,8 +509,8 @@ class WorkflowTestRunner:
         try:
             res = self.review.review_sync(self.principal, self.project["id"], "main", item["record_id"])
         except Exception as exc:  # noqa: BLE001 - shown as a failed row
-            from .errors import BookforgeError  # noqa: PLC0415
-            if isinstance(exc, BookforgeError):
+            from .errors import AkoweError  # noqa: PLC0415
+            if isinstance(exc, AkoweError):
                 raise StepFailed(f"The AI review did not work: {exc.code}: {exc.errors[0].get('message')}",
                                  "Check the AI in Settings (Test connection), then press Re-run.") from None
             raise
@@ -546,7 +546,7 @@ class WorkflowTestRunner:
         k09_new = len(self.store.list_records(pid, "main", module_id="K09")) - k09
         self.have["approvals"] = True
         return (f"Approved {out['approved']} draft(s) with one “approve all” ({', '.join(sorted({i['module_id'] for i in q['items']}))}); "
-                f"BookForge recorded {k09_new} extra approval record(s) (K09) for drafts that need one. The queue is "
+                f"Akọwe recorded {k09_new} extra approval record(s) (K09) for drafts that need one. The queue is "
                 "empty now.")
 
     def _approve_step(self, step_id):
@@ -614,10 +614,10 @@ class WorkflowTestRunner:
         rows = [dict(self.rows[i]) for i in ROW_IDS]
         counts = {k: sum(1 for r in rows if r["status"] == k) for k in (PASS, FAIL, SKIPPED, NOT_RUN)}
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        rep = {"report_kind": "bookforge-workflow-test", "report_version": 1,
+        rep = {"report_kind": "akowe-workflow-test", "report_version": 1,
                "verdict": "FAIL" if counts[FAIL] else "PASS", "counts": counts,
                "started_at": _iso(started), "finished_at": _iso(), "rows_run": rows_run,
-               "project": self.project, "bookforge_version": __version__, "contract_version": CONTRACT_VERSION,
+               "project": self.project, "akowe_version": __version__, "contract_version": CONTRACT_VERSION,
                "ai_slots": self.slots_info, "ai_ready": sorted(self.ai_ready), "environment": environment(self.store),
                "rows": rows, "stamp": stamp,
                "note": "No keys, connection keys or prompts are written here; AI answers appear only as excerpts of at "
@@ -651,12 +651,12 @@ def _cell(v) -> str:
 def render_markdown(rep: dict) -> str:
     c = rep["counts"]
     p = rep.get("project") or {}
-    L = [f"# BookForge workflow test — {rep['verdict']}", "",
+    L = [f"# Akọwe workflow test — {rep['verdict']}", "",
          f"- **Date:** {rep['started_at']} (finished {rep['finished_at']})",
          f"- **Result:** {c[PASS]} passed, {c[FAIL]} failed, {c[SKIPPED]} skipped, {c[NOT_RUN]} not run",
          f"- **Rows in this run:** {', '.join(TITLES[r] for r in rep['rows_run'])}",
          f"- **Test book:** {p.get('name')} (`{p.get('id')}`) — a separate project; your books were not touched",
-         f"- **BookForge:** {rep['bookforge_version']} · contract {rep['contract_version']}",
+         f"- **Akọwe:** {rep['akowe_version']} · contract {rep['contract_version']}",
          "- Approvals in the test book were made by the test runner because you pressed Run.", "",
          "## AI slots (no keys are ever written here)", "",
          "| Slot | Adapter | Site / model | State | Message |", "|---|---|---|---|---|"]

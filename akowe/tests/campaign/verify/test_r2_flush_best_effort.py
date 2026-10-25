@@ -9,8 +9,8 @@ import os
 
 import pytest
 
-import bookforge.store as store_mod
-from bookforge.server import App
+import akowe.store as store_mod
+from akowe.server import App
 
 TOKEN = "flush-best-effort-token-0123456789"
 
@@ -52,7 +52,7 @@ def test_windows_flush_failure_is_a_warning_and_the_backup_says_best_effort(app,
     fake = FlakyWinOS()
     monkeypatch.setattr(store_mod, "_os", fake)
     monkeypatch.setattr(store_mod, "os", fake)
-    with caplog.at_level(logging.WARNING, logger="bookforge"):
+    with caplog.at_level(logging.WARNING, logger="akowe"):
         b = app.backups.backup("manual")
     assert b["verified"] is True and b["flushed"] == "best effort", b
     listed = next(x for x in app.backups.list() if x["name"] == b["name"])

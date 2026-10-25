@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-from bookforge import editor as ed_mod
-from bookforge import journal
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
-from bookforge.review import ReviewJob
+from akowe import editor as ed_mod
+from akowe import journal
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
+from akowe.review import ReviewJob
 
 from autobook_fake import CHAPTER_TEXT
 from test_failover_review import SlotFake, make_app, no_provider_sleep, run_book  # noqa: F401
@@ -55,11 +55,11 @@ def test_clean_craft_normalises_and_decides():
     assert f1["found"] and f1["label"] == "Subtext" and f1["keep_nearby"] == ["Only old Nessa"]
     assert f2["dimension"] == "other" and f2["severity"] == "minor" and not f2["found"]
     assert c["keep"] == ["Only old Nessa at the net sheds would talk"] and c["keep_quotes"] == c["keep"]
-    # BookForge decides, not the AI: a major finding and low scores mean REVISE although the AI said PASS
+    # Akọwe decides, not the AI: a major finding and low scores mean REVISE although the AI said PASS
     assert c["verdict"] == "REVISE" and c["ai_verdict"] == "PASS" and c["counts"] == {"major": 1, "minor": 1}
     assert c["min_score"] == 1
     for bad in (None, {}, {"scores": {}}, {"scores": {"bogus": 5}}, {"scores": "8"}):
-        with pytest.raises(BookforgeError) as e:
+        with pytest.raises(AkoweError) as e:
             ed_mod.clean_craft(bad, DIMS, CH2, "normal")
         assert e.value.code == "INTERNAL_ERROR"
 
@@ -227,10 +227,10 @@ def test_manual_fixes_accept_and_reject_per_passage(tmp_path):
     rw = outbox(app, pid, "editor.rewrite")[-1]
     assert rw["applied"] == 1 and rw["unresolved"] == 1 and rw["how"] == "author" and BETTER not in json.dumps(rw)
     # the old fixes no longer fit the new version: refused, nothing changed
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.apply_editor_fix("author", pid, "main", {"record_id": rid, "version": ver, "accept": [keep_id]})
     assert e.value.code == "VERSION_CONFLICT"
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.start_editor_fix("author", pid, "main", {"record_id": rid})  # no editor review of v+1 yet
     assert e.value.code == "INVALID_INPUT"
 
@@ -244,7 +244,7 @@ def test_manual_fix_with_unfound_original_is_unresolved_not_guessed(tmp_path):
     wait_job(app, app.review.start_editor("author", pid, "main", {"record_id": rid}))
     prop = wait_job(app, app.review.start_editor_fix("author", pid, "main", {"record_id": rid}))["results"][0]["proposal"]
     assert prop["applied"] == 0 and prop["items"][0]["reason"] == "NOT_FOUND" and not prop["items"][0]["ok"]
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.apply_editor_fix("author", pid, "main", {"record_id": rid, "version": ver})
     assert e.value.code == "INVALID_INPUT"
     assert app.review._head(pid, "main", rid)["version"] == ver
@@ -393,7 +393,7 @@ def test_editor_off_and_rounds_zero_and_editor_failing(tmp_path):
     assert run2["editor_summary"]["flagged"] and "set to 0" in run2["editor_summary"]["flagged"][0]["reason"]
     # the editor's AI fails: the book is still made, with a ⚠️ note
     fake3 = SlotFake()
-    fake3.fail_kind("craft", *[BookforgeError("INTERNAL_ERROR", "", "bad answer")] * 3)
+    fake3.fail_kind("craft", *[AkoweError("INTERNAL_ERROR", "", "bad answer")] * 3)
     app3 = make_app(tmp_path, fake3, slots=("AI-1", "AI-2"), name="d3")
     run3 = run_book(app3)
     assert run3["status"] == "done", (run3["phase"], run3.get("problem"))
@@ -411,7 +411,7 @@ def test_editor_settings_validation(tmp_path):
     assert ed.settings()["enabled"] is False and ed.settings()["strictness"] == "strict"
     for bad, path in (({"rounds": 4}, "/rounds"), ({"rounds": -1}, "/rounds"), ({"rounds": True}, "/rounds"),
                       ({"strictness": "brutal"}, "/strictness"), ({"enabled": "yes"}, "/enabled")):
-        with pytest.raises(BookforgeError) as e:
+        with pytest.raises(AkoweError) as e:
             ed.save_settings(bad)
         assert e.value.errors[0]["path"] == path
     assert ed.settings()["rounds"] == 3  # nothing changed by a refused save
@@ -422,7 +422,7 @@ def test_editor_settings_validation(tmp_path):
 def served(tmp_path):
     import threading
     from http.server import ThreadingHTTPServer
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     fake = SlotFake()
     fake.editor_flags = {PHRASE: BETTER}
     app, pid, rid, ver, ch = chapter_book(tmp_path, fake, editor={"enabled": True})
@@ -487,9 +487,9 @@ def test_editor_refuses_other_drafts(tmp_path):
     ref, _ = bp.create("A01", {"concept": "Old Tom"}, manual_candidate={
         "concept": "Old Tom", "attributes": {}, "linked_refs": [], "protected_fact_flags": [],
         "facts": [fact("tom", "entity.name", "Old Tom")]})
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.start_editor("author", pid, "main", {"record_id": ref["record_id"]})
     assert e.value.code == "INVALID_INPUT"
     job = ReviewJob("editor", "author", pid, "main", [ref["record_id"]], None)
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.review.editor.craft_one(job, ref["record_id"])

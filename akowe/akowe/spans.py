@@ -14,7 +14,7 @@ owner when it converts accepted F patches into a C replacement candidate (``buil
 from __future__ import annotations
 
 from .canonical import sha256_text
-from .errors import BookforgeError
+from .errors import AkoweError
 
 TEXT_PATH = "/text"
 
@@ -40,7 +40,7 @@ def make_span(record: dict, start: int, end: int, span_id: str | None = None) ->
     """Evidence span for record (a stored C prose record with data.text)."""
     text = record_text(record)
     if not (0 <= start <= end <= len(text)):
-        raise BookforgeError("SPAN_CONFLICT", "", f"span [{start},{end}) outside text of length {len(text)}",
+        raise AkoweError("SPAN_CONFLICT", "", f"span [{start},{end}) outside text of length {len(text)}",
                              status="REJECTED")
     return {"record_ref": record["ref"], "span_id": span_id or span_id_for(record["record_id"], text, start, end),
             "start": start, "end": end, "text_hash": sha256_text(text[start:end])}
@@ -49,7 +49,7 @@ def make_span(record: dict, start: int, end: int, span_id: str | None = None) ->
 def record_text(record: dict) -> str:
     data = record.get("data") if record else None
     if not isinstance(data, dict) or not isinstance(data.get("text"), str):
-        raise BookforgeError("INVALID_INPUT", "/payload/manuscript_ref",
+        raise AkoweError("INVALID_INPUT", "/payload/manuscript_ref",
                              "referenced record has no prose text (data.text)", status="REJECTED")
     return data["text"]
 
@@ -72,17 +72,17 @@ def reanchor(old_text: str, new_text: str, span: dict) -> dict:
     """
     reason = verify_span(old_text, span)
     if reason:
-        raise BookforgeError("HASH_MISMATCH", "", f"span {span.get('span_id')}: {reason}", status="REJECTED")
+        raise AkoweError("HASH_MISMATCH", "", f"span {span.get('span_id')}: {reason}", status="REJECTED")
     pre = old_text[span["start"]:span["end"]]
     if pre == "":
-        raise BookforgeError("SPAN_CONFLICT", "", f"span {span['span_id']}: empty anchors cannot be re-anchored",
+        raise AkoweError("SPAN_CONFLICT", "", f"span {span['span_id']}: empty anchors cannot be re-anchored",
                              status="BLOCKED")
     hits = occurrences(new_text, pre)
     if not hits:
-        raise BookforgeError("VERSION_CONFLICT", "", f"span {span['span_id']}: anchored text no longer present",
+        raise AkoweError("VERSION_CONFLICT", "", f"span {span['span_id']}: anchored text no longer present",
                              status="REJECTED")
     if len(hits) > 1:
-        raise BookforgeError("SPAN_CONFLICT", "", f"span {span['span_id']}: anchored text matches {len(hits)} "
+        raise AkoweError("SPAN_CONFLICT", "", f"span {span['span_id']}: anchored text matches {len(hits)} "
                              "places in the new revision", status="BLOCKED")
     out = dict(span)
     out["start"], out["end"] = hits[0], hits[0] + len(pre)
@@ -118,7 +118,7 @@ def apply_edits(text: str, edits: list[tuple[int, int, str]]) -> tuple[str, list
     """
     pairs = find_overlaps([(str(i), s, e) for i, (s, e, _) in enumerate(edits)])
     if pairs:
-        raise BookforgeError("PATCH_OVERLAP", "", f"overlapping edits {pairs[0]}", status="REJECTED")
+        raise AkoweError("PATCH_OVERLAP", "", f"overlapping edits {pairs[0]}", status="REJECTED")
     out, inverse, cursor, delta = [], [], 0, 0
     for s, e, rep in sorted(edits, key=lambda x: (x[0], x[1])):
         out.append(text[cursor:s])
@@ -148,11 +148,11 @@ def anchored_patches(data: dict) -> list[tuple[dict, dict]]:
         cands = [ev for ev in spans.get(p["patch_id"], []) if _same_pin(ev["record_ref"], p["target_ref"])]
         uniq = {(ev["start"], ev["end"], ev["text_hash"]) for ev in cands}
         if len(uniq) != 1:
-            raise BookforgeError("SPAN_CONFLICT", f"/patches/{i}",
+            raise AkoweError("SPAN_CONFLICT", f"/patches/{i}",
                                  f"patch {p['patch_id']} has {len(uniq)} anchoring spans (need exactly one)",
                                  status="REJECTED")
         if not isinstance(p["replacement"], str):
-            raise BookforgeError("INVALID_INPUT", f"/patches/{i}/replacement", "textual patch needs a string",
+            raise AkoweError("INVALID_INPUT", f"/patches/{i}/replacement", "textual patch needs a string",
                                  status="REJECTED")
         out.append((p, cands[0]))
     return out
@@ -177,12 +177,12 @@ def build_replacement(manuscript: dict, proposals: list[dict]) -> dict:
     for rec in proposals:
         for p, ev in anchored_patches(rec["data"]):
             if not _same_pin(p["target_ref"], manuscript["ref"]):
-                raise BookforgeError("VERSION_CONFLICT", "/target_ref",
+                raise AkoweError("VERSION_CONFLICT", "/target_ref",
                                      f"patch {p['patch_id']} pins {p['target_ref']['record_id']} "
                                      f"v{p['target_ref']['version']}, not the current manuscript", status="REJECTED")
             reason = verify_span(text, ev)
             if reason:
-                raise BookforgeError("HASH_MISMATCH", "/target_ref", f"patch {p['patch_id']}: {reason}",
+                raise AkoweError("HASH_MISMATCH", "/target_ref", f"patch {p['patch_id']}: {reason}",
                                      status="REJECTED")
             key = f"{rec['record_id']}:{p['patch_id']}"
             items.append((key, ev["start"], ev["end"]))
@@ -190,7 +190,7 @@ def build_replacement(manuscript: dict, proposals: list[dict]) -> dict:
             ids.append(key)
     pairs = find_overlaps(items)
     if pairs:
-        raise BookforgeError("PATCH_OVERLAP", "", f"overlapping proposals {pairs[0][0]} and {pairs[0][1]}; "
+        raise AkoweError("PATCH_OVERLAP", "", f"overlapping proposals {pairs[0][0]} and {pairs[0][1]}; "
                              "queue merge/review instead of choosing the last writer", status="REJECTED")
     new_text, inverse = apply_edits(text, edits)
     return {"text": new_text, "inverse": inverse, "applied": ids, "precondition_hash": sha256_text(text),

@@ -1,7 +1,7 @@
 """✒️ P25 Your writing style: learn the narrator's voice from samples of the author's own writing.
 
 The author pastes (or uploads as .txt / .md) a few samples of their own prose on the ✒️ My writing style page.
-BookForge derives a **style card** from them:
+Akọwe derives a **style card** from them:
 
 * **numbers** (``stats``, no AI, deterministic): words per sentence and how much sentence length varies, very short /
   very long sentences, dialogue share, words per paragraph, reading grade (readability.py), narration person (first /
@@ -10,7 +10,7 @@ BookForge derives a **style card** from them:
   words of 4+ letters the samples use often that are not everyday function words);
 * **an AI summary** (``ai``, one AI call when the author presses ✨ Learn my style): the voice in a sentence, rhythm,
   diction, imagery, how the narration works, up to 6 things to do and 6 to avoid, and up to 4 "moves" each with a
-  quote copied from the samples — BookForge checks every quote against the samples (``verified``).
+  quote copied from the samples — Akọwe checks every quote against the samples (``verified``).
 
 Where it lives (companion data, like the story rules): the author's card in the settings key
 ``style_card:author:<principal>`` (samples, numbers, AI summary, ``version``); a book that writes in the author's style
@@ -37,10 +37,10 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from . import readability
-from .errors import BookforgeError
+from .errors import AkoweError
 from .prose_audit import paragraphs, sentences, words
 
-log = logging.getLogger("bookforge.style_card")
+log = logging.getLogger("akowe.style_card")
 
 AUTHOR_KEY = "style_card:author:{principal}"
 BOOK_KEY = "style_card:{pid}"
@@ -72,7 +72,7 @@ EDITOR_NOTE = ("The author wants the narration in their own style (context.narra
                "cards, not this style.")
 TASK = (
     "Task: you are a careful prose stylist. context.samples are samples of the AUTHOR'S OWN writing; "
-    "context.numbers are counts BookForge made from them. Describe the narrator's voice so another writer could "
+    "context.numbers are counts Akọwe made from them. Describe the narrator's voice so another writer could "
     "write new narration that sounds like this author: voice_summary (1-2 sentences), rhythm (sentence length and "
     "flow), diction (word choice, register), imagery (what kind of images, how often), narration (person, tense, "
     "distance, how thoughts are shown), do (up to 6 concrete habits to keep), avoid (up to 6 things this author never "
@@ -187,30 +187,30 @@ def describe(st: dict) -> list[str]:
 # ====================================================================== cleaning
 def clean_samples(raw) -> list[dict]:
     if not isinstance(raw, list) or not raw:
-        raise BookforgeError("MISSING_INPUT", "/samples", "paste at least one sample of your own writing",
+        raise AkoweError("MISSING_INPUT", "/samples", "paste at least one sample of your own writing",
                              status="REJECTED")
     if len(raw) > MAX_SAMPLES:
-        raise BookforgeError("INVALID_INPUT", "/samples", f"at most {MAX_SAMPLES} samples", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/samples", f"at most {MAX_SAMPLES} samples", status="REJECTED")
     out, total = [], 0
     for i, s in enumerate(raw):
         if isinstance(s, str):
             s = {"text": s}
         if not isinstance(s, dict) or not isinstance(s.get("text"), str):
-            raise BookforgeError("INVALID_INPUT", f"/samples/{i}", "each sample is text", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"/samples/{i}", "each sample is text", status="REJECTED")
         text = s["text"].replace("\r\n", "\n").strip()
         if not text:
             continue
         if len(text) > MAX_SAMPLE_CHARS:
-            raise BookforgeError("INVALID_INPUT", f"/samples/{i}", f"a sample can be up to {MAX_SAMPLE_CHARS:,} "
+            raise AkoweError("INVALID_INPUT", f"/samples/{i}", f"a sample can be up to {MAX_SAMPLE_CHARS:,} "
                                  "characters", status="REJECTED")
         total += len(text)
         name = _clip(s.get("name"), 80) or f"Sample {len(out) + 1}"
         out.append({"name": name, "text": text})
     if total > MAX_TOTAL_CHARS:
-        raise BookforgeError("INVALID_INPUT", "/samples", f"all samples together can be up to {MAX_TOTAL_CHARS:,} "
+        raise AkoweError("INVALID_INPUT", "/samples", f"all samples together can be up to {MAX_TOTAL_CHARS:,} "
                              "characters", status="REJECTED")
     if sum(len(words(s["text"])) for s in out) < MIN_WORDS:
-        raise BookforgeError("INVALID_INPUT", "/samples", f"the samples need at least {MIN_WORDS} words together "
+        raise AkoweError("INVALID_INPUT", "/samples", f"the samples need at least {MIN_WORDS} words together "
                              "(more is better: 1 000–3 000 words of narration)", status="REJECTED")
     return out
 
@@ -338,7 +338,7 @@ class StyleService:
     def get(self, principal) -> dict:
         card = author_card(self.store, principal)
         if card and card.get("status") == "learning" and not self._alive(principal):
-            card.update(status="failed", error={"code": "INTERRUPTED", "message": "BookForge stopped while the AI "
+            card.update(status="failed", error={"code": "INTERRUPTED", "message": "Akọwe stopped while the AI "
                                                 "was reading your samples: press ✨ Learn my style again"})
         out = public(card)
         out["books"] = self.books(principal)
@@ -355,7 +355,7 @@ class StyleService:
         body = body if isinstance(body, dict) else {}
         samples = clean_samples(body.get("samples"))
         if self._alive(principal):
-            raise BookforgeError("VERSION_CONFLICT", "/style", "the AI is reading your samples; wait for it to finish",
+            raise AkoweError("VERSION_CONFLICT", "/style", "the AI is reading your samples; wait for it to finish",
                                  status="REJECTED")
         with _LOCK:
             old = author_card(self.store, principal) or {}
@@ -376,15 +376,15 @@ class StyleService:
         with _LOCK:
             card = author_card(self.store, principal)
             if not card or not card.get("samples"):
-                raise BookforgeError("MISSING_INPUT", "/samples", "save some samples of your writing first",
+                raise AkoweError("MISSING_INPUT", "/samples", "save some samples of your writing first",
                                      status="REJECTED")
             if self._alive(principal):
-                raise BookforgeError("VERSION_CONFLICT", "/style", "the AI is already reading your samples",
+                raise AkoweError("VERSION_CONFLICT", "/style", "the AI is already reading your samples",
                                      status="REJECTED")
             card.update(status="learning", error=None)
             self.store.set_setting(self._key(principal), card)
             t = threading.Thread(target=self._learn, args=(principal, card["version"], slot),
-                                 name="bookforge-style", daemon=True)
+                                 name="akowe-style", daemon=True)
             self._threads[principal] = t
             t.start()
         return self.get(principal)
@@ -401,15 +401,15 @@ class StyleService:
                                            protected=[])
             ai = clean_ai(raw, _norm("\n".join(s["text"] for s in samples)))
             if not ai.get("voice_summary") and not ai.get("do"):
-                raise BookforgeError("INVALID_INPUT", "/ai", "the AI gave no usable description")
+                raise AkoweError("INVALID_INPUT", "/ai", "the AI gave no usable description")
             result = {"ai": ai, "status": "ready", "error": None, "ai_by": {"slot": job.slot, "name": job.slot_label,
                                                                             "at": _now()}}
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0] if exc.errors else {}
             result = {"status": "failed", "error": {"code": exc.code, "message": _clip(e.get("message"), 200)}}
         except Exception as exc:  # noqa: BLE001 - the numbers stay; only the AI part failed
             log.error("style card AI summary failed: %s", type(exc).__name__)
-            result = {"status": "failed", "error": {"code": "INTERNAL_ERROR", "message": "BookForge hit an "
+            result = {"status": "failed", "error": {"code": "INTERNAL_ERROR", "message": "Akọwe hit an "
                                                     "unexpected problem"}}
         with _LOCK:
             cur = author_card(self.store, principal) or {}
@@ -442,10 +442,10 @@ class StyleService:
         body = body if isinstance(body, dict) else {}
         on = body.get("on")
         if not isinstance(on, bool):
-            raise BookforgeError("INVALID_INPUT", "/on", "on must be true or false", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/on", "on must be true or false", status="REJECTED")
         if on:
             if apply_to_book(self.store, principal, pid) is None:
-                raise BookforgeError("MISSING_INPUT", "/samples", "save samples of your writing on ✒️ My writing "
+                raise AkoweError("MISSING_INPUT", "/samples", "save samples of your writing on ✒️ My writing "
                                      "style first", status="REJECTED")
         else:
             cur = book_entry(self.store, pid) or {}
@@ -473,7 +473,7 @@ def route(app, method: str, parts: list, body, principal: str):
         return 200, svc.delete(principal)
     if parts == ["style-card", "learn"] and method == "POST":
         return 202, svc.learn(principal, body)
-    raise BookforgeError("NOT_FOUND", "/" + "/".join(parts), "no such endpoint", status="REJECTED")
+    raise AkoweError("NOT_FOUND", "/" + "/".join(parts), "no such endpoint", status="REJECTED")
 
 
 def route_book(app, method: str, body, principal: str, pid: str):
@@ -486,4 +486,4 @@ def route_book(app, method: str, body, principal: str, pid: str):
                      "has_card": bool((card.get("stats") or {}).get("words"))}
     if method == "PUT":
         return 200, svc.set_book(principal, pid, body)
-    raise BookforgeError("NOT_FOUND", "/style", "no such endpoint", status="REJECTED")
+    raise AkoweError("NOT_FOUND", "/style", "no such endpoint", status="REJECTED")

@@ -42,9 +42,9 @@ import re
 import threading
 from datetime import datetime, timezone
 
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.story_rules")
+log = logging.getLogger("akowe.story_rules")
 
 TEXT_MAX = 300
 SOURCE_MAX = 200
@@ -234,8 +234,8 @@ def update_single(store, key: str, pid: str, branch: str, change, event: tuple |
     return copy.deepcopy(entry)
 
 
-def conflict(what: str, have) -> BookforgeError:
-    return BookforgeError("VERSION_CONFLICT", "/version", f"the {what} changed since you opened it (it is now version "
+def conflict(what: str, have) -> AkoweError:
+    return AkoweError("VERSION_CONFLICT", "/version", f"the {what} changed since you opened it (it is now version "
                           f"{have or 0}); reload it — your text is kept in the form", status="REJECTED")
 
 
@@ -377,7 +377,7 @@ def generate(assist, job, bp, *, update: bool | None = None, note: str | None = 
     job.check()
     rules = clean_rules(raw, AI_MAX_RULES, known={r["id"] for r in active(entry)} if upd else None)
     if not rules:
-        raise BookforgeError("INTERNAL_ERROR", "/rules", "the AI's answer had no usable story rule; nothing was saved")
+        raise AkoweError("INTERNAL_ERROR", "/rules", "the AI's answer had no usable story rule; nothing was saved")
     notes = [_clip(x, 200) for x in (raw.get("notes") if isinstance(raw, dict) else None) or [] if _clip(x, 200)][:5]
     b = basis(bp)
     if not upd:
@@ -453,13 +453,13 @@ def decide_proposals(store, pid, branch, *, accept=None, reject=None, version=No
     """Apply the accepted proposals (accept=None: all) to the ledger as a new version; the rest are dropped."""
     entry = get_entry(store, pid, branch)
     if not entry or not (entry.get("proposals") or {}).get("items"):
-        raise BookforgeError("INVALID_INPUT", "/proposals", "there are no suggested updates to decide on",
+        raise AkoweError("INVALID_INPUT", "/proposals", "there are no suggested updates to decide on",
                              status="REJECTED")
     if version is not None and entry["version"] != version:
         raise conflict("story rules", entry["version"])
     for k, v in (("accept", accept), ("reject", reject)):
         if v is not None and (not isinstance(v, list) or not all(isinstance(x, str) for x in v)):
-            raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k}: a list of suggestion ids", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", f"/{k}", f"{k}: a list of suggestion ids", status="REJECTED")
     props = entry["proposals"]
     take = [i for i in props["items"] if (accept is None or i["id"] in accept) and i["id"] not in (reject or [])]
     rules = [dict(r) for r in entry.get("rules") or []]

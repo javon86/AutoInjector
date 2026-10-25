@@ -26,7 +26,7 @@ from ..canonical import canonical_bytes
 from .. import d_assets as da
 from .. import d_imaging
 from .. import d_maps
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from . import register
 from .base import Context, OperationHandler, Result
 
@@ -37,7 +37,7 @@ SVG_MIME = "image/svg+xml"
 
 
 def _internal_rights(op_id: str) -> dict:
-    return {"license": "project-owned", "source": f"bookforge:{op_id} deterministic output", "cleared": True}
+    return {"license": "project-owned", "source": f"akowe:{op_id} deterministic output", "cleared": True}
 
 
 def _asset_type(ctx: Context) -> str:
@@ -69,7 +69,7 @@ def _protected_facts(rec: dict) -> list[dict]:
 
 def _require_subject(rec: dict, subject_id: str, field: str, what: str):
     if subject_id not in _canon_subjects(rec):
-        raise BookforgeError("INVALID_INPUT", f"/payload/{field}",
+        raise AkoweError("INVALID_INPUT", f"/payload/{field}",
                              f"{subject_id!r} is not a {what} in the pinned canon {rec['module_id']}:{rec['record_id']} "
                              f"v{rec['version']}", status="REJECTED")
 
@@ -121,7 +121,7 @@ class DHandler(OperationHandler):
         if ctx.request.get("source_set") == "K":
             # Scheduler-dispatched work for an unselected art operation (text-only project).
             if "artwork" not in m.get("features", {}):
-                raise BookforgeError("MISSING_INPUT", "/feature_manifest/features/artwork",
+                raise AkoweError("MISSING_INPUT", "/feature_manifest/features/artwork",
                                      "feature 'artwork' state is unknown; set it in the project feature manifest")
             return ("REQUIRED_OR_DIRECT_REQUEST:artwork",
                     f"{ctx.op_id} requires artwork=true or an explicit user request; feature manifest revision "
@@ -130,7 +130,7 @@ class DHandler(OperationHandler):
 
     def create(self, ctx: Context) -> Result:
         if self.computed and ctx.manual_candidate is not None:
-            raise BookforgeError("INVALID_INPUT", "/manual_candidate",
+            raise AkoweError("INVALID_INPUT", "/manual_candidate",
                                  f"{ctx.op_id} output bytes are computed deterministically from the payload; "
                                  "supply the payload fields instead of a manual candidate", status="REJECTED")
         return self.build(ctx)
@@ -161,10 +161,10 @@ class DHandler(OperationHandler):
             if (rec is not None and rec["representation"] == "BINARY_ARTIFACT" and rec["module_id"] == ctx.op_id
                     and rec["content_hash"] == data["file_hash"] == parsed["sha"]):
                 if rec["binary"]["mime_type"] != data["mime_type"]:
-                    raise BookforgeError("INVALID_INPUT", "/payload/mime_type",
+                    raise AkoweError("INVALID_INPUT", "/payload/mime_type",
                                          "mime_type must equal the stored binary's MIME", status="REJECTED")
                 return []
-        raise BookforgeError("INVALID_INPUT", "/payload/storage_uri",
+        raise AkoweError("INVALID_INPUT", "/payload/storage_uri",
                              f"storage_uri/file_hash must name this {ctx.op_id} record's own D-owned binary",
                              status="REJECTED")
 
@@ -224,7 +224,7 @@ class VisualStyle(DHandler):
             rec = _resolve_asset_id(ctx, rid, f"/payload/reference_asset_ids/{i}")
             refs.append(rec["ref"])
             pins.append({"asset_id": rid, "ref": rec["ref"]})
-        doc = {"kind": "bookforge.visual_style", "style_name": p["style_name"], "style_rules": p["style_rules"],
+        doc = {"kind": "akowe.visual_style", "style_name": p["style_name"], "style_rules": p["style_rules"],
                "publishing_format": p["publishing_format"]}
         if "palette" in p:
             doc["palette"] = p["palette"]
@@ -249,7 +249,7 @@ class VisualStyle(DHandler):
 def _resolve_asset_id(ctx: Context, rid: str, pointer: str) -> dict:
     rec = ctx.store.get_record(ctx.project_id, ctx.branch_id, rid)
     if rec is None or not (rec["owner"] == "D" or (rec["module_id"] == "I01" and rec["representation"] == "BINARY_ARTIFACT")):
-        raise BookforgeError("INVALID_INPUT", pointer, f"reference asset {rid!r} is not a D asset or uploaded image "
+        raise AkoweError("INVALID_INPUT", pointer, f"reference asset {rid!r} is not a D asset or uploaded image "
                              "in this project/branch", status="REJECTED")
     return rec
 
@@ -272,9 +272,9 @@ class ImageAsset(DHandler):
                    **context}
         try:
             got = d_imaging.generate(ctx, request)
-        except BookforgeError as exc:
+        except AkoweError as exc:
             if exc.code == "CAPABILITY_UNAVAILABLE":
-                raise BookforgeError(
+                raise AkoweError(
                     "CAPABILITY_UNAVAILABLE", "/payload",
                     f"{ctx.op_id} needs image generation and no connected AI slot offers 'image'. Upload the image "
                     "(I01 import) and pin it in input_refs, or send a manual_candidate whose file_hash is the "
@@ -303,7 +303,7 @@ class ImageAsset(DHandler):
 
     def from_upload(self, ctx, manual, imp, extra_refs, findings) -> Result:
         if imp is None:
-            raise BookforgeError("MISSING_INPUT", "/manual_candidate/file_hash",
+            raise AkoweError("MISSING_INPUT", "/manual_candidate/file_hash",
                                  "no uploaded image (I01 import) has this file_hash; upload the image first and use "
                                  "its exact SHA-256", status="BLOCKED")
         blob, mime = da.load_import(ctx, imp, manual["mime_type"] if manual else None,
@@ -332,7 +332,7 @@ class ImageAsset(DHandler):
         style = ctx.field_record("style_ref")
         doc = _binary_json(ctx, style) if style else None
         if style is not None and doc is None:
-            raise BookforgeError("INVALID_INPUT", "/payload/style_ref", "style asset bytes do not verify",
+            raise AkoweError("INVALID_INPUT", "/payload/style_ref", "style asset bytes do not verify",
                                  status="REJECTED")
         return {"style": doc} if doc else {}
 
@@ -348,7 +348,7 @@ class ImageAsset(DHandler):
     def rebind(self, ctx: Context, data: dict) -> list:
         try:
             return super().rebind(ctx, data)
-        except BookforgeError:
+        except AkoweError:
             imp = da.find_import(ctx, data["file_hash"], pointer="/payload/file_hash")
             if imp is None:
                 raise
@@ -400,10 +400,10 @@ class CharacterPose(ImageAsset):
         ref_rec = ctx.field_record("character_reference_ref")
         canon = [s for s in _a_sources(ctx, ref_rec) if s["module_id"] == "A01"]
         if not canon:
-            raise BookforgeError("INVALID_INPUT", "/payload/character_reference_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/character_reference_ref",
                                  "character reference has no pinned A01 appearance canon", status="REJECTED")
         if not any(ctx.payload["character_id"] in _canon_subjects(c) for c in canon):
-            raise BookforgeError("INVALID_INPUT", "/payload/character_id",
+            raise AkoweError("INVALID_INPUT", "/payload/character_id",
                                  "character_id does not match the reference's appearance canon", status="REJECTED")
         context = {**self.style_context(ctx), "character_id": ctx.payload["character_id"],
                    "reference_image": {"storage_uri": ref_rec["data"]["storage_uri"],
@@ -461,7 +461,7 @@ class SceneIllustration(ImageAsset):
             subjects.append(("/payload/location_asset_ref", loc))
         for ptr, rec in subjects:  # supplied subjects need approved reference interpretations
             if rec["lifecycle"] not in APPROVED:
-                raise BookforgeError("APPROVAL_REQUIRED", ptr, f"{rec['module_id']}:{rec['record_id']} "
+                raise AkoweError("APPROVAL_REQUIRED", ptr, f"{rec['module_id']}:{rec['record_id']} "
                                      f"v{rec['version']} is {rec['lifecycle']}; depicted subjects need approved "
                                      "reference interpretations", unresolved=[f"{rec['module_id']}:accept"])
         canon = [s for _, rec in subjects for s in _a_sources(ctx, rec)]
@@ -495,7 +495,7 @@ class ComicPanels(ImageAsset):
         if raw is None:
             return list(range(len(panels)))
         if not panels:
-            raise BookforgeError("INVALID_INPUT", "/payload/reading_order",
+            raise AkoweError("INVALID_INPUT", "/payload/reading_order",
                                  "reading_order orders supplied panels; asset_refs is empty", status="REJECTED")
         ids = {p["record_id"]: i for i, p in enumerate(panels)}
         order = []
@@ -505,14 +505,14 @@ class ComicPanels(ImageAsset):
             elif tok in ids:
                 order.append(ids[tok])
             else:
-                raise BookforgeError("INVALID_INPUT", "/payload/reading_order",
+                raise AkoweError("INVALID_INPUT", "/payload/reading_order",
                                      f"unknown panel {tok!r}; use 1-based positions or panel record IDs",
                                      status="REJECTED")
         if len(order) != len(set(order)):
-            raise BookforgeError("INVALID_INPUT", "/payload/reading_order", "reading_order repeats a panel",
+            raise AkoweError("INVALID_INPUT", "/payload/reading_order", "reading_order repeats a panel",
                                  status="REJECTED")
         if len(order) != len(panels):
-            raise BookforgeError("INVALID_INPUT", "/payload/reading_order",
+            raise AkoweError("INVALID_INPUT", "/payload/reading_order",
                                  f"reading_order lists {len(order)} of {len(panels)} supplied panels",
                                  status="REJECTED")
         return order
@@ -523,7 +523,7 @@ class ComicPanels(ImageAsset):
             return None
         for i, rec in enumerate(panels):
             if rec["lifecycle"] not in APPROVED:
-                raise BookforgeError("APPROVAL_REQUIRED", f"/payload/asset_refs/{i}",
+                raise AkoweError("APPROVAL_REQUIRED", f"/payload/asset_refs/{i}",
                                      f"panel asset {rec['record_id']} v{rec['version']} is not approved",
                                      unresolved=[f"{rec['module_id']}:accept"])
         page, order = context["page"], context["panel_order"]
@@ -537,7 +537,7 @@ class ComicPanels(ImageAsset):
             r, c = divmod(pos, cols)
             layout.append({"reading_index": pos + 1, "asset_ref": rec["ref"], "file_hash": rec["data"]["file_hash"],
                            "box": {"x": c * w, "y": r * hgt, "width": w, "height": hgt, "unit": page["unit"]}})
-        doc = {"kind": "bookforge.panel_plan", "panel_brief": ctx.payload["panel_brief"], "page": page,
+        doc = {"kind": "akowe.panel_plan", "panel_brief": ctx.payload["panel_brief"], "page": page,
                "style_ref": ctx.payload["style_ref"], "panels": layout}
         bref = self.stage_json_asset(ctx, doc, self._pins(ctx, extra_refs))
         f = ctx.finding("READING_ORDER", f"{n} supplied panels in a unique complete reading order",
@@ -577,7 +577,7 @@ class Composition(DHandler):
         for i, rec in enumerate(assets):
             placements.append({"asset_ref": rec["ref"], "file_hash": rec["data"]["file_hash"], "z": i,
                                "box": {"x": W * i / n, "y": 0, "width": W / n, "height": H}})
-        doc = {"kind": "bookforge.composition", "composition_brief": p["composition_brief"], "canvas": canvas,
+        doc = {"kind": "akowe.composition", "composition_brief": p["composition_brief"], "canvas": canvas,
                "focal_point": {"x": focal[0], "y": focal[1], "source": p.get("focal_point", "rule-of-thirds")},
                "style_ref": p["style_ref"], "placements": placements}
         bref = self.stage_json_asset(ctx, doc, [r["ref"] for r in ctx.resolved.values()])
@@ -594,11 +594,11 @@ class Composition(DHandler):
             return (W * fx, H * fy)
         m = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$", text)
         if not m:
-            raise BookforgeError("INVALID_INPUT", "/payload/focal_point", "focal_point must be 'x,y' in canvas units "
+            raise AkoweError("INVALID_INPUT", "/payload/focal_point", "focal_point must be 'x,y' in canvas units "
                                  f"or one of {sorted(self.ANCHORS)}", status="REJECTED")
         x, y = float(m.group(1)), float(m.group(2))
         if not (0 <= x <= W and 0 <= y <= H):
-            raise BookforgeError("INVALID_INPUT", "/payload/focal_point", "focal point lies outside the canvas",
+            raise AkoweError("INVALID_INPUT", "/payload/focal_point", "focal point lies outside the canvas",
                                  status="REJECTED")
         return (x, y)
 
@@ -636,7 +636,7 @@ class ConsistencyChecker(DHandler):
     def document(ctx, assets, refs, tol, findings) -> dict:
         def entry(r):
             return {"ref": r["ref"], "file_hash": r["data"]["file_hash"], "mime_type": r["data"]["mime_type"]}
-        return {"kind": "bookforge.visual_consistency_check", "tolerance_profile": tol,
+        return {"kind": "akowe.visual_consistency_check", "tolerance_profile": tol,
                 "assets": [entry(a) for a in assets], "references": [entry(r) for r in refs], "findings": findings}
 
     def check_asset(self, ctx, a, refs, tol) -> list[dict]:
@@ -729,7 +729,7 @@ class ConsistencyChecker(DHandler):
         base = ctx.base
         doc = _binary_json(ctx, base)
         if doc is None:
-            raise BookforgeError("INVALID_INPUT", "/base_ref", "base check bytes do not verify", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/base_ref", "base check bytes do not verify", status="REJECTED")
         doc["findings"] = data["findings"]
         doc["reviewed_by"] = ctx.principal_id
         bref = self.stage_json_asset(ctx, doc, list(base["source_refs"]))
@@ -767,18 +767,18 @@ class MapArtwork(DHandler):
         labels_recs = ctx.field_records("canonical_label_refs")
         for i, rec in enumerate(labels_recs):
             if rec["lifecycle"] not in APPROVED:
-                raise BookforgeError("APPROVAL_REQUIRED", f"/payload/canonical_label_refs/{i}",
+                raise AkoweError("APPROVAL_REQUIRED", f"/payload/canonical_label_refs/{i}",
                                      "canonical labels must come from approved canon",
                                      unresolved=[f"{rec['module_id']}:accept"])
         extra = []
         if src["module_id"] == "A04":
             if src["lifecycle"] not in APPROVED:
-                raise BookforgeError("APPROVAL_REQUIRED", "/payload/geometry_source_ref",
+                raise AkoweError("APPROVAL_REQUIRED", "/payload/geometry_source_ref",
                                      "initial geometry is extracted from approved A04 coordinates only",
                                      unresolved=["A04:accept"])
             graph, problems = d_maps.extract_graph(src, labels_recs, p.get("projection"))
             if problems:
-                raise BookforgeError("INVALID_INPUT", "/payload/geometry_source_ref",
+                raise AkoweError("INVALID_INPUT", "/payload/geometry_source_ref",
                                      "cannot extract map geometry: " + "; ".join(problems), status="REJECTED")
             graph_ref = ctx.stage_json("D12", graph, record_kind="MapGraph",
                                        source_refs=[src["ref"]] + [r["ref"] for r in labels_recs])
@@ -789,7 +789,7 @@ class MapArtwork(DHandler):
             extra.append(graph_ref)
             gp = d_maps.graph_problems(graph)
             if gp:
-                raise BookforgeError("INVALID_INPUT", "/payload/geometry_source_ref", "; ".join(gp),
+                raise AkoweError("INVALID_INPUT", "/payload/geometry_source_ref", "; ".join(gp),
                                      status="REJECTED")
             canonical = d_maps.canonical_labels(labels_recs + self.graph_label_sources(ctx, graph_rec))[0]
         svg = d_maps.render_svg(graph, title=p["map_requirements"], legend=p.get("legend"), scale=p.get("scale"))
@@ -810,7 +810,7 @@ class MapArtwork(DHandler):
             g = ctx.record(rec["data"]["source_graph_ref"])
             if g is not None and g["record_kind"] == "MapGraph":
                 return g
-        raise BookforgeError("INVALID_INPUT", "/payload/geometry_source_ref",
+        raise AkoweError("INVALID_INPUT", "/payload/geometry_source_ref",
                              "a D12 geometry source must be a MapGraph record or a D12 map", status="REJECTED")
 
     @staticmethod
@@ -834,11 +834,11 @@ class MapArtwork(DHandler):
         super().rebind(ctx, data)
         g, s = ctx.field_record("source_graph_ref"), ctx.field_record("sidecar_ref")
         if g["record_kind"] != "MapGraph" or s["record_kind"] != "MapSidecar":
-            raise BookforgeError("INVALID_INPUT", "/payload/source_graph_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/source_graph_ref",
                                  "source_graph_ref/sidecar_ref must be D12 MapGraph/MapSidecar records",
                                  status="REJECTED")
         if s["data"]["graph_ref"] != g["ref"] or s["data"]["file_hash"] != data["file_hash"]:
-            raise BookforgeError("INVALID_INPUT", "/payload/sidecar_ref",
+            raise AkoweError("INVALID_INPUT", "/payload/sidecar_ref",
                                  "sidecar must pin source_graph_ref and the map file hash", status="REJECTED")
         return []
 

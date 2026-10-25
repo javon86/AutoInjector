@@ -34,10 +34,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .canonical import sha256_bytes
-from .errors import BookforgeError
+from . import legacy
+from .errors import AkoweError
 from .store import Store, best_effort_flushes, durable_copy, fsync_dir, fsync_file
 
-log = logging.getLogger("bookforge.backups")
+log = logging.getLogger("akowe.backups")
 
 DEFAULT_KEEP = 10
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
@@ -91,7 +92,7 @@ class BackupManager:
 
     def set_keep(self, n) -> int:
         if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 100:
-            raise BookforgeError("INVALID_INPUT", "/keep", "keep 1 to 100 backups", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/keep", "keep 1 to 100 backups", status="REJECTED")
         self.store.set_setting("backup_keep", n)
         self.rotate()
         return n
@@ -115,21 +116,21 @@ class BackupManager:
                 problems = Store.verify_backup(dest)
                 info = {"reason": reason, "label": REASONS[reason], "verified": not problems,
                         "problems": problems[:5]}
-                (dest / "bookforge-backup.json").write_text(json.dumps(info), encoding="utf-8")
-                fsync_file(dest / "bookforge-backup.json")
+                (dest / "akowe-backup.json").write_text(json.dumps(info), encoding="utf-8")
+                fsync_file(dest / "akowe-backup.json")
                 fsync_dir(dest)
                 if best_effort_flushes() != flush_before:
                     # Verified = the copy reads back right; but the system could not confirm it reached the disk
                     # (Windows refused a flush), so say so instead of implying it survives a power cut.
                     info["flushed"] = "best effort"
-                    (dest / "bookforge-backup.json").write_text(json.dumps(info), encoding="utf-8")
+                    (dest / "akowe-backup.json").write_text(json.dumps(info), encoding="utf-8")
                     log.warning("backup %s: some files could not be flushed to disk (best effort)", dest.name)
             except (OSError, sqlite3.Error) as exc:
                 self.last_error = f"{type(exc).__name__}: {exc}"[:300]
                 log.error("backup failed: %s", self.last_error)
                 if dest is not None:
                     shutil.rmtree(dest, ignore_errors=True)
-                raise BookforgeError("INTERNAL_ERROR", "/backup", DISK_MESSAGE) from exc
+                raise AkoweError("INTERNAL_ERROR", "/backup", DISK_MESSAGE) from exc
             if problems:
                 # Keep the damaged backup for inspection, but never let it push a good one out of rotation.
                 self.last_error = f"backup {dest.name} did not verify: {'; '.join(problems[:2])}"[:300]
@@ -152,7 +153,10 @@ class BackupManager:
     def _describe(self, d: Path) -> dict:
         info = {}
         try:
-            info = json.loads((d / "bookforge-backup.json").read_text(encoding="utf-8"))
+            f = d / "akowe-backup.json"
+            if not f.exists() and (d / legacy.OLD_BACKUP_INFO).exists():
+                f = d / legacy.OLD_BACKUP_INFO  # a backup made before the rename
+            info = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             info = {"reason": "manual", "label": "Backup", "verified": None}
         created = None
@@ -224,22 +228,22 @@ class BackupManager:
     def restore(self, name, body) -> dict:
         body = body if isinstance(body, dict) else {}
         if body.get("author_confirms") is not True or str(body.get("confirm") or "").strip().upper() != "RESTORE":
-            raise BookforgeError("APPROVAL_REQUIRED", "/confirm", "restoring replaces ALL your books with this backup: "
+            raise AkoweError("APPROVAL_REQUIRED", "/confirm", "restoring replaces ALL your books with this backup: "
                                  "type RESTORE and confirm (author_confirms: true)", status="REJECTED")
         if not isinstance(name, str) or not NAME_RE.fullmatch(name) or not (self.dir / name / "manifest.json").exists():
-            raise BookforgeError("NOT_FOUND", "/name", "that backup does not exist", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/name", "that backup does not exist", status="REJECTED")
         src = self.dir / name
         schema = Store.schema_problem(src)
         if schema:
-            raise BookforgeError("UNSUPPORTED_CONTRACT", "/name", schema, status="REJECTED")
+            raise AkoweError("UNSUPPORTED_CONTRACT", "/name", schema, status="REJECTED")
         with (self.exclusive() if self.exclusive else nullcontext()):
             why = self.busy() if self.busy else None
             if why:
-                raise BookforgeError("VERSION_CONFLICT", "/name", f"wait until {why} is finished (or pause it), then "
+                raise AkoweError("VERSION_CONFLICT", "/name", f"wait until {why} is finished (or pause it), then "
                                      "restore", status="REJECTED")
             problems = Store.verify_backup(src)
             if problems:
-                raise BookforgeError("HASH_MISMATCH", "/name", "this backup is damaged and was not restored: "
+                raise AkoweError("HASH_MISMATCH", "/name", "this backup is damaged and was not restored: "
                                      + "; ".join(problems[:3]), status="REJECTED")
             with self._lock:
                 return self._restore_locked(name, src)
@@ -252,7 +256,7 @@ class BackupManager:
             restored.close()
             safety = self.backup("before-restore", protect=(name,))
             digests = json.loads((src / "manifest.json").read_text()).get("assets") or {}
-            rconn = sqlite3.connect(staging / "bookforge.sqlite3")
+            rconn = sqlite3.connect(legacy.db_in(staging))
             live_touched = True
             try:
                 with self.store.connection() as live:
@@ -274,9 +278,9 @@ class BackupManager:
             self.last_error = f"{type(exc).__name__}: {exc}"[:300]
             log.error("restore of %s failed: %s", name, self.last_error)
             if not live_touched:
-                raise BookforgeError("INTERNAL_ERROR", "/name", "the restore could not start (is the disk full or the "
+                raise AkoweError("INTERNAL_ERROR", "/name", "the restore could not start (is the disk full or the "
                                      "data folder read-only?); nothing was changed") from exc
-            raise BookforgeError("INTERNAL_ERROR", "/name", "the restore could not finish (is the disk full or the "
+            raise AkoweError("INTERNAL_ERROR", "/name", "the restore could not finish (is the disk full or the "
                                  "data folder read-only?); your books may be partly restored: restore again, or "
                                  "restore the safety copy") from exc
         finally:

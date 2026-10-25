@@ -1,4 +1,4 @@
-# Bookforge Set H - Final Quality Control
+# Akọwe Set H - Final Quality Control
 Revision BF-CLOSURE-1.1 | 10 operations | independent module
 
 This is the current specification. Historical source/addenda are not active instructions. Use Shared_Contract.md for wire formats, lifecycle, ownership, permissions, failures and record storage.

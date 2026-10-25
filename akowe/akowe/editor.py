@@ -9,7 +9,7 @@ when another AI works (⚠️ "not independent" otherwise). It answers strict JS
     {"scores": {dimension: 1-10}, "findings": [{"id", "dimension", "severity": "minor"|"major", "passage", "why",
      "suggestion", "keep_nearby": [...]}], "keep": [...], "verdict": "PASS"|"REVISE"}
 
-(the rubric lives in editor_rubric.py). BookForge decides PASS / REVISE itself from the scores and findings with the
+(the rubric lives in editor_rubric.py). Akọwe decides PASS / REVISE itself from the scores and findings with the
 author's strictness (Settings › Editor: gentle / normal / strict); the AI's own verdict is kept as ``ai_verdict``.
 
 Storage: like the AI reviewer's verdicts the editor's opinion is ADVICE, stored in the settings key
@@ -23,7 +23,7 @@ never text. Only the stored findings hold short quotes (≤ 200 characters) of t
 
 P36 calibration (calibration.py): the editor must quote its weakest passages, name at least 3 problems and prove every
 9/10 with a quote. A near-perfect review without that is asked again once (stricter prompt, same AI); still unproven
--> flagged ⚠️, those scores count as 7 and, when nothing is left to rewrite, BookForge's own pattern notes are added so
+-> flagged ⚠️, those scores count as 7 and, when nothing is left to rewrite, Akọwe's own pattern notes are added so
 the rewrite loop can still run. When a second AI works that is neither the writer nor the first editor, it reviews
 too and the LOWER score per dimension counts (Settings › Editor › two reviewers, on by default; an AI the author
 picked for this review stays the only one). Each AI's leniency is kept over time (settings ``reviewer_leniency``) and
@@ -53,11 +53,11 @@ from . import prose_audit
 from . import providers as providers_mod
 from .assist import Cancelled, book_profile_brief, canon_context
 from .book_path import BookPath
-from .errors import BookforgeError
+from .errors import AkoweError
 from .fact_checks import editor_context as fact_checks_context  # P26/P30/P31 (Section 7a)
 from .fact_checks import protected_keep as protected_repeats
 
-log = logging.getLogger("bookforge.editor")
+log = logging.getLogger("akowe.editor")
 
 EDITABLE = ("C02", "B01", "B03", "B11")
 REWRITABLE = ("C02",)
@@ -109,7 +109,7 @@ REWRITE_SCHEMA = {
 
 UNRESOLVED_WORDS = {
     "NOT_FOUND": "the AI's “original” is not in the chapter word for word, so nothing was changed there",
-    "AMBIGUOUS": "the AI's “original” appears more than once in the chapter, so BookForge did not guess which",
+    "AMBIGUOUS": "the AI's “original” appears more than once in the chapter, so Akọwe did not guess which",
     "NOT_AT_PASSAGE": "the AI changed text that is not where the editor pointed",
     "TOO_LONG": "the AI tried to replace much more than the flagged passage",
     "KEEP_LOST": "the change would remove a passage the editor said to keep",
@@ -148,7 +148,7 @@ def _find_passage(text: str, passage: str) -> tuple[int, int] | None:
 
 # ====================================================================== pure helpers (unit-tested)
 def decide(scores: dict, findings: list, strictness: str, relax: dict | None = None) -> tuple[str, list[str]]:
-    """BookForge's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness).
+    """Akọwe's own PASS / REVISE from the editor's scores and findings (Settings › Editor › strictness).
     ``relax``: per-dimension change of the minimum score from the author's story choices (P12, e.g. "explain the
     mysteries" lowers the bar of protected_mysteries by 2)."""
     thr = rubric.STRICTNESS.get(strictness) or rubric.STRICTNESS["normal"]
@@ -170,7 +170,7 @@ def decide(scores: dict, findings: list, strictness: str, relax: dict | None = N
 def clean_craft(raw, dims: list[str], text: str, strictness: str, relax: dict | None = None) -> dict:
     """Validate and normalise the editor's answer; raise INTERNAL_ERROR when it is not a usable review."""
     if not isinstance(raw, dict) or not isinstance(raw.get("scores"), dict):
-        raise BookforgeError("INTERNAL_ERROR", "/scores", "the editor's answer was not a valid craft review (no "
+        raise AkoweError("INTERNAL_ERROR", "/scores", "the editor's answer was not a valid craft review (no "
                              "scores); nothing was changed")
     scores = {}
     for d in dims:
@@ -179,7 +179,7 @@ def clean_craft(raw, dims: list[str], text: str, strictness: str, relax: dict | 
             continue
         scores[d] = int(min(10, max(1, round(v))))
     if not scores:
-        raise BookforgeError("INTERNAL_ERROR", "/scores", "the editor gave no usable scores; nothing was changed")
+        raise AkoweError("INTERNAL_ERROR", "/scores", "the editor gave no usable scores; nothing was changed")
     findings, seen = [], set()
     for i, f in enumerate(raw.get("findings") or []):
         if not isinstance(f, dict) or len(findings) >= MAX_FINDINGS:
@@ -228,7 +228,7 @@ def summarise(scores: dict, findings: list, keep: list, dims: list[str], text: s
 
 def keep_quotes_of(craft: dict, text: str, finding_ids=None) -> list[str]:
     """The exact quotes a rewrite must not lose: the keep list and the keep_nearby of the targeted findings, when
-    they are in the text word for word (plain notes such as "the ending's image" cannot be checked by BookForge)."""
+    they are in the text word for word (plain notes such as "the ending's image" cannot be checked by Akọwe)."""
     out = [k for k in craft.get("keep") or [] if k and k in text]
     for f in craft.get("findings") or []:
         if finding_ids is None or f["id"] in finding_ids:
@@ -302,7 +302,7 @@ def judge_rewrite(old: dict, new: dict | None, *, consistency: str | None, check
     """Keep a rewrite only if nothing got worse: (keep?, code, plain reason). Scores may move by AI noise: the
     average must not drop and no single dimension may drop by more than 1 point."""
     if not checks_ok:
-        return False, "CHECKS_REFUSED", "BookForge's checks refused the rewritten chapter"
+        return False, "CHECKS_REFUSED", "Akọwe's checks refused the rewritten chapter"
     if consistency != "APPROVE":
         return False, "CONSISTENCY", f"the consistency reviewer said {consistency or 'nothing'} for the rewrite"
     if keep_lost:
@@ -353,24 +353,24 @@ class EditorService:
         cur = {k: v for k, v in self.settings().items() if k in DEFAULTS}
         if "enabled" in body:
             if not isinstance(body["enabled"], bool):
-                raise BookforgeError("INVALID_INPUT", "/enabled", "Editor: on (true) or off (false)", status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/enabled", "Editor: on (true) or off (false)", status="REJECTED")
             cur["enabled"] = body["enabled"]
         if "rounds" in body:
             r = body["rounds"]
             if isinstance(r, str) and r.strip().isdigit():
                 r = int(r)
             if isinstance(r, bool) or not isinstance(r, int) or not 0 <= r <= 3:
-                raise BookforgeError("INVALID_INPUT", "/rounds", "Editor rounds: a whole number from 0 to 3",
+                raise AkoweError("INVALID_INPUT", "/rounds", "Editor rounds: a whole number from 0 to 3",
                                      status="REJECTED")
             cur["rounds"] = r
         if "strictness" in body:
             if body["strictness"] not in rubric.STRICTNESS:
-                raise BookforgeError("INVALID_INPUT", "/strictness", "Strictness: gentle, normal or strict",
+                raise AkoweError("INVALID_INPUT", "/strictness", "Strictness: gentle, normal or strict",
                                      status="REJECTED")
             cur["strictness"] = body["strictness"]
         if "two_reviewers" in body:
             if not isinstance(body["two_reviewers"], bool):
-                raise BookforgeError("INVALID_INPUT", "/two_reviewers", "Two reviewers: on (true) or off (false)",
+                raise AkoweError("INVALID_INPUT", "/two_reviewers", "Two reviewers: on (true) or off (false)",
                                      status="REJECTED")
             cur["two_reviewers"] = body["two_reviewers"]
         cur["at"] = _now_iso()
@@ -535,9 +535,9 @@ class EditorService:
         pid, branch = job.project_id, job.branch_id
         rec = rv._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this draft no longer exists", status="REJECTED")
         if rec["module_id"] not in EDITABLE:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
+            raise AkoweError("INVALID_INPUT", "/record_id", "the editor reads chapters and the premise, main plot "
                                  "and chapter outline", status="REJECTED")
         st = self.settings()
         info = chapter or (self.chapter_info(pid, branch, rec, job.principal) if rec["module_id"] == "C02" else {})
@@ -578,7 +578,7 @@ class EditorService:
                     job.phase = f"A second editor is reading “{title}”"
                     try:
                         second = self._ask(job, slot=other, optional=True, **ask)
-                    except BookforgeError as exc:
+                    except AkoweError as exc:
                         second_note = f"the second editor ({rv.slot_label(other)}) could not read it ({exc.code})"
                         log.info("second editor %s failed: %s", other, exc.code)
                     finally:
@@ -662,7 +662,7 @@ class EditorService:
                     got["model"] = job.model
                 except Cancelled:
                     raise
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     reask_error = exc.code
                     log.info("strict re-ask of the editor on %s failed: %s", got["slot"], exc.code)
         finally:
@@ -718,7 +718,7 @@ class EditorService:
         for r in reviewers:
             if r["reasked"]:
                 out.append(f"{r['name']}'s first review was not accepted ({'; '.join(r['first_reasons'])}), so "
-                           "BookForge asked once more with a stricter prompt"
+                           "Akọwe asked once more with a stricter prompt"
                            + (f" — that failed ({r['reask_error']})" if r["reask_error"] else "") + ".")
             if r["flagged"]:
                 out.append(f"⚠️ {r['name']}'s review is still not backed by quotes: "
@@ -731,14 +731,14 @@ class EditorService:
             out.append(f"Two editors read it ({' and '.join(r['name'] for r in reviewers)}): the lower score counts "
                        "on each point and the notes of both are listed.")
         if added:
-            out.append(f"{len(added)} note(s) from BookForge's own pattern check were added so the rewrite can work "
+            out.append(f"{len(added)} note(s) from Akọwe's own pattern check were added so the rewrite can work "
                        "on something.")
         if second_note:
             out.append(f"Only one editor this time: {second_note}.")
         return out
 
     def _track(self, reviewers: list):
-        """P36 leniency over time: each editor vs the other one and vs BookForge's pattern check (numbers only)."""
+        """P36 leniency over time: each editor vs the other one and vs Akọwe's pattern check (numbers only)."""
         gap = calibration.pair_gap(reviewers[0]["raw_scores"], reviewers[1]["raw_scores"]) \
             if len(reviewers) > 1 else None
         for i, r in enumerate(reviewers):
@@ -754,19 +754,19 @@ class EditorService:
         pid, branch = job.project_id, job.branch_id
         rec = rv._head(pid, branch, rid)
         if rec is None or rec["module_id"] not in REWRITABLE:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "the editor's fixes can be applied to chapters only",
+            raise AkoweError("INVALID_INPUT", "/record_id", "the editor's fixes can be applied to chapters only",
                                  status="REJECTED")
         craft = craft or self.crafts(pid, branch).get(_rkey(rid, rec["version"]))
         if not craft:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "ask the editor to review this version first "
+            raise AkoweError("INVALID_INPUT", "/record_id", "ask the editor to review this version first "
                                  "(🖋 Editor review)", status="REJECTED")
         findings = [f for f in craft.get("findings") or [] if finding_ids is None or f["id"] in finding_ids]
         if not findings:
-            raise BookforgeError("INVALID_INPUT", "/finding_ids", "the editor has no notes to fix for this version",
+            raise AkoweError("INVALID_INPUT", "/finding_ids", "the editor has no notes to fix for this version",
                                  status="REJECTED")
         text = str((rec.get("data") or {}).get("text") or "")
         keep = keep_quotes_of(craft, text, {f["id"] for f in findings})
-        # P30: voice and motif repeats are never cut by a rewrite (only BookForge's own trim of their excess)
+        # P30: voice and motif repeats are never cut by a rewrite (only Akọwe's own trim of their excess)
         keep = list(dict.fromkeys(keep + protected_repeats(self.engine, job.principal, pid, branch, text,
                                                            except_keys=craft.get("except_keys") or ())))
         if not job.slot_pref:
@@ -797,7 +797,7 @@ class EditorService:
         job.check()
         reps = raw.get("replacements") if isinstance(raw, dict) else None
         if not isinstance(reps, list):
-            raise BookforgeError("INTERNAL_ERROR", "/replacements", "the writer's answer had no list of replacements; "
+            raise AkoweError("INTERNAL_ERROR", "/replacements", "the writer's answer had no list of replacements; "
                                  "nothing was changed")
         res = apply_replacements(text, reps, findings, keep)
         byf = {f["id"]: f for f in findings}
@@ -825,25 +825,25 @@ class EditorService:
         rv = self.review
         rec = rv._head(pid, branch, rid)
         if rec is None:
-            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this chapter no longer exists", status="REJECTED")
         if not isinstance(version, int) or isinstance(version, bool) or version != rec["version"]:
-            raise BookforgeError("VERSION_CONFLICT", "/version", f"the chapter changed since the editor's fixes were "
+            raise AkoweError("VERSION_CONFLICT", "/version", f"the chapter changed since the editor's fixes were "
                                  f"made (it is now version {rec['version']}); ask for the fixes again",
                                  status="REJECTED")
         prop = proposal or self.proposals(pid, branch).get(_rkey(rid, version))
         if not prop:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "there are no editor's fixes for this version; press "
+            raise AkoweError("INVALID_INPUT", "/record_id", "there are no editor's fixes for this version; press "
                                  "✍ Get the editor's fixes first", status="REJECTED")
         craft = self.crafts(pid, branch).get(_rkey(rid, version)) or {}
         text = str((rec.get("data") or {}).get("text") or "")
         wanted = [i for i in prop.get("items") or [] if i.get("ok")]
         if accept is not None:
             if not isinstance(accept, list) or not all(isinstance(x, str) for x in accept):
-                raise BookforgeError("INVALID_INPUT", "/accept", "accept: the list of note ids to use",
+                raise AkoweError("INVALID_INPUT", "/accept", "accept: the list of note ids to use",
                                      status="REJECTED")
             wanted = [i for i in wanted if i["finding_id"] in accept]
         if not wanted:
-            raise BookforgeError("INVALID_INPUT", "/accept", "no change was chosen, so nothing was changed",
+            raise AkoweError("INVALID_INPUT", "/accept", "no change was chosen, so nothing was changed",
                                  status="REJECTED")
         findings = [f for f in craft.get("findings") or [] if f["id"] in {i["finding_id"] for i in wanted}] or \
             [{"id": i["finding_id"], "passage": i.get("passage") or ""} for i in wanted]
@@ -851,7 +851,7 @@ class EditorService:
         res = apply_replacements(text, [{k: i[k] for k in ("finding_id", "original", "replacement")} for i in wanted],
                                  findings, keep)
         if not res["applied"]:
-            raise BookforgeError("INVALID_INPUT", "/accept", "none of the chosen changes could be applied word for "
+            raise AkoweError("INVALID_INPUT", "/accept", "none of the chosen changes could be applied word for "
                                  "word, so nothing was changed", status="REJECTED")
         rejected = [{"finding_id": i["finding_id"], "reason": "REJECTED_BY_AUTHOR",
                      "message": UNRESOLVED_WORDS["REJECTED_BY_AUTHOR"]}
@@ -864,7 +864,7 @@ class EditorService:
         resp = bp.dispatch(rec["module_id"], "UPDATE", base_ref=rec["ref"], payload=payload)
         if resp["status"] != "DRAFT" or not resp.get("output_refs"):
             from .book_path import problems  # noqa: PLC0415
-            raise BookforgeError("INVALID_INPUT", "/payload", "the changed chapter did not pass BookForge's checks, so "
+            raise AkoweError("INVALID_INPUT", "/payload", "the changed chapter did not pass Akọwe's checks, so "
                                  "nothing was saved: " + "; ".join(problems(resp))[:400], status="REJECTED")
         new = resp["output_refs"][0]
         rv._put(f"ai_fixes:{pid}:{branch}", _rkey(rid, new["version"]),
@@ -899,7 +899,7 @@ class EditorService:
         resp = bp.dispatch(head["module_id"], "UPDATE", base_ref=head["ref"], payload=copy.deepcopy(old["data"]))
         if resp["status"] != "DRAFT" or not resp.get("output_refs"):
             from .book_path import problems  # noqa: PLC0415
-            raise BookforgeError("INVALID_INPUT", "/payload", "the earlier version could not be saved again: "
+            raise AkoweError("INVALID_INPUT", "/payload", "the earlier version could not be saved again: "
                                  + "; ".join(problems(resp))[:300], status="REJECTED")
         new = resp["output_refs"][0]
         at = _now_iso()

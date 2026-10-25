@@ -13,11 +13,11 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-import bookforge.store as store_mod
-from bookforge.errors import BookforgeError
-from bookforge.providers import ProviderRegistry
-from bookforge.server import ApiError, App, make_handler
-from bookforge.store import Store
+import akowe.store as store_mod
+from akowe.errors import AkoweError
+from akowe.providers import ProviderRegistry
+from akowe.server import ApiError, App, make_handler
+from akowe.store import Store
 
 from fault_helpers import TOKEN, call, check_store
 
@@ -84,7 +84,7 @@ def test_a_damaged_new_backup_never_rotates_good_ones_away(app, monkeypatch):
 def test_legacy_backup_names_sort_before_numbered_ones(app):
     legacy = app.backups.dir / "auto-20990101T000000000000Z-daily"
     app.store.backup(legacy)
-    (legacy / "bookforge-backup.json").write_text(json.dumps({"reason": "daily", "label": "x", "verified": True}))
+    (legacy / "akowe-backup.json").write_text(json.dumps({"reason": "daily", "label": "x", "verified": True}))
     new = app.backups.backup("manual")["name"]
     assert _names(app)[0] == new
 
@@ -93,7 +93,7 @@ def test_legacy_backup_names_sort_before_numbered_ones(app):
 def test_restore_waits_for_a_request_that_is_writing_and_writers_wait_for_restore(app):
     b = app.backups.backup("manual")
     with app.writer():
-        with pytest.raises(BookforgeError) as ei:
+        with pytest.raises(AkoweError) as ei:
             app.backups.restore(b["name"], CONFIRM)
         assert ei.value.code == "VERSION_CONFLICT"
     with app.exclusive():
@@ -161,7 +161,7 @@ def test_assets_and_backups_are_fsynced(app, monkeypatch):
     assert any(".tmp-" in s and h in s for s in synced)  # the asset bytes before the rename
     assert any(s.endswith("/assets") and b["name"] not in s for s in synced)  # the assets folder after it
     assert any(b["name"] in s and s.endswith(f"{h}.bin") for s in synced)
-    assert any(b["name"] in s and s.endswith("bookforge.sqlite3") for s in synced)
+    assert any(b["name"] in s and s.endswith("akowe.sqlite3") for s in synced)
     assert any(s.endswith("/" + b["name"]) for s in synced)
 
 
@@ -185,7 +185,7 @@ def test_archive_hides_a_book_and_unarchive_brings_it_back(app):
     arch = app.route("GET", "/api/projects", {"archived": ["1"]}, None, "author", {})[1]
     assert [p["project_id"] for p in arch] == [pid]
     b = app.backups.backup("manual")
-    assert app.backups.dir.joinpath(b["name"], "bookforge.sqlite3").exists()  # archived books stay in backups
+    assert app.backups.dir.joinpath(b["name"], "akowe.sqlite3").exists()  # archived books stay in backups
     app.route("POST", f"/api/projects/{pid}/archive", {}, {"archived": False}, "author", {})
     assert [p["project_id"] for p in app.route("GET", "/api/projects", {}, None, "author", {})[1]] == [pid]
 
@@ -229,7 +229,7 @@ def test_delete_is_refused_while_something_is_working(app):
 
 
 def test_selftest_books_archive_earlier_ones(app):
-    from bookforge.selftest import SelfTest
+    from akowe.selftest import SelfTest
     for _ in range(2):
         t = SelfTest(app.store, base_providers=app.engine.providers, principal_id="author")
         t.p_project()

@@ -31,9 +31,9 @@ import re
 from datetime import datetime, timezone
 
 from . import story_rules
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.version_ledger")
+log = logging.getLogger("akowe.version_ledger")
 
 VALUE_MAX = 240
 DECISIONS = ("unresolved", "deliberate", "restore")
@@ -252,16 +252,16 @@ def decide(store, pid: str, branch: str, decisions: dict, *, by: str, how: str =
            run_id: str | None = None, base_version: int | None = None) -> dict:
     """decisions: {fact id: unresolved|deliberate|restore}."""
     if not isinstance(decisions, dict) or not decisions:
-        raise BookforgeError("INVALID_INPUT", "/decisions", "decisions: {fact id: deliberate | restore | "
+        raise AkoweError("INVALID_INPUT", "/decisions", "decisions: {fact id: deliberate | restore | "
                              "unresolved}", status="REJECTED")
     for k, v in decisions.items():
         if v not in DECISIONS:
-            raise BookforgeError("INVALID_INPUT", f"/decisions/{k}", "each decision is deliberate, restore or "
+            raise AkoweError("INVALID_INPUT", f"/decisions/{k}", "each decision is deliberate, restore or "
                                  "unresolved", status="REJECTED")
 
     def change(old):
         if not old:
-            raise BookforgeError("NOT_FOUND", "/ledger", "this book has no version ledger (it is not a rerun or a "
+            raise AkoweError("NOT_FOUND", "/ledger", "this book has no version ledger (it is not a rerun or a "
                                  "variant)", status="REJECTED")
         if base_version is not None and old.get("version") != base_version:
             raise story_rules.conflict("version ledger", old.get("version"))

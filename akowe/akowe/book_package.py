@@ -1,8 +1,8 @@
-"""📦 ``book.bookforge``: one book as a complete, re-importable package (P20 save / P21 open).
+"""📦 ``book.akowe``: one book as a complete, re-importable package (P20 save / P21 open).
 
 Format (a ZIP file, ``schema_version`` 1):
 
-    manifest.json          {format: "bookforge-package", schema_version, app_version, contract_version,
+    manifest.json          {format: "akowe-package", schema_version, app_version, contract_version,
                             store_schema_version, saved_at, project_id, title, name, counts, files: {path: sha256}}
     book/tables.json       every row of the book in the storage kernel (projects, branches, feature manifests,
                            records with ALL their versions, binaries, lifecycle, heads, receipts, audit, provenance,
@@ -36,15 +36,15 @@ import re
 import uuid
 import zipfile
 
-from . import CONTRACT_VERSION, __version__
+from . import CONTRACT_VERSION, __version__, legacy
 from .canonical import canonical_bytes, sha256_bytes
-from .errors import BookforgeError
+from .errors import AkoweError
 from .jobs import now_iso
 from .store import SCHEMA_VERSION as STORE_SCHEMA_VERSION
 
-log = logging.getLogger("bookforge.book_package")
+log = logging.getLogger("akowe.book_package")
 
-FORMAT = "bookforge-package"
+FORMAT = "akowe-package"
 SCHEMA_VERSION = 1
 MAX_PACKAGE_BYTES = 512 * 1024 * 1024     # a package file larger than this is refused
 MAX_UNPACKED = 1024 * 1024 * 1024         # the sum of the entries' sizes (zip bombs)
@@ -120,7 +120,7 @@ def build(app, pid: str, *, bible: dict | None = None, on_progress=None) -> byte
     for i, name in enumerate(rows["assets"]):
         data = (store.asset_dir / name).read_bytes()
         if sha256_bytes(data) != name.split(".", 1)[0]:
-            raise BookforgeError("HASH_MISMATCH", "/assets", "a stored file of this book is damaged (its bytes do not "
+            raise AkoweError("HASH_MISMATCH", "/assets", "a stored file of this book is damaged (its bytes do not "
                                  "match its fingerprint); restore a backup, then save again")
         entries.append((f"assets/{name}", data, zipfile.ZIP_STORED))
         if on_progress:
@@ -132,7 +132,7 @@ def build(app, pid: str, *, bible: dict | None = None, on_progress=None) -> byte
     for s in rows["settings"]:
         if s["key"] == f"book_profile:{pid}" and isinstance(s["value"], dict):
             title = s["value"].get("title")
-    manifest = {"format": FORMAT, "schema_version": SCHEMA_VERSION, "app": "BookForge", "app_version": __version__,
+    manifest = {"format": FORMAT, "schema_version": SCHEMA_VERSION, "app": "Akọwe", "app_version": __version__,
                 "contract_version": CONTRACT_VERSION, "store_schema_version": STORE_SCHEMA_VERSION,
                 "saved_at": now_iso(), "project_id": pid, "name": proj.get("name"), "title": title or proj.get("name"),
                 "counts": {"records": len(rows["tables"].get("records") or []),
@@ -162,7 +162,7 @@ def read(data: bytes) -> dict:
         zf = zipfile.ZipFile(io.BytesIO(data))
         infos = zf.infolist()
     except (zipfile.BadZipFile, OSError, ValueError):
-        raise PackageProblem("OPEN_BAD_PACKAGE", "this file is not a BookForge book package (book.bookforge), or it "
+        raise PackageProblem("OPEN_BAD_PACKAGE", "this file is not an Akọwe book package (book.akowe), or it "
                              "is damaged (it was perhaps not copied completely)") from None
     if len(infos) > MAX_ENTRIES or sum(i.file_size for i in infos) > MAX_UNPACKED:
         raise PackageProblem("OPEN_TOO_LARGE", "this book package is too large to open")
@@ -174,16 +174,16 @@ def read(data: bytes) -> dict:
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
     except (KeyError, ValueError, UnicodeDecodeError, zipfile.BadZipFile, OSError):
         raise PackageProblem("OPEN_BAD_PACKAGE", "the book package has no readable manifest.json (it is damaged or "
-                             "not a BookForge package)") from None
-    if not isinstance(manifest, dict) or manifest.get("format") != FORMAT:
-        raise PackageProblem("OPEN_BAD_PACKAGE", "this is not a BookForge book package")
+                             "not an Akọwe package)") from None
+    if not isinstance(manifest, dict) or manifest.get("format") not in (FORMAT, legacy.OLD_PACKAGE_FORMAT):  # old: a book.bookforge
+        raise PackageProblem("OPEN_BAD_PACKAGE", "this is not an Akọwe book package")
     sv = manifest.get("schema_version")
     if not isinstance(sv, int) or isinstance(sv, bool) or sv < 1:
         raise PackageProblem("OPEN_BAD_PACKAGE", "the book package has no valid schema_version")
     ssv = manifest.get("store_schema_version")
     if sv > SCHEMA_VERSION or (isinstance(ssv, int) and ssv > STORE_SCHEMA_VERSION):
-        raise PackageProblem("OPEN_NEWER_VERSION", f"this book was saved by a newer BookForge (package format {sv}; "
-                             f"this BookForge opens format {SCHEMA_VERSION} and older)")
+        raise PackageProblem("OPEN_NEWER_VERSION", f"this book was saved by a newer Akọwe (package format {sv}; "
+                             f"this Akọwe opens format {SCHEMA_VERSION} and older)")
     files = manifest.get("files")
     if not isinstance(files, dict) or "book/tables.json" not in files or "book/settings.json" not in files:
         raise PackageProblem("OPEN_BAD_PACKAGE", "the book package's manifest does not list its files")

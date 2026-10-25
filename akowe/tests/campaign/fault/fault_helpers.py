@@ -76,9 +76,9 @@ def call(port, method, path, body=None, token=TOKEN, timeout=10, raw=None, conte
 
 # ---------------------------------------------------------------------------------------------- invariants
 def check_store(data_dir: Path, *, check_assets: bool = True) -> list[str]:
-    """Everything that must hold for a BookForge data folder after any crash. Returns a list of problems."""
+    """Everything that must hold for an Akọwe data folder after any crash. Returns a list of problems."""
     probs: list[str] = []
-    db = Path(data_dir) / "bookforge.sqlite3"
+    db = Path(data_dir) / "akowe.sqlite3"
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     try:
@@ -144,7 +144,7 @@ def check_store(data_dir: Path, *, check_assets: bool = True) -> list[str]:
 
 
 def jobs(data_dir: Path) -> list[dict]:
-    conn = sqlite3.connect(Path(data_dir) / "bookforge.sqlite3")
+    conn = sqlite3.connect(Path(data_dir) / "akowe.sqlite3")
     try:
         return [json.loads(r[0]) for r in conn.execute("SELECT value FROM settings WHERE key LIKE 'job:%'")]
     finally:

@@ -1,5 +1,5 @@
 """Section 6: 💾 P20 save the book (one folder per book: finished book, chapters, book bible, reports, log, progress,
-book.bookforge; automatic and debounced progress saves; atomic writes; Windows-safe names; no secrets) and 📂 P21 open
+book.akowe; automatic and debounced progress saves; atomic writes; Windows-safe names; no secrets) and 📂 P21 open
 a saved book (package round trip as a NEW book, continue an unfinished one, refuse damaged / newer packages, a
 book-bible.json alone) and 🔁 rerun from the book bible (same characters, world and plan; new chapters), plus the
 localhost-only folder routes."""
@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from bookforge import book_bible, book_package, book_save
-from bookforge import providers as prov_mod
-from bookforge.book_path import BookPath, save_profile
-from bookforge.book_report import book_chapters
-from bookforge.errors import BookforgeError
+from akowe import book_bible, book_package, book_save
+from akowe import providers as prov_mod
+from akowe.book_path import BookPath, save_profile
+from akowe.book_report import book_chapters
+from akowe.errors import AkoweError
 
 from autobook_fake import BookFakeAI
 from test_autobook import make_app
@@ -36,7 +36,7 @@ def no_provider_sleep(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def autosave_on(monkeypatch):
-    monkeypatch.setenv("BOOKFORGE_AUTOSAVE", "1")
+    monkeypatch.setenv("AKOWE_AUTOSAVE", "1")
 
 
 def route(app, method, path, body=None, query=None, headers=None):
@@ -107,7 +107,7 @@ def test_folder_layout_and_contents_after_a_finished_run(tmp_path):
         assert text.strip().splitlines()[-1] in body
     # Book Bible/
     bible = json.loads(f["Book Bible/book-bible.json"])
-    assert bible["schema_version"] == 1 and bible["kind"] == "bookforge-book-bible" and bible["app_version"]
+    assert bible["schema_version"] == 1 and bible["kind"] == "akowe-book-bible" and bible["app_version"]
     assert bible["saved_at"] and bible["profile"]["title"] == title and bible["pipeline"]["preset"] == "full"
     assert bible["characters"] and all(c["module_id"] == "A01" and c["sheet"] and c["voice"] and c["approved"]
                                        for c in bible["characters"])
@@ -128,16 +128,16 @@ def test_folder_layout_and_contents_after_a_finished_run(tmp_path):
     assert all(s["started_at"] for s in r0["steps"] if s["state"] == "done")
     prog = json.loads(f["Progress/progress.json"])
     assert prog["finished"] is True and prog["next_step"] is None and prog["run"]["status"] == "done"
-    assert zipfile.ZipFile(io.BytesIO(f["book.bookforge"])).read("manifest.json")
+    assert zipfile.ZipFile(io.BytesIO(f["book.akowe"])).read("manifest.json")
     readme = f["README.txt"].decode("utf-8")
     assert "Book Bible/" in readme and "Open a saved book" in readme and "Rerun" in readme and title in readme
-    marker = json.loads(f[".bookforge-folder.json"])
-    assert marker["project_id"] == pid and set(marker["files"]) == set(f) - {".bookforge-folder.json"}
+    marker = json.loads(f[".akowe-folder.json"])
+    assert marker["project_id"] == pid and set(marker["files"]) == set(f) - {".akowe-folder.json"}
     # the run window carries the save; the book page's status says where
     assert app.autobook.public(app.autobook.get(run["id"]))["save"]["last"]["path"] == str(folder)
     st = route(app, "GET", f"/api/projects/{pid}/branches/main/save")[1]
     assert st["path"] == str(folder) and st["last"]["ok"] and st["opened"]["finished"] is True
-    # nothing BookForge did not write is touched, and every full path is short enough for Windows
+    # nothing Akọwe did not write is touched, and every full path is short enough for Windows
     (folder / "my notes.txt").write_text("mine")
     app.saver.save_now(pid, "main")
     assert (folder / "my notes.txt").read_text() == "mine"
@@ -154,7 +154,7 @@ def test_no_keys_tokens_or_prompts_in_any_saved_file(tmp_path):
     texts = []
     for rel, data in files_of(folder).items():
         texts.append((rel, data))
-        if rel.endswith(".bookforge"):
+        if rel.endswith(".akowe"):
             z = zipfile.ZipFile(io.BytesIO(data))
             texts += [(f"{rel}!{n}", z.read(n)) for n in z.namelist()]
     prompts = {s for kind in fake.prompts.values() for s, _ctx in kind}
@@ -239,7 +239,7 @@ def test_writes_are_atomic_and_a_full_disk_is_a_plain_problem(tmp_path, monkeypa
     for k, v in after.items():  # every file is complete: the old version or the whole new one
         if k.endswith(".json"):
             json.loads(v)
-    zipfile.ZipFile(io.BytesIO(after["book.bookforge"])).testzip()
+    zipfile.ZipFile(io.BytesIO(after["book.akowe"])).testzip()
     # the background save records the problem (never raises), the next save works again
     calls["n"] = 1
     app.saver.start(pid, "main", kind="manual")
@@ -288,21 +288,21 @@ def test_windows_unsafe_titles_and_long_paths(tmp_path):
     assert not set('<>:"/\\|?*') & set(name) and not name.endswith((" ", "."))
     res = app.saver.save_now(pid2, "main")  # an unfinished, empty book saves too (bible, progress, package)
     folder = Path(res["path"])
-    assert (folder / "Book Bible" / "book-bible.json").is_file() and (folder / "book.bookforge").is_file()
+    assert (folder / "Book Bible" / "book-bible.json").is_file() and (folder / "book.akowe").is_file()
     assert json.loads((folder / "Progress" / "progress.json").read_text())["finished"] is False
     # a books folder whose path leaves no room for the book's own names is refused in plain words
     deep = tmp_path / ("d" * 70) / ("e" * 70)
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         route(app, "PUT", "/api/settings/books-folder", {"path": str(deep)})
     assert problem_of(x.value) == "SAVE_PATH_TOO_LONG"
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         route(app, "PUT", "/api/settings/books-folder", {"path": "relative/folder"})
     assert problem_of(x.value) == "SAVE_FOLDER_NOT_WRITABLE"
     (tmp_path / "afile").write_text("x")
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         route(app, "PUT", "/api/settings/books-folder", {"path": str(tmp_path / "afile" / "sub")})
     assert problem_of(x.value) == "SAVE_FOLDER_NOT_WRITABLE"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "PUT", "/api/settings/books-folder", {"auto_save": "yes"})
     out = route(app, "GET", "/api/settings/books-folder")[1]
     assert out["path"] == str(tmp_path / "books") and out["writable"] and out["auto_save"] and out["local"]
@@ -311,14 +311,14 @@ def test_windows_unsafe_titles_and_long_paths(tmp_path):
 
 
 def test_default_books_folder(monkeypatch, tmp_path):
-    monkeypatch.delenv("BOOKFORGE_BOOKS_DIR", raising=False)
+    monkeypatch.delenv("AKOWE_BOOKS_DIR", raising=False)
     (tmp_path / "Documents").mkdir()
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
-    assert book_save.default_folder(windows=True) == tmp_path / "Documents" / "BookForge Books"
-    assert book_save.default_folder(windows=False) == Path.home() / "BookForge Books"
+    assert book_save.default_folder(windows=True) == tmp_path / "Documents" / "Akowe Books"
+    assert book_save.default_folder(windows=False) == Path.home() / "Akowe Books"
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "nobody"))  # no Documents folder: the home folder
-    assert book_save.default_folder(windows=True) == Path.home() / "BookForge Books"
-    monkeypatch.setenv("BOOKFORGE_AUTOSAVE", "0")
+    assert book_save.default_folder(windows=True) == Path.home() / "Akowe Books"
+    monkeypatch.setenv("AKOWE_AUTOSAVE", "0")
     assert book_save.autosave_default() is False
 
 
@@ -328,9 +328,9 @@ def test_package_round_trip_opens_a_new_identical_book(tmp_path):
     run = run_book(app)
     pid = run["project_id"]
     folder = Path(app.saver.last(pid)["path"])
-    data = (folder / "book.bookforge").read_bytes()
+    data = (folder / "book.akowe").read_bytes()
     man = json.loads(zipfile.ZipFile(io.BytesIO(data)).read("manifest.json"))
-    assert man["format"] == "bookforge-package" and man["schema_version"] == 1 and man["project_id"] == pid
+    assert man["format"] == "akowe-package" and man["schema_version"] == 1 and man["project_id"] == pid
     assert man["counts"]["records"] > 10 and man["counts"]["assets"] >= 3
     before = {"chapters": chapters(app, pid), "exports": export_hashes(app, pid),
               "bible": book_bible.build(app, pid, "main")}
@@ -374,13 +374,13 @@ def test_package_round_trip_opens_a_new_identical_book(tmp_path):
 
 def test_continue_an_unfinished_opened_book(tmp_path):
     app, fake = new_app(tmp_path)
-    fake.fail_kind("C02", BookforgeError("TIMEOUT", "", "timed out"))
+    fake.fail_kind("C02", AkoweError("TIMEOUT", "", "timed out"))
     run = run_book(app)
     assert run["status"] == "paused" and run["problem"]["code"] == "TIMEOUT"
     pid = run["project_id"]
     last = app.saver.last(pid)
     assert last["ok"] and last["finished"] is False
-    data = (Path(last["path"]) / "book.bookforge").read_bytes()
+    data = (Path(last["path"]) / "book.akowe").read_bytes()
     # another computer: open it, continue it with a new run (the steps already done are skipped)
     fake2 = BookFakeAI()
     other, _ = new_app(tmp_path, name="data2", fake=fake2, books="books2")
@@ -407,7 +407,7 @@ def test_continue_an_unfinished_opened_book(tmp_path):
     other.autobook.wait_for(rid, 240)
     assert other.autobook.get(rid)["status"] == "done"
     assert all(a for _c, _t, a in chapters(other, res3["project_id"]))
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(other, "POST", "/api/autobook", {"author_confirms": True, "continue_project": "proj-nope"})
 
 
@@ -425,11 +425,11 @@ def _rewrite_zip(data: bytes, change) -> bytes:
 def test_damaged_newer_and_foreign_packages_are_refused(tmp_path):
     app, fake = new_app(tmp_path)
     run = run_book(app)
-    data = (Path(app.saver.last(run["project_id"])["path"]) / "book.bookforge").read_bytes()
+    data = (Path(app.saver.last(run["project_id"])["path"]) / "book.akowe").read_bytes()
     n_books = len(app.store.query("SELECT 1 FROM projects"))
 
     def refused(blob, code):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             route(app, "POST", "/api/books/open", blob, headers={"Content-Type": "application/octet-stream"})
         assert problem_of(x.value) == code, x.value.errors
         assert x.value.errors[0].get("fix")
@@ -471,14 +471,14 @@ def test_store_export_and_import_rows_never_overwrite(tmp_path):
     pid = app.engine.bootstrap_project("author", "Rows")
     rows = app.store.export_project_rows(pid)
     assert rows["tables"]["projects"][0]["project_id"] == pid and rows["tables"]["feature_manifests"]
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.store.import_project_rows(rows["tables"], [], principal_id="author")
     assert x.value.code == "VERSION_CONFLICT"
     bad = dict(rows["tables"], projects=[dict(rows["tables"]["projects"][0], project_id="proj-other")])
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.store.import_project_rows(bad, [], principal_id="author")
     assert app.store.project("proj-other") is None
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.store.write_asset(b"bytes", "0" * 64)
 
 
@@ -562,10 +562,10 @@ def test_a_book_bible_alone_starts_a_new_book(tmp_path):
     for blob, code in ((b'{"kind": "something"}', "BIBLE_BAD"), (b"{not json", "BIBLE_BAD"),
                        (json.dumps(dict(raw, schema_version=7)).encode(), "OPEN_NEWER_VERSION"),
                        (json.dumps(dict(raw, profile={"title": ""})).encode(), "BIBLE_BAD")):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             route(app, "POST", "/api/books/open", blob, headers={"Content-Type": "application/octet-stream"})
         assert problem_of(x.value) == code
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.autobook.start("author", {"author_confirms": True, "from_bible": {"bible_id": "bible-gone"}})
     assert problem_of(x.value) == "OPEN_NOT_FOUND"
 
@@ -587,7 +587,7 @@ def test_folder_routes_are_for_this_computer_only(server, tmp_path):  # noqa: F8
         for method, path, b, q in (("GET", "/api/books-folder", None, None), ("POST", "/api/books-folder/show", {}, None),
                                    ("POST", "/api/books-folder/open", {"folder": "x"}, None),
                                    ("GET", "/api/books-folder/bible", None, {"folder": ["x"]})):
-            with pytest.raises(BookforgeError) as x:
+            with pytest.raises(AkoweError) as x:
                 route(app, method, path, b, q)
             assert x.value.code == "PERMISSION_DENIED" and problem_of(x.value) == "OPEN_NOT_LOCAL"
         assert route(app, "GET", "/api/settings/books-folder")[1]["local"] is False
@@ -596,6 +596,6 @@ def test_folder_routes_are_for_this_computer_only(server, tmp_path):  # noqa: F8
     assert len(shown) == 1
     # folder names are names, never paths
     for bad in ("../etc", "a/b", "..", "C:\\x", ""):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             route(app, "POST", "/api/books-folder/open", {"folder": bad})
         assert problem_of(x.value) == "OPEN_NOT_FOUND"

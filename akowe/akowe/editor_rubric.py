@@ -1,6 +1,6 @@
 """The AI editor's rubric (P4) — the ONE place where what the editor looks for is written down.
 
-Edit the plain sentences below to change what the editor checks; nothing else in BookForge has to change. Each
+Edit the plain sentences below to change what the editor checks; nothing else in Akọwe has to change. Each
 dimension has a key (used in the stored scores; keep it), a short label for the author and the question the editor
 answers with a score from 1 (bad) to 10 (excellent).
 
@@ -56,7 +56,7 @@ DIMENSIONS = [
     ("rules_bounded", "Story rules bounded",
      "(Planning drafts, only when context.story_rules is given.) Is every exception, special object, power or "
      "convenient rule the plan relies on bounded by a stated limit (context.story_rules: scope; "
-     "context.story_rules.not_bounded lists what BookForge found unbounded)? Flag an exception that is used but not "
+     "context.story_rules.not_bounded lists what Akọwe found unbounded)? Flag an exception that is used but not "
      "bounded, and a belief or mystery the plan treats as fact."),
     # P36: trade / logic / timeline checks (the second book had a "wick-key" on a gas lamp and ages to verify)
     ("trade_terms", "Right trade and period terms",
@@ -105,7 +105,7 @@ SEVERITY_WORDS = (
     "severity: major = it clearly weakens the chapter and should be rewritten; minor = worth improving.")
 
 # P36: a tough, calibrated critic. Reviews that score near-perfect without evidence are not trusted (calibration.py):
-# BookForge asks once more with STRICT_REASK and otherwise caps the unproven scores.
+# Akọwe asks once more with STRICT_REASK and otherwise caps the unproven scores.
 CALIBRATION_WORDS = (
     "Be a tough, calibrated critic: 10 means nothing could be improved, 9 means one tiny flaw; most good drafts score "
     "6-8 on most dimensions. weakest: quote the 2-3 weakest passages of the draft (exact quotes, every draft has "
@@ -114,7 +114,7 @@ CALIBRATION_WORDS = (
     "with an exact quote that proves the strength; a 9 or 10 without such a quote is not accepted.")
 
 STRICT_REASK = (
-    "Your previous review was not accepted by BookForge: {reasons}. Read the draft again as a tough critic. Most "
+    "Your previous review was not accepted by Akọwe: {reasons}. Read the draft again as a tough critic. Most "
     "published drafts score 6-8. Give at least 3 concrete findings with exact quotes, quote the weakest passages, and "
     "for every score of 9 or 10 give score_evidence (an exact quote). Lower every score you cannot back with a quote.")
 
@@ -122,7 +122,7 @@ VERDICT_WORDS = (
     "verdict: PASS when the draft is good enough to publish as it is (no major finding and every score at least 6), "
     "otherwise REVISE.")
 
-# How strict BookForge is when it turns the editor's scores and findings into PASS / REVISE (Settings › Editor).
+# How strict Akọwe is when it turns the editor's scores and findings into PASS / REVISE (Settings › Editor).
 STRICTNESS = {
     "gentle": {"min_score": 5, "max_major": 1, "max_minor": 99,
                "about": "Only clear problems: two or more major findings, or a score below 5."},
@@ -155,7 +155,7 @@ def task_text(module_id: str, dims: list[str], notes: dict | None = None) -> str
              "given," if module_id == "C02" else " the story rules (context.story_rules) when given,")
     return (f"Task: {PRINCIPLES} Read the {what} with the book profile (context.book_profile), the characters and "
             f"places (context.canon),{extra} the plan for this part (context.outline) and the deterministic pattern "
-            "report (context.pattern_report, counts made by BookForge). Score each of these dimensions from 1 to 10: "
+            "report (context.pattern_report, counts made by Akọwe). Score each of these dimensions from 1 to 10: "
             f"{rubric} "
             f"Return scores for exactly these keys: {', '.join(dims)}. findings: up to 12, each with id (f1, f2, …), "
             f"dimension (one of the keys), {SEVERITY_WORDS} passage (exact quote), why, suggestion, keep_nearby (short "

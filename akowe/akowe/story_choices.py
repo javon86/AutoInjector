@@ -7,7 +7,7 @@ The author picks in plain words (the 🚀 wizard, the profile card/dialog, ⚡ M
 * **darkness** (peril): gentle / some (some danger) / real (real danger)
 * style knobs: **dialogue** little / some / lots, **pace** slow / medium / fast, **humor** none / some
 
-Empty ("") means "let the AI choose" — nothing is said to the AI about it, and nothing changes in BookForge's checks.
+Empty ("") means "let the AI choose" — nothing is said to the AI about it, and nothing changes in Akọwe's checks.
 
 The ending choice is represented internally by an **ending-state matrix** (from the review of the first book): one row
 per thing an ending settles — the external plot (complete / incomplete), the main decision (made / deferred /
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 
-from .errors import BookforgeError
+from .errors import AkoweError
 
 BRIEF_MAX = 1600
 
@@ -109,7 +109,7 @@ def clean(raw) -> dict:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise BookforgeError("INVALID_INPUT", "/choices", "ending and style choices must be an object",
+        raise AkoweError("INVALID_INPUT", "/choices", "ending and style choices must be an object",
                              status="REJECTED")
     out = {}
     for k in KEYS:
@@ -117,23 +117,23 @@ def clean(raw) -> dict:
         if v in (None, "", "ai"):
             continue
         if v not in VALUES[k]:
-            raise BookforgeError("INVALID_INPUT", f"/choices/{k}", f"{k}: one of {', '.join(VALUES[k])} (or empty to "
+            raise AkoweError("INVALID_INPUT", f"/choices/{k}", f"{k}: one of {', '.join(VALUES[k])} (or empty to "
                                  "let the AI choose)", status="REJECTED")
         out[k] = v
     m = raw.get("matrix")
     if m not in (None, {}):
         if not isinstance(m, dict):
-            raise BookforgeError("INVALID_INPUT", "/choices/matrix", "ending options must be an object of rows",
+            raise AkoweError("INVALID_INPUT", "/choices/matrix", "ending options must be an object of rows",
                                  status="REJECTED")
         mm = {}
         for r, v in m.items():
             if v in (None, ""):
                 continue
             if r not in ROW_VALUES:
-                raise BookforgeError("INVALID_INPUT", f"/choices/matrix/{r}", f"unknown ending option {r!r}",
+                raise AkoweError("INVALID_INPUT", f"/choices/matrix/{r}", f"unknown ending option {r!r}",
                                      status="REJECTED")
             if v not in ROW_VALUES[r]:
-                raise BookforgeError("INVALID_INPUT", f"/choices/matrix/{r}", f"{r}: one of "
+                raise AkoweError("INVALID_INPUT", f"/choices/matrix/{r}", f"{r}: one of "
                                      f"{', '.join(ROW_VALUES[r])}", status="REJECTED")
             mm[r] = v
         if mm:
@@ -145,7 +145,7 @@ def of_profile(prof: dict | None) -> dict:
     """The (cleaned) choices stored in a book profile; a broken stored value is ignored, never raised."""
     try:
         return clean((prof or {}).get("choices"))
-    except BookforgeError:
+    except AkoweError:
         return {}
 
 
@@ -264,7 +264,7 @@ def editor_notes(choices: dict) -> dict:
 
 
 def relax(choices: dict) -> dict:
-    """Per-dimension change of the minimum score BookForge uses to decide PASS/REVISE (negative = more lenient)."""
+    """Per-dimension change of the minimum score Akọwe uses to decide PASS/REVISE (negative = more lenient)."""
     out = {}
     mode = matrix(choices).get("mystery") if choices else None
     if mode == "explained":

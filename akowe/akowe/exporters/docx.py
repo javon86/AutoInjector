@@ -255,7 +255,7 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
             "</cp:coreProperties>\n")
     app = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
            "<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\">"
-           "<Application>Bookforge DOCX writer 1</Application></Properties>\n")
+           "<Application>Akowe DOCX writer 1</Application></Properties>\n")
     exts = sorted({posixpath.splitext(n)[1][1:] for n, _ in media})
     img_types = {"png": "image/png", "jpg": "image/jpeg"}
     ctypes = ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"

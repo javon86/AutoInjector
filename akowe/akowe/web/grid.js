@@ -45,7 +45,7 @@ export async function viewSceneGrid(main, ui) {
     crumbs(['Your books', '#/'], [project.name, plink()], ['Make my book', plink('book')], 'Scene grid'), h('h1', null, '🗂 Scene grid')),
   h('div', { class: 'row no-print' }, infoTip('Scene grid',
     h('p', null, 'Every scene of the book on one page, in story order: who tells it, where and when it happens, what each character wants, what gets in the way and what changes — from the scene cards — beside how many words the scene has on the page and how it reads (reading level, dialogue, pace).'),
-    h('p', null, 'Problems BookForge already knows are listed in each row: scene cards without a goal, obstacle or anything unsaid, the scene checker’s notes, very short scenes, chapters far under their length, the editor’s and the planned-to-page check’s open notes.'),
+    h('p', null, 'Problems Akọwe already knows are listed in each row: scene cards without a goal, obstacle or anything unsaid, the scene checker’s notes, very short scenes, chapters far under their length, the editor’s and the planned-to-page check’s open notes.'),
     h('p', null, 'Scenes on the page are told apart by scene-break lines (***). A chapter written in one piece shows its plan only.')),
   h('button', { type: 'button', 'data-testid': 'sg-print', onclick: () => window.print() }, '🖨 Print'), csv,
   h('a', { class: 'btn', href: plink('costs') }, '⏱ Time and AI use'))));

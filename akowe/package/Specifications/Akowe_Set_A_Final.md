@@ -1,4 +1,4 @@
-# Bookforge Set A - Bible Universe Builder
+# Akọwe Set A - Bible Universe Builder
 Revision BF-CLOSURE-1.1 | 18 operations | independent module
 
 This is the current specification. Historical source/addenda are not active instructions. Use Shared_Contract.md for wire formats, lifecycle, ownership, permissions, failures and record storage.

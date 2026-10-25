@@ -38,7 +38,7 @@ import unicodedata
 from datetime import timedelta
 
 from ..canonical import canonical_bytes, resolve_pointer, sha256_json
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from ..j_approvals import (APPROVAL_MODULES, approval_problem, approval_view, check_approval, covers, now_utc,
                            waiver_applies)
 from ..spans import anchored_patches, make_span, occurrences, reanchor, record_text, verify_span
@@ -159,7 +159,7 @@ def set_pointer(doc, ptr: str, value):
     """Replace the existing value at ptr in a deep copy of doc (patches never add structure)."""
     out = copy.deepcopy(doc)
     if ptr in ("", "/"):
-        raise BookforgeError("INVALID_INPUT", "/path", "whole-record replacement is not a localized patch",
+        raise AkoweError("INVALID_INPUT", "/path", "whole-record replacement is not a localized patch",
                              status="REJECTED")
     parts = [p.replace("~1", "/").replace("~0", "~") for p in ptr[1:].split("/")]
     cur = out
@@ -177,7 +177,7 @@ def set_pointer(doc, ptr: str, value):
         else:
             raise KeyError(last)
     except (KeyError, IndexError, ValueError, TypeError) as exc:
-        raise BookforgeError("INVALID_INPUT", "/path", f"patch path {ptr} does not exist in the target",
+        raise AkoweError("INVALID_INPUT", "/path", f"patch path {ptr} does not exist in the target",
                              status="REJECTED") from exc
     return out
 
@@ -247,7 +247,7 @@ class JHandler(OperationHandler):
     def create(self, ctx: Context) -> Result:
         if ctx.manual_candidate is not None:
             if not self.manual_allowed:
-                raise BookforgeError("INVALID_INPUT", "/manual_candidate",
+                raise AkoweError("INVALID_INPUT", "/manual_candidate",
                                      f"{ctx.op_id} is deterministic LOGIC; manual results are not accepted",
                                      status="REJECTED")
             return Result(data=copy.deepcopy(ctx.manual_candidate), transform="MANUAL")
@@ -262,13 +262,13 @@ class JHandler(OperationHandler):
         try:
             pairs_ = anchored_patches({"findings": data.get("findings", []),
                                        "patches": data.get("patches") or data.get("patch_proposals") or []})
-        except BookforgeError as exc:
+        except AkoweError as exc:
             return [ctx.finding(exc.code, exc.errors[0]["message"], severity="BLOCKING")]
         for p, ev in pairs_:
             try:
                 tgt = self.resolve(ctx, p["target_ref"], "/target_ref")
                 why = verify_span(record_text(tgt), ev)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 why = exc.errors[0]["message"]
             if why:
                 out.append(ctx.finding("HASH_MISMATCH", f"patch {p['patch_id']}: {why}", severity="BLOCKING"))
@@ -311,7 +311,7 @@ class CrossBibleChecker(JHandler):
         recs = ctx.field_records("candidate_refs")
         for i, rec in enumerate(recs):
             if rec["owner"] != "A":
-                raise BookforgeError("INVALID_INPUT", f"/payload/candidate_refs/{i}",
+                raise AkoweError("INVALID_INPUT", f"/payload/candidate_refs/{i}",
                                      "J02 checks A-set (Bible) records against one another", status="REJECTED")
         claims = []
         for rec in recs:
@@ -334,7 +334,7 @@ class CrossBibleChecker(JHandler):
             for j, link in enumerate((rec.get("data") or {}).get("linked_refs") or []):
                 try:
                     tgt = self.resolve(ctx, link, f"/linked_refs/{j}")
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     findings.append(ctx.finding("BROKEN_REFERENCE", f"{rec['record_id']} linked_refs/{j}: "
                                                 f"{exc.errors[0]['message']}", severity="MAJOR",
                                                 source_refs=[rec["ref"]]))
@@ -678,19 +678,19 @@ class PatchGenerator(JHandler):
     def run(self, ctx: Context) -> Result:
         src = ctx.field_record("approved_option_ref")
         if src["lifecycle"] not in ("APPROVED", "LOCKED"):
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
                                  "the reconciliation option must be approved before patch generation",
                                  unresolved=[f"{src['module_id']}:accept"])
         if src["module_id"] == "J05":
             plans = [p for p in src["data"]["ranked_repairs"] if p["state"] == "PROPOSED" and p["cost"] is not None]
             if not plans:
-                raise BookforgeError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
+                raise AkoweError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
                                      "no feasible known-cost plan", unresolved=["J11:decision_request"])
             patches = plans[0]["owner_patches"]
         else:
             chosen = [o for o in src["data"]["repair_options"] if o["decision"] == "PROPOSED"]
             if len(chosen) != 1:
-                raise BookforgeError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
+                raise AkoweError("APPROVAL_REQUIRED", "/payload/approved_option_ref",
                                      f"{len(chosen)} proposed options; rank them (J05) or decide (J11)",
                                      unresolved=["J05:create", "J11:decision_request"])
             patches = [p for p in src["data"]["patches"] if p["patch_id"].startswith(chosen[0]["id"] + "/")]
@@ -698,7 +698,7 @@ class PatchGenerator(JHandler):
         for p in patches:
             tgt = self.resolve(ctx, p["target_ref"], "/patch_proposals/target_ref")
             if tgt["version"] != tgt["latest_version"]:
-                raise BookforgeError("VERSION_CONFLICT", "/payload/approved_option_ref",
+                raise AkoweError("VERSION_CONFLICT", "/payload/approved_option_ref",
                                      f"{tgt['record_id']} moved to v{tgt['latest_version']}; regenerate options",
                                      status="REJECTED")
             current = resolve_pointer(tgt["data"], p["path"])
@@ -725,7 +725,7 @@ class PatchGenerator(JHandler):
                 for e in ctx.contracts.check(tgt["module_id"], "OUTPUT", new):
                     out.append(ctx.finding("OWNER_SCHEMA", f"patch {p['patch_id']}: {e['path']} {e['message']}",
                                            severity="BLOCKING"))
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 out.append(ctx.finding(exc.code, f"patch {p['patch_id']}: {exc.errors[0]['message']}",
                                        severity="BLOCKING"))
         return out
@@ -740,7 +740,7 @@ class CanonUpdateManager(JHandler):
     def run(self, ctx: Context) -> Result:
         jp = ctx.field_record("approved_patch_ref")
         if jp["lifecycle"] not in ("APPROVED", "LOCKED") or jp.get("stale"):
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/approved_patch_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/approved_patch_ref",
                                  "the J07 patch proposal must be approved (and current) before commit",
                                  unresolved=["J07:accept"])
         approvals = [r for r in self.evidence(ctx) if r["module_id"] in APPROVAL_MODULES]
@@ -748,23 +748,23 @@ class CanonUpdateManager(JHandler):
         for p in jp["data"]["patch_proposals"]:
             groups.setdefault(p["target_ref"]["record_id"], []).append(p)
         if not groups:
-            raise BookforgeError("INVALID_INPUT", "/payload/approved_patch_ref", "no patches to commit",
+            raise AkoweError("INVALID_INPUT", "/payload/approved_patch_ref", "no patches to commit",
                                  status="REJECTED")
         participants, findings, unresolved = [], [], []
         record_id = ctx.allocate_record_id()
         for rid, ps in sorted(groups.items()):
             pins = {ref_key(p["target_ref"]) for p in ps}
             if len(pins) != 1:
-                raise BookforgeError("VERSION_CONFLICT", "/payload/approved_patch_ref",
+                raise AkoweError("VERSION_CONFLICT", "/payload/approved_patch_ref",
                                      f"patches pin several revisions of {rid}", status="REJECTED")
             tgt = self.resolve(ctx, ps[0]["target_ref"], "/payload/approved_patch_ref")
             if tgt["version"] != tgt["latest_version"] or (tgt["approved_version"] and
                                                            tgt["approved_version"] != tgt["version"]):
-                raise BookforgeError("VERSION_CONFLICT", "/payload/approved_patch_ref",
+                raise AkoweError("VERSION_CONFLICT", "/payload/approved_patch_ref",
                                      f"{rid} v{tgt['version']} is no longer the head (latest v{tgt['latest_version']}, "
                                      f"approved v{tgt['approved_version']}); regenerate the repair", status="REJECTED")
             if tgt["record_kind"] != "OUTPUT":
-                raise BookforgeError("INVALID_INPUT", "/payload/approved_patch_ref",
+                raise AkoweError("INVALID_INPUT", "/payload/approved_patch_ref",
                                      f"{rid} is a {tgt['record_kind']} record; J08 commits owner OUTPUT records",
                                      status="REJECTED")
             paths = [p["path"] for p in ps]
@@ -774,7 +774,7 @@ class CanonUpdateManager(JHandler):
                 cover = [a for a in approvals if covers(approval_view(a), jp["ref"]) or
                          covers(approval_view(a), tgt["ref"])]
                 if not cover:
-                    raise BookforgeError("LOCKED_FACT", "/payload/evidence_refs",
+                    raise AkoweError("LOCKED_FACT", "/payload/evidence_refs",
                                          f"{rid} is protected; supply an I10/K09 authorization for this exact repair",
                                          unresolved=["I10:protected_change"])
                 for a in cover:
@@ -785,7 +785,7 @@ class CanonUpdateManager(JHandler):
                 data = set_pointer(data, p["path"], p["replacement"])
             errs = ctx.contracts.check(tgt["module_id"], "OUTPUT", data)
             if errs:
-                raise BookforgeError("INVALID_INPUT", "/payload/approved_patch_ref",
+                raise AkoweError("INVALID_INPUT", "/payload/approved_patch_ref",
                                      f"{rid} would violate {tgt['module_id']} OUTPUT at {errs[0]['path']}",
                                      status="REJECTED")
             staged = ctx.stage_revision(tgt, data, source_refs=uniq_refs(list(tgt["source_refs"]) + [jp["ref"]]))
@@ -864,7 +864,7 @@ class CanonUpdateManager(JHandler):
                 None, None)
         probs = self._problems(ctx, record, heads)
         if probs:
-            raise BookforgeError(probs[0][0] if probs[0][0] != "OWNER_VALIDATION" else "APPROVAL_REQUIRED",
+            raise AkoweError(probs[0][0] if probs[0][0] != "OWNER_VALIDATION" else "APPROVAL_REQUIRED",
                                  "/payload/candidate_ref", probs[0][1])
         now = now_utc()
         receipts = []
@@ -908,21 +908,21 @@ class CanonUpdateManager(JHandler):
         st = ctx.get_state(PREPARE_NS, base["record_id"]) or {"participants": []}
         if want == "COMMITTED":
             if not commits:
-                raise BookforgeError("APPROVAL_REQUIRED", "/payload/transaction_state",
+                raise AkoweError("APPROVAL_REQUIRED", "/payload/transaction_state",
                                      "not committed: ACCEPT the prepared J08 record first; a partially prepared "
                                      "repair is never reported as committed", unresolved=["J08:accept"])
             return Result(data={"commit_receipts": commits["receipts"], "transaction_state": "COMMITTED",
                                 "findings": []})
         if want == "COMPENSATED":
             if commits:
-                raise BookforgeError("VERSION_CONFLICT", "/payload/transaction_state",
+                raise AkoweError("VERSION_CONFLICT", "/payload/transaction_state",
                                      "already committed; a new reconciliation is required to revert",
                                      status="REJECTED")
             for part in st["participants"]:
                 s = part["staged_ref"]
                 cur = ctx.store.get_record(ctx.project_id, ctx.branch_id, s["record_id"], s["version"])
                 if cur is None or cur["latest_version"] != s["version"] or cur["lifecycle"] in ("APPROVED", "LOCKED"):
-                    raise BookforgeError("VERSION_CONFLICT", "/payload/transaction_state",
+                    raise AkoweError("VERSION_CONFLICT", "/payload/transaction_state",
                                          f"{s['record_id']} postcondition no longer matches; escalate (J11)",
                                          status="BLOCKED", unresolved=["J11:decision_request"])
             refs = [p["staged_ref"] for p in st["participants"]]
@@ -930,7 +930,7 @@ class CanonUpdateManager(JHandler):
             return Result(data={"commit_receipts": [], "transaction_state": "COMPENSATED", "findings": [
                 ctx.finding("COMPENSATED", f"rejected {len(refs)} unpromoted staged revision(s)", severity="INFO",
                             decision="PASS")]})
-        raise BookforgeError("INVALID_INPUT", "/payload/transaction_state",
+        raise AkoweError("INVALID_INPUT", "/payload/transaction_state",
                              "UPDATE records the outcome: COMMITTED or COMPENSATED", status="REJECTED")
 
     def validate(self, ctx: Context, record: dict) -> list[dict]:
@@ -1000,7 +1000,7 @@ class ManuscriptImpactChecker(JHandler):
             try:
                 anchored = anchored_patches({"findings": ev_rec["data"].get("findings", []),
                                              "patches": ev_rec["data"].get("patches", [])})
-            except (BookforgeError, AttributeError):
+            except (AkoweError, AttributeError):
                 continue
             for p, span in anchored:
                 old = ctx.store.get_record(ctx.project_id, ctx.branch_id, span["record_ref"]["record_id"],
@@ -1018,7 +1018,7 @@ class ManuscriptImpactChecker(JHandler):
                                                 f"{moved['end']})", severity="INFO", decision="PASS",
                                                 evidence=[make_span(head, moved["start"], moved["end"],
                                                                     span_id=span["span_id"])]))
-                except BookforgeError as exc:
+                except AkoweError as exc:
                     findings.append(ctx.finding(exc.code, f"{ev_rec['record_id']}:{p['patch_id']}: "
                                                 f"{exc.errors[0]['message']}", severity="MAJOR",
                                                 decision="UNKNOWN"))
@@ -1040,7 +1040,7 @@ class Revalidation(JHandler):
         j08 = ctx.field_record("repair_receipt_ref")
         commits = ctx.get_state(COMMIT_NS, j08["record_id"])
         if not commits:
-            raise BookforgeError("APPROVAL_REQUIRED", "/payload/repair_receipt_ref",
+            raise AkoweError("APPROVAL_REQUIRED", "/payload/repair_receipt_ref",
                                  "repair is not committed; nothing to revalidate", unresolved=["J08:accept"])
         reports, findings, unresolved, evidence = [], [], [], [j08["ref"]]
         waivers = list(ctx.store.list_state(ctx.project_id, ctx.branch_id, WAIVER_NS).values())

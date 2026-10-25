@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from bookforge.server import App
+from akowe.server import App
 
 TOKEN = "archive-token-0123456789"
 

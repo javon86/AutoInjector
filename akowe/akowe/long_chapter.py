@@ -5,7 +5,7 @@ Used by the C02 writer (``modules/set_c.ChapterWriter``) inside the normal CREAT
 C02 record, so every kernel check, the reviewer, the editor and the planned-to-page check work as before.
 
 * **Whole chapter** (the target fits one reply, ``length.scene_by_scene`` false): one call with the normal prose schema
-  (text + objective assessments) — exactly what BookForge did before.
+  (text + objective assessments) — exactly what Akọwe did before.
 * **Scene by scene** (target > ``per_call_words``, default 2 500 words): one call per scene card (or, without cards,
   ``ceil(target / per_call_words)`` parts, at least 2). Each call gets the whole writing context plus
   ``context.scene_writing`` = {scene, of, card, words, first, last, previous_scene_end (the last ≤ 1 500 characters
@@ -29,7 +29,7 @@ import copy
 import math
 import re
 
-from .errors import BookforgeError
+from .errors import AkoweError
 
 PREVIOUS_END = 1500
 SO_FAR_LINES = 8
@@ -120,7 +120,7 @@ def write(gen, *, task: str, context: dict, protected: list, plan: dict | None, 
         info["calls"] += 1
     text = out.get("text") if isinstance(out, dict) else None
     if not isinstance(text, str) or not text.strip():
-        raise BookforgeError("INVALID_INPUT", "/text", "the AI answered with no chapter text (empty prose), so "
+        raise AkoweError("INVALID_INPUT", "/text", "the AI answered with no chapter text (empty prose), so "
                              "nothing was saved; ask it again or write the chapter yourself", status="REJECTED")
     if plan:
         text = _expand(gen, text, context, protected, plan, cards, info)
@@ -160,7 +160,7 @@ def _scene_by_scene(gen, task, context, protected, plan, cards, info, assess_not
         info["calls"] += 1
         t = o.get("scene_text") if isinstance(o, dict) else None
         if not isinstance(t, str) or not t.strip():
-            raise BookforgeError("INVALID_INPUT", "/text", f"the AI answered with no text for scene {i + 1} of {n}, so "
+            raise AkoweError("INVALID_INPUT", "/text", f"the AI answered with no text for scene {i + 1} of {n}, so "
                                  "nothing was saved; ask it again or write the chapter yourself", status="REJECTED")
         t = t.strip() if first else _strip_titles(t)
         texts.append(t)
@@ -188,7 +188,7 @@ def _expand(gen, text, context, protected, plan, cards, info):
             o, _res = gen(task=EXPAND_TASK.format(missing=f"{max(0, target - have):,}"), output_schema=EXPAND_SCHEMA,
                           context=ectx, protected_facts=protected)
             info["calls"] += 1
-        except BookforgeError as exc:
+        except AkoweError as exc:
             info["expand_error"] = exc.code  # the chapter as written is kept; the editor still reads it
             break
         add = new_text_only(text, (o or {}).get("continuation") if isinstance(o, dict) else "")

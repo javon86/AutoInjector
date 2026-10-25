@@ -1,7 +1,7 @@
 """🩺 P37.5 "ChatGPT isn't working — here's why and how to fix it", before a book run starts and while it runs.
 
 Before a Make-a-book run (⚡ Make a book for me, a pipeline variant, 🔁 rerun from a book bible, ▶ continue a book) or
-✍ Write all chapters starts, the page asks ``GET /api/ai-check`` (``check``): BookForge reads the AutoInjector bridge's
+✍ Write all chapters starts, the page asks ``GET /api/ai-check`` (``check``): Akọwe reads the AutoInjector bridge's
 ``/v1/health`` (contract v1.2, fresh, not the 15-second cache) for EVERY AI slot the run may use — a run uses all
 working AIs for reviewing, even when one AI is picked to write. Each AI that is not ``ok`` comes back with plain words:
 which AI, what is wrong (the bridge state ``repairing`` / ``needs_user`` / ``broken`` / ``unknown`` and AutoInjector's
@@ -10,12 +10,12 @@ then offers 🔁 I fixed it — check again (``POST /api/ai-check`` with ``probe
 check-in first, bridge ``/v1/probe``), ▶ Start without it, or ✖ Cancel.
 
 "Start without it" sends ``ai_check: {"skipped": [slot ids]}`` with the start request; the run records the choice and
-says in its window which AIs take over (``start_note``). BookForge does not lock the skipped AI out: when it starts
+says in its window which AIs take over (``start_note``). Akọwe does not lock the skipped AI out: when it starts
 working during the run, it is used again (also said). A run started without the check (an older page, the API) still
 shows every AI that is not working at its start as a ⚠️ notice — no AI ever sits out silently — and an AI that stops
 working DURING the run gets a visible notice in the run window too (``alert_rows``), cleared when it works again.
 
-The bridge gives only states and codes (never free text from the site); every sentence here is BookForge's own.
+The bridge gives only states and codes (never free text from the site); every sentence here is Akọwe's own.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import logging
 
 from . import providers as providers_mod
 
-log = logging.getLogger("bookforge.ai_check")
+log = logging.getLogger("akowe.ai_check")
 
 FIX_NUMBER = "open AutoInjector and press 🔢 Fix with a number on {ai}'s card (or 🎯 to point at the part that moved)"
 
@@ -69,14 +69,14 @@ STATE_WORDS = {
     "broken": ("{ai} isn't working and AutoInjector could not repair it by itself.",
                ["To fix it, " + FIX_NUMBER + ".", "Then press 🔁 Check again here."]),
     "unknown": ("AutoInjector has not checked {ai} yet.",
-                ["Press 🔁 Check again: BookForge asks AutoInjector to check {ai} now (takes up to a minute)."]),
+                ["Press 🔁 Check again: Akọwe asks AutoInjector to check {ai} now (takes up to a minute)."]),
 }
 # Why a slot could not be read at all (slot_status "source")
 SOURCE_WORDS = {
-    "not_connected": ("{ai} is not connected to BookForge.",
+    "not_connected": ("{ai} is not connected to Akọwe.",
                       ["Open ⚙️ Settings › AI, connect AutoInjector (pairing code) and press Test connection.",
                        "Then press 🔁 Check again here."]),
-    "bridge_error": ("BookForge can't reach the AutoInjector app, so it can't use {ai}.",
+    "bridge_error": ("Akọwe can't reach the AutoInjector app, so it can't use {ai}.",
                      ["Start the AutoInjector desktop app (or check that it is still running).",
                       "Then press 🔁 Check again here."]),
 }
@@ -166,7 +166,7 @@ def start_note(skipped: list[str], working: list[str]) -> str:
     lone = len(working) == 1
     return (f"Without {' and '.join(skipped)}, {who} {'does' if lone else 'do'} all the work — writing, reviewing and "
             "editing" + (" (one AI then reviews its own writing ⚠️)" if lone else "") + ". If "
-            + ("it starts" if len(skipped) == 1 else "they start") + " working during the run, BookForge uses "
+            + ("it starts" if len(skipped) == 1 else "they start") + " working during the run, Akọwe uses "
             + ("it" if len(skipped) == 1 else "them") + " again.")
 
 

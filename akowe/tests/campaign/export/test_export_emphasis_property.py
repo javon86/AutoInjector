@@ -10,7 +10,7 @@ from collections import Counter
 
 import pytest
 
-from bookforge.exporters.book import _emphasis, inline_runs, para_block
+from akowe.exporters.book import _emphasis, inline_runs, para_block
 
 ALPHABET = "ab1 *_*_.,/?!'-é"
 

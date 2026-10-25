@@ -143,7 +143,7 @@ def test_refused_outline_in_plain_words_redo_and_plain_editor(make_context, ai_s
         page.select_option(f"#sd-place-{i}", value="")
     page.get_by_role("button", name="💾 Save as a new version").click()
     page.wait_for_function("() => /Approve this version/.test(document.querySelector('#main').innerText)", timeout=10000)
-    assert "BookForge’s checks found problems" not in page.inner_text("#main")
+    assert "Akọwe’s checks found problems" not in page.inner_text("#main")
     page.get_by_role("button", name="✔ Approve this version").click()
     yes(page)
     page.wait_for_url(re.compile(r"/book$"), timeout=10000)

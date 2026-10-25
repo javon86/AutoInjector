@@ -10,12 +10,12 @@ import types
 
 import pytest
 
-from bookforge import journal, providers as prov_mod
-from bookforge.autobook import verify_file
-from bookforge.book_path import BookPath, save_profile
-from bookforge.errors import BookforgeError
-from bookforge.jobs import JobStore, RetryPolicy, wait_and_retry
-from bookforge.server import App, make_handler
+from akowe import journal, providers as prov_mod
+from akowe.autobook import verify_file
+from akowe.book_path import BookPath, save_profile
+from akowe.errors import AkoweError
+from akowe.jobs import JobStore, RetryPolicy, wait_and_retry
+from akowe.server import App, make_handler
 
 from autobook_fake import CHAPTER_TEXT, BookFakeAI, fact, plan_item
 from test_server import TOKEN, call  # noqa: F401
@@ -116,19 +116,19 @@ def test_run_consent_is_scoped_to_the_live_run(tmp_path):
     out = bp.dispatch("B01", "CREATE", payload=bp.payload_for("B01"))
     ref = out["output_refs"][0]
     saved = app.autobook.get(run["id"])
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         app.autobook._approve(saved, ref, why="test")  # run finished: no consent any more
     assert exc.value.code == "PERMISSION_DENIED"
     live = dict(saved, status="running")
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.autobook._approve(live, ref, why="test")  # not inside the run's own thread
     assert app.store.history(run["project_id"], "main", ref["record_id"])[-1]["lifecycle"] == "DRAFT"
     # starting needs the button press (author_confirms) and an AI
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         app.autobook.start("author", {})
     assert exc.value.code == "APPROVAL_REQUIRED"
     bare = make_app(tmp_path, "bare")
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         bare.autobook.start("author", {"author_confirms": True})
     assert exc.value.code == "CAPABILITY_UNAVAILABLE"
 
@@ -144,9 +144,9 @@ def test_revise_twice_pauses_for_the_author_then_approve_anyway(tmp_path):
     assert fake.kinds.count("fix") == 2
     assert steps(run)["canon"]["state"] == "paused" and steps(run)["premise"]["state"] == "pending"
     head = app.store.history(run["project_id"], "main", prob["record_id"])[-1]
-    # two AI fixes, nothing approved (the run runs BookForge's checks - VALIDATE - before each AI review)
+    # two AI fixes, nothing approved (the run runs Akọwe's checks - VALIDATE - before each AI review)
     assert head["lifecycle"] in ("DRAFT", "VALIDATED") and head["version"] == 3
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.autobook.decide("author", run["id"], {"action": "approve_anyway"})  # needs author_confirms
     app.autobook.decide("author", run["id"], {"action": "approve_anyway", "author_confirms": True})
     app.autobook.wait_for(run["id"], 120)
@@ -203,7 +203,7 @@ def test_pause_resume_and_cancel(tmp_path):
     fake.gate.set()
     app.autobook.wait_for(r2["id"], 60)
     assert app.autobook.get(r2["id"])["status"] == "cancelled"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         app.autobook.resume("author", r2["id"])
 
 
@@ -217,7 +217,7 @@ def test_restart_shows_interrupted_and_resumes(tmp_path):
     app.autobook.pause("author", r["id"])
     fake.gate.set()
     app.autobook.wait_for(r["id"], 60)
-    # simulate BookForge stopping in the middle of a step: the saved state still says "running"
+    # simulate Akọwe stopping in the middle of a step: the saved state still says "running"
     saved = app.autobook.get(r["id"])
     saved["status"] = "running"
     app.jobstore.save(saved)
@@ -237,7 +237,7 @@ def test_restart_shows_interrupted_and_resumes(tmp_path):
 def test_retry_queue_waits_on_busy_then_succeeds(tmp_path):
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake)
-    busy = [BookforgeError("RATE_LIMITED", "", "the web site is busy with another bridge request (SITE_BUSY: x)")
+    busy = [AkoweError("RATE_LIMITED", "", "the web site is busy with another bridge request (SITE_BUSY: x)")
             for _ in range(4)]
     fake.fail_kind("B01", *busy)
     run = run_book(app)
@@ -255,7 +255,7 @@ def test_wait_and_retry_policy_backoff_and_timeout():
     def flaky():
         calls["n"] += 1
         if calls["n"] < 3:
-            raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "bridge down")
+            raise AkoweError("UPSTREAM_UNAVAILABLE", "", "bridge down")
         return "ok"
     assert wait_and_retry(flaky, policy=policy, on_wait=infos.append, who="Claude") == "ok"
     assert abs(sum(slept) - 45) < 0.01
@@ -264,15 +264,15 @@ def test_wait_and_retry_policy_backoff_and_timeout():
                     "Waiting for Claude (not reachable) — retrying in 30 s"]
 
     def timeout():
-        raise BookforgeError("TIMEOUT", "", "no answer")
+        raise AkoweError("TIMEOUT", "", "no answer")
     slept.clear()
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         wait_and_retry(timeout, policy=policy)
     assert exc.value.code == "TIMEOUT" and not slept  # never retried automatically
 
     def always_busy():
-        raise BookforgeError("RATE_LIMITED", "", "busy")
-    with pytest.raises(BookforgeError) as exc:
+        raise AkoweError("RATE_LIMITED", "", "busy")
+    with pytest.raises(AkoweError) as exc:
         wait_and_retry(always_busy, policy=RetryPolicy([15, 30, 60], 100, sleep=lambda s: None))
     assert exc.value.code == "RATE_LIMITED" and "stopped waiting" in exc.value.errors[0]["message"]
 
@@ -280,7 +280,7 @@ def test_wait_and_retry_policy_backoff_and_timeout():
 def test_timeout_pauses_the_step_not_the_run(tmp_path):
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake)
-    fake.fail_kind("B03", BookforgeError("TIMEOUT", "", "provider timed out"))
+    fake.fail_kind("B03", AkoweError("TIMEOUT", "", "provider timed out"))
     run = run_book(app)
     st = steps(run)
     assert run["status"] == "paused" and run["problem"]["code"] == "TIMEOUT"
@@ -341,7 +341,7 @@ def test_write_all_timeout_stops_on_that_chapter_and_try_again(tmp_path):
     fake = BookFakeAI()
     app = make_app(tmp_path, fake=fake)
     pid = approved_outline(app, 2)
-    fake.fail_kind("C02", BookforgeError("TIMEOUT", "", "timed out"))
+    fake.fail_kind("C02", AkoweError("TIMEOUT", "", "timed out"))
     j = app.write_all.start("author", pid, "main")
     app.write_all.wait_for(j["id"], 60)
     j = app.write_all.get(j["id"])
@@ -400,7 +400,7 @@ def test_diagnostics_contain_no_secrets_or_book_text(tmp_path):
     chapter = CHAPTER_TEXT[1][0]
     app.errors.add(400, "POST", "/api/dispatch", [{"code": "INVALID_INPUT", "path": "/payload/text",
                                                    "message": f"'{chapter}' is too long; key {FAKE_KEY}"}])
-    from bookforge import diagnostics
+    from akowe import diagnostics
     rep = diagnostics.build(app, {"user_agent": "test", "errors": [{"code": "NETWORK", "message": f"x {FAKE_KEY}"}]})
     raw = json.dumps(rep, ensure_ascii=False) + diagnostics.render_text(rep)
     assert FAKE_KEY not in raw and TOKEN not in raw
@@ -424,10 +424,10 @@ def test_backups_rotation_and_guarded_restore(tmp_path):
     assert len(kept) == 3 and set(kept) == set(names[-3:]) and all(b["verified"] for b in app.backups.list())
     assert manual in [b["name"] for b in app.backups.list()]
     p2 = app.engine.bootstrap_project("author", "After backup")
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         app.backups.restore(kept[0], {"author_confirms": True})  # the word RESTORE is missing
     assert exc.value.code == "APPROVAL_REQUIRED"
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         app.backups.restore("../etc", {"author_confirms": True, "confirm": "RESTORE"})
     assert exc.value.code == "NOT_FOUND"
     out = app.backups.restore(kept[0], {"author_confirms": True, "confirm": "RESTORE"})
@@ -490,7 +490,7 @@ def test_http_run_journal_and_shelf(served):
     # health, diagnostics, backups and jobs over HTTP
     assert call(port, "GET", "/api/health?force=1")[1]["overall"] in ("ok", "warn")
     status, dg, _ = call(port, "POST", "/api/diagnostics", {"client": {"user_agent": "pw", "errors": []}})
-    assert status == 200 and dg["text"].startswith("BookForge diagnostics")
+    assert status == 200 and dg["text"].startswith("Akọwe diagnostics")
     status, txt, resp = call(port, "GET", "/api/diagnostics?download=1")
     assert status == 200 and "attachment" in resp.getheader("Content-Disposition")
     status, b, _ = call(port, "GET", "/api/backups")
@@ -536,7 +536,7 @@ def test_endpoints_return_structured_errors_without_tracebacks(served):
 
 
 def test_jobstore_marks_live_work_interrupted(tmp_path):
-    from bookforge.store import Store
+    from akowe.store import Store
     store = Store(tmp_path / "d")
     js = JobStore(store)
     js.save({"id": "assist-1", "kind": "assist", "status": "running"})
@@ -550,8 +550,8 @@ def test_jobstore_marks_live_work_interrupted(tmp_path):
 def test_problem_table_covers_every_error_code():
     """R1-R3: one plain-language table (web/problems.js) maps every kernel error code."""
     from pathlib import Path
-    from bookforge.errors import ERROR_CODES
-    src = (Path(__file__).resolve().parent.parent / "bookforge" / "web" / "problems.js").read_text(encoding="utf-8")
+    from akowe.errors import ERROR_CODES
+    src = (Path(__file__).resolve().parent.parent / "akowe" / "web" / "problems.js").read_text(encoding="utf-8")
     missing = [c for c in ERROR_CODES if f"{c}:" not in src]
     assert not missing, missing
     for extra in ("NETWORK", "HTTP_500", "REVIEW_NOT_PASSED", "INTERRUPTED", "SITE_BUSY", "NOT_APPLICABLE"):

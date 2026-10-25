@@ -1,4 +1,4 @@
-"""Helpers for the browser-level UI tests (fixtures are re-exported by conftest.py): a real BookForge server (subprocess, temp data dir), an in-process fake AutoInjector
+"""Helpers for the browser-level UI tests (fixtures are re-exported by conftest.py): a real Akọwe server (subprocess, temp data dir), an in-process fake AutoInjector
 bridge answering with tests/autobook_fake.BookFakeAI, and Playwright Chromium (sync API).
 
 Every `page` is watched: console errors, uncaught exceptions/promise rejections and failed (>=400 / aborted)
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]          # bookforge/ (repo dir with bookforge/ package and tests/)
+ROOT = Path(__file__).resolve().parents[3]          # akowe/ (repo dir with akowe/ package and tests/)
 TESTS = ROOT / "tests"
 for p in (str(ROOT), str(TESTS)):
     if p not in sys.path:
@@ -170,9 +170,9 @@ class Server:
         self.port = free_port()
         self.base = f"http://127.0.0.1:{self.port}/"
         env = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1")
-        env.pop("BOOKFORGE_PORT", None)
+        env.pop("AKOWE_PORT", None)
         self.log = open(data_dir.parent / f"server-{self.port}.log", "w")
-        self.proc = subprocess.Popen([sys.executable, "-m", "bookforge", "--port", str(self.port), "--data-dir",
+        self.proc = subprocess.Popen([sys.executable, "-m", "akowe", "--port", str(self.port), "--data-dir",
                                       str(data_dir), "--no-browser"], cwd=str(ROOT), env=env,
                                      stdout=self.log, stderr=subprocess.STDOUT)
         deadline = time.time() + 30

@@ -8,16 +8,16 @@ editor.py applies to every craft review (all deterministic, unit-tested, no AI c
   item for that dimension whose quote is in the draft (whitespace and quote marks normalised). A review is "too clean"
   when its average is near-perfect (``NEAR_PERFECT_AVG`` 8.5 or more) and it has fewer than ``MIN_FINDINGS`` (3)
   findings that quote the draft, or no weakest passage that quotes the draft. Either makes the review untrusted.
-* **What BookForge does with an untrusted review** (editor.py): it asks the same AI ONCE more with the stricter
+* **What Akọwe does with an untrusted review** (editor.py): it asks the same AI ONCE more with the stricter
   ``editor_rubric.STRICT_REASK``. Still untrusted -> the review is flagged ⚠️ and ``apply_caps`` counts every
   unproven 9/10 as ``CAP`` (7); a too-clean review has ALL its scores capped at 7. When the flagged review has nothing
-  to rewrite, BookForge adds up to 3 notes from its own pattern check (``audit_findings``) and the verdict is REVISE
+  to rewrite, Akọwe adds up to 3 notes from its own pattern check (``audit_findings``) and the verdict is REVISE
   whenever there is at least one note to work on — so the rewrite loop can still run.
 * **Two reviewers** (``merge``): when a second AI works that is neither the writer nor the first reviewer, both read
-  the draft; BookForge takes the LOWER score per dimension and the notes of both (duplicates by passage removed).
+  the draft; Akọwe takes the LOWER score per dimension and the notes of both (duplicates by passage removed).
 * **Leniency over time** (settings key ``reviewer_leniency``, companion data like the editor's notes): per AI family
-  (ChatGPT / Claude / Gemini / an API slot) BookForge keeps how far its scores sit above (+) or below (−) the other
-  reviewer of the same draft, and how far they sit above the ceiling that BookForge's own pattern check allows
+  (ChatGPT / Claude / Gemini / an API slot) Akọwe keeps how far its scores sit above (+) or below (−) the other
+  reviewer of the same draft, and how far they sit above the ceiling that Akọwe's own pattern check allows
   (``AUDIT_DIMS``: a major pattern finding caps that dimension at 6, a minor one at 8). ``leniency`` is the mean of
   those gaps. After ``MIN_OBS`` (3) observations an AI whose leniency is ``LENIENT_AT`` (1.0) or more gets its scores
   lowered by ``discount`` = floor(leniency), at most ``MAX_DISCOUNT`` (2), before they are merged.
@@ -36,7 +36,7 @@ import re
 import threading
 from datetime import datetime, timezone
 
-log = logging.getLogger("bookforge.calibration")
+log = logging.getLogger("akowe.calibration")
 
 HIGH = 9                  # a score this high needs a quoted piece of evidence
 NEAR_PERFECT_AVG = 8.5    # an average at or above this with too few findings is "too clean"
@@ -111,7 +111,7 @@ def weakest_of(raw, text_norm: str) -> list[dict]:
 
 
 def audit_ceilings(report: dict | None, dims_map: dict | None = None) -> dict:
-    """{editor dimension: highest believable score} from BookForge's own pattern report (P6). ``dims_map``: which
+    """{editor dimension: highest believable score} from Akọwe's own pattern report (P6). ``dims_map``: which
     check bounds which dimension (default ``AUDIT_DIMS``; whole-book reviews: ``BOOK_AUDIT_DIMS``)."""
     out: dict = {}
     for f in (report or {}).get("findings") or []:
@@ -241,7 +241,7 @@ def merge(reviews: list[dict], max_findings: int = 12, max_keep: int = 10) -> di
 
 
 def audit_findings(report: dict | None, text: str, dims: list, limit: int = MAX_AUDIT_NOTES) -> list[dict]:
-    """Up to ``limit`` notes from BookForge's own pattern check, in the editor's finding format, for a flagged
+    """Up to ``limit`` notes from Akọwe's own pattern check, in the editor's finding format, for a flagged
     review that has nothing to rewrite. Only passages that are in the chapter word for word are used."""
     out = []
     order = {"major": 0, "minor": 1}
@@ -255,7 +255,7 @@ def audit_findings(report: dict | None, text: str, dims: list, limit: int = MAX_
             dim = AUDIT_DIMS.get(f.get("check"))
             out.append({"id": f"p{len(out) + 1}", "dimension": dim if dim in dims else "other",
                         "severity": f["severity"], "passage": ex[:200],
-                        "why": f"BookForge's pattern check: {f.get('label')} ({f.get('detail') or str(f.get('count')) + '×'})."[:500],
+                        "why": f"Akọwe's pattern check: {f.get('label')} ({f.get('detail') or str(f.get('count')) + '×'})."[:500],
                         "suggestion": str(f.get("advice") or "")[:500], "keep_nearby": [], "found": True,
                         "located": True, "source": "pattern_check"})
             break
@@ -382,6 +382,6 @@ def table(store) -> list[dict]:
 RULES = {"high": HIGH, "near_perfect_avg": NEAR_PERFECT_AVG, "min_findings": MIN_FINDINGS, "cap": CAP,
          "min_obs": MIN_OBS, "lenient_at": LENIENT_AT, "max_discount": MAX_DISCOUNT,
          "about": "A 9 or 10 needs a quoted proof; a near-perfect review (average 8.5+) needs at least 3 quoted "
-                  "problems. Otherwise BookForge asks once more, then counts unproven scores as 7. Two reviewers: the "
+                  "problems. Otherwise Akọwe asks once more, then counts unproven scores as 7. Two reviewers: the "
                   "lower score per point. An AI that scores 1+ points above the others (3+ reviews) is lowered by "
                   "up to 2 points."}

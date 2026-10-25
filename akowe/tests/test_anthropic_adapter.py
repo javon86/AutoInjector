@@ -7,8 +7,8 @@ import types
 
 import pytest
 
-from bookforge.errors import BookforgeError
-from bookforge.providers import AnthropicAdapter
+from akowe.errors import AkoweError
+from akowe.providers import AnthropicAdapter
 
 SLOT = {"model": "claude-test", "max_output_tokens": 100, "effort": "high"}
 
@@ -96,7 +96,7 @@ def test_success_returns_json_and_usage(install):
 
 def test_missing_sdk_is_capability_unavailable(monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", None)  # import fails
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == "CAPABILITY_UNAVAILABLE" and "pip install" in exc.value.errors[0]["message"]
 
@@ -105,7 +105,7 @@ def test_old_sdk_rejecting_new_arguments_gets_an_upgrade_message(install):
     def old(kw):
         raise TypeError("stream() got an unexpected keyword argument 'fallbacks'")
     install(make_sdk(old))
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == "CAPABILITY_UNAVAILABLE"
     assert "--upgrade anthropic" in exc.value.errors[0]["message"]
@@ -113,7 +113,7 @@ def test_old_sdk_rejecting_new_arguments_gets_an_upgrade_message(install):
 
 def test_old_sdk_client_constructor(install):
     install(make_sdk(lambda kw: response("{}"), client_kwargs_ok=False))
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == "CAPABILITY_UNAVAILABLE" and "too old" in exc.value.errors[0]["message"]
 
@@ -129,7 +129,7 @@ def test_sdk_errors_are_classified(install, name, code):
     def fail(kw):
         raise getattr(holder["sdk"], name)("boom")
     holder["sdk"] = install(make_sdk(fail))
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == code
 
@@ -139,7 +139,7 @@ def test_status_errors(install, status, code):
     def fail(kw):
         raise _APIStatusError("x", status_code=status)
     install(make_sdk(fail))
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == code
 
@@ -148,7 +148,7 @@ def test_unknown_sdk_error_and_sdk_without_error_classes(install):
     def fail(kw):
         raise RuntimeError("socket exploded")
     install(make_sdk(fail, with_errors=False))  # an SDK lacking the error classes must not crash the except
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == "INTERNAL_ERROR" and "RuntimeError: socket exploded" in exc.value.errors[0]["message"]
 
@@ -159,6 +159,6 @@ def test_unknown_sdk_error_and_sdk_without_error_classes(install):
                                        (response("[1, 2]"), "INTERNAL_ERROR")])
 def test_bad_responses(install, resp, code):
     install(make_sdk(lambda kw: resp))
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         submit()
     assert exc.value.code == code

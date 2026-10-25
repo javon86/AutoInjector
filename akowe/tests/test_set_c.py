@@ -8,8 +8,8 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timedelta, timezone
 
-from bookforge.c_events import extract_event_bundle, find_bundles
-from bookforge.errors import BookforgeError
+from akowe.c_events import extract_event_bundle, find_bundles
+from akowe.errors import AkoweError
 
 from conftest import PRINCIPAL, errors_of
 
@@ -139,7 +139,7 @@ class FakeAI:
         if "events" in props:
             self.calls["events"] += 1
             if self.fail_extract:
-                raise BookforgeError(self.fail_extract, "", "extraction provider failed")
+                raise AkoweError(self.fail_extract, "", "extraction provider failed")
             return {"events": self.events if self.events is not None else raw_events()}, usage
         if "text" in props:
             self.calls["prose"] += 1

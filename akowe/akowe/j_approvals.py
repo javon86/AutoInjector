@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .canonical import sha256_json
-from .errors import BookforgeError
+from .errors import AkoweError
 
 APPROVAL_MODULES = ("K09", "I10")
 
@@ -40,7 +40,7 @@ def approval_view(rec: dict) -> dict:
         subj = body.get("subject_ref")
         return {"decision": decision, "expiry": body.get("expires_at"), "subjects": [subj] if subj else [],
                 "approval_id": body.get("approval_id"), "scopes": list(body.get("scopes") or []), "body": body}
-    raise BookforgeError("INVALID_INPUT", "/module_id", "approval must be a K09 or I10 decision record",
+    raise AkoweError("INVALID_INPUT", "/module_id", "approval must be a K09 or I10 decision record",
                          status="REJECTED")
 
 
@@ -52,14 +52,14 @@ def covers(view: dict, ref: dict) -> bool:
 def check_approval(rec: dict, path: str, subject: dict | None = None, now: datetime | None = None) -> dict:
     """Raise unless rec is an APPROVED, unrevoked, unexpired decision (covering subject if given)."""
     if rec["module_id"] not in APPROVAL_MODULES:
-        raise BookforgeError("APPROVAL_REQUIRED", path, "approval must be a K09 or I10 decision record")
+        raise AkoweError("APPROVAL_REQUIRED", path, "approval must be a K09 or I10 decision record")
     view = approval_view(rec)
     if view["decision"] != "APPROVED":
-        raise BookforgeError("APPROVAL_REQUIRED", path, f"approval decision is {view['decision']}")
+        raise AkoweError("APPROVAL_REQUIRED", path, f"approval decision is {view['decision']}")
     if not view["expiry"] or parse_time(view["expiry"]) <= (now or now_utc()):
-        raise BookforgeError("EXPIRED_APPROVAL", path, "approval has expired; a renewed authorization is required")
+        raise AkoweError("EXPIRED_APPROVAL", path, "approval has expired; a renewed authorization is required")
     if subject is not None and not covers(view, subject):
-        raise BookforgeError("APPROVAL_REQUIRED", path, "approval does not cover this exact revision; prior "
+        raise AkoweError("APPROVAL_REQUIRED", path, "approval does not cover this exact revision; prior "
                              "approval cannot authorize changed output")
     return view
 
@@ -68,7 +68,7 @@ def approval_problem(rec: dict, subject: dict | None = None) -> tuple[str, str] 
     """Non-raising variant: (code, message) or None."""
     try:
         check_approval(rec, "", subject)
-    except BookforgeError as exc:
+    except AkoweError as exc:
         return exc.code, exc.errors[0]["message"]
     return None
 

@@ -1,6 +1,9 @@
-# Bookforge
+# Akọwe
 
-Bookforge is a local book-production workspace built from the **BookForge Final Build Plan**
+**Akọwe — your book's scribe.** (Yoruba *akọwe*: scribe, secretary — from *kọ*, write, and *ìwé*, book.)
+Formerly BookForge — renamed to Akọwe on 2026-10-25; see [Renamed from BookForge](#renamed-from-bookforge).
+
+Akọwe is a local book-production workspace built from the **Akọwe Final Build Plan**
 (contract `BF-IRB-1.0.0`, closure revision `BF-CLOSURE-1.1`). It covers the whole path from
 story bible to a release-checked book: universe canon, planning, prose, art, story state,
 editing, reconciliation, assembly/export, quality checks, storage and orchestration.
@@ -26,25 +29,44 @@ module first.
 
 ## Run it (Windows)
 
-1. Double-click **`run-bookforge.bat`** in this folder. If Python 3.10+ is missing, the window says
+1. Double-click **`run-akowe.bat`** in this folder. If Python 3.10+ is missing, the window says
    so and opens python.org: install it, tick **"Add python.exe to PATH"**, then double-click again.
-2. The first start makes BookForge's own Python environment (`%LOCALAPPDATA%\Bookforge\venv`) and
+2. The first start makes Akọwe's own Python environment (`%LOCALAPPDATA%\Akowe\venv`) and
    installs the one dependency quietly (needs the internet once).
-3. Your browser opens the workspace. If port 8780 is busy, BookForge picks the next free port; if
-   BookForge is already running, it just opens it again. Keep the window open while you work; close
+3. Your browser opens the workspace. If port 8780 is busy, Akọwe picks the next free port; if
+   Akọwe is already running, it just opens it again. Keep the window open while you work; close
    it to stop. On a problem the window stays open with a plain explanation.
-4. Optional: double-click **`create-shortcut.bat`** once to put a **BookForge** shortcut on your
+4. Optional: double-click **`create-shortcut.bat`** once to put an **Akọwe** shortcut on your
    Desktop.
 
-macOS/Linux: `./run-bookforge.sh`. Manual start: `python -m pip install -r requirements.txt`
-then `python -m bookforge` (options: `--port 8780`, `--data-dir PATH`, `--no-browser`).
+macOS/Linux: `./run-akowe.sh`. Manual start: `python -m pip install -r requirements.txt`
+then `python -m akowe` (options: `--port 8780`, `--data-dir PATH`, `--no-browser`).
 
-Your projects are stored privately on this computer (Windows: `%LOCALAPPDATA%\Bookforge`;
-elsewhere `~/.local/share/bookforge`). The server only listens on `127.0.0.1`.
+Your projects are stored privately on this computer (Windows: `%LOCALAPPDATA%\Akowe`;
+elsewhere `~/.local/share/akowe`). The server only listens on `127.0.0.1`.
+
+### Renamed from BookForge
+
+Akọwe was called BookForge until 2026-10-25. An existing install keeps everything; nothing is deleted:
+
+- **Data folder**: on the first start `%LOCALAPPDATA%\Bookforge` (elsewhere `~/.local/share/bookforge`) is
+  moved to `%LOCALAPPDATA%\Akowe` (`~/.local/share/akowe`), Python environment included — by the launcher, or
+  by Akọwe itself. When it cannot be moved it is copied and the old folder gets a `MOVED-TO-AKOWE.txt` note;
+  when even that fails Akọwe keeps using the old folder. The database `bookforge.sqlite3` becomes `akowe.sqlite3`
+  and backups made before the rename still verify and restore.
+- **Books folder**: a folder you chose in Settings stays as it is. Without one, an existing
+  `Documents\BookForge Books` keeps being used; only new installs get `Documents\Akowe Books`.
+- **Saved books**: `book.bookforge` files and their book folders still open (📂 Open a saved book, or upload);
+  the next save of that book writes `book.akowe` in the same folder and removes the old `book.bookforge`.
+  Book bibles saved by BookForge open too.
+- **Keys**: `~/.bookforge/secrets.json` (AI keys, the AutoInjector connection key) is copied to
+  `~/.akowe/secrets.json`, so the pairing with AutoInjector survives; AutoInjector keeps its key as well.
+- **Environment variables**: `AKOWE_*` (`AKOWE_PORT`, `AKOWE_DATA`, `AKOWE_BOOKS_DIR`, `AKOWE_AUTOSAVE`,
+  `AKOWE_SECRETS`, `AKOWE_EPUBCHECK`, …); the old `BOOKFORGE_*` names are still read when the new one is not set.
 
 ## Getting started: Start a new book and Make my book
 
-The first time you open BookForge (and any time from **🚀 New book** in the top bar) a short
+The first time you open Akọwe (and any time from **🚀 New book** in the top bar) a short
 **Start a new book** wizard asks, in plain words: 1) your **book profile** — title, author or pen
 name, genre, who it is for, length (short story / novelette / novella / novel), tone and your idea in a
 paragraph; 2) which **AI** to use (each slot with its current status, Automatic, or *Manual — I'll
@@ -60,7 +82,7 @@ places → premise → main plot → chapter outline → write each chapter → 
 together → export (PDF, EPUB, DOCX for the release profiles you chose) → a content check. Each step
 says **Done**, **Needs you**, **AI can do it**, **Ready** or **Waiting**, and the big **▶ Do the
 next step** button does the next one. Creative steps are written by your AI (or, with no AI, open a
-ready-made form for you to write); BookForge never approves anything for you (the only exception is a ⚡ Make a book for me run you start, see below) — every approval asks
+ready-made form for you to write); Akọwe never approves anything for you (the only exception is a ⚡ Make a book for me run you start, see below) — every approval asks
 *"Approve as the author?"*, and when a step needs an explicit approval record (for example a chapter
 without an objective review) one is recorded for exactly that version because you confirmed. At the
 end **⬇ Download my book** gives you the files. Full release readiness (H10) stays in Quality Checks.
@@ -70,10 +92,10 @@ API: `GET /api/projects/{id}/branches/{b}/book`, `POST .../book/{create|write_ch
 
 The yellow **⚡ Make a book** button (top bar, Your books, the Overview and Make my book) lets your AI make a
 whole **new** book in one go. Quick settings are optional — genre, length (default **short story**), which AI
-(or Automatic) and an idea — or press **⚡ Start — let the AI choose everything**. BookForge first saves a backup,
+(or Automatic) and an idea — or press **⚡ Start — let the AI choose everything**. Akọwe first saves a backup,
 creates a separate new book (your other books are never touched), and then walks every step of Make my book: the
 AI invents the book (title, pen name, genre, readers, tone, idea), drafts the characters and places (Bible
-Builder), writes the premise, main plot, chapter outline and every chapter, then BookForge sets up the book
+Builder), writes the premise, main plot, chapter outline and every chapter, then Akọwe sets up the book
 format, puts the book together, exports **PDF, EPUB and Word** and runs the content check.
 
 **Your consent.** Pressing Start is your consent for *this run only*: each draft is checked by the AI reviewer;
@@ -87,16 +109,16 @@ approved outside a run you started.
 code, how long it took and a plain message; chapters and characters are listed one by one. **⏸ Pause**,
 **▶ Resume** (continues exactly where it stopped) and **✖ Cancel** are always there. You can close the window — the
 run keeps going, and the ⚡ button shows *Making… 4/11*. When it is done you get the download buttons and links to
-the book, its journal and your finished books. Runs survive reloading the page and even a BookForge restart (they
+the book, its journal and your finished books. Runs survive reloading the page and even an Akọwe restart (they
 then show *Interrupted — ▶ Resume*).
 
-**When the AI is busy.** If the AI is busy or cannot be reached, BookForge waits and tries again by itself (15 s,
+**When the AI is busy.** If the AI is busy or cannot be reached, Akọwe waits and tries again by itself (15 s,
 30 s, 60 s, 120 s … up to about 10 minutes; change it in Settings → *When the AI is busy*) and shows *“Waiting for
 Claude (busy) — retrying in 30 s”*. A slow answer (time-out) is never retried automatically, because the first
 answer may still arrive: the step pauses with a ⚠️ and **🔁 Try again**.
 
 **When one AI breaks, the others take over.** Before a run starts (and before ✍ Write all chapters and 🧪 Test
-workflow) BookForge asks AutoInjector to check in with every AI (up to a minute) and the window shows **AIs:**
+workflow) Akọwe asks AutoInjector to check in with every AI (up to a minute) and the window shows **AIs:**
 *✔ AI-1 · Claude — working · 🔧 AI-3 · Gemini — being repaired · ⚠️ AI-2 · ChatGPT — needs you (logged out)*.
 An AI that AutoInjector is repairing, that needs you (logged out, “are you human?” check, usage limit) or that is
 broken is skipped: its work goes to an AI that works (the run notes *“… is being repaired — this went to AI-2 ·
@@ -119,16 +141,16 @@ why and suggests a change; the editor also lists what works and must be **kept**
 characters and the world, never from random accidents. The editor is never the AI that wrote the chapter when
 another AI works (⚠️ otherwise, as for reviews).
 
-Before the editor reads, BookForge's own **pattern check** (no AI) counts repeated habits: stillness and gesture
+Before the editor reads, Akọwe's own **pattern check** (no AI) counts repeated habits: stillness and gesture
 phrases (“went very still”, “for a long time”, “looked at”…), “Not X. Not Y.”, lists of three, paragraphs that end on
 a moral, feelings named in dialogue (“I'm afraid”, “half of me”), fancy dialogue tags, sentences of the same length or
 the same opening, overused words, who has the dialogue, and reassurance that removes the risk (“It won't hurt
 anyone”). The editor gets these counts; you see them under **🔎 Pattern check** on the chapter page.
 
 - **In ⚡ Make a book for me** (on by default): a chapter whose editor says *revise* goes back to the AI that wrote
-  it, which rewrites **only the flagged passages**. BookForge applies each change word for word (a change that does
+  it, which rewrites **only the flagged passages**. Akọwe applies each change word for word (a change that does
   not match the text exactly, or would remove a passage to keep, is left out — never guessed), saves a new version
-  and checks it again: BookForge's checks, the consistency reviewer, the pattern check and the editor. The rewrite is
+  and checks it again: Akọwe's checks, the consistency reviewer, the pattern check and the editor. The rewrite is
   kept only if nothing got worse; otherwise the earlier text is put back. At most **2 rounds** per chapter; if the
   editor still has notes then, the chapter is approved under your run consent anyway and marked ⚠️ *“editor still
   had notes”* — the run summary lists those chapters and notes. The editor never holds up the whole book.
@@ -140,7 +162,7 @@ anyone”). The editor gets these counts; you see them under **🔎 Pattern chec
   normal / strict (when scores and notes count as *revise*: normal = any major note or any score below 6).
 
 The editor's scores and notes are advice stored for exactly that version; the journal shows the verdicts and counts,
-never your text. What the editor checks is written in one plain file, `bookforge/editor_rubric.py`.
+never your text. What the editor checks is written in one plain file, `akowe/editor_rubric.py`.
 
 ## 🎭 Characters who are their own people, 🎬 scenes planned before writing
 
@@ -197,10 +219,10 @@ never your text. What the editor checks is written in one plain file, `bookforge
 - **🧺 World texture**: concrete details of work and trade, weather and sea, institutions, local people and money — each
   with what it can **cause** (it gets in the way, shows skill, or costs something). Scene plans take their obstacles from
   it, the writer gets a few per chapter, and a detail is used only if it causes something, shows skill or gets in the
-  way. BookForge counts how often each one is on the page (⚠️ never used / used too often).
+  way. Akọwe counts how often each one is on the page (⚠️ never used / used too often).
 - **✅ Planned to page**: on every chapter page a checklist of what the plan says must reach the reader — the outline
   beat, each scene's obstacle and change, the narrator's / point-of-view character's **name** (in their first chapter)
-  and the **must show** details of the character sheets — with ✔ / ⚠️. BookForge looks for the words first, then an AI
+  and the **must show** details of the character sheets — with ✔ / ⚠️. Akọwe looks for the words first, then an AI
   that did not write the chapter checks what is unclear. **✨ Fix with AI** asks the writer to work only the missing items
   into the right passages; you see before → after and save a new version. The book page lists what is still missing in
   the whole book. In ⚡ Make a book it runs after the editor (one fix round, kept only if the reviewer passes it); what is
@@ -212,21 +234,21 @@ never your text. What the editor checks is written in one plain file, `bookforge
 ## 📊 Book report, ⚖️ compare versions and 📏 longer books
 
 - **📊 Book report.** When a ⚡ run finishes (its last step), or from the book page, the shelf or **📊 Book report**,
-  BookForge makes a quality report of the book: scores from 1 to 10 for atmosphere, premise, plot continuity,
+  Akọwe makes a quality report of the book: scores from 1 to 10 for atmosphere, premise, plot continuity,
   structure, prose clarity, world distinctiveness, character differentiation, psychological complexity, realism, rule
   rigor, peril and uncertainty, subtext and the ending; **strengths and weaknesses with quotes** (⚠️ when a quote is not
   in the book word for word); what the editor, the planned-to-page check and the pattern check found across all
   chapters; words per chapter against the length; **which AI wrote, reviewed and edited what**; and **what to try
-  next**. The whole book is read by every working AI that did **not** write most of it (independent); BookForge shows
+  next**. The whole book is read by every working AI that did **not** write most of it (independent); Akọwe shows
   the middle score (median) per dimension and ⚠️ where the AIs are 3 or more points apart. A short book is sent whole;
   a long one as a digest of every chapter (opening, a middle passage, ending). **📨 Ask the other AIs to review this
   book** lets you choose AIs (the writer is marked ⚠️ not independent). **⬇ Markdown** and **⬇ PDF** download it as
-  “<Book title> - BookForge report - <date>”. Reports are kept per book version (⚠️ when a chapter changed since).
+  “<Book title> - Akọwe report - <date>”. Reports are kept per book version (⚠️ when a chapter changed since).
 - **🧪 Variants and ⚖️ compare.** ⚡ quick settings → *Pipeline (advanced)*: switch off the editor, scene cards, voice
   cards, story rules or the planned-to-page check (preset **Baseline** = all off, like the first automatic book).
   **🧪 Make a variant** (book page, report, shelf) makes the same book — same profile, idea and choices — again with
   other switches. **⚖️ Compare** (shelf, book page, `#/compare`) gives two books or two chapter versions to your AIs
-  **blind**: each sees “Version 1” and “Version 2” in its own random order, scores both and picks one; then BookForge
+  **blind**: each sees “Version 1” and “Version 2” in its own random order, scores both and picks one; then Akọwe
   reveals which was which and shows a table with the median scores and the winner per dimension.
 - **📏 Lengths.** Short story (~3,000–5,000 words, 3–5 chapters), novelette (~10,000–15,000, 5–8), novella
   (~20,000–40,000, 8–15) and novel (~60,000–90,000, 20–35). The outline gets the chapter count and words per chapter,
@@ -239,8 +261,8 @@ never your text. What the editor checks is written in one plain file, `bookforge
 ## 💾 Your books folder: save, open again, make again
 
 **Where books are saved.** Every book gets its own folder in your *books folder*: on Windows
-`Documents\BookForge Books` (elsewhere `BookForge Books` in your home folder). Change it in **Settings → 📁 Where books
-are saved** (BookForge checks that it can write there; **📂 Open folder** shows it in Explorer). A book's folder is
+`Documents\Akowe Books` (elsewhere `Akowe Books` in your home folder). Change it in **Settings → 📁 Where books
+are saved** (Akọwe checks that it can write there; **📂 Open folder** shows it in Explorer). A book's folder is
 called “*Book title* (abc123)” and keeps that name even when you rename the book.
 
 **What is in a book's folder** (a `README.txt` in each folder says the same):
@@ -249,19 +271,19 @@ called “*Book title* (abc123)” and keeps that name even when you rename the 
 |---|---|
 | `Book/` | the finished book: PDF, EPUB and Word (once it is exported) |
 | `Chapters/` | every chapter as a text file (`01 - Title.md` …); a chapter not approved yet says **DRAFT** at the top |
-| `Book Bible/` | everything the book is built on: profile, ending and style choices, characters with their sheets and voice cards, places and world, premise, plot, outline, scene cards, story rules, world texture — `book-bible.md` to read, `book-bible.json` for BookForge |
+| `Book Bible/` | everything the book is built on: profile, ending and style choices, characters with their sheets and voice cards, places and world, premise, plot, outline, scene cards, story rules, world texture — `book-bible.md` to read, `book-bible.json` for Akọwe |
 | `Reports/` | the book report (Markdown and PDF), the editor's and the planned-to-page summaries |
 | `Log/` | the book journal and `run-events.json` (every step of the run, which AI did what, times, problems — never keys or prompts) |
 | `Progress/` | `progress.json`: what is done and what comes next |
-| `book.bookforge` | the **whole book in one file** (every version and file, with checksums) — to open it again, also on another computer |
+| `book.akowe` | the **whole book in one file** (every version and file, with checksums) — to open it again, also on another computer |
 
 **Saving.** Press **💾 Save** on the book page, in the top bar (while a book is open), on a book of 📚 My finished
 books or in the ⚡ run window; it says **Saved to …** with the folder (or ⚠️ with what to do, for example when the disk
-is full or the folder cannot be written). With **auto-save** (on unless you switch it off in Settings) BookForge saves
+is full or the folder cannot be written). With **auto-save** (on unless you switch it off in Settings) Akọwe saves
 by itself while a book is made — after each step and chapter, at most every 2 minutes — and at once when it is
-finished, paused or stopped. BookForge only ever replaces the files it wrote itself; your own files in the folder stay.
+finished, paused or stopped. Akọwe only ever replaces the files it wrote itself; your own files in the folder stay.
 
-**📂 Open a saved book** (top bar or Your books): pick a book from your books folder, or upload its `book.bookforge`.
+**📂 Open a saved book** (top bar or Your books): pick a book from your books folder, or upload its `book.akowe`.
 It always opens as a **new** book (“… (opened)” when you already have one with that title) — nothing is overwritten.
 An unfinished book shows **▶ Continue making this book** (the AI does the steps that are left; what is done is kept),
 and **▶ Resume the saved run** when its run was stopped half-way.
@@ -286,11 +308,11 @@ tile, a step in the side bar, a form field, an AI slot, a test row, a run step o
 see **Where** (book › set › step › field), **What happened** in plain words (the technical code is folded away),
 **How to fix it**, and a button that does it: **🔁 Try again**, **✏️ Open the form** or **⚙️ Open Settings**, plus
 **📋 Copy diagnostics**. Form fields the server refuses are highlighted with their own ⚠️ and message. If the page
-hits something unexpected (or BookForge stops answering) a ⚠️ bar appears at the bottom instead of failing silently.
+hits something unexpected (or Akọwe stops answering) a ⚠️ bar appears at the bottom instead of failing silently.
 
 ## ❤️ Health, 📋 diagnostics and background work
 
-The **❤️** in the top bar turns **💛** or **⚠️** when something needs attention. BookForge checks about once a minute
+The **❤️** in the top bar turns **💛** or **⚠️** when something needs attention. Akọwe checks about once a minute
 while the page is open: the database (read and write), free disk space, recent backups, each AI slot, the
 AutoInjector link and status updates, your exported files (still present and unchanged) and stuck background
 work. Click it for the **Health** panel: each check with ✔ or ⚠️, details and how to fix it, **🔁 Run checks now**,
@@ -310,7 +332,7 @@ consent*), AI reviews and fixes, waits and retries, pauses, problems, backups an
 
 ## 💾 Automatic backups
 
-BookForge backs up all your books automatically: once a day (first start), before ⚡ Make a book for me, before
+Akọwe backs up all your books automatically: once a day (first start), before ⚡ Make a book for me, before
 putting a book together and before exporting. Each backup is verified; the newest 10 are kept (change it in
 Settings → Backups). **💾 Back up now** makes one any time. **↩ Restore** puts *all* your books back to that backup —
 it asks you to tick a box and type **RESTORE**, first saves a safety backup of how things are now (so you can undo
@@ -358,7 +380,7 @@ It is advice only and is shown on the draft and in the queue. For *revise* you c
 reviews the list one draft at a time, with progress and a **Stop** button.
 
 **Auto-approve (optional, off by default).** At the bottom of the review queue you can tick *Auto-approve drafts that
-pass the AI review*. BookForge asks you to confirm and remembers who turned it on and when. While it is on, a draft
+pass the AI review*. Akọwe asks you to confirm and remembers who turned it on and when. While it is on, a draft
 whose AI review says *approve* is approved in your name without you reading it; *revise*, *reject* or a failed review
 never approve anything. Every automatic approval appears in **Activity**, marked as approved under your standing
 setting. Untick it any time.
@@ -378,14 +400,14 @@ answer); **📄 Open report** shows it. Test books are listed apart from your bo
 
 ## Connect AutoInjector with one button
 
-In the AutoInjector desktop app press **Connect** next to BookForge: your browser opens BookForge, which says
+In the AutoInjector desktop app press **Connect** next to Akọwe: your browser opens Akọwe, which says
 *Connecting to AutoInjector…*, connects AI-1 = Claude, AI-2 = ChatGPT and AI-3 = Gemini, checks each one and then
 takes you to your Current task. The one-time code in that link works once, for about two minutes, and is removed from
 the address immediately; it is not your connection key (the key is stored privately and never shown). If it says the
-code expired, press Connect in AutoInjector again. (BookForge remembers its access token in this browser so that tabs
-opened by AutoInjector work; if you never opened BookForge from its start link in this browser, open it once first.)
-Once connected, BookForge keeps AutoInjector informed with a short status — the book's title, your current task, what
-BookForge is working on and how many drafts wait for you (titles only, never your text) — so AutoInjector can show it
+code expired, press Connect in AutoInjector again. (Akọwe remembers its access token in this browser so that tabs
+opened by AutoInjector work; if you never opened Akọwe from its start link in this browser, open it once first.)
+Once connected, Akọwe keeps AutoInjector informed with a short status — the book's title, your current task, what
+Akọwe is working on and how many drafts wait for you (titles only, never your text) — so AutoInjector can show it
 and link back.
 
 ## How to get around
@@ -417,7 +439,7 @@ box opens instead (press Ctrl+V there).
 
 ## Test everything
 
-Press **🧪 Test everything** (top bar → **More**) (or run `python -m bookforge selftest`) to check that
+Press **🧪 Test everything** (top bar → **More**) (or run `python -m akowe selftest`) to check that
 the whole program really works on this computer. It is a real test, not a simulation:
 
 1. It creates a new, separate project named **"Self-test <date time>"** (your projects are not
@@ -442,9 +464,9 @@ each connected AI slot and then really send the premise (B01) and one chapter dr
 its event extraction) to your AI. A slot that is not set up or not reachable makes those steps
 SKIPPED with the exact reason and fix; the rest of the book still runs manually.
 
-The report is saved as `reports/selftest-<stamp>.md` and `.json` in your BookForge data folder
+The report is saved as `reports/selftest-<stamp>.md` and `.json` in your Akọwe data folder
 (the dialog offers **View report**, **Download report (.md)** and **Open the Self-test project**).
-It lists the date, BookForge and contract versions, package hash, Python/OS, the AI slots
+It lists the date, Akọwe and contract versions, package hash, Python/OS, the AI slots
 (without keys), a summary table, every step with details and timings, the exported files' sizes
 and hashes, and environment notes. It never contains API keys, connection keys, access tokens or
 AI prompts/replies (only their lengths and hashes).
@@ -452,12 +474,12 @@ AI prompts/replies (only their lengths and hashes).
 API: `POST /api/selftest {"use_ai": false}` starts a run (409 while one is running),
 `GET /api/selftest` returns live progress and the last summary, `GET /api/selftest/report?format=md|json`
 returns the latest report (all need the access token). `GET /api/ping` needs no token and only
-answers `{"app": "bookforge", "version": ..., "contract_version": ...}` so AutoInjector can see that
-BookForge is running.
+answers `{"app": "akowe", "version": ..., "contract_version": ...}` so AutoInjector can see that
+Akọwe is running.
 
 ## Using AI (optional)
 
-Bookforge has exactly three AI slots (AI-1, AI-2, AI-3), configured under **Settings**.
+Akọwe has exactly three AI slots (AI-1, AI-2, AI-3), configured under **Settings**.
 The bundled adapter uses Anthropic's Claude (default model `claude-opus-5-5`); it needs the
 optional `anthropic` SDK - a recent release, so install or update it with
 `python -m pip install --upgrade anthropic` (it is not in `requirements.txt` because manual and
@@ -472,8 +494,8 @@ the cap does not have room, the work is held with `QUOTA_EXCEEDED` and the AI is
 
 **Experimental: AutoInjector web sessions.** Instead of an API key, a slot can use the
 ChatGPT, Claude or Gemini web session you are already logged in to inside the AutoInjector
-desktop app (adapter `autoinjector`). In AutoInjector open the **BookForge bridge panel**, switch
-the bridge on and press **Copy connection key**; then in BookForge **Settings** paste it into
+desktop app (adapter `autoinjector`). In AutoInjector open the **Akọwe bridge panel**, switch
+the bridge on and press **Copy connection key**; then in Akọwe **Settings** paste it into
 **Connect AutoInjector** (AI-1=Claude, AI-2=ChatGPT, AI-3=Gemini). Each slot shows a status
 strip — where it's at (Not set up, Needs connection key, Connected · Ready, Busy, Error) and the
 next step in plain words — and the ⓘ buttons explain AutoInjector, the connection key and
@@ -481,11 +503,11 @@ next step in plain words — and the ⓘ buttons explain AutoInjector, the conne
 stored in the local secret file like an API key and is never shown again. Each slot
 may list `roles` (operation IDs such as `C02` or set letters such as `B`) to route that work to
 it. Automating these sites' web interfaces may be against their terms of service; use at your
-own risk. Contract: `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`. With AutoInjector's self-repair (bridge 1.2) the
+own risk. Contract: `../docs/AKOWE_AUTOINJECTOR_BRIDGE.md`. With AutoInjector's self-repair (bridge 1.2) the
 strip and the ❤️ Health panel also show *🔧 Being repaired*, *Needs you* (with the reason, e.g. logged out) or *Not
-working*; meanwhile BookForge sends the work to the other AIs.
+working*; meanwhile Akọwe sends the work to the other AIs.
 
-BookForge's default port is **8780** (8765 is used by AutoInjector's extension bridge).
+Akọwe's default port is **8780** (8765 is used by AutoInjector's extension bridge).
 
 Slots are optional. Without one, every creative operation offers a **Manual candidate**
 form so you write that content yourself; deterministic operations (validation, state
@@ -533,7 +555,7 @@ are created as DRAFT records in dependency order, so sketch links (a character's
 example) become real links to the records just created. Nothing is validated or accepted for you.
 
 After every run and every create a report is written to `reports/bible-builder-<stamp>.md` and
-`.json` in your BookForge data folder (View/Download in the panel): sections requested, AI slot and
+`.json` in your Akọwe data folder (View/Download in the panel): sections requested, AI slot and
 model, each entry's outcome and timing, created record IDs versus discarded ones, links made and
 made-up links removed. It never contains keys, prompts, AI replies or your idea text.
 
@@ -563,12 +585,12 @@ API: `POST /api/bible-builder {project_id, branch_id, idea, counts?, slot_id?}`,
 * Exports use the PDF base-14 fonts (Times/Helvetica/Courier) and are not embedded; print
   interiors therefore fail the H09 font-embedding check until font import/embedding is added.
 * The official EPUB validator **EPUBCheck** is optional. Without it the EPUB is still checked by
-  Bookforge, and the H09 report adds a note "not checked by EPUBCheck" (it does not block the
+  Akọwe, and the H09 report adds a note "not checked by EPUBCheck" (it does not block the
   release). To add the official check: install Java (11 or newer), download EPUBCheck from
-  https://www.w3.org/publishing/epubcheck/ and unzip it into `bookforge/tools/` so that
-  `bookforge/tools/epubcheck-<version>/epubcheck.jar` exists - or set the environment variable
-  `BOOKFORGE_EPUBCHECK` to the full path of `epubcheck.jar` (or of an `epubcheck` program).
-  Restart Bookforge; the self-test's environment notes say whether it was found.
+  https://www.w3.org/publishing/epubcheck/ and unzip it into `akowe/tools/` so that
+  `akowe/tools/epubcheck-<version>/epubcheck.jar` exists - or set the environment variable
+  `AKOWE_EPUBCHECK` to the full path of `epubcheck.jar` (or of an `epubcheck` program).
+  Restart Akọwe; the self-test's environment notes say whether it was found.
 * No image-generation adapter is bundled: art operations accept uploaded images (rights must
   be cleared by review) and maps are rendered deterministically as SVG.
 * Single-author local use; there is no multi-user server or cloud sync.

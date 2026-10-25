@@ -1,9 +1,9 @@
 'use strict';
 /*
- * bookforge-bridge.js — the AutoInjector desktop side of the BookForge bridge
- * (contract v1: docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md, which is normative).
+ * akowe-bridge.js — the AutoInjector desktop side of the Akọwe bridge
+ * (contract v1: docs/AKOWE_AUTOINJECTOR_BRIDGE.md, which is normative).
  *
- * A tiny loopback-only HTTP server that lets BookForge send one prompt to one of
+ * A tiny loopback-only HTTP server that lets Akọwe send one prompt to one of
  * the chat panes (chatgpt|claude|gemini) and get the next captured reply back.
  * PURE NODE: no Electron import. main.js supplies the pane-facing pieces:
  *
@@ -27,7 +27,7 @@
  *                                           starts check-ins (null = every active AI); results show
  *                                           up later in /v1/health
  *   }) -> { start(), stop(), onCaptured(turn) -> bool, status(), recordEvent(kind, fields),
- *          createPairingCode() -> string, bookforgeStatus() -> object|null }
+ *          createPairingCode() -> string, akoweStatus() -> object|null }
  *
  * onCaptured(turn) is called by main.js for every captured reply
  * ({ site, text, answers }). It returns true when the reply belonged to a bridge
@@ -67,7 +67,7 @@
  * selftest } — never prompt/reply text and never a presented or real key. The
  * app's own link test marks itself with the header `X-AutoInjector-Selftest: 1`
  * (health checks) and request_ids starting with "selftest-" (completions), so
- * it never counts as "BookForge connected".
+ * it never counts as "Akọwe connected".
  *
  * Contract v1.1 (backward compatible) adds:
  *   POST /v1/pair    (NO Authorization) — trade a one-time pairing code made by
@@ -77,10 +77,10 @@
  *                    PAIR_MAX_FAILS failures in PAIR_WINDOW_MS every pair attempt
  *                    gets 429 for PAIR_LOCK_MS. Codes and the key are never logged
  *                    or recorded — only the outcome.
- *   POST /v1/status  (Bearer) — BookForge reports what it is doing (current
+ *   POST /v1/status  (Bearer) — Akọwe reports what it is doing (current
  *                    sub-module step, approvals, book checklist). The body is
- *                    whitelisted and capped (sanitizeBookforgeStatus); the latest
- *                    one is kept and exposed as status().bookforge (stale after
+ *                    whitelisted and capped (sanitizeAkoweStatus); the latest
+ *                    one is kept and exposed as status().akowe (stale after
  *                    BF_STATUS_STALE_MS). Its content never goes to the activity
  *                    ring — only a "status received" event.
  *
@@ -108,6 +108,7 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const legacy = require('./akowe-legacy'); // names from before the rename BookForge -> Akọwe (old key file, old status fields)
 
 const BRIDGE_VERSION = '1.2';
 const DEFAULT_PORT = 17891;
@@ -119,7 +120,7 @@ const DEFAULT_TIMEOUT_MS = 240000;
 const MIN_TIMEOUT_MS = 10000;
 const MAX_TIMEOUT_MS = 900000;
 // The late window after a 504 for a prompt that WAS typed: the site stays
-// reserved for its answer for min(timeout_ms, this). BookForge's busy-retry
+// reserved for its answer for min(timeout_ms, this). Akọwe's busy-retry
 // budget (jobs.DEFAULT_RETRY max_total_s = 600 s) is twice this, so a request
 // refused with 409 meanwhile still gets its turn.
 const LATE_WINDOW_MAX_MS = 5 * 60 * 1000;
@@ -129,11 +130,11 @@ const MAX_PAIR_BODY_BYTES = 4096;
 const HOST_RE = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?$/i;
 const REQUEST_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
-const TOKEN_FILE = 'bookforge-bridge-token';
+const TOKEN_FILE = 'akowe-bridge-token';
 const EVENT_RING_SIZE = 50;
 const RECONNECT_GAP_MS = 5 * 60 * 1000; // silence longer than this, then a request = a new "connected" event
 const SELFTEST_ID_PREFIX = 'selftest-';
-// --- contract v1.1: pairing + BookForge status ---
+// --- contract v1.1: pairing + Akọwe status ---
 const PAIR_CODE_LEN = 12;
 const PAIR_CODE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 const PAIR_CODE_TTL_MS = 120 * 1000;
@@ -142,7 +143,7 @@ const PAIR_WINDOW_MS = 60 * 1000;
 const PAIR_LOCK_MS = 60 * 1000;
 const MAX_STATUS_BYTES = 32 * 1024; // POST /v1/status bodies over this -> 413
 const BF_STATUS_STALE_MS = 90 * 1000;
-// outcome -> the HTTP status BookForge saw (or would see) for it.
+// outcome -> the HTTP status Akọwe saw (or would see) for it.
 const OUTCOME_HTTP = {
   OK: 200, CACHED: 200, LATE_REPLY_STORED: 200, TIMEOUT: 504, LATE_EXPIRED: 504,
   SITE_NOT_READY: 503, SEND_FAILED: 502, TOO_LARGE: 413, SITE_BUSY: 409,
@@ -157,7 +158,7 @@ const PROBLEM_RE = /^[A-Z][A-Z0-9_]{1,40}$/;
 const RECENT_DECLINED_MS = 2 * 60 * 1000; // P18.5: declined captures kept this long for a send that confirms late
 const MAX_PROBE_BODY_BYTES = 4096;
 // v1.2 "skipped" reasons a check-in can report (anything else becomes "busy").
-const PROBE_SKIP_REASONS = new Set(['inactive', 'busy', 'typing', 'checking', 'teaching', 'bookforge', 'relay', 'test', 'waiting', 'sending', 'recent', 'not_ready', 'unknown_site', 'unsupported', 'off']);
+const PROBE_SKIP_REASONS = new Set(['inactive', 'busy', 'typing', 'checking', 'teaching', 'akowe', 'relay', 'test', 'waiting', 'sending', 'recent', 'not_ready', 'unknown_site', 'unsupported', 'off']);
 
 // --- envelope helpers ---------------------------------------------------------
 // Mirrors main.js's withEnvelope() text; main.js passes its own wrapper anyway.
@@ -189,6 +190,7 @@ function generateToken() {
 }
 function tokenPath(dir) { return path.join(dir, TOKEN_FILE); }
 function readToken(dir) {
+  legacy.adoptFile(dir, legacy.OLD_TOKEN_FILE, TOKEN_FILE); // a key saved before the rename to Akọwe keeps the pairing
   try {
     const t = fs.readFileSync(tokenPath(dir), 'utf8').trim();
     return t.length >= 24 ? t : '';
@@ -226,7 +228,7 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(x, y) && String(a).length === String(b).length;
 }
 
-// Sanitize a POST /v1/status body from BookForge. Whitelists fields, caps string
+// Sanitize a POST /v1/status body from Akọwe. Whitelists fields, caps string
 // lengths and array sizes, and keeps only loopback http URLs. Returns
 // { ok: true, value } or { ok: false, message }.
 const CTRL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
@@ -255,11 +257,11 @@ function toEpochMs(v) {
   if (typeof v === 'string' && v.length <= 64) { const t = Date.parse(v); return Number.isFinite(t) ? t : null; }
   return null;
 }
-function sanitizeBookforgeStatus(body) {
+function sanitizeAkoweStatus(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, message: 'body must be a JSON object' };
-  if (body.app !== 'bookforge') return { ok: false, message: 'app must be "bookforge"' };
+  if (!legacy.isAppId(body.app)) return { ok: false, message: 'app must be "akowe"' }; // (or "bookforge": an Akọwe from before the rename)
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
-  const out = { app: 'bookforge', version: capInt(body.version, 1000000), bookforge_url: loopbackUrl(body.bookforge_url) };
+  const out = { app: 'akowe', version: capInt(body.version, 1000000), akowe_url: loopbackUrl(body.akowe_url || body.bookforge_url) };
   const p = obj(body.project);
   out.project = p ? { id: capStr(p.id, 100), title: capStr(p.title, 200) } : null;
   const ct = obj(body.current_task);
@@ -288,7 +290,7 @@ function sanitizeBookforgeStatus(body) {
 function createBridge(opts) {
   const o = opts || {};
   const host = o.host || '127.0.0.1';
-  if (!LOOPBACK_HOSTS.has(host)) throw new Error(`bookforge-bridge: refusing to bind non-loopback host ${host}`);
+  if (!LOOPBACK_HOSTS.has(host)) throw new Error(`akowe-bridge: refusing to bind non-loopback host ${host}`);
   const port = o.port == null ? DEFAULT_PORT : Number(o.port);
   const getToken = typeof o.getToken === 'function' ? o.getToken : () => '';
   const sendToSite = o.sendToSite;
@@ -299,7 +301,7 @@ function createBridge(opts) {
   const sites = Array.isArray(o.sites) && o.sites.length ? o.sites.slice() : DEFAULT_SITES.slice();
   const timeScale = Number(o.timeScale) > 0 ? Number(o.timeScale) : 1;
   const bodyTimeLimitMs = Number(o.bodyTimeLimitMs) > 0 ? Number(o.bodyTimeLimitMs) : BODY_TIME_LIMIT_MS;
-  if (typeof sendToSite !== 'function') throw new Error('bookforge-bridge: sendToSite is required');
+  if (typeof sendToSite !== 'function') throw new Error('akowe-bridge: sendToSite is required');
   // v1.2: the self-repair state of a site (always a well-formed object).
   function stateOf(site) {
     let r = null;
@@ -378,10 +380,10 @@ function createBridge(opts) {
       locked: pairLockedUntil > t
     };
   }
-  // --- latest status from BookForge (contract v1.1) ------------------------------
+  // --- latest status from Akọwe (contract v1.1) ------------------------------
   let bfStatus = null; // { data, receivedAt }
   let bfStatusEventAt = 0;
-  function bookforgeStatus() {
+  function akoweStatus() {
     if (!bfStatus) return null;
     const t = now();
     const age = Math.max(0, t - bfStatus.receivedAt);
@@ -623,7 +625,7 @@ function createBridge(opts) {
       siteLast: JSON.parse(JSON.stringify(siteLast)),
       events: events.map((e) => Object.assign({}, e)),
       pairing: pairingStatus(),
-      bookforge: bookforgeStatus()
+      akowe: akoweStatus()
     };
   }
 
@@ -676,7 +678,7 @@ function createBridge(opts) {
     try { body = JSON.parse(raw.toString('utf8')); } catch (_) { body = undefined; }
     if (!body || typeof body !== 'object' || Array.isArray(body) || typeof body.code !== 'string' || !body.code || body.code.length > 128 ||
         (body.client !== undefined && typeof body.client !== 'string')) {
-      return outcome(400, 'BAD_REQUEST', errBody('BAD_REQUEST', 'body must be {"code": "<pairing code>", "client": "bookforge"}', false));
+      return outcome(400, 'BAD_REQUEST', errBody('BAD_REQUEST', 'body must be {"code": "<pairing code>", "client": "akowe"}', false));
     }
     const p = pairing;
     if (!p || p.used || !safeEqual(body.code, p.code)) return outcome(401, 'PAIRING_CODE_INVALID', errBody('PAIRING_CODE_INVALID', 'that pairing code is unknown or was already used', false));
@@ -688,12 +690,12 @@ function createBridge(opts) {
     return outcome(200, 'PAIRED', { ok: true, token, bridge_version: BRIDGE_VERSION });
   }
 
-  // POST /v1/status — BookForge's progress report (Bearer). Content never logged.
+  // POST /v1/status — Akọwe's progress report (Bearer). Content never logged.
   function handleStatus(raw, res, size) {
     if (size > MAX_STATUS_BYTES) return send(res, 413, errBody('TOO_LARGE', `status body is over ${MAX_STATUS_BYTES} bytes`, false));
     let body;
     try { body = JSON.parse(raw.toString('utf8')); } catch (_) { return send(res, 400, errBody('BAD_REQUEST', 'body must be JSON', false)); }
-    const r = sanitizeBookforgeStatus(body);
+    const r = sanitizeAkoweStatus(body);
     if (!r.ok) return send(res, 400, errBody('BAD_REQUEST', r.message, false));
     const t = now();
     const firstAfterGap = !bfStatus || t - bfStatus.receivedAt > BF_STATUS_STALE_MS || (lastPairedAt != null && bfStatusEventAt < lastPairedAt);
@@ -771,7 +773,7 @@ function createBridge(opts) {
     const busy = active.get(site);
     if (busy && !busy.done) {
       const why = busy.phase === 'late'
-        ? `${site} is still reserved for the answer to an earlier BookForge prompt (request ${busy.requestId}, typed as [MSG #${busy.seq}], which timed out); ask again with that request_id to collect it — ${site} is free again when it arrives or within ${lateSeconds(busy)} s`
+        ? `${site} is still reserved for the answer to an earlier Akọwe prompt (request ${busy.requestId}, typed as [MSG #${busy.seq}], which timed out); ask again with that request_id to collect it — ${site} is free again when it arrives or within ${lateSeconds(busy)} s`
         : busy.typed
           ? `${site} is answering another bridge request (request ${busy.requestId}, typed as [MSG #${busy.seq}])`
           : `another bridge request for ${site} (request ${busy.requestId}) is waiting to be typed`;
@@ -866,7 +868,7 @@ function createBridge(opts) {
       // and always sends Origin: refused, and NOT counted toward the lockout.
       if (req.headers.origin !== undefined || !contentTypeIsJson(req)) {
         recordEvent('pair', { outcome: 'BAD_REQUEST', http_status: 403 });
-        return sendAndClose(res, 403, errBody('FORBIDDEN', 'pairing requests must come from BookForge itself (JSON, no browser Origin)', false));
+        return sendAndClose(res, 403, errBody('FORBIDDEN', 'pairing requests must come from Akọwe itself (JSON, no browser Origin)', false));
       }
       return readBody(req, res, MAX_PAIR_BODY_BYTES, (raw, size, tooLarge) => {
         Promise.resolve().then(() => handlePair(raw, res, tooLarge)).catch(fail);
@@ -951,7 +953,7 @@ function createBridge(opts) {
     });
   }
 
-  return { start, stop, onCaptured, awaitingReply, status, recordEvent, createPairingCode, bookforgeStatus, pairingStatus, address: () => (server ? server.address() : null) };
+  return { start, stop, onCaptured, awaitingReply, status, recordEvent, createPairingCode, akoweStatus, pairingStatus, address: () => (server ? server.address() : null) };
 }
 
 // --- plain-English activity lines (for the desktop panel + link-test report) ---
@@ -965,11 +967,11 @@ function formatDuration(ms) {
 function describeEvent(ev, label) {
   const e = ev || {};
   const L = e.site ? (typeof label === 'function' ? label(e.site) : e.site) : 'the AI';
-  const who = e.selftest ? 'The link test' : 'BookForge';
+  const who = e.selftest ? 'The link test' : 'Akọwe';
   const id = e.request_id ? ` (request ${e.request_id})` : '';
   const dur = formatDuration(e.elapsed_ms);
   switch (e.kind) {
-    case 'connected': return { say: 'BookForge connected', tone: 'ok' };
+    case 'connected': return { say: 'Akọwe connected', tone: 'ok' };
     case 'request': return { say: `${who} asked ${L}${id}`, tone: 'info' };
     case 'join': return { say: `${who} checked back on a request that is still running for ${L}${id}`, tone: 'info' };
     case 'unauthorized': return e.selftest
@@ -978,15 +980,15 @@ function describeEvent(ev, label) {
     case 'forbidden_host': return { say: 'Refused a request that was not addressed to 127.0.0.1/localhost (a web page may have tried to reach the bridge)', tone: 'warn' };
     case 'listening': return { say: `Bridge turned on — listening on 127.0.0.1:${e.port != null ? e.port : '?'}`, tone: 'ok' };
     case 'stopped': return { say: 'Bridge turned off', tone: 'info' };
-    case 'key_changed': return { say: 'A new connection key was made — BookForge needs the new one before it can connect again', tone: 'warn' };
+    case 'key_changed': return { say: 'A new connection key was made — Akọwe needs the new one before it can connect again', tone: 'warn' };
     case 'start_failed': return { say: `The bridge couldn't start (${e.error || 'unknown error'})`, tone: 'error' };
-    case 'pair_code': return { say: 'Made a one-time pairing code and opened BookForge to connect', tone: 'info' };
-    case 'status': return { say: 'BookForge sent an update on your book', tone: 'ok' };
+    case 'pair_code': return { say: 'Made a one-time pairing code and opened Akọwe to connect', tone: 'info' };
+    case 'status': return { say: 'Akọwe sent an update on your book', tone: 'ok' };
     case 'probe': return e.outcome === 'STARTED'
-      ? { say: `BookForge asked for a check-in of ${L}`, tone: 'info' }
-      : { say: `BookForge asked for a check-in of ${L} — not now (${e.error || 'busy'})`, tone: 'info' };
+      ? { say: `Akọwe asked for a check-in of ${L}`, tone: 'info' }
+      : { say: `Akọwe asked for a check-in of ${L} — not now (${e.error || 'busy'})`, tone: 'info' };
     case 'pair': switch (e.outcome) {
-      case 'PAIRED': return { say: 'BookForge picked up the connection key (paired)', tone: 'ok' };
+      case 'PAIRED': return { say: 'Akọwe picked up the connection key (paired)', tone: 'ok' };
       case 'PAIRING_CODE_EXPIRED': return { say: 'A pairing code was used too late (codes last 2 minutes) — press Connect again', tone: 'warn' };
       case 'TOO_MANY_ATTEMPTS': return { say: 'Too many wrong pairing codes — pairing is paused for a minute', tone: 'warn' };
       case 'PAIRING_CODE_INVALID': return { say: 'Something tried an unknown or already-used pairing code — it was refused', tone: 'warn' };
@@ -998,7 +1000,7 @@ function describeEvent(ev, label) {
   switch (e.outcome) {
     case 'OK': return { say: `${L} answered in ${dur}${e.selftest ? ' (link test)' : ''}`, tone: 'ok' };
     case 'LATE_REPLY_STORED': return { say: `${L} answered late (after ${dur}) — saved so ${who} gets it if it asks again`, tone: 'warn' };
-    case 'TIMEOUT': return { say: `${L} hadn't answered after ${dur} — timed out${e.selftest ? '' : '. BookForge will ask you before retrying'}`, tone: 'error' };
+    case 'TIMEOUT': return { say: `${L} hadn't answered after ${dur} — timed out${e.selftest ? '' : '. Akọwe will ask you before retrying'}`, tone: 'error' };
     case 'LATE_EXPIRED': return { say: `${L} never answered${id}; ${L} is free again`, tone: 'warn' };
     case 'CACHED': return { say: `${who} collected ${L}'s earlier answer again (nothing re-sent)`, tone: 'info' };
     case 'SITE_NOT_READY': return { say: `${L}'s window isn't loaded, so the request was turned away`, tone: 'error' };
@@ -1028,7 +1030,7 @@ module.exports = {
   EVENT_RING_SIZE,
   SELFTEST_ID_PREFIX,
   SITE_STATES,
-  sanitizeBookforgeStatus,
+  sanitizeAkoweStatus,
   generatePairingCode,
   PAIR_CODE_LEN,
   PAIR_CODE_TTL_MS,

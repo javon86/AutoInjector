@@ -11,15 +11,15 @@ import types
 
 import pytest
 
-from bookforge import ambiguity as amb
-from bookforge import chapter_brief, continuity
-from bookforge import character_state as cs
-from bookforge import characters as chars_mod
-from bookforge import physical_state as ps
-from bookforge import providers as prov_mod
-from bookforge import version_ledger as vl
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
+from akowe import ambiguity as amb
+from akowe import chapter_brief, continuity
+from akowe import character_state as cs
+from akowe import characters as chars_mod
+from akowe import physical_state as ps
+from akowe import providers as prov_mod
+from akowe import version_ledger as vl
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
 
 from autobook_fake import BookFakeAI
 from test_autobook import make_app, run_book
@@ -246,7 +246,7 @@ def test_run_tracks_each_chapter_approves_under_consent_and_feeds_the_next_brief
         assert e["status"] == "approved" and e["approved"]["how"] == "run_consent"
         assert e["approved"]["run_id"] == run["id"] and e["made_by"]["ai"]
     assert phys["ch1"]["scenes"][0]["counts"][0] == {"name": "lamps lit", "value": "31", "running": True}
-    # BookForge's own reading filled in what the AI did not name (the steps of chapter 1)
+    # Akọwe's own reading filled in what the AI did not name (the steps of chapter 1)
     assert any(c["name"] == "step" for c in phys["ch1"]["scenes"][0]["counts"])
     # the writer of chapter 2 started from chapter 1's state; chapter 3 from chapters 1-2
     briefs = [ctx.get("writing_brief") or {} for _t, ctx in fake.prompts["C02"]]
@@ -259,10 +259,10 @@ def test_run_tracks_each_chapter_approves_under_consent_and_feeds_the_next_brief
     assert ps.RULE in b2["rules"] and cs.RULE in b2["rules"]
     assert briefs[2]["physical_state"]["after_chapter"] == 2
     assert briefs[2]["physical_state"]["open_hazards"][0]["what"] == "gas leak"  # still open: it must matter
-    # the tracker saw the state before the chapter and BookForge's own reading
+    # the tracker saw the state before the chapter and Akọwe's own reading
     track_ctx = [ctx for _t, ctx in fake.prompts["track"]]
     assert "state_before" not in track_ctx[0] and track_ctx[1]["state_before"]["physical"]["after_chapter"] == 1
-    assert track_ctx[0]["bookforge_found"] and track_ctx[0]["variables"] == ["duty", "guilt", "fear of exposure",
+    assert track_ctx[0]["akowe_found"] and track_ctx[0]["variables"] == ["duty", "guilt", "fear of exposure",
                                                                              "desire for contact"]
     ev = [e for e in app.autobook.get(run["id"])["events"] if "Continuity of chapter" in e["message"]]
     assert len(ev) == 3 and all("approved under the run consent" in e["message"] for e in ev)
@@ -284,11 +284,11 @@ def test_run_tracks_each_chapter_approves_under_consent_and_feeds_the_next_brief
     assert "# Continuity" in md and "gas leak" in md and "Mara Vell" in md and "Make-a-book" not in md
 
 
-def test_run_with_the_plain_mock_and_with_a_failing_ai_falls_back_to_bookforge(tmp_path):
+def test_run_with_the_plain_mock_and_with_a_failing_ai_falls_back_to_akowe(tmp_path):
     class DownForChapterOne(BookFakeAI):  # generic answers: the tracker gets an empty list back …
         def _answer(self, ctx, props, schema):
             if "tracked_scenes" in props and (ctx.get("chapter") or {}).get("number") == 1:
-                raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "the AI is down")  # … except for chapter 1
+                raise AkoweError("UPSTREAM_UNAVAILABLE", "", "the AI is down")  # … except for chapter 1
             return super()._answer(ctx, props, schema)
     fake = DownForChapterOne()
     app = make_app(tmp_path, fake=fake)
@@ -297,11 +297,11 @@ def test_run_with_the_plain_mock_and_with_a_failing_ai_falls_back_to_bookforge(t
     pid = run["project_id"]
     phys = continuity.get_all(app.store, pid, "main", "physical")["chapters"]
     assert set(phys) == {"ch1", "ch2", "ch3"}
-    assert all(e["made_by"]["kind"] == "bookforge" and e["status"] == "approved" for e in phys.values())
+    assert all(e["made_by"]["kind"] == "akowe" and e["status"] == "approved" for e in phys.values())
     assert phys["ch1"]["scenes"][0]["time"] == "before dawn" and phys["ch3"]["scenes"][0]["tide"] == "low tide"
     assert continuity.get_all(app.store, pid, "main", "characters")["chapters"] == {}
     notes = [e["message"] for e in app.autobook.get(run["id"])["events"] if "Continuity of chapter" in e["message"]]
-    assert "could not track it (UPSTREAM_UNAVAILABLE)" in notes[0] and "BookForge only" in notes[0]
+    assert "could not track it (UPSTREAM_UNAVAILABLE)" in notes[0] and "Akọwe only" in notes[0]
     assert all("nothing usable" in n for n in notes[1:])
     # the baseline pipeline (scenes off) does not track at all
     app2 = make_app(tmp_path, name="d2", fake=BookFakeAI())
@@ -319,7 +319,7 @@ def test_routes_track_edit_approve_variables_and_errors(tmp_path):
     pid = run["project_id"]
     st, page = route(app, "GET", cpath(pid))
     assert st == 200 and not any(r["tracked"] for r in page["chapters"])  # scenes off: nothing tracked in the run
-    from bookforge import pipeline  # noqa: PLC0415
+    from akowe import pipeline  # noqa: PLC0415
     pipeline.save(app.store, pid, pipeline.clean(None))  # switch the book's pipeline back on (the brief uses it then)
     # ⚡ quick read without AI (immediate)
     st, out = route(app, "POST", cpath(pid, "/track"), {"ai": False})
@@ -336,10 +336,10 @@ def test_routes_track_edit_approve_variables_and_errors(tmp_path):
     brief, _m = chapter_brief.build(app.store, pid, "main", outline, "ch3")
     assert "physical_state" not in (brief or {})
     # approving needs the author's confirmation, and the version they saw
-    with pytest.raises(BookforgeError) as ei:
+    with pytest.raises(AkoweError) as ei:
         route(app, "POST", cpath(pid, "/chapter/ch2/approve"), {})
     assert ei.value.code == "APPROVAL_REQUIRED"
-    with pytest.raises(BookforgeError) as ei:
+    with pytest.raises(AkoweError) as ei:
         route(app, "POST", cpath(pid, "/chapter/ch2/approve"), {"author_confirms": True, "versions": {"physical": 1}})
     assert ei.value.code == "VERSION_CONFLICT"
     st, out = route(app, "POST", cpath(pid, "/chapter/ch2/approve"), {"author_confirms": True,
@@ -351,15 +351,15 @@ def test_routes_track_edit_approve_variables_and_errors(tmp_path):
     st, out = route(app, "PUT", cpath(pid, "/chapter/ch2"), {"physical": {"version": 2, "scenes": [
         {"time": "midnight", "hazards": [{"what": "rotten boards", "status": "open", "effect": "walk the edge"}]}]}})
     assert st == 200 and out["saved"]["physical"]["version"] == 3 and out["saved"]["physical"]["status"] == "draft"
-    with pytest.raises(BookforgeError) as ei:
+    with pytest.raises(AkoweError) as ei:
         route(app, "PUT", cpath(pid, "/chapter/ch2"), {"physical": {"version": 2, "scenes": []}})
     assert ei.value.code == "VERSION_CONFLICT"
-    with pytest.raises(BookforgeError) as ei:
+    with pytest.raises(AkoweError) as ei:
         route(app, "PUT", cpath(pid, "/chapter/nope"), {"physical": {"scenes": []}})
     assert ei.value.code == "INVALID_INPUT"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "POST", cpath(pid, "/track"), {"chapter_ids": ["nope"]})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "POST", cpath(pid, "/track"), {"ai": "yes"})
     # variables
     st, out = route(app, "PUT", cpath(pid, "/variables"), {"variables": ["Loyalty", "fear of the sea"]})
@@ -379,7 +379,7 @@ def test_two_readings_routes_ai_suggestion_test_and_brief(tmp_path):
     page = route(app, "GET", cpath(pid))[1]
     myst = page["ambiguity"]["mysteries"]
     assert len(myst) == 1 and myst[0]["text"] == "Who the stranger on the reef was."
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "POST", cpath(pid, "/readings/test"), {})  # no readings yet
     st, job = route(app, "POST", cpath(pid, "/readings/ai"), {})
     j = wait_job(app, job["job_id"])
@@ -413,7 +413,7 @@ def test_two_readings_routes_ai_suggestion_test_and_brief(tmp_path):
         {"label": "Someone", "text": "Nessa's brother left him there."},
         {"label": "Accident", "text": "The keeper slipped on the reef and drowned."}]}]})
     assert st == 200 and not out["entry"]["test"]["results"]
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "PUT", cpath(pid, "/readings"), {"items": [{"id": "not-a-mystery", "readings": [
             {"label": "a", "text": "b"}, {"label": "c", "text": "d"}]}]})
 
@@ -425,7 +425,7 @@ def test_version_ledger_of_a_rerun_decisions_and_brief(tmp_path):
     pid = run["project_id"]
     st, page = route(app, "GET", cpath(pid))
     assert page["ledger"] is None
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "POST", cpath(pid, "/ledger"), {})  # not a rerun / variant
     r = app.autobook.start("author", {"author_confirms": True, "from_bible": {"project_id": pid}, "reuse_plan": True})
     app.autobook.wait_for(r["id"], 240)
@@ -446,10 +446,10 @@ def test_version_ledger_of_a_rerun_decisions_and_brief(tmp_path):
     assert led["counts"]["unresolved"] == 1
     item = next(i for i in led["items"] if i["kind"] != "retained")
     assert item["id"] == "char:mara-vell:sheet:secret" and item["new"] == "Mara burned the stranger's letter"
-    with pytest.raises(BookforgeError) as ei:
+    with pytest.raises(AkoweError) as ei:
         route(app, "POST", cpath(new, "/ledger/decide"), {"decisions": {item["id"]: "deliberate"}})
     assert ei.value.code == "APPROVAL_REQUIRED"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         route(app, "POST", cpath(new, "/ledger/decide"), {"author_confirms": True, "decisions": {item["id"]: "maybe"}})
     st, out = route(app, "POST", cpath(new, "/ledger/decide"), {"author_confirms": True, "version": led["version"],
                                                                "decisions": {item["id"]: "deliberate"}})

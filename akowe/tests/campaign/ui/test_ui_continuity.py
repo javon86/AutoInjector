@@ -25,7 +25,7 @@ def test_continuity_page_after_a_book(make_context, ai_server):
     assert page.locator("[data-testid=cont-checks]").count() == 1
     assert page.locator("[data-testid=cont-readings]").count() == 1
     page.get_by_role("button", name="⚡ Quick read (no AI)").click()
-    page.wait_for_function("() => /BookForge read/.test(document.body.textContent)", timeout=10000)
+    page.wait_for_function("() => /Akọwe read/.test(document.body.textContent)", timeout=10000)
     assert not bad_text(page, "#main"), bad_text(page, "#main")
     assert overflow(page) <= 1
     assert not unnamed_controls(page), unnamed_controls(page)

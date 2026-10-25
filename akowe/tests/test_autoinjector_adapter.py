@@ -1,4 +1,4 @@
-"""AutoInjector bridge adapter (docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md, contract v1).
+"""AutoInjector bridge adapter (docs/AKOWE_AUTOINJECTOR_BRIDGE.md, contract v1).
 
 An in-process fake bridge (http.server on an ephemeral port) implements the contract: bearer
 auth, GET /v1/health, POST /v1/complete with request_id idempotency and scripted outcomes.
@@ -17,10 +17,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from bookforge import providers as prov
-from bookforge.errors import BookforgeError
-from bookforge.providers import extract_json_object
-from bookforge.server import App, make_handler
+from akowe import providers as prov
+from akowe.errors import AkoweError
+from akowe.providers import extract_json_object
+from akowe.server import App, make_handler
 
 from conftest import errors_of
 
@@ -305,7 +305,7 @@ def test_roles_route_operations(h, bridge):
                                  "http://user:pw@127.0.0.1:17891", "http://127.0.0.1:17891/v1", "ftp://localhost:1",
                                  "http://0.0.0.0:17891", "http://[::1]:17891", "127.0.0.1:17891", ""])
 def test_non_localhost_bridge_url_rejected(h, url):
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         connect(h, url)
     assert e.value.code == "INVALID_INPUT" and e.value.errors[0]["path"] == "/bridge_url"
     assert h.engine.providers.slots()[0]["adapter_id"] == "none"
@@ -315,13 +315,13 @@ def test_non_localhost_bridge_url_rejected(h, url):
 def test_slot_validation(h):
     pr = h.engine.providers
     assert connect(h, "http://localhost:17891/")["bridge_url"] == "http://localhost:17891"
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         pr.configure_slot("AI-2", {"adapter_id": "autoinjector"})  # site required
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         pr.configure_slot("AI-2", {"adapter_id": "autoinjector", "site": "bing"})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         pr.configure_slot("AI-2", {"roles": ["C2"]})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         pr.configure_slot("AI-2", {"roles": "C"})
     assert pr.configure_slot("AI-2", {"roles": ["c02", "B"]})["roles"] == ["C02", "B"]
     assert pr.slots()[0]["max_concurrent"] == 1

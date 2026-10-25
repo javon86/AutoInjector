@@ -1,6 +1,6 @@
-"""CI-style run of every storage path under a Windows simulation (the author runs BookForge on Windows).
+"""CI-style run of every storage path under a Windows simulation (the author runs Akọwe on Windows).
 
-``WinOS`` stands in for the ``os`` module the durable-write helpers in bookforge.store use, with the Windows
+``WinOS`` stands in for the ``os`` module the durable-write helpers in akowe.store use, with the Windows
 behaviour that matters for them:
 - os.fsync() is FlushFileBuffers: it needs a descriptor opened with WRITE access (EBADF otherwise);
 - a directory cannot be opened at all (PermissionError), so it cannot be fsynced;
@@ -19,10 +19,10 @@ import stat
 
 import pytest
 
-import bookforge.store as store_mod
-from bookforge.backups import BackupManager
-from bookforge.server import App
-from bookforge.store import Store, durable_copy, fsync_file, replace_file, write_private
+import akowe.store as store_mod
+from akowe.backups import BackupManager
+from akowe.server import App
+from akowe.store import Store, durable_copy, fsync_file, replace_file, write_private
 
 TOKEN = "windows-sim-token-0123456789"
 CONFIRM = {"author_confirms": True, "confirm": "RESTORE"}

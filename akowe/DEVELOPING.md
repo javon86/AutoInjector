@@ -1,16 +1,16 @@
-# Developing Bookforge
+# Developing Akọwe
 
-Bookforge is one Python application with 11 independently owned modules (sets A-K, 142
-operations) sharing a transactional storage kernel. It implements the BookForge Final Build
+Akọwe is one Python application with 11 independently owned modules (sets A-K, 142
+operations) sharing a transactional storage kernel. It implements the Akọwe Final Build
 Plan (contract `BF-IRB-1.0.0`, closure `BF-CLOSURE-1.1`) bundled in `package/`.
 
 ## Layout
 
 ```
-bookforge/
+akowe/
   package/                 delivered blueprint: contracts.zip (schemas, registries, cases),
                            Specifications/*.md, Build_Plan.md
-  bookforge/
+  akowe/
     canonical.py           canonical JSON + SHA-256, Reference helpers, JSON Pointer utils
     contracts.py           loads contracts.zip; per-op schema validators; error mapping
     store.py               SQLite storage kernel (records, heads, lifecycle, receipts,
@@ -75,7 +75,7 @@ bookforge/
     costs.py               ⏱ P28 AI calls and minutes per AI / per run / per book, estimate before a run (web/grid.js)
     book_bible.py          📖 P20/P21 the book bible: build (versioned JSON), Markdown, clean (a file from outside),
                            summary, remap_refs
-    book_package.py        📦 P20/P21 book.bookforge: build, read + check, transplant into a NEW project, import, verify
+    book_package.py        📦 P20/P21 book.akowe: build, read + check, transplant into a NEW project, import, verify
     book_save.py           💾 P20 books folder settings, one folder per book, atomic writes, debounced auto-saves
     book_open.py           📂 P21 books-folder list, open a folder / upload (package or book-bible.json), resolve_bible
     workflow_test.py       🧪 Test workflow runner (rows, separate "🧪 Workflow test" project, reports/workflow-test-*)
@@ -89,7 +89,7 @@ bookforge/
     journal.py             📜 per-book journal built from audit + provenance + outbox + job events (+ markdown)
     shelf.py               📚 finished books across projects (exports re-read and hash-checked)
     selftest.py            "Test everything": real end-to-end self-test through engine.dispatch,
-                           writes reports/selftest-<stamp>.md/.json (CLI: python -m bookforge selftest)
+                           writes reports/selftest-<stamp>.md/.json (CLI: python -m akowe selftest)
     server.py, web/        local HTTP API + browser workspace (web/app.js, web/clipboard.js = the one
                            clipboard helper with execCommand/paste-box fallbacks, hash routes #/p/<pid>/<branch>/...,
                            incl. #/start wizard, .../book, .../journal, #/shelf); web/problems.js = the ONE
@@ -99,18 +99,18 @@ bookforge/
 
 ## Rules for module code
 
-* Edit only your set's files: `bookforge/modules/set_<x>.py`, optional helpers in a new
-  `bookforge/<x>_*.py` or `bookforge/exporters/`, and `tests/test_set_<x>.py`.
+* Edit only your set's files: `akowe/modules/set_<x>.py`, optional helpers in a new
+  `akowe/<x>_*.py` or `akowe/exporters/`, and `tests/test_set_<x>.py`.
   Do not change engine.py / store.py / base.py / contracts.py / server.py; propose kernel
   changes instead.
 * Read `package/Specifications/Shared_Contract.md` and your set's
-  `Bookforge_Set_<X>_Final.md` (the "Set rules" section holds the real semantics; the
+  `Akowe_Set_<X>_Final.md` (the "Set rules" section holds the real semantics; the
   per-operation sections are uniform boilerplate). Schemas: `get_package().schema(op)`.
 * LOGIC operations are deterministic and never call an AI slot. AI/HYBRID creative work
   uses `OperationHandler.generate` (AI slot) or a manual candidate; never fabricate
   creative content in code.
 * Never fabricate approvals or evidence; findings carry real evidence.
-* Errors: raise `BookforgeError(code, json_pointer, message, status=...)` with codes from
+* Errors: raise `AkoweError(code, json_pointer, message, status=...)` with codes from
   `errors.py`. BLOCKED for missing deps/capabilities/approvals; REJECTED for invalid input.
 
 ## Handler API (modules/base.py)
@@ -155,7 +155,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 ## AI slots, adapters and roles
 
 * Adapters: `none`, `anthropic`, `manual`, `autoinjector` (experimental; local HTTP bridge to the
-  AutoInjector desktop app, contract `../docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md`). Autoinjector
+  AutoInjector desktop app, contract `../docs/AKOWE_AUTOINJECTOR_BRIDGE.md`). Autoinjector
   slots need `site` (chatgpt|claude|gemini) and `bridge_url` (http://127.0.0.1 or
   http://localhost only, default `http://127.0.0.1:17891`); the bridge token uses the
   write-only `api_key` secret. They cost 0 and run one request at a time.
@@ -165,8 +165,8 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 * Adapters that set `accepts_request_context = True` get `request_id`, `attempt`,
   `deadline` and `call` keywords in `submit()`; plain `submit(slot, system, user, schema)`
   adapters (and test fakes) keep working.
-* The server listens on port 8780 by default (`--port`, `BOOKFORGE_PORT`). Without an explicit port it
-  reuses an already running BookForge on the same data folder, or moves to the next free port.
+* The server listens on port 8780 by default (`--port`, `AKOWE_PORT`). Without an explicit port it
+  reuses an already running Akọwe on the same data folder, or moves to the next free port.
   `POST /api/slots/connect-autoinjector` and `GET /api/slots/{id}/health` serve the Settings page.
 
 ## AIs that break: failover (P18.9) and writer ≠ reviewer (P3.1 / P3.2)
@@ -187,7 +187,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   waits). TIMEOUT is unchanged (ambiguous → author decides; a run step pauses). `health.set_listener(fn)`
   (thread-local) hears `{"event": "failover", "from": [...], "to", "to_name"}`; runs log it as event `failover`.
 * **Probe before a run:** `probe_and_wait(timeout_s=60, poll_s=2)` → `POST /v1/probe {"sites"}` per bridge (404 =
-  older bridge: just read health; env `BOOKFORGE_PRERUN_CHECKIN=0` skips the POST), then re-reads health until every probed site has a result (ok with
+  older bridge: just read health; env `AKOWE_PRERUN_CHECKIN=0` skips the POST), then re-reads health until every probed site has a result (ok with
   `last_probe_ok_at`/`since` after the start, needs_user or broken) or the time is up. Make-a-book, Write all
   chapters (`_Runner.probe_ais`, run fields `probe`, `ais` = [{slot_id, name, state, word, problem, working}]) and
   the workflow test (`ais` in its status) call it. `GET /api/slots/states` returns `slot_status()` per AI slot;
@@ -249,7 +249,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   place (`chapter_info`: number, of, last, objective, neighbours) and `prose_audit.brief`. Slot choice =
   `ReviewService.plan_reviewer` (editor != writer, P3.1). Schema `{scores, findings[{id, dimension, severity, passage,
   why, suggestion, keep_nearby}], keep, verdict}`; `clean_craft` clips scores 1-10, drops unknown dimensions, marks
-  whether each passage is in the text, and BookForge's own `decide()` sets PASS/REVISE from `editor_rubric.STRICTNESS`
+  whether each passage is in the text, and Akọwe's own `decide()` sets PASS/REVISE from `editor_rubric.STRICTNESS`
   (normal: any major or any score < 6) — the AI's verdict is kept as `ai_verdict`. Stored as ADVICE in
   `craft_reviews:<pid>:<branch>` (`<rid>:<version>`); outbox `editor.craft_review` (scores and counts, no text).
   Set F records were not used: F findings are anchored patch proposals that enter the approval queue and need an
@@ -299,7 +299,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   `characters.COMPANION_TASK`); the result carries `companion`; `BibleSession.create` saves it for the new record; the
   Fill-with-AI form saves it after Create (`PUT .../review/characters/{rid}` with `from_ai`). `characters.generate`
   writes them for an existing character (`CHARACTER_TASK`, op roles A01). `ScenePlanner.make` (writer slot, roles of
-  C02, `PLAN_TASK`), `.check` (`ReviewService.plan_reviewer` → another AI, `REVIEW_TASK`; BookForge decides PASS only
+  C02, `PLAN_TASK`), `.check` (`ReviewService.plan_reviewer` → another AI, `REVIEW_TASK`; Akọwe decides PASS only
   when every scene passes goal / obstacle_from_world / unsaid and `lint` has no major problem), `make(revise=True)`
   (earlier plan + notes; prefers the writer, avoids the checker).
 * **Prompts.** `ChapterWriter.preconditions` builds `chapter_brief.build(...)` (never raises) and stores only IDs and
@@ -429,7 +429,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   (`length`: mode, calls, scenes, expand rounds, words — numbers only).
 * **ETA**: the run's providers are `_TimedProviders` (PinnedProviders timing `_generate_on`) and the run's
   `assist._call_ai_once` times cross-pinned calls → `run["timing"]` {calls, call_s, chapter_s}; `_eta()` = average
-  chapter × chapters left + 3 average calls + 5 s per remaining BookForge step → `run["eta"]`, the chapters step message
+  chapter × chapters left + 3 average calls + 5 s per remaining Akọwe step → `run["eta"]`, the chapters step message
   and `[data-testid=mb-eta]`.
 * **P14 pipeline switches** (`pipeline.py`): `POST /api/autobook {pipeline: {preset|flags}, variant_of: {project_id}}`;
   stored in `run.settings.pipeline` and the book's `pipeline:<pid>`. Honoured: steps `characters`/`world`/`planned`
@@ -448,7 +448,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   numbers. Chunked review was not chosen (N+1 calls per reviewer, loses the whole-book view). API under
   `/api/projects/{pid}/branches/{b}/report`: `GET` (overview: latest, stale, reviewers, job), `POST {ai?, slots?,
   report_id?}` → 202 job (JobStore kind `book_review`, resumable), `GET job/{id}`, `GET {rid}?format=json|md|pdf
-  &download=1` (`file_name`: "<title> - BookForge report - <date>"; `server.content_disposition` adds the UTF-8 name).
+  &download=1` (`file_name`: "<title> - Akọwe report - <date>"; `server.content_disposition` adds the UTF-8 name).
   Run step `report` (`_s_report`, independent AIs only; failures ⚠️ `REPORT_FAILED`, none → `REPORT_NOT_INDEPENDENT`).
   The shelf adds `report`, `pipeline`, `variant_of`. PDF: `render_pdf` = the Markdown through `exporters.layout.paginate`
   + `exporters.pdf.render_pdf` (Helvetica, cp1252-safe text).
@@ -469,8 +469,8 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
 ## 💾 Section 6: save the book (P20), 📂 open a saved book / 🔁 rerun (P21)
 
 * **Books folder** (`book_save.SaveService`, `app.saver`): settings key `books_folder` = {path?, auto_save?}; default
-  `%USERPROFILE%\Documents\BookForge Books` on Windows when that Documents folder exists, else `~/BookForge Books`
-  (`BOOKFORGE_BOOKS_DIR` overrides the default, `BOOKFORGE_AUTOSAVE=0` makes auto-save default to off — **tests/conftest.py
+  `%USERPROFILE%\Documents\Akowe Books` on Windows when that Documents folder exists, else `~/Akowe Books`
+  (`AKOWE_BOOKS_DIR` overrides the default, `AKOWE_AUTOSAVE=0` makes auto-save default to off — **tests/conftest.py
   sets both**, so the suite never writes into a real Documents folder and only `tests/test_section6.py` saves).
   `check_folder`: absolute, at most `MAX_PATH - 60` characters, writable (a probe file). API: `GET|PUT
   /api/settings/books-folder {path ("" = default), auto_save}` (+ `writable`, `problem`, `local`).
@@ -485,7 +485,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   report MD/PDF, `Editor summary.md` from `craft_reviews`, `Planned to page.md` from `review.planned.book`), `Log/`
   (`journal.render_markdown`, `run-events.json` = the book's autobook/write_all jobs: steps, states, times, problems,
   `ai_per_step` from event slots, events without book text), `Progress/progress.json` (BookPath.status steps/next, words,
-  chapters, the latest run's state), `book.bookforge`, `README.txt`, `.bookforge-folder.json` (marker: project, files
+  chapters, the latest run's state), `book.akowe`, `README.txt`, `.akowe-folder.json` (marker: project, files
   written). Every text goes through `book_package.guard` (the saved API keys / connection keys and the access token →
   `[redacted]`).
 * **Writes**: `write_atomic` = temp file in the same folder (`store.tmp_name`), flush + fsync, `store.replace_file`
@@ -516,7 +516,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   `SAVE_FOLDER_NOT_WRITABLE`, `SAVE_PATH_TOO_LONG`, `SAVE_DISK_FULL`, `OPEN_NOT_LOCAL`, `OPEN_FAILED`,
   `OPEN_BAD_PACKAGE`, `OPEN_NEWER_VERSION`, `OPEN_TOO_LARGE`, `OPEN_NOT_FOUND`, `BIBLE_BAD`, `BIBLE_RERUN`,
   `BIBLE_ENTRY_REFUSED`, `BIBLE_PLAN_REFUSED`.
-* **The book bible** (`book_bible.py`, `schema_version` 1, `kind: bookforge-book-bible`, `app_version`, `saved_at`,
+* **The book bible** (`book_bible.py`, `schema_version` 1, `kind: akowe-book-bible`, `app_version`, `saved_at`,
   `source`): profile (title … chapters), choices, pipeline, length plan; `characters` (A01: data + sheet + voice,
   approved version else newest draft with `approved: false`), `canon` (every other Set A head), `protected_facts`
   (from `protected_fact_flags`), `plan` {premise B01, main_plot B03, outline B11} (OUTPUT data), `scene_cards` of the
@@ -542,7 +542,7 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   “ (opened)” (“ (opened 2)” …) only when that name exists; the profile title is unchanged (so the exports stay
   current). `verify` re-hashes every record and file; a failing import is removed again (`OPEN_FAILED`).
   Known limit: an approval's `action_hash` (a hash over the action as it was signed) keeps its old value (history).
-* **API**: `GET /api/books-folder` (folders with `book.bookforge` and/or `Book Bible/book-bible.json`: title, saved_at,
+* **API**: `GET /api/books-folder` (folders with `book.akowe` and/or `Book Bible/book-bible.json`: title, saved_at,
   finished, chapters, `in_library`), `POST /api/books-folder/open {folder}` (a plain folder name inside the books
   folder, never a path), `GET /api/books-folder/bible?folder=`, `POST /api/books/open` (multipart/form-data, raw bytes
   or a JSON body; ≤ `MAX_BODY` 64 MB): a zip → package import (201 {kind: package, project_id, name, finished,
@@ -612,21 +612,21 @@ registry (selftest's `SelfTestProviders`) limited to slots that pass the run's h
 SKIPPED and a manual candidate keeps dependent rows going. Projects with `workflow_test`/`selftest` settings are
 `test_book: true` in project summaries and never become the "last used" project.
 
-## AutoInjector link: pairing and status push (BookForge side)
+## AutoInjector link: pairing and status push (Akọwe side)
 
 * Pairing: AutoInjector opens `http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<urlencoded bridge url>`. The page
   reads the fragment, removes it with `history.replaceState` (address becomes `#/pair`), and calls
   `POST /api/slots/pair-autoinjector {code, bridge_url}` (normal bearer auth; the browser token is also kept in
   `localStorage` so tabs opened by AutoInjector are authenticated). The server checks the code
   (`^[A-Za-z0-9-]{8,32}$`) and the bridge URL (`validate_bridge_url`: http 127.0.0.1/localhost only), then
-  `POST <bridge>/v1/pair {"code", "client": "bookforge"}` without Authorization (no proxy). 200
+  `POST <bridge>/v1/pair {"code", "client": "akowe"}` without Authorization (no proxy). 200
   `{"ok": true, "token"}` -> `connect_autoinjector(token)` (AI-1 claude, AI-2 chatgpt, AI-3 gemini) and a health check
   per slot; answer `{connected, bridge_url, slots: [{slot_id, site, ok, message, error, ...}], message}` - never the
   token. 401/404/410 -> 400 `EXPIRED_APPROVAL` "the pairing code expired or was already used — press Connect again in
   AutoInjector"; not reachable -> `UPSTREAM_UNAVAILABLE`.
 * Status push (`StatusPusher`, daemon thread started by `main()`): when a slot uses the autoinjector adapter with a
   saved key, `POST <bridge>/v1/status` with `Authorization: Bearer <key>` and the body documented in
-  `status_push.py` (`app, version: 1, bookforge_url, project {id, title}, current_task {set, op, title, state,
+  `status_push.py` (`app, version: 1, akowe_url, project {id, title}, current_task {set, op, title, state,
   message, url}, working_on, approvals {count, items (max 20, {op, set, title}), url}, checklist, done, total,
   updated_at`). Titles only (canon by concept name, other drafts by step name). On change at most every 5 s plus a
   30 s heartbeat; body < 32 KiB; refused/timeouts back off quietly up to 60 s; 401 stops pushing with that key until a
@@ -679,7 +679,7 @@ SKIPPED and a manual candidate keeps dependent rows going. Projects with `workfl
 
 ## Tests
 
-`python -m pytest -q tests` (test-only packages: `requirements-test.txt`; CI: `.github/workflows/bookforge-tests.yml`). Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
+`python -m pytest -q tests` (test-only packages: `requirements-test.txt`; CI: `.github/workflows/akowe-tests.yml`). Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
 `h.dispatch(op, action, ...)`, `h.validate(ref)`, `h.accept(ref)`, `h.approve(ref)`,
 `h.create_approved(op, payload, manual_candidate=...)`, `h.set_features(magic=True)`.
 For AI paths set `engine.providers.test_adapter` to a fake with

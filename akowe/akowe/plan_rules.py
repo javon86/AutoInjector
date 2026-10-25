@@ -452,14 +452,14 @@ def ai_complete(ctx, partial: dict, fields: list[str], *, task: str, context: di
     Returns (data, resource, findings). Raises CAPABILITY_UNAVAILABLE (with a manual
     candidate request) when no slot can run the job.
     """
-    from .errors import BookforgeError
+    from .errors import AkoweError
     out_schema = ctx.contracts.definition(ctx.op_id, "OUTPUT")
     try:
         generated, resource = ctx.ai_generate(task=task, output_schema=out_schema, context=context,
                                               protected_facts=list(protected or []))
-    except BookforgeError as exc:
+    except AkoweError as exc:
         if exc.code == "CAPABILITY_UNAVAILABLE":
-            raise BookforgeError(
+            raise AkoweError(
                 "CAPABILITY_UNAVAILABLE", "/payload",
                 f"{ctx.op_id} needs an AI slot for {', '.join(fields)}; configure AI-1..AI-3 or supply a manual "
                 "candidate.", unresolved=[f"{ctx.op_id}:manual_candidate"]) from exc

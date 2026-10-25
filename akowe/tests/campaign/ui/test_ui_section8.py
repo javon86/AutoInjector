@@ -1,6 +1,6 @@
 """Section 8 in the browser: P37.5 the "ChatGPT isn't working — here's why / fix" notice before a run (Cancel, Start
 without it, the run window's AI notice) and P36 the editor card's calibration box (re-asked, capped, each editor's own
-scores). An in-process BookForge with the deterministic fake AI and per-slot bridge states (v1.2), so a "logged out"
+scores). An in-process Akọwe with the deterministic fake AI and per-slot bridge states (v1.2), so a "logged out"
 ChatGPT can be shown. Screenshots go to $BF_UI_SHOTS (see ui_helpers.shot)."""
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ Q4 = "Mara asked every captain about the night the light went dark"
 
 @pytest.fixture
 def s8(tmp_path):
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     fake = SlotFake()
     app = make_app(tmp_path, fake)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))

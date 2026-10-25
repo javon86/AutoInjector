@@ -29,11 +29,11 @@ from datetime import datetime, timezone
 
 from .. import h_checks as hc
 from ..canonical import sha256_bytes, sha256_text
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from . import register
 from .base import Context, OperationHandler, Result
 
-CHECKER_VERSION = "bookforge-h/1.0.0"
+CHECKER_VERSION = "akowe-h/1.0.0"
 SEMANTIC_OPS = ("H01", "H02", "H03", "H04", "H06")
 DETERMINISTIC_OPS = ("H05", "H07", "H08", "H09", "H10")
 PROSE_PRODUCERS = tuple(f"C{n:02d}" for n in range(2, 12))
@@ -181,7 +181,7 @@ class Review:
         except OSError as exc:
             self.add("INPUT", f"{label}: stored bytes unreadable: {exc}", severity, "FAIL", source_refs=[ref])
             return None
-        except BookforgeError as exc:
+        except AkoweError as exc:
             e = exc.errors[0]
             self.add("INPUT", f"{label} {ref.get('module_id')}:{ref.get('record_id')} v{ref.get('version')} does not "
                               f"resolve: {e['code']} {e['message']}", severity, "FAIL", source_refs=[ref])
@@ -229,7 +229,7 @@ class Review:
             return None, None
         try:
             data = self.ctx.binary(binrec)
-        except (BookforgeError, OSError) as exc:
+        except (AkoweError, OSError) as exc:
             self.add("HASH_MISMATCH", f"{label}: stored bytes cannot be verified: {exc}", source_refs=[aref])
             return None, None
         if sha256_bytes(data) != aref["content_hash"]:
@@ -401,21 +401,21 @@ class HReport(OperationHandler):
         old = base["data"]
         for k in ("operation", "source_refs", "policy_ref"):
             if new.get(k) != old.get(k):
-                raise BookforgeError("INVALID_INPUT", f"/payload/{k}", f"{k} is fixed by the original check run; "
+                raise AkoweError("INVALID_INPUT", f"/payload/{k}", f"{k} is fixed by the original check run; "
                                      "create a new report for different inputs", status="REJECTED")
         if new.get("result_revision") != base["version"] + 1:
-            raise BookforgeError("INVALID_INPUT", "/payload/result_revision",
+            raise AkoweError("INVALID_INPUT", "/payload/result_revision",
                                  "result_revision must equal the new version", status="REJECTED")
         derived = derive_readiness(new["findings"]) if self.op_id == "H10" else derive_status(
             new["findings"], new.get("coverage_refs"))
         if new.get("status") != derived:
-            raise BookforgeError("INVALID_INPUT", "/payload/status", f"status must be derived from findings "
+            raise AkoweError("INVALID_INPUT", "/payload/status", f"status must be derived from findings "
                                  f"({derived})", status="REJECTED")
         if self.op_id in DETERMINISTIC_OPS:
             review = Review(ctx, self.op_id)
             inputs = self.inputs_from_record(ctx, base, review)
             if inputs is None:
-                raise BookforgeError("MISSING_INPUT", "/base_ref", "pinned inputs no longer resolve; create a new "
+                raise AkoweError("MISSING_INPUT", "/base_ref", "pinned inputs no longer resolve; create a new "
                                      "report", status="BLOCKED")
             self.run(ctx, review, inputs, None)
             rerun = self.assemble(ctx, review, inputs, base["version"] + 1, old.get("policy_ref"))
@@ -425,11 +425,11 @@ class HReport(OperationHandler):
                               if f["decision"] in ("FAIL", "UNKNOWN") and f["severity"] in BLOCK_SEV)
 
             if rerun["status"] != new["status"] or blocking(rerun["findings"]) != blocking(new["findings"]):
-                raise BookforgeError("INVALID_INPUT", "/payload/findings",
+                raise AkoweError("INVALID_INPUT", "/payload/findings",
                                      "deterministic check results cannot be overridden; only INFO/MINOR notes may "
                                      "change", status="REJECTED")
             if new.get("coverage_refs") != old.get("coverage_refs"):
-                raise BookforgeError("INVALID_INPUT", "/payload/coverage_refs", "coverage is fixed by the check run",
+                raise AkoweError("INVALID_INPUT", "/payload/coverage_refs", "coverage is fixed by the check run",
                                      status="REJECTED")
         else:
             def det(fs):
@@ -437,14 +437,14 @@ class HReport(OperationHandler):
                               if f["rule_id"].split(":")[0] in SEMANTIC_DET_RULES)
 
             if det(new["findings"]) != det(old["findings"]):
-                raise BookforgeError("INVALID_INPUT", "/payload/findings", "deterministic coverage/evidence/obligation "
+                raise AkoweError("INVALID_INPUT", "/payload/findings", "deterministic coverage/evidence/obligation "
                                      "findings cannot be removed or changed by disposition", status="REJECTED")
             if new.get("coverage_refs") != old.get("coverage_refs"):
-                raise BookforgeError("INVALID_INPUT", "/payload/coverage_refs",
+                raise AkoweError("INVALID_INPUT", "/payload/coverage_refs",
                                      "coverage cannot be extended by disposition; run a new review", status="REJECTED")
             problems = self.check_evidence(ctx, new["findings"], self.claim_targets(ctx, base))
             if problems:
-                raise BookforgeError("INVALID_INPUT", "/payload/findings", problems[0], status="REJECTED")
+                raise AkoweError("INVALID_INPUT", "/payload/findings", problems[0], status="REJECTED")
         return Result(data=new, transform="MANUAL")
 
     def claim_targets(self, ctx: Context, record: dict) -> dict:
@@ -661,7 +661,7 @@ class SemanticCheck(HReport):
             try:
                 out, resource = ctx.ai_generate(task=self.ai_task(ctx), output_schema=self.ai_schema(),
                                                 context=context, capability=self.capability)
-            except BookforgeError as exc:
+            except AkoweError as exc:
                 if exc.code in ("CAPABILITY_UNAVAILABLE", "CONTEXT_TOO_LARGE"):
                     review.add("VALIDATOR_UNAVAILABLE", f"semantic reviewer unavailable ({exc.code}): "
                                                         f"{exc.errors[0]['message']}; supply a manual review",
@@ -939,7 +939,7 @@ class MissingDuplicateContent(HReport):
             try:
                 binrec = ctx.record(man["data"]["artifact_ref"])
                 g01 = json.loads(ctx.binary(binrec).decode("utf-8"))
-            except (BookforgeError, ValueError, OSError):
+            except (AkoweError, ValueError, OSError):
                 g01 = None
             if g01 is not None and not same_pin(g01.get("source_manifest_ref"), cm["ref"]):
                 review.add("MANUSCRIPT_MANIFEST_MISMATCH", "compiled manuscript was built from a different chapter "
@@ -1370,7 +1370,7 @@ class FinalReadiness(HReport):
                 if a:
                     try:
                         note_origin(ctx.record(a))
-                    except BookforgeError:
+                    except AkoweError:
                         pass
         for r in M.get("source_refs", []):
             note_origin(review.load(r, f"manifest source {r['module_id']}"))

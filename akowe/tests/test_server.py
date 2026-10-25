@@ -8,8 +8,8 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from bookforge.canonical import sha256_bytes
-from bookforge.server import WEB_DIR, App, make_handler
+from akowe.canonical import sha256_bytes
+from akowe.server import WEB_DIR, App, make_handler
 from test_set_g import png_bytes
 
 TOKEN = "author-token-123"

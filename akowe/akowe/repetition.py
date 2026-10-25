@@ -1,4 +1,4 @@
-"""🔁 Repetition sorter (P30): before a repeat is cut, BookForge decides what kind of repeat it is.
+"""🔁 Repetition sorter (P30): before a repeat is cut, Akọwe decides what kind of repeat it is.
 
 ChatGPT's review of book 2: some repeats are a character's voice ("Right, so" — the way one person starts talking)
 or a motif (Odile counting the lamps, "thirty-two, thirty-three …"), others are filler or plain accidents. An editor
@@ -20,7 +20,7 @@ a chapter; filler → every use after the first in a chapter; voice → only a s
 motif → only uses crowded within two paragraphs of the previous one. Each occurrence carries ``trim: true|false``.
 Voice and motif phrases are *protected*: their exact words go into the keep list of every editor rewrite
 (editor.propose, via fact_checks.protected_keep), so a rewrite that removes them is refused (KEEP_LOST) — unless it
-is BookForge's own trim of exactly that excess. Pure Python, no AI; the trim itself is a P5 rewrite (fact_checks).
+is Akọwe's own trim of exactly that excess. Pure Python, no AI; the trim itself is a P5 rewrite (fact_checks).
 """
 from __future__ import annotations
 
@@ -380,10 +380,10 @@ def get_labels(store, pid: str, branch: str) -> dict:
 
 def save_labels(store, pid: str, branch: str, labels, *, base_version: int | None = None, by: str = "author") -> dict:
     """Merge the author's labels ({phrase: voice|motif|filler|accident, or "" to remove})."""
-    from .errors import BookforgeError  # noqa: PLC0415
+    from .errors import AkoweError  # noqa: PLC0415
     from .story_rules import _now, conflict, update_single  # noqa: PLC0415
     if not isinstance(labels, dict) or not labels:
-        raise BookforgeError("INVALID_INPUT", "/labels", "labels: {phrase: voice | motif | filler | accident | \"\"}",
+        raise AkoweError("INVALID_INPUT", "/labels", "labels: {phrase: voice | motif | filler | accident | \"\"}",
                              status="REJECTED")
     clean = {}
     for k, v in labels.items():
@@ -391,11 +391,11 @@ def save_labels(store, pid: str, branch: str, labels, *, base_version: int | Non
         if not nk:
             continue
         if v not in CLASSES and v not in ("", None):
-            raise BookforgeError("INVALID_INPUT", "/labels", "a label is voice, motif, filler or accident (or empty to "
-                                 "let BookForge decide)", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/labels", "a label is voice, motif, filler or accident (or empty to "
+                                 "let Akọwe decide)", status="REJECTED")
         clean[nk] = v or ""
     if not clean:
-        raise BookforgeError("INVALID_INPUT", "/labels", "no phrase to label", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/labels", "no phrase to label", status="REJECTED")
 
     def change(old):
         old = old or {}
@@ -408,7 +408,7 @@ def save_labels(store, pid: str, branch: str, labels, *, base_version: int | Non
             else:
                 cur.pop(k, None)
         if len(cur) > MAX_LABELS:
-            raise BookforgeError("INVALID_INPUT", "/labels", f"at most {MAX_LABELS} labels", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/labels", f"at most {MAX_LABELS} labels", status="REJECTED")
         return {"version": int(old.get("version") or 0) + 1, "labels": cur, "updated_at": _now(), "by": by}
     return update_single(store, _key(pid, branch), pid, branch, change, (
         "repetition.labels_saved", lambda e: {"version": e["version"], "labels": len(e["labels"]), "by": by,

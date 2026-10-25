@@ -28,15 +28,15 @@ import logging
 from . import repetition as rep_mod
 from . import terms as terms_mod
 from . import timeline_check as tl_mod
-from .errors import BookforgeError
+from .errors import AkoweError
 
-log = logging.getLogger("bookforge.fact_checks")
+log = logging.getLogger("akowe.fact_checks")
 
 MAX_FIX_FINDINGS = 12
 EDITOR_BUDGET = 3000     # characters of JSON for fact_checks in the editor's context (approximate)
 RUN_SCAN_CHAPTERS = 60
 
-EDITOR_NOTE = ("BookForge's own checks (no AI) of this chapter. timeline: ages and years it found and where they do "
+EDITOR_NOTE = ("Akọwe's own checks (no AI) of this chapter. timeline: ages and years it found and where they do "
                "not add up — confirm or ignore each in your findings (dimension continuity or the closest one). "
                "terms: equipment and period words that are wrong, do not fit (a wick on a gas lamp) or are not "
                "verified yet — never invent how equipment works. repeats: voice and motif repeats are deliberate — "
@@ -166,11 +166,11 @@ class FactChecker:
     def _chapter_rec(self, principal, pid, branch, rid):
         rec = self.review._head(pid, branch, rid)
         if rec is None or rec["module_id"] != "C02":
-            raise BookforgeError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/record_id", "this chapter does not exist", status="REJECTED")
         chs = book_texts(self.engine, principal, pid, branch)
         me = next((c for c in chs if c["record_id"] == rid), None)
         if me is None:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "this chapter is not part of the approved outline",
+            raise AkoweError("INVALID_INPUT", "/record_id", "this chapter is not part of the approved outline",
                                  status="REJECTED")
         return rec, chs, me
 
@@ -239,12 +239,12 @@ class FactChecker:
 
     # ------------------------------------------------------------------ author actions (no AI)
     def scan_terms(self, principal, pid, branch, rid=None) -> dict:
-        """Add the terms BookForge finds (one chapter, or every chapter) as "research needed"."""
+        """Add the terms Akọwe finds (one chapter, or every chapter) as "research needed"."""
         chs = book_texts(self.engine, principal, pid, branch)
         if rid:
             chs = [c for c in chs if c["record_id"] == rid]
             if not chs:
-                raise BookforgeError("NOT_FOUND", "/record_id", "this chapter is not part of the approved outline",
+                raise AkoweError("NOT_FOUND", "/record_id", "this chapter is not part of the approved outline",
                                      status="REJECTED")
         ctx = _context(self.store, pid, branch)
         year = story_year_of(ctx)
@@ -329,7 +329,7 @@ class FactChecker:
             _tl, reps = _run_all(chs, ctx)
             findings, keys = rep_mod.findings_for(text, rep_mod.for_chapter(reps, me["chapter_id"]), MAX_FIX_FINDINGS)
         else:
-            raise BookforgeError("INVALID_INPUT", "/kind", "kind: terms or repeats", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/kind", "kind: terms or repeats", status="REJECTED")
         return {"findings": findings, "keep": [], "version": rec["version"], "fact_fix": kind,
                 "except_keys": sorted(keys)}
 
@@ -337,7 +337,7 @@ class FactChecker:
         pid, branch = job.project_id, job.branch_id
         craft = self.pseudo_craft(job.principal, pid, branch, rid, kind)
         if not craft["findings"]:
-            raise BookforgeError("INVALID_INPUT", "/record_id", "nothing to fix in this version: no wrong terms"
+            raise AkoweError("INVALID_INPUT", "/record_id", "nothing to fix in this version: no wrong terms"
                                  if kind == "terms" else "nothing to fix in this version: no accidental repeats to "
                                  "trim", status="REJECTED")
         return self.review.editor.propose(job, rid, craft=craft)
@@ -401,7 +401,7 @@ def route(rv, principal, pid, branch, rest: list, method: str, body: dict):
         year = terms_mod.clean_year(body.get("story_year")) if "story_year" in body else "keep"
         v = body.get("version")
         if v is not None and (not isinstance(v, int) or isinstance(v, bool)):
-            raise BookforgeError("INVALID_INPUT", "/version", "version: the list version you edited",
+            raise AkoweError("INVALID_INPUT", "/version", "version: the list version you edited",
                                  status="REJECTED")
         e = terms_mod.save(rv.store, pid, branch, items, by="author", base_version=v, story_year=year)
         return 200, {"ok": True, "entry": e}
@@ -426,6 +426,6 @@ def route(rv, principal, pid, branch, rest: list, method: str, body: dict):
     if len(sub) == 2 and sub[1] == "fix" and method == "POST":
         kind = body.get("kind")
         if kind not in ("terms", "repeats"):
-            raise BookforgeError("INVALID_INPUT", "/kind", "kind: terms or repeats", status="REJECTED")
+            raise AkoweError("INVALID_INPUT", "/kind", "kind: terms or repeats", status="REJECTED")
         return 202, rv.start_facts_job(principal, pid, branch, f"facts_fix_{kind}", sub[0], body)
     return None

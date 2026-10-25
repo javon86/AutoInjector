@@ -18,7 +18,7 @@ import copy
 
 import pytest
 
-from bookforge.contracts import get_package
+from akowe.contracts import get_package
 
 from conftest import errors_of
 import opsgen

@@ -1,10 +1,10 @@
-"""The "brain" behind the fake chat sites of AutoInjector's BookForge end-to-end test
-(desktop-app/test/bookforge-e2e.test.js).
+"""The "brain" behind the fake chat sites of AutoInjector's Akọwe end-to-end test
+(desktop-app/test/akowe-e2e.test.js).
 
-The fake sites are web pages in a real Chromium; when one of them receives a BookForge prompt (the text the
+The fake sites are web pages in a real Chromium; when one of them receives an Akọwe prompt (the text the
 AutoInjector adapter builds: system, "Project context package (JSON):" + one JSON line, JSON_SCHEMA ...
 END_JSON_SCHEMA, instructions, optional validation errors) the node test hands the prompt to this process, which
-answers it exactly like BookForge's own deterministic test AI (tests/autobook_fake.py BookFakeAI) would: same
+answers it exactly like Akọwe's own deterministic test AI (tests/autobook_fake.py BookFakeAI) would: same
 answer kinds, same content, schema-valid.
 
 Protocol: one JSON object per line on stdin {"id", "prompt"} -> one JSON line on stdout
@@ -17,8 +17,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
-ROOT = HERE.parents[3]          # .../bookforge (repo folder with the bookforge package)
-TESTS = HERE.parents[2]         # .../bookforge/tests
+ROOT = HERE.parents[3]          # .../akowe (repo folder with the akowe package)
+TESTS = HERE.parents[2]         # .../akowe/tests
 for p in (str(ROOT), str(TESTS)):
     if p not in sys.path:
         sys.path.insert(0, p)

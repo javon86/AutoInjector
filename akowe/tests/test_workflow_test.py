@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from bookforge.selftest import plan_item
-from bookforge.workflow_test import ROW_IDS, WorkflowTestRunner
+from akowe.selftest import plan_item
+from akowe.workflow_test import ROW_IDS, WorkflowTestRunner
 
 from test_server import call, server  # noqa: F401
 
@@ -69,7 +69,7 @@ def test_run_all_without_ai(engine, tmp_path):
     assert len(store.list_records(real, "main")) == before  # the real book was not touched
     md, js = runner.latest_paths()
     rep = json.loads(js.read_text())
-    assert rep["counts"]["PASS"] == 5 and rep["counts"]["SKIPPED"] == 6 and md.read_text().startswith("# BookForge")
+    assert rep["counts"]["PASS"] == 5 and rep["counts"]["SKIPPED"] == 6 and md.read_text().startswith("# Akọwe")
     assert "api_key" not in js.read_text() and "token" not in js.read_text().lower()
     # re-run one row in the same test book
     rows = run(runner, {"rows": ["check"]})
@@ -108,7 +108,7 @@ def test_unknown_rows_and_http(server, tmp_path):  # noqa: F811
     rows = {r["id"]: r for r in st["rows"]}
     assert rows["ai"]["status"] == "SKIPPED" and rows["format"]["status"] == "PASS"
     status, md, resp = call(port, "GET", "/api/workflow-test/report?format=md")
-    assert status == 200 and md.startswith(b"# BookForge workflow test")
+    assert status == 200 and md.startswith("# Akọwe workflow test".encode("utf-8"))
     assert call(port, "GET", "/api/workflow-test", token=None)[0] == 401
     # the test book is marked, so the project list can keep it apart from real books
     status, projects, _ = call(port, "GET", "/api/projects")

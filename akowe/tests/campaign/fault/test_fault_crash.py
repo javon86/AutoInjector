@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from bookforge.autobook import verify_file
-from bookforge.store import Store
+from akowe.autobook import verify_file
+from akowe.store import Store
 
 from fault_helpers import LIVE, Proc, call, check_store, jobs, poll
 
@@ -58,7 +58,7 @@ def _crash_then_resume(tmp_path, *kill_args):
 
 
 def _projects(data):
-    conn = sqlite3.connect(data / "bookforge.sqlite3")
+    conn = sqlite3.connect(data / "akowe.sqlite3")
     try:
         return conn.execute("SELECT project_id, name, settings FROM projects ORDER BY created_at").fetchall()
     finally:
@@ -143,7 +143,7 @@ def test_crash_right_after_the_project_is_created_leaves_one_book(tmp_path):
 def test_crash_after_profile_saved_still_names_the_book(tmp_path):
     """NEW-fault-6: the AI profile and the book's name are now saved in ONE transaction, so there is no commit at
     which the title is saved and the book is still 'New book (being made…)': the kill point is never reached and
-    the run makes a correctly named book. (Resume also renames a book left unnamed by an older BookForge: see
+    the run makes a correctly named book. (Resume also renames a book left unnamed by an older Akọwe: see
     test_resume_names_a_book_left_unnamed in the flow campaign.)"""
     data = tmp_path / "data"
     p = Proc(data, "--kill-when", TITLE_SAVED)

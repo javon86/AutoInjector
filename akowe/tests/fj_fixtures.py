@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from bookforge.store import new_id
+from akowe.store import new_id
 
 
 def seed(h, module_id, data, *, source_refs=None, lifecycle="APPROVED", record=None):

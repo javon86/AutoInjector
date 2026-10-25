@@ -14,11 +14,11 @@ import shutil
 import subprocess
 import zipfile
 
-from bookforge.exporters import book as bookmod
-from bookforge.exporters.docx import build_docx
-from bookforge.exporters.epub import build_epub
-from bookforge.exporters.layout import Typography, make_geometry, paginate
-from bookforge.exporters.pdf import render_pdf
+from akowe.exporters import book as bookmod
+from akowe.exporters.docx import build_docx
+from akowe.exporters.epub import build_epub
+from akowe.exporters.layout import Typography, make_geometry, paginate
+from akowe.exporters.pdf import render_pdf
 
 PAGE = {"width_mm": 152.4, "height_mm": 228.6, "bleed_mm": 0, "safe_margin_mm": 12.7}
 META = {"title": "The Salt Road", "author": "Mara Vell", "identifier": "urn:uuid:3f1c2d7e-0000-4000-8000-000000000001",

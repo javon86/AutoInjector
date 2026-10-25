@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from bookforge.server import App
+from akowe.server import App
 
 TOKEN = "rotation-token-0123456789"
 CONFIRM = {"author_confirms": True, "confirm": "RESTORE"}

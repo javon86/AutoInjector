@@ -28,12 +28,12 @@ import copy
 import logging
 
 from .. import plan_rules as pr
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from . import register
 from .base import Context, OperationHandler, Result, normalize_to_output
 from .set_a import historical_events, resolve_pins
 
-log = logging.getLogger("bookforge.set_b")
+log = logging.getLogger("akowe.set_b")
 
 B_OPS = tuple(f"B{i:02d}" for i in range(1, 15))
 
@@ -238,25 +238,25 @@ class PlanHandler(OperationHandler):
         if self.op_id in FEATURE_OPS:
             feature = FEATURE_OPS[self.op_id]
             if p.get("feature_selected") is not feats.get(feature):
-                raise BookforgeError("INVALID_INPUT", "/payload/feature_selected",
+                raise AkoweError("INVALID_INPUT", "/payload/feature_selected",
                                      f"feature_selected={p.get('feature_selected')} contradicts {feature}="
                                      f"{feats.get(feature)} in the pinned feature manifest", status="REJECTED")
         for field in ("selected_plan_refs", "plot_refs", "reveal_refs"):
             for i, ref in enumerate(p.get(field) or []):
                 feature = FEATURE_OPS.get(ref["module_id"])
                 if feature and feats.get(feature) is not True:
-                    raise BookforgeError("INVALID_INPUT", f"/payload/{field}/{i}",
+                    raise AkoweError("INVALID_INPUT", f"/payload/{field}/{i}",
                                          f"{ref['module_id']} output is not selected ({feature} is not true); "
                                          "only selected plan outputs may be used", status="REJECTED")
         if self.op_id == "B11":
             ids = [r["record_id"] for r in p.get("selected_plan_refs") or []]
             if len(ids) != len(set(ids)):
-                raise BookforgeError("INVALID_INPUT", "/payload/selected_plan_refs",
+                raise AkoweError("INVALID_INPUT", "/payload/selected_plan_refs",
                                      "pin each selected plan record once", status="REJECTED")
 
     def _check_manual(self, ctx: Context, data: dict):
         if self.op_id == "B06" and data["structure_model"] != ctx.payload["selected_structure"]:
-            raise BookforgeError("INVALID_INPUT", "/manual_candidate/structure_model",
+            raise AkoweError("INVALID_INPUT", "/manual_candidate/structure_model",
                                  f"structure_model must be the selected structure "
                                  f"'{ctx.payload['selected_structure']}'", status="REJECTED")
 
@@ -726,7 +726,7 @@ class PlanHandler(OperationHandler):
 
     @staticmethod
     def _earlier_refusals(ctx: Context, limit: int = 3) -> list[str]:
-        """Blocking findings of the newest unapproved outlines of this branch (drafts BookForge's checks refused),
+        """Blocking findings of the newest unapproved outlines of this branch (drafts Akọwe's checks refused),
         so a fresh outline does not repeat them."""
         try:
             recs = ctx.store.list_records(ctx.project_id, ctx.branch_id, "B11", "OUTPUT")

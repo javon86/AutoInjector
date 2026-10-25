@@ -532,53 +532,53 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
-## BookForge (experimental, bridge off by default)
+## Akọwe (experimental, bridge off by default)
 
-Lets BookForge (the book-writing tool in this repo) use the ChatGPT, Claude and
+Lets Akọwe (the book-writing tool in this repo) use the ChatGPT, Claude and
 Gemini panes as its AI slots, with no API keys. **Caution:** automating these
 sites' web UIs may be against their terms of service — use at your own risk.
-The contract is `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.2, normative).
+The contract is `docs/AKOWE_AUTOINJECTOR_BRIDGE.md` (contract v1.2, normative).
 
-**The BookForge panel** is compact (about a quarter of its old height when
+**The Akọwe panel** is compact (about a quarter of its old height when
 connected) and every ⓘ explains its part in plain words (Esc or a click outside closes it):
 
 - **Header (one line)** — a **health dot** (green = all good, amber = not connected
   yet / waiting, ⚠️ = something needs fixing, grey = bridge off; computed from: bridge
-  listening, key present, BookForge reachable (pinged at most every 30 s), status
+  listening, key present, Akọwe reachable (pinged at most every 30 s), status
   freshness and each Active AI window; click it for the checklist), the **state pill**
   (Off / Starting / Not connected / Connecting / Connected / Working — animated
-  purple-blue — / Problem), a one-line summary, **🔗 Connect BookForge**, the
+  purple-blue — / Problem), a one-line summary, **🔗 Connect Akọwe**, the
   **Bridge** switch, **📋 Copy diagnostics** and **▾/▸**.
-  - **🔗 Connect BookForge** — one click: turns the bridge on if it's off,
-    checks BookForge is running (`GET http://127.0.0.1:8780/api/ping`; port from
-    `BOOKFORGE_PORT`, or BookForge's own fallback ports 8781–8799), makes a
+  - **🔗 Connect Akọwe** — one click: turns the bridge on if it's off,
+    checks Akọwe is running (`GET http://127.0.0.1:8780/api/ping`; port from
+    `AKOWE_PORT`, or Akọwe's own fallback ports 8781–8799), makes a
     one-time **pairing code** (12 characters, 2 minutes, single use) and opens
     your browser at `http://127.0.0.1:<port>/#/pair?code=<CODE>&bridge=<bridge url>`.
-    BookForge trades the code for the connection key itself (`POST /v1/pair`),
-    so **the key never goes into a URL** and you copy nothing. If BookForge isn't
-    running, **▶ Start BookForge for me** runs `../bookforge/run-bookforge.bat`
+    Akọwe trades the code for the connection key itself (`POST /v1/pair`),
+    so **the key never goes into a URL** and you copy nothing. If Akọwe isn't
+    running, **▶ Start Akọwe for me** runs `../akowe/run-akowe.bat`
     (`.sh` elsewhere) detached, waits up to 90 s (`AUTOINJECTOR_BF_START_WAIT_MS`)
     and then connects by itself.
   - **Bridge** switch (off = nothing listens; on = `127.0.0.1:17891` only,
-    `AUTOINJECTOR_BOOKFORGE_PORT` overrides; remembered).
+    `AUTOINJECTOR_AKOWE_PORT` overrides; remembered).
   - **▾ / ▸** (or click the title) folds the panel into a **slim status bar**: state
     pill · current step · ✅ approvals count · ⚠️ problem count (click = expand and
-    show the first problem) · 📚 Open BookForge. The choice is remembered.
+    show the first problem) · 📚 Open Akọwe. The choice is remembered.
 - **Status line** — what Connect is doing and the **Next** step.
 - **Your AIs** — ChatGPT / Claude / Gemini side by side (each in its app colour):
   Ready / Not loaded / Busy / Not active, plus the last result.
-- **Connection check** — one row of chips (bridge · key · BookForge running ·
+- **Connection check** — one row of chips (bridge · key · Akọwe running ·
   connected · each AI window · each AI answers through the bridge) with ✔ / … / ○ /
   ✕. **Details ▸** opens the full list (it opens by itself when something fails).
   **🧪 Test the connection** runs the real link test (below) and ticks the same
   chips/rows; **📄 Last report**.
 - **Now working on** | **Book checklist**, side by side — the current step
-  ("Set B · B03 Main plot"), its state, BookForge's message, a running clock,
+  ("Set B · B03 Main plot"), its state, Akọwe's message, a running clock,
   **N need your OK** with **✅ Review & approve** and **▶ Go to current task**; the
   book's "k/n" bar and a stepper of chips with **module-set letter badges** (A–K,
   one fixed colour each — the palette is documented in `BF_SET_COLORS` in
-  `controls.js` so BookForge can match it), **List ▸** for every part by name,
-  **📚 Open BookForge**. A status older than 90 s gets a ⚠️ "last update X min ago".
+  `controls.js` so Akọwe can match it), **List ▸** for every part by name,
+  **📚 Open Akọwe**. A status older than 90 s gets a ⚠️ "last update X min ago".
 - **Footer (folded)** — Activity log, Other ways to connect (📋 Copy connection
   key / Show key / Make a new key), the terms-of-service and routing cautions.
 
@@ -588,12 +588,12 @@ blocks) sits on the exact element — the Bridge switch, an AI, a check chip, th
 button for a failed Connect step, or any button whose action failed. Clicking it
 opens **Where / What happened / How to fix** (the technical code folded away) and,
 where possible, **🔁 Try again** (restart the bridge, connect again, run the test
-again, reload that AI's window, open/start BookForge). All bridge, pairing,
+again, reload that AI's window, open/start Akọwe). All bridge, pairing,
 request-outcome, start-error, Connect and link-test codes map to plain words in one
 table (`BF_CODES` in `controls.js`). Every IPC call is wrapped (a failure becomes a
 ⚠️, never silence) and a window error handler turns a panel bug into a ⚠️ instead of
-a broken panel. **📋 Copy diagnostics** (`bookforge:copy-diagnostics`) copies a safe
-summary — app version, bridge on/port, key present (yes/no only), BookForge reachable,
+a broken panel. **📋 Copy diagnostics** (`akowe:copy-diagnostics`) copies a safe
+summary — app version, bridge on/port, key present (yes/no only), Akọwe reachable,
 connection/Connect phase, health, each AI's readiness and last outcome code,
 counters, the last link-test counts and failed step ids, recent problem codes —
 **never** the key, pairing codes, prompts, replies or book content; without a
@@ -603,35 +603,35 @@ The **Activity log** (text-free: who connected, which AI was asked, how long it
 took, refused keys/codes) is kept, folded away at the bottom. Only loopback
 `http://127.0.0.1` / `http://localhost` pages are ever opened from the panel.
 
-- The key lives in the app's userData folder (`bookforge-bridge-token`, mode
+- The key lives in the app's userData folder (`akowe-bridge-token`, mode
   0600), never in the state file, logs, reports or URLs. Pairing codes are never
   logged either — only the outcome of each pairing attempt.
-- **🧪 Test the connection** (`bookforge-link-test.js`): bridge listening, key file
+- **🧪 Test the connection** (`akowe-link-test.js`): bridge listening, key file
   present, a wrong key refused (401) and the right one accepted (`/v1/health`),
   then for each Active AI: window ready + a real `POST /v1/complete` round trip
   (request_id `selftest-<stamp>-<site>`, a tiny JSON_SCHEMA prompt whose JSON reply
-  must echo a random word), "is BookForge running?" and "is BookForge connected?"
+  must echo a random word), "is Akọwe running?" and "is Akọwe connected?"
   (both SKIPPED with instructions when not). PASS / FAIL / SKIPPED with timing and
-  a how-to-fix tip; Stop works mid-run. Reports: `bookforge-link-test-<stamp>.md`
+  a how-to-fix tip; Stop works mid-run. Reports: `akowe-link-test-<stamp>.md`
   and `.json` in the logs folder (never the key or the prompt; the last 80
   characters of each reply). Reply time limit per AI: 3 min (`AUTOINJECTOR_BF_LINKTEST_MS`).
 - Endpoints: `GET /v1/health`, `POST /v1/complete` (`site`, `prompt`, `request_id`,
   `timeout_ms`; one request per pane at a time, 409 otherwise; a repeated
   `request_id` within 15 minutes returns the same result), and in v1.1
-  `POST /v1/pair` (no key; code -> key) and `POST /v1/status` (BookForge's progress,
+  `POST /v1/pair` (no key; code -> key) and `POST /v1/status` (Akọwe's progress,
   sanitized: whitelisted fields, capped strings/lists, loopback URLs only, < 32 KiB).
 - A reply to a bridge request is shown in the Conversation panel but is
   **not** relayed to the other AIs (no mesh routing, roundtable, House Rules,
   Prompt Sequence or Manager handling).
-- Code: `bookforge-bridge.js` (pure Node; also `createPairingCode()`, the latest
-  BookForge status and a text-free event ring in `status()`), `bookforge-link-test.js`
-  (link-test orchestration + report), main.js IPC `bookforge:*` (incl. `connect`,
+- Code: `akowe-bridge.js` (pure Node; also `createPairingCode()`, the latest
+  Akọwe status and a text-free event ring in `status()`), `akowe-link-test.js`
+  (link-test orchestration + report), main.js IPC `akowe:*` (incl. `connect`,
   `start-app`, `open-url`, `diagnostics`, `copy-diagnostics`; the status snapshot
-  carries `health`). Tests: `test/bookforge-bridge.test.js`,
-  `test/bookforge-main.test.js` (Connect flow with a mocked `shell.openExternal`),
-  `test/bookforge-diagnostics.test.js` (health + diagnostics; a planted key, the
+  carries `health`). Tests: `test/akowe-bridge.test.js`,
+  `test/akowe-main.test.js` (Connect flow with a mocked `shell.openExternal`),
+  `test/akowe-diagnostics.test.js` (health + diagnostics; a planted key, the
   pairing code, prompt, reply and book content must never appear),
-  `test/bookforge-link-test.test.js`. `test/fixtures/fake-bridge-host.js` runs the
+  `test/akowe-link-test.test.js`. `test/fixtures/fake-bridge-host.js` runs the
   real bridge with fake panes for cross-process tests (see its header for the CLI,
   incl. `--pairing-code-file` and `--status-file`).
 
@@ -639,8 +639,8 @@ took, refused keys/codes) is kept, folded away at the bottom. Only loopback
 
 AutoInjector checks that each Active AI still answers by sending it a tiny **check-in**
 (“Reply with only this word: marigold”): once when its page has loaded, every 20 minutes
-while it is idle (BookForge panel → 🤖 Your AIs → *Check-ins*: off / 10 / 20 / 30 / 60 min),
-when you press **🩺 Check now**, and when BookForge asks before a book. Never while you are
+while it is idle (Akọwe panel → 🤖 Your AIs → *Check-ins*: off / 10 / 20 / 30 / 60 min),
+when you press **🩺 Check now**, and when Akọwe asks before a book. Never while you are
 typing in that AI or it is busy. Check-ins and their answers are not shown in the
 conversation and never passed on to the other AIs.
 
@@ -668,7 +668,7 @@ belongs to, it reads that whole message instead.
 
 #### 🔢 Number teach (“Do it for me with a number”)
 
-From an AI's 🎯 card or its ⚠️ pop-over. A box in the BookForge panel (and a banner in the AI's
+From an AI's 🎯 card or its ⚠️ pop-over. A box in the Akọwe panel (and a banner in the AI's
 window) says *Type 4827 into ChatGPT's message box and press Send* (a random 4-digit number).
 While you do, AutoInjector watches the page: where the digits appear while typing is the message
 box, what empties the box is the Send button (or Enter), and the digits in a new block are your
@@ -682,7 +682,7 @@ never starts again by itself.
 A saved 🎯 / 🔢 selector wins over one learned before it; one the self-repair learns later (because
 the saved one stopped matching) wins over it. Everything it does is in the activity log and 📋 Copy diagnostics (codes
 only, never message text). Set `AUTOINJECTOR_CHECKIN=0` to switch the automatic check-ins
-off. Details: `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.2) and `self-repair.js`.
+off. Details: `docs/AKOWE_AUTOINJECTOR_BRIDGE.md` (contract v1.2) and `self-repair.js`.
 Real ChatGPT/Claude/Gemini pages couldn't be tested here — only realistic fake pages.
 
 ## Picking up where you left off
@@ -779,10 +779,10 @@ not a timing fluke, and retrying further wouldn't change that.
 **⤓ Extract All** (Activity / Troubleshooting) no longer dumps the app's whole
 history in one click. It opens a small dialog that asks what goes into the file:
 
-- **📖 This BookForge book only** — the default when BookForge has sent this app
-  requests for a book (BookForge connected, or the book was active in the last
-  24 hours). Only the AIs' replies to BookForge's requests *for that book*, the
-  activity events of those requests (by `request_id` / `[MSG #]`), BookForge bridge
+- **📖 This Akọwe book only** — the default when Akọwe has sent this app
+  requests for a book (Akọwe connected, or the book was active in the last
+  24 hours). Only the AIs' replies to Akọwe's requests *for that book*, the
+  activity events of those requests (by `request_id` / `[MSG #]`), Akọwe bridge
   events inside the book's run windows, and the Relay Trace for just those
   messages. Your own conversations with the AIs — even ones during the run — and
   other books are left out. A picker lists every recorded book.
@@ -800,7 +800,7 @@ and traced messages) and is named after its scope, e.g.
 `The Lighthouse Keeper - AutoInjector log - 2026-10-24_11-30-00.txt` or
 `AutoInjector log - last 24 h - ….txt`.
 
-Every scope is **redacted**: the BookForge connection key, the service-bridge
+Every scope is **redacted**: the Akọwe connection key, the service-bridge
 token, pairing codes made this session and any key/token/password in the app's
 settings are removed by value; API-key shapes (`sk-…`, `AIza…`, `ghp_…`, `xoxb-…`,
 `hf_…`, `AKIA…`), `Bearer …` values, `?code=`/`?token=`/`?key=` URL values and long
@@ -809,12 +809,12 @@ pattern; your home folder is shown as `~`, the app's own folders stay
 (`~/…/AutoInjector/…`), and any other path under a home folder becomes
 `[private path]`. Ordinary prose, ids and numbers are left alone.
 
-How a reply is tied to a book: when BookForge pushes `/v1/status` with
+How a reply is tied to a book: when Akọwe pushes `/v1/status` with
 `project {id, title}`, the app records every bridge `request_id` that starts while
 that project is current (and its `[MSG #]` numbers); a captured reply the bridge
 owns is tagged with its request and project. That mapping (ids, sites and times
 only — no prompt or reply text) is kept in memory and in
-`bookforge-extract-books.json` next to the app state, so it survives a restart.
+`akowe-extract-books.json` next to the app state, so it survives a restart.
 Replies captured before this version have no tag, so they appear only in a time
 range / Everything extract.
 
@@ -936,7 +936,7 @@ at.
 
 ### 🎯 Fixing it yourself: point at it
 
-Click **🎯** on an AI's pane (or **🎯 Point at it** in the BookForge panel's ⚠️ pop-over) and a
+Click **🎯** on an AI's pane (or **🎯 Point at it** in the Akọwe panel's ⚠️ pop-over) and a
 small card opens: **What do you want to point at?** — **Message box** (where you type), **Send
 button**, or **AI's reply** (pick the latest answer). Choose ONE and press **OK — point at it**.
 The AI's window shows a banner *“Click the … in this window”*; hovering outlines what a click would

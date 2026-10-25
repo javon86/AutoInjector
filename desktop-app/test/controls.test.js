@@ -82,7 +82,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     extractAllLogs: async (opts) => { calls.push({ fn: "extractAllLogs", opts }); return { ok: true, file: "/tmp/AutoInjector/output/logs/My Book - AutoInjector log - x.txt", messages: 3, logEntries: 5, scope: (opts && opts.scope) || "book", book: { id: "p1", title: "My Book" } }; },
     // P16: the Extract dialog's options + preview.
     extractOptions: async () => { calls.push({ fn: "extractOptions" }); return calls._exOptions || { ok: true, connected: true, books: [{ id: "p1", title: "My Book", requests: 4, lastAt: Date.now(), current: true }, { id: "p0", title: "Older Book", requests: 2, lastAt: Date.now() - 86400000, current: false }], default: { scope: "book", bookId: "p1", include: { conversation: true, activity: true, relay: true } }, totals: { messages: 50, events: 300 } }; },
-    extractPreview: async (opts) => { calls.push({ fn: "extractPreview", opts }); return { ok: true, scope: opts.scope, counts: { messages: opts.scope === "everything" ? 50 : 3, events: 5, relayMessages: 4 }, redactions: 1, fileName: "My Book - AutoInjector log - x.txt", preview: "AutoInjector — Extract (this BookForge book only)\nWHAT IS IN THIS FILE" }; },
+    extractPreview: async (opts) => { calls.push({ fn: "extractPreview", opts }); return { ok: true, scope: opts.scope, counts: { messages: opts.scope === "everything" ? 50 : 3, events: 5, relayMessages: 4 }, redactions: 1, fileName: "My Book - AutoInjector log - x.txt", preview: "AutoInjector — Extract (this Akọwe book only)\nWHAT IS IN THIS FILE" }; },
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -1826,7 +1826,7 @@ async function testExtractAllButton() {
   const modal = doc.getElementById("extract-modal");
   assert(modal && modal.classList.contains("on"), "clicking it opens the Extract dialog");
   assert(!api.calls.some((c) => c.fn === "extractAllLogs"), "nothing is saved just by opening the dialog");
-  assert(doc.getElementById("ex-scope-book").checked && doc.getElementById("ex-book").value === "p1", "default: 'This BookForge book only', the current book");
+  assert(doc.getElementById("ex-scope-book").checked && doc.getElementById("ex-book").value === "p1", "default: 'This Akọwe book only', the current book");
   assert(doc.getElementById("ex-book").options.length === 2 && /My Book \(current\) — 4 requests/.test(doc.getElementById("ex-book").options[0].textContent), "the book picker lists the known books with request counts");
   assert(doc.getElementById("ex-inc-conv").checked && doc.getElementById("ex-inc-act").checked && doc.getElementById("ex-inc-relay").checked, "conversation text, activity log and relay trace are on by default");
   assert(/Includes all conversations, including older private ones/.test(doc.getElementById("ex-scope-all-row").textContent), "Everything carries the private-conversations warning");

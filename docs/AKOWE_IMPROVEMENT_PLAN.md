@@ -1,4 +1,6 @@
-# BookForge improvement plan (from the "Lamplighter's Last Round" review)
+# Akọwe improvement plan (from the "Lamplighter's Last Round" review)
+
+> Formerly BookForge — renamed to Akọwe on 2026-10-25.
 
 Source: the first fully automatic book ("The Lamplighter's Last Round", 2026-10-23), ChatGPT's and
 Gemini's reviews of it, and the AutoInjector run log. Main findings:
@@ -18,7 +20,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Status at a glance  (keep this up to date — updated on every add / finish)
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21), Section 8 (P36, P37.1, P37.3–P37.5, P38; P37.2 partly [!]),
-  Section 7 (P23–P28, P30–P35; P22 skipped by the user, P29 audiobook later), BookForge GitHub CI, the follow-through fix.
+  Section 7 (P23–P28, P30–P35; P22 skipped by the user, P29 audiobook later), Akọwe GitHub CI, the follow-through fix.
 - **Now:** the FIRST REAL TEST on the user's PC — step by step in `docs/FIRST_REAL_TEST.md`. Waiting on the user's
   ChatGPT page check (`desktop-app/tools/chatgpt-page-check.js`) to hard-code ChatGPT's live selectors.
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
@@ -30,7 +32,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
 - [x] **P18.1** Check-in probe: a tiny automatic message with a random word, sent to each AI at
-  start, every so often while running, and before BookForge starts a book.
+  start, every so often while running, and before Akọwe starts a book.
 - [!] **P18.2** Failure classifier: typing failed / sent but no reply found / reply rejected as old /
   stuck generating / logged out or captcha / usage limit.
 - [!] **P18.3** Automatic fix 1: try other known ways (built-in list per site) to find the message box,
@@ -45,7 +47,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   number appears, saves them and confirms with a new check-in. Falls back to the 🎯 picker.
 - [x] **P18.8** User-only problems (logged out, captcha, usage limit): ⚠️ says exactly what to do,
   re-checks by itself when fixed.
-- [x] **P18.9** BookForge keeps going: work moves to the AIs that are working while one is being
+- [x] **P18.9** Akọwe keeps going: work moves to the AIs that are working while one is being
   fixed, and moves back when it recovers.
 - [x] **P18.10** Every detection and fix goes into the activity log and diagnostics.
 - [x] **P3.1** Writer and reviewer are always different AIs when more than one works.
@@ -56,8 +58,8 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - [x] **P4** Craft review after the consistency review: subtext, characters' own goals and
   resistance, distinct voices, obstacles from the world, over-stated theme, repeated patterns and
   gestures, too-neat ending, protected mysteries. Each finding points at the exact passage.
-  *(bookforge/editor.py + editor_rubric.py: scores 1-10 per dimension, findings with exact quotes, keep list; editor ≠
-  writer; BookForge decides PASS/REVISE by strictness; advice per record+version; chapter page, review queue, run
+  *(akowe/editor.py + editor_rubric.py: scores 1-10 per dimension, findings with exact quotes, keep list; editor ≠
+  writer; Akọwe decides PASS/REVISE by strictness; advice per record+version; chapter page, review queue, run
   window, journal; premise/plot/outline with a lighter rubric on request.)*
 - [x] **P5** Targeted rewrite of only the flagged passages, with a "keep" list; afterwards check that
   nothing good was lost and no story rule was broken.
@@ -67,13 +69,13 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   Outside runs: ✍ Apply editor's fixes with before/after per passage.)*
 - [x] **P6** Pattern checker (no AI): counts repeated tics ("went very still", "not X, not Y, but Z",
   moral paragraph endings, repeated gestures) and feeds them to the editor.
-  *(bookforge/prose_audit.py: 11 checks with passage locations, thresholds per 1 000 words, strictness.)*
+  *(akowe/prose_audit.py: 11 checks with passage locations, thresholds per 1 000 words, strictness.)*
 
 ## Section 3 — Characters who are their own people  (Phase 3a)
 
 - [x] **P7** Richer character sheets: wants, needs, fears, secrets, false belief, stress behaviour,
   what they would never say; side characters get their own wish.
-  *(bookforge/characters.py: + private memory, relationships (tension/history) and limits of change; companion data
+  *(akowe/characters.py: + private memory, relationships (tension/history) and limits of change; companion data
   `characters:<pid>:<branch>` per A01 record; made with the character (Bible Builder / Make a book / Fill with AI) or
   on request; character page card + edit form with ⓘ; Make-a-book step "Character sheets and voices"; the consistency
   reviewer of a character sees its sheet.)*
@@ -85,7 +87,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   line that sounds like another character.)*
 - [x] **P8** Scene cards before writing: each character's goal and hidden agenda, an obstacle from
   the world, what changes, what stays unsaid.
-  *(bookforge/scenes.py + chapter_brief.py: writer AI plans, another AI checks (light rubric), rework ≤ 2, approved
+  *(akowe/scenes.py + chapter_brief.py: writer AI plans, another AI checks (light rubric), rework ≤ 2, approved
   under the run consent; book page row 🎬, scene cards page (read/edit/check/plan again/approve), chapter page card,
   run window; writer follows them, editor `scene_plan` dimension checks them. P11-lite: the POV/narrator's name and
   planned backstory are in every chapter prompt.)*
@@ -93,7 +95,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Section 4 — A world with rules and texture  (Phase 3b + 4a)
 
 - [x] **P9** Story-rules ledger: hard rules / things seen to happen / beliefs / protected mysteries.
-  *(bookforge/story_rules.py: category, scope/limits, source, stated by, status; companion data
+  *(akowe/story_rules.py: category, scope/limits, source, stated by, status; companion data
   `story_rules:<pid>:<branch>`; the AI drafts it from the rule-bearing canon (A03/A09/A08/A17/…) + profile + plan, later
   suggests updates as proposals the author accepts/rejects (a run accepts them under its consent after the outline);
   deterministic "bounded?" lint with ⚠️; bounded rules in the plot/outline prompts and reviews (new planning dimension
@@ -101,18 +103,18 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   dimension `story_rules`, protected mysteries) and the consistency review; 🌍 page with edit/ⓘ.)*
 - [x] **P10** World-texture list (work, weather, institutions, locals); a detail is used only if it
   causes something, shows skill or gets in the way.
-  *(bookforge/texture.py: kind, detail, causes obstacle/skill/cost, effect, match words; companion data
+  *(akowe/texture.py: kind, detail, causes obstacle/skill/cost, effect, match words; companion data
   `world_texture:<pid>:<branch>`; scene planning takes obstacles from it (cards name the ids), the writer gets ≤ 4 per
   chapter, `world_friction` reads it; deterministic usage counts (pattern check `texture_overused`, unused/overused on
   the 🌍 page).)*
 - [x] **P11** Planned-to-page check (e.g. a narrator's planned name and backstory never shown).
-  *(bookforge/planned.py: beat, scene obstacles/changes, POV name, sheets' new "must show" items, planned details; word
+  *(akowe/planned.py: beat, scene obstacles/changes, POV name, sheets' new "must show" items, planned details; word
   check, then one independent AI check; ✅ checklist on the chapter page and the book page with ⚠️; ✨ Fix with AI = the
   missing items as anchored findings for the P5 rewrite; in Make a book after the editor (1 round, kept only if checks +
   reviewer pass and fewer items are open), never blocks: ⚠️ + run summary; a book-level report step before assembly.)*
 - [x] **P12** Ending and style choices in the book profile (neat / bittersweet / open; how much is
   explained; how dark), all optional with good defaults.
-  *(bookforge/story_choices.py: ending neat/bittersweet/open/dark, explain/hint/leave, gentle/some/real danger, dialogue,
+  *(akowe/story_choices.py: ending neat/bittersweet/open/dark, explain/hint/leave, gentle/some/real danger, dialogue,
   pace, humor; "Let the AI choose" by default; the ending-state matrix is the internal form (presets + mystery row +
   row overrides under "More ending options"); wizard, profile card/dialog, ⚡ quick settings; feeds premise/plot/outline,
   scene cards, chapter prompts (matrix in the last chapter), editor questions and thresholds, the ledger's mysteries.)*
@@ -121,21 +123,21 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 - [x] **P13** Automatic book report when a book is done (scores, strengths, weaknesses) and a button to
   send the book to the other AIs for review.
-  *(bookforge/book_report.py: words vs the length targets, editor / planned-to-page / pattern findings across chapters,
+  *(akowe/book_report.py: words vs the length targets, editor / planned-to-page / pattern findings across chapters,
   who wrote / reviewed / edited what, whole-book review by every working AI that did not write most of the book — 13
   criteria, strengths and weaknesses with quotes checked against the book, median per dimension and ⚠️ disagreement,
   what to try next; whole book ≤ 60 000 chars, else a per-chapter digest; stored per book version; last run step
   "Book report" (never blocks); 📊 report page with ⬇ Markdown / PDF and 📨 Ask the other AIs; shelf and book page.)*
 - [x] **P14** Compare versions: old vs new pipeline, rated blind by the other AIs.
-  *(bookforge/pipeline.py: run switches editor / scenes / voices / rules / planned, presets full and baseline, honoured
+  *(akowe/pipeline.py: run switches editor / scenes / voices / rules / planned, presets full and baseline, honoured
   by the run, the chapter brief, the outline prompt and Write all chapters; 🧪 Make a variant = the same profile, idea
-  and choices made again with other switches; bookforge/compare.py: two books or two chapter versions, each reviewer
+  and choices made again with other switches; akowe/compare.py: two books or two chapter versions, each reviewer
   sees "Version 1 / Version 2" in its own random order (mapping recorded, no IDs/titles/pipeline names in the prompt),
-  BookForge reveals the mapping: median per dimension, winner per dimension, votes; ⚖️ compare page from the shelf.)*
+  Akọwe reveals the mapping: median per dimension, winner per dimension, votes; ⚖️ compare page from the shelf.)*
 - [x] **P15** Novella and novel lengths with word targets per chapter and scene.
-  *(bookforge/lengths.py: short story / novelette / novella / novel presets with words, chapters and scenes per chapter
+  *(akowe/lengths.py: short story / novelette / novella / novel presets with words, chapters and scenes per chapter
   → B11 target_length + a length sentence, scene cards (scene count, words per scene), chapter prompts (target words);
-  bookforge/long_chapter.py: chapters above 2 500 words written scene by scene (one AI call per scene, continuity from
+  akowe/long_chapter.py: chapters above 2 500 words written scene by scene (one AI call per scene, continuity from
   the previous scene's end), a chapter far under target continued in bounded rounds (never padding); ETA in the run
   window from measured times; Settings › 📏 Long chapters; a 25-chapter novel runs end to end in the tests.)*
 - [x] **P16** AutoInjector "Extract this book only" (the full extract mixed in unrelated private
@@ -150,18 +152,18 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   premise, plot, outline, scene cards, story rules, world texture), the chapters as text, the book report,
   and the book's log (journal, run events, AutoInjector-free); saves automatically when a book finishes and
   as progress while it is being made; a Save button on the book page and the run window.
-  *(bookforge/book_save.py: Settings › 📁 Where books are saved (default Documents\BookForge Books on Windows, ~/BookForge
+  *(akowe/book_save.py: Settings › 📁 Where books are saved (default Documents\Akowe Books on Windows, ~/Akọwe
   Books elsewhere; writable check; 📂 Open folder on this computer only); one folder per book “<title> (<id>)” kept
   when the title changes (`book_folder:<pid>:<branch>`); Book/, Chapters/ (DRAFT marked), Book Bible/ (book_bible.py:
-  versioned JSON + Markdown), Reports/, Log/ (journal + run-events.json), Progress/, README.txt and book.bookforge
+  versioned JSON + Markdown), Reports/, Log/ (journal + run-events.json), Progress/, README.txt and book.akowe
   (book_package.py: every row, version and file of the book with checksums); atomic writes, Windows-safe names, paths
   ≤ 200; auto-save (default on) after each run step / chapter / approval at most every 2 minutes and at once when a run
   finishes, pauses, is cancelled or stops; ⚠️ SAVE_* codes, never blocks a run; no keys, tokens or prompts (checked);
   💾 on the book page, top bar, shelf and run window.)*
-- [x] **P21** 📂 Open a saved book / rerun: load a saved folder back into BookForge (as a new book), continue
+- [x] **P21** 📂 Open a saved book / rerun: load a saved folder back into Akọwe (as a new book), continue
   an unfinished one, or rerun it from its book bible (same characters, world and plan; new chapters).
-  *(bookforge/book_open.py + book_package.py: 📂 Open a saved book (top bar / Your books): the books-folder list (this
-  computer only) or an upload of book.bookforge / book-bible.json; checksums, record hashes and schema_version checked
+  *(akowe/book_open.py + book_package.py: 📂 Open a saved book (top bar / Your books): the books-folder list (this
+  computer only) or an upload of book.akowe / book-bible.json; checksums, record hashes and schema_version checked
   (OPEN_BAD_PACKAGE / OPEN_NEWER_VERSION); always a NEW book (new ids, every content hash recomputed, “(opened)” only
   when the title exists); ▶ Continue making this book (a run on that book that skips what is done) and ▶ Resume the
   saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
@@ -169,7 +171,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   approved inside it under the run consent; new chapters.)*
 ## Section 8 — Fixes from the book-2 run log  (proposed — do before Section 7)
 
-From the 2026-10-24 AutoInjector log: Claude wrote, Gemini reviewed (independence worked), 48 BookForge
+From the 2026-10-24 AutoInjector log: Claude wrote, Gemini reviewed (independence worked), 48 Akọwe
 requests in 16 min; ChatGPT never took part; Gemini's reply reading broke in the evening; Gemini as
 editor passed every chapter and scored the book 10/10 on 10 of 13 criteria while ChatGPT's own review
 gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
@@ -222,25 +224,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
 
-- [-] **P22** (SKIPPED — user said don't do the AI tools/skills menu, 2026-10-25) Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
+- [-] **P22** (SKIPPED — user said don't do the AI tools/skills menu, 2026-10-25) Tool menu for the AIs: the AI can ask Akọwe for a lookup mid-task (T1 look up character /
   place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
 - [x] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
-  Done: bookforge/beta_reader.py — one AI (independent by default) reads the book text only as the profile's audience,
-  returns reactions/interest/guesses/stop with quotes checked against the book and the chapter; BookForge derives
+  Done: akowe/beta_reader.py — one AI (independent by default) reads the book text only as the profile's audience,
+  returns reactions/interest/guesses/stop with quotes checked against the book and the chapter; Akọwe derives
   findings (lost, flat stretch, twists guessed early, would stop); 📖 card + button on the 📊 report page, optional
   ⚡ run step "Beta reader" (`beta_reader: true`), never blocks the book.
 - [x] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
-  *(bookforge/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
+  *(akowe/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
   dialogue share, paragraph length, scenes per chapter (scene-break lines), pace fast/steady/slow; audience matched
   from the profile's free text (children / middle grade / young adult / adult, literary +2 grades); findings for
   too hard / too simple, long sentences, low variety, little or only dialogue, chapters that read differently, very
   short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
   next; numbers only, never breaks the report.)*
 - [x] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
-  Done: bookforge/style_card.py — ✒️ My writing style page (paste/upload samples): numbers counted without AI plus an
+  Done: akowe/style_card.py — ✒️ My writing style page (paste/upload samples): numbers counted without AI plus an
   AI summary (quotes checked); a book holds a snapshot (`style_card:<pid>`) that goes into the chapter brief
   (`narrator_style` + a rule) and the editor's context/task; ⚡ run option "Write in my style" (`my_style: true`).
 - [x] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
@@ -263,25 +265,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (`trade_terms:<pid>:<branch>`): scan/AI add terms as research needed, AI answers are advice, only the author verifies.
 - [x] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
   (the 32–41 lamp count, the clock, the gauge reading); early hazards must change later actions.
-  Done: bookforge/physical_state.py + continuity.py — AI + no-AI extraction per scene, checks (count backwards, clock
+  Done: akowe/physical_state.py + continuity.py — AI + no-AI extraction per scene, checks (count backwards, clock
   backwards, hazard dropped), approved state feeds the next chapter's brief; 🧭 Continuity page.
 - [x] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
   flag the weaker one (zero gas pressure vs. "it was the isolator").
-  Done: bookforge/ambiguity.py — two readings per protected mystery (AI or author), AI test with quotes checked word
-  for word, BookForge marks the weaker reading; the writer's brief keeps both open.
+  Done: akowe/ambiguity.py — two readings per protected mystery (AI or author), AI test with quotes checked word
+  for word, Akọwe marks the weaker reading; the writer's brief keeps both open.
 - [x] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
   facts, so checkers never "correct" a deliberate change back to the old story.
-  Done: bookforge/version_ledger.py — fact-by-fact diff against the source bible / variant source, author decisions
+  Done: akowe/version_ledger.py — fact-by-fact diff against the source bible / variant source, author decisions
   (deliberate / restore), sent to the writer's brief and the consistency review.
 - [x] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
   plus what each can observe and falsely assumes; at least one action per main character that serves
   their own goal, not the theme.
-  Done: bookforge/character_state.py — 0-10 values (book's own list), observes / assumes / own action per scene, checks
+  Done: akowe/character_state.py — 0-10 values (book's own list), observes / assumes / own action per scene, checks
   (big jump, no own-goal action), latest state in the next chapter's brief.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
-- [ ] **B1** 🖼 Images: hook BookForge up to image generation — Stable Diffusion (AutoInjector already has
+- [ ] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
   an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image
   AIs; pictures stored as book assets with the right permissions.
 - [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
@@ -289,7 +291,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
 - [ ] **B4** 🧭 Local AI book manager (LATER — not started): a local LLM (runs on the user's PC) acts as
-  the project manager for the book. BookForge still runs the book by itself; the manager rides alongside:
+  the project manager for the book. Akọwe still runs the book by itself; the manager rides alongside:
   - **Guide:** explains in plain words what's happening, which step the book is on, what's next, and why.
   - **Live changes:** the user says "change X" mid-run; the manager pauses at a safe point, makes the
     change (bible, outline, character, chapter brief, settings), and resumes — with run consent and approvals.
@@ -301,12 +303,12 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ### Other ideas parked from earlier lists (not scheduled)
 
-- Merge BookForge into the AutoInjector app (one app, one launcher).
+- Merge Akọwe into the AutoInjector app (one app, one launcher).
 - Print-ready PDF: embedded fonts, print-on-demand trim sizes, margins/bleed.
 - Official EPUB check installed by default (EPUBCheck needs Java).
 - Guided first-time tour; notifications when the AI finishes or needs approval; dark mode / larger text.
 - Series support: reuse characters and world across books.
-- GitHub checks for BookForge (see Problems).
+- GitHub checks for Akọwe (see Problems).
 
 ## Problems to come back to
 
@@ -332,13 +334,13 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   not be saved and was skipped"); (3) an entry VALIDATE refused was set aside and replaced from a NEW world sketch, where
   the set-aside draft still counted as "name taken", so the AI invented a different person; (4) nothing checked, before
   the outline, that the main character was approved canon. Fix: (a) refused entries are made again under the same name
-  with BookForge's exact problems (form, save and VALIDATE; at most 2 rounds; what still fails is a ⚠️ event
+  with Akọwe's exact problems (form, save and VALIDATE; at most 2 rounds; what still fails is a ⚠️ event
   `CANON_ENTRY_REFUSED` naming it); set-aside drafts no longer block their name; (b) after the canon step and before the
   outline the run checks the main characters (people named in the idea, the Bible Builder's character with sheet role
   "main", a POV a refused outline needed) and makes any missing one (bounded); if that fails the run stops with
   `PROTAGONIST_MISSING` naming the character and the refusal reasons; (c) the guided "Make my book" outline step shows
   ⚠️ for a missing main character with ✨ Make “name” (a draft for the author to approve) or ✔ Approve its waiting draft
-  (`bookforge/protagonist.py`). Limits: names in the idea are found by a heuristic (two or more capitalised words, no
+  (`akowe/protagonist.py`). Limits: names in the idea are found by a heuristic (two or more capitalised words, no
   place word like Harbour/Ferry/Street, not an existing place or group); a one-word name ("Odile …") is only caught
   through the Bible Builder's "main" mark or the outline's POV.
 
@@ -379,7 +381,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   audience targets are rules of thumb (not tuned on real books yet).
 
 - **P32–P35 — not tried with real AIs or a real book.** Tested with the deterministic fake AI and the generic mock
-  (which answers the tracker with an empty list: then only BookForge's own reading is kept). On the first real book
+  (which answers the tracker with an empty list: then only Akọwe's own reading is kept). On the first real book
   check: (1) does the tracker's scene split match the chapter (it follows `* * *` / `---` breaks and the scene cards);
   (2) `physical_state.extract` is English-only keyword/number patterns (time, light, tide, weather, footing, hazard
   words, "the 32nd lamp", "the gauge read 40 psi") — expect misses and some noise ("two men" is ignored, but any count
@@ -387,18 +389,18 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   "big jump" check (≥ 5) fire on AI noise; (4) the two-readings test sends the whole book (or the P13 per-chapter
   digest above 60 000 characters) — a digest may miss the passage that contradicts a reading.
 - **P32–P35 design choices to confirm:** (a) tracked state is companion data (`physical_state:` /
-  `character_state:` / `ambiguity:` / `version_ledger:<pid>:<branch>`), included in book.bookforge and in
+  `character_state:` / `ambiguity:` / `version_ledger:<pid>:<branch>`), included in book.akowe and in
   Reports/Continuity.md of the book folder, not in book-bible.json (a rerun tracks its new chapters again); (b) only
   APPROVED state reaches the next chapter's writer — a run tracks each chapter right after it is approved (one extra AI
   call per chapter) and approves the state under the run consent; outside runs the author presses ✔ Approve; (c)
   tracking is tied to the pipeline's "scenes" switch (the baseline preset does not track, so P14 comparisons stay
-  fair); (d) a busy or failing AI never holds a run up: BookForge's own reading is kept with a ⚠️ note; (e) the
+  fair); (d) a busy or failing AI never holds a run up: Akọwe's own reading is kept with a ⚠️ note; (e) the
   two-readings test and the readings are on request only (🧭 Continuity page), not run steps; (f) the ledger starts
   every change as "unresolved" — the writer is still told not to change unresolved items back, only to follow the
   current bible; a variant made from scratch has almost everything "unresolved"; (g) ✍ Write all chapters does not
-  track (press 🧭 Track on the page); (h) the AI jobs cannot be resumed after a BookForge restart (start them again).
-- **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
-  v1.2 bridge and the desktop app's real `bookforge-bridge.js` (fake host `--site-state`), not with real
+  track (press 🧭 Track on the page); (h) the AI jobs cannot be resumed after an Akọwe restart (start them again).
+- **P18.9 / P3.1 (Akọwe side) — not yet tried against the live sites.** Tested with fakes, an in-process
+  v1.2 bridge and the desktop app's real `akowe-bridge.js` (fake host `--site-state`), not with real
   ChatGPT/Claude/Gemini windows. On the first real run check that the run window's "AIs:" line matches the
   AutoInjector panel and that a logged-out site is skipped.
 - **P3.1 design choice to confirm:** when a Make-a-book run (or the book profile) names one AI, that AI writes and
@@ -406,7 +408,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   An explicitly picked AI is never replaced while it is being repaired: that work waits instead of moving.
 - ~~**P18.9 — the desktop e2e harness cannot answer check-ins.**~~ **Resolved:** `test/fixtures/fake-chat.html`
   now answers check-ins ("Reply with only this word: X" → X) and teach prompts ("Repeat this number: 1234" → 1234);
-  `BOOKFORGE_PRERUN_CHECKIN=0` was removed from `bookforge/tests/campaign/bridge/test_bridge_e2e_autoinjector.py`
+  `AKOWE_PRERUN_CHECKIN=0` was removed from `akowe/tests/campaign/bridge/test_bridge_e2e_autoinjector.py`
   and `pytest -q tests/campaign/bridge` passes (42 passed; that e2e file alone 32/32).
 - **P18.1–P18.8 (desktop) — not tried against the live sites.** Everything was tested with realistic fake pages
   (jsdom-free fake DOM, real Chromium, and the real Electron app with `fake-chat.html`), not with logged-in
@@ -440,14 +442,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   rejected rewrite; the copied reviews say `copied_from_version`); (c) when the author's standing auto-approve is on,
   a run now approves chapters after the editor under the run consent instead of the auto-approve label; (d) the
   rewrite only covers chapters (C02) — premise/plot/outline get notes only; (e) "keep" notes that are not exact quotes
-  cannot be checked by BookForge after a rewrite (only quotes are).
+  cannot be checked by Akọwe after a rewrite (only quotes are).
 - ~~**Desktop e2e flake seen during Section 2 (desktop-app, not changed here).** `tests/campaign/bridge/
   test_bridge_e2e_autoinjector.py` failed in 3 of ~10 runs with the Section 2 code (passes alone 6/7, baseline 4/4 +
   one full run): after the forced TIMEOUT and Resume, the run's pre-run check-in to Gemini and the re-sent chapter
   overlap, and AutoInjector logs `untagged-reply-accepted … a check-in answer` for Gemini's chapter reply, so the
-  BookForge request never gets its answer and the run is still "running" when the 170 s budget ends. The editor adds
+  Akọwe request never gets its answer and the run is still "running" when the 170 s budget ends. The editor adds
   ~5 s of AI calls per run, which shifts timing; the race itself is in the desktop app's check-in/reply matching
-  (P18.1/P18.5). Fix there: a reply that answers a pending BookForge request (or contains JSON) must not be taken as a
+  (P18.1/P18.5). Fix there: a reply that answers a pending Akọwe request (or contains JSON) must not be taken as a
   check-in answer.~~ **Resolved:** a check-in now owns a reply only if the Relay Trace says it answers the check-in's
   own [MSG #] (and nothing else) and it holds the word as a whole word (it used to match any reply containing the
   word, e.g. "harbor" in a chapter); bridge requests and check-ins no longer interleave; e2e 10/10 passes.
@@ -527,22 +529,22 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   reply selector is read on its own when it matches (built-in ones only when it doesn't). `test/verify-relay-trace
   .test.js` (not in the unit list) compares against origin/main's relay-trace and already fails there on one
   pre-existing case, unrelated to P18.
-- **P16 limits to know:** "This BookForge book only" relies on BookForge pushing `/v1/status` with `project {id,
+- **P16 limits to know:** "This Akọwe book only" relies on Akọwe pushing `/v1/status` with `project {id,
   title}` before its requests; requests made before any status go to an unnamed book, and a request is filed under the
   project that was current when it *started* (a book switch mid-request is not split). Replies captured before P16 have
   no book tag, so older runs can only be extracted by time range / Everything. Only the AIs' replies are in the
-  conversation section (BookForge's prompts are never stored by the app). Path redaction covers home-folder paths
+  conversation section (Akọwe's prompts are never stored by the app). Path redaction covers home-folder paths
   (`~`, `/home/x`, `/Users/x`, `C:\Users\x`); a path outside any home folder (e.g. `D:\Private\…`) is kept, and a
-  file name with spaces after the last folder may keep its last word. Not yet tried in a real BookForge run.
+  file name with spaces after the last folder may keep its last word. Not yet tried in a real Akọwe run.
 - **P20 / P21 — not tried on a real Windows computer.** Tested on Linux (unit, fake-AI runs, Playwright 27/27). On
-  the first Windows run check: (1) the default folder is `%USERPROFILE%\Documents\BookForge Books` — when Documents is
-  redirected (OneDrive “Back up my folders”, a company policy) the real Documents known folder may be elsewhere; BookForge
-  does not call `SHGetKnownFolderPath` (it falls back to `~\BookForge Books` only when `%USERPROFILE%\Documents` is
+  the first Windows run check: (1) the default folder is `%USERPROFILE%\Documents\Akowe Books` — when Documents is
+  redirected (OneDrive “Back up my folders”, a company policy) the real Documents known folder may be elsewhere; Akọwe
+  does not call `SHGetKnownFolderPath` (it falls back to `~\Akowe Books` only when `%USERPROFILE%\Documents` is
   missing) — change it in Settings if so; (2) 📂 Open folder uses `os.startfile`; (3) antivirus or the search indexer may
   hold a file open: `replace_file` retries for about 2 s, then the save is ⚠️ SAVE_FAILED (the next save tries again);
   (4) paths are kept ≤ 200 characters by shortening the title; a very deep books folder is refused (SAVE_PATH_TOO_LONG).
 - **P20 / P21 design choices to confirm:** (a) a book's folder keeps its first name when the title changes (stable,
-  never moved behind the author's back); (b) every save rewrites only changed files, but `book.bookforge` changes on
+  never moved behind the author's back); (b) every save rewrites only changed files, but `book.akowe` changes on
   every step, so a progress save of a long novel rewrites a package of several MB each time (at most every 2 minutes);
   (c) the package holds every version of every record and file (exact restore) — opening a saved book on the same
   computer copies all of it again as a new book; (d) an opened book's project name gets “(opened)” only when the name
@@ -553,7 +555,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   run with a new consent instead); (g) a 🔁 rerun keeps the saved story rules but the outline step still asks the AI
   for rule updates for the plan (one call, accepted under the run consent); (h) uploads are limited to 64 MB
   (`MAX_BODY`): a larger book must be copied into the books folder and opened from the list; (i) auto-save is off in
-  the test suite by default (`BOOKFORGE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
+  the test suite by default (`AKOWE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
 - **P38 / P37.1–P37.4 — not tried against the live sites.** The 🎯 card, pick mode, the 🔢 number teach and the
   general-selector rules were tested on fake pages (fake DOM, jsdom, real Electron with `fake-chat.html`, headless
   Chromium), not on logged-in ChatGPT/Claude/Gemini. On the first real run: (1) 🎯 → AI's reply on each site and check
@@ -567,17 +569,17 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   lazily). If `reply-unreadable` / `capture-stalled` "the reader only sees the start" comes back, its `nodeInfo` now
   also has `containerChars` — copy that log line so the container list can be fixed; 🎯 → AI's reply on Gemini is the
   workaround meanwhile.
-- **P38 design choices to confirm:** (a) the 🎯 "dialog" is a card in the pane's strip (and opened from the BookForge
+- **P38 design choices to confirm:** (a) the 🎯 "dialog" is a card in the pane's strip (and opened from the Akọwe
   ⚠️), not a modal window — a modal would hide the AI panes, which must stay clickable for pick mode; (b) Clear removes
   a new (unsaved) pick first, and the saved one on the next Clear; (c) a saved 🎯 / 🔢 selector wins over one the
   self-repair learned before it, but a selector learned LATER (because the saved one stopped matching) wins over it —
   the chip then shows red ⚠️ for the saved one; (d) the number teach no longer has the user type "Repeat this number:"
   — just the digits; the old `fake-chat.html` "Repeat this number" answer is kept for older tests; (e) the old 🧪
   round-trip test stays as a small button in the 🎯 card; "Test it" is a check-in; (f) after "not working", automatic
-  reasons (a stall, a BookForge timeout) no longer trigger an immediate check-in — only the 5/15/60-minute re-checks
+  reasons (a stall, an Akọwe timeout) no longer trigger an immediate check-in — only the 5/15/60-minute re-checks
   and the user's own actions do.
 - **P37.4 limit:** a short reply (≤ 300 characters, tags stripped) that holds a check-in word from the last hour is
-  treated as a check-in answer (held, not relayed, not nagged) when no BookForge request is waiting for that AI — a
+  treated as a check-in answer (held, not relayed, not nagged) when no Akọwe request is waiting for that AI — a
   genuine short reply that happens to use the same unusual word ("quokka") would be held too.
 - **P36 / P37.5 — not tried with the real AIs.** Tested with the fake AI (unit, Make-a-book runs, Playwright
   `tests/campaign/ui/test_ui_section8.py`). On the first real book check: (1) do web AIs fill `score_evidence` and
@@ -593,7 +595,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   discounts and second editor are reused so the two versions stay comparable; (e) an editor the author picks by hand
   (🖋 with a slot) stays the only editor.
 - **P37.5 design choices to confirm:** (a) "Start without it" does not lock the AI out: if it starts working during the
-  run BookForge uses it again (the run says so); (b) when the AI picked to write is skipped, the run switches to Automatic;
+  run Akọwe uses it again (the run says so); (b) when the AI picked to write is skipped, the run switches to Automatic;
   (c) "unknown" from a v1.2 bridge (not checked yet) counts as not ok and the notice offers 🔁 Check again (a probe, up
   to 45 s); an older v1.0/1.1 bridge without states counts as ok; (d) the server does not refuse a start without the
   check (older pages / API) — the run window shows the ⚠️ notice instead.
@@ -630,13 +632,13 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (d) the timeline checker never edits text (fixing a number needs the author's decision); (e) the writer's chapter
   brief gets the verified/wrong terms (`trade_terms`, ≤ 1 200 chars); research-needed terms only when the plan names
   them; (f) the editor's context gets `fact_checks` as data (no change to `editor_rubric.py`), so the AI editor may or
-  may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.bookforge` (all
+  may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.akowe` (all
   companion settings do) but are now in the book bible too (`trade_terms` with the author's ✔/✕ decisions and the story year, `repeat_labels`), and a 🔁 rerun starts with them (FIXED 2026-10-25).
-- **GitHub checks don't cover BookForge.** *Addressed:* `.github/workflows/bookforge-tests.yml` runs on PRs and
-  pushes to main that touch `bookforge/**` (or the Node bridge files the cross-process tests use). Job `test`
-  installs `bookforge/requirements.txt` + `requirements-test.txt` on Python 3.13 with Node 22 and runs
-  `python -m pytest -q` in `bookforge/` (UI tests skip there: no Playwright); job `ui-test` installs Playwright +
+- **GitHub checks don't cover Akọwe.** *Addressed:* `.github/workflows/akowe-tests.yml` runs on PRs and
+  pushes to main that touch `akowe/**` (or the Node bridge files the cross-process tests use). Job `test`
+  installs `akowe/requirements.txt` + `requirements-test.txt` on Python 3.13 with Node 22 and runs
+  `python -m pytest -q` in `akowe/` (UI tests skip there: no Playwright); job `ui-test` installs Playwright +
   Chromium and runs `tests/campaign/ui`. Still not on CI: the AutoInjector desktop-app bridge e2e
   (`tests/campaign/bridge`, needs `desktop-app/node_modules`), EPUBCheck and LibreOffice checks (skipped there).
-  Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so BookForge-only PRs (Sections 3–5) were merged
+  Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so Akọwe-only PRs (Sections 3–5) were merged
   on the full local suite.

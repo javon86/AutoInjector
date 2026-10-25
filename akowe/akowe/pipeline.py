@@ -40,24 +40,24 @@ KEY = "pipeline:{pid}"
 def clean(body) -> dict:
     """{preset, flags} from a request ({"preset": "full"|"baseline"} or {"flags": {...}} or both); unknown keys are
     refused, missing flags are on."""
-    from .errors import BookforgeError  # noqa: PLC0415
+    from .errors import AkoweError  # noqa: PLC0415
     if body in (None, "", {}):
         return {"preset": "full", "flags": dict(PRESETS["full"])}
     if isinstance(body, str):
         body = {"preset": body}
     if not isinstance(body, dict):
-        raise BookforgeError("INVALID_INPUT", "/pipeline", "pipeline: {preset: full|baseline} or {flags: {...}}",
+        raise AkoweError("INVALID_INPUT", "/pipeline", "pipeline: {preset: full|baseline} or {flags: {...}}",
                              status="REJECTED")
     pre = body.get("preset")
     if pre not in (None, "", "full", "baseline", "custom"):
-        raise BookforgeError("INVALID_INPUT", "/pipeline/preset", "pipeline preset: full, baseline or custom",
+        raise AkoweError("INVALID_INPUT", "/pipeline/preset", "pipeline preset: full, baseline or custom",
                              status="REJECTED")
     flags = dict(PRESETS.get(pre or "full") or PRESETS["full"])
     raw = body.get("flags")
     if raw is not None:
         if not isinstance(raw, dict) or any(k not in FLAGS for k in raw) or \
                 any(not isinstance(v, bool) for v in raw.values()):
-            raise BookforgeError("INVALID_INPUT", "/pipeline/flags", "pipeline flags: editor, scenes, voices, rules, "
+            raise AkoweError("INVALID_INPUT", "/pipeline/flags", "pipeline flags: editor, scenes, voices, rules, "
                                  "planned — each true or false", status="REJECTED")
         flags.update(raw)
     return {"preset": preset_of(flags), "flags": flags}

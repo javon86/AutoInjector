@@ -1,4 +1,4 @@
-"""Subprocess BookForge server for crash tests: the real App + HTTP handler with the deterministic fake AI.
+"""Subprocess Akọwe server for crash tests: the real App + HTTP handler with the deterministic fake AI.
 
 Usage: python fault_server.py <data_dir> <token> [--kill-after-commit N] [--kill-before-commit N] [--kill-when SQL]
 Prints "PORT <n>" when it listens. With --kill-after-commit N the process SIGKILLs itself right after the N-th
@@ -25,9 +25,9 @@ for p in (str(ROOT), str(TESTS)):
 
 from http.server import ThreadingHTTPServer  # noqa: E402
 
-from bookforge import providers as prov_mod  # noqa: E402
-from bookforge.jobs import RetryPolicy  # noqa: E402
-from bookforge.server import App, make_handler  # noqa: E402
+from akowe import providers as prov_mod  # noqa: E402
+from akowe.jobs import RetryPolicy  # noqa: E402
+from akowe.server import App, make_handler  # noqa: E402
 
 from autobook_fake import BookFakeAI  # noqa: E402
 

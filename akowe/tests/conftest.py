@@ -11,15 +11,15 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 # 💾 P20: the test suite never saves into the real Documents folder, and auto-save is off unless a test turns it on
 # (tests/test_section6.py does, with its own books folder per test).
-os.environ.setdefault("BOOKFORGE_BOOKS_DIR", str(Path(tempfile.gettempdir()) / f"bookforge-test-books-{os.getpid()}"))
-os.environ.setdefault("BOOKFORGE_AUTOSAVE", "0")
+os.environ.setdefault("AKOWE_BOOKS_DIR", str(Path(tempfile.gettempdir()) / f"akowe-test-books-{os.getpid()}"))
+os.environ.setdefault("AKOWE_AUTOSAVE", "0")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from bookforge.contracts import get_package  # noqa: E402
-from bookforge.engine import Engine  # noqa: E402
-from bookforge.requests import build_request, candidate_payload  # noqa: E402
-from bookforge.store import Store  # noqa: E402
+from akowe.contracts import get_package  # noqa: E402
+from akowe.engine import Engine  # noqa: E402
+from akowe.requests import build_request, candidate_payload  # noqa: E402
+from akowe.store import Store  # noqa: E402
 
 PRINCIPAL = "author-1"
 

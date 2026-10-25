@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from bookforge.assist import AssistService
-from bookforge.book_path import BookPath, save_profile
-from bookforge.errors import BookforgeError
-from bookforge.review import REVIEW_SCHEMA, ReviewService, current_task, keep_refs
+from akowe.assist import AssistService
+from akowe.book_path import BookPath, save_profile
+from akowe.errors import AkoweError
+from akowe.review import REVIEW_SCHEMA, ReviewService, current_task, keep_refs
 
 from test_server import call, server  # noqa: F401
 
@@ -30,7 +30,7 @@ class FakeAI:
     def submit(self, slot, system, user, schema):
         self.calls.append({"system": system, "schema": schema, "user": user})
         if self.fail:
-            raise BookforgeError("UPSTREAM_UNAVAILABLE", "", "fake bridge down")
+            raise AkoweError("UPSTREAM_UNAVAILABLE", "", "fake bridge down")
         if "verdict" in (schema.get("properties") or {}):
             return {"verdict": self.verdict, "reasons": ["It fits the book.", "Clear."],
                     "suggested_changes": [] if self.verdict == "APPROVE" else ["Name the harbor."],
@@ -82,7 +82,7 @@ def test_queue_order_filters_and_approve_all(h, rv):
     assert ids == [c["record_id"], p["record_id"]]  # A before B (book-process order)
     assert q["items"][0]["group"].startswith("A · ") and q["items"][0]["made_by"]["kind"] == "you"
     assert q["count"] == 2 and q["settings"]["auto_approve"] is False
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         rv.approve(h.principal, h.project_id, "main", {"record_ids": ids})
     assert exc.value.code == "APPROVAL_REQUIRED"
     # a stale version number is refused in plain words and stays in the list
@@ -127,7 +127,7 @@ def test_ai_review_never_auto_approves_when_off_and_settings_need_consent(h, rv)
     assert h.store.history(h.project_id, "main", p["record_id"])[-1]["lifecycle"] == "DRAFT"
     # stored as advice in settings, not as a record
     assert h.store.get_setting(f"ai_reviews:{h.project_id}:main")[f"{p['record_id']}:1"]["verdict"] == "APPROVE"
-    with pytest.raises(BookforgeError) as exc:
+    with pytest.raises(AkoweError) as exc:
         rv.save_settings(h.principal, h.project_id, "main", {"auto_approve": True})
     assert exc.value.code == "APPROVAL_REQUIRED"
     assert rv.settings(h.project_id)["auto_approve"] is False

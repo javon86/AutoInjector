@@ -1,12 +1,12 @@
-// test/bookforge-bridge.test.js — exercises the REAL bookforge-bridge.js HTTP
+// test/akowe-bridge.test.js — exercises the REAL akowe-bridge.js HTTP
 // server (pure Node, no Electron) against contract v1
-// (docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md) with fake sendToSite/siteReady.
-// Run with: node test/bookforge-bridge.test.js
+// (docs/AKOWE_AUTOINJECTOR_BRIDGE.md) with fake sendToSite/siteReady.
+// Run with: node test/akowe-bridge.test.js
 const http = require("http");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const bridgeMod = require("../bookforge-bridge");
+const bridgeMod = require("../akowe-bridge");
 
 let passed = 0;
 let failed = 0;
@@ -297,7 +297,7 @@ async function main() {
     await request(A.port, "GET", "/v1/health", { headers: { "X-AutoInjector-Selftest": "1" } });
     st = A.bridge.status();
     assert(st.lastContactAt === t && st.lastExternalContactAt === null, "a self-test health check updates lastContactAt only");
-    assert(!seen.some((e) => e.kind === "connected"), "the app's own link test never produces 'BookForge connected'");
+    assert(!seen.some((e) => e.kind === "connected"), "the app's own link test never produces 'Akọwe connected'");
     t += 1000;
     await request(A.port, "GET", "/v1/health");
     st = A.bridge.status();
@@ -475,8 +475,8 @@ async function main() {
     r = await request(p9, "POST", "/v1/pair", { token: null, body: { code: "WRONGWRONG99" }, headers: { Origin: "https://evil.example" } });
     assert(r.status === 403, "POST /v1/pair with a browser Origin header -> 403");
     assert(S9.bridge.status().pairing.locked === false, "those refusals never trip the pairing lockout");
-    r = await request(p9, "POST", "/v1/pair", { token: null, body: { code: code9, client: "bookforge" } });
-    assert(r.status === 200 && r.json.token === TOKEN, "BookForge's own JSON pairing still works afterwards");
+    r = await request(p9, "POST", "/v1/pair", { token: null, body: { code: code9, client: "akowe" } });
+    assert(r.status === 200 && r.json.token === TOKEN, "Akọwe's own JSON pairing still works afterwards");
     await S9.bridge.stop();
   }
 
@@ -497,18 +497,18 @@ async function main() {
     const pp = P.status().port;
     const pair = (body, extra = {}) => request(pp, "POST", "/v1/pair", Object.assign({ token: null, body }, extra));
     assert(typeof P.createPairingCode === "function", "createPairingCode() is exposed");
-    let res = await pair({ code: "AAAAAAAAAAAA", client: "bookforge" });
+    let res = await pair({ code: "AAAAAAAAAAAA", client: "akowe" });
     assert(res.status === 401 && res.json.ok === false && res.json.error === "PAIRING_CODE_INVALID", "no code made yet -> 401 PAIRING_CODE_INVALID");
     const code = P.createPairingCode();
     assert(/^[A-Za-z0-9]{12}$/.test(code), `pairing code is 12 chars of [A-Za-z0-9] (${code.length})`);
     const codes = new Set(); for (let i = 0; i < 50; i++) codes.add(bridgeMod.generatePairingCode());
     assert(codes.size === 50, "pairing codes are random (50 distinct)");
     assert(P.status().pairing.pending === true && !JSON.stringify(P.status()).includes(code), "status() says a code is pending but never shows the code");
-    res = await pair({ code: code.toLowerCase() === code ? code.toUpperCase() : code.toLowerCase(), client: "bookforge" });
+    res = await pair({ code: code.toLowerCase() === code ? code.toUpperCase() : code.toLowerCase(), client: "akowe" });
     assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID", "wrong code (case matters) -> 401");
-    res = await pair({ code, client: "bookforge" });
+    res = await pair({ code, client: "akowe" });
     assert(res.status === 200 && res.json.ok === true && res.json.token === TOKEN && res.json.bridge_version === "1.2", "right code, no Authorization header -> 200 with the connection key + bridge_version 1.2");
-    res = await pair({ code, client: "bookforge" });
+    res = await pair({ code, client: "akowe" });
     assert(res.status === 401 && res.json.error === "PAIRING_CODE_INVALID" && !res.text.includes(TOKEN), "a code works only once (second use -> 401, no key)");
     assert(P.status().pairing.pending === false && P.status().pairing.lastPairedAt === clock, "status() records when pairing happened");
     const c1 = P.createPairingCode();
@@ -520,7 +520,7 @@ async function main() {
     assert(res.status === 410 && res.json.error === "PAIRING_CODE_EXPIRED", "expired code (after 120 s) -> 410 PAIRING_CODE_EXPIRED");
     const c3 = P.createPairingCode();
     clock += bridgeMod.PAIR_CODE_TTL_MS - 1000;
-    res = await pair({ code: c3, client: "bookforge" });
+    res = await pair({ code: c3, client: "akowe" });
     assert(res.status === 200 && res.json.token === TOKEN, "a code still works just before 120 s");
     for (const [extra, what] of [[{ rawBody: Buffer.from("nope") }, "non-JSON"], [{ body: [1] }, "array"], [{ body: {} }, "missing code"], [{ body: { code: 123 } }, "numeric code"], [{ body: { code: "x", client: 5 } }, "non-string client"]]) {
       res = await request(pp, "POST", "/v1/pair", Object.assign({ token: null }, extra));
@@ -560,8 +560,8 @@ async function main() {
     await P.stop();
   }
 
-  // --- contract v1.1: status from BookForge ----------------------------------------
-  console.log("status from BookForge (contract v1.1)");
+  // --- contract v1.1: status from Akọwe ----------------------------------------
+  console.log("status from Akọwe (contract v1.1)");
   {
     let clock = 5_000_000;
     const S = bridgeMod.createBridge({ port: 0, getToken: () => TOKEN, sendToSite: async () => ({ ok: true }), now: () => clock });
@@ -569,7 +569,7 @@ async function main() {
     const sp = S.status().port;
     const SECRET_TITLE = "Chapter about TOPSECRET-TITLE-q1";
     const good = {
-      app: "bookforge", version: 1, bookforge_url: "http://127.0.0.1:8780/",
+      app: "akowe", version: 1, akowe_url: "http://127.0.0.1:8780/",
       project: { id: "p-1", title: "The Lantern Keeper" },
       current_task: { set: "B", op: "B03", title: "Main plot", state: "running", message: "Writing the main plot with Claude", url: "http://127.0.0.1:8780/#/op/B03" },
       working_on: { op: "B03", title: SECRET_TITLE, started_at: "2026-10-17T10:00:00Z" },
@@ -577,16 +577,16 @@ async function main() {
       checklist: [{ id: "A", title: "Book profile", set: "A", state: "done" }, { id: "B", title: "Story bible", set: "B", state: "current" }],
       done: 1, total: 9, updated_at: 1792231200
     };
-    assert(S.status().bookforge === null && S.bookforgeStatus() === null, "status().bookforge is null before BookForge reports");
+    assert(S.status().akowe === null && S.akoweStatus() === null, "status().akowe is null before Akọwe reports");
     let res = await request(sp, "POST", "/v1/status", { token: null, body: good });
     assert(res.status === 401, "POST /v1/status without the key -> 401");
     res = await request(sp, "POST", "/v1/status", { body: good });
     assert(res.status === 200 && res.json.ok === true, "POST /v1/status with the key -> 200 {ok:true}");
-    let b = S.status().bookforge;
-    assert(b && b.project.title === "The Lantern Keeper" && b.current_task.op === "B03" && b.current_task.set === "B" && b.approvals.count === 2 && b.approvals.items.length === 2 && b.checklist.length === 2 && b.done === 1 && b.total === 9, "latest status is exposed as status().bookforge");
+    let b = S.status().akowe;
+    assert(b && b.project.title === "The Lantern Keeper" && b.current_task.op === "B03" && b.current_task.set === "B" && b.approvals.count === 2 && b.approvals.items.length === 2 && b.checklist.length === 2 && b.done === 1 && b.total === 9, "latest status is exposed as status().akowe");
     assert(b.receivedAt === clock && b.stale === false && b.age_ms === 0, "status carries receivedAt and stale:false while fresh");
     assert(b.working_on.started_at === Date.parse("2026-10-17T10:00:00Z") && b.updated_at === 1792231200000, "started_at / updated_at normalised to epoch ms (ISO or seconds)");
-    assert(typeof S.status().lastExternalContactAt === "number", "a status report counts as contact from BookForge");
+    assert(typeof S.status().lastExternalContactAt === "number", "a status report counts as contact from Akọwe");
     // sanitising
     const evil = JSON.parse(JSON.stringify(good));
     evil.extra_field = "nope";
@@ -597,36 +597,36 @@ async function main() {
     evil.approvals.url = "javascript:alert(1)";
     evil.approvals.items = Array.from({ length: 50 }, (_, i) => ({ op: `X${i}`, title: "t", junk: 1 }));
     evil.checklist = Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, title: "row", set: "C", state: "todo" }));
-    evil.bookforge_url = "http://192.168.1.5:8780/";
+    evil.akowe_url = "http://192.168.1.5:8780/";
     res = await request(sp, "POST", "/v1/status", { body: evil });
-    b = S.status().bookforge;
+    b = S.status().akowe;
     assert(res.status === 200 && !("extra_field" in b) && !("extra" in b.current_task) && !("junk" in b.approvals.items[0]), "unknown fields are dropped (whitelist)");
     assert(b.project.title.length === 200 && b.current_task.message.length === 500, "titles capped at 200 chars, message at 500");
     assert(b.approvals.items.length === 20 && b.checklist.length === 40, "approval items capped at 20, checklist at 40");
-    assert(b.current_task.url === null && b.approvals.url === null && b.bookforge_url === null, "non-loopback / non-http URLs are dropped");
+    assert(b.current_task.url === null && b.approvals.url === null && b.akowe_url === null, "non-loopback / non-http URLs are dropped");
     res = await request(sp, "POST", "/v1/status", { body: Object.assign({}, good, { current_task: Object.assign({}, good.current_task, { url: "http://localhost:8780/#/op/B03" }) }) });
-    assert(S.status().bookforge.current_task.url === "http://localhost:8780/#/op/B03", "http://localhost URLs are kept");
-    for (const [extra, what] of [[{ rawBody: Buffer.from("{bad") }, "non-JSON"], [{ body: [1] }, "array"], [{ body: { app: "other" } }, "app not bookforge"]]) {
+    assert(S.status().akowe.current_task.url === "http://localhost:8780/#/op/B03", "http://localhost URLs are kept");
+    for (const [extra, what] of [[{ rawBody: Buffer.from("{bad") }, "non-JSON"], [{ body: [1] }, "array"], [{ body: { app: "other" } }, "app not akowe"]]) {
       res = await request(sp, "POST", "/v1/status", extra);
       assert(res.status === 400 && res.json.error === "BAD_REQUEST", `bad status body (${what}) -> 400`);
     }
     const big = Object.assign({}, good, { pad: "x".repeat(bridgeMod.MAX_STATUS_BYTES + 10) });
     res = await request(sp, "POST", "/v1/status", { body: big });
     assert(res.status === 413 && res.json.error === "TOO_LARGE", "status body over 32 KiB -> 413");
-    assert(S.status().bookforge.current_task.url === "http://localhost:8780/#/op/B03", "a rejected status leaves the last good one in place");
+    assert(S.status().akowe.current_task.url === "http://localhost:8780/#/op/B03", "a rejected status leaves the last good one in place");
     // staleness
     clock += bridgeMod.BF_STATUS_STALE_MS + 5000;
-    b = S.status().bookforge;
+    b = S.status().akowe;
     assert(b && b.stale === true && b.age_ms === bridgeMod.BF_STATUS_STALE_MS + 5000, "after 90 s without an update the status is marked stale:true (kept, with its age)");
     res = await request(sp, "POST", "/v1/status", { body: good });
-    assert(S.status().bookforge.stale === false, "a new report makes it fresh again");
+    assert(S.status().akowe.stale === false, "a new report makes it fresh again");
     // activity: only "status received", never the content
     const sev = S.status().events.filter((e) => e.kind === "status");
     assert(sev.length === 2, `"status received" is recorded only on the first report and after a gap (${sev.length})`);
     const evDump = JSON.stringify(S.status().events);
     assert(!evDump.includes("Lantern") && !evDump.includes("TOPSECRET-TITLE") && !evDump.includes("Main plot"), "status content never goes into the activity ring");
     assert(S.status().counters.status_updates >= 4, "status updates are counted");
-    assert(/BookForge sent an update/.test(bridgeMod.describeEvent({ kind: "status" }).say), "status events have a plain-English line");
+    assert(/Akọwe sent an update/.test(bridgeMod.describeEvent({ kind: "status" }).say), "status events have a plain-English line");
     // Health and complete still behave as v1
     res = await request(sp, "GET", "/v1/health");
     assert(res.status === 200 && res.json.sites && res.json.sites.claude, "v1 /v1/health unchanged");
@@ -704,9 +704,9 @@ async function main() {
     h = await spawnHost(["--pairing-code-file", codeFile, "--status-file", statusFile]);
     const fhCode = fs.readFileSync(codeFile, "utf8");
     assert(/^[A-Za-z0-9]{12}$/.test(fhCode), "--pairing-code-file writes a 12-char pairing code before READY");
-    r = await request(h.port, "POST", "/v1/pair", { token: null, body: { code: fhCode, client: "bookforge" } });
+    r = await request(h.port, "POST", "/v1/pair", { token: null, body: { code: fhCode, client: "akowe" } });
     assert(r.status === 200 && r.json.token === TOKEN, "fake host: /v1/pair with that code returns the key");
-    r = await request(h.port, "POST", "/v1/status", { body: { app: "bookforge", version: 1, done: 2, total: 5, checklist: [] } });
+    r = await request(h.port, "POST", "/v1/status", { body: { app: "akowe", version: 1, done: 2, total: 5, checklist: [] } });
     let wrote = null;
     for (let i = 0; i < 60 && !wrote; i++) { await sleep(25); try { wrote = JSON.parse(fs.readFileSync(statusFile, "utf8")); } catch (_) {} }
     assert(r.status === 200 && wrote && wrote.done === 2 && wrote.total === 5, "--status-file receives the sanitized status");

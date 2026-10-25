@@ -1,5 +1,5 @@
 // test/self-repair-main.test.js — P18 inside the REAL main.js (mock Electron, see
-// mock-electron.js) with the REAL BookForge bridge over HTTP:
+// mock-electron.js) with the REAL Akọwe bridge over HTTP:
 //   * P18.5 regression, the exact Gemini case from the first real run: the answer
 //     ([TO: USER] … "word": "tundra" … [FROM: GEMINI]) was captured while the send
 //     was still retrying SEND_NOT_CONFIRMED and then rejected as "already
@@ -8,11 +8,11 @@
 //     the AI was seen writing after the message went out.
 //   * P18.1: a check-in (🩺 / POST /v1/probe) — its answer is never shown in the
 //     conversation and never relayed; busy AIs are skipped.
-//   * P18.1 regression (the BookForge e2e flake): a check-in waits, a BookForge
+//   * P18.1 regression (the Akọwe e2e flake): a check-in waits, an Akọwe
 //     chapter that happens to contain the check-in word arrives -> the bridge gets
 //     it (200), the check-in is not satisfied by it, the AI is not marked broken,
 //     and the check-in's own late answer is still kept out of the conversation.
-//   * P18.1: no check-in while a BookForge prompt is in flight or in its late window.
+//   * P18.1: no check-in while an Akọwe prompt is in flight or in its late window.
 //   * P18.4 through main: a ChatGPT page whose replies use unknown markup (fake
 //     DOM) -> check-in fails NO_REPLY_FOUND -> page search learns -> fixed; the
 //     learned selector is saved (versioned, timestamped) and used by the reader.
@@ -36,10 +36,10 @@ process.env.AUTOINJECTOR_PROBE_SEND_TIMEOUT_MS = "4000";
 process.env.AUTOINJECTOR_PROBE_EARLY_MS = "600";
 process.env.AUTOINJECTOR_RELOAD_SETTLE_MS = "50";
 process.env.AUTOINJECTOR_TEACH_POLL_MS = "50";
-process.env.AUTOINJECTOR_CHECKIN_YIELD_MS = "1500"; // a BookForge request waits this long for a typed check-in to settle
-process.env.AUTOINJECTOR_BOOKFORGE_PORT = String(20000 + Math.floor(Math.random() * 20000));
-process.env.AUTOINJECTOR_BOOKFORGE_APP_URL = `http://127.0.0.1:${Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT) + 1}/api/ping`;
-process.env.AUTOINJECTOR_BOOKFORGE_DIR = require("path").join(require("os").tmpdir(), "no-bookforge-here-" + process.pid);
+process.env.AUTOINJECTOR_CHECKIN_YIELD_MS = "1500"; // an Akọwe request waits this long for a typed check-in to settle
+process.env.AUTOINJECTOR_AKOWE_PORT = String(20000 + Math.floor(Math.random() * 20000));
+process.env.AUTOINJECTOR_AKOWE_APP_URL = `http://127.0.0.1:${Number(process.env.AUTOINJECTOR_AKOWE_PORT) + 1}/api/ping`;
+process.env.AUTOINJECTOR_AKOWE_DIR = require("path").join(require("os").tmpdir(), "no-akowe-here-" + process.pid);
 
 const path = require("path");
 const fs = require("fs");
@@ -70,7 +70,7 @@ async function waitUntil(fn, timeout = 6000, step = 25) {
 }
 const call = (ch, p) => mockElectron.__ipcHandlers[ch]({}, p);
 const reg = (s) => mockElectron.__registry[s];
-const PORT = Number(process.env.AUTOINJECTOR_BOOKFORGE_PORT);
+const PORT = Number(process.env.AUTOINJECTOR_AKOWE_PORT);
 function request(method, urlPath, token, body) {
   return new Promise((resolve, reject) => {
     const data = body !== undefined ? Buffer.from(JSON.stringify(body)) : null;
@@ -97,10 +97,10 @@ async function main() {
   await waitUntil(() => reg("chatgpt") && reg("claude") && reg("gemini") && reg("controls-ui"));
   const userData = mockElectron.app.getPath("userData");
   const broadcasts = [];
-  reg("controls-ui").webContents.on("ipc-send", (channel, payload) => { if (channel === "self-repair" || channel === "capture" || channel === "bookforge-activity") broadcasts.push({ channel, payload }); });
-  let st = await call("bookforge:set-enabled", { enabled: true });
+  reg("controls-ui").webContents.on("ipc-send", (channel, payload) => { if (channel === "self-repair" || channel === "capture" || channel === "akowe-activity") broadcasts.push({ channel, payload }); });
+  let st = await call("akowe:set-enabled", { enabled: true });
   assert(st.listening === true, "bridge on");
-  const token = (await call("bookforge:reveal-token")).token;
+  const token = (await call("akowe:reveal-token")).token;
   await waitUntil(async () => { const h = await request("GET", "/v1/health", token); return h.json && ["chatgpt", "claude", "gemini"].every((s) => h.json.sites[s].ready); });
 
   // ---------------------------------------------------------------------------------
@@ -114,7 +114,7 @@ async function main() {
   let r = await request("POST", "/v1/complete", token, { site: "gemini", prompt: "Reply with one JSON object echoing the word tundra.", request_id: "gem-regression-1", timeout_ms: 10000 });
   gw.onSendAttempt = null;
   assert(r.status === 200, `200, not a TIMEOUT (${r.status} ${r.json && r.json.error})`);
-  assert(r.json && /"word": "tundra"/.test(r.json.text) && r.json.text.startsWith("JSON") && !/\[(TO|FROM):/.test(r.json.text), "BookForge gets that answer, envelope stripped");
+  assert(r.json && /"word": "tundra"/.test(r.json.text) && r.json.text.startsWith("JSON") && !/\[(TO|FROM):/.test(r.json.text), "Akọwe gets that answer, envelope stripped");
   assert(r.json && r.json.seq && r.json.seq === r.json.reply_to, "seq == reply_to");
   await sleep(300);
   assert(reg("claude").webContents.sentLog.length === 0, "the bridge's answer was not relayed to Claude (routing gemini->claude is on)");
@@ -181,7 +181,7 @@ async function main() {
   assert(!broadcasts.some((b) => b.channel === "capture" && String(b.payload && b.payload.text).includes(word)), "no capture broadcast carries it");
   let h = await request("GET", "/v1/health", token);
   assert(h.json.bridge_version === "1.2" && h.json.sites.claude.state === "ok" && typeof h.json.sites.claude.last_probe_ok_at === "number" && h.json.sites.claude.ready === true, "health v1.2: claude ok with last_probe_ok_at");
-  // BookForge asks for check-ins; a busy AI is skipped
+  // Akọwe asks for check-ins; a busy AI is skipped
   reg("chatgpt").webContents.generating = true;
   await sleep(120);
   r = await request("POST", "/v1/probe", token, { sites: ["chatgpt", "gemini"] });
@@ -193,26 +193,26 @@ async function main() {
   await call("routing:set", { source: "claude", target: "gemini", enabled: false });
 
   // ---------------------------------------------------------------------------------
-  console.log("\n== P18.1 regression (e2e flake): a check-in waits, a BookForge reply arrives -> it goes to the bridge ==");
+  console.log("\n== P18.1 regression (e2e flake): a check-in waits, an Akọwe reply arrives -> it goes to the bridge ==");
   const logNow = () => fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
   const logLen0 = logNow().length;
   gw.sentLog = [];
   r = await request("POST", "/v1/probe", token, { sites: ["gemini"] });
-  assert(r.status === 202 && r.json.started.join() === "gemini", "BookForge asks for a check-in of Gemini (nobody answers it yet)");
+  assert(r.status === 202 && r.json.started.join() === "gemini", "Akọwe asks for a check-in of Gemini (nobody answers it yet)");
   const probeSent = await waitUntil(() => gw.sentLog.find((x) => /Reply with only this word: [a-z]+/.test(x.text)));
   const gword = /Reply with only this word: ([a-z]+)/.exec(probeSent.text)[1];
   const tTr = (await call("state:get")).transcript.length;
   p = request("POST", "/v1/complete", token, { site: "gemini", prompt: "Write chapter 2 of the story.", request_id: "flake-ch2", timeout_ms: 10000 });
   await sleep(500);
-  assert(!gw.sentLog.some((x) => /Write chapter 2/.test(x.text)), "the BookForge prompt waits while the typed check-in settles (no interleaving)");
+  assert(!gw.sentLog.some((x) => /Write chapter 2/.test(x.text)), "the Akọwe prompt waits while the typed check-in settles (no interleaving)");
   assert(await waitUntil(() => /"kind":"checkin-yield".*"site":"gemini".*"how":"wait"/.test(logNow().slice(logLen0)), 2000), "logged: the request waits for the check-in");
   assert(await waitUntil(() => gw.sentLog.some((x) => /Write chapter 2/.test(x.text)), 4000), "…for a bounded time, then it is typed");
-  // Gemini answers the CHAPTER first — bare text (BookForge asks for no tags), and it
+  // Gemini answers the CHAPTER first — bare text (Akọwe asks for no tags), and it
   // happens to use the check-in word.
   const CHAPTER = `Chapter 2\n\nThe old ${gword} creaked in the wind as Mara climbed toward the ${gword.toUpperCase()}. She did not look back.`;
   gw.currentText = CHAPTER;
   r = await p;
-  assert(r.status === 200 && r.json.text === CHAPTER, `BookForge receives its chapter (${r.status} ${r.json && (r.json.error || "")})`);
+  assert(r.status === 200 && r.json.text === CHAPTER, `Akọwe receives its chapter (${r.status} ${r.json && (r.json.error || "")})`);
   const tail = logNow().slice(logLen0);
   assert(!/"kind":"untagged-reply-accepted"[^\n]*a check-in answer/.test(tail) && !/"kind":"checkin-reply"/.test(tail), "the chapter was never taken as the check-in answer");
   const settled = await waitUntil(async () => { const s = await call("selfrepair:status"); return !s.sites.gemini.running ? s.sites.gemini : null; }, 6000);
@@ -225,16 +225,16 @@ async function main() {
   await sleep(200);
   assert((await call("state:get")).transcript.length === tAfterChapter && tAfterChapter >= tTr, "…and is not shown in the conversation");
 
-  console.log("\n== P18.1: no check-in while a BookForge prompt is in flight or in its late window ==");
+  console.log("\n== P18.1: no check-in while an Akọwe prompt is in flight or in its late window ==");
   cw.sentLog = [];
   p = request("POST", "/v1/complete", token, { site: "claude", prompt: "Write chapter 3 slowly.", request_id: "late-ch3", timeout_ms: 10000 });
   await waitUntil(() => cw.sentLog.some((x) => /Write chapter 3/.test(x.text)));
   r = await request("POST", "/v1/probe", token, { sites: ["claude"] });
-  assert(r.status === 202 && r.json.skipped.claude === "bookforge" && !r.json.started.length, `in flight -> skipped (${JSON.stringify(r.json)})`);
+  assert(r.status === 202 && r.json.skipped.claude === "akowe" && !r.json.started.length, `in flight -> skipped (${JSON.stringify(r.json)})`);
   r = await p;
   assert(r.status === 504 && r.json.typed === true, "the request times out after it was typed (late window)");
   r = await request("POST", "/v1/probe", token, { sites: ["claude"] });
-  assert(r.json.skipped.claude === "bookforge" && !cw.sentLog.some((x) => /Reply with only this word/.test(x.text)), `late window -> skipped, nothing typed (${JSON.stringify(r.json)})`);
+  assert(r.json.skipped.claude === "akowe" && !cw.sentLog.some((x) => /Reply with only this word/.test(x.text)), `late window -> skipped, nothing typed (${JSON.stringify(r.json)})`);
   cw.currentText = "[TO: USER]\nChapter 3, at last.\n[FROM: CLAUDE]";
   r = await waitUntil(async () => { const x = await request("POST", "/v1/complete", token, { site: "claude", prompt: "Write chapter 3 slowly.", request_id: "late-ch3", timeout_ms: 10000 }); return x.status === 200 ? x : null; }, 6000, 200);
   assert(r && r.json.text === "Chapter 3, at last.", "the late answer is collected with the same request_id");
@@ -281,19 +281,19 @@ async function main() {
   append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body"><p>[TO: USER]</p><p>A normal reply after the repair.</p><p>[FROM: CHATGPT]</p></div></div>`);
   ok = await waitUntil(async () => (await call("state:get")).transcript.some((t) => t.site === "chatgpt" && t.text === "A normal reply after the repair."));
   assert(ok, "the reader uses the learned selector: a normal ChatGPT reply is captured again");
-  assert(broadcasts.some((b) => b.channel === "bookforge-activity" && b.payload.event && b.payload.event.kind === "repair" && /Fixed — ChatGPT is working again/.test(b.payload.event.say)), "the panel's activity feed says '✔ Fixed — ChatGPT is working again'");
+  assert(broadcasts.some((b) => b.channel === "akowe-activity" && b.payload.event && b.payload.event.kind === "repair" && /Fixed — ChatGPT is working again/.test(b.payload.event.say)), "the panel's activity feed says '✔ Fixed — ChatGPT is working again'");
 
   // ---------------------------------------------------------------------------------
   console.log("\n== P18.8 + v1.2: logged-out Gemini -> needs_user, 503 {state, problem} ==");
   const gdoc = parseHTML(`<div><h1>Gemini</h1><p>Sign in to continue</p><a href="https://accounts.google.com/ServiceLogin?x">Sign in</a></div>`, { url: "https://gemini.google.com/app" });
   gw.evaluator = async (script) => (script.includes("typeByKeyboard") ? { ok: false, error: "INPUT_NOT_FOUND" } : runScript(script, gdoc));
   r = await request("POST", "/v1/probe", token, { sites: ["gemini"] });
-  assert(r.status === 202 && r.json.started.join() === "gemini", `BookForge asks for a check-in of Gemini (${JSON.stringify(r.json)})`);
+  assert(r.status === 202 && r.json.started.join() === "gemini", `Akọwe asks for a check-in of Gemini (${JSON.stringify(r.json)})`);
   ok = await waitUntil(async () => { const x = (await request("GET", "/v1/health", token)).json.sites.gemini; return x.state === "needs_user" ? x : null; });
   assert(ok && ok.problem === "LOGGED_OUT" && ok.ready === false && typeof ok.since === "number", `health: needs_user LOGGED_OUT, ready false (${JSON.stringify(ok)})`);
   r = await request("POST", "/v1/complete", token, { site: "gemini", prompt: "x", request_id: "nu-1", timeout_ms: 10000 });
   assert(r.status === 503 && r.json.error === "SITE_NOT_READY" && r.json.state === "needs_user" && r.json.problem === "LOGGED_OUT", "complete -> 503 SITE_NOT_READY with state + problem");
-  st = await call("bookforge:status");
+  st = await call("akowe:status");
   assert(st.sites.gemini.repair.state === "needs_user" && st.sites.gemini.ready === false && /log in/i.test((st.sites.gemini.repair.fix || []).join(" ")), "the panel snapshot carries the repair state and what to do");
   assert(st.health.checks.some((c) => c.id === "pane:gemini" && c.level === "bad" && c.why === "needs you"), "overall health: Gemini 'needs you'");
 
@@ -310,7 +310,7 @@ async function main() {
 
   // ---------------------------------------------------------------------------------
   console.log("\n== P18.10 diagnostics + logs: codes and steps only ==");
-  const d = await call("bookforge:diagnostics", {});
+  const d = await call("akowe:diagnostics", {});
   assert(d.ok && /Self-repair chatgpt: state ok/.test(d.text) && /learned assistant\(page-search/.test(d.text) && /Self-repair gemini: state needs_user · problem LOGGED_OUT/.test(d.text), "diagnostics list each AI's repair state, problem and learned parts");
   assert(/tried: .*page_search=LEARNED/.test(d.text) && /Check-ins: every 20 min/.test(d.text), "…what was tried, and the check-in setting");
   const dbg = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
@@ -433,7 +433,7 @@ async function main() {
   assert(reg("gemini").webContents.sentLog.length === gsent0 && !(await call("state:get")).transcript.some((t) => t.site === "claude" && t.text.trim() === lateWord), "…not relayed (routing claude->gemini is on) and not shown in the conversation");
   await call("routing:set", { source: "claude", target: "gemini", enabled: false });
 
-  await call("bookforge:set-enabled", { enabled: false });
+  await call("akowe:set-enabled", { enabled: false });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

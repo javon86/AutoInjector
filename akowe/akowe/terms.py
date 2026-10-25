@@ -36,10 +36,10 @@ from __future__ import annotations
 import logging
 import re
 
-from .errors import BookforgeError
+from .errors import AkoweError
 from .story_rules import _clip, _now, conflict, update_single
 
-log = logging.getLogger("bookforge.terms")
+log = logging.getLogger("akowe.terms")
 
 MAX_ITEMS = 60
 AI_MAX_ITEMS = 12
@@ -217,10 +217,10 @@ def clean_year(v) -> int | None:
     try:
         y = int(v)
     except (TypeError, ValueError):
-        raise BookforgeError("INVALID_INPUT", "/story_year", "the story year must be a year such as 1887",
+        raise AkoweError("INVALID_INPUT", "/story_year", "the story year must be a year such as 1887",
                              status="REJECTED") from None
     if not 1000 <= y <= 2200:
-        raise BookforgeError("INVALID_INPUT", "/story_year", "the story year must be between 1000 and 2200",
+        raise AkoweError("INVALID_INPUT", "/story_year", "the story year must be between 1000 and 2200",
                              status="REJECTED")
     return y
 
@@ -259,7 +259,7 @@ def save(store, pid: str, branch: str, items: list[dict], *, by: str, slot: str 
         for it in items:
             p = prev.get(it["id"])
             if it["status"] != "research_needed" and (p is None or p.get("status") != it["status"]):
-                raise BookforgeError("APPROVAL_REQUIRED", "/items", f"“{it['term']}”: only ✔ Verified / ✕ Wrong (with "
+                raise AkoweError("APPROVAL_REQUIRED", "/items", f"“{it['term']}”: only ✔ Verified / ✕ Wrong (with "
                                      "your confirmation) can mark a term verified or wrong", status="REJECTED")
             if p and p.get("status") == it["status"] and it["status"] != "research_needed":
                 it["verified"] = p.get("verified")
@@ -284,7 +284,7 @@ def seed_from_bible(store, pid: str, branch: str, items, story_year=None) -> dic
     clean = clean_items(items)
     try:
         year = clean_year(story_year)
-    except BookforgeError:
+    except AkoweError:
         year = None
     if not clean and year is None:
         return None
@@ -341,24 +341,24 @@ def decide(store, pid: str, branch: str, *, ids, status: str, note: str = "", us
     """The author's verification: mark terms verified (with what was checked) or wrong (with what to write
     instead), or back to research needed. Needs ``author_confirms``."""
     if author_confirms is not True:
-        raise BookforgeError("APPROVAL_REQUIRED", "/author_confirms", "confirm that you checked these terms "
+        raise AkoweError("APPROVAL_REQUIRED", "/author_confirms", "confirm that you checked these terms "
                              "(author_confirms: true)", status="REJECTED")
     if status not in STATUSES:
-        raise BookforgeError("INVALID_INPUT", "/status", "status: research_needed, verified or wrong",
+        raise AkoweError("INVALID_INPUT", "/status", "status: research_needed, verified or wrong",
                              status="REJECTED")
     if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
-        raise BookforgeError("INVALID_INPUT", "/ids", "ids: the list of term ids to mark", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/ids", "ids: the list of term ids to mark", status="REJECTED")
 
     def change(old):
         if not old:
-            raise BookforgeError("NOT_FOUND", "/ids", "there is no trade-facts list yet", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/ids", "there is no trade-facts list yet", status="REJECTED")
         if version is not None and int(old.get("version") or 0) != version:
             raise conflict("trade-facts list", old.get("version"))
         items = old.get("items") or []
         known = {i["id"] for i in items}
         missing = [i for i in ids if i not in known]
         if missing:
-            raise BookforgeError("NOT_FOUND", "/ids", f"unknown term id(s): {', '.join(missing[:5])}",
+            raise AkoweError("NOT_FOUND", "/ids", f"unknown term id(s): {', '.join(missing[:5])}",
                                  status="REJECTED")
         hist = list(old.get("history") or [])
         hist.append({k: old.get(k) for k in ("version", "items", "made_by", "updated_at")})
@@ -380,7 +380,7 @@ def set_ai_notes(store, pid: str, branch: str, notes: dict, *, slot: str | None,
     """Store an AI's research answers as advice on each term (the status does not change)."""
     def change(old):
         if not old:
-            raise BookforgeError("NOT_FOUND", "/ids", "there is no trade-facts list yet", status="REJECTED")
+            raise AkoweError("NOT_FOUND", "/ids", "there is no trade-facts list yet", status="REJECTED")
         for it in old.get("items") or []:
             a = notes.get(it["id"])
             if a:
@@ -570,7 +570,7 @@ def ai_research(assist, job, entry: dict | None, ids=None, *, where: dict | None
     items = [i for i in items_of(entry) if i["status"] == "research_needed" and (ids is None or i["id"] in ids)]
     items = items[:AI_MAX_ITEMS]
     if not items:
-        raise BookforgeError("INVALID_INPUT", "/ids", "no term on the list needs research", status="REJECTED")
+        raise AkoweError("INVALID_INPUT", "/ids", "no term on the list needs research", status="REJECTED")
     ctx = {"terms": [{"id": i["id"], "term": i["term"], "kind": i["kind"], "question": i.get("question") or "",
                       "where": ((where or {}).get(i["id"]) or "")[:200]} for i in items]}
     if (entry or {}).get("story_year"):

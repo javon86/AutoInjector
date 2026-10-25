@@ -29,10 +29,10 @@ import json
 import logging
 import re
 
-from .errors import BookforgeError
+from .errors import AkoweError
 from .story_rules import _clip, _now, basis, conflict, update_single
 
-log = logging.getLogger("bookforge.texture")
+log = logging.getLogger("akowe.texture")
 
 MAX_ITEMS = 30
 AI_MAX_ITEMS = 16
@@ -59,7 +59,7 @@ CAUSE_KEYS = tuple(k for k, _l in CAUSES)
 FIELDS = (
     ("detail", "The detail", "Concrete and specific to this book (a tool, a rule, a person, a price)."),
     ("effect", "What it can cause", "The obstacle, skill moment or cost it can bring into a scene."),
-    ("words", "Words to look for", "A few words or short phrases BookForge counts in the chapters (comma-separated)."),
+    ("words", "Words to look for", "A few words or short phrases Akọwe counts in the chapters (comma-separated)."),
 )
 
 _S = {"type": "string"}
@@ -182,7 +182,7 @@ def items_of(entry: dict | None) -> list[dict]:
 def save(store, pid: str, branch: str, items: list[dict], *, by: str, slot: str | None = None,
          base_version: int | None = None, basis_now: dict | None = None, how: str = "edited") -> dict:
     if not items:
-        raise BookforgeError("INVALID_INPUT", "/items", "the texture list needs at least one detail with text",
+        raise AkoweError("INVALID_INPUT", "/items", "the texture list needs at least one detail with text",
                              status="REJECTED")
 
     def change(old):
@@ -221,7 +221,7 @@ def generate(assist, job, bp, *, note: str | None = None) -> dict:
     job.check()
     items = clean_items(raw, AI_MAX_ITEMS)
     if not items:
-        raise BookforgeError("INTERNAL_ERROR", "/texture", "the AI's answer had no usable texture detail; nothing was "
+        raise AkoweError("INTERNAL_ERROR", "/texture", "the AI's answer had no usable texture detail; nothing was "
                              "saved")
     return save(assist.store, pid, branch, items, by="ai", slot=job.slot, basis_now=basis(bp),
                 how="remade" if cur else "made")

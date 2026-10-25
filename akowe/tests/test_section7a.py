@@ -13,10 +13,10 @@ import time
 
 import pytest
 
-from bookforge import chapter_brief, fact_checks, repetition as rep_mod, terms as terms_mod
-from bookforge import timeline_check as tl
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
+from akowe import chapter_brief, fact_checks, repetition as rep_mod, terms as terms_mod
+from akowe import timeline_check as tl
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
 
 from test_failover_review import SlotFake, make_app, no_provider_sleep, run_book  # noqa: F401
 from test_server import call  # noqa: F401
@@ -133,7 +133,7 @@ def test_terms_scan_check_and_brief():
     assert brief[0] == {"term": "wick-key", "status": "wrong", "use_instead": "lighting pole"}
     assert brief[1]["status"] == "verified" and brief[1]["note"]
     assert terms_mod.clean_year("1887") == 1887 and terms_mod.clean_year("") is None
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         terms_mod.clean_year("soon")
 
 
@@ -167,7 +167,7 @@ def test_repetition_classes_trim_plan_labels_and_findings():
 
 
 def test_labels_and_terms_storage(tmp_path):
-    from bookforge.server import App  # noqa: PLC0415
+    from akowe.server import App  # noqa: PLC0415
     app = App(tmp_path / "d", token="t")
     store, pid, b = app.store, "p1", "main"
     e = rep_mod.save_labels(store, pid, b, {"Right, so": "voice"})
@@ -175,19 +175,19 @@ def test_labels_and_terms_storage(tmp_path):
     e = rep_mod.save_labels(store, pid, b, {"right so": ""}, base_version=1)
     assert e["labels"] == {}
     for bad in ({"x": "keep"}, {}, "voice"):
-        with pytest.raises(BookforgeError):
+        with pytest.raises(AkoweError):
             rep_mod.save_labels(store, pid, b, bad)
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         rep_mod.save_labels(store, pid, b, {"a b": "voice"}, base_version=1)
     assert x.value.code == "VERSION_CONFLICT"
     e, n = terms_mod.add_terms(store, pid, b, [{"term": "wick-key", "status": "verified"}, {"term": "wick key"}],
                                by="scan")
     assert n == 1 and e["items"][0]["status"] == "research_needed"  # adding never verifies
-    with pytest.raises(BookforgeError) as x:  # an edit cannot verify by itself
+    with pytest.raises(AkoweError) as x:  # an edit cannot verify by itself
         terms_mod.save(store, pid, b, terms_mod.clean_items([dict(e["items"][0], status="verified")]), by="author",
                        base_version=e["version"])
     assert x.value.code == "APPROVAL_REQUIRED"
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         terms_mod.decide(store, pid, b, ids=["k1"], status="verified")
     assert x.value.code == "APPROVAL_REQUIRED"
     e = terms_mod.set_ai_notes(store, pid, b, {"k1": {"verdict": "wrong", "answer": "No wick.", "use_instead": "pole"}},
@@ -200,7 +200,7 @@ def test_labels_and_terms_storage(tmp_path):
     e2 = terms_mod.save(store, pid, b, terms_mod.clean_items([dict(e["items"][0], note="checked")]), by="author",
                         base_version=e["version"], story_year=1887)
     assert e2["items"][0]["verified"] and e2["items"][0]["ai_note"] and e2["story_year"] == 1887
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         terms_mod.decide(store, pid, b, ids=["nope"], status="verified", author_confirms=True)
     assert x.value.code == "NOT_FOUND"
     app.store.close()
@@ -229,7 +229,7 @@ def test_run_adds_research_needed_terms_and_flags_without_blocking(tmp_path):
     assert bk["chapters"] == 3 and bk["terms"]["counts"]["research_needed"] >= 1
     assert next(i for i in bk["terms"]["items"] if i["term"] == "wick-key")["in_chapters"] == [1]
     assert bk["timeline"]["findings"][0]["passages"][0]["number"] in (1, 2)
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.review.facts.chapter("author", pid, "main", "nope")
     assert x.value.code == "NOT_FOUND"
 
@@ -267,9 +267,9 @@ def test_ai_find_research_verify_and_fix_terms(tmp_path):
     # nothing left to fix -> a clear refusal
     j = wait_job(app, rv.start_facts_job("author", pid, "main", "facts_fix_terms", rid, {}))
     assert j["status"] == "error" and "nothing to fix" in j["error"]["message"]
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         rv.start_facts_job("author", pid, "main", "facts_find", "nope", {})
-    with pytest.raises(BookforgeError):
+    with pytest.raises(AkoweError):
         rv.start_facts_job("author", pid, "main", "facts_research", None, {"ids": "k1"})
 
 
@@ -321,7 +321,7 @@ def test_fact_checks_never_break_the_editor():
 def served(tmp_path):
     import threading
     from http.server import ThreadingHTTPServer
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     app, fake, run = made(tmp_path)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

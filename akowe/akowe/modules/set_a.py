@@ -28,7 +28,7 @@ from __future__ import annotations
 import copy
 
 from .. import plan_rules as pr
-from ..errors import BookforgeError
+from ..errors import AkoweError
 from . import register
 from .base import Context, OperationHandler, Result, normalize_to_output
 
@@ -128,7 +128,7 @@ class CanonHandler(OperationHandler):
         if approved is not None:
             changes = pr.protected_changes(approved["data"], data)
             if changes and not ctx.engine._protected_change_authorized(ctx, approved):
-                raise BookforgeError(
+                raise AkoweError(
                     "LOCKED_FACT", "/payload/facts",
                     f"{'; '.join(changes)} on approved v{approved['version']}; an I10/K09 approval with scope "
                     f"{self.op_id}:protected_change for that exact revision is required", status="BLOCKED")
@@ -157,7 +157,7 @@ class CanonHandler(OperationHandler):
     def _reject_intervals(data: dict, base: str):
         for i, f in enumerate(data.get("facts") or []):
             if not pr.interval_ok(f):
-                raise BookforgeError("INVALID_INPUT", f"{base}/facts/{i}/effective_to",
+                raise AkoweError("INVALID_INPUT", f"{base}/facts/{i}/effective_to",
                                      "effective interval is half-open [from,to): to must be greater than from",
                                      status="REJECTED")
 

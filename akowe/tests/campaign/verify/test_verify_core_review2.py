@@ -1,4 +1,4 @@
-"""Independent pre-merge review (review2) of the fix round's BookForge core changes: the AI redo path of refused
+"""Independent pre-merge review (review2) of the fix round's Akọwe core changes: the AI redo path of refused
 drafts, step locks / Write-all, upgrade of books made before G06/G08 assembly, and E08 power limits.
 
 Each test documents one problem found in review; see the docstrings for the failure scenario."""
@@ -16,8 +16,8 @@ if str(FLOW) not in sys.path:
     sys.path.insert(0, str(FLOW))
 
 import flowkit as fk  # noqa: E402
-from bookforge.engine import Engine  # noqa: E402
-from bookforge.book_path import ASSEMBLY  # noqa: E402
+from akowe.engine import Engine  # noqa: E402
+from akowe.book_path import ASSEMBLY  # noqa: E402
 
 from test_flow_idempotency_restart import act, guided_book, outputs  # noqa: E402
 
@@ -28,7 +28,7 @@ def _quiet(monkeypatch):
 
 
 def _refuse_validate(monkeypatch, op, state):
-    """BookForge's own checks refuse every VALIDATE of `op` while state['on'] (stands in for a real blocking rule,
+    """Akọwe's own checks refuse every VALIDATE of `op` while state['on'] (stands in for a real blocking rule,
     e.g. an AI-made place whose containment is cyclic)."""
     orig = Engine.dispatch
 
@@ -76,7 +76,7 @@ def test_reviewer_that_always_rejects_is_bounded(tmp_path):
 
 
 def test_refused_canon_entry_try_again_lets_the_ai_make_it_again(tmp_path, monkeypatch):
-    """BUG: a character/place draft BookForge's checks refuse pauses the run with CHECKS_REFUSED, whose fix text
+    """BUG: a character/place draft Akọwe's checks refuse pauses the run with CHECKS_REFUSED, whose fix text
     says "Press Try again: the AI writes it again". In the canon step nothing is ever set aside or re-made
     (_s_canon has no ChecksRefused handling; only _planning/_s_chapters call _redo_refused), so Try again just
     re-validates the same refused draft and pauses again, forever. Expected: Try again gets a new AI entry."""
@@ -106,7 +106,7 @@ def test_write_all_does_not_rewrite_a_chapter_the_author_just_wrote(tmp_path):
 
     def c02(ctx, out):
         req = ctx.get("request_payload") or {}
-        if threading.current_thread().name.startswith("bookforge-write_all") and req.get("chapter_id") == "ch1":
+        if threading.current_thread().name.startswith("akowe-write_all") and req.get("chapter_id") == "ch1":
             inside.set()
             gate.wait(20)
         return out
@@ -158,7 +158,7 @@ def test_book_finished_before_the_g06_g08_assembly_stays_consistent(tmp_path):
 # ---------------------------------------------------------------------------------------------- author's own edit
 def test_continue_after_the_authors_own_edit_never_discards_it_for_new_ai_text(tmp_path, monkeypatch):
     """BUG: the run pauses on chapter ch1 (REVIEW_NOT_PASSED) and offers "Edit it yourself and then press
-    Continue". The author edits the chapter; BookForge's checks refuse the edited version; on Continue
+    Continue". The author edits the chapter; Akọwe's checks refuse the edited version; on Continue
     (decide 'edited') the chapter loop treats the refusal like a refused AI draft: _redo_refused sets the AUTHOR's
     version aside (marked out of date) and has the AI write a brand-new chapter, which is then reviewed and approved
     under the run consent. The author's work silently leaves the approval queue and AI text replaces it.

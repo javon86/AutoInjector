@@ -30,7 +30,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from .errors import BookforgeError
+from .errors import AkoweError
 from .requests import build_request, candidate_payload
 
 PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "length": 20, "tone": 200,
@@ -77,7 +77,7 @@ def _now():
 
 
 def _err(code, path, message):
-    return BookforgeError(code, path, message, status="REJECTED")
+    return AkoweError(code, path, message, status="REJECTED")
 
 
 # ---------------------------------------------------------------------------------- profile
@@ -222,7 +222,7 @@ class BookPath:
 
     def set_aside(self, rec, reason: str):
         """Take an unapproved draft out of the approval queue (marked out of date, kept in its history), e.g. an AI
-        draft BookForge's checks refused and the AI is asked to redo."""
+        draft Akọwe's checks refused and the AI is asked to redo."""
         with self.store.transaction() as tx:
             tx.mark_stale(self.pid, self.branch, rec["record_id"], rec["version"], reason[:300])
             tx.insert_outbox(self.pid, self.branch, "book_path.draft_set_aside",
@@ -339,12 +339,12 @@ class BookPath:
 
     def assembly_out_of_date(self, asm: dict, fmt_recs: dict) -> str | None:
         """Why an existing assembly no longer matches the book (plain words), or None. The title page (G08) and the
-        chapter headings (G06) are made when the book is put together, so a book put together before BookForge added
+        chapter headings (G06) are made when the book is put together, so a book put together before Akọwe added
         them, or before the book format changed (a new title or author), must be put together again."""
         if not asm.get("G01"):
             return None
         if not asm.get("G06") or not asm.get("G08"):
-            return ("BookForge now adds a title page and chapter headings: put the book together again "
+            return ("Akọwe now adds a title page and chapter headings: put the book together again "
                     "(nothing you wrote changes).")
         made_with = asm.get("title_page")
         cur = self.format_title_author(fmt_recs.get("metadata"))
@@ -400,7 +400,7 @@ class BookPath:
         def item(r, chapter_id=None):
             out = {"record_id": r["record_id"], "version": r["version"], "module_id": r["module_id"],
                    "title": _title(r), "lifecycle": r["lifecycle"]}
-            # What BookForge's checks found blocking when this draft was last checked: the page offers to redo or
+            # What Akọwe's checks found blocking when this draft was last checked: the page offers to redo or
             # edit it instead of only "approve" (which would be refused again).
             blocking = [f"{f.get('rule_id')}: {f.get('message')}" for f in r.get("findings") or []
                         if f.get("severity") == "BLOCKING" and f.get("decision") in ("FAIL", "UNKNOWN")]
@@ -798,7 +798,7 @@ class BookPath:
             except StepError as exc:
                 res = {"record_id": rid, "ok": False, "problems": exc.problems or [exc.message]}
             if not res["ok"]:
-                # BookForge's own checks refused it: pressing approve again cannot help. Say how to get past it.
+                # Akọwe's own checks refused it: pressing approve again cannot help. Say how to get past it.
                 redo = REDO_FOR.get(r["module_id"])
                 if redo and r["module_id"] == "C02":
                     cid = self._chapter_of(rid)
@@ -1001,7 +1001,7 @@ class StepError(Exception):
 
 
 def refusal_advice(probs: list, redo=None) -> str:
-    """What the author can do about a draft BookForge's checks refused, in plain words. Editing only helps when the
+    """What the author can do about a draft Akọwe's checks refused, in plain words. Editing only helps when the
     text itself is wrong: a draft made from a plan or inputs that changed since (STALE, SOURCE_PIN) stays out of date
     whatever is typed into it, and one whose inputs are not approved yet waits for those inputs."""
     rules = {str(p).split(":", 1)[0].strip() for p in probs or []}

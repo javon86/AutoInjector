@@ -6,7 +6,7 @@ readings and contradicts neither. The second book: "zero gas pressure" (nobody d
 
 For every protected mystery the book keeps two **readings** ({label, text}; the AI drafts them, the author edits).
 The **test** (one AI call over the whole book, or a per-chapter digest when it is long) lists, per reading, passages
-that support it and passages that contradict it, each with an exact quote. BookForge checks every quote word for word
+that support it and passages that contradict it, each with an exact quote. Akọwe checks every quote word for word
 against the chapters (a quote that is not found counts for nothing) and decides itself:
 
 * a reading **holds** when at least one found quote supports it and no found quote contradicts it;
@@ -200,7 +200,7 @@ def _quotes(raw, chapters) -> list[dict]:
 
 
 def judge(items: list[dict], raw, chapters: list[dict]) -> list[dict]:
-    """BookForge's own verdict per mystery from the AI's passages (only quotes found word for word count)."""
+    """Akọwe's own verdict per mystery from the AI's passages (only quotes found word for word count)."""
     by_id = {}
     for r in (raw.get("results") if isinstance(raw, dict) else None) or []:
         if isinstance(r, dict) and isinstance(r.get("id"), str):

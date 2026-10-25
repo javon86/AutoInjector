@@ -1,6 +1,6 @@
 """Section 3: character sheets (P7), voice cards (P17) and scene cards (P8).
 
-Pure parts (cleaning, completeness, the bounded voice brief, the scene lint and BookForge's own PASS/REVISE), the
+Pure parts (cleaning, completeness, the bounded voice brief, the scene lint and Akọwe's own PASS/REVISE), the
 companion storage (made by the AI with the character, edited by the author with a version check), the C02 prompt
 (voice cards of the characters present, scene cards, the POV character's name and planned backstory), the P6 voice
 check, the editor's voice_distinction and scene_plan checks, Make-a-book end to end (characters step, scene cards
@@ -13,10 +13,10 @@ import time
 
 import pytest
 
-from bookforge import chapter_brief, characters as chars_mod, journal, prose_audit, scenes as scenes_mod
-from bookforge.book_path import BookPath
-from bookforge.errors import BookforgeError
-from bookforge.review import ReviewJob
+from akowe import chapter_brief, characters as chars_mod, journal, prose_audit, scenes as scenes_mod
+from akowe.book_path import BookPath
+from akowe.errors import AkoweError
+from akowe.review import ReviewJob
 
 from autobook_fake import VOICES, sheet_for, voice_for
 from test_failover_review import SlotFake, make_app, no_provider_sleep, run_book  # noqa: F401
@@ -108,7 +108,7 @@ def test_voice_brief_is_bounded_and_puts_the_pov_first(tmp_path):
     assert chars_mod.voice_brief(app.store, pid, "main", [])["cards"] == []
 
 
-def test_scene_lint_and_bookforge_decides_the_check():
+def test_scene_lint_and_akowe_decides_the_check():
     cards = scenes_mod.clean_cards({"scenes": [
         {"place": "quay", "time": "dusk", "characters": ["Mara Vell", "Stranger"], "goals": [
             {"character": "Mara Vell", "goal": "the log", "hidden_agenda": ""}],
@@ -124,14 +124,14 @@ def test_scene_lint_and_bookforge_decides_the_check():
     ok = {"verdict": "PASS", "scenes": [{"scene": i, "goal": True, "obstacle_from_world": True, "unsaid": True,
                                          "note": ""} for i in (1, 2)], "notes": []}
     res = scenes_mod.clean_review(ok, cards, probs)
-    assert res["verdict"] == "REVISE" and "BookForge" in res["why"][0]  # the AI said PASS, the lint did not
+    assert res["verdict"] == "REVISE" and "Akọwe" in res["why"][0]  # the AI said PASS, the lint did not
     res = scenes_mod.clean_review(ok, cards[1:], [])
     assert res["verdict"] == "PASS"
     half = dict(ok, scenes=[ok["scenes"][0]])
     res = scenes_mod.clean_review(half, cards[1:] * 2, [])
     assert res["verdict"] == "REVISE" and res["scenes"][1]["note"].startswith("the reviewer did not check")
     for bad in (None, {}, {"verdict": "MAYBE"}):
-        with pytest.raises(BookforgeError) as e:
+        with pytest.raises(AkoweError) as e:
             scenes_mod.clean_review(bad, cards, [])
         assert e.value.code == "INTERNAL_ERROR"
 
@@ -193,15 +193,15 @@ def test_sheets_made_with_the_characters_and_edited_by_the_author(tmp_path):
     assert out["entry"]["version"] == mara["version"] + 1 and out["entry"]["voice"]["rhythm"] == "clipped"
     assert out["entry"]["sheet"] == mara["sheet"] and out["entry"]["made_by"]["kind"] == "author"
     assert out["entry"]["history"][-1]["voice"]["rhythm"] == VOICES["Mara Vell"]["rhythm"]
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.save_character("author", pid, "main", rid, {"sheet": {"wants": "x"}, "version": mara["version"]})
     assert e.value.code == "VERSION_CONFLICT"
     for body, code in (({}, "INVALID_INPUT"), ({"sheet": "x"}, "INVALID_INPUT"), ({"sheet": {}, "version": -1},
                                                                                      "INVALID_INPUT")):
-        with pytest.raises(BookforgeError) as e:
+        with pytest.raises(AkoweError) as e:
             app.review.save_character("author", pid, "main", rid, body)
         assert e.value.code == code
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.review.save_character("author", pid, "main", "A04-nope", {"sheet": {}})
     assert e.value.code == "NOT_FOUND"
     ev = outbox(app, pid, "characters.sheet_saved")
@@ -229,7 +229,7 @@ def test_the_ai_writes_a_missing_sheet_in_the_run_and_on_request(tmp_path):
     _sys, ctx = fake.prompts["sheet"][-1]
     assert ctx["author_note"] == "make her angrier" and ctx["other_characters"] and ctx["character"]["name"]
     # a model answer without a usable sheet changes nothing
-    fake.kind_failures["sheet"] = [BookforgeError("INTERNAL_ERROR", "", "bad")]
+    fake.kind_failures["sheet"] = [AkoweError("INTERNAL_ERROR", "", "bad")]
     j = wait_job(app, app.review.start_character_ai("author", pid, "main", rid, {}))
     assert j["status"] == "error" and chars_mod.get_entry(app.store, pid, "main", rid)["version"] == after["version"]
 
@@ -237,7 +237,7 @@ def test_the_ai_writes_a_missing_sheet_in_the_run_and_on_request(tmp_path):
 def test_a_failing_sheet_never_blocks_the_book(tmp_path):
     fake = SlotFake()
     fake.companion = False
-    fake.kind_failures["sheet"] = [BookforgeError("INTERNAL_ERROR", "", "no usable answer")] * 2
+    fake.kind_failures["sheet"] = [AkoweError("INTERNAL_ERROR", "", "no usable answer")] * 2
     app, fake, run = book(tmp_path, fake)
     st = steps(run)["characters"]
     assert st["state"] == "done" and "could not be made" in st["message"]
@@ -306,17 +306,17 @@ def test_scene_cards_planned_checked_edited_approved_and_used(tmp_path):
     e = out["entry"]
     assert e["version"] == ver + 1 and e["made_by"]["kind"] == "author" and e["cards"][0]["characters"] == ["Mara Vell",
                                                                                                           "Tom Reed"]
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.review.save_scenes("author", pid, "main", ch, {"cards": cards, "version": ver})
     assert x.value.code == "VERSION_CONFLICT"
     for body in ({"cards": []}, {"cards": "x"}, {"cards": [{}]}, {"cards": cards, "version": "1"}):
-        with pytest.raises(BookforgeError) as x:
+        with pytest.raises(AkoweError) as x:
             app.review.save_scenes("author", pid, "main", ch, body)
         assert x.value.code == "INVALID_INPUT"
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.review.approve_scenes("author", pid, "main", ch, {"version": e["version"]})
     assert x.value.code == "APPROVAL_REQUIRED"
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.review.approve_scenes("author", pid, "main", ch, {"author_confirms": True, "version": e["version"] - 1})
     assert x.value.code == "VERSION_CONFLICT"
     a = app.review.approve_scenes("author", pid, "main", ch, {"author_confirms": True, "version": e["version"]})
@@ -337,7 +337,7 @@ def test_scene_cards_planned_checked_edited_approved_and_used(tmp_path):
     kinds = {x["kind"] for x in jr["entries"]}
     assert {"scenes", "characters"} <= kinds and "harbour board audits" not in json.dumps(jr)
     # unknown chapter / no outline problems are plain errors
-    with pytest.raises(BookforgeError) as x:
+    with pytest.raises(AkoweError) as x:
         app.review.scenes_info("author", pid, "main", "nope")
     assert x.value.code == "INVALID_INPUT"
 
@@ -426,7 +426,7 @@ def test_make_a_book_end_to_end_with_sheets_voices_and_scene_cards(tmp_path):
     assert "harbour board has sealed" not in json.dumps(jr)
     # the consent never works outside the live run
     saved = app.autobook.get(run["id"])
-    with pytest.raises(BookforgeError) as e:
+    with pytest.raises(AkoweError) as e:
         app.autobook._check_consent(saved, pid)
     assert e.value.code == "PERMISSION_DENIED"
 
@@ -446,7 +446,7 @@ def test_scene_checker_notes_after_two_reworks_never_block(tmp_path):
 
 def test_scene_plan_failure_writes_from_the_outline_and_timeout_pauses(tmp_path):
     fake = SlotFake()
-    fake.kind_failures["scenes"] = [BookforgeError("INTERNAL_ERROR", "", "garbage")]
+    fake.kind_failures["scenes"] = [AkoweError("INTERNAL_ERROR", "", "garbage")]
     app = make_app(tmp_path, fake, slots=("AI-1", "AI-2"))
     app.review.editor.save_settings({"enabled": False})
     run = run_book(app, {"slot_id": "AI-1"})
@@ -456,7 +456,7 @@ def test_scene_plan_failure_writes_from_the_outline_and_timeout_pauses(tmp_path)
     assert any(e.get("code") == "SCENES_FAILED" for e in run["events"])
     # a TIMEOUT while planning pauses the step for the author (never guessed past)
     fake2 = SlotFake()
-    fake2.kind_failures["scenes"] = [BookforgeError("TIMEOUT", "", "slow")]
+    fake2.kind_failures["scenes"] = [AkoweError("TIMEOUT", "", "slow")]
     app2 = make_app(tmp_path, fake2, slots=("AI-1", "AI-2"), name="data2")
     run2 = run_book(app2, {"slot_id": "AI-1"})
     assert run2["status"] == "paused" and run2["problem"]["code"] == "TIMEOUT"
@@ -468,7 +468,7 @@ def test_scene_plan_failure_writes_from_the_outline_and_timeout_pauses(tmp_path)
 
 def test_old_runs_get_the_new_step_on_resume():
     run = {"steps": [{"id": s, "state": "done"} for s in ("backup", "profile", "canon", "premise")]}
-    from bookforge.autobook import AutoBookService, STEP_IDS
+    from akowe.autobook import AutoBookService, STEP_IDS
     AutoBookService._ensure_steps(run)
     assert [s["id"] for s in run["steps"]] == STEP_IDS
     assert next(s for s in run["steps"] if s["id"] == "characters")["state"] == "pending"
@@ -499,7 +499,7 @@ def test_write_all_plans_scenes_first(tmp_path):
 def served(tmp_path):
     import threading
     from http.server import ThreadingHTTPServer
-    from bookforge.server import make_handler
+    from akowe.server import make_handler
     app, fake, run = book(tmp_path)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

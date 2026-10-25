@@ -1,5 +1,5 @@
-// verify-bf-checklist-label.test.js — ACCEPT-5 (acceptance run, BookForge panel screenshot): the Book checklist chip
-// for BookForge's "chapters" step (id "chapters", set "C") reads "hapters": bfShortLabel() strips a leading set
+// verify-bf-checklist-label.test.js — ACCEPT-5 (acceptance run, Akọwe panel screenshot): the Book checklist chip
+// for Akọwe's "chapters" step (id "chapters", set "C") reads "hapters": bfShortLabel() strips a leading set
 // letter from ANY id that starts with it, meant only for op codes like "B03" -> "03".
 "use strict";
 const fs = require("fs");
@@ -10,7 +10,7 @@ if (!m) { console.log("FAIL: bfShortLabel not found"); process.exit(1); }
 const bfShortLabel = new Function(`${m[0]}; return bfShortLabel;`)();
 let fails = 0;
 const eq = (got, want, what) => { const ok = got === want; if (!ok) fails++; console.log(`  ${ok ? "ok  " : "FAIL"} ${what}: ${JSON.stringify(got)}${ok ? "" : ` (want ${JSON.stringify(want)})`}`); };
-// BookForge's status push (bookforge/status_push.py) sends {id: <step id>, title, set}
+// Akọwe's status push (akowe/status_push.py) sends {id: <step id>, title, set}
 eq(bfShortLabel({ id: "B03", set: "B", title: "Main plot" }), "03", "op code B03 in set B");
 eq(bfShortLabel({ id: "premise", set: "B", title: "Premise" }), "premise", "step id premise (set B)");
 eq(bfShortLabel({ id: "chapters", set: "C", title: "Write the chapters" }), "chapters", "step id chapters (set C)");

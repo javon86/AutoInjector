@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from bookforge import book_report as br
-from bookforge import calibration as cal
-from bookforge import h_checks as hc
-from bookforge.errors import BookforgeError
+from akowe import book_report as br
+from akowe import calibration as cal
+from akowe import h_checks as hc
+from akowe.errors import AkoweError
 
 from test_failover_review import SlotFake, make_app, no_provider_sleep, run_book  # noqa: F401
 
@@ -149,7 +149,7 @@ def test_too_clean_review_is_reasked_once_then_flagged_and_capped(tmp_path):
     assert "🎯 How generous: Gemini:" in md and "ChatGPT" in md.split("## How far the reviewers were trusted")[1]
     doc, issues = hc.pdf_structure(br.render_pdf(rep))
     assert doc is not None and not [i for i in issues if i.get("decision") == "FAIL"]
-    assert "Your previous review was not accepted by BookForge" in reask_task and "at least 3 weaknesses" in reask_task
+    assert "Your previous review was not accepted by Akọwe" in reask_task and "at least 3 weaknesses" in reask_task
 
 
 def test_reask_that_is_honest_replaces_the_first_answer(tmp_path):
@@ -168,7 +168,7 @@ def test_failed_reask_keeps_the_first_answer_flagged_and_never_blocks(tmp_path):
     fake, app, pid, first = _book(tmp_path)
 
     def lenient_then_fail(_ctx):
-        fake.failures.append(BookforgeError("TIMEOUT", "", "limit"))  # the next call (the re-ask) fails
+        fake.failures.append(AkoweError("TIMEOUT", "", "limit"))  # the next call (the re-ask) fails
         return gemini_like()
     fake.book_review_script = [lenient_then_fail]
     rep = app.reports.make("author", pid, "main", slots=["AI-3"], add_to=first["id"])

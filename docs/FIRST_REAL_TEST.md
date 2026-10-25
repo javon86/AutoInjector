@@ -7,14 +7,14 @@ real ChatGPT, Claude and Gemini. Tick each box; if something fails, stop there a
 ## 0. Get the newest version
 
 - [ ] Download / pull the latest `main` (GitHub Desktop: **Fetch origin → Pull**).
-- [ ] Close any old AutoInjector and BookForge windows first.
+- [ ] Close any old AutoInjector and Akọwe windows first.
 
 ## 1. Start both apps
 
 - [ ] `desktop-app/run-windows.bat` → AutoInjector opens with the three AI panes.
 - [ ] Log in to **ChatGPT, Claude and Gemini** inside their panes (each once).
-- [ ] `bookforge/run-bookforge.bat` → BookForge opens in your browser.
-- [ ] In AutoInjector press **Connect** next to BookForge → BookForge says it is connected (AI-1 Claude, AI-2 ChatGPT,
+- [ ] `akowe/run-akowe.bat` → Akọwe opens in your browser.
+- [ ] In AutoInjector press **Connect** next to Akọwe → Akọwe says it is connected (AI-1 Claude, AI-2 ChatGPT,
       AI-3 Gemini).
 
 ## 2. Check each AI works (one at a time)
@@ -32,7 +32,7 @@ If 🔢 fails on a part, it names the part (message box / Send button / reply ar
 
 ## 3. The pre-run check (P37.5)
 
-- [ ] In BookForge press **⚡ Make a book**. Before it starts you should see the AI check:
+- [ ] In Akọwe press **⚡ Make a book**. Before it starts you should see the AI check:
       all three ✔ — or a plain notice naming the AI that isn't working, with **I fixed it — check again /
       Start without it / Cancel**.
 - [ ] (Optional test) log out of one AI, press ⚡ again → the notice must name that AI and say "log in".

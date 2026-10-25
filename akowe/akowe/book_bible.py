@@ -23,24 +23,24 @@ import copy
 import json
 import logging
 
-from . import __version__
+from . import __version__, legacy
 from . import characters as chars_mod
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
 from . import scenes as scenes_mod
 from . import story_choices
 from . import story_rules
-from .errors import BookforgeError
+from .errors import AkoweError
 from . import repetition as repetition_mod
 from . import terms as terms_mod
 from . import texture as texture_mod
 from .book_path import BookPath, clean_profile, get_profile
 from .canonical import iter_references
 
-log = logging.getLogger("bookforge.book_bible")
+log = logging.getLogger("akowe.book_bible")
 
 SCHEMA_VERSION = 1
-KIND = "bookforge-book-bible"
+KIND = "akowe-book-bible"
 MAX_BYTES = 8 * 1024 * 1024        # a bible file larger than this is refused (a real one is far smaller)
 MAX_CANON = 200
 PLAN_OPS = {"B01": "premise", "B03": "main_plot", "B11": "outline"}
@@ -78,7 +78,7 @@ def _current(store, pid, branch, head: dict) -> dict:
     return head
 
 
-# ====================================================================== build (from a book in this BookForge)
+# ====================================================================== build (from a book in this Akọwe)
 def build(app, pid: str, branch: str = "main") -> dict:
     store = app.store
     prof = get_profile(store, pid)
@@ -145,7 +145,7 @@ def build(app, pid: str, branch: str = "main") -> dict:
     terms = terms_mod.get_entry(store, pid, branch) or {}  # P31 trade facts (with the author's decisions)
     labels = repetition_mod.get_labels(store, pid, branch).get("labels") or {}  # P30 the author's repeat labels
     return {
-        "schema_version": SCHEMA_VERSION, "kind": KIND, "app": "BookForge", "app_version": __version__,
+        "schema_version": SCHEMA_VERSION, "kind": KIND, "app": "Akọwe", "app_version": __version__,
         "saved_at": _now(),
         "source": {"project_id": pid, "branch_id": branch, "name": proj["name"] if proj else None},
         "profile": profile, "choices": choices, "pipeline": pipe,
@@ -194,18 +194,18 @@ def clean(raw) -> dict:
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise BibleProblem("BIBLE_BAD", "this file is not readable JSON (was it changed in a word processor?)") \
                 from None
-    if not isinstance(raw, dict) or raw.get("kind") != KIND:
-        raise BibleProblem("BIBLE_BAD", "this is not a BookForge book bible (book-bible.json)")
+    if not isinstance(raw, dict) or raw.get("kind") not in (KIND, legacy.OLD_BIBLE_KIND):  # also one saved before the rename
+        raise BibleProblem("BIBLE_BAD", "this is not an Akọwe book bible (book-bible.json)")
     sv = raw.get("schema_version")
     if not isinstance(sv, int) or isinstance(sv, bool) or sv < 1:
         raise BibleProblem("BIBLE_BAD", "the book bible has no valid schema_version")
     if sv > SCHEMA_VERSION:
-        raise BibleProblem("OPEN_NEWER_VERSION", f"this book bible was saved by a newer BookForge (format "
-                                                 f"{sv}; this BookForge reads format {SCHEMA_VERSION} and older)")
+        raise BibleProblem("OPEN_NEWER_VERSION", f"this book bible was saved by a newer Akọwe (format "
+                                                 f"{sv}; this Akọwe reads format {SCHEMA_VERSION} and older)")
     prof_raw = raw.get("profile") if isinstance(raw.get("profile"), dict) else {}
     try:
         profile = clean_profile({k: prof_raw.get(k) for k in PROFILE_KEYS if prof_raw.get(k) not in (None, "")})
-    except Exception as exc:  # noqa: BLE001 - BookforgeError: a field out of range
+    except Exception as exc:  # noqa: BLE001 - AkoweError: a field out of range
         raise BibleProblem("BIBLE_BAD", f"the book profile in the bible is not usable: {exc}") from None
     if not profile.get("title"):
         raise BibleProblem("BIBLE_BAD", "the book bible has no title (profile.title)")
@@ -242,7 +242,7 @@ def clean(raw) -> dict:
     tt = raw.get("trade_terms") if isinstance(raw.get("trade_terms"), dict) else {}
     try:
         year = terms_mod.clean_year(tt.get("story_year"))
-    except BookforgeError:
+    except AkoweError:
         year = None
     labels = {repetition_mod.norm_phrase(k)[:120]: v for k, v in (raw.get("repeat_labels") or {}).items()
               if isinstance(k, str) and v in repetition_mod.CLASSES and repetition_mod.norm_phrase(k)} \
@@ -330,8 +330,8 @@ def _facts(data: dict) -> list[str]:
 def render_markdown(b: dict) -> str:
     prof = b.get("profile") or {}
     out = [f"# 📖 Book bible — {prof.get('title') or 'Untitled book'}", "",
-           f"Saved by BookForge {b.get('app_version') or ''} on {(b.get('saved_at') or '')[:19].replace('T', ' ')} "
-           "(UTC). The same content as `book-bible.json` (that file is the one BookForge reads back).", "",
+           f"Saved by Akọwe {b.get('app_version') or ''} on {(b.get('saved_at') or '')[:19].replace('T', ' ')} "
+           "(UTC). The same content as `book-bible.json` (that file is the one Akọwe reads back).", "",
            "## The book", ""]
     for k in PROFILE_KEYS:
         if prof.get(k) not in (None, ""):

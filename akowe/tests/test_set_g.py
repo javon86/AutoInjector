@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from conftest import PRINCIPAL, errors_of
-from bookforge.canonical import sha256_bytes
+from akowe.canonical import sha256_bytes
 
 MD = {"title": "The Salt Road", "author": "Mara Vell", "identifier": "urn:uuid:3f1c2d7e-0000-4000-8000-000000000001",
       "rights": "Copyright 2026 Mara Vell. All rights reserved."}
@@ -323,7 +323,7 @@ def test_full_chain_exports_open_and_bind_bytes(h):
     assert b"/TrimBox" not in pdf and b"/BleedBox" not in pdf  # manuscript PDF: no print geometry
     assert b"/Outlines" in info["catalog"] and b"/Link" in pdf
     # every TOC page number matches where the heading actually rendered
-    from bookforge.exporters.pdf import inspect_pdf
+    from akowe.exporters.pdf import inspect_pdf
     rep = inspect_pdf(pdf)
     assert rep["errors"] == [] and rep["page_count"] == info["count"] and rep["links"] == len(toc["entries"])
     # provenance: the binary pins manifest, chapters, profiles and approval manifest
@@ -342,7 +342,7 @@ def test_full_chain_exports_open_and_bind_bytes(h):
     chapter_html = [e["zip"].read(n).decode() for n in e["zip"].namelist() if n.endswith(".xhtml")]
     assert any(f'id="{b.chapters[0]["record_id"]}"' in x for x in chapter_html)
     assert not any("page-break" in x and "spine" in x for x in chapter_html)
-    from bookforge.exporters.epub import inspect_epub
+    from akowe.exporters.epub import inspect_epub
     assert inspect_epub(epub)["errors"] == []
 
     r13 = b.export("G13", c["g07"])
@@ -380,9 +380,9 @@ def test_exports_are_deterministic(h):
     g04b = b.g04(c["g01"], c["g05"])
     assert h.record(g04b)["data"]["sha256"] == h.record(c["g04"])["data"]["sha256"]
     # exporter level: identical calls give identical bytes
-    from bookforge.exporters.book import build_book
-    from bookforge.exporters.docx import build_docx
-    from bookforge.exporters.epub import build_epub
+    from akowe.exporters.book import build_book
+    from akowe.exporters.docx import build_docx
+    from akowe.exporters.epub import build_epub
     bk = build_book(dict(MD, language="en"), [{"id": "c1", "text": CH1}])
     assert build_epub(bk, modified="2026-10-14T00:00:00Z") == build_epub(bk, modified="2026-10-14T00:00:00Z")
     assert build_docx(bk, created="2026-10-14T00:00:00Z") == build_docx(bk, created="2026-10-14T00:00:00Z")

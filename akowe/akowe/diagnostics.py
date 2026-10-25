@@ -1,6 +1,6 @@
 """📋 Copy diagnostics (S8): one safe report to paste into a message when something is wrong.
 
-It contains: BookForge and contract versions, operating system, Python and SQLite versions, the port, the health
+It contains: Akọwe and contract versions, operating system, Python and SQLite versions, the port, the health
 check results, recent errors (code, API path, short message), background job states (kind, status, step, error
 code), and the AI slots (adapter, site or model, whether a key is saved - never the key). It never contains API
 keys, connection keys, the access token, prompts, AI replies, book titles or book text: only whitelisted fields
@@ -96,7 +96,7 @@ def build(app, client: dict | None = None) -> dict:
                      "steps_done": sum(1 for s in j.get("steps") or [] if s.get("state") == "done") or None})
     projects = app.store.query_one("SELECT COUNT(*) AS n FROM projects WHERE archived=0")
     rep = {
-        "report": "bookforge-diagnostics", "generated_at": now_iso(),
+        "report": "akowe-diagnostics", "generated_at": now_iso(),
         "app": {"version": __version__, "contract": CONTRACT_VERSION, "closure": CLOSURE_REVISION,
                 "port": getattr(app, "port", None), "uptime_s": int(time.monotonic() - getattr(app, "started", time.monotonic()))},
         "system": {"os": f"{platform.system()} {platform.release()}", "machine": platform.machine(),
@@ -159,9 +159,9 @@ def guard(app, rep: dict) -> dict:
 
 
 def render_text(rep: dict) -> str:
-    lines = ["BookForge diagnostics (safe to share: no keys, prompts or book text)",
+    lines = ["Akọwe diagnostics (safe to share: no keys, prompts or book text)",
              f"Generated: {rep['generated_at']}",
-             f"BookForge {rep['app']['version']} · contract {rep['app']['contract']} · port {rep['app']['port']}",
+             f"Akọwe {rep['app']['version']} · contract {rep['app']['contract']} · port {rep['app']['port']}",
              f"System: {rep['system']['os']} ({rep['system']['machine']}) · Python {rep['system']['python']} · "
              f"SQLite {rep['system']['sqlite']}",
              f"Health: {rep['health'].get('overall')}"]
