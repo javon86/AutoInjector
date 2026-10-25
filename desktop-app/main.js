@@ -230,6 +230,7 @@ const state = {
     maximumTurns: 20,
     costLimit: 5
   },
+  sdManaged: { startWithApp: false, targetId: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
   voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
@@ -662,6 +663,7 @@ function saveStateDebounced() {
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
+        sdManaged: state.sdManaged,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
@@ -771,6 +773,9 @@ function loadPersistedState() {
       }
     }
     state.nextLoginId = maxId + 1;
+  }
+  if (snap.sdManaged && typeof snap.sdManaged === "object") {
+    state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || "") };
   }
   if (snap.imageConfig && typeof snap.imageConfig === "object") {
     imageProvider.setSettings(snap.imageConfig);
@@ -5669,6 +5674,153 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
   } catch (e) { return { ok: false, error: `SAVE_FAILED: ${e}` }; }
 });
 
+// ---- 🎨 Images tab: Stable Diffusion for real (sd-studio.js) ----------------
+// Connect to whatever SD app the user runs (Forge / A1111 / reForge / SD.Next /
+// ComfyUI), generate with checkpoints + LoRAs, the Model & LoRA library, and the
+// character locks Akọwe's portraits/covers will use. All of it is optional: with
+// no SD app running every call answers in plain words and nothing else breaks.
+const sdLibraryMod = require("./sd-library");
+const { createSdStudio } = require("./sd-studio");
+let _sdLibrary = null;
+function sdLibrary() {
+  if (_sdLibrary) return _sdLibrary;
+  _sdLibrary = sdLibraryMod.createLibrary({
+    storePath: path.join(userDataDir(), "sd-library.json"),
+    defaultFolders: () => {
+      const out = [];
+      try { out.push({ path: outputManager.modelsDir("image"), kind: "checkpoint" }, { path: outputManager.modelsDir("loras"), kind: "lora" }); } catch (_) {}
+      try { const pt = sdInstallerInst().portable(); if (pt) out.push({ path: pt.models, kind: "auto", source: "ComfyUI (installed by AutoInjector)" }); } catch (_) {}
+      return out;
+    },
+    log: (t, d) => logEvent(t, d),
+  });
+  return _sdLibrary;
+}
+let _sdStudio = null;
+function sdStudio() {
+  if (_sdStudio) return _sdStudio;
+  _sdStudio = createSdStudio({
+    imageProvider,
+    library: sdLibrary(),
+    imagesDir: () => outputManager.imagesDir(),
+    recordImage: (e) => dbService.recordImage(e),
+    persist: () => { state.imageConfig = imageProvider.getSettings(); saveStateDebounced(); },
+    log: (t, d) => logEvent(t, d),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+  });
+  return _sdStudio;
+}
+function sdSafe(fn) {
+  return async (_evt, arg) => { try { return await fn(arg || {}); } catch (e) { logEvent("sd-ipc-error", { error: String((e && e.message) || e) }); return { ok: false, error: "INTERNAL", message: `Something went wrong: ${(e && e.message) || e}` }; } };
+}
+ipcMain.handle("sd:status", sdSafe(() => sdStudio().status()));
+ipcMain.handle("sd:detect", sdSafe(() => sdStudio().detect()));
+ipcMain.handle("sd:connect", sdSafe((a) => sdStudio().connect(a.url || "")));
+ipcMain.handle("sd:lists", sdSafe(() => sdStudio().lists()));
+ipcMain.handle("sd:settings", sdSafe((a) => sdStudio().settings(a.patch || {})));
+ipcMain.handle("sd:generate", sdSafe((a) => sdStudio().generate(a, "images-tab")));
+ipcMain.handle("sd:test", sdSafe(() => sdStudio().test()));
+ipcMain.handle("sd:progress", sdSafe(() => sdStudio().progress()));
+ipcMain.handle("sd:cancel", sdSafe(() => sdStudio().cancel()));
+ipcMain.handle("sd:gallery", sdSafe((a) => sdStudio().gallery(a.limit)));
+ipcMain.handle("sd:record", sdSafe((a) => sdStudio().record(a.path)));
+ipcMain.handle("sd:open-images-folder", sdSafe(async () => { const err = await shell.openPath(outputManager.imagesDir()); return err ? { ok: false, error: err } : { ok: true }; }));
+ipcMain.handle("sd:open-ui", sdSafe(async () => { const b = imageProvider.status().base; if (!b) return { ok: false, error: "NO_ENDPOINT" }; await shell.openExternal(b); return { ok: true }; }));
+ipcMain.handle("sd:show-file", sdSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
+ipcMain.handle("sdlib:list", sdSafe((a) => sdStudio().libList(a.filters || {})));
+ipcMain.handle("sdlib:scan", sdSafe(() => sdStudio().libScan()));
+ipcMain.handle("sdlib:update", sdSafe((a) => sdLibrary().update(a.id, a.patch || {})));
+ipcMain.handle("sdlib:folders", sdSafe(() => ({ ok: true, folders: sdLibrary().folders() })));
+ipcMain.handle("sdlib:add-folder", sdSafe(async (a) => {
+  let p = a.path;
+  if (!p) {
+    const r = await dialog.showOpenDialog(win || undefined, { title: "Add a models folder (Stability Matrix Data\\Models, a WebUI or ComfyUI folder, or a Lora folder)", properties: ["openDirectory"] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, error: "CANCELLED" };
+    p = r.filePaths[0];
+  }
+  return sdLibrary().addFolder(p, a.kind);
+}));
+ipcMain.handle("sdlib:remove-folder", sdSafe((a) => sdLibrary().removeFolder(a.path)));
+ipcMain.handle("sdlib:collection", sdSafe((a) => {
+  const L = sdLibrary();
+  if (a.op === "add") return L.addCollection(a.name);
+  if (a.op === "rename") return L.renameCollection(a.name, a.to);
+  if (a.op === "delete") return L.deleteCollection(a.name);
+  return { ok: false, error: "BAD_OP" };
+}));
+ipcMain.handle("sdlib:locks", sdSafe(() => sdLibrary().listLocks()));
+ipcMain.handle("sdlib:save-lock", sdSafe((a) => sdLibrary().saveLock(a.lock || {})));
+ipcMain.handle("sdlib:delete-lock", sdSafe((a) => sdLibrary().deleteLock(a.id)));
+ipcMain.handle("sdlib:check", sdSafe((a) => Object.assign({ ok: true }, sdLibrary().checkLoras(a.loras || [], a.checkpoint || ""))));
+
+// ---- 🎨 Stable Diffusion that installs and runs from inside AutoInjector ------
+// sd-runner.js starts a Stability Matrix package (Forge / reForge / A1111 / SD.Next /
+// ComfyUI) or our own ComfyUI portable as a managed child process (like Akọwe's
+// server); sd-installer.js downloads the official ComfyUI portable. Off unless asked.
+const sdRunnerMod = require("./sd-runner");
+const sdInstallerMod = require("./sd-installer");
+const sdApiMod = require("./sd-api");
+function sdLogFile() { return path.join(userDataDir(), "logs", "stable-diffusion.log"); }
+let _sdRunner = null;
+function sdRunner() {
+  if (_sdRunner) return _sdRunner;
+  let lastPhase = null;
+  _sdRunner = sdRunnerMod.createSdRunner({
+    logFile: sdLogFile(),
+    logger: (k, d) => logEvent(k, d),
+    onChange: (st) => {
+      broadcast("sd-runner", st);
+      // When it comes up, point the image module at it (once per start).
+      if (st.phase === "running" && lastPhase !== "running" && st.base) sdStudio().connect(st.base).then((r) => broadcast("sd-connected", { ok: r.ok, message: r.message, status: r.status })).catch(() => {});
+      lastPhase = st.phase;
+    },
+  });
+  return _sdRunner;
+}
+let _sdInstaller = null;
+function sdInstallerInst() {
+  if (_sdInstaller) return _sdInstaller;
+  _sdInstaller = sdInstallerMod.createInstaller({ home: process.env.AUTOINJECTOR_SD_HOME || undefined, log: (k, d) => logEvent(k, d), onChange: (st) => broadcast("sd-install", st) });
+  return _sdInstaller;
+}
+function sdTargets() {
+  try { return sdRunnerMod.targets({ portableHome: sdInstallerInst().home }); } catch (e) { logEvent("sd-targets-error", { error: String(e) }); return []; }
+}
+function sdTargetsPublic() {
+  return {
+    ok: true,
+    targets: sdTargets().map((t) => ({ id: t.id, label: t.label, displayName: t.displayName, kind: t.kind, source: t.source, supported: t.supported, hasPython: !!t.python, dir: t.dir })),
+    runner: sdRunner().status(), install: sdInstallerInst().status(), startWithApp: !!state.sdManaged.startWithApp, targetId: state.sdManaged.targetId || "",
+    platform: process.platform,
+  };
+}
+async function sdStart(targetId) {
+  const list = sdTargets();
+  const t = list.find((x) => x.id === targetId) || list.find((x) => x.id === state.sdManaged.targetId && x.supported) || list.find((x) => x.supported);
+  if (!t) return Object.assign({ ok: false, error: "NO_TARGET", message: "No Stable Diffusion app was found to start. Press ⬇ Install Stable Diffusion, or add Forge / ComfyUI in Stability Matrix." }, { runner: sdRunner().status() });
+  if (state.sdManaged.targetId !== t.id) { state.sdManaged.targetId = t.id; saveStateDebounced(); }
+  logEvent("sd-runner-begin", { target: t.kind, source: t.source });
+  const st = await sdRunner().start(t);
+  return { ok: st.phase === "running", runner: st, message: st.message };
+}
+ipcMain.handle("sd:targets", sdSafe(() => sdTargetsPublic()));
+ipcMain.handle("sd:start", sdSafe((a) => sdStart(a.id)));
+ipcMain.handle("sd:stop", sdSafe(async () => ({ ok: true, runner: await sdRunner().stop() })));
+ipcMain.handle("sd:open-log", sdSafe(async () => { const f = sdLogFile(); try { fs.mkdirSync(path.dirname(f), { recursive: true }); if (!fs.existsSync(f)) fs.writeFileSync(f, ""); } catch (_) {} const err = await shell.openPath(f); return err ? { ok: false, error: err } : { ok: true }; }));
+ipcMain.handle("sd:set-autostart", sdSafe((a) => { state.sdManaged.startWithApp = !!a.on; saveStateDebounced(); logEvent("sd-autostart", { on: !!a.on }); return sdTargetsPublic(); }));
+ipcMain.handle("sd:install-check", sdSafe(() => sdInstallerInst().check()));
+ipcMain.handle("sd:install", sdSafe(async (a) => { const r = await sdInstallerInst().install({ build: a.build, ignoreSpace: !!a.ignoreSpace }); if (r && r.ok) { try { sdLibrary().scan(); } catch (_) {} } return r; }));
+ipcMain.handle("sd:install-model", sdSafe(async (a) => { const r = await sdInstallerInst().downloadModel(a.id); if (r && r.ok) { try { sdLibrary().scan(); } catch (_) {} } return r; }));
+ipcMain.handle("sd:install-cancel", sdSafe(() => sdInstallerInst().cancel()));
+ipcMain.handle("sd:open-install-folder", sdSafe(async () => { const h = sdInstallerInst().home; try { fs.mkdirSync(h, { recursive: true }); } catch (_) {} const err = await shell.openPath(h); return err ? { ok: false, error: err } : { ok: true }; }));
+// The module API for Alfred and other callers in the main process (docs: STABLE_DIFFUSION_PLAN.md).
+sdApiMod.register(sdApiMod.createImagesApi({
+  studio: { status: () => sdStudio().status(), generate: (r, from) => sdStudio().generate(r, from), progress: () => sdStudio().progress(), cancel: () => sdStudio().cancel(), gallery: (l) => sdStudio().gallery(l), test: () => sdStudio().test(), detect: () => sdStudio().detect(), connect: (u) => sdStudio().connect(u) },
+  library: { list: (f) => sdLibrary().list(f), get: (id) => sdLibrary().get(id), getLock: (n) => sdLibrary().getLock(n), listLocks: () => sdLibrary().listLocks(), scan: () => sdLibrary().scan() },
+  runner: () => sdRunner(), installer: () => sdInstallerInst(),
+  targets: () => sdTargetsPublic(), start: (id) => sdStart(id), stop: async () => ({ ok: true, runner: await sdRunner().stop() }),
+}));
+
 // Video generation (text-to-video). Same shape as image: a configurable local
 // endpoint; a base64 clip is saved into the videos/ output folder and a data URL
 // is handed back for the panel's inline preview.
@@ -6117,6 +6269,13 @@ const serviceBridge = createServiceBridge({
     status: () => imageProvider.status(),
     configure: (patch) => imageProvider.setSettings(patch),
     generate: (prompt, o) => imageProvider.generate(prompt, o),
+  },
+  // 🎨 The Akọwe image contract (POST /image/request with a character lock,
+  // GET /image/locks, GET /image/backend) — docs/SD_IMAGE_API.md.
+  sdStudio: {
+    request: (body) => sdStudio().request(body),
+    locks: () => sdStudio().locks(),
+    backend: () => sdStudio().backendInfo(),
   },
   // The minimal phone companion: the bridge serves this static shell at /m and
   // the page streams the feed + posts sends back. "Stop" on the phone routes to
@@ -7535,7 +7694,19 @@ app.whenReady().then(() => {
   // Akọwe's server starts with AutoInjector (setting, ON by default) — in the background, never blocking the window.
   try { initAkoweServer(); } catch (e) { logEvent("akowe-server-error", { error: String(e) }); }
   if (akoweServerEnabled()) setTimeout(() => { akoweServerStart("startup"); }, 0);
+  // 🎨 "Start Stable Diffusion with AutoInjector" (default off): in the background, never blocking the window.
+  if (state.sdManaged && state.sdManaged.startWithApp && process.env.AUTOINJECTOR_SD_AUTOSTART !== "0") setTimeout(() => { sdStart(state.sdManaged.targetId).catch((e) => logEvent("sd-runner-error", { error: String(e) })); }, 1500);
 });
+// Stop OUR Stable Diffusion process before quitting (one started outside AutoInjector keeps running).
+let sdQuitDone = false;
+app.on("before-quit", (event) => {
+  if (sdQuitDone || !_sdRunner || !_sdRunner.isOwnedAlive()) return;
+  event.preventDefault();
+  sdQuitDone = true;
+  const t = setTimeout(() => app.quit(), 8000); // never hang the quit
+  _sdRunner.stop().catch(() => {}).finally(() => { clearTimeout(t); app.quit(); });
+});
+process.on("exit", () => { try { if (_sdRunner) _sdRunner.killNow(); } catch (_) {} });
 // Stop OUR Akọwe server cleanly before quitting (a hand-started one keeps running).
 let akoweQuitDone = false;
 app.on("before-quit", (event) => {

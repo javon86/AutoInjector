@@ -4864,6 +4864,9 @@ function wireAkoweTab() {
     el("tab-app-main").setAttribute("aria-selected", String(!ak));
     el("tab-app-akowe").setAttribute("aria-selected", String(ak));
     el("akowe-tab").hidden = !ak;
+    // The 🎨 Images tab (images-studio.js) is the third tab; any switch here hides it.
+    if (el("tab-app-images")) el("tab-app-images").setAttribute("aria-selected", "false");
+    if (el("images-tab")) el("images-tab").hidden = true;
     try { if (api.akoweTab) api.akoweTab(ak); } catch (_) {}
     try { localStorage.setItem("akoweTab", ak ? "akowe" : "main"); } catch (_) {}
   }
@@ -4940,9 +4943,12 @@ function wireAkoweTab() {
   // Arrow keys move between the two tabs (tablist pattern).
   el("app-tabs").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    const toAk = document.body.dataset.appTab !== "akowe";
-    setTab(toAk ? "akowe" : "main");
-    el(toAk ? "tab-app-akowe" : "tab-app-main").focus();
+    // Three tabs: 🤖 AutoInjector · 📖 Akọwe · 🎨 Images (when present).
+    const order = el("tab-app-images") && typeof window.sdShowImagesTab === "function" ? ["main", "akowe", "images"] : ["main", "akowe"];
+    const cur = Math.max(0, order.indexOf(document.body.dataset.appTab || "main"));
+    const next = order[(cur + (e.key === "ArrowRight" ? 1 : order.length - 1)) % order.length];
+    if (next === "images") window.sdShowImagesTab(); else setTab(next);
+    el(next === "images" ? "tab-app-images" : next === "akowe" ? "tab-app-akowe" : "tab-app-main").focus();
     e.preventDefault();
   });
   let saved = "main";

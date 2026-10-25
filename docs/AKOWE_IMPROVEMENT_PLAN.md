@@ -285,9 +285,17 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
-- [ ] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
+- [~] **B1** 🖼 Images: hook Akọwe up to image generation — Stable Diffusion (AutoInjector already has
   an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image
   AIs; pictures stored as book assets with the right permissions.
+  Done (AutoInjector side, 2026-10-25): the 🎨 **Images** tab — connects to Forge / A1111 / reForge / SD.Next
+  (`/sdapi`) or ComfyUI (built-in workflow + LoRA nodes), finds them on localhost, spots "started without
+  `--api`" and says the Stability Matrix fix; checkpoints/VAE/sampler/LoRAs with weights, progress + Stop,
+  pictures saved with their settings (Remake); the Model & LoRA library (Stability Matrix `Data/Models`,
+  safetensors headers + Civitai/SM sidecars, base-model mismatch warnings, tags/collections/★/notes) and
+  **character locks**; it can start Stability Matrix packages itself or install the official ComfyUI portable.
+  Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
+  `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
 - [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
@@ -316,6 +324,12 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for Akọwe (see Problems).
 
 ## Problems to come back to
+
+- **Stable Diffusion (B1) — not yet tried on a real GPU:** everything was tested against fake Forge/ComfyUI
+  servers, fake processes and a fake download server. First real run on the user's PC: Stability Matrix package
+  start (venv + launch options + `--api`), ComfyUI portable install/extract (needs 7-Zip or a .7z-capable Windows
+  `tar`), Flux/SD3 UNet-only models (not supported by the built-in ComfyUI graph). See
+  `desktop-app/STABLE_DIFFUSION_PLAN.md` → "Problems / limits".
 
 - **First real book (2026-10-25, "The Lamplighter's Last Ferry") — ChatGPT's answers lost (FIXED):** ChatGPT answered with
   UNFENCED JSON; the chat page rendered it as Markdown, which strips the backslash from every `\"` in text, so quoted

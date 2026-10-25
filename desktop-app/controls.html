@@ -45,6 +45,85 @@
     #akowe-notice .ak-actions button { font-size:13px; padding:5px 12px; }
     #akowe-notice .ak-small { font-size:12px; opacity:.75; }
 
+    /* 🎨 Images tab (images-studio.js): generator + Model & LoRA library + character locks. */
+    body[data-app-tab="images"] #wrap { display:none; }
+    body.window-collapsed #images-tab { display:none; }
+    #images-tab { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:#101010; }
+    #images-tab[hidden] { display:none; }
+    #sd-bar { flex:0 0 auto; display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 10px; background:#151515; border-bottom:1px solid #2a2a2a; font-size:12px; }
+    #sd-bar button, #sd-bar input, #sd-bar select { font-size:12px; padding:3px 8px; }
+    #sd-url { width:210px; }
+    #sd-status { display:inline-flex; align-items:center; gap:6px; font-weight:600; max-width:520px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #sd-bar .spacer { flex:1 1 auto; }
+    .sd-subtab { border-radius:6px; border:1px solid #2a2a2a; background:#151515; color:#cfcfcf; cursor:pointer; }
+    .sd-subtab[aria-selected="true"] { background:#22202e; border-color:#5a4ca0; color:#f0ecff; }
+    #sd-hint { margin:8px 10px 0; padding:9px 12px; border:1px solid #6b5a2a; background:#1d1a10; border-radius:8px; font-size:12.5px; line-height:1.5; white-space:pre-line; }
+    #sd-hint[hidden] { display:none; }
+    #sd-hint[data-tone="error"] { border-color:#6b3a3a; background:#1d1212; }
+    #sd-hint[data-tone="ok"] { border-color:#2d5a3a; background:#101d14; }
+    .sd-view { flex:1 1 auto; min-height:0; overflow:auto; padding:10px; }
+    .sd-view[hidden] { display:none !important; }
+    .sd-badges { display:flex; gap:4px; flex-wrap:wrap; align-items:center; }
+    #sd-view-generate { display:grid; grid-template-columns:minmax(300px, 420px) 1fr; gap:12px; align-items:start; }
+    @media (max-width:820px) { #sd-view-generate { grid-template-columns:1fr; } }
+    .sd-card { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:9px 11px; }
+    .sd-card h3 { font-size:11px; margin:0 0 6px; text-transform:uppercase; letter-spacing:.04em; opacity:.75; }
+    .sd-card label.sd-l { display:block; font-size:11.5px; opacity:.8; margin:6px 0 2px; }
+    .sd-card textarea, .sd-card input[type=text], .sd-card input[type=number], .sd-card select { width:100%; box-sizing:border-box; }
+    .sd-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .sd-row > * { flex:1 1 0; min-width:0; }
+    .sd-row > .sd-fixed { flex:0 0 auto; }
+    .sd-slider { display:grid; grid-template-columns:62px 1fr 46px; gap:6px; align-items:center; font-size:11.5px; margin:3px 0; }
+    .sd-slider span { text-align:right; font-variant-numeric:tabular-nums; }
+    #sd-lora-chips { display:flex; flex-wrap:wrap; gap:5px; margin:5px 0; min-height:4px; }
+    .sd-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; border-radius:12px; background:#1e2230; border:1px solid #34405e; font-size:11.5px; }
+    .sd-chip[data-compat="hard"] { border-color:#a04a4a; background:#2a1616; }
+    .sd-chip[data-compat="soft"] { border-color:#8a7a3a; background:#262212; }
+    .sd-chip input { width:48px; font-size:11px; padding:0 2px; }
+    .sd-chip button { font-size:11px; padding:0 5px; line-height:1.3; }
+    #sd-lora-suggest { position:relative; }
+    #sd-lora-list { position:absolute; left:0; right:0; top:100%; z-index:20; background:#1a1a1a; border:1px solid #333; border-radius:6px; max-height:240px; overflow:auto; }
+    #sd-lora-list[hidden] { display:none; }
+    .sd-sugg { display:flex; gap:8px; align-items:center; padding:4px 8px; cursor:pointer; font-size:12px; }
+    .sd-sugg:hover, .sd-sugg[aria-selected="true"] { background:#262640; }
+    .sd-sugg img, .sd-thumb-ph { width:28px; height:28px; object-fit:cover; border-radius:4px; background:#222; flex:0 0 auto; }
+    .sd-badge { font-size:10.5px; padding:0 6px; border-radius:8px; background:#26303a; border:1px solid #3a4a5a; white-space:nowrap; }
+    .sd-badge[data-base="SDXL"], .sd-badge[data-base="Pony"], .sd-badge[data-base="Illustrious"], .sd-badge[data-base="NoobAI"] { background:#2a2440; border-color:#4a3f7a; }
+    .sd-badge[data-base="SD1.5"] { background:#1f3226; border-color:#3a6a48; }
+    .sd-badge[data-base="Flux"] { background:#3a2a1a; border-color:#7a5a2a; }
+    .sd-warn { font-size:11.5px; color:#f0c674; margin:3px 0; }
+    .sd-warn[data-level="hard"] { color:#ff8c8c; }
+    #sd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
+    #sd-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
+    #sd-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
+    #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; }
+    #sd-preview { display:block; max-width:100%; max-height:62vh; margin:0 auto; border-radius:6px; border:1px solid #2a2a2a; }
+    #sd-preview-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
+    #sd-preview-info { font-size:11.5px; opacity:.8; margin-top:6px; white-space:pre-wrap; word-break:break-word; }
+    #sd-gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(92px, 1fr)); gap:6px; margin-top:8px; }
+    #sd-gallery img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:5px; border:1px solid #2a2a2a; cursor:pointer; }
+    #sd-gallery img:focus-visible, .sd-libcard:focus-visible { outline:2px solid #7c5ce0; }
+    #sd-lib-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+    #sd-lib-tools input, #sd-lib-tools select, #sd-lib-tools button { font-size:12px; padding:3px 7px; }
+    #sd-lib-wrap { display:grid; grid-template-columns:1fr minmax(260px, 340px); gap:10px; align-items:start; }
+    @media (max-width:820px) { #sd-lib-wrap { grid-template-columns:1fr; } }
+    #sd-lib-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:8px; }
+    .sd-libcard { background:#171717; border:1px solid #2a2a2a; border-radius:8px; padding:6px; cursor:pointer; font-size:11.5px; display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .sd-libcard[aria-selected="true"] { border-color:#7c5ce0; }
+    .sd-libcard .sd-pv { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:5px; background:#1d1d1d; display:flex; align-items:center; justify-content:center; font-size:22px; opacity:.9; }
+    .sd-libcard .sd-nm { font-weight:600; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sd-libcard .sd-tr { opacity:.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .sd-libcard[data-compat="hard"] { border-color:#7a3a3a; }
+    #sd-lib-empty, #sd-lock-empty { opacity:.6; padding:20px; text-align:center; }
+    #sd-lib-editor[hidden] { display:none; }
+    #sd-lib-folders { font-size:11.5px; margin-bottom:8px; }
+    #sd-lib-folders li { margin:2px 0; word-break:break-all; }
+    #sd-lock-wrap { display:grid; grid-template-columns:minmax(200px, 260px) 1fr; gap:10px; align-items:start; }
+    @media (max-width:820px) { #sd-lock-wrap { grid-template-columns:1fr; } }
+    .sd-lockitem { padding:6px 8px; border:1px solid #2a2a2a; border-radius:6px; margin-bottom:5px; cursor:pointer; background:#171717; }
+    .sd-lockitem[aria-selected="true"] { border-color:#7c5ce0; }
+    .sd-small { font-size:11px; opacity:.65; }
+    #sd-ed-facts, #sd-lib-folders li { overflow-wrap:anywhere; }
     #wrap { display:flex; flex-direction:column; gap:12px; padding:12px 14px; flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; }
     #wrap.window-collapsed { display:none; }
     /* Visible scrollbar so it's obvious the panel scrolls vertically. */
@@ -959,6 +1038,7 @@
     <div id="app-tabs" role="tablist" aria-label="What this window shows">
       <button id="tab-app-main" class="app-tab" role="tab" aria-selected="true" aria-controls="wrap" title="The AIs, the butler and everything else">🤖 AutoInjector</button>
       <button id="tab-app-akowe" class="app-tab" role="tab" aria-selected="false" aria-controls="akowe-tab" title="Akọwe, the book workspace — it starts with AutoInjector">📖 Akọwe <span id="akowe-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
+      <button id="tab-app-images" class="app-tab" role="tab" aria-selected="false" aria-controls="images-tab" title="Stable Diffusion: make pictures with your checkpoints and LoRAs, and organise them">🎨 Images <span id="sd-tab-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span></button>
     </div>
     <button id="btn-collapse-window" title="Collapse this window to a titlebar" aria-label="Collapse this window to a titlebar">⌄</button>
   </div>
@@ -978,6 +1058,200 @@
         <p id="akowe-notice-text">Akọwe starts together with AutoInjector. The first start can take a few minutes while it prepares what it needs.</p>
         <div class="ak-actions" id="akowe-notice-actions"></div>
         <p class="ak-small" id="akowe-notice-small">Everything else in AutoInjector works while Akọwe starts.</p>
+      </div>
+    </div>
+  </div>
+  <!-- 🎨 Images tab: Stable Diffusion (Forge / A1111 / reForge / SD.Next / ComfyUI). images-studio.js -->
+  <div id="images-tab" role="tabpanel" aria-labelledby="tab-app-images" hidden>
+    <div id="sd-bar">
+      <span id="sd-status" role="status" aria-live="polite"><span id="sd-dot" class="ak-dot" data-tone="off" aria-hidden="true"></span><span id="sd-status-text">Not connected</span></span>
+      <input type="text" id="sd-url" placeholder="http://127.0.0.1:7860" aria-label="Stable Diffusion address" title="Where your SD app serves its API — Forge/A1111 usually :7860, ComfyUI :8188">
+      <button id="btn-sd-find" title="Look on this PC for Forge, A1111, reForge, SD.Next or ComfyUI">🔍 Find my SD app</button>
+      <button id="btn-sd-connect" class="primary" title="Connect to the address on the left">Connect</button>
+      <button id="btn-sd-test" title="Make one small 512×512 picture to prove it works">🧪 Test: make a 512px image</button>
+      <button id="btn-sd-openui" title="Open your SD app's own page in the browser">Open SD UI ↗</button>
+      <button id="btn-sd-run" hidden title="AutoInjector starts it hidden, with the API on, and looks after it">▶ Start</button>
+      <button id="btn-sd-halt" hidden title="Stop the Stable Diffusion that AutoInjector started">⏹ Stop SD</button>
+      <span class="spacer"></span>
+      <div role="tablist" aria-label="Images views" class="sd-row" style="flex:0 0 auto;">
+        <button class="sd-subtab sd-fixed" id="sd-sub-generate" role="tab" aria-selected="true" aria-controls="sd-view-generate">🖌 Generate</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-library" role="tab" aria-selected="false" aria-controls="sd-view-library">📚 Library</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-locks" role="tab" aria-selected="false" aria-controls="sd-view-locks">🔒 Character locks</button>
+        <button class="sd-subtab sd-fixed" id="sd-sub-setup" role="tab" aria-selected="false" aria-controls="sd-view-setup">⚙ Start &amp; install</button>
+      </div>
+    </div>
+    <div id="sd-hint" role="note" hidden></div>
+
+    <div id="sd-view-generate" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-generate">
+      <div class="sd-card">
+        <h3>Prompt</h3>
+        <textarea id="sd-prompt" rows="4" placeholder="Describe the picture… e.g. portrait of an old ferryman at dusk, lantern light, oil painting"></textarea>
+        <label class="sd-l" for="sd-negative">Negative prompt (what to avoid)</label>
+        <textarea id="sd-negative" rows="2" placeholder="blurry, extra fingers, text, watermark"></textarea>
+        <label class="sd-l" for="sd-lock-pick">Character lock (same face every time)</label>
+        <select id="sd-lock-pick"><option value="">— none —</option></select>
+        <label class="sd-l" for="sd-lora-search">LoRAs</label>
+        <div id="sd-lora-suggest">
+          <input type="text" id="sd-lora-search" placeholder="Type to find a LoRA… (or choose from the Library)" autocomplete="off" aria-autocomplete="list" aria-controls="sd-lora-list">
+          <div id="sd-lora-list" role="listbox" hidden></div>
+        </div>
+        <div id="sd-lora-chips" aria-label="Chosen LoRAs"></div>
+        <div id="sd-warnings" aria-live="polite"></div>
+        <div class="sd-row" style="margin-top:4px;">
+          <div><label class="sd-l" for="sd-checkpoint">Checkpoint (model)</label><select id="sd-checkpoint"><option value="">(the one loaded in your SD app)</option></select></div>
+          <div><label class="sd-l" for="sd-vae">VAE</label><select id="sd-vae"><option value="">Automatic</option></select></div>
+        </div>
+        <div class="sd-row">
+          <div><label class="sd-l" for="sd-sampler">Sampler</label><select id="sd-sampler"><option value="">(default)</option></select></div>
+          <div><label class="sd-l" for="sd-scheduler">Scheduler</label><select id="sd-scheduler"><option value="">(default)</option></select></div>
+        </div>
+        <div style="margin-top:6px;">
+          <div class="sd-slider"><label for="sd-steps">Steps</label><input type="range" id="sd-steps" min="1" max="100" value="20"><span id="sd-steps-v">20</span></div>
+          <div class="sd-slider"><label for="sd-cfg">CFG</label><input type="range" id="sd-cfg" min="1" max="20" step="0.5" value="7"><span id="sd-cfg-v">7</span></div>
+          <div class="sd-slider"><label for="sd-width">Width</label><input type="range" id="sd-width" min="256" max="2048" step="64" value="512"><span id="sd-width-v">512</span></div>
+          <div class="sd-slider"><label for="sd-height">Height</label><input type="range" id="sd-height" min="256" max="2048" step="64" value="512"><span id="sd-height-v">512</span></div>
+          <div class="sd-slider"><label for="sd-batch">Batch</label><input type="range" id="sd-batch" min="1" max="8" value="1"><span id="sd-batch-v">1</span></div>
+        </div>
+        <div class="sd-row" style="margin-top:4px;">
+          <label class="sd-fixed" for="sd-seed" style="font-size:11.5px;">Seed</label>
+          <input type="number" id="sd-seed" value="-1" title="-1 = a new random picture each time; a fixed number makes the same picture again">
+          <button class="sd-fixed" id="btn-sd-seed-rand" title="Random seed (-1)">🎲</button>
+          <button class="sd-fixed" id="btn-sd-seed-last" title="Reuse the last picture's seed">♻</button>
+          <select class="sd-fixed" id="sd-size-preset" title="Common sizes" style="width:auto;">
+            <option value="">Size…</option><option value="512x512">512² (SD1.5)</option><option value="512x768">512×768 portrait</option><option value="768x512">768×512 wide</option>
+            <option value="1024x1024">1024² (SDXL)</option><option value="832x1216">832×1216 portrait</option><option value="1216x832">1216×832 wide</option>
+          </select>
+        </div>
+        <div class="sd-row" style="margin-top:8px;">
+          <button id="btn-sd-generate" class="primary">🎨 Generate</button>
+          <button id="btn-sd-stop" class="sd-fixed" disabled>⏹ Stop</button>
+        </div>
+        <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
+        <div id="sd-msg" role="status" aria-live="polite"></div>
+        <div id="sd-final-prompt"></div>
+      </div>
+      <div class="sd-card">
+        <h3>Result</h3>
+        <div id="sd-preview-empty">Your pictures appear here. They are saved in the <b>images/</b> folder with their settings, so any one can be made again.</div>
+        <img id="sd-preview" alt="The selected picture" hidden>
+        <div id="sd-preview-info"></div>
+        <div class="sd-row" style="margin-top:6px;">
+          <button id="btn-sd-remake" disabled title="Put this picture's exact settings (and seed) back into the form">♻ Remake</button>
+          <button id="btn-sd-variation" disabled title="Same settings, new random seed">🎲 Variation</button>
+          <button id="btn-sd-showfile" disabled title="Show the file in its folder">📂 Show file</button>
+          <button id="btn-sd-folder" title="Open the images folder">🗂 Images folder</button>
+        </div>
+        <h3 style="margin-top:10px;">Gallery</h3>
+        <div id="sd-gallery" aria-label="Recent pictures"></div>
+      </div>
+    </div>
+
+    <div id="sd-view-library" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-library" hidden>
+      <div id="sd-lib-tools">
+        <input type="search" id="sd-lib-q" placeholder="Search name, trigger words, tags…" aria-label="Search the library" style="flex:1 1 200px;">
+        <select id="sd-lib-kind" aria-label="Kind"><option value="">All kinds</option><option value="lora">LoRAs</option><option value="checkpoint">Checkpoints</option><option value="embedding">Embeddings</option><option value="vae">VAEs</option></select>
+        <select id="sd-lib-base" aria-label="Base model"><option value="">All base models</option><option>SD1.5</option><option>SD2</option><option>SDXL</option><option>Pony</option><option>Illustrious</option><option>NoobAI</option><option>SD3</option><option>Flux</option><option value="unknown">unknown</option></select>
+        <select id="sd-lib-coll" aria-label="Collection"><option value="">All collections</option></select>
+        <label style="font-size:12px; display:inline-flex; gap:4px; align-items:center;"><input type="checkbox" id="sd-lib-fav"> ★ only</label>
+        <button id="btn-sd-lib-scan" title="Look through the model folders again">↻ Rescan</button>
+        <button id="btn-sd-lib-addfolder" title="Add a folder: Stability Matrix's Data\Models, a WebUI / ComfyUI folder, or a Lora folder">＋ Add folder</button>
+        <input type="text" id="sd-lib-newcoll-name" placeholder="New collection name" aria-label="New collection name" style="width:150px;">
+        <button id="btn-sd-lib-newcoll" title="Make a new collection (e.g. Characters, Styles, Odile's look)">＋ Collection</button>
+      </div>
+      <details id="sd-lib-folders-box"><summary class="sd-small" id="sd-lib-summary">Folders</summary><ul id="sd-lib-folders"></ul></details>
+      <div id="sd-lib-wrap">
+        <div><div id="sd-lib-grid" role="listbox" aria-label="Models and LoRAs"></div><div id="sd-lib-empty" hidden></div></div>
+        <div id="sd-lib-editor" class="sd-card" hidden>
+          <h3 id="sd-ed-title">Details</h3>
+          <div id="sd-ed-facts" class="sd-small"></div>
+          <label class="sd-l"><input type="checkbox" id="sd-ed-fav"> ★ Favourite</label>
+          <label class="sd-l" for="sd-ed-triggers">Trigger words (comma separated)</label>
+          <input type="text" id="sd-ed-triggers">
+          <div id="sd-ed-dataset" class="sd-small"></div>
+          <label class="sd-l" for="sd-ed-tags">Your tags</label>
+          <input type="text" id="sd-ed-tags" placeholder="e.g. face, watercolor, night">
+          <label class="sd-l">Collections</label>
+          <div id="sd-ed-colls" class="sd-row" style="gap:4px 10px;"></div>
+          <div class="sd-row">
+            <div><label class="sd-l" for="sd-ed-weight">Default weight</label><input type="number" id="sd-ed-weight" step="0.05" min="-5" max="5"></div>
+            <div><label class="sd-l" for="sd-ed-base">Base model</label><select id="sd-ed-base"><option value="">(detected)</option><option>SD1.5</option><option>SD2</option><option>SDXL</option><option>Pony</option><option>Illustrious</option><option>NoobAI</option><option>SD3</option><option>Flux</option></select></div>
+          </div>
+          <label class="sd-l" for="sd-ed-notes">Notes</label>
+          <textarea id="sd-ed-notes" rows="3"></textarea>
+          <div class="sd-row" style="margin-top:6px;">
+            <button id="btn-sd-ed-save" class="primary">Save</button>
+            <button id="btn-sd-ed-use" title="Use it in the generator">🖌 Use</button>
+          </div>
+          <div id="sd-ed-msg" class="sd-small" role="status"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="sd-view-setup" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-setup" hidden>
+      <div class="sd-card" style="max-width:760px;">
+        <h3>Run Stable Diffusion from AutoInjector</h3>
+        <div id="sd-run-state" role="status" aria-live="polite" style="font-weight:600; margin:2px 0 6px;">Not started</div>
+        <label class="sd-l" for="sd-run-target">What to start</label>
+        <select id="sd-run-target"><option value="">(nothing found yet)</option></select>
+        <div class="sd-row" style="margin-top:6px;">
+          <button id="btn-sd-run2" class="primary sd-fixed">▶ Start with API</button>
+          <button id="btn-sd-halt2" class="sd-fixed">⏹ Stop</button>
+          <button id="btn-sd-runlog" class="sd-fixed" title="Stable Diffusion's own output (no passwords or tokens in it)">📄 Open log</button>
+          <button id="btn-sd-refresh-targets" class="sd-fixed" title="Look for Stability Matrix packages again">↻ Look again</button>
+        </div>
+        <label class="sd-l"><input type="checkbox" id="sd-autostart"> Start Stable Diffusion with AutoInjector</label>
+        <p class="sd-small" id="sd-run-help">AutoInjector looks for packages installed by Stability Matrix (Forge, reForge, Automatic1111, SD.Next, ComfyUI) and for the ComfyUI it installed itself. It starts them hidden, with the API switched on, restarts them if they crash, and stops them when you quit. Models stay in Stability Matrix's shared Data\Models folder.</p>
+      </div>
+      <div class="sd-card" id="sd-install-card" style="max-width:760px; margin-top:10px;">
+        <h3>Don't have Stable Diffusion yet?</h3>
+        <p class="sd-small" style="margin:0 0 6px;">AutoInjector can download the official <b>ComfyUI portable for Windows</b> (about 2 GB to download, about 4 GB on disk) into its own folder, then one starter model (2–7 GB). It checks your graphics card and free disk space first. Downloads can be paused and continue where they stopped.</p>
+        <div id="sd-install-check" class="sd-small" style="white-space:pre-line; margin:4px 0;"></div>
+        <div class="sd-row">
+          <button id="btn-sd-install" class="primary sd-fixed">⬇ Install Stable Diffusion</button>
+          <button id="btn-sd-install-cancel" class="sd-fixed" disabled>⏸ Pause</button>
+          <button id="btn-sd-install-folder" class="sd-fixed">📂 Open its folder</button>
+        </div>
+        <div id="sd-install-progress" style="height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px;"><div id="sd-install-bar" style="height:100%; width:0; background:linear-gradient(90deg,#2d6a4c,#57c07a); transition:width .3s;"></div></div>
+        <div id="sd-install-msg" class="sd-small" role="status" aria-live="polite"></div>
+        <div id="sd-model-pick" hidden style="margin-top:8px;">
+          <label class="sd-l">Starter model (goes into ComfyUI's models\checkpoints)</label>
+          <div id="sd-model-options"></div>
+          <button id="btn-sd-model" class="sd-fixed" style="margin-top:4px;">⬇ Download this model</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sd-view-locks" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-locks" hidden>
+      <p class="sd-small" style="margin:0 0 8px;">A character lock ties a book character to a LoRA, its trigger words and fixed prompt bits (and optionally a checkpoint and seed), so their face stays the same in every picture. Akọwe will use these for portraits and covers.</p>
+      <div id="sd-lock-wrap">
+        <div><button id="btn-sd-lock-new" style="width:100%; margin-bottom:6px;">＋ New character lock</button><div id="sd-lock-list"></div><div id="sd-lock-empty" hidden>No character locks yet.</div></div>
+        <div class="sd-card" id="sd-lock-editor">
+          <div class="sd-row">
+            <div><label class="sd-l" for="sd-lk-character">Character</label><input type="text" id="sd-lk-character" placeholder="e.g. Odile"></div>
+            <div><label class="sd-l" for="sd-lk-book">Book (optional)</label><input type="text" id="sd-lk-book"></div>
+          </div>
+          <label class="sd-l" for="sd-lk-loras">LoRAs (name:weight, comma separated)</label>
+          <input type="text" id="sd-lk-loras" placeholder="odile_face:0.8, inkwash_style:0.5" list="sd-lk-lora-names">
+          <datalist id="sd-lk-lora-names"></datalist>
+          <label class="sd-l" for="sd-lk-triggers">Trigger words</label>
+          <input type="text" id="sd-lk-triggers" placeholder="odile woman">
+          <label class="sd-l" for="sd-lk-prompt">Always add to the prompt (looks, clothes, style)</label>
+          <textarea id="sd-lk-prompt" rows="3" placeholder="short silver hair, green eyes, scar on left cheek, navy wool coat"></textarea>
+          <label class="sd-l" for="sd-lk-negative">Always avoid</label>
+          <input type="text" id="sd-lk-negative">
+          <div class="sd-row">
+            <div><label class="sd-l" for="sd-lk-checkpoint">Checkpoint (optional)</label><select id="sd-lk-checkpoint"><option value="">(whatever is chosen)</option></select></div>
+            <div><label class="sd-l" for="sd-lk-seed">Seed (-1 = random)</label><input type="number" id="sd-lk-seed" value="-1"></div>
+          </div>
+          <label class="sd-l" for="sd-lk-notes">Notes</label>
+          <input type="text" id="sd-lk-notes">
+          <div class="sd-row" style="margin-top:8px;">
+            <button id="btn-sd-lk-save" class="primary">Save lock</button>
+            <button id="btn-sd-lk-try" title="Make a portrait with this lock">🎨 Try a portrait</button>
+            <button id="btn-sd-lk-delete" class="danger">Delete</button>
+          </div>
+          <div id="sd-lk-msg" class="sd-small" role="status"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1700,5 +1974,6 @@
   </div>
 
   <script src="controls.js"></script>
+  <script src="images-studio.js"></script>
 </body>
 </html>
