@@ -17,6 +17,10 @@ list (``TEXTURE``; scene plans then take their obstacles from it and name the te
 (an item is on the page when a sentence of the chapter holds one of its words; ``planned_script`` overrides), the
 writer's fix of planned items (``planned_fix``: the anchor sentence gets the item appended) and editor notes for story
 rules (``rule_flags``: phrase -> dimension, e.g. a sentence that explains a protected mystery).
+
+Section 7a: the trade-facts finder (hyphenated "-key/-cock/-valve/-pole" words of the chapter; ``terms_script``
+overrides), research answers (a wick term is "wrong", the rest "plausible") and the fact fixes (a terminology finding
+replaces the term with its "use:" text, a repetition finding drops the repeated words from the sentence).
 """
 from __future__ import annotations
 
@@ -161,6 +165,7 @@ class BookFakeAI:
         self.expand_text = False                 # P15: the writer's continuation adds a paragraph (default: nothing)
         self.book_review_script: list = []       # P13: scripted whole-book reviews (dicts or callables(ctx))
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
+        self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -225,6 +230,24 @@ class BookFakeAI:
         if "replacements" in props and ctx.get("findings") and all(
                 f.get("dimension") == "planned_to_page" for f in ctx["findings"]):  # ✅ P11: work planned items in
             return "planned_rewrite", self._rewrite(ctx)
+        if "replacements" in props and ctx.get("findings") and all(
+                f.get("dimension") in ("terminology", "repetition") for f in ctx["findings"]):  # 🔎 P26/P30 fixes
+            return "fact_rewrite", self._fact_rewrite(ctx)
+        if "terms" in props and "chapter_text" in ctx:  # 🔧 P31: which trade facts to check
+            with self.lock:
+                scripted = self.terms_script.pop(0) if self.terms_script else None
+            if scripted is not None:
+                return "terms_find", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            import re  # noqa: PLC0415
+            found = re.findall(r"\b[a-z]+-(?:key|cock|valve|pole)\b", ctx.get("chapter_text") or "")
+            return "terms_find", {"terms": [{"term": t, "kind": "equipment", "question": f"How is a {t} used?"}
+                                            for t in dict.fromkeys(found)][:5]}
+        if "answers" in props and "terms" in ctx:  # 🔧 P31: research answers (advice)
+            return "terms_research", {"answers": [
+                {"id": t["id"], "verdict": "wrong" if "wick" in t["term"] else "plausible",
+                 "answer": "Gas street lamps had no wick; the lamplighter opened the gas cock and lit the burner "
+                           "with a lighting pole." if "wick" in t["term"] else "That fits the trade and the period.",
+                 "use_instead": "lighting pole" if "wick" in t["term"] else ""} for t in ctx["terms"]]}
         if "replacements" in props:  # ✍ the writer reworks the flagged passages
             with self.lock:
                 scripted = self.rewrite_script.pop(0) if self.rewrite_script else None
@@ -496,6 +519,26 @@ class BookFakeAI:
                 if ph in p:
                     out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(ph, rep)})
                     break
+        return {"replacements": out}
+
+    def _fact_rewrite(self, ctx):
+        """P26: replace the flagged term (with its 'use:' text when given); P30: drop the repeated words."""
+        out = []
+        for f in ctx.get("findings") or []:
+            p = f.get("passage") or ""
+            if f.get("dimension") == "terminology":
+                sug = str(f.get("suggestion") or "")
+                term = sug.split("“", 1)[1].split("”", 1)[0] if "“" in sug else ""
+                use = sug.split("(use: ", 1)[1].split(")", 1)[0].split(";")[0].strip() if "(use: " in sug else "pole"
+                if term and term in p:
+                    out.append({"finding_id": f["id"], "original": p, "replacement": p.replace(term, use, 1)})
+            else:
+                why = str(f.get("why") or "")
+                ph = why.split("“", 1)[1].split("”", 1)[0] if "“" in why else ""
+                if ph and ph in p:
+                    rep = " ".join(p.replace(ph, "", 1).split())
+                    rep = rep[:1].upper() + rep[1:] if rep else "It was so."
+                    out.append({"finding_id": f["id"], "original": p, "replacement": rep})
         return {"replacements": out}
 
     def _rules(self, ctx):

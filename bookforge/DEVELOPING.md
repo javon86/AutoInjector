@@ -56,6 +56,16 @@ bookforge/
                            draft, scene/chapter briefs, deterministic usage counts (lemma match)
     planned.py             ✅ P11 planned-to-page check: planned items per chapter, word check, independent AI check,
                            findings for the P5 rewrite (fix), book-level list (settings planned_checks:<pid>:<branch>)
+    timeline_check.py      🕰️ P26 timeline checker: ages, birth/story years, "N years ago" arithmetic (no AI)
+    terms.py               🔧 P31 trade facts (settings trade_terms:<pid>:<branch>) + the P26 terminology check
+    repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels
+                           (settings repetition_labels:<pid>:<branch>)
+    fact_checks.py         🔎 Section 7a glue: chapter/book views, editor context + keep list, fixes, run report, HTTP
+    continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
+                           AI tracking + run hooks (approved under the run consent), brief section, review context,
+                           routes /review/continuity, Reports/Continuity.md; physical_state.py (🌊 P32 extraction +
+                           checks), character_state.py (🫀 P35), ambiguity.py (🪞 P33 two readings,
+                           ambiguity:<pid>:<b>), version_ledger.py (🧾 P34, version_ledger:<pid>:<b>); web/continuity.js
     lengths.py             📏 P15 length presets (words, chapters, scenes per chapter), chapter_plan, long-chapter settings
     long_chapter.py        📏 P15 scene-by-scene writing of long chapters + bounded continuation (used by set_c C02)
     pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets
@@ -558,6 +568,38 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   opened book and resume its imported run, damaged/newer/foreign packages refused, store helpers never overwrite,
   rerun with and without the plan, a book-bible.json upload (multipart) and refusals, localhost-only routes over HTTP).
 
+## 🔎 Section 7a: timeline (P26), trade facts (P31), repetition sorter (P30)
+
+* **Modules.** `timeline_check.check_book([(cid, text)], names=, characters=, story_year=)` reads ages (with an age
+  marker, tied to a known name in the sentence; past sentences kept apart), birth years, the story's year and "N years
+  ago, in YEAR" → findings `age_conflict`, `age_backwards`, `age_gap`, `age_canon` (minor), `year_arithmetic`,
+  `time_backwards` (flashback chapters skipped). `terms.py`: the list (companion data `trade_terms:<pid>:<branch>` =
+  {version, items, story_year, history}), `scan` (built-in `CONFLICTS` — a wick on a gas lamp —, `ANACHRONISMS` when the
+  story year is known, equipment compounds, world-texture work words), `check_text` (`term_wrong`, `term_conflict`,
+  `term_anachronism`, `term_unverified`), `ai_find` / `ai_research` (one AI call each; research answers are stored as
+  `ai_note`, never as a verification), `decide` (verified / wrong / research needed — needs `author_confirms`; `save`
+  refuses a NEW verified/wrong status). `repetition.sort_repeats` (3–6-word phrases inside sentences, 2 words only as a
+  dialogue opener, overlapping windows merged; classes voice → motif → filler → accident; the author's label in
+  `repetition_labels:<pid>:<branch>` wins; trim plan per occurrence; `protected` = exact words of voice/motif uses).
+* **Glue** (`fact_checks.py`): `FactChecker` (`ReviewService.facts`) — `chapter` / `book` views over the newest text of
+  every outline chapter, `scan_terms`, `ai_find`, `ai_research`, `propose_fix(kind="terms"|"repeats")` → findings with
+  dimension `terminology` / `repetition` (ids `term<n>` / `rep<n>`, anchored at an exact unique sentence) → `editor.
+  propose(craft=pseudo)`; the author applies them with `/review/editor/apply`. Editor hooks (2 lines in editor.py):
+  `craft_one` adds `fact_checks` (timeline brief, term findings, repeats to keep / may trim, a note) to the context;
+  `propose` adds `protected_keep` (voice/motif words, minus `craft["except_keys"]` of a ✨ Trim) to the keep list, so a
+  rewrite that cuts them is `KEEP_LOST`. Both never raise. The C02 brief gets `trade_terms` (wrong + verified terms,
+  research-needed ones the plan names, ≤ 1 200 chars) and `terms.RULE`.
+* **Runs.** `autobook._facts_report` at the end of the `planned` step: `run_book_check` adds scanned terms as research
+  needed (`added_by: run`), `run["facts_summary"]` and ⚠️ notes `TIMELINE_PROBLEMS`, `TERMS_WRONG`,
+  `TERMS_RESEARCH_NEEDED`, `REPEATS_TO_TRIM` (`FACTS_CHECK_FAILED` when it breaks). Never blocks, never rewrites.
+* **API** (under `/api/projects/{pid}/branches/{b}/review`): `GET facts` (book), `GET facts/{rid}` (chapter), `PUT
+  facts/terms {items, version, story_year?}`, `POST facts/terms/scan {record_id?}`, `POST facts/terms/verify {ids,
+  status, note?, use_instead?, version?, author_confirms}`, `POST facts/terms/ai {ids?}` (202), `POST facts/{rid}/find`
+  (202), `POST facts/{rid}/fix {kind: terms|repeats}` (202 → proposal at `editor/{rid}`), `PUT facts/repeats {labels,
+  version?}`. Routed by one block in server.py (`fact_checks.route`). UI (one block at the end of app.js): `factsCard`
+  (chapter page), `bookFactsCard` (book page), `factsRunSummary` (run window); problems.js codes above.
+* Tests: `tests/test_section7a.py`; the fake AI answers the term finder (`terms_script`), research and the fact fixes.
+
 ## 🧪 Test workflow (workflow_test.py)
 
 `GET /api/workflow-test` (rows, project, report), `POST /api/workflow-test/run {rows: "all" | [ids]}` (202; 409 while
@@ -635,7 +677,7 @@ SKIPPED and a manual candidate keeps dependent rows going. Projects with `workfl
 
 ## Tests
 
-`python -m pytest -q tests` . Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
+`python -m pytest -q tests` (test-only packages: `requirements-test.txt`; CI: `.github/workflows/bookforge-tests.yml`). Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
 `h.dispatch(op, action, ...)`, `h.validate(ref)`, `h.accept(ref)`, `h.approve(ref)`,
 `h.create_approved(op, payload, manual_candidate=...)`, `h.set_features(magic=True)`.
 For AI paths set `engine.providers.test_adapter` to a fake with

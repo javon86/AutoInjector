@@ -224,24 +224,35 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
   next; numbers only, never breaks the report.)*
 - [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
-- [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
-  lamp and age arithmetic to verify).
+- [x] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
+  lamp and age arithmetic to verify). Done: `timeline_check.py` (ages, birth/story years, "N years ago" arithmetic,
+  no AI) + the term check of `terms.py`, shown on the chapter/book page and sent to the AI editor as `fact_checks`.
 - [ ] **P27** Scene-grid / timeline view of the whole book.
 - [ ] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
 - [ ] **P29** Read-aloud / audiobook export (later).
-- [ ] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
-  filler / accident (keep "Right, so" and Odile's counting; trim only excess).
-- [ ] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
-  ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation).
-- [ ] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
+- [x] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
+  filler / accident (keep "Right, so" and Odile's counting; trim only excess). Done: `repetition.py` sorts every
+  repeat (author can relabel); voice/motif words join every rewrite's keep list; ✨ Trim cuts only accidents/excess.
+- [x] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
+  ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation). Done: `terms.py` list
+  (`trade_terms:<pid>:<branch>`): scan/AI add terms as research needed, AI answers are advice, only the author verifies.
+- [x] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
   (the 32–41 lamp count, the clock, the gauge reading); early hazards must change later actions.
-- [ ] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
+  Done: bookforge/physical_state.py + continuity.py — AI + no-AI extraction per scene, checks (count backwards, clock
+  backwards, hazard dropped), approved state feeds the next chapter's brief; 🧭 Continuity page.
+- [x] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
   flag the weaker one (zero gas pressure vs. "it was the isolator").
-- [ ] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
+  Done: bookforge/ambiguity.py — two readings per protected mystery (AI or author), AI test with quotes checked word
+  for word, BookForge marks the weaker reading; the writer's brief keeps both open.
+- [x] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
   facts, so checkers never "correct" a deliberate change back to the old story.
-- [ ] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
+  Done: bookforge/version_ledger.py — fact-by-fact diff against the source bible / variant source, author decisions
+  (deliberate / restore), sent to the writer's brief and the consistency review.
+- [x] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
   plus what each can observe and falsely assumes; at least one action per main character that serves
   their own goal, not the theme.
+  Done: bookforge/character_state.py — 0-10 values (book's own list), observes / assumes / own action per scene, checks
+  (big jump, no own-goal action), latest state in the next chapter's brief.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
@@ -277,6 +288,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
   audience targets are rules of thumb (not tuned on real books yet).
 
+- **P32–P35 — not tried with real AIs or a real book.** Tested with the deterministic fake AI and the generic mock
+  (which answers the tracker with an empty list: then only BookForge's own reading is kept). On the first real book
+  check: (1) does the tracker's scene split match the chapter (it follows `* * *` / `---` breaks and the scene cards);
+  (2) `physical_state.extract` is English-only keyword/number patterns (time, light, tide, weather, footing, hazard
+  words, "the 32nd lamp", "the gauge read 40 psi") — expect misses and some noise ("two men" is ignored, but any count
+  noun in `COUNT_NOUNS` is taken); (3) are the character values (0-10) stable enough between chapters, or does the
+  "big jump" check (≥ 5) fire on AI noise; (4) the two-readings test sends the whole book (or the P13 per-chapter
+  digest above 60 000 characters) — a digest may miss the passage that contradicts a reading.
+- **P32–P35 design choices to confirm:** (a) tracked state is companion data (`physical_state:` /
+  `character_state:` / `ambiguity:` / `version_ledger:<pid>:<branch>`), included in book.bookforge and in
+  Reports/Continuity.md of the book folder, not in book-bible.json (a rerun tracks its new chapters again); (b) only
+  APPROVED state reaches the next chapter's writer — a run tracks each chapter right after it is approved (one extra AI
+  call per chapter) and approves the state under the run consent; outside runs the author presses ✔ Approve; (c)
+  tracking is tied to the pipeline's "scenes" switch (the baseline preset does not track, so P14 comparisons stay
+  fair); (d) a busy or failing AI never holds a run up: BookForge's own reading is kept with a ⚠️ note; (e) the
+  two-readings test and the readings are on request only (🧭 Continuity page), not run steps; (f) the ledger starts
+  every change as "unresolved" — the writer is still told not to change unresolved items back, only to follow the
+  current bible; a variant made from scratch has almost everything "unresolved"; (g) ✍ Write all chapters does not
+  track (press 🧭 Track on the page); (h) the AI jobs cannot be resumed after a BookForge restart (start them again).
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
   v1.2 bridge and the desktop app's real `bookforge-bridge.js` (fake host `--site-state`), not with real
   ChatGPT/Claude/Gemini windows. On the first real run check that the run window's "AIs:" line matches the
@@ -477,10 +507,46 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (c) "unknown" from a v1.2 bridge (not checked yet) counts as not ok and the notice offers 🔁 Check again (a probe, up
   to 45 s); an older v1.0/1.1 bridge without states counts as ok; (d) the server does not refuse a start without the
   check (older pages / API) — the run window shows the ⚠️ notice instead.
-- **Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
+- ~~**Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
   test_wizard_to_downloaded_book` fails "stuck on Write the chapters: ✔ Done: Approved 1 of 1." on unmodified `main` too
-  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).
-- **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
-  changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
-  (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the
-  campaign bridge e2e or mark it as a separate job).
+  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).~~
+  **FIXED (2026-10-25).** No click was dropped. The test was wrong: it called the book "stuck" when the step title had
+  been the same four times in a row. Writing and approving every chapter all happen under "Write the chapters", so with
+  the 3-chapter short story the test gave up after ch1 write/approve and ch2 write/approve, which is normal progress.
+  The test now fails only when two presses in a row leave the API's book state (done count, next step, step states,
+  waiting approvals, chapter states/versions) unchanged. While checking, a second bug turned up and was fixed in the
+  page. The 💾 card's "This book is not finished — next step: …" note was read once when the page opened, so it kept
+  showing "Characters and places" while the book moved on. `renderBook` now keeps it in step with the book, and clears
+  it once the book is made. The test checks the note after every step.
+- **P26 / P30 / P31 (Section 7a) — not tried with real AIs or the real book 2.** Tested with crafted text and the fake
+  AI (unit, Make-a-book end to end, HTTP, a Playwright smoke of both cards). On the first real book check: (1) the
+  timeline regexes are English-only and only read ages written with an age marker ("twelve years old", "aged forty",
+  "the 40-year-old Odile", "turned thirteen") next to a known character name — pronouns ("she was twelve years old")
+  are skipped, so some problems are missed; a book spanning years may show `year_arithmetic` notes for chapters that
+  mix two times; (2) the term scan uses a small built-in table (`terms.CONFLICTS`, `ANACHRONISMS`, `HEADS`/`MODIFIERS`)
+  — it catches a wick on a gas lamp but will add everyday compounds ("gas lamp") as research needed; prune them on the
+  book page or tighten `MODIFIERS`; (3) the repetition sorter only looks at 3–6-word phrases (2 words only as a
+  dialogue opener like "Right, so"), single repeated words ("Nothing." ×4) are left to the P6 pattern checker; voice
+  is decided from tagged dialogue ("…," Tom said) — untagged lines count as dialogue without a speaker; check the
+  classes on book 2 ("Right, so" voice, Odile's counting motif) with `repetition.sort_repeats`.
+- **P26 / P30 / P31 design choices — CONFIRMED by the user (2026-10-25: "go with the defaults"):** (a) trade facts, the story year and repeat labels are companion data
+  (`trade_terms:<pid>:<branch>`, `repetition_labels:<pid>:<branch>`), not records — like the story rules; (b) only the
+  author can mark a term verified/wrong (`author_confirms`); an AI's research answer is shown as advice and a Make-a-book
+  run never verifies — it adds what it finds as "research needed" and reports ⚠️ `TERMS_RESEARCH_NEEDED` /
+  `TERMS_WRONG` / `TIMELINE_PROBLEMS` after the planned-to-page step (never blocks, no automatic rewrite of terms or
+  repeats in a run); (c) voice/motif repeats are protected in EVERY editor rewrite (also the run's editor pass): a
+  rewrite that removes them is refused word for word (KEEP_LOST) unless it is ✨ Trim's own cut of their excess — so an
+  editor note that only says "cut 'Right, so'" can no longer be applied; relabel the phrase as accidental to allow it;
+  (d) the timeline checker never edits text (fixing a number needs the author's decision); (e) the writer's chapter
+  brief gets the verified/wrong terms (`trade_terms`, ≤ 1 200 chars); research-needed terms only when the plan names
+  them; (f) the editor's context gets `fact_checks` as data (no change to `editor_rubric.py`), so the AI editor may or
+  may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.bookforge` (all
+  companion settings do) but are now in the book bible too (`trade_terms` with the author's ✔/✕ decisions and the story year, `repeat_labels`), and a 🔁 rerun starts with them (FIXED 2026-10-25).
+- **GitHub checks don't cover BookForge.** *Addressed:* `.github/workflows/bookforge-tests.yml` runs on PRs and
+  pushes to main that touch `bookforge/**` (or the Node bridge files the cross-process tests use). Job `test`
+  installs `bookforge/requirements.txt` + `requirements-test.txt` on Python 3.13 with Node 22 and runs
+  `python -m pytest -q` in `bookforge/` (UI tests skip there: no Playwright); job `ui-test` installs Playwright +
+  Chromium and runs `tests/campaign/ui`. Still not on CI: the AutoInjector desktop-app bridge e2e
+  (`tests/campaign/bridge`, needs `desktop-app/node_modules`), EPUBCheck and LibreOffice checks (skipped there).
+  Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so BookForge-only PRs (Sections 3–5) were merged
+  on the full local suite.

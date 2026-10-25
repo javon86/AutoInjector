@@ -1534,6 +1534,25 @@ class AutoBookService(_Runner):
                 code="PLANNED_MISSING")
         else:
             st["message"] = "Everything planned is on the page"
+        self._facts_report(run, st)
+
+    def _facts_report(self, run, st):
+        """🔎 P26/P30/P31 (fact_checks.py): timeline, trade facts (found terms are added as "research needed" — a run
+        never verifies one) and repeats to trim, as ⚠️ notes. A report: it never blocks the book."""
+        from . import fact_checks  # noqa: PLC0415
+        try:
+            fs = fact_checks.run_book_check(self._review, run["principal"], run["project_id"], run["branch_id"])
+        except Exception as exc:  # noqa: BLE001 - a report must never stop the book
+            log.exception("fact checks failed")
+            self.event(run, "note", f"⚠️ The fact checks could not run ({type(exc).__name__}); the book goes on",
+                       step="planned", code="FACTS_CHECK_FAILED")
+            return
+        run["facts_summary"] = {k: v for k, v in fs.items() if k != "notes"}
+        run["facts_summary"]["notes"] = [{"code": c, "message": m} for c, m in fs.get("notes") or []]
+        for code, msg in fs.get("notes") or []:
+            self.event(run, "note", msg, step="planned", code=code)
+        if any(c != "REPEATS_TO_TRIM" for c, _m in fs.get("notes") or []):
+            st["message"] = (st.get("message") or "") + " · ⚠️ fact checks have notes"
 
     # ------------------------------------------------------------------ 📏 story rules and 🧺 world texture (P9/P10)
     def _s_world(self, run, st):
@@ -2119,6 +2138,17 @@ class AutoBookService(_Runner):
                 texture_mod.save(self.store, pid, branch, texture_mod.clean_items(b["world_texture"]), by="author",
                                  how="book_bible")
                 notes.append(f"{len(b['world_texture'])} world detail(s)")
+            tt = b.get("trade_terms") or {}
+            if tt.get("items") or tt.get("story_year"):  # P31: the earlier book's trade facts (author's decisions kept)
+                from . import terms as terms_mod  # noqa: PLC0415
+                if not terms_mod.get_entry(self.store, pid, branch) and \
+                        terms_mod.seed_from_bible(self.store, pid, branch, tt.get("items") or [], tt.get("story_year")):
+                    notes.append(f"{len(tt.get('items') or [])} trade term(s)")
+            if b.get("repeat_labels"):  # P30: the author's voice / motif / filler / accident labels
+                from . import repetition as repetition_mod  # noqa: PLC0415
+                if not repetition_mod.get_labels(self.store, pid, branch).get("labels"):
+                    repetition_mod.save_labels(self.store, pid, branch, b["repeat_labels"], by="author")
+                    notes.append(f"{len(b['repeat_labels'])} repeat label(s)")
         except BookforgeError as exc:
             self.event(run, "note", f"⚠️ The story rules / world texture of the book bible could not be used "
                        f"({exc.code}); the AI makes new ones", step="world", code="BIBLE_ENTRY_REFUSED")
@@ -2237,6 +2267,8 @@ class AutoBookService(_Runner):
                     st["message"] = f"Chapter {idx + 1} of {len(chapters)}" + self._eta_words(run)
                     run["phase"] = st["message"]
                     self.save(run)
+                    from . import continuity  # noqa: PLC0415 - Section 7 (P34): the version ledger, once per run
+                    continuity.before_chapter(self, run, cid)
                     payload = bp.prepare_chapter(cid)
                     ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
                     rid = ref["record_id"]
@@ -2254,6 +2286,8 @@ class AutoBookService(_Runner):
                 except StepProblem:
                     item["state"] = "paused"
                     raise
+            from . import continuity  # noqa: PLC0415 - Section 7 (P32/P35): track + approve under the run consent
+            continuity.after_chapter(self, run, cid, rec, item)
             item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()),
                         seconds=round(time.monotonic() - t_chapter, 1))
             tm = run.setdefault("timing", {"calls": 0, "call_s": 0.0})

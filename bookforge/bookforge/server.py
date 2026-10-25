@@ -906,6 +906,12 @@ class App:
                 return 200, rv.save_texture(principal, pid, branch, body)
             if len(rest) == 3 and rest[0] == "world" and rest[2] == "ai" and method == "POST":
                 return 202, rv.start_world_ai(principal, pid, branch, rest[1], body)
+            # 🧭 Section 7 continuity: physical / character state, two readings, version ledger (continuity.py)
+            if rest and rest[0] == "continuity":
+                from . import continuity  # noqa: PLC0415
+                out = continuity.route(self, method, rest[1:], body, principal, pid, branch)
+                if out is not None:
+                    return out
             # ✅ planned-to-page check (P11)
             if rest == ["planned"] and method == "GET":
                 return 200, rv.planned_book(principal, pid, branch)
@@ -913,6 +919,12 @@ class App:
                 return 200, rv.planned_info(principal, pid, branch, rest[1])
             if len(rest) == 3 and rest[0] == "planned" and rest[2] in ("check", "fix") and method == "POST":
                 return 202, rv.start_planned(principal, pid, branch, rest[1], body, fix=rest[2] == "fix")
+            # 🔎 fact checks: timeline + terms (P26), trade facts (P31), repetition sorter (P30) — fact_checks.py
+            if rest and rest[0] == "facts":
+                from .fact_checks import route as facts_route  # noqa: PLC0415
+                out = facts_route(rv, principal, pid, branch, rest, method, body)
+                if out is not None:
+                    return out
         except BookforgeError as exc:
             from .assist import FIX  # noqa: PLC0415
             for e in exc.errors:

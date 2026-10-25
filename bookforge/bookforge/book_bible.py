@@ -30,6 +30,9 @@ from . import pipeline as pipeline_mod
 from . import scenes as scenes_mod
 from . import story_choices
 from . import story_rules
+from .errors import BookforgeError
+from . import repetition as repetition_mod
+from . import terms as terms_mod
 from . import texture as texture_mod
 from .book_path import BookPath, clean_profile, get_profile
 from .canonical import iter_references
@@ -139,6 +142,8 @@ def build(app, pid: str, branch: str = "main") -> dict:
                                     "status": e.get("status")})
     rules = story_rules.get_entry(store, pid, branch) or {}
     tex = texture_mod.get_entry(store, pid, branch) or {}
+    terms = terms_mod.get_entry(store, pid, branch) or {}  # P31 trade facts (with the author's decisions)
+    labels = repetition_mod.get_labels(store, pid, branch).get("labels") or {}  # P30 the author's repeat labels
     return {
         "schema_version": SCHEMA_VERSION, "kind": KIND, "app": "BookForge", "app_version": __version__,
         "saved_at": _now(),
@@ -149,6 +154,8 @@ def build(app, pid: str, branch: str = "main") -> dict:
         "characters": characters, "canon": canon, "protected_facts": protected, "plan": plan,
         "scene_cards": scene_cards, "story_rules": copy.deepcopy(rules.get("rules") or []),
         "world_texture": copy.deepcopy(tex.get("items") or []),
+        "trade_terms": {"story_year": terms.get("story_year"), "items": copy.deepcopy(terms.get("items") or [])},
+        "repeat_labels": dict(labels),
     }
 
 
@@ -232,6 +239,14 @@ def clean(raw) -> dict:
                 scene_cards.append({"chapter_id": s["chapter_id"][:80], "cards": cards})
     rules = story_rules.clean_rules(raw.get("story_rules") or [])
     tex = texture_mod.clean_items(raw.get("world_texture") or [])
+    tt = raw.get("trade_terms") if isinstance(raw.get("trade_terms"), dict) else {}
+    try:
+        year = terms_mod.clean_year(tt.get("story_year"))
+    except BookforgeError:
+        year = None
+    labels = {repetition_mod.norm_phrase(k)[:120]: v for k, v in (raw.get("repeat_labels") or {}).items()
+              if isinstance(k, str) and v in repetition_mod.CLASSES and repetition_mod.norm_phrase(k)} \
+        if isinstance(raw.get("repeat_labels"), dict) else {}
     return {"schema_version": SCHEMA_VERSION, "kind": KIND, "app_version": str(raw.get("app_version") or "")[:20],
             "saved_at": str(raw.get("saved_at") or "")[:40],
             "source": {k: str(v)[:200] for k, v in (raw.get("source") or {}).items()
@@ -239,7 +254,9 @@ def clean(raw) -> dict:
             if isinstance(raw.get("source"), dict) else {},
             "profile": profile, "choices": choices, "pipeline": pipe, "length": None,
             "characters": characters, "canon": canon, "protected_facts": [], "plan": plan,
-            "scene_cards": scene_cards, "story_rules": rules, "world_texture": tex}
+            "scene_cards": scene_cards, "story_rules": rules, "world_texture": tex,
+            "trade_terms": {"story_year": year, "items": terms_mod.clean_items(tt.get("items") or [])},
+            "repeat_labels": dict(list(labels.items())[:repetition_mod.MAX_LABELS])}
 
 
 def summary(b: dict) -> dict:
@@ -253,7 +270,9 @@ def summary(b: dict) -> dict:
             "plan": [k for k in ("premise", "main_plot", "outline") if k in (b.get("plan") or {})],
             "chapters": len(outline.get("chapters") or []),
             "scene_cards": len(b.get("scene_cards") or []), "story_rules": len(b.get("story_rules") or []),
-            "world_texture": len(b.get("world_texture") or []), "saved_at": b.get("saved_at")}
+            "world_texture": len(b.get("world_texture") or []),
+            "trade_terms": len((b.get("trade_terms") or {}).get("items") or []),
+            "repeat_labels": len(b.get("repeat_labels") or {}), "saved_at": b.get("saved_at")}
 
 
 def remap_refs(data, refs_by_rid: dict):
@@ -385,5 +404,16 @@ def render_markdown(b: dict) -> str:
     out += ["", f"## World texture ({len(b.get('world_texture') or [])})", ""]
     for t in b.get("world_texture") or []:
         out.append(f"- **{t.get('kind')}:** {t.get('detail')}" + (f" — {t['effect']}" if t.get("effect") else ""))
+    tt = b.get("trade_terms") or {}
+    if tt.get("items") or tt.get("story_year"):
+        out += ["", f"## Trade and period terms ({len(tt.get('items') or [])})"
+                + (f" — story year {tt['story_year']}" if tt.get("story_year") else ""), ""]
+        for i in tt.get("items") or []:
+            out.append(f"- **{i.get('term')}** — {str(i.get('status') or '').replace('_', ' ')}"
+                       + (f"; use instead: {i['use_instead']}" if i.get("use_instead") else "")
+                       + (f" ({i['note']})" if i.get("note") else ""))
+    if b.get("repeat_labels"):
+        out += ["", f"## Repeat labels ({len(b['repeat_labels'])})", ""]
+        out += [f"- “{k}”: {v}" for k, v in b["repeat_labels"].items()]
     out.append("")
     return "\n".join(out)

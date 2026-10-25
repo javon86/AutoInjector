@@ -2,6 +2,7 @@
 // All data is rendered with DOM APIs (never innerHTML with server data).
 import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
+import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -644,6 +645,7 @@ async function pickView(parts) {
     if (rest[0] === 'write' && rest[1]) return m => viewWrite(m, rest[1], rest[2] || null);
     if (rest[0] === 'scenes' && rest[1]) return m => viewScenes(m, rest[1]);
     if (rest[0] === 'world') return viewWorld;
+    if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
@@ -700,6 +702,7 @@ function renderTop(parts) {
   if (inProject) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
+    add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -2682,6 +2685,8 @@ async function viewWrite(main, rid, mode) {
   edSlot.appendChild(editorCard(latest, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
   // ✅ planned to page (P11): what the plan says must be in this chapter, and whether it is
   if (isChapter && chapterRow) edSlot.appendChild(plannedCard(rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
+  // 🔎 timeline, trade facts and repeats (P26/P30/P31)
+  if (isChapter && chapterRow) edSlot.appendChild(factsCard(rid, { onSaved: () => { S.details[rid] = null; go(plink('write', rid)); } }));
 }
 
 /* ======================================================================= views: manifest */
@@ -5164,6 +5169,10 @@ function renderBook(holder, book, redraw) {
     if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…', s.id);
   };
   const nextStep = book.steps.find(s => s.id === book.next);
+  // the 💾 card's "not finished — next step" note was read when the page opened: keep it in step with the book
+  const opened = document.querySelector('#main [data-testid="opened-box"]');
+  if (opened && !nextStep) clear(opened);
+  else if (opened && opened.querySelector('[data-testid="opened-next"]')) opened.querySelector('[data-testid="opened-next"]').textContent = nextStep.title;
   holder.appendChild(h('section', { class: 'card book-top' },
     h('div', { class: 'row space' }, h('div', null, h('strong', null, `${book.done_count} of ${book.total} steps done`),
       h('div', { class: 'small muted' }, book.ai_ready ? '✨ Your AI is connected: steps marked “AI can do it” are drafted for you.'
@@ -5266,6 +5275,7 @@ function renderBook(holder, book, redraw) {
   }
   holder.appendChild(ol);
   if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookSection4Card());
+  if (book.steps.some(x => x.id === 'canon' && x.state === 'done')) holder.appendChild(bookFactsCard()); // 🔎 P26/P30/P31
   holder.appendChild(bookSection5Card(book));
   if (S.pendingBookStep) {
     const want = S.pendingBookStep; S.pendingBookStep = null;
@@ -7431,6 +7441,8 @@ function renderRun() {
   if (doneBox && edBox) doneBox.appendChild(edBox);
   const plBox = plannedRunSummary(r);
   if (doneBox && plBox) doneBox.appendChild(plBox);
+  const fcBox = factsRunSummary(r); // 🔎 P26/P30/P31
+  if (doneBox && fcBox) doneBox.appendChild(fcBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
   mbShell('⚡ Make a book for me', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
@@ -8164,7 +8176,7 @@ function bookSaveCard(redraw) {
     if (o.finished) return;
     const run = o.resumable_run;
     put(clear(opened), h('div', { class: 'state ask opened-note' },
-      h('p', null, run ? `▶ This book’s Make-a-book run stopped (${run.phase || run.status}).` : `This book is not finished${o.next_step ? ` — next step: ${o.next_step}` : ''}.`),
+      h('p', null, run ? `▶ This book’s Make-a-book run stopped (${run.phase || run.status}).` : ['This book is not finished', o.next_step ? [' — next step: ', h('span', { 'data-testid': 'opened-next' }, o.next_step)] : null, '.']),
       h('div', { class: 'row' },
         run ? h('button', { type: 'button', class: 'small', 'data-testid': 'resume-saved-run', onclick: async ev => {
           ev.currentTarget.disabled = true;
@@ -8554,4 +8566,198 @@ function boot() {
     route();
   })();
 }
+/* ======================================================================= 🔎 fact checks (Section 7a: P26 / P30 / P31)
+ * Timeline + terminology check, the trade-facts list ("research needed" until you verify a term) and the repetition
+ * sorter (voice / motif / filler / accidental — only accidental repeats and the excess of the others are trimmed).
+ * Server: /review/facts… (fact_checks.py). Kept in one block so it merges easily. */
+Object.assign(ED_DIMS, { terminology: 'Trade fact or term', repetition: 'Repeat to trim' });
+const FACT_CLASS = { voice: ['🗣️', 'Voice — kept'], motif: ['🔁', 'Motif — kept'], filler: ['🧹', 'Filler — trim the excess'], accident: ['✂️', 'Accidental — trim'] };
+const TERM_STATUS = { research_needed: ['🔬', 'Research needed'], verified: ['✔', 'Verified'], wrong: ['✕', 'Wrong — do not use'] };
+const factWhere = { step: 'Fact checks' };
+
+/** ✔ Verified / ✕ Wrong / ↩ for one term: an inline confirm row (the author's own check; never the AI's). */
+function termVerifyRow(term, after) {
+  const row = h('span', { class: 'fact-verify' });
+  const open = status => {
+    const inp = h('input', { type: 'text', class: 'small', 'aria-label': status === 'wrong' ? 'What to write instead' : 'What you checked',
+      placeholder: status === 'wrong' ? 'What to write instead (optional)' : 'What you checked (optional)' });
+    const msg = h('span', { 'aria-live': 'polite' });
+    const ok = h('button', { type: 'button', class: 'small primary', onclick: async () => {
+      ok.disabled = true;
+      try {
+        await api('POST', bpath('/review/facts/terms/verify'), { body: { ids: [term.id], status, author_confirms: true,
+          note: status === 'verified' ? inp.value : '', use_instead: status === 'wrong' ? inp.value : '' } });
+        toast(status === 'verified' ? `“${term.term}” marked verified` : status === 'wrong' ? `“${term.term}” marked wrong` : `“${term.term}” needs research again`);
+        if (after) after();
+      } catch (e) { clear(msg).appendChild(problemBox(toProblem(e, factWhere), {})); ok.disabled = false; }
+    } }, 'Confirm');
+    clear(row).appendChild(h('span', { class: 'row' }, status === 'research_needed' ? null : inp, ok,
+      h('button', { type: 'button', class: 'small', onclick: () => draw() }, 'Cancel'), msg));
+    inp.focus && status !== 'research_needed' && inp.focus();
+  };
+  const draw = () => clear(row).appendChild(h('span', null,
+    term.status !== 'verified' ? h('button', { type: 'button', class: 'small', 'data-testid': 'term-verified', onclick: () => open('verified') }, '✔ Verified') : null, ' ',
+    term.status !== 'wrong' ? h('button', { type: 'button', class: 'small', 'data-testid': 'term-wrong', onclick: () => open('wrong') }, '✕ Wrong') : null, ' ',
+    term.status !== 'research_needed' ? h('button', { type: 'button', class: 'small link', onclick: () => open('research_needed') }, '↩ Needs research') : null));
+  draw();
+  return row;
+}
+/** A select to relabel one repeated phrase (the author's label always wins). */
+function repeatLabel(r, version, after) {
+  const sel = h('select', { class: 'small', 'aria-label': `Kind of repeat: ${r.phrase}` },
+    h('option', { value: '' }, 'Let BookForge decide'),
+    Object.entries(FACT_CLASS).map(([k, [ic, l]]) => h('option', { value: k, selected: r.source === 'author' && r.class === k }, `${ic} ${l}`)));
+  sel.addEventListener('change', async () => {
+    try {
+      await api('PUT', bpath('/review/facts/repeats'), { body: { labels: { [r.key === 'counting' ? 'counting' : r.phrase]: sel.value }, version } });
+      toast('Label saved'); if (after) after();
+    } catch (e) { toast(toProblem(e, factWhere).title); }
+  });
+  return sel;
+}
+function factFindingList(fs, testid) {
+  return h('ul', { class: 'small fact-list', 'data-testid': testid }, fs.map(f => h('li', { class: `fact-${f.severity}` },
+    f.severity === 'major' ? '⚠️ ' : '• ', h('strong', null, f.label), `: ${f.detail}`,
+    (f.passages || []).slice(0, 2).map(p => h('div', { class: 'muted' }, p.number ? `Chapter ${p.number}: ` : '', `“${(p.sentence || p.excerpt || '').slice(0, 140)}”`)))));
+}
+
+/** Chapter page: timeline, trade facts and repeats of this chapter, with ✨ fixes through the editor's rewrite. */
+function factsCard(rid, { onSaved } = {}) {
+  const box = h('section', { class: 'card facts-card', 'aria-labelledby': `fc-h-${rid}`, 'data-testid': 'facts-card' },
+    h('div', { class: 'row space' }, h('h2', { id: `fc-h-${rid}` }, '🔎 Timeline, trade facts and repeats'),
+      infoTip('Fact checks', h('p', null, 'BookForge reads the ages and years in the book and checks that they add up (born in 1850 + forty years old should be the story’s year).'),
+        h('p', null, 'Trade facts: equipment, procedures and period words stay “research needed” until you mark them ✔ Verified or ✕ Wrong. An AI may suggest an answer, but only you can verify. A wick on a gas lamp is flagged on sight.'),
+        h('p', null, 'Repeats are sorted before anything is cut: a character’s way of talking (voice) and motifs are kept; only accidental repeats and the excess of the others may be trimmed.'))));
+  const body = h('div', null, loadingState('Checking ages, years, terms and repeats…'));
+  const prog = h('div', { 'aria-live': 'polite' });
+  const msg = h('div', { 'aria-live': 'polite' });
+  put(box, body, prog, msg);
+  const draw = async () => {
+    let info;
+    try { info = await api('GET', bpath(`/review/facts/${encodeURIComponent(rid)}`)); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, factWhere), { retry: draw })); return; }
+    clear(body);
+    // 🕰️ timeline
+    const tf = info.timeline.findings || [];
+    const ages = Object.entries(info.timeline.ages || {}).map(([n, rows]) => `${n} ${[...new Set(rows.filter(r => !r.past).map(r => r.age))].join(', ')}`).filter(x => /\d/.test(x));
+    body.appendChild(h('h3', null, '🕰️ Timeline'));
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'facts-timeline' }, tf.length ? `⚠️ ${tf.length} place(s) where ages or years do not add up.` : '✔ No timeline problems found.',
+      info.story_year ? ` Story year: ${info.story_year}${info.story_year_set ? '' : ' (read from the text)'}.` : '', ages.length ? ` Ages on this page: ${ages.join('; ')}.` : ''));
+    if (tf.length) body.appendChild(factFindingList(tf, 'facts-timeline-list'));
+    // 🔧 trade facts
+    const tc = info.terms;
+    const hard = (tc.findings || []).filter(f => f.check !== 'term_unverified');
+    const open = (tc.findings || []).filter(f => f.check === 'term_unverified');
+    body.appendChild(h('h3', null, '🔧 Trade facts'));
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'facts-terms' }, hard.length ? `⚠️ ${hard.length} wrong or out-of-place term(s).` : '✔ No wrong terms found.',
+      open.length ? ` 🔬 ${open.length} term(s) here still need research.` : ''));
+    if (hard.length) body.appendChild(factFindingList(hard, 'facts-terms-list'));
+    if (open.length) body.appendChild(h('ul', { class: 'small fact-list' }, open.map(f => h('li', null, '🔬 ', f.detail, ' ', f.term ? termVerifyRow({ id: f.term, term: (f.passages[0] || {}).match || '', status: 'research_needed' }, draw) : null))));
+    if ((tc.candidates || []).length) body.appendChild(h('p', { class: 'small' }, `Found ${tc.candidates.length} term(s) to check: ${tc.candidates.map(c => c.term).join(', ')} `,
+      h('button', { type: 'button', class: 'small', 'data-testid': 'facts-scan', onclick: async () => {
+        try { const out = await api('POST', bpath('/review/facts/terms/scan'), { body: { record_id: rid } }); toast(`${out.added} term(s) added as research needed`); draw(); }
+        catch (e) { clear(msg).appendChild(problemBox(toProblem(e, factWhere), {})); }
+      } }, '➕ Add them as research needed')));
+    // 🔁 repeats
+    const reps = info.repetition.repeats || [];
+    const keep = reps.filter(r => r.class === 'voice' || r.class === 'motif');
+    const trim = reps.filter(r => r.trim_here);
+    body.appendChild(h('h3', null, '🔁 Repeats'));
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'facts-repeats' }, trim.length ? `${trim.length} repeat(s) could be trimmed here.` : '✔ Nothing to trim.',
+      keep.length ? ` ${keep.length} voice or motif repeat(s) are kept on purpose.` : ''));
+    if (reps.length) body.appendChild(h('ul', { class: 'small fact-list' }, reps.slice(0, 12).map(r => h('li', { 'data-class': r.class },
+      `${(FACT_CLASS[r.class] || ['•'])[0]} “${r.phrase.slice(0, 60)}” — ${(FACT_CLASS[r.class] || ['', r.class])[1]} (${r.why}; ${r.here} here${r.trim_here ? `, ${r.trim_here} to trim` : ''}) `,
+      repeatLabel(r, info.repetition.labels_version, draw)))));
+    // ✨ fixes (proposal shown with the editor's fixes box when it is ours)
+    let edInfo = null;
+    try { edInfo = await api('GET', bpath(`/review/editor/${encodeURIComponent(rid)}`)); } catch { /* no fixes to show */ }
+    const prop = edInfo && edInfo.proposal && (edInfo.proposal.items || []).length && edInfo.proposal.items.every(x => ['terminology', 'repetition'].includes(x.dimension)) ? edInfo.proposal : null;
+    if (prop && prop.items.some(x => x.ok)) body.appendChild(fixesBox(prop, edInfo, msg, () => draw(), onSaved));
+    body.appendChild(h('div', { class: 'row' },
+      h('button', { type: 'button', 'data-testid': 'facts-find', onclick: async () => {
+        clear(msg); const j = await runAiJob(`/review/facts/${encodeURIComponent(rid)}/find`, {}, prog, 'Finding the trade facts');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); draw(); }
+      } }, '🤖 Find trade facts with AI'),
+      info.fix.terms ? h('button', { type: 'button', class: 'primary ai-btn', 'data-testid': 'facts-fix-terms', onclick: async () => {
+        clear(msg); const j = await runAiJob(`/review/facts/${encodeURIComponent(rid)}/fix`, { kind: 'terms' }, prog, 'The writer is fixing the wrong terms');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); draw(); }
+      } }, '✨ Fix the wrong terms with AI') : null,
+      info.fix.repeats ? h('button', { type: 'button', class: 'primary ai-btn', 'data-testid': 'facts-fix-repeats', onclick: async () => {
+        clear(msg); const j = await runAiJob(`/review/facts/${encodeURIComponent(rid)}/fix`, { kind: 'repeats' }, prog, 'The writer is trimming the accidental repeats');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); draw(); }
+      } }, '✨ Trim accidental repeats with AI') : null));
+  };
+  draw();
+  return box;
+}
+
+/** Book page: the trade-facts list (verify here), the story year, the book's timeline and its repeats. */
+function bookFactsCard() {
+  const box = h('section', { class: 'card facts-card', 'aria-labelledby': 'bfc-h', 'data-testid': 'book-facts' },
+    h('h2', { id: 'bfc-h' }, '🔎 Timeline, trade facts and repeats'));
+  const body = h('div', null, loadingState('Loading…'));
+  const prog = h('div', { 'aria-live': 'polite' });
+  const msg = h('div', { 'aria-live': 'polite' });
+  put(box, body, prog, msg);
+  const draw = async () => {
+    let bk;
+    try { bk = await api('GET', bpath('/review/facts')); }
+    catch (e) { clear(body).appendChild(problemBox(toProblem(e, factWhere), { retry: draw })); return; }
+    clear(body);
+    if (!bk.chapters) { body.appendChild(h('p', { class: 'small muted' }, 'No chapter is written yet.')); return; }
+    const year = h('input', { type: 'number', min: 1000, max: 2200, class: 'small', value: bk.story_year_set ? bk.story_year : '', 'aria-label': 'Story year', placeholder: bk.story_year ? String(bk.story_year) : 'e.g. 1887' });
+    body.appendChild(h('p', { class: 'small row' }, h('strong', null, 'Story year: '), year,
+      h('button', { type: 'button', class: 'small', onclick: async () => {
+        try { await api('PUT', bpath('/review/facts/terms'), { body: { items: bk.terms.items, version: bk.terms.version, story_year: year.value ? Number(year.value) : null } }); toast('Story year saved'); draw(); }
+        catch (e) { clear(msg).appendChild(problemBox(toProblem(e, factWhere), { retry: draw })); }
+      } }, 'Save'), h('span', { class: 'muted' }, ' Used for the age arithmetic and for words from a later time.')));
+    const tf = bk.timeline.findings || [];
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'book-facts-timeline' }, h('strong', null, '🕰️ Timeline: '),
+      tf.length ? `⚠️ ${tf.length} place(s) where ages or years do not add up.` : '✔ Ages and years add up.'));
+    if (tf.length) body.appendChild(factFindingList(tf.slice(0, 8), 'book-facts-timeline-list'));
+    const c = bk.terms.counts;
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'book-facts-terms' }, h('strong', null, '🔧 Trade facts: '),
+      `🔬 ${c.research_needed} need research · ✔ ${c.verified} verified · ✕ ${c.wrong} wrong`,
+      (bk.terms.flagged || []).length ? ` · ⚠️ ${bk.terms.flagged.length} wrong or out-of-place use(s) in the chapters` : ''));
+    if ((bk.terms.items || []).length) body.appendChild(h('ul', { class: 'small fact-list', 'data-testid': 'book-terms' }, bk.terms.items.map(t => h('li', { 'data-status': t.status },
+      `${(TERM_STATUS[t.status] || ['•'])[0]} `, h('strong', null, t.term), ` — ${(TERM_STATUS[t.status] || ['', t.status])[1]}`,
+      t.uses ? h('span', { class: 'muted' }, ` (used ${t.uses}× in chapter ${t.in_chapters.join(', ')})`) : h('span', { class: 'muted' }, ' (not used)'),
+      t.question ? h('div', { class: 'muted' }, `❓ ${t.question}`) : null,
+      t.note ? h('div', null, `📝 ${t.note}`) : null,
+      t.use_instead && t.status === 'wrong' ? h('div', null, `→ write: ${t.use_instead}`) : null,
+      t.ai_note ? h('div', { class: 'muted' }, `🤖 ${t.ai_note.reviewer || 'An AI'} says (${t.ai_note.verdict}, advice only): ${t.ai_note.answer}${t.ai_note.use_instead ? ` — suggests “${t.ai_note.use_instead}”` : ''}`) : null,
+      termVerifyRow(t, draw)))));
+    body.appendChild(h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'small', 'data-testid': 'book-terms-scan', onclick: async () => {
+        try { const out = await api('POST', bpath('/review/facts/terms/scan'), { body: {} }); toast(`${out.added} term(s) added as research needed`); draw(); }
+        catch (e) { clear(msg).appendChild(problemBox(toProblem(e, factWhere), {})); }
+      } }, '➕ Scan the book for terms'),
+      c.research_needed ? h('button', { type: 'button', class: 'small ai-btn', 'data-testid': 'book-terms-research', onclick: async () => {
+        clear(msg); const j = await runAiJob('/review/facts/terms/ai', {}, prog, 'An AI is researching the trade facts');
+        if (j) { toast(((j.results || [])[0] || {}).message || 'Done'); draw(); }
+      } }, '🤖 Ask an AI to research the open questions') : null));
+    const rc = bk.repetition.counts;
+    const trim = (bk.repetition.repeats || []).filter(r => r.trim_count);
+    body.appendChild(h('p', { class: 'small', 'data-testid': 'book-facts-repeats' }, h('strong', null, '🔁 Repeats: '),
+      `🗣️ ${rc.voice} voice · 🔁 ${rc.motif} motif (kept) · 🧹 ${rc.filler} filler · ✂️ ${rc.accident} accidental — ${rc.trim} use(s) could be trimmed`));
+    if (trim.length) body.appendChild(h('ul', { class: 'small fact-list' }, trim.slice(0, 10).map(r => h('li', null,
+      `${(FACT_CLASS[r.class] || ['•'])[0]} “${r.phrase.slice(0, 60)}” (${r.why}) — `,
+      r.occurrences.filter(o => o.trim && o.record_id).slice(0, 3).map(o => [h('a', { href: plink('write', o.record_id) }, `chapter ${o.number}`), ' ']),
+      repeatLabel(r, bk.repetition.labels_version, draw)))));
+  };
+  draw();
+  return box;
+}
+
+/** Run window: what the fact checks found (P26/P30/P31). */
+function factsRunSummary(r) {
+  const fs = r.facts_summary;
+  if (!fs || !fs.chapters) return null;
+  const notes = fs.notes || [];
+  return h('div', { class: notes.some(n => n.code !== 'REPEATS_TO_TRIM') ? 'words-warn' : 'small', 'data-testid': 'mb-facts-summary' },
+    h('p', null, notes.length ? '🔎 ' : '✅ ', `Fact checks: ${fs.terms_added || 0} trade term(s) added as “research needed”, ${fs.timeline ? fs.timeline.major : 0} timeline problem(s), ${fs.trim || 0} repeat(s) that could be trimmed.`),
+    notes.length ? h('ul', { class: 'small' }, notes.map(n => h('li', null, n.message))) : null,
+    h('p', { class: 'small muted' }, 'A run never verifies a trade fact: open the book page → 🔎 Timeline, trade facts and repeats to check them.'));
+}
+
 boot();

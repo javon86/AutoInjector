@@ -18,6 +18,9 @@
 P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
 scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
 * ``rules``: how to use all of this, in plain sentences.
+* Section 7 (continuity.py): ``physical_state`` (P32), ``character_state`` (P35) at the end of the earlier chapters
+  (approved tracked state only), ``two_readings`` of the protected mysteries (P33) and ``version_changes`` of a rerun /
+  variant (P34); bounded to about 3 500 characters, one rule each. Off when the pipeline's scenes switch is off.
 
 Prompt budget of the brief (characters of JSON): voice cards ≤ 7 000, scene cards ≤ 6 × ~1 500, story rules ≤ 2 500,
 world texture ≤ 1 200, must-show ≤ 5 × 160, story choices ≤ 1 600, length ≤ 400 — about 22 000 at most, typically
@@ -154,14 +157,28 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(TEXTURE_RULE)
         if brief.get("must_show"):
             rules.append(RULES["must_show"])
+        trade = _trade_terms(store, pid, branch, texts + [json.dumps(cards, ensure_ascii=False)])  # P31
+        if trade:
+            from .terms import RULE as TERMS_RULE  # noqa: PLC0415
+            brief["trade_terms"] = trade
+            rules.append(TERMS_RULE)
         rules += extra.get("choice_rules") or []
+        # Section 7 (P32-P35): continuity tracked from the earlier chapters (continuity.py; never raises)
+        if flags["scenes"]:
+            from . import continuity  # noqa: PLC0415
+            from .book_path import BookPath  # noqa: PLC0415
+            cont = continuity.section(store, pid, branch, [c["chapter_id"] for c in BookPath.outline_chapters(
+                None, outline)], chapter_id, [c["name"] for c in present])
+            rules += cont.pop("continuity_rules", [])
+            brief.update(cont)
         if length:
             from . import lengths as lengths_mod  # noqa: PLC0415
             rules.append(lengths_mod.rule(length))
         brief.pop("choice_rules", None)
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
-                or extra.get("world_texture") or extra.get("story_choices") or length):
+                or extra.get("world_texture") or extra.get("story_choices") or length
+                or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
@@ -171,6 +188,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
                     length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
+                    continuity=[k for k in ("physical_state", "character_state", "two_readings", "version_changes")
+                                if k in brief] or None,
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
@@ -192,6 +211,17 @@ def _length(store, pid: str, outline: dict) -> dict | None:
     except Exception:  # noqa: BLE001
         log.exception("could not add the length to the brief")
         return None
+
+
+def _trade_terms(store, pid: str, branch: str, texts: list) -> list:
+    """P31: verified trade terms (with notes), terms marked wrong (with what to write) and research-needed terms the
+    plan mentions. Never raises."""
+    try:
+        from . import terms as terms_mod  # noqa: PLC0415
+        return terms_mod.chapter_brief(terms_mod.get_entry(store, pid, branch), " ".join(t for t in texts if t))
+    except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter
+        log.exception("could not add the trade terms to the brief")
+        return []
 
 
 def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, cards: list, texts: list) -> dict:
