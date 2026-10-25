@@ -154,6 +154,11 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(TEXTURE_RULE)
         if brief.get("must_show"):
             rules.append(RULES["must_show"])
+        trade = _trade_terms(store, pid, branch, texts + [json.dumps(cards, ensure_ascii=False)])  # P31
+        if trade:
+            from .terms import RULE as TERMS_RULE  # noqa: PLC0415
+            brief["trade_terms"] = trade
+            rules.append(TERMS_RULE)
         rules += extra.get("choice_rules") or []
         if length:
             from . import lengths as lengths_mod  # noqa: PLC0415
@@ -192,6 +197,17 @@ def _length(store, pid: str, outline: dict) -> dict | None:
     except Exception:  # noqa: BLE001
         log.exception("could not add the length to the brief")
         return None
+
+
+def _trade_terms(store, pid: str, branch: str, texts: list) -> list:
+    """P31: verified trade terms (with notes), terms marked wrong (with what to write) and research-needed terms the
+    plan mentions. Never raises."""
+    try:
+        from . import terms as terms_mod  # noqa: PLC0415
+        return terms_mod.chapter_brief(terms_mod.get_entry(store, pid, branch), " ".join(t for t in texts if t))
+    except Exception:  # noqa: BLE001 - guidance, never a reason to fail the chapter
+        log.exception("could not add the trade terms to the brief")
+        return []
 
 
 def _section4(store, pid: str, branch: str, outline: dict, chapter_id: str, cards: list, texts: list) -> dict:

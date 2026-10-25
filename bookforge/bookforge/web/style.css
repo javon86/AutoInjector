@@ -1086,3 +1086,13 @@ ul.samples q { font-style: italic; }
 /* 🎯 P36 calibrated editor */
 .ed-cal { margin: 8px 0; }
 .ed-cal ul { margin: 4px 0; }
+/* 🔎 fact checks (Section 7a: P26 / P30 / P31) */
+.fact-list { list-style: none; padding: 0; margin: 0 0 8px; }
+.fact-list > li { padding: 3px 0; overflow-wrap: anywhere; }
+.fact-list > li.fact-major { color: var(--warn); }
+.fact-list > li .muted { font-weight: normal; }
+.fact-verify { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 4px; }
+.fact-verify input { min-width: 12em; max-width: 100%; }
+.facts-card h3 { margin: 10px 0 4px; font-size: 1rem; }
+.fact-list select { width: auto; max-width: 100%; display: inline-block; margin-left: 4px; }
+.facts-card input[type=number] { width: 8em; display: inline-block; }

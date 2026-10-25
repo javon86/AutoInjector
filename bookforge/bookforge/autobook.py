@@ -1534,6 +1534,25 @@ class AutoBookService(_Runner):
                 code="PLANNED_MISSING")
         else:
             st["message"] = "Everything planned is on the page"
+        self._facts_report(run, st)
+
+    def _facts_report(self, run, st):
+        """🔎 P26/P30/P31 (fact_checks.py): timeline, trade facts (found terms are added as "research needed" — a run
+        never verifies one) and repeats to trim, as ⚠️ notes. A report: it never blocks the book."""
+        from . import fact_checks  # noqa: PLC0415
+        try:
+            fs = fact_checks.run_book_check(self._review, run["principal"], run["project_id"], run["branch_id"])
+        except Exception as exc:  # noqa: BLE001 - a report must never stop the book
+            log.exception("fact checks failed")
+            self.event(run, "note", f"⚠️ The fact checks could not run ({type(exc).__name__}); the book goes on",
+                       step="planned", code="FACTS_CHECK_FAILED")
+            return
+        run["facts_summary"] = {k: v for k, v in fs.items() if k != "notes"}
+        run["facts_summary"]["notes"] = [{"code": c, "message": m} for c, m in fs.get("notes") or []]
+        for code, msg in fs.get("notes") or []:
+            self.event(run, "note", msg, step="planned", code=code)
+        if any(c != "REPEATS_TO_TRIM" for c, _m in fs.get("notes") or []):
+            st["message"] = (st.get("message") or "") + " · ⚠️ fact checks have notes"
 
     # ------------------------------------------------------------------ 📏 story rules and 🧺 world texture (P9/P10)
     def _s_world(self, run, st):
