@@ -22,6 +22,11 @@ editor.py applies to every craft review (all deterministic, unit-tested, no AI c
   those gaps. After ``MIN_OBS`` (3) observations an AI whose leniency is ``LENIENT_AT`` (1.0) or more gets its scores
   lowered by ``discount`` = floor(leniency), at most ``MAX_DISCOUNT`` (2), before they are merged.
 
+The same rules apply to the 📊 whole-book review (book_report.py): ``assess_book`` (a 9/10 needs a quoted
+``score_evidence``; a near-perfect average needs at least 3 weaknesses whose quotes are in the book), one stricter
+re-ask, then ⚠️ flagged and ``apply_caps``; the review feeds ``reviewer_leniency`` (vs the median of the other
+reviewers and vs the book's pattern check through ``BOOK_AUDIT_DIMS``) and gets the same ``discount``.
+
 Only numbers and dimension keys are stored for leniency, never text.
 """
 from __future__ import annotations
@@ -51,6 +56,9 @@ AUDIT_DIMS = {"gesture": "prose_variety", "not_parallel": "prose_variety", "tria
               "named_emotion": "subtext", "reassurance": "tension_stakes", "voice_sameness": "voice_distinction",
               "voice_never_word": "voice_distinction"}
 AUDIT_CEILING = {"major": 6, "minor": 8}
+# the same pattern checks -> the whole-book review dimension they bound (book_report.DIMENSIONS)
+BOOK_AUDIT_DIMS = {"moral_ending": "ending", "named_emotion": "subtext", "reassurance": "peril_uncertainty",
+                   "voice_sameness": "character_differentiation", "voice_never_word": "character_differentiation"}
 
 _lock = threading.Lock()
 
@@ -102,11 +110,12 @@ def weakest_of(raw, text_norm: str) -> list[dict]:
     return out
 
 
-def audit_ceilings(report: dict | None) -> dict:
-    """{editor dimension: highest believable score} from BookForge's own pattern report (P6)."""
+def audit_ceilings(report: dict | None, dims_map: dict | None = None) -> dict:
+    """{editor dimension: highest believable score} from BookForge's own pattern report (P6). ``dims_map``: which
+    check bounds which dimension (default ``AUDIT_DIMS``; whole-book reviews: ``BOOK_AUDIT_DIMS``)."""
     out: dict = {}
     for f in (report or {}).get("findings") or []:
-        dim = AUDIT_DIMS.get(f.get("check"))
+        dim = (dims_map or AUDIT_DIMS).get(f.get("check"))
         ceil = AUDIT_CEILING.get(f.get("severity"))
         if dim and ceil:
             out[dim] = min(out.get(dim, 10), ceil)
@@ -125,30 +134,55 @@ def audit_gap(scores: dict, ceilings: dict) -> tuple[float | None, list[str]]:
     return (round(sum(gaps) / len(gaps), 2) if gaps else None), sorted(over)
 
 
-def assess(raw, craft: dict, text: str, report: dict | None = None) -> dict:
-    """Trust check of one cleaned craft review (editor.clean_craft) against its raw answer and the draft."""
-    tn = norm(text)
-    scores = craft.get("scores") or {}
-    dims = craft.get("dimensions") or list(scores)
+def judge(scores: dict, evidence: dict, quoted_problems: int, avg: float | None = None,
+          weakest_found: bool | None = None, what: str = "problem(s)") -> dict:
+    """The shared trust rules for any review (chapter editor or whole-book reviewer).
+
+    ``evidence``: {dimension: quote} of the verified proofs; ``quoted_problems``: how many problems quote the text;
+    ``weakest_found``: None when the review has no separate "weakest passages" (whole-book reviews), else whether one
+    of them quotes the text. Returns {trusted, reasons, unjustified, too_clean, high, avg}."""
     high = sorted(d for d, v in scores.items() if v >= HIGH)
-    ev = evidence_of(raw, dims, tn)
-    unjustified = [d for d in high if d not in ev]
-    findings_quoted = sum(1 for f in craft.get("findings") or [] if f.get("located"))
-    weakest = weakest_of(raw, tn)
-    near_perfect = float(craft.get("avg_score") or 0) >= NEAR_PERFECT_AVG
-    too_clean = near_perfect and (findings_quoted < MIN_FINDINGS or not any(w["found"] for w in weakest))
-    gap, over = audit_gap(scores, audit_ceilings(report))
+    unjustified = [d for d in high if d not in evidence]
+    if avg is None:
+        avg = round(sum(scores.values()) / len(scores), 2) if scores else 0.0
+    near_perfect = float(avg or 0) >= NEAR_PERFECT_AVG
+    too_clean = near_perfect and (quoted_problems < MIN_FINDINGS or weakest_found is False)
     reasons = []
     if unjustified:
         some = ", ".join(unjustified[:3]) + (f" and {len(unjustified) - 3} more" if len(unjustified) > 3 else "")
         reasons.append(f"{len(unjustified)} score(s) of 9-10 without a quoted proof ({some})")
     if too_clean:
-        reasons.append(f"an average of {craft.get('avg_score')} with only {findings_quoted} quoted problem(s) (at "
-                       f"least {MIN_FINDINGS} are required)" + ("" if any(w["found"] for w in weakest) else
-                                                                 " and no quoted weakest passage"))
+        reasons.append(f"an average of {avg} with only {quoted_problems} quoted {what} (at least {MIN_FINDINGS} "
+                       "are required)" + (" and no quoted weakest passage" if weakest_found is False else ""))
     return {"trusted": not reasons, "reasons": reasons, "unjustified": unjustified, "too_clean": too_clean,
-            "high": high, "evidence": ev, "weakest": weakest, "findings_quoted": findings_quoted,
-            "audit_gap": gap, "audit_over": over}
+            "high": high, "avg": avg}
+
+
+def assess(raw, craft: dict, text: str, report: dict | None = None) -> dict:
+    """Trust check of one cleaned craft review (editor.clean_craft) against its raw answer and the draft."""
+    tn = norm(text)
+    scores = craft.get("scores") or {}
+    dims = craft.get("dimensions") or list(scores)
+    ev = evidence_of(raw, dims, tn)
+    findings_quoted = sum(1 for f in craft.get("findings") or [] if f.get("located"))
+    weakest = weakest_of(raw, tn)
+    j = judge(scores, ev, findings_quoted, float(craft.get("avg_score") or 0),
+              weakest_found=any(w["found"] for w in weakest))
+    gap, over = audit_gap(scores, audit_ceilings(report))
+    return {"trusted": j["trusted"], "reasons": j["reasons"], "unjustified": j["unjustified"],
+            "too_clean": j["too_clean"], "high": j["high"], "evidence": ev, "weakest": weakest,
+            "findings_quoted": findings_quoted, "audit_gap": gap, "audit_over": over}
+
+
+def assess_book(raw, review: dict, text_norm: str) -> dict:
+    """Trust check of one cleaned whole-book review (book_report.clean_review): the same rules as ``assess`` — a 9/10
+    needs a ``score_evidence`` quote that is in the book; a near-perfect average needs at least ``MIN_FINDINGS``
+    weaknesses whose quotes are in the book (``text_norm``: the book through ``norm``)."""
+    scores = review.get("scores") or {}
+    ev = evidence_of(raw, list(scores), text_norm)
+    verified = sum(1 for w in review.get("weaknesses") or [] if w.get("verified"))
+    j = judge(scores, ev, verified, what="weakness(es)")
+    return dict(j, evidence=ev, weaknesses_verified=verified)
 
 
 def apply_caps(scores: dict, assessment: dict) -> tuple[dict, dict]:
@@ -307,6 +341,19 @@ def words(lv: float | None, n: int) -> str:
     if lv <= -1:
         return "stricter than the others"
     return "about right"
+
+
+def generosity_line(name: str, row: dict | None) -> str:
+    """One plain line for the author: how generous this AI has been as a reviewer so far (a ``table`` row)."""
+    if not row or row.get("leniency") is None or int(row.get("observations") or 0) < MIN_OBS:
+        n = int((row or {}).get("observations") or 0)
+        return f"{name}: not enough reviews yet to tell how generous it is ({n} of {MIN_OBS} comparisons)."
+    lv = row["leniency"]
+    line = (f"{name}: {'+' if lv > 0 else ''}{lv} point(s) against the other reviewers and the pattern check over "
+            f"{row['observations']} comparison(s) — {row['words']}.")
+    if row.get("discount"):
+        line += f" Its scores are lowered by {row['discount']} point(s)."
+    return line
 
 
 def table(store) -> list[dict]:

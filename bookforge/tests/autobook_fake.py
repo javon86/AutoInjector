@@ -440,7 +440,10 @@ class BookFakeAI:
                 "weaknesses": [{"point": "Helpers hand Mara what she needs.", "quote": "Only old Nessa at the net sheds "
                                 "would talk"}, {"point": "An invented line.", "quote": "This sentence is not in the "
                                                                                "book at all."}],
-                "try_next": ["Let Nessa ask a real price."], "summary": "Atmospheric but too cooperative."}
+                "try_next": ["Let Nessa ask a real price."], "summary": "Atmospheric but too cooperative.",
+                # P36: a quoted proof for each 9 (so the fake's whole-book review is trusted)
+                "score_evidence": [{"dimension": d, "quote": quote, "why": "vivid"} for d in ("atmosphere", "premise")
+                                   if d in dims]}
 
     def _compare(self, ctx, props):
         dims = list((props["version_1"].get("properties") or {}).keys())
