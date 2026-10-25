@@ -38,8 +38,10 @@
               limit    the chat, plus a usage-limit banner (role=alert)
               error    no message box, an "Something went wrong" alert
   Check-ins: "Reply with only this word: X" is answered with X (tagged). A typed
-  "Repeat this number: 1234" (the teach step, no [MSG #]) is answered with the
-  number, untagged — like a real AI would.
+  "Repeat this number: 1234" (the old teach step, no [MSG #]) is answered with the
+  number, untagged — like a real AI would. P38 number teach: a typed bare "4827" is
+  answered "Got it: 4827. …" (untagged), and "Write the number 4827 backwards,
+  digits only." is answered with 7284 (tagged).
   Quirks:
     rich         rich editor: keeps its OWN text state, changed only through
                  beforeinput / paste; raw DOM writes are wiped; Send posts the
@@ -241,7 +243,7 @@
     else if (SITE === "claude") { u = el("div", { "data-testid": "user-message", class: "user-text", text }, log); }
     else { u = el("user-query", {}, log); el("div", { class: "query-text user-text", text }, u); }
     if (has("slowclear")) setTimeout(() => clearComposer(text), between(500, 1500)); else clearComposer(text);
-    if (/^\[MSG #\d+\]/.test(text) || /Repeat this number:\s*\d{4}/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
+    if (/^\[MSG #\d+\]/.test(text) || /Repeat this number:\s*\d{4}/.test(text) || /^\s*\d{4}\s*$/.test(text)) { F.jobs++; reply(text).finally(() => { F.jobs--; }); }
   }
 
   // ---- the fake AI ---------------------------------------------------------
@@ -295,7 +297,11 @@
       let hook = null;
       const pw = /Reply with only this word:\s*([A-Za-z]+)/.exec(msg);   // P18.1 check-in
       const tn = /Repeat this number:\s*(\d{4})/.exec(msg);             // P18.7 teach step
-      if (pw) hook = { lines: [pw[1]], to: "USER", tagged: true };
+      const bw = /Write the number (\d{4}) backwards, digits only/.exec(msg); // P38 number teach follow-up
+      const bare = /^\s*(\d{4})\s*$/.exec(msg);                          // P38: the user typed just the number
+      if (bw) hook = { lines: [bw[1].split("").reverse().join("")], to: "USER", tagged: true };
+      else if (bare) hook = { lines: ["Got it: " + bare[1] + ". What would you like me to do with it?"], to: "USER", tagged: false, bare: true };
+      else if (pw) hook = { lines: [pw[1]], to: "USER", tagged: true };
       else if (tn) hook = { lines: [tn[1]], to: "USER", tagged: false, bare: true };
       else if (typeof window.__fakeHook === "function") { try { hook = await window.__fakeHook(msg); } catch (_) { hook = null; } }
       r = newReply("#" + seq, hook);

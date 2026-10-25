@@ -18,12 +18,13 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Status at a glance  (keep this up to date — updated on every add / finish)
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
-- **Next up:** waiting for the user's choice from Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
+- **Just finished (P38 PR):** 🎯 picker rebuild + 🔢 number teach, with P37.1, P37.3, P37.4 done and P37.2 partly done [!].
+- **Next up:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
-- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures (B1–B3).
+- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
-- Last updated: 2026-10-25 (after the book-2 review).
+- Last updated: 2026-10-25 (P38 done; W1–W15 prompts in docs/WRITING_TOOL_PROMPTS.md; B4 added).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -165,6 +166,39 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
   sheets, voices, rules, texture and — optionally — premise/plot/outline/scene cards come from the bible and are
   approved inside it under the run consent; new chapters.)*
+## Section 8 — Fixes from the book-2 run log  (proposed — do before Section 7)
+
+From the 2026-10-24 AutoInjector log: Claude wrote, Gemini reviewed (independence worked), 48 BookForge
+requests in 16 min; ChatGPT never took part; Gemini's reply reading broke in the evening; Gemini as
+editor passed every chapter and scored the book 10/10 on 10 of 13 criteria while ChatGPT's own review
+gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
+
+- [ ] **P36** Tougher, calibrated reviewer: must name its weakest passages and at least 3 concrete
+  problems; reviews with near-perfect scores and no findings are distrusted (re-asked or flagged);
+  add trade/logic/timeline checks to the rubric; use two reviewers when available and take the lower
+  score; track each AI's leniency over time.
+- [x] **P37.1** Self-repair page search must learn a selector that matches every reply, not one message
+  (ChatGPT learned `div[data-content-search-unit-key="fallback-turn-7:2:assistant"]`). Done: per-message
+  numbers/ids/keys are never part of a learned selector (that key becomes `[…$=":assistant"]`), and with
+  2+ replies on the page it must match at least two (page search, 🎯 picks and the 🔢 number teach alike).
+- [!] **P37.2** Read the whole reply when the page splits it into several nodes (Gemini read only "[TO:").
+  Done for split nodes (the reader takes the whole AI message container; tested with fake Gemini DOMs),
+  but the live Gemini cause (`parentChars 4`) is still unconfirmed — see "Problems to come back to".
+- [x] **P38** 🎯 Picker rebuilt (user's design, done — fake pages only, see Problems): click 🎯 → choose ONE of the three things
+  (message box / Send button / reply area) → OK → click it in the AI's window; the chip turns from blue
+  to green when something is picked; Clear or Save per item, any one at any time; Save locks it in.
+  🔢 Number teach: the user types the shown number into the AI's box and presses Send (AutoInjector
+  learns the box, Send and the user's message); AutoInjector then itself asks the AI to write that number
+  backwards and learns the reply area from where the reversed number appears; saves it and tells the user.
+  Includes P37.1 (selectors that fit every reply) and P37.2 (read the whole split reply).
+- [x] **P37.3** Teach step: ask once, make it noticeable (sound/popup), back off after BROKEN, stop the
+  probe → repair → teach loop (9 teach timeouts, 192 self-repair events in the log). Done: never started
+  automatically; one notice (card flash + ⚠️ with 🎯 / 🔢, optional 🔔 sound); re-checks after 5 → 15 → 60 min.
+- [x] **P37.4** Never send "missing [TO:] tag" nags for check-in answers (48 nags to ChatGPT). Done (also
+  for late / unproven check-in answers and the number-teach answers; they are held, not relayed).
+- [ ] **P37.5** Before a book starts: a clear "ChatGPT isn't working — here's why / fix" so the user can fix
+  it first instead of the AI silently sitting out.
+
 ## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
 
 - [ ] **P22** Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
@@ -203,6 +237,16 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
+- [ ] **B4** 🧭 Local AI book manager (LATER — not started): a local LLM (runs on the user's PC) acts as
+  the project manager for the book. BookForge still runs the book by itself; the manager rides alongside:
+  - **Guide:** explains in plain words what's happening, which step the book is on, what's next, and why.
+  - **Live changes:** the user says "change X" mid-run; the manager pauses at a safe point, makes the
+    change (bible, outline, character, chapter brief, settings), and resumes — with run consent and approvals.
+  - **Character helper:** builds character sheets and voice cards with the user by conversation.
+  - **Orchestrator:** watches progress, problems and AI health; can interrupt to add or fix things the
+    user asked for; keeps a log of every change it made.
+  - Ideas to expand: answers "where are we?" anytime, suggests fixes when a review fails, spots
+    continuity problems early, summarizes each chapter for the user, and works offline/free.
 
 ### Other ideas parked from earlier lists (not scheduled)
 
@@ -372,6 +416,31 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   for rule updates for the plan (one call, accepted under the run consent); (h) uploads are limited to 64 MB
   (`MAX_BODY`): a larger book must be copied into the books folder and opened from the list; (i) auto-save is off in
   the test suite by default (`BOOKFORGE_AUTOSAVE=0` in tests/conftest.py) — only tests/test_section6.py exercises it.
+- **P38 / P37.1–P37.4 — not tried against the live sites.** The 🎯 card, pick mode, the 🔢 number teach and the
+  general-selector rules were tested on fake pages (fake DOM, jsdom, real Electron with `fake-chat.html`, headless
+  Chromium), not on logged-in ChatGPT/Claude/Gemini. On the first real run: (1) 🎯 → AI's reply on each site and check
+  the chip preview shows the start of the latest answer and that 📋 Copy diagnostics lists `🎯 saved assistant(pick …)`;
+  (2) run 🔢 once per site and check it ends with "✔ Saved — … is working again." — if a part fails, its name is shown;
+  (3) look at the saved selector in diagnostics / the state file: it must not contain digits from one message.
+- **P37.2 [!] Gemini's "[TO:" with `parentChars 4` is not fully explained.** The reader now takes the whole AI message
+  (`MESSAGE_CONTAINERS` in automation.js: `message-content`, `model-response`), joins split nodes, and falls back to
+  `textContent` when `innerText` is much shorter (a part the page hasn't laid out). In the log even the parent of the
+  matched node had only 4 characters, so the rest of the reply may live outside `model-response` (or be rendered
+  lazily). If `reply-unreadable` / `capture-stalled` "the reader only sees the start" comes back, its `nodeInfo` now
+  also has `containerChars` — copy that log line so the container list can be fixed; 🎯 → AI's reply on Gemini is the
+  workaround meanwhile.
+- **P38 design choices to confirm:** (a) the 🎯 "dialog" is a card in the pane's strip (and opened from the BookForge
+  ⚠️), not a modal window — a modal would hide the AI panes, which must stay clickable for pick mode; (b) Clear removes
+  a new (unsaved) pick first, and the saved one on the next Clear; (c) a saved 🎯 / 🔢 selector wins over one the
+  self-repair learned before it, but a selector learned LATER (because the saved one stopped matching) wins over it —
+  the chip then shows red ⚠️ for the saved one; (d) the number teach no longer has the user type "Repeat this number:"
+  — just the digits; the old `fake-chat.html` "Repeat this number" answer is kept for older tests; (e) the old 🧪
+  round-trip test stays as a small button in the 🎯 card; "Test it" is a check-in; (f) after "not working", automatic
+  reasons (a stall, a BookForge timeout) no longer trigger an immediate check-in — only the 5/15/60-minute re-checks
+  and the user's own actions do.
+- **P37.4 limit:** a short reply (≤ 300 characters, tags stripped) that holds a check-in word from the last hour is
+  treated as a check-in answer (held, not relayed, not nagged) when no BookForge request is waiting for that AI — a
+  genuine short reply that happens to use the same unusual word ("quokka") would be held too.
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

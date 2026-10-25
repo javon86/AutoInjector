@@ -7,11 +7,15 @@
 //     check-in passes -> ✔ fixed, learned selector saved.
 //   * Gemini shows a log-in page: needs you (LOGGED_OUT) without a message typed;
 //     once the page is the chat again (the user "logged in"), it re-checks by itself.
-//   * Claude: 🎓 teach step — the user types "Repeat this number: ####" into
-//     Claude's box and presses Send; the app learns the box, Send, the user's
-//     message and the reply and confirms with a check-in -> ✔ Fixed.
-//   * Cancelling a teach step leaves the AI "Not working" with the ⚠️ pop-over
-//     listing what was tried.
+//   * Claude: P38 🔢 number teach from the 🎯 card — the user types the shown
+//     4 digits into Claude's box and presses Send; AutoInjector itself asks Claude
+//     to "Write the number #### backwards, digits only.", learns the reply area
+//     from where the reversed digits appear, saves all three and confirms with a
+//     check-in -> "✔ Saved — Claude is working again."
+//   * ChatGPT made "not working" -> the ⚠️ pop-over offers 🎯 Point at it / 🔢;
+//     🎯 opens the card with "AI's reply" chosen; OK -> the banner in ChatGPT's
+//     window; hover outlines, click picks (blue -> green chip); Save that ONE item
+//     (green ✓); Test it -> the check-in works.
 // Screenshots of each state go to SHOTS (default test/e2e/__screenshots__).
 //   xvfb-run -a node test/e2e/self-repair.e2e.js
 const fs = require('fs');
@@ -130,54 +134,115 @@ async function main() {
     const back = await waitFor(async () => { const x = (await status()).sites.gemini; return x.state === 'ok' ? x : null; }, 60000);
     assert(!!back, 'Gemini noticed by itself that it works again (signature gone -> one check-in -> ok)');
 
-    console.log('\n== Claude: 🎓 teach step ==');
+    // the 🎯 card of one pane (it sits in the pane's strip of the control window)
+    const cardShot = async (site, name) => {
+      await controls.evaluate((s) => { const m = document.getElementById(`pick-menu-${s}`); if (m) m.scrollIntoView({ block: 'center' }); }, site);
+      await sleep(250);
+      const f = path.join(SHOTS, `${name}.png`);
+      const card = await controls.$(`#pick-menu-${site}`);
+      if (card) await card.screenshot({ path: f }).catch(async () => { await controls.screenshot({ path: f }); });
+      shots.push(f);
+      return f;
+    };
+    const cardClick = (site, sel) => controls.evaluate((a) => { const m = document.getElementById(`pick-menu-${a.site}`); const b = m && m.querySelector(a.sel); if (!b) return false; b.click(); return true; }, { site, sel });
+    const chipOf = (site, role) => controls.evaluate((a) => { const c = document.querySelector(`#pick-menu-${a.site} .pk-row[data-role="${a.role}"] .pk-chip`); return c ? { st: c.dataset.st, text: c.textContent } : null; }, { site, role });
+
+    console.log('\n== Claude: 🔢 number teach from the 🎯 card (type → Send → AutoInjector asks for it backwards → saved) ==');
     const okClaude = await waitFor(async () => { const x = (await status()).sites.claude; return x.state === 'ok' && !x.running ? x : null; }, 60000);
     assert(!!okClaude, 'Claude passed its start-up check-in');
-    const t = await controls.evaluate(() => window.api.selfRepairTeachStart('claude'));
-    assert(t && t.ok && /^\d{4}$/.test(t.number), `teach step started (number ${t && t.number})`);
-    await waitFor(() => controls.$eval('#bf-teach', (e) => !e.hidden && /Repeat this number/.test(e.innerText)).catch(() => false), 8000);
+    await controls.evaluate(() => { const b = document.querySelector('#col-claude .pick-btn'); if (b) b.click(); });
+    await sleep(600);
+    const cardText = await controls.$eval('#pick-menu-claude', (e) => e.innerText).catch(() => '');
+    assert(/What do you want to point at\?/.test(cardText) && /Message box/.test(cardText) && /Send button/.test(cardText) && /AI's reply/.test(cardText) && /Do it for me with a number/.test(cardText), '🎯 opens the card with the three choices and “🔢 Do it for me with a number”');
+    await cardShot('claude', 'p38_01_picker_card_three_choices');
+    await cardClick('claude', '.pk-number');
+    const tst = await waitFor(async () => { const x = (await status()).sites.claude; return x.teach && x.teach.active ? x.teach : null; }, 8000);
+    assert(tst && /^\d{4}$/.test(tst.number), `number teach started (number ${tst && tst.number})`);
+    const N = tst ? tst.number : '0000'; const REV = N.split('').reverse().join('');
+    await waitFor(() => controls.$eval('#bf-teach', (e) => !e.hidden && /Number teach/.test(e.innerText)).catch(() => false), 8000);
     const teachText = await controls.$eval('#bf-teach', (e) => e.innerText).catch(() => '');
-    assert(new RegExp(`Repeat this number: ${t.number}`).test(teachText) && /Cancel/.test(teachText), 'the pop-up in the controls panel says exactly what to type, with Cancel');
-    await panelShot('p18_04_teach_popup');
-    await sleep(800);
+    assert(new RegExp(`Type\\s*${N}\\s*into Claude's message box and press Send`).test(teachText.replace(/\n/g, ' ')) && /Cancel/.test(teachText), 'the BookForge panel box says exactly what to type, with Cancel');
+    await panelShot('p38_02_number_teach_type');
+    await sleep(600);
     const banner = await inPane('claude', 'String((document.querySelector("[data-autoinjector-overlay]") || {}).textContent || "")');
-    assert(new RegExp(`Repeat this number: ${t.number}`).test(banner || ''), 'the same request shows as a banner inside Claude\'s window');
-    await paneShot('claude', 'p18_05_teach_banner_in_claude_pane');
-    // the user types the line and presses Send (real DOM events in the real page)
-    await inPane('claude', `(() => { const ed = document.querySelector('[contenteditable="true"]'); ed.focus(); ed.textContent = ${JSON.stringify(`Repeat this number: ${t.number}`)}; ed.dispatchEvent(new InputEvent('input', { bubbles: true })); return true; })()`);
+    assert(new RegExp(`type\\s+${N}\\s+into Claude`).test(banner || ''), 'the same request shows as a banner inside Claude\'s window');
+    await paneShot('claude', 'p38_03_number_teach_banner_in_claude_pane');
+    // the user types the number and presses Send (real DOM events in the real page)
+    await inPane('claude', `(() => { const ed = document.querySelector('[contenteditable="true"]'); ed.focus(); ed.textContent = ${JSON.stringify(N)}; ed.dispatchEvent(new InputEvent('input', { bubbles: true })); return true; })()`);
     await sleep(1200);
     await inPane('claude', `(() => { const b = document.getElementById('send'); b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b.click(); return true; })()`);
+    const asked = await waitFor(async () => { const x = (await status()).sites.claude; return x.teach && (x.teach.phase === 'wait_reply' || x.teach.result) ? x.teach : null; }, 30000, 150);
+    assert(asked && asked.asked, `after the user's message AutoInjector asked Claude to write ${N} backwards (${asked && asked.phase})`);
+    await panelShot('p38_04_number_teach_asked_backwards');
+    const askedInPane = await inPane('claude', `document.body.innerText.includes(${JSON.stringify(`Write the number ${N} backwards, digits only.`)})`);
+    assert(askedInPane, 'the follow-up “Write the number #### backwards, digits only.” is in Claude\'s chat');
+    await waitFor(() => inPane('claude', `document.body.innerText.includes(${JSON.stringify(REV)})`), 15000);
+    await inPane('claude', `(() => { const hit = Array.from(document.querySelectorAll('#log p')).filter((p) => p.textContent.trim() === ${JSON.stringify(REV)}).pop(); const blk = hit ? (hit.closest('.font-claude-message') || hit) : null; const ask = blk ? blk.previousElementSibling : null; const top = (ask || blk); if (top) window.scrollTo(0, top.getBoundingClientRect().top + window.scrollY - 70); return !!hit; })()`);
+    await sleep(200);
+    await paneShot('claude', 'p38_05_claude_wrote_it_backwards');
     const taught = await waitFor(async () => { const x = (await status()).sites.claude; return x.teach && x.teach.result ? x : null; }, 60000);
-    assert(taught && taught.teach.result === 'fixed' && taught.state === 'ok', `taught and confirmed by a new check-in (${taught && taught.teach.result}; missing ${taught && taught.teach.missing})`);
-    assert(taught && taught.learned.input && taught.learned.assistant && taught.learned.input.how === 'teach' && taught.learned.assistant.how === 'teach', 'message box + reply learned from the teach step');
-    await waitFor(() => controls.$eval('#bf-teach', (e) => /Fixed — Claude is working again/.test(e.innerText)).catch(() => false), 8000);
-    assert(/Fixed — Claude is working again/.test(await controls.$eval('#bf-teach', (e) => e.innerText).catch(() => '')), '"✔ Fixed — Claude is working again"');
-    await panelShot('p18_06_teach_fixed');
+    assert(taught && taught.teach.result === 'fixed' && taught.state === 'ok', `learned, saved and confirmed by a check-in (${taught && taught.teach.result}; part ${taught && taught.teach.failedPart})`);
+    const pkc = await controls.evaluate(() => window.api.pickerStatus('claude'));
+    assert(pkc && ['input', 'send', 'assistant'].every((r) => pkc.items[r].state === 'saved' && pkc.items[r].how === 'number'), `all three saved like 🎯 picks (${pkc && JSON.stringify(Object.fromEntries(Object.entries(pkc.items).map(([k, v]) => [k, v.state + '/' + v.how])))})`);
+    await waitFor(() => controls.$eval('#bf-teach', (e) => /Saved — Claude is working again/.test(e.innerText)).catch(() => false), 8000);
+    assert(/✔ Saved — Claude is working again\./.test(await controls.$eval('#bf-teach', (e) => e.innerText).catch(() => '')), '“✔ Saved — Claude is working again.”');
+    await panelShot('p38_06_number_teach_saved');
+    await sleep(500);
+    await cardShot('claude', 'p38_07_card_after_number_teach_saved');
+    const nags = await controls.evaluate(() => window.api.getState ? window.api.getState().then((s) => (s.log || []).filter((e) => /totag-missing|endtag-missing/.test(e.kind) && e.detail && e.detail.site === 'claude').length) : 0);
+    assert(nags === 0, `no missing-tag nags were sent to Claude for the teach answers (${nags})`);
     await controls.evaluate(() => { const b = Array.from(document.querySelectorAll('#bf-teach-actions button')).find((x) => /Close/.test(x.textContent)); if (b) b.click(); });
+    await controls.evaluate(() => { const m = document.getElementById('pick-menu-claude'); if (m) m.classList.add('collapsed'); });
 
-    console.log('\n== Not working: a cancelled teach step, the ⚠️ pop-over lists what was tried ==');
-    const t2 = await controls.evaluate(() => window.api.selfRepairTeachStart('chatgpt'));
-    assert(t2 && t2.ok, 'teach started for ChatGPT');
-    await sleep(800);
-    await controls.evaluate(() => window.api.selfRepairTeachCancel('chatgpt'));
+    console.log('\n== ChatGPT not working -> ⚠️ pop-over -> 🎯 Point at it -> pick the reply -> Save that ONE item -> Test it ==');
+    await controls.evaluate(() => window.api.selfRepairForgetLearned('chatgpt'));
+    const tfail = await controls.evaluate(() => window.api.pickerTest('chatgpt'));
+    assert(tfail && !tfail.ok, `with what it learned forgotten, “Test it” fails (${tfail && tfail.state} ${tfail && tfail.problem})`);
     const br = await waitFor(async () => { const x = (await status()).sites.chatgpt; return x.state === 'broken' ? x : null; }, 15000);
-    assert(!!br, 'cancel -> ChatGPT shows as not working');
+    assert(!!br, 'ChatGPT shows as not working');
     await sleep(1200);
     const m2 = await controls.$('.bf-ai[data-site="chatgpt"] .bf-hz');
     if (m2) { await m2.click(); await sleep(500); }
     const pop2 = await controls.$eval('#bf-pop', (e) => (e.hidden ? '' : e.innerText)).catch(() => '');
-    assert(/isn't working/.test(pop2) && /What AutoInjector already tried/i.test(pop2) && /Show AutoInjector/.test(pop2), `the ⚠️ pop-over: what was tried + 🎓 Show AutoInjector / 🔄 Reload [${pop2.replace(/\s+/g, ' ').slice(0, 400)}]`);
-    await panelShot('p18_07_broken_popover');
-    await controls.evaluate(() => { const b = document.getElementById('bf-pop'); if (b) b.hidden = true; });
-    await controls.evaluate(() => window.api.selfRepairProbe(['chatgpt']));
-    const again = await waitFor(async () => { const x = (await status()).sites.chatgpt; return x.state === 'ok' && !x.running ? x : null; }, 60000);
-    assert(!!again, '🩺 Check now: ChatGPT works again (the learned selector is still there)');
+    assert(/isn't working/.test(pop2) && /What AutoInjector already tried/i.test(pop2) && /Point at it/.test(pop2) && /Do it for me with a number/.test(pop2), `the ⚠️ pop-over: what was tried + 🎯 Point at it / 🔢 Do it for me with a number [${pop2.replace(/\s+/g, ' ').slice(0, 400)}]`);
+    await panelShot('p38_08_broken_popover_point_at_it');
+    await controls.evaluate(() => { const b = Array.from(document.querySelectorAll('#bf-pop button')).find((x) => /Point at it/.test(x.textContent)); if (b) b.click(); });
+    await sleep(700);
+    const sel0 = await controls.evaluate(() => { const r = document.querySelector('#pick-menu-chatgpt .pk-row.sel'); const m = document.getElementById('pick-menu-chatgpt'); return { open: !!m && !m.classList.contains('collapsed'), role: r ? r.dataset.role : null }; });
+    assert(sel0.open && sel0.role === 'assistant', `the pop-over opened ChatGPT's 🎯 card with “AI's reply” chosen (${JSON.stringify(sel0)})`);
+    const c0 = await chipOf('chatgpt', 'assistant');
+    assert(c0 && c0.st === 'none' && (await chipOf('chatgpt', 'input')).st === 'none', `chips start BLUE (${c0 && c0.text})`);
+    await cardShot('chatgpt', 'p38_09_card_blue_chips');
+    await cardClick('chatgpt', '.pk-ok');
+    await waitFor(() => inPane('chatgpt', '!!document.querySelector("[data-autoinjector-overlay]")'), 8000);
+    const pbanner = await inPane('chatgpt', 'String((document.querySelector("[data-autoinjector-overlay]") || {}).textContent || "")');
+    assert(/Click the AI's latest reply in this window/.test(pbanner || ''), `pick mode: ChatGPT's window says “Click the AI's latest reply in this window” (${pbanner})`);
+    // hover the newest reply (outline), take the picture, then click it
+    await inPane('chatgpt', `(() => { const l = document.querySelectorAll('.answer-body'); const t = l[l.length - 1].querySelector('p:nth-child(2)') || l[l.length - 1]; t.scrollIntoView({ block: 'center' }); t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); return true; })()`);
+    await sleep(300);
+    await paneShot('chatgpt', 'p38_10_pick_banner_and_hover_outline');
+    await inPane('chatgpt', `(() => { const l = document.querySelectorAll('.answer-body'); const t = l[l.length - 1].querySelector('p:nth-child(2)') || l[l.length - 1]; t.click(); return true; })()`);
+    const green = await waitFor(async () => { const c = await chipOf('chatgpt', 'assistant'); return c && c.st === 'picked' ? c : null; }, 8000);
+    assert(!!green, `the reply chip turned GREEN with a preview (${green && green.text})`);
+    assert((await chipOf('chatgpt', 'input')).st === 'none' && (await chipOf('chatgpt', 'send')).st === 'none', 'the other two stay blue');
+    await cardShot('chatgpt', 'p38_11_card_green_picked');
+    await cardClick('chatgpt', '.pk-row[data-role="assistant"] .pk-save');
+    const savedChip = await waitFor(async () => { const c = await chipOf('chatgpt', 'assistant'); return c && c.st === 'saved' ? c : null; }, 5000);
+    assert(!!savedChip && /✓ Saved/.test(savedChip.text), `Save -> green ✓ (${savedChip && savedChip.text})`);
+    const pkg = await controls.evaluate(() => window.api.pickerStatus('chatgpt'));
+    assert(pkg.items.assistant.state === 'saved' && pkg.items.input.state === 'none' && pkg.items.send.state === 'none', 'only that ONE item is saved');
+    await cardClick('chatgpt', '.pk-test');
+    const tested = await waitFor(() => controls.$eval('#pick-status-chatgpt', (e) => (/answered the check-in/.test(e.textContent) ? e.textContent : null)).catch(() => null), 40000, 300);
+    assert(!!tested, `Test it: the check-in works with the saved pick (${tested})`);
+    const again = await waitFor(async () => { const x = (await status()).sites.chatgpt; return x.state === 'ok' && !x.running ? x : null; }, 20000);
+    assert(!!again, 'ChatGPT works again');
+    await cardShot('chatgpt', 'p38_12_card_saved_and_tested');
     await sleep(1200);
     await panelShot('p18_08_all_ok');
 
     const diag = await controls.evaluate(() => window.api.bookforgeDiagnostics({}));
-    assert(diag && diag.ok && /Self-repair chatgpt: state ok/.test(diag.text) && /Self-repair claude: state ok/.test(diag.text) && /Self-repair claude: .*assistant\(teach/.test(diag.text), `diagnostics list the self-repair per AI [${diag && String(diag.text).split('\n').filter((l) => /Self-repair/.test(l)).join(' | ')}]`);
-    assert(!/Repeat this number|Reply with only this word/.test(diag.text), 'diagnostics carry no message text');
+    assert(diag && diag.ok && /Self-repair chatgpt: state ok/.test(diag.text) && /Self-repair claude: state ok/.test(diag.text) && /Self-repair claude: .*🎯 saved .*assistant\(number/.test(diag.text) && /Self-repair chatgpt: .*🎯 saved assistant\(pick/.test(diag.text), `diagnostics list the self-repair and the saved picks per AI [${diag && String(diag.text).split('\n').filter((l) => /Self-repair/.test(l)).join(' | ')}]`);
+    assert(!/Repeat this number|Reply with only this word|backwards, digits only/.test(diag.text), 'diagnostics carry no message text');
     assert(errors.length === 0, `no page errors in the control panel (${errors.slice(0, 3).join(' | ')})`);
     console.log('screenshots:\n  ' + shots.join('\n  '));
   } finally {

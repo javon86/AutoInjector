@@ -329,6 +329,110 @@ async function main() {
   const fg = await call("selfrepair:forget-learned", { site: "chatgpt" });
   assert(fg.ok && Object.keys((await call("selfrepair:status")).sites.chatgpt.learned).length === 0, "forget what was learned for an AI");
 
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== P38 🎯 picker through main: pick ONE thing, Save it (persisted, versioned), stale chip, Test it, Clear ==");
+  const pkState = () => JSON.parse(fs.readFileSync(path.join(userData, "autoinjector-state.json"), "utf8"));
+  // a couple of AI replies on the page (the P18.4 layout)
+  append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body"><p>[TO: USER]</p><p>The newest answer on the page.</p><p>[FROM: CHATGPT]</p></div></div>`);
+  let ps = await call("picker:status", { site: "chatgpt" });
+  assert(ps.ok && ["input", "send", "assistant"].every((r) => ps.items[r].state === "none"), `picker:status: nothing set (blue) for all three (${JSON.stringify(Object.fromEntries(Object.entries(ps.items).map(([k, v]) => [k, v.state])))})`);
+  const pickP = call("picker:start", { site: "chatgpt", role: "assistant" });
+  await waitUntil(() => doc.querySelector("[data-autoinjector-overlay]"), 3000);
+  assert(/Click the AI's latest reply in this window/.test(doc.querySelector("[data-autoinjector-overlay]").textContent), "pick mode: the banner in ChatGPT's window says what to click");
+  const lastP = Array.from(doc.querySelectorAll(".answer-body p")).filter((x) => /newest answer/.test(x.textContent)).pop();
+  lastP.dispatchEvent({ type: "click", target: lastP, preventDefault() {}, stopImmediatePropagation() {} });
+  const pk = await pickP;
+  assert(pk.ok && pk.role === "assistant" && /newest answer/.test(pk.preview) && doc.querySelectorAll(pk.selector).length >= 3 && !/\d/.test(pk.selector), `picked the reply area: ${pk.selector} (matches ${doc.querySelectorAll(pk.selector).length} replies) — "${pk.preview}"`);
+  ps = await call("picker:status", { site: "chatgpt" });
+  assert(ps.items.assistant.state === "picked" && ps.items.input.state === "none" && ps.items.send.state === "none", "status: the reply is picked (green), the others still blue");
+  await sleep(100);
+  assert(!((pkState().selectorOverrides || {}).chatgpt || {}).assistant, "a pick is NOT saved until Save");
+  const sv = await call("picker:save", { site: "chatgpt", role: "assistant" });
+  assert(sv.ok && sv.items.assistant.state === "saved" && typeof sv.items.assistant.savedAt === "number" && sv.items.input.state === "none", "Save locks in that ONE item (green ✓ with saved-at); the others are untouched");
+  await sleep(120);
+  let stf = pkState();
+  assert(stf.selectorOverrides.chatgpt.assistant === pk.selector && stf.pickMeta && stf.pickMeta.version === 1 && stf.pickMeta.sites.chatgpt.assistant.how === "pick" && stf.pickMeta.sites.chatgpt.assistant.rev === 1 && typeof stf.pickMeta.sites.chatgpt.assistant.savedAt === "number" && !stf.selectorOverrides.chatgpt.input, `persisted per site, versioned, with saved-at (${JSON.stringify(stf.pickMeta.sites.chatgpt)})`);
+  assert((await call("picker:save", { site: "chatgpt", role: "send" })).error === "NOTHING_PICKED", "Save with nothing picked is refused");
+  // input: pick + save, then the page changes -> red ⚠️
+  const pickI = call("picker:start", { site: "chatgpt", role: "input" });
+  await waitUntil(() => doc.querySelector("[data-autoinjector-overlay]"), 3000);
+  const boxEl = doc.getElementById("prompt-textarea");
+  boxEl.dispatchEvent({ type: "click", target: boxEl, preventDefault() {}, stopImmediatePropagation() {} });
+  const pi = await pickI;
+  await call("picker:save", { site: "chatgpt", role: "input" });
+  boxEl.setAttribute("id", "renamed-box");
+  ps = await call("picker:status", { site: "chatgpt" });
+  assert(pi.ok && pi.selector === "#prompt-textarea" && ps.items.input.state === "stale" && ps.items.assistant.state === "saved", `a saved pick that no longer matches the page -> stale (red ⚠️) (${ps.items.input.state})`);
+  boxEl.setAttribute("id", "prompt-textarea");
+  ps = await call("picker:status", { site: "chatgpt" });
+  assert(ps.items.input.state === "saved", "…and back to saved once it matches again");
+  const tst = await call("picker:test", { site: "chatgpt" });
+  assert(tst.ok && tst.state === "ok", `Test it: a check-in through the saved picks works (${JSON.stringify(tst)})`);
+  const cl = await call("picker:clear", { site: "chatgpt", role: "input" });
+  await sleep(120);
+  assert(cl.ok && cl.cleared === "saved" && cl.items.input.state === "none" && cl.items.assistant.state === "saved" && !pkState().selectorOverrides.chatgpt.input && !(pkState().pickMeta.sites.chatgpt || {}).input, "Clear removes just that saved item (back to the built-ins)");
+  assert(!fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8").includes("The newest answer on the page."), "the pick preview never reaches the log");
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== P38 🔢 number teach through main: the user types the digits; AutoInjector asks for them backwards; saved; confirmed ==");
+  await call("picker:clear", { site: "chatgpt", role: "assistant" });
+  const nt = await call("selfrepair:teach-start", { site: "chatgpt" });
+  assert(nt.ok && /^\d{4}$/.test(nt.number), `number teach started (${nt.number})`);
+  const NREV = nt.number.split("").reverse().join("");
+  await waitUntil(() => doc.querySelector("[data-autoinjector-overlay]") && /type\s+\d{4}\s+into ChatGPT/.test(doc.querySelector("[data-autoinjector-overlay]").textContent), 3000);
+  const followups = [];
+  const prevEval = chw.evaluator;
+  chw.evaluator = async (script) => {
+    if (script.includes("typeByKeyboard")) {
+      const cfg = cfgOf(script) || {};
+      const fb = /Write the number (\d{4}) backwards, digits only/.exec(cfg.text || "");
+      if (fb) {
+        followups.push(cfg.text);
+        append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">${esc(cfg.text)}</div></div>`);
+        setTimeout(() => append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body"><p>${fb[1].split("").reverse().join("")}</p></div></div>`), 30);
+        return { ok: true, method: "click", verified: true, markerBaseline: 0 };
+      }
+    }
+    return prevEval(script);
+  };
+  const tbox = doc.getElementById("prompt-textarea");
+  require("./fake-dom").typeInto(tbox, nt.number);
+  await waitUntil(async () => (await call("selfrepair:status")).sites.chatgpt.teach.phase === "typed", 3000);
+  const sbtn = doc.querySelector('[data-testid="send-button"]');
+  sbtn.dispatchEvent({ type: "click", target: sbtn, preventDefault() {}, stopImmediatePropagation() {} });
+  tbox.textContent = "";
+  append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">${nt.number}</div></div>`);
+  const ntDone = await waitUntil(async () => { const x = (await call("selfrepair:status")).sites.chatgpt; return x.teach && x.teach.result ? x : null; }, 15000);
+  assert(followups.length === 1 && followups[0].includes(`Write the number ${nt.number} backwards, digits only.`) && /Reply envelope required/.test(followups[0]), "AutoInjector itself sent ONE follow-up: “Write the number #### backwards, digits only.” (with the reply envelope)");
+  assert(ntDone && ntDone.teach.result === "fixed" && ntDone.state === "ok", `✔ Saved — ChatGPT is working again (${ntDone && ntDone.teach.result}, ${ntDone && ntDone.state}, part ${ntDone && ntDone.teach.failedPart})`);
+  await sleep(150);
+  stf = pkState();
+  assert(["input", "send", "assistant"].every((r) => stf.selectorOverrides.chatgpt[r] && stf.pickMeta.sites.chatgpt[r] && stf.pickMeta.sites.chatgpt[r].how === "number"), `all three saved like picks (how: number) (${JSON.stringify(stf.pickMeta.sites.chatgpt)})`);
+  assert(doc.querySelectorAll(stf.selectorOverrides.chatgpt.assistant).length >= 3 && !/\d/.test(stf.selectorOverrides.chatgpt.assistant), `the reply area is general: ${stf.selectorOverrides.chatgpt.assistant}`);
+  ps = await call("picker:status", { site: "chatgpt" });
+  assert(ps.items.assistant.state === "saved" && ps.items.assistant.how === "number", "the 🎯 card shows them as saved (🔢)");
+  const dbgN = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
+  assert(!dbgN.includes(`Write the number ${nt.number}`) && !(await call("state:get")).transcript.some((t) => t.site === "chatgpt" && (t.text.includes(NREV) || t.text.includes("backwards"))), "the follow-up and its answer never reach the log or the conversation");
+  assert(!/"kind":"(totag-missing|endtag-missing)"[^\n]*"site":"chatgpt"/.test(dbgN.split("\n").filter((l) => l.includes("chatgpt")).join("\n")), "no missing-tag nag was sent to ChatGPT for the teach answers (P37.4)");
+  chw.evaluator = prevEval;
+
+  // ---------------------------------------------------------------------------------
+  console.log("\n== P37.4 through main: a late check-in answer without its [TO:] tag is never nagged or relayed ==");
+  const lateMsg = cw.sentLog.filter((x) => /Reply with only this word: ([a-z]+)/.test(x.text || "")).pop();
+  const lateWord = lateMsg && /Reply with only this word: ([a-z]+)/.exec(lateMsg.text)[1];
+  const nagsBefore = (fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8").match(/"kind":"totag-missing"[^\n]*"site":"claude"/g) || []).length;
+  await call("routing:set", { source: "claude", target: "gemini", enabled: true });
+  const gsent0 = reg("gemini").webContents.sentLog.length;
+  cw.sentLog = [];
+  cw.currentText = `${lateWord}\n[FROM: CLAUDE]`;
+  await sleep(900);
+  const dbgL = fs.readFileSync(path.join(userData, "autoinjector-debug.log"), "utf8");
+  const nagsAfter = (dbgL.match(/"kind":"totag-missing"[^\n]*"site":"claude"/g) || []).length;
+  assert(lateWord && nagsAfter === nagsBefore && !cw.sentLog.some((x) => /FLAG: NO \[TO:\] TAG|NO ENDING TAG/.test(x.text || "")), `no "[TO:] tag missing" nag for it (nags ${nagsBefore} -> ${nagsAfter})`);
+  assert(reg("gemini").webContents.sentLog.length === gsent0 && !(await call("state:get")).transcript.some((t) => t.site === "claude" && t.text.trim() === lateWord), "…not relayed (routing claude->gemini is on) and not shown in the conversation");
+  await call("routing:set", { source: "claude", target: "gemini", enabled: false });
+
   await call("bookforge:set-enabled", { enabled: false });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

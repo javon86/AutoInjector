@@ -159,63 +159,118 @@ async function testPageSearch() {
 
 // ---------------------------------------------------------------------------------
 async function testTeachLearner() {
-  console.log("\n== P18.7 teach step learner (user types the number, sends, message + reply appear) ==");
+  console.log("\n== P38 🔢 number teach watcher: type the digits, Send, AutoInjector asks for them backwards ==");
   const page = () => parseHTML(`<main><div id="log"><div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body">older reply 12</div></div></div>
     <div class="composer-wrap"><div id="editor-x9" contenteditable="true" class="composer-input"></div><button class="submit-btn" data-testid="composer-submit">Send</button><button aria-label="Attach">+</button></div></main>`, { url: "https://chatgpt.com/" });
   for (const how of ["click", "enter"]) {
     const doc = page();
-    const r0 = await runScript(SR.buildTeachStartScript("ChatGPT", "4827"), doc);
+    const r0 = await runScript(SR.buildTeachStartScript("ChatGPT", "4827", "chatgpt"), doc);
     const win = doc.__window;
     const st = win.__aiTeach;
     const banner = doc.querySelector("[data-autoinjector-overlay]");
-    assert(r0.ok && st && banner && /Repeat this number: 4827/.test(banner.textContent), `(${how}) the in-pane banner shows the number`);
+    assert(r0.ok && st && banner && /type\s+4827\s+into ChatGPT's message box/.test(banner.textContent), `(${how}) the in-pane banner says: type 4827 into ChatGPT's message box`);
+    assert(st.reversed === "7284", `(${how}) the watcher knows the reversed digits (${st.reversed})`);
     const box = doc.getElementById("editor-x9");
     const btn = doc.querySelector(".submit-btn");
     let t = 1000;
     let s = K.teachStep(doc, st, t);
     assert(s.phase === "type", `(${how}) waiting for the user to type`);
-    typeInto(box, "Repeat this number: 4827");
+    typeInto(box, "4827");
     s = K.teachStep(doc, st, t += 300);
-    assert(s.phase === "typed" && s.selectors.input && doc.querySelector(s.selectors.input) === box, `(${how}) message box learned from where the number was typed (${s.selectors.input})`);
+    assert(s.phase === "typed" && s.selectors.input && doc.querySelector(s.selectors.input) === box, `(${how}) message box learned from where the digits appeared (${s.selectors.input})`);
     if (how === "click") st.events.push({ type: "click", t: t + 100, el: btn });
     else st.events.push({ type: "enter", t: t + 100 });
     box.textContent = "";
-    append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">Repeat this number: 4827</div></div>`);
     s = K.teachStep(doc, st, t += 400);
-    assert(s.phase === "sent" || s.phase === "wait_reply", `(${how}) the emptied box means it was sent`);
+    assert(s.phase === "sent", `(${how}) the emptied box means it was sent`);
     if (how === "click") assert(s.sendHow === "click" && s.selectors.send && doc.querySelector(s.selectors.send) === btn, `(click) the Send button learned from the click (${s.selectors.send})`);
     else assert(s.sendHow === "enter" && !s.selectors.send, "(enter) Enter recorded as the way to send");
+    append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">4827</div></div>`);
     s = K.teachStep(doc, st, t += 300);
-    assert(s.phase === "wait_reply", `(${how}) the user's message was seen; waiting for the reply`);
-    append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body"><p>4827</p></div></div>`);
+    assert(s.phase === "user_seen" && s.selectors.user && doc.querySelectorAll(s.selectors.user).some((x) => /4827/.test(x.textContent)), `(${how}) the user's message block learned from the digits in a new block (${s.selectors.user})`);
+    // the AI answers the bare number; then AutoInjector's follow-up goes in
+    append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body">You sent 4827. What should I do with it?</div></div>`);
+    const asked = await runScript(SR.buildTeachAskedScript("ChatGPT", "4827"), doc);
+    assert(asked.ok && asked.phase === "wait_reply" && /write 4827 backwards/.test(doc.querySelector("[data-autoinjector-overlay]").textContent), `(${how}) after AutoInjector's follow-up the banner says it asked for 4827 backwards`);
+    append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">[MSG #0007]\n${SR.followupText("4827")}\n\n[Reply envelope required: start with [TO: USER] and end with [FROM: CHATGPT]]</div></div>`);
+    s = K.teachStep(doc, st, t += 300);
+    assert(s.phase === "wait_reply", `(${how}) the follow-up alone (it holds 4827, not 7284) is not the reply`);
+    append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body"><p>[TO: USER]</p><p>7284</p><p>[FROM: CHATGPT]</p></div></div>`);
     s = K.teachStep(doc, st, t += 300);
     assert(s.phase === "wait_reply", `(${how}) a new reply must hold still a moment first`);
     s = K.teachStep(doc, st, t += 1500);
-    assert(s.phase === "done" && s.selectors.assistant, `(${how}) the reply block learned (${s.selectors.assistant})`);
-    assert(s.selectors.user && doc.querySelectorAll(s.selectors.user).some((x) => /Repeat this number/.test(x.textContent)), `(${how}) the user's message block learned (${s.selectors.user})`);
+    assert(s.phase === "done" && s.selectors.assistant, `(${how}) the reply area learned from where 7284 appeared (${s.selectors.assistant})`);
     const replies = doc.querySelectorAll(s.selectors.assistant);
-    assert(replies.length >= 1 && /4827/.test(replies[replies.length - 1].textContent) && !replies.some((x) => /Repeat this number/.test(x.textContent)), `(${how}) the reply selector finds the newest reply and never the user's message`);
-    assert(!/4827|Repeat/.test(JSON.stringify(s.selectors)), `(${how}) learned selectors carry no typed text or number`);
+    assert(replies.length === 3 && /7284/.test(replies[replies.length - 1].textContent) && !replies.some((x) => /backwards|^4827$/.test(x.textContent.trim())), `(${how}) the reply selector is general: it finds all 3 AI replies, the newest holds 7284, never the user's messages (${replies.length})`);
+    assert(!/4827|7284|backwards/.test(JSON.stringify(s.selectors)), `(${how}) learned selectors carry no digits or typed text`);
     const poll = await runScript(SR.buildTeachPollScript(), doc);
     assert(poll.ok && poll.phase === "done", `(${how}) the poll script reports the same state`);
     await runScript(SR.buildTeachStopScript(), doc);
     assert(!doc.querySelector("[data-autoinjector-overlay]") && !win.__aiTeach, `(${how}) stopping removes the banner and the watcher`);
   }
-  // an AI that echoes "Repeat this number: 4827" is still learned (it's after the user's block)
+  // the AI writes "Here it is backwards: 7284" — still learned (the phrase that marks
+  // the user's follow-up is "backwards, digits only", which the AI doesn't repeat)
   const doc = page();
-  await runScript(SR.buildTeachStartScript("ChatGPT", "5150"), doc);
+  await runScript(SR.buildTeachStartScript("ChatGPT", "5163", "chatgpt"), doc);
   const st = doc.__window.__aiTeach;
-  typeInto(doc.getElementById("editor-x9"), "Repeat this number: 5150");
+  typeInto(doc.getElementById("editor-x9"), "5163");
   K.teachStep(doc, st, 100);
   doc.getElementById("editor-x9").textContent = "";
-  append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">Repeat this number: 5150</div></div>`);
-  K.teachStep(doc, st, 200); K.teachStep(doc, st, 300);
-  append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body">Sure! Repeat this number: 5150</div></div>`);
+  K.teachStep(doc, st, 200);
+  append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">5163</div></div>`);
+  K.teachStep(doc, st, 300);
+  K.teachAsked(doc, st, 350);
+  append(doc, doc.getElementById("log"), `<div class="convo-turn human-turn" data-turn-role="human"><div class="ask-body">${SR.followupText("5163")}</div></div>`);
+  append(doc, doc.getElementById("log"), `<div class="convo-turn bot-turn" data-turn-role="model"><div class="answer-body">Here it is backwards: 3615</div></div>`);
   K.teachStep(doc, st, 400);
   const s = K.teachStep(doc, st, 2000);
-  assert(s.phase === "done" && s.selectors.assistant && doc.querySelectorAll(s.selectors.assistant).slice(-1)[0].textContent.includes("Sure!"), `an echoing AI is still learned (${s.selectors.assistant})`);
+  assert(s.phase === "done" && s.selectors.assistant && doc.querySelectorAll(s.selectors.assistant).slice(-1)[0].textContent.includes("3615"), `a chatty answer is still learned (${s.selectors.assistant})`);
   const poll = await runScript(SR.buildTeachPollScript(), parseHTML("<p>x</p>"));
   assert(poll.ok === false && poll.error === "NO_TEACH", "polling a page without the watcher (reloaded) says NO_TEACH");
+  for (let i = 0; i < 200; i++) { const n = SR.pickNumber(); if (n === SR.reverseDigits(n) || n.endsWith("0")) { assert(false, `pickNumber never gives a palindrome or a trailing 0 (${n})`); break; } }
+  assert(SR.followupText("4827") === "Write the number 4827 backwards, digits only.", "the follow-up text is exactly the user's wording");
+}
+
+// ---------------------------------------------------------------------------------
+async function testGeneralise() {
+  console.log("\n== P37.1 learned selectors fit EVERY reply, not one message ==");
+  // the exact ChatGPT case from the 2026-10-24 log: a per-message key with a turn number
+  const turn = (n, who, text) => `<article data-testid="conversation-turn-${n}" data-turn="${who}"><div data-content-search-unit-key="fallback-turn-${n}:${who === "user" ? 1 : 2}:${who}" class="text-base"><div class="whitespace-pre-wrap">${text}</div></div></article>`;
+  const gpt = (extra) => parseHTML(`<main><div id="thread">${turn(4, "user", "[MSG #0010]\nWrite something")}${turn(5, "assistant", "[TO: USER]\nAn older reply.\n[FROM: CHATGPT]")}${turn(6, "user", "[MSG #0011]\nReply with only this word: tundra")}${turn(7, "assistant", "[TO: USER]\ntundra\n[FROM: CHATGPT]")}${extra || ""}</div><form><div id="prompt-textarea" contenteditable="true"></div></form></main>`, { url: "https://chatgpt.com/c/1" });
+  let doc = gpt();
+  const cands = K.candidatesFor(doc.querySelector('[data-content-search-unit-key="fallback-turn-7:2:assistant"]'), "assistant").map((c) => c.sel);
+  assert(!cands.some((c) => /turn-7|:2:|7:2/.test(c)), `no candidate carries the per-message key value (${cands.slice(0, 4).join(" | ")})`);
+  assert(cands.includes('div[data-content-search-unit-key$=":assistant"]'), "the key becomes div[data-content-search-unit-key$=\":assistant\"]");
+  let r = await runScript(SR.buildLearnReplyScript("tundra", PHRASE, "chatgpt"), doc);
+  assert(r.ok && !/\d/.test(r.selector), `page search learns a selector with no per-message number (${r.selector})`);
+  let m = doc.querySelectorAll(r.selector);
+  assert(m.length === 2 && /tundra/.test(m[1].textContent) && /older reply/.test(m[0].textContent), `it matches BOTH replies, the newest holds the word (${m.length})`);
+  assert(/\$=":assistant"|data-turn="assistant"|\*="assistant"/.test(r.selector), `it is the ":assistant" key suffix or the assistant turn (${r.selector})`);
+  // with the author role on the page, a parent [data-message-author-role="assistant"] is fine too
+  const turn2 = (n, who, text) => `<div data-message-author-role="${who}" data-message-id="a1b2c3d4-${n}${n}${n}${n}-4e5f"><div data-content-search-unit-key="fallback-turn-${n}:2:${who}"><div class="markdown prose">${text}</div></div></div>`;
+  doc = parseHTML(`<main><div id="thread">${turn2(4, "user", "hello")}${turn2(5, "assistant", "first answer")}${turn2(6, "user", "Reply with only this word: lantern")}${turn2(7, "assistant", "lantern")}</div><textarea></textarea></main>`, { url: "https://chatgpt.com/c/2" });
+  r = await runScript(SR.buildLearnReplyScript("lantern", PHRASE, "chatgpt"), doc);
+  m = r.ok ? doc.querySelectorAll(r.selector) : [];
+  assert(r.ok && m.length === 2 && !/a1b2|turn-7|\d/.test(r.selector), `with the author role present: general selector (${r.selector}, ${m.length} matches)`);
+  // only ONE reply on the page (a fresh chat): still never the per-message key
+  doc = parseHTML(`<main><div id="thread">${turn(1, "user", "Reply with only this word: cobalt")}${turn(2, "assistant", "cobalt")}</div><textarea></textarea></main>`, { url: "https://chatgpt.com/c/3" });
+  r = await runScript(SR.buildLearnReplyScript("cobalt", PHRASE, "chatgpt"), doc);
+  assert(r.ok && !/\d/.test(r.selector), `a fresh chat (one reply): no number in the selector either (${r.selector})`);
+  // a page where only the unique key could tell replies apart -> rejected (falls back)
+  doc = parseHTML(`<main><div id="thread"><div class="u">Reply with only this word: mango</div><div class="msg" data-k="r-1">older answer</div><div class="msg" data-k="r-2">mango</div></div><textarea></textarea></main>`, { url: "https://x.test/" });
+  const one = K.learnReplyFrom(doc, doc.querySelector('[data-k="r-2"]'), "mango", K.userTest(PHRASE, ""));
+  assert(one.ok ? doc.querySelectorAll(one.selector).length === 2 : true, `two replies on the page: a selector matching only one of them is never taken (${one.ok ? one.selector : one.reason})`);
+  const v = K.validateBlocks(doc, '[data-k="r-2"]', { isUser: K.userTest(PHRASE, ""), word: "mango", minCount: 2 });
+  assert(!v.ok && v.reason === "TOO_NARROW", "validateBlocks: one match when two messages exist -> TOO_NARROW");
+  // Gemini structures: per-message ids on message-content / markdown, custom elements
+  const gem = (id, text) => `<div class="conversation-container" id="c${id}"><user-query><div class="query-text">${text.q}</div></user-query><model-response><div class="response-container"><message-content id="message-content-id-r_${id}" class="model-response-text"><div class="markdown markdown-main-panel" id="model-response-message-contentr_${id}">${text.a}</div></message-content></div></model-response></div>`;
+  doc = parseHTML(`<main>${gem("8f3a2b19", { q: "[MSG #0003]\nhi", a: "[TO: USER]\nhello\n[FROM: GEMINI]" })}${gem("1c9d77e0", { q: "[MSG #0004]\nReply with only this word: quokka", a: "[TO: USER]\nquokka\n[FROM: GEMINI]" })}<rich-textarea><div class="ql-editor" contenteditable="true"></div></rich-textarea></main>`, { url: "https://gemini.google.com/app/x" });
+  r = await runScript(SR.buildLearnReplyScript("quokka", PHRASE, "gemini"), doc);
+  m = r.ok ? doc.querySelectorAll(r.selector) : [];
+  assert(r.ok && m.length === 2 && !/r_|8f3a|1c9d|\d/.test(r.selector), `Gemini: a general selector without the per-reply ids (${r.selector}, ${m.length})`);
+  // the picker uses the same rules: clicking a paragraph of an OLD reply still gives a selector for all replies
+  const pk = K.pickResolve(doc, doc.querySelectorAll(".markdown")[0], { role: "assistant", markers: SR.replyMarkers("gemini", SITES), userSel: SR.userSelFor("gemini") });
+  assert(pk.ok && doc.querySelectorAll(pk.selector).length === 2 && /hello/.test(pk.preview) && pk.latest === false, `🎯 on an older Gemini reply: ${pk.selector} matches both, preview "${pk.preview}", flagged as not the latest`);
 }
 
 // ---------------------------------------------------------------------------------
@@ -258,6 +313,13 @@ function makeSite(opts) {
     }
     if (sim.generating) return { ok: false, error: "AI_BUSY" };
     sim.block("human", `[MSG #${seq}]\n${text}`);
+    const fb = /Write the number (\d{4}) backwards, digits only/.exec(text);
+    if (fb && o.answer) setTimeout(() => {
+      const rev = fb[1].split("").reverse().join("");
+      sim.block("bot", `[TO: USER]\n${rev}\n[FROM: CHATGPT]`);
+      const seen = sim.readerText();
+      if (seen.includes(rev)) { sim.capturedTexts.push(seen); sim.engine.onCaptured("chatgpt", { text: seen, answers: [seq] }); }
+    }, 15);
     const w = /Reply with only this word: ([a-z]+)/.exec(text);
     if (w && o.answer) setTimeout(() => {
       sim.block("bot", `[TO: USER]\n${w[1]}\n[FROM: CHATGPT]`);
@@ -274,6 +336,8 @@ function makeSite(opts) {
     readState: () => ({ text: sim.readerText(), textLen: sim.readerText().length, generating: sim.generating, generatingMs: sim.generating ? 999999 : 0, loadFailed: !!o.loadFailed }),
     sendProbe: (_s, text, token) => sim.onSend(text, token),
     saveLearned: (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); },
+    savePick: o.noSavePick ? undefined : (_s, role, sel, how) => { sim.learned[role] = sel; sim.saved.push({ role, sel, how }); return true; },
+    teachOverrides: (_s, sel) => { sim.teachOv = sel; sim.teachOvLog = (sim.teachOvLog || []).concat([sel]); },
     busyReason: () => sim.busy, isActive: () => true,
     log: (k, d) => sim.logs.push({ k, d }),
     onChange: (site, snap, ev) => sim.changes.push({ state: snap.state, ev })
@@ -359,48 +423,101 @@ async function testEngine() {
   st = sim.engine.state("chatgpt");
   assert(r.ok && sim.reloads === 1 && st.tried.some((t) => t.step === "reload" && t.outcome === "FIXED"), `reloaded and checked again (${st.tried.map((t) => t.step + ":" + t.outcome).join(", ")})`);
 
-  console.log("\n== P18.7 engine: nothing works -> teach step -> learned -> confirmed ==");
-  sim = makeSite({ layout: "changed" });
+  console.log("\n== P37.3 engine: nothing works -> ONE notice, no automatic teach step, re-checks back off ==");
+  sim = makeSite({ layout: "changed", options: { brokenBackoffMs: [150, 1200, 2400] } });
   sim.engine.options.probeTimeoutMs = 300;
-  sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); if (!l) return; if (who === "human") append(sim.doc, l, `<p class="flat">${text.replace(/</g, "&lt;")}</p>`); else append(sim.doc, l, `<p class="flat">${text.replace(/</g, "&lt;")}</p>`); };
+  const flat = (who, text) => { const l = sim.doc.getElementById("thread"); if (l) append(sim.doc, l, `<p class="flat">${text.replace(/</g, "&lt;")}</p>`); };
+  sim.block = flat;
   r = await sim.engine.runCheck("chatgpt", "periodic");
   st = sim.engine.state("chatgpt");
-  assert(r.teach === true && st.state === "needs_user" && st.teach && st.teach.active && /^\d{4}$/.test(st.teach.number), `all automatic fixes failed -> teach step started (number ${st.teach && st.teach.number})`);
+  assert(r.state === "broken" && r.ask === true && !st.teach && !sim.engine.teachActive("chatgpt"), `all automatic fixes failed -> "not working" with a notice for the user, and NO teach step started (${st.state}, teach ${!!st.teach})`);
+  assert(st.askUser && st.nextCheckAt > Date.now() && sim.changes.some((c) => c.ev && c.ev.kind === "broken" && c.ev.ask === true), "the snapshot says the user was asked, and when the next re-check is");
+  assert(sim.engine.events().filter((e) => e.kind === "ask_user").length === 1, "exactly one ask_user event");
+  assert(sim.engine.requestCheck("chatgpt", "stalled") === false && sim.engine.requestCheck("chatgpt", "bookforge-timeout") === false, "automatic reasons (a stall, a BookForge timeout) don't re-check a 'not working' AI at once");
+  let sends0 = sim.sends;
+  await sim.engine.tick(); await sleep(20);
+  assert(sim.sends === sends0, "tick right away: no re-check before the first back-off");
+  await sleep(170); await sim.engine.tick();
+  await waitUntil(() => sim.sends > sends0 && !sim.engine.state("chatgpt").running, 3000);
+  const afterFirst = sim.sends - sends0;
+  st = sim.engine.state("chatgpt");
+  assert(afterFirst === 1 && st.state === "broken" && sim.reloads === 1, `first back-off: ONE plain check-in (no repairs, no reload) — sends +${afterFirst}, reloads ${sim.reloads}`);
+  assert(sim.engine.events().filter((e) => e.kind === "ask_user").length === 1 && !sim.changes.slice(-3).some((c) => c.ev && c.ev.ask), "the failed re-check doesn't announce it again");
+  sends0 = sim.sends;
+  await sleep(170); await sim.engine.tick(); await sleep(20);
+  assert(sim.sends === sends0, "the second wait is longer (15 min in the app) — nothing yet");
+  const due2 = sim.engine.state("chatgpt").nextCheckAt;
+  assert(due2 - Date.now() > 300, `the next re-check is further away (${due2 - Date.now()} ms)`);
+  await sleep(Math.max(0, due2 - Date.now()) + 30); await sim.engine.tick();
+  assert(await waitUntil(() => sim.sends === sends0 + 1, 3000), "…then the second re-check");
+  await waitUntil(() => !sim.engine.state("chatgpt").running);
+  assert(sim.engine.requestCheck("chatgpt", "after-save") === true && sim.engine.state("chatgpt").state === "broken", "a user action (🎯 Save) checks it at once (and starts the back-off over)");
+
+  console.log("\n== P38 engine: 🔢 number teach — the user types the digits, AutoInjector asks for them backwards, saves, confirms ==");
+  sim.block = flat;
+  await waitUntil(() => !sim.engine.state("chatgpt").running);
+  sim.engine.options.teachTimeoutMs = 8000;
+  const tr = await sim.engine.startTeach("chatgpt", null, { auto: false });
+  st = sim.engine.state("chatgpt");
+  assert(tr.ok && /^\d{4}$/.test(tr.number) && st.teach && st.teach.active && st.teach.reversed === SR.reverseDigits(tr.number), `teach started on request (number ${tr.number}, reversed ${st.teach && st.teach.reversed})`);
   assert(sim.engine.teachActive("chatgpt") && sim.engine.isUsable("chatgpt") === false, "while teaching the AI is not usable");
-  const N = st.teach.number;
+  const N = tr.number, REV = SR.reverseDigits(N);
   await waitUntil(() => sim.doc.querySelector("[data-autoinjector-overlay]"));
-  assert(/Repeat this number: \d{4}/.test(sim.doc.querySelector("[data-autoinjector-overlay]").textContent), "the in-pane banner is up");
+  assert(new RegExp(`type\\s+${N}\\s+into ChatGPT`).test(sim.doc.querySelector("[data-autoinjector-overlay]").textContent), "the in-pane banner is up with the number");
   // the user's page now has proper blocks (what the teach step will learn)
   sim.block = (who, text) => { const l = sim.doc.getElementById("thread"); append(sim.doc, l, `<section class="${who === "bot" ? "bot-zone" : "me-zone"}" data-who="${who}"><div class="tx">${text.replace(/</g, "&lt;")}</div></section>`); };
   const box = sim.doc.getElementById("prompt-textarea");
-  typeInto(box, `Repeat this number: ${N}`);
+  typeInto(box, N);
   await waitUntil(() => sim.engine.state("chatgpt").teach.phase === "typed");
   const stw = sim.doc.__window.__aiTeach;
   stw.events.push({ type: "click", t: Date.now(), el: sim.doc.querySelector('[data-testid="send-button"]') });
   box.textContent = "";
-  sim.block("human", `Repeat this number: ${N}`);
-  await waitUntil(() => sim.engine.state("chatgpt").teach.phase === "wait_reply");
-  sim.block("bot", N);
+  sim.block("human", N);
+  const sendsBefore = sim.sends;
+  const askedOk = await waitUntil(() => sim.engine.state("chatgpt").teach.asked && sim.sends > sendsBefore, 4000);
+  assert(askedOk && sim.teachOvLog && sim.teachOvLog[0] && sim.teachOvLog[0].input === "#prompt-textarea", `after the user's message, AutoInjector itself sent the follow-up with the box it just learned (${JSON.stringify(sim.teachOvLog && sim.teachOvLog[0])})`);
+  assert(new RegExp(`Write the number ${N} backwards, digits only`).test(sim.doc.body.textContent), "the follow-up text is in the AI's chat");
   const done = await waitUntil(() => sim.engine.state("chatgpt").teach.result, 8000);
   st = sim.engine.state("chatgpt");
-  assert(done === "fixed" && st.state === "ok", `taught + confirmed by a new check-in -> ✔ fixed (${done})`);
-  assert(sim.saved.filter((x) => x.how === "teach").map((x) => x.role).sort().join(",") === "assistant,input,send,user", `saved message box, send button, user block and reply block (${sim.saved.filter((x) => x.how === "teach").map((x) => x.role).join(",")})`);
+  assert(done === "fixed" && st.state === "ok", `taught + confirmed by a new check-in -> ✔ fixed (${done}, ${st.state})`);
+  const saved = sim.saved.filter((x) => x.how === "number");
+  assert(saved.map((x) => x.role).sort().join(",") === "assistant,input,send,user", `saved message box, Send button, user block and reply area as picks (${saved.map((x) => x.role).join(",")})`);
+  const asel = (saved.find((x) => x.role === "assistant") || {}).sel;
+  assert(asel && sim.doc.querySelectorAll(asel).length >= 2 && !/\d/.test(asel), `the reply area is general (${asel} matches ${asel ? sim.doc.querySelectorAll(asel).length : 0} replies)`);
+  assert(st.teach.saved.join() === "input,send,assistant" && !st.teach.failedPart, "the snapshot lists what was saved, nothing failed");
+  assert(sim.teachOvLog[sim.teachOvLog.length - 1] === null, "the temporary teach overrides are cleared afterwards");
   assert(!sim.doc.querySelector("[data-autoinjector-overlay]"), "the banner is removed afterwards");
-  assert(textFree(sim, [`Repeat this number: ${N}`]), "the typed teach text never reaches logs/events");
+  assert(textFree(sim, [`Write the number ${N}`, REV + "\n"]), "the follow-up text never reaches logs/events");
+  assert(sim.engine.probeReplyKind("chatgpt", `[TO: USER]\n${REV}\n[FROM: CHATGPT]`, []) && sim.engine.probeReplyKind("chatgpt", `${N}`, null), "the teach answers (the number, the reversed number) are never nagged (P37.4)");
 
-  console.log("\n== P18.7 engine: cancel and timeout ==");
+  console.log("\n== P38 engine: number teach — cancel, timeout, and a part that fails ==");
   sim = makeSite();
+  await sim.engine.runCheck("chatgpt", "startup");
   await sim.engine.startTeach("chatgpt", "NO_REPLY_FOUND", { auto: false });
-  assert(sim.engine.teachActive("chatgpt"), "teach started on request (🎓 Show AutoInjector)");
+  assert(sim.engine.teachActive("chatgpt"), "teach started on request (🔢)");
   assert(sim.engine.cancelTeach("chatgpt").ok, "cancel accepted");
   await waitUntil(() => !sim.engine.teachActive("chatgpt"));
   st = sim.engine.state("chatgpt");
-  assert(st.teach.result === "cancelled" && st.state === "broken" && !sim.doc.querySelector("[data-autoinjector-overlay]"), "cancel -> nothing learned, banner gone, still marked not working");
+  assert(st.teach.result === "cancelled" && st.state === "ok" && !sim.doc.querySelector("[data-autoinjector-overlay]") && sim.saved.length === 0, `cancel -> nothing learned or saved, banner gone, the AI keeps its state (${st.state})`);
   sim = makeSite({ options: { teachTimeoutMs: 150 } });
   await sim.engine.startTeach("chatgpt", "TYPE_FAILED", { auto: false });
   await waitUntil(() => !sim.engine.teachActive("chatgpt"));
   st = sim.engine.state("chatgpt");
-  assert(st.teach.result === "timeout" && st.state === "broken" && st.teach.missing.includes("input"), "nobody typed -> friendly timeout, says what wasn't learned");
+  assert(st.teach.result === "timeout" && st.teach.missing.includes("input") && st.teach.failedPart === "input" && sim.sends === 0, "nobody typed -> friendly timeout, says which part (the message box), nothing sent");
+  // the AI never writes the number backwards -> the reply part fails, box + Send are still saved
+  sim = makeSite({ answer: false, options: { teachTimeoutMs: 1500 } });
+  const t3 = await sim.engine.startTeach("chatgpt", null, { auto: false });
+  await waitUntil(() => sim.doc.querySelector("[data-autoinjector-overlay]"));
+  const b3 = sim.doc.getElementById("prompt-textarea");
+  typeInto(b3, t3.number);
+  await waitUntil(() => sim.engine.state("chatgpt").teach.phase === "typed");
+  sim.doc.__window.__aiTeach.events.push({ type: "click", t: Date.now(), el: sim.doc.querySelector('[data-testid="send-button"]') });
+  b3.textContent = "";
+  sim.block("human", t3.number);
+  await waitUntil(() => !sim.engine.teachActive("chatgpt"), 5000);
+  st = sim.engine.state("chatgpt");
+  assert(st.teach.result === "failed" && st.teach.failedPart === "assistant" && st.teach.saved.includes("input") && st.teach.saved.includes("send") && !st.teach.saved.includes("assistant"), `no backwards answer -> it says the reply area failed (offer 🎯 for it), the box + Send are saved (${st.teach.result}, ${st.teach.failedPart}, saved ${st.teach.saved})`);
+  assert(sim.engine.events().filter((e) => e.kind === "teach" && e.outcome === "STARTED").length === 1, "the teach step never restarts by itself");
 
   console.log("\n== P18.1 scheduling: busy / typing / inactive are skipped; requests run when free ==");
   sim = makeSite();
@@ -522,6 +639,82 @@ async function testOwnership() {
   assert(r.deferred && st.state === "unknown" && sim.reloads === 0, `a failed check-in with a request waiting: no repair steps (no reload), no verdict (${st.state}, ${st.tried.map((t) => t.step).join(",")})`);
 }
 
+// ---------------------------------------------------------------------------------
+async function testPicker() {
+  console.log("\n== P38 🎯 picker page script: choose ONE thing, hover outlines it, the click picks it ==");
+  const html = `<main><div id="thread">
+      <div data-message-author-role="user"><div class="user-text">hello there</div></div>
+      <div data-message-author-role="assistant" data-message-id="m-1111aaaa"><div class="markdown prose"><p>[TO: USER]</p><p>First answer, long enough.</p><p>[FROM: CHATGPT]</p></div></div>
+      <div data-message-author-role="user"><div class="user-text">and again</div></div>
+      <div data-message-author-role="assistant" data-message-id="m-2222bbbb"><div class="markdown prose"><p>[TO: USER]</p><p>The latest answer is this one.</p><p>[FROM: CHATGPT]</p></div></div>
+    </div><form><div id="wrap"><div id="prompt-textarea" contenteditable="true" class="ProseMirror"><p>draft</p></div></div><button data-testid="send-button" aria-label="Send prompt"><svg></svg></button></form></main>`;
+  for (const [role, clickOn, check] of [
+    ["input", (d) => d.querySelector("#prompt-textarea p"), (r, d) => d.querySelector(r.selector) === d.getElementById("prompt-textarea") && r.preview === "Message box found"],
+    ["send", (d) => d.querySelector('[data-testid="send-button"] svg'), (r, d) => d.querySelector(r.selector) === d.querySelector('[data-testid="send-button"]') && r.preview === "Send button found"],
+    ["assistant", (d) => d.querySelectorAll(".markdown p")[4], (r, d) => d.querySelectorAll(r.selector).length === 2 && /latest answer/.test(r.preview) && r.latest === true && !/\d/.test(r.selector)]
+  ]) {
+    const doc = parseHTML(html, { url: "https://chatgpt.com/c/1" });
+    const p = runScript(SR.buildPickScript("chatgpt", role, "ChatGPT", SITES, 3000), doc);
+    await sleep(5);
+    const banner = doc.querySelector("[data-autoinjector-overlay]");
+    assert(banner && banner.textContent.includes(`Click ${SR.PICK_THING[role]} in this window`), `(${role}) the banner says "Click ${SR.PICK_THING[role]} in this window"`);
+    const target = clickOn(doc);
+    target.dispatchEvent({ type: "mouseover", target });
+    const hl = doc.querySelectorAll("[data-autoinjector-overlay]").find((x) => /border:3px/.test(x.getAttribute("style") || ""));
+    assert(!!hl, `(${role}) hovering outlines the candidate`);
+    let prevented = false;
+    target.dispatchEvent({ type: "click", target, preventDefault() { prevented = true; }, stopImmediatePropagation() {} });
+    const r = await p;
+    assert(r.ok && r.role === role && check(r, doc), `(${role}) the click picked it: ${r.selector} — "${r.preview}"`);
+    assert(prevented && !doc.querySelector("[data-autoinjector-overlay]") && !doc.__window.__aiPick, `(${role}) the click is swallowed and the banner/outline are gone`);
+  }
+  // wrong kind of element / user message / Esc / cancel / timeout
+  let doc = parseHTML(html, { url: "https://chatgpt.com/c/1" });
+  let p = runScript(SR.buildPickScript("chatgpt", "send", "ChatGPT", SITES, 3000), doc);
+  await sleep(5);
+  let t = doc.querySelector(".user-text"); t.dispatchEvent({ type: "click", target: t, preventDefault() {}, stopImmediatePropagation() {} });
+  assert((await p).error === "WRONG_ELEMENT_TYPE", "a click on text when the Send button was asked for -> WRONG_ELEMENT_TYPE");
+  p = runScript(SR.buildPickScript("chatgpt", "assistant", "ChatGPT", SITES, 3000), doc);
+  await sleep(5);
+  t = doc.querySelector(".user-text"); t.dispatchEvent({ type: "click", target: t, preventDefault() {}, stopImmediatePropagation() {} });
+  assert((await p).error === "LOOKS_LIKE_USER", "pointing at the user's own message for the AI's reply -> LOOKS_LIKE_USER");
+  p = runScript(SR.buildPickScript("chatgpt", "input", "ChatGPT", SITES, 3000), doc);
+  await sleep(5);
+  doc.dispatchEvent({ type: "keydown", key: "Escape", target: doc.body, preventDefault() {}, stopImmediatePropagation() {} });
+  assert((await p).error === "CANCELLED", "Esc cancels");
+  p = runScript(SR.buildPickScript("chatgpt", "input", "ChatGPT", SITES, 3000), doc);
+  await sleep(5);
+  const c = await runScript(SR.buildPickCancelScript(), doc);
+  assert(c.cancelled && (await p).error === "CANCELLED" && !doc.querySelector("[data-autoinjector-overlay]"), "the panel's Cancel stops it");
+  p = runScript(SR.buildPickScript("chatgpt", "input", "ChatGPT", SITES, 60), doc);
+  assert((await p).error === "TIMEOUT", "no click in time -> TIMEOUT");
+  // saved picks still matching? (the red ⚠️ chip)
+  const mc = await runScript(SR.buildMatchCheckScript("chatgpt", SITES, { input: "#prompt-textarea", send: "button.gone", assistant: '[data-message-author-role="assistant"]' }), doc);
+  assert(mc.ok && mc.roles.input.ok && !mc.roles.send.ok && mc.roles.assistant.count === 2 && mc.repliesOnPage === 2, "matchCheck: which saved selectors still find their thing");
+  // only the per-message key tells replies apart -> the key suffix is learned
+  const k = (n, who, text) => `<div class="row"><div data-content-search-unit-key="fallback-turn-${n}:${who === "user" ? 1 : 2}:${who}"><span>${text}</span></div></div>`;
+  doc = parseHTML(`<main><div id="t">${k(1, "user", "hi")}${k(2, "assistant", "older")}${k(3, "user", "more")}${k(4, "assistant", "newest reply")}</div><textarea></textarea></main>`, { url: "https://chatgpt.com/c/9" });
+  const pk = K.pickResolve(doc, doc.querySelectorAll("span")[3], { role: "assistant", markers: [], userSel: "" });
+  assert(pk.ok && /data-content-search-unit-key\$=":assistant"/.test(pk.selector) && doc.querySelectorAll(pk.selector).length === 2, `the ChatGPT key alone: 🎯 learns ${pk.selector}`);
+}
+
+function testNoNags() {
+  console.log("\n== P37.4 check-in / teach answers are never nagged ==");
+  const sim = makeSite();
+  return sim.engine.runCheck("chatgpt", "startup").then(() => {
+    const word = /Reply with only this word: ([a-z]+)/.exec(sim.doc.body.textContent)[1];
+    const seq = sim.lastSeq;
+    const K2 = (t, a) => sim.engine.probeReplyKind("chatgpt", t, a);
+    assert(K2(`${word}\n[FROM: CHATGPT]`, [seq]) === "owned", "the check-in's own answer (no [TO:] tag) -> owned, no nag");
+    assert(K2("Sure, here you go.\n[FROM: CHATGPT]", [seq]) === "answers-checkin", "an answer to a check-in's [MSG #] without the word -> still a check-in answer");
+    assert(K2(`${word}\n[FROM: CHATGPT]`, []) === "has-word", "a late, short answer holding a recent check-in word -> no nag");
+    assert(K2(`${word}`, ["0999"]) === null, "a reply to another message (even with the word) is a normal reply");
+    assert(K2(`A long chapter about the ${word} ` + "and more words ".repeat(40), null) === null, "a long reply that merely uses the word is a normal reply");
+    assert(K2("Hello, how can I help?", []) === null, "an unrelated reply -> null");
+    assert(K2(`Reply with only this word: ${word}`, [seq]) === null, "the user's / app's own message never counts");
+  });
+}
+
 function testLearnedStore() {
   console.log("\n== learned selectors: versioned, with timestamps, sanitized on load ==");
   const raw = { version: 1, sites: { chatgpt: { assistant: { selector: 'div[data-turn-role="model"]', how: "page-search", learnedAt: 123, version: 1 }, input: { selector: "span" }, send: { selector: 42 } }, evil: { assistant: { selector: "x" } } } };
@@ -538,8 +731,11 @@ function testLearnedStore() {
     await testAlternatives();
     await testPageSearch();
     await testTeachLearner();
+    await testGeneralise();
     await testEngine();
     await testOwnership();
+    await testPicker();
+    await testNoNags();
     testLearnedStore();
   } catch (e) { failed++; console.log(`  FAIL - crashed: ${e && e.stack || e}`); }
   console.log(`\n${passed} passed, ${failed} failed`);

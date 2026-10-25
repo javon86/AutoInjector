@@ -66,6 +66,10 @@ function testDedup() {
     'a DROP_DUPLICATE row records the reason and the original MSG id (recoverable, not lost)');
 
   const outsideWindow = new MessageLog(d, { dedupWindowMs: 0 });
+  // Let the clock move past the original's millisecond; on a fast machine an
+  // age of 0 ms still counts as inside a 0 ms window.
+  const t0 = Date.now();
+  while (Date.now() < t0 + 2) { /* spin */ }
   const third = outsideWindow.append({ projectId: 'P', from: 'claude', to: 'chatgpt', body: 'identical body' });
   assert(!third.dropped, 'an identical message outside the dedup window is NOT dropped');
   d.close();
