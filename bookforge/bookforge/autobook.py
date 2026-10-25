@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 
 from . import ai_check
 from . import characters as chars_mod
+from . import costs as costs_mod
 from . import h_checks as hc
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
@@ -469,11 +470,15 @@ class _TimedProviders(PinnedProviders):
 
     def _generate_on(self, *a, **kw):
         t0 = time.monotonic()
+        slot = (a[1] if len(a) > 1 else kw.get("slot")) or {}  # P28: which AI answered (numbers only)
+        ok = False
         try:
-            return super()._generate_on(*a, **kw)
+            out = super()._generate_on(*a, **kw)
+            ok = True
+            return out
         finally:
             try:
-                self._sink(time.monotonic() - t0)
+                self._sink(time.monotonic() - t0, slot=slot.get("slot_id"), ok=ok)
             except Exception:  # noqa: BLE001 - a timing hint never breaks a call
                 pass
 
@@ -524,6 +529,10 @@ class AutoBookService(_Runner):
             steps.append(s)
         out["steps"] = steps
         out["events"] = (run.get("events") or [])[-60:]
+        try:  # ⏱ P28: calls and minutes of this run, per AI and per step (numbers only)
+            out["costs"] = costs_mod.run_costs(run, getattr(self.app.review, "slot_label", None))
+        except Exception:  # noqa: BLE001 - display only
+            log.exception("could not add the run's costs")
         saver = getattr(self.app, "saver", None)
         out["save"] = saver.brief(run.get("project_id"), run.get("branch_id") or "main") if saver else None
         return out
@@ -801,7 +810,7 @@ class AutoBookService(_Runner):
     # ------------------------------------------------------------------ services bound to this run's AI choice
     def _services(self, run):
         slot = run["settings"].get("slot_id")
-        sink = lambda secs: self._timed(run, secs)  # noqa: E731 - P15: measured AI call times (ETA)
+        sink = lambda secs, **kw: self._timed(run, secs, **kw)  # noqa: E731 - P15 ETA / P28 time per AI
         providers = _TimedProviders(self.app.engine.providers, slot, sink)
         engine = Engine(self.store, self.app.engine.contracts, providers=providers)
         assist = AssistService(engine, run["principal"], retry_busy=True)
@@ -813,19 +822,20 @@ class AutoBookService(_Runner):
             if not getattr(job, "cross_pin", False):
                 return once(job, **kw)
             t0 = time.monotonic()
+            ok = False
             try:
-                return once(job, **kw)
+                out = once(job, **kw)
+                ok = True
+                return out
             finally:
-                sink(time.monotonic() - t0)
+                sink(time.monotonic() - t0, slot=getattr(job, "slot", None), ok=ok)
         assist._call_ai_once = timed_once  # type: ignore[method-assign]
         review = ReviewService(engine, assist, run["principal"], work=self.app.work, on_change=self.app.changed)
         return engine, assist, review
 
     @staticmethod
-    def _timed(run, secs: float):
-        t = run.setdefault("timing", {"calls": 0, "call_s": 0.0})
-        t["calls"] = int(t.get("calls") or 0) + 1
-        t["call_s"] = round(float(t.get("call_s") or 0.0) + max(0.0, float(secs)), 3)
+    def _timed(run, secs: float, slot: str | None = None, ok: bool = True):
+        costs_mod.record_call(run, secs, slot, ok)  # P28: totals (P15 ETA) plus per AI and per step
 
     def _eta(self, run, done: int, total: int) -> dict | None:
         """P15: time left, estimated from this run's measured times: the average chapter so far for the chapters

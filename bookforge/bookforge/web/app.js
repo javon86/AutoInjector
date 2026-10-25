@@ -3,6 +3,7 @@
 import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
+import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -652,6 +653,8 @@ async function pickView(parts) {
     if (rest[0] === 'progress') return viewProgress;
     if (rest[0] === 'book') return viewBook;
     if (rest[0] === 'journal' || (rest[0] || '').startsWith('journal?')) return viewJournal;
+    if (rest[0] === 'grid') return m => viewSceneGrid(m, gridUI());  // 🗂 P27
+    if (rest[0] === 'costs') return m => viewCosts(m, gridUI());     // ⏱ P28
     if (rest[0] === 'review') return m => viewReview(m, rest[1] === 'step', rest[2] || null);
   }
   return m => { m.appendChild(h('h1', null, 'Page not found')); m.appendChild(h('p', null, h('a', { href: '#/' }, 'Go to projects'))); };
@@ -701,6 +704,8 @@ function renderTop(parts) {
   add(more, '#/shelf', '📚 My finished books');
   if (inProject) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
+    add(more, link('p', S.pid, S.branch, 'grid'), '🗂 Scene grid');
+    add(more, link('p', S.pid, S.branch, 'costs'), '⏱ Time and AI use');
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
@@ -5018,6 +5023,7 @@ async function viewBook(main) {
     crumbs(['Your books', '#/'], [S.project.name, plink()], 'Make my book'), h('h1', null, '📘 Make my book')),
   h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => openProfileDialog(() => drawBook()) }, '📝 Book profile'),
     h('a', { class: 'btn', href: plink('journal') }, '📜 Journal'),
+    h('a', { class: 'btn', href: plink('grid'), 'data-testid': 'bk-grid' }, '🗂 Scene grid'),
     h('button', { type: 'button', class: 'mab-cta', onclick: ev => openMakeBook(ev.currentTarget), title: 'Let the AI make a whole new book (this one is not touched)' }, boltLabel('Make a book for me')))));
   main.appendChild(bookSaveCard());
   const holder = h('div', null, loadingState('Checking where your book is…'));
@@ -7251,6 +7257,11 @@ async function renderMakeSetup() {
       lengthBox,
       h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
+  const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
+    const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
+    return Object.assign({ length: l ? l.value : 'short_story' }, pl ? { pipeline: pl } : {});
+  });
+  form.insertBefore(est.el, err); form.addEventListener('change', () => est.refresh()); est.refresh();
   mbShell('⚡ Make a book for me', form);
   startAll.addEventListener('click', () => go(true));
   try {
@@ -7342,7 +7353,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save, r.costs && [r.costs.calls, r.costs.ais]]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -7352,7 +7363,7 @@ function renderRun() {
       h('div', { class: 'row' }, badge(w[0], w[1], w[2]), h('span', { class: 'small' }, `${done} of ${r.steps.length} steps`), h('span', { class: 'small muted' }, '⏱ ', h('span', { class: 'mb-elapsed' }, fmtElapsed(sinceMs(r.started_at, r.finished_at)))),
         r.eta && ['running', 'waiting', 'queued', 'pausing'].includes(r.status) ? h('span', { class: 'small mb-eta', 'data-testid': 'mb-eta', title: `Estimated from this run's measured times: ${r.eta.per_chapter_s} s per chapter, ${r.eta.calls} AI answers so far (${r.eta.avg_call_s} s each on average)` },
           `⏳ ${etaWords(r.eta.seconds_left)} left · ${r.eta.chapters_left} chapter(s) to go`) : null),
-      runVariantLine(r)),
+      runVariantLine(r), runCostLine(gridUI(), r)),
     h('progress', { class: 'mb-bar', max: String(r.steps.length), value: String(done), 'aria-label': `${done} of ${r.steps.length} steps done` }));
   const phase = h('p', { class: `mb-phase ${r.status}`, 'aria-live': 'polite' },
     ['running', 'queued'].includes(r.status) ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : null, ' ',
@@ -7715,6 +7726,12 @@ async function viewJournal(main) {
   step.addEventListener('change', load); probs.addEventListener('change', load);
   if (q.get('problems') === '1') probs.checked = true;
   await load();
+}
+
+/* ======================================================================= 🗂 P27 scene grid · ⏱ P28 time and AI use (web/grid.js) */
+function gridUI() {
+  return { h, api, bpath, plink, link, clear, crumbs, stateBox, loadingState, problemBox, toProblem, infoTip, toast, fmtTime, badge,
+    safeFileStem, showGlobalProblem, profileOf, route, closeMakeBook, project: () => S.project };
 }
 
 /* ======================================================================= 📚 my finished books (S22) */

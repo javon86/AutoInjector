@@ -227,8 +227,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [x] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
   lamp and age arithmetic to verify). Done: `timeline_check.py` (ages, birth/story years, "N years ago" arithmetic,
   no AI) + the term check of `terms.py`, shown on the chapter/book page and sent to the AI editor as `fact_checks`.
-- [ ] **P27** Scene-grid / timeline view of the whole book.
-- [ ] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
+- [x] **P27** Scene-grid / timeline view of the whole book.
+  Done: `scene_grid.py` + `GET …/grid[?format=csv]` and the 🗂 Scene grid page (`#/p/…/grid`, web/grid.js): one row per
+  scene (POV, place/time, goals, obstacle, change from the scene cards; words and P24 readability per scene; problems),
+  sortable/filterable, cards on a phone, 🖨 print stylesheet, ⬇ CSV; no AI, nothing stored.
+- [x] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
+  Done: `costs.py`: each run times every AI call per AI and per step (`run.timing.by_ai/by_step`), `GET …/costs[?format=md]`
+  + ⏱ Time and AI use page (runs, per AI, journal-counted work, tokens/money), 🤖 line in the run window, and
+  `POST /api/estimate` shown as ⏱ "about X–Y min · N–M AI answers" in the Make-a-book setup (length + pipeline).
 - [ ] **P29** Read-aloud / audiobook export (later).
 - [x] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
   filler / accident (keep "Right, so" and Odile's counting; trim only excess). Done: `repetition.py` sorts every
@@ -284,6 +290,20 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for BookForge (see Problems).
 
 ## Problems to come back to
+
+- **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
+  in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
+  "ⓘ written without scene breaks" — only scene-by-scene chapters (long ones) get words/readability per scene. Asking the
+  writer to mark scene breaks would fix it (prompt change, not done here); (b) POV is per chapter (outline `plan.pov_id`),
+  scene cards have no POV field; (c) "time" is the card's free text, not a computed story clock (P32 may add one);
+  (d) printing uses a global `@media print` block in style.css (hides the top bar/side nav on every page).
+- **P28 time/cost limits and choices to confirm:** (a) only ⚡ Make-a-book runs are timed per AI; ✍ Write all chapters
+  shows wall time only and ✨ Fill with AI / reviews / reports outside runs are counted from the journal, not timed;
+  runs saved before P28 show their calls as "an AI (not recorded which)"; (b) a run's "minutes" is start→end and includes
+  pauses; (c) the estimate's calls-per-step model (`costs.STEP_MODEL`, two editors, 25 % fix rounds) was calibrated on
+  fake-AI runs only (short story 46 calls measured vs 52 estimated); after real runs the measured calls per step and
+  seconds per answer replace it — check it after the first real novel; until then 45 s per web-AI answer is a guess;
+  (d) money is only shown for slots with per-token prices (tokens from provenance × today's slot prices), web AIs = 0.
 
 - P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
   audience targets are rules of thumb (not tuned on real books yet).

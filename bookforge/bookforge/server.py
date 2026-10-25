@@ -405,6 +405,9 @@ class App:
                 raise ApiError(400, "INVALID_INPUT", "/probe", "probe must be true or false")
             return 200, ai_check.check(self.engine.providers, pinned=AssistService._check_slot(pinned), probe=probe,
                                        timeout_s=self.ai_check_timeout_s)
+        if parts == ["estimate"] and method == "POST":  # ⏱ P28: AI calls and minutes before a run starts
+            from . import costs as costs_mod  # noqa: PLC0415
+            return 200, costs_mod.estimate(self, body if isinstance(body, dict) else {})
         if parts == ["reviewer-leniency"] and method == "GET":
             # P36: how generous each AI reviewer has been (numbers only) and the calibration rules
             return 200, {"ais": calibration.table(self.store), "rules": calibration.RULES}
@@ -492,6 +495,8 @@ class App:
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
                 if rest == ["journal"] and method == "GET":
                     return self.journal(pid, branch, query)
+                if rest in (["grid"], ["costs"]) and method == "GET":  # 🗂 P27 scene grid · ⏱ P28 time and AI use
+                    return self.route_grid_costs(rest[0], query, principal, pid, branch)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
                 if rest == ["save"] and method == "POST":  # 💾 P20 save the book now
@@ -628,6 +633,28 @@ class App:
         if len(rest) == 2 and rest[1] == "resume" and method == "POST":
             return 200, wa.resume(principal, rest[0])
         raise ApiError(404, "NOT_FOUND", "/book/write-all", "no such endpoint")
+
+    # ------------------------------------------------------------------ 🗂 P27 scene grid · ⏱ P28 time and AI use
+    def route_grid_costs(self, what, query, principal, pid, branch):
+        fmt = (query.get("format") or ["json"])[0]
+        disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+        if what == "grid":
+            from . import scene_grid  # noqa: PLC0415
+            g = scene_grid.build(self, principal, pid, branch)
+            if fmt == "csv":
+                return 200, ("__binary__", "text/csv; charset=utf-8", scene_grid.render_csv(g).encode("utf-8"),
+                             f"scene-grid-{pid}.csv", disposition)
+            if fmt != "json":
+                raise ApiError(400, "INVALID_INPUT", "/format", "format: json or csv")
+            return 200, g
+        from . import costs as costs_mod  # noqa: PLC0415
+        c = costs_mod.book_costs(self, pid, branch)
+        if fmt == "md":
+            return 200, ("__binary__", "text/markdown; charset=utf-8", costs_mod.render_markdown(c).encode("utf-8"),
+                         f"time-and-ai-use-{pid}.md", disposition)
+        if fmt != "json":
+            raise ApiError(400, "INVALID_INPUT", "/format", "format: json or md")
+        return 200, c
 
     # ------------------------------------------------------------------ journal (R11)
     def journal(self, pid, branch, query):
