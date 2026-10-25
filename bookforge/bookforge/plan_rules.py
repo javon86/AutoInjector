@@ -15,6 +15,8 @@ requires; any other extension (or unregistered predicate) yields UNKNOWN for rev
 """
 from __future__ import annotations
 
+import re
+
 from typing import Callable, Iterable, Iterator
 
 Add = Callable[..., None]
@@ -184,6 +186,52 @@ def declared_ids(record: dict) -> set[str]:
     for _, f in iter_facts(record.get("data")):
         ids.add(f["subject_id"])
     return ids
+
+
+def _slug_tokens(v) -> list[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", str(v or "").lower()) if t]
+
+
+def resolve_entity_ids(data, canon: list[dict], governed: dict) -> list[str]:
+    """Web AIs sometimes write a name-like ID ("odile-marsh") instead of the canon ID they were given. Map such a
+    value to the ONE pinned canon record of the governing module whose name or declared ID matches it (same words,
+    or the value's words are a part of the name, e.g. "odile" -> "Odile Marsh"); leave it alone when nothing or more
+    than one record matches, so the canon check still refuses it. Changes ``data`` in place; returns notes."""
+    notes = []
+    by_module: dict = {}
+    for r in canon:
+        try:
+            name = next((f["value"] for _, f in iter_facts(r.get("data"))
+                         if f.get("predicate") == "entity.name" and isinstance(f.get("value"), str)), "")
+        except Exception:  # noqa: BLE001 - a malformed record never breaks the check
+            name = ""
+        ids = declared_ids(r)
+        subject = next((f["subject_id"] for _, f in iter_facts(r.get("data"))
+                        if f.get("predicate") == "entity.name"), None) or r["record_id"]
+        keys = [_slug_tokens(name)] + [_slug_tokens(i) for i in ids]
+        by_module.setdefault(r["module_id"], []).append((subject, ids, [k for k in keys if k]))
+    for ptr, f in iter_facts(data):
+        modules = governed.get(f.get("predicate"))
+        if not modules:
+            continue
+        cands = [c for m in modules for c in by_module.get(m, [])]
+        known = set().union(*(c[1] for c in cands)) if cands else set()
+
+        def fix(v):
+            if not isinstance(v, str) or v in known:
+                return v
+            vt = _slug_tokens(v)
+            if not vt:
+                return v
+            hits = {c[0] for c in cands for k in c[2] if vt == k or (set(vt) <= set(k) and len(vt) < len(k))}
+            if len(hits) == 1:
+                new = hits.pop()
+                notes.append(f"{ptr}: {f['predicate']} '{v}' -> '{new}'")
+                return new
+            return v
+        val = f.get("value")
+        f["value"] = [fix(x) for x in val] if isinstance(val, list) else fix(val)
+    return notes
 
 
 # ---------------------------------------------------------------------- plan items

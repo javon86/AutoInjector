@@ -25,12 +25,15 @@ preview) runs the deterministic closure rules of Shared Contract section 10:
 from __future__ import annotations
 
 import copy
+import logging
 
 from .. import plan_rules as pr
 from ..errors import BookforgeError
 from . import register
 from .base import Context, OperationHandler, Result, normalize_to_output
 from .set_a import historical_events, resolve_pins
+
+log = logging.getLogger("bookforge.set_b")
 
 B_OPS = tuple(f"B{i:02d}" for i in range(1, 15))
 
@@ -202,6 +205,13 @@ class PlanHandler(OperationHandler):
                     ctx, partial, fields, task=self.ai_task(ctx), context=self.ai_context(ctx),
                     protected=self._protected(ctx))
                 transform = "AI"
+                # A web AI may write "odile-marsh" for the character it was given as an ID: map such a value to the
+                # one matching pinned canon record before the canon check (no match / several -> still refused).
+                canon = Sources(ctx, [r for p, r in ctx.resolved.items() if p != "/base_ref"]).canon()
+                fixed = pr.resolve_entity_ids(data, canon, dict(pr.AUTHORITY, **{"plan.pov_id": ("A01",),
+                                                                                  "plan.location_id": ("A04",)}))
+                if fixed:
+                    log.info("%s: mapped %d AI-written ID(s) to canon IDs", self.op_id, len(fixed))
         record_id = None
         if self.op_id == "B11":
             record_id = ctx.allocate_record_id()
