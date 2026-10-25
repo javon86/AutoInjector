@@ -18,11 +18,12 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Status at a glance  (keep this up to date — updated on every add / finish)
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
-- **Next up:** waiting for the user's choice from Section 7 (suggested order P22 → P26 → P23 → P24).
+- **Next up:** waiting for the user's choice from Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
+- **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures (B1–B3).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
-- Last updated: 2026-10-25.
+- Last updated: 2026-10-25 (after the book-2 review).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -179,6 +180,19 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - [ ] **P27** Scene-grid / timeline view of the whole book.
 - [ ] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
 - [ ] **P29** Read-aloud / audiobook export (later).
+- [ ] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
+  filler / accident (keep "Right, so" and Odile's counting; trim only excess).
+- [ ] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
+  ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation).
+- [ ] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
+  (the 32–41 lamp count, the clock, the gauge reading); early hazards must change later actions.
+- [ ] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
+  flag the weaker one (zero gas pressure vs. "it was the isolator").
+- [ ] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
+  facts, so checkers never "correct" a deliberate change back to the old story.
+- [ ] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
+  plus what each can observe and falsely assumes; at least one action per main character that serves
+  their own goal, not the theme.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
