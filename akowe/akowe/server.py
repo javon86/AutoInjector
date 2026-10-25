@@ -480,7 +480,7 @@ class App:
                 branch = parts[3]
                 self._require_access(principal, pid, branch)
                 rest = parts[4:]
-                if rest != ["save"]:  # the shelf asks every book's save state: that is not "opening" the book
+                if rest not in (["save"], ["journal", "note"]):  # the shelf asks every book's save state / Alfred notes an action: not "opening" the book
                     self.touch_project(pid, branch)
                 if rest and rest[0] == "review":
                     return self.route_review(method, rest[1:], query, body, principal, pid, branch)
@@ -499,6 +499,8 @@ class App:
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
                 if rest == ["journal"] and method == "GET":
                     return self.journal(pid, branch, query)
+                if rest == ["journal", "note"] and method == "POST":  # 🎩 an assistant's action, for the journal
+                    return 201, journal.add_note(self.store, pid, branch, body)
                 if rest in (["grid"], ["costs"]) and method == "GET":  # 🗂 P27 scene grid · ⏱ P28 time and AI use
                     return self.route_grid_costs(rest[0], query, principal, pid, branch)
                 if rest and rest[0] == "report":
