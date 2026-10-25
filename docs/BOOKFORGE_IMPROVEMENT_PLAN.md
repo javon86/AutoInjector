@@ -21,7 +21,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 - **In progress:** P38 🎯 picker rebuild + number teach (with P37.1, P37.2).
 - **Next up:** Section 8 (P36, P37.1–P37.5) — fixes from the book-2 run log; then Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
-- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures (B1–B3).
+- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
 - Last updated: 2026-10-25 (after the book-2 run log).
@@ -231,6 +231,16 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
+- [ ] **B4** 🧭 Local AI book manager (LATER — not started): a local LLM (runs on the user's PC) acts as
+  the project manager for the book. BookForge still runs the book by itself; the manager rides alongside:
+  - **Guide:** explains in plain words what's happening, which step the book is on, what's next, and why.
+  - **Live changes:** the user says "change X" mid-run; the manager pauses at a safe point, makes the
+    change (bible, outline, character, chapter brief, settings), and resumes — with run consent and approvals.
+  - **Character helper:** builds character sheets and voice cards with the user by conversation.
+  - **Orchestrator:** watches progress, problems and AI health; can interrupt to add or fix things the
+    user asked for; keeps a log of every change it made.
+  - Ideas to expand: answers "where are we?" anytime, suggests fixes when a review fails, spots
+    continuity problems early, summarizes each chapter for the user, and works offline/free.
 
 ### Other ideas parked from earlier lists (not scheduled)
 
