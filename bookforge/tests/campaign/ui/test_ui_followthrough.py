@@ -81,6 +81,15 @@ def api_book(server, pid):
     return {"done": b["done_count"], "total": b["total"], "next": step["title"] if step else None, "raw": b}
 
 
+def progress_key(raw):
+    """What changes when a step really moves the book on. The step title alone does not: writing and approving every
+    chapter all happen under "Write the chapters"."""
+    return [raw["done_count"], raw["next"],
+            [(s["id"], s["state"], [(a["record_id"], a.get("version")) for a in s.get("approve") or []],
+              [(c["chapter_id"], c["state"], (c.get("prose") or {}).get("version"), (c.get("prose") or {}).get("lifecycle"))
+               for c in s.get("chapters") or []]) for s in raw["steps"]]]
+
+
 def approvals_count(page):
     t = page.locator("#nav-task .count-badge").inner_text()
     m = re.search(r"\d+", t)
@@ -111,12 +120,20 @@ def test_wizard_to_downloaded_book(make_context, ai_server, tmp_path):
     recs = ai_server.api("GET", f"/projects/{pid}/branches/main/records")
     assert sorted(r["module_id"] for r in recs) == ["A01", "A04"], recs
 
-    trail = []
+    trail, keys = [], []
     for i in range(40):
         ub, ab = ui_book(page), api_book(ai_server, pid)
+        keys.append(progress_key(ab["raw"]))
+        if len(keys) > 2 and keys[-1] == keys[-2] == keys[-3]:   # two presses in a row changed nothing
+            shot(page, "followthrough_stuck")
+            pytest.fail(f"stuck on {trail[-1]}: {page.inner_text('#main .book-msg')} (trail {trail})")
         # the page shows what the API says (steps done, the next step)
         assert (ub["done"], ub["total"]) == (ab["done"], ab["total"]), (i, ub, ab, trail)
         assert ub["next"] == ab["next"], (i, ub, ab, trail)
+        # the 💾 card's "not finished — next step" note follows the book (it was read once when the page opened)
+        note = page.locator("#main [data-testid='opened-next']")
+        if note.count():
+            assert note.inner_text() == ub["next"], (i, note.inner_text(), ub, trail)
         q = ai_server.api("GET", f"/projects/{pid}/branches/main/review/summary")
         page.wait_for_function("n => { const b = document.querySelector('#nav-task .count-badge'); return b && b.textContent.includes('(' + n + ')'); }",
                                arg=q["count"], timeout=12000)
@@ -133,9 +150,6 @@ def test_wizard_to_downloaded_book(make_context, ai_server, tmp_path):
         wait_book_msg(page)
         msg = page.inner_text("#main .book-msg")
         assert "Failed" not in msg and "did not work" not in msg, (trail, msg)
-        if len(trail) > 4 and trail[-1] == trail[-2] == trail[-3] == trail[-4]:
-            shot(page, "followthrough_stuck")
-            pytest.fail(f"stuck on {trail[-1]}: {msg}")
     else:
         pytest.fail(f"book not made after 40 steps: {trail}")
     ab = api_book(ai_server, pid)

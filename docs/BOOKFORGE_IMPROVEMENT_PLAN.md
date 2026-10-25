@@ -477,9 +477,17 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   (c) "unknown" from a v1.2 bridge (not checked yet) counts as not ok and the notice offers 🔁 Check again (a probe, up
   to 45 s); an older v1.0/1.1 bridge without states counts as ok; (d) the server does not refuse a start without the
   check (older pages / API) — the run window shows the ⚠️ notice instead.
-- **Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
+- ~~**Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
   test_wizard_to_downloaded_book` fails "stuck on Write the chapters: ✔ Done: Approved 1 of 1." on unmodified `main` too
-  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).
+  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).~~
+  **FIXED (2026-10-25).** No click was dropped. The test was wrong: it called the book "stuck" when the step title had
+  been the same four times in a row. Writing and approving every chapter all happen under "Write the chapters", so with
+  the 3-chapter short story the test gave up after ch1 write/approve and ch2 write/approve, which is normal progress.
+  The test now fails only when two presses in a row leave the API's book state (done count, next step, step states,
+  waiting approvals, chapter states/versions) unchanged. While checking, a second bug turned up and was fixed in the
+  page. The 💾 card's "This book is not finished — next step: …" note was read once when the page opened, so it kept
+  showing "Characters and places" while the book moved on. `renderBook` now keeps it in step with the book, and clears
+  it once the book is made. The test checks the note after every step.
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

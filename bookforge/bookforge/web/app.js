@@ -5164,6 +5164,10 @@ function renderBook(holder, book, redraw) {
     if (s.action && ['setup_format', 'assemble', 'export', 'check'].includes(s.action)) await run(() => post(s.action), 'Working…', s.id);
   };
   const nextStep = book.steps.find(s => s.id === book.next);
+  // the 💾 card's "not finished — next step" note was read when the page opened: keep it in step with the book
+  const opened = document.querySelector('#main [data-testid="opened-box"]');
+  if (opened && !nextStep) clear(opened);
+  else if (opened && opened.querySelector('[data-testid="opened-next"]')) opened.querySelector('[data-testid="opened-next"]').textContent = nextStep.title;
   holder.appendChild(h('section', { class: 'card book-top' },
     h('div', { class: 'row space' }, h('div', null, h('strong', null, `${book.done_count} of ${book.total} steps done`),
       h('div', { class: 'small muted' }, book.ai_ready ? '✨ Your AI is connected: steps marked “AI can do it” are drafted for you.'
@@ -8164,7 +8168,7 @@ function bookSaveCard(redraw) {
     if (o.finished) return;
     const run = o.resumable_run;
     put(clear(opened), h('div', { class: 'state ask opened-note' },
-      h('p', null, run ? `▶ This book’s Make-a-book run stopped (${run.phase || run.status}).` : `This book is not finished${o.next_step ? ` — next step: ${o.next_step}` : ''}.`),
+      h('p', null, run ? `▶ This book’s Make-a-book run stopped (${run.phase || run.status}).` : ['This book is not finished', o.next_step ? [' — next step: ', h('span', { 'data-testid': 'opened-next' }, o.next_step)] : null, '.']),
       h('div', { class: 'row' },
         run ? h('button', { type: 'button', class: 'small', 'data-testid': 'resume-saved-run', onclick: async ev => {
           ev.currentTarget.disabled = true;
