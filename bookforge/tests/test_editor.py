@@ -449,7 +449,7 @@ def test_http_endpoints(served):
     app, port, pid, rid, ver = served
     base = f"/api/projects/{pid}/branches/main/review"
     st, s, _ = call(port, "GET", "/api/settings/editor")
-    assert st == 200 and s["enabled"] is True and s["rounds"] == 2 and len(s["dimensions"]) == 12
+    assert st == 200 and s["enabled"] is True and s["rounds"] == 2 and len(s["dimensions"]) == 15
     st, s, _ = call(port, "PUT", "/api/settings/editor", {"rounds": 1, "strictness": "gentle"})
     assert st == 200 and s["rounds"] == 1 and s["strictness"] == "gentle"
     st, e, _ = call(port, "PUT", "/api/settings/editor", {"rounds": 9})

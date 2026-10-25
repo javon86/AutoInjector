@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import CLOSURE_REVISION, CONTRACT_VERSION, __version__
-from . import diagnostics, journal
+from . import ai_check, calibration, diagnostics, journal
 from .assist import AssistService, supports as assist_supports
 from .autobook import AutoBookService, WriteAllService
 from .backups import BackupManager
@@ -159,6 +159,7 @@ class App:
                                      after_restore=self._after_restore)
         self.autobook = AutoBookService(self)
         self.write_all = WriteAllService(self)
+        self.ai_check_timeout_s = 45.0  # P37.5 🔁 check again: wait at most this long for the AIs' check-ins
         self.reports = ReportService(self)     # 📊 P13 book reports + whole-book AI reviews
         self.compare = CompareService(self)    # ⚖️ P14 blind comparisons
         self.health = HealthService(self)
@@ -394,6 +395,19 @@ class App:
             # Which AIs work right now (bridge v1.2 state, cached 15 s): {slots: [{slot_id, name, state, word, ...}]}
             prov = self.engine.providers
             return 200, {"slots": [prov.slot_status(s) for s in prov.ai_slots()]}
+        if parts == ["ai-check"] and method in ("GET", "POST"):
+            # P37.5 before a run: which AIs work, and for each one that does not: what is wrong and how to fix it.
+            # POST {probe: true} first asks AutoInjector to check in with each AI ("🔁 I fixed it — check again").
+            body = body if isinstance(body, dict) else {}
+            pinned = body.get("slot_id") if method == "POST" else (query.get("slot_id") or [None])[0]
+            probe = body.get("probe", False) if method == "POST" else False
+            if not isinstance(probe, bool):
+                raise ApiError(400, "INVALID_INPUT", "/probe", "probe must be true or false")
+            return 200, ai_check.check(self.engine.providers, pinned=AssistService._check_slot(pinned), probe=probe,
+                                       timeout_s=self.ai_check_timeout_s)
+        if parts == ["reviewer-leniency"] and method == "GET":
+            # P36: how generous each AI reviewer has been (numbers only) and the calibration rules
+            return 200, {"ais": calibration.table(self.store), "rules": calibration.RULES}
         if len(parts) == 3 and parts[0] == "slots" and parts[2] == "health" and method == "GET":
             return 200, self.engine.providers.health_check(parts[1])
         if parts == ["selftest"] and method == "POST":

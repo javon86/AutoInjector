@@ -5767,7 +5767,8 @@ function recordReviewCard(cur) {
 const ED_DIMS = { subtext: 'Subtext', character_agency: 'Characters with their own goals', voice_distinction: 'Distinct voices',
   world_friction: 'Obstacles from the world', theme_restraint: 'Theme carried, not stated', prose_variety: 'Varied prose, no tics',
   tension_stakes: 'Real stakes', ending_openness: 'An ending that is earned', protected_mysteries: 'Protected mysteries kept', scene_plan: 'Scene plan kept',
-  story_rules: 'Story rules kept', rules_bounded: 'Story rules bounded', planned_to_page: 'Planned but not on the page', other: 'Other' };
+  story_rules: 'Story rules kept', rules_bounded: 'Story rules bounded', planned_to_page: 'Planned but not on the page',
+  trade_terms: 'Right trade and period terms', cause_effect: 'Cause and effect', timeline: 'Time, ages and order', other: 'Other' };
 const ED_MIN = { gentle: 5, normal: 6, strict: 7 };
 function craftBadge(c) {
   if (!c) return null;
@@ -5812,10 +5813,29 @@ function craftView(c, settings) {
       c.independent === false ? [' ', h('strong', { class: 'rv-warn' }, `⚠️ ${NOT_INDEPENDENT}`)] : null),
     !pass && (c.verdict_why || []).length ? h('p', { class: 'small' }, h('strong', null, 'Why it needs another look: '), c.verdict_why.join('; ')) : null,
     scoreBars(c),
+    calibrationBox(c),
     (c.findings || []).length ? [h('h3', null, `What the editor would change (${c.findings.length})`), h('ol', { class: 'ed-findings', 'data-testid': 'ed-findings' }, c.findings.map(findingItem))]
       : h('p', { class: 'small' }, 'The editor has no notes on this version.'),
     (c.keep || []).length ? h('div', { class: 'ed-keep' }, h('strong', null, '✔ Keep (works well): '), h('ul', { class: 'small' }, c.keep.map(k => h('li', null, k)))) : null,
     settings && !settings.enabled ? h('p', { class: 'small muted' }, 'The editor is switched off in Settings for Make-a-book runs; you can still ask it here.') : null);
+}
+/** P36: how far the editor's review was trusted — re-asked, capped, two editors (lower score counts), leniency. */
+function calibrationBox(c) {
+  const cal = c.calibration;
+  const revs = c.reviewers || [];
+  if (!cal || (!(cal.notes || []).length && revs.length < 2)) return null;
+  return h('div', { class: cal.flagged ? 'words-warn ed-cal' : 'small ed-cal', role: 'note', 'data-testid': 'ed-calibration' },
+    h('p', null, h('strong', null, cal.flagged ? '⚠️ The editor’s review was too clean to trust' : revs.length > 1 ? `🎯 Two editors read it (${revs.map(r => r.reviewer).join(' and ')})` : '🎯 The editor was asked for proof')),
+    (cal.notes || []).length ? h('ul', { class: 'small' }, cal.notes.map(n => h('li', null, n))) : null,
+    revs.length ? h('details', { class: 'small' }, h('summary', null, 'Each editor’s own scores'),
+      h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' },
+        h('thead', null, h('tr', null, h('th', null, 'Point'), revs.map(r => h('th', null, r.reviewer, r.flagged ? ' ⚠️' : '')),
+          h('th', null, 'Counts'))),
+        h('tbody', null, Object.keys(c.scores || {}).map(k => h('tr', null, h('th', { scope: 'row' }, ED_DIMS[k] || k),
+          revs.map(r => h('td', { class: 'num' }, r.scores && r.scores[k] != null ? String(r.scores[k]) : '–', r.adjusted && r.scores && r.adjusted[k] !== r.scores[k] ? ` → ${r.adjusted[k]}` : '')),
+          h('td', { class: 'num' }, h('strong', null, String(c.scores[k]))))))))) : null,
+    revs.some(r => (r.weakest || []).length) ? h('details', { class: 'small' }, h('summary', null, 'Weakest passages the editors named'),
+      h('ul', null, revs.flatMap(r => (r.weakest || []).map(w => h('li', null, `“${w.passage}”`, w.why ? ` — ${w.why}` : '', w.found ? '' : h('span', { class: 'muted' }, ' (not found word for word)'), h('span', { class: 'muted' }, ` (${r.reviewer})`)))))) : null);
 }
 /** Chapter page / review step: the editor's scores and notes for exactly this version, and its fixes. */
 function editorCard(cur, { onSaved } = {}) {
@@ -7082,6 +7102,61 @@ const MB = { dialog: null, run: null, poll: null, tick: null, opener: null, late
 const RUN_WORD = { queued: ['…', 'Starting', 'b-info'], running: ['⏳', 'Working', 'b-ai'], waiting: ['⏳', 'Waiting for the AI', 'b-warn'],
   pausing: ['⏸', 'Pausing…', 'b-warn'], paused: ['⏸', 'Paused', 'b-warn'], done: ['✔', 'Done', 'b-ok'], cancelled: ['✖', 'Cancelled', 'b-muted'],
   interrupted: ['⚠️', 'Interrupted', 'b-warn'] };
+/* ======================================================================= 🩺 P37.5 before a run: which AIs work, and how to fix the others */
+/**
+ * Before a book run starts: BookForge asks AutoInjector (/v1/health) about every AI the run will use. When all work it
+ * returns at once ({skipped: []}). Otherwise a notice says which AI, what is wrong and how to fix it, with
+ * 🔁 I fixed it — check again / ▶ Start without it / ✖ Cancel. Resolves {skipped: [slot ids]} or null (cancelled).
+ */
+async function aiPreflight({ slotId = null, what = 'the book' } = {}) {
+  let res;
+  try { res = await api('GET', `/ai-check${slotId ? `?slot_id=${encodeURIComponent(slotId)}` : ''}`); }
+  catch (e) { noteClientError(toProblem(e).code, 'AI check', toProblem(e).message); return { skipped: [] }; } // a help only: the start itself still reports problems
+  if (!res || res.ok || !(res.ais || []).length) return { skipped: [] };
+  return new Promise(resolve => {
+    const prev = document.activeElement;
+    const d = h('dialog', { class: 'selftest-dialog choice-dialog ai-check-dialog', 'aria-labelledby': 'aic-title', 'data-testid': 'ai-check-dialog' });
+    let done = false;
+    const finish = v => { if (done) return; done = true; try { if (d.open) d.close(); } catch { /* ignore */ } d.remove(); if (prev && prev.focus) { try { prev.focus(); } catch { /* ignore */ } } resolve(v); };
+    const draw = (r, busy = false) => {
+      clear(d);
+      const bad = (r.ais || []).filter(a => !a.ok);
+      d.appendChild(h('h2', { id: 'aic-title' }, bad.length === 1 ? `⚠️ ${bad[0].title}` : `⚠️ ${bad.length} of your AIs aren’t working`));
+      d.appendChild(h('p', null, `Before ${what} starts, BookForge checked every AI the run will use (for writing, reviewing and editing).`));
+      d.appendChild(h('ul', { class: 'aic-list' }, (r.ais || []).map(a => h('li', { class: a.ok ? 'aic-ok' : 'aic-bad', 'data-slot': a.slot_id, 'data-testid': a.ok ? 'aic-ok' : 'aic-bad' },
+        a.ok ? [h('strong', null, `✔ ${a.ai}`), ' works.']
+          : [h('strong', null, `⚠️ ${a.title}`), h('p', { class: 'aic-what' }, a.what),
+            (a.fix || []).length ? h('div', { class: 'small aic-fix' }, h('strong', null, 'How to fix it:'), h('ol', null, a.fix.map(f => h('li', null, f)))) : null]))));
+      d.appendChild(h('p', { class: r.any_working ? 'small' : 'words-warn', role: 'note', 'data-testid': 'aic-if-skipped' }, r.any_working ? r.if_skipped : r.message));
+      if (busy) d.appendChild(loadingState('Checking again… AutoInjector checks in with each AI (up to a minute).'));
+      const again = h('button', { type: 'button', class: 'primary', 'data-testid': 'aic-recheck', disabled: busy, onclick: recheck }, '🔁 I fixed it — check again');
+      const skip = h('button', { type: 'button', 'data-testid': 'aic-skip', disabled: busy || !r.any_working, onclick: () => finish({ skipped: bad.map(a => a.slot_id) }) },
+        bad.length === 1 ? `▶ Start without ${bad[0].ai}` : '▶ Start without them');
+      d.appendChild(h('div', { class: 'form-actions' }, again, skip, h('button', { type: 'button', 'data-testid': 'aic-cancel', onclick: () => finish(null) }, '✖ Cancel')));
+      const f = d.querySelector('button:not([disabled])'); if (f && !busy) f.focus();
+    };
+    const recheck = async () => {
+      draw(res, true);
+      try { res = await api('POST', '/ai-check', { body: { probe: true, slot_id: slotId } }); }
+      catch (e) { draw(res); d.appendChild(problemBox(toProblem(e, { step: 'Check the AIs again' }))); return; }
+      if (res.ok) { toast(`All your AIs work: ${res.working.join(', ')}`); finish({ skipped: [] }); return; }
+      draw(res);
+      announce(res.message || 'Some AIs still aren’t working');
+    };
+    d.addEventListener('cancel', ev => { ev.preventDefault(); finish(null); });
+    document.body.appendChild(d);
+    try { if (d.showModal) d.showModal(); else d.setAttribute('open', ''); } catch { d.setAttribute('open', ''); }
+    draw(res);
+  });
+}
+/** Start body + the AI check: null when the author cancelled; the body (with ai_check when AIs are skipped) otherwise. */
+async function withAiCheck(body, what) {
+  const pf = await aiPreflight({ slotId: body.slot_id || null, what });
+  if (!pf) return null;
+  if (pf.skipped.length) body.ai_check = { skipped: pf.skipped };
+  return body;
+}
+
 const STEP_ICON = { pending: '○', running: '⏳', waiting: '⏳', done: '✔', failed: '⚠️', paused: '⏸', cancelled: '✖', skipped: '–' };
 function initMakeBook() {
   const btn = $('#mab-btn');
@@ -7185,7 +7260,9 @@ async function renderMakeSetup() {
       const pl = pipe.get(); if (pl) body.pipeline = pl;
     }
     startAll.disabled = startSet.disabled = true;
-    err.appendChild(loadingState('Starting…'));
+    err.appendChild(loadingState('Checking your AIs…'));
+    if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
+    clear(err).appendChild(loadingState('Starting…'));
     try {
       const run = await api('POST', '/autobook', { body });
       MB.run = run; MB.view = 'progress'; renderRun(); startRunPolling(); refreshRunChip();
@@ -7255,7 +7332,7 @@ function runDecision(prob) {
 }
 function renderRun() {
   const r = MB.run; if (!r || !MB.dialog) return;
-  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save]);
+  const sig = JSON.stringify([r.status, r.phase, r.current, r.problem && r.problem.code, (r.waiting || {}).retry_at, r.steps.map(s => [s.state, s.message, s.review_note, s.editor_note, (s.items || []).map(i => [i.state, i.editor, i.scenes, i.phase, i.note, i.planned, i.length]), s.planned_note]), (r.files || []).length, r.ais, r.ai_alerts, r.review_summary, r.editor_summary, r.planned_summary, r.eta, r.report, r.save]);
   if (sig === MB.sig && MB.dialog.querySelector('.mb-steps')) { updateRunClocks(); return; }
   MB.sig = sig;
   const w = RUN_WORD[r.status] || ['?', r.status, 'b-muted'];
@@ -7341,6 +7418,7 @@ function renderRun() {
   const rs = r.review_summary || {};
   const ais = aiStrip(r.ais, r.probe && r.probe.state === 'running' ? 'Checking the AIs' : 'AIs');
   const working = (r.ais || []).filter(a => a.working);
+  const alerts = runAiAlerts(r);
   const indep = rs.same_ai || (r.ais && r.ais.length && working.length === 1 && !(r.probe && r.probe.state === 'running') && !['done', 'cancelled'].includes(r.status))
     ? h('p', { class: 'words-warn mb-indep', role: 'note', 'data-testid': 'mb-not-independent' }, h('span', { 'aria-hidden': 'true' }, '⚠️ '),
       rs.same_ai ? `${NOT_INDEPENDENT} (${rs.same_ai} of ${rs.same_ai + (rs.independent || 0)} reviews so far).` : `Only ${working[0].name} works right now, so it will review its own writing: reviews are not independent (the same AI writes and reviews).`,
@@ -7354,11 +7432,21 @@ function renderRun() {
   const plBox = plannedRunSummary(r);
   if (doneBox && plBox) doneBox.appendChild(plBox);
   const consent = h('p', { class: 'small muted mb-consent' }, `Approvals in this run are made by the AI reviewer under your consent (run ${r.id}, ${fmtTime(r.consent && r.consent.at)}). Every one is in the book journal.`);
-  mbShell('⚡ Make a book for me', head, runBibleLine(r), phase, ais, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
+  mbShell('⚡ Make a book for me', head, runBibleLine(r), phase, ais, alerts, indep, doneBox, doneBox ? null : edBox, runSaveLine(r), msg, ol, ctl, consent,
     r.project_id && r.status !== 'done' ? h('p', { class: 'small' }, h('a', { href: link('p', r.project_id, r.branch_id || 'main', 'book'), onclick: () => closeMakeBook() }, 'Open the book being made')) : null);
   updateRunClocks();
 }
 
+/** P37.5 run window: a visible notice for every AI that is not working right now (what is wrong, how to fix it). */
+function runAiAlerts(r) {
+  const list = r.ai_alerts || [];
+  if (!list.length || ['done', 'cancelled'].includes(r.status)) return null;
+  return h('div', { class: 'mb-ai-alerts', role: 'status', 'data-testid': 'mb-ai-alerts' }, list.map(a => h('div', { class: 'words-warn mb-ai-alert', 'data-slot': a.slot_id },
+    h('p', null, h('strong', null, `⚠️ ${a.title}`), ' ', a.what || '', ' ',
+      a.chosen ? 'You chose to start without it. ' : '',
+      (a.takes_over || []).length ? `Its work goes to ${a.takes_over.join(' and ')} meanwhile.` : 'No other AI works, so the work waits for one.'),
+    (a.fix || []).length ? h('details', { class: 'small' }, h('summary', null, 'How to fix it'), h('ol', null, a.fix.map(f => h('li', null, f)))) : null)));
+}
 function etaWords(sec) {
   if (sec == null) return '';
   if (sec < 90) return `about ${Math.max(1, Math.round(sec))} s`;
@@ -7465,6 +7553,7 @@ function writeAllBox(book, redraw) {
     catch (e) { box.appendChild(problemBox(toProblem(e, { step: 'Write all chapters', set: 'C', op: 'C02' }))); }
   };
   box.start = async () => {
+    if (!(await aiPreflight({ what: 'Write all chapters' }))) return; // P37.5: say which AI isn't working first
     try { WA.job = await api('POST', bpath('/book/write-all')); draw(); poll(); }
     catch (e) { clear(box).appendChild(problemBox(toProblem(e, { book: profileOf().title || S.project.name, set: 'C', step: 'Write all chapters', op: 'C02' }), { settings: true })); }
   };
@@ -7785,6 +7874,8 @@ async function viewReport(main) {
         h('tbody', null, (wd.chapters || []).map((c, i) => { const u = (us.chapters || [])[i] || {};
           return h('tr', null, h('th', { scope: 'row' }, `${c.number}${c.title ? ` · ${c.title}` : ''}`), h('td', { class: 'num' }, c.words.toLocaleString(), c.under ? [' ', hazard({ code: 'CHAPTER_UNDER_TARGET', message: `${c.words} of about ${wd.per_chapter_target} words` }, {}, { small: true })] : null),
             h('td', null, u.writer || '–'), h('td', null, u.reviewer || '–', u.review_independent === false ? ' ⚠️' : ''), h('td', null, u.editor || '–', u.editor_independent === false ? ' ⚠️' : '')); }))))));
+    const len = leniencyCard(ov.leniency, ov.calibration);
+    if (len) holder.appendChild(len);
     holder.appendChild(askBox(rep));
     if ((ov.reports || []).length > 1) holder.appendChild(h('details', { class: 'card' }, h('summary', null, `Earlier reports (${ov.reports.length - 1})`),
       h('ul', { class: 'small' }, ov.reports.slice(1).map(r => h('li', null, `${fmtTime(r.at)} · overall ${r.overall ?? '–'} · ${r.reviewers || 0} reviewer(s)`)))));
@@ -7792,6 +7883,21 @@ async function viewReport(main) {
   await load();
 }
 
+/** P36: how generous each AI reviewer has been over time (vs the other reviewer and vs BookForge's pattern check). */
+function leniencyCard(rows, about) {
+  if (!(rows || []).length) return null;
+  const sign = v => (v == null ? '–' : `${v > 0 ? '+' : ''}${v}`);
+  return h('section', { class: 'card', 'data-testid': 'rp-leniency', 'aria-labelledby': 'rp-len-h' },
+    h('h2', { id: 'rp-len-h' }, '🎯 How generous each AI reviewer is'),
+    h('p', { class: 'small' }, 'Points above (+) or below (−) the other reviewer of the same chapter or book, and above what BookForge’s own pattern check allows. Measured over all your books. ', about || ''),
+    h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' },
+      h('thead', null, h('tr', null, ['AI', 'Reviews', 'Generosity', 'vs other reviewer', 'vs pattern check', 'Too-clean reviews', 'Scores lowered by'].map(x => h('th', null, x)))),
+      h('tbody', null, rows.map(r => h('tr', { class: r.discount ? 'low' : '', 'data-family': r.family },
+        h('th', { scope: 'row' }, r.name), h('td', { class: 'num' }, String(r.reviews)),
+        h('td', null, `${sign(r.leniency)} · ${r.words}`), h('td', { class: 'num' }, sign(r.vs_other)), h('td', { class: 'num' }, sign(r.vs_audit)),
+        h('td', { class: 'num' }, `${r.flagged}${r.reasked ? ` (${r.reasked} asked again)` : ''}`),
+        h('td', { class: 'num' }, r.discount ? `${r.discount} point(s) ⚠️` : '–')))))));
+}
 /** 🧪 Make a variant: the same book (profile, idea, choices) made again with other pipeline switches. */
 async function openVariantDialog(pid, title, opener) {
   const pf = await pipelineFields('var', { flags: (PIPE.info || { presets: { baseline: { flags: {} } } }).presets.baseline.flags });
@@ -7801,7 +7907,9 @@ async function openVariantDialog(pid, title, opener) {
       clear(err); go.disabled = true;
       const p = pf.get();
       try {
-        const run = await api('POST', '/autobook', { body: { author_confirms: true, variant_of: { project_id: pid }, pipeline: p || { preset: 'full' } } });
+        const vb = await withAiCheck({ author_confirms: true, variant_of: { project_id: pid }, pipeline: p || { preset: 'full' } }, 'the variant');
+        if (!vb) { go.disabled = false; return; }
+        const run = await api('POST', '/autobook', { body: vb });
         close(); MB.run = run; await openMakeBook(opener, { runId: run.id });
       } catch (e) { err.appendChild(problemBox(toProblem(e, { book: title, step: 'Make a variant' }))); go.disabled = false; }
     } }, '⚡ Make the variant');
@@ -8069,7 +8177,9 @@ async function continueBook(pid, title, opener) {
     h('p', { class: 'small' }, 'What is already done is kept and skipped.')), [{ id: 'go', label: '▶ Continue' }]);
   if (ok !== 'go') return;
   try {
-    const r = await api('POST', '/autobook', { body: { author_confirms: true, continue_project: pid } });
+    const cb = await withAiCheck({ author_confirms: true, continue_project: pid }, 'the run');
+    if (!cb) return;
+    const r = await api('POST', '/autobook', { body: cb });
     openMakeBook(opener, { runId: r.id });
   } catch (e) { modal('▶ Continue making this book', () => problemBox(toProblem(e, { book: title, step: 'Continue making this book' }))); }
 }
@@ -8092,11 +8202,13 @@ function openRerunDialog(spec, title, opener, summary = null) {
         h('p', { class: 'small mb-consent' }, 'Pressing 🔁 Start is your consent for this run: the saved characters, places and plan come into the new book as drafts and the AI reviewer approves each one there under this consent (every approval is in the book journal). The chapters are written new.'),
         msg,
         h('div', { class: 'form-actions' }, h('button', { type: 'button', class: 'primary', 'data-testid': 'rerun-start', onclick: async ev => {
-          ev.currentTarget.disabled = true; clear(msg);
+          const btn = ev.currentTarget; btn.disabled = true; clear(msg);
           try {
-            const r = await api('POST', '/autobook', { body: { author_confirms: true, from_bible: spec, reuse_plan: !!(sm.plan.length && keep.checked) } });
+            const rb = await withAiCheck({ author_confirms: true, from_bible: spec, reuse_plan: !!(sm.plan.length && keep.checked) }, 'the rerun');
+            if (!rb) { btn.disabled = false; return; }
+            const r = await api('POST', '/autobook', { body: rb });
             close(); openMakeBook(opener, { runId: r.id });
-          } catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); ev.currentTarget.disabled = false; }
+          } catch (e) { msg.appendChild(problemBox(toProblem(e, { step: '🔁 Rerun from the book bible' }))); btn.disabled = false; }
         } }, '🔁 Start'), h('button', { type: 'button', onclick: close }, 'Cancel')));
     };
     (async () => {
@@ -8314,16 +8426,19 @@ function editorSettingsCard() {
     rounds.value = String(cur.rounds);
     const strict = h('select', { id: 'eds-strict', 'aria-describedby': 'eds-s-h' }, Object.entries(cur.strictness_choices || { gentle: '', normal: '', strict: '' }).map(([k, about]) => h('option', { value: k }, `${k[0].toUpperCase()}${k.slice(1)}${k === 'normal' ? ' (default)' : ''} — ${about}`)));
     strict.value = cur.strictness;
+    const two = h('input', { type: 'checkbox', id: 'eds-two', checked: cur.two_reviewers !== false, 'aria-describedby': 'eds-two-h' });
     const out = h('div', { 'aria-live': 'polite' });
     const save = h('button', { type: 'button', class: 'small primary', 'data-testid': 'eds-save', onclick: async () => {
       clearFieldProblems(card); clear(out);
-      try { await api('PUT', '/settings/editor', { body: { enabled: on.checked, rounds: parseInt(rounds.value, 10), strictness: strict.value } }); toast('Saved'); }
-      catch (e) { const rest = showFieldErrors(e, { enabled: on, rounds, strictness: strict }, { step: 'Settings › Editor' }); if (rest.length) out.appendChild(problemBox(e)); }
+      try { await api('PUT', '/settings/editor', { body: { enabled: on.checked, rounds: parseInt(rounds.value, 10), strictness: strict.value, two_reviewers: two.checked } }); toast('Saved'); }
+      catch (e) { const rest = showFieldErrors(e, { enabled: on, rounds, strictness: strict, two_reviewers: two }, { step: 'Settings › Editor' }); if (rest.length) out.appendChild(problemBox(e)); }
     } }, 'Save');
     put(box, h('div', { class: 'check-row field' }, on, h('label', { for: 'eds-on' }, h('strong', null, 'Editor on'), ' (in Make a book for me; the 🖋 Editor review button always works)')),
       h('div', { class: 'grid-2' },
         h('div', { class: 'field' }, h('label', { for: 'eds-rounds' }, 'Editor rounds per chapter'), rounds, h('span', { class: 'hint', id: 'eds-r-h' }, 'How many times the writer may rework the editor’s notes in a run.')),
         h('div', { class: 'field' }, h('label', { for: 'eds-strict' }, 'Strictness'), strict, h('span', { class: 'hint', id: 'eds-s-h' }, 'When the editor’s scores and notes count as “revise”.'))),
+      h('div', { class: 'check-row field' }, two, h('label', { for: 'eds-two' }, h('strong', null, 'Two editors when two other AIs work'), h('span', { class: 'hint', id: 'eds-two-h' }, ' The lower score counts on each point (costs one more AI answer per chapter).'))),
+      cur.calibration ? h('p', { class: 'small muted' }, '🎯 ', cur.calibration) : null,
       h('div', { class: 'row' }, save), out);
   })();
   return card;

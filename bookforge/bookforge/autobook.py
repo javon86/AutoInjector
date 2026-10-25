@@ -41,6 +41,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from . import ai_check
 from . import characters as chars_mod
 from . import h_checks as hc
 from . import lengths as lengths_mod
@@ -378,6 +379,35 @@ class _Runner:
             run["ais"] = [self._ai_row(prov.slot_status(s)) for s in prov.ai_slots()]
         except Exception:  # noqa: BLE001 - a display hint must never break the run
             log.exception("could not read the AI states")
+            return
+        self.ai_alerts(run)
+
+    def ai_alerts(self, run: dict, *, at_start: bool = False):
+        """P37.5: a visible notice in the run window for every AI that is not working — what is wrong and how to fix
+        it (ai_check.describe) — so no AI ever sits out silently; an event when one stops working during the run and
+        when it works again."""
+        try:
+            skipped = set(((run.get("settings") or {}).get("ai_check") or {}).get("skipped") or [])
+            now, new, back = ai_check.alert_rows(run.get("ais") or [], run.get("ai_alerts"), skipped)
+            others = [a["name"].split(" · ")[-1] for a in run.get("ais") or [] if a.get("working")]
+            for a in now:
+                a["since"] = a.get("since") or now_iso()
+                a["takes_over"] = others
+            for a in new:
+                if a["chosen"]:
+                    continue  # the author chose to start without it; the start event already says so
+                where = "at the start of the run" if at_start else "during the run"
+                self.event(run, "ai_alert", f"⚠️ {a['title']} ({where}): {a['what']} "
+                           + (f"Its work goes to {' and '.join(others)} meanwhile. " if others else
+                              "No other AI works, so the work waits for one. ")
+                           + (f"To fix it: {a['fix'][0]}" if a.get("fix") else ""),
+                           code="AI_NOT_READY" if at_start else "AI_STOPPED", slot=a["slot_id"])
+            for a in back:
+                self.event(run, "note", f"✔ {a.get('ai') or a.get('slot_id')} works again — BookForge uses it again.",
+                           code="AI_BACK", slot=a.get("slot_id"))
+            run["ai_alerts"] = now
+        except Exception:  # noqa: BLE001 - a display hint must never break the run
+            log.exception("could not update the AI notices")
 
     def probe_ais(self, run: dict):
         """Before the run works: ask AutoInjector to check in with each site (bridge v1.2 /v1/probe) and wait up to
@@ -403,6 +433,7 @@ class _Runner:
         words = "; ".join(f"{a['name']}: {a['word']}" + (f" ⚠️ {a['problem']}" if a.get("problem") and not a["working"]
                                                           else "") for a in run["ais"])
         self.event(run, "probe", f"AIs checked — {words}", step=run.get("current") or "backup")
+        self.ai_alerts(run, at_start=True)
         if len(working) == 1 and len(run["ais"]) >= 1:
             self.event(run, "note", f"Only {working[0]['name']} works right now: it writes AND reviews ⚠️ "
                        f"({NOT_INDEPENDENT.split(' — ')[0].lower()} until another AI works again)",
@@ -423,7 +454,7 @@ class _Runner:
             self.event(run, "failover", msg, code="AI_MOVED", slot=info.get("to"))
             run.setdefault("failovers", 0)
             run["failovers"] += 1
-            self.refresh_ais(run)
+            self.refresh_ais(run)  # also raises the visible ⚠️ notice for the AI that stopped working (P37.5)
             self.save(run)
         except Exception:  # noqa: BLE001 - display only
             log.exception("could not record a failover")
@@ -591,6 +622,7 @@ class AutoBookService(_Runner):
                          for sid, st, op, title, about in STEPS]}
         self.event(run, "start", "Make a book for me started (you pressed the button: consent for this run)",
                    step="backup")
+        self._note_ai_choice(run)
         if settings.get("continue"):
             c = settings["continue"]
             run.update(project_id=c["project_id"], title=c["title"])
@@ -700,6 +732,27 @@ class AutoBookService(_Runner):
         return self.resume(principal, run_id)
 
     # ------------------------------------------------------------------ settings
+    def _note_ai_choice(self, run: dict):
+        """P37.5: say plainly which AIs the author chose to start without and who does their work (never raises)."""
+        try:
+            settings = run["settings"]
+            skipped = (settings.get("ai_check") or {}).get("skipped") or []
+            if not skipped:
+                return
+            prov = self.app.engine.providers
+            slots = {s["slot_id"]: s for s in prov.ai_slots()}
+            names = [ai_check.ai_word(slots.get(x) or {"slot_id": x}) for x in skipped]
+            working = [ai_check.ai_word(s) for sid, s in slots.items() if sid not in skipped]
+            if settings.get("slot_id") in skipped:
+                self.event(run, "note", f"The AI you picked to write ({ai_check.ai_word(slots.get(settings['slot_id']) or {})}"
+                           ") isn't working, so this run uses Automatic: the best working AI writes.", step="backup",
+                           code="AI_SKIPPED")
+                settings["slot_id"] = None
+            self.event(run, "note", f"You chose to start without {' and '.join(names)}. "
+                       + ai_check.start_note(names, working), step="backup", code="AI_SKIPPED")
+        except Exception:  # noqa: BLE001 - a note must never stop the start
+            log.exception("could not note the AI choice")
+
     def _clean_settings(self, body) -> dict:
         out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {},
                "pipeline": pipeline_mod.clean(None)}
@@ -717,6 +770,9 @@ class AutoBookService(_Runner):
                                      status="REJECTED")
             out["length"] = ln
         out["slot_id"] = AssistService._check_slot(body.get("slot_id"))
+        # P37.5: the page's AI check before the start ("Start without it": the AIs the author chose to skip)
+        out["ai_check"] = ai_check.clean_choice(body.get("ai_check"), [s["slot_id"] for s in
+                                                                     self.app.engine.providers.slots()])
         # P14: the pipeline switches of this run (default: everything on) and an optional "variant of" another book
         out["pipeline"] = pipeline_mod.clean(body.get("pipeline"))
         vo = body.get("variant_of")
@@ -1178,13 +1234,13 @@ class AutoBookService(_Runner):
             return self._editor_flag(run, st, ed, craft, self.bp(run).rec(rid), f"rewrite not kept — {why}",
                                      "EDITOR_NOTES")
 
-    def _craft(self, run, st, rid, label, ed, round_no):
+    def _craft(self, run, st, rid, label, ed, round_no, prev=None):
         st["message"] = f"The editor is reading the {label}" + (f" again (after round {round_no})" if round_no else "")
         run["phase"] = st["message"]
         self.save(run)
         rj = self._sub_job(run, "editor", rid)
         try:
-            craft = self._review.editor.craft_one(rj, rid, round_no=round_no)
+            craft = self._review.editor.craft_one(rj, rid, round_no=round_no, prev=prev)
         except BookforgeError as exc:
             ed["error"] = exc.code
             self.event(run, "note", f"⚠️ The editor could not read the {label} ({exc.code}); the book goes on without "
@@ -1206,6 +1262,13 @@ class AutoBookService(_Runner):
         if craft.get("independent") is False:
             self.event(run, "note", f"⚠️ {NOT_INDEPENDENT} (the editor of the {label} is the AI that wrote it)",
                        code="REVIEW_NOT_INDEPENDENT")
+        cal = craft.get("calibration") or {}
+        ed["calibration"] = {"flagged": bool(cal.get("flagged")), "reasked": cal.get("reasked", 0),
+                             "two": bool(cal.get("two_reviewers"))}
+        if cal.get("flagged") or cal.get("reasked"):  # P36: never let a too-clean review pass silently
+            self.event(run, "note", f"{'⚠️ ' if cal.get('flagged') else ''}Editor on the {label}: "
+                       + " ".join(cal.get("notes") or [])[:380], code="EDITOR_UNTRUSTED" if cal.get("flagged")
+                       else "EDITOR_REASKED", record_id=rid)
         st["editor_note"] = self._editor_line(ed)
         self.save(run)
         return craft
@@ -1267,7 +1330,7 @@ class AutoBookService(_Runner):
                 self.event(run, "note", f"⚠️ The rewritten {label} could not be reviewed ({exc.code})",
                            code="EDITOR_FAILED", record_id=rid)
             if cons == "APPROVE":
-                new_craft = self._craft(run, st, rid, label, ed, n)
+                new_craft = self._craft(run, st, rid, label, ed, n, prev=old_craft)
         old_text = str((old.get("data") or {}).get("text") or "")
         new_text = str((self.bp(run).rec(rid).get("data") or {}).get("text") or "")
         lost = lost_keeps(old_text, new_text, keep_quotes_of(old_craft, old_text))
@@ -1297,6 +1360,11 @@ class AutoBookService(_Runner):
             bits.append(f"{ed['rounds']} rewrite round(s)")
         if ed.get("reviewer"):
             bits.append(f"by {ed['reviewer']}")
+        cal = ed.get("calibration") or {}
+        if cal.get("flagged"):
+            bits.append("⚠️ review too clean to trust (capped)")
+        elif cal.get("reasked"):
+            bits.append("asked again for proof")
         return " · ".join(bits) + (" ⚠️ still had notes" if ed.get("flagged") else "")
 
     def _editor_summary(self, run):

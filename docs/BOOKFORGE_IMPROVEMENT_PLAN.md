@@ -173,10 +173,15 @@ requests in 16 min; ChatGPT never took part; Gemini's reply reading broke in the
 editor passed every chapter and scored the book 10/10 on 10 of 13 criteria while ChatGPT's own review
 gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
-- [ ] **P36** Tougher, calibrated reviewer: must name its weakest passages and at least 3 concrete
+- [x] **P36** Tougher, calibrated reviewer: must name its weakest passages and at least 3 concrete
   problems; reviews with near-perfect scores and no findings are distrusted (re-asked or flagged);
   add trade/logic/timeline checks to the rubric; use two reviewers when available and take the lower
-  score; track each AI's leniency over time.
+  score; track each AI's leniency over time. Done: `calibration.py` + editor.py — a 9/10 needs a quoted proof and an
+  average ≥ 8.5 needs 3 quoted problems, else one stricter re-ask, then ⚠️ flagged, unproven scores count as 7 and
+  pattern-check notes are added so the rewrite runs; new rubric points trade_terms / cause_effect / timeline; a second
+  editor (not the writer, not the first editor's AI) when one works, lower score per point; leniency per AI in
+  `reviewer_leniency` (vs the other editor, the pattern check and whole-book reviewers), lenient AIs lowered by up to 2,
+  shown on the 🖋 Editor card and the 📊 Book report.
 - [x] **P37.1** Self-repair page search must learn a selector that matches every reply, not one message
   (ChatGPT learned `div[data-content-search-unit-key="fallback-turn-7:2:assistant"]`). Done: per-message
   numbers/ids/keys are never part of a learned selector (that key becomes `[…$=":assistant"]`), and with
@@ -196,8 +201,12 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   automatically; one notice (card flash + ⚠️ with 🎯 / 🔢, optional 🔔 sound); re-checks after 5 → 15 → 60 min.
 - [x] **P37.4** Never send "missing [TO:] tag" nags for check-in answers (48 nags to ChatGPT). Done (also
   for late / unproven check-in answers and the number-teach answers; they are held, not relayed).
-- [ ] **P37.5** Before a book starts: a clear "ChatGPT isn't working — here's why / fix" so the user can fix
-  it first instead of the AI silently sitting out.
+- [x] **P37.5** Before a book starts: a clear "ChatGPT isn't working — here's why / fix" so the user can fix
+  it first instead of the AI silently sitting out. Done: `ai_check.py` + `GET/POST /api/ai-check` (fresh /v1/health,
+  🔁 check again = /v1/probe first); every run start (⚡ Make a book, variant, 🔁 rerun, ▶ continue, ✍ Write all) shows
+  which AI, what is wrong (LOGGED_OUT, CAPTCHA, USAGE_LIMIT, … in plain words) and how to fix it, with Check again /
+  Start without it (roles reassigned, said in the run) / Cancel; the run window shows a ⚠️ notice for every AI not
+  working at the start or stopping mid-run (and ✔ when it is back). No desktop-app change was needed.
 
 ## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
 
@@ -441,6 +450,27 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - **P37.4 limit:** a short reply (≤ 300 characters, tags stripped) that holds a check-in word from the last hour is
   treated as a check-in answer (held, not relayed, not nagged) when no BookForge request is waiting for that AI — a
   genuine short reply that happens to use the same unusual word ("quokka") would be held too.
+- **P36 / P37.5 — not tried with the real AIs.** Tested with the fake AI (unit, Make-a-book runs, Playwright
+  `tests/campaign/ui/test_ui_section8.py`). On the first real book check: (1) do web AIs fill `score_evidence` and
+  `weakest`? If not, every near-perfect review costs one extra re-ask (watch "asked once more" in the run log);
+  (2) two editors per chapter means one more AI answer per chapter and per rewrite check (Settings › Editor › "Two
+  editors" turns it off); (3) the thresholds (average 8.5, 3 problems, cap 7, discount from +1.0 after 3 reviews, max 2)
+  are first guesses — `calibration.py` constants; (4) the pattern-check part of leniency only counts scores ABOVE the
+  ceiling, so it can only push an AI towards "generous", never "strict".
+- **P36 design choices to confirm:** (a) a flagged review with at least one note is forced to REVISE even when its capped
+  scores would pass — with no note at all (no pattern finding either) it stays PASS but ⚠️ flagged; (b) leniency is kept
+  per AI family across all books (one global settings key), measured on raw scores (before caps/discount); (c) a lenient
+  AI's discount is applied to every score (not only high ones), floor 1; (d) in a rewrite round the earlier round's
+  discounts and second editor are reused so the two versions stay comparable; (e) an editor the author picks by hand
+  (🖋 with a slot) stays the only editor.
+- **P37.5 design choices to confirm:** (a) "Start without it" does not lock the AI out: if it starts working during the
+  run BookForge uses it again (the run says so); (b) when the AI picked to write is skipped, the run switches to Automatic;
+  (c) "unknown" from a v1.2 bridge (not checked yet) counts as not ok and the notice offers 🔁 Check again (a probe, up
+  to 45 s); an older v1.0/1.1 bridge without states counts as ok; (d) the server does not refuse a start without the
+  check (older pages / API) — the run window shows the ⚠️ notice instead.
+- **Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
+  test_wizard_to_downloaded_book` fails "stuck on Write the chapters: ✔ Done: Approved 1 of 1." on unmodified `main` too
+  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

@@ -21,6 +21,14 @@ stored the normal way — a C02 UPDATE, which re-runs every canon check of C. Pr
 activity events (``editor.craft_review``, ``editor.rewrite``, ``editor.rewrite_rejected``) carry numbers and codes,
 never text. Only the stored findings hold short quotes (≤ 200 characters) of the author's own book.
 
+P36 calibration (calibration.py): the editor must quote its weakest passages, name at least 3 problems and prove every
+9/10 with a quote. A near-perfect review without that is asked again once (stricter prompt, same AI); still unproven
+-> flagged ⚠️, those scores count as 7 and, when nothing is left to rewrite, BookForge's own pattern notes are added so
+the rewrite loop can still run. When a second AI works that is neither the writer nor the first editor, it reviews
+too and the LOWER score per dimension counts (Settings › Editor › two reviewers, on by default; an AI the author
+picked for this review stays the only one). Each AI's leniency is kept over time (settings ``reviewer_leniency``) and
+a lenient AI's scores are lowered before they are merged.
+
 Targeted rewrite: the WRITER slot (the AI that wrote the chapter, never the editor when another AI works) gets the
 chapter, the findings, the keep list, the protected facts and the characters, and returns
 ``{"replacements": [{"finding_id", "original", "replacement"}]}``. ``apply_replacements`` applies them
@@ -37,12 +45,13 @@ import logging
 import re
 from datetime import datetime, timezone
 
+from . import ai_check, calibration
 from . import chapter_brief
 from . import characters as chars_mod
 from . import editor_rubric as rubric
 from . import prose_audit
 from . import providers as providers_mod
-from .assist import book_profile_brief, canon_context
+from .assist import Cancelled, book_profile_brief, canon_context
 from .book_path import BookPath
 from .errors import BookforgeError
 
@@ -55,7 +64,7 @@ MAX_KEEP = 10
 PASSAGE_MAX = 200
 MAX_ORIGINAL = 1200
 MAX_TEXT_CHARS = 120000
-DEFAULTS = {"enabled": True, "rounds": 2, "strictness": "normal"}
+DEFAULTS = {"enabled": True, "rounds": 2, "strictness": "normal", "two_reviewers": True}
 NOT_INDEPENDENT = "Reviews are not independent — the same AI wrote and reviewed this"
 
 
@@ -75,6 +84,15 @@ def _schema(dims: list[str]) -> dict:
                                "keep_nearby": {"type": "array", "items": {"type": "string"}, "maxItems": 3}}}},
             "keep": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_KEEP},
             "verdict": {"type": "string", "enum": ["PASS", "REVISE"]},
+            # P36 (optional so older answers stay valid; the prompt asks for both): the weakest passages and a
+            # quoted proof for every score of 9 or 10
+            "weakest": {"type": "array", "maxItems": 5, "items": {
+                "type": "object", "additionalProperties": False, "required": ["passage"],
+                "properties": {"passage": {"type": "string", "maxLength": PASSAGE_MAX}, "why": {"type": "string"}}}},
+            "score_evidence": {"type": "array", "maxItems": len(dims), "items": {
+                "type": "object", "additionalProperties": False, "required": ["dimension", "quote"],
+                "properties": {"dimension": {"type": "string", "enum": list(dims)},
+                               "quote": {"type": "string", "maxLength": PASSAGE_MAX}, "why": {"type": "string"}}}},
         },
     }
 
@@ -182,11 +200,22 @@ def clean_craft(raw, dims: list[str], text: str, strictness: str, relax: dict | 
                             if isinstance(k, str) and k.strip()][:3],
             "found": bool(loc) and text.find(passage) >= 0, "located": bool(loc)})
     keep = [str(k).strip()[:PASSAGE_MAX] for k in (raw.get("keep") or []) if isinstance(k, str) and k.strip()]
-    keep = keep[:MAX_KEEP]
+    out = summarise(scores, findings, keep[:MAX_KEEP], dims, text, strictness, relax)
+    out["ai_verdict"] = raw.get("verdict") if raw.get("verdict") in ("PASS", "REVISE") else None
+    return out
+
+
+def summarise(scores: dict, findings: list, keep: list, dims: list[str], text: str, strictness: str,
+              relax: dict | None = None, distrust: str | None = None) -> dict:
+    """The verdict and the numbers of a craft review from its (maybe merged, capped) scores and findings.
+    ``distrust``: why the editor's review was not trusted (P36) — then a PASS with notes to work on becomes REVISE."""
     verdict, why = decide(scores, findings, strictness, relax)
+    if distrust:
+        if verdict == "PASS" and findings:
+            verdict = "REVISE"
+        why = why + [f"the editor's review was too clean to trust ({distrust})"]
     vals = list(scores.values())
     return {"verdict": verdict, "verdict_why": why,
-            "ai_verdict": raw.get("verdict") if raw.get("verdict") in ("PASS", "REVISE") else None,
             "scores": scores, "dimensions": list(dims), "missing_scores": [d for d in dims if d not in scores],
             "findings": findings, "keep": keep, "keep_quotes": [k for k in keep if text and k in text],
             "min_score": min(vals), "avg_score": round(sum(vals) / len(vals), 1),
@@ -310,6 +339,9 @@ class EditorService:
             out["rounds"] = cur["rounds"]
         if cur.get("strictness") in rubric.STRICTNESS:
             out["strictness"] = cur["strictness"]
+        if isinstance(cur.get("two_reviewers"), bool):
+            out["two_reviewers"] = cur["two_reviewers"]
+        out["calibration"] = calibration.RULES["about"]
         out["strictness_choices"] = {k: v["about"] for k, v in rubric.STRICTNESS.items()}
         out["dimensions"] = [{"key": k, "label": label} for k, label, _q in rubric.DIMENSIONS]
         return out
@@ -334,6 +366,11 @@ class EditorService:
                 raise BookforgeError("INVALID_INPUT", "/strictness", "Strictness: gentle, normal or strict",
                                      status="REJECTED")
             cur["strictness"] = body["strictness"]
+        if "two_reviewers" in body:
+            if not isinstance(body["two_reviewers"], bool):
+                raise BookforgeError("INVALID_INPUT", "/two_reviewers", "Two reviewers: on (true) or off (false)",
+                                     status="REJECTED")
+            cur["two_reviewers"] = body["two_reviewers"]
         cur["at"] = _now_iso()
         self.store.set_setting("editor_settings", cur)
         return self.settings()
@@ -353,8 +390,11 @@ class EditorService:
         """The few numbers the review queue shows for a craft review (no text)."""
         if not craft:
             return None
-        return {k: craft.get(k) for k in ("verdict", "min_score", "avg_score", "counts", "at", "reviewer",
-                                          "independent", "round", "strictness")}
+        out = {k: craft.get(k) for k in ("verdict", "min_score", "avg_score", "counts", "at", "reviewer",
+                                         "independent", "round", "strictness")}
+        out["flagged"] = bool((craft.get("calibration") or {}).get("flagged"))
+        out["reviewers"] = len(craft.get("reviewers") or []) or 1
+        return out
 
     # ------------------------------------------------------------------ context
     def chapter_info(self, pid, branch, rec, principal="author") -> dict:
@@ -482,8 +522,11 @@ class EditorService:
         return ctx, protected
 
     # ------------------------------------------------------------------ craft review (P4)
-    def craft_one(self, job, rid: str, *, round_no: int | None = None, chapter: dict | None = None) -> dict:
-        """Craft review of the head revision of ``rid`` (job: a review.ReviewJob). Stores and returns the review."""
+    def craft_one(self, job, rid: str, *, round_no: int | None = None, chapter: dict | None = None,
+                  prev: dict | None = None) -> dict:
+        """Craft review of the head revision of ``rid`` (job: a review.ReviewJob). Stores and returns the review.
+        ``prev``: the craft review of the version before a rewrite (P36: its reviewers and leniency discounts are
+        reused so that the scores of the two versions stay comparable)."""
         rv = self.review
         pid, branch = job.project_id, job.branch_id
         rec = rv._head(pid, branch, rid)
@@ -505,38 +548,195 @@ class EditorService:
         rv.plan_reviewer(job, writer)  # the editor is never the writer when another AI works (P3.1)
         from .review import safe_title  # noqa: PLC0415
         title = safe_title(self.contracts, rec)
+        text = str((rec.get("data") or {}).get("text") or "") if rec["module_id"] == "C02" else \
+            json.dumps(rec.get("data"), ensure_ascii=False)
+        prev_disc = {r.get("family"): r.get("discount", 0) for r in (prev or {}).get("reviewers") or []
+                     if r.get("family")}
         job.phase = f"The editor is reading “{title}”"
         tok = rv.work.begin(pid, rec["module_id"], f"The editor is reading {title}")
+        second, second_note = None, None
         try:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
-            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"],
-                                       task=rubric.task_text(rec["module_id"], dims, notes),
-                                       schema=_schema(dims), context=ctx, protected=protected)
+            task = rubric.task_text(rec["module_id"], dims, notes)
+            ask = dict(rec=rec, task=task, dims=dims, ctx=ctx, protected=protected, text=text,
+                       strictness=st["strictness"], relax=relax, report=report, prev_disc=prev_disc)
+            first = self._ask(job, **ask)
+            # P36: a second, independent opinion when another AI works (never instead of an AI the author picked)
+            if st.get("two_reviewers", True) and not job.slot_pref:
+                prefer = next((r.get("slot") for r in ((prev or {}).get("reviewers") or [])[1:2]), None)
+                other = self._second_slot(job, writer, first["slot"], ctx, prefer=prefer)
+                if other:
+                    keep_slot = (job.slot, job.slot_label, job.model)
+                    job.phase = f"A second editor is reading “{title}”"
+                    try:
+                        second = self._ask(job, slot=other, optional=True, **ask)
+                    except BookforgeError as exc:
+                        second_note = f"the second editor ({rv.slot_label(other)}) could not read it ({exc.code})"
+                        log.info("second editor %s failed: %s", other, exc.code)
+                    finally:
+                        job.slot, job.slot_label, job.model = keep_slot
         finally:
             rv.work.end(tok)
         job.check()
-        text = str((rec.get("data") or {}).get("text") or "") if rec["module_id"] == "C02" else \
-            json.dumps(rec.get("data"), ensure_ascii=False)
-        craft = clean_craft(raw, dims, text, st["strictness"], relax)
+        reviewers = [first] + ([second] if second else [])
+        merged = calibration.merge([{"scores": r["adjusted"], "findings": r["craft"]["findings"],
+                                     "keep": r["craft"]["keep"]} for r in reviewers], MAX_FINDINGS, MAX_KEEP)
+        flagged = [r for r in reviewers if r["flagged"]]
+        findings, added = merged["findings"], []
+        if flagged and not findings and rec["module_id"] == "C02":
+            added = calibration.audit_findings(report, text, dims)
+            findings = added
+        distrust = "; ".join(f"{r['name']}: {'; '.join(r['reasons'])}" for r in flagged) or None
+        craft = summarise(merged["scores"], findings, merged["keep"], dims, text, st["strictness"], relax, distrust)
+        craft["ai_verdict"] = first["craft"].get("ai_verdict")
         if relax:
             craft["relaxed"] = relax
-        editor = rv._slot(job.slot)
-        same = bool(writer.get("slot")) and (job.slot == writer["slot"] or providers_mod.slot_family(editor)
+        craft["reviewers"] = [self._reviewer_row(r) for r in reviewers]
+        craft["calibration"] = {
+            "flagged": bool(flagged), "reasked": sum(1 for r in reviewers if r["reasked"]),
+            "two_reviewers": bool(second), "second_note": second_note, "pattern_notes_added": len(added),
+            "notes": self._calibration_notes(reviewers, added, second_note), "rule": calibration.RULES["about"]}
+        editor = rv._slot(first["slot"])
+        same = bool(writer.get("slot")) and (first["slot"] == writer["slot"] or providers_mod.slot_family(editor)
                                              == providers_mod.slot_family(rv._slot(writer["slot"])))
-        craft.update(slot=job.slot, slot_label=job.slot_label, model=job.model, at=_now_iso(),
-                     reviewer=providers_mod.slot_name(editor) if editor else job.slot,
+        craft.update(slot=first["slot"], slot_label=first["slot_label"], model=first["model"], at=_now_iso(),
+                     reviewer=" + ".join(r["name"] for r in reviewers),
                      writer_slot=writer.get("slot"), writer=writer.get("label"), independent=not same,
                      warning=NOT_INDEPENDENT if same else None, module_id=rec["module_id"], version=rec["version"],
                      record_id=rid, chapter_id=info.get("chapter_id"), last_chapter=bool(info.get("last")),
                      round=round_no, pattern=prose_audit.counts_only(report) if report else None)
+        job.slot, job.slot_label, job.model = first["slot"], first["slot_label"], first["model"]
+        self._track(reviewers)
         rv._put(f"craft_reviews:{pid}:{branch}", _rkey(rid, rec["version"]), craft)
         with self.store.transaction() as tx:
             tx.insert_outbox(pid, branch, "editor.craft_review", {
                 "record_id": rid, "version": rec["version"], "module_id": rec["module_id"],
                 "verdict": craft["verdict"], "scores": craft["scores"], "major": craft["counts"]["major"],
-                "minor": craft["counts"]["minor"], "ai_slot": job.slot, "writer_slot": writer.get("slot"),
-                "independent": not same, "round": round_no, "chapter_id": info.get("chapter_id")})
+                "minor": craft["counts"]["minor"], "ai_slot": first["slot"], "writer_slot": writer.get("slot"),
+                "independent": not same, "round": round_no, "chapter_id": info.get("chapter_id"),
+                "reviewers": [r["slot"] for r in reviewers], "flagged": bool(flagged),
+                "reasked": craft["calibration"]["reasked"]})
         return craft
+
+    # ------------------------------------------------------------------ P36: one reviewer, trust check, second slot
+    def _ask(self, job, *, rec, task, dims, ctx, protected, text, strictness, relax, report, prev_disc=None,
+             slot: str | None = None, optional: bool = False) -> dict:
+        """One editor's review with the trust check (calibration.assess). An untrusted answer is asked again ONCE
+        (same AI, editor_rubric.STRICT_REASK); still untrusted -> flagged and its unproven scores capped. Then the
+        AI's leniency discount is applied. ``slot``: this AI only; ``optional``: never wait and retry a busy or
+        broken AI (the second editor is a bonus, it must not hold the book up)."""
+        rv = self.review
+        saved = (job.slot_pref, getattr(job, "retry_busy", None))
+        if slot:
+            job.slot_pref = slot
+        try:
+            if optional:
+                job.retry_busy = False
+            raw = self.assist._call_ai(job, op_for_roles=rec["module_id"], task=task, schema=_schema(dims),
+                                       context=ctx, protected=protected)
+            job.check()
+            craft = clean_craft(raw, dims, text, strictness, relax)
+            got = {"slot": job.slot, "slot_label": job.slot_label, "model": job.model}
+            a = calibration.assess(raw, craft, text, report)
+            reasked, reask_error, first_reasons = False, None, list(a["reasons"])
+            if not a["trusted"] and got["slot"]:
+                reasked = True
+                job.slot_pref = got["slot"]
+                job.retry_busy = False  # the first answer is kept when the AI cannot answer again right now
+                try:
+                    raw2 = self.assist._call_ai(job, op_for_roles=rec["module_id"],
+                                                task=task + " " + rubric.STRICT_REASK.format(
+                                                    reasons="; ".join(a["reasons"])),
+                                                schema=_schema(dims), context=ctx, protected=protected)
+                    job.check()
+                    craft = clean_craft(raw2, dims, text, strictness, relax)
+                    a = calibration.assess(raw2, craft, text, report)
+                    got["model"] = job.model
+                except Cancelled:
+                    raise
+                except BookforgeError as exc:
+                    reask_error = exc.code
+                    log.info("strict re-ask of the editor on %s failed: %s", got["slot"], exc.code)
+        finally:
+            job.slot_pref = saved[0]
+            job.retry_busy = saved[1]
+        sd = rv._slot(got["slot"])
+        family = providers_mod.slot_family(sd) or got["slot"]
+        name = (ai_check.ai_word(sd) if sd else got["slot"]) or "AI"
+        flagged = not a["trusted"]
+        scores, capped = (calibration.apply_caps(craft["scores"], a) if flagged else (dict(craft["scores"]), {}))
+        disc = (prev_disc or {}).get(family)
+        if disc is None:
+            disc = calibration.discount_for(self.store, family)
+        return dict(got, craft=craft, assessment=a, name=name, family=family, reasked=reasked,
+                    reask_error=reask_error, first_reasons=first_reasons, flagged=flagged,
+                    reasons=a["reasons"], capped=capped, discount=int(disc or 0),
+                    raw_scores=dict(craft["scores"]), adjusted=calibration.discounted(scores, int(disc or 0)))
+
+    def _second_slot(self, job, writer: dict, first_slot: str | None, ctx: dict, prefer: str | None = None):
+        """A working AI for a second opinion: not the writer, not the first editor, and not the same AI (family) as
+        either of them. None when there is none right now (never waits)."""
+        rv = self.review
+        try:
+            prov = self.assist._providers(job)
+            needed = len(json.dumps(ctx, ensure_ascii=False)) // 3 + 2000
+            elig = prov.eligible(job.project_id, "text", needed, None)
+        except Exception:  # noqa: BLE001 - the second opinion is a bonus
+            log.exception("could not look for a second editor")
+            return None
+        wslot = writer.get("slot")
+        bad = {providers_mod.slot_family(rv._slot(x)) for x in (wslot, first_slot) if x} - {None}
+        cands = [s["slot_id"] for s in elig if s["slot_id"] not in (wslot, first_slot)
+                 and providers_mod.slot_family(s) not in bad]
+        if prefer in cands:
+            return prefer
+        return cands[0] if cands else None
+
+    @staticmethod
+    def _reviewer_row(r: dict) -> dict:
+        a = r["assessment"]
+        return {"slot": r["slot"], "slot_label": r["slot_label"], "reviewer": r["name"], "family": r["family"],
+                "model": r["model"], "scores": r["raw_scores"], "adjusted": r["adjusted"], "trusted": a["trusted"],
+                "flagged": r["flagged"], "reasked": r["reasked"], "reask_error": r["reask_error"],
+                "first_reasons": r["first_reasons"], "reasons": r["reasons"], "capped": r["capped"],
+                "discount": r["discount"], "findings": len(r["craft"]["findings"]),
+                "avg_score": r["craft"]["avg_score"], "weakest": a["weakest"][:3], "evidence": a["evidence"],
+                "audit_gap": a["audit_gap"]}
+
+    @staticmethod
+    def _calibration_notes(reviewers: list, added: list, second_note: str | None) -> list[str]:
+        """Plain sentences for the author about how far each editor's scores were trusted."""
+        out = []
+        for r in reviewers:
+            if r["reasked"]:
+                out.append(f"{r['name']}'s first review was not accepted ({'; '.join(r['first_reasons'])}), so "
+                           "BookForge asked once more with a stricter prompt"
+                           + (f" — that failed ({r['reask_error']})" if r["reask_error"] else "") + ".")
+            if r["flagged"]:
+                out.append(f"⚠️ {r['name']}'s review is still not backed by quotes: "
+                           + (", ".join(f"{rubric.LABELS.get(d, d)} {o}→{n}" for d, (o, n) in r["capped"].items())
+                              or "no score changed") + f" (unproven scores count as {calibration.CAP}).")
+            if r["discount"]:
+                out.append(f"{r['name']} has been more generous than the other reviewers, so its scores were lowered "
+                           f"by {r['discount']} point(s).")
+        if len(reviewers) > 1:
+            out.append(f"Two editors read it ({' and '.join(r['name'] for r in reviewers)}): the lower score counts "
+                       "on each point and the notes of both are listed.")
+        if added:
+            out.append(f"{len(added)} note(s) from BookForge's own pattern check were added so the rewrite can work "
+                       "on something.")
+        if second_note:
+            out.append(f"Only one editor this time: {second_note}.")
+        return out
+
+    def _track(self, reviewers: list):
+        """P36 leniency over time: each editor vs the other one and vs BookForge's pattern check (numbers only)."""
+        gap = calibration.pair_gap(reviewers[0]["raw_scores"], reviewers[1]["raw_scores"]) \
+            if len(reviewers) > 1 else None
+        for i, r in enumerate(reviewers):
+            vs = None if gap is None else (gap if i == 0 else -gap)
+            calibration.record(self.store, r["family"], r["name"], vs_other=vs,
+                               vs_audit=r["assessment"]["audit_gap"], flagged=r["flagged"], reasked=r["reasked"])
 
     # ------------------------------------------------------------------ rewrite proposal (P5)
     def propose(self, job, rid: str, *, craft: dict | None = None, finding_ids=None) -> dict:
