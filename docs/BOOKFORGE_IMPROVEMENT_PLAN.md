@@ -18,6 +18,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 ## Status at a glance  (keep this up to date — updated on every add / finish)
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
+- **In progress:** P38 🎯 picker rebuild + number teach (with P37.1, P37.2).
 - **Next up:** Section 8 (P36, P37.1–P37.5) — fixes from the book-2 run log; then Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures (B1–B3).
@@ -179,6 +180,13 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **P37.1** Self-repair page search must learn a selector that matches every reply, not one message
   (ChatGPT learned `div[data-content-search-unit-key="fallback-turn-7:2:assistant"]`).
 - [ ] **P37.2** Read the whole reply when the page splits it into several nodes (Gemini read only "[TO:").
+- [~] **P38** 🎯 Picker rebuilt (user's design, in progress): click 🎯 → choose ONE of the three things
+  (message box / Send button / reply area) → OK → click it in the AI's window; the chip turns from blue
+  to green when something is picked; Clear or Save per item, any one at any time; Save locks it in.
+  🔢 Number teach: the user types the shown number into the AI's box and presses Send (AutoInjector
+  learns the box, Send and the user's message); AutoInjector then itself asks the AI to write that number
+  backwards and learns the reply area from where the reversed number appears; saves it and tells the user.
+  Includes P37.1 (selectors that fit every reply) and P37.2 (read the whole split reply).
 - [ ] **P37.3** Teach step: ask once, make it noticeable (sound/popup), back off after BROKEN, stop the
   probe → repair → teach loop (9 teach timeouts, 192 self-repair events in the log).
 - [ ] **P37.4** Never send "missing [TO:] tag" nags for check-in answers (48 nags to ChatGPT).
