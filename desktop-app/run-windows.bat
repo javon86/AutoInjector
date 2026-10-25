@@ -22,6 +22,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo Starting AutoInjector Desktop...
+rem This is the ONE launcher: AutoInjector starts Akowe (the book workspace in ..\akowe)
+rem by itself and shows it in its "Akowe" tab. ..\akowe\run-akowe.bat is only for Akowe alone.
+echo Starting AutoInjector Desktop (Akowe starts with it)...
 call npm start
 pause

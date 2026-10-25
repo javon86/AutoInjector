@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 # Akowe launcher for macOS/Linux: Python 3.10+, a private venv, the one dependency, then start
 # (the program picks a free port and opens the browser).
+# OPTIONAL: AutoInjector (desktop-app/run-linux.sh / run-mac.command) starts Akowe by itself and shows it in its
+# "Akowe" tab. Use this only to run Akowe on its own (if AutoInjector already runs it, this opens it).
 set -e
 cd "$(dirname "$0")"
 PY="${PYTHON:-python3}"

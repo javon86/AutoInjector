@@ -39,7 +39,7 @@ async function main() {
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'], cwd: path.join(__dirname, '..', '..'),
     env: Object.assign({}, process.env, { HOME: home, AUTOINJECTOR_AKOWE_PORT: String(port), AUTOINJECTOR_AKOWE_APP_URL: `${BF_URL}/api/ping`,
-      AUTOINJECTOR_AKOWE_DIR: empty, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }),
+      AUTOINJECTOR_AKOWE_DIR: empty, AUTOINJECTOR_AKOWE_SERVER: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }),
   });
   const shotsTaken = [];
   try {

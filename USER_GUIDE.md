@@ -66,7 +66,11 @@ You need two things:
   to be able to log in normally.
 
 Optional extras (only for the advanced features) are listed in
-[section 15](#15-what-you-need-to-run-each-part).
+[section 15](#15-what-you-need-to-run-each-part). For **Akọwe** (the book
+workspace, which starts together with AutoInjector) you also need **Python 3.10
+or newer** from [python.org](https://www.python.org/downloads/) (on Windows tick
+**"Add python.exe to PATH"**). Without it the app works as usual and the 📖 Akọwe
+tab tells you what to install.
 
 ---
 
@@ -85,6 +89,13 @@ Optional extras (only for the advanced features) are listed in
    minute or two). After that, the same double‑click opens the app in seconds.
 5. When the window opens, **sign in** to ChatGPT, Claude and/or Gemini right in
    their panes, exactly like visiting the websites.
+6. **Akọwe starts with it** — click the **📖 Akọwe** tab at the top of the window
+   to see your books. It is already signed in and connected to the three AIs.
+   The very first start prepares Akọwe's own Python environment (a minute or
+   two, needs the internet once). **⇱ Pop out** puts Akọwe in its own window;
+   close that window to bring it back. If something goes wrong the tab says what
+   and offers **Try again** and **Open log**. (You can still run
+   `akowe/run-akowe.bat` on its own if you only want Akọwe — optional.)
 
 Nothing installs system‑wide — it all lives inside the `desktop-app` folder, so
 deleting the folder removes it cleanly.
@@ -603,6 +614,7 @@ It requires Python 3 when active.
 | **System AI (Supervisor)** | A local model — easiest with [Ollama](https://ollama.com); the panel downloads one for you. Setup/switch work; it isn't filtering messages yet. 🔌 |
 | **Image Studio** | A **Forge** (recommended, lighter) or **Automatic1111** server with a GPU (local or RunPod). 🔌 |
 | **Book Governance (ATELIER)** | Python 3 — but it's on hold, so nothing for now. ⏸️ |
+| **Akọwe (📖 tab, starts with the app)** | Python 3.10+ ([python.org](https://www.python.org/downloads/)); the first start installs its one package (internet once). ✅ |
 
 ---
 

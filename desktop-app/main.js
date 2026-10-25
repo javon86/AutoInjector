@@ -234,7 +234,10 @@ const state = {
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
   voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
   setupStatus: {}, // last-known install state per setup-manager target id (true/false/null); refreshed by refreshSetupStatus()
-  akowe: { enabled: false }, // Akọwe bridge (experimental) — persisted; OFF by default. See startAkoweBridge().
+  // Akọwe: enabled = the bridge (persisted; OFF by default, see startAkoweBridge()). startWithApp = AutoInjector
+  // starts Akọwe's server itself (akowe-server.js, ON by default). autoConnect = pair Akọwe with the bridge by
+  // itself when that server is up (ON by default; turning the bridge off by hand turns it off).
+  akowe: { enabled: false, startWithApp: true, autoConnect: true },
   manager: null, // set by resetManagerTask() below — always idle on startup, a restart must never auto-resume a live task
   managerLog: [] // manager-only event stream (mirrors state.log's shape but filtered to source:"manager"), see logManagerEvent()
 };
@@ -662,7 +665,7 @@ function saveStateDebounced() {
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
-        akowe: { enabled: !!state.akowe.enabled }, // the bridge token itself lives in its own 0600 file, never here
+        akowe: { enabled: !!state.akowe.enabled, startWithApp: state.akowe.startWithApp !== false, autoConnect: state.akowe.autoConnect !== false }, // the bridge token itself lives in its own 0600 file, never here
         hr: hr && hr.mode ? {
           mode: hr.mode,
           topic: hr.topic,
@@ -790,7 +793,7 @@ function loadPersistedState() {
     state.manager.maximumTurns = state.managerConfig.maximumTurns;
     state.manager.costLimit = state.managerConfig.costLimit;
   }
-  { const bfs = akoweLegacy.settingsFrom(snap); if (bfs) state.akowe.enabled = bfs.enabled === true; } // also the "bookforge" key saved before the rename
+  { const bfs = akoweLegacy.settingsFrom(snap); if (bfs) { state.akowe.enabled = bfs.enabled === true; if (bfs.startWithApp === false) state.akowe.startWithApp = false; if (bfs.autoConnect === false) state.akowe.autoConnect = false; } } // also the "bookforge" key saved before the rename
   if (snap.hr && snap.hr.mode) {
     resetHouseRule(snap.hr.mode, snap.hr.topic, snap.hr.rounds);
     state.hr.roundNum = snap.hr.roundNum || 0;
@@ -1023,6 +1026,11 @@ async function syncPaneBounds() {
         const upr = up ? up.getBoundingClientRect() : null;
         out.__top = upr && getComputedStyle(up).position === "sticky" ? Math.max(0, Math.round(upr.bottom)) : 0;
         out.__bottom = window.innerHeight;
+        // The 📖 Akọwe tab: where its page goes (null when that tab isn't showing).
+        const ak = document.getElementById("akowe-slot");
+        const akOn = ak && document.body.dataset.appTab === "akowe" && ak.offsetParent !== null;
+        const akr = akOn ? ak.getBoundingClientRect() : null;
+        out.__akowe = akr && akr.width > 20 && akr.height > 20 ? { x: Math.round(akr.x), y: Math.round(akr.y), width: Math.round(akr.width), height: Math.round(akr.height) } : null;
         out.__modal = Array.from(document.querySelectorAll('[role="dialog"], dialog[open]')).some((d) => {
           const cs = getComputedStyle(d); const b = d.getBoundingClientRect();
           return cs.display !== "none" && cs.visibility !== "hidden" && b.width > 0 && b.height > 0;
@@ -1033,6 +1041,7 @@ async function syncPaneBounds() {
   } catch {
     return;
   }
+  try { placeAkoweView(rects && rects.__akowe, !!(rects && rects.__modal)); } catch (_) {}
   const visible = clipPaneRects(rects);
   for (const site of SITE_IDS) {
     const view = siteViews[site];
@@ -1133,6 +1142,9 @@ function createWindow() {
     // ensureProtocolTaught() sends the [TO:]/[FROM:] routing explainer once, so
     // relay still works, but only on a deliberate user action.
   }
+
+  // A re-created window (macOS: closed, then reopened from the Dock) gets the Akọwe view back, above the panes.
+  try { if (akoweView && !akoweView.webContents.isDestroyed() && !akowePopWin) { win.contentView.addChildView(akoweView); akoweView.setVisible(false); } } catch (_) {}
 
   layout();
   win.on("resize", () => { layout(); syncPaneBounds(); });
@@ -4818,6 +4830,7 @@ function rememberPairingCode(code) { if (code) { recentPairingCodes.push(String(
 function knownSecrets() {
   const out = [];
   try { const t = akoweBridgeMod.readToken(userDataDir()); if (t) out.push(t); } catch (_) {}
+  try { const t = akoweServer && akoweServer.token(); if (t) out.push(t); } catch (_) {} // Akọwe's own access token (start link)
   try { const f = path.join(userDataDir(), "autoinjector-bridge-token.txt"); if (fs.existsSync(f)) out.push(fs.readFileSync(f, "utf8").trim()); } catch (_) {}
   out.push(...recentPairingCodes);
   const skip = new Set(["transcript", "log", "ledger", "managerLog", "captured", "prompts"]);
@@ -6739,6 +6752,7 @@ function akoweStatusSnapshot(opts) {
   // keep the status current from then on).
   if (snap.enabled || bfApp.userAsked || (opts && opts.panelOpen)) akoweAppCheckSoon();
   snap.app = { running: bfApp.running, base: bfApp.base, version: bfApp.version, checkedAt: bfApp.checkedAt, launcherAvailable: !!akoweLauncher() };
+  snap.server = akoweServerPublicStatus();
   snap.health = akoweHealth(snap);
   return snap;
 }
@@ -6794,6 +6808,8 @@ function akoweDiagnostics(extra) {
   L.push(`Connection key: ${snap.tokenPresent ? "present (not shown)" : "missing"}`);
   const a = snap.app || {};
   L.push(`Akọwe app: ${a.running === true ? "running" : a.running === false ? "not answering" : "not checked yet"}${a.version ? ` · version ${bfSafeCode(a.version)}` : ""} · last ping ${ago(a.checkedAt)} · launcher ${a.launcherAvailable ? "found" : "not found"}`);
+  const sv = snap.server || {};
+  L.push(`Akọwe server (started with AutoInjector): ${sv.enabled ? "on" : "off"} · ${bfSafeCode(sv.phase || "idle")}${sv.error ? ` (${bfSafeCode(sv.error)})` : ""}${sv.port ? ` · port ${Number(sv.port)}` : ""} · ${sv.owned ? "started by AutoInjector" : sv.ready ? "started outside AutoInjector" : "—"}${sv.python ? ` · Python ${bfSafeCode(sv.python.version)}${sv.python.venv ? " (private env)" : ""}` : ""} · restarts ${Number(sv.restarts) || 0} · signed in ${sv.hasToken ? "yes" : "no"} · tab view ${sv.view && sv.view.popped ? "popped out" : sv.view && sv.view.loaded ? "loaded" : "not loaded"}`);
   const c = snap.connection || {};
   const cp = snap.connect || {};
   L.push(`Connection: connected ${c.connected ? "yes" : "no"} · paired ${c.paired ? "yes" : "no"} · last contact ${ago(c.lastContactAt)} · connect phase ${bfSafeCode(cp.phase || "idle")}${cp.step ? ` (step ${bfSafeCode(cp.step)})` : ""}`);
@@ -6860,6 +6876,7 @@ ipcMain.handle("akowe:copy-diagnostics", (_evt, extra) => {
 ipcMain.handle("akowe:set-enabled", async (_evt, payload) => {
   const enabled = !!(payload && payload.enabled);
   state.akowe.enabled = enabled;
+  state.akowe.autoConnect = enabled; // the author's own choice: off = don't switch it back on by itself
   saveStateDebounced();
   if (enabled) {
     const r = await startAkoweBridge();
@@ -6932,6 +6949,12 @@ async function akowePing(pingUrl, timeoutMs) {
 // test / Start Akọwe — never from the panel's background check, L1).
 async function akoweFindApp({ scan = true } = {}) {
   if (scan) bfApp.userAsked = true; // only the author's own actions scan (L1)
+  // The Akọwe AutoInjector runs (or reuses) itself — it may be on any free port.
+  const managed = akoweServerBase();
+  if (managed && !akoweAppConfigured()) {
+    const m = await akowePing(`${managed}api/ping`, 3000);
+    if (m.running) return m;
+  }
   const first = await akowePing(akoweAppUrl(), 3000);
   if (first.running || akoweAppConfigured() || !scan) return first;
   const tries = [];
@@ -7077,6 +7100,12 @@ function akoweLauncher() {
   return null;
 }
 async function akoweConnectNow() {
+  // The Akọwe AutoInjector runs itself (or a hand-started one whose key we could read): pair it
+  // directly through its API — nothing opens in the browser.
+  if (akoweServerCanPair()) {
+    const r = await akoweAutoPair({ manual: true });
+    if (r.ok || r.phaseSet) return bfConnect;
+  }
   // 1. bridge on
   if (!state.akowe.enabled || !akoweBridge) {
     state.akowe.enabled = true;
@@ -7131,6 +7160,16 @@ ipcMain.handle("akowe:connect", async () => {
 // what Akọwe needs) until /api/ping answers.
 let bfAppStarting = false;
 ipcMain.handle("akowe:start-app", async () => {
+  // One app: AutoInjector starts Akọwe's server itself (no separate window) when it can.
+  if (process.env.AUTOINJECTOR_AKOWE_SERVER !== "0" && initAkoweServer().status().appFound) {
+    const m = initAkoweServer();
+    const st0 = m.status();
+    if (st0.ready) return { ok: true, running: true, already: true };
+    logEvent("akowe-server-begin", { reason: "start_button" });
+    const st = await (["failed", "stopped", "idle"].includes(st0.phase) ? m.retry() : m.start());
+    if (st.ready) return { ok: true, started: true, running: true };
+    return { ok: st.phase !== "failed", started: true, running: false, message: st.message || "Akọwe is still starting — give it a moment." };
+  }
   const launcher = akoweLauncher();
   if (!launcher) return { ok: false, error: "NO_LAUNCHER", message: "Couldn't find Akọwe next to this app. Start it yourself with run-akowe.bat, then press Connect again." };
   if (bfAppStarting) return { ok: false, error: "ALREADY_STARTING", message: "Akọwe is already starting — give it a moment." };
@@ -7170,12 +7209,295 @@ ipcMain.handle("akowe:open-url", async (_evt, payload) => {
   let url = null;
   try { const u = new URL(raw); if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost") && !u.username && !u.password) url = u.href; } catch (_) {}
   if (!url) url = bfApp.base || akoweAppUrl().replace(/api\/ping$/, "");
+  if (akoweShowInTab(url)) return { ok: true, inApp: true };
   try {
     if (!shell || typeof shell.openExternal !== "function") throw new Error("NO_SHELL");
     await shell.openExternal(url);
     return { ok: true };
   } catch (e) { return { ok: false, error: "OPEN_FAILED", message: `Couldn't open your web browser. Go to ${url} yourself.` }; }
 });
+
+// ---- 📖 Akọwe inside AutoInjector: one app, one launcher -------------------
+// AutoInjector starts Akọwe's server itself (akowe-server.js: reuse a running
+// one, else Python 3.10+ -> `python -m akowe --no-browser` on a free 127.0.0.1
+// port, health wait, restart on crash with backoff, clean stop on quit) and
+// shows it in the "📖 Akọwe" tab of the main window: a WebContentsView loaded
+// from the server's start link (so it is signed in), locked to that server
+// (other links open in the browser), which can pop out to its own window and
+// back. When the server is up, Akọwe is paired with the bridge by itself (no
+// Connect press). Setting: state.akowe.startWithApp (ON by default);
+// AUTOINJECTOR_AKOWE_SERVER=0 turns the whole thing off (the test harnesses do).
+const akoweServerMod = require("./akowe-server");
+let akoweServer = null;
+let akoweView = null;          // the WebContentsView showing Akọwe
+let akoweViewLink = null;      // the start link it was loaded from (never logged)
+let akoweViewOrigin = null;    // http://127.0.0.1:<port> — the only place it may go
+let akowePopWin = null;        // the pop-out window, when Akọwe is in its own window
+let akoweLastPhase = null;
+let akoweLastReadyKey = null;  // "<port>|<owned>" of the last server we paired / loaded
+function akoweServerEnabled() { return process.env.AUTOINJECTOR_AKOWE_SERVER !== "0" && state.akowe.startWithApp !== false; }
+function akoweServerLogFile() {
+  let dir = null;
+  try { dir = outputManager.logsDir(); } catch (_) {}
+  return path.join(dir || userDataDir(), "akowe-server.log");
+}
+function initAkoweServer() {
+  if (akoweServer) return akoweServer;
+  const ms = (k) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? n : undefined; };
+  akoweServer = akoweServerMod.createServerManager({
+    app: akoweServerMod.findAppDir(__dirname, akoweLegacy.aiEnv("DIR") || null),
+    logFile: akoweServerLogFile(),
+    logger: (kind, detail) => logEvent(`akowe-server-${kind}`, detail), // ports, codes, versions — never the token
+    onChange: (st) => akoweServerChanged(st),
+    healthTimeoutMs: ms("AUTOINJECTOR_AKOWE_HEALTH_MS"),
+    reuseWatchMs: ms("AUTOINJECTOR_AKOWE_WATCH_MS"),
+  });
+  return akoweServer;
+}
+function akoweServerStart(reason) {
+  const m = initAkoweServer();
+  logEvent("akowe-server-begin", { reason });
+  return m.start().catch((e) => { logEvent("akowe-server-error", { error: String(e) }); return m.status(); });
+}
+function akoweServerBase() {
+  try { const s = akoweServer && akoweServer.status(); return s && s.ready ? s.base : null; } catch (_) { return null; }
+}
+function akoweServerCanPair() {
+  try { const s = akoweServer && akoweServer.status(); return !!(s && s.ready && s.hasToken); } catch (_) { return false; }
+}
+function akoweServerPublicStatus() {
+  const s = akoweServer ? akoweServer.status() : { phase: "idle", ready: false };
+  return Object.assign({}, s, {
+    enabled: akoweServerEnabled(),
+    startWithApp: state.akowe.startWithApp !== false,
+    autoConnect: state.akowe.autoConnect !== false,
+    view: { popped: !!(akowePopWin && !akowePopWin.isDestroyed?.()), loaded: !!akoweViewLink, shown: !!akoweViewShown && !akowePopWin },
+    pythonDownloadUrl: akoweServerMod.PYTHON_DOWNLOAD_URL,
+  });
+}
+function akoweServerChanged(st) {
+  try { broadcast("akowe-server", akoweServerPublicStatus()); } catch (_) {}
+  const phase = st.phase;
+  const prev = akoweLastPhase;
+  akoweLastPhase = phase;
+  if (phase === "running") {
+    Object.assign(bfApp, { running: true, base: st.base, version: st.version || null, checkedAt: Date.now() });
+    const key = `${st.port}|${st.owned}|${st.hasToken}`;
+    if (key !== akoweLastReadyKey) {
+      akoweLastReadyKey = key;
+      akoweNoteActivity({ kind: "app_start", say: st.owned ? `Akọwe is running (started by AutoInjector, port ${st.port})` : `Using the Akọwe that is already running (port ${st.port})`, tone: "ok" });
+      setImmediate(() => { try { akoweLoadView(); } catch (e) { logEvent("akowe-view-error", { error: String(e) }); } });
+      if (st.hasToken) setTimeout(() => { akoweAutoPair({ manual: false }).catch((e) => logEvent("akowe-autopair-error", { error: String(e) })); }, 300);
+    }
+  } else if (phase === "failed" && prev !== "failed") {
+    akoweLastReadyKey = null;
+    akoweNoteActivity({ kind: "app_start", say: `Akọwe couldn't start: ${String(st.message || st.error).slice(0, 160)}`, tone: "error" });
+  } else if (phase === "restarting" && prev !== "restarting") {
+    akoweLastReadyKey = null;
+    akoweNoteActivity({ kind: "app_start", say: String(st.message || "Akọwe stopped unexpectedly; restarting it…"), tone: "warn" });
+  }
+}
+// Akọwe's own API with its access token (main process only; never logged).
+async function akoweApi(method, p, body, timeoutMs) {
+  const base = akoweServerBase();
+  const tok = akoweServer && akoweServer.token();
+  if (!base || !tok) return { status: 0, json: null, error: "NOT_READY" };
+  try {
+    return await akoweLinkTest.nodeHttp({ method, url: base.replace(/\/$/, "") + p, headers: { Authorization: `Bearer ${tok}`, Accept: "application/json" }, body, timeoutMs: timeoutMs || 15000 });
+  } catch (e) { return { status: 0, json: null, error: (e && e.code) || "ERROR" }; }
+}
+// Pair Akọwe with the bridge by itself (what "🔗 Connect" + Akọwe's #/pair page do, without the browser):
+// bridge on, a one-time code, and Akọwe's POST /api/slots/pair-autoinjector. Leaves Akọwe alone when
+// its AI slots use something else (an API key) — that would overwrite the author's choice; Connect still can.
+let akoweAutoPairBusy = false;
+async function akoweAutoPair({ manual } = {}) {
+  if (akoweAutoPairBusy) return { ok: false, skipped: "busy" };
+  if (!manual && state.akowe.autoConnect === false) { logEvent("akowe-autopair-skipped", { reason: "turned_off" }); return { ok: false, skipped: "off" }; }
+  if (!akoweServerCanPair()) return { ok: false, skipped: "not_ready" };
+  akoweAutoPairBusy = true;
+  try {
+    if (!state.akowe.enabled || !akoweBridge) {
+      state.akowe.enabled = true;
+      saveStateDebounced();
+      if (manual) akoweSetConnect("starting_bridge");
+      const r = await startAkoweBridge();
+      logEvent("akowe-enabled", { ok: r.ok, error: r.error || null, port: akoweBridgePort(), via: manual ? "connect" : "auto" });
+      if (!r.ok || !akoweBridge) {
+        const why = r.error === "EADDRINUSE" ? `another program is using port ${akoweBridgePort()} (often a second copy of AutoInjector) — close it and press Connect again` : `the bridge couldn't start (${r.error || "unknown error"})`;
+        akoweSetConnect("error", { step: "bridge", message: `Couldn't connect Akọwe: ${why}.` });
+        return { ok: false, error: r.error || "BRIDGE", phaseSet: true };
+      }
+    }
+    const slots = await akoweApi("GET", "/api/slots");
+    const list = Array.isArray(slots.json) ? slots.json : (slots.json && Array.isArray(slots.json.slots) ? slots.json.slots : null);
+    if (slots.status !== 200 || !list) {
+      logEvent("akowe-autopair-error", { step: "slots", http_status: slots.status || null, error: slots.error || null });
+      if (manual) { akoweSetConnect("error", { step: "akowe", message: "Couldn't read Akọwe's AI settings. Press Connect again." }); return { ok: false, phaseSet: true }; }
+      return { ok: false };
+    }
+    const custom = list.filter((x) => x && x.adapter_id && !["none", "autoinjector"].includes(x.adapter_id));
+    if (custom.length && !manual) {
+      logEvent("akowe-autopair-skipped", { reason: "custom_slots", slots: custom.map((x) => x.slot_id) });
+      akoweNoteActivity({ kind: "autopair", say: "Akọwe uses its own AI settings, so it was not switched to AutoInjector's AIs. Press “🔗 Connect Akọwe” to switch.", tone: "info" });
+      return { ok: false, skipped: "custom_slots" };
+    }
+    const code = akoweBridge.createPairingCode();
+    rememberPairingCode(code);
+    const startedAt = Date.now();
+    akoweSetConnect("waiting", { startedAt, expiresAt: startedAt + akoweBridgeMod.PAIR_CODE_TTL_MS, pairedAt: null, connectedAt: null, canStartApp: false });
+    const bridgeUrl = `http://127.0.0.1:${akoweBridge.status().port}`;
+    const r = await akoweApi("POST", "/api/slots/pair-autoinjector", { code, bridge_url: bridgeUrl }, 45000);
+    if (r.status === 200 && r.json && r.json.connected) {
+      logEvent("akowe-autopair", { ok: true, manual: !!manual, slots: Array.isArray(r.json.slots) ? r.json.slots.length : null });
+      akoweNoteActivity({ kind: "autopair", say: "Akọwe is connected to your AIs (done by itself)", tone: "ok" });
+      try { broadcast("akowe-activity", { event: null, status: akoweStatusSnapshot() }); } catch (_) {}
+      return { ok: true };
+    }
+    const msg = r.json && Array.isArray(r.json.errors) && r.json.errors[0] ? String(r.json.errors[0].message || r.json.errors[0].code || "").slice(0, 120) : (r.error || `HTTP ${r.status}`);
+    logEvent("akowe-autopair-error", { step: "pair", http_status: r.status || null, error: r.error || null });
+    akoweSetConnect("error", { step: "akowe", message: `Couldn't connect Akọwe by itself (${msg}). Press “🔗 Connect Akọwe” to try again.` });
+    return { ok: false, phaseSet: true };
+  } finally { akoweAutoPairBusy = false; }
+}
+
+// -- the view
+function akoweIsLocalUrl(u) {
+  try { const x = new URL(u); return x.protocol === "http:" && (x.hostname === "127.0.0.1" || x.hostname === "localhost") && !x.username && !x.password; } catch (_) { return false; }
+}
+function akoweSameServer(u) {
+  try { return !!akoweViewOrigin && new URL(u).origin === akoweViewOrigin; } catch (_) { return false; }
+}
+function akoweOpenOutside(u) {
+  try { const x = new URL(u); if (!["http:", "https:", "mailto:"].includes(x.protocol)) return; } catch (_) { return; }
+  try { shell.openExternal(u); } catch (_) {}
+}
+// Only Akọwe's own server inside; everything else goes to the default browser.
+function lockAkoweContents(wc) {
+  if (!wc || typeof wc.on !== "function") return;
+  const guard = (e, u) => { if (akoweSameServer(u)) return; try { e.preventDefault(); } catch (_) {} logEvent("akowe-view-link-outside", {}); akoweOpenOutside(u); };
+  wc.on("will-navigate", guard);
+  wc.on("will-redirect", guard);
+  try {
+    wc.setWindowOpenHandler(({ url }) => {
+      if (akoweSameServer(url)) {
+        return { action: "allow", overrideBrowserWindowOptions: { width: 1100, height: 800, autoHideMenuBar: true, title: "Akọwe",
+          webPreferences: { partition: "persist:akowe", contextIsolation: true, nodeIntegration: false, sandbox: true } } };
+      }
+      akoweOpenOutside(url);
+      return { action: "deny" };
+    });
+  } catch (_) {}
+  wc.on("did-create-window", (w) => { try { lockAkoweContents(w.webContents); } catch (_) {} });
+  wc.on("did-fail-load", (_e, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame === false || code === -3) return;
+    logEvent("akowe-view-load-failed", { code, severity: "warn" }); // never the address (it may carry the start link)
+  });
+  wc.on("did-finish-load", () => { try { broadcast("akowe-server", akoweServerPublicStatus()); } catch (_) {} });
+}
+function ensureAkoweView() {
+  if (akoweView && !akoweView.webContents.isDestroyed()) return akoweView;
+  akoweView = new WebContentsView({ webPreferences: { partition: "persist:akowe", contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  lockAkoweContents(akoweView.webContents);
+  try { akoweView.setVisible(false); } catch (_) {}
+  if (win) win.contentView.addChildView(akoweView); // added last: above the AI panes when its tab shows
+  return akoweView;
+}
+function akoweLoadView(force) {
+  const link = akoweServer && akoweServer.startLink();
+  if (!link || !win) return false;
+  const v = ensureAkoweView();
+  if (!force && akoweViewLink === link) return true;
+  akoweViewLink = link;
+  try { akoweViewOrigin = new URL(link).origin; } catch (_) { akoweViewOrigin = null; }
+  logEvent("akowe-view-load", { port: akoweServer.status().port, signedIn: akoweServer.status().hasToken });
+  v.webContents.loadURL(link).catch(() => {});
+  return true;
+}
+let akoweTabActive = false;
+let akoweViewShown = false; // laid over the tab right now
+function placeAkoweView(rect, modal) {
+  if (!akoweView || akoweView.webContents.isDestroyed() || akowePopWin) return;
+  const show = !!(akoweTabActive && rect && !modal && akoweViewLink && akoweServerBase());
+  try { akoweView.setVisible(show); } catch (_) {}
+  if (show) akoweView.setBounds(rect);
+  akoweViewShown = show;
+}
+// "Open Akọwe" / "Review & approve" from the panel: show it here when it is our server.
+function akoweShowInTab(url) {
+  if (!akoweView || !akoweViewLink || !akoweSameServer(url)) return false;
+  const target = new URL(url);
+  const cur = akoweView.webContents.getURL();
+  if (target.hash && target.hash !== "#/" && !/token=/.test(target.hash)) { try { akoweView.webContents.loadURL(target.href); } catch (_) {} }
+  else if (!cur) akoweLoadView(true);
+  if (akowePopWin && !akowePopWin.isDestroyed?.()) { try { akowePopWin.focus(); } catch (_) {} }
+  else broadcast("akowe-tab-show", {});
+  return true;
+}
+function akowePopOut() {
+  if (!akoweView || akowePopWin) return { ok: !!akowePopWin };
+  try { win && win.contentView.removeChildView(akoweView); } catch (_) {}
+  const pw = new BaseWindow({ width: 1200, height: 860, title: "Akọwe — inside AutoInjector" });
+  akowePopWin = pw;
+  pw.contentView.addChildView(akoweView);
+  try { akoweView.setVisible(true); } catch (_) {}
+  const fit = () => { try { const [w, h] = pw.getContentSize(); akoweView.setBounds({ x: 0, y: 0, width: w, height: h }); } catch (_) {} };
+  fit();
+  pw.on("resize", fit);
+  // Closing the pop-out puts Akọwe back into the tab (the page keeps its place).
+  pw.on("close", () => { akoweDock(); });
+  logEvent("akowe-view-popout", {});
+  broadcast("akowe-server", akoweServerPublicStatus());
+  return { ok: true };
+}
+function akoweDock() {
+  const pw = akowePopWin;
+  if (!pw) return { ok: true };
+  akowePopWin = null;
+  try { pw.contentView.removeChildView(akoweView); } catch (_) {}
+  try { if (akoweView && !akoweView.webContents.isDestroyed() && win) { win.contentView.addChildView(akoweView); akoweView.setVisible(false); } } catch (_) {}
+  try { if (!pw.isDestroyed?.()) pw.destroy(); } catch (_) {}
+  logEvent("akowe-view-dock", {});
+  broadcast("akowe-server", akoweServerPublicStatus());
+  broadcast("akowe-tab-show", {});
+  syncPaneBounds();
+  return { ok: true };
+}
+ipcMain.handle("akowe-server:status", () => akoweServerPublicStatus());
+ipcMain.handle("akowe-server:retry", async () => {
+  const m = initAkoweServer();
+  logEvent("akowe-server-begin", { reason: "try_again" });
+  akoweLastReadyKey = null;
+  m.retry().catch(() => {});
+  return akoweServerPublicStatus();
+});
+ipcMain.handle("akowe-server:set-autostart", async (_evt, payload) => {
+  const on = !!(payload && payload.on);
+  state.akowe.startWithApp = on;
+  saveStateDebounced();
+  logEvent("akowe-server-autostart", { on });
+  if (on && process.env.AUTOINJECTOR_AKOWE_SERVER !== "0") {
+    const st = initAkoweServer().status();
+    if (!["running", "starting", "restarting", "checking", "finding_python", "preparing", "installing"].includes(st.phase)) akoweServerStart("setting_on");
+  }
+  return akoweServerPublicStatus();
+});
+ipcMain.handle("akowe-server:open-log", async () => {
+  const f = akoweServerLogFile();
+  try { if (!fs.existsSync(f)) fs.writeFileSync(f, ""); const err = await shell.openPath(f); return err ? { ok: false, error: "OPEN_FAILED", file: f } : { ok: true, file: f }; }
+  catch (e) { return { ok: false, error: "OPEN_FAILED", file: f }; }
+});
+ipcMain.handle("akowe-server:get-python", async () => {
+  try { await shell.openExternal(akoweServerMod.PYTHON_DOWNLOAD_URL); return { ok: true }; } catch (_) { return { ok: false, url: akoweServerMod.PYTHON_DOWNLOAD_URL }; }
+});
+ipcMain.handle("akowe-view:tab", (_evt, payload) => {
+  akoweTabActive = !!(payload && payload.active);
+  if (akoweTabActive && akoweServerBase() && !akoweViewLink) akoweLoadView();
+  syncPaneBounds();
+  return akoweServerPublicStatus();
+});
+ipcMain.handle("akowe-view:reload", () => { const ok = akoweLoadView(true); return Object.assign(akoweServerPublicStatus(), { ok }); });
+ipcMain.handle("akowe-view:pop-out", () => Object.assign(akowePopOut(), { status: akoweServerPublicStatus() }));
+ipcMain.handle("akowe-view:dock", () => Object.assign(akoweDock(), { status: akoweServerPublicStatus() }));
 
 app.whenReady().then(() => {
   loadPersistedState();
@@ -7210,7 +7532,20 @@ app.whenReady().then(() => {
   startManagedVoice();
   // Akọwe bridge: listens only if the user turned it on (persisted; default OFF).
   if (state.akowe.enabled) startAkoweBridge().catch((e) => logEvent("akowe-error", { error: String(e) }));
+  // Akọwe's server starts with AutoInjector (setting, ON by default) — in the background, never blocking the window.
+  try { initAkoweServer(); } catch (e) { logEvent("akowe-server-error", { error: String(e) }); }
+  if (akoweServerEnabled()) setTimeout(() => { akoweServerStart("startup"); }, 0);
 });
+// Stop OUR Akọwe server cleanly before quitting (a hand-started one keeps running).
+let akoweQuitDone = false;
+app.on("before-quit", (event) => {
+  if (akoweQuitDone || !akoweServer || !akoweServer.isOwnedAlive()) return;
+  event.preventDefault();
+  akoweQuitDone = true;
+  const t = setTimeout(() => app.quit(), 8000); // never hang the quit
+  akoweServer.stop().catch(() => {}).finally(() => { clearTimeout(t); app.quit(); });
+});
+process.on("exit", () => { try { if (akoweServer) akoweServer.killNow(); } catch (_) {} });
 app.on("will-quit", () => { stopAkoweBridge(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (!win) createWindow(); });

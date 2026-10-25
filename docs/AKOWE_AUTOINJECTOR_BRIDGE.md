@@ -349,11 +349,23 @@ pre-run check-in.
   tab, so you may briefly see two Akọwe tabs. On macOS/Linux it runs in the background
   (no terminal window); stop it from Akọwe or with your system's tools.
 
+## One app: AutoInjector runs Akọwe and pairs it by itself (2026-10-25)
+
+AutoInjector now starts Akọwe's server itself (`desktop-app/akowe-server.js`; reuses an Akọwe
+that already answers on 8780..8799) and shows it in its **📖 Akọwe** tab. When that server is up and
+AutoInjector knows its access token (read from Akọwe's "Open:" line, or from its data folder's
+`local_token` after the `/api/ping?challenge=` proof matches), it pairs without the browser: bridge on,
+`createPairingCode()`, then Akọwe's own `POST /api/slots/pair-autoinjector {code, bridge_url}` (Bearer =
+Akọwe's access token) — the same call the `#/pair` page makes, so the key still never appears in a URL.
+It skips this when one of Akọwe's slots uses another adapter (an API key) — 🔗 Connect still does it on
+request — and when the user turned the Bridge switch off. The contract above is unchanged.
+
 ## First real run (on your PC)
 
 1. `git pull`, then start AutoInjector desktop (`desktop-app/run-windows.bat`) and log in
-   to ChatGPT, Claude and Gemini in their panes. Turn routing/autopilot OFF.
-2. Start Akọwe (`akowe/run-akowe.bat`, port 8780) — or skip this and let step 3
+   to ChatGPT, Claude and Gemini in their panes. Turn routing/autopilot OFF. Akọwe starts
+   with it (📖 Akọwe tab) and connects by itself — then skip to the 🧪 test in step 3.
+2. (Only for an Akọwe you run on its own) Start Akọwe (`akowe/run-akowe.bat`, port 8780) — or skip this and let step 3
    offer **▶ Start Akọwe for me**.
 3. In AutoInjector's **Akọwe** panel press **🔗 Connect Akọwe**. Your browser opens
    Akọwe's pairing page; confirm there if it asks. The panel shows **Connected ✔** and

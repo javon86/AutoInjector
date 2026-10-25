@@ -43,7 +43,7 @@ async function main() {
       AUTOINJECTOR_PROBE_DELAY_MS: '1500', AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS: '800', AUTOINJECTOR_CHECKIN_TICK_MS: '700',
       AUTOINJECTOR_PROBE_TIMEOUT_MS: '20000', AUTOINJECTOR_PROBE_EARLY_MS: '3000', AUTOINJECTOR_NEEDS_USER_RECHECK_MS: '1500',
       AUTOINJECTOR_RELOAD_SETTLE_MS: '600', AUTOINJECTOR_TEACH_POLL_MS: '300', AUTOINJECTOR_CAPTURE_SETTLE_MS: '400',
-      AUTOINJECTOR_AKOWE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'ai-nobf-')), NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost'
+      AUTOINJECTOR_AKOWE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'ai-nobf-')), AUTOINJECTOR_AKOWE_SERVER: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost'
     }),
   });
   const shots = [];

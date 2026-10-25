@@ -18,8 +18,10 @@ Two ways to run it, same underlying automation:
 | UI | Extension popup + a roundtable tab, fixed turn order | One window, three AI panes side by side you watch live, message routing (send to one/some/all, one-off or on autopilot) |
 | Setup | Load unpacked in Chrome | Double-click a launcher script — see below |
 
-Plus **Akọwe** (`akowe/`) — *Akọwe — your book's scribe.* A local book-production workspace (Python,
-`akowe/run-akowe.bat`) whose three AI slots can use the desktop app's panes through the Akọwe bridge
+Plus **Akọwe** (`akowe/`) — *Akọwe — your book's scribe.* A local book-production workspace (Python) whose
+three AI slots can use the desktop app's panes through the Akọwe bridge. **One app, one launcher:** start
+AutoInjector (`desktop-app/run-windows.bat`, `run-mac.command` or `run-linux.sh`) — Akọwe starts with it and
+opens in its **📖 Akọwe** tab, already connected. (`akowe/run-akowe.bat` still runs Akọwe on its own, optional)
 ([`docs/AKOWE_AUTOINJECTOR_BRIDGE.md`](docs/AKOWE_AUTOINJECTOR_BRIDGE.md)). Formerly BookForge — renamed to
 Akọwe on 2026-10-25; existing data, saved books and the pairing carry over (see [`akowe/README.md`](akowe/README.md)).
 

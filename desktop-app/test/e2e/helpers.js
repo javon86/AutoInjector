@@ -21,9 +21,12 @@ const SHOT_DIR = path.join(__dirname, '__screenshots__');
 async function launchApp() {
   // --no-sandbox / --disable-dev-shm-usage are needed to run Chromium/Electron
   // inside CI containers and this sandbox; harmless on a normal desktop.
+  // Akọwe's real server (akowe-server.js) stays off here unless asked: these tests are about
+  // AutoInjector itself; test/e2e/akowe-oneapp.e2e.js covers the one-app start.
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     cwd: APP_DIR,
+    env: Object.assign({}, process.env, { AUTOINJECTOR_AKOWE_SERVER: process.env.AUTOINJECTOR_AKOWE_SERVER || '0' }),
   });
   const controls = await findWindow(app, '#up-zone-compose', 40000);
   if (!controls) { await app.close().catch(() => {}); throw new Error('control panel window never appeared'); }

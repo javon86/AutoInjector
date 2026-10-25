@@ -174,6 +174,18 @@ contextBridge.exposeInMainWorld("api", {
   onTerminalState: (cb) => ipcRenderer.on("terminal-state", (_e, payload) => cb(payload)),
   // Akọwe bridge (experimental) — see docs/AKOWE_AUTOINJECTOR_BRIDGE.md
   akoweStatus: (opts) => ipcRenderer.invoke("akowe:status", opts || {}),
+  // 📖 Akọwe tab: the server AutoInjector runs itself, and the view showing it
+  akoweServerStatus: () => ipcRenderer.invoke("akowe-server:status"),
+  akoweServerRetry: () => ipcRenderer.invoke("akowe-server:retry"),
+  akoweServerSetAutostart: (on) => ipcRenderer.invoke("akowe-server:set-autostart", { on }),
+  akoweServerOpenLog: () => ipcRenderer.invoke("akowe-server:open-log"),
+  akoweServerGetPython: () => ipcRenderer.invoke("akowe-server:get-python"),
+  akoweTab: (active) => ipcRenderer.invoke("akowe-view:tab", { active }),
+  akoweReload: () => ipcRenderer.invoke("akowe-view:reload"),
+  akowePopOut: () => ipcRenderer.invoke("akowe-view:pop-out"),
+  akoweDock: () => ipcRenderer.invoke("akowe-view:dock"),
+  onAkoweServer: (cb) => ipcRenderer.on("akowe-server", (_e, payload) => cb(payload)),
+  onAkoweTabShow: (cb) => ipcRenderer.on("akowe-tab-show", (_e, payload) => cb(payload)),
   akoweSetEnabled: (enabled) => ipcRenderer.invoke("akowe:set-enabled", { enabled }),
   akoweCopyToken: () => ipcRenderer.invoke("akowe:copy-token"),
   akoweRevealToken: () => ipcRenderer.invoke("akowe:reveal-token"),
