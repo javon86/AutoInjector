@@ -424,9 +424,56 @@ def _first_object(text: str) -> dict | None:
         i = end + 1  # top-level only: skip past this balanced block
 
 
+_AFTER_VALUE = re.compile(r'\s*(?:[}\]:]|,\s*(?:["{\[\-0-9tfn]|$)|$)')
+
+
+def repair_json_quotes(text: str) -> str:
+    """Escape quote marks that are text inside a JSON string. A web chat page renders an AI's unfenced JSON as
+    Markdown, which turns every \\" into a bare " — e.g. "quote": ""Say my name," he said." — so the reply no longer
+    parses. Inside a string, a " only ends it when what follows can come after a JSON value (} ] : or a comma that
+    starts the next key/value, or the end); any other " is escaped. Valid JSON comes back unchanged."""
+    out, in_str, esc, i, n = [], False, False, 0, len(text)
+    while i < n:
+        c = text[i]
+        if not in_str:
+            out.append(c)
+            in_str = c == '"'
+        elif esc:
+            out.append(c)
+            esc = False
+        elif c == "\\":
+            out.append(c)
+            esc = True
+        elif c == '"':
+            if _AFTER_VALUE.match(text, i + 1):
+                out.append(c)
+                in_str = False
+            else:
+                out.append('\\"')
+        elif c == "\n":
+            out.append("\\n")  # a raw line break inside a string (also from page rendering)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _repaired_object(text: str) -> dict | None:
+    """Last resort: the span from the first '{' to the last '}' with text-quotes escaped."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        value = json.loads(repair_json_quotes(text[start:end + 1]))
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def extract_json_object(text: str) -> dict | None:
     """The answer's JSON object: whole reply, else the first ```json fence holding one, else the
-    first balanced top-level {...} in the prose that parses as an object."""
+    first balanced top-level {...} in the prose that parses as an object, else (unfenced JSON whose
+    inner quote marks lost their backslashes on the chat page) the repaired {...} span."""
     if not isinstance(text, str):
         return None
     try:
@@ -436,10 +483,27 @@ def extract_json_object(text: str) -> dict | None:
     except ValueError:
         pass
     for m in _FENCE_RE.finditer(text):
-        obj = _first_object(m.group(1))
+        obj = _outer_object(m.group(1))
         if obj is not None:
             return obj
-    return _first_object(text)
+    return _outer_object(text)
+
+
+def _outer_object(text: str) -> dict | None:
+    """The first top-level {...}; when it does not parse as it is, its repaired form comes BEFORE any later or inner
+    object (else a broken answer would yield its first nested object, e.g. just its "scores")."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    end = _match_brace(text, start)
+    if end is not None:
+        try:
+            value = json.loads(text[start:end + 1])
+        except ValueError:
+            value = None
+        if isinstance(value, dict):
+            return value
+    return _repaired_object(text[start:]) or _first_object(text[end + 1:] if end is not None else text[start + 1:])
 
 
 def schema_errors(schema: dict, data: Any, limit: int = 20) -> list[str]:
@@ -671,12 +735,13 @@ class AutoInjectorAdapter:
         parts = [system.strip(), "", user.strip(), "", "JSON_SCHEMA:",
                  json.dumps(schema, ensure_ascii=False, sort_keys=True), "END_JSON_SCHEMA", "",
                  "Answer with exactly one JSON object that validates against JSON_SCHEMA. Output only that JSON "
-                 "object: no explanations, no extra objects, no markdown other than an optional ```json fence."]
+                 "object inside one ```json code block (the chat page would otherwise strip the backslashes from quote "
+                 "marks inside text): no explanations, no extra objects, no other markdown."]
         if errors:
             parts += ["", "Your previous answer was rejected because it did not validate against JSON_SCHEMA. "
                       "Validation errors (JSON pointer: message):"]
             parts += [f"- {e}" for e in errors]
-            parts += ["Return the complete corrected JSON object only."]
+            parts += ["Return the complete corrected JSON object only, inside one ```json code block."]
         return "\n".join(parts)
 
     @classmethod

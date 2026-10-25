@@ -36,14 +36,16 @@ SHORT_SENTENCE = 6
 MAX_CHAPTER_FINDINGS = 8
 
 # Grade range (Flesch-Kincaid) a book for this audience usually sits in, and how long its sentences usually run.
+# Fiction reads low: plain, rhythmic adult prose (short sentences, everyday words) often scores grade 3-6, so the lower
+# bounds are generous — the first real book (literary fantasy, grade 3.4) was wrongly called too simple at 5.
 AUDIENCES = {
     "children": {"label": "Children", "grade": (1.0, 4.5), "sentence_max": 12,
                  "keys": ("child", "kid", "picture book", "early reader", "chapter book", "ages 5", "ages 6", "ages 7")},
-    "middle_grade": {"label": "Middle grade", "grade": (3.5, 7.0), "sentence_max": 16,
+    "middle_grade": {"label": "Middle grade", "grade": (2.5, 7.0), "sentence_max": 16,
                      "keys": ("middle grade", "middle-grade", "8-12", "8–12", "9-12", "9–12", "tween")},
-    "young_adult": {"label": "Young adult", "grade": (5.0, 9.0), "sentence_max": 20,
+    "young_adult": {"label": "Young adult", "grade": (3.0, 9.0), "sentence_max": 20,
                     "keys": ("young adult", "teen", "ya ", " ya", "ya,", "ages 12", "ages 13", "ages 14")},
-    "adult": {"label": "Adult", "grade": (5.0, 10.0), "sentence_max": 24, "keys": ()},
+    "adult": {"label": "Adult", "grade": (3.0, 10.0), "sentence_max": 24, "keys": ()},
 }
 LITERARY_BONUS = 2.0
 

@@ -299,6 +299,15 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Problems to come back to
 
+- **First real book (2026-10-25, "The Lamplighter's Last Ferry") — ChatGPT's answers lost (FIXED):** ChatGPT answered with
+  UNFENCED JSON; the chat page rendered it as Markdown, which strips the backslash from every `\"` in text, so quoted
+  dialogue became `""Say my name…""` and every ChatGPT editor / whole-book review answer was refused — the P36 editor
+  never ran ("The editor did not read these chapter versions") and the report showed ChatGPT INTERNAL_ERROR.
+  `providers.repair_json_quotes` now repairs text-quotes as a last resort (valid JSON unchanged; the broken outer object
+  wins over its inner ones) and every bridge prompt asks for one ```json code block.
+- **First real book — readability floor (FIXED):** adult/YA/middle-grade lower grade bounds lowered (fiction reads low;
+  the book's grade 3.4 was wrongly called "simpler than usual").
+
 - **First real test, 2026-10-25 — outline refused (FIXED):** a web AI wrote `plan.pov_id` 'odile-marsh' (a name) instead
   of the character's canon ID, so the chapter outline failed CANON_UNRESOLVED. `plan_rules.resolve_entity_ids` now maps
   a name-like ID to the ONE matching pinned canon record (same words, or part of the name) right after the AI answers;
