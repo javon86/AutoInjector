@@ -218,15 +218,23 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   filler / accident (keep "Right, so" and Odile's counting; trim only excess).
 - [ ] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
   ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation).
-- [ ] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
+- [x] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
   (the 32–41 lamp count, the clock, the gauge reading); early hazards must change later actions.
-- [ ] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
+  Done: bookforge/physical_state.py + continuity.py — AI + no-AI extraction per scene, checks (count backwards, clock
+  backwards, hazard dropped), approved state feeds the next chapter's brief; 🧭 Continuity page.
+- [x] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
   flag the weaker one (zero gas pressure vs. "it was the isolator").
-- [ ] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
+  Done: bookforge/ambiguity.py — two readings per protected mystery (AI or author), AI test with quotes checked word
+  for word, BookForge marks the weaker reading; the writer's brief keeps both open.
+- [x] **P34** Version delta ledger for reruns and variants: retained / replaced / removed / unresolved
   facts, so checkers never "correct" a deliberate change back to the old story.
-- [ ] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
+  Done: bookforge/version_ledger.py — fact-by-fact diff against the source bible / variant source, author decisions
+  (deliberate / restore), sent to the writer's brief and the consistency review.
+- [x] **P35** Character state variables per scene (e.g. duty, guilt, fear of exposure, desire for contact)
   plus what each can observe and falsely assumes; at least one action per main character that serves
   their own goal, not the theme.
+  Done: bookforge/character_state.py — 0-10 values (book's own list), observes / assumes / own action per scene, checks
+  (big jump, no own-goal action), latest state in the next chapter's brief.
 
 ## Back burner — later, by the user's call  (don't start until asked)
 
@@ -259,6 +267,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Problems to come back to
 
+- **P32–P35 — not tried with real AIs or a real book.** Tested with the deterministic fake AI and the generic mock
+  (which answers the tracker with an empty list: then only BookForge's own reading is kept). On the first real book
+  check: (1) does the tracker's scene split match the chapter (it follows `* * *` / `---` breaks and the scene cards);
+  (2) `physical_state.extract` is English-only keyword/number patterns (time, light, tide, weather, footing, hazard
+  words, "the 32nd lamp", "the gauge read 40 psi") — expect misses and some noise ("two men" is ignored, but any count
+  noun in `COUNT_NOUNS` is taken); (3) are the character values (0-10) stable enough between chapters, or does the
+  "big jump" check (≥ 5) fire on AI noise; (4) the two-readings test sends the whole book (or the P13 per-chapter
+  digest above 60 000 characters) — a digest may miss the passage that contradicts a reading.
+- **P32–P35 design choices to confirm:** (a) tracked state is companion data (`physical_state:` /
+  `character_state:` / `ambiguity:` / `version_ledger:<pid>:<branch>`), included in book.bookforge and in
+  Reports/Continuity.md of the book folder, not in book-bible.json (a rerun tracks its new chapters again); (b) only
+  APPROVED state reaches the next chapter's writer — a run tracks each chapter right after it is approved (one extra AI
+  call per chapter) and approves the state under the run consent; outside runs the author presses ✔ Approve; (c)
+  tracking is tied to the pipeline's "scenes" switch (the baseline preset does not track, so P14 comparisons stay
+  fair); (d) a busy or failing AI never holds a run up: BookForge's own reading is kept with a ⚠️ note; (e) the
+  two-readings test and the readings are on request only (🧭 Continuity page), not run steps; (f) the ledger starts
+  every change as "unresolved" — the writer is still told not to change unresolved items back, only to follow the
+  current bible; a variant made from scratch has almost everything "unresolved"; (g) ✍ Write all chapters does not
+  track (press 🧭 Track on the page); (h) the AI jobs cannot be resumed after a BookForge restart (start them again).
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
   v1.2 bridge and the desktop app's real `bookforge-bridge.js` (fake host `--site-state`), not with real
   ChatGPT/Claude/Gemini windows. On the first real run check that the run window's "AIs:" line matches the

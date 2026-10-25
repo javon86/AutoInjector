@@ -56,6 +56,11 @@ bookforge/
                            draft, scene/chapter briefs, deterministic usage counts (lemma match)
     planned.py             ✅ P11 planned-to-page check: planned items per chapter, word check, independent AI check,
                            findings for the P5 rewrite (fix), book-level list (settings planned_checks:<pid>:<branch>)
+    continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
+                           AI tracking + run hooks (approved under the run consent), brief section, review context,
+                           routes /review/continuity, Reports/Continuity.md; physical_state.py (🌊 P32 extraction +
+                           checks), character_state.py (🫀 P35), ambiguity.py (🪞 P33 two readings,
+                           ambiguity:<pid>:<b>), version_ledger.py (🧾 P34, version_ledger:<pid>:<b>); web/continuity.js
     lengths.py             📏 P15 length presets (words, chapters, scenes per chapter), chapter_plan, long-chapter settings
     long_chapter.py        📏 P15 scene-by-scene writing of long chapters + bounded continuation (used by set_c C02)
     pipeline.py            🧪 P14 run/book pipeline switches (editor, scenes, voices, rules, planned), presets

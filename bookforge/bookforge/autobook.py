@@ -2169,6 +2169,8 @@ class AutoBookService(_Runner):
                     st["message"] = f"Chapter {idx + 1} of {len(chapters)}" + self._eta_words(run)
                     run["phase"] = st["message"]
                     self.save(run)
+                    from . import continuity  # noqa: PLC0415 - Section 7 (P34): the version ledger, once per run
+                    continuity.before_chapter(self, run, cid)
                     payload = bp.prepare_chapter(cid)
                     ref = self.ai_create(run, self.bp(run), "C02", payload, f"chapter {cid}")
                     rid = ref["record_id"]
@@ -2186,6 +2188,8 @@ class AutoBookService(_Runner):
                 except StepProblem:
                     item["state"] = "paused"
                     raise
+            from . import continuity  # noqa: PLC0415 - Section 7 (P32/P35): track + approve under the run consent
+            continuity.after_chapter(self, run, cid, rec, item)
             item.update(state="done", words=len((((rec or {}).get("data") or {}).get("text") or "").split()),
                         seconds=round(time.monotonic() - t_chapter, 1))
             tm = run.setdefault("timing", {"calls": 0, "call_s": 0.0})

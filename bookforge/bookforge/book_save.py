@@ -9,7 +9,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Book/          the latest exports (PDF, EPUB, DOCX) with readable names, copied from the verified stored files
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
-    Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md
+    Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.bookforge the complete re-importable package (book_package.py)
@@ -432,6 +432,10 @@ class SaveService:
         pl = self._planned_summary(pid, branch)
         if pl:
             text("Reports/Planned to page.md", pl)
+        from . import continuity  # noqa: PLC0415 - Section 7: tracked state, two readings, version ledger
+        co = continuity.render_markdown(app, pid, branch)
+        if co:
+            text("Reports/Continuity.md", co)
         # Log/
         phase("Writing the log")
         try:
