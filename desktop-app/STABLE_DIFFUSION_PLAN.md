@@ -16,8 +16,11 @@ first build is kept below ("Original design").
 | Studio | `sd-studio.js` | glues it together for the UI and the bridge: generate + save + record (db `recordImage`), character-lock merge, purpose sizes, mismatch warnings, gallery, the Akọwe request. |
 | Runner | `sd-runner.js` | runs SD **from inside AutoInjector**, like `akowe-server.js` runs Akọwe: finds Stability Matrix packages (`settings.json` InstalledPackages + `Packages/`), launches the package's venv Python with its launch command, its saved Stability Matrix launch options, `--api` and `--port`; or the ComfyUI portable (`python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build`). Hidden start, health wait (≤15 min), reuse of an SD app already running, restart with backoff (3 s / 10 s / 30 s, max 3), stop on quit (whole process tree on Windows), log without secrets (`<userData>/logs/stable-diffusion.log`). |
 | Installer | `sd-installer.js` | **⬇ Install Stable Diffusion**: GPU check (nvidia-smi, then WMI) → which official ComfyUI portable build; free-space check; resumable, cancellable download with size + SHA-256 from GitHub's release info; extract with 7-Zip or Windows `tar`; optional starter checkpoint (DreamShaper 8 SD1.5 / SDXL base 1.0) into `models/checkpoints`. Installs into `%LOCALAPPDATA%\AutoInjector\comfyui`. Never overwrites user files. |
-| Module API | `sd-api.js` | one API for Alfred and other main-process callers (below). |
-| UI | `controls.html` + `images-studio.js` | the **🎨 Images** app tab: connection bar (Find / Connect / Test 512px / Open SD UI / ▶ Start / ⏹ Stop), 🖌 Generate, 📚 Library, 🔒 Character locks, ⚙ Start & install. |
+| Parameters | `sd-params.js` | **every** setting in one schema (`GENERATE_SCHEMA`, `UPSCALE_SCHEMA`): types, ranges, enums, how each reaches A1111 (`x-a1111` payload fields) and ComfyUI (`x-comfy` yes / partial / no + note). `normalize()` (images from base64 / data: URL / a file path), `a1111Apply()` (hires, refiner, img2img/inpaint, ControlNet, ADetailer, styles, scripts, clip skip, variation, override settings, `extra`), `buildComfyGraph()` (LoRAs, CLIP skip, img2img/inpaint, ControlNet, refiner, hires), `unsupportedOn()`, and the pass-through checks against the server's own `/openapi.json` and options. |
+| Control | `sd-control.js` | everything beyond "make a picture": A1111 options get/set (validated), upscalers + latent modes, Extras upscale, styles, embeddings, scripts + args, ControlNet models/modules, ADetailer models, interrupt, skip, refresh, memory, the txt2img/img2img payload schema, `a1111Check()` (every name in a request checked before sending). ComfyUI `/object_info`, `/queue`, `/interrupt`, `/free`, memory, uploads, upscale-model graph. |
+| Workflows | `sd-workflows.js` | run **any** ComfyUI API-format workflow: saved in `<userData>/sd-workflows/`, named params via `"<node>.<input>"`, explicit bindings, `{{placeholders}}` or auto-detected names (prompt, negativePrompt, seed, steps, cfgScale, sampler, scheduler, denoise, width, height, batchSize, checkpoint, image, mask). UI-format saves refused with how to export the API format. |
+| Module API | `sd-api.js` | one API for Alfred and other main-process callers (below), with `capabilities()` and `call()`. |
+| UI | `controls.html` + `images-studio.js` | the **🎨 Images** app tab: connection bar (Find / Connect / Test 512px / Open SD UI / ▶ Start / ⏹ Stop), 🖌 Generate, 📚 Library, 🔒 Character locks, ⚙ Start & install. The Generate form has collapsible sections, all off by default: **Hires fix**, **Refiner**, **img2img / Inpaint** (with a mask brush), **ControlNet** units, **ADetailer**, **Upscale the result**, **Advanced** (CLIP skip, restore faces, tiling, styles, script + args, override settings JSON, extra fields JSON, read/set any settings-menu option), **ComfyUI workflow** (pick / run / save). Sections the connected app can't use are hidden. |
 | Bridge | `service-bridge.js` | `GET /image/backend`, `GET /image/locks`, `POST /image/request` (character lock) — `docs/SD_IMAGE_API.md`. |
 
 Settings persisted in the app state: `imageConfig` (endpoint, backend, size, sampler…) and
@@ -29,22 +32,97 @@ Settings persisted in the app state: `imageConfig` (endpoint, backend, size, sam
 
 ```js
 const imagesApi = require('./sd-api').get();   // registered by main.js at load; null in tests unless registered
+
+// Discover everything (generate Alfred tools from this — nothing is left out):
+await imagesApi.capabilities();
+// → { ok, backend:'a1111'|'comfy'|'', label, connected, features:{controlnet, adetailer, openapi, nodes…},
+//     operations:[{ name:'images.generate', description, params:<JSON schema>, args, supported, hint, code }],
+//     generateParams:[{ name, supported:'yes'|'partial'|'no', note, a1111Fields }],
+//     extraFields:{ txt2img:[…], img2img:[…], validated } }        // A1111: every pass-through field
+await imagesApi.call('images.generate', { prompt: 'a cat', hires: { scale: 2 } });   // generic dispatcher (checks params)
+
+// Pictures
 await imagesApi.images.status();               // { ok, enabled, endpoint, backend, label, checkpoint, busy, managed:{phase,…} }
 await imagesApi.images.generate({ prompt, negativePrompt, loras:[{name,weight}], characterLock:'Odile',
-                                  purpose:'portrait', width, height, steps, cfgScale, seed, checkpoint, sampler, count, from:'alfred' });
-     // → { ok, images:[{ path, url, seed, sha256 }], seed, warnings, settings } | { ok:false, error, message }
-await imagesApi.images.progress();  await imagesApi.images.cancel();
-await imagesApi.images.gallery(20); await imagesApi.images.test();
-await imagesApi.sd.status();        // { image, managed (runner), install }
-await imagesApi.sd.detect();        await imagesApi.sd.connect('http://127.0.0.1:7860');
-await imagesApi.sd.targets();       await imagesApi.sd.start(targetId?);  await imagesApi.sd.stop();
-await imagesApi.sd.install.check(); await imagesApi.sd.install.install(); await imagesApi.sd.install.downloadModel('sd15'|'sdxl');
+     purpose:'portrait', width, height, steps, cfgScale, seed, checkpoint, vae, sampler, scheduler, count, batchCount,
+     clipSkip:2, restoreFaces, tiling, styles:['Cinematic'], variation:{ subseed, strength },
+     hires:{ scale:2, upscaler:'R-ESRGAN 4x+', secondPassSteps:12, denoise:0.4, resizeX, resizeY, sampler, scheduler, checkpoint, prompt, negativePrompt, cfgScale },
+     refiner:{ checkpoint:'sdxl_refiner_1.0', switchAt:0.8 },
+     initImage:'<path|base64|data: URL>', denoise:0.6, resizeMode:'crop and resize', imageCfgScale,
+     mask:'<path|base64>', inpaint:{ maskBlur:4, fill:'original'|'fill'|'latent noise'|'latent nothing', onlyMasked, padding, invertMask },
+     controlnet:[{ image, module:'canny', model, weight, guidanceStart, guidanceEnd, controlMode, pixelPerfect, resizeMode, processorRes, thresholdA, thresholdB }],
+     adetailer:[{ model:'face_yolov8n.pt', prompt, negativePrompt, confidence, denoise, maskBlur, inpaintOnlyMasked, inpaintPadding, steps, cfgScale }],
+     script:{ name:'X/Y/Z plot', args:[…] }, alwaysonScripts:{ '<extension>':{ args:[…] } },
+     overrideSettings:{ '<any option>': value }, extra:{ '<any txt2img/img2img field>': value }, from:'alfred' });
+     // → { ok, images:[{ path, url, seed, sha256 }], seed, warnings, settings } | { ok:false, error, code, field?, message, hint? }
+await imagesApi.images.img2img({ initImage, prompt, denoise, … });        // initImage required
+await imagesApi.images.inpaint({ initImage, mask, prompt, inpaint:{…} });  // initImage + mask required
+await imagesApi.images.upscale({ image, upscaler, factor, width, height, crop, upscaler2, upscaler2Visibility, gfpgan, codeformer, codeformerWeight });
+await imagesApi.images.progress();  await imagesApi.images.cancel();  await imagesApi.images.gallery(20);  await imagesApi.images.test();
+
+// The SD app
+await imagesApi.sd.status();  await imagesApi.sd.detect();  await imagesApi.sd.connect('http://127.0.0.1:7860');  await imagesApi.sd.lists();
+await imagesApi.sd.targets(); await imagesApi.sd.start(targetId?); await imagesApi.sd.stop();
+await imagesApi.sd.install.check(); await imagesApi.sd.install.install(); await imagesApi.sd.install.downloadModel('sd15'|'sdxl'); await imagesApi.sd.install.cancel();
+await imagesApi.sd.options.get(['CLIP_stop_at_last_layers']);   // all keys when no list
+await imagesApi.sd.options.set({ CLIP_stop_at_last_layers: 2 }); // key must exist, type must match, choices checked
+await imagesApi.sd.options.schema();                             // [{ key, type, current, description }]
+await imagesApi.sd.controlnet.models(); await imagesApi.sd.controlnet.modules(); await imagesApi.sd.adetailer.models();
+await imagesApi.sd.styles(); await imagesApi.sd.scripts(); await imagesApi.sd.embeddings(); await imagesApi.sd.upscalers();
+await imagesApi.sd.extraFields('txt2img'|'img2img');             // every payload field + which structured param covers it
+await imagesApi.sd.interrupt(); await imagesApi.sd.skip(); await imagesApi.sd.refresh('all'|'checkpoints'|'loras'|'vae'|'embeddings'); await imagesApi.sd.memory();
+await imagesApi.sd.workflows.list(); await imagesApi.sd.workflows.get(id); await imagesApi.sd.workflows.delete(id);
+await imagesApi.sd.workflows.save({ name, workflow /* API format */, bindings: { prompt: [{ node:'6', input:'text' }] } });
+await imagesApi.sd.workflows.run({ id /* or workflow */, params: { prompt, seed: -1, '6.text': '…', image: '<path>' } });
+await imagesApi.sd.comfy.objectInfo(node?); await imagesApi.sd.comfy.queue(); await imagesApi.sd.comfy.upload(image, name); await imagesApi.sd.comfy.free();
+
+// Library
 await imagesApi.library.find('odile', { kind:'lora', base:'SD1.5' });   // → items
 await imagesApi.library.characterLock('Odile');                          // → lock | null
 await imagesApi.library.locks();    await imagesApi.library.get('lora:odile_face');  await imagesApi.library.scan();
 ```
 
-Every call resolves (never throws); failures carry a plain-English `message`.
+Every call resolves (never throws); failures carry a plain-English `message`. Error codes:
+`INVALID_PARAM` (type / range / enum / unknown parameter, with `field` and a suggestion), `UNKNOWN_VALUE`
+(a model, upscaler, style, script, ControlNet model/preprocessor or ADetailer model the server doesn't have —
+`hint` lists the real ones), `UNKNOWN_FIELD` / `BAD_TYPE` / `BAD_VALUE` (pass-through `extra` checked against
+`/openapi.json`), `UNKNOWN_OPTION` (options), `UNSUPPORTED_ON_BACKEND` (with a `hint` saying what to do instead),
+`UNKNOWN_PARAM` / `MISSING_PARAM` / `UI_FORMAT` / `BAD_WORKFLOW` (workflows), plus the connection errors
+(`NO_ENDPOINT`, `REFUSED`, `NO_API`, `TIMEOUT`, `HTTP_5xx`, `COMFY_REJECTED`, `CANCELLED`, …). Names are checked
+**before** anything is sent, so a typo never costs a render. `extra` is sent unchecked (with a warning) only when
+the server has no `/openapi.json`.
+
+## Coverage: what can be controlled
+
+Generated from `sd-params.js` (`x-a1111` / `x-comfy`) and checked by `test/sd-full.test.js`, including a test that
+**every field of the server's txt2img and img2img OpenAPI schema is reachable** (fake A1111 1.10/Forge schema:
+58 + 58 fields; 41 / 38 through structured params, the rest through the validated `extra` pass-through; 0 unreachable).
+
+| Feature | A1111 / Forge / reForge / SD.Next | ComfyUI (built-in graph) |
+|---|---|---|
+| prompt, negative, LoRAs, checkpoint, VAE, sampler, scheduler, steps, CFG, size, seed, batch | ✅ payload + `<lora:>` tags + `override_settings` | ✅ LoraLoader chain, VAELoader, sampler names mapped |
+| batch count (`n_iter`) | ✅ | ➖ use batchSize |
+| hires fix (scale, upscaler, steps, denoise, resize-to, sampler, scheduler) | ✅ `enable_hr`, `hr_*`, `denoising_strength` | ✅ LatentUpscale or UpscaleModelLoader → ImageUpscaleWithModel → ImageScale → VAEEncode, + 2nd KSampler |
+| hires checkpoint / prompt / negative / CFG | ✅ `hr_checkpoint_name`, `hr_prompt`, `hr_negative_prompt`, `hr_cfg` (Forge) | ❌ UNSUPPORTED (same model + prompt) |
+| SDXL refiner | ✅ `refiner_checkpoint`, `refiner_switch_at` | ✅ two KSamplerAdvanced (switch step), refiner's own encoders |
+| img2img (picture, denoise, resize mode) | ✅ `/img2img`, `init_images`, `resize_mode` | ✅ upload → LoadImage → ImageScale (crop for “crop and resize”) → VAEEncode (+ RepeatLatentBatch) |
+| image CFG (instruct-pix2pix) | ✅ `image_cfg_scale` | ❌ |
+| inpaint: mask, blur, masked content, invert | ✅ `mask`, `mask_blur`, `inpainting_fill`, `inpainting_mask_invert` | ✅ LoadImageMask (+ InvertMask); original → SetLatentNoiseMask, else VAEEncodeForInpaint (blur → `grow_mask_by`) |
+| inpaint “only masked” + padding | ✅ `inpaint_full_res`, `inpaint_full_res_padding` | ❌ UNSUPPORTED |
+| CLIP skip | ✅ `override_settings.CLIP_stop_at_last_layers` | ✅ CLIPSetLastLayer |
+| restore faces / tiling / variation seed / styles | ✅ | ❌ UNSUPPORTED (hint: workflow / prompt) |
+| ControlNet units (image, module, model, weight, start/end, control mode, pixel perfect, resize, processor res, thresholds) | ✅ `alwayson_scripts.controlnet` (models/modules listed and checked) | ✅ ControlNetLoader + ControlNetApplyAdvanced; preprocessors via `AIO_Preprocessor` (comfyui_controlnet_aux); control mode / per-unit mask ❌ |
+| ADetailer (model, prompt, confidence, denoise, blur, only-masked, padding, steps, CFG) | ✅ `alwayson_scripts.ADetailer` (models checked) | ❌ UNSUPPORTED (use a FaceDetailer workflow) |
+| any other extension | ✅ `alwaysonScripts` raw | ✅ via workflows |
+| scripts (`script_name`, `script_args`) | ✅ (names checked per txt2img / img2img; args listed by `sd.scripts()`) | ❌ (workflows) |
+| any settings-menu option | ✅ `sd.options.get/set/schema` (validated) + per-picture `overrideSettings` | ❌ no settings menu |
+| any other payload field | ✅ `extra`, validated against `/openapi.json` | ❌ (use `"<node>.<input>"` workflow params) |
+| upscale a picture | ✅ `/extra-single-image` (2 upscalers, GFPGAN, CodeFormer, resize-to, crop) | ✅ upscale model (+ ImageScaleBy to the factor) or lanczos; extras ❌ |
+| run any workflow with named params | ❌ UNSUPPORTED (it's a ComfyUI graph) | ✅ `sd.workflows.*` |
+| lists: upscalers, styles, scripts, embeddings, ControlNet, ADetailer | ✅ | ✅ upscalers, embeddings, ControlNet models/preprocessors; others ❌ |
+| node types / queue / upload / free VRAM | ❌ | ✅ `/object_info`, `/queue`, `/upload/image`, `/free` |
+| progress / cancel / interrupt / skip | ✅ / ✅ / ✅ / ✅ | ✅ / ✅ / ✅ / ❌ |
+| refresh models / memory | ✅ refresh-checkpoints/loras/vae/embeddings, `/memory` | ✅ (lists re-read) / `/system_stats` |
 
 ## Problems / limits (honest)
 
@@ -53,9 +131,19 @@ Every call resolves (never throws); failures carry a plain-English `message`.
   run on the user's PC is the real test.
 - The A1111-family "flavor" (Forge vs reForge vs A1111 vs SD.Next) is a best guess from
   `/sdapi/v1/options`, `/cmd-flags`, `/version`; only the label depends on it.
-- ComfyUI: the built-in graph is plain txt2img with CheckpointLoaderSimple. **Flux / SD3
-  UNet-only models** (separate UNet + CLIP + VAE files) need a different graph — not built;
-  all-in-one Flux checkpoints should work (use CFG ~1). No img2img on ComfyUI yet (A1111 has it).
+- ComfyUI: the built-in graph uses CheckpointLoaderSimple. **Flux / SD3 UNet-only models**
+  (separate UNet + CLIP + VAE files) need a different graph — use a saved workflow
+  (`sd.workflows.run`); all-in-one Flux checkpoints work in the built-in graph (use CFG ~1).
+  Built-in graph limits (all answered with `UNSUPPORTED_ON_BACKEND` + a hint): no ADetailer,
+  restore faces, tiling, variation seeds, styles, scripts, inpaint “only masked”, ControlNet
+  control mode, hires checkpoint/prompt. Hires fix is txt2img-only on both backends (as in A1111).
+  Inpainting on ComfyUI does not paste the result back over the original outside the mask
+  (A1111 does). ControlNet preprocessors on ComfyUI need comfyui_controlnet_aux.
+- The validated pass-through relies on the server's `/openapi.json` (A1111/Forge serve it);
+  without it, `extra` fields are sent with a warning. Script arguments (`script_args`) are
+  positional and passed as given — `sd.scripts()` shows each script's argument list.
+- ControlNet / ADetailer payloads follow the sd-webui-controlnet and ADetailer API shapes; Forge's
+  built-in ControlNet accepts the same unit fields. Tested against fake servers, not a real GPU.
 - Launching Stability Matrix packages directly (venv Python + launch command + its saved
   options) mirrors what Stability Matrix does, but Stability Matrix may set extra environment
   for some packages; if a package won't start from AutoInjector, start it in Stability Matrix

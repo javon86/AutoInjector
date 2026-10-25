@@ -52,6 +52,7 @@ Request body (all optional except a `prompt` or a `characterLock`):
 | `book` | the book title, recorded with the picture |
 | `from` | who asks (recorded as `bridge:<from>`, default `akowe`) |
 | `returnImage` | `true` = also return each picture as base64 (otherwise only paths) |
+| `hires`, `refiner`, `clipSkip`, `restoreFaces`, `tiling`, `styles`, `variation`, `initImage` + `denoise` (img2img), `mask` + `inpaint` (inpaint), `controlnet`, `adetailer`, `script`, `alwaysonScripts`, `overrideSettings`, `extra` | every advanced setting of `images.generate` — same names and shapes as the module API (`desktop-app/STABLE_DIFFUSION_PLAN.md` → "Module API" and the coverage table). Pictures (`initImage`, `mask`, ControlNet `image`) are a path to a picture file on the same PC (recommended: bridge bodies are limited to 1 MB), or small base64 / data: URLs. What the connected app can't do is refused with `UNSUPPORTED_ON_BACKEND` and a `hint`. |
 
 Answer (200):
 
@@ -72,6 +73,7 @@ Errors (always `{ ok:false, error, message }`, `message` is plain English for th
 |---|---|---|
 | 400 | `NEED_PROMPT` | neither `prompt` nor `characterLock` |
 | 400 | `NO_LOCK` | no character lock with that id/name |
+| 400 | `INVALID_PARAM`, `UNKNOWN_VALUE`, `UNKNOWN_FIELD`, `BAD_TYPE`, `BAD_VALUE`, `UNKNOWN_OPTION`, `UNSUPPORTED_ON_BACKEND` | an advanced setting is wrong or not available on the connected app — `field` names it, `hint` says what would work (e.g. the real model names) |
 | 503 | `NO_ENDPOINT` / `IMAGE_DISABLED` | no SD app connected yet |
 | 502 | `REFUSED`, `TIMEOUT`, `NO_API`, `HTTP_500`, `COMFY_REJECTED`, `CANCELLED`, … | the SD app failed — `message` says what to do |
 | 501 | `IMAGE_NOT_WIRED` | this AutoInjector build has no image module |
@@ -88,5 +90,8 @@ curl -s -X POST http://127.0.0.1:8765/image/request \
   -d '{"purpose":"portrait","characterLock":"Odile","prompt":"reading a letter by lamplight","book":"The Lamplighter'"'"'s Last Ferry"}'
 ```
 
-Inside AutoInjector's own main process, the same things are available without HTTP through
-`require('./sd-api').get()` — see `desktop-app/STABLE_DIFFUSION_PLAN.md` ("Module API").
+Inside AutoInjector's own main process, the same things — and much more: options get/set,
+img2img / inpaint / upscale, ControlNet / ADetailer / styles / scripts lists, ComfyUI workflows,
+and `capabilities()` (a machine-readable list of every operation + parameter schema for the
+connected app) — are available without HTTP through `require('./sd-api').get()` — see
+`desktop-app/STABLE_DIFFUSION_PLAN.md` ("Module API" and "Coverage").

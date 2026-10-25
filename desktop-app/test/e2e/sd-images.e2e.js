@@ -33,6 +33,7 @@ async function main() {
   const forge = await fakeA1111({ flavor: 'forge', loraFile: path.join(models, 'Lora', 'odile_face.safetensors') });
   const userData = path.join(tmp, 'userdata');
   let file = null; // the picture the test makes (removed afterwards)
+  const t0 = Date.now() - 1000;
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', `--user-data-dir=${userData}`],
     cwd: APP_DIR,
@@ -79,6 +80,46 @@ async function main() {
     assert((await c.$$('#sd-gallery img')).length >= 1, 'the gallery shows it');
     await shot(c, '03-images-result');
 
+    // ---- more settings: hires fix, then a real inpaint with the mask brush
+    await c.click('#sd-sec-hires > summary');
+    await c.check('#sd-hr-on');
+    await c.fill('#sd-hr-scale', '1.5');
+    await c.waitForFunction(() => [...document.getElementById('sd-hr-upscaler').options].some((o) => o.value === 'R-ESRGAN 4x+'), null, { timeout: 10000 }).catch(() => {});
+    await c.selectOption('#sd-hr-upscaler', 'R-ESRGAN 4x+').catch(() => {});
+    await c.click('#btn-sd-generate');
+    await c.waitForFunction(() => /saved/.test(document.getElementById('sd-msg').textContent) && !document.getElementById('btn-sd-generate').disabled, null, { timeout: 20000 }).catch(() => {});
+    const hb = forge.state.lastTxt2img || {};
+    assert(hb.enable_hr === true && hb.hr_scale === 1.5 && hb.hr_upscaler === 'R-ESRGAN 4x+', `hires fix reaches Forge (enable_hr ${hb.enable_hr}, hr_scale ${hb.hr_scale}, hr_upscaler ${hb.hr_upscaler})`);
+    await c.uncheck('#sd-hr-on');
+    await c.click('#sd-sec-img2img > summary');
+    await c.selectOption('#sd-i2i-mode', 'inpaint');
+    await c.click('#btn-sd-i2i-current');
+    await c.waitForFunction(() => { const i = document.getElementById('sd-i2i-img'); return i.complete && i.naturalWidth > 0 && document.getElementById('sd-mask-canvas').width === i.naturalWidth; }, null, { timeout: 10000 }).catch(() => {});
+    await shot(c, '03b-images-inpaint-mask');
+    const box = await c.$eval('#sd-mask-canvas', (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+    await c.mouse.move(box.x + box.w * 0.3, box.y + box.h * 0.3);
+    await c.mouse.down();
+    await c.mouse.move(box.x + box.w * 0.6, box.y + box.h * 0.6, { steps: 5 });
+    await c.mouse.up();
+    await c.selectOption('#sd-ip-fill', 'latent noise');
+    await c.click('#btn-sd-generate');
+    await c.waitForFunction(() => /saved/.test(document.getElementById('sd-msg').textContent) && !document.getElementById('btn-sd-generate').disabled, null, { timeout: 20000 }).catch(() => {});
+    const ib = forge.state.lastTxt2img || {};
+    assert(forge.state.lastPath === '/sdapi/v1/img2img' && ib.init_images && ib.init_images[0] && ib.mask && ib.inpainting_fill === 2, `inpaint reaches Forge's /img2img with the picture, a mask and the fill (${forge.state.lastPath})`);
+    let maskOk = false;
+    try { const buf = Buffer.from(ib.mask, 'base64'); maskOk = buf.subarray(1, 4).toString() === 'PNG' && buf.length > 60; } catch (_) {}
+    assert(maskOk, 'the brushed mask arrives as a real PNG');
+    await c.selectOption('#sd-i2i-mode', '');
+    await c.click('#sd-sec-adv > summary');
+    await c.fill('#sd-opt-key', 'CLIP_stop_at_last_layers');
+    await c.fill('#sd-opt-value', '2');
+    await c.click('#btn-sd-opt-set');
+    await c.waitForFunction(() => /is now 2/.test(document.getElementById('sd-opt-msg').textContent), null, { timeout: 10000 }).catch(() => {});
+    assert(forge.state.options.CLIP_stop_at_last_layers === 2, 'Advanced → settings menu: Set changes the option in Forge');
+    const caps = await c.evaluate(() => window.api.sd.capabilities());
+    assert(caps && caps.ok && caps.backend === 'a1111' && caps.operations.some((o) => o.name === 'images.inpaint' && o.supported) && caps.operations.length > 40, `capabilities() over IPC: ${caps && caps.operations ? caps.operations.length : 0} operations for the connected Forge`);
+    await shot(c, '03c-images-advanced');
+
     await c.click('#sd-sub-library');
     await c.click('#btn-sd-lib-scan');
     await c.waitForFunction(() => document.querySelectorAll('.sd-libcard').length >= 3, null, { timeout: 15000 }).catch(() => {});
@@ -113,6 +154,10 @@ async function main() {
     await app.close().catch(() => {});
     await forge.close();
     if (file) for (const f of [file, file.replace(/\.png$/, '.json')]) { try { fs.unlinkSync(f); } catch (_) {} }
+    if (file) { // and the other pictures this run made (hires, inpaint)
+      const dir = path.dirname(file);
+      try { for (const n of fs.readdirSync(dir)) { const f = path.join(dir, n); if (/^(sd|img2img|inpaint|upscale)-.*\.(png|json)$/.test(n) && fs.statSync(f).mtimeMs >= t0) fs.unlinkSync(f); } } catch (_) {}
+    }
     fs.rmSync(tmp, { recursive: true, force: true });
   }
   console.log(`\n${state.passed} passed, ${state.failed} failed`);

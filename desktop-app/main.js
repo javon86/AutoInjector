@@ -5707,6 +5707,7 @@ function sdStudio() {
     persist: () => { state.imageConfig = imageProvider.getSettings(); saveStateDebounced(); },
     log: (t, d) => logEvent(t, d),
     fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+    workflowsDir: () => path.join(userDataDir(), "sd-workflows"),
   });
   return _sdStudio;
 }
@@ -5727,6 +5728,23 @@ ipcMain.handle("sd:record", sdSafe((a) => sdStudio().record(a.path)));
 ipcMain.handle("sd:open-images-folder", sdSafe(async () => { const err = await shell.openPath(outputManager.imagesDir()); return err ? { ok: false, error: err } : { ok: true }; }));
 ipcMain.handle("sd:open-ui", sdSafe(async () => { const b = imageProvider.status().base; if (!b) return { ok: false, error: "NO_ENDPOINT" }; await shell.openExternal(b); return { ok: true }; }));
 ipcMain.handle("sd:show-file", sdSafe((a) => { if (a.path) shell.showItemInFolder(a.path); return { ok: true }; }));
+// Everything beyond txt2img (sd-control.js / sd-workflows.js via sd-studio.js).
+ipcMain.handle("sd:img2img", sdSafe((a) => sdStudio().img2img(a, "images-tab:img2img")));
+ipcMain.handle("sd:inpaint", sdSafe((a) => sdStudio().inpaint(a, "images-tab:inpaint")));
+ipcMain.handle("sd:upscale", sdSafe((a) => sdStudio().upscale(a, "images-tab:upscale")));
+ipcMain.handle("sd:extras", sdSafe(() => sdStudio().extras()));
+ipcMain.handle("sd:options-get", sdSafe((a) => sdStudio().optionsGet(a.keys)));
+ipcMain.handle("sd:options-set", sdSafe((a) => sdStudio().optionsSet(a.options || {})));
+ipcMain.handle("sd:interrupt", sdSafe(() => sdStudio().interrupt()));
+ipcMain.handle("sd:skip", sdSafe(() => sdStudio().skip()));
+ipcMain.handle("sd:refresh", sdSafe((a) => sdStudio().refresh(a.what)));
+ipcMain.handle("sd:memory", sdSafe(() => sdStudio().memory()));
+ipcMain.handle("sd:workflows", sdSafe(() => sdStudio().workflowsList()));
+ipcMain.handle("sd:workflow-get", sdSafe((a) => sdStudio().workflowGet(a.id)));
+ipcMain.handle("sd:workflow-save", sdSafe((a) => sdStudio().workflowSave(a.workflow || {})));
+ipcMain.handle("sd:workflow-delete", sdSafe((a) => sdStudio().workflowDelete(a.id)));
+ipcMain.handle("sd:workflow-run", sdSafe((a) => sdStudio().runWorkflow(a, "images-tab:workflow")));
+ipcMain.handle("sd:capabilities", sdSafe(() => sdApiMod.get() ? sdApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" }));
 ipcMain.handle("sdlib:list", sdSafe((a) => sdStudio().libList(a.filters || {})));
 ipcMain.handle("sdlib:scan", sdSafe(() => sdStudio().libScan()));
 ipcMain.handle("sdlib:update", sdSafe((a) => sdLibrary().update(a.id, a.patch || {})));
@@ -5815,7 +5833,8 @@ ipcMain.handle("sd:install-cancel", sdSafe(() => sdInstallerInst().cancel()));
 ipcMain.handle("sd:open-install-folder", sdSafe(async () => { const h = sdInstallerInst().home; try { fs.mkdirSync(h, { recursive: true }); } catch (_) {} const err = await shell.openPath(h); return err ? { ok: false, error: err } : { ok: true }; }));
 // The module API for Alfred and other callers in the main process (docs: STABLE_DIFFUSION_PLAN.md).
 sdApiMod.register(sdApiMod.createImagesApi({
-  studio: { status: () => sdStudio().status(), generate: (r, from) => sdStudio().generate(r, from), progress: () => sdStudio().progress(), cancel: () => sdStudio().cancel(), gallery: (l) => sdStudio().gallery(l), test: () => sdStudio().test(), detect: () => sdStudio().detect(), connect: (u) => sdStudio().connect(u) },
+  // The whole studio, created on first use (every method: generate, img2img, inpaint, upscale, options, workflows, …).
+  studio: new Proxy({}, { get: (_t, k) => { const s = sdStudio(); const v = s[k]; return typeof v === "function" ? v.bind(s) : v; }, has: (_t, k) => k in sdStudio() }),
   library: { list: (f) => sdLibrary().list(f), get: (id) => sdLibrary().get(id), getLock: (n) => sdLibrary().getLock(n), listLocks: () => sdLibrary().listLocks(), scan: () => sdLibrary().scan() },
   runner: () => sdRunner(), installer: () => sdInstallerInst(),
   targets: () => sdTargetsPublic(), start: (id) => sdStart(id), stop: async () => ({ ok: true, runner: await sdRunner().stop() }),

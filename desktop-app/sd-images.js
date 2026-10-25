@@ -91,6 +91,17 @@ function infotext(rec) {
   if (r.checkpoint) kv.push(`Model: ${String(r.checkpoint).replace(/\s*\[[0-9a-f]+\]$/i, '')}`);
   if (r.vae && !/^(automatic|none)$/i.test(r.vae)) kv.push(`VAE: ${r.vae}`);
   if (Array.isArray(r.loras) && r.loras.length) kv.push(`Lora: "${r.loras.map((l) => `${l.name}:${l.weight}`).join(', ')}"`);
+  if (r.clipSkip > 1) kv.push(`Clip skip: ${r.clipSkip}`);
+  if (r.initImage && r.denoise != null) kv.push(`Denoising strength: ${r.denoise}`);
+  if (r.hires) {
+    kv.push(`Hires upscale: ${r.hires.scale || 2}`);
+    if (r.hires.secondPassSteps) kv.push(`Hires steps: ${r.hires.secondPassSteps}`);
+    kv.push(`Hires upscaler: ${r.hires.upscaler || 'Latent'}`);
+    kv.push(`Denoising strength: ${r.hires.denoise != null ? r.hires.denoise : 0.5}`);
+  }
+  if (r.refiner && r.refiner.checkpoint) kv.push(`Refiner: ${r.refiner.checkpoint}`, `Refiner switch at: ${r.refiner.switchAt != null ? r.refiner.switchAt : 0.8}`);
+  if (r.variation && r.variation.subseed != null) kv.push(`Variation seed: ${r.variation.subseed}`, `Variation seed strength: ${r.variation.strength || 0}`);
+  if (Array.isArray(r.controlnet)) r.controlnet.forEach((u, i) => kv.push(`ControlNet ${i}: "Module: ${u.module || 'none'}, Model: ${u.model || ''}, Weight: ${u.weight != null ? u.weight : 1}"`));
   if (r.backend) kv.push(`Backend: ${r.label || r.backend}`);
   lines.push(kv.join(', '));
   return lines.join('\n');

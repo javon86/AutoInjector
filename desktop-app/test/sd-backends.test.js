@@ -119,7 +119,7 @@ async function main() {
   cr = await ip.connect(comfy.base);
   assert(cr.ok && ip.status().backend === 'comfy' && ip.status().endpoint === comfy.base, 'connect() makes ComfyUI the backend (base address, no /sdapi)');
   const cl = await ip.lists();
-  assert(cl.ok && cl.checkpoints.length === 2 && cl.loras.map((x) => x.name).includes('Characters\\odile_face.safetensors'), 'lists() parses the old combo shape and the new ["COMBO",{options}] shape');
+  assert(cl.ok && cl.checkpoints.length === 3 && cl.loras.map((x) => x.name).includes('Characters\\odile_face.safetensors'), 'lists() parses the old combo shape and the new ["COMBO",{options}] shape');
   assert(cl.samplers.includes('dpmpp_2m') && cl.schedulers.includes('karras') && cl.vaes.includes('vae-ft-mse-840000.safetensors') && cl.embeddings[0].name === 'easynegative', 'samplers, schedulers, VAEs, embeddings from /object_info + /embeddings');
   g = await ip.generate('portrait of odile <lora:ink_style:0.5>', { negativePrompt: 'blurry', loras: [{ name: 'odile_face', weight: 0.8 }], checkpoint: 'dreamshaper_8', vae: 'vae-ft-mse-840000', sampler: 'DPM++ 2M Karras', steps: 22, cfgScale: 6, width: 512, height: 640, seed: -1, batchSize: 2, pollMs: 30 });
   const graph = comfy.state.lastGraph;

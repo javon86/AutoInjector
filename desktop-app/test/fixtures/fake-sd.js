@@ -1,9 +1,18 @@
 'use strict';
 // fake-sd.js — tiny fake Stable Diffusion servers for the tests:
-//   fakeA1111({ flavor, noApi, oom, slow })  — /sdapi/v1/* like A1111 / Forge / SD.Next
-//   fakeComfy({ slow })                      — /system_stats, /object_info, /prompt, /history, /view, /queue, /interrupt
+//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions })
+//       /sdapi/v1/* like A1111 / Forge / SD.Next — incl. /openapi.json (real field
+//       names, test/fixtures/a1111-openapi.js), options get/set, upscalers, latent
+//       modes, prompt-styles, scripts + script-info, extra-single-image, skip,
+//       refresh-*, memory, and the ControlNet + ADetailer extension routes
+//   fakeComfy({ slow, failWith, aux })
+//       /system_stats, /object_info (all + per node; unknown → {}), /prompt (refuses
+//       unknown node types, dangling links, missing uploads), /history, /view,
+//       /queue, /interrupt, /upload/image (multipart), /free. aux: true adds
+//       comfyui_controlnet_aux's AIO_Preprocessor.
 // Each resolves { server, port, base, seen, state, close() }.
 const http = require('http');
+const { openapi: makeOpenapi } = require('./a1111-openapi');
 
 // A real (valid) 1x1 PNG, built here so its chunks and CRCs are right.
 function makePng() {
@@ -21,25 +30,64 @@ function send(res, code, body, type) {
   res.writeHead(code, { 'Content-Type': type || (isBuf ? 'image/png' : typeof body === 'string' ? 'text/html' : 'application/json') });
   res.end(isBuf || typeof body === 'string' ? body : JSON.stringify(body));
 }
-function readBody(req) { return new Promise((r) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { r(b ? JSON.parse(b) : {}); } catch { r({ __raw: b }); } }); }); }
+function readBody(req) {
+  return new Promise((r) => {
+    const chunks = []; req.on('data', (c) => chunks.push(c));
+    req.on('end', () => { const buf = Buffer.concat(chunks); const b = buf.toString('utf8'); try { r(b ? JSON.parse(b) : {}); } catch { r({ __raw: buf.toString('latin1'), __buf: buf }); } });
+  });
+}
+// Minimal multipart/form-data reader: { fields, file: { name, data } }.
+function parseMultipart(raw, buf, contentType) {
+  const m = String(contentType || '').match(/boundary=(.+)$/);
+  const out = { fields: {}, file: null };
+  if (!m) return out;
+  const parts = raw.split(`--${m[1]}`);
+  for (const part of parts) {
+    const hm = part.match(/Content-Disposition: form-data; name="([^"]+)"(?:; filename="([^"]+)")?/);
+    if (!hm) continue;
+    const idx = part.indexOf('\r\n\r\n');
+    const body = part.slice(idx + 4).replace(/\r\n$/, '');
+    if (hm[2]) out.file = { name: hm[2], size: Buffer.from(body, 'latin1').length, data: Buffer.from(body, 'latin1') };
+    else out.fields[hm[1]] = body;
+  }
+  return out;
+}
 function listen(server, port) { return new Promise((r) => server.listen(port || 0, '127.0.0.1', () => r(server.address().port))); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fakeA1111(opts = {}) {
   const seen = [];
-  const state = { interrupted: false, running: false, lastTxt2img: null };
+  const state = { interrupted: false, running: false, lastTxt2img: null, lastExtras: null, skipped: false, refreshed: [], optionsSet: [],
+    options: Object.assign({ sd_model_checkpoint: 'dreamshaper_8.safetensors [879db523c3]', sd_vae: 'Automatic', CLIP_stop_at_last_layers: 1, samples_format: 'png', jpeg_quality: 80, enable_pnginfo: true, eta_noise_seed_delta: 0 }, opts.flavor === 'forge' ? { forge_preset: 'sd', forge_additional_modules: [] } : {}) };
+  const ext = opts.noExtensions !== true;
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const body = req.method === 'POST' ? await readBody(req) : null;
-    seen.push({ method: req.method, path: u.pathname, body });
+    seen.push({ method: req.method, path: u.pathname, body, query: u.search });
     if (u.pathname === '/') return send(res, 200, `<!doctype html><html><head><title>${opts.title || 'Stable Diffusion'}</title><script>window.gradio_config = {"version":"3.41.2"};</script></head><body>gradio</body></html>`);
-    if (u.pathname.startsWith('/sdapi/') && opts.noApi) return send(res, 404, { detail: 'Not Found' });
+    if ((u.pathname.startsWith('/sdapi/') || u.pathname === '/openapi.json') && opts.noApi) return send(res, 404, { detail: 'Not Found' });
+    if (u.pathname === '/openapi.json') return opts.noOpenapi ? send(res, 404, { detail: 'Not Found' }) : send(res, 200, makeOpenapi({ extensions: ext }));
+    if (u.pathname === '/sdapi/v1/options' && req.method === 'POST') { state.optionsSet.push(body); Object.assign(state.options, body); return send(res, 200, null); }
+    if (ext) {
+      if (u.pathname === '/controlnet/model_list') return send(res, 200, { model_list: ['control_v11p_sd15_canny [d14c016b]', 'control_v11f1p_sd15_depth [cfd03158]'] });
+      if (u.pathname === '/controlnet/module_list') return send(res, 200, { module_list: ['none', 'canny', 'depth_midas', 'openpose'], module_detail: {} });
+      if (u.pathname === '/adetailer/v1/ad_model') return send(res, 200, { ad_model: ['face_yolov8n.pt', 'hand_yolov8n.pt', 'person_yolov8n-seg.pt'] });
+    }
     switch (u.pathname) {
+      case '/sdapi/v1/upscalers': return send(res, 200, [{ name: 'None', model_name: null, scale: 4 }, { name: 'Lanczos', model_name: null, scale: 4 }, { name: 'R-ESRGAN 4x+', model_name: 'RealESRGAN_x4plus', scale: 4 }, { name: '4x-UltraSharp', model_name: '4x-UltraSharp', scale: 4 }]);
+      case '/sdapi/v1/latent-upscale-modes': return send(res, 200, [{ name: 'Latent' }, { name: 'Latent (antialiased)' }, { name: 'Latent (bicubic)' }, { name: 'Latent (nearest-exact)' }]);
+      case '/sdapi/v1/prompt-styles': return send(res, 200, [{ name: 'Cinematic', prompt: 'cinematic still, {prompt}', negative_prompt: 'cartoon' }, { name: 'Oil painting', prompt: '{prompt}, oil on canvas', negative_prompt: '' }]);
+      case '/sdapi/v1/scripts': return send(res, 200, { txt2img: ['prompt matrix', 'prompts from file or textbox', 'x/y/z plot', 'controlnet', 'adetailer'], img2img: ['img2img alternative test', 'loopback', 'sd upscale', 'x/y/z plot'] });
+      case '/sdapi/v1/script-info': return send(res, 200, [{ name: 'x/y/z plot', is_alwayson: false, is_img2img: false, args: [{ label: 'X type', value: 'Nothing', minimum: null, maximum: null, step: null, choices: ['Nothing', 'Seed', 'Steps', 'CFG Scale'] }, { label: 'X values', value: '' }] }, { name: 'adetailer', is_alwayson: true, is_img2img: false, args: [] }]);
+      case '/sdapi/v1/extra-single-image': state.lastExtras = body; return send(res, 200, { image: PNG_B64, html_info: '<p>Postprocess upscale by: 2</p>' });
+      case '/sdapi/v1/skip': state.skipped = true; return send(res, 200, null);
+      case '/sdapi/v1/refresh-checkpoints': case '/sdapi/v1/refresh-loras': case '/sdapi/v1/refresh-vae': case '/sdapi/v1/refresh-embeddings': state.refreshed.push(u.pathname.split('/').pop()); return send(res, 200, null);
+      case '/sdapi/v1/memory': return send(res, 200, { ram: { free: 8e9, used: 8e9, total: 16e9 }, cuda: { system: { free: 6e9, used: 6e9, total: 12e9 }, active: {}, allocated: {} } });
       case '/sdapi/v1/sd-models': return send(res, 200, [
         { title: 'dreamshaper_8.safetensors [879db523c3]', model_name: 'dreamshaper_8', hash: '879db523c3', filename: opts.ckptFile || '/models/Stable-diffusion/dreamshaper_8.safetensors' },
         { title: 'juggernautXL_v9.safetensors [c9e3e68f89]', model_name: 'juggernautXL_v9', hash: 'c9e3e68f89', filename: '/models/Stable-diffusion/juggernautXL_v9.safetensors' },
       ]);
-      case '/sdapi/v1/options': return send(res, 200, Object.assign({ sd_model_checkpoint: 'dreamshaper_8.safetensors [879db523c3]', sd_vae: 'Automatic' }, opts.flavor === 'forge' ? { forge_preset: 'sd', forge_additional_modules: [] } : {}));
+      case '/sdapi/v1/options': return send(res, 200, state.options);
       case '/sdapi/v1/cmd-flags': return send(res, 200, { api: true, listen: false });
       case '/sdapi/v1/version': return opts.flavor === 'sdnext' ? send(res, 200, { app: 'sd.next', updated: '2025-01-01' }) : send(res, 404, { detail: 'Not Found' });
       case '/sdapi/v1/loras': return send(res, 200, [
@@ -54,7 +102,7 @@ async function fakeA1111(opts = {}) {
       case '/sdapi/v1/interrupt': state.interrupted = true; return send(res, 200, {});
       case '/sdapi/v1/txt2img':
       case '/sdapi/v1/img2img': {
-        state.lastTxt2img = body;
+        state.lastTxt2img = body; state.lastPath = u.pathname;
         if (opts.oom) return send(res, 500, { error: 'OutOfMemoryError', detail: 'CUDA out of memory. Tried to allocate 2.00 GiB', body: '', errors: '' });
         if (opts.slow) { state.running = true; const t0 = Date.now(); while (!state.interrupted && Date.now() - t0 < 5000) await sleep(40); state.running = false; }
         const n = (body.batch_size || 1) * (body.n_iter || 1);
@@ -68,29 +116,57 @@ async function fakeA1111(opts = {}) {
   return { server, port, base: `http://127.0.0.1:${port}`, seen, state, close: () => new Promise((r) => server.close(r)) };
 }
 
+// The node types the fake ComfyUI knows (a slice of /object_info).
+function comfyNodes(CKPTS, LORAS, opts) {
+  const req = (o) => ({ input: { required: o }, output: [], category: 'x' });
+  const n = {
+    CheckpointLoaderSimple: req({ ckpt_name: [CKPTS, { tooltip: 'x' }] }),
+    LoraLoader: req({ model: ['MODEL'], clip: ['CLIP'], lora_name: ['COMBO', { options: LORAS }], strength_model: ['FLOAT', {}], strength_clip: ['FLOAT', {}] }),
+    VAELoader: req({ vae_name: [['vae-ft-mse-840000.safetensors'], {}] }),
+    KSampler: req({ sampler_name: [['euler', 'euler_ancestral', 'dpmpp_2m'], {}], scheduler: [['normal', 'karras', 'simple'], {}] }),
+    KSamplerAdvanced: req({ sampler_name: [['euler', 'euler_ancestral', 'dpmpp_2m'], {}], scheduler: [['normal', 'karras', 'simple'], {}] }),
+    CLIPTextEncode: req({ text: ['STRING', {}], clip: ['CLIP'] }), CLIPSetLastLayer: req({ clip: ['CLIP'], stop_at_clip_layer: ['INT', {}] }),
+    EmptyLatentImage: req({}), VAEDecode: req({}), VAEEncode: req({}), VAEEncodeForInpaint: req({}), SetLatentNoiseMask: req({}),
+    SaveImage: Object.assign(req({}), { output_node: true }), PreviewImage: Object.assign(req({}), { output_node: true }),
+    LoadImage: req({ image: [['example.png'], { image_upload: true }] }), LoadImageMask: req({ image: [['example.png'], {}], channel: [['alpha', 'red', 'green', 'blue'], {}] }),
+    MaskToImage: req({}), ImageToMask: req({}), InvertMask: req({}), ImageScale: req({}), ImageScaleBy: req({}), LatentUpscale: req({}), LatentUpscaleBy: req({}), RepeatLatentBatch: req({}),
+    UpscaleModelLoader: req({ model_name: [['4x-UltraSharp.pth', 'RealESRGAN_x2plus.pth'], {}] }), ImageUpscaleWithModel: req({}),
+    ControlNetLoader: req({ control_net_name: [['control_v11p_sd15_canny.pth', 'control_v11f1p_sd15_depth.pth'], {}] }), ControlNetApplyAdvanced: req({}),
+  };
+  if (opts.aux) n.AIO_Preprocessor = req({ image: ['IMAGE'], preprocessor: [['none', 'CannyEdgePreprocessor', 'DepthAnythingPreprocessor', 'OpenposePreprocessor'], {}], resolution: ['INT', {}] });
+  return n;
+}
+
 async function fakeComfy(opts = {}) {
   const seen = [];
-  const state = { prompts: {}, polls: 0, interrupted: false, deleted: [], lastGraph: null };
-  const CKPTS = ['sd15/dreamshaper_8.safetensors', 'juggernautXL_v9.safetensors'];
+  const state = { prompts: {}, polls: 0, interrupted: false, deleted: [], lastGraph: null, uploads: [], freed: null };
+  const CKPTS = ['sd15/dreamshaper_8.safetensors', 'juggernautXL_v9.safetensors', 'sdxl_refiner_1.0.safetensors'];
   const LORAS = ['Characters\\odile_face.safetensors', 'ink_style.safetensors'];
+  const NODES = comfyNodes(CKPTS, LORAS, opts);
+  const reject = (res, id, cls, type, message, details) => send(res, 400, { error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation', details: '' }, node_errors: { [id]: { class_type: cls, errors: [{ type, message, details }] } } });
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const body = req.method === 'POST' ? await readBody(req) : null;
     seen.push({ method: req.method, path: u.pathname, body, query: u.search });
     if (u.pathname === '/') return send(res, 200, '<!doctype html><html><head><title>ComfyUI</title></head><body></body></html>');
-    if (u.pathname === '/system_stats') return send(res, 200, { system: { os: 'nt', comfyui_version: '0.3.10', python_version: '3.11' }, devices: [{ name: 'cuda:0 NVIDIA GeForce RTX 4070', type: 'cuda' }] });
-    if (u.pathname === '/object_info/CheckpointLoaderSimple') return send(res, 200, { CheckpointLoaderSimple: { input: { required: { ckpt_name: [CKPTS, { tooltip: 'x' }] } } } });
-    if (u.pathname === '/object_info/LoraLoader') return send(res, 200, { LoraLoader: { input: { required: { model: ['MODEL'], clip: ['CLIP'], lora_name: ['COMBO', { options: LORAS }], strength_model: ['FLOAT', {}], strength_clip: ['FLOAT', {}] } } } });
-    if (u.pathname === '/object_info/VAELoader') return send(res, 200, { VAELoader: { input: { required: { vae_name: [['vae-ft-mse-840000.safetensors'], {}] } } } });
-    if (u.pathname === '/object_info/KSampler') return send(res, 200, { KSampler: { input: { required: { sampler_name: [['euler', 'euler_ancestral', 'dpmpp_2m'], {}], scheduler: [['normal', 'karras', 'simple'], {}] } } } });
+    if (u.pathname === '/system_stats') return send(res, 200, { system: { os: 'nt', comfyui_version: '0.3.10', python_version: '3.11', ram_total: 32e9, ram_free: 20e9 }, devices: [{ name: 'cuda:0 NVIDIA GeForce RTX 4070', type: 'cuda', vram_total: 12e9, vram_free: 9e9 }] });
+    if (u.pathname === '/object_info') return send(res, 200, NODES);
+    if (u.pathname.startsWith('/object_info/')) { const nm = decodeURIComponent(u.pathname.slice('/object_info/'.length)); return send(res, 200, NODES[nm] ? { [nm]: NODES[nm] } : {}); }
     if (u.pathname === '/embeddings') return send(res, 200, ['easynegative']);
+    if (u.pathname === '/upload/image' && req.method === 'POST') {
+      const mp = parseMultipart(body.__raw || '', body.__buf, req.headers['content-type']);
+      if (!mp.file || !mp.file.size) return send(res, 400, { error: 'no image' });
+      state.uploads.push({ name: mp.file.name, size: mp.file.size, type: mp.fields.type, overwrite: mp.fields.overwrite, data: mp.file.data });
+      return send(res, 200, { name: mp.file.name, subfolder: mp.fields.subfolder || '', type: mp.fields.type || 'input' });
+    }
     if (u.pathname === '/prompt' && req.method === 'POST') {
       const g = body.prompt || {};
       state.lastGraph = g;
       for (const [id, n] of Object.entries(g)) {
-        if (n.class_type === 'CheckpointLoaderSimple' && !CKPTS.includes(n.inputs.ckpt_name)) {
-          return send(res, 400, { error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation', details: '' }, node_errors: { [id]: { class_type: 'CheckpointLoaderSimple', errors: [{ type: 'value_not_in_list', message: 'Value not in list', details: `ckpt_name: '${n.inputs.ckpt_name}' not in ${JSON.stringify(CKPTS)}` }] } } });
-        }
+        if (!NODES[n.class_type]) return send(res, 400, { error: { type: 'invalid_prompt', message: `Cannot execute because node ${n.class_type} does not exist.`, details: `Node ID '#${id}'` }, node_errors: {} });
+        for (const [k, v] of Object.entries(n.inputs || {})) if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && Number.isInteger(v[1]) && !g[v[0]]) return reject(res, id, n.class_type, 'invalid_link', 'Linked node missing', `${k} -> ${v[0]}`);
+        if (n.class_type === 'CheckpointLoaderSimple' && !CKPTS.includes(n.inputs.ckpt_name)) return reject(res, id, 'CheckpointLoaderSimple', 'value_not_in_list', 'Value not in list', `ckpt_name: '${n.inputs.ckpt_name}' not in ${JSON.stringify(CKPTS)}`);
+        if ((n.class_type === 'LoadImage' || n.class_type === 'LoadImageMask') && n.inputs.image !== 'example.png' && !state.uploads.some((x) => x.name === n.inputs.image)) return reject(res, id, n.class_type, 'custom_validation_failed', 'Invalid image file', `image - Invalid image file: ${n.inputs.image}`);
       }
       const id = `p${Object.keys(state.prompts).length + 1}`;
       state.prompts[id] = { graph: g, polls: 0 };
@@ -104,13 +180,18 @@ async function fakeComfy(opts = {}) {
       if (state.interrupted) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_start', {}], ['execution_interrupted', { prompt_id: id }]] } } });
       if (opts.failWith) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: 'KSampler', exception_message: opts.failWith }]] } } });
       if (opts.slow ? true : p.polls < 2) return send(res, 200, {});
-      const batch = (Object.values(p.graph).find((n) => n.class_type === 'EmptyLatentImage') || { inputs: { batch_size: 1 } }).inputs.batch_size;
-      return send(res, 200, { [id]: { outputs: { 9: { images: Array.from({ length: batch }, (_, i) => ({ filename: `AutoInjector_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } }, status: { status_str: 'success', completed: true, messages: [] } } });
+      const nodes = Object.values(p.graph);
+      const lat = nodes.find((n) => n.class_type === 'EmptyLatentImage');
+      const rep = nodes.find((n) => n.class_type === 'RepeatLatentBatch');
+      const batch = lat ? lat.inputs.batch_size : rep ? rep.inputs.amount : 1;
+      const outId = (Object.entries(p.graph).find(([, n]) => n.class_type === 'SaveImage') || ['9'])[0];
+      return send(res, 200, { [id]: { outputs: { [outId]: { images: Array.from({ length: batch }, (_, i) => ({ filename: `AutoInjector_0000${i + 1}_.png`, subfolder: '', type: 'output' })) } }, status: { status_str: 'success', completed: true, messages: [] } } });
     }
     if (u.pathname === '/view') return send(res, 200, PNG);
     if (u.pathname === '/queue' && req.method === 'GET') { const ids = Object.keys(state.prompts); return send(res, 200, { queue_running: ids.length && !state.interrupted ? [[0, ids[ids.length - 1], {}, {}, ['9']]] : [], queue_pending: [] }); }
     if (u.pathname === '/queue' && req.method === 'POST') { state.deleted.push(...((body && body.delete) || [])); return send(res, 200, {}); }
     if (u.pathname === '/interrupt') { state.interrupted = true; return send(res, 200, {}); }
+    if (u.pathname === '/free' && req.method === 'POST') { state.freed = body; return send(res, 200, {}); }
     return send(res, 404, { error: 'not found' });
   });
   const port = await listen(server, opts.port);

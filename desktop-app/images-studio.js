@@ -10,6 +10,11 @@
  *   • 📚 Library: the Model & LoRA library (search, filters, previews, base-model
  *     badges + mismatch warnings, your tags / collections / ★ / weight / notes);
  *   • 🔒 Character locks.
+ *   • the Generate form's collapsible "more settings": Hires fix, Refiner,
+ *     img2img / Inpaint (with a mask brush), ControlNet units, ADetailer,
+ *     Upscale, Advanced (clip skip, restore faces, tiling, styles, scripts,
+ *     override settings, extra fields JSON, read/set any settings-menu option),
+ *     ComfyUI workflow picker. All off by default — the plain form is unchanged.
  * Talks only to window.api.sd (preload.js). If that is missing the tab says so.
  */
 (function () {
@@ -20,6 +25,7 @@
   const st = {
     connected: false, status: null, lists: null, loras: [], locks: [], lib: null, libSel: null, lockSel: null,
     chips: [], generating: false, pollTimer: null, lastSeed: null, current: null, libItemsById: new Map(), loaded: false,
+    extras: null, i2i: null, maskDirty: false, cnUnits: [],
   };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -137,7 +143,9 @@
     fillSelect('sd-lk-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), null, '(whatever is chosen)');
     st.loras = l.loras;
     const dl = $('sd-lk-lora-names'); if (dl) { dl.textContent = ''; for (const x of l.loras) { const o = document.createElement('option'); o.value = `${x.alias || x.name}:0.8`; dl.appendChild(o); } }
+    fillSelect('sd-rf-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), null, '(choose)');
     checkCompat();
+    await loadExtras();
   }
 
   $('btn-sd-find').onclick = find;
@@ -169,6 +177,220 @@
       characterLock: $('sd-lock-pick').value || undefined,
     };
   }
+  // The collapsible sections → advanced request fields. Throws Error(message) on bad JSON.
+  function advancedRequest() {
+    const num = (id) => { const v = $(id).value; return v === '' ? undefined : Number(v); };
+    const json = (id, label, want) => {
+      const t = $(id).value.trim(); if (!t) return undefined;
+      let v; try { v = JSON.parse(t); } catch (e) { throw new Error(`${label}: that isn't valid JSON (${e.message}).`); }
+      if (want === 'array' ? !Array.isArray(v) : (!v || typeof v !== 'object' || Array.isArray(v))) throw new Error(`${label} must be ${want === 'array' ? 'a JSON list [ … ]' : 'a JSON object { … }'}.`);
+      return v;
+    };
+    const a1111 = !st.status || st.status.backend !== 'comfy';
+    const out = {};
+    if ($('sd-hr-on').checked) out.hires = { scale: num('sd-hr-scale'), upscaler: $('sd-hr-upscaler').value || undefined, secondPassSteps: num('sd-hr-steps'), denoise: num('sd-hr-denoise') };
+    if ($('sd-rf-on').checked && $('sd-rf-checkpoint').value) out.refiner = { checkpoint: $('sd-rf-checkpoint').value, switchAt: num('sd-rf-switch') };
+    const mode = $('sd-i2i-mode').value;
+    if (mode) {
+      if (!st.i2i) throw new Error('Choose the start picture first (img2img / Inpaint → Choose file, or Use result).');
+      out.initImage = st.i2i.path || st.i2i.dataUrl;
+      out.denoise = num('sd-i2i-denoise');
+      if ($('sd-i2i-resize').value) out.resizeMode = $('sd-i2i-resize').value;
+      if (mode === 'inpaint') {
+        if (!st.maskDirty) throw new Error('Brush over the part to repaint first (img2img / Inpaint → the picture).');
+        out.mask = maskDataUrl();
+        out.inpaint = { fill: $('sd-ip-fill').value, maskBlur: num('sd-ip-blur'), invertMask: $('sd-ip-invert').checked || undefined };
+        if ($('sd-ip-only').checked) { out.inpaint.onlyMasked = true; out.inpaint.padding = num('sd-ip-pad'); }
+      }
+    }
+    const units = st.cnUnits.filter((u) => u.image || out.initImage).map((u) => ({ image: u.image ? (u.image.path || u.image.dataUrl) : undefined, module: u.el.querySelector('.cn-module').value || 'none', model: u.el.querySelector('.cn-model').value, weight: Number(u.el.querySelector('.cn-weight').value), guidanceStart: Number(u.el.querySelector('.cn-start').value), guidanceEnd: Number(u.el.querySelector('.cn-end').value), controlMode: u.el.querySelector('.cn-mode').value, pixelPerfect: u.el.querySelector('.cn-pp').checked }));
+    if (st.cnUnits.length && units.length < st.cnUnits.length) throw new Error('Each ControlNet unit needs a control picture.');
+    if (units.length) out.controlnet = units;
+    if (a1111 && $('sd-ad-on').checked) out.adetailer = [{ model: $('sd-ad-model').value, prompt: $('sd-ad-prompt').value || undefined, confidence: num('sd-ad-conf'), denoise: num('sd-ad-denoise') }];
+    const cs = num('sd-adv-clipskip'); if (cs && cs > 1) out.clipSkip = cs;
+    if (a1111) {
+      if ($('sd-adv-restore').checked) out.restoreFaces = true;
+      if ($('sd-adv-tiling').checked) out.tiling = true;
+      const styles = [...$('sd-adv-styles').selectedOptions].map((o) => o.value); if (styles.length) out.styles = styles;
+      if ($('sd-adv-script').value) out.script = { name: $('sd-adv-script').value, args: json('sd-adv-script-args', 'Script args', 'array') || [] };
+      const ov = json('sd-adv-override', 'Override settings'); if (ov) out.overrideSettings = ov;
+      const ex = json('sd-adv-extra', 'Extra fields'); if (ex) out.extra = ex;
+    }
+    return out;
+  }
+  function updateBadges() {
+    setText('sd-hr-badge', $('sd-hr-on').checked ? `on ×${$('sd-hr-scale').value}` : '');
+    setText('sd-rf-badge', $('sd-rf-on').checked && $('sd-rf-checkpoint').value ? 'on' : '');
+    setText('sd-i2i-badge', $('sd-i2i-mode').value ? $('sd-i2i-mode').value : '');
+    setText('sd-cn-badge', st.cnUnits.length ? `${st.cnUnits.length} unit${st.cnUnits.length > 1 ? 's' : ''}` : '');
+    setText('sd-ad-badge', $('sd-ad-on').checked ? 'on' : '');
+    const adv = [$('sd-adv-clipskip').value > 1 ? `clip skip ${$('sd-adv-clipskip').value}` : '', $('sd-adv-restore').checked ? 'faces' : '', $('sd-adv-tiling').checked ? 'tiling' : '', $('sd-adv-styles').selectedOptions.length ? 'styles' : '', $('sd-adv-script').value ? 'script' : '', $('sd-adv-override').value.trim() ? 'override' : '', $('sd-adv-extra').value.trim() ? 'extra' : ''].filter(Boolean);
+    setText('sd-adv-badge', adv.join(' · '));
+  }
+  for (const id of ['sd-hr-on', 'sd-hr-scale', 'sd-rf-on', 'sd-rf-checkpoint', 'sd-ad-on', 'sd-adv-clipskip', 'sd-adv-restore', 'sd-adv-tiling', 'sd-adv-styles', 'sd-adv-script', 'sd-adv-override', 'sd-adv-extra']) { const e = $(id); if (e) { e.addEventListener('change', updateBadges); e.addEventListener('input', updateBadges); } }
+
+  // ------------------------------------------------------------ advanced lists + backend notes
+  async function loadExtras() {
+    const x = await call('extras');
+    if (!x || !x.ok) return;
+    st.extras = x;
+    const comfy = x.backend === 'comfy';
+    for (const e of document.querySelectorAll('#sd-advanced [data-backend]')) e.hidden = e.dataset.backend !== x.backend;
+    fillSelect('sd-hr-upscaler', x.upscalers.filter((u) => !/^latent$/i.test(u)), null, 'Latent');
+    fillSelect('sd-up-upscaler', comfy ? (x.upscaleModels.length ? x.upscaleModels : ['lanczos']).concat(x.upscaleModels.length ? ['lanczos'] : []) : x.upscaleModels.filter((u) => !/^none$/i.test(u)), null, '(default)');
+    if (x.adetailer) fillSelect('sd-ad-model', x.adetailer.models, $('sd-ad-model').value || 'face_yolov8n.pt', '(choose)');
+    setText('sd-ad-note', x.adetailer ? '' : 'ADetailer isn\'t installed in this WebUI (Extensions → Available → ADetailer).');
+    const sty = $('sd-adv-styles'); sty.textContent = ''; for (const n of x.styles) { const o = document.createElement('option'); o.value = n; o.textContent = n; sty.appendChild(o); }
+    fillSelect('sd-adv-script', x.scripts ? x.scripts.txt2img : [], null, 'None');
+    const dl = $('sd-opt-keys'); dl.textContent = ''; for (const k of x.optionKeys) { const o = document.createElement('option'); o.value = k; dl.appendChild(o); }
+    fillSelect('sd-wf-pick', x.workflows.map((w) => ({ value: w.id, label: w.name })), null, x.workflows.length ? '(choose)' : '(none saved yet)');
+    renderWfParams();
+    setText('sd-cn-note', x.controlnet ? (comfy && x.controlnet.modules.length <= 1 ? 'ComfyUI: use an already-processed control picture (preprocessor "none"), or install comfyui_controlnet_aux for preprocessors.' : '') : (comfy ? 'This ComfyUI has no ControlNet models (models/controlnet).' : 'ControlNet isn\'t installed in this WebUI (Forge has it built in; A1111: install sd-webui-controlnet).'));
+    $('btn-sd-cn-add').disabled = !x.controlnet;
+    for (const u of st.cnUnits) fillUnitLists(u);
+    setText('sd-i2i-note', comfy ? 'ComfyUI: “only masked” is not available; mask blur grows the mask.' : '');
+  }
+
+  // ------------------------------------------------------------ img2img / inpaint + the mask brush
+  function setI2i(img) {
+    st.i2i = img;
+    const im = $('sd-i2i-img');
+    $('sd-mask-wrap').hidden = !img;
+    if (!img) return;
+    im.onload = () => {
+      const c = $('sd-mask-canvas');
+      c.width = im.naturalWidth || 512; c.height = im.naturalHeight || 512;
+      clearMask();
+    };
+    im.src = img.url || img.dataUrl;
+    updateI2iMode();
+  }
+  function ctx2d() { const c = $('sd-mask-canvas'); try { return c.getContext ? c.getContext('2d') : null; } catch (_) { return null; } }
+  function clearMask() { const g = ctx2d(); if (g) g.clearRect(0, 0, $('sd-mask-canvas').width, $('sd-mask-canvas').height); st.maskDirty = false; }
+  // White strokes on black, the size of the picture — what A1111 and ComfyUI expect.
+  function maskDataUrl() {
+    const c = $('sd-mask-canvas');
+    const out = document.createElement('canvas'); out.width = c.width; out.height = c.height;
+    const g = out.getContext && out.getContext('2d');
+    if (!g) return c.toDataURL('image/png');
+    g.fillStyle = '#000'; g.fillRect(0, 0, out.width, out.height); g.drawImage(c, 0, 0);
+    return out.toDataURL('image/png');
+  }
+  function updateI2iMode() {
+    const m = $('sd-i2i-mode').value;
+    $('sd-inpaint-opts').hidden = m !== 'inpaint';
+    $('sd-mask-tools').hidden = m !== 'inpaint' || !st.i2i;
+    $('sd-mask-canvas').style.display = m === 'inpaint' ? '' : 'none';
+    $('btn-sd-generate').textContent = m === 'inpaint' ? '🎨 Inpaint' : m === 'img2img' ? '🎨 Generate (img2img)' : '🎨 Generate';
+    updateBadges();
+  }
+  $('sd-i2i-mode').onchange = updateI2iMode;
+  $('btn-sd-i2i-current').onclick = () => { if (st.current && st.current.path) setI2i({ path: st.current.path, url: st.current.url }); else msg('Make or pick a picture first (it shows under Result).'); };
+  function readFile(input, cb) {
+    const f = input.files && input.files[0]; if (!f) return;
+    const fr = new FileReader(); fr.onload = () => cb({ dataUrl: String(fr.result), name: f.name }); fr.readAsDataURL(f);
+  }
+  $('sd-i2i-file').onchange = (e) => readFile(e.target, (img) => setI2i(img));
+  (function brush() {
+    const c = $('sd-mask-canvas'); let down = false; let lastPt = null;
+    const pt = (e) => { const r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) * (c.width / (r.width || 1)), y: (e.clientY - r.top) * (c.height / (r.height || 1)) }; };
+    const draw = (p) => {
+      const g = ctx2d(); if (!g) return;
+      const r = c.getBoundingClientRect();
+      const size = Number($('sd-mask-brush').value) * (c.width / (r.width || c.width || 1));
+      g.globalCompositeOperation = $('sd-mask-erase').checked ? 'destination-out' : 'source-over';
+      g.strokeStyle = '#fff'; g.fillStyle = '#fff'; g.lineWidth = size; g.lineCap = 'round'; g.lineJoin = 'round';
+      g.beginPath(); if (lastPt) { g.moveTo(lastPt.x, lastPt.y); g.lineTo(p.x, p.y); g.stroke(); } else { g.arc(p.x, p.y, size / 2, 0, Math.PI * 2); g.fill(); }
+      lastPt = p; if (!$('sd-mask-erase').checked) st.maskDirty = true;
+    };
+    c.addEventListener('pointerdown', (e) => { down = true; lastPt = null; try { c.setPointerCapture(e.pointerId); } catch (_) {} draw(pt(e)); });
+    c.addEventListener('pointermove', (e) => { if (down) draw(pt(e)); });
+    const up = () => { down = false; lastPt = null; };
+    c.addEventListener('pointerup', up); c.addEventListener('pointerleave', up); c.addEventListener('pointercancel', up);
+  })();
+  $('btn-sd-mask-clear').onclick = clearMask;
+
+  // ------------------------------------------------------------ ControlNet units
+  function fillUnitLists(u) {
+    const cn = st.extras && st.extras.controlnet;
+    const mod = u.el.querySelector('.cn-module'); const mdl = u.el.querySelector('.cn-model');
+    const keepM = mod.value; const keepD = mdl.value;
+    mod.textContent = ''; for (const n of (cn ? cn.modules : ['none'])) { const o = document.createElement('option'); o.value = n; o.textContent = n; mod.appendChild(o); }
+    mdl.textContent = ''; for (const n of (cn ? cn.models : [])) { const o = document.createElement('option'); o.value = n; o.textContent = n; mdl.appendChild(o); }
+    if ([...mod.options].some((o) => o.value === keepM)) mod.value = keepM;
+    if ([...mdl.options].some((o) => o.value === keepD)) mdl.value = keepD;
+    u.el.querySelector('.cn-mode').disabled = !!(st.extras && st.extras.backend === 'comfy');
+  }
+  function addUnit() {
+    const el = document.createElement('div'); el.className = 'sd-cn-unit';
+    el.innerHTML = `<div class="sd-row"><input type="file" class="cn-file" accept="image/png,image/jpeg,image/webp" aria-label="Control picture"><button class="sd-fixed cn-current" title="Use the picture under Result">Use result</button><button class="sd-fixed cn-remove" title="Remove this unit" aria-label="Remove this unit">×</button></div>
+      <span class="sd-small cn-img">no control picture yet${st.i2i ? ' — img2img picture is used' : ''}</span>
+      <div class="sd-row"><div><label class="sd-l">Preprocessor</label><select class="cn-module"></select></div><div><label class="sd-l">Model</label><select class="cn-model"></select></div></div>
+      <div class="sd-row"><div><label class="sd-l">Weight</label><input type="number" class="cn-weight" min="0" max="2" step="0.05" value="1"></div><div><label class="sd-l">Start</label><input type="number" class="cn-start" min="0" max="1" step="0.05" value="0"></div><div><label class="sd-l">End</label><input type="number" class="cn-end" min="0" max="1" step="0.05" value="1"></div></div>
+      <div class="sd-row"><div><label class="sd-l">Control mode</label><select class="cn-mode"><option>Balanced</option><option>My prompt is more important</option><option>ControlNet is more important</option></select></div><label class="sd-fixed" style="font-size:12px;"><input type="checkbox" class="cn-pp"> Pixel perfect</label></div>`;
+    const u = { el, image: null };
+    const setImg = (img) => { u.image = img; el.querySelector('.cn-img').textContent = `control picture: ${img.name || (img.path ? img.path.split(/[\\/]/).pop() : 'set')}`; };
+    el.querySelector('.cn-file').onchange = (e) => readFile(e.target, setImg);
+    el.querySelector('.cn-current').onclick = () => { if (st.current && st.current.path) setImg({ path: st.current.path, name: st.current.path.split(/[\\/]/).pop() }); };
+    el.querySelector('.cn-remove').onclick = () => { st.cnUnits = st.cnUnits.filter((x) => x !== u); el.remove(); updateBadges(); };
+    st.cnUnits.push(u); $('sd-cn-units').appendChild(el); fillUnitLists(u); updateBadges();
+    return u;
+  }
+  $('btn-sd-cn-add').onclick = () => addUnit();
+
+  // ------------------------------------------------------------ upscale / options / workflows
+  $('btn-sd-upscale').onclick = async () => {
+    if (!st.current || !st.current.path || st.generating) return;
+    setBusy(true); msg('⤢ Upscaling…'); startPolling();
+    const r = await call('upscale', { image: st.current.path, upscaler: $('sd-up-upscaler').value || undefined, factor: Number($('sd-up-factor').value) || 2 });
+    setBusy(false);
+    if (!r || !r.ok) { msg(`✖ ${(r && (r.message + (r.hint ? ` ${r.hint}` : ''))) || 'Upscale failed.'}`); return; }
+    msg(`✔ Upscaled picture saved`);
+    showImage({ path: r.images[0].path, url: r.images[0].url, record: r.settings });
+    refreshGallery();
+  };
+  function parseValue(t) { const s = String(t).trim(); try { return JSON.parse(s); } catch (_) { return s; } }
+  $('btn-sd-opt-get').onclick = async () => {
+    const k = $('sd-opt-key').value.trim(); if (!k) { setText('sd-opt-msg', 'Type an option key (the list suggests them).'); return; }
+    const r = await call('optionsGet', [k]);
+    if (!r || !r.ok) { setText('sd-opt-msg', `✖ ${(r && r.message) || 'failed'} ${(r && r.hint) || ''}`); return; }
+    $('sd-opt-value').value = JSON.stringify(r.options[k]); setText('sd-opt-msg', `${k} = ${JSON.stringify(r.options[k])}`);
+  };
+  $('btn-sd-opt-set').onclick = async () => {
+    const k = $('sd-opt-key').value.trim(); if (!k) { setText('sd-opt-msg', 'Type an option key first.'); return; }
+    const r = await call('optionsSet', { [k]: parseValue($('sd-opt-value').value) });
+    setText('sd-opt-msg', r && r.ok ? `✔ ${k} is now ${$('sd-opt-value').value} (saved in your WebUI's settings)` : `✖ ${(r && r.message) || 'failed'} ${(r && r.hint) || ''}`);
+  };
+  function renderWfParams() {
+    const id = $('sd-wf-pick').value;
+    const w = st.extras && st.extras.workflows.find((x) => x.id === id);
+    setText('sd-wf-params-list', w ? `Parameters: ${w.params.join(', ') || '(none — use "<node id>.<input>")'}` : '');
+  }
+  $('sd-wf-pick').onchange = renderWfParams;
+  $('btn-sd-wf-save').onclick = async () => {
+    let wf; try { wf = JSON.parse($('sd-wf-json').value); } catch (e) { setText('sd-wf-msg', `✖ That isn't valid JSON (${e.message}).`); return; }
+    const r = await call('workflowSave', { name: $('sd-wf-name').value.trim(), workflow: wf });
+    if (!r || !r.ok) { setText('sd-wf-msg', `✖ ${(r && r.message) || 'failed'} ${(r && r.hint) || ''}`); return; }
+    setText('sd-wf-msg', `✔ Saved “${r.workflow.name}” — parameters: ${r.workflow.params.join(', ')}`);
+    $('sd-wf-json').value = '';
+    await loadExtras(); $('sd-wf-pick').value = r.workflow.id; renderWfParams();
+  };
+  $('btn-sd-wf-run').onclick = async () => {
+    const id = $('sd-wf-pick').value; if (!id) { setText('sd-wf-msg', 'Choose a saved workflow (or paste one and press Save workflow).'); return; }
+    let params = {};
+    const t = $('sd-wf-params').value.trim();
+    if (t) { try { params = JSON.parse(t); } catch (e) { setText('sd-wf-msg', `✖ Parameters: not valid JSON (${e.message}).`); return; } }
+    const w = st.extras && st.extras.workflows.find((x) => x.id === id);
+    if (params.prompt == null && $('sd-prompt').value.trim() && w && w.params.includes('prompt')) params.prompt = $('sd-prompt').value.trim();
+    if (st.generating) return;
+    setBusy(true); msg('▶ Running the workflow…'); startPolling();
+    const r = await call('workflowRun', { id, params });
+    setBusy(false);
+    if (!r || !r.ok) { msg(`✖ ${(r && (r.message + (r.hint ? ` ${r.hint}` : ''))) || 'The workflow failed.'}`); setText('sd-wf-msg', ''); return; }
+    msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved from the workflow`);
+    if (r.images[0]) showImage({ path: r.images[0].path, url: r.images[0].url, record: r.settings });
+    refreshGallery();
+  };
   function fillForm(rec, keepSeed) {
     if (!rec) return;
     $('sd-prompt').value = rec.prompt || '';
@@ -181,6 +403,14 @@
       e.value = v || '';
     }
     $('sd-lock-pick').value = ''; // the lock's bits are already inside the recorded prompt
+    const h = rec.hires; $('sd-hr-on').checked = !!h;
+    if (h) { if (h.scale != null) $('sd-hr-scale').value = h.scale; if (h.secondPassSteps != null) $('sd-hr-steps').value = h.secondPassSteps; if (h.denoise != null) $('sd-hr-denoise').value = h.denoise; if (h.upscaler && [...$('sd-hr-upscaler').options].some((o) => o.value === h.upscaler)) $('sd-hr-upscaler').value = h.upscaler; }
+    $('sd-rf-on').checked = !!(rec.refiner && rec.refiner.checkpoint);
+    if (rec.refiner && rec.refiner.checkpoint) { if (![...$('sd-rf-checkpoint').options].some((o) => o.value === rec.refiner.checkpoint)) { const o = document.createElement('option'); o.value = rec.refiner.checkpoint; o.textContent = rec.refiner.checkpoint; $('sd-rf-checkpoint').appendChild(o); } $('sd-rf-checkpoint').value = rec.refiner.checkpoint; if (rec.refiner.switchAt != null) $('sd-rf-switch').value = rec.refiner.switchAt; }
+    $('sd-adv-clipskip').value = rec.clipSkip ? String(rec.clipSkip) : '';
+    $('sd-adv-restore').checked = !!rec.restoreFaces; $('sd-adv-tiling').checked = !!rec.tiling;
+    $('sd-ad-on').checked = !!(rec.adetailer && rec.adetailer.length);
+    updateBadges();
     st.chips = (rec.loras || []).map((l) => ({ name: String(l.name).replace(/\\/g, '/').split('/').pop().replace(/\.(safetensors|ckpt|pt)$/i, ''), weight: Number(l.weight) || 0.8 }));
     renderChips(); checkCompat();
     subTab('generate');
@@ -297,18 +527,21 @@
   }
   async function runGenerate(req, isTest) {
     if (st.generating) return;
-    const r0 = req || formRequest();
-    if (!isTest && !String(r0.prompt || '').trim() && !r0.characterLock) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
+    let r0 = req || formRequest();
+    if (!req && !isTest) {
+      try { r0 = Object.assign(r0, advancedRequest()); } catch (e) { msg(`✖ ${e.message}`); return; }
+    }
+    if (!isTest && !String(r0.prompt || '').trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
     if (!st.connected) { msg('Connecting first…'); await find(); if (!st.connected) { msg('No Stable Diffusion app is connected — see the note above.'); return; } }
     setBusy(true);
     $('sd-progress-bar').style.width = '0%';
     msg(isTest ? '🧪 Making a 512×512 test picture… (the first one after starting can take a minute while the model loads)' : '🎨 Making your picture…');
     startPolling();
-    const r = isTest ? await call('test') : await call('generate', r0);
+    const r = isTest ? await call('test') : await call(r0.mask ? 'inpaint' : r0.initImage ? 'img2img' : 'generate', r0);
     setBusy(false);
     $('sd-progress-bar').style.width = r && r.ok ? '100%' : '0%';
     if (!r || !r.ok) {
-      msg(`✖ ${(r && r.message) || (r && r.error) || 'Failed.'}`);
+      msg(`✖ ${(r && r.message) || (r && r.error) || 'Failed.'}${r && r.hint ? `\n${r.hint}` : ''}`);
       if (r && (r.error === 'NO_API' || /--api/.test(r.message || ''))) hint(r.message, 'warn');
       return;
     }
@@ -335,9 +568,12 @@
     if (kv.length) lines.push(kv.join(' · '));
     if (r.loras && r.loras.length) lines.push(`LoRAs: ${r.loras.map((l) => `${l.name} ${l.weight}`).join(', ')}`);
     if (r.characterLock) lines.push(`Character lock: ${r.characterLock.character}`);
+    const extra = [r.hires ? `hires ×${r.hires.scale || 2}${r.hires.upscaler ? ` ${r.hires.upscaler}` : ''}` : '', r.refiner && r.refiner.checkpoint ? `refiner ${r.refiner.checkpoint}` : '', r.initImage ? (r.mask ? 'inpaint' : `img2img ${r.denoise != null ? r.denoise : ''}`) : '', r.controlnet ? `ControlNet ×${r.controlnet.length}` : '', r.adetailer ? 'ADetailer' : '', r.clipSkip ? `clip skip ${r.clipSkip}` : '', r.kind === 'upscale' ? `upscaled ×${r.factor || 2} ${r.upscaler || ''}` : '', r.kind === 'workflow' ? `workflow ${r.workflowName}` : ''].filter(Boolean);
+    if (extra.length) lines.push(extra.join(' · '));
     setText('sd-preview-info', lines.join('\n') || g.name || '');
     for (const b of ['btn-sd-remake', 'btn-sd-variation']) $(b).disabled = !g.record;
     $('btn-sd-showfile').disabled = !g.path;
+    $('btn-sd-upscale').disabled = !g.path;
   }
   $('btn-sd-remake').onclick = () => { if (st.current && st.current.record) { fillForm(st.current.record, true); msg('Settings loaded — press Generate to make it again (same seed = same picture).'); } };
   $('btn-sd-variation').onclick = () => { if (st.current && st.current.record) { fillForm(st.current.record, false); runGenerate(); } };

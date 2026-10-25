@@ -324,7 +324,8 @@ function createServiceBridge(deps) {
         emit('image', { type: 'request', purpose: body.purpose || 'free', characterLock: body.characterLock || null });
         const r = await sdStudio.request(body || {});
         emit('image', { type: 'done', ok: !!(r && r.ok) });
-        const code = r && r.ok ? 200 : (r && (r.error === 'NEED_PROMPT' || r.error === 'NO_LOCK') ? 400 : (r && (r.error === 'NO_ENDPOINT' || r.error === 'IMAGE_DISABLED') ? 503 : 502));
+        const CLIENT = ['NEED_PROMPT', 'NO_LOCK', 'INVALID_PARAM', 'UNKNOWN_VALUE', 'UNKNOWN_FIELD', 'BAD_TYPE', 'BAD_VALUE', 'UNKNOWN_OPTION', 'UNSUPPORTED_ON_BACKEND'];
+        const code = r && r.ok ? 200 : (r && CLIENT.includes(r.error) ? 400 : (r && (r.error === 'NO_ENDPOINT' || r.error === 'IMAGE_DISABLED') ? 503 : 502));
         return reply(res, code, Object.assign({ ok: false }, r || {}));
       }
       if (!sdStudio && (path === '/image/backend' || path === '/image/locks' || path === '/image/request')) {

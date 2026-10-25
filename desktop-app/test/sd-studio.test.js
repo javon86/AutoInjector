@@ -117,6 +117,10 @@ async function main() {
   assert(r.status === 400 && r.json.error === 'NEED_PROMPT', 'empty request → 400 NEED_PROMPT');
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x' }, 'wrong');
   assert(r.status === 401, 'the route needs the bridge token');
+  r = await req(st.port, 'POST', '/image/request', { prompt: 'a ferry', hires: { scale: 2, denoise: 0.4 }, clipSkip: 2 }, TOKEN);
+  assert(r.status === 200 && a.state.lastTxt2img.enable_hr === true && a.state.lastTxt2img.denoising_strength === 0.4 && a.state.lastTxt2img.override_settings.CLIP_stop_at_last_layers === 2, 'POST /image/request accepts the advanced settings (hires fix, clip skip)');
+  r = await req(st.port, 'POST', '/image/request', { prompt: 'x', hires: { upscaler: 'Magic 8x' } }, TOKEN);
+  assert(r.status === 400 && r.json.error === 'UNKNOWN_VALUE' && r.json.field === 'hires.upscaler' && r.json.hint, 'a wrong advanced setting → 400 with the field and a hint');
   await a.close();
   r = await req(st.port, 'POST', '/image/request', { prompt: 'x' }, TOKEN);
   assert(r.status === 502 && /Nothing is answering|closed the connection/.test(r.json.message), 'SD app gone → 502 with a plain message');
