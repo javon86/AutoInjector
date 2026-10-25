@@ -278,6 +278,9 @@ def canon_context(engine, pid: str, branch: str, *, max_approved: int = 80, max_
                 "key_facts": [_fact_line(f) for f in facts if f.get("assertion_type") == "FACT"][:12]})
             for f in pr.protected_facts(data):
                 protected.append(dict(f, source=f"{rec['module_id']}:{rec['record_id']} v{rec['version']}"))
+        elif r.get("stale") or rec["lifecycle"] in ("REJECTED", "SUPERSEDED"):
+            # a draft set aside (BookForge's checks refused it) is not canon: its name is free for the entry made again
+            continue
         elif len(drafts) < max_drafts:
             drafts.append({"module_id": rec["module_id"], "record_id": rec["record_id"],
                            "concept": str(data.get("concept") or "")[:120], "names": names[:4],
@@ -1495,25 +1498,18 @@ class BibleSession:
                 label = self.svc.contracts.operation(op_id)["name"]
                 rows = per[op_id] + [{"section": op_id, "name": "", "role": "", "links": []}] * (n - len(per[op_id]))
                 for row in rows:
-                    seq = sum(1 for k in self.items if self.items[k]["op"] == op_id) + 1
-                    key = f"{op_id}-{seq}"
                     name = str(row.get("name") or "").strip()[:120]
                     dup = name if name and name.lower() in taken_names else None
                     if dup:
                         name = ""
                     elif name:
                         taken_names.add(name.lower())
-                    item = {"key": key, "op": op_id, "name": name or f"{label} {seq}", "placeholder": not name,
-                            "role": str(row.get("role") or "").strip()[:600], "raw_links": list(row.get("links") or []),
-                            "links": [], "status": "pending", "message": "Waiting", "proposal": None, "findings": [],
-                            "removed_refs": [], "error": None, "slot": None, "model": None, "elapsed_ms": None,
-                            "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None}
-                    item["subject_id"] = slugify(item["name"], self.taken_subjects)
+                    key = self._new_item(op_id, name, row.get("role"), run_no, label=label,
+                                         raw_links=list(row.get("links") or []))
+                    item = self.items[key]
                     if dup:
                         item["duplicate_of"] = dup
                         item["message"] = f"“{dup}” is already in the book: the AI makes a different one"
-                    self.items[key] = item
-                    self.order.append(key)
                     new.append(key)
             by_name = {self.items[k]["name"].lower(): k for k in self.order}
             for k in new:
@@ -1525,6 +1521,44 @@ class BibleSession:
                         links.append(tgt)
                 it["links"] = links
             return new
+
+    def _new_item(self, op_id: str, name: str, role, run_no: int, *, label: str | None = None,
+                  raw_links: list | None = None) -> str:
+        label = label or self.svc.contracts.operation(op_id)["name"]
+        seq = sum(1 for k in self.items if self.items[k]["op"] == op_id) + 1
+        key = f"{op_id}-{seq}"
+        item = {"key": key, "op": op_id, "name": name or f"{label} {seq}", "placeholder": not name,
+                "role": str(role or "").strip()[:600], "raw_links": list(raw_links or []),
+                "links": [], "status": "pending", "message": "Waiting", "proposal": None, "findings": [],
+                "removed_refs": [], "error": None, "slot": None, "model": None, "elapsed_ms": None,
+                "created_ref": None, "create_error": None, "run": run_no, "summary": None, "valid": None}
+        if not self.taken_subjects:
+            approved, drafts, _ = canon_context(self.svc.engine, self.project_id, self.branch_id)
+            for r in approved + drafts:
+                self.taken_subjects.update(r.get("subject_ids") or [])
+        item["subject_id"] = slugify(item["name"], self.taken_subjects)
+        self.items[key] = item
+        self.order.append(key)
+        return key
+
+    def add_named(self, op_id: str, name: str, role: str = "") -> str:
+        """One entry with a name that is already decided (the book's main character named in the idea, or an entry
+        BookForge's checks refused that the AI makes again): no world sketch, the name is kept exactly."""
+        with self._lock:
+            key = self._new_item(op_id, str(name).strip()[:120], role, len(self.runs) + 1)
+            self.items[key].pop("raw_links", None)
+            return key
+
+    @staticmethod
+    def refusals(it: dict) -> list[str]:
+        """What BookForge's checks refuse in this entry's proposal (the form, or a fact interval the save refuses)."""
+        if it.get("status") != "done":
+            return []
+        out = [f"{f.get('rule_id')}: {f.get('message')}" for f in it.get("findings") or []
+               if f.get("rule_id") in ("SCHEMA", "FACT_INTERVAL") and f.get("decision") == "FAIL"]
+        if it.get("valid") is False and not out:
+            out = ["SCHEMA: the entry does not fit BookForge's form"]
+        return out
 
     # ------------------------------------------------------------------ one item
     def _generate_item(self, it: dict, slot, note: str | None):

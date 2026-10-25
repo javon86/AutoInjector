@@ -299,6 +299,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Problems to come back to
 
+- **First real test ("The Lamplighter's Last Ferry", Make a book with real web AIs) — the main character was lost.
+  FIXED (2026-10-25), check on the next real run.** The idea named Odile Marsh; the Bible Builder proposed Odile,
+  Tamsin and Corvin; Odile's entry never reached review and the run went on without her (the outline had no POV ID
+  for her → `CANON_UNRESOLVED 'odile-marsh'` / Corvin as POV; editor and scene checker kept asking for her). Causes
+  found (each reproduced with the fake AI, `tests/test_protagonist_guard.py`): (1) a proposal that did not fit the form
+  (`valid: false`) was silently left out of the drafts; (2) a proposal the save refused was only counted ("1 entry could
+  not be saved and was skipped"); (3) an entry VALIDATE refused was set aside and replaced from a NEW world sketch, where
+  the set-aside draft still counted as "name taken", so the AI invented a different person; (4) nothing checked, before
+  the outline, that the main character was approved canon. Fix: (a) refused entries are made again under the same name
+  with BookForge's exact problems (form, save and VALIDATE; at most 2 rounds; what still fails is a ⚠️ event
+  `CANON_ENTRY_REFUSED` naming it); set-aside drafts no longer block their name; (b) after the canon step and before the
+  outline the run checks the main characters (people named in the idea, the Bible Builder's character with sheet role
+  "main", a POV a refused outline needed) and makes any missing one (bounded); if that fails the run stops with
+  `PROTAGONIST_MISSING` naming the character and the refusal reasons; (c) the guided "Make my book" outline step shows
+  ⚠️ for a missing main character with ✨ Make “name” (a draft for the author to approve) or ✔ Approve its waiting draft
+  (`bookforge/protagonist.py`). Limits: names in the idea are found by a heuristic (two or more capitalised words, no
+  place word like Harbour/Ferry/Street, not an existing place or group); a one-word name ("Odile …") is only caught
+  through the Bible Builder's "main" mark or the outline's POV.
+
 - **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
   in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
   "ⓘ written without scene breaks" — only scene-by-scene chapters (long ones) get words/readability per scene. Asking the

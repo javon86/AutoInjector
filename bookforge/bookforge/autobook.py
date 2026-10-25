@@ -48,6 +48,7 @@ from . import h_checks as hc
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
 from . import planned as planned_mod
+from . import protagonist
 from . import scenes as scenes_mod
 from . import story_choices
 from . import story_rules
@@ -1791,8 +1792,11 @@ class AutoBookService(_Runner):
         canon_ops = ("A01", "A04", "A03") + tuple(op for op in run.get("bible_ops") or () if op not in
                                                   ("A01", "A04", "A03"))
         counts = CANON_COUNTS[run["settings"]["length"]]
-        # Entries BookForge's checks refused and set aside, per section, that the Bible Builder must make again.
+        # Entries BookForge's checks refused and set aside, per section, that the Bible Builder must make again
+        # (older runs: a count per section), and by name (the same character made again, told what was refused:
+        # a fresh world sketch would invent a different person, e.g. lose the main character named in the idea).
         remake = run.setdefault("canon_remake", {})
+        redo_named = run.setdefault("canon_redo", [])
         made_missing = False  # the missing sections get one Bible Builder pass per step run (never a loop)
         while True:
             bp = self.bp(run)
@@ -1806,10 +1810,15 @@ class AutoBookService(_Runner):
             want = {} if made_missing else dict(missing or ({} if have else counts))
             for op, n in remake.items():
                 want[op] = max(want.get(op, 0), int(n))
-            if want:
+            for n in redo_named:  # an entry made again by name takes the place of one the sketch would invent
+                if want.get(n["op"]):
+                    want[n["op"]] -= 1
+            want = {op: n for op, n in want.items() if n > 0}
+            if want or redo_named:
                 made_missing = made_missing or bool(missing) or not have
-                self._bible(run, st, want)
+                self._bible(run, st, want, named=redo_named, strict=bool(want))
                 run["canon_remake"] = remake = {}
+                run["canon_redo"] = redo_named = []
                 self.save(run)
                 bp = self.bp(run)
                 have = [r for op in canon_ops for r in bp.heads(op) if not r.get("stale")]
@@ -1833,11 +1842,13 @@ class AutoBookService(_Runner):
                     self._redo_refused(run, st, r["record_id"], f"redo:canon:{r['module_id']}", f"entry “{name}”",
                                        exc)
                     redo = r["module_id"]
+                    redo_named.append({"op": redo, "name": (protagonist.record_names(r) or [name])[0][:120],
+                                       "details": exc.problem.get("details") or []})
                     break
             if redo is None:
                 break
-            remake[redo] = int(remake.get(redo, 0)) + 1
             self.save(run)
+        self._ensure_main(run, st)  # (b) the main character named in the idea / proposed as main is approved canon
         n = len(self.bp(run).approved("A01"))
         st["items"] = [dict(x, state="done") for x in st.get("items") or []]
         st["message"] = f"{n} character(s) and {len(self.bp(run).approved('A04'))} place(s) approved"
@@ -1968,7 +1979,7 @@ class AutoBookService(_Runner):
             item.pop("phase", None)
             self.save(run)
 
-    def _bible(self, run, st, counts):
+    def _bible_session(self, run) -> BibleSession:
         prof = book_profile_brief(self.store, run["project_id"])
         sess = BibleSession(self._assist, run["principal"], run["project_id"], run["branch_id"],
                             prof.get("idea") or prof.get("title") or "a new book", run["settings"].get("slot_id"))
@@ -1981,39 +1992,221 @@ class AutoBookService(_Runner):
             j.on_wait = lambda info: self.on_wait(run, info)
             return j
         sess._job = hooked_job  # type: ignore[method-assign]
+        return sess
+
+    def _bible(self, run, st, counts, named=None, strict: bool = True) -> dict:
+        """The Bible Builder inside a run: a world sketch for ``counts`` plus the ``named`` entries (a name already
+        decided: the main character, or an entry BookForge refused that the AI makes again under the same name).
+        An entry BookForge's checks refuse (its form, or the save) is made again with the exact problems, at most
+        MAX_FIXES times; what still fails is named in an event (never dropped silently). Returns {created, dropped}."""
+        sess = self._bible_session(run)
+        slot = run["settings"].get("slot_id")
         sess.current = {"run": 1, "t0": time.time(), "phase": "Starting"}
-        st["message"] = "The AI is sketching the characters and places"
+        st["message"] = "The AI is sketching the characters and places" if counts else \
+            "The AI is making the " + ", ".join(f"entry “{n['name']}”" for n in named or [])[:200]
         self.save(run)
-        sess._run_sections({"run": 1, "sections": dict(counts), "slot": run["settings"].get("slot_id"),
-                            "guidance": None})
+        if counts:
+            sess._run_sections({"run": 1, "sections": dict(counts), "slot": slot, "guidance": None})
+        notes = {}
+        for n in named or []:
+            self.check(run)
+            key = sess.add_named(n["op"], n["name"], n.get("role") or "")
+            notes[key] = self._named_note(n)
+            sess._generate_item(sess.items[key], slot, notes[key])
         sess.current = None
         self.check(run)  # a pause/cancel during the Bible Builder stops here (items are made again on resume)
+        self._fix_refused_items(run, sess, slot, notes)
         items = [sess.items[k] for k in sess.order]
         errs = [i.get("error") or {} for i in items if i["status"] == "error"]
         run_err = (sess.runs[-1].get("error") if sess.runs else None) or {}
         codes = {e.get("code") for e in errs} | ({run_err.get("code")} if run_err else set())
-        good = [i["key"] for i in items if i["status"] == "done" and i.get("valid") is not False]
+        good = [i["key"] for i in items if i["status"] == "done" and i.get("valid") is not False
+                and not sess.refusals(i)]
         # A main character is required when this pass makes characters; a pass that only makes again a refused
         # place or group needs at least one usable entry.
         need = (lambda k: sess.items[k]["op"] == "A01") if "A01" in counts else (lambda k: True)
+        self._note_mains(run, sess)
         if not any(need(k) for k in good):
             if "TIMEOUT" in codes:
                 raise StepProblem("TIMEOUT", "The AI did not answer in time while making the characters.", TIMEOUT_FIX)
             busy = codes & set(BUSY_CODES)
             if busy:
                 raise StepProblem(sorted(busy)[0], "The AI stayed busy while making the characters.", BUSY_FIX)
-            msg = (run_err.get("message") or (errs[0].get("message") if errs else None) or
-                   "the AI's characters did not fit BookForge's forms")
-            raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
-                              f"The characters could not be made: {msg}", "Press 🔁 Try again.")
-        out = sess.create(good, {})
+            if strict:
+                refused = [sess.refusals(i) for i in items if sess.refusals(i)]
+                msg = (run_err.get("message") or (errs[0].get("message") if errs else None) or
+                       ("BookForge's checks refused them: " + "; ".join(digest(refused[0], 3)) if refused else
+                        "the AI's characters did not fit BookForge's forms"))
+                raise StepProblem(run_err.get("code") or (errs[0].get("code") if errs else None) or "INVALID_INPUT",
+                                  f"The characters could not be made: {msg}", "Press 🔁 Try again.")
+        out = sess.create(good, {}) if good else {"created": [], "errors": []}
+        out = self._fix_create_errors(run, sess, slot, notes, out)
         for c in out["created"]:
             self._made(run, c["ref"])
-        self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Bible Builder)",
-                   slot=sess.runs[-1].get("slot") if sess.runs else None)
-        if out["errors"]:
-            self.event(run, "note", f"{len(out['errors'])} entr(y/ies) could not be saved and were skipped",
-                       code=out["errors"][0].get("code"))
+        if out["created"]:
+            self.event(run, "ai", f"The AI drafted {len(out['created'])} character/place entries (Bible Builder)",
+                       slot=sess.runs[-1].get("slot") if sess.runs else None)
+        made = {c["key"] for c in out["created"]}
+        dropped = {}
+        for it in items:
+            if it["key"] in made or it.get("created_ref"):
+                continue
+            why = sess.refusals(it) or ([f"{it['create_error']['code']}: {it['create_error']['message']}"]
+                                        if it.get("create_error") else []) or \
+                ([f"{(it.get('error') or {}).get('code')}: {(it.get('error') or {}).get('message')}"]
+                 if it.get("error") else ["no usable entry"])
+            dropped[it["key"]] = {"op": it["op"], "name": it["name"], "details": digest(why)}
+            self.event(run, "note", f"⚠️ The entry “{it['name']}” could not be made: BookForge's checks refused it — "
+                       + "; ".join(digest(why, 3))[:300] + ". The run goes on without it"
+                       + (" (BookForge checks the main characters before the outline)." if it["op"] == "A01" else "."),
+                       code="CANON_ENTRY_REFUSED")
+        return {"created": out["created"], "dropped": dropped}
+
+    @staticmethod
+    def _named_note(n: dict) -> str:
+        note = (protagonist.main_note(n["name"], n.get("why") or protagonist.IDEA_WHY) if n.get("main") else
+                f"Make the entry “{n['name']}” again: keep exactly this name and its role in the story.")
+        if n.get("details"):
+            note += (" BookForge's checks refused the earlier entry: " + "; ".join(n["details"][:6])
+                     + ". Fix exactly these problems.")
+        return note
+
+    @staticmethod
+    def _fix_note(base: str | None, probs: list) -> str:
+        return ((base + " ") if base else "") + ("BookForge's checks refused your previous proposal of this entry: "
+                                                 + "; ".join(str(p)[:300] for p in probs[:8]) + ". Keep the same "
+                                                 "name and role and return a corrected complete entry that fixes "
+                                                 "exactly these problems.")
+
+    @staticmethod
+    def _retryable(it: dict) -> list[str]:
+        """An AI answer that failed for a reason the AI can fix (not a timeout, a busy AI or a missing AI)."""
+        e = it.get("error") or {}
+        if it.get("status") != "error" or not e.get("code") or e["code"] in ("TIMEOUT", "CANCELLED",
+                                                                             "CAPABILITY_UNAVAILABLE") \
+                or e["code"] in BUSY_CODES:
+            return []
+        return [f"{e['code']}: {e.get('message') or ''}"]
+
+    def _fix_refused_items(self, run, sess, slot, notes: dict):
+        """(a) Entries whose proposal BookForge refuses are made again with the exact problems (max MAX_FIXES)."""
+        for key in list(sess.order):
+            it = sess.items[key]
+            for n in range(MAX_FIXES):
+                probs = sess.refusals(it) or self._retryable(it)
+                if not probs:
+                    break
+                self.check(run)
+                self.event(run, "fix", f"BookForge's checks refused the proposed entry “{it['name']}”; asked the AI "
+                           f"to make it again ({n + 1} of {MAX_FIXES}): " + "; ".join(digest(probs, 3))[:300],
+                           code="CANON_ENTRY_REFUSED")
+                st_msg = f"The AI is making the entry “{it['name']}” again ({n + 1} of {MAX_FIXES})"
+                run["phase"] = st_msg
+                self.save(run)
+                sess._generate_item(it, slot, self._fix_note(notes.get(key), probs))
+        self.check(run)
+
+    def _fix_create_errors(self, run, sess, slot, notes: dict, out: dict) -> dict:
+        """(a) An entry BookForge refused to save is made again with the save's exact problem (max MAX_FIXES)."""
+        created, errors = list(out.get("created") or []), list(out.get("errors") or [])
+        for n in range(MAX_FIXES):
+            retry = [e for e in errors if e.get("key") in sess.items and e.get("code") != "MISSING_INPUT"]
+            if not retry:
+                break
+            errors = [e for e in errors if e not in retry]
+            again = []
+            for e in retry:
+                it = sess.items[e["key"]]
+                probs = [f"{e.get('code')}: {e.get('message')}" + (f" (at {e['path']})" if e.get("path") else "")]
+                self.check(run)
+                self.event(run, "fix", f"BookForge refused to save the entry “{it['name']}”; asked the AI to make it "
+                           f"again ({n + 1} of {MAX_FIXES}): " + "; ".join(probs)[:300], code="CANON_ENTRY_REFUSED")
+                self.save(run)
+                sess._generate_item(it, slot, self._fix_note(notes.get(e["key"]), probs))
+                left = sess.refusals(it) or self._retryable(it)
+                if it["status"] == "done" and not left:
+                    again.append(e["key"])
+                elif left:
+                    it["create_error"] = dict(key=e["key"], code="CHECKS_REFUSED", message="; ".join(left)[:500])
+                    errors.append(it["create_error"])
+            if again:
+                o2 = sess.create(again, {})
+                created += o2["created"]
+                errors += o2["errors"]
+        self.check(run)
+        return {"created": created, "errors": errors}
+
+    def _note_mains(self, run, sess):
+        """Remember the characters the Bible Builder proposed as main (character sheet role "main"), made or not."""
+        mains = run.setdefault("main_names", [])
+        for k in sess.order:
+            it = sess.items[k]
+            sheet = ((it.get("companion") or {}).get("character_sheet") or {})
+            if it["op"] == "A01" and sheet.get("role") == "main" and not it.get("placeholder") \
+                    and it["name"] not in mains:
+                mains.append(it["name"][:120])
+        del mains[8:]
+
+    # ------------------------------------------------------------------ (b) the main character is approved canon
+    def _ensure_main(self, run, st):
+        """Before the outline: every main character (named in the book idea, proposed as main by the Bible Builder,
+        or a viewpoint a refused outline needed) is approved canon. One that is not is made now (its draft reviewed,
+        or the AI makes the entry with BookForge's refusals, at most MAX_FIXES times); if that fails the run stops
+        here with a plain-English problem naming the character and the reasons (never goes on silently)."""
+        bp = self.bp(run)
+        for m in protagonist.missing(bp, main_names=run.get("main_names") or (), store=self.store):
+            self._make_main(run, st, m)
+
+    def _make_main(self, run, st, m: dict):
+        name, why = m["name"], m["why"]
+        label = f"entry “{name}”"
+        self.event(run, "note", f"⚠️ The main character “{name}” ({why}) is not in the approved characters: "
+                   "BookForge makes the entry now", code="PROTAGONIST_MISSING")
+        reasons = list(m.get("refused") or [])
+        rid = (m.get("draft") or {}).get("record_id")
+        tries = 0
+        while True:
+            self.check(run)
+            if rid is None:
+                res = self._bible(run, st, {}, named=[{"op": "A01", "name": name, "why": why, "main": True,
+                                                        "details": reasons}], strict=False)
+                made = [c for c in res["created"] if c["op"] == "A01"]
+                if not made:
+                    reasons = [d for x in res["dropped"].values() for d in x["details"]] or reasons
+                    self._no_main(name, why, reasons)
+                rid = made[0]["ref"]["record_id"]
+            try:
+                self._review_until_approved(run, st, rid, label)
+            except ChecksRefused as exc:
+                reasons = exc.problem.get("details") or reasons
+                rec = self.bp(run).rec(rid)
+                if rec is not None and not self._ai_made(run, rec):
+                    self._redo_refused(run, st, rid, f"redo:main:{protagonist.slug(name)}", label, exc)  # raises
+                tries += 1
+                if tries > MAX_FIXES:
+                    self._no_main(name, why, reasons)
+                if rec is not None:
+                    self.bp(run).set_aside(rec, f"BookForge's checks refused it; the AI makes the {label} again")
+                self.event(run, "fix", f"BookForge's checks refused the {label}; asked the AI to make it again "
+                           f"({tries} of {MAX_FIXES}): " + "; ".join(reasons)[:300], record_id=rid,
+                           code="CANON_ENTRY_REFUSED")
+                rid = None
+                continue
+            self.event(run, "note", f"✔ The main character “{name}” is an approved character now", record_id=rid)
+            return
+
+    @staticmethod
+    def _no_main(name: str, why: str, reasons: list):
+        raise StepProblem("PROTAGONIST_MISSING",
+                          f"The main character “{name}” ({why}) is not in the approved characters, and BookForge "
+                          "could not make the entry: " + (("BookForge's checks refused it — "
+                                                           + "; ".join(digest(reasons, 3))[:400]) if reasons else
+                                                          "the AI did not make a usable entry")
+                          + ". The chapter outline needs this character, so the run stopped here.",
+                          f"Press 🔁 Try again: the AI makes the entry “{name}” again and is told exactly what "
+                          "BookForge refused. Or open the book, make the character yourself (Characters and places → "
+                          "✍️ Write one myself), approve it, then press ▶ Resume.",
+                          details=digest(reasons), character=name, options=["retry"])
 
     @staticmethod
     def _made(run, ref: dict):
@@ -2251,6 +2444,8 @@ class AutoBookService(_Runner):
         self._planning(run, st, "B03", "main plot")
 
     def _s_outline(self, run, st):
+        if not self.bp(run).approved("B11"):
+            self._ensure_main(run, st)  # never plan the chapters without the book's main character in the canon
         self._planning(run, st, "B11", "chapter outline")
         self._update_rules(run, st)
         n = len(self.bp(run).outline_chapters(self.bp(run).outline()))
