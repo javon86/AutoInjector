@@ -168,6 +168,7 @@ async function main() {
     }
   }, 20);
   const tBefore = (await call("state:get")).transcript.length;
+  const bBefore = broadcasts.length;  // only broadcasts from this check-in on (earlier captures may share a common word)
   let pr = await call("selfrepair:probe", { sites: ["claude"] });
   assert(pr.ok && pr.started.join() === "claude", "🩺 Check now starts a check-in");
   let ok = await waitUntil(async () => { const s = await call("selfrepair:status"); return s.sites.claude.state === "ok" && s.sites.claude.lastProbeOkAt ? s : null; });
@@ -178,7 +179,8 @@ async function main() {
   await sleep(300);
   assert((await call("state:get")).transcript.length === tBefore, "its answer is NOT shown in the conversation");
   assert(gw.sentLog.length === 0, "and NOT relayed to Gemini (routing claude->gemini is on)");
-  assert(!broadcasts.some((b) => b.channel === "capture" && String(b.payload && b.payload.text).includes(word)), "no capture broadcast carries it");
+  const wordRe = new RegExp(`\\b${word}\\b`, "i");
+  assert(!broadcasts.slice(bBefore).some((b) => b.channel === "capture" && wordRe.test(String(b.payload && b.payload.text))), "no capture broadcast carries it");
   let h = await request("GET", "/v1/health", token);
   assert(h.json.bridge_version === "1.2" && h.json.sites.claude.state === "ok" && typeof h.json.sites.claude.last_probe_ok_at === "number" && h.json.sites.claude.ready === true, "health v1.2: claude ok with last_probe_ok_at");
   // Akọwe asks for check-ins; a busy AI is skipped
