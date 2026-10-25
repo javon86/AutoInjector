@@ -161,6 +161,7 @@ class BookFakeAI:
         self.expand_text = False                 # P15: the writer's continuation adds a paragraph (default: nothing)
         self.book_review_script: list = []       # P13: scripted whole-book reviews (dicts or callables(ctx))
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
+        self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -199,6 +200,14 @@ class BookFakeAI:
 
     # ------------------------------------------------------------------ answers
     def _answer(self, ctx, props, schema):
+        if "reactions" in props:  # 📖 P23 (Section 7c): beta reader
+            with self.lock:
+                scripted = self.beta_script.pop(0) if getattr(self, "beta_script", None) else None
+            if scripted is not None:
+                return "beta", scripted(ctx) if callable(scripted) else copy.deepcopy(scripted)
+            return "beta", self._beta(ctx)
+        if "voice_summary" in props:  # ✒️ P25 (Section 7c): the author's style card
+            return "style", self._style(ctx)
         if "scene_text" in props:  # 📏 P15: one scene of a long chapter
             return "scene_prose", self._scene_prose(ctx, props)
         if "continuation" in props:  # 📏 P15: expand a chapter far under its target
@@ -367,6 +376,34 @@ class BookFakeAI:
                                 f"({n} words in, she still had the brass key and no one to give it to)."}
 
     BOOK_DIMS_DEFAULT = 7
+
+    def _beta(self, ctx):
+        """P23: a deterministic beta read — confused in chapter 1 (a real quote), bored in the middle, a twist guessed
+        in chapter 1 and revealed in the last chapter, and one invented quote."""
+        chs = (ctx.get("book") or {}).get("chapters") or []
+        n = max(1, len(chs))
+        first = str(chs[0].get("text") or chs[0].get("opening") or "") if chs else ""
+        q1 = next((s for s in self.sentences(first.split("\n", 1)[-1]) if len(s) > 20), "")[:160]
+        return {"reactions": [{"chapter": 1, "kind": "confused", "quote": q1, "note": "Who wrote the last line?"},
+                              {"chapter": 1, "kind": "hooked", "quote": q1, "note": "I want to know."},
+                              {"chapter": n, "kind": "bored", "quote": "A sentence that is not in the book at all.",
+                               "note": "Dragged."}],
+                "interest": [{"chapter": i + 1, "score": 8 if i == 0 else 5, "would_keep_reading": True}
+                             for i in range(n)],
+                "guesses": [{"guess": "The key opens the lighthouse", "guessed_in_chapter": 1, "quote": q1,
+                             "revealed_in_chapter": n, "came_true": "yes"}],
+                "stop": {"would_finish": True, "chapter": 0, "why": ""},
+                "summary": "A cosy read; I guessed the key early."}
+
+    def _style(self, ctx):
+        samples = ctx.get("samples") or []
+        text = " ".join(str(s.get("text") or "") for s in samples)
+        q = next((s for s in self.sentences(text) if len(s) > 20), "")[:160]
+        return {"voice_summary": "Plain, wry first-person narration.", "rhythm": "short sentences, some long",
+                "diction": "everyday words", "imagery": "kitchen and weather images", "narration": "first person, past",
+                "do": ["Undercut big moments with a dry aside."], "avoid": ["Adverbs on dialogue tags."],
+                "example_moves": [{"quote": q, "move": "a dry aside"},
+                                  {"quote": "Not in the samples at all, this one.", "move": "invented"}]}
 
     def _book_review(self, ctx, props):
         dims = list((props["book_scores"].get("properties") or {}).keys())

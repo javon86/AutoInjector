@@ -14,6 +14,7 @@
 * ``must_show`` (P11): "must reach the page" details of the character sheets assigned to this chapter.
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
+* ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style.
 
 P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
 scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
@@ -159,9 +160,14 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             from . import lengths as lengths_mod  # noqa: PLC0415
             rules.append(lengths_mod.rule(length))
         brief.pop("choice_rules", None)
+        style = _narrator_style(store, pid)  # P25 (Section 7c): the author's own narrating style, when chosen
+        if style:
+            from .style_card import RULE as STYLE_RULE  # noqa: PLC0415
+            brief["narrator_style"] = style
+            rules.append(STYLE_RULE)
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
-                or extra.get("world_texture") or extra.get("story_choices") or length):
+                or extra.get("world_texture") or extra.get("story_choices") or length or style):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),
                     other_voices=len(vb["others"]), summarized=vb["summarized"],
@@ -171,11 +177,22 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                     must_show=len(brief.get("must_show") or []), choices=bool(brief.get("story_choices")),
                     length={k: length[k] for k in ("target_words", "scenes", "scene_by_scene")} if length else None,
                     pipeline=None if all(flags.values()) else {k: v for k, v in flags.items()},
+                    narrator_style=bool(style),
                     chars=len(json.dumps(brief, ensure_ascii=False)))
         return brief, meta
     except Exception:  # noqa: BLE001 - a brief is help for the writer, never a reason to fail the chapter
         log.exception("could not build the writing brief of chapter %s", chapter_id)
         return None, meta
+
+
+def _narrator_style(store, pid: str) -> dict | None:
+    """P25 (Section 7c): the style card of a book that writes in the author's own style (never raises)."""
+    try:
+        from . import style_card  # noqa: PLC0415
+        return style_card.brief_for(store, pid)
+    except Exception:  # noqa: BLE001
+        log.exception("could not add the narrator style to the brief")
+        return None
 
 
 def _length(store, pid: str, outline: dict) -> dict | None:

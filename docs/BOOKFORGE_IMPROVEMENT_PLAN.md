@@ -214,7 +214,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
-- [ ] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
+- [x] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
+  Done: bookforge/beta_reader.py — one AI (independent by default) reads the book text only as the profile's audience,
+  returns reactions/interest/guesses/stop with quotes checked against the book and the chapter; BookForge derives
+  findings (lost, flat stretch, twists guessed early, would stop); 📖 card + button on the 📊 report page, optional
+  ⚡ run step "Beta reader" (`beta_reader: true`), never blocks the book.
 - [x] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
   *(bookforge/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
@@ -223,7 +227,10 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   too hard / too simple, long sentences, low variety, little or only dialogue, chapters that read differently, very
   short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
   next; numbers only, never breaks the report.)*
-- [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
+- [x] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
+  Done: bookforge/style_card.py — ✒️ My writing style page (paste/upload samples): numbers counted without AI plus an
+  AI summary (quotes checked); a book holds a snapshot (`style_card:<pid>`) that goes into the chapter brief
+  (`narrator_style` + a rule) and the editor's context/task; ⚡ run option "Write in my style" (`my_style: true`).
 - [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
   lamp and age arithmetic to verify).
 - [ ] **P27** Scene-grid / timeline view of the whole book.
@@ -273,6 +280,26 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for BookForge (see Problems).
 
 ## Problems to come back to
+
+- **P23 beta reader — not tried with real AIs.** Check on the first real book: (1) do web AIs quote word for word
+  (many ⓘ "quotes not found" = paraphrase); (2) does the reader really react as the audience or slide back into
+  editor talk (then sharpen `beta_reader.TASK`); (3) "guessed it" is judged after reading the whole book at once, not
+  truly page by page — an AI that already knows the ending may over- or under-report guesses; (4) long books are read
+  as a digest (same budget as the 📊 review), so boredom in a chapter's unseen middle is missed.
+- **P23 design choices to confirm:** (a) the run step is OFF by default (one extra AI call; tick 📖 Beta reader in the
+  ⚡ form); (b) one reader per read (not several); by default an AI that did not write most of the book; (c) reads are
+  advice in settings (`beta_reads:<pid>:<branch>`, newest 5), not in the report's Markdown/PDF; (d) the 📖 job is not
+  resumable after a restart (press 📖 again).
+- **P25 [!] style numbers are English-only heuristics** (person from pronouns outside quotes, tense from a rough verb
+  count, signature words = frequent lower-case words). Tune on real samples.
+- **P25 design choices to confirm:** (a) one style card per author (`style_card:author:<principal>`), and a book keeps a
+  SNAPSHOT (`style_card:<pid>`) — editing the card does not change a book until it is ticked again (the page shows
+  "uses version N"); (b) the style is for the NARRATION only; dialogue keeps the voice cards; (c) the editor gets the
+  card and one sentence in its task but no new scored dimension (adding one would change every chapter's rubric);
+  (d) samples are stored (≤ 60 000 characters) so the numbers can be redone; they go to an AI only on ✨ Learn my
+  style (≤ 12 000 characters); (e) "Write in my style" is pre-ticked in the ⚡ form when a card exists; (f) the AI
+  summary call runs without a book (project id none): an AI slot limited to certain projects cannot do it (the
+  numbers still work).
 
 - P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
   audience targets are rules of thumb (not tuned on real books yet).

@@ -441,6 +441,9 @@ class App:
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
+        if parts and parts[0] == "style-card":  # ✒️ P25 (Section 7c) the author's writing style
+            from . import style_card  # noqa: PLC0415
+            return style_card.route(self, method, parts, body, principal)
         if parts == ["projects"] and method == "GET":
             if (query.get("archived") or ["0"])[0] in ("1", "true", "yes"):
                 return 200, [dict(self.project_summary(principal, r["project_id"]), archived=True)
@@ -494,6 +497,12 @@ class App:
                     return self.journal(pid, branch, query)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
+                if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
+                    from . import beta_reader  # noqa: PLC0415
+                    return beta_reader.route(self, method, rest, body, principal, pid, branch)
+                if rest == ["style"]:  # ✒️ P25 (Section 7c) this book's use of the author's style
+                    from . import style_card  # noqa: PLC0415
+                    return style_card.route_book(self, method, body, principal, pid)
                 if rest == ["save"] and method == "POST":  # 💾 P20 save the book now
                     return 202, self.saver.start(pid, branch, kind="manual", reason="you pressed 💾 Save")
                 if rest == ["save"] and method == "GET":
