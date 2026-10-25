@@ -167,6 +167,11 @@ class BookFakeAI:
         self.compare_script: list = []           # P14: scripted blind comparisons (dicts or callables(ctx))
         self.terms_script: list = []             # P31: scripted "which trade facts to check" answers
         self.beta_script: list = []              # P23: scripted beta reads (dicts or callables(ctx))
+        # Character entries that break a BookForge check: name -> kinds, one consumed per proposal of that name
+        # ("interval": a fact whose effective_to is not after effective_from (the save is refused); "authority": a
+        # home place no pinned A04 declares (VALIDATE refuses it); "schema": a fact missing its fields (the proposal
+        # does not fit the form)).
+        self.canon_breaks: dict[str, list] = {}
 
     def fail_next(self, *excs):
         self.failures.extend(excs)
@@ -344,6 +349,11 @@ class BookFakeAI:
                 others = [i.get("name") for i in ctx.get("builder_items") or [] if i.get("section") == "A01"]
                 out["character_sheet"] = sheet_for(name, others)
                 out["voice_card"] = voice_for(name)
+            with self.lock:
+                breaks = self.canon_breaks.get(name)
+                kind = breaks.pop(0) if breaks else None
+            if kind and "facts" in out:
+                self._break_canon(out, sid, kind)
             return "canon", out
         if "premise" in props:
             return "B01", {"premise": "An apprentice keeper searches a fog-bound harbor for her vanished master.",
@@ -373,6 +383,15 @@ class BookFakeAI:
         if "events" in props:
             return "events", {"events": []}
         return "generic", self._from_schema(schema)
+
+    @staticmethod
+    def _break_canon(out, sid, kind):
+        if kind == "interval":
+            out["facts"][0].update(effective_from=5, effective_to=2)
+        elif kind == "authority":
+            out["facts"].append(fact(sid, "entity.location_id", "nowhere-harbour"))
+        elif kind == "schema":
+            out["facts"].append({"subject_id": sid})
 
     def _scene_prose(self, ctx, props):
         sw = ctx.get("scene_writing") or {}
@@ -440,7 +459,10 @@ class BookFakeAI:
                 "weaknesses": [{"point": "Helpers hand Mara what she needs.", "quote": "Only old Nessa at the net sheds "
                                 "would talk"}, {"point": "An invented line.", "quote": "This sentence is not in the "
                                                                                "book at all."}],
-                "try_next": ["Let Nessa ask a real price."], "summary": "Atmospheric but too cooperative."}
+                "try_next": ["Let Nessa ask a real price."], "summary": "Atmospheric but too cooperative.",
+                # P36: a quoted proof for each 9 (so the fake's whole-book review is trusted)
+                "score_evidence": [{"dimension": d, "quote": quote, "why": "vivid"} for d in ("atmosphere", "premise")
+                                   if d in dims]}
 
     def _compare(self, ctx, props):
         dims = list((props["version_1"].get("properties") or {}).keys())

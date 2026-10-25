@@ -182,7 +182,18 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   pattern-check notes are added so the rewrite runs; new rubric points trade_terms / cause_effect / timeline; a second
   editor (not the writer, not the first editor's AI) when one works, lower score per point; leniency per AI in
   `reviewer_leniency` (vs the other editor, the pattern check and whole-book reviewers), lenient AIs lowered by up to 2,
-  shown on the 🖋 Editor card and the 📊 Book report.
+  shown on the 🖋 Editor card and the 📊 Book report. Done: … also whole-book reviews (after the first real book:
+  Gemini read 4,500 words in 7.5 s, scored 8–9 on all 13 points with one weakness → "overall 8.6/10 from 1
+  reviewer"): the 📊 whole-book review prompt asks for at least 3 quoted weaknesses and a `score_evidence` quote for
+  every 9–10 (optional fields, older answers still parse); the same rules from `calibration.py` (`judge` shared by
+  `assess` and the new `assess_book`) — unproven 9/10 or a near-perfect average with < 3 weaknesses whose quotes are in
+  the book → one stricter re-ask (`book_report.STRICT_REASK`), still untrusted → ⚠️ warning and its unproven high
+  scores count as 7 (`scores_raw` keeps what it said); each whole-book review feeds `reviewer_leniency` (vs the median
+  of the other reviewers and vs the book's pattern check through `BOOK_AUDIT_DIMS`, flagged/re-asked counted) and gets
+  the same discount after 3 observations; the report page, Markdown and PDF show the flag and a one-line "how
+  generous" note per reviewer ("How far the reviewers were trusted"). Not done for the ⚖️ P14 blind compare: it has
+  no quotes and decides by the difference between two versions scored by the same AI, so caps or a discount would
+  hit both sides alike. Tests: `tests/test_book_review_calibration.py`.
 - [x] **P37.1** Self-repair page search must learn a selector that matches every reply, not one message
   (ChatGPT learned `div[data-content-search-unit-key="fallback-turn-7:2:assistant"]`). Done: per-message
   numbers/ids/keys are never part of a learned selector (that key becomes `[…$=":assistant"]`), and with
@@ -312,6 +323,24 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   of the character's canon ID, so the chapter outline failed CANON_UNRESOLVED. `plan_rules.resolve_entity_ids` now maps
   a name-like ID to the ONE matching pinned canon record (same words, or part of the name) right after the AI answers;
   nothing or several matches → still refused as before.
+- **First real test ("The Lamplighter's Last Ferry", Make a book with real web AIs) — the main character was lost.
+  FIXED (2026-10-25), check on the next real run.** The idea named Odile Marsh; the Bible Builder proposed Odile,
+  Tamsin and Corvin; Odile's entry never reached review and the run went on without her (the outline had no POV ID
+  for her → `CANON_UNRESOLVED 'odile-marsh'` / Corvin as POV; editor and scene checker kept asking for her). Causes
+  found (each reproduced with the fake AI, `tests/test_protagonist_guard.py`): (1) a proposal that did not fit the form
+  (`valid: false`) was silently left out of the drafts; (2) a proposal the save refused was only counted ("1 entry could
+  not be saved and was skipped"); (3) an entry VALIDATE refused was set aside and replaced from a NEW world sketch, where
+  the set-aside draft still counted as "name taken", so the AI invented a different person; (4) nothing checked, before
+  the outline, that the main character was approved canon. Fix: (a) refused entries are made again under the same name
+  with BookForge's exact problems (form, save and VALIDATE; at most 2 rounds; what still fails is a ⚠️ event
+  `CANON_ENTRY_REFUSED` naming it); set-aside drafts no longer block their name; (b) after the canon step and before the
+  outline the run checks the main characters (people named in the idea, the Bible Builder's character with sheet role
+  "main", a POV a refused outline needed) and makes any missing one (bounded); if that fails the run stops with
+  `PROTAGONIST_MISSING` naming the character and the refusal reasons; (c) the guided "Make my book" outline step shows
+  ⚠️ for a missing main character with ✨ Make “name” (a draft for the author to approve) or ✔ Approve its waiting draft
+  (`bookforge/protagonist.py`). Limits: names in the idea are found by a heuristic (two or more capitalised words, no
+  place word like Harbour/Ferry/Street, not an existing place or group); a one-word name ("Odile …") is only caught
+  through the Bible Builder's "main" mark or the outline's POV.
 
 - **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
   in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
