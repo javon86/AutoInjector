@@ -5203,6 +5203,19 @@ function renderBook(holder, book, redraw) {
           err ? hazard(Object.assign({}, toProblem(err), { where: { book: profileOf().title || S.project.name, step: s.title, set: s.op ? s.op[0] : null, op: s.op } }), { retry: () => doStep(s) }) : null)),
       h('p', { class: 'small' }, plainText(s.about)));
     if (s.state === 'blocked' && s.waiting_for) li.appendChild(h('p', { class: 'small muted' }, `Waiting for ${STEP_WAIT[s.waiting_for] || s.waiting_for}.`));
+    if (s.id === 'outline' && (s.missing_characters || []).length) {
+      // ⚠️ a main character (named in the idea, proposed as main, or a viewpoint the outline needs) is not approved canon
+      li.appendChild(h('div', { class: 'refused-box', 'data-testid': 'missing-characters' },
+        h('p', { class: 'small' }, hazard({ code: 'PROTAGONIST_MISSING' }, {}, { small: true }), ' ',
+          'Not in your approved characters yet — the chapter outline cannot give them their chapters:'),
+        h('ul', { class: 'book-items' }, s.missing_characters.map(m => h('li', { 'data-character': m.name },
+          h('strong', null, m.name), h('span', { class: 'small muted' }, ` (${m.why})`), ' ',
+          m.draft ? h('button', { type: 'button', class: 'small primary', onclick: () => approve([m.draft], `“${m.draft.title || m.name}”`) }, `✔ Approve “${m.draft.title || m.name}”`)
+            : book.ai_ready ? h('button', { type: 'button', class: 'small ai-btn', 'data-testid': 'make-character',
+              onclick: () => run(() => post('make_character', { name: m.name }), `Your AI is making “${m.name}”… (web AIs can take a few minutes)`, 'canon') }, `✨ Make “${m.name}”`)
+              : h('button', { type: 'button', class: 'small', onclick: () => goNew('A01') }, '✍️ Write it myself'),
+          (m.refused || []).length ? h('ul', { class: 'small' }, m.refused.map(checkItem)) : null)))));
+    }
     if (s.approve && s.approve.length) {
       li.appendChild(h('ul', { class: 'book-items' }, s.approve.map(i => h('li', null, h('a', { href: simpleHref(i) }, nameEl(i)), ' ', lifecycleBadge(i.lifecycle),
         (i.problems || []).length ? [badge('⚠️', 'The checks found problems', 'b-bad'), ' ', redoBox([i])] : null,

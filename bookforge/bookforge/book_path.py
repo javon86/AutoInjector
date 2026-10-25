@@ -441,6 +441,16 @@ class BookPath:
                      else "ai_can" if ai else "needs_you")
             step(sid, title, about, state, op=op, action=None if state in ("done", "blocked") else "create",
                  approve=[item(r) for r in drafts][:6], waiting_for=need if blocked else None)
+            if sid == "outline" and not appr and a01:
+                # ⚠️ a main character named in the idea / proposed as main / needed as a viewpoint is not approved
+                # canon: the outline could not give them their chapters (one click makes the entry)
+                from . import protagonist  # noqa: PLC0415
+                steps[-1]["missing_characters"] = [
+                    {"name": m["name"], "why": m["why"], "refused": m["refused"][:3],
+                     "draft": {"record_id": m["draft"]["record_id"], "version": m["draft"]["version"],
+                               "module_id": "A01", "title": m["draft_title"], "lifecycle": m["draft_lifecycle"]}
+                     if m["draft"] else None}
+                    for m in protagonist.missing(self, store=self.store)]
             prev_ok = prev_ok and bool(appr)
         # chapters
         outline = self.outline()

@@ -38,6 +38,7 @@ from .requests import build_request
 from .selftest import SelfTestRunner
 from .sets_guide import sets_overview
 from .book_path import BookPath, clean_profile, get_profile, save_profile
+from . import protagonist
 from .review import ReviewService, WorkTracker
 from .shelf import shelf as shelf_page
 from .book_report import ReportService
@@ -532,13 +533,14 @@ class App:
 
     BOOK_WORK = {"create": "AI is writing", "write_chapter": "AI is writing a chapter", "setup_format": "Setting up the book format",
                  "assemble": "Putting the book together", "export": "Exporting the book", "check": "Checking the book",
-                 "approve": "Approving"}
+                 "approve": "Approving", "make_character": "AI is making a main character"}
 
     def book_act(self, principal: str, pid: str, branch: str, action: str, body: dict) -> dict:
         """A "Make my book" step; while it runs the status summary says what BookForge is working on."""
         title = self.BOOK_WORK.get(action, "Working")
         op = body.get("op") if action == "create" else {"write_chapter": "C02", "setup_format": "I01",
-                                                         "assemble": "G01", "export": "G11", "check": "H05"}.get(action)
+                                                         "assemble": "G01", "export": "G11", "check": "H05",
+                                                         "make_character": "A01"}.get(action)
         if action == "create" and body.get("op") in ("B01", "B03", "B11"):
             title = {"B01": "Writing the premise", "B03": "Writing the main plot", "B11": "Planning the chapters"}[body["op"]]
         if action == "write_chapter" and isinstance(body.get("chapter_id"), str):
@@ -548,10 +550,15 @@ class App:
                 self.backups.try_backup(f"before-{action}")  # S9: automatic backup before big steps
             tok = self.work.begin(pid, op, title)
             try:
-                out = BookPath(self.engine, principal, pid, branch).act(action, body)
+                if action == "make_character":  # ⚠️ on the outline step: make the missing main character (a draft)
+                    bp = BookPath(self.engine, principal, pid, branch)
+                    out = protagonist.make_for_book(self.assist, bp, body.get("name"))
+                    out["book"] = BookPath(self.engine, principal, pid, branch).status()
+                else:
+                    out = BookPath(self.engine, principal, pid, branch).act(action, body)
             finally:
                 self.work.end(tok)
-            if action in ("approve", "assemble", "export", "check", "write_chapter", "create"):
+            if action in ("approve", "assemble", "export", "check", "write_chapter", "create", "make_character"):
                 self.saver.auto(pid, branch, reason=f"book step {action}", force=action == "export")
             return out
 
