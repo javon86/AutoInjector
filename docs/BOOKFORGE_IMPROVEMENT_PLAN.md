@@ -299,6 +299,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Problems to come back to
 
+- **First real test, 2026-10-25 — outline refused (FIXED):** a web AI wrote `plan.pov_id` 'odile-marsh' (a name) instead
+  of the character's canon ID, so the chapter outline failed CANON_UNRESOLVED. `plan_rules.resolve_entity_ids` now maps
+  a name-like ID to the ONE matching pinned canon record (same words, or part of the name) right after the AI answers;
+  nothing or several matches → still refused as before.
+
 - **P27 scene grid limits:** (a) scenes on the page are told apart only by scene-break lines (`***`); a chapter written
   in one AI answer usually has none (the whole-chapter prompt does not ask for them), so its row shows the plan only and
   "ⓘ written without scene breaks" — only scene-by-scene chapters (long ones) get words/readability per scene. Asking the
