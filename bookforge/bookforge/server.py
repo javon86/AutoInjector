@@ -405,6 +405,9 @@ class App:
                 raise ApiError(400, "INVALID_INPUT", "/probe", "probe must be true or false")
             return 200, ai_check.check(self.engine.providers, pinned=AssistService._check_slot(pinned), probe=probe,
                                        timeout_s=self.ai_check_timeout_s)
+        if parts == ["estimate"] and method == "POST":  # ⏱ P28: AI calls and minutes before a run starts
+            from . import costs as costs_mod  # noqa: PLC0415
+            return 200, costs_mod.estimate(self, body if isinstance(body, dict) else {})
         if parts == ["reviewer-leniency"] and method == "GET":
             # P36: how generous each AI reviewer has been (numbers only) and the calibration rules
             return 200, {"ais": calibration.table(self.store), "rules": calibration.RULES}
@@ -441,6 +444,9 @@ class App:
             return self.route_ops(method, parts, query, body, principal)
         if parts and parts[0] in ("assist", "bible-builder"):
             return self.route_ai(method, parts, query, body, principal)
+        if parts and parts[0] == "style-card":  # ✒️ P25 (Section 7c) the author's writing style
+            from . import style_card  # noqa: PLC0415
+            return style_card.route(self, method, parts, body, principal)
         if parts == ["projects"] and method == "GET":
             if (query.get("archived") or ["0"])[0] in ("1", "true", "yes"):
                 return 200, [dict(self.project_summary(principal, r["project_id"]), archived=True)
@@ -492,8 +498,16 @@ class App:
                     return 200, self.asset(pid, branch, rest[1], int(rest[2]))
                 if rest == ["journal"] and method == "GET":
                     return self.journal(pid, branch, query)
+                if rest in (["grid"], ["costs"]) and method == "GET":  # 🗂 P27 scene grid · ⏱ P28 time and AI use
+                    return self.route_grid_costs(rest[0], query, principal, pid, branch)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
+                if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
+                    from . import beta_reader  # noqa: PLC0415
+                    return beta_reader.route(self, method, rest, body, principal, pid, branch)
+                if rest == ["style"]:  # ✒️ P25 (Section 7c) this book's use of the author's style
+                    from . import style_card  # noqa: PLC0415
+                    return style_card.route_book(self, method, body, principal, pid)
                 if rest == ["save"] and method == "POST":  # 💾 P20 save the book now
                     return 202, self.saver.start(pid, branch, kind="manual", reason="you pressed 💾 Save")
                 if rest == ["save"] and method == "GET":
@@ -628,6 +642,28 @@ class App:
         if len(rest) == 2 and rest[1] == "resume" and method == "POST":
             return 200, wa.resume(principal, rest[0])
         raise ApiError(404, "NOT_FOUND", "/book/write-all", "no such endpoint")
+
+    # ------------------------------------------------------------------ 🗂 P27 scene grid · ⏱ P28 time and AI use
+    def route_grid_costs(self, what, query, principal, pid, branch):
+        fmt = (query.get("format") or ["json"])[0]
+        disposition = "attachment" if (query.get("download") or ["0"])[0] == "1" else "inline"
+        if what == "grid":
+            from . import scene_grid  # noqa: PLC0415
+            g = scene_grid.build(self, principal, pid, branch)
+            if fmt == "csv":
+                return 200, ("__binary__", "text/csv; charset=utf-8", scene_grid.render_csv(g).encode("utf-8"),
+                             f"scene-grid-{pid}.csv", disposition)
+            if fmt != "json":
+                raise ApiError(400, "INVALID_INPUT", "/format", "format: json or csv")
+            return 200, g
+        from . import costs as costs_mod  # noqa: PLC0415
+        c = costs_mod.book_costs(self, pid, branch)
+        if fmt == "md":
+            return 200, ("__binary__", "text/markdown; charset=utf-8", costs_mod.render_markdown(c).encode("utf-8"),
+                         f"time-and-ai-use-{pid}.md", disposition)
+        if fmt != "json":
+            raise ApiError(400, "INVALID_INPUT", "/format", "format: json or md")
+        return 200, c
 
     # ------------------------------------------------------------------ journal (R11)
     def journal(self, pid, branch, query):

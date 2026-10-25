@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 
 from . import ai_check
 from . import characters as chars_mod
+from . import costs as costs_mod
 from . import h_checks as hc
 from . import lengths as lengths_mod
 from . import pipeline as pipeline_mod
@@ -97,10 +98,16 @@ STEPS = [
     ("report", "H", None, "Book report", "Scores, strengths and weaknesses with quotes, the editor's and the "
      "planned-to-page findings, word counts and which AI did what — the whole book is read by the AIs that did not "
      "write it. (Never holds up the book.)"),
+    # P23 (Section 7c): optional, only when the run asks for it (run setting beta_reader)
+    ("beta", "H", None, "Beta reader", "An AI reads the whole book as its target reader and marks where it got "
+     "confused, bored or guessed a twist, each with a quote checked against the book. (Optional; never holds up the "
+     "book.)"),
 ]
 STEP_IDS = [s[0] for s in STEPS]
 # P14: steps that belong to a pipeline switch (switched off -> the step is skipped)
 STEP_FLAGS = {"characters": "voices", "world": "rules", "planned": "planned"}
+# P23 (Section 7c): steps that run only when the run's settings ask for them (step -> setting)
+STEP_OPTIONAL = {"beta": "beta_reader"}
 
 PROFILE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -469,11 +476,15 @@ class _TimedProviders(PinnedProviders):
 
     def _generate_on(self, *a, **kw):
         t0 = time.monotonic()
+        slot = (a[1] if len(a) > 1 else kw.get("slot")) or {}  # P28: which AI answered (numbers only)
+        ok = False
         try:
-            return super()._generate_on(*a, **kw)
+            out = super()._generate_on(*a, **kw)
+            ok = True
+            return out
         finally:
             try:
-                self._sink(time.monotonic() - t0)
+                self._sink(time.monotonic() - t0, slot=slot.get("slot_id"), ok=ok)
             except Exception:  # noqa: BLE001 - a timing hint never breaks a call
                 pass
 
@@ -524,6 +535,10 @@ class AutoBookService(_Runner):
             steps.append(s)
         out["steps"] = steps
         out["events"] = (run.get("events") or [])[-60:]
+        try:  # ⏱ P28: calls and minutes of this run, per AI and per step (numbers only)
+            out["costs"] = costs_mod.run_costs(run, getattr(self.app.review, "slot_label", None))
+        except Exception:  # noqa: BLE001 - display only
+            log.exception("could not add the run's costs")
         saver = getattr(self.app, "saver", None)
         out["save"] = saver.brief(run.get("project_id"), run.get("branch_id") or "main") if saver else None
         return out
@@ -756,6 +771,11 @@ class AutoBookService(_Runner):
     def _clean_settings(self, body) -> dict:
         out = {"genre": "", "length": "short_story", "slot_id": None, "idea": "", "choices": {},
                "pipeline": pipeline_mod.clean(None)}
+        for k in ("beta_reader", "my_style"):  # P23 / P25 (Section 7c): optional, off unless asked for
+            v = body.get(k, False)
+            if not isinstance(v, bool):
+                raise BookforgeError("INVALID_INPUT", f"/{k}", f"{k} must be true or false", status="REJECTED")
+            out[k] = v
         # P12: ending and style choices (all optional; empty = let the AI choose)
         out["choices"] = story_choices.clean(body.get("choices"))
         g = body.get("genre")
@@ -801,7 +821,7 @@ class AutoBookService(_Runner):
     # ------------------------------------------------------------------ services bound to this run's AI choice
     def _services(self, run):
         slot = run["settings"].get("slot_id")
-        sink = lambda secs: self._timed(run, secs)  # noqa: E731 - P15: measured AI call times (ETA)
+        sink = lambda secs, **kw: self._timed(run, secs, **kw)  # noqa: E731 - P15 ETA / P28 time per AI
         providers = _TimedProviders(self.app.engine.providers, slot, sink)
         engine = Engine(self.store, self.app.engine.contracts, providers=providers)
         assist = AssistService(engine, run["principal"], retry_busy=True)
@@ -813,19 +833,20 @@ class AutoBookService(_Runner):
             if not getattr(job, "cross_pin", False):
                 return once(job, **kw)
             t0 = time.monotonic()
+            ok = False
             try:
-                return once(job, **kw)
+                out = once(job, **kw)
+                ok = True
+                return out
             finally:
-                sink(time.monotonic() - t0)
+                sink(time.monotonic() - t0, slot=getattr(job, "slot", None), ok=ok)
         assist._call_ai_once = timed_once  # type: ignore[method-assign]
         review = ReviewService(engine, assist, run["principal"], work=self.app.work, on_change=self.app.changed)
         return engine, assist, review
 
     @staticmethod
-    def _timed(run, secs: float):
-        t = run.setdefault("timing", {"calls": 0, "call_s": 0.0})
-        t["calls"] = int(t.get("calls") or 0) + 1
-        t["call_s"] = round(float(t.get("call_s") or 0.0) + max(0.0, float(secs)), 3)
+    def _timed(run, secs: float, slot: str | None = None, ok: bool = True):
+        costs_mod.record_call(run, secs, slot, ok)  # P28: totals (P15 ETA) plus per AI and per step
 
     def _eta(self, run, done: int, total: int) -> dict | None:
         """P15: time left, estimated from this run's measured times: the average chapter so far for the chapters
@@ -907,6 +928,13 @@ class AutoBookService(_Runner):
                     st.update(state="skipped", message=f"Off in this run's pipeline ({pipeline_mod.LABELS[flag]})",
                               finished_at=now_iso())
                     self.event(run, "skip", f"{st['title']}: switched off in this run's pipeline", step=sid)
+                    self.save(run)
+                    continue
+                opt = STEP_OPTIONAL.get(sid)  # P23 (Section 7c): an optional step the run did not ask for
+                if opt and not (run.get("settings") or {}).get(opt):
+                    # "done", not "skipped": nothing was switched off, the extra was simply not asked for
+                    st.update(state="done", message="Not asked for in this run", started_at=now_iso(),
+                              finished_at=now_iso())
                     self.save(run)
                     continue
                 run["current"] = sid
@@ -1679,6 +1707,8 @@ class AutoBookService(_Runner):
         if pipeline_mod.info_of(self.store, pid) is None:  # P14: the book remembers the switches it was made with
             pipeline_mod.save(self.store, pid, s.get("pipeline") or pipeline_mod.clean(None), run_id=run["id"],
                               variant_of=(s.get("variant_of") or {}).get("project_id"))
+        if s.get("my_style") and not run.get("style_applied"):  # P25 (Section 7c): write in the author's style
+            self._apply_style(run, pid)
         if not get_profile(self.store, pid).get("length"):
             first = {"length": s["length"], "chapters": CHAPTERS_FOR[s["length"]], "ai_slot": s.get("slot_id") or "",
                      "genre": s.get("genre") or ""}
@@ -2450,6 +2480,26 @@ class AutoBookService(_Runner):
                             "on the report page later)"
             self.event(run, "note", st["message"], step="report", code="REPORT_NOT_INDEPENDENT")
         self.event(run, "report", f"Book report {rep['id']}: {st['message']}", step="report")
+
+    # ------------------------------------------------------------------ Section 7c (P23 beta reader, P25 style)
+    def _s_beta(self, run, st):
+        from . import beta_reader  # noqa: PLC0415
+        beta_reader.run_step(self, run, st, control=(RunPaused, RunCancelled))
+
+    def _apply_style(self, run, pid):
+        from . import style_card  # noqa: PLC0415
+        try:
+            ok = style_card.apply_to_book(self.store, run["principal"], pid)
+        except Exception:  # noqa: BLE001 - the style is help for the writer, never a reason to stop
+            log.exception("could not apply the writing style in run %s", run["id"])
+            ok = None
+        run["style_applied"] = True
+        if ok:
+            self.event(run, "note", "✒️ This book is written in your own style (your style card, version "
+                       f"{ok.get('from_version')})", step="profile", code="STYLE_APPLIED")
+        else:
+            self.event(run, "note", "✒️ You asked for your own writing style, but there is no style card yet (✒️ My "
+                       "writing style): the book is written without it", step="profile", code="STYLE_MISSING")
 
     def _s_check(self, run, st):
         out = self.bp(run).a_check({})

@@ -1096,3 +1096,80 @@ ul.samples q { font-style: italic; }
 .facts-card h3 { margin: 10px 0 4px; font-size: 1rem; }
 .fact-list select { width: auto; max-width: 100%; display: inline-block; margin-left: 4px; }
 .facts-card input[type=number] { width: 8em; display: inline-block; }
+
+/* ======================================================================= 🗂 P27 scene grid · ⏱ P28 time and AI use */
+.sg-summary .rp-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.sg-filters { align-items: center; gap: 8px 12px; flex-wrap: wrap; }
+.sg-filters select { width: auto; max-width: 100%; }
+.sg-table tbody th { text-transform: none; letter-spacing: normal; font-size: inherit; color: var(--text); }
+.sg-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.sg-table caption { text-align: left; margin-bottom: 4px; }
+.sg-table th, .sg-table td { border-bottom: 1px solid var(--border); padding: 6px 8px; vertical-align: top; text-align: left; }
+.sg-table thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; white-space: nowrap; }
+.sg-table tr.sg-ch th { background: var(--accent-soft); font-weight: normal; padding-top: 10px; }
+.sg-ch-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.sg-obj { margin-top: 2px; }
+.sg-table .sg-n { white-space: nowrap; font-weight: 700; }
+.sg-table .sg-goals, .sg-table .sg-obst, .sg-table .sg-change { min-width: 9rem; overflow-wrap: anywhere; }
+.sg-table .sg-num { white-space: nowrap; }
+.sg-table tr.has-major > .sg-n { border-left: 4px solid var(--bad); }
+.sg-table tr.has-prob > .sg-n { border-left: 4px solid var(--warn-line); }
+.sg-table tr.unplanned td { color: var(--text-muted); }
+.sg-goal-list, .sg-probs { list-style: none; margin: 0; padding: 0; }
+.sg-goal-list li + li { margin-top: 2px; }
+.sg-probs { display: flex; flex-direction: column; gap: 2px; }
+.sg-prob { font-size: .85rem; line-height: 1.3; }
+.sg-prob.sev-major { color: var(--bad); font-weight: 600; }
+.sg-prob.sev-minor { color: var(--warn); }
+.sg-prob.sev-info { color: var(--text-muted); }
+.sg-ok { color: var(--ok); }
+.mb-estimate { margin: 8px 0; }
+.mb-costs { margin: 4px 0 0; overflow-wrap: anywhere; }
+.ct-run { margin: 6px 0; }
+.ct-run > summary { cursor: pointer; }
+.print-only { display: none; }
+/* phone: every scene is a card, each value with its label */
+@media (max-width: 760px) {
+  .sg-summary .rp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sg-wrap { overflow-x: visible; }
+  .sg-table, .sg-table tbody, .sg-table tr, .sg-table th, .sg-table td { display: block; width: 100%; box-sizing: border-box; }
+  .sg-table caption { display: block; width: 100%; }
+  .sg-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .sg-table tr.sg-scene { border: 1px solid var(--border); border-radius: 8px; margin: 8px 0; padding: 4px 0; background: var(--surface); }
+  .sg-table tr.sg-ch th { border-radius: 8px; margin-top: 12px; }
+  .sg-table td, .sg-table .sg-n { border-bottom: 0; padding: 3px 10px; white-space: normal; }
+  .sg-table td::before { content: attr(data-label); display: block; font-size: .75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em; }
+  .sg-table tr.has-major, .sg-table tr.has-prob { border-left-width: 4px; }
+  .sg-table tr.has-major > .sg-n, .sg-table tr.has-prob > .sg-n { border-left: 0; }
+  .sg-table tr.has-major { border-left-color: var(--bad); }
+  .sg-table tr.has-prob { border-left-color: var(--warn-line); }
+}
+@media (max-width: 420px) { .sg-summary .rp-kpis { grid-template-columns: minmax(0, 1fr); } }
+/* printing (the scene grid, and any page): only the page itself */
+@media print {
+  .topbar, .sidenav, .skip-link, .ai-dock, .wf-drawer, .toast, .no-print, .crumbs, .info-wrap { display: none !important; }
+  .shell { display: block !important; }
+  main { padding: 0 !important; max-width: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .print-only { display: block; }
+  .card { box-shadow: none !important; border: 0 !important; }
+  .sg-wrap { overflow: visible !important; }
+  .sg-table { font-size: 9pt; }
+  .sg-table thead th { position: static; }
+  .sg-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .sg-table tr.sg-ch th { background: #eee !important; }
+  .sg-table a { color: inherit; text-decoration: none; }
+}
+/* 📖 P23 beta reader and ✒️ P25 your writing style (Section 7c) */
+.s7-say { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.s7-meter { display: flex; align-items: flex-end; gap: 3px; min-height: 52px; margin: 8px 0; overflow-x: auto; }
+.s7-bar { display: inline-flex; align-items: flex-end; justify-content: center; min-width: 18px; font-size: 11px;
+  background: var(--accent-soft); border: 1px solid var(--border); border-radius: 3px 3px 0 0; }
+.s7-bar.low { background: var(--warn-soft); border-color: var(--warn-line); }
+.s7-samples { display: grid; gap: 8px; }
+.s7-sample textarea { width: 100%; box-sizing: border-box; }
+.s7-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0; }
+.s7-dl dt { font-weight: 600; }
+.s7-dl dd { margin: 0; }
+.s7-books { list-style: none; padding: 0; }
+.s7-make .check-row { margin: 4px 0; }

@@ -7,6 +7,7 @@ import re
 import time
 
 import pytest
+from playwright.sync_api import TimeoutError as PWTimeout
 
 from .ui_helpers import assert_clean, goto, open_app, settle, shot
 
@@ -117,8 +118,12 @@ def test_make_a_book_live_pause_reload_resume_cancel(make_context, ai_server, sl
     # a new run can start after the cancelled one
     page.click("#mab-btn")
     dlg.locator("button", has_text="Make another book").or_(dlg.get_by_role("button", name="⚡ Start — let the AI choose everything")).first.wait_for(timeout=5000)
-    if dlg.locator("button", has_text="Make another book").count():
-        dlg.locator("button", has_text="Make another book").click()
+    another = dlg.locator("button", has_text="Make another book")
+    if another.count():
+        try:  # the dialog can re-render to the start form between count() and click(): then there is nothing to click
+            another.click(timeout=5000)
+        except PWTimeout:
+            pass
     slow_ai.delay = 0.0
     dlg.get_by_role("button", name="⚡ Start — let the AI choose everything").click()
     dlg.locator(".mb-done").wait_for(timeout=60000)
