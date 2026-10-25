@@ -15,6 +15,15 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ---
 
+## Status at a glance  (keep this up to date — updated on every add / finish)
+
+- **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
+- **Next up:** waiting for the user's choice from Section 7 (suggested order P22 → P26 → P23 → P24).
+- **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures (B1–B3).
+- **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
+  run on the user's PC is the real test (see "Problems to come back to").
+- Last updated: 2026-10-25.
+
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
 - [x] **P18.1** Check-in probe: a tiny automatic message with a random word, sent to each AI at
@@ -155,9 +164,40 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   saved run; 🔁 Rerun from the book bible (book page, shelf, folder list, uploaded bible) = a new book whose canon,
   sheets, voices, rules, texture and — optionally — premise/plot/outline/scene cards come from the bible and are
   approved inside it under the run consent; new chapters.)*
-- [ ] **P19** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
+## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
+
+- [ ] **P22** Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
+  place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
+  voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
+  T9 optional web research); bounded requests per step, all logged.
+- [ ] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
+- [ ] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
+  matched to the profile's audience.
+- [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
+- [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
+  lamp and age arithmetic to verify).
+- [ ] **P27** Scene-grid / timeline view of the whole book.
+- [ ] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
+- [ ] **P29** Read-aloud / audiobook export (later).
+
+## Back burner — later, by the user's call  (don't start until asked)
+
+- [ ] **B1** 🖼 Images: hook BookForge up to image generation — Stable Diffusion (AutoInjector already has
+  an Image Generation panel and a Stable Diffusion endpoint setting in its setup wizard) and/or other image
+  AIs; pictures stored as book assets with the right permissions.
+- [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
+- [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
+
+### Other ideas parked from earlier lists (not scheduled)
+
+- Merge BookForge into the AutoInjector app (one app, one launcher).
+- Print-ready PDF: embedded fonts, print-on-demand trim sizes, margins/bleed.
+- Official EPUB check installed by default (EPUBCheck needs Java).
+- Guided first-time tour; notifications when the AI finishes or needs approval; dark mode / larger text.
+- Series support: reuse characters and world across books.
+- GitHub checks for BookForge (see Problems).
 
 ## Problems to come back to
 
