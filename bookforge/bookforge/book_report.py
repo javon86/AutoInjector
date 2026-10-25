@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 from . import ai_check, calibration
 from . import lengths as lengths_mod
 from . import prose_audit
+from . import readability
 from . import providers as providers_mod
 from .assist import Cancelled, Job, book_profile_brief
 from .book_path import BookPath, get_profile
@@ -321,8 +322,19 @@ class ReportService:
         words["percent"] = int(round(100 * words["total"] / words["target"])) if words["target"] else None
         out = {"words": words, "editor": self._editor(review, pid, branch, chapters),
                "planned": self._planned(review, bp), "patterns": self._patterns(chapters),
-               "usage": self._usage(review, pid, branch, chapters)}
+               "usage": self._usage(review, pid, branch, chapters),
+               "readability": self._readability(chapters, prof)}
         return out
+
+    @staticmethod
+    def _readability(chapters, prof) -> dict:  # P24
+        try:
+            rep = readability.book([(c["chapter_id"], c["text"]) for c in chapters],
+                                   audience=(prof or {}).get("audience"), genre=(prof or {}).get("genre"))
+        except Exception:  # noqa: BLE001
+            log.exception("readability check failed in the report")
+            return {"error": True}
+        return readability.brief(rep)
 
     @staticmethod
     def _editor(review, pid, branch, chapters) -> dict:
@@ -571,6 +583,10 @@ class ReportService:
         if pl.get("missing"):
             out.append({"from": "planned", "text": f"{pl['missing']} planned detail(s) never reached the page: use "
                         "✨ Fix with AI on the chapter pages (✅ Planned to page)."})
+        rd = rep.get("readability") or {}
+        for f in rd.get("findings") or []:
+            if f.get("severity") in ("major", "minor") and len([o for o in out if o["from"] == "readability"]) < 2:
+                out.append({"from": "readability", "text": f"{f['label']}: {f['detail']} {f['advice']}"})
         w = rep.get("words") or {}
         under = [c["number"] for c in w.get("chapters") or [] if c.get("under")]
         if under:
@@ -771,6 +787,20 @@ def render_markdown(rep: dict) -> str:
     if not pa.get("findings"):
         L.append("No strong repeated habits found.")
     L.append("")
+    rd = rep.get("readability") or {}
+    rt = rd.get("totals") or {}
+    if rt.get("grade") is not None:
+        au = rd.get("audience") or {}
+        L += ["## Readability and pacing (no AI)", "",
+              f"Reading level: grade {rt['grade']:g} (reading ease {rt['ease']:g}/100); usual for "
+              f"{(au.get('label') or 'adult').lower()} readers: grade {au['grade'][0]:g}–{au['grade'][1]:g}.",
+              f"{rt['avg_sentence']:g} words per sentence · {round(100 * rt['dialogue_share'])}% dialogue · "
+              f"{rt['scenes']} scene(s), about {rt['avg_scene']:,} words each · pace: {rt['pace']}.", ""]
+        for f in rd.get("findings") or []:
+            L.append(f"- {f['label']} ({f['severity']}): {f['detail']} {f['advice']}")
+        if not rd.get("findings"):
+            L.append("Reading level and pacing fit the audience.")
+        L.append("")
     L += ["## Words per chapter", "", "| Chapter | Title | Words | |", "|---|---|---|---|"]
     for c in w.get("chapters") or []:
         L.append(f"| {c['number']} | {c.get('title') or ''} | {c['words']:,} | {'⚠️ far under target' if c.get('under') else ''} |")

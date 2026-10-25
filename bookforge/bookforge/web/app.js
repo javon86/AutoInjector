@@ -7867,6 +7867,20 @@ async function viewReport(main) {
         h('p', { class: 'small' }, pl.missing ? [hazard({ code: 'PLANNED_MISSING' }, { open: plink('book'), openLabel: '📘 Open the book' }, { small: true }), ` ${pl.missing} planned item(s) not on the page`] : '✔ Everything planned is on the page.'),
         (pl.items || []).length ? h('ul', { class: 'small' }, pl.items.map(m => h('li', null, `Chapter ${m.number || m.chapter_id}: ${m.label}`))) : null,
         (pa.findings || []).length ? h('ul', { class: 'small' }, pa.findings.map(f => h('li', null, `${f.label}: ${f.count} (${f.per_1000} per 1 000 words)`, f.example ? h('span', { class: 'muted' }, ` — “${f.example}”`) : null))) : h('p', { class: 'small muted' }, 'No strong repeated habits.'))));
+    const rd = rep.readability || {}; const rt = rd.totals || {};  // P24 readability and pacing (no AI)
+    if (rt.grade != null) {
+      const au = rd.audience || { label: 'Adult', grade: [5, 10] }; const pct = x => `${Math.round(100 * (x || 0))}%`;
+      const sevIcon = { major: '⚠️ ', info: 'ⓘ ' };
+      holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-readability' }, h('h2', null, '📖 Readability and pacing'),
+        h('p', { class: 'small' }, `Reading level about grade ${rt.grade} (ease ${rt.ease}/100) · usual for ${au.label.toLowerCase()} readers: grade ${au.grade[0]}–${au.grade[1]}.`),
+        h('p', { class: 'small' }, `${rt.avg_sentence} words per sentence · ${pct(rt.dialogue_share)} dialogue · ${rt.scenes} scene(s), about ${(rt.avg_scene || 0).toLocaleString()} words each · pace: ${rt.pace}.`),
+        (rd.findings || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-readability-findings' }, rd.findings.map(f => h('li', null, `${sevIcon[f.severity] || ''}${f.label}: ${f.detail} `, h('span', { class: 'muted' }, f.advice))))
+          : h('p', { class: 'small muted' }, '✔ Reading level and pacing fit the audience.'),
+        (rd.chapters || []).length > 1 ? h('details', null, h('summary', null, 'Per chapter'), h('div', { class: 'table-wrap' }, h('table', { class: 'rp-table' },
+          h('thead', null, h('tr', null, ['Chapter', 'Grade', 'Words / sentence', 'Dialogue', 'Scenes', 'Pace'].map(x => h('th', null, x)))),
+          h('tbody', null, rd.chapters.map(c => h('tr', null, h('th', { scope: 'row' }, String(c.number)), h('td', { class: 'num' }, c.grade ?? '–'),
+            h('td', { class: 'num' }, c.avg_sentence || '–'), h('td', { class: 'num' }, pct(c.dialogue_share)), h('td', { class: 'num' }, String(c.scenes || 0)), h('td', null, c.pace || '–'))))))) : null));
+    }
     const us = rep.usage || {};
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-words' }, h('h2', null, '📝 Words and 🤖 who did what'),
       h('p', { class: 'small' }, `Most of the book was written by ${us.writer || 'the author'}.`, us.same_ai_reviews ? h('span', { class: 'words-warn' }, ` ⚠️ ${us.same_ai_reviews} chapter review(s) by the writer itself.`) : null),

@@ -215,8 +215,14 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
 - [ ] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
-- [ ] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
+- [x] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
+  *(bookforge/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
+  dialogue share, paragraph length, scenes per chapter (scene-break lines), pace fast/steady/slow; audience matched
+  from the profile's free text (children / middle grade / young adult / adult, literary +2 grades); findings for
+  too hard / too simple, long sentences, low variety, little or only dialogue, chapters that read differently, very
+  short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
+  next; numbers only, never breaks the report.)*
 - [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
 - [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
   lamp and age arithmetic to verify).
@@ -267,6 +273,9 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for BookForge (see Problems).
 
 ## Problems to come back to
+
+- P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
+  audience targets are rules of thumb (not tuned on real books yet).
 
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
   v1.2 bridge and the desktop app's real `bookforge-bridge.js` (fake host `--site-state`), not with real
