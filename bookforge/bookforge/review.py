@@ -1226,6 +1226,53 @@ class ReviewService:
                                           if prop["unresolved"] else "") + ". Choose which changes to use."})
         job.done = 1
 
+    # ------------------------------------------------------------------ 🔎 fact checks (P26 / P30 / P31, fact_checks.py)
+    @property
+    def facts(self):
+        """Timeline + terminology check, trade facts and the repetition sorter with this service's AIs."""
+        if getattr(self, "_facts", None) is None:
+            from .fact_checks import FactChecker  # noqa: PLC0415
+            self._facts = FactChecker(self)
+        return self._facts
+
+    def start_facts_job(self, principal, pid, branch, kind, rid, body) -> dict:
+        """kind: facts_find (AI lists a chapter's trade facts), facts_research (AI answers the research questions:
+        advice only), facts_fix_terms / facts_fix_repeats (a rewrite proposal through the editor)."""
+        self._access(principal, pid, branch)
+        body = body if isinstance(body, dict) else {}
+        if kind != "facts_research":
+            if not isinstance(rid, str) or not rid:
+                raise BookforgeError("INVALID_INPUT", "/record_id", "which chapter?", status="REJECTED")
+            self.facts._chapter_rec(principal, pid, branch, rid)  # a chapter of the outline (404/400 now, not later)
+        ids = body.get("ids")
+        if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+            raise BookforgeError("INVALID_INPUT", "/ids", "ids: a list of term ids", status="REJECTED")
+        job = ReviewJob(kind, principal, pid, branch, [rid or "terms"], self.assist._check_slot(body.get("slot_id")))
+        job.term_ids = ids
+        return self._start(job, self._run_facts)
+
+    def _run_facts(self, job: ReviewJob):
+        rid = job.record_ids[0]
+        job.current = rid
+        if job.kind == "facts_find":
+            out = self.facts.ai_find(job, rid)
+            msg = (f"The AI found {out['found']} trade fact(s) to check; {out['added']} new on the list (research "
+                   "needed).") if out["found"] else "The AI found no new trade facts to check in this chapter."
+            job.results.append({"record_id": rid, "ok": True, "added": out["added"], "message": msg})
+        elif job.kind == "facts_research":
+            out = self.facts.ai_research(job, getattr(job, "term_ids", None))
+            job.results.append({"record_id": rid, "ok": True, "answered": out["answered"],
+                                "message": f"The AI answered {out['answered']} research question(s). Its answers are "
+                                           "advice: mark each term ✔ Verified or ✕ Wrong yourself."})
+        else:
+            kind = job.kind.rsplit("_", 1)[-1]
+            prop = self.facts.propose_fix(job, rid, kind)
+            job.results.append({"record_id": rid, "ok": True, "version": prop["version"], "proposal": prop,
+                                "message": f"The writer changed {prop['applied']} passage(s)"
+                                           + (f"; {prop['unresolved']} could not be placed word for word"
+                                              if prop["unresolved"] else "") + ". Choose which changes to use."})
+        job.done = 1
+
     @staticmethod
     def clean_verdict(raw) -> dict:
         if not isinstance(raw, dict) or raw.get("verdict") not in VERDICTS:

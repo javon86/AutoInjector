@@ -209,15 +209,18 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
 - [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
-- [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
-  lamp and age arithmetic to verify).
+- [x] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
+  lamp and age arithmetic to verify). Done: `timeline_check.py` (ages, birth/story years, "N years ago" arithmetic,
+  no AI) + the term check of `terms.py`, shown on the chapter/book page and sent to the AI editor as `fact_checks`.
 - [ ] **P27** Scene-grid / timeline view of the whole book.
 - [ ] **P28** Cost and time per book (calls and minutes per AI; estimate before starting).
 - [ ] **P29** Read-aloud / audiobook export (later).
-- [ ] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
-  filler / accident (keep "Right, so" and Odile's counting; trim only excess).
-- [ ] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
-  ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation).
+- [x] **P30** Repetition sorter: before cutting a repeat, the editor classifies it as voice / motif /
+  filler / accident (keep "Right, so" and Odile's counting; trim only excess). Done: `repetition.py` sorts every
+  repeat (author can relabel); voice/motif words join every rewrite's keep list; ✨ Trim cuts only accidents/excess.
+- [x] **P31** Trade-facts lane: equipment and period terms marked "research needed" until verified
+  ("wick-key" on a gas lamp; how gas lamps are lit/extinguished; pressure and isolation). Done: `terms.py` list
+  (`trade_terms:<pid>:<branch>`): scan/AI add terms as research needed, AI answers are advice, only the author verifies.
 - [ ] **P32** Physical state tracker per scene: tide, light, time, footing, hazards, running counts
   (the 32–41 lamp count, the clock, the gauge reading); early hazards must change later actions.
 - [ ] **P33** Two-readings test for protected ambiguity: both readings must hold without contradiction;
@@ -441,6 +444,33 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - **P37.4 limit:** a short reply (≤ 300 characters, tags stripped) that holds a check-in word from the last hour is
   treated as a check-in answer (held, not relayed, not nagged) when no BookForge request is waiting for that AI — a
   genuine short reply that happens to use the same unusual word ("quokka") would be held too.
+- **P26 / P30 / P31 (Section 7a) — not tried with real AIs or the real book 2.** Tested with crafted text and the fake
+  AI (unit, Make-a-book end to end, HTTP, a Playwright smoke of both cards). On the first real book check: (1) the
+  timeline regexes are English-only and only read ages written with an age marker ("twelve years old", "aged forty",
+  "the 40-year-old Odile", "turned thirteen") next to a known character name — pronouns ("she was twelve years old")
+  are skipped, so some problems are missed; a book spanning years may show `year_arithmetic` notes for chapters that
+  mix two times; (2) the term scan uses a small built-in table (`terms.CONFLICTS`, `ANACHRONISMS`, `HEADS`/`MODIFIERS`)
+  — it catches a wick on a gas lamp but will add everyday compounds ("gas lamp") as research needed; prune them on the
+  book page or tighten `MODIFIERS`; (3) the repetition sorter only looks at 3–6-word phrases (2 words only as a
+  dialogue opener like "Right, so"), single repeated words ("Nothing." ×4) are left to the P6 pattern checker; voice
+  is decided from tagged dialogue ("…," Tom said) — untagged lines count as dialogue without a speaker; check the
+  classes on book 2 ("Right, so" voice, Odile's counting motif) with `repetition.sort_repeats`.
+- **P26 / P30 / P31 design choices to confirm:** (a) trade facts, the story year and repeat labels are companion data
+  (`trade_terms:<pid>:<branch>`, `repetition_labels:<pid>:<branch>`), not records — like the story rules; (b) only the
+  author can mark a term verified/wrong (`author_confirms`); an AI's research answer is shown as advice and a Make-a-book
+  run never verifies — it adds what it finds as "research needed" and reports ⚠️ `TERMS_RESEARCH_NEEDED` /
+  `TERMS_WRONG` / `TIMELINE_PROBLEMS` after the planned-to-page step (never blocks, no automatic rewrite of terms or
+  repeats in a run); (c) voice/motif repeats are protected in EVERY editor rewrite (also the run's editor pass): a
+  rewrite that removes them is refused word for word (KEEP_LOST) unless it is ✨ Trim's own cut of their excess — so an
+  editor note that only says "cut 'Right, so'" can no longer be applied; relabel the phrase as accidental to allow it;
+  (d) the timeline checker never edits text (fixing a number needs the author's decision); (e) the writer's chapter
+  brief gets the verified/wrong terms (`trade_terms`, ≤ 1 200 chars); research-needed terms only when the plan names
+  them; (f) the editor's context gets `fact_checks` as data (no change to `editor_rubric.py`), so the AI editor may or
+  may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.bookforge` (all
+  companion settings do) but are NOT in the book bible yet, so a 🔁 rerun from the bible starts with an empty list.
+- **Full suite note (Section 7a):** `tests/campaign/ui/test_ui_followthrough.py::test_wizard_to_downloaded_book` already
+  failed on this worktree's base before any Section 7a change ("stuck on Write the chapters: ✔ Done: Approved 1 of 1").
+
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

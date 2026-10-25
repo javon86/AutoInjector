@@ -45,6 +45,8 @@ from . import providers as providers_mod
 from .assist import book_profile_brief, canon_context
 from .book_path import BookPath
 from .errors import BookforgeError
+from .fact_checks import editor_context as fact_checks_context  # P26/P30/P31 (Section 7a)
+from .fact_checks import protected_keep as protected_repeats
 
 log = logging.getLogger("bookforge.editor")
 
@@ -509,6 +511,7 @@ class EditorService:
         tok = rv.work.begin(pid, rec["module_id"], f"The editor is reading {title}")
         try:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
+            ctx.update(fact_checks_context(self.engine, job.principal, pid, branch, rec))  # P26/P30/P31 (never raises)
             raw = self.assist._call_ai(job, op_for_roles=rec["module_id"],
                                        task=rubric.task_text(rec["module_id"], dims, notes),
                                        schema=_schema(dims), context=ctx, protected=protected)
@@ -558,6 +561,9 @@ class EditorService:
                                  status="REJECTED")
         text = str((rec.get("data") or {}).get("text") or "")
         keep = keep_quotes_of(craft, text, {f["id"] for f in findings})
+        # P30: voice and motif repeats are never cut by a rewrite (only BookForge's own trim of their excess)
+        keep = list(dict.fromkeys(keep + protected_repeats(self.engine, job.principal, pid, branch, text,
+                                                           except_keys=craft.get("except_keys") or ())))
         if not job.slot_pref:
             writer = rv.writer_of(pid, branch, rec)
             job.prefer_slots = [writer["slot"]] if writer.get("slot") else []
