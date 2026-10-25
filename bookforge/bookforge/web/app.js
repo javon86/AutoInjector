@@ -4,6 +4,7 @@ import { configureClipboard, copyText, readText } from './clipboard.js';
 import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './problems.js';
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
+import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -635,6 +636,7 @@ async function pickView(parts) {
   if (parts[0] === 'start') return viewStart;
   if (parts[0] === 'pair') return viewPair;
   if (parts[0] === 'shelf') return viewShelf;
+  if (parts[0] === 'style') return m => S7C.viewStyle(m, s7c());  // ✒️ P25
   if ((parts[0] || '').split('?')[0] === 'compare') return m => viewCompare(m, parts[1] ? parts[1].split('?')[0] : null);
   if (parts[0] === 'p') {
     const rest = parts.slice(3);
@@ -702,6 +704,7 @@ function renderTop(parts) {
   // Less frequent pages live in the "More" menu so the bar stays on one line.
   const more = clear($('#more-links'));
   add(more, '#/shelf', '📚 My finished books');
+  add(more, '#/style', '✒️ My writing style');  // P25 (Section 7c)
   if (inProject) {
     add(more, link('p', S.pid, S.branch, 'journal'), '📜 Book journal');
     add(more, link('p', S.pid, S.branch, 'grid'), '🗂 Scene grid');
@@ -7243,6 +7246,7 @@ async function renderMakeSetup() {
   const pipe = await pipelineFields('mb');
   await loadChoicesInfo();
   const cf = choicesFields({}, 'mb');
+  const s7 = await S7C.makeSetupExtras(s7c());  // P23 / P25 (Section 7c)
   fields.length = lengthBox.querySelector('input');
   const startAll = h('button', { type: 'button', class: 'primary big mab-go', 'data-testid': 'mb-start-auto' }, '⚡ Start — let the AI choose everything');
   const startSet = h('button', { type: 'submit', class: 'big', 'data-testid': 'mb-start' }, '⚡ Start with these settings');
@@ -7255,7 +7259,7 @@ async function renderMakeSetup() {
         h('div', { class: 'field' }, h('label', { for: 'mb-genre' }, 'Genre'), genre, h('datalist', { id: 'mb-genres' }, GENRES.map(g => h('option', { value: g }))), h('span', { class: 'hint' }, 'Empty = the AI chooses.')),
         h('div', { class: 'field' }, h('label', { for: 'mb-slot' }, 'Which AI'), slot, h('span', { class: 'hint' }, 'Automatic uses whichever AI is ready.'))),
       lengthBox,
-      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el),
+      h('div', { class: 'field' }, h('label', { for: 'mb-idea' }, 'Your idea (optional)'), idea), cf.el, pipe.el, s7.el),
     err, h('div', { class: 'form-actions' }, startAll, startSet));
   const est = estimateBox(gridUI(), () => {  // ⏱ P28: AI answers and minutes before the run starts
     const l = form.querySelector('input[name="mb-len"]:checked'); const pl = pipe.get();
@@ -7280,6 +7284,7 @@ async function renderMakeSetup() {
       if (CH.info) body.choices = cf.get();
       const pl = pipe.get(); if (pl) body.pipeline = pl;
     }
+    s7.apply(body);  // P23 / P25 (Section 7c): beta reader and "write in my style"
     startAll.disabled = startSet.disabled = true;
     err.appendChild(loadingState('Checking your AIs…'));
     if (!(await withAiCheck(body, 'the book'))) { clear(err); startAll.disabled = startSet.disabled = false; return; }
@@ -7801,6 +7806,11 @@ async function pollQualityJob(path, progressEl) {
   }
 }
 function scoreCell(v, cls = '') { return h('td', { class: `num ${cls}` }, v == null ? '–' : String(v)); }
+/** The helpers section7c.js (P23 beta reader, P25 writing style) uses — passed in, so that module stays separate. */
+function s7c() {
+  return { h, api, bpath, plink, link, clear, crumbs, toast, announce, problemBox, toProblem, stateBox, loadingState,
+    fmtTime, pollQualityJob, infoTip, hazard, S };
+}
 async function viewReport(main) {
   const title = profileOf().title || S.project.name;
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
@@ -7920,6 +7930,7 @@ async function viewReport(main) {
     const len = leniencyCard(ov.leniency, ov.calibration);
     if (len) holder.appendChild(len);
     holder.appendChild(askBox(rep));
+    holder.appendChild(S7C.betaCard(s7c()));  // 📖 P23 beta reader (Section 7c)
     if ((ov.reports || []).length > 1) holder.appendChild(h('details', { class: 'card' }, h('summary', null, `Earlier reports (${ov.reports.length - 1})`),
       h('ul', { class: 'small' }, ov.reports.slice(1).map(r => h('li', null, `${fmtTime(r.at)} · overall ${r.overall ?? '–'} · ${r.reviewers || 0} reviewer(s)`)))));
   }

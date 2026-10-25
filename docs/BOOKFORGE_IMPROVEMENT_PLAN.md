@@ -17,14 +17,15 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 ## Status at a glance  (keep this up to date — updated on every add / finish)
 
-- **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
-- **Just finished (P38 PR):** 🎯 picker rebuild + 🔢 number teach, with P37.1, P37.3, P37.4 done and P37.2 partly done [!].
-- **Now:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 without P22 (skipped by the user): P26 + P31, then P30, P32–P35, P23, P24, P25, P27, P28 (P29 later).
+- **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21), Section 8 (P36, P37.1, P37.3–P37.5, P38; P37.2 partly [!]),
+  Section 7 (P23–P28, P30–P35; P22 skipped by the user, P29 audiobook later), BookForge GitHub CI, the follow-through fix.
+- **Now:** the FIRST REAL TEST on the user's PC — step by step in `docs/FIRST_REAL_TEST.md`. Waiting on the user's
+  ChatGPT page check (`desktop-app/tools/chatgpt-page-check.js`) to hard-code ChatGPT's live selectors.
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
-- Last updated: 2026-10-25 (P38 done; W1–W15 prompts in docs/WRITING_TOOL_PROMPTS.md; B4 added).
+- Last updated: 2026-10-25 (Section 7 and 8 done; first real test next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -214,7 +215,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
-- [ ] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
+- [x] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
+  Done: bookforge/beta_reader.py — one AI (independent by default) reads the book text only as the profile's audience,
+  returns reactions/interest/guesses/stop with quotes checked against the book and the chapter; BookForge derives
+  findings (lost, flat stretch, twists guessed early, would stop); 📖 card + button on the 📊 report page, optional
+  ⚡ run step "Beta reader" (`beta_reader: true`), never blocks the book.
 - [x] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
   *(bookforge/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
@@ -223,7 +228,10 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   too hard / too simple, long sentences, low variety, little or only dialogue, chapters that read differently, very
   short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
   next; numbers only, never breaks the report.)*
-- [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
+- [x] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
+  Done: bookforge/style_card.py — ✒️ My writing style page (paste/upload samples): numbers counted without AI plus an
+  AI summary (quotes checked); a book holds a snapshot (`style_card:<pid>`) that goes into the chapter brief
+  (`narrator_style` + a rule) and the editor's context/task; ⚡ run option "Write in my style" (`my_style: true`).
 - [x] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
   lamp and age arithmetic to verify). Done: `timeline_check.py` (ages, birth/story years, "N years ago" arithmetic,
   no AI) + the term check of `terms.py`, shown on the chapter/book page and sent to the AI editor as `fact_checks`.
@@ -304,6 +312,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   fake-AI runs only (short story 46 calls measured vs 52 estimated); after real runs the measured calls per step and
   seconds per answer replace it — check it after the first real novel; until then 45 s per web-AI answer is a guess;
   (d) money is only shown for slots with per-token prices (tokens from provenance × today's slot prices), web AIs = 0.
+- **P23 beta reader — not tried with real AIs.** Check on the first real book: (1) do web AIs quote word for word
+  (many ⓘ "quotes not found" = paraphrase); (2) does the reader really react as the audience or slide back into
+  editor talk (then sharpen `beta_reader.TASK`); (3) "guessed it" is judged after reading the whole book at once, not
+  truly page by page — an AI that already knows the ending may over- or under-report guesses; (4) long books are read
+  as a digest (same budget as the 📊 review), so boredom in a chapter's unseen middle is missed.
+- **P23 design choices to confirm:** (a) the run step is OFF by default (one extra AI call; tick 📖 Beta reader in the
+  ⚡ form); (b) one reader per read (not several); by default an AI that did not write most of the book; (c) reads are
+  advice in settings (`beta_reads:<pid>:<branch>`, newest 5), not in the report's Markdown/PDF; (d) the 📖 job is not
+  resumable after a restart (press 📖 again).
+- **P25 [!] style numbers are English-only heuristics** (person from pronouns outside quotes, tense from a rough verb
+  count, signature words = frequent lower-case words). Tune on real samples.
+- **P25 design choices to confirm:** (a) one style card per author (`style_card:author:<principal>`), and a book keeps a
+  SNAPSHOT (`style_card:<pid>`) — editing the card does not change a book until it is ticked again (the page shows
+  "uses version N"); (b) the style is for the NARRATION only; dialogue keeps the voice cards; (c) the editor gets the
+  card and one sentence in its task but no new scored dimension (adding one would change every chapter's rubric);
+  (d) samples are stored (≤ 60 000 characters) so the numbers can be redone; they go to an AI only on ✨ Learn my
+  style (≤ 12 000 characters); (e) "Write in my style" is pre-ticked in the ⚡ form when a card exists; (f) the AI
+  summary call runs without a book (project id none): an AI slot limited to certain projects cannot do it (the
+  numbers still work).
 
 - P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
   audience targets are rules of thumb (not tuned on real books yet).

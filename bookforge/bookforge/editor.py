@@ -514,6 +514,8 @@ class EditorService:
                     ctx["scene_cards"] = brief["scene_cards"]
                 if brief.get("pov"):
                     ctx["pov"] = brief["pov"]
+                if brief.get("narrator_style"):  # P25 (Section 7c): the author's own narrating style
+                    ctx["narrator_style"] = brief["narrator_style"]
             ctx["chapter_text"] = str(data.get("text") or "")[:MAX_TEXT_CHARS]
             ctx["outline"] = {k: info.get(k) for k in ("chapter_id", "number", "of", "last", "objective", "previous",
                                                        "next")}
@@ -561,6 +563,9 @@ class EditorService:
             ctx, protected = self._context(pid, branch, rec, report, info, brief, guide)
             ctx.update(fact_checks_context(self.engine, job.principal, pid, branch, rec))  # P26/P30/P31 (never raises)
             task = rubric.task_text(rec["module_id"], dims, notes)
+            if ctx.get("narrator_style"):  # P25 (Section 7c)
+                from .style_card import EDITOR_NOTE  # noqa: PLC0415
+                task = f"{task} {EDITOR_NOTE}"
             ask = dict(rec=rec, task=task, dims=dims, ctx=ctx, protected=protected, text=text,
                        strictness=st["strictness"], relax=relax, report=report, prev_disc=prev_disc)
             first = self._ask(job, **ask)
@@ -774,6 +779,12 @@ class EditorService:
                                                    "keep_nearby")} for f in findings],
                "keep": craft.get("keep") or [], "voices": self._voices(pid, branch),
                "canon": {"approved_records": approved}, "protected_facts": protected[:40]}
+        try:  # P25 (Section 7c): the reworked passages keep the author's own narrating style
+            from .style_card import brief_for  # noqa: PLC0415
+            if rec["module_id"] == "C02" and brief_for(self.store, pid):
+                ctx["narrator_style"] = brief_for(self.store, pid)
+        except Exception:  # noqa: BLE001
+            log.exception("could not add the narrator style to the rewrite")
         from .review import safe_title  # noqa: PLC0415
         title = safe_title(self.contracts, rec)
         job.phase = f"The writer is reworking the flagged passages of “{title}”"

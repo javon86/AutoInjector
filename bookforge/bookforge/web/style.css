@@ -1160,3 +1160,16 @@ ul.samples q { font-style: italic; }
   .sg-table tr.sg-ch th { background: #eee !important; }
   .sg-table a { color: inherit; text-decoration: none; }
 }
+/* 📖 P23 beta reader and ✒️ P25 your writing style (Section 7c) */
+.s7-say { margin: 8px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.s7-meter { display: flex; align-items: flex-end; gap: 3px; min-height: 52px; margin: 8px 0; overflow-x: auto; }
+.s7-bar { display: inline-flex; align-items: flex-end; justify-content: center; min-width: 18px; font-size: 11px;
+  background: var(--accent-soft); border: 1px solid var(--border); border-radius: 3px 3px 0 0; }
+.s7-bar.low { background: var(--warn-soft); border-color: var(--warn-line); }
+.s7-samples { display: grid; gap: 8px; }
+.s7-sample textarea { width: 100%; box-sizing: border-box; }
+.s7-dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0; }
+.s7-dl dt { font-weight: 600; }
+.s7-dl dd { margin: 0; }
+.s7-books { list-style: none; padding: 0; }
+.s7-make .check-row { margin: 4px 0; }
