@@ -2138,6 +2138,17 @@ class AutoBookService(_Runner):
                 texture_mod.save(self.store, pid, branch, texture_mod.clean_items(b["world_texture"]), by="author",
                                  how="book_bible")
                 notes.append(f"{len(b['world_texture'])} world detail(s)")
+            tt = b.get("trade_terms") or {}
+            if tt.get("items") or tt.get("story_year"):  # P31: the earlier book's trade facts (author's decisions kept)
+                from . import terms as terms_mod  # noqa: PLC0415
+                if not terms_mod.get_entry(self.store, pid, branch) and \
+                        terms_mod.seed_from_bible(self.store, pid, branch, tt.get("items") or [], tt.get("story_year")):
+                    notes.append(f"{len(tt.get('items') or [])} trade term(s)")
+            if b.get("repeat_labels"):  # P30: the author's voice / motif / filler / accident labels
+                from . import repetition as repetition_mod  # noqa: PLC0415
+                if not repetition_mod.get_labels(self.store, pid, branch).get("labels"):
+                    repetition_mod.save_labels(self.store, pid, branch, b["repeat_labels"], by="author")
+                    notes.append(f"{len(b['repeat_labels'])} repeat label(s)")
         except BookforgeError as exc:
             self.event(run, "note", f"⚠️ The story rules / world texture of the book bible could not be used "
                        f"({exc.code}); the AI makes new ones", step="world", code="BIBLE_ENTRY_REFUSED")

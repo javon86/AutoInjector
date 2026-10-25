@@ -277,6 +277,28 @@ def save(store, pid: str, branch: str, items: list[dict], *, by: str, slot: str 
                                   "how": how, **_counts(e["items"])}))
 
 
+def seed_from_bible(store, pid: str, branch: str, items, story_year=None) -> dict | None:
+    """🔁 A rerun from the book bible: the earlier book's list as this book's list, only when it has none yet. The
+    author's own ✔ Verified / ✕ Wrong decisions from the earlier book are kept (they were confirmed there); every
+    other term stays research needed. Returns the entry, or None when there was nothing to seed."""
+    clean = clean_items(items)
+    try:
+        year = clean_year(story_year)
+    except BookforgeError:
+        year = None
+    if not clean and year is None:
+        return None
+
+    def change(old):
+        if old and old.get("version"):
+            return old  # the new book already has its own list: keep it
+        return {"version": 1, "items": clean, "story_year": year,
+                "made_by": {"kind": "author", "slot": None, "at": _now()}, "updated_at": _now(), "history": []}
+    return update_single(store, _key(pid, branch), pid, branch, change, (
+        "terms.saved", lambda e: {"version": e["version"], "items": len(e["items"]), "by": "author", "ai_slot": None,
+                                  "how": "book_bible", **_counts(e["items"])}))
+
+
 def add_terms(store, pid: str, branch: str, new: list[dict], *, by: str, slot: str | None = None,
               how: str = "scan") -> tuple[dict | None, int]:
     """Add terms that are not on the list yet (as research needed). Returns (entry, added)."""

@@ -506,7 +506,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   brief gets the verified/wrong terms (`trade_terms`, ≤ 1 200 chars); research-needed terms only when the plan names
   them; (f) the editor's context gets `fact_checks` as data (no change to `editor_rubric.py`), so the AI editor may or
   may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.bookforge` (all
-  companion settings do) but are NOT in the book bible yet, so a 🔁 rerun from the bible starts with an empty list.
+  companion settings do) but are now in the book bible too (`trade_terms` with the author's ✔/✕ decisions and the story year, `repeat_labels`), and a 🔁 rerun starts with them (FIXED 2026-10-25).
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the
