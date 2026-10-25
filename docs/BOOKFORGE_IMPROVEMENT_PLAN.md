@@ -494,7 +494,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   dialogue opener like "Right, so"), single repeated words ("Nothing." ×4) are left to the P6 pattern checker; voice
   is decided from tagged dialogue ("…," Tom said) — untagged lines count as dialogue without a speaker; check the
   classes on book 2 ("Right, so" voice, Odile's counting motif) with `repetition.sort_repeats`.
-- **P26 / P30 / P31 design choices to confirm:** (a) trade facts, the story year and repeat labels are companion data
+- **P26 / P30 / P31 design choices — CONFIRMED by the user (2026-10-25: "go with the defaults"):** (a) trade facts, the story year and repeat labels are companion data
   (`trade_terms:<pid>:<branch>`, `repetition_labels:<pid>:<branch>`), not records — like the story rules; (b) only the
   author can mark a term verified/wrong (`author_confirms`); an AI's research answer is shown as advice and a Make-a-book
   run never verifies — it adds what it finds as "research needed" and reports ⚠️ `TERMS_RESEARCH_NEEDED` /
