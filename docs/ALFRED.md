@@ -41,6 +41,10 @@ he makes no more calls.
    ollama pull qwen2.5:7b
    ```
 
+   Optional but recommended (Alfred's tool list is long): give Ollama a bigger memory window — Windows key →
+   "Edit the system environment variables" → Environment Variables → New (user variable):
+   name `OLLAMA_CONTEXT_LENGTH`, value `16384` → OK, then quit Ollama from the tray icon and start it again.
+
    **Recommended:** `qwen2.5:7b` — good at tool calling, fits graphics cards with 8 GB of memory
    (it also runs, slower, without one). Alternatives: `llama3.1:8b` (8 GB), `qwen3:8b`
    (newer, 8 GB); on a small card (4–6 GB) `qwen2.5:3b` or `llama3.2:3b` (less reliable with tools);
@@ -85,6 +89,28 @@ your decision stays yours to decide in Akọwe.
 from them (never programs or scripts) · ✋ export the logs ("this book only", the last day, or everything;
 secrets are taken out).
 
+**🧰 Everything else in the app** — two tools reach every other control of AutoInjector through a fixed
+catalog (`desktop-app/alfred-app-actions.js`, 151 actions, each with a title, an argument schema and
+"changes things?"): `app_info` for looking (pane health, the app state, the butler's state and memory, lockers,
+the database, models, logs, setup, voice/image settings, self-repair, Akọwe connection, the Images tab's lists …)
+and `app_control` for doing (routing / Auto / hop limit / roles / active AIs, House Rules, prompt sequences and the
+prompt library, tests and checks, the butler's tasks and settings, lockers, the terminal connection, setup and
+downloads, voice, image/video settings, self-repair and the 🎯 picker, the Akọwe bridge/server/view, the Images
+tab's settings, library folders, collections and character locks, which tab is shown …). `app_help` explains any
+action. They call the very same handlers as the buttons. A few things are deliberately **not** reachable, each
+with its reason in the file: saved passwords and connection keys, the phone/LAN switch, opening any web address,
+free command execution (the terminal's run/approve, the butler's run-command tool), developer tools and window
+chrome.
+
+**🎨 Every Stable Diffusion setting** — `sd_call` reaches every method of the 🎨 Images module (`sd-api.js`):
+`images.generate` with all generation fields (prompt, negative, LoRAs, character lock, size, steps, CFG, sampler,
+scheduler, seed, checkpoint, VAE, count, init image, denoise …), status / progress / cancel / gallery / test,
+connect / detect / start / stop, the installer, and the model library. It is built from the module itself: when the
+module lists its operations (`capabilities()` — the full-controls build with hires fix, upscalers, ControlNet,
+inpainting, refiner, ADetailer, A1111 options, ComfyUI workflows and raw `extra` payload fields), those appear in
+`sd_call` automatically with their own schemas. On a build without them, `extra` / `options` / `workflow` are
+validated and then refused with a plain message (nothing is generated).
+
 **🧪 Open Interpreter (optional)** — off unless you tick it in ⚙. Even then he always shows the
 **exact code** on the card and asks first, can never be "always allowed", and refuses it when a direct
 tool exists (images, books, the AIs, video, logs).
@@ -112,12 +138,22 @@ At most one of each every 5 minutes and 6 in 10 minutes.
 |---|---|
 | `desktop-app/alfred.js` | the core: switch, settings (`alfred-settings.json` in the app data folder), the loop, cards, cancel, watcher |
 | `desktop-app/alfred-tools.js` | the fixed tool registry: name, title, description, JSON schema, `changes`, `allowAlways`, `describe`, `run` |
+| `desktop-app/alfred-app-actions.js` | the catalog of every other app control (→ `app_info` / `app_control`) and the EXCLUDED list with reasons |
 | `desktop-app/alfred-ai.js` | his AI: OpenAI-compatible tool calling (Ollama `/v1`, the connected AI), the JSON text protocol (web panes / models without tools) |
 | `desktop-app/alfred-image.js` | the ONE image adapter (sd-api `images.generate`; falls back to image-provider) |
 | `desktop-app/alfred-main.js` | wiring into Electron: tool context, IPC `alfred:*`, app events → watcher |
 | `desktop-app/alfred-panel.js` | the drawer UI (built only when on) |
-| hooks | one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
+| hooks | `captureIpc(ipcMain)` right after Electron is required + one marked block in `main.js`, `preload.js` (`alfred*`), the switch + script tag in `controls.html`, `alfred-` log tag in `log-tags.js` |
 | Akọwe | `POST /api/projects/{id}/branches/{b}/journal/note` `{source:"alfred", code, title}`; optional `note` on `POST …/review/fix` |
+
+**Can he really control everything?** `desktop-app/test/alfred-coverage.test.js` (part of `npm run test:unit`)
+keeps an explicit inventory of every capability — all IPC channels the window, tabs and menus use, the live
+events, the butler's decision actions, the service-bridge and Akọwe-bridge routes, the Images-module methods, the
+Akọwe API Alfred uses, the menu items and tabs — and fails when the code has one the inventory doesn't, or when
+one is neither mapped to an Alfred tool nor excluded with a reason. It then drives **every Alfred tool, every app
+action and every Images-module method** from a fake model's tool call: against the real main.js (mock Electron,
+fake panes), a fake Forge and a fake ComfyUI through the real sd-api, and a fake Akọwe API — checking the effect
+and that anything that changes something waits for ✔ Do it — and prints the coverage table.
 
 Tests: `desktop-app/test/alfred.test.js` (fake Ollama/OpenAI server, fake Akọwe API) and
 `desktop-app/test/e2e/alfred.e2e.js` (the real app under xvfb with the real Akọwe server, a fake model and

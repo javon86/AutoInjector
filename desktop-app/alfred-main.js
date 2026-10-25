@@ -18,6 +18,106 @@ const { createImageAdapter } = require('./alfred-image');
 
 const NEVER_OPEN = /\.(exe|bat|cmd|com|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msi|msp|scr|lnk|jar|sh|bash|py|pyw|app|command|reg|hta|cpl|dll)$/i;
 
+// ---- IPC capture: Alfred's app controls call the SAME handlers the buttons call ----------------------------
+// main.js calls captureIpc(ipcMain) right after requiring Electron, before any handler is registered.
+const ipcHandlers = new Map();
+function captureIpc(ipcMain) {
+  if (!ipcMain || ipcMain.__alfredCaptured) return ipcHandlers;
+  const orig = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => { ipcHandlers.set(channel, fn); return orig(channel, fn); };
+  ipcMain.__alfredCaptured = true;
+  return ipcHandlers;
+}
+const ALFRED_EVENT = Object.freeze({ sender: { send: () => {} }, senderFrame: null, alfred: true });
+async function invokeChannel(channel, ...args) {
+  const fn = ipcHandlers.get(channel);
+  if (!fn) return { ok: false, error: 'NO_SUCH_CONTROL', message: `This build has no "${channel}" control.` };
+  try { return await fn(ALFRED_EVENT, ...args); } catch (e) { return { ok: false, error: 'CONTROL_ERROR', message: `That control failed: ${String((e && e.message) || e).slice(0, 200)}` }; }
+}
+
+// ---- the 🎨 Images module (sd-api.js) as Alfred methods -------------------------------------------------------
+// Built from the module object itself, so a method the module gains later appears here automatically (unknown
+// ones ask first and take their arguments as given). Known ones get a schema; when the module advertises
+// capabilities() (the full-controls build), its schemas win.
+const str = { type: 'string', maxLength: 2000 };
+const LORAS = { type: 'array', maxItems: 12, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 200 }, weight: { type: 'number', minimum: -5, maximum: 5 } }, additionalProperties: false } };
+const PASS = { 'x-passthrough': true };
+const GENERATE_SCHEMA = { type: 'object', additionalProperties: false, required: ['prompt'], properties: {
+  prompt: { type: 'string', minLength: 1, maxLength: 4000 }, negativePrompt: str, loras: LORAS, characterLock: { type: 'string', maxLength: 120 },
+  purpose: { type: 'string', enum: ['portrait', 'cover', 'scene', 'illustration', 'test', 'free'] },
+  width: { type: 'integer', minimum: 64, maximum: 4096 }, height: { type: 'integer', minimum: 64, maximum: 4096 },
+  steps: { type: 'integer', minimum: 1, maximum: 200 }, cfgScale: { type: 'number', minimum: 0, maximum: 40 }, seed: { type: 'integer' },
+  sampler: { type: 'string', maxLength: 80 }, scheduler: { type: 'string', maxLength: 80 }, checkpoint: { type: 'string', maxLength: 300 }, vae: { type: 'string', maxLength: 300 },
+  count: { type: 'integer', minimum: 1, maximum: 8 }, batchCount: { type: 'integer', minimum: 1, maximum: 8 }, initImage: { type: 'string', maxLength: 30000000 }, denoise: { type: 'number', minimum: 0, maximum: 1 },
+  book: { type: 'string', maxLength: 200 }, keepSeed: { type: 'boolean' },
+  extra: Object.assign({ description: 'raw A1111 txt2img/img2img payload fields (e.g. enable_hr, hr_scale, alwayson_scripts)' }, PASS),
+  options: Object.assign({ description: '/sdapi/v1/options keys to set (e.g. CLIP_stop_at_last_layers)' }, PASS),
+  workflow: Object.assign({ description: 'ComfyUI: a workflow JSON (API format) with {{name}} parameters, or the name of a saved one' }, PASS),
+  params: Object.assign({ description: 'values for the workflow\'s {{name}} parameters' }, PASS),
+} };
+const SD_META = {
+  'images.status': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.progress': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.gallery': { changes: false, schema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 200 } }, additionalProperties: false }, call: (a) => [a.limit || 20] },
+  'images.generate': { changes: true, schema: GENERATE_SCHEMA, call: (a) => [Object.assign({ from: 'alfred' }, a)] },
+  'images.cancel': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.test': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.status': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.targets': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.detect': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.connect': { changes: true, schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', minLength: 4, maxLength: 400 } }, additionalProperties: false }, call: (a) => [a.url] },
+  'sd.start': { changes: true, schema: { type: 'object', properties: { target: { type: 'string', maxLength: 200 } }, additionalProperties: false }, call: (a) => [a.target] },
+  'sd.stop': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.install.check': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'sd.install.install': { changes: true, schema: { type: 'object', properties: { build: { type: 'string', maxLength: 40 }, ignoreSpace: { type: 'boolean' } }, additionalProperties: false }, call: (a) => [a] },
+  'sd.install.downloadModel': { changes: true, schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', enum: ['sd15', 'sdxl'] } }, additionalProperties: false }, call: (a) => [a.id] },
+  'sd.install.cancel': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'library.find': { changes: false, schema: { type: 'object', properties: { query: { type: 'string', maxLength: 200 }, kind: { type: 'string', enum: ['checkpoint', 'lora', 'vae', 'embedding'] }, base: { type: 'string', maxLength: 40 } }, additionalProperties: false }, call: (a) => [a.query || '', { kind: a.kind, base: a.base }] },
+  'library.get': { changes: false, schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', maxLength: 300 } }, additionalProperties: false }, call: (a) => [a.id] },
+  'library.characterLock': { changes: false, schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 120 } }, additionalProperties: false }, call: (a) => [a.name] },
+  'library.locks': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'library.scan': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+};
+const READ_VERBS = /^(status|progress|gallery|list|lists|find|get|locks|targets|detect|check|models|modules|schema|capabilities|upscalers|samplers|schedulers|info|describe|styles|scripts|embeddings|extraFields|memory|queue|objectInfo|characterLock)$/i;
+function walkMethods(obj, prefix, out, depth) {
+  if (!obj || typeof obj !== 'object' || depth > 3) return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const name = prefix ? `${prefix}.${k}` : k;
+    if (typeof v === 'function') out.push(name);
+    else if (v && typeof v === 'object') walkMethods(v, name, out, depth + 1);
+  }
+  return out;
+}
+async function sdMethodsOf(api) {
+  if (!api) return [];
+  let caps = null;
+  if (typeof api.capabilities === 'function') { try { caps = await api.capabilities(); } catch (_) { caps = null; } }
+  if (caps && caps.ok === false) caps = null;
+  const capList = caps && (Array.isArray(caps) ? caps : caps.operations || caps.ops || caps.methods) || [];
+  const capBy = new Map(capList.filter((c) => c && (c.method || c.name)).map((c) => [c.method || c.name, c]));
+  const passthrough = (caps && caps.passthrough) || {};
+  const names = new Set(walkMethods(api, '', [], 0));
+  for (const c of capBy.keys()) names.add(c); // operations reachable only through api.call()
+  return [...names].filter((m) => m !== 'capabilities' && m !== 'call').map((m) => {
+    const meta = SD_META[m] || {};
+    const cap = capBy.get(m) || {};
+    const last = m.split('.').pop();
+    const changes = cap.changes !== undefined ? !!cap.changes : meta.changes !== undefined ? meta.changes : !READ_VERBS.test(last);
+    const capSchema = cap.params && typeof cap.params === 'object' ? cap.params : cap.schema && typeof cap.schema === 'object' ? cap.schema : null;
+    let schema = capSchema || meta.schema || null;
+    if (m === 'images.generate' && caps && caps.generateSchema) schema = Object.assign({}, caps.generateSchema, { properties: Object.assign({}, GENERATE_SCHEMA.properties, caps.generateSchema.properties || {}) });
+    const out = { method: m, changes, schema, title: cap.title || cap.description || null, call: meta.call || null };
+    if (m === 'images.generate' && !capSchema) {
+      out.unsupported = (a) => {
+        for (const k of ['extra', 'options', 'workflow']) if (a && a[k] !== undefined && !passthrough[k] && !(caps && caps.generateSchema && caps.generateSchema.properties && caps.generateSchema.properties[k])) return `"${k}" needs the full Stable Diffusion controls in the Images module, which this build does not have yet`;
+        return null;
+      };
+    }
+    return out;
+  });
+}
+function resolvePath(api, method) { return method.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), api); }
+
 function installAlfred(h) {
   const { ipcMain, shell } = h;
   const image = createImageAdapter({ imageProvider: h.imageProvider, outputManager: h.outputManager, dbService: h.dbService });
@@ -114,6 +214,21 @@ function installAlfred(h) {
   }
 
   const ctx = {
+    invoke: (channel, ...args) => invokeChannel(channel, ...args),
+    local: async (what, a) => { if (what === 'showTab') { h.broadcast('alfred', { type: 'show-tab', tab: a.tab }); return { ok: true, tab: a.tab }; } return { ok: false, error: 'UNKNOWN' }; },
+    sdMethods: async () => sdMethodsOf(image.module()),
+    sdInvoke: async (method, a) => {
+      const api = image.module();
+      if (!api) return { ok: false, error: 'NO_IMAGES_MODULE', message: 'The Images module is not available.' };
+      const params = method === 'images.generate' && a && typeof a === 'object' && !Array.isArray(a) ? Object.assign({ from: 'alfred' }, a) : a;
+      if (typeof api.call === 'function') return api.call(method, params === undefined ? {} : params); // the module's own dispatcher (full-controls build)
+      const fn = resolvePath(api, method);
+      if (typeof fn !== 'function') return { ok: false, error: 'NO_METHOD' };
+      const meta = (await sdMethodsOf(api)).find((m) => m.method === method) || {};
+      const args = meta.call ? meta.call(a || {}) : Array.isArray(a) ? a : a === undefined || (a && typeof a === 'object' && !Object.keys(a).length) ? [] : [a];
+      const owner = resolvePath(api, method.split('.').slice(0, -1).join('.')) || api;
+      return fn.apply(owner, args);
+    },
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,
     generateImage: (o) => image.generate(o),
@@ -176,4 +291,4 @@ function installAlfred(h) {
   return alfred;
 }
 
-module.exports = { installAlfred };
+module.exports = { installAlfred, captureIpc, ipcHandlers, invokeChannel, sdMethodsOf, SD_META, GENERATE_SCHEMA };

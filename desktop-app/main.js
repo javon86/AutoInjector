@@ -19,6 +19,7 @@
 // and Rotation's "UPDATED" confirmations, neither of which should ever be
 // shown to the user.
 const { app, BaseWindow, WebContentsView, ipcMain, dialog, safeStorage, Menu, shell, clipboard } = require("electron");
+require("./alfred-main").captureIpc(ipcMain); // 🎩 ALFRED HOOK: remembers each IPC handler so Alfred's app controls run the same code as the buttons
 const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");

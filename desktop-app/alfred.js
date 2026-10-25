@@ -116,7 +116,7 @@ function createAlfred(deps = {}) {
     out.interpreter = s.interpreter === true;
     out.notices = s.notices !== false;
     out.alwaysAllow = {};
-    for (const [k, v] of Object.entries(s.alwaysAllow || {})) { const t = registry.get(k); if (v === true && t && t.allowAlways) out.alwaysAllow[k] = true; }
+    for (const [k, v] of Object.entries(s.alwaysAllow || {})) { if (v === true && registry.allowableKey(k)) out.alwaysAllow[k] = true; }
     return out;
   }
   function save() {
@@ -212,20 +212,21 @@ function createAlfred(deps = {}) {
   }
 
   // ------------------------------------------------------------------ running one tool
-  async function execute(tool, args, { auto } = {}) {
+  async function execute(tool, args, { auto, readOnly } = {}) {
     let r;
     try { r = await withTimeout(Promise.resolve().then(() => tool.run(args, deps.ctx || {})), tool.timeoutMs || 60000); }
     catch (e) { r = { ok: false, error: 'TOOL_ERROR', message: `Something went wrong while doing "${tool.title}".` }; }
     r = r && typeof r === 'object' ? r : { ok: false, error: 'TOOL_ERROR' };
     const entry = { ts: now(), tool: tool.name, title: tool.title, text: registry.describe(tool, args), ok: !!r.ok, message: String(r.message || (r.ok ? 'Done.' : r.error || 'failed')).slice(0, 400), auto: !!auto, image: r.image || null };
-    if (tool.changes) addActivity(entry);
+    const isChange = !!tool.changes && !readOnly;
+    if (isChange) addActivity(entry);
     // Activity log: the tool, its fixed title and the outcome code — never arguments, prompts or text.
-    log('alfred-tool', { tool: tool.name, title: tool.title, changes: !!tool.changes, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), auto: auto || undefined });
-    if (tool.changes && tool.book && r.ok && deps.journal) {
+    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), auto: auto || undefined });
+    if (isChange && tool.book && r.ok && deps.journal) {
       const pid = r.project_id || (args && args.project_id) || null;
       if (pid) Promise.resolve(deps.journal(pid, tool.name, tool.title)).catch(() => {});
     }
-    if (tool.name === 'generate_image' && r.ok) notice('image', `image:${r.image}`, `🎨 The image is ready: ${r.image}`, { force: true, image: r.image });
+    if ((tool.name === 'generate_image' || (tool.name === 'sd_call' && r.image)) && r.ok) notice('image', `image:${r.image}`, `🎨 The image is ready: ${r.image}`, { force: true, image: r.image });
     return r;
   }
   function toolMessage(call, content) {
@@ -308,7 +309,12 @@ function createAlfred(deps = {}) {
           history.push(toolMessage(call, { ok: false, error: tool ? 'INTERPRETER_OFF' : 'UNKNOWN_TOOL', message: tool ? 'Open Interpreter is turned off in Alfred\'s settings.' : `There is no tool called "${safeName(call.name)}". Use only the listed tools.` }));
           continue;
         }
-        const v = registry.validate(tool, call.args);
+        let v = registry.validate(tool, call.args);
+        if (v.ok && typeof tool.check === 'function') {
+          let c;
+          try { c = await tool.check(v.args, deps.ctx || {}); } catch (_) { c = { ok: false, error: 'the arguments could not be checked' }; }
+          v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: (c && c.error) || 'not allowed' };
+        }
         if (!v.ok) {
           log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS' });
           history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}.` }));
@@ -322,13 +328,15 @@ function createAlfred(deps = {}) {
             continue;
           }
         }
-        if (!tool.changes) {
-          const out = await execute(tool, v.args);
+        let changes = !!tool.changes;
+        if (typeof tool.dynamicChanges === 'function') { try { changes = !!(await tool.dynamicChanges(v.args, deps.ctx || {})); } catch (_) { changes = true; } }
+        if (!changes) {
+          const out = await execute(tool, v.args, { readOnly: true });
           history.push(toolMessage(call, resultForAi(out)));
           if (r.cancelled) break;
           continue;
         }
-        if (tool.allowAlways && settings.alwaysAllow[tool.name]) {
+        if (registry.canAllowAlways(tool, v.args) && settings.alwaysAllow[registry.allowKeyOf(tool, v.args)]) {
           const out = await execute(tool, v.args, { auto: true });
           history.push(toolMessage(call, resultForAi(out)));
           if (r.cancelled) break;
@@ -340,7 +348,7 @@ function createAlfred(deps = {}) {
         const id = `card-${seq}-${r.steps}`;
         card = {
           id, req: r, steps: pending,
-          public: { id, intro: msg.content ? String(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: !!p.tool.allowAlways, code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : null })) },
+          public: { id, intro: msg.content ? String(msg.content).slice(0, 600) : '', steps: pending.map((p, i) => ({ n: i + 1, tool: p.tool.name, title: p.tool.title, text: p.text, allowAlways: registry.canAllowAlways(p.tool, p.args), allowKey: registry.allowKeyOf(p.tool, p.args), code: p.tool.interpreter ? { language: p.args.language, code: p.args.code } : null })) },
         };
         log('alfred-card', { req: r.id, card: id, tools: pending.map((p) => p.tool.name) });
         emit({ type: 'card', card: card.public });
@@ -358,7 +366,7 @@ function createAlfred(deps = {}) {
     card = null;
     const allow = Array.isArray(opts.alwaysAllow) ? opts.alwaysAllow : [];
     let changed = false;
-    for (const name of allow) { const t = registry.get(name); if (t && t.allowAlways && !settings.alwaysAllow[name]) { settings.alwaysAllow[name] = true; changed = true; } }
+    for (const key of allow) { if (registry.allowableKey(key) && !settings.alwaysAllow[key]) { settings.alwaysAllow[key] = true; changed = true; } }
     if (changed) { save(); log('alfred-settings', { alwaysAllow: Object.keys(settings.alwaysAllow) }); }
     log('alfred-confirm', { req: c.req.id, card: c.id, tools: c.steps.map((s) => s.tool.name) });
     emitState();

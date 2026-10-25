@@ -224,7 +224,7 @@
     for (const s of card.steps) {
       const li = h('li', { 'data-tool': s.tool }, s.code ? `${s.title} — here is the exact ${s.code.language} code:` : s.text);
       if (s.code) li.append(h('pre', null, s.code.code));
-      if (s.allowAlways) li.append(h('label', null, h('input', { type: 'checkbox', class: 'al-always', 'data-tool': s.tool }), ` Always allow "${s.title}" without asking`));
+      if (s.allowAlways) li.append(h('label', null, h('input', { type: 'checkbox', class: 'al-always', 'data-tool': s.allowKey || s.tool }), s.allowKey && s.allowKey.includes(':') ? ' Always allow this without asking' : ` Always allow "${s.title}" without asking`));
       ol.append(li);
     }
     box.append(ol, h('div', { class: 'al-actions' },
@@ -262,6 +262,7 @@
   if (typeof api.onAlfred === 'function') {
     api.onAlfred((p) => {
       if (!p) return;
+      if (p.type === 'show-tab' && p.tab) { const b = document.getElementById(`tab-app-${p.tab}`); if (b) b.click(); return; }
       if (p.type === 'state' && p.state) render(p.state);
       else if (last && last.enabled && built) {
         // message / card / activity events: refresh from a fresh status (cheap, no AI call)

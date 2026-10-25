@@ -547,6 +547,80 @@ def({
   },
 });
 
+// ---- 🧰 the rest of the app (alfred-app-actions.js) and the 🎨 Images module (sd-api.js) ---------------------
+const appActions = require('./alfred-app-actions');
+function appTool(changes) {
+  return {
+    name: changes ? 'app_control' : 'app_info',
+    title: changes ? 'Use an app control' : 'Look something up in the app',
+    group: 'app', changes, timeoutMs: 180000,
+    description: changes
+      ? `Any other control of AutoInjector (changes something). action: ${appActions.catalogText(true)}. args: that action's arguments (app_help shows titles and argument details).`
+      : `Read anything else in AutoInjector (read-only). action: ${appActions.catalogText(false)}. args: that action's arguments (app_help shows titles and argument details).`,
+    args: { type: 'object', required: ['action'], properties: { action: { type: 'string', maxLength: 60 }, args: { type: 'object', 'x-passthrough': true } }, additionalProperties: false },
+    allowAlwaysFor: (a) => { const e = appActions.get(a && a.action); return !!(e && e.allowAlways); },
+    allowKey: (a) => `${changes ? 'app_control' : 'app_info'}:${a && a.action}`,
+    check(a) {
+      const e = appActions.get(a.action);
+      if (!e || e.changes !== changes) return { ok: false, error: `there is no ${changes ? 'app_control' : 'app_info'} action "${str(a.action, 60)}"` };
+      const e2 = checkValue(a.args || {}, appActions.schemaOf(e), 'args');
+      return e2 ? { ok: false, error: e2 } : { ok: true, args: { action: a.action, args: a.args || {} } };
+    },
+    describe: (a) => { const e = appActions.get(a.action); const args = a.args && Object.keys(a.args).length ? ` — ${clip(JSON.stringify(a.args), 300)}` : ''; return `${e ? e.title : a.action}${args}`; },
+    async run(a, ctx) {
+      const e = appActions.get(a.action);
+      if (e.local) { const r = await ctx.local(e.local, a.args || {}); return r && r.ok === false ? r : { ok: true, message: `${e.title}: done.`, data: r }; }
+      if (typeof ctx.invoke !== 'function') return { ok: false, error: 'NOT_WIRED', message: 'That control is not available here.' };
+      const r = await ctx.invoke(e.channel, ...e.call(a.args || {}));
+      if (r && r.ok === false) return { ok: false, error: str(r.error || 'FAILED', 60), message: r.message ? clip(r.message, 300) : `${e.title} didn't work (${str(r.error || 'failed', 60)}).`, data: r };
+      return { ok: true, message: `${e.title}: done.`, data: r === undefined ? null : r };
+    },
+  };
+}
+def({
+  name: 'app_help', title: 'What an app control does', group: 'app',
+  description: 'Titles and argument details of the app_info / app_control actions (optionally only those starting with a prefix such as "routing." or "sd"). Read-only.',
+  args: { type: 'object', properties: { prefix: { type: 'string', maxLength: 40 } }, additionalProperties: false },
+  async run(a) { return { ok: true, data: appActions.help(a.prefix) }; },
+});
+def(appTool(false));
+def(appTool(true));
+
+def({
+  name: 'sd_call', title: 'Use the 🎨 Images module', group: 'images', changes: true, timeoutMs: 600000,
+  description: 'Any Stable Diffusion control through the 🎨 Images module (sd-api): method = a module method such as images.generate (every generation field: prompt, negativePrompt, loras, characterLock, width, height, steps, cfgScale, seed, sampler, scheduler, checkpoint, vae, count, initImage, denoise … plus, when the module supports it, extra = raw A1111 payload fields, options = /sdapi/v1/options keys, workflow = a ComfyUI workflow JSON with {{name}} parameters), images.status/progress/cancel/gallery/test, sd.status/detect/connect/targets/start/stop, sd.install.*, library.find/get/characterLock/locks/scan, and any newer method the module lists. Read-only methods run directly; the rest ask first.',
+  args: { type: 'object', required: ['method'], properties: { method: { type: 'string', minLength: 3, maxLength: 80 }, args: { 'x-passthrough': true } }, additionalProperties: false },
+  allowAlwaysFor: () => false,
+  allowKey: (a) => `sd_call:${a && a.method}`,
+  dynamicChanges: async (a, ctx) => { const m = await sdMethod(ctx, a.method); return m ? !!m.changes : true; },
+  async check(a, ctx) {
+    const m = await sdMethod(ctx, a.method);
+    if (!m) return { ok: false, error: `the Images module has no method "${str(a.method, 80)}"${ctx && ctx.sdMethods ? '' : ' (the Images module is not available)'}` };
+    const args = a.args === undefined ? (m.positional ? [] : {}) : a.args;
+    if (m.schema) {
+      const e = m.positional ? (Array.isArray(args) ? args.map((v, i) => checkValue(v, (m.schema.items || [])[i] || {}, `args[${i}]`)).find(Boolean) : 'args must be a list') : checkValue(args, m.schema, 'args');
+      if (e) return { ok: false, error: e };
+    }
+    if (m.unsupported) { const bad = m.unsupported(args); if (bad) return { ok: false, error: bad }; }
+    return { ok: true, args: { method: a.method, args } };
+  },
+  describe: (a) => `${a.method} in the 🎨 Images module${a.args && (Array.isArray(a.args) ? a.args.length : Object.keys(a.args).length) ? ` with ${clip(JSON.stringify(a.args), 400)}` : ''}`,
+  async run(a, ctx) {
+    const r = await ctx.sdInvoke(a.method, a.args);
+    if (r && r.ok === false) return { ok: false, error: str(r.error || 'FAILED', 60), message: clip(r.message || `It didn't work (${r.error || 'failed'}).`, 400) };
+    const images = r && Array.isArray(r.images) ? r.images.map((x) => x.path).filter(Boolean) : [];
+    return { ok: true, message: images.length ? `Saved ${images.length} picture(s).` : 'Done.', data: shrink(r), image: images[0] || null };
+  },
+});
+async function sdMethod(ctx, name) {
+  if (!ctx || typeof ctx.sdMethods !== 'function') return null;
+  const list = await ctx.sdMethods();
+  return (list || []).find((m) => m.method === name) || null;
+}
+function shrink(v) { // keep tool results small: no base64 images
+  try { return JSON.parse(JSON.stringify(v === undefined ? null : v, (k, x) => (typeof x === 'string' && x.length > 2000 ? `${x.slice(0, 200)}… (${x.length} chars)` : x))); } catch (_) { return null; }
+}
+
 // Words that mean a DIRECT tool exists: Open Interpreter is refused for these.
 const DIRECT_FOR = [
   [/\b(image|picture|draw|illustrat|stable diffusion|png)\b/i, 'generate_image'],
@@ -561,8 +635,34 @@ function directToolFor(text) {
 }
 
 // ----------------------------------------------------------------------------- schema validation
+/** A validated pass-through value (settings patches, raw SD payload fields): plain JSON, bounded size and
+ *  depth, safe key names. The receiving module validates the meaning. */
+const PASS_KEY = /^[A-Za-z_][A-Za-z0-9_.\- ]{0,79}$/;
+function checkPassthrough(v, at) {
+  let n = 0;
+  const walk = (x, d, where) => {
+    if (++n > 2000) return `${at} is too big`;
+    if (d > 8) return `${at} is nested too deeply`;
+    if (x === null || typeof x === 'boolean') return null;
+    if (typeof x === 'number') return Number.isFinite(x) ? null : `${where} must be a finite number`;
+    if (typeof x === 'string') return x.length > 200000 ? `${where} is too long` : null;
+    if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) { const e = walk(x[i], d + 1, `${where}[${i}]`); if (e) return e; } return null; }
+    if (typeof x === 'object') {
+      for (const [k, val] of Object.entries(x)) {
+        if (!PASS_KEY.test(k) || k === '__proto__' || k === 'constructor' || k === 'prototype') return `${where} has a key that is not allowed ("${str(k, 40)}")`;
+        const e = walk(val, d + 1, `${where}.${k}`); if (e) return e;
+      }
+      return null;
+    }
+    return `${where} must be plain JSON`;
+  };
+  if (v === undefined) return null;
+  try { if (JSON.stringify(v).length > 400000) return `${at} is too big`; } catch (_) { return `${at} must be plain JSON`; }
+  return walk(v, 0, at);
+}
 function checkValue(v, s, at) {
   if (!s || typeof s !== 'object') return null;
+  if (s['x-passthrough'] && !s.type) return checkPassthrough(v, at);
   if (s.enum && !s.enum.includes(v)) return `${at} must be one of: ${s.enum.join(', ')}`;
   switch (s.type) {
     case 'string':
@@ -586,6 +686,7 @@ function checkValue(v, s, at) {
       for (let i = 0; i < v.length; i++) { const e = checkValue(v[i], s.items, `${at}[${i}]`); if (e) return e; }
       return null;
     case 'object': {
+      if (s['x-passthrough']) return checkPassthrough(v, at);
       if (!v || typeof v !== 'object' || Array.isArray(v)) return `${at} must be an object`;
       if (JSON.stringify(v).length > 8000) return `${at} is too big`;
       const props = s.properties || {};
@@ -629,8 +730,18 @@ function openAiTools(opts = {}) {
 function publicList(opts = {}) {
   return list(opts).map((t) => ({ name: t.name, title: t.title, group: t.group, description: t.description, changes: !!t.changes, allowAlways: !!t.allowAlways }));
 }
+/** May this key ("tool" or "tool:action") be "always allowed"? */
+function allowableKey(key) {
+  const [name, sub] = String(key || '').split(/:(.+)/);
+  const t = get(name);
+  if (!t || t.interpreter) return false;
+  if (sub !== undefined) return typeof t.allowAlwaysFor === 'function' && !!t.allowAlwaysFor(t.name === 'sd_call' ? { method: sub } : { action: sub });
+  return !t.allowAlwaysFor && !!t.allowAlways;
+}
+function allowKeyOf(tool, args) { return typeof tool.allowKey === 'function' ? tool.allowKey(args || {}) : tool.name; }
+function canAllowAlways(tool, args) { return typeof tool.allowAlwaysFor === 'function' ? !!tool.allowAlwaysFor(args || {}) : !!tool.allowAlways; }
 function describe(tool, args) {
   try { return typeof tool.describe === 'function' ? tool.describe(args || {}) : tool.title; } catch (_) { return tool.title; }
 }
 
-module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, directToolFor, akoweError, _resolveBook: resolveBook };
+module.exports = { TOOLS, SITES, SITE_LABEL, get, list, openAiTools, publicList, validate, describe, directToolFor, akoweError, allowableKey, allowKeyOf, canAllowAlways, checkPassthrough, _resolveBook: resolveBook };

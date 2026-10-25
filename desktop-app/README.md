@@ -560,6 +560,10 @@ local model on Windows: **[docs/ALFRED.md](../docs/ALFRED.md)**.
   keys) and, for books, the Akọwe journal; "What Alfred did" in the panel.
 - **Notices** (no AI involved): an AI pane broke / was fixed, a book run paused / needs you / finished,
   an image finished — rate-limited.
+- **Everything else:** `app_info` / `app_control` reach every other control of the app (151 actions, the same
+  handlers as the buttons); `sd_call` reaches every Stable Diffusion method of the 🎨 Images module. A few things
+  are deliberately off-limits (passwords, keys, LAN switch, free command execution, window chrome) — see
+  `alfred-app-actions.js`. `test/alfred-coverage.test.js` proves the coverage and prints the table.
 
 ## 🎨 Images — Stable Diffusion (checkpoints, LoRAs, character locks)
 
