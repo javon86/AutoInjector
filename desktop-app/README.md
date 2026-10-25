@@ -537,6 +537,38 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
+## 🎨 Images — Stable Diffusion (checkpoints, LoRAs, character locks)
+
+The **🎨 Images** tab (next to 🤖 AutoInjector and 📖 Akọwe in the title bar) makes pictures with
+Stable Diffusion on your own PC. Plain-English setup for Windows (Stability Matrix, the one-click
+ComfyUI install, or a standalone Forge/A1111/ComfyUI): **[docs/STABLE_DIFFUSION_SETUP.md](../docs/STABLE_DIFFUSION_SETUP.md)**.
+
+- **Connect:** 🔍 *Find my SD app* checks localhost (Forge/A1111/reForge/SD.Next on 7860–7865,
+  ComfyUI on 8188/8000) and says which app answers — "✔ Connected to Forge on :7860 — model X" — or,
+  for a WebUI started without `--api`, exactly what to tick in Stability Matrix / put in
+  `webui-user.bat`. Or type an address and press *Connect*. *🧪 Test* makes one 512×512 picture.
+- **Start / install:** *⚙ Start & install* starts a Stability Matrix package (Forge, reForge, A1111,
+  SD.Next, ComfyUI) hidden with the API on, restarts it after a crash and stops it on quit
+  ("✔ ComfyUI running on :8188 (managed)"; log without secrets; "Start Stable Diffusion with
+  AutoInjector" is off by default) — or *⬇ Install Stable Diffusion* downloads the official ComfyUI
+  portable (GPU + disk-space check, resumable, verified) and a starter model.
+- **🖌 Generate:** prompt, negative, character lock, LoRA chips with weights (`<lora:name:w>` for the
+  WebUIs, LoRA loader nodes for ComfyUI; trigger words added for you), checkpoint, VAE, sampler,
+  scheduler, size, steps, CFG, seed, batch; progress + Stop; pictures saved in `stuff and thing/images/`
+  with their settings inside the PNG and in a `.json` next to it — *♻ Remake* / *🎲 Variation*.
+- **📚 Library:** checkpoints / LoRAs / embeddings / VAEs from Stability Matrix's `Data/Models`, the
+  SD app's own lists and folders you add; base model + trigger words from the safetensors header and
+  Civitai/Stability Matrix info files (only the header is read; model files are never changed);
+  preview pictures; your tags, collections, ★, default weight, notes; red/yellow warning when a LoRA
+  doesn't fit the checkpoint. Stored in `<settings folder>/sd-library.json`.
+- **🔒 Character locks:** LoRA + trigger words + fixed looks for one book character (same face every
+  time). Akọwe can ask for a portrait/cover with one: `POST /image/request` on the service bridge
+  ([docs/SD_IMAGE_API.md](../docs/SD_IMAGE_API.md)).
+- Code: `sd-backends.js`, `image-provider.js`, `sd-library.js`, `sd-images.js`, `sd-studio.js`,
+  `sd-runner.js`, `sd-installer.js`, `sd-api.js` (module API for Alfred), `images-studio.js`; design
+  and limits in [STABLE_DIFFUSION_PLAN.md](STABLE_DIFFUSION_PLAN.md). Tests: `test/sd-*.test.js`,
+  `test/images-tab.test.js`, `test/e2e/sd-images.e2e.js` (fake servers, nothing real downloaded).
+
 ## Akọwe inside AutoInjector (one app, one launcher)
 
 Starting AutoInjector also starts Akọwe (`akowe-server.js`, setting **Start with
