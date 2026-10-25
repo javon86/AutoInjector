@@ -39,8 +39,10 @@ const ZOOM_STEP = 0.1;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 2;
 const PICK_ROLES = ["input", "send", "assistant"];
-const PICK_ROLE_LABELS = { input: "Pick Input", send: "Pick Send", assistant: "Pick Reply" };
-const PICK_ROLE_TARGET_DESC = { input: "the message box you type into", send: "the Send button", assistant: "the text of a reply" };
+// P38 🎯 picker card: the three things the user can point at (one at a time).
+const PICK_ROLE_NAME = { input: "Message box", send: "Send button", assistant: "AI's reply" };
+const PICK_ROLE_HINT = { input: "where you type", send: "", assistant: "pick the latest answer" };
+const PICK_ROLE_TARGET_DESC = { input: "the message box (where you type)", send: "the Send button", assistant: "the AI's latest reply" };
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
@@ -60,45 +62,249 @@ async function adjustZoom(site, delta) {
   }
 }
 
+// --- P38 🎯 picker: "What do you want to point at?" ---------------------------------
+// Clicking 🎯 opens a small card (not a modal dialog — the AI's window must stay
+// clickable): choose ONE of Message box / Send button / AI's reply, press OK, then
+// click that thing in the AI's window (a banner there says what to click; hovering
+// outlines it). Each item has a chip — blue "Not set", green "Picked" (with a short
+// preview, not saved yet), green "✓ Saved", red "⚠️ Saved but not found" — and its
+// own Clear and Save: any ONE item can be saved at any time. "Test it" sends a
+// check-in; "🔢 Do it for me with a number" starts the number teach.
+const pickerUi = {}; // site -> { role (radio choice), status (main's picker:status), busy, msg, tone }
+function pickerState(site) { return pickerUi[site] || (pickerUi[site] = { role: null, status: null, busy: null, msg: "", tone: null }); }
+function pickTime(ts) { try { return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); } catch (_) { return ""; } }
+function pickChip(item) {
+  const st = (item && item.state) || "none";
+  if (item && item.picking) return { st: "picking", text: "Click it in the AI's window…" };
+  if (st === "picked") return { st, text: `Picked: ${item.preview || "found"}${item.latest === false ? " (not the latest answer)" : ""}` };
+  if (st === "saved") return { st, text: `✓ Saved${item.savedAt ? ` ${pickTime(item.savedAt)}` : ""}${item.how === "number" ? " (🔢)" : ""}` };
+  if (st === "stale") return { st, text: "⚠️ Saved — not found on the page now" };
+  return { st: "none", text: "Not set" };
+}
 function togglePickMenu(site) {
   const menu = el(`pick-menu-${site}`);
-  if (menu) menu.classList.toggle("collapsed");
+  if (!menu) return;
+  menu.classList.toggle("collapsed");
+  if (!menu.classList.contains("collapsed")) refreshPicker(site);
 }
-
-// The selector picker: pick a role, then click the real element live in that
-// site's pane -- main.js captures the next click there and works out a
-// selector for it (see automation.js's buildPickScript). No separate "test"
-// step; the picked sample text (for a reply) or tag (for input/send) IS the
-// confirmation, shown right here.
+// Open the card for one AI (also from the BookForge panel's ⚠️), optionally with
+// one item already chosen.
+function openPicker(site, role) {
+  const menu = el(`pick-menu-${site}`);
+  if (!menu) return false;
+  const col = el(`col-${site}`);
+  if (col && !col.classList.contains("state-open")) { try { setColumnState(site, "open"); } catch (_) {} }
+  menu.classList.remove("collapsed");
+  if (role && PICK_ROLES.includes(role)) pickerState(site).role = role;
+  renderPicker(site);
+  refreshPicker(site);
+  try { menu.scrollIntoView({ block: "nearest" }); } catch (_) {}
+  return true;
+}
+async function refreshPicker(site) {
+  if (!window.api || !window.api.pickerStatus) return;
+  try { const st = await window.api.pickerStatus(site); if (st && st.ok) { pickerState(site).status = st; renderPicker(site); } } catch (_) {}
+}
+function pickerSay(site, text, tone) { const ps = pickerState(site); ps.msg = text || ""; ps.tone = tone || null; const s = el(`pick-status-${site}`); if (s) { s.textContent = ps.msg; if (tone) s.dataset.tone = tone; else delete s.dataset.tone; } }
+const PICK_REJECT = {
+  WRONG_ELEMENT_TYPE: (d) => `that doesn't look like ${d} — try clicking right on it`,
+  LOOKS_LIKE_USER: () => "that is your own message — click the AI's latest answer instead",
+  LOOKS_LIKE_ECHO: () => "that looks like the last message sent, not a real reply — click the AI's answer",
+  TOO_GENERIC: () => "that would match too many things on the page — click more precisely",
+  TOO_BROAD: () => "that matches too many things on the page — click the AI's answer text itself",
+  NO_STABLE_SELECTOR: () => "AutoInjector couldn't find a reliable way to recognise it — try clicking a different part of it",
+  ONLY_ONE_MESSAGE: () => "that only matches this one message, not every reply — try clicking the middle of the answer text",
+  MISSES_PICK: () => "couldn't pin that down — try clicking the middle of the answer text",
+  TIMEOUT: () => "no click in time — press OK and click again",
+  CANCELLED: () => "cancelled",
+  REPLACED: () => "cancelled",
+  TEACHING: () => "a 🔢 number teach is running for this AI — finish or cancel it first",
+  NO_VIEW: () => "the AI's window isn't open"
+};
 async function runPick(site, role) {
-  const statusEl = el(`pick-status-${site}`);
+  const ps = pickerState(site);
   const desc = PICK_ROLE_TARGET_DESC[role];
-  if (statusEl) statusEl.textContent = `Click ${desc} in ${SITE_LABELS[site]}'s pane now…`;
-  setStatus(`Waiting for a click in ${SITE_LABELS[site]}'s pane to pick ${desc}…`);
-  const res = await window.api.pickSelector(site, role);
-  if (res?.ok) {
-    const sample = res.sample ? ` — "${res.sample.slice(0, 60)}${res.sample.length > 60 ? "…" : ""}"` : "";
-    if (statusEl) statusEl.textContent = `Picked <${res.tag}> ${res.selector}${sample}`;
-    setStatus(`${SITE_LABELS[site]}: picked a new selector for ${desc}.`);
+  if (!role) { pickerSay(site, "Choose one of the three first (Message box, Send button or AI's reply), then press OK.", "warn"); return; }
+  ps.role = role; ps.busy = role;
+  if (ps.status && ps.status.items && ps.status.items[role]) ps.status.items[role].picking = true;
+  renderPicker(site);
+  pickerSay(site, `Click ${desc} in ${SITE_LABELS[site]}'s window… (hovering outlines it · Esc or Cancel to stop)`);
+  setStatus(`Waiting for a click in ${SITE_LABELS[site]}'s window to pick ${desc}…`);
+  const res = window.api.pickerStart ? await window.api.pickerStart(site, role) : await window.api.pickSelector(site, role);
+  ps.busy = null;
+  if (res && res.ok) {
+    pickerSay(site, `✓ ${PICK_ROLE_NAME[role]}: ${res.preview || "found"}. Press Save to lock it in (or Clear).`, "ok");
+    setStatus(`${SITE_LABELS[site]}: picked ${desc} — press Save to keep it.`);
   } else {
-    const REJECT_REASONS = {
-      NOT_FOUND: "the generated selector doesn't actually match the clicked element — try clicking again",
-      NOT_VISIBLE: "the clicked element is hidden or zero-size — try clicking the visible part of it",
-      WRONG_ELEMENT_TYPE: `that doesn't look like ${desc} — try clicking more precisely`,
-      LOOKS_LIKE_ECHO: "that looks like it's just the last message sent, not a real reply — try clicking the actual reply text"
-    };
-    const reason = REJECT_REASONS[res?.error] || `didn't catch a click (${res?.error || "unknown"})`;
-    if (statusEl) statusEl.textContent = `Pick rejected: ${reason}. Try again.`;
-    setStatus(`${SITE_LABELS[site]}: selector pick failed (${res?.error || "unknown"}).`);
+    const f = PICK_REJECT[res && res.error];
+    const reason = f ? f(desc) : `didn't catch a click (${(res && res.error) || "unknown"})`;
+    pickerSay(site, `Not picked: ${reason}.`, res && (res.error === "CANCELLED" || res.error === "REPLACED") ? null : "err");
+    setStatus(`${SITE_LABELS[site]}: pick ${res && res.error === "CANCELLED" ? "cancelled" : `failed (${(res && res.error) || "unknown"})`}.`);
   }
+  await refreshPicker(site);
 }
-
+async function pickerSave(site, role) {
+  const r = await window.api.pickerSave(site, role);
+  if (r && r.ok) { pickerState(site).status = r; pickerSay(site, `✓ Saved ${PICK_ROLE_NAME[role]} for ${SITE_LABELS[site]} — press “Test it” to check it works.`, "ok"); }
+  else pickerSay(site, r && r.error === "NOTHING_PICKED" ? `Nothing picked for ${PICK_ROLE_NAME[role]} yet — choose it, press OK and click it first.` : `Couldn't save (${(r && r.error) || "error"}).`, "err");
+  renderPicker(site);
+}
+async function pickerClear(site, role) {
+  const r = await window.api.pickerClear(site, role);
+  if (r && r.ok) { pickerState(site).status = r; pickerSay(site, r.cleared === "draft" ? `Cleared the new pick for ${PICK_ROLE_NAME[role]}.` : `Cleared ${PICK_ROLE_NAME[role]} — back to AutoInjector's built-in way of finding it.`); }
+  renderPicker(site);
+}
+async function pickerTest(site) {
+  const ps = pickerState(site);
+  ps.busy = "test"; renderPicker(site);
+  pickerSay(site, `Sending ${SITE_LABELS[site]} a check-in (a tiny message)…`);
+  const r = await window.api.pickerTest(site);
+  ps.busy = null;
+  if (r && r.ok) pickerSay(site, `✔ ${SITE_LABELS[site]} answered the check-in and AutoInjector read it — it works.`, "ok");
+  else if (r && r.deferred) pickerSay(site, `${SITE_LABELS[site]} was busy — try “Test it” again in a moment.`, "warn");
+  else pickerSay(site, r && r.error === "CHECKING" ? `${SITE_LABELS[site]} is being checked right now — try again in a moment.` : r && r.error === "TEACHING" ? "A 🔢 number teach is running — wait for it to finish." : r && r.error === "INACTIVE" ? `${SITE_LABELS[site]} isn't Active — tick it first.` : `✕ The check-in didn't work${r && r.say ? `: ${r.say}` : ""}`, "err");
+  await refreshPicker(site);
+}
+async function pickerCancel(site) {
+  if (window.api.pickerCancel) await window.api.pickerCancel(site);
+  pickerState(site).busy = null;
+  await refreshPicker(site);
+}
+// The number teach as the card (and the BookForge panel's box) shows it.
+const TEACH_PART_WORD = { input: "message box", send: "Send button", assistant: "reply area" };
+function teachSteps(t, L) {
+  const ph = String((t && t.phase) || "type");
+  const order = ["type", "typed", "sent", "user_seen", "asking", "wait_reply", "done"];
+  const at = order.indexOf(ph);
+  const past = (p) => at >= order.indexOf(p);
+  const fixed = t && t.result === "fixed";
+  const lr = (t && t.learned) || {};
+  return [
+    { label: "You type the number", ok: past("typed") || !!lr.input || fixed, wait: ph === "type" },
+    { label: "You press Send", ok: past("sent") || fixed, wait: ph === "typed" },
+    { label: "Your message shows", ok: past("user_seen") || fixed, wait: ph === "sent" },
+    { label: `AutoInjector asks ${L} to write it backwards`, ok: past("wait_reply") || fixed, wait: ph === "user_seen" || ph === "asking" },
+    { label: `${L} writes ${t && t.reversed ? t.reversed : "it"} backwards`, ok: ph === "done" || !!lr.reply || fixed, wait: ph === "wait_reply" },
+    { label: "Saved and checked", ok: fixed, wait: !!t && !t.active && !t.result }
+  ];
+}
+function renderPicker(site, menuEl) {
+  const menu = menuEl || el(`pick-menu-${site}`);
+  if (!menu) return;
+  const ps = pickerState(site);
+  const st = ps.status || { items: {} };
+  const L = SITE_LABELS[site];
+  let body = menu.querySelector(".pk-body");
+  if (!body) {
+    menu.textContent = "";
+    const head = document.createElement("div");
+    head.className = "pk-head";
+    head.innerHTML = `<span>🎯 What do you want to point at?</span><span class="pk-site"></span>`;
+    head.querySelector(".pk-site").textContent = L;
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "pk-x"; x.textContent = "✕"; x.title = "Close"; x.onclick = () => menu.classList.add("collapsed");
+    head.appendChild(x);
+    menu.appendChild(head);
+    body = document.createElement("div");
+    body.className = "pk-body";
+    for (const role of PICK_ROLES) {
+      const row = document.createElement("div");
+      row.className = "pk-row"; row.dataset.role = role;
+      const lab = document.createElement("label");
+      lab.className = "pk-name";
+      const radio = document.createElement("input");
+      radio.type = "radio"; radio.name = `pk-role-${site}`; radio.value = role;
+      radio.onchange = () => { pickerState(site).role = role; renderPicker(site); };
+      const nm = document.createElement("span");
+      nm.textContent = PICK_ROLE_NAME[role];
+      lab.append(radio, nm);
+      if (PICK_ROLE_HINT[role]) { const h = document.createElement("small"); h.textContent = `(${PICK_ROLE_HINT[role]})`; lab.appendChild(h); }
+      const chip = document.createElement("span"); chip.className = "pk-chip";
+      const clr = document.createElement("button"); clr.type = "button"; clr.className = "pk-clear"; clr.textContent = "Clear"; clr.onclick = () => pickerClear(site, role);
+      const sv = document.createElement("button"); sv.type = "button"; sv.className = "pk-save"; sv.textContent = "Save"; sv.onclick = () => pickerSave(site, role);
+      row.append(lab, chip, clr, sv);
+      body.appendChild(row);
+    }
+    menu.appendChild(body);
+    const acts = document.createElement("div");
+    acts.className = "pk-actions";
+    const mk = (cls, text, fn, tip) => { const b = document.createElement("button"); b.type = "button"; b.className = cls; b.textContent = text; if (tip) b.title = tip; b.onclick = fn; acts.appendChild(b); return b; };
+    mk("pk-ok", "OK — point at it", () => runPick(site, pickerState(site).role), "Then click the chosen thing in the AI's window");
+    mk("pk-cancel", "Cancel", () => pickerCancel(site), "Stop pointing");
+    mk("pk-number", "🔢 Do it for me with a number", () => pickerNumber(site), "You type a 4-digit number and press Send; AutoInjector learns all three by itself");
+    mk("pk-test", "Test it", () => pickerTest(site), "Send a check-in (a tiny message) to confirm the AI works");
+    const testBtn = mk("pk-roundtrip", "🧪 Test", () => runSelfTest(site), "Round-trip test: send a real test prompt, wait for the reply, and light up green/red");
+    testBtn.classList.add("pk-more");
+    menu.appendChild(acts);
+    const status = document.createElement("div");
+    status.className = "pick-status"; status.id = `pick-status-${site}`; status.setAttribute("aria-live", "polite");
+    menu.appendChild(status);
+    const teach = document.createElement("div");
+    teach.className = "pk-teach"; teach.hidden = true;
+    menu.appendChild(teach);
+  }
+  for (const role of PICK_ROLES) {
+    const row = body.querySelector(`.pk-row[data-role="${role}"]`);
+    const item = (st.items || {})[role] || { state: "none" };
+    const c = pickChip(Object.assign({}, item, { picking: item.picking || ps.busy === role }));
+    const chip = row.querySelector(".pk-chip");
+    chip.dataset.st = c.st; chip.textContent = c.text; chip.title = c.text;
+    row.classList.toggle("sel", ps.role === role);
+    const radio = row.querySelector("input[type=radio]"); radio.checked = ps.role === role;
+    row.querySelector(".pk-save").disabled = item.state !== "picked";
+    row.querySelector(".pk-clear").disabled = item.state === "none" && !item.picking;
+  }
+  const busy = !!ps.busy;
+  const teaching = !!(st.repair && st.repair.teach && st.repair.teach.active);
+  const okb = menu.querySelector(".pk-ok"); if (okb) okb.disabled = busy || teaching;
+  const cb = menu.querySelector(".pk-cancel"); if (cb) cb.hidden = !(ps.busy && ps.busy !== "test");
+  const nb = menu.querySelector(".pk-number"); if (nb) nb.disabled = busy || teaching;
+  const tb = menu.querySelector(".pk-test"); if (tb) tb.disabled = busy || teaching;
+  const sEl = menu.querySelector(".pick-status"); if (sEl && sEl.textContent !== ps.msg) { sEl.textContent = ps.msg; if (ps.tone) sEl.dataset.tone = ps.tone; else delete sEl.dataset.tone; }
+  const tt = st.repair && st.repair.teach;
+  if (tt && tt.result && /^🔢 Type /.test(ps.msg || "")) { ps.msg = ""; if (sEl) sEl.textContent = ""; }
+  renderPickerTeach(site, menu.querySelector(".pk-teach"), tt);
+}
+function renderPickerTeach(site, box, t) {
+  if (!box) return;
+  const recent = t && (t.active || (t.result && t.result !== "cancelled" && Date.now() - (t.startedAt || 0) < 15 * 60000));
+  if (!recent) { box.hidden = true; box.textContent = ""; return; }
+  const L = SITE_LABELS[site];
+  box.hidden = false;
+  box.textContent = "";
+  box.dataset.tone = t.result === "fixed" ? "ok" : t.result ? "err" : "";
+  const h = document.createElement("div"); h.className = "pk-teach-title";
+  const p = document.createElement("div"); p.className = "pk-teach-text";
+  if (t.result === "fixed") { h.textContent = `✔ Saved — ${L} is working again.`; p.textContent = "The number teach learned the message box, the Send button and the reply area, saved them and a check-in worked."; }
+  else if (t.result === "timeout") { h.textContent = "🔢 The number didn't show up in time"; p.textContent = `Nothing was changed. Press “🔢 Do it for me with a number” to try again — type the number exactly, then press Send.`; }
+  else if (t.result) { const part = TEACH_PART_WORD[t.failedPart] || "reply area"; h.textContent = `🔢 The ${part} part didn't work`; p.textContent = `${t.saved && t.saved.length ? `Saved: ${t.saved.map((x) => TEACH_PART_WORD[x]).join(", ")}. ` : ""}Use 🎯 for just the ${part}: choose it above, press OK and click it in ${L}'s window.`; }
+  else { h.textContent = `🔢 Type ${t.number} into ${L}'s message box and press Send`; p.textContent = "AutoInjector watches where the number appears, then asks the AI to write it backwards to find its replies."; }
+  box.append(h, p);
+  const ol = document.createElement("ol"); ol.className = "pk-teach-steps";
+  for (const s of teachSteps(t, L)) { const li = document.createElement("li"); li.dataset.st = s.ok ? "ok" : s.wait ? "wait" : ""; li.textContent = `${s.ok ? "✔" : s.wait ? "…" : "○"} ${s.label}`; ol.appendChild(li); }
+  if (!t.result || t.result === "fixed") box.appendChild(ol);
+  const acts = document.createElement("div"); acts.className = "pk-actions";
+  if (t.active) { const b = document.createElement("button"); b.type = "button"; b.textContent = "Cancel"; b.onclick = async () => { await window.api.selfRepairTeachCancel(site); pickerSay(site, `Cancelled — nothing was changed for ${L}.`); refreshPicker(site); }; acts.appendChild(b); }
+  else if (t.result && t.result !== "fixed" && t.failedPart && PICK_ROLES.includes(t.failedPart)) { const b = document.createElement("button"); b.type = "button"; b.className = "pk-ok"; b.textContent = `🎯 Point at the ${TEACH_PART_WORD[t.failedPart]}`; b.onclick = () => { pickerState(site).role = t.failedPart; renderPicker(site); runPick(site, t.failedPart); }; acts.appendChild(b); }
+  if (acts.children.length) box.appendChild(acts);
+}
+async function pickerNumber(site) {
+  if (!window.api.selfRepairTeachStart) return;
+  const r = await window.api.selfRepairTeachStart(site);
+  if (r && r.ok) pickerSay(site, `🔢 Type ${r.number} into ${SITE_LABELS[site]}'s message box and press Send.`);
+  else pickerSay(site, r && r.error === "INACTIVE" ? `${SITE_LABELS[site]} isn't Active — tick it first.` : r && r.error === "CHECKING" ? `AutoInjector is checking ${SITE_LABELS[site]} right now — try again in a moment.` : `Couldn't start (${(r && r.error) || "error"}).`, "err");
+  await refreshPicker(site);
+}
+// Old entry point kept for the BookForge panel's buttons and older callers.
 async function clearPickOverrides(site) {
   for (const role of PICK_ROLES) await window.api.clearSelectorOverride(site, role);
-  const statusEl = el(`pick-status-${site}`);
-  if (statusEl) statusEl.textContent = "Overrides cleared — back to the built-in selectors.";
+  pickerSay(site, "Overrides cleared — back to the built-in selectors.");
   setStatus(`${SITE_LABELS[site]}: selector overrides cleared.`);
+  refreshPicker(site);
 }
+// the number teach's progress also shows on the pane's 🎯 card
+if (window.api && window.api.onSelfRepair) window.api.onSelfRepair((p) => { try { if (!p || !p.site || !pickerUi[p.site]) return; const ps = pickerState(p.site); ps.status = Object.assign({ items: {} }, ps.status || {}, { repair: p.repair }); renderPicker(p.site); } catch (_) {} });
+if (window.api && window.api.onPicker) window.api.onPicker((st) => { try { if (st && st.ok && st.site) { const ps = pickerState(st.site); ps.status = st; if (!st.picking && ps.busy && ps.busy !== "test") ps.busy = null; renderPicker(st.site); } } catch (_) {} });
 
 function toggleLoginMenu(site) {
   const menu = el(`login-menu-${site}`);
@@ -200,14 +406,13 @@ function setTestLed(site, resultState) {
 // come back -- this is a genuine round-trip check (send AND read both have
 // to work, with the right content), not just "did something happen."
 async function runSelfTest(site) {
-  const statusEl = el(`pick-status-${site}`);
   setTestLed(site, "pending");
-  if (statusEl) statusEl.textContent = `Testing ${SITE_LABELS[site]}: sent a prompt, waiting for it to reply back…`;
+  pickerSay(site, `Testing ${SITE_LABELS[site]}: sent a prompt, waiting for it to reply back…`);
   setStatus(`Testing ${SITE_LABELS[site]}'s connection — this can take up to 45s…`);
   const res = await window.api.runSelfTest(site);
   if (res?.ok) {
     setTestLed(site, "ok");
-    if (statusEl) statusEl.textContent = `✅ ${SITE_LABELS[site]} is hooked up correctly — it replied with exactly what was asked.`;
+    pickerSay(site, `✅ ${SITE_LABELS[site]} is hooked up correctly — it replied with exactly what was asked.`);
     setStatus(`${SITE_LABELS[site]}: connectivity test passed.`);
   } else {
     setTestLed(site, "fail");
@@ -223,7 +428,7 @@ async function runSelfTest(site) {
             : res?.error === "ALREADY_RUNNING"
               ? "a test is already running for this site"
               : `sending failed (${res?.error || "unknown error"})`;
-    if (statusEl) statusEl.textContent = `❌ ${SITE_LABELS[site]}: ${reason}`;
+    pickerSay(site, `❌ ${SITE_LABELS[site]}: ${reason}`);
     setStatus(`${SITE_LABELS[site]}: connectivity test failed — ${res?.error || "error"}.`);
   }
 }
@@ -625,7 +830,7 @@ function buildAiColumn(site) {
   const pickBtn = document.createElement("button");
   pickBtn.className = "pick-btn";
   pickBtn.textContent = "🎯";
-  pickBtn.title = "Fix selectors: pick the real input box / send button / reply text live in this pane -- no DevTools needed";
+  pickBtn.title = "Point at the message box, the Send button or the AI's reply in this window (no DevTools needed)";
   pickBtn.onclick = () => togglePickMenu(site);
   head.appendChild(pickBtn);
   const loginBtn = document.createElement("button");
@@ -653,28 +858,11 @@ function buildAiColumn(site) {
   strip.appendChild(head);
 
   const pickMenu = document.createElement("div");
-  pickMenu.className = "pick-menu collapsed";
+  pickMenu.className = "pick-menu picker-card collapsed";
   pickMenu.id = `pick-menu-${site}`;
-  pickMenu.innerHTML = `<span class="row-label">Fix:</span>`;
-  const testBtn = document.createElement("button");
-  testBtn.textContent = "🧪 Test";
-  testBtn.title = "Send a real test prompt, wait for the reply, and light up green/red based on whether it actually round-tripped";
-  testBtn.onclick = () => runSelfTest(site);
-  pickMenu.appendChild(testBtn);
-  for (const role of PICK_ROLES) {
-    const btn = document.createElement("button");
-    btn.textContent = PICK_ROLE_LABELS[role];
-    btn.onclick = () => runPick(site, role);
-    pickMenu.appendChild(btn);
-  }
-  const clearOverridesBtn = document.createElement("button");
-  clearOverridesBtn.textContent = "Clear Overrides";
-  clearOverridesBtn.onclick = () => clearPickOverrides(site);
-  pickMenu.appendChild(clearOverridesBtn);
-  const pickStatus = document.createElement("div");
-  pickStatus.className = "pick-status";
-  pickStatus.id = `pick-status-${site}`;
-  pickMenu.appendChild(pickStatus);
+  pickMenu.setAttribute("role", "region");
+  pickMenu.setAttribute("aria-label", `Point at things in ${SITE_LABELS[site]}'s window`);
+  renderPicker(site, pickMenu);
   strip.appendChild(pickMenu);
 
   const loginMenu = document.createElement("div");
@@ -2730,8 +2918,8 @@ const BF_INFO = {
     "Signed out? / No message box — the page loaded but there is no message box: log in, or (if the site changed its page) use 🎯 to pick the box.",
     "Busy — it's answering a BookForge question right now. Leave that window alone until it finishes.",
     "🔧 Repairing… — a check-in failed and AutoInjector is fixing it by itself (other known ways to find things, searching the page for the reply, reloading the window). BookForge uses your other AIs meanwhile.",
-    "⚠️ Needs you — only you can fix it (log in, the “are you human?” check, a usage limit) or AutoInjector asks you to show it the page (🎓). Click the ⚠️ for exactly what to do; it re-checks by itself.",
-    "✕ Not working — AutoInjector tried everything it can. Click the ⚠️ to see what was tried, then 🎓 show it the page, 🎯 pick the part, or reload.",
+    "⚠️ Needs you — only you can fix it (log in, the “are you human?” check, a usage limit) or AutoInjector asks you to point at something (🎯 / 🔢). Click the ⚠️ for exactly what to do; it re-checks by itself.",
+    "✕ Not working — AutoInjector tried everything it can. Click the ⚠️ to see what was tried, then 🎯 point at the part that's wrong, 🔢 let it learn with a number, or reload. It re-checks by itself after 5, 15, then every 60 minutes.",
     "Check-ins: every so often (and when you press 🩺 Check now) AutoInjector sends each idle AI a tiny message — “Reply with only this word: …” — to make sure it still answers. Never while you're typing in it or it's busy, and never passed on to the other AIs.",
     "Not active — tick that AI as Active in this app if you want BookForge to use it.",
     "Under each status you see the result of its last request and when it happened."]],
@@ -2860,7 +3048,7 @@ const BF_CODES = {
     fix: (c) => (Array.isArray(c.fix) && c.fix.length ? c.fix : [`Open ${c.L || "the AI"}'s window and follow what it shows.`, "AutoInjector checks again by itself."]), retry: null },
   AI_BROKEN: { sev: "err", title: (c) => `${c.L || "This AI"} isn't working`,
     what: (c) => `${c.say || "A check-in failed."} AutoInjector tried to fix it by itself but couldn't. BookForge uses your other AIs meanwhile.`,
-    fix: (c) => [`Press 🎓 Show AutoInjector and follow the pop-up (you type one short line into ${c.L || "the AI"}).`, `Or use 🎯 on ${c.L || "the AI"}'s pane to pick the part that's wrong (message box, Send button or a reply).`, "Or press 🔄 Reload, then 🩺 Check again."], retry: null },
+    fix: (c) => [`Press 🎯 Point at it: choose the part that's wrong (message box, Send button or the AI's reply), press OK and click it in ${c.L || "the AI"}'s window, then Save.`, `Or press 🔢 Do it for me with a number: you type a 4-digit number into ${c.L || "the AI"} and press Send — AutoInjector learns all three by itself.`, "Or press 🔄 Reload, then 🩺 Check again.", "AutoInjector re-checks by itself after 5, 15, then every 60 minutes — it won't keep asking you."], retry: null },
   // the panel itself
   IPC_FAILED: { sev: "err", title: "The app didn't answer", what: (c) => `${c.where || "This action"} didn't get an answer from the main app.`, fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: null },
   IPC_MISSING: { sev: "err", title: "This part of the app isn't available", what: (c) => `${c.where || "This action"} isn't available in this version of the app.`, fix: () => ["Restart AutoInjector. If it still happens, update AutoInjector."], retry: null },
@@ -2986,7 +3174,7 @@ const BF_OUTCOME = {
   CACHED: () => "Gave an earlier answer again"
 };
 // Why an AI window isn't ready, as a short pill word (main sends problem + problemSay).
-const BF_NOT_READY_WORD = { SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…", CHECKING: "Checking…" };
+const BF_NOT_READY_WORD = { TEACHING: "Teaching…", SIGNED_OUT: "Signed out?", NO_MESSAGE_BOX: "No message box", LOAD_FAILED: "Didn't load", LOADING: "Loading…", CHECKING: "Checking…" };
 function bfNotReadyWord(x) { return BF_NOT_READY_WORD[x && x.problem] || "Not loaded"; }
 const BF_REPAIR_STEP = { check: "checking in", alternatives: "trying other known ways", page_search: "searching the page", retry: "checking in again", unfreeze: "pressing Stop", reload: "reloading the window", reload_home: "opening a fresh page", teach: "waiting for you" };
 function bfRepairOf(x) { return (x && x.repair) || {}; }
@@ -2995,14 +3183,14 @@ function bfAiView(s, site) {
   const R = bfRepairOf(x);
   let pill = [bfNotReadyWord(x), "err", "✕", "bad"];
   if (!x.active) pill = ["Not active", "off", "–", "off"];
-  else if (R.teach && R.teach.active) pill = ["Needs you", "warn", "🎓", "needs"];
+  else if (R.teach && R.teach.active) pill = ["Needs you", "warn", "🔢", "needs"];
   else if (R.state === "repairing") pill = ["Repairing…", "work", "🔧", "repair"];
   else if (R.state === "needs_user") pill = ["Needs you", "warn", "⚠️", "needs"];
   else if (R.state === "broken") pill = ["Not working", "err", "✕", "bad"];
   else if (x.inFlight) pill = [x.inFlight.selftest ? "Testing" : "Busy", "work", "✍️", "work"];
   else if (x.ready) pill = [R.running ? "Checking…" : "Ready", "ok", R.running ? "🩺" : "✔", "ok"];
   let last;
-  if (x.active && R.teach && R.teach.active) last = `Show AutoInjector the page — see the box above (number ${R.teach.number})`;
+  if (x.active && R.teach && R.teach.active) last = `🔢 Type ${R.teach.number} into ${bfLabel(site, s)}'s message box and press Send — see the box above`;
   else if (x.active && (R.state === "repairing" || R.state === "needs_user" || R.state === "broken")) last = `${R.say || "A check-in failed."}${R.running && R.step ? ` Now: ${BF_REPAIR_STEP[R.step] || R.step}…` : ""}`;
   else if (x.inFlight) last = `Working for ${bfClock((x.inFlight.elapsed_ms || 0) + (Date.now() - bf.at))}`;
   else if (x.active && !x.ready && x.problemSay) last = `Not ready: ${x.problemSay}`;
@@ -3025,6 +3213,7 @@ function bfRenderAis(s) {
   }, (card, site) => {
     const v = bfAiView(s, site);
     card.dataset.st = v.pill[3];
+    if (bf.attention && bf.attention[site] && Date.now() - bf.attention[site] < 8000) card.dataset.flash = "1"; else delete card.dataset.flash;
     bfSetText(card.querySelector(".bf-ai-name"), bfLabel(site, s));
     const p = card.querySelector(".bf-pill"); p.dataset.tone = v.pill[1]; bfSetText(p, `${v.pill[2]} ${v.pill[0]}`);
     const last = card.querySelector(".bf-ai-last"); bfSetText(last, v.last); last.title = v.last;
@@ -3083,7 +3272,7 @@ function bfConnRows(s, d) {
     const L = bfLabel(site, s);
     if (!x.active) { rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} (not used)`, st: "na", state: "Not used", detail: `Not Active in this app — tick ${L} as Active to use it.` }); continue; }
     rows.push({ id: `ready:${site}`, site, label: `${L} is ready`, short: `${L} window`,
-      st: x.inFlight ? "ok" : x.ready ? "ok" : "bad",
+      st: x.inFlight ? "ok" : x.ready ? "ok" : x.problem === "TEACHING" ? "wait" : "bad",
       state: x.inFlight ? "Busy" : x.ready ? "Ready" : bfNotReadyWord(x),
       detail: x.inFlight ? "Answering right now." : x.ready ? "" : x.problemSay ? `Not ready: ${x.problemSay}.` : "Open its window, log in and wait until it has loaded." });
     const lastTest = x.last && x.last.selftest ? x.last : null;
@@ -3552,8 +3741,13 @@ function bfOpenProblem(marker) {
     }
     if (p.ctx && p.ctx.repair && p.ctx.site) {
       if (!p.ctx.fix) { // (log in / captcha / limit: only the user can fix those — no teach step)
-        const tb = bfNode("button", null, "🎓 Show AutoInjector");
-        tb.type = "button"; tb.title = `Type one short line into ${p.ctx.L}'s message box so AutoInjector can learn where things are`;
+        // P38: the 🎯 picker (the thing that works for the user) and the 🔢 number teach
+        const pb = bfNode("button", "bf-primary", "🎯 Point at it");
+        pb.type = "button"; pb.title = `Opens the 🎯 card on ${p.ctx.L}'s pane: choose the message box, the Send button or the AI's reply, press OK and click it in ${p.ctx.L}'s window`;
+        pb.onclick = bfSafe(() => { bfCloseInfo(false); if (!openPicker(p.ctx.site, BF_PART_FOR[p.ctx.problem] || null)) bfMsg(`Couldn't open ${p.ctx.L}'s 🎯 card.`, "err"); else bfMsg(`See the 🎯 card on ${p.ctx.L}'s pane: choose one thing, press OK and click it in ${p.ctx.L}'s window.`); }, "picker");
+        acts.appendChild(pb);
+        const tb = bfNode("button", null, "🔢 Do it for me with a number");
+        tb.type = "button"; tb.title = `You type a 4-digit number into ${p.ctx.L}'s message box and press Send; AutoInjector then asks ${p.ctx.L} to write it backwards and learns the message box, Send button and replies`;
         tb.onclick = bfSafe(async () => { bfCloseInfo(false); await bfTeachStart(p.ctx.site); }, "teach");
         acts.appendChild(tb);
       }
@@ -3679,11 +3873,10 @@ function bfTriedOutcome(o) {
   if (t.startsWith("LEARNED:")) return `learned ${bfPartWords(t.slice(8))}`;
   return BF_TRIED_WORD[t] || t.toLowerCase().replace(/_/g, " ");
 }
-const BF_TEACH_WHAT = { TYPE_FAILED: "message box", SEND_NOT_CONFIRMED: "Send button", NO_REPLY_FOUND: "replies", FALSE_DUPLICATE: "replies" };
-const BF_TEACH_PART = { input: "the message box", send: "the Send button", assistant: "the replies" };
-const BF_TEACH_PHASES = ["type", "typed", "sent", "wait_reply", "wait_reply_nouser", "done"];
+const BF_PART_FOR = { TYPE_FAILED: "input", SEND_NOT_CONFIRMED: "send", NO_REPLY_FOUND: "assistant", FALSE_DUPLICATE: "assistant" };
+const BF_TEACH_PART = { input: "the message box", send: "the Send button", assistant: "the reply area" };
 bf.teachDismissed = {};
-// The teach box shows the active teach step, or the latest finished one (until closed).
+// The 🔢 number-teach box shows the active number teach, or the latest finished one (until closed).
 function bfTeachSite(s) {
   let best = null;
   for (const site of BF_SITES) {
@@ -3705,7 +3898,7 @@ function bfRenderTeach(s) {
   const { site, R, t } = cur;
   const L = bfLabel(site, s);
   const confirming = !t.active && !t.result;
-  const key = JSON.stringify([site, t.startedAt, t.phase, t.active, t.result, t.learned, t.missing, R.state]);
+  const key = JSON.stringify([site, t.startedAt, t.phase, t.active, t.result, t.learned, t.missing, t.failedPart, R.state]);
   box.hidden = false;
   if (box.dataset.key === key) return;
   box.dataset.key = key;
@@ -3714,55 +3907,48 @@ function bfRenderTeach(s) {
   text.textContent = ""; steps.textContent = ""; acts.textContent = "";
   const btn = (label, fn, cls, tip) => { const b = bfNode("button", cls || null, label); b.type = "button"; if (tip) b.title = tip; b.onclick = bfSafe(fn, "teach"); acts.appendChild(b); return b; };
   const close = () => { bf.teachDismissed[site] = t.startedAt; bfRenderAll(); };
+  const row = (st) => { const li = bfNode("li"); li.dataset.st = st.ok ? "ok" : st.wait ? "wait" : ""; li.append(bfNode("span", "ic", st.ok ? "✔" : st.wait ? "…" : "○"), bfNode("span", null, st.label)); steps.appendChild(li); };
   delete box.dataset.tone;
   if (t.result === "fixed") {
     box.dataset.tone = "ok";
-    title.textContent = `✔ Fixed — ${L} is working again`;
-    text.textContent = "Thank you! AutoInjector learned where things are on the page and a new check-in worked. There is nothing else to do.";
+    title.textContent = `✔ Saved — ${L} is working again.`;
+    text.textContent = `AutoInjector learned ${L}'s message box, Send button and reply area from the number, saved them, and a new check-in worked. Nothing else to do.`;
+    for (const st of teachSteps(t, L)) row(st);
     btn("Close", close, "bf-primary");
     return;
   }
   if (t.active || confirming) {
-    const what = BF_TEACH_WHAT[t.code] || "message box or replies";
-    title.textContent = `🎓 Help AutoInjector with ${L}`;
-    text.append(`AutoInjector can't find ${L}'s ${what}. Please type `);
-    const say = bfNode("span", "bf-teach-say", `Repeat this number: ${t.number}`);
-    say.title = "Type exactly this (you can also select it and copy it)";
-    text.append(say, ` into ${L}'s message box and press Send.`);
-    const lr = t.learned || {};
-    const ph = String(t.phase || "type");
-    const at = BF_TEACH_PHASES.indexOf(ph);
-    const past = (p) => at >= BF_TEACH_PHASES.indexOf(p);
-    const row = (label, ok, waiting) => { const li = bfNode("li"); li.dataset.st = ok ? "ok" : waiting ? "wait" : ""; li.append(bfNode("span", "ic", ok ? "✔" : waiting ? "…" : "○"), bfNode("span", null, label)); steps.appendChild(li); };
-    row("You type the number", past("typed") || !!lr.input, ph === "type");
-    row("You press Send", past("sent"), ph === "typed");
-    row("Your message shows", !!lr.user || past("wait_reply"), ph === "sent");
-    row(`${L} answers`, ph === "done" || confirming, ph === "wait_reply" || ph === "wait_reply_nouser");
-    if (confirming) row("Checking that it works…", false, true);
-    if (t.active) btn("Cancel", async () => { await bfCall(`teach-cancel-${site}`, "selfRepairTeachCancel", [site], { where: "Cancel the teach step", anchor: `ai:${site}` }); bfMsg(`Cancelled — nothing was changed for ${L}.`); bookforgeRefresh(); }, null, "Stop — nothing is changed");
+    title.textContent = `🔢 Number teach — ${L}`;
+    text.append("Type ");
+    const say = bfNode("span", "bf-teach-say", String(t.number));
+    say.title = "Type exactly this number (you can also select it and copy it)";
+    text.append(say, ` into ${L}'s message box and press Send. AutoInjector then asks ${L} to write it backwards and learns where its replies appear.`);
+    for (const st of teachSteps(t, L)) row(st);
+    if (t.active) btn("Cancel", async () => { await bfCall(`teach-cancel-${site}`, "selfRepairTeachCancel", [site], { where: "Cancel the number teach", anchor: `ai:${site}` }); bfMsg(`Cancelled — nothing was changed for ${L}.`); bookforgeRefresh(); }, null, "Stop — nothing is changed");
     return;
   }
-  // finished without fixing it
+  // finished without fixing it: say which part, offer 🎯 for just that part
   box.dataset.tone = "err";
-  const missing = Array.isArray(t.missing) ? t.missing.filter((m) => BF_TEACH_PART[m]) : [];
+  const part = PICK_ROLES.includes(t.failedPart) ? t.failedPart : (Array.isArray(t.missing) ? t.missing.find((m) => BF_TEACH_PART[m]) : null);
   if (t.result === "timeout") {
     title.textContent = `${L}: the number didn't show up in time`;
-    text.textContent = `AutoInjector waited a few minutes but didn't see the number in ${L}'s window. Nothing was changed. You can try again — type it exactly as shown, then press Send.`;
+    text.textContent = `AutoInjector waited 4 minutes but didn't see the number in ${L}'s window. Nothing was changed. You can try again whenever you like — type it exactly as shown, then press Send.`;
   } else {
-    title.textContent = `${L} still isn't working`;
-    text.textContent = missing.length
-      ? `AutoInjector couldn't learn ${missing.map((m) => BF_TEACH_PART[m]).join(", ")}. Use 🎯 to point at ${missing.length === 1 ? "it" : "them"} yourself: click the button, then click that part in ${L}'s window.`
-      : `AutoInjector learned the page, but a new check-in still didn't work. Try again, or reload ${L}'s window.`;
-    for (const m of missing) btn(`🎯 Pick ${BF_TEACH_PART[m]}`, async () => { const r = await bfCall(`pick-${site}-${m}`, "pickSelector", [site, m], { where: `🎯 Pick ${BF_TEACH_PART[m]}`, anchor: `ai:${site}` }); bfMsg(r && r.ok ? `✓ Saved — checking ${L} again now.` : `Nothing was picked (${(r && r.error) || "no click"}).`, r && r.ok ? null : "err"); if (r && r.ok) bfCheckIn([site]); }, "bf-primary", `Click this, then click ${BF_TEACH_PART[m]} in ${L}'s window`);
+    title.textContent = `${L}: ${part ? `the ${TEACH_PART_WORD[part]} part didn't work` : "still not working"}`;
+    const savedTxt = Array.isArray(t.saved) && t.saved.length ? ` Saved: ${t.saved.map((x) => TEACH_PART_WORD[x]).join(", ")}.` : "";
+    text.textContent = part
+      ? `${part === "assistant" ? `${L} didn't write the number backwards where AutoInjector could find it.` : part === "send" ? "AutoInjector couldn't send its follow-up message." : `AutoInjector couldn't learn ${L}'s message box.`}${savedTxt} Use 🎯 to point at ${BF_TEACH_PART[part]} yourself: press the button, then click it in ${L}'s window and Save.`
+      : `AutoInjector learned the page, but a new check-in still didn't work.${savedTxt} Try 🎯, or reload ${L}'s window.`;
   }
-  btn("🎓 Try again", () => bfTeachStart(site), missing.length ? null : "bf-primary");
+  if (part) btn(`🎯 Point at ${BF_TEACH_PART[part]}`, () => { if (openPicker(site, part)) { runPick(site, part); bfMsg(`Click ${BF_TEACH_PART[part]} in ${L}'s window, then press Save on its 🎯 card.`); } }, "bf-primary", `Opens ${L}'s 🎯 card for just this part`);
+  btn("🔢 Try again", () => bfTeachStart(site), part ? null : "bf-primary");
   btn(`🔄 Reload ${L}`, () => bfRepairReload(site, L));
   btn("Close", close);
 }
 async function bfTeachStart(site) {
   const L = bfLabel(site, bf.snap || {});
-  const r = await bfCall(`teach-${site}`, "selfRepairTeachStart", [site], { where: `🎓 Show AutoInjector ${L}`, anchor: `ai:${site}`, retryRun: () => bfTeachStart(site), retryLabel: "Try again" });
-  if (r && r.ok) { delete bf.teachDismissed[site]; bfMsg(`See the box above: type the number into ${L}'s message box and press Send.`); }
+  const r = await bfCall(`teach-${site}`, "selfRepairTeachStart", [site], { where: `🔢 Number teach for ${L}`, anchor: `ai:${site}`, retryRun: () => bfTeachStart(site), retryLabel: "Try again" });
+  if (r && r.ok) { delete bf.teachDismissed[site]; bfMsg(`See the box above: type ${r.number} into ${L}'s message box and press Send.`); }
   else if (r) bfMsg(r.error === "INACTIVE" ? `${L} isn't Active — tick it first.` : r.error === "CHECKING" ? `AutoInjector is checking ${L} right now — try again in a moment.` : `Couldn't start (${r.error || "error"}).`, "err");
   bookforgeRefresh();
 }
@@ -3793,11 +3979,35 @@ if (el("bf-checkin-every")) el("bf-checkin-every").onchange = bfSafe(async (e) =
   if (r && r.ok) bfMsg(v ? `✓ AutoInjector checks in with idle AIs every ${v >= 60 ? "hour" : `${v} minutes`}.` : "✓ Automatic check-ins are off (🩺 Check now still works).");
   bookforgeRefresh();
 }, "checkin-every");
+// P37.3: an AI that couldn't be fixed is announced ONCE, noticeably: its card
+// flashes, and (if the user ticked 🔔) a short sound plays. No pop-up loop.
+function bfSoundOn() { try { return localStorage.getItem("bf-sound") === "1"; } catch (_) { return false; } }
+function bfBeep() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return false;
+    const ctx = new AC(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ctx.destination);
+    o.start(); setTimeout(() => { try { o.frequency.value = 660; } catch (_) {} }, 160); setTimeout(() => { try { o.stop(); ctx.close(); } catch (_) {} }, 360);
+    return true;
+  } catch (_) { return false; }
+}
+bf.attention = {};
+function bfAttention(site) {
+  bf.attention[site] = Date.now();
+  if (bfSoundOn()) bfBeep();
+  const L = bfLabel(site, bf.snap || {});
+  bfMsg(`⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself — click its ⚠️, then 🎯 Point at it or 🔢 Do it for me with a number.`, "err");
+}
+if (el("bf-sound")) {
+  try { el("bf-sound").checked = bfSoundOn(); } catch (_) {}
+  el("bf-sound").onchange = (e) => { try { localStorage.setItem("bf-sound", e.target.checked ? "1" : "0"); } catch (_) {} if (e.target.checked) bfBeep(); };
+}
 // Live repair updates (state changes, teach progress) re-render at once.
 if (window.api && window.api.onSelfRepair) window.api.onSelfRepair((p) => {
   try {
     if (!p || !p.site || !bf.snap || !bf.snap.sites || !bf.snap.sites[p.site]) return;
     bf.snap.sites[p.site].repair = p.repair;
+    if (p.event && p.event.kind === "broken" && p.event.ask) bfAttention(p.site);
     bfRenderAll();
   } catch (e) { bfReportUiError(e, "self-repair update"); }
 });

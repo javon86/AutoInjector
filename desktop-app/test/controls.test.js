@@ -58,6 +58,23 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     setZoom: async (site, factor) => { calls.push({ fn: "setZoom", site, factor }); return { ok: true, factor }; },
     pickSelector: async (site, role) => { calls.push({ fn: "pickSelector", site, role }); return pickResult || { ok: true, selector: `#mock-${site}-${role}`, tag: "div", sample: "sample text" }; },
     clearSelectorOverride: async (site, role) => { calls.push({ fn: "clearSelectorOverride", site, role }); return { ok: true }; },
+    // P38 🎯 picker (a tiny in-memory stand-in for main's picker:* handlers)
+    _pk: {},
+    _pkStatus(site) { const items = {}; for (const r of ["input", "send", "assistant"]) items[r] = Object.assign({ state: "none" }, (api._pk[site] || {})[r] || {}); return { ok: true, site, label: site, items, picking: null, repair: api._teach && api._teach.site === site ? { teach: api._teach.t } : null }; },
+    pickerStatus: async (site) => { calls.push({ fn: "pickerStatus", site }); return api._pkStatus(site); },
+    pickerStart: async (site, role) => {
+      calls.push({ fn: "pickerStart", site, role });
+      const res = pickResult || { ok: true, selector: `#mock-${site}-${role}`, preview: role === "send" ? "Send button found" : role === "input" ? "Message box found" : "The latest answer text", count: 2 };
+      if (res.ok) { api._pk[site] = api._pk[site] || {}; api._pk[site][role] = Object.assign({}, (api._pk[site] || {})[role], { state: "picked", preview: res.preview, latest: true, draft: true }); }
+      return res;
+    },
+    pickerSave: async (site, role) => { calls.push({ fn: "pickerSave", site, role }); const x = (api._pk[site] || {})[role]; if (!x || x.state !== "picked") return { ok: false, error: "NOTHING_PICKED" }; api._pk[site][role] = { state: "saved", savedAt: Date.now(), how: "pick", hadSaved: true }; return Object.assign({ saved: role }, api._pkStatus(site)); },
+    pickerClear: async (site, role) => { calls.push({ fn: "pickerClear", site, role }); const x = (api._pk[site] || {})[role]; const draft = !!(x && x.state === "picked"); if (api._pk[site]) delete api._pk[site][role]; return Object.assign({ cleared: draft ? "draft" : "saved" }, api._pkStatus(site)); },
+    pickerTest: async (site) => { calls.push({ fn: "pickerTest", site }); return api._pkTestResult || { ok: true, state: "ok" }; },
+    pickerCancel: async (site) => { calls.push({ fn: "pickerCancel", site }); return { ok: true }; },
+    onPicker: (cb) => { api._pickerCb = cb; },
+    selfRepairTeachStart: async (site) => { calls.push({ fn: "selfRepairTeachStart", site }); return { ok: true, number: "4827" }; },
+    selfRepairTeachCancel: async (site) => { calls.push({ fn: "selfRepairTeachCancel", site }); return { ok: true }; },
     runSelfTest: async (site) => { calls.push({ fn: "runSelfTest", site }); return selfTestResult || { ok: true }; },
     runTuner: async () => { calls.push({ fn: "runTuner" }); return tunerRunResult || { ok: true }; },
     openSequenceEditor: async () => { calls.push({ fn: "openSequenceEditor" }); return { ok: true }; },
@@ -427,58 +444,121 @@ async function testSelectorPickMenuToggle() {
   assert(menu.classList.contains("collapsed"), "clicking it again closes the menu");
 }
 
-async function testSelectorPickSuccess() {
-  console.log("\n== Selector picker: a successful pick calls pickSelector with the right site/role and shows the result inline ==");
-  const api = makeApi({ pickResult: { ok: true, selector: '[data-testid="composer"]', tag: "div", sample: "Hello world" } });
-  const dom = await loadWindow(api);
-  const doc = dom.window.document;
-
-  const menu = doc.getElementById("pick-menu-claude");
-  const inputBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Input");
-  assert(!!inputBtn, "menu has a Pick Input button");
-  inputBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-
-  const pickCall = api.calls.find((c) => c.fn === "pickSelector");
-  assert(!!pickCall && pickCall.site === "claude" && pickCall.role === "input", "clicking Pick Input calls pickSelector('claude', 'input')");
-
-  const statusEl = doc.getElementById("pick-status-claude");
-  assert(statusEl.textContent.includes('[data-testid="composer"]'), "the picked selector is shown inline as confirmation");
-  assert(statusEl.textContent.includes("Hello world"), "the sample text is shown too -- no separate test panel needed");
+function findByText(nodes, text) {
+  return Array.from(nodes).find((n) => n.textContent === text);
 }
 
-async function testSelectorPickFailure() {
-  console.log("\n== Selector picker: a failed/timed-out pick reports the error instead of pretending success ==");
-  const api = makeApi({ pickResult: { ok: false, error: "TIMEOUT" } });
-  const dom = await loadWindow(api);
-  const doc = dom.window.document;
-
-  const menu = doc.getElementById("pick-menu-gemini");
-  const sendBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Send");
-  sendBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-
-  const statusEl = doc.getElementById("pick-status-gemini");
-  assert(statusEl.textContent.includes("TIMEOUT"), `the failure reason is shown, not silently swallowed (got "${statusEl.textContent}")`);
-}
-
-async function testClearOverridesButton() {
-  console.log("\n== Selector picker: Clear Overrides clears all three roles for that site ==");
+async function testPickerDialogFlow() {
+  console.log("\n== P38 🎯 picker card: choose ONE thing, OK, pick it (blue -> green), Save one only, Clear, Test it ==");
   const api = makeApi();
   const dom = await loadWindow(api);
   const doc = dom.window.document;
-
-  const menu = doc.getElementById("pick-menu-chatgpt");
-  const clearBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Clear Overrides");
-  clearBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-
-  const clearCalls = api.calls.filter((c) => c.fn === "clearSelectorOverride" && c.site === "chatgpt");
-  assert(clearCalls.length === 3 && ["input", "send", "assistant"].every((role) => clearCalls.some((c) => c.role === role)), "Clear Overrides clears input, send, and assistant for that site");
+  const w = dom.window;
+  const tick = () => new Promise((r) => setTimeout(r, 25));
+  const menu = doc.getElementById("pick-menu-claude");
+  doc.querySelector("#col-claude .pick-btn").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(!menu.classList.contains("collapsed") && /What do you want to point at\?/.test(menu.textContent), "🎯 opens the card: “What do you want to point at?”");
+  const rows = Array.from(menu.querySelectorAll(".pk-row"));
+  assert(rows.map((r) => r.dataset.role).join() === "input,send,assistant", "three choices: Message box / Send button / AI's reply");
+  assert(/Message box/.test(rows[0].textContent) && /where you type/.test(rows[0].textContent) && /Send button/.test(rows[1].textContent) && /AI's reply/.test(rows[2].textContent) && /latest answer/.test(rows[2].textContent), "plain-language labels");
+  const chip = (role) => menu.querySelector(`.pk-row[data-role="${role}"] .pk-chip`);
+  assert(["input", "send", "assistant"].every((r) => chip(r).dataset.st === "none" && /Not set/.test(chip(r).textContent)), "every chip starts BLUE: “Not set”");
+  assert(Array.from(menu.querySelectorAll(".pk-save")).every((b) => b.disabled), "Save is disabled until something is picked");
+  const btn = (cls) => menu.querySelector(cls);
+  btn(".pk-ok").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(!api.calls.some((c) => c.fn === "pickerStart") && /Choose one of the three/.test(doc.getElementById("pick-status-claude").textContent), "OK without a choice asks to choose one first (nothing starts)");
+  const radio = menu.querySelector('.pk-row[data-role="send"] input[type=radio]');
+  radio.checked = true; radio.dispatchEvent(new w.Event("change", { bubbles: true }));
+  btn(".pk-ok").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  const st = api.calls.find((c) => c.fn === "pickerStart");
+  assert(st && st.site === "claude" && st.role === "send", "OK starts pick mode for exactly the chosen thing (Send button)");
+  assert(chip("send").dataset.st === "picked" && /Send button found/.test(chip("send").textContent), `the Send chip turns GREEN with a preview (${chip("send").textContent})`);
+  assert(chip("input").dataset.st === "none" && chip("assistant").dataset.st === "none", "the other two stay blue");
+  assert(!menu.querySelector('.pk-row[data-role="send"] .pk-save').disabled && menu.querySelector('.pk-row[data-role="input"] .pk-save').disabled, "only the picked item can be saved");
+  menu.querySelector('.pk-row[data-role="send"] .pk-save').dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(api.calls.filter((c) => c.fn === "pickerSave").map((c) => c.role).join() === "send", "Save saves that ONE item only");
+  assert(chip("send").dataset.st === "saved" && /✓ Saved/.test(chip("send").textContent), `saved -> green with ✓ (${chip("send").textContent})`);
+  assert(/Test it/.test(doc.getElementById("pick-status-claude").textContent), "after Save it suggests “Test it”");
+  // the reply: pick, then a second pick replaces the draft; Clear removes the draft
+  const r2 = menu.querySelector('.pk-row[data-role="assistant"] input[type=radio]');
+  r2.checked = true; r2.dispatchEvent(new w.Event("change", { bubbles: true }));
+  btn(".pk-ok").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(chip("assistant").dataset.st === "picked" && /latest answer text/.test(chip("assistant").textContent), "the reply chip shows the first words of the picked reply");
+  menu.querySelector('.pk-row[data-role="assistant"] .pk-clear').dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(chip("assistant").dataset.st === "none" && /Cleared the new pick/.test(doc.getElementById("pick-status-claude").textContent), "Clear on a draft removes it (back to blue)");
+  menu.querySelector('.pk-row[data-role="send"] .pk-clear').dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(chip("send").dataset.st === "none" && /built-in/.test(doc.getElementById("pick-status-claude").textContent), "Clear on a saved item removes it (falls back to the built-ins)");
+  // red ⚠️: saved but no longer matching
+  api._pk.claude = { input: { state: "stale", savedAt: Date.now() - 60000, how: "pick" } };
+  api._pickerCb(api._pkStatus("claude"));
+  assert(chip("input").dataset.st === "stale" && /⚠️/.test(chip("input").textContent), "a saved pick that no longer matches shows RED ⚠️");
+  // Test it
+  btn(".pk-test").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(api.calls.some((c) => c.fn === "pickerTest" && c.site === "claude") && /answered the check-in/.test(doc.getElementById("pick-status-claude").textContent), "Test it sends a check-in and says it works");
+  api._pkTestResult = { ok: false, state: "broken", say: "Claude answered, but AutoInjector can't find its replies on the page." };
+  btn(".pk-test").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await tick();
+  assert(/didn't work.*can't find its replies/.test(doc.getElementById("pick-status-claude").textContent), "a failed Test it says why");
 }
 
-function findByText(nodes, text) {
-  return Array.from(nodes).find((n) => n.textContent === text);
+async function testPickerRejections() {
+  console.log("\n== P38 🎯 picker: a pick that doesn't work says why in plain words ==");
+  const cases = [
+    { error: "WRONG_ELEMENT_TYPE", expect: "doesn't look like" },
+    { error: "LOOKS_LIKE_USER", expect: "your own message" },
+    { error: "LOOKS_LIKE_ECHO", expect: "last message sent" },
+    { error: "ONLY_ONE_MESSAGE", expect: "not every reply" },
+    { error: "TIMEOUT", expect: "no click in time" }
+  ];
+  for (const { error, expect } of cases) {
+    const api = makeApi({ pickResult: { ok: false, error } });
+    const dom = await loadWindow(api);
+    const doc = dom.window.document;
+    const menu = doc.getElementById("pick-menu-gemini");
+    const radio = menu.querySelector('.pk-row[data-role="input"] input[type=radio]');
+    radio.checked = true; radio.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    menu.querySelector(".pk-ok").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 25));
+    const statusEl = doc.getElementById("pick-status-gemini");
+    assert(statusEl.textContent.includes(expect) && menu.querySelector('.pk-row[data-role="input"] .pk-chip').dataset.st === "none", `${error}: "${statusEl.textContent}" and the chip stays blue`);
+  }
+}
+
+async function testPickerNumberTeach() {
+  console.log("\n== P38 🔢 “Do it for me with a number” from the 🎯 card: steps, saved, a failed part offers 🎯 ==");
+  const api = makeApi();
+  const dom = await loadWindow(api);
+  const doc = dom.window.document;
+  const w = dom.window;
+  const menu = doc.getElementById("pick-menu-chatgpt");
+  menu.querySelector(".pk-number").dispatchEvent(new w.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 25));
+  assert(api.calls.some((c) => c.fn === "selfRepairTeachStart" && c.site === "chatgpt") && /Type 4827 into ChatGPT's message box and press Send/.test(doc.getElementById("pick-status-chatgpt").textContent), "starts the number teach and says exactly what to type");
+  const fire = (t) => { api._teach = { site: "chatgpt", t: Object.assign({ number: "4827", reversed: "7284", startedAt: Date.now(), learned: {}, saved: [], missing: [] }, t) }; api._pickerCb(api._pkStatus("chatgpt")); };
+  fire({ active: true, phase: "type" });
+  let box = menu.querySelector(".pk-teach");
+  assert(!box.hidden && /Type 4827 into ChatGPT's message box and press Send/.test(box.textContent) && box.querySelectorAll("li").length === 6 && /Cancel/.test(box.textContent), "the card shows the steps and a Cancel button");
+  fire({ active: true, phase: "wait_reply", asked: true, learned: { input: true, send: true, user: true } });
+  const sts = Array.from(box.querySelectorAll("li")).map((li) => li.dataset.st);
+  assert(sts.slice(0, 4).every((x) => x === "ok") && sts[4] === "wait" && /writes 7284 backwards/.test(box.textContent), `type ✔ send ✔ message ✔ asked ✔, now waiting for "7284" (${sts.join(",")})`);
+  fire({ active: false, phase: "done", result: "fixed", saved: ["input", "send", "assistant"], learned: { input: true, send: true, reply: true } });
+  box = menu.querySelector(".pk-teach");
+  assert(/✔ Saved — ChatGPT is working again\./.test(box.textContent) && box.dataset.tone === "ok", "finished: “✔ Saved — ChatGPT is working again.”");
+  fire({ active: false, phase: "wait_reply", result: "failed", failedPart: "assistant", saved: ["input", "send"] });
+  box = menu.querySelector(".pk-teach");
+  const fixBtn = Array.from(box.querySelectorAll("button")).find((b) => /Point at the reply area/.test(b.textContent));
+  assert(/reply area part didn't work/.test(box.textContent) && /Saved: message box, Send button/.test(box.textContent) && !!fixBtn, "a failed part is named, what worked is saved, and 🎯 is offered for just that part");
+  fixBtn.dispatchEvent(new w.Event("click", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 25));
+  assert(api.calls.some((c) => c.fn === "pickerStart" && c.role === "assistant"), "…which starts pick mode for the reply area only");
 }
 
 async function testSavedLoginsAddAndFill() {
@@ -742,28 +822,6 @@ async function testConnectivityTestButtonDistinguishesTooBroadAndEcho() {
   await new Promise((r) => setTimeout(r, 20));
   statusEl = doc.getElementById("pick-status-gemini");
   assert(statusEl.textContent.includes("echo"), `REPLY_ECHO gets its own distinct explanation too (got "${statusEl.textContent}")`);
-}
-
-async function testSelectorPickValidationRejections() {
-  console.log("\n== Selector picker: each post-pick validation rejection shows its own specific, actionable reason ==");
-
-  const cases = [
-    { error: "NOT_FOUND", expect: "doesn't actually match" },
-    { error: "NOT_VISIBLE", expect: "hidden or zero-size" },
-    { error: "WRONG_ELEMENT_TYPE", expect: "doesn't look like" },
-    { error: "LOOKS_LIKE_ECHO", expect: "last message sent" }
-  ];
-  for (const { error, expect } of cases) {
-    const api = makeApi({ pickResult: { ok: false, error } });
-    const dom = await loadWindow(api);
-    const doc = dom.window.document;
-    const menu = doc.getElementById("pick-menu-claude");
-    const inputBtn = Array.from(menu.querySelectorAll("button")).find((b) => b.textContent === "Pick Input");
-    inputBtn.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
-    const statusEl = doc.getElementById("pick-status-claude");
-    assert(statusEl.textContent.includes(expect), `${error} shows its own specific reason (got "${statusEl.textContent}")`);
-  }
 }
 
 async function testUserPanelMergedAndNeverCollapses() {
@@ -1216,10 +1274,9 @@ async function main() {
   await testPhonePanel();
   await testZoomControls();
   await testSelectorPickMenuToggle();
-  await testSelectorPickSuccess();
-  await testSelectorPickFailure();
-  await testSelectorPickValidationRejections();
-  await testClearOverridesButton();
+  await testPickerDialogFlow();
+  await testPickerRejections();
+  await testPickerNumberTeach();
   await testSavedLoginsAddAndFill();
   await testSavedLoginsDeleteAndSaveFailure();
   await testConnectivityTestButtonSuccess();

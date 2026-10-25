@@ -81,6 +81,36 @@ function runGen(html, site = "chatgpt") {
   return vm.runInContext(buildReadScript(site), dom.getInternalVMContext());
 }
 
+console.log("\n== P37.2: read the WHOLE reply when the page splits it over several nodes ==");
+{
+  const runOv = (html, site, ov) => {
+    const dom = new JSDOM(`<!doctype html><body>${html}</body>`, { runScripts: "outside-only" });
+    return vm.runInContext(buildReadScript(site, ov), dom.getInternalVMContext());
+  };
+  const older = `<div class="conversation-container"><user-query><div class="query-text">[MSG #0003] hi</div></user-query><model-response><message-content><div class="markdown markdown-main-panel"><p>[TO: USER]</p><p>older</p><p>[FROM: GEMINI]</p></div></message-content></model-response></div>`;
+  // (a) the exact log case: the learned alternative 'model-response message-content .markdown'
+  //     reads a node holding only "[TO:" — the rest sits in sibling nodes under message-content
+  const splitA = `<div class="conversation-container"><user-query><div class="query-text">[MSG #0004] go</div></user-query><model-response><message-content><div class="markdown markdown-main-panel">[TO:</div><div class="response-tail"> USER]</div><div class="response-tail"><p>The whole body of the reply.</p><pre><code>code part</code></pre><p>[FROM: GEMINI]</p></div></message-content></model-response></div>`;
+  let r = runOv(older + splitA, "gemini", { assistant: "model-response message-content .markdown", assistantStrict: true });
+  assert(/\[TO:\s*USER\]/.test(r.text) && /whole body of the reply/.test(r.text) && /code part/.test(r.text) && /\[FROM: GEMINI\]\s*$/.test(r.text), `"[TO:" + sibling nodes -> the whole reply, code block included (${JSON.stringify(r.text.slice(0, 80))})`);
+  assert(!/older/.test(r.text) && !/MSG #0004/.test(r.text), "never the older reply or the user's message");
+  // (b) [TO: USER] and the body in sibling nodes, the body node LAST and matched alone
+  const splitB = `<div class="conversation-container"><user-query><div class="query-text">[MSG #0005] go</div></user-query><model-response><message-content><div class="head-x"><p>[TO: USER]</p></div><div class="markdown"><p>Body in a sibling node.</p><p>[FROM: GEMINI]</p></div></message-content></model-response></div>`;
+  r = runOv(older + splitB, "gemini", { assistant: "model-response message-content .markdown", assistantStrict: true });
+  assert(/^\s*\[TO: USER\]/.test(r.text) && /Body in a sibling node/.test(r.text), `[TO: USER] and the body in sibling nodes -> both read (${JSON.stringify(r.text)})`);
+  // (c) "[TO:" only, the rest OUTSIDE message-content but inside the same model-response (parentChars 4)
+  const splitC = `<div class="conversation-container"><user-query><div class="query-text">[MSG #0006] go</div></user-query><model-response><div class="response-container"><message-content><div class="markdown markdown-main-panel">[TO:</div></message-content><div class="continuation"> USER]\nSplit outside message-content.\n[FROM: GEMINI]</div></div></model-response></div>`;
+  r = runOv(older + splitC, "gemini", { assistant: "model-response message-content .markdown", assistantStrict: true });
+  assert(/Split outside message-content/.test(r.text) && /^\s*\[TO:/.test(r.text) && /\[FROM: GEMINI\]\s*$/.test(r.text), `"[TO:" with the rest elsewhere in the same reply -> whole reply (${JSON.stringify(r.text)})`);
+  // (d) a selector that reads just the first paragraph of a ChatGPT reply -> the whole message
+  const gpt = `<div data-message-author-role="user"><div>[MSG #0001] hi</div></div><div data-message-author-role="assistant"><div class="markdown"><p class="first">[TO: USER]</p><p>Paragraph two is long enough to matter here.</p><ul><li>a list item</li></ul><p>[FROM: CHATGPT]</p></div></div>`;
+  r = runOv(gpt, "chatgpt", { assistant: "div.markdown p.first", assistantStrict: true });
+  assert(/Paragraph two/.test(r.text) && /a list item/.test(r.text) && /\[FROM: CHATGPT\]\s*$/.test(r.text) && !/MSG #0001/.test(r.text), `a selector reaching only part of the message -> the whole message (${JSON.stringify(r.text.slice(0, 60))})`);
+  // (e) a normal, whole reply is left exactly as it was
+  r = runOv(gpt.replace(' class="first"', ""), "chatgpt", {});
+  assert(r.fragmentFixed === false || r.fragmentFixed === undefined, `an ordinary reply needs no fix (${r.fragmentFixed})`);
+}
+
 console.log("\n== generating: a visible Stop button means the model is still speaking ==");
 {
   const r = runGen(`<div data-message-author-role="assistant">half a rep</div>

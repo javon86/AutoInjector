@@ -343,7 +343,7 @@ These came out of the 21 Oct 2026 Extract All and test report. Tracker IDs (TR-x
 - **Re-drawn replies (TR-17).** A tagged reply must hold still briefly before it's captured; a reply the page re-draws (Gemini adds paragraph breaks and "PDF"/"+ 1" citation chips seconds later) is recognised as the same reply block and not captured or relayed again. Gemini's chip lines are stripped.
 - **Build stamp (TR-19).** Extract All, Help → About and the window title name the commit and branch the app is running from.
 - **Reading whole replies (TR-23).** If the reply reader reaches only part of a reply (one paragraph, or just the `[FROM: X]` line), it climbs to the element that holds the whole reply — never into the user's message or two replies, and never re-cutting at a `[TO:]` the AI merely quoted — and stops right after the closing tag.
-- **Selector picks (TR-24).** 🎯 Pick Reply saves the reply's container (the site's own reply selector when it recognises one), never the clicked word or paragraph. Bare tag names (`span`, `p`, `div`) are refused when picking and dropped from saved settings on start (logged as `selector-override-dropped`); per-turn test-ids are never used.
+- **Selector picks (TR-24, P38).** 🎯 → AI's reply saves the reply's container (the site's own reply selector when it recognises one), never the clicked word or paragraph. Bare tag names (`span`, `p`, `div`) are refused when picking and dropped from saved settings on start (logged as `selector-override-dropped`); per-turn test-ids are never used.
 - **Busy AIs (TR-25).** A message to an AI that is still writing its last reply (its Stop button is showing) waits for it to finish — up to 5 minutes (`AUTOINJECTOR_SEND_BUSY_WAIT_MS`) — instead of failing; the wait doesn't use up retries, relays to other AIs aren't held up, and Stop AIs Talking cancels it.
 - **Relay Trace (TR-13).** `relay-trace.js` follows every `[MSG #n]` through typed → proven → reply started → reply captured → handed on (or held, and why), and reports per AI where messages stop, plus duplicates, retries and timings. Passive; it sends nothing. Shown in every Extract All, in **Tools → Relay Trace report**, and over IPC (`trace:report`, `{ save }` / `{ reset }`).
 - **Bucket Brigade (TR-14).** `bucket-brigade.js` — **Tools → Run relay check**. The checked AIs pass a 20-item list round with the normal `[TO:]` relay (Auto is paused during the run and restored after); items stress line breaks, accents, quotes, code, brackets, symbols, a URL and a long paragraph. Each hand-off is scored and blame is split: **app** (delivered, proven, captured, passed on exactly, no duplicates) vs **AI** (right `[TO:]`, kept every item, nothing altered). If an AI breaks the chain the app hands the correct list to the next AI and continues. About 23 messages, 10–20 minutes; the report (with the Relay Trace) opens when done.
@@ -635,7 +635,7 @@ took, refused keys/codes) is kept, folded away at the bottom. Only loopback
   real bridge with fake panes for cross-process tests (see its header for the CLI,
   incl. `--pairing-code-file` and `--status-file`).
 
-### AIs that repair themselves (check-ins, self-repair, teach step)
+### AIs that repair themselves (check-ins, self-repair, 🎯 picker, 🔢 number teach)
 
 AutoInjector checks that each Active AI still answers by sending it a tiny **check-in**
 (“Reply with only this word: marigold”): once when its page has loaded, every 20 minutes
@@ -649,13 +649,38 @@ When a check-in fails, the AI's card says **🔧 Repairing…** and AutoInjector
 logged out / “are you human?” check / usage limit / page error) and fixes what it can by
 itself: other known ways to find the message box, Send button and replies; searching the
 page for the check-in word to learn where replies appear; reloading the window; pressing
-Stop on a stuck AI. If that doesn't work it asks you (**🎓**) to type
-`Repeat this number: 4827` into that AI and press Send — a box in the panel and a banner in
-the AI's window walk you through it — and learns the page from that. **✔ Fixed** when it
-works again. Logged out, captcha and usage limits show **⚠️ Needs you** with exactly what to
-do; it notices by itself when you've done it. Click any ⚠️ to see what was already tried.
-What it learned is saved per AI (`learnedSelectors` in the state file); a 🎯 pick of your
-own always wins. Everything it does is in the activity log and 📋 Copy diagnostics (codes
+Stop on a stuck AI. If that doesn't work the AI shows **✕ Not working** and AutoInjector tells
+you **once**, noticeably (its card flashes, the ⚠️ pop-over offers **🎯 Point at it** and **🔢 Do it
+for me with a number**, and a short sound plays if you tick **🔔 sound** next to *Check-ins*). It
+never starts the teach step by itself and doesn't nag: it re-checks that AI with a plain check-in
+after 5, then 15, then every 60 minutes until you act (🎯 Save, 🔢, 🩺 Check now, reload) or a
+normal reply shows it works again. **✔ Fixed** when it works again. Logged out, captcha and usage
+limits show **⚠️ Needs you** with exactly what to do; it notices by itself when you've done it.
+Click any ⚠️ to see what was already tried. Check-in answers (and number-teach answers) are never
+relayed and never get a “you forgot your [TO:] tag” reminder, even when they come late.
+What it learned is saved per AI (`learnedSelectors` in the state file). Anything it learns is
+made **general** (it must match every reply of that kind, not one message: per-message numbers,
+ids and `data-…-key` values such as `fallback-turn-7:2:assistant` are stripped — that one becomes
+`[data-content-search-unit-key$=":assistant"]` — and when two or more replies are on the page the
+selector must match at least two of them). The reader always takes the **whole** reply: if the
+node it lands on is only the envelope start (`[TO:`) or much shorter than the AI message it
+belongs to, it reads that whole message instead.
+
+#### 🔢 Number teach (“Do it for me with a number”)
+
+From an AI's 🎯 card or its ⚠️ pop-over. A box in the BookForge panel (and a banner in the AI's
+window) says *Type 4827 into ChatGPT's message box and press Send* (a random 4-digit number).
+While you do, AutoInjector watches the page: where the digits appear while typing is the message
+box, what empties the box is the Send button (or Enter), and the digits in a new block are your
+message. Then **AutoInjector itself** sends that AI *“Write the number 4827 backwards, digits
+only.”* (with the usual reply envelope; never relayed, never nagged) and learns the reply area from
+where **7284** appears in a new block that is neither your message nor the box. All three are saved
+like a 🎯 Save, a check-in confirms them, and the box says **✔ Saved — ChatGPT is working again.**
+If a part fails it says which one (message box / Send button / reply area), keeps what worked and
+offers 🎯 for just that part. Cancel any time; it gives up after 4 minutes with a friendly note and
+never starts again by itself.
+A saved 🎯 / 🔢 selector wins over one learned before it; one the self-repair learns later (because
+the saved one stopped matching) wins over it. Everything it does is in the activity log and 📋 Copy diagnostics (codes
 only, never message text). Set `AUTOINJECTOR_CHECKIN=0` to switch the automatic check-ins
 off. Details: `docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md` (contract v1.2) and `self-repair.js`.
 Real ChatGPT/Claude/Gemini pages couldn't be tested here — only realistic fake pages.
@@ -909,30 +934,29 @@ connection, and a forward that never sent looks different from a target
 that never answered, so now you can tell exactly which one you're looking
 at.
 
-### 🎯 Fixing it yourself: the selector picker
+### 🎯 Fixing it yourself: point at it
 
-The same button also opens a small menu with **Pick Input**, **Pick Send**,
-**Pick Reply**, and **Clear Overrides**. Click one of the first three, then
-click the real element live in that pane — the input box you type into, the
-actual Send button, or the text of an actual reply. The app captures that
-exact click (it never actually submits anything — the click's default
-action is prevented), works out a selector for it, and — before saving
-anything — validates it against the live page right then, in the same tick
-as the click: the generated selector actually has to resolve back to (at
-least) the clicked element, that element has to be visibly on screen (not
-zero-size/hidden), and it has to be the right *kind* of element for the role
-(an editable box for Input, a real button for Send). A **Pick Reply** also
-gets checked against whatever was most recently sent to that site — if the
-captured sample just echoes that outgoing message, the pick is rejected
-rather than saved as if it read a genuine reply. Any of these failures shows
-the specific reason inline (e.g. "that looks like it's just the last message
-sent, not a real reply") instead of silently saving a bad override. Once a
-pick passes every check, the selector (and, for a reply pick, a short sample
-of its text) is shown right there as confirmation. **Clear Overrides** drops
-all three roles for that site back to the built-in defaults if a pick turns
-out wrong anyway. Overrides persist across restarts the same way everything
-else does. Run 🧪 Test again afterward to confirm the pick actually fixed
-things.
+Click **🎯** on an AI's pane (or **🎯 Point at it** in the BookForge panel's ⚠️ pop-over) and a
+small card opens: **What do you want to point at?** — **Message box** (where you type), **Send
+button**, or **AI's reply** (pick the latest answer). Choose ONE and press **OK — point at it**.
+The AI's window shows a banner *“Click the … in this window”*; hovering outlines what a click would
+pick, and the click itself is swallowed (nothing is sent or opened; Esc or Cancel stops it). Each
+item has a chip:
+
+- **blue “Not set”** — nothing saved, AutoInjector's built-in way of finding it is used;
+- **green “Picked: …”** — just picked, with a short preview (the first words of the reply / “Send
+  button found”), not saved yet;
+- **green “✓ Saved 10:42”** — locked in (saved per site, versioned, with the time; 🔢 if the number
+  teach saved it);
+- **red “⚠️ Saved — not found on the page now”** — saved, but it no longer matches the page.
+
+Every item has its own **Clear** and **Save**: save any ONE at any time — you never have to do all
+three. Clear removes a new pick, or (if there is none) the saved one, back to the built-ins.
+**Test it** sends a check-in to confirm the AI answers and is read. **🔢 Do it for me with a
+number** starts the number teach (above). A reply pick is generalised the same way as everything
+the self-repair learns (it matches every reply, never one message). The old round-trip test is the
+small **🧪 Test** button in the same card. A pick's preview text is shown only in the card, never
+logged.
 
 This replaces needing to open DevTools yourself for the common case (a site
 renamed a class or restructured its composer). If picking doesn't land on

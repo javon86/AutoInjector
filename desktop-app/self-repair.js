@@ -18,9 +18,19 @@
  *          with a timestamp) and check in again.
  *   P18.6  Fix 3: reload the AI's window (then check in again); unfreeze a stuck AI
  *          (press its Stop button, wait, send the check-in once more).
- *   P18.7  Teach step: the user types "Repeat this number: ####" into the AI; a page
- *          watcher learns the message box, how it was sent, the user's message block
- *          and the reply block, saves them and confirms with a new check-in.
+ *   P38    🔢 Number teach (replaces the P18.7 teach box): the user types the shown
+ *          4 digits into the AI and presses Send (the watcher learns the box, Send and
+ *          the user's message), AutoInjector then asks the AI to write the number
+ *          backwards and learns the reply area from where the reversed digits appear;
+ *          saved like a 🎯 Save, confirmed by a check-in. Never started by itself.
+ *   P38    🎯 Picker page script (pickStart): point at ONE thing; hover outlines it.
+ *   P37.1  Every learned selector is GENERAL: per-message numbers/ids/keys are stripped
+ *          (fallback-turn-7:2:assistant -> [..$=":assistant"]) and, with 2+ replies on
+ *          the page, it must match at least two of them.
+ *   P37.3  After every automatic fix failed: one notice for the user (ask_user), no
+ *          automatic teach step, re-checks back off 5 -> 15 -> 60 minutes.
+ *   P37.4  probeReplyKind: late / unproven check-in and teach answers are never
+ *          relayed or nagged about missing tags.
  *   P18.8  User-only problems (logged out / captcha / usage limit) -> state
  *          "needs_user" with exactly what to do; cheap signature checks every 60 s
  *          (and when the page changes), a check-in only once the signature is gone.
@@ -202,7 +212,24 @@ function pageKit() {
   const UTILITY = /^(?:[a-z0-9]+:|-?[mp][xytrbl]?-|w-|h-|min-|max-|size-|text-|bg-|border|rounded|flex|grid|gap-|items-|justify-|self-|overflow|relative|absolute|fixed|sticky|inset|top-|left-|right-|bottom-|z-|font-|leading-|tracking-|shadow|opacity|transition|duration|ease|cursor|select-|whitespace|break-|truncate|sr-only|hidden|block|inline|contents|group|peer|space-|order-|col-|row-|place-|align-|origin-|transform|translate|scale|rotate|ring|outline|fill-|stroke-|visible|invisible|pointer-events|resize|list-|decoration|underline|italic|antialiased|container|mx-auto|dark|light|active|selected|hover|focus|disabled|ng-|mat-|mdc-|css-|sc-|jsx-)/;
   const IDENT = /^-?[A-Za-z_][\w-]*$/;
   const SKIP_DATA = /^data-(?:start|end|index|offset|state|headlessui|radix|reactroot|v-|ved|hveid|ei|sentry|testid-index)/;
+  // P37.1: words in an attribute value that say WHAT KIND of message it is (kept
+  // when the per-message number around them is stripped).
+  const ROLE_WORD = /^(?:assistant|model|bot|ai|response|answer|reply|agent|user|human|query|prompt|request)$/i;
+  const DIGIT = /\d/;
   function q(v) { return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; }
+  // P37.1: a value that names ONE message ("fallback-turn-7:2:assistant", "msg-41")
+  // -> the parts every message of that kind shares: [a$=":assistant"], [a*="assistant"],
+  // [a^="fallback-turn-"]. Never the number itself.
+  function partialsFor(tag, n, v, add) {
+    if (!v || v.length > 80 || /["\\\n\r\s]/.test(v)) return;
+    const first = v.search(/\d/);
+    if (first < 0) return;
+    let last = -1; for (let i = v.length - 1; i >= 0; i--) if (DIGIT.test(v.charAt(i))) { last = i; break; }
+    const suffix = v.slice(last + 1); const prefix = v.slice(0, first);
+    if (/[a-z]{3,}/i.test(suffix) && suffix.length <= 40) { add(tag + '[' + n + '$=' + q(suffix) + ']', 93); add('[' + n + '$=' + q(suffix) + ']', 90); }
+    for (const w of v.split(/[^A-Za-z]+/).filter((x) => ROLE_WORD.test(x)).slice(0, 2)) add(tag + '[' + n + '*=' + q(w) + ']', 86);
+    if (/[a-z]{3,}/i.test(prefix) && prefix.length <= 40) add(tag + '[' + n + '^=' + q(prefix) + ']', 72);
+  }
   function candidatesFor(e, role) {
     const tag = String(e.localName || e.tagName || '').toLowerCase();
     if (!tag || !IDENT.test(tag)) return [];
@@ -211,21 +238,27 @@ function pageKit() {
     if (tag.indexOf('-') !== -1) add(tag, 90);
     // Message blocks (assistant / user): attribute VALUES must look like names, never
     // like words someone wrote (no spaces, no labels/titles) — a learned selector must
-    // never carry page text, and must match the NEXT reply too.
+    // never carry page text, and must match the NEXT reply too (P37.1: no value with
+    // a digit in it — turn numbers, ids and indices name ONE message).
     const block = role === 'assistant' || role === 'user' || role === 'anchor';
+    const volatile = (v) => VOLATILE.test(v) || (block && DIGIT.test(v));
     for (const a of Array.from(e.attributes || [])) {
       const n = String(a.name || '').toLowerCase(); const v = String(a.value == null ? '' : a.value);
       if (!IDENT.test(n)) continue;
       if (n.indexOf('data-') === 0 && !SKIP_DATA.test(n)) {
-        if (v && v.length <= 40 && !VOLATILE.test(v) && !/[\n\r]/.test(v) && !(block && /\s/.test(v))) { add(tag + '[' + n + '=' + q(v) + ']', 100); add('[' + n + '=' + q(v) + ']', 97); }
-        else add(tag + '[' + n + ']', /(?:^|-)id$|-key$|uuid/.test(n) ? 66 : 60);
+        if (v && v.length <= 40 && !volatile(v) && !/[\n\r]/.test(v) && !(block && /\s/.test(v))) { add(tag + '[' + n + '=' + q(v) + ']', 100); add('[' + n + '=' + q(v) + ']', 97); }
+        else {
+          if (block) partialsFor(tag, n, v, add);
+          add(tag + '[' + n + ']', /(?:^|-)id$|-key$|uuid/.test(n) ? 66 : 60);
+        }
       } else if (n === 'role' && v && !/\s/.test(v)) add(tag + '[role=' + q(v) + ']', role === 'assistant' ? 70 : 80);
       else if (!block && (n === 'aria-label' || n === 'mattooltip' || n === 'title') && v && v.length <= 40 && !VOLATILE.test(v)) add(tag + '[' + n + '=' + q(v) + ']', 82);
-      else if (n === 'id' && IDENT.test(v) && !VOLATILE.test(v)) add('#' + v, role === 'assistant' || role === 'user' ? 5 : 88);
+      else if (n === 'id' && IDENT.test(v) && !volatile(v)) add('#' + v, block ? 5 : 88);
+      else if (n === 'id' && block) partialsFor(tag, 'id', v, (sel, score) => add(sel, score - 20));
       else if ((n === 'name' || n === 'placeholder') && v && v.length <= 40 && role === 'input') add(tag + '[' + n + '=' + q(v) + ']', 78);
       else if (n === 'type' && v === 'submit' && role === 'send') add(tag + '[type="submit"]', 55);
     }
-    const cls = String((e.className && e.className.baseVal != null ? e.className.baseVal : e.className) || '').split(/\s+/).filter((c) => c && c.length <= 40 && IDENT.test(c) && !VOLATILE.test(c));
+    const cls = String((e.className && e.className.baseVal != null ? e.className.baseVal : e.className) || '').split(/\s+/).filter((c) => c && c.length <= 40 && IDENT.test(c) && !volatile(c));
     const stable = cls.filter((c) => !UTILITY.test(c));
     for (const c of stable.slice(0, 4)) { add(tag + '.' + c, 62); add('.' + c, 58); }
     if (stable.length >= 2) add(tag + '.' + stable[0] + '.' + stable[1], 64);
@@ -245,51 +278,102 @@ function pageKit() {
     return out;
   }
 
-  // ---- reply blocks (P18.4 page search; also used by the teach step) -------------
-  // isUser(el) -> true when the element is (or holds) the user's own message.
-  function validateReply(doc, sel, word, isUser) {
+  // ---- reply blocks (P18.4 page search; the teach step; the 🎯 picker) ----------
+  // A user-message test from a phrase (the check-in / teach text) and/or a selector
+  // list of known user-message markers.
+  function userTest(phrase, userSel) {
+    return (e) => {
+      if (!e || e.nodeType !== 1) return false;
+      if (phrase && lc(textOf(e)).indexOf(lc(phrase)) !== -1) return true;
+      if (userSel) { if (safeMatches(e, userSel)) return true; try { if (e.closest && e.closest(userSel)) return true; } catch (_) {} const k = qsa(e, userSel); if (k && k.length) return true; }
+      return false;
+    };
+  }
+  // P37.1: the highest ancestor of `base` that is still only this message (the next
+  // one up holds the user's message, the message box or our overlay).
+  function turnOf(base, isUser) {
+    let top = base;
+    for (let i = 0; i < 14 && top.parentElement && top.parentElement.tagName !== 'BODY' && top.parentElement.tagName !== 'HTML'; i++) {
+      const p = top.parentElement;
+      if (isUser(p) || holdsEditable(p) || inOverlay(p)) break;
+      top = p;
+    }
+    return top;
+  }
+  function shapeOf(e) {
+    const names = Array.from(e.attributes || []).map((a) => String(a.name).toLowerCase()).filter((n) => n !== 'id' && n !== 'style' && n !== 'class').sort().join(',');
+    const cls = String((e.className && e.className.baseVal != null ? e.className.baseVal : e.className) || '').split(/\s+/).filter((c) => c && !DIGIT.test(c)).sort().join('.');
+    return String(e.localName || '') + '|' + names + '|' + cls;
+  }
+  // How many messages of the same kind (same tag, attribute names and classes as
+  // this message's top element, not the user's) are on the page.
+  function peersOf(doc, turn, isUser) {
+    const want = shapeOf(turn);
+    let n = 0;
+    for (const e of qsa(doc, String(turn.localName || '*')) || []) {
+      if (shapeOf(e) !== want || inOverlay(e) || holdsEditable(e) || isUser(e) || !textOf(e).trim()) continue;
+      n++;
+    }
+    return n;
+  }
+  // o = { isUser, word (the newest match must hold it), cover (some match must
+  // hold this element), minCount (P37.1: must match at least this many) }
+  function validateBlocks(doc, sel, o) {
     const list = qsa(doc, sel);
     if (!list || !list.length) return { ok: false, reason: 'NO_MATCH' };
     const l = list.filter((x) => !inOverlay(x));
     if (!l.length) return { ok: false, reason: 'NO_MATCH' };
     if (l.length > 200) return { ok: false, reason: 'TOO_BROAD' };
-    if (l.some((x) => isUser(x))) return { ok: false, reason: 'MATCHES_USER_MESSAGE' };
+    if (l.some((x) => o.isUser(x))) return { ok: false, reason: 'MATCHES_USER_MESSAGE' };
     if (l.some((x) => inEditable(x) || holdsEditable(x))) return { ok: false, reason: 'MATCHES_MESSAGE_BOX' };
+    if (l.length > 1 && l.some((x) => l.some((y) => y !== x && x.contains(y)))) return { ok: false, reason: 'NESTED' };
     const last = l[l.length - 1];
-    if (lc(textOf(last)).indexOf(lc(word)) === -1) return { ok: false, reason: 'NEWEST_LACKS_WORD' };
+    if (o.word && lc(textOf(last)).indexOf(lc(o.word)) === -1) return { ok: false, reason: 'NEWEST_LACKS_WORD' };
+    if (o.cover && !l.some((x) => overlaps(x, o.cover))) return { ok: false, reason: 'MISSES_PICK' };
+    if (o.minCount && l.length < o.minCount) return { ok: false, reason: 'TOO_NARROW' };
     return { ok: true, count: l.length };
   }
-  function learnReplyFrom(doc, base, word, isUser) {
+  // isUser(el) -> true when the element is (or holds) the user's own message.
+  function validateReply(doc, sel, word, isUser) { return validateBlocks(doc, sel, { word, isUser }); }
+  // P37.1: learn a selector that fits EVERY reply, not one: per-message numbers are
+  // never part of it (candidatesFor), and when two or more replies are on the page
+  // it must match at least two of them (else it names one message: rejected).
+  function learnReplyFrom(doc, base, word, isUser, opts) {
+    const o = opts || {};
     const levels = [];
     for (let e = base, i = 0; e && e.nodeType === 1 && e.tagName !== 'BODY' && e.tagName !== 'HTML' && i < 12; e = e.parentElement, i++) {
       if (isUser(e) || holdsEditable(e) || inOverlay(e)) break;
       levels.push(e);
     }
     if (!levels.length) return { ok: false, reason: 'NO_CONTAINER' };
+    const peers = peersOf(doc, turnOf(base, isUser), isUser);
+    const minCount = peers >= 2 ? 2 : 0;
     const baseLen = textOf(base).trim().length;
-    let best = null; let tried = 0;
+    let best = null; let tried = 0; let narrow = 0;
     levels.forEach((node, li) => {
       const t = textOf(node);
       const tight = t.trim().length <= baseLen + 160 && (t.match(/\[\s*FROM\s*:/gi) || []).length <= 1;
       for (const c of withAncestors(node, candidatesFor(node, 'assistant'))) {
         tried++;
-        const v = validateReply(doc, c.sel, word, isUser);
-        if (!v.ok) continue;
+        const v = validateBlocks(doc, c.sel, { word, isUser, cover: o.cover || null, minCount });
+        if (!v.ok) { if (v.reason === 'TOO_NARROW') narrow++; continue; }
         const score = c.score + (tight ? li * 3 : -40);
         if (!best || score > best.score) best = { selector: c.sel, score, count: v.count, level: li };
       }
     });
-    if (!best) return { ok: false, reason: 'NO_STABLE_SELECTOR', tried };
-    return { ok: true, selector: best.selector, count: best.count, level: best.level, score: best.score, tried };
+    if (!best) return { ok: false, reason: narrow ? 'ONLY_ONE_MESSAGE' : 'NO_STABLE_SELECTOR', tried, peers };
+    return { ok: true, selector: best.selector, count: best.count, level: best.level, score: best.score, tried, peers };
   }
   // P18.4: the check-in word in a NEW element that is not the user's message (which
   // holds `phrase`, e.g. "reply with only this word") and not the message box.
-  function learnReply(doc, word, phrase) {
-    const isUser = (e) => lc(textOf(e)).indexOf(lc(phrase)) !== -1;
+  function learnReply(doc, word, phrase, userSel) {
+    const isUser = userTest(phrase, userSel);
     const bases = findText(doc, word, (e) => !isUser(e) && !inEditable(e) && !inOverlay(e));
     if (!bases.length) return { ok: false, reason: 'WORD_NOT_FOUND' };
     return learnReplyFrom(doc, bases[bases.length - 1], word, isUser);
   }
+  // P37.2: the whole text of the message an element belongs to (its top element).
+  function wholeText(base) { return base ? String(base.innerText || textOf(base) || '') : ''; }
 
   // ---- what is on the page right now (evidence for the classifier) --------------
   function scan(doc, word, phrase, assistantSelectors) {
@@ -374,7 +458,7 @@ function pageKit() {
     return { ok: true, pressed: false };
   }
 
-  // ---- P18.7 teach step ------------------------------------------------------------------
+  // ---- P38 🔢 number teach -----------------------------------------------------------
   function deriveFor(doc, el, role, validate) {
     const own = candidatesFor(el, role);
     const cands = (role === 'send' || role === 'input') ? own : withAncestors(el, own);
@@ -406,19 +490,29 @@ function pageKit() {
     }
     return top;
   }
+  function overlay(doc, text, extra) {
+    const b = doc.createElement('div');
+    b.setAttribute('data-autoinjector-overlay', '1');
+    b.setAttribute('role', 'status');
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#3b2a8a;color:#fff;font:600 15px/1.4 system-ui,sans-serif;padding:10px 16px;text-align:center;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4)' + (extra || '');
+    b.textContent = text;
+    (doc.body || doc.documentElement).appendChild(b);
+    return b;
+  }
   function teachState(win) { return win && win.__aiTeach ? win.__aiTeach : null; }
-  function teachInstall(doc, win, number, bannerText) {
+  // The user types the shown digits into the AI's box and presses Send; the watcher
+  // learns the box (where the digits appear while typing), how it was sent (the
+  // click / Enter that emptied the box) and the user's message block (the digits in
+  // a new block). AutoInjector then asks the AI to write the number BACKWARDS
+  // (teachAsked) and the watcher learns the reply area from where the reversed
+  // digits appear — in a new block that is neither the user's message nor the box.
+  function teachInstall(doc, win, number, bannerText, reversed, phrase, userSel) {
     teachRemove(doc, win);
-    const st = { number: String(number), phase: 'type', events: [], startedAt: Date.now(), input: null, send: null, sendHow: null, user: null, reply: null, replyKey: null, replyStableSince: 0, polls: 0, box: null, userBase: null, userTop: null };
+    const num = String(number);
+    const pre = new Set(findText(doc, num, () => true));
+    const st = { number: num, reversed: String(reversed || num.split('').reverse().join('')), phrase: lc(phrase || 'backwards, digits only'), userSel: userSel || '', phase: 'type', events: [], startedAt: Date.now(), input: null, send: null, sendHow: null, user: null, reply: null, replyKey: null, replyStableSince: 0, polls: 0, box: null, userBase: null, userTop: null, pre };
     win.__aiTeach = st;
-    try {
-      const b = doc.createElement('div');
-      b.setAttribute('data-autoinjector-overlay', '1');
-      b.setAttribute('role', 'status');
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#3b2a8a;color:#fff;font:600 15px/1.4 system-ui,sans-serif;padding:10px 16px;text-align:center;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4)';
-      b.textContent = bannerText;
-      (doc.body || doc.documentElement).appendChild(b);
-    } catch (_) {}
+    try { st.banner = overlay(doc, bannerText); } catch (_) {}
     st.onClick = (ev) => { try { const t = ev.target && ev.target.closest ? ev.target.closest('button, [role="button"], input[type="submit"]') : null; if (t && !inOverlay(t)) st.events.push({ type: 'click', t: Date.now(), el: t }); } catch (_) {} };
     st.onKey = (ev) => { try { if (ev.key === 'Enter' && !ev.shiftKey && ev.target && inEditable(ev.target)) st.events.push({ type: 'enter', t: Date.now() }); } catch (_) {} };
     try { doc.addEventListener('click', st.onClick, true); doc.addEventListener('mousedown', st.onClick, true); doc.addEventListener('keydown', st.onKey, true); } catch (_) {}
@@ -430,6 +524,17 @@ function pageKit() {
     for (const o of qsa(doc, OVERLAY) || []) { try { o.remove(); } catch (_) {} }
     if (win) { try { delete win.__aiTeach; } catch (_) { win.__aiTeach = undefined; } }
     return { ok: true };
+  }
+  // AutoInjector has sent "Write the number #### backwards, digits only." (P38).
+  function teachAsked(doc, st, now, bannerText) {
+    st.phase = 'wait_reply'; st.askedAt = now; st.replyKey = null;
+    if (bannerText && st.banner) { try { st.banner.textContent = bannerText; } catch (_) {} }
+    return teachSummary(st);
+  }
+  function teachIsUser(doc, st) {
+    const userEls = st.user ? (qsa(doc, st.user) || []) : [];
+    const known = userTest(null, st.userSel);
+    return (e) => (st.userTop && overlaps(e, st.userTop)) || userEls.some((u) => overlaps(u, e)) || lc(textOf(e)).indexOf(st.phrase) !== -1 || known(e);
   }
   // One step of the teach watcher. Pure apart from `st`; `now` passed in for tests.
   function teachStep(doc, st, now) {
@@ -455,35 +560,26 @@ function pageKit() {
       }
     }
     if (st.phase === 'sent') {
-      const hits = findText(doc, num, (e) => !inEditable(e) && !inOverlay(e));
-      // the user's message is the one that holds "Repeat this number" (the reply may
-      // already be there too when the AI is quick); else the first new hit
-      if (hits.length) { st.userBase = hits.filter((e) => lc(textOf(e)).indexOf('repeat this number') !== -1).pop() || hits[0]; st.phase = 'wait_reply'; }
-      else if (now - st.sentAt > 20000) st.phase = 'wait_reply_nouser';
+      // the user's message: the digits in a NEW block (not the box, not our banner)
+      const hits = findText(doc, num, (e) => !inEditable(e) && !inOverlay(e) && !st.pre.has(e));
+      if (hits.length) {
+        st.userBase = hits[0];
+        st.userTop = blockTop(st.userBase, (p) => findText(p, num, () => true).length > 1);
+        const ut = st.userTop;
+        st.user = deriveFor(doc, ut, 'user', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 200 && l.some((x) => overlaps(x, ut)) && !l.some((x) => holdsEditable(x) || inOverlay(x)); });
+        st.phase = 'user_seen';
+      } else if (now - st.sentAt > 20000) st.phase = 'user_seen';
     }
-    if (st.phase === 'wait_reply' || st.phase === 'wait_reply_nouser') {
+    if (st.phase === 'wait_reply') {
+      const isUser = teachIsUser(doc, st);
       const ub = st.userBase;
-      const hits = findText(doc, num, (e) => !inEditable(e) && !inOverlay(e) && (ub ? !overlaps(e, ub) && after(ub, e) : lc(textOf(e)).indexOf('repeat this number') === -1));
+      const hits = findText(doc, st.reversed, (e) => !inEditable(e) && !inOverlay(e) && !isUser(e) && (!ub || after(ub, e)));
       if (hits.length) {
         const r = hits[hits.length - 1];
-        // The user's block and the reply's block are the two branches below their
-        // closest common ancestor (the message list) — so a first message alone in
-        // the list never swallows the reply that comes after it.
-        let userTop = null, replyTop = r;
-        if (ub) {
-          let lca = ub.parentElement;
-          while (lca && !lca.contains(r)) lca = lca.parentElement;
-          userTop = ub; while (userTop.parentElement && userTop.parentElement !== lca) userTop = userTop.parentElement;
-          while (replyTop.parentElement && replyTop.parentElement !== lca) replyTop = replyTop.parentElement;
-        }
-        const key = lc(textOf(replyTop));
+        const key = lc(textOf(turnOf(r, isUser)));
         if (st.replyKey !== key) { st.replyKey = key; st.replyStableSince = now; }
         else if (now - st.replyStableSince >= 1200) {
-          st.userTop = userTop;
-          if (userTop) st.user = deriveFor(doc, userTop, 'user', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 200 && l.some((x) => overlaps(x, userTop)) && !l.some((x) => overlaps(x, r) || holdsEditable(x)); });
-          const userEls = st.user ? (qsa(doc, st.user) || []) : [];
-          const isUser = (e) => (userTop && overlaps(e, userTop)) || userEls.some((u) => overlaps(u, e));
-          const res = learnReplyFrom(doc, r, num, isUser);
+          const res = learnReplyFrom(doc, r, st.reversed, isUser);
           st.reply = res.ok ? res.selector : null;
           st.replyReason = res.ok ? null : res.reason;
           st.phase = 'done';
@@ -496,7 +592,101 @@ function pageKit() {
     return { ok: true, phase: st.phase, polls: st.polls, sendHow: st.sendHow, selectors: { input: st.input, send: st.send, user: st.user, assistant: st.reply }, replyReason: st.replyReason || null };
   }
 
-  return { findText, candidatesFor, validateReply, learnReply, learnReplyFrom, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachSummary, teachState, deriveInput, deriveSend };
+  // ---- P38 🎯 picker: point at ONE thing in the AI's window --------------------------
+  // cfg = { role: input|send|assistant, banner, timeoutMs, markers (reply containers),
+  //         userSel (user-message markers) }. Hovering outlines what a click would
+  // pick; the click itself is swallowed (nothing is sent or opened). Resolves with
+  // { ok, role, selector, preview, count } — the preview is for the panel only.
+  const EDIT_SEL = 'textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]';
+  function snapFor(doc, el, cfg) {
+    if (!el || el.nodeType !== 1) return null;
+    if (cfg.role === 'input') {
+      let n = el.closest ? el.closest(EDIT_SEL) : null;
+      if (!n) { const k = qsa(el, EDIT_SEL); n = k && k.length ? k[0] : null; }
+      for (let p = el.parentElement, i = 0; !n && p && i < 4; p = p.parentElement, i++) { const k = qsa(p, EDIT_SEL); if (k && k.length) n = k.find(shown) || k[0]; }
+      return n ? outerEditable(n) : null;
+    }
+    if (cfg.role === 'send') return el.closest ? el.closest('button, [role="button"], input[type="submit"]') : null;
+    for (const m of cfg.markers || []) { try { const c = el.closest(m); if (c) return c; } catch (_) {} }
+    return el;
+  }
+  function pickResolve(doc, el, cfg) {
+    const target = snapFor(doc, el, cfg);
+    if (!target || inOverlay(target)) return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
+    if (cfg.role === 'input') {
+      if (!isEditable(target)) return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
+      const sel = deriveInput(doc, target);
+      return sel ? { ok: true, role: 'input', selector: sel, preview: 'Message box found', count: (qsa(doc, sel) || []).length, tag: target.localName } : { ok: false, error: 'NO_STABLE_SELECTOR' };
+    }
+    if (cfg.role === 'send') {
+      const sel = deriveSend(doc, target);
+      return sel ? { ok: true, role: 'send', selector: sel, preview: 'Send button found', count: (qsa(doc, sel) || []).length, tag: target.localName } : { ok: false, error: 'NO_STABLE_SELECTOR' };
+    }
+    const isUser = userTest(null, cfg.userSel);
+    if (inEditable(target) || holdsEditable(target)) return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
+    if (isUser(target)) return { ok: false, error: 'LOOKS_LIKE_USER' };
+    const res = learnReplyFrom(doc, target, null, isUser, { cover: el });
+    if (!res.ok) return { ok: false, error: res.reason || 'NO_STABLE_SELECTOR' };
+    const l = (qsa(doc, res.selector) || []).filter((x) => !inOverlay(x));
+    const mine = l.find((x) => overlaps(x, el)) || l[l.length - 1];
+    const words = String(wholeText(mine)).replace(/\s+/g, ' ').trim();
+    return { ok: true, role: 'assistant', selector: res.selector, preview: words.slice(0, 80) + (words.length > 80 ? '…' : ''), count: res.count, tag: mine ? mine.localName : null, latest: mine === l[l.length - 1] };
+  }
+  function pickStart(doc, win, cfg, resolve) {
+    if (win.__aiPick) { try { win.__aiPick.cancel('REPLACED'); } catch (_) {} }
+    let done = false;
+    const parts = [];
+    let box = null, timer = null;
+    const finish = (r) => {
+      if (done) return; done = true;
+      try { if (timer) clearTimeout(timer); } catch (_) {}
+      for (const [t, f] of [['mouseover', onOver], ['click', onClick], ['mousedown', block], ['pointerdown', block], ['mouseup', block], ['keydown', onKey]]) { try { doc.removeEventListener(t, f, true); } catch (_) {} }
+      for (const p of parts) { try { p.remove(); } catch (_) {} }
+      try { delete win.__aiPick; } catch (_) { win.__aiPick = undefined; }
+      resolve(r);
+    };
+    function onOver(ev) {
+      try {
+        const t = snapFor(doc, ev.target, cfg);
+        if (!t || inOverlay(t) || !box) return;
+        const r = t.getBoundingClientRect();
+        box.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;border:3px solid #2f9bff;border-radius:6px;background:rgba(47,155,255,.12);left:' + (r.left - 3) + 'px;top:' + (r.top - 3) + 'px;width:' + (r.width + 6) + 'px;height:' + (r.height + 6) + 'px';
+        box.setAttribute('data-target', String(t.localName || ''));
+      } catch (_) {}
+    }
+    function block(ev) { if (ev && ev.target && inOverlay(ev.target)) return; try { ev.preventDefault(); ev.stopImmediatePropagation(); } catch (_) {} }
+    function onClick(ev) {
+      if (ev && ev.target && inOverlay(ev.target)) return;
+      block(ev);
+      finish(pickResolve(doc, ev.target, cfg));
+    }
+    function onKey(ev) { if (ev && ev.key === 'Escape') { block(ev); finish({ ok: false, error: 'CANCELLED' }); } }
+    try {
+      parts.push(overlay(doc, cfg.banner, ';background:#0b5ed7'));
+      box = doc.createElement('div'); box.setAttribute('data-autoinjector-overlay', '1'); box.style.cssText = 'display:none'; (doc.body || doc.documentElement).appendChild(box); parts.push(box);
+    } catch (_) {}
+    for (const [t, f] of [['mouseover', onOver], ['click', onClick], ['mousedown', block], ['pointerdown', block], ['mouseup', block], ['keydown', onKey]]) { try { doc.addEventListener(t, f, true); } catch (_) {} }
+    win.__aiPick = { cancel: (why) => finish({ ok: false, error: why || 'CANCELLED' }), cfg };
+    timer = setTimeout(() => finish({ ok: false, error: 'TIMEOUT' }), Number(cfg.timeoutMs) || 60000);
+    return { ok: true };
+  }
+  function pickCancel(win) { if (win && win.__aiPick) { try { win.__aiPick.cancel('CANCELLED'); } catch (_) {} return { ok: true, cancelled: true }; } return { ok: true, cancelled: false }; }
+  // Does each saved selector still find its thing on the page? (red ⚠️ when not)
+  function matchCheck(doc, sels, replyHints) {
+    const out = {};
+    for (const role of Object.keys(sels || {})) {
+      const sel = sels[role]; if (!sel) continue;
+      const l = qsa(doc, sel);
+      if (l === null) { out[role] = { ok: false, count: 0, bad: true }; continue; }
+      const vis = l.filter((e) => !inOverlay(e) && shown(e));
+      out[role] = { ok: vis.length > 0, count: vis.length };
+    }
+    let repliesOnPage = 0;
+    for (const s of replyHints || []) { const l = qsa(doc, s); if (l && l.length) { repliesOnPage = l.length; break; } }
+    return { ok: true, roles: out, repliesOnPage };
+  }
+
+  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, deriveInput, deriveSend, pickStart, pickCancel, pickResolve, matchCheck };
 }
 
 // ---- script builders ----------------------------------------------------------------
@@ -531,24 +721,53 @@ function buildAlternativesScript(site, SITES, overrides, roles, word, phrase) {
   const skip = [].concat(roles.includes('assistant') ? lists.assistant : [], roles.includes('stop') ? lists.stop : []);
   return kitScript(`const CFG = ${cfgJson({ alts, roles, word: word || '', phrase: phrase || '', skip })}; return K.tryAlternatives(document, CFG.alts, CFG.roles, CFG.word, CFG.phrase, CFG.skip);`);
 }
-function buildLearnReplyScript(word, phrase) {
-  return kitScript(`const CFG = ${cfgJson({ word, phrase })}; return K.learnReply(document, CFG.word, CFG.phrase);`);
+function userSelFor(site) { return altsFor(site || 'generic', 'user').join(', '); }
+function buildLearnReplyScript(word, phrase, site) {
+  return kitScript(`const CFG = ${cfgJson({ word, phrase, user: site ? userSelFor(site) : '' })}; return K.learnReply(document, CFG.word, CFG.phrase, CFG.user);`);
 }
 function buildUnfreezeScript(site, SITES, overrides) {
   const lists = currentLists(SITES, site, overrides);
   return kitScript(`const CFG = ${cfgJson({ stop: Array.from(new Set(lists.stop.concat(altsFor(site, 'stop')))) })}; return K.pressStop(document, CFG.stop);`);
 }
+// P38 🔢 number teach: what the user is asked to type, and AutoInjector's follow-up.
+const FOLLOWUP_PHRASE = 'backwards, digits only';
+function reverseDigits(n) { return String(n).split('').reverse().join(''); }
+function followupText(number) { return `Write the number ${number} backwards, digits only.`; }
 function teachBanner(label, number) {
-  return `AutoInjector: please type   Repeat this number: ${number}   into ${label}'s message box below and press Send. (This shows AutoInjector where things are.)`;
+  return `AutoInjector: please type   ${number}   into ${label}'s message box below and press Send. (This shows AutoInjector where things are.)`;
 }
-function buildTeachStartScript(label, number) {
-  return kitScript(`const CFG = ${cfgJson({ number: String(number), banner: teachBanner(label, number) })}; return K.teachInstall(document, window, CFG.number, CFG.banner);`);
+function teachAskedBanner(label, number) {
+  return `AutoInjector asked ${label} to write ${number} backwards — watching where the answer appears…`;
+}
+function buildTeachStartScript(label, number, site) {
+  return kitScript(`const CFG = ${cfgJson({ number: String(number), reversed: reverseDigits(number), banner: teachBanner(label, number), phrase: FOLLOWUP_PHRASE, user: userSelFor(site) })}; return K.teachInstall(document, window, CFG.number, CFG.banner, CFG.reversed, CFG.phrase, CFG.user);`);
 }
 function buildTeachPollScript() {
   return kitScript('const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachStep(document, st, Date.now());');
 }
+function buildTeachAskedScript(label, number) {
+  return kitScript(`const CFG = ${cfgJson({ banner: teachAskedBanner(label, number) })}; const st = K.teachState(window); if (!st) return { ok: false, error: "NO_TEACH" }; return K.teachAsked(document, st, Date.now(), CFG.banner);`);
+}
 function buildTeachStopScript() {
   return kitScript('return K.teachRemove(document, window);');
+}
+// P38 🎯 picker
+const PICK_THING = { input: 'the message box (where you type)', send: 'the Send button', assistant: "the AI's latest reply" };
+function pickBanner(label, role) { return `🎯 Click ${PICK_THING[role] || 'it'} in this window  (${label} · Esc = cancel)`; }
+function replyMarkers(site, SITES) {
+  const cfg = siteDefaults(SITES, site);
+  const own = (cfg.MESSAGE_CONTAINERS || []);
+  const known = { chatgpt: ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'], claude: ['.font-claude-response', '.font-claude-message', '[data-testid="assistant-message"]'], gemini: ['model-response'] }[site] || [];
+  return Array.from(new Set(own.concat(known, ['[data-message-author-role="assistant"]', 'model-response'])));
+}
+function buildPickScript(site, role, label, SITES, timeoutMs) {
+  const cfg = { role, banner: pickBanner(label || site, role), timeoutMs: Number(timeoutMs) || 60000, markers: role === 'assistant' ? replyMarkers(site, SITES) : [], userSel: userSelFor(site) };
+  return kitScript(`const CFG = ${cfgJson(cfg)}; return new Promise((resolve) => { K.pickStart(document, window, CFG, resolve); });`);
+}
+function buildPickCancelScript() { return kitScript('return K.pickCancel(window);'); }
+function buildMatchCheckScript(site, SITES, sels) {
+  const hints = Array.from(new Set((siteDefaults(SITES, site).ASSISTANT_CANDIDATES || []).concat(altsFor(site, 'assistant'))));
+  return kitScript(`const CFG = ${cfgJson({ sels: sels || {}, hints })}; return K.matchCheck(document, CFG.sels, CFG.hints);`);
 }
 
 // ---- P18.2 the classifier --------------------------------------------------------------
@@ -614,7 +833,12 @@ function pickWord(avoid) {
   for (let i = 0; i < 20; i++) { const w = WORDS[crypto.randomInt(WORDS.length)]; if (!bad.has(w)) return w; }
   return WORDS[crypto.randomInt(WORDS.length)];
 }
-function pickNumber() { return String(1000 + crypto.randomInt(9000)); }
+// A number whose digits read differently backwards (never 4774 / 1111), so the
+// reversed digits can only come from the AI's answer (P38).
+function pickNumber() {
+  for (let i = 0; i < 50; i++) { const n = String(1000 + crypto.randomInt(9000)); if (n.split('').reverse().join('') !== n && n.charAt(3) !== '0') return n; }
+  return '4827';
+}
 const PROBE_PHRASE = 'reply with only this word';
 const TEACH_PHRASE = 'repeat this number';
 function probeText(word) { return `Reply with only this word: ${word}`; }
@@ -661,19 +885,30 @@ function createSelfRepair(deps) {
     probeTimeoutMs: 90000, sendTimeoutMs: 45000, earlyQuietMs: 10000, stuckMs: 120000,
     intervalMs: 20 * 60000, needsUserRecheckMs: 60000, teachTimeoutMs: 4 * 60000, teachPollMs: 800,
     reloadSettleMs: 4000, unfreezeWaitMs: 3000, recentWordsMs: 10 * 60000, pollStepMs: 1000,
-    autoChecks: true // false: no automatic check-ins at all (startup / after a failure); on-demand ones still run
+    autoChecks: true, // false: no automatic check-ins at all (startup / after a failure); on-demand ones still run
+    // P37.3: after an AI is marked "not working" it is re-checked (check-in only,
+    // no repairs, no teach step) after 5, then 15, then every 60 minutes — until the
+    // user does something (🎯 Save, 🔢, 🩺, reload) or a normal reply proves it works.
+    brokenBackoffMs: [5 * 60000, 15 * 60000, 60 * 60000],
+    probeWordsMs: 60 * 60000 // P37.4: replies holding a check-in / teach word this recent are never nagged
   }, d.options || {});
   const S = {};
-  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0 };
+  for (const s of sites) S[s] = { state: 'unknown', problem: null, since: null, lastProbeOkAt: null, lastProbeAt: 0, lastCheckReason: null, running: false, step: null, tried: [], teach: null, pending: null, lastSignalCheckAt: 0, startupDone: false, fixedAt: null, yieldReq: false, displacedCount: 0, backoffN: 0, askNotified: false, askedAt: null, nextCheckAt: null };
   const events = [];
   const createdAt = now(); // periodic check-ins count from app start (the start-up one is separate)
   const awaiting = {}; // site -> check-in record { word, resolve, captured, token (token.seq = its [MSG #]), typed, withdrawn, displaced, orphaned }
   const recent = {};   // site -> [{ word, until, a }]  (a late answer to a recent check-in's OWN message is still owned)
   const teachCtl = {}; // site -> { cancel: bool }
+  const seenSeqs = {};  // site -> Set of every check-in / teach follow-up [MSG #] (P37.4)
+  const probeWords = {}; // site -> [{ word, until }] check-in words, teach numbers (P37.4)
+  function rememberProbe(site, word, seq) {
+    if (word) { (probeWords[site] = (probeWords[site] || []).filter((r) => r.until > now())).push({ word: String(word), until: now() + opt.probeWordsMs }); }
+    if (seq != null) { const set = seenSeqs[site] || (seenSeqs[site] = new Set()); set.add(String(seq)); if (set.size > 200) set.delete(set.values().next().value); }
+  }
 
   function event(kind, fields) {
     const e = { kind, at: now() };
-    for (const k of ['site', 'step', 'code', 'outcome', 'reason', 'state', 'how', 'role']) if (fields && fields[k] != null) e[k] = String(fields[k]).slice(0, 48);
+    for (const k of ['site', 'step', 'code', 'outcome', 'reason', 'state', 'how', 'role', 'part']) if (fields && fields[k] != null) e[k] = String(fields[k]).slice(0, 48);
     events.push(e);
     if (events.length > EVENT_RING) events.shift();
     log(e);
@@ -686,10 +921,11 @@ function createSelfRepair(deps) {
     return {
       state: x.state, problem: x.problem, since: x.since, lastProbeOkAt: x.lastProbeOkAt, lastProbeAt: x.lastProbeAt || null,
       running: x.running, step: x.step, fixedAt: x.fixedAt,
+      askUser: x.state === 'broken' && !!x.askedAt, askedAt: x.askedAt, nextCheckAt: x.state === 'broken' ? nextBrokenCheck(site) : null,
       say: x.problem ? describeProblem(x.problem, label(site)).say : null,
       fix: x.problem ? describeProblem(x.problem, label(site)).fix : null,
       tried: x.tried.slice(-12).map((r) => ({ step: r.step, outcome: r.outcome, code: r.code, at: r.at, say: STEP_TEXT[r.step] || r.step })),
-      teach: t ? { active: !!t.active, number: t.number, phase: t.phase, startedAt: t.startedAt, learned: Object.assign({}, t.learned), sendHow: t.sendHow || null, missing: (t.missing || []).slice(), result: t.result || null, code: t.code || null } : null
+      teach: t ? { active: !!t.active, number: t.number, reversed: t.reversed, phase: t.phase, asked: !!t.asked, startedAt: t.startedAt, learned: Object.assign({}, t.learned), saved: (t.saved || []).slice(), sendHow: t.sendHow || null, missing: (t.missing || []).slice(), failedPart: t.failedPart || null, result: t.result || null, code: t.code || null } : null
     };
   }
   function emit(site, ev) { try { if (typeof d.onChange === 'function') d.onChange(site, snap(site), ev || null); } catch (_) {} }
@@ -723,8 +959,9 @@ function createSelfRepair(deps) {
     const out = [];
     if (awaiting[site]) out.push(awaiting[site].word);
     const t = S[site] && S[site].teach;
-    if (t && t.active) out.push(t.number);
+    if (t && t.active) out.push(t.number, t.reversed);
     for (const r of recent[site] || []) if (r.until > now()) out.push(r.word);
+    for (const r of probeWords[site] || []) if (r.until > now()) out.push(r.word);
     return out;
   }
   function seqOf(a) { return a && a.token && a.token.seq != null ? String(a.token.seq) : null; }
@@ -740,7 +977,7 @@ function createSelfRepair(deps) {
     const t = String(text || '');
     const low = t.toLowerCase();
     // never the user's / app's message itself (it holds the word AND the instruction)
-    if (!t || low.indexOf(PROBE_PHRASE) !== -1 || low.indexOf(TEACH_PHRASE) !== -1) return null;
+    if (!t || low.indexOf(PROBE_PHRASE) !== -1 || low.indexOf(TEACH_PHRASE) !== -1 || low.indexOf(FOLLOWUP_PHRASE) !== -1) return null;
     const ans = Array.isArray(answers) ? answers.map(String) : null;
     if (ans) {
       for (const a of checkinsOf(site)) {
@@ -761,7 +998,27 @@ function createSelfRepair(deps) {
     // the teach message is typed by the user (no [MSG #]); its answer must not
     // answer any message the app sent (other than a check-in)
     const tc = S[site].teach;
-    if (tc && tc.active && containsWord(t, tc.number) && (!ans || ans.every((q) => isCheckinSeq(site, q)))) return { kind: 'teach' };
+    if (tc && tc.active && (containsWord(t, tc.number) || containsWord(t, tc.reversed)) && (!ans || ans.every((q) => isCheckinSeq(site, q)))) return { kind: 'teach' };
+    return null;
+  }
+  // P37.4: a reply that is (very likely) the answer to a check-in or a number-teach
+  // message, even when ownerOf can't prove it (a late answer, a [MSG #] the Relay
+  // Trace gave to it alone, a reply without its word). Such a reply is never
+  // relayed and never nagged about missing tags. -> 'owned' | 'answers-checkin' | 'has-word' | null
+  // o.loose: a short reply holding a recent check-in / teach word counts even when
+  // the Relay Trace ties it to another message (the caller makes sure no BookForge
+  // request is waiting for this AI's answer).
+  function probeReplyKind(site, text, answers, o) {
+    if (!S[site]) return null;
+    if (ownerOf(site, text, answers)) return 'owned';
+    const t = String(text || '');
+    const low = t.toLowerCase();
+    if (!t || low.indexOf(PROBE_PHRASE) !== -1 || low.indexOf(FOLLOWUP_PHRASE) !== -1) return null;
+    const ans = Array.isArray(answers) ? answers.map(String) : null;
+    const seqs = seenSeqs[site];
+    if (ans && ans.length && seqs && ans.every((q) => seqs.has(q))) return 'answers-checkin';
+    const body = t.replace(/\[\s*(?:TO|FROM)\s*:[^\]]*\]/gi, '').trim();
+    if ((!ans || !ans.length || (o && o.loose)) && body.length <= 300 && wordsFor(site).some((w) => containsWord(body, w))) return 'has-word';
     return null;
   }
   // Is this reply the answer to a check-in / teach message here?
@@ -839,6 +1096,7 @@ function createSelfRepair(deps) {
     } catch (e) { sendRes = { ok: false, error: 'EXCEPTION' }; }
     sendRes = sendRes && typeof sendRes === 'object' ? { ok: !!sendRes.ok, error: sendRes.error || null, verified: sendRes.verified } : { ok: false, error: 'UNKNOWN' };
     if (sendRes.ok) a.typed = true;
+    rememberProbe(site, word, token.seq);
     try {
       // withdrawn before it was typed, to make way for a BookForge request: not a failure
       if (a.withdrawn && !sendRes.ok && !a.captured) return { ok: false, displaced: true, word };
@@ -871,6 +1129,7 @@ function createSelfRepair(deps) {
     const x = S[site];
     x.lastProbeOkAt = now();
     x.displacedCount = 0;
+    x.backoffN = 0; x.askNotified = false; x.askedAt = null;
     const wasBad = x.state !== 'ok' && x.state !== 'unknown';
     if (wasBad) x.fixedAt = now();
     setState(site, 'ok', null);
@@ -885,11 +1144,37 @@ function createSelfRepair(deps) {
     emit(site, { kind: 'needs_user', code });
     return { ok: false, state: 'needs_user', problem: code };
   }
-  function broken(site, code) {
+  function broken(site, code, o) {
+    const ask = !!(o && o.ask);
     setState(site, 'broken', code);
-    event('result', { site, outcome: 'BROKEN', code });
-    emit(site, { kind: 'broken', code });
-    return { ok: false, state: 'broken', problem: code };
+    event('result', { site, outcome: 'BROKEN', code, reason: ask ? 'ask-user' : undefined });
+    emit(site, { kind: 'broken', code, ask });
+    return { ok: false, state: 'broken', problem: code, ask };
+  }
+  // P37.3: every automatic fix failed. Show the user ONE noticeable notice (the
+  // panel's ⚠️ with 🎯 / 🔢, plus a sound if they want one) — never start the teach
+  // step by itself, and back off the re-checks until the user acts.
+  function askUser(site, code) {
+    const x = S[site];
+    const first = !x.askNotified;
+    x.askNotified = true;
+    if (!x.askedAt) x.askedAt = now();
+    if (first) event('ask_user', { site, code });
+    return broken(site, code, { ask: first });
+  }
+  function nextBrokenCheck(site) {
+    const x = S[site];
+    const list = Array.isArray(opt.brokenBackoffMs) && opt.brokenBackoffMs.length ? opt.brokenBackoffMs : [3600000];
+    const wait = Number(list[Math.min(x.backoffN || 0, list.length - 1)]) || 3600000;
+    return Math.max(x.lastProbeAt || 0, x.since || 0) + wait;
+  }
+  // The user did something about this AI (🎯 Save / Clear, 🔢, 🩺, reload): the
+  // re-check back-off starts over and a new failure is announced again.
+  function userActed(site) {
+    const x = S[site];
+    if (!x) return false;
+    x.backoffN = 0; x.askNotified = false;
+    return true;
   }
 
   // ---- repair steps -------------------------------------------------------------------------
@@ -907,7 +1192,7 @@ function createSelfRepair(deps) {
     }
     if (step === 'page_search') {
       if (!word) return { applied: false, outcome: 'NO_WORD' };
-      const r = await page(site, buildLearnReplyScript(word, PROBE_PHRASE));
+      const r = await page(site, buildLearnReplyScript(word, PROBE_PHRASE, site));
       if (!r || !r.ok || !r.selector) return { applied: false, outcome: (r && r.reason) || 'NOT_FOUND' };
       try { d.saveLearned(site, 'assistant', r.selector, 'page-search'); } catch (_) {}
       event('learned', { site, role: 'assistant', how: 'page-search' });
@@ -967,7 +1252,7 @@ function createSelfRepair(deps) {
         done.add(step);
         if (step === 'give_up') break;
         if (x.yieldReq) return deferred('bookforge'); // a BookForge request waits for this AI: repair later
-        if (step === 'teach') { x.running = false; x.step = null; startTeach(site, code, { auto: true }); return { ok: false, state: 'needs_user', problem: code, teach: true }; }
+        if (step === 'teach') return askUser(site, code);
         x.step = step; emit(site);
         const out = await runStep(site, step, code, r);
         note(site, step, code, out.outcome);
@@ -1008,41 +1293,54 @@ function createSelfRepair(deps) {
   // A check-in (or its repair steps) is under way on this AI.
   function busyWithSite(site) { const x = S[site]; return !!(x && (x.running || awaiting[site])); }
 
-  // ---- P18.7 teach ----------------------------------------------------------------------------
+  // ---- P38 🔢 number teach (replaces the P18.7 "Repeat this number" box) ----------------
+  // 1. the user types the shown 4 digits into the AI's box and presses Send — the
+  //    watcher learns the box, Send (or Enter) and the user's message block;
+  // 2. AutoInjector itself sends "Write the number #### backwards, digits only."
+  //    (with the learned box / Send) — its answer is owned here: never relayed,
+  //    never nagged about tags;
+  // 3. where the reversed digits appear (a NEW block, not the user's message, not the
+  //    box) is the reply area — learned as a GENERAL selector (P37.1);
+  // 4. all of it is saved (d.savePick, like a 🎯 Save) and a check-in confirms it.
+  // Never started automatically (P37.3); Cancel; 4-minute timeout; never loops.
   async function startTeach(site, code, o) {
     const x = S[site];
     if (!x) return { ok: false, error: 'BAD_SITE' };
     if (x.teach && x.teach.active) return { ok: true, already: true, number: x.teach.number };
-    if (x.running && !(o && o.auto)) return { ok: false, error: 'CHECKING' };
+    if (x.running) return { ok: false, error: 'CHECKING' };
     const number = pickNumber();
-    x.teach = { active: true, number, phase: 'type', startedAt: now(), learned: {}, sendHow: null, missing: [], result: null, code: code || x.problem || null };
+    x.teach = { active: true, number, reversed: reverseDigits(number), phase: 'type', asked: false, startedAt: now(), learned: {}, saved: [], sendHow: null, missing: [], failedPart: null, result: null, code: code || x.problem || null, prev: { state: x.state, problem: x.problem } };
     teachCtl[site] = { cancel: false };
-    setState(site, 'needs_user', code || x.problem || 'UNKNOWN');
+    userActed(site);
     event('teach', { site, outcome: 'STARTED', code: x.teach.code });
     emit(site, { kind: 'teach', phase: 'type' });
-    // run the watcher loop in the background
-    teachLoop(site).catch(() => {});
+    teachLoop(site).catch(() => { try { const t = x.teach; if (t && t.active) { t.active = false; t.result = 'failed'; emit(site, { kind: 'teach', phase: 'failed' }); } } catch (_) {} });
     return { ok: true, number };
+  }
+  function savePart(site, role, sel) {
+    try { if (typeof d.savePick === 'function') return d.savePick(site, role, sel, 'number') !== false; d.saveLearned(site, role, sel, 'teach'); return true; } catch (_) { return false; }
   }
   async function teachLoop(site) {
     const x = S[site];
     const t = x.teach;
     const ctl = teachCtl[site];
     const L = label(site);
-    let installed = await page(site, buildTeachStartScript(L, t.number));
+    const setTeachOverrides = (sel) => { try { if (typeof d.teachOverrides === 'function') d.teachOverrides(site, sel); } catch (_) {} };
+    let installed = await page(site, buildTeachStartScript(L, t.number, site));
     let summary = null;
+    let sendFail = null;
     while (!ctl.cancel && now() - t.startedAt < opt.teachTimeoutMs) {
       await sleep(opt.teachPollMs);
       if (ctl.cancel) break;
-      let r = await page(site, buildTeachPollScript());
+      const r = await page(site, buildTeachPollScript());
       if (!r || !r.ok) {
         // the page was reloaded / navigated: put the watcher back (same number)
-        if (!installed || !installed.ok || (r && r.error === 'NO_TEACH')) installed = await page(site, buildTeachStartScript(L, t.number));
+        if (!installed || !installed.ok || (r && r.error === 'NO_TEACH')) { installed = await page(site, buildTeachStartScript(L, t.number, site)); if (t.asked && installed && installed.ok) await page(site, buildTeachAskedScript(L, t.number)); }
         continue;
       }
       summary = r;
       const before = JSON.stringify([t.phase, t.learned, t.sendHow]);
-      t.phase = r.phase;
+      t.phase = t.asked && r.phase === 'user_seen' ? 'asking' : r.phase;
       t.sendHow = r.sendHow || null;
       t.learned = { input: !!(r.selectors && r.selectors.input), send: !!(r.selectors && r.selectors.send) || r.sendHow === 'enter', user: !!(r.selectors && r.selectors.user), reply: !!(r.selectors && r.selectors.assistant) };
       if (JSON.stringify([t.phase, t.learned, t.sendHow]) !== before) {
@@ -1050,42 +1348,88 @@ function createSelfRepair(deps) {
         emit(site, { kind: 'teach', phase: t.phase });
       }
       if (r.phase === 'done') break;
+      if (r.phase === 'user_seen' && !t.asked) {
+        // step 2: AutoInjector asks for the number backwards, with what was just learned
+        t.asked = true; t.phase = 'asking';
+        emit(site, { kind: 'teach', phase: 'asking' });
+        const sel = r.selectors || {};
+        setTeachOverrides({ input: sel.input || null, send: sel.send || null });
+        const token = { cancelled: false, typing: false, seq: null };
+        const fa = { word: t.reversed, resolve: () => {}, captured: false, token, typed: false, withdrawn: false, displaced: false, orphaned: false, teach: true };
+        (recent[site] = (recent[site] || []).filter((q) => q.until > now())).push({ word: t.reversed, until: now() + opt.recentWordsMs, a: fa });
+        rememberProbe(site, t.number, null); rememberProbe(site, t.reversed, null);
+        let res;
+        try {
+          const sendP = Promise.resolve(d.sendProbe(site, followupText(t.number), token));
+          res = await Promise.race([sendP, sleep(opt.sendTimeoutMs).then(() => ({ timedOut: true }))]);
+          if (res && res.timedOut) { token.cancelled = true; res = await sendP.catch(() => ({ ok: false, error: 'CANCELLED' })); }
+        } catch (_) { res = { ok: false, error: 'EXCEPTION' }; }
+        rememberProbe(site, null, token.seq);
+        event('teach', { site, outcome: res && res.ok ? 'ASKED' : 'ASK_FAILED' });
+        if (!res || !res.ok) { sendFail = String((res && res.error) || 'UNKNOWN'); break; }
+        fa.typed = true;
+        await page(site, buildTeachAskedScript(L, t.number));
+        t.phase = 'wait_reply';
+        emit(site, { kind: 'teach', phase: 'wait_reply' });
+      }
     }
     await page(site, buildTeachStopScript());
+    setTeachOverrides(null);
     if (ctl.cancel) {
       t.active = false; t.result = 'cancelled';
       event('teach', { site, outcome: 'CANCELLED' });
-      return broken(site, t.code || 'UNKNOWN');
+      // nothing changed: the AI keeps the state it had before (no new verdict)
+      if (t.prev && (x.state !== t.prev.state || x.problem !== t.prev.problem)) setState(site, t.prev.state, t.prev.problem);
+      emit(site, { kind: 'teach', phase: 'cancelled' });
+      return { ok: false, cancelled: true };
     }
     const sel = (summary && summary.selectors) || {};
-    // save what was learned (each part separately)
+    // save what was learned (each part separately — the box and Send are proven by
+    // the digits appearing in / leaving the box, the reply by the reversed digits)
     const saved = [];
-    if (sel.input) { d.saveLearned(site, 'input', sel.input, 'teach'); saved.push('input'); }
-    if (sel.send) { d.saveLearned(site, 'send', sel.send, 'teach'); saved.push('send'); }
-    if (sel.user) { d.saveLearned(site, 'user', sel.user, 'teach'); }
-    if (sel.assistant) { d.saveLearned(site, 'assistant', sel.assistant, 'teach'); saved.push('assistant'); }
-    for (const role of saved) event('learned', { site, role, how: 'teach' });
+    if (sel.input && savePart(site, 'input', sel.input)) saved.push('input');
+    if (sel.send && savePart(site, 'send', sel.send)) saved.push('send');
+    if (sel.user) savePart(site, 'user', sel.user);
+    if (sel.assistant && savePart(site, 'assistant', sel.assistant)) saved.push('assistant');
+    for (const role of saved) event('learned', { site, role, how: 'number' });
+    t.saved = saved;
     t.missing = [];
     if (!sel.input) t.missing.push('input');
     if (!sel.send && t.sendHow !== 'enter') t.missing.push('send');
     if (!sel.assistant) t.missing.push('assistant');
+    // which part failed (the panel offers 🎯 for just that part)
+    t.failedPart = sendFail ? (/INPUT|INJECT|TYPE/.test(sendFail) ? 'input' : 'send')
+      : !sel.input ? 'input' : (!sel.send && t.sendHow !== 'enter') && !t.asked ? 'send' : !sel.assistant ? 'assistant' : null;
     const timedOut = !summary || summary.phase !== 'done';
     t.active = false;
-    if (timedOut && !saved.length) {
-      t.result = 'timeout';
-      event('teach', { site, outcome: 'TIMEOUT' });
+    if (sendFail) {
+      t.result = 'failed';
+      note(site, 'teach', t.code, 'ASK_FAILED');
+      emit(site, { kind: 'teach', phase: 'failed', part: t.failedPart });
+      return { ok: false, result: 'failed', part: t.failedPart };
+    }
+    if (timedOut) {
+      t.result = t.phase === 'type' ? 'timeout' : 'failed';
+      event('teach', { site, outcome: 'TIMEOUT', part: t.failedPart });
       note(site, 'teach', t.code, 'TIMEOUT');
-      return broken(site, t.code || 'UNKNOWN');
+      emit(site, { kind: 'teach', phase: t.result, part: t.failedPart });
+      return { ok: false, result: t.result, part: t.failedPart };
     }
     note(site, 'teach', t.code, saved.length ? `LEARNED:${saved.join('+')}` : 'NOTHING_LEARNED');
+    if (!sel.assistant) {
+      t.result = 'failed';
+      emit(site, { kind: 'teach', phase: 'failed', part: 'assistant' });
+      return { ok: false, result: 'failed', part: 'assistant' };
+    }
     // confirm with a new check-in
     x.running = true; x.step = 'check'; emit(site, { kind: 'teach', phase: 'confirming' });
     let r;
     try { r = await probeOnce(site, 'after-teach'); } finally { x.running = false; x.step = null; }
-    if (r.ok) { t.result = 'fixed'; note(site, 'teach', t.code, 'FIXED'); return markOk(site, 'teach'); }
-    if (r.displaced) { t.result = 'deferred'; if (opt.autoChecks) x.pending = { reason: 're-check', at: now() }; event('result', { site, outcome: 'DEFERRED', reason: 'after-teach' }); return { ok: false, deferred: true }; }
+    if (r.ok) { t.result = 'fixed'; note(site, 'teach', t.code, 'FIXED'); return markOk(site, 'number'); }
+    if (r.displaced) { t.result = 'deferred'; if (opt.autoChecks) x.pending = { reason: 'after-teach', at: now() }; event('result', { site, outcome: 'DEFERRED', reason: 'after-teach' }); emit(site, { kind: 'teach', phase: 'deferred' }); return { ok: false, deferred: true }; }
     t.result = 'failed';
-    if (!t.missing.length) t.missing = ALT_ROLES[r.code] ? ALT_ROLES[r.code].filter((role) => role !== 'stop') : ['assistant'];
+    t.failedPart = (ALT_ROLES[r.code] || ['assistant']).filter((role) => role !== 'stop')[0] || 'assistant';
+    if (!t.missing.length) t.missing = [t.failedPart];
     note(site, 'check', r.code, 'STILL_FAILING');
     if (USER_ONLY.has(r.code)) return needsUser(site, r.code);
     return broken(site, r.code);
@@ -1117,10 +1461,16 @@ function createSelfRepair(deps) {
     return { started, skipped };
   }
   // Something went wrong in normal use (a timeout, a stall): check this AI when it is free.
+  // While an AI is "not working" (P37.3) only the user's own actions check it at
+  // once; automatic reasons (a stall, a BookForge timeout) wait for the back-off.
+  const USER_REASON = /^(?:after-|you-asked|user|picked|saved|number)/;
   function requestCheck(site, reason) {
     const x = S[site];
     if (!opt.autoChecks || !x || x.running || teachActive(site)) return false;
-    x.pending = { reason: String(reason || 'request').slice(0, 40), at: now() };
+    const why = String(reason || 'request').slice(0, 40);
+    if (x.state === 'broken' && !USER_REASON.test(why)) { event('pending', { site, reason: why, outcome: 'BACKED_OFF' }); return false; }
+    if (USER_REASON.test(why)) userActed(site);
+    x.pending = { reason: why, at: now() };
     event('pending', { site, reason: x.pending.reason });
     return true;
   }
@@ -1153,6 +1503,12 @@ function createSelfRepair(deps) {
         if (!busy(site, lvl)) { const why = x.pending.reason; x.pending = null; runCheck(site, why).catch(() => {}); }
         continue;
       }
+      // P37.3: a "not working" AI: a plain check-in after 5 / 15 / 60 minutes (no
+      // repairs, no teach step) — the user was told once and decides what to do.
+      if (x.state === 'broken') {
+        if (opt.autoChecks && t >= nextBrokenCheck(site) && !busy(site, 'periodic')) { x.backoffN = (x.backoffN || 0) + 1; runCheck(site, 'broken-recheck', { repair: false }).catch(() => {}); }
+        continue;
+      }
       const every = opt.intervalMs;
       if (every > 0 && t - Math.max(x.lastProbeAt || 0, createdAt) >= every && !busy(site, 'periodic')) runCheck(site, 'periodic').catch(() => {});
     }
@@ -1177,11 +1533,11 @@ function createSelfRepair(deps) {
     if (!x) return { state: 'unknown', problem: null, since: null, last_probe_ok_at: null };
     return { state: x.state, problem: x.problem, since: x.since, last_probe_ok_at: x.lastProbeOkAt };
   }
-  function isUsable(site) { const x = S[site]; return !x || x.state === 'ok' || x.state === 'unknown'; }
+  function isUsable(site) { const x = S[site]; return !x || ((x.state === 'ok' || x.state === 'unknown') && !teachActive(site)); }
 
   return {
     runCheck, probeMany, requestCheck, startup, tick, onPageChanged, noteWorking,
-    onCaptured, expects, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite,
+    onCaptured, expects, probeReplyKind, noteForeignReply, awaitingReply, teachActive, startTeach, cancelTeach, makeWay, busyWithSite, userActed,
     state: snap, snapshot: () => Object.fromEntries(sites.map((s) => [s, snap(s)])), health, isUsable,
     events: () => events.map((e) => Object.assign({}, e)), setIntervalMs, options: opt, lastTick: () => lastTick
   };
@@ -1192,5 +1548,6 @@ module.exports = {
   LEARNED_VERSION, MARKER, PROBE_PHRASE, TEACH_PHRASE, WORDS,
   describeProblem, signaturesFor, altsFor, pageKit, classify, createSelfRepair, sanitizeLearned,
   buildSignalScript, buildScanScript, buildAlternativesScript, buildLearnReplyScript, buildUnfreezeScript,
-  buildTeachStartScript, buildTeachPollScript, buildTeachStopScript, teachBanner, probeText, pickWord, pickNumber, containsWord
+  buildTeachStartScript, buildTeachPollScript, buildTeachAskedScript, buildTeachStopScript, teachBanner, teachAskedBanner, probeText, pickWord, pickNumber, containsWord,
+  FOLLOWUP_PHRASE, followupText, reverseDigits, PICK_THING, pickBanner, replyMarkers, buildPickScript, buildPickCancelScript, buildMatchCheckScript, userSelFor
 };

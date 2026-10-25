@@ -213,6 +213,7 @@ const state = {
   sequence: { active: false, steps: [], index: 0, generation: 0, dispatchGen: {} }, // Prompt Sequence run state, see startSequence()/handleSequenceCapture()
   selectorOverrides: {}, // site -> { input?, send?, assistant? } — user-picked CSS selectors (see selector:pick), tried before the built-in candidates in selectors.js
   learnedSelectors: {}, // site -> { input?|send?|assistant?|stop?|user?: { selector, how: alternative|page-search|teach, learnedAt, version } } — found by the self-repair (P18.3/4/7) and proved by a check-in; persisted (versioned)
+  pickMeta: {}, // P38: site -> { input?|send?|assistant?|user?: { savedAt, how: pick|number, rev, version } } — when each 🎯 / 🔢 SAVED selector (in selectorOverrides) was locked in; persisted (versioned)
   selfRepair: { intervalMin: 20, startup: true }, // P18.1 check-ins: every N minutes while an AI is idle (0 = off), and once at start
   savedLogins: {}, // site -> [{ id, label, username, encryptedPassword }] — encryptedPassword is a safeStorage-encrypted (OS keychain) ciphertext, base64-encoded; the plaintext password is never stored, never sent to the renderer, never logged. See logins:save/logins:fill.
   nextLoginId: 1,
@@ -249,6 +250,7 @@ for (const site of SITE_IDS) {
   state.customRole[site] = "";
   state.selectorOverrides[site] = {};
   state.learnedSelectors[site] = {};
+  state.pickMeta[site] = {};
 }
 
 // Built-in starter prompt: a one-click sanity check that the whole
@@ -650,6 +652,7 @@ function saveStateDebounced() {
         customRole: state.customRole,
         prompts: state.prompts,
         selectorOverrides: state.selectorOverrides,
+        pickMeta: { version: PICK_VERSION, sites: state.pickMeta }, // P38: when each saved pick was locked in (no page text)
         learnedSelectors: { version: selfRepairLib.LEARNED_VERSION, sites: state.learnedSelectors }, // P18: selectors the self-repair learned (CSS only — never page text)
         selfRepair: { intervalMin: state.selfRepair.intervalMin, startup: state.selfRepair.startup !== false },
         nextMsgSeq: state.nextMsgSeq, // TR-29: [MSG #] numbers carry on after a restart (the AIs remember the old ones)
@@ -738,6 +741,17 @@ function loadPersistedState() {
   }
   if (snap.learnedSelectors) {
     try { state.learnedSelectors = selfRepairLib.sanitizeLearned(snap.learnedSelectors, SITE_IDS, isBareTagSelector); } catch (_) {}
+  }
+  if (snap.pickMeta && typeof snap.pickMeta === "object") {
+    const src = snap.pickMeta.sites && typeof snap.pickMeta.sites === "object" ? snap.pickMeta.sites : {};
+    for (const site of SITE_IDS) {
+      const m = src[site]; if (!m || typeof m !== "object") continue;
+      for (const role of PICK_ROLES_ALL) {
+        const x = m[role];
+        if (!x || typeof x !== "object" || !(state.selectorOverrides[site] || {})[role]) continue;
+        state.pickMeta[site][role] = { savedAt: Number(x.savedAt) || 0, how: x.how === "number" ? "number" : "pick", rev: Math.max(1, Number(x.rev) || 1), version: PICK_VERSION };
+      }
+    }
   }
   if (snap.selfRepair && typeof snap.selfRepair === "object") {
     const n = Number(snap.selfRepair.intervalMin);
@@ -930,11 +944,28 @@ function siteNewChat(site) { return siteUrlOverride(site) || SITES[site].newChat
 // P18: the selectors the page scripts use — the user's 🎯 picks, with anything the
 // self-repair LEARNED (and proved with a check-in) on top. A learned reply selector
 // is read strictly (automation.js STRICT) so a stale built-in match can't win.
+// P38: a selector the user SAVED (🎯 Save / 🔢) wins over one learned before it;
+// one the self-repair learned AFTER it (because the saved one stopped matching)
+// wins over it — the newest proven selector is used. While a 🔢 number teach runs,
+// what it just learned is used for its own follow-up message.
+const PICK_VERSION = 1;
+const PICK_ROLES_ALL = ["input", "send", "assistant", "user"];
+const teachOverrides = {}; // site -> { input?, send? } (memory only, while a number teach runs)
 function effectiveOverrides(site) {
   const out = { ...(state.selectorOverrides[site] || {}) };
+  delete out.user;
   const learned = state.learnedSelectors[site] || {};
-  for (const role of ["input", "send", "assistant", "stop"]) if (learned[role] && learned[role].selector) out[role] = learned[role].selector;
-  if (learned.assistant && learned.assistant.selector) out.assistantStrict = true;
+  const meta = state.pickMeta[site] || {};
+  for (const role of ["input", "send", "assistant", "stop"]) {
+    const l = learned[role];
+    if (!l || !l.selector) continue;
+    if (out[role] && meta[role] && (meta[role].savedAt || 0) >= (l.learnedAt || 0)) continue; // the user's saved pick is newer
+    out[role] = l.selector;
+  }
+  const usedLearned = learned.assistant && learned.assistant.selector && out.assistant === learned.assistant.selector;
+  if (usedLearned || (out.assistant && meta.assistant)) out.assistantStrict = true;
+  const t = teachOverrides[site];
+  if (t) { if (t.input) out.input = t.input; if (t.send) out.send = t.send; }
   return out;
 }
 // TR-08: a read-only page check (sends nothing) a few seconds after each pane
@@ -3693,6 +3724,15 @@ async function handleHouseRuleCapture(turn) {
   }
 }
 
+// P37.4: is this reply a check-in / number-teach answer? Strictly (its [MSG #] or
+// word proves it), or loosely (short, holds a recent check-in word) when no
+// BookForge request is waiting for this AI's answer.
+function probeReplyKindFor(site, text, answers) {
+  let k = null;
+  try { k = selfRepair.probeReplyKind(site, text, answers); } catch (_) { k = null; }
+  if (!k && !bookforgeAwaitingReply(site)) { try { k = selfRepair.probeReplyKind(site, text, answers, { loose: true }); } catch (_) { k = null; } }
+  return k;
+}
 async function pollSite(site) {
   if (state.busy[site]) return;
   const view = siteViews[site];
@@ -3807,7 +3847,9 @@ async function pollSite(site) {
       // that answers the check-in's OWN [MSG #] and holds its word counts; any
       // other reply (a BookForge chapter that happens to use the word) is left
       // to the handling below, exactly as without check-ins.
-      if (selfRepair && selfRepair.expects(site, text, relayWouldAnswer(site)) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS) {
+      // P37.4: also a late check-in / number-teach answer the Relay Trace can't tie to
+      // its [MSG #] — never nagged ("you forgot your tag") either.
+      if (selfRepair && probeReplyKindFor(site, text, relayWouldAnswer(site)) && !pend.reprompted && Date.now() - pend.sinceTs >= CAPTURE_SETTLE_MS) {
         acceptedUntaggedRaw[site] = text;
         text = `${text}\n[FROM: ${String(site).toUpperCase()}]`;
         forcedAccept = true;
@@ -3940,7 +3982,11 @@ async function pollSite(site) {
     // Ownership is by [MSG #] (the Relay Trace) plus the check-in's word: a reply
     // that answers an older message (a BookForge prompt, a relay) goes to its owner.
     const checkinAnswers = relayWouldAnswer(site);
-    if (selfRepair && selfRepair.expects(site, text, checkinAnswers)) {
+    // P37.4: a reply that is (very likely) a check-in / number-teach answer even when
+    // it can't be proven (late, no word, its [MSG #] only a check-in's) is held the
+    // same way: no relay, no transcript, and never a missing-[TO:]-tag nag.
+    const probeKind = selfRepair ? probeReplyKindFor(site, text, checkinAnswers) : null;
+    if (probeKind) {
       const turnId = state.nextTurnId++;
       state.captured[site] = { id: turnId, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, checkIn: true };
       markCaptured(site);
@@ -3951,8 +3997,8 @@ async function pollSite(site) {
         state.waitingSince[site] = null;
         broadcast("waiting-changed", { site, waiting: false });
       }
-      try { selfRepair.onCaptured(site, { text, answers: checkinAnswers }); } catch (_) {}
-      logEvent("checkin-reply", { site, chars: text.length });
+      if (probeKind === "owned") { try { selfRepair.onCaptured(site, { text, answers: checkinAnswers }); } catch (_) {} }
+      logEvent("checkin-reply", { site, chars: text.length, how: probeKind === "owned" ? undefined : probeKind });
       return;
     }
     let roundtableTag = null;
@@ -4172,7 +4218,7 @@ async function pollSite(site) {
     // TR-22: no [TO:] tag on a normal reply -> flag it and re-send the rules.
     // Not during a House Rules stage or a self-test/Tuner (their own formats),
     // nor while the Feature Test or relay check is running.
-    if (!stageActive && !bareMode && !roundtableExplicit && !forcedAccept && !ftState.running && !bbState.running) { // a TR-30 accepted reply's flag rides on the next message
+    if (!stageActive && !bareMode && !roundtableExplicit && !forcedAccept && !ftState.running && !bbState.running && !(selfRepair && selfRepair.probeReplyKind(site, text, null, { loose: true }))) { // a TR-30 accepted reply's flag rides on the next message; P37.4: never for a check-in / teach answer
       missingToReminder(site, { forwarded: autoForwarded }).catch(() => {});
     }
     if (state.sequence.active) await handleSequenceCapture(turn);
@@ -5104,9 +5150,150 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
   delete next[role];
   state.selectorOverrides[site] = next;
   if (state.learnedSelectors[site] && state.learnedSelectors[site][role]) { const l = { ...state.learnedSelectors[site] }; delete l[role]; state.learnedSelectors[site] = l; } // P18: "Clear" clears what was learned too
+  if (state.pickMeta[site] && state.pickMeta[site][role]) { const m = { ...state.pickMeta[site] }; delete m[role]; state.pickMeta[site] = m; }
   saveStateDebounced();
   logEvent("selector-override-cleared", { site, role });
+  broadcastPicker(site);
   return { ok: true };
+});
+
+// --- P38 🎯 picker (the user's design) ----------------------------------------------
+// 🎯 opens a small card: "What do you want to point at?" — Message box / Send button /
+// AI's reply. The user picks ONE, presses OK and clicks that thing in the AI's window
+// (a banner there says what to click; hovering outlines it). The pick is a DRAFT
+// (green chip) until Save locks it in (green ✓, persisted per site, versioned, with
+// "saved at"); Clear removes the saved one (back to the built-ins); any one item can
+// be saved at any time. Test it = a check-in. A saved pick that no longer matches the
+// page shows red ⚠️. The page script is self-repair.js pageKit (P37.1 general
+// selectors: it matches EVERY reply, never one message).
+const PICK_UI_ROLES = ["input", "send", "assistant"];
+const pickDrafts = {}; // site -> { role: { selector, preview, pickedAt, count, latest } } (memory only — never logged)
+const pickRunning = {}; // site -> role being picked right now
+const PICK_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PICK_TIMEOUT_MS) || 90000;
+function pickerSavedSel(site, role) { return (state.selectorOverrides[site] || {})[role] || null; }
+async function pickerStatus(site) {
+  const meta = state.pickMeta[site] || {};
+  const drafts = pickDrafts[site] || {};
+  const saved = {};
+  for (const role of PICK_UI_ROLES) { const sel = pickerSavedSel(site, role); if (sel) saved[role] = sel; }
+  let check = null;
+  const view = siteViews[site];
+  if (Object.keys(saved).length && view && !view.webContents.isDestroyed()) {
+    try { check = await view.webContents.executeJavaScript(selfRepairLib.buildMatchCheckScript(site, SITES, saved), true); } catch (_) { check = null; }
+  }
+  const items = {};
+  for (const role of PICK_UI_ROLES) {
+    const d = drafts[role];
+    const sel = saved[role];
+    const m = meta[role] || null;
+    let st = "none";
+    if (d) st = "picked";
+    else if (sel) {
+      const c = check && check.ok && check.roles ? check.roles[role] : null;
+      // a saved reply pick on a page with no replies yet isn't "broken"
+      const stale = c && !c.ok && !(role === "assistant" && !(check.repliesOnPage > 0) && !c.bad);
+      st = stale ? "stale" : "saved";
+    }
+    items[role] = { state: st, preview: d ? d.preview : null, latest: d ? d.latest !== false : null, savedAt: sel ? (m ? m.savedAt || null : null) : null, how: sel ? (m ? m.how : "pick") : null, rev: m ? m.rev : null, picking: pickRunning[site] === role, selector: d ? d.selector : sel || null };
+  }
+  let repair = null; try { repair = selfRepair.state(site); } catch (_) {}
+  return { ok: true, site, label: siteLabel(site), items, picking: pickRunning[site] || null, repair };
+}
+function broadcastPicker(site) {
+  pickerStatus(site).then((st) => broadcast("picker", st)).catch(() => {});
+}
+ipcMain.handle("picker:status", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  return pickerStatus(site);
+});
+ipcMain.handle("picker:start", async (_evt, payload) => {
+  const site = payload && payload.site; const role = payload && payload.role;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!PICK_UI_ROLES.includes(role)) return { ok: false, error: "BAD_ROLE" };
+  const view = siteViews[site];
+  if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  if (selfRepair.teachActive(site)) return { ok: false, error: "TEACHING" };
+  pickRunning[site] = role;
+  broadcastPicker(site);
+  logEvent("picker-started", { site, role });
+  let res;
+  try { res = await view.webContents.executeJavaScript(selfRepairLib.buildPickScript(site, role, siteLabel(site), SITES, PICK_TIMEOUT_MS), true); }
+  catch (e) { res = { ok: false, error: "SCRIPT_FAILED" }; }
+  if (pickRunning[site] === role) delete pickRunning[site];
+  if (res && res.ok && res.selector) {
+    const problems = [];
+    if (isBareTagSelector(res.selector)) problems.push("TOO_GENERIC");
+    if (role === "assistant" && Number(res.count) > 60) problems.push("TOO_BROAD");
+    if (role === "assistant" && looksLikeEcho(res.preview, state.lastSentTo[site])) problems.push("LOOKS_LIKE_ECHO");
+    if (problems.length) { logEvent("picker-rejected", { site, role, selector: res.selector, reasons: problems }); broadcastPicker(site); return { ok: false, error: problems[0], reasons: problems }; }
+    pickDrafts[site] = { ...(pickDrafts[site] || {}), [role]: { selector: res.selector, preview: String(res.preview || "").slice(0, 120), pickedAt: Date.now(), count: Number(res.count) || 0, latest: res.latest !== false } };
+    logEvent("picker-picked", { site, role, selector: res.selector, matches: Number(res.count) || 0 }); // never the preview text
+  } else logEvent("picker-no-pick", { site, role, error: (res && res.error) || "unknown" });
+  broadcastPicker(site);
+  return res && res.ok ? { ok: true, role, selector: res.selector, preview: res.preview, count: res.count, latest: res.latest !== false } : (res || { ok: false, error: "unknown" });
+});
+ipcMain.handle("picker:cancel", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  const view = siteViews[site];
+  delete pickRunning[site];
+  if (view && !view.webContents.isDestroyed()) { try { await view.webContents.executeJavaScript(selfRepairLib.buildPickCancelScript(), true); } catch (_) {} }
+  broadcastPicker(site);
+  return { ok: true };
+});
+// Save one item (the others are left exactly as they are).
+function savePickedSelector(site, role, selector, how) {
+  state.selectorOverrides[site] = { ...(state.selectorOverrides[site] || {}), [role]: selector };
+  const prev = (state.pickMeta[site] || {})[role];
+  state.pickMeta[site] = { ...(state.pickMeta[site] || {}), [role]: { savedAt: Date.now(), how: how === "number" ? "number" : "pick", rev: ((prev && prev.rev) || 0) + 1, version: PICK_VERSION } };
+  if (state.learnedSelectors[site] && state.learnedSelectors[site][role]) { const l = { ...state.learnedSelectors[site] }; delete l[role]; state.learnedSelectors[site] = l; }
+  saveStateDebounced();
+  logEvent("selector-saved", { site, role, how: how || "pick", selector });
+}
+ipcMain.handle("picker:save", async (_evt, payload) => {
+  const site = payload && payload.site; const role = payload && payload.role;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!PICK_UI_ROLES.includes(role)) return { ok: false, error: "BAD_ROLE" };
+  const d = (pickDrafts[site] || {})[role];
+  if (!d) return { ok: false, error: "NOTHING_PICKED" };
+  savePickedSelector(site, role, d.selector, "pick");
+  const nd = { ...pickDrafts[site] }; delete nd[role]; pickDrafts[site] = nd;
+  try { selfRepair.userActed(site); } catch (_) {}
+  const st = await pickerStatus(site);
+  broadcast("picker", st);
+  return Object.assign({ saved: role }, st);
+});
+ipcMain.handle("picker:clear", async (_evt, payload) => {
+  const site = payload && payload.site; const role = payload && payload.role;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!PICK_UI_ROLES.includes(role)) return { ok: false, error: "BAD_ROLE" };
+  const hadDraft = !!(pickDrafts[site] || {})[role];
+  if (hadDraft) { const nd = { ...pickDrafts[site] }; delete nd[role]; pickDrafts[site] = nd; }
+  // Clear = the draft if there is one, otherwise the saved one (back to the built-ins)
+  if (!hadDraft) {
+    const next = { ...(state.selectorOverrides[site] || {}) }; delete next[role]; state.selectorOverrides[site] = next;
+    if (state.pickMeta[site] && state.pickMeta[site][role]) { const m = { ...state.pickMeta[site] }; delete m[role]; state.pickMeta[site] = m; }
+    if (state.learnedSelectors[site] && state.learnedSelectors[site][role]) { const l = { ...state.learnedSelectors[site] }; delete l[role]; state.learnedSelectors[site] = l; }
+    saveStateDebounced();
+    logEvent("selector-override-cleared", { site, role, via: "picker" });
+    try { selfRepair.userActed(site); } catch (_) {}
+  }
+  const st = await pickerStatus(site);
+  broadcast("picker", st);
+  return Object.assign({ cleared: hadDraft ? "draft" : "saved" }, st);
+});
+// Test it: one check-in (no repairs) — says whether the AI answers and is read.
+ipcMain.handle("picker:test", async (_evt, payload) => {
+  const site = payload && payload.site;
+  if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
+  if (!state.enabled[site]) return { ok: false, error: "INACTIVE" };
+  try { selfRepair.userActed(site); } catch (_) {}
+  const r = await selfRepair.runCheck(site, "you-asked-test", { repair: false });
+  if (r && r.skipped) return { ok: false, error: r.skipped === "teaching" ? "TEACHING" : "CHECKING" };
+  const snap = selfRepair.state(site) || {};
+  broadcastPicker(site);
+  return { ok: !!(r && r.ok), state: snap.state, problem: snap.problem || null, say: snap.say || null, deferred: !!(r && r.deferred) };
 });
 
 // --- Saved logins: purely manual, one-click credential fill+submit. Never
@@ -6170,6 +6357,7 @@ function bookforgeSiteProblem(site) {
   if (!view || !view.webContents || view.webContents.isDestroyed()) return { code: "NO_PANE", say: `the ${L} window is missing` };
   try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return { code: "LOADING", say: `the ${L} page is still loading` }; }
   catch (_) { return { code: "NO_PANE", say: `the ${L} window is missing` }; }
+  try { if (selfRepair && selfRepair.teachActive(site)) return { code: "TEACHING", say: `a 🔢 number teach is running for ${L} — follow the box at the top of the BookForge panel` }; } catch (_) {}
   if (paneLoadFailed[site]) return { code: "LOAD_FAILED", say: `the ${L} page didn't load (${paneLoadFailed[site]}) — reload it` };
   let box = { found: null, signedOut: false };
   try { box = paneHealth.messageBox(site); } catch (_) {}
@@ -6286,10 +6474,12 @@ function selfRepairSaveLearned(site, role, selector, how) {
   return true;
 }
 const SELF_REPAIR_SAY = {
-  fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
+  fixed: (L, ev) => ({ say: `✔ Fixed — ${L} is working again${ev && ev.how ? ` (${ev.how === "number" ? "✔ Saved — the number teach learned where things are" : ev.how === "teach" ? "you showed AutoInjector where things are" : ev.how === "page-search" || ev.how === "page_search" ? "it found where replies appear" : ev.how === "alternatives" ? "it used another known way to find things" : ev.how === "reload" || ev.how === "reload_home" ? "after reloading its window" : ev.how === "unfreeze" ? "after pressing Stop" : "a check-in worked"})` : ""}`, tone: "ok" }),
   needs_user: (L, ev) => ({ say: `⚠️ ${L} needs you: ${selfRepairLib.describeProblem(ev && ev.code, L).say}`, tone: "warn" }),
-  broken: (L, ev) => ({ say: `✕ ${L} isn't working and couldn't be fixed automatically (${(ev && ev.code) || "UNKNOWN"}) — BookForge will use your other AIs`, tone: "error" }),
-  teach: (L, ev) => (ev && ev.phase === "type" ? { say: `🎓 AutoInjector needs your help with ${L} — see the pop-up`, tone: "warn" } : null)
+  broken: (L, ev) => (ev && ev.ask ? { say: `⚠️ ${L} isn't working and AutoInjector couldn't fix it by itself (${(ev && ev.code) || "UNKNOWN"}). Please use 🎯 on ${L}'s pane, or 🔢 “Do it for me with a number” — BookForge uses your other AIs meanwhile. (AutoInjector re-checks after 5, 15, then every 60 minutes.)`, tone: "error" } : { say: `✕ ${L} still isn't working (${(ev && ev.code) || "UNKNOWN"}) — BookForge uses your other AIs`, tone: "error" }),
+  teach: (L, ev) => (ev && ev.phase === "type" ? { say: `🔢 Number teach for ${L}: type the number shown into ${L}'s message box and press Send`, tone: "warn" }
+    : ev && ev.phase === "asking" ? { say: `🔢 AutoInjector is asking ${L} to write the number backwards…`, tone: "info" }
+    : ev && (ev.phase === "failed" || ev.phase === "timeout") ? { say: `🔢 Number teach for ${L} didn't finish${ev.part ? ` — the ${ev.part === "assistant" ? "reply area" : ev.part === "send" ? "Send button" : "message box"} part` : ""}. Use 🎯 for just that part.`, tone: "warn" } : null)
 };
 const selfRepair = selfRepairLib.createSelfRepair({
   sites: SITE_IDS,
@@ -6304,6 +6494,17 @@ const selfRepair = selfRepairLib.createSelfRepair({
   },
   sendProbe: (s, text, token) => sendTextTo(s, withEnvelope(text, s), null, { probe: true, automatic: true, cancelToken: token }).then((r) => ({ ok: !!(r && r.ok), error: r && r.error, verified: r ? r.verified : undefined })),
   saveLearned: selfRepairSaveLearned,
+  // P38 🔢: what the number teach learned is SAVED like a 🎯 Save (per site, versioned)
+  savePick: (s, role, selector, how) => {
+    if (!SITES[s] || !PICK_ROLES_ALL.includes(role)) return false;
+    const sel = String(selector || "").trim();
+    if (!sel || sel.length > 300 || isBareTagSelector(sel)) return false;
+    savePickedSelector(s, role, sel, how || "number");
+    if (pickDrafts[s] && pickDrafts[s][role]) { const nd = { ...pickDrafts[s] }; delete nd[role]; pickDrafts[s] = nd; }
+    broadcastPicker(s);
+    return true;
+  },
+  teachOverrides: (s, sel) => { if (sel && (sel.input || sel.send)) teachOverrides[s] = { input: sel.input || null, send: sel.send || null }; else delete teachOverrides[s]; },
   busyReason: selfRepairBusy,
   isActive: (s) => !!state.enabled[s],
   log: (kind, detail) => logEvent(kind, Object.assign({}, detail, /BROKEN|NEEDS_USER|STILL_FAILING|TIMEOUT|EXCEPTION/.test(String(detail && detail.outcome)) ? { severity: "warn" } : {})),
@@ -6338,6 +6539,7 @@ function selfRepairStatus() {
 ipcMain.handle("selfrepair:status", () => selfRepairStatus());
 ipcMain.handle("selfrepair:probe", (_evt, payload) => {
   const want = payload && Array.isArray(payload.sites) ? payload.sites.filter((s) => SITES[s]) : null;
+  for (const s of (want && want.length ? want : SITE_IDS)) { try { selfRepair.userActed(s); } catch (_) {} }
   const r = selfRepair.probeMany(want && want.length ? want : null, "you-asked", "demand");
   logEvent("self-repair", { step: "check", reason: "you-asked", outcome: `started:${r.started.length}` });
   return Object.assign({ ok: true }, r);
@@ -6606,7 +6808,8 @@ function bookforgeDiagnostics(extra) {
   for (const s of SITE_IDS) {
     const r = selfRepair.state(s) || {};
     const learned = Object.entries(state.learnedSelectors[s] || {}).map(([role, v]) => `${role}(${bfSafeCode(v.how)} ${ago(v.learnedAt)})`).join(" ");
-    L.push(`Self-repair ${s}: state ${bfSafeCode(r.state || "unknown")}${r.problem ? ` · problem ${bfSafeCode(r.problem)}` : ""}${r.since ? ` · since ${ago(r.since)}` : ""} · last check-in OK ${ago(r.lastProbeOkAt)}${r.running ? ` · now: ${bfSafeCode(r.step || "check")}` : ""}${r.teach && r.teach.active ? ` · teach step ${bfSafeCode(r.teach.phase)}` : ""}${learned ? ` · learned ${learned}` : ""}`);
+    const picks = Object.entries(state.selectorOverrides[s] || {}).filter(([role]) => PICK_UI_ROLES.includes(role)).map(([role]) => { const m = (state.pickMeta[s] || {})[role]; return `${role}(${m ? `${bfSafeCode(m.how)} v${m.rev} ${ago(m.savedAt)}` : "saved"})`; }).join(" ");
+    L.push(`Self-repair ${s}: state ${bfSafeCode(r.state || "unknown")}${r.problem ? ` · problem ${bfSafeCode(r.problem)}` : ""}${r.since ? ` · since ${ago(r.since)}` : ""} · last check-in OK ${ago(r.lastProbeOkAt)}${r.running ? ` · now: ${bfSafeCode(r.step || "check")}` : ""}${r.teach && r.teach.active ? ` · teach step ${bfSafeCode(r.teach.phase)}` : ""}${learned ? ` · learned ${learned}` : ""}${picks ? ` · 🎯 saved ${picks}` : ""}${r.askUser ? " · asked the user (re-checks back off)" : ""}`);
     const tried = (r.tried || []).slice(-8);
     if (tried.length) L.push(`  tried: ${tried.map((t) => `${bfSafeCode(t.step)}=${bfSafeCode(String(t.outcome).split(":")[0])}${t.code ? `(${bfSafeCode(t.code)})` : ""}`).join(", ")}`);
   }

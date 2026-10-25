@@ -388,6 +388,13 @@ function buildSendScript(site, text, overrides, sendOpts) {
   `;
 }
 
+// P37.2: per site, the element that holds one whole AI message (outermost wins).
+const MESSAGE_CONTAINERS = {
+  chatgpt: ['[data-message-author-role="assistant"]', 'article[data-turn="assistant"]'],
+  claude: ['.font-claude-response', '.font-claude-message', '[data-testid="assistant-message"]'],
+  gemini: ['message-content', 'model-response'],
+  generic: ['[data-message-author-role="assistant"]', 'model-response']
+};
 function buildReadScript(site, overrides) {
   const cfg = siteConfig(site);
   const ov = overrides || {};
@@ -402,7 +409,10 @@ function buildReadScript(site, overrides) {
     STRICT: !!(ovAssistant && ov.assistantStrict),
     SEND_CANDIDATES: usableOverride(ov.send) ? [ov.send, ...cfg.SEND_CANDIDATES] : cfg.SEND_CANDIDATES,
     STOP_CANDIDATES: usableOverride(ov.stop) ? [ov.stop, ...(cfg.STOP_CANDIDATES || [])] : (cfg.STOP_CANDIDATES || []),
-    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || [])
+    INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || []),
+    // P37.2: the element that holds ONE whole AI message on each site — the reader
+    // uses its full text when the matched node only has part of the reply.
+    MESSAGE_CONTAINERS: MESSAGE_CONTAINERS[site] || MESSAGE_CONTAINERS.generic
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -503,10 +513,42 @@ function buildReadScript(site, overrides) {
         if (cand.trim().length > text.trim().length + 5) { node = p; text = cand; fragmentFixed = "climb-start"; break; }
       }
     }
+    // P37.2: read the WHOLE reply. The page may split one reply over several nodes
+    // (Gemini: "[TO:" in one, the rest in others; code blocks / markdown parts): when
+    // the node we read is just the envelope start, or much shorter than the AI
+    // message it belongs to, use that message's full text. Never a container that
+    // holds the user's message or more than one reply.
+    const fullOf = (n) => { let t = ""; try { t = n.innerText || ""; } catch (_) {} const tc = String(n.textContent || ""); return t.trim().length >= tc.trim().length * 0.6 ? t : tc; };
+    const squash = (s) => String(s || "").replace(/\\s+/g, " ").trim();
+    let containerChars = null;
+    if (node && !fragmentFixed) {
+      // innerText of a part the page hasn't laid out (collapsed / not yet painted)
+      // can be shorter than its real text
+      const tcText = String(node.textContent || "");
+      if (text.trim().length <= 40 && tcText.trim().length > text.trim().length + 5) { text = tcText; fragmentFixed = "textcontent"; }
+      let box = null;
+      for (const sel of CFG.MESSAGE_CONTAINERS || []) { try { const c = node.closest(sel); if (c && (!box || box.contains(c))) box = c; } catch (_) {} }
+      if (box && box !== node) {
+        const USER_MARKERS3 = '[data-message-author-role="user"], [data-testid="user-message"], user-query, .user-query';
+        let hasUser = false; try { hasUser = !!box.querySelector(USER_MARKERS3) || !!(box.closest && box.closest(USER_MARKERS3)); } catch (_) {}
+        let ct = fullOf(box);
+        containerChars = ct.length;
+        const froms = (ct.match(/\\[\\s*FROM\\s*:/gi) || []).length;
+        const short = text.trim().length <= 40 && startsWithTo(text) && !hasFrom(text);
+        if (!hasUser && froms <= 1 && squash(ct).length > squash(text).length + 5 && squash(ct).indexOf(squash(text).slice(0, 30)) !== -1 && (short || squash(text).length < squash(ct).length * 0.6)) {
+          // from the reply's own [TO: (a line start) to right after its [FROM:], so
+          // page buttons around it don't tag along
+          const tm = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:/i.exec(ct);
+          if (tm) ct = ct.slice(tm.index + tm[1].length);
+          if (hasFrom(ct)) { let end = ct.length, fm; const fre = /\\[\\s*FROM\\s*:[^\\]]*\\]/gi; while ((fm = fre.exec(ct))) end = fm.index + fm[0].length; ct = ct.slice(0, end); }
+          node = box; text = ct; fragmentFixed = "container";
+        }
+      }
+    }
     // For the log when a reply can't be read properly: what the reader landed on.
     let nodeInfo = null;
     if (node && text.trim().length <= 40) {
-      try { nodeInfo = { tag: node.tagName.toLowerCase(), cls: String(node.className || "").slice(0, 60) || null, parentTag: node.parentElement ? node.parentElement.tagName.toLowerCase() : null, parentChars: node.parentElement ? (node.parentElement.innerText || "").length : 0, siblings: node.parentElement ? node.parentElement.children.length : 0 }; } catch (_) {}
+      try { nodeInfo = { tag: node.tagName.toLowerCase(), cls: String(node.className || "").slice(0, 60) || null, parentTag: node.parentElement ? node.parentElement.tagName.toLowerCase() : null, parentChars: node.parentElement ? (node.parentElement.innerText || "").length : 0, siblings: node.parentElement ? node.parentElement.children.length : 0, containerChars }; } catch (_) {}
     }
 
     // Is the composer empty? A Send button is ALSO disabled when there's simply
@@ -809,4 +851,4 @@ function buildProbeScript(site, overrides) {
   `;
 }
 
-module.exports = { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };
+module.exports = { MESSAGE_CONTAINERS, buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector, usableOverride };

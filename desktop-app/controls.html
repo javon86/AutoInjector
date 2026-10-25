@@ -492,6 +492,38 @@
     .pick-menu.collapsed { display:none; }
     .pick-menu button { font-size:11px; padding:2px 6px; }
     .pick-status { flex-basis:100%; opacity:.7; font-size:11px; }
+    /* P38 🎯 picker card: one choice at a time; chips blue (not set) / green (picked) / green ✓ (saved) / red ⚠️ (saved, not found) */
+    .pick-menu.picker-card { flex-direction:column; align-items:stretch; gap:6px; padding:8px 10px; border:1px solid #2f5d9b; border-radius:9px; background:#0f1826; font-size:12px; }
+    .pick-menu.picker-card.collapsed { display:none; }
+    .pk-head { display:flex; align-items:center; gap:8px; font-weight:600; font-size:13px; }
+    .pk-head .pk-site { font-weight:500; opacity:.75; font-size:12px; }
+    .pk-head .pk-x { margin-left:auto; background:none; border:1px solid transparent; color:inherit; cursor:pointer; }
+    .pk-body { display:flex; flex-direction:column; gap:4px; }
+    .pk-row { display:grid; grid-template-columns:minmax(92px,1fr) minmax(0,1.7fr) auto auto; align-items:center; gap:6px; padding:4px 6px; border-radius:7px; border:1px solid #223047; }
+    .pk-row.sel { border-color:#4b8fe0; background:#14223a; }
+    .pk-name { display:flex; flex-wrap:wrap; align-items:center; column-gap:5px; cursor:pointer; min-width:0; line-height:1.25; }
+    .pk-name > span { font-weight:600; }
+    .pk-name small { flex-basis:100%; padding-left:19px; opacity:.65; font-size:10.5px; }
+    .pk-chip { font-size:11px; border-radius:999px; padding:2px 9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+    .pk-chip[data-st="none"] { background:#14365f; color:#d4e7ff; border:1px solid #2f6fbe; }
+    .pk-chip[data-st="picking"] { background:#14365f; color:#fff; border:1px dashed #6fb0ff; }
+    .pk-chip[data-st="picked"] { background:#1b5532; color:#e2ffec; border:1px solid #2fae5f; }
+    .pk-chip[data-st="saved"] { background:#1f7a3f; color:#fff; border:1px solid #3fd27a; font-weight:600; }
+    .pk-chip[data-st="stale"] { background:#6b1f24; color:#ffe1e1; border:1px solid #e5484d; font-weight:600; }
+    .pk-row button, .pk-actions button { font-size:11.5px; padding:3px 8px; }
+    .pk-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .pk-actions .pk-ok { background:#0b5ed7; color:#fff; border:1px solid #2f7cf0; border-radius:6px; font-weight:600; }
+    .pk-actions .pk-ok:disabled { opacity:.5; }
+    .pk-actions .pk-more { margin-left:auto; opacity:.7; }
+    .picker-card .pick-status { opacity:.9; font-size:11.5px; }
+    .picker-card .pick-status[data-tone="ok"] { color:#7be3a2; } .picker-card .pick-status[data-tone="err"] { color:#ff9a9a; } .picker-card .pick-status[data-tone="warn"] { color:#f5c46b; }
+    .pk-teach { border:1px solid #6d5ce0; border-left:4px solid #f5b642; border-radius:8px; padding:6px 9px; background:#1a1730; }
+    .pk-teach[data-tone="ok"] { border-color:#3fae72; border-left-color:#29c447; background:#13281b; }
+    .pk-teach[data-tone="err"] { border-color:#6b2c30; border-left-color:#e5484d; background:#1d1214; }
+    .pk-teach-title { font-weight:700; font-size:12.5px; margin-bottom:2px; }
+    .pk-teach-text { font-size:11.5px; opacity:.9; margin-bottom:4px; }
+    .pk-teach-steps { list-style:none; margin:0 0 4px; padding:0; display:flex; flex-wrap:wrap; gap:2px 10px; font-size:11.5px; }
+    .pk-teach-steps li[data-st="ok"] { color:#7be3a2; } .pk-teach-steps li[data-st="wait"] { color:#f5c46b; }
     /* .login-btn is styled with the other pane-header buttons above. */
     .login-list { flex-basis:100%; display:flex; flex-direction:column; gap:3px; }
     .login-list .login-row { display:flex; align-items:center; gap:4px; }
@@ -733,6 +765,8 @@
     .bf-teach[data-tone="ok"] { border-color:#3fae72; border-left-color:var(--bf-ok); background:linear-gradient(180deg, #16301f, #122418); }
     .bf-teach[data-tone="err"] { border-color:#6b2c30; border-left-color:var(--bf-err); background:#1d1214; }
     .bf-teach h3 { margin:0 0 4px; font-size:13.5px; }
+    .bf-ai[data-flash="1"] { animation: bf-flash 1s ease-in-out 4; }
+    @keyframes bf-flash { 0%,100% { box-shadow:none; } 50% { box-shadow:0 0 0 3px #e5484d; } }
     .bf-teach-text { margin:0 0 5px; font-size:13px; line-height:1.45; }
     .bf-teach-text .bf-teach-say { display:inline-block; font:700 14px/1.3 ui-monospace, Consolas, monospace; background:#0e0e18; border:1px dashed #a18bff; border-radius:6px; padding:2px 8px; margin:2px 2px; color:#fff; user-select:all; }
     .bf-teach-steps { list-style:none; margin:0 0 6px; padding:0; display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12.5px; }
@@ -1402,7 +1436,7 @@
           <!-- the three AIs, side by side -->
           <section class="bf-card" id="bf-ais-card" aria-labelledby="bf-ais-h">
             <h3 id="bf-ais-h">🤖 Your AIs <button class="bf-info" type="button" data-info="ais" aria-expanded="false" aria-controls="bf-pop" aria-label="What do the AI statuses mean?">ⓘ</button>
-              <span class="bf-h3-extra"><label class="bf-checkin" title="AutoInjector sends each idle AI a tiny check-in message (“Reply with only this word: …”) this often, and fixes what it can by itself. Check-ins never go to an AI that is busy or that you are typing in, and are never passed on to the other AIs.">Check-ins <select id="bf-checkin-every" aria-label="How often to check in with each AI"><option value="0">off</option><option value="10">every 10 min</option><option value="20" selected>every 20 min</option><option value="30">every 30 min</option><option value="60">every hour</option></select></label><span class="bf-anchor" id="bf-checkin-anchor"><button id="btn-bf-checkin" type="button" title="Check in with every Active AI now (a tiny automatic message), and fix what can be fixed">🩺 Check now</button></span></span></h3>
+              <span class="bf-h3-extra"><label class="bf-checkin" title="AutoInjector sends each idle AI a tiny check-in message (“Reply with only this word: …”) this often, and fixes what it can by itself. Check-ins never go to an AI that is busy or that you are typing in, and are never passed on to the other AIs.">Check-ins <select id="bf-checkin-every" aria-label="How often to check in with each AI"><option value="0">off</option><option value="10">every 10 min</option><option value="20" selected>every 20 min</option><option value="30">every 30 min</option><option value="60">every hour</option></select></label><label class="bf-checkin" title="Play a short sound when an AI stops working and AutoInjector needs you (it asks only once)"><input type="checkbox" id="bf-sound"> 🔔 sound</label><span class="bf-anchor" id="bf-checkin-anchor"><button id="btn-bf-checkin" type="button" title="Check in with every Active AI now (a tiny automatic message), and fix what can be fixed">🩺 Check now</button></span></span></h3>
             <div class="bf-ais" id="bf-ais"></div>
           </section>
           <!-- connection check: chips; the full list opens on click or when something fails -->
