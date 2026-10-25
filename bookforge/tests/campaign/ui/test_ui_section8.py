@@ -118,6 +118,8 @@ def test_editor_card_shows_calibration(make_context, s8):
     goto(page, f"#/p/{run['project_id']}/main/report")
     page.locator("[data-testid=rp-leniency]").wait_for(timeout=15000)
     assert "How generous each AI reviewer is" in page.inner_text("[data-testid=rp-leniency]")
+    # ... and a one-line "how generous" note under each whole-book reviewer (P36 extended to the whole-book review)
+    assert "How generous:" in page.inner_text("[data-testid=rp-reviewers]")
     page.locator("[data-testid=rp-leniency]").scroll_into_view_if_needed()
     shot(page, "s8-report-leniency")
     assert_clean(page, "editor calibration")

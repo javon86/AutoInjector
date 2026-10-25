@@ -7880,7 +7880,7 @@ async function viewReport(main) {
         h('div', { class: 'kpi' }, h('strong', null, `${(wd.total || 0).toLocaleString()}`), h('span', { class: 'small' }, `words of about ${(wd.target || 0).toLocaleString()} (${wd.length || ''})`)))));
     if ((agg.dimensions || []).some(d => d.n)) {
       const t = h('table', { class: 'rp-table', 'data-testid': 'rp-scores' }, h('caption', { class: 'small' }, 'Scores from 1 to 10. Median = the middle score of the reviewers. ⚠️ = they are 3 or more points apart.'),
-        h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent ? '' : ' ⚠️')))),
+        h('thead', null, h('tr', null, h('th', null, 'Dimension'), h('th', null, 'Median'), h('th', null, 'Range'), reviews.map(r => h('th', null, r.name, r.independent && !(r.calibration || {}).flagged ? '' : ' ⚠️')))),
         h('tbody', null, agg.dimensions.filter(d => d.n).map(d => h('tr', { class: d.median <= 5 ? 'low' : d.median >= 8 ? 'high' : '' },
           h('th', { scope: 'row' }, d.label, d.disagree ? [' ', hazard({ code: 'REPORT_DISAGREE', message: `${d.label}: from ${d.min} to ${d.max}` }, {}, { small: true })] : null),
           scoreCell(d.median, 'strong'), h('td', { class: 'num small' }, `${d.min}–${d.max}`), reviews.map(r => scoreCell((d.by || {})[r.slot]))))));
@@ -7891,7 +7891,10 @@ async function viewReport(main) {
       holder.appendChild(h('div', { class: 'grid-2' },
         h('section', { class: 'card', 'data-testid': 'rp-strengths' }, h('h2', null, '👍 Strengths'), h('ul', null, pts('strengths'))),
         h('section', { class: 'card', 'data-testid': 'rp-weaknesses' }, h('h2', null, '👎 Weaknesses'), h('ul', null, pts('weaknesses')))));
-      holder.appendChild(h('section', { class: 'card' }, h('h2', null, 'What the reviewers said'), reviews.map(r => h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), ': ', r.summary || ''))));
+      // 🎯 P36: under each reviewer, how far its review was trusted (re-asked, ⚠️ flagged and capped, lowered) and how generous it is
+      holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-reviewers' }, h('h2', null, 'What the reviewers said'), reviews.map(r => h('div', { class: 'rp-reviewer', 'data-slot': r.slot },
+        h('p', null, h('strong', null, r.name), r.independent ? '' : h('span', { class: 'words-warn small' }, ' ⚠️ not independent'), (r.calibration || {}).flagged ? h('span', { class: 'words-warn small', 'data-testid': 'rp-flagged' }, ' ⚠️ not backed by quotes') : '', ': ', r.summary || ''),
+        (r.trust_notes || []).length ? h('ul', { class: 'small', 'data-testid': 'rp-trust' }, r.trust_notes.map(n => h('li', { class: /^⚠️/.test(n) ? 'words-warn' : 'muted' }, n))) : null))));
     }
     holder.appendChild(h('section', { class: 'card', 'data-testid': 'rp-next' }, h('h2', null, '🧭 What to try next'),
       (rep.try_next || []).length ? h('ul', null, rep.try_next.map(t => h('li', null, t.text, h('span', { class: 'small muted' }, ` (${t.from})`)))) : h('p', { class: 'small muted' }, 'Nothing stands out. Try ⚖️ comparing a variant to see what the pipeline changes.')));
