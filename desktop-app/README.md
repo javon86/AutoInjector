@@ -537,6 +537,62 @@ matching the spec's "cloud adjudication" — and steps back down toward the
 configured baseline tier automatically once a response lands and the task
 is making progress again.
 
+## 🎩 Alfred — your assistant for the whole app (off by default)
+
+Alfred is the butler grown into an assistant who can use everything in AutoInjector: your Akọwe books
+(status, ⚡ Make a book for me, pause/resume, profile, characters, story rules, world details, a chapter
+rewrite with a note, the report, saving, opening pages), images (Stable Diffusion through the 🎨 Images
+module, character locks, the LoRA library), video (when a backend is set up), the three AI panes (send,
+read the latest reply, health, check-in) and the output folders / logs. Full guide, incl. installing a
+local model on Windows: **[docs/ALFRED.md](../docs/ALFRED.md)**.
+
+- **Switch:** **🎩 Alfred: Off / On** in the title bar. Off = the app behaves exactly as without him (no
+  calls, no panel). On = a panel on the right, on every tab (also over 📖 Akọwe and 🎨 Images).
+- **His AI:** a local model via Ollama (`http://127.0.0.1:11434/v1`, recommended `ollama pull qwen2.5:7b`),
+  or the connected AI (the butler/manager's API), or a web AI pane — ⚙ in his panel. If it can't be
+  reached he says so in plain words; everything else keeps working.
+- **Safety:** a fixed tool list (no free code); looking runs directly, anything that changes or creates
+  something shows an **"I will: …"** card and runs only after **✔ Do it** (optional "always allow" for
+  harmless ones like making an image). He never approves book drafts or gets around Akọwe's approvals.
+  Max 8 steps per request, ■ Stop, timeouts. Open Interpreter only if you tick it — and then always the
+  exact code first.
+- **Records:** every action → the Activity log (tool name + title + outcome; never your words, prompts or
+  keys) and, for books, the Akọwe journal; "What Alfred did" in the panel.
+- **Notices** (no AI involved): an AI pane broke / was fixed, a book run paused / needs you / finished,
+  an image finished — rate-limited.
+
+## 🎨 Images — Stable Diffusion (checkpoints, LoRAs, character locks)
+
+The **🎨 Images** tab (next to 🤖 AutoInjector and 📖 Akọwe in the title bar) makes pictures with
+Stable Diffusion on your own PC. Plain-English setup for Windows (Stability Matrix, the one-click
+ComfyUI install, or a standalone Forge/A1111/ComfyUI): **[docs/STABLE_DIFFUSION_SETUP.md](../docs/STABLE_DIFFUSION_SETUP.md)**.
+
+- **Connect:** 🔍 *Find my SD app* checks localhost (Forge/A1111/reForge/SD.Next on 7860–7865,
+  ComfyUI on 8188/8000) and says which app answers — "✔ Connected to Forge on :7860 — model X" — or,
+  for a WebUI started without `--api`, exactly what to tick in Stability Matrix / put in
+  `webui-user.bat`. Or type an address and press *Connect*. *🧪 Test* makes one 512×512 picture.
+- **Start / install:** *⚙ Start & install* starts a Stability Matrix package (Forge, reForge, A1111,
+  SD.Next, ComfyUI) hidden with the API on, restarts it after a crash and stops it on quit
+  ("✔ ComfyUI running on :8188 (managed)"; log without secrets; "Start Stable Diffusion with
+  AutoInjector" is off by default) — or *⬇ Install Stable Diffusion* downloads the official ComfyUI
+  portable (GPU + disk-space check, resumable, verified) and a starter model.
+- **🖌 Generate:** prompt, negative, character lock, LoRA chips with weights (`<lora:name:w>` for the
+  WebUIs, LoRA loader nodes for ComfyUI; trigger words added for you), checkpoint, VAE, sampler,
+  scheduler, size, steps, CFG, seed, batch; progress + Stop; pictures saved in `stuff and thing/images/`
+  with their settings inside the PNG and in a `.json` next to it — *♻ Remake* / *🎲 Variation*.
+- **📚 Library:** checkpoints / LoRAs / embeddings / VAEs from Stability Matrix's `Data/Models`, the
+  SD app's own lists and folders you add; base model + trigger words from the safetensors header and
+  Civitai/Stability Matrix info files (only the header is read; model files are never changed);
+  preview pictures; your tags, collections, ★, default weight, notes; red/yellow warning when a LoRA
+  doesn't fit the checkpoint. Stored in `<settings folder>/sd-library.json`.
+- **🔒 Character locks:** LoRA + trigger words + fixed looks for one book character (same face every
+  time). Akọwe can ask for a portrait/cover with one: `POST /image/request` on the service bridge
+  ([docs/SD_IMAGE_API.md](../docs/SD_IMAGE_API.md)).
+- Code: `sd-backends.js`, `image-provider.js`, `sd-library.js`, `sd-images.js`, `sd-studio.js`,
+  `sd-runner.js`, `sd-installer.js`, `sd-api.js` (module API for Alfred), `images-studio.js`; design
+  and limits in [STABLE_DIFFUSION_PLAN.md](STABLE_DIFFUSION_PLAN.md). Tests: `test/sd-*.test.js`,
+  `test/images-tab.test.js`, `test/e2e/sd-images.e2e.js` (fake servers, nothing real downloaded).
+
 ## Akọwe inside AutoInjector (one app, one launcher)
 
 Starting AutoInjector also starts Akọwe (`akowe-server.js`, setting **Start with

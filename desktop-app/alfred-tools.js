@@ -357,12 +357,14 @@ def({
     width: { type: 'integer', minimum: 256, maximum: 2048 },
     height: { type: 'integer', minimum: 256, maximum: 2048 },
     style: { type: 'string', maxLength: 200 },
-    character: { type: 'string', maxLength: 200 },
+    character: { type: 'string', maxLength: 200, description: 'A character name: their saved character lock is used when there is one' },
+    negative_prompt: { type: 'string', maxLength: 1000 },
+    loras: { type: 'array', maxItems: 4, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, weight: { type: 'number' } }, additionalProperties: false } },
   }, additionalProperties: false },
-  describe: (a) => `Make an image of ${q(a.prompt)}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)}` : ''}, and save it in the images folder.`,
+  describe: (a) => `Make an image of ${q(a.prompt)}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}, and save it in the images folder.`,
   async run(a, ctx) {
-    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character });
-    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check 🎨 image generation in the Setup Wizard.` };
+    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, negativePrompt: a.negative_prompt, loras: a.loras });
+    if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check the 🎨 Images tab.` };
     return { ok: true, message: `Saved ${r.count || 1} image(s).`, data: { path: r.path, paths: r.paths || [r.path] }, image: r.path };
   },
 });
@@ -373,6 +375,62 @@ def({
   async run(a, ctx) {
     const items = await ctx.listOutputs('images', a.limit || 10);
     return { ok: true, data: items };
+  },
+});
+
+def({
+  name: 'image_generator_status', title: 'Image generator status', group: 'images',
+  description: 'Whether Stable Diffusion is connected (which app, checkpoint, busy) and whether AutoInjector is running it. Read-only.',
+  args: { type: 'object', properties: {}, additionalProperties: false },
+  async run(_a, ctx) {
+    const r = await ctx.sdStatus();
+    if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'NO_IMAGES_MODULE', message: (r && r.message) || 'The image module is not available in this build.' };
+    const im = r.image || {}; const mg = r.managed || {};
+    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null } };
+  },
+});
+def({
+  name: 'start_image_generator', title: 'Start Stable Diffusion', group: 'images', changes: true, allowAlways: true, timeoutMs: 200000,
+  description: 'Start the Stable Diffusion app AutoInjector knows about (from the 🎨 Images tab → Start & install), optionally a specific one by its target id.',
+  args: { type: 'object', properties: { target: { type: 'string', maxLength: 200 } }, additionalProperties: false },
+  describe: (a) => `Start Stable Diffusion${a.target ? ` (${a.target})` : ''} so images can be made (it can take a minute).`,
+  async run(a, ctx) {
+    const r = await ctx.sdStart(a.target);
+    return r && r.ok !== false ? { ok: true, message: 'Stable Diffusion is starting (or already running).' } : { ok: false, error: (r && r.error) || 'START_FAILED', message: (r && r.message) || "Stable Diffusion couldn't be started — see the 🎨 Images tab." };
+  },
+});
+def({
+  name: 'stop_image_generator', title: 'Stop Stable Diffusion', group: 'images', changes: true, allowAlways: true,
+  description: 'Stop the Stable Diffusion app that AutoInjector started (frees the GPU). One you started yourself is left alone.',
+  args: { type: 'object', properties: {}, additionalProperties: false },
+  describe: () => 'Stop the Stable Diffusion app AutoInjector started (frees the graphics card).',
+  async run(_a, ctx) {
+    const r = await ctx.sdStop();
+    return r && r.ok !== false ? { ok: true, message: 'Stopped.' } : { ok: false, error: (r && r.error) || 'STOP_FAILED', message: (r && r.message) || "It couldn't be stopped." };
+  },
+});
+def({
+  name: 'find_models', title: 'Search the model library', group: 'images',
+  description: 'Search the Stable Diffusion library (LoRAs, checkpoints, VAEs, embeddings) by words, e.g. a character or a style. Read-only.',
+  args: { type: 'object', properties: { query: { type: 'string', maxLength: 200 }, kind: { type: 'string', enum: ['lora', 'checkpoint', 'vae', 'embedding'] } }, additionalProperties: false },
+  async run(a, ctx) {
+    const items = await ctx.libraryFind(a.query || '', a.kind ? { kind: a.kind } : {});
+    if (!Array.isArray(items)) return { ok: false, error: (items && items.error) || 'LIBRARY_FAILED', message: (items && items.message) || 'The library could not be searched.' };
+    return { ok: true, data: items.slice(0, 15).map((x) => ({ id: x.id, name: x.name, kind: x.kind, base: x.base || null, trigger_words: (x.triggerWords || []).slice(0, 6), weight: x.defaultWeight != null ? x.defaultWeight : null })) };
+  },
+});
+def({
+  name: 'character_locks', title: 'Character locks', group: 'images',
+  description: 'List the saved character locks (a character\'s LoRAs, trigger words and look), or show one by name. Read-only. Use the character name in generate_image to use the lock.',
+  args: { type: 'object', properties: { name: { type: 'string', maxLength: 120 } }, additionalProperties: false },
+  async run(a, ctx) {
+    const brief = (l) => ({ character: l.character, book: l.book || null, loras: (l.loras || []).map((x) => `${x.name}:${x.weight}`), trigger_words: (l.triggerWords || []).slice(0, 8), look: clip(l.prompt || '', 200) });
+    if (a.name) {
+      const l = await ctx.characterLock(a.name);
+      return l && l.character ? { ok: true, data: brief(l) } : { ok: true, data: null, message: `There is no character lock for ${q(a.name)} yet (make one in the 🎨 Images tab → 🔒 Character locks).` };
+    }
+    const all = await ctx.characterLocks();
+    return { ok: true, data: (Array.isArray(all) ? all : []).slice(0, 30).map(brief) };
   },
 });
 

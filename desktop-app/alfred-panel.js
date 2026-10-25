@@ -33,7 +33,7 @@
     const s = document.createElement('style');
     s.id = 'alfred-style';
     s.textContent = `
-      body.alfred-open #wrap, body.alfred-open #akowe-tab { margin-right:${W}px; }
+      body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab { margin-right:${W}px; }
       #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}px; z-index:50; display:flex; flex-direction:column; background:#0d0f14; border-left:1px solid #2b3550; color:#e8ecf5; font-size:13px; }
       #alfred-drawer[hidden] { display:none; }
       #alfred-drawer header { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid #222a3d; background:#121726; }

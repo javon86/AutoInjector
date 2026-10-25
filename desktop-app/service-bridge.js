@@ -52,6 +52,8 @@ function createServiceBridge(deps) {
   const tools = d.tools || null; // { list(), run(name, args, {onEvent}) }
   const voice = d.voice || null; // { status(), configure(patch), speak(text), listen(opts) }
   const image = d.image || null; // { status(), configure(patch), generate(prompt, {onEvent}) }
+  // 🎨 Akọwe's image contract: { request(body), locks(), backend() } — docs/SD_IMAGE_API.md
+  const sdStudio = d.sdStudio || null;
   // The minimal phone client: the bridge serves this HTML shell (no token needed
   // to LOAD it — it carries the token from the pairing URL and uses it for data).
   const mobilePage = d.mobilePage || null; // string of HTML, or null to disable
@@ -308,6 +310,25 @@ function createServiceBridge(deps) {
         emit('image', { type: 'done' });
         // Never stream the raw base64 back over the bridge — just the outcome.
         return reply(res, r && r.ok ? 200 : 400, { ok: !!(r && r.ok), info: (r && r.info) || '', error: (r && r.error) || null, detail: (r && r.detail) || null, count: r && Array.isArray(r.images) ? r.images.length : (r && r.imageBase64 ? 1 : 0), bytes: r && r.imageBase64 ? r.imageBase64.length : 0 });
+      }
+      // --- 🎨 Character portraits / covers for Akọwe (docs/SD_IMAGE_API.md) ---
+      if (sdStudio && method === 'GET' && path === '/image/backend') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(sdStudio.backend) || {}));
+      }
+      if (sdStudio && method === 'GET' && path === '/image/locks') {
+        return reply(res, 200, Object.assign({ ok: true }, safeCall(sdStudio.locks) || { locks: [] }));
+      }
+      if (sdStudio && method === 'POST' && path === '/image/request') {
+        const body = await readJsonBody(req);
+        if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
+        emit('image', { type: 'request', purpose: body.purpose || 'free', characterLock: body.characterLock || null });
+        const r = await sdStudio.request(body || {});
+        emit('image', { type: 'done', ok: !!(r && r.ok) });
+        const code = r && r.ok ? 200 : (r && (r.error === 'NEED_PROMPT' || r.error === 'NO_LOCK') ? 400 : (r && (r.error === 'NO_ENDPOINT' || r.error === 'IMAGE_DISABLED') ? 503 : 502));
+        return reply(res, code, Object.assign({ ok: false }, r || {}));
+      }
+      if (!sdStudio && (path === '/image/backend' || path === '/image/locks' || path === '/image/request')) {
+        return reply(res, 501, { ok: false, error: 'IMAGE_NOT_WIRED' });
       }
       if (!image && (path === '/image/status' || path === '/image/settings' || path === '/image/generate')) {
         return reply(res, 501, { ok: false, error: 'IMAGE_NOT_WIRED' });

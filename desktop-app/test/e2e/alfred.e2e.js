@@ -3,7 +3,7 @@
 // On shows the drawer, and with a fake OpenAI-compatible model (like Ollama /v1) that returns tool
 // calls he answers "what's the status of my book?" from the REAL Akọwe server AutoInjector starts,
 // and "make an image of a lighthouse" goes through the "I will" card -> ✔ Do it -> the image path
-// (a fake Stable Diffusion server) -> a saved PNG. The drawer also works over the 📖 Akọwe tab.
+// (the 🎨 Images module, sd-api.js, against a fake Forge server) -> a saved PNG. The drawer also works over the 📖 Akọwe tab.
 //   xvfb-run -a node test/e2e/alfred.e2e.js
 // Env: AKOWE_E2E_PYTHON (default python3); SHOTS=<dir> (default: test/e2e/__screenshots__/alfred).
 const fs = require('fs');
@@ -12,7 +12,8 @@ const path = require('path');
 const net = require('net');
 const { execFileSync } = require('child_process');
 const { makeAsserts, APP_DIR } = require('./helpers');
-const { fakeLlm, fakeSd, toolCall, lastMsg, lastUser } = require('../alfred-fakes');
+const { fakeLlm, toolCall, lastMsg, lastUser } = require('../alfred-fakes');
+const { fakeA1111 } = require('../fixtures/fake-sd');
 const electron = require('playwright')._electron;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,13 +58,15 @@ async function main() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'alfred-e2e-home-'));
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'alfred-e2e-akowe-'));
   const fake = 'file://' + path.join(APP_DIR, 'test', 'fixtures', 'fake-chat.html');
+  const madeFiles = []; // the picture this test makes (removed afterwards)
   const llm = await fakeLlm(script);
-  const sd = await fakeSd();
+  const sd = await fakeA1111({ flavor: 'forge' });
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'], cwd: APP_DIR,
     env: Object.assign({}, process.env, {
       HOME: home, AKOWE_DATA: data, AUTOINJECTOR_AKOWE_SERVER: '1', AUTOINJECTOR_AKOWE_PYTHON: process.env.AKOWE_E2E_PYTHON || 'python3',
       AUTOINJECTOR_AKOWE_PORT: String(await freePort()), AUTOINJECTOR_CHECKIN: '0', AUTOINJECTOR_BRIDGE: '0',
+      AUTOINJECTOR_SD_AUTOSTART: '0', AUTOINJECTOR_SD_HOME: path.join(home, 'sdhome'), AUTOINJECTOR_SD_MODEL_DIRS: path.join(home, 'models'),
       AUTOINJECTOR_SITE_URL_CHATGPT: fake, AUTOINJECTOR_SITE_URL_CLAUDE: fake, AUTOINJECTOR_SITE_URL_GEMINI: fake,
       NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost',
     }),
@@ -100,7 +103,8 @@ async function main() {
     await controls.click('#tab-app-main');
 
     console.log('\n== turn him On ==');
-    await controls.evaluate((ep) => window.api.configureImage({ enabled: true, endpoint: ep }), sd.endpoint);
+    const con = await controls.evaluate((u) => window.api.sd.connect(u), sd.base);
+    assert(con && con.ok !== false, `Stable Diffusion (fake Forge) connected through the 🎨 Images module (${con && (con.label || con.message || con.error)})`);
     await controls.click('#btn-alfred-switch');
     const on = await until(async () => (await controls.textContent('#btn-alfred-switch')) === '🎩 Alfred: On' && await controls.isVisible('#alfred-drawer'), 5000, 150);
     assert(!!on, 'the switch reads On and the drawer opens');
@@ -126,14 +130,15 @@ async function main() {
     assert(!!card, 'an "I will" card appears');
     const cardText = await controls.textContent('#alfred-card');
     assert(/I will/.test(cardText) && /a lighthouse on a cliff at dusk/.test(cardText) && /Do it/.test(cardText), 'it says exactly what will happen, with ✔ Do it / ✖ No');
-    assert(sd.requests.length === 0, 'nothing was generated before ✔ Do it');
+    assert(!sd.state.lastTxt2img, 'nothing was generated before ✔ Do it');
     await shot(controls, '03-i-will-card');
     await controls.click('#alfred-do-it');
     const done = await until(async () => { const t = await controls.$$eval('#alfred-chat .al-alfred', (els) => els.map((e) => e.textContent)); return t.find((x) => /Here is your lighthouse/.test(x)); }, 30000, 300);
     assert(!!done, `Alfred reports the image: "${done && done.slice(0, 120)}"`);
-    assert(sd.requests.length === 1 && /lighthouse/.test(sd.requests[0].prompt), 'the image went through the existing image path (Stable Diffusion txt2img)');
+    assert(!!sd.state.lastTxt2img && /lighthouse/.test(sd.state.lastTxt2img.prompt), 'the image went through the 🎨 Images module (sd-api) to Stable Diffusion txt2img');
     const p = done && done.replace(/^.*Here is your lighthouse: /, '').trim();
     assert(!!p && fs.existsSync(p) && fs.statSync(p).size > 0, `the PNG was saved (${p})`);
+    madeFiles.push(p, String(p).replace(/\.png$/, '.json'));
     const did = await controls.textContent('#alfred-did-list');
     assert(/Make an image of/.test(did), '"What Alfred did" lists it');
     await controls.evaluate(() => { document.getElementById('alfred-did').open = true; });
@@ -166,6 +171,7 @@ async function main() {
   } finally {
     await app.close().catch(() => {});
     await llm.close(); await sd.close();
+    for (const f of madeFiles) { try { fs.unlinkSync(f); } catch (_) {} }
   }
   console.log(`\n${state.passed} passed, ${state.failed} failed`);
   return state.failed ? 1 : 0;

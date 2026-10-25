@@ -117,6 +117,13 @@ function installAlfred(h) {
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,
     generateImage: (o) => image.generate(o),
+    // Stable Diffusion module (sd-api.js) — the 🎨 Images tab's own API
+    sdStatus: async () => { const m = image.module(); return m ? m.sd.status() : { ok: false, error: 'NO_IMAGES_MODULE' }; },
+    sdStart: async (t) => { const m = image.module(); return m ? m.sd.start(t) : { ok: false, error: 'NO_IMAGES_MODULE' }; },
+    sdStop: async () => { const m = image.module(); return m ? m.sd.stop() : { ok: false, error: 'NO_IMAGES_MODULE' }; },
+    libraryFind: async (q, f) => { const m = image.module(); return m ? m.library.find(q, f) : { ok: false, error: 'NO_IMAGES_MODULE' }; },
+    characterLock: async (n) => { const m = image.module(); return m ? m.library.characterLock(n) : null; },
+    characterLocks: async () => { const m = image.module(); return m ? m.library.locks() : []; },
     listOutputs: async (cat, limit) => listOutputs(cat, limit),
     videoStatus: () => h.videoProvider.status(),
     generateVideo,

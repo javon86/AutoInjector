@@ -62,7 +62,7 @@ async function main() {
   assert(new Set(names).size === names.length, `tool names are unique (${names.length} tools)`);
   assert(registry.TOOLS.every((t) => t.name && t.title && t.description && t.args && t.args.type === 'object' && typeof t.changes === 'boolean' && typeof t.run === 'function'), 'every tool has a name, title, plain description, JSON args schema, a "changes things?" flag and an implementation');
   assert(registry.TOOLS.filter((t) => t.changes).every((t) => typeof t.describe === 'function'), 'every tool that changes something says what it will do (the "I will" line)');
-  for (const n of ['book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code']) assert(!!registry.get(n), `tool ${n} exists`);
+  for (const n of ['image_generator_status', 'start_image_generator', 'stop_image_generator', 'find_models', 'character_locks', 'book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code']) assert(!!registry.get(n), `tool ${n} exists`);
   assert(['book_status', 'list_images', 'read_latest_reply', 'ai_health', 'list_outputs', 'open_akowe_page', 'video_status'].every((n) => !registry.get(n).changes), 'status / list / read tools are read-only');
   assert(['start_book', 'edit_profile', 'generate_image', 'send_to_ai', 'run_code', 'export_logs', 'rewrite_chapter'].every((n) => registry.get(n).changes), 'tools that change or create something are flagged');
   assert(registry.get('generate_image').allowAlways && !registry.get('start_book').allowAlways && !registry.get('run_code').allowAlways && !registry.get('send_to_ai').allowAlways, '"always allow" only for harmless ones (generate image yes; start a book, send to an AI, run code no)');
@@ -436,6 +436,55 @@ async function main() {
     const m = make({ settings: { brain: 'auto', local: { endpoint: 'http://127.0.0.1:9/v1', model: 'q' } }, deps: { managerConfig: () => ({ endpoint: `${llm.base}/chat/completions`, model: 'api-model' }) } });
     const r = await m.a.ask('hi');
     assert(r.text === 'from api', 'Automatic: no local model answering -> the connected AI is used');
+    await llm.close();
+  }
+
+  // ------------------------------------------------------------------------------------------
+  console.log('\n== images through the sd-api module (the 🎨 Images tab\'s API) + SD tools ==');
+  {
+    const { createImageAdapter } = require('../alfred-image');
+    const seen = [];
+    const fakeModule = {
+      images: { generate: async (req) => { seen.push(req); return { ok: true, images: [{ path: '/out/images/sd-1.png', seed: 7 }], warnings: [] }; } },
+      sd: { status: async () => ({ ok: true, image: { enabled: true, endpoint: 'http://127.0.0.1:7860', label: 'Forge', checkpoint: 'dreamshaper_8' }, managed: { phase: 'running' } }), start: async (t) => { seen.push({ start: t || null }); return { ok: true }; }, stop: async () => { seen.push({ stop: true }); return { ok: true }; } },
+      library: { characterLock: async (n) => (/odile/i.test(n) ? { id: 'lock-1', character: 'Odile', loras: [{ name: 'odile_face', weight: 0.8 }], triggerWords: ['odile woman'], prompt: 'red hair' } : null), locks: async () => [{ id: 'lock-1', character: 'Odile', loras: [{ name: 'odile_face', weight: 0.8 }], triggerWords: ['odile woman'] }], find: async (q) => [{ id: 'lora:odile_face', name: 'odile_face', kind: 'lora', base: 'SD1.5', triggerWords: ['odile woman'], defaultWeight: 0.8 }].filter((x) => x.name.includes(q)) },
+    };
+    let providerCalled = false;
+    const adapter = createImageAdapter({ sdApi: { get: () => fakeModule }, imageProvider: { generate: async () => { providerCalled = true; return { ok: false }; } }, outputManager: {}, dbService: {} });
+    const r1 = await adapter.generate({ prompt: 'Odile at the harbor', character: 'Odile', style: 'ink wash', width: 768, height: 512 });
+    assert(r1.ok && r1.path === '/out/images/sd-1.png' && !providerCalled, 'the adapter generates through sd-api images.generate (not the old provider)');
+    assert(seen[0].characterLock === 'Odile' && /in the style of ink wash/.test(seen[0].prompt) && seen[0].width === 768 && seen[0].from === 'alfred', 'a saved character lock is used by name; style and size are passed');
+    await adapter.generate({ prompt: 'a gull', character: 'Bob' });
+    assert(!seen[1].characterLock && /featuring Bob/.test(seen[1].prompt), 'no lock for that name: the character is described in the prompt instead');
+    const fallback = createImageAdapter({ sdApi: { get: () => null }, imageProvider: { getSettings: () => ({ width: 512, height: 512 }), setSettings: () => {}, generate: async () => ({ ok: false, error: 'NO_ENDPOINT' }), status: () => ({}) }, outputManager: {}, dbService: {} });
+    const r3 = await fallback.generate({ prompt: 'x y' });
+    assert(!r3.ok && /Images tab/.test(r3.message), 'without the module it falls back to image-provider, with a plain message');
+
+    const llmQ = [];
+    const llm = await fakeLlm((body) => (lastMsg(body).role === 'tool' ? { content: `ok ${lastMsg(body).content.slice(0, 200)}` } : llmQ.shift()));
+    const { a } = make({ llm, ctx: {
+      sdStatus: () => fakeModule.sd.status(), sdStart: (t) => fakeModule.sd.start(t), sdStop: () => fakeModule.sd.stop(),
+      libraryFind: (q, f) => fakeModule.library.find(q, f), characterLock: (n) => fakeModule.library.characterLock(n), characterLocks: () => fakeModule.library.locks(),
+    } });
+    llmQ.push(toolCall('image_generator_status', {}));
+    let r = await a.ask('is SD running?');
+    assert(r.type === 'reply' && /Forge/.test(r.text) && /dreamshaper_8/.test(r.text), 'image generator status (read-only, no card)');
+    llmQ.push(toolCall('find_models', { query: 'odile', kind: 'lora' }));
+    r = await a.ask('find odile loras');
+    assert(r.type === 'reply' && /odile_face/.test(r.text), 'library search (read-only)');
+    llmQ.push(toolCall('character_locks', { name: 'odile' }));
+    r = await a.ask('show odile lock');
+    assert(r.type === 'reply' && /odile_face:0.8/.test(r.text), 'character lock lookup (read-only)');
+    llmQ.push(toolCall('start_image_generator', {}));
+    r = await a.ask('start SD');
+    assert(r.type === 'confirm' && /Start Stable Diffusion/.test(r.card.steps[0].text) && !seen.some((x) => x.start !== undefined), 'starting SD waits for the card');
+    await a.confirm(r.card.id);
+    assert(seen.some((x) => x.start === null), '✔ Do it starts it through sd-api');
+    llmQ.push(toolCall('stop_image_generator', {}));
+    r = await a.ask('stop SD');
+    await a.confirm(r.card.id);
+    assert(seen.some((x) => x.stop), 'and stops it');
+    assert(registry.validate(registry.get('generate_image'), { prompt: 'p q', loras: [{ name: 'odile_face', weight: 0.7 }] }).ok && !registry.validate(registry.get('generate_image'), { prompt: 'p q', loras: [{ weight: 1 }] }).ok, 'generate_image accepts LoRAs (name + weight), checked');
     await llm.close();
   }
 
