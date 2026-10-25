@@ -1,12 +1,12 @@
 'use strict';
 /*
- * self-repair.js — "AIs that always answer" (BookForge improvement plan, Section 1,
+ * self-repair.js — "AIs that always answer" (Akọwe improvement plan, Section 1,
  * P18.1–P18.8 + P18.10). PURE NODE: no Electron import. main.js supplies the
  * pane-facing pieces (send a message, run a page script, reload, read state).
  *
  *   P18.1  Check-in probe: a tiny message "Reply with only this word: <word>" sent
  *          to an AI at start, every N minutes while it is idle, and on demand
- *          (BookForge POST /v1/probe). Its reply is owned here: never relayed to
+ *          (Akọwe POST /v1/probe). Its reply is owned here: never relayed to
  *          another AI, never shown in the conversation, never nagged about tags.
  *   P18.2  classify(evidence) -> one failure code (CODES). Page signals for log-in
  *          pages, "are you human" checks, usage limits and page errors live in ONE
@@ -55,7 +55,7 @@ const CODES = ['TYPE_FAILED', 'SEND_NOT_CONFIRMED', 'NO_REPLY_FOUND', 'FALSE_DUP
 const USER_ONLY = new Set(['LOGGED_OUT', 'CAPTCHA', 'USAGE_LIMIT']);
 const STATES = ['ok', 'repairing', 'needs_user', 'broken', 'unknown'];
 
-// Plain words for each code (the panel, the log's "say" line and BookForge's 503 message).
+// Plain words for each code (the panel, the log's "say" line and Akọwe's 503 message).
 const PROBLEM_TEXT = {
   TYPE_FAILED: { short: "can't type", say: (L) => `AutoInjector can't find or type into ${L}'s message box.` },
   SEND_NOT_CONFIRMED: { short: "can't send", say: (L) => `AutoInjector typed into ${L} but the message didn't go out (the Send button may have moved).` },
@@ -64,7 +64,7 @@ const PROBLEM_TEXT = {
   STUCK_GENERATING: { short: 'stuck writing', say: (L) => `${L} seems stuck — it keeps "writing" and never finishes.` },
   LOGGED_OUT: { short: 'logged out', say: (L) => `${L} is logged out.`, fix: (L) => [`Open ${L}'s window (its pane in AutoInjector) and log in.`, 'AutoInjector notices by itself when you are back and checks again — nothing else to do.'] },
   CAPTCHA: { short: 'human check', say: (L) => `${L} is showing an "are you a human?" check.`, fix: (L) => [`Open ${L}'s window and complete the check (tick the box / solve the puzzle).`, 'AutoInjector notices by itself when it is gone and checks again.'] },
-  USAGE_LIMIT: { short: 'usage limit', say: (L) => `${L} says you've reached its usage limit.`, fix: (L) => [`Wait until the time ${L} shows in its window (or switch to another account / plan).`, 'AutoInjector re-checks every minute and carries on by itself when the limit is gone.', 'Meanwhile BookForge can use your other AIs.'] },
+  USAGE_LIMIT: { short: 'usage limit', say: (L) => `${L} says you've reached its usage limit.`, fix: (L) => [`Wait until the time ${L} shows in its window (or switch to another account / plan).`, 'AutoInjector re-checks every minute and carries on by itself when the limit is gone.', 'Meanwhile Akọwe can use your other AIs.'] },
   NETWORK_ERROR: { short: "didn't load", say: (L) => `${L}'s page didn't load (no internet, or the site is down).` },
   PAGE_ERROR: { short: 'page error', say: (L) => `${L}'s page shows an error ("something went wrong").` },
   UNKNOWN: { short: 'not answering', say: (L) => `${L} didn't answer a check-in and AutoInjector couldn't tell why.` }
@@ -952,7 +952,7 @@ function createSelfRepair(deps) {
   // A reply belongs to a check-in ONLY when the Relay Trace says it answers the
   // check-in's own [MSG #] (answers = the [MSG #] numbers it answers, relay-trace.js
   // answersOf / wouldAnswer) AND it holds the check-in's word as a whole word. A
-  // reply that also answers any other message (an older BookForge prompt, a relay,
+  // reply that also answers any other message (an older Akọwe prompt, a relay,
   // the user's message) belongs to that message's owner. Anything else goes
   // wherever it would go without check-ins.
   function wordsFor(site) {
@@ -984,7 +984,7 @@ function createSelfRepair(deps) {
         const seq = seqOf(a);
         if (!seq || !containsWord(t, a.word)) continue;
         if (ans.includes(seq)) {
-          // it also answers a message that is not a check-in (an older BookForge
+          // it also answers a message that is not a check-in (an older Akọwe
           // prompt / relay / the user's message, or one typed after it): that
           // owner comes first — a check-in never takes a reply that may be theirs
           if (ans.some((q) => q !== seq && !isCheckinSeq(site, q))) continue;
@@ -1006,7 +1006,7 @@ function createSelfRepair(deps) {
   // Trace gave to it alone, a reply without its word). Such a reply is never
   // relayed and never nagged about missing tags. -> 'owned' | 'answers-checkin' | 'has-word' | null
   // o.loose: a short reply holding a recent check-in / teach word counts even when
-  // the Relay Trace ties it to another message (the caller makes sure no BookForge
+  // the Relay Trace ties it to another message (the caller makes sure no Akọwe
   // request is waiting for this AI's answer).
   function probeReplyKind(site, text, answers, o) {
     if (!S[site]) return null;
@@ -1098,7 +1098,7 @@ function createSelfRepair(deps) {
     if (sendRes.ok) a.typed = true;
     rememberProbe(site, word, token.seq);
     try {
-      // withdrawn before it was typed, to make way for a BookForge request: not a failure
+      // withdrawn before it was typed, to make way for an Akọwe request: not a failure
       if (a.withdrawn && !sendRes.ok && !a.captured) return { ok: false, displaced: true, word };
       if (sendRes.ok || a.captured) {
         const t0 = now();
@@ -1222,7 +1222,7 @@ function createSelfRepair(deps) {
     x.running = true; x.step = 'check'; x.pending = null; x.yieldReq = false;
     const prev = { state: x.state, problem: x.problem };
     emit(site);
-    // No verdict: the check-in made way for a BookForge request, or another owner's
+    // No verdict: the check-in made way for an Akọwe request, or another owner's
     // reply took its message. The AI's state stays as it was (never "broken" for
     // this); with automatic check-ins on, it is sent again later, when the AI is
     // free (at most twice in a row) — otherwise it just ends quietly.
@@ -1238,7 +1238,7 @@ function createSelfRepair(deps) {
     try {
       let r = await probeOnce(site, reason);
       if (r.ok) return markOk(site, 'check-in');
-      if (r.displaced) return deferred(x.yieldReq ? 'bookforge' : 'other-reply');
+      if (r.displaced) return deferred(x.yieldReq ? 'akowe' : 'other-reply');
       let code = r.code;
       event('detect', { site, code, reason });
       if (USER_ONLY.has(code)) { note(site, 'signals', code, 'FOUND'); return needsUser(site, code); }
@@ -1251,7 +1251,7 @@ function createSelfRepair(deps) {
         if (done.has(step)) continue;
         done.add(step);
         if (step === 'give_up') break;
-        if (x.yieldReq) return deferred('bookforge'); // a BookForge request waits for this AI: repair later
+        if (x.yieldReq) return deferred('akowe'); // an Akọwe request waits for this AI: repair later
         if (step === 'teach') return askUser(site, code);
         x.step = step; emit(site);
         const out = await runStep(site, step, code, r);
@@ -1260,7 +1260,7 @@ function createSelfRepair(deps) {
         x.step = 'check'; emit(site);
         r = await probeOnce(site, `after-${step}`);
         if (r.ok) { note(site, step, code, 'FIXED'); return markOk(site, step); }
-        if (r.displaced) return deferred(x.yieldReq ? 'bookforge' : 'other-reply');
+        if (r.displaced) return deferred(x.yieldReq ? 'akowe' : 'other-reply');
         note(site, 'check', r.code, 'STILL_FAILING');
         if (USER_ONLY.has(r.code)) return needsUser(site, r.code);
         if (r.code !== code) { code = r.code; setState(site, 'repairing', code); ladder = (LADDERS[code] || LADDERS.UNKNOWN).filter((s) => !done.has(s)); }
@@ -1272,7 +1272,7 @@ function createSelfRepair(deps) {
     } finally { x.running = false; x.step = null; x.yieldReq = false; emit(site); }
   }
 
-  // A BookForge request wants this AI (main.js calls this before typing the prompt).
+  // An Akọwe request wants this AI (main.js calls this before typing the prompt).
   // A check-in that is not typed yet is withdrawn; one already typed is left to
   // settle (the caller waits, bounded, until busyWithSite() is false) and the
   // repair steps after it are put off. Returns 'none' | 'withdrawn' | 'wait'.
@@ -1462,7 +1462,7 @@ function createSelfRepair(deps) {
   }
   // Something went wrong in normal use (a timeout, a stall): check this AI when it is free.
   // While an AI is "not working" (P37.3) only the user's own actions check it at
-  // once; automatic reasons (a stall, a BookForge timeout) wait for the back-off.
+  // once; automatic reasons (a stall, an Akọwe timeout) wait for the back-off.
   const USER_REASON = /^(?:after-|you-asked|user|picked|saved|number)/;
   function requestCheck(site, reason) {
     const x = S[site];
@@ -1527,7 +1527,7 @@ function createSelfRepair(deps) {
   }
   function setIntervalMs(ms) { opt.intervalMs = Math.max(0, Number(ms) || 0); }
 
-  // BookForge contract v1.2 fields
+  // Akọwe contract v1.2 fields
   function health(site) {
     const x = S[site];
     if (!x) return { state: 'unknown', problem: null, since: null, last_probe_ok_at: null };

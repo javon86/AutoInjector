@@ -141,7 +141,7 @@ async function main() {
     console.log('\n== ⤓ Extract All writes the conversation + activity log to a text file ==');
     await controls.click('#btn-extract-all');
     await controls.waitForFunction(() => { const c = document.getElementById('ex-counts'); return !!(c && /Will save:/.test(c.textContent)); }, { timeout: 6000 }).catch(() => {});
-    await controls.click('#btn-extract-save'); // the safe default (no BookForge book here: the last 24 hours)
+    await controls.click('#btn-extract-save'); // the safe default (no Akọwe book here: the last 24 hours)
     const wroteLog = await controls.waitForFunction(
       () => { const s = document.getElementById('extract-status'); return !!(s && /Saved/.test(s.textContent)); },
       { timeout: 8000 }).then(() => true).catch(() => false);

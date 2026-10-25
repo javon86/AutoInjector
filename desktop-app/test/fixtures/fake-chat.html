@@ -62,7 +62,7 @@
   The fake AI answers every message that carries a "[MSG #n]" header with ONE
   reply: "[TO: X]" first, a body holding a unique token (e.g. GEMINI-R3), and
   "[FROM: SITE]" last. window.__fake.dump() reports what was posted / replied.
-  Optional reply hook (test/bookforge-e2e.test.js): when the page has an async
+  Optional reply hook (test/akowe-e2e.test.js): when the page has an async
   window.__fakeHook(message) (e.g. a Playwright exposeFunction), every new reply
   asks it first; it returns null (normal reply) or { lines, to?, delayMs?,
   tagged? } -- the body lines ("{TOKEN}" is replaced by the reply's token), the

@@ -87,7 +87,7 @@ function togglePickMenu(site) {
   menu.classList.toggle("collapsed");
   if (!menu.classList.contains("collapsed")) refreshPicker(site);
 }
-// Open the card for one AI (also from the BookForge panel's ⚠️), optionally with
+// Open the card for one AI (also from the Akọwe panel's ⚠️), optionally with
 // one item already chosen.
 function openPicker(site, role) {
   const menu = el(`pick-menu-${site}`);
@@ -170,7 +170,7 @@ async function pickerCancel(site) {
   pickerState(site).busy = null;
   await refreshPicker(site);
 }
-// The number teach as the card (and the BookForge panel's box) shows it.
+// The number teach as the card (and the Akọwe panel's box) shows it.
 const TEACH_PART_WORD = { input: "message box", send: "Send button", assistant: "reply area" };
 function teachSteps(t, L) {
   const ph = String((t && t.phase) || "type");
@@ -295,7 +295,7 @@ async function pickerNumber(site) {
   else pickerSay(site, r && r.error === "INACTIVE" ? `${SITE_LABELS[site]} isn't Active — tick it first.` : r && r.error === "CHECKING" ? `AutoInjector is checking ${SITE_LABELS[site]} right now — try again in a moment.` : `Couldn't start (${(r && r.error) || "error"}).`, "err");
   await refreshPicker(site);
 }
-// Old entry point kept for the BookForge panel's buttons and older callers.
+// Old entry point kept for the Akọwe panel's buttons and older callers.
 async function clearPickOverrides(site) {
   for (const role of PICK_ROLES) await window.api.clearSelectorOverride(site, role);
   pickerSay(site, "Overrides cleared — back to the built-in selectors.");
@@ -1660,7 +1660,7 @@ const COLLAPSIBLE_PANELS = {
   video: { panelId: "col-video", label: "Video Generation" },
   gpu: { panelId: "col-gpu", label: "GPU Usage" },
   systemai: { panelId: "col-systemai", label: "System AI" },
-  bookforge: { panelId: "col-bookforge", label: "BookForge bridge" }
+  akowe: { panelId: "col-akowe", label: "Akọwe bridge" }
 };
 function collapseYellowPanel(key) {
   const { panelId, label } = COLLAPSIBLE_PANELS[key];
@@ -1685,7 +1685,7 @@ function expandYellowPanel(key) {
 for (const key of Object.keys(COLLAPSIBLE_PANELS)) {
   const panel = el(COLLAPSIBLE_PANELS[key].panelId);
   const h2 = panel && panel.querySelector(".yc-head h2");
-  if (!h2 || key === "bookforge") continue; // BookForge's heading folds it to its slim status bar instead (see bfSetCollapsed)
+  if (!h2 || key === "akowe") continue; // Akọwe's heading folds it to its slim status bar instead (see bfSetCollapsed)
   h2.setAttribute("role", "button");
   h2.setAttribute("tabindex", "0");
   h2.title = "Minimize this panel to the top tab strip";
@@ -2822,9 +2822,9 @@ el("btn-download").onclick = () => {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 };
 
-// --- BookForge panel ----------------------------------------------------------
-// Loopback HTTP bridge that lets BookForge drive these panes (main.js +
-// bookforge-bridge.js; contract v1.1 in docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md).
+// --- Akọwe panel ----------------------------------------------------------
+// Loopback HTTP bridge that lets Akọwe drive these panes (main.js +
+// akowe-bridge.js; contract v1.1 in docs/AKOWE_AUTOINJECTOR_BRIDGE.md).
 // Compact layout, top to bottom:
 //   header  — health dot · state pill · one-line "where it's at" · 🔗 Connect ·
 //             Bridge switch · 📋 Copy diagnostics · ⓘ · ▾/▸ (collapse to a slim bar)
@@ -2842,9 +2842,9 @@ el("btn-download").onclick = () => {
 const BF_SITES = ["chatgpt", "claude", "gemini"];
 const BF_LABEL = { chatgpt: "ChatGPT", claude: "Claude", gemini: "Gemini" };
 const BF_STALE_MS = 90000;
-// Module-set letter badges (BookForge sets A–K). 11 hues picked to stay apart from
+// Module-set letter badges (Akọwe sets A–K). 11 hues picked to stay apart from
 // each other and readable with dark text (#0b0b10, contrast ≥ 4.5:1 on every one).
-// BookForge can reuse exactly these so a letter has the same colour in both apps:
+// Akọwe can reuse exactly these so a letter has the same colour in both apps:
 //   A #f87171 coral   B #fb923c orange  C #fbbf24 amber   D #a3e635 lime
 //   E #34d399 emerald F #22d3ee cyan    G #60a5fa blue    H #818cf8 indigo
 //   I #c084fc violet  J #f472b6 pink    K #a8a29e stone   (anything else: K's stone)
@@ -2900,50 +2900,50 @@ function bfKeyed(box, items, keyOf, create, update) {
 
 // Plain-English explanations behind every ⓘ.
 const BF_INFO = {
-  what: ["BookForge & your AIs", [
-    "BookForge is the book-writing app on this computer. This panel lets BookForge hand questions to ChatGPT, Claude or Gemini in the windows of this app and get the answers back — using your normal logins, so there are no API keys and no extra bills.",
-    "🔗 Connect BookForge does everything in one click: it turns the bridge on, checks BookForge is running, opens BookForge in your browser and hands it the connection key privately. You don't copy or paste anything.",
+  what: ["Akọwe & your AIs", [
+    "Akọwe is the book-writing app on this computer. This panel lets Akọwe hand questions to ChatGPT, Claude or Gemini in the windows of this app and get the answers back — using your normal logins, so there are no API keys and no extra bills.",
+    "🔗 Connect Akọwe does everything in one click: it turns the bridge on, checks Akọwe is running, opens Akọwe in your browser and hands it the connection key privately. You don't copy or paste anything.",
     "The coloured dot is the overall health: green = all good, amber = not connected yet / waiting, ⚠️ = something needs fixing (look for the ⚠️ marker), grey = bridge off. ▾ folds the panel into a slim one-line bar. 📋 copies a safe summary for asking for help.",
     "It only works on this computer (nothing on the internet can reach it), and only while the bridge is on."]],
   key: ["What is the connection key?", [
-    "It's like a password that lets only your BookForge talk to this app. Connect BookForge hands it over for you, so normally you never see it.",
+    "It's like a password that lets only your Akọwe talk to this app. Connect Akọwe hands it over for you, so normally you never see it.",
     "It never leaves your computer and is never shown in logs, reports or diagnostics, and it is never put in a web address. If anything tries to connect without it, it's refused — you'll see that in the Activity log."]],
   buttons: ["Copy, Show, and Make a new key", [
-    "📋 Copy connection key — puts the key on your clipboard. Then in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).",
+    "📋 Copy connection key — puts the key on your clipboard. Then in Akọwe open Settings → Connect AutoInjector and paste it (Ctrl+V).",
     "Show key — shows the key on screen, in case you'd rather type it. Click Hide key when you're done.",
-    "Make a new key — throws the old key away and makes a new one. BookForge is disconnected until it gets the new key (press Connect BookForge again). Only do this if you think someone else has seen your key."]],
+    "Make a new key — throws the old key away and makes a new one. Akọwe is disconnected until it gets the new key (press Connect Akọwe again). Only do this if you think someone else has seen your key."]],
   ais: ["What do the AI statuses mean?", [
-    "Ready — the window is loaded and its message box is on the page; BookForge can use it.",
+    "Ready — the window is loaded and its message box is on the page; Akọwe can use it.",
     "Not loaded / Didn't load — the window is missing, still loading, or its page failed to load. Open it and wait until the page has finished loading. A ⚠️ marker offers 🔁 Reload.",
     "Signed out? / No message box — the page loaded but there is no message box: log in, or (if the site changed its page) use 🎯 to pick the box.",
-    "Busy — it's answering a BookForge question right now. Leave that window alone until it finishes.",
-    "🔧 Repairing… — a check-in failed and AutoInjector is fixing it by itself (other known ways to find things, searching the page for the reply, reloading the window). BookForge uses your other AIs meanwhile.",
+    "Busy — it's answering an Akọwe question right now. Leave that window alone until it finishes.",
+    "🔧 Repairing… — a check-in failed and AutoInjector is fixing it by itself (other known ways to find things, searching the page for the reply, reloading the window). Akọwe uses your other AIs meanwhile.",
     "⚠️ Needs you — only you can fix it (log in, the “are you human?” check, a usage limit) or AutoInjector asks you to point at something (🎯 / 🔢). Click the ⚠️ for exactly what to do; it re-checks by itself.",
     "✕ Not working — AutoInjector tried everything it can. Click the ⚠️ to see what was tried, then 🎯 point at the part that's wrong, 🔢 let it learn with a number, or reload. It re-checks by itself after 5, 15, then every 60 minutes.",
     "Check-ins: every so often (and when you press 🩺 Check now) AutoInjector sends each idle AI a tiny message — “Reply with only this word: …” — to make sure it still answers. Never while you're typing in it or it's busy, and never passed on to the other AIs.",
-    "Not active — tick that AI as Active in this app if you want BookForge to use it.",
+    "Not active — tick that AI as Active in this app if you want Akọwe to use it.",
     "Under each status you see the result of its last request and when it happened."]],
   test: ["The connection check", [
-    "Each chip is one thing that has to work for BookForge to use your AIs: ✔ works, … waiting, ○ not done yet, ✕ problem (with a ⚠️ marker — click it). The chips update by themselves.",
+    "Each chip is one thing that has to work for Akọwe to use your AIs: ✔ works, … waiting, ○ not done yet, ✕ problem (with a ⚠️ marker — click it). The chips update by themselves.",
     "Details ▸ opens the full list. It opens by itself when something fails.",
-    "🧪 Test the connection checks every line for real, the same way BookForge works: the bridge, the key (a wrong key must be refused), each AI window, a tiny test question to each Active AI (it must answer with a small JSON reply), whether BookForge is running and whether it is connected.",
+    "🧪 Test the connection checks every line for real, the same way Akọwe works: the bridge, the key (a wrong key must be refused), each AI window, a tiny test question to each Active AI (it must answer with a small JSON reply), whether Akọwe is running and whether it is connected.",
     "A report is saved in the logs folder (📄 Last report) — it never contains your key or the question text. Heads-up: the test really types a short test message into each Active AI's chat."]],
   now: ["Now working on", [
-    "What BookForge is doing right now: the step of your book it's on (for example “Set B · B03 Main plot”), whether it's working or waiting for you, and a short note in plain words.",
-    "If something needs your OK — like a draft to approve — it shows here with a ✅ Review & approve button that opens the right page in BookForge.",
-    "BookForge sends this update by itself every few seconds while it's connected. If updates stop, a ⚠️ note says when the last one came."]],
+    "What Akọwe is doing right now: the step of your book it's on (for example “Set B · B03 Main plot”), whether it's working or waiting for you, and a short note in plain words.",
+    "If something needs your OK — like a draft to approve — it shows here with a ✅ Review & approve button that opens the right page in Akọwe.",
+    "Akọwe sends this update by itself every few seconds while it's connected. If updates stop, a ⚠️ note says when the last one came."]],
   book: ["Book checklist", [
-    "The big picture of your book: every part BookForge works through. The coloured letter is the module set (A, B, C…); ✓ done, ▶ in progress, ! waiting for your OK, ○ to do.",
-    "The bar shows how many parts are done out of the total. List ▸ shows every part with its name. 📚 Open BookForge takes you to the book in your browser."]],
+    "The big picture of your book: every part Akọwe works through. The coloured letter is the module set (A, B, C…); ✓ done, ▶ in progress, ! waiting for your OK, ○ to do.",
+    "The bar shows how many parts are done out of the total. List ▸ shows every part with its name. 📚 Open Akọwe takes you to the book in your browser."]],
   activity: ["Activity log", [
-    "A live diary of what happened between BookForge and this app, newest first — when BookForge connected, which AI it asked, how long the answer took, time-outs and refused connections.",
+    "A live diary of what happened between Akọwe and this app, newest first — when Akọwe connected, which AI it asked, how long the answer took, time-outs and refused connections.",
     "It never shows what was asked or answered, and never shows your connection key."]],
   tos: ["Is this allowed?", [
     "This app works by typing into the ChatGPT, Claude and Gemini websites for you. Those websites' terms of service may not allow automated use, and an account could be limited if they object.",
-    "That's why the bridge is off until you turn it on (Connect BookForge turns it on for you). Use it at your own risk, at a gentle pace."]],
+    "That's why the bridge is off until you turn it on (Connect Akọwe turns it on for you). Use it at your own risk, at a gentle pace."]],
   routing: ["Why keep routing / autopilot off?", [
-    "While BookForge is using an AI, the answer must go straight back to BookForge. If routing, autopilot, House Rules or a Prompt Sequence is also running, other messages can land in the same chat window at the same time and mix up the answers.",
-    "The bridge never forwards BookForge's answers to the other AIs — but it can't stop other features typing into that window. So turn those off while BookForge works."]]
+    "While Akọwe is using an AI, the answer must go straight back to Akọwe. If routing, autopilot, House Rules or a Prompt Sequence is also running, other messages can land in the same chat window at the same time and mix up the answers.",
+    "The bridge never forwards Akọwe's answers to the other AIs — but it can't stop other features typing into that window. So turn those off while Akọwe works."]]
 };
 
 // --- ⚠️ problems: every code in plain words, in ONE table ------------------------
@@ -2958,7 +2958,7 @@ const BF_CODES = {
     fix: () => ["Close any other AutoInjector window (check the taskbar).", "Press 🔁 Try again — or turn the Bridge switch off and on.", "Still stuck? Restart the computer."], retry: "restartBridge" },
   EACCES: { sev: "err", title: "This computer blocked the bridge",
     what: (c) => `Your system refused to let the bridge open its private address (port ${c.port}).`,
-    fix: () => ["Restart AutoInjector and press 🔁 Try again.", "If it keeps happening, security software may be blocking it — ask for help choosing another port (AUTOINJECTOR_BOOKFORGE_PORT)."], retry: "restartBridge" },
+    fix: () => ["Restart AutoInjector and press 🔁 Try again.", "If it keeps happening, security software may be blocking it — ask for help choosing another port (AUTOINJECTOR_AKOWE_PORT)."], retry: "restartBridge" },
   TOKEN_WRITE_FAILED: { sev: "err", title: "Couldn't save the connection key",
     what: () => "The app couldn't write the key file in its settings folder.",
     fix: () => ["Make sure your disk isn't full.", "Press 🔁 Try again."], retry: "restartBridge" },
@@ -2966,66 +2966,66 @@ const BF_CODES = {
     what: () => "The bridge was switched on but isn't listening.",
     fix: () => ["Press 🔁 Try again.", "If it keeps failing, restart AutoInjector, then 📋 copy the diagnostics and ask for help."], retry: "restartBridge" },
   NOT_READY: { sev: "err", title: "The bridge has no connection key yet",
-    what: () => "BookForge tried to connect, but this app hasn't made its connection key.",
+    what: () => "Akọwe tried to connect, but this app hasn't made its connection key.",
     fix: () => ["Press 🔁 Try again — the key is made automatically."], retry: "reconnect" },
   // Connect steps
   CONNECT_BRIDGE: { sev: "err", title: "Connecting stopped — the bridge went off",
     what: (c) => c.msg || "The bridge was turned off while connecting.",
     fix: () => ["Leave the Bridge switch on.", "Press 🔁 Try again."], retry: "reconnect" },
   CONNECT_BROWSER: { sev: "err", title: "Couldn't open your web browser",
-    what: (c) => c.msg || "Connect couldn't open BookForge in your browser.",
-    fix: () => ["Open BookForge in your browser yourself (📚 Open BookForge), then press 🔁 Try again.", "Or use “Other ways to connect” → 📋 Copy connection key and paste it in BookForge (Settings → Connect AutoInjector)."], retry: "reconnect" },
-  CONNECT_EXPIRED: { sev: "warn", title: "BookForge didn't pick up the connection in time",
-    what: () => "The one-time connection code lasts 2 minutes and BookForge didn't use it.",
-    fix: () => ["Press 🔁 Try again — a BookForge page opens in your browser.", "If BookForge asks, click Connect there and keep that page open."], retry: "reconnect" },
+    what: (c) => c.msg || "Connect couldn't open Akọwe in your browser.",
+    fix: () => ["Open Akọwe in your browser yourself (📚 Open Akọwe), then press 🔁 Try again.", "Or use “Other ways to connect” → 📋 Copy connection key and paste it in Akọwe (Settings → Connect AutoInjector)."], retry: "reconnect" },
+  CONNECT_EXPIRED: { sev: "warn", title: "Akọwe didn't pick up the connection in time",
+    what: () => "The one-time connection code lasts 2 minutes and Akọwe didn't use it.",
+    fix: () => ["Press 🔁 Try again — an Akọwe page opens in your browser.", "If Akọwe asks, click Connect there and keep that page open."], retry: "reconnect" },
   CONNECT_FAILED: { sev: "err", title: "Connecting didn't finish",
     what: (c) => c.msg || "Something went wrong while connecting.",
     fix: () => ["Press 🔁 Try again.", "If it keeps failing, 📋 copy the diagnostics and ask for help."], retry: "reconnect" },
-  BOOKFORGE_NOT_RUNNING: { sev: "warn", title: "BookForge isn't running",
-    what: (c) => c.msg || "This app can't find BookForge on this computer.",
-    fix: () => ["Start BookForge: double-click run-bookforge.bat (Windows) or run-bookforge.sh (Mac/Linux) in the BookForge folder — or press 🔁 “Start BookForge for me”.", "Wait until its window says it is running.", "Press 🔗 Connect BookForge."], retry: "startApp" },
-  NO_STATUS: { sev: "warn", title: "BookForge hasn't reported back yet",
-    what: () => "BookForge has the connection key, but hasn't sent what it's working on.",
-    fix: () => ["Keep the BookForge page open in your browser.", "If this stays, update BookForge — the AIs still work either way."], retry: "openBookforge" },
-  STATUS_STALE: { sev: "warn", title: "BookForge stopped sending updates",
-    what: (c) => `The last update from BookForge came ${c.ago || "a while ago"}. What you see is the last thing it reported.`,
-    fix: () => ["Check that BookForge's page is still open in your browser (📚 Open BookForge).", "If you restarted BookForge, press 🔗 Connect BookForge again."], retry: "openBookforge" },
+  AKOWE_NOT_RUNNING: { sev: "warn", title: "Akọwe isn't running",
+    what: (c) => c.msg || "This app can't find Akọwe on this computer.",
+    fix: () => ["Start Akọwe: double-click run-akowe.bat (Windows) or run-akowe.sh (Mac/Linux) in the Akọwe folder — or press 🔁 “Start Akọwe for me”.", "Wait until its window says it is running.", "Press 🔗 Connect Akọwe."], retry: "startApp" },
+  NO_STATUS: { sev: "warn", title: "Akọwe hasn't reported back yet",
+    what: () => "Akọwe has the connection key, but hasn't sent what it's working on.",
+    fix: () => ["Keep the Akọwe page open in your browser.", "If this stays, update Akọwe — the AIs still work either way."], retry: "openAkowe" },
+  STATUS_STALE: { sev: "warn", title: "Akọwe stopped sending updates",
+    what: (c) => `The last update from Akọwe came ${c.ago || "a while ago"}. What you see is the last thing it reported.`,
+    fix: () => ["Check that Akọwe's page is still open in your browser (📚 Open Akọwe).", "If you restarted Akọwe, press 🔗 Connect Akọwe again."], retry: "openAkowe" },
   // keys & pairing
   UNAUTHORIZED: { sev: "warn", title: "Something used an old or wrong connection key",
-    what: () => "A connection attempt with an old or wrong key was refused. Usually BookForge still has a key from before a new one was made.",
-    fix: () => ["Press 🔁 Try again (Connect) to hand BookForge the right key."], retry: "reconnect" },
+    what: () => "A connection attempt with an old or wrong key was refused. Usually Akọwe still has a key from before a new one was made.",
+    fix: () => ["Press 🔁 Try again (Connect) to hand Akọwe the right key."], retry: "reconnect" },
   PAIRING_CODE_INVALID: { sev: "warn", title: "An unknown or used-up connection code was refused",
     what: () => "Something tried a one-time connection code that isn't valid any more (each code works once).",
     fix: () => ["Press 🔁 Try again for a fresh code."], retry: "reconnect" },
   PAIRING_CODE_EXPIRED: { sev: "warn", title: "The connection code was used too late",
     what: () => "One-time connection codes last 2 minutes.",
-    fix: () => ["Press 🔁 Try again and finish in the BookForge page within 2 minutes."], retry: "reconnect" },
+    fix: () => ["Press 🔁 Try again and finish in the Akọwe page within 2 minutes."], retry: "reconnect" },
   TOO_MANY_ATTEMPTS: { sev: "warn", title: "Too many wrong connection codes",
     what: () => "After several wrong codes, connecting is paused for a minute (a safety lock).",
     fix: () => ["Wait one minute.", "Then press 🔁 Try again."], retry: "reconnect" },
   // the AIs
   SITE_NOT_READY: { sev: "err", title: (c) => `${c.L}'s window isn't ready`,
-    what: (c) => `${c.L}'s window is missing or still loading, so BookForge can't use it.`,
+    what: (c) => `${c.L}'s window is missing or still loading, so Akọwe can't use it.`,
     fix: (c) => [`Look at ${c.L}'s window in this app — log in if it asks.`, "Wait until the page has finished loading.", `Or press 🔁 Reload ${c.L}.`], retry: "reloadPane" },
-  NO_ACTIVE_AI: { sev: "warn", title: "No AI is switched on for BookForge",
-    what: () => "None of ChatGPT, Claude or Gemini is ticked as Active in this app, so BookForge has nobody to ask.",
+  NO_ACTIVE_AI: { sev: "warn", title: "No AI is switched on for Akọwe",
+    what: () => "None of ChatGPT, Claude or Gemini is ticked as Active in this app, so Akọwe has nobody to ask.",
     fix: () => ["Tick at least one AI as Active (the Active checkboxes in the User Panel).", "Press 🔁 Try again."], retry: "recheck" },
   TIMEOUT: { sev: "warn", title: (c) => `${c.L} took too long to answer`,
-    what: (c) => `${c.L} hadn't finished answering before BookForge stopped waiting.`,
-    fix: (c) => [`Look at ${c.L}'s window: is it still writing, logged out, or showing a pop-up/captcha?`, `Fix what it shows, or press 🔁 Reload ${c.L}.`, "BookForge asks you before it retries."], retry: "reloadPane" },
+    what: (c) => `${c.L} hadn't finished answering before Akọwe stopped waiting.`,
+    fix: (c) => [`Look at ${c.L}'s window: is it still writing, logged out, or showing a pop-up/captcha?`, `Fix what it shows, or press 🔁 Reload ${c.L}.`, "Akọwe asks you before it retries."], retry: "reloadPane" },
   LATE_EXPIRED: { sev: "warn", title: (c) => `${c.L} never answered`,
     what: (c) => `${c.L} never finished the answer; it is free again.`,
     fix: (c) => [`Check ${c.L}'s window (logged out? pop-up?).`, `Press 🔁 Reload ${c.L} if it looks stuck.`], retry: "reloadPane" },
   SEND_FAILED: { sev: "err", title: (c) => `Couldn't type into ${c.L}'s window`,
     what: (c) => `The question couldn't be typed into ${c.L}'s chat box.`,
-    fix: (c) => [`Look at ${c.L}'s window — close any pop-up and make sure you're logged in.`, `Press 🔁 Reload ${c.L}, then try again in BookForge.`], retry: "reloadPane" },
+    fix: (c) => [`Look at ${c.L}'s window — close any pop-up and make sure you're logged in.`, `Press 🔁 Reload ${c.L}, then try again in Akọwe.`], retry: "reloadPane" },
   SITE_BUSY: { sev: "warn", title: (c) => `${c.L} was busy`,
-    what: (c) => `${c.L} was still answering an earlier request, so BookForge was told to wait.`,
-    fix: () => ["Nothing to do — BookForge tries again by itself.", "Keep routing/autopilot off while BookForge works."], retry: null },
-  TOO_LARGE: { sev: "warn", title: "A request was too big", what: () => "BookForge sent a request over 1 MB, so it was refused.", fix: () => ["Update BookForge and AutoInjector.", "📋 Copy the diagnostics and ask for help if it repeats."], retry: null },
-  BAD_REQUEST: { sev: "warn", title: "A request this app couldn't use", what: () => "BookForge sent something this app couldn't understand.", fix: () => ["Update BookForge and AutoInjector so they match.", "Run 🧪 Test the connection."], retry: "linktest" },
-  UNKNOWN_SITE: { sev: "warn", title: "A request named an unknown AI", what: () => "BookForge asked for an AI this app doesn't have.", fix: () => ["Update BookForge and AutoInjector so they match."], retry: "linktest" },
-  NOT_FOUND: { sev: "warn", title: "A request went to the wrong address", what: () => "Something asked the bridge for a page that doesn't exist.", fix: () => ["Update BookForge and AutoInjector so they match."], retry: "linktest" },
+    what: (c) => `${c.L} was still answering an earlier request, so Akọwe was told to wait.`,
+    fix: () => ["Nothing to do — Akọwe tries again by itself.", "Keep routing/autopilot off while Akọwe works."], retry: null },
+  TOO_LARGE: { sev: "warn", title: "A request was too big", what: () => "Akọwe sent a request over 1 MB, so it was refused.", fix: () => ["Update Akọwe and AutoInjector.", "📋 Copy the diagnostics and ask for help if it repeats."], retry: null },
+  BAD_REQUEST: { sev: "warn", title: "A request this app couldn't use", what: () => "Akọwe sent something this app couldn't understand.", fix: () => ["Update Akọwe and AutoInjector so they match.", "Run 🧪 Test the connection."], retry: "linktest" },
+  UNKNOWN_SITE: { sev: "warn", title: "A request named an unknown AI", what: () => "Akọwe asked for an AI this app doesn't have.", fix: () => ["Update Akọwe and AutoInjector so they match."], retry: "linktest" },
+  NOT_FOUND: { sev: "warn", title: "A request went to the wrong address", what: () => "Something asked the bridge for a page that doesn't exist.", fix: () => ["Update Akọwe and AutoInjector so they match."], retry: "linktest" },
   // 🧪 link test
   LINKTEST_FAIL: { sev: "err", title: (c) => `Test failed: ${c.step || "a check"}`,
     what: (c) => c.msg || "This check failed during the connection test.",
@@ -3033,27 +3033,27 @@ const BF_CODES = {
   ALREADY_RUNNING: { sev: "warn", title: "A test is already running", what: () => "Only one connection test can run at a time.", fix: () => ["Wait for it to finish (or press ■ Stop)."], retry: null },
   LINKTEST_COULDNT_RUN: { sev: "err", title: "The connection test couldn't run", what: (c) => c.msg || "The test stopped before it started.", fix: () => ["Press 🔁 Try again.", "If it keeps failing, 📋 copy the diagnostics and ask for help."], retry: "linktest" },
   BAD_FILE: { sev: "warn", title: "Couldn't open the report", what: () => "The saved test report couldn't be found or opened.", fix: () => ["Run 🧪 Test the connection again to make a new report.", "Reports are in the app's logs folder."], retry: "linktest" },
-  // Start BookForge for me / open pages / clipboard
-  NO_LAUNCHER: { sev: "warn", title: "Couldn't find BookForge next to this app", what: (c) => c.msg || "The run-bookforge launcher isn't in the BookForge folder next to AutoInjector.", fix: () => ["Start BookForge yourself with run-bookforge.bat (or .sh).", "Then press 🔗 Connect BookForge."], retry: "reconnect" },
-  SPAWN_FAILED: { sev: "err", title: "Couldn't start BookForge", what: (c) => c.msg || "Starting the BookForge launcher failed.", fix: () => ["Start BookForge yourself with run-bookforge.bat (or .sh).", "Then press 🔗 Connect BookForge."], retry: "startApp" },
-  ALREADY_STARTING: { sev: "warn", title: "BookForge is already starting", what: () => "Give it a moment — the first start can take a few minutes.", fix: () => ["Wait until BookForge's window says it is running, then press 🔗 Connect BookForge."], retry: "reconnect" },
-  STILL_STARTING: { sev: "warn", title: "BookForge is still starting", what: (c) => c.msg || "BookForge didn't answer yet.", fix: () => ["Wait until BookForge's window says it is running.", "Press 🔁 Try again."], retry: "reconnect" },
-  OPEN_FAILED: { sev: "err", title: "Couldn't open your web browser", what: (c) => c.msg || "The page couldn't be opened.", fix: () => ["Open your browser and go to BookForge's address yourself (usually http://127.0.0.1:8780/).", "Press 🔁 Try again."], retry: "openBookforge" },
+  // Start Akọwe for me / open pages / clipboard
+  NO_LAUNCHER: { sev: "warn", title: "Couldn't find Akọwe next to this app", what: (c) => c.msg || "The run-akowe launcher isn't in the Akọwe folder next to AutoInjector.", fix: () => ["Start Akọwe yourself with run-akowe.bat (or .sh).", "Then press 🔗 Connect Akọwe."], retry: "reconnect" },
+  SPAWN_FAILED: { sev: "err", title: "Couldn't start Akọwe", what: (c) => c.msg || "Starting the Akọwe launcher failed.", fix: () => ["Start Akọwe yourself with run-akowe.bat (or .sh).", "Then press 🔗 Connect Akọwe."], retry: "startApp" },
+  ALREADY_STARTING: { sev: "warn", title: "Akọwe is already starting", what: () => "Give it a moment — the first start can take a few minutes.", fix: () => ["Wait until Akọwe's window says it is running, then press 🔗 Connect Akọwe."], retry: "reconnect" },
+  STILL_STARTING: { sev: "warn", title: "Akọwe is still starting", what: (c) => c.msg || "Akọwe didn't answer yet.", fix: () => ["Wait until Akọwe's window says it is running.", "Press 🔁 Try again."], retry: "reconnect" },
+  OPEN_FAILED: { sev: "err", title: "Couldn't open your web browser", what: (c) => c.msg || "The page couldn't be opened.", fix: () => ["Open your browser and go to Akọwe's address yourself (usually http://127.0.0.1:8780/).", "Press 🔁 Try again."], retry: "openAkowe" },
   NO_CLIPBOARD: { sev: "warn", title: "Couldn't use the clipboard", what: () => "Copying didn't work on this computer.", fix: () => ["Use “Show key” and copy it by hand (or select the text shown).", "Press 🔁 Try again."], retry: null },
-  TOKEN_UNAVAILABLE: { sev: "err", title: "Couldn't read the connection key", what: () => "The key file couldn't be read or made.", fix: () => ["Press 🔁 Try again.", "If it repeats, press 🔗 Connect BookForge — it makes the key for you."], retry: null },
+  TOKEN_UNAVAILABLE: { sev: "err", title: "Couldn't read the connection key", what: () => "The key file couldn't be read or made.", fix: () => ["Press 🔁 Try again.", "If it repeats, press 🔗 Connect Akọwe — it makes the key for you."], retry: null },
   DIAGNOSTICS_FAILED: { sev: "warn", title: "Couldn't put the diagnostics together", what: () => "The app couldn't build the summary.", fix: () => ["Press 🔁 Try again."], retry: null },
   // P18 self-repair
   AI_NEEDS_YOU: { sev: "warn", title: (c) => `${c.L || "This AI"} needs you`,
     what: (c) => c.say || `${c.L || "This AI"} needs you before it can work again.`,
     fix: (c) => (Array.isArray(c.fix) && c.fix.length ? c.fix : [`Open ${c.L || "the AI"}'s window and follow what it shows.`, "AutoInjector checks again by itself."]), retry: null },
   AI_BROKEN: { sev: "err", title: (c) => `${c.L || "This AI"} isn't working`,
-    what: (c) => `${c.say || "A check-in failed."} AutoInjector tried to fix it by itself but couldn't. BookForge uses your other AIs meanwhile.`,
+    what: (c) => `${c.say || "A check-in failed."} AutoInjector tried to fix it by itself but couldn't. Akọwe uses your other AIs meanwhile.`,
     fix: (c) => [`Press 🎯 Point at it: choose the part that's wrong (message box, Send button or the AI's reply), press OK and click it in ${c.L || "the AI"}'s window, then Save.`, `Or press 🔢 Do it for me with a number: you type a 4-digit number into ${c.L || "the AI"} and press Send — AutoInjector learns all three by itself.`, "Or press 🔄 Reload, then 🩺 Check again.", "AutoInjector re-checks by itself after 5, 15, then every 60 minutes — it won't keep asking you."], retry: null },
   // the panel itself
   IPC_FAILED: { sev: "err", title: "The app didn't answer", what: (c) => `${c.where || "This action"} didn't get an answer from the main app.`, fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: null },
   IPC_MISSING: { sev: "err", title: "This part of the app isn't available", what: (c) => `${c.where || "This action"} isn't available in this version of the app.`, fix: () => ["Restart AutoInjector. If it still happens, update AutoInjector."], retry: null },
-  STATUS_UNAVAILABLE: { sev: "err", title: "The panel can't get the latest status", what: () => "Asking the main app for the BookForge status failed, so what you see may be out of date.", fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: "recheck" },
-  UI_ERROR: { sev: "err", title: "The BookForge panel hit a snag", what: () => "Something unexpected went wrong while showing this panel. The rest of the app is fine.", fix: () => ["Press 🔁 Try again.", "If it repeats, 📋 copy the diagnostics and ask for help."], retry: "recheck" }
+  STATUS_UNAVAILABLE: { sev: "err", title: "The panel can't get the latest status", what: () => "Asking the main app for the Akọwe status failed, so what you see may be out of date.", fix: () => ["Press 🔁 Try again.", "If it keeps happening, restart AutoInjector."], retry: "recheck" },
+  UI_ERROR: { sev: "err", title: "The Akọwe panel hit a snag", what: () => "Something unexpected went wrong while showing this panel. The rest of the app is fine.", fix: () => ["Press 🔁 Try again.", "If it repeats, 📋 copy the diagnostics and ask for help."], retry: "recheck" }
 };
 function bfCodeInfo(code) { return BF_CODES[code] || BF_CODES[String(code || "").toUpperCase()] || null; }
 const BF_START_ERRORS = ["EADDRINUSE", "EACCES", "TOKEN_WRITE_FAILED"];
@@ -3082,62 +3082,62 @@ function bfDerive(s) {
   const working = BF_SITES.map((k) => [k, s.sites && s.sites[k] && s.sites[k].inFlight]).find(([, f]) => f && !f.selftest);
   const phase = (s.connect && s.connect.phase) || "idle";
   const d = { badKey, connected, phase, activeSites, notReady };
-  if (!s.enabled && !bf.connecting) return Object.assign(d, { key: "off", pill: "⏻ Off", tone: "off", title: "BookForge isn't connected", sub: "The bridge is off — nothing is shared until you connect.", next: "Press “🔗 Connect BookForge”. It turns the bridge on and connects BookForge in one click." });
+  if (!s.enabled && !bf.connecting) return Object.assign(d, { key: "off", pill: "⏻ Off", tone: "off", title: "Akọwe isn't connected", sub: "The bridge is off — nothing is shared until you connect.", next: "Press “🔗 Connect Akọwe”. It turns the bridge on and connects Akọwe in one click." });
   if (s.enabled && (bf.starting || (!s.listening && (s.starting || !s.error)))) return Object.assign(d, { key: "starting", pill: "⏳ Starting", tone: "info", title: "Starting the bridge…", sub: `Opening a private doorway on this computer (127.0.0.1:${port}).`, next: "Wait a moment while the bridge starts…" });
   if (s.enabled && !s.listening) { const e = bfErrorText(s.error, port); return Object.assign(d, { key: "error", pill: "⚠️ Problem", tone: "err", title: e.title, sub: e.sub, next: "Click the ⚠️ next to the Bridge switch for how to fix it." }); }
   let next;
   if (bf.test.running) next = "The connection test is running — watch the chips. You can stop it any time.";
-  else if (badKey && !connected) next = "BookForge (or something else) tried an old or wrong key. Press “🔗 Connect BookForge” to hand BookForge the right one.";
-  else if (!connected && (phase === "waiting" || phase === "paired")) next = "Finish in the BookForge page that opened in your browser. This panel ticks by itself when it's done.";
-  else if (!connected && phase === "not_running") next = "Start BookForge, then press Connect BookForge again.";
-  else if (!connected) next = "Press “🔗 Connect BookForge”. It opens BookForge in your browser and connects it — nothing to copy or paste.";
-  else if (!activeSites.length) next = "Tick at least one AI (ChatGPT, Claude or Gemini) as Active in this app so BookForge has someone to ask.";
-  else if (notReady.length) next = `Open ${notReady.map((k) => bfLabel(k, s)).join(" and ")} and log in, so BookForge can use ${notReady.length > 1 ? "them" : "it"}.`;
-  else if (s.bookforge && s.bookforge.approvals && s.bookforge.approvals.count > 0) next = "BookForge is waiting for your OK — press ✅ Review & approve.";
-  else next = "All set. Use BookForge as normal and keep routing/autopilot off while it works.";
+  else if (badKey && !connected) next = "Akọwe (or something else) tried an old or wrong key. Press “🔗 Connect Akọwe” to hand Akọwe the right one.";
+  else if (!connected && (phase === "waiting" || phase === "paired")) next = "Finish in the Akọwe page that opened in your browser. This panel ticks by itself when it's done.";
+  else if (!connected && phase === "not_running") next = "Start Akọwe, then press Connect Akọwe again.";
+  else if (!connected) next = "Press “🔗 Connect Akọwe”. It opens Akọwe in your browser and connects it — nothing to copy or paste.";
+  else if (!activeSites.length) next = "Tick at least one AI (ChatGPT, Claude or Gemini) as Active in this app so Akọwe has someone to ask.";
+  else if (notReady.length) next = `Open ${notReady.map((k) => bfLabel(k, s)).join(" and ")} and log in, so Akọwe can use ${notReady.length > 1 ? "them" : "it"}.`;
+  else if (s.akowe && s.akowe.approvals && s.akowe.approvals.count > 0) next = "Akọwe is waiting for your OK — press ✅ Review & approve.";
+  else next = "All set. Use Akọwe as normal and keep routing/autopilot off while it works.";
   if (working) {
     const [site, f] = working;
     const L = bfLabel(site, s);
     const el2 = (f.elapsed_ms || 0) + (Date.now() - bf.at);
     const late = f.phase === "late";
     return Object.assign(d, { key: "working", pill: "✍️ Working", tone: "work",
-      title: `BookForge asked ${L} for an answer… ${bfClock(el2)}`,
-      sub: late ? `${L} is taking longer than BookForge waited; a late answer is still saved for BookForge.` : "The answer goes straight back to BookForge.",
-      next: `Leave the ${L} window alone until it finishes answering — BookForge is waiting for it.` });
+      title: `Akọwe asked ${L} for an answer… ${bfClock(el2)}`,
+      sub: late ? `${L} is taking longer than Akọwe waited; a late answer is still saved for Akọwe.` : "The answer goes straight back to Akọwe.",
+      next: `Leave the ${L} window alone until it finishes answering — Akọwe is waiting for it.` });
   }
   if (connected) {
-    const b = s.bookforge;
+    const b = s.akowe;
     const when = b && !b.stale ? `last update ${bfAgo(b.receivedAt)}` : `last contact ${bfAgo(s.lastExternalContactAt || (b && b.receivedAt))}`;
-    return Object.assign(d, { key: "connected", pill: "✔ Connected", tone: "ok", title: "BookForge is connected", sub: `can use your AIs · ${when}`, next });
+    return Object.assign(d, { key: "connected", pill: "✔ Connected", tone: "ok", title: "Akọwe is connected", sub: `can use your AIs · ${when}`, next });
   }
-  if (phase === "waiting" || phase === "paired") return Object.assign(d, { key: "waiting", pill: "📡 Connecting", tone: "wait", title: "Connecting to BookForge…", sub: "finish in the BookForge page in your browser", next });
-  return Object.assign(d, { key: "waiting", pill: "📡 Not connected", tone: "wait", title: "Bridge is on — BookForge isn't connected yet", sub: `listening on 127.0.0.1:${port} (this computer only)`, next });
+  if (phase === "waiting" || phase === "paired") return Object.assign(d, { key: "waiting", pill: "📡 Connecting", tone: "wait", title: "Connecting to Akọwe…", sub: "finish in the Akọwe page in your browser", next });
+  return Object.assign(d, { key: "waiting", pill: "📡 Not connected", tone: "wait", title: "Bridge is on — Akọwe isn't connected yet", sub: `listening on 127.0.0.1:${port} (this computer only)`, next });
 }
 
 // --- 🔗 Connect: the message on the status line --------------------------------
 function bfConnectView(s, d) {
   const c = s.connect || {};
-  if (bf.startingApp) return { tone: "work", text: "Starting BookForge for you… the first start can take a minute or two." };
+  if (bf.startingApp) return { tone: "work", text: "Starting Akọwe for you… the first start can take a minute or two." };
   if (bf.localMsg) return bf.localMsg;
-  if (bf.connecting || c.phase === "starting_bridge" || c.phase === "checking") return { tone: "work", text: c.phase === "checking" ? "Looking for BookForge…" : "Turning the bridge on…" };
+  if (bf.connecting || c.phase === "starting_bridge" || c.phase === "checking") return { tone: "work", text: c.phase === "checking" ? "Looking for Akọwe…" : "Turning the bridge on…" };
   if (d.connected && (c.phase === "connected" || c.phase === "idle" || !c.phase || c.phase === "no_status" || c.phase === "expired" || c.phase === "error" || c.phase === "not_running")) {
-    if (c.phase === "no_status" || !s.bookforge) return { tone: "ok", text: "Connected ✔ (BookForge hasn't said what it's working on yet.)" };
+    if (c.phase === "no_status" || !s.akowe) return { tone: "ok", text: "Connected ✔ (Akọwe hasn't said what it's working on yet.)" };
     return { tone: "ok", text: "" }; // the pill already says "Connected"
   }
   switch (c.phase) {
     case "waiting": {
       const left = c.expiresAt ? Math.max(0, c.expiresAt - bfNow()) : 0;
-      return { tone: "work", text: `BookForge opened in your browser — click Connect there if it asks (${bfClock(left)} left).` };
+      return { tone: "work", text: `Akọwe opened in your browser — click Connect there if it asks (${bfClock(left)} left).` };
     }
-    case "paired": return { tone: "work", text: "BookForge has the key ✔ — waiting for its first update…" };
+    case "paired": return { tone: "work", text: "Akọwe has the key ✔ — waiting for its first update…" };
     case "connected": // connected earlier, but not any more (no contact / updates stopped)
-      return s.bookforge && s.bookforge.stale
-        ? { tone: "warn", text: `BookForge stopped sending updates ${bfAgo(s.bookforge.receivedAt)}.` }
-        : { tone: "warn", text: "BookForge isn't connected any more." };
-    case "no_status": return { tone: "warn", text: "BookForge has the key, but hasn't reported back yet." };
-    case "not_running": return { tone: "warn", text: "BookForge isn't running.", start: !!c.canStartApp };
+      return s.akowe && s.akowe.stale
+        ? { tone: "warn", text: `Akọwe stopped sending updates ${bfAgo(s.akowe.receivedAt)}.` }
+        : { tone: "warn", text: "Akọwe isn't connected any more." };
+    case "no_status": return { tone: "warn", text: "Akọwe has the key, but hasn't reported back yet." };
+    case "not_running": return { tone: "warn", text: "Akọwe isn't running.", start: !!c.canStartApp };
     case "expired": case "error": return { tone: "err", text: "Connecting didn't finish." };
-    default: return { tone: "", text: "One click: turns the bridge on, opens BookForge in your browser and hands it the key." };
+    default: return { tone: "", text: "One click: turns the bridge on, opens Akọwe in your browser and hands it the key." };
   }
 }
 function bfRenderConnect(s, d) {
@@ -3152,13 +3152,13 @@ function bfRenderConnect(s, d) {
     const c = s.connect || {};
     const busy = bf.connecting || bf.startingApp || c.phase === "starting_bridge" || c.phase === "checking";
     btn.disabled = busy;
-    let label = "🔗 Connect BookForge";
+    let label = "🔗 Connect Akọwe";
     if (busy) label = "⏳ Connecting…";
     else if (c.phase === "waiting" || c.phase === "paired") label = "🔗 Connect again";
     else if (d.connected) label = "✔ Connected";
     bfSetText(btn, label);
     btn.dataset.state = d.connected && !busy ? "connected" : "";
-    btn.title = d.connected ? "BookForge is connected. Click to connect again (for example after restarting BookForge)." : "Turns the bridge on, opens BookForge in your browser and hands it the connection key — nothing to copy or paste";
+    btn.title = d.connected ? "Akọwe is connected. Click to connect again (for example after restarting Akọwe)." : "Turns the bridge on, opens Akọwe in your browser and hands it the connection key — nothing to copy or paste";
   }
 }
 
@@ -3170,7 +3170,7 @@ const BF_OUTCOME = {
   LATE_EXPIRED: () => "Never answered",
   SEND_FAILED: () => "Couldn't type the prompt",
   SITE_NOT_READY: () => "Window wasn't loaded",
-  SITE_BUSY: () => "Was busy — told BookForge to wait",
+  SITE_BUSY: () => "Was busy — told Akọwe to wait",
   CACHED: () => "Gave an earlier answer again"
 };
 // Why an AI window isn't ready, as a short pill word (main sends problem + problemSay).
@@ -3226,8 +3226,8 @@ function bfRenderAis(s) {
 function bfRowForStep(id) {
   if (id === "bridge_on") return "bridge";
   if (id === "key_file" || id === "wrong_key" || id === "right_key") return "key";
-  if (id === "bookforge_running") return "app";
-  if (id === "bookforge_connected") return "paired";
+  if (id === "akowe_running") return "app";
+  if (id === "akowe_connected") return "paired";
   const [k, site] = String(id).split(":");
   if (k === "pane") return `ready:${site}`;
   if (k === "roundtrip") return `trip:${site}`;
@@ -3250,23 +3250,23 @@ function bfConnRows(s, d) {
   rows.push({ id: "bridge", label: "The bridge is on", short: "Bridge",
     st: on ? "ok" : s.enabled && s.error ? "bad" : s.enabled ? "wait" : "todo",
     state: on ? "On" : s.enabled && s.error ? "Problem" : s.enabled ? "Starting…" : "Off",
-    detail: on ? `Listening on 127.0.0.1:${s.port} — this computer only.` : s.enabled && s.error ? bfErrorText(s.error, s.port).title : "Connect BookForge turns it on for you." });
+    detail: on ? `Listening on 127.0.0.1:${s.port} — this computer only.` : s.enabled && s.error ? bfErrorText(s.error, s.port).title : "Connect Akọwe turns it on for you." });
   rows.push({ id: "key", label: "The connection key is ready", short: "Key",
     st: s.tokenPresent ? "ok" : "todo", state: s.tokenPresent ? "Ready" : "Not yet",
-    detail: s.tokenPresent ? "BookForge gets it privately when you connect — never in a web address." : "Made automatically when you connect." });
+    detail: s.tokenPresent ? "Akọwe gets it privately when you connect — never in a web address." : "Made automatically when you connect." });
   const app = s.app || {};
-  const bfFresh = !!(s.bookforge && !s.bookforge.stale);
+  const bfFresh = !!(s.akowe && !s.akowe.stale);
   const appOk = app.running === true || bfFresh;
-  rows.push({ id: "app", label: "BookForge is running", short: "BookForge running",
+  rows.push({ id: "app", label: "Akọwe is running", short: "Akọwe running",
     st: appOk ? "ok" : app.running === false ? (c.phase === "not_running" ? "bad" : "todo") : "wait",
     state: appOk ? "Running" : app.running === false ? "Not running" : "Checking…",
-    detail: appOk ? `${app.base ? `At ${app.base.replace(/\/$/, "")}` : "Running"}${app.version ? ` · version ${app.version}` : ""}` : app.running === false ? "Start BookForge with run-bookforge.bat (or press Connect and choose “Start BookForge for me”)." : "" });
+    detail: appOk ? `${app.base ? `At ${app.base.replace(/\/$/, "")}` : "Running"}${app.version ? ` · version ${app.version}` : ""}` : app.running === false ? "Start Akọwe with run-akowe.bat (or press Connect and choose “Start Akọwe for me”)." : "" });
   const waiting = c.phase === "waiting" || c.phase === "paired";
-  const stale = !!(s.bookforge && s.bookforge.stale);
-  rows.push({ id: "paired", label: "BookForge is connected to this app", short: "Connected",
+  const stale = !!(s.akowe && s.akowe.stale);
+  rows.push({ id: "paired", label: "Akọwe is connected to this app", short: "Connected",
     st: d.connected ? (stale ? "warn" : "ok") : waiting ? "wait" : d.badKey || c.phase === "no_status" || (c.phase === "connected" && stale) ? "warn" : "todo",
     state: d.connected ? (stale ? "Updates stopped" : "Connected") : waiting ? "Connecting…" : d.badKey ? "Wrong key used" : c.phase === "no_status" ? "No update yet" : "Not yet",
-    detail: d.connected ? (s.bookforge && !stale ? `Last update ${bfAgo(s.bookforge.receivedAt)}.` : `Last contact ${bfAgo(s.lastExternalContactAt || (s.bookforge && s.bookforge.receivedAt))}.`) : waiting ? "Finish in the BookForge page in your browser." : "Press 🔗 Connect BookForge." });
+    detail: d.connected ? (s.akowe && !stale ? `Last update ${bfAgo(s.akowe.receivedAt)}.` : `Last contact ${bfAgo(s.lastExternalContactAt || (s.akowe && s.akowe.receivedAt))}.`) : waiting ? "Finish in the Akọwe page in your browser." : "Press 🔗 Connect Akọwe." });
   for (const site of BF_SITES) {
     const x = (s.sites && s.sites[site]) || {};
     const L = bfLabel(site, s);
@@ -3370,19 +3370,19 @@ function bfStepLabel(t) {
   if (name) parts.push(name);
   return parts.join(" · ");
 }
-function bfOpenFor(s) { const b = s && s.bookforge; return (b && b.bookforge_url) || (s && s.app && s.app.base) || null; }
+function bfOpenFor(s) { const b = s && s.akowe; return (b && b.akowe_url) || (s && s.app && s.app.base) || null; }
 function bfStaleNote(b) {
   if (!b || !b.stale) return "";
-  return `Last update from BookForge ${bfAgo(b.receivedAt)} — it may be closed or busy. This shows the last thing it reported.`;
+  return `Last update from Akọwe ${bfAgo(b.receivedAt)} — it may be closed or busy. This shows the last thing it reported.`;
 }
 function bfRenderNow(s, d) {
-  const b = s.bookforge;
+  const b = s.akowe;
   bfShow("bf-now", !!b);
   bfShow("bf-now-empty", !!(!b));
   const card = el("bf-now-card");
   if (!b) {
     if (card) card.dataset.tone = "off";
-    bfText("bf-now-empty", d.connected ? "Connected — BookForge hasn't said what it's working on yet." : "Connect BookForge to see what's happening.");
+    bfText("bf-now-empty", d.connected ? "Connected — Akọwe hasn't said what it's working on yet." : "Connect Akọwe to see what's happening.");
     bfShow("bf-now-stale", false);
     return;
   }
@@ -3391,7 +3391,7 @@ function bfRenderNow(s, d) {
   const sw = bfStateWord(t && t.state);
   const pill = el("bf-now-state");
   if (pill) { pill.hidden = !sw.word; bfSetText(pill, sw.word); pill.dataset.tone = sw.tone; }
-  bfText("bf-now-msg", (t && t.message) || (t ? "" : "BookForge isn't working on a step right now."));
+  bfText("bf-now-msg", (t && t.message) || (t ? "" : "Akọwe isn't working on a step right now."));
   const w = b.working_on;
   const wEl = el("bf-now-working");
   if (wEl) {
@@ -3451,12 +3451,12 @@ function bfSetBadge(set) {
   return b;
 }
 function bfRenderBook(s, d) {
-  const b = s.bookforge;
+  const b = s.akowe;
   const rows = b && Array.isArray(b.checklist) ? b.checklist.filter((r) => r && typeof r === "object") : [];
   const has = !!(b && (rows.length || b.total || (b.project && b.project.title)));
   bfShow("bf-book", has);
   bfShow("bf-book-empty", !has);
-  if (!has) bfText("bf-book-empty", d.connected ? "Connected — open a book in BookForge and its progress shows here." : "When BookForge is connected, your book's progress shows here.");
+  if (!has) bfText("bf-book-empty", d.connected ? "Connected — open a book in Akọwe and its progress shows here." : "When Akọwe is connected, your book's progress shows here.");
   if (has) {
     bfText("bf-book-title", (b.project && b.project.title) ? `“${b.project.title}”` : "Your book");
     const doneCount = rows.filter((r) => bfCheckState(r.state).tone === "ok").length;
@@ -3546,24 +3546,24 @@ function bfProblemsFor(s, d, rows) {
   if (!d.connected && !bf.connecting) {
     if (c.phase === "error" && !(c.step === "bridge" && anchored.has("bridge"))) { // (a bridge start error already has its own ⚠️)
       const code = c.step === "bridge" ? "CONNECT_BRIDGE" : c.step === "browser" ? "CONNECT_BROWSER" : "CONNECT_FAILED";
-      add("connect", code, `🔗 Connect BookForge — step “${c.step === "bridge" ? "turn the bridge on" : c.step === "browser" ? "open BookForge in your browser" : "connect"}”`, ["#bf-connect-anchor"], { msg: c.message }, { tech: `connect phase=error step=${c.step || "?"}` });
+      add("connect", code, `🔗 Connect Akọwe — step “${c.step === "bridge" ? "turn the bridge on" : c.step === "browser" ? "open Akọwe in your browser" : "connect"}”`, ["#bf-connect-anchor"], { msg: c.message }, { tech: `connect phase=error step=${c.step || "?"}` });
     } else if (c.phase === "expired") {
-      add("connect", "CONNECT_EXPIRED", "🔗 Connect BookForge — step “BookForge picks up the connection”", ["#bf-connect-anchor", "chip:paired", "row:paired"], {}, { tech: "connect phase=expired (pairing code unused after 120 s)" });
+      add("connect", "CONNECT_EXPIRED", "🔗 Connect Akọwe — step “Akọwe picks up the connection”", ["#bf-connect-anchor", "chip:paired", "row:paired"], {}, { tech: "connect phase=expired (pairing code unused after 120 s)" });
       mark("paired");
     } else if (c.phase === "not_running") {
-      add("connect", "BOOKFORGE_NOT_RUNNING", "🔗 Connect BookForge — step “is BookForge running?”", ["#bf-connect-anchor", "chip:app", "row:app"], { msg: c.message }, { tech: `connect phase=not_running · ping ${(s.app && s.app.base) || "?"}api/ping`, retryOverride: c.canStartApp ? "startApp" : "reconnect" });
+      add("connect", "AKOWE_NOT_RUNNING", "🔗 Connect Akọwe — step “is Akọwe running?”", ["#bf-connect-anchor", "chip:app", "row:app"], { msg: c.message }, { tech: `connect phase=not_running · ping ${(s.app && s.app.base) || "?"}api/ping`, retryOverride: c.canStartApp ? "startApp" : "reconnect" });
       mark("app");
     } else if (c.phase === "no_status") {
-      add("nostatus", "NO_STATUS", "“Connected” check — BookForge's first update", ["chip:paired", "row:paired"], {}, { tech: "connect phase=no_status (paired, no POST /v1/status within 30 s)" });
+      add("nostatus", "NO_STATUS", "“Connected” check — Akọwe's first update", ["chip:paired", "row:paired"], {}, { tech: "connect phase=no_status (paired, no POST /v1/status within 30 s)" });
       mark("paired");
     }
   }
   // stale status
-  if (s.bookforge && s.bookforge.stale) {
-    add("stale", "STATUS_STALE", "“Now working on” — BookForge's last update", ["#bf-now-stale", "chip:paired"], { ago: bfAgo(s.bookforge.receivedAt) }, { tech: `status age ${Math.round((s.bookforge.age_ms || 0) / 1000)} s (stale after ${BF_STALE_MS / 1000} s)` });
+  if (s.akowe && s.akowe.stale) {
+    add("stale", "STATUS_STALE", "“Now working on” — Akọwe's last update", ["#bf-now-stale", "chip:paired"], { ago: bfAgo(s.akowe.receivedAt) }, { tech: `status age ${Math.round((s.akowe.age_ms || 0) / 1000)} s (stale after ${BF_STALE_MS / 1000} s)` });
     mark("paired");
   }
-  // a wrong key was seen and BookForge isn't connected
+  // a wrong key was seen and Akọwe isn't connected
   if (d.badKey && !d.connected && !anchored.has("paired")) { add("badkey", "UNAUTHORIZED", "“Connected” check", ["chip:paired", "row:paired"], {}, { tech: "HTTP 401 UNAUTHORIZED seen after the last good contact" }); mark("paired"); }
   // pairing refusals in the last 2 minutes
   const act = Array.isArray(s.activity) ? s.activity : [];
@@ -3615,7 +3615,7 @@ function bfAnchorEl(a) {
 }
 // Put exactly one ⚠️ on each anchor that has a problem; leave unchanged markers alone (keeps focus).
 function bfSyncMarkers(problems) {
-  const panel = el("col-bookforge");
+  const panel = el("col-akowe");
   if (!panel) return;
   const want = new Map();
   for (const p of problems) for (const a of p.anchors) { const n = bfAnchorEl(a); if (n && !want.has(n)) want.set(n, p); }
@@ -3644,13 +3644,13 @@ function bfProblemTitle(p) { const i = bfCodeInfo(p.code) || BF_CODES.UI_ERROR; 
 
 // --- 🔁 Try again ------------------------------------------------------------------
 const BF_RETRY = {
-  recheck: { label: "Check again", run: () => bookforgeRefresh() },
+  recheck: { label: "Check again", run: () => akoweRefresh() },
   reconnect: { label: "Connect again", run: () => bfConnect() },
   restartBridge: { label: "Restart the bridge", run: () => bfRestartBridge() },
   linktest: { label: "Run the test again", run: () => bfRunLinkTest() },
   reloadPane: { label: (c) => `Reload ${c.L || "the window"}`, run: (c) => bfReloadPane(c.site, c.L) },
-  openBookforge: { label: "Open BookForge", run: () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open") },
-  startApp: { label: "Start BookForge for me", run: () => bfStartApp() }
+  openAkowe: { label: "Open Akọwe", run: () => bfOpen(bfOpenFor(bf.snap || {}), "Akọwe", "open") },
+  startApp: { label: "Start Akọwe for me", run: () => bfStartApp() }
 };
 function bfRetryFor(p) {
   if (p.retryRun) return { label: p.retryLabel || "Try again", run: p.retryRun };
@@ -3664,7 +3664,7 @@ function bfRetryFor(p) {
 // --- pop-over: ⓘ explanations, ⚠️ problems, health, diagnostics fallback -----------
 function bfOpenPop(owner, kind, fill) {
   const pop = el("bf-pop");
-  const panel = el("col-bookforge");
+  const panel = el("col-akowe");
   if (!pop || !panel || !owner) return;
   const wasOpen = !pop.hidden && pop._owner === owner;
   bfCloseInfo(false);
@@ -3683,7 +3683,7 @@ function bfOpenPop(owner, kind, fill) {
 }
 function bfPlacePop() {
   const pop = el("bf-pop");
-  const panel = el("col-bookforge");
+  const panel = el("col-akowe");
   const owner = pop && pop._owner;
   if (!pop || pop.hidden || !owner || !panel) return;
   try {
@@ -3776,7 +3776,7 @@ function bfOpenProblem(marker) {
     body.appendChild(acts);
   });
 }
-const BF_HEALTH_NAMES = { bridge: "Bridge listening", key: "Connection key", bookforge_reachable: "BookForge reachable", status_fresh: "BookForge updates are fresh", panes: "An AI is Active" };
+const BF_HEALTH_NAMES = { bridge: "Bridge listening", key: "Connection key", akowe_reachable: "Akọwe reachable", status_fresh: "Akọwe updates are fresh", panes: "An AI is Active" };
 function bfHealthOf(s) {
   if (s.health && s.health.level) return s.health;
   // older main.js: a rough local version
@@ -3796,9 +3796,9 @@ function bfOpenHealth(btn) {
       li.append(bfNode("span", null, c.level === "ok" ? "✔" : c.level === "bad" ? "⚠️" : "…"), bfNode("span", null, `${nm} — ${c.why}`));
       ul.appendChild(li);
     }
-    if (!ul.children.length) body.appendChild(bfNode("p", null, h.level === "off" ? "Press 🔗 Connect BookForge to start." : "No details from this version of the app."));
+    if (!ul.children.length) body.appendChild(bfNode("p", null, h.level === "off" ? "Press 🔗 Connect Akọwe to start." : "No details from this version of the app."));
     else body.appendChild(ul);
-    body.appendChild(bfNode("p", null, "Checked every few seconds; BookForge itself is pinged at most every 30 seconds. Problems show a ⚠️ marker on the exact spot — click it for how to fix."));
+    body.appendChild(bfNode("p", null, "Checked every few seconds; Akọwe itself is pinged at most every 30 seconds. Problems show a ⚠️ marker on the exact spot — click it for how to fix."));
   });
 }
 function bfCloseInfo(returnFocus) {
@@ -3809,8 +3809,8 @@ function bfCloseInfo(returnFocus) {
   pop._owner = null;
   if (owner) { owner.setAttribute("aria-expanded", "false"); if (returnFocus && owner.isConnected) { try { owner.focus(); } catch (_) {} } }
 }
-if (el("col-bookforge")) {
-  el("col-bookforge").addEventListener("click", (e) => {
+if (el("col-akowe")) {
+  el("col-akowe").addEventListener("click", (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
     const info = t.closest(".bf-info");
@@ -3854,9 +3854,9 @@ function bfReportUiError(e, where) {
   bf.uiError = `${where || "panel"}: ${String((e && e.message) || e).slice(0, 160)}`;
   try { bfRenderAll(); } catch (_) {}
 }
-// Global safety net: an error thrown from BookForge panel code anywhere (timers,
+// Global safety net: an error thrown from Akọwe panel code anywhere (timers,
 // IPC callbacks) shows the ⚠️ instead of silently breaking the panel.
-function bfIsPanelError(stack, file) { return /\b(bf[A-Z]\w*|bookforge\w*)\b/.test(String(stack || "")) && (!file || /controls\.js/.test(String(file))); }
+function bfIsPanelError(stack, file) { return /\b(bf[A-Z]\w*|akowe\w*)\b/.test(String(stack || "")) && (!file || /controls\.js/.test(String(file))); }
 window.addEventListener("error", (ev) => { try { const st = ev && ev.error && ev.error.stack; if (bfIsPanelError(st || ev.message, ev.filename)) bfReportUiError(ev.error || ev.message, "panel"); } catch (_) {} });
 window.addEventListener("unhandledrejection", (ev) => { try { const r = ev && ev.reason; if (bfIsPanelError(r && r.stack)) bfReportUiError(r, "panel"); } catch (_) {} });
 
@@ -3924,7 +3924,7 @@ function bfRenderTeach(s) {
     say.title = "Type exactly this number (you can also select it and copy it)";
     text.append(say, ` into ${L}'s message box and press Send. AutoInjector then asks ${L} to write it backwards and learns where its replies appear.`);
     for (const st of teachSteps(t, L)) row(st);
-    if (t.active) btn("Cancel", async () => { await bfCall(`teach-cancel-${site}`, "selfRepairTeachCancel", [site], { where: "Cancel the number teach", anchor: `ai:${site}` }); bfMsg(`Cancelled — nothing was changed for ${L}.`); bookforgeRefresh(); }, null, "Stop — nothing is changed");
+    if (t.active) btn("Cancel", async () => { await bfCall(`teach-cancel-${site}`, "selfRepairTeachCancel", [site], { where: "Cancel the number teach", anchor: `ai:${site}` }); bfMsg(`Cancelled — nothing was changed for ${L}.`); akoweRefresh(); }, null, "Stop — nothing is changed");
     return;
   }
   // finished without fixing it: say which part, offer 🎯 for just that part
@@ -3950,20 +3950,20 @@ async function bfTeachStart(site) {
   const r = await bfCall(`teach-${site}`, "selfRepairTeachStart", [site], { where: `🔢 Number teach for ${L}`, anchor: `ai:${site}`, retryRun: () => bfTeachStart(site), retryLabel: "Try again" });
   if (r && r.ok) { delete bf.teachDismissed[site]; bfMsg(`See the box above: type ${r.number} into ${L}'s message box and press Send.`); }
   else if (r) bfMsg(r.error === "INACTIVE" ? `${L} isn't Active — tick it first.` : r.error === "CHECKING" ? `AutoInjector is checking ${L} right now — try again in a moment.` : `Couldn't start (${r.error || "error"}).`, "err");
-  bookforgeRefresh();
+  akoweRefresh();
 }
-const BF_SKIP_WORD = { busy: "is busy", typing: "— you're typing there", inactive: "isn't Active", checking: "is already being checked", teaching: "is waiting for you", bookforge: "is answering BookForge", waiting: "is still answering", sending: "is getting a message", test: "is in a test", relay: "is in a relay", recent: "was just used", not_ready: "isn't loaded" };
+const BF_SKIP_WORD = { busy: "is busy", typing: "— you're typing there", inactive: "isn't Active", checking: "is already being checked", teaching: "is waiting for you", akowe: "is answering Akọwe", waiting: "is still answering", sending: "is getting a message", test: "is in a test", relay: "is in a relay", recent: "was just used", not_ready: "isn't loaded" };
 async function bfCheckIn(sites) {
   const r = await bfCall("checkin", "selfRepairProbe", [sites || null], { where: "🩺 Check now", anchor: "#bf-checkin-anchor", retryRun: () => bfCheckIn(sites), retryLabel: "Check again" });
   if (!r || r.ok === false) return;
   const skipped = Object.entries(r.skipped || {}).map(([x, why]) => `${bfLabel(x, bf.snap || {})} ${BF_SKIP_WORD[why] || `(${why})`}`);
   bfMsg(`${(r.started || []).length ? `Checking in with ${r.started.map((x) => bfLabel(x, bf.snap || {})).join(", ")}…` : "No check-in started."}${skipped.length ? ` Not now: ${skipped.join("; ")}.` : ""}`);
-  bookforgeRefresh();
+  akoweRefresh();
 }
 async function bfRepairReload(site, L) {
   const r = await bfCall(`reload-${site}`, "selfRepairReload", [site], { where: `Reloading ${L || site}`, anchor: `ai:${site}` });
   bfMsg(r && r.ok ? `Reloaded ${L || site} — checking it again…` : `Couldn't reload ${L || site}.`, r && r.ok ? null : "err");
-  bookforgeRefresh();
+  akoweRefresh();
 }
 function bfRenderCheckinSetting(s) {
   const sel = el("bf-checkin-every");
@@ -3977,7 +3977,7 @@ if (el("bf-checkin-every")) el("bf-checkin-every").onchange = bfSafe(async (e) =
   const v = Number(e.target.value);
   const r = await bfCall("checkin-every", "selfRepairSettings", [{ intervalMin: v }], { where: "Check-ins", anchor: "#bf-checkin-anchor" });
   if (r && r.ok) bfMsg(v ? `✓ AutoInjector checks in with idle AIs every ${v >= 60 ? "hour" : `${v} minutes`}.` : "✓ Automatic check-ins are off (🩺 Check now still works).");
-  bookforgeRefresh();
+  akoweRefresh();
 }, "checkin-every");
 // P37.3: an AI that couldn't be fixed is announced ONCE, noticeably: its card
 // flashes, and (if the user ticked 🔔) a short sound plays. No pop-up loop.
@@ -4013,7 +4013,7 @@ if (window.api && window.api.onSelfRepair) window.api.onSelfRepair((p) => {
 });
 
 // --- render ------------------------------------------------------------------------
-function bookforgeRender(s) {
+function akoweRender(s) {
   if (!s || !s.ok) return;
   bf.snap = s;
   bf.at = Date.now();
@@ -4025,7 +4025,7 @@ function bfRenderAll() {
   try {
     if (el("bf-enabled") && !bf.starting) el("bf-enabled").checked = !!s.enabled;
     const d = bfDerive(s);
-    const panel = el("col-bookforge");
+    const panel = el("col-akowe");
     if (panel) { panel.dataset.bfState = d.key; panel.dataset.collapsed = bf.collapsed ? "1" : "0"; }
     const st = el("bf-status");
     if (st) { bfSetText(st, d.pill); st.dataset.tone = d.tone; }
@@ -4044,7 +4044,7 @@ function bfRenderAll() {
     bfRenderNow(s, d);
     bfRenderBook(s, d);
     bfRenderActivity(s);
-    // health dot (R12): bridge, key, BookForge reachable, status fresh, each pane
+    // health dot (R12): bridge, key, Akọwe reachable, status fresh, each pane
     const h = bfHealthOf(s);
     const dot = el("bf-health");
     if (dot) {
@@ -4079,12 +4079,12 @@ function bfRenderAll() {
     // Never let a bad snapshot break the rest of the controls window.
     if (!bf.uiError) bf.uiError = `render: ${String((e && e.message) || e).slice(0, 160)}`;
     try { bf.problems = [{ id: "ui", code: "UI_ERROR", sev: "err", where: "This panel", anchors: ["#bf-status-anchor"], ctx: {}, tech: bf.uiError, transient: "__ui" }]; bfSyncMarkers(bf.problems); } catch (_) {}
-    bfMsg("The BookForge panel couldn't update — click the ⚠️ for help.", "err");
+    bfMsg("The Akọwe panel couldn't update — click the ⚠️ for help.", "err");
   }
 }
-// The slim bar (collapsed): state pill · current step · approvals · ⚠️ count · Open BookForge.
+// The slim bar (collapsed): state pill · current step · approvals · ⚠️ count · Open Akọwe.
 function bfRenderSlim(s, d) {
-  const b = s.bookforge;
+  const b = s.akowe;
   const t = b && b.current_task;
   const step = t ? `${bfStepLabel(t) || "Current step"}${t.state ? ` — ${bfStateWord(t.state).word}` : ""}` : d.title;
   bfText("bf-slim-step", step);
@@ -4098,37 +4098,37 @@ function bfRenderSlim(s, d) {
   const op = el("btn-bf-slim-open");
   if (op) op.style.display = bfOpenFor(s) ? "" : "none";
 }
-// L1: is the BookForge panel open in the sense that it may check on BookForge in
+// L1: is the Akọwe panel open in the sense that it may check on Akọwe in
 // the background? Only when the author expanded it themselves: not minimized to a
 // tab, not folded to the slim bar, and not merely shown as it is by default.
 function bfPanelExpanded(panel, state) {
   return !!(panel && !panel.classList.contains("hidden-collapsed") && state && !state.collapsed && state.userExpanded);
 }
-async function bookforgeRefresh() {
-  if (!window.api || typeof window.api.bookforgeStatus !== "function") { bfActionProblem("status", "IPC_MISSING", { where: "The BookForge status", tech: "window.api.bookforgeStatus is missing" }); return; }
+async function akoweRefresh() {
+  if (!window.api || typeof window.api.akoweStatus !== "function") { bfActionProblem("status", "IPC_MISSING", { where: "The Akọwe status", tech: "window.api.akoweStatus is missing" }); return; }
   let s = null;
-  // L1: main only checks whether BookForge is running (a local GET) while the
+  // L1: main only checks whether Akọwe is running (a local GET) while the
   // bridge is on, after Connect / the link test, or while the author has this
   // panel expanded (the default view and the folded slim bar count as closed).
-  const panelOpen = bfPanelExpanded(el("col-bookforge"), bf);
-  try { s = await window.api.bookforgeStatus({ panelOpen }); }
-  catch (e) { bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus: ${String((e && e.message) || e).slice(0, 160)}` }); return; }
-  if (s && s.ok) bookforgeRender(s);
-  else bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `bookforgeStatus returned ${s ? JSON.stringify(Object.keys(s)).slice(0, 80) : "nothing"}` });
+  const panelOpen = bfPanelExpanded(el("col-akowe"), bf);
+  try { s = await window.api.akoweStatus({ panelOpen }); }
+  catch (e) { bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `akoweStatus: ${String((e && e.message) || e).slice(0, 160)}` }); return; }
+  if (s && s.ok) akoweRender(s);
+  else bfActionProblem("status", "STATUS_UNAVAILABLE", { tech: `akoweStatus returned ${s ? JSON.stringify(Object.keys(s)).slice(0, 80) : "nothing"}` });
 }
 // Live: every bridge event arrives with a fresh snapshot; the 4 s refresh stays as a fallback.
-if (window.api && window.api.onBookforgeActivity) window.api.onBookforgeActivity((p) => { try { if (p && p.status) bookforgeRender(p.status); } catch (e) { bfReportUiError(e, "live update"); } });
+if (window.api && window.api.onAkoweActivity) window.api.onAkoweActivity((p) => { try { if (p && p.status) akoweRender(p.status); } catch (e) { bfReportUiError(e, "live update"); } });
 // Tick clocks ("0:42", "12s ago") once a second without asking main.
-setInterval(() => { if (bf.snap && el("col-bookforge") && !el("col-bookforge").classList.contains("hidden-collapsed")) bfRenderAll(); }, 1000);
+setInterval(() => { if (bf.snap && el("col-akowe") && !el("col-akowe").classList.contains("hidden-collapsed")) bfRenderAll(); }, 1000);
 
 // --- ▾/▸ collapse to a slim status bar (remembered) ---------------------------------
 function bfSetCollapsed(on, save) {
   bf.collapsed = !!on;
-  const btn = el("btn-collapse-bookforge");
+  const btn = el("btn-collapse-akowe");
   if (btn) {
     btn.textContent = on ? "▸" : "▾";
     btn.setAttribute("aria-expanded", String(!on));
-    const t = on ? "Expand the BookForge panel" : "Collapse to a slim status bar";
+    const t = on ? "Expand the Akọwe panel" : "Collapse to a slim status bar";
     btn.title = t; btn.setAttribute("aria-label", t);
   }
   if (on) bfCloseInfo(false);
@@ -4137,7 +4137,7 @@ function bfSetCollapsed(on, save) {
 }
 bf.collapsed = bfStore.get("bf-collapsed") === "1";
 bf.userExpanded = bfStore.get("bf-collapsed") === "0"; // the author expanded the panel themselves (L1)
-if (el("btn-collapse-bookforge")) el("btn-collapse-bookforge").onclick = () => bfSetCollapsed(!bf.collapsed, true);
+if (el("btn-collapse-akowe")) el("btn-collapse-akowe").onclick = () => bfSetCollapsed(!bf.collapsed, true);
 if (el("bf-title")) {
   const h2 = el("bf-title");
   h2.setAttribute("role", "button");
@@ -4150,11 +4150,11 @@ if (el("bf-slim-problems")) el("bf-slim-problems").onclick = bfSafe(() => {
   const first = bf.problems[0];
   bfSetCollapsed(false, true);
   if (!first) return;
-  const m = el("col-bookforge").querySelector(`.bf-hz[data-pid="${CSS.escape(first.id)}"]`);
+  const m = el("col-akowe").querySelector(`.bf-hz[data-pid="${CSS.escape(first.id)}"]`);
   if (m) { try { m.scrollIntoView({ block: "nearest" }); } catch (_) {} bfOpenProblem(m); }
 }, "slim bar");
-if (el("bf-slim-approvals")) el("bf-slim-approvals").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
-if (el("btn-bf-slim-open")) el("btn-bf-slim-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open");
+if (el("bf-slim-approvals")) el("bf-slim-approvals").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
+if (el("btn-bf-slim-open")) el("btn-bf-slim-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "Akọwe", "open");
 if (el("btn-bf-checks-more")) el("btn-bf-checks-more").onclick = () => { const ol = el("bf-conn-steps"); bf.checksOpen = !!(ol && ol.hidden); bfRenderAll(); };
 if (el("btn-bf-book-more")) el("btn-bf-book-more").onclick = () => { bf.bookOpen = !bf.bookOpen; bfRenderAll(); };
 if (el("bf-act-card")) el("bf-act-card").addEventListener("toggle", () => bfRenderAll());
@@ -4165,10 +4165,10 @@ async function bfSetEnabled(want) {
   if (bf.snap) { bf.snap.enabled = want; }
   bfMsg("");
   bfRenderAll();
-  const s = await bfCall("bridge", "bookforgeSetEnabled", [want], { where: "The Bridge switch", anchor: "#bf-switch-anchor", retryRun: () => bfSetEnabled(want), retryLabel: want ? "Turn the bridge on" : "Turn the bridge off" });
+  const s = await bfCall("bridge", "akoweSetEnabled", [want], { where: "The Bridge switch", anchor: "#bf-switch-anchor", retryRun: () => bfSetEnabled(want), retryLabel: want ? "Turn the bridge on" : "Turn the bridge off" });
   bf.starting = false;
-  if (s && s.ok) { bfActionOk("bridge"); bookforgeRender(s); }
-  else { if (s) bfActionProblem("bridge", "IPC_FAILED", { where: "The Bridge switch", anchor: "#bf-switch-anchor", tech: `setEnabled -> ${String(s.error || "no ok")}`, retryRun: () => bfSetEnabled(want) }); await bookforgeRefresh(); }
+  if (s && s.ok) { bfActionOk("bridge"); akoweRender(s); }
+  else { if (s) bfActionProblem("bridge", "IPC_FAILED", { where: "The Bridge switch", anchor: "#bf-switch-anchor", tech: `setEnabled -> ${String(s.error || "no ok")}`, retryRun: () => bfSetEnabled(want) }); await akoweRefresh(); }
 }
 async function bfRestartBridge() {
   const s0 = bf.snap || {};
@@ -4177,17 +4177,17 @@ async function bfRestartBridge() {
 }
 if (el("bf-enabled")) el("bf-enabled").onchange = bfSafe(() => bfSetEnabled(el("bf-enabled").checked), "the Bridge switch");
 
-// --- 🔗 Connect BookForge -------------------------------------------------------
+// --- 🔗 Connect Akọwe -------------------------------------------------------
 async function bfConnect() {
   if (bf.connecting) return;
   bf.connecting = true;
   bf.localMsg = null;
   bfMsg("");
   bfRenderAll();
-  const s = await bfCall("connect", "bookforgeConnect", [], { where: "🔗 Connect BookForge", anchor: "#bf-connect-anchor", retryRun: () => bfConnect(), retryLabel: "Connect again" });
+  const s = await bfCall("connect", "akoweConnect", [], { where: "🔗 Connect Akọwe", anchor: "#bf-connect-anchor", retryRun: () => bfConnect(), retryLabel: "Connect again" });
   bf.connecting = false;
-  if (s && s.ok) { bfActionOk("connect"); bookforgeRender(s); }
-  else { if (s) bfActionProblem("connect", "CONNECT_FAILED", { where: "🔗 Connect BookForge", anchor: "#bf-connect-anchor", tech: "connect returned no snapshot", retryRun: () => bfConnect() }); bfRenderAll(); }
+  if (s && s.ok) { bfActionOk("connect"); akoweRender(s); }
+  else { if (s) bfActionProblem("connect", "CONNECT_FAILED", { where: "🔗 Connect Akọwe", anchor: "#bf-connect-anchor", tech: "connect returned no snapshot", retryRun: () => bfConnect() }); bfRenderAll(); }
 }
 if (el("btn-bf-connect")) el("btn-bf-connect").onclick = bfSafe(() => bfConnect(), "Connect");
 async function bfStartApp() {
@@ -4195,39 +4195,39 @@ async function bfStartApp() {
   bf.startingApp = true;
   bf.localMsg = null;
   bfRenderAll();
-  const r = await bfCall("startapp", "bookforgeStartApp", [], { where: "▶ Start BookForge for me", anchor: "#bf-connect-anchor", retryRun: () => bfStartApp() });
+  const r = await bfCall("startapp", "akoweStartApp", [], { where: "▶ Start Akọwe for me", anchor: "#bf-connect-anchor", retryRun: () => bfStartApp() });
   bf.startingApp = false;
   if (r && r.ok && r.running) { bfActionOk("startapp"); await bfConnect(); return; } // it's up — finish connecting by itself
-  if (r) bfActionProblem("startapp", r.ok ? "STILL_STARTING" : (r.error || "SPAWN_FAILED"), { where: "▶ Start BookForge for me", anchor: "#bf-connect-anchor", msg: r.message, tech: `start-app -> ${r.ok ? "started, not answering yet" : r.error || "error"}` });
+  if (r) bfActionProblem("startapp", r.ok ? "STILL_STARTING" : (r.error || "SPAWN_FAILED"), { where: "▶ Start Akọwe for me", anchor: "#bf-connect-anchor", msg: r.message, tech: `start-app -> ${r.ok ? "started, not answering yet" : r.error || "error"}` });
   bfRenderAll();
 }
-if (el("btn-bf-start-app")) el("btn-bf-start-app").onclick = bfSafe(() => bfStartApp(), "Start BookForge");
-// Open a BookForge page; `action` names the button that gets the ⚠️ if it fails.
+if (el("btn-bf-start-app")) el("btn-bf-start-app").onclick = bfSafe(() => bfStartApp(), "Start Akọwe");
+// Open an Akọwe page; `action` names the button that gets the ⚠️ if it fails.
 const BF_OPEN_ANCHOR = { open: "#bf-open-anchor", approve: "#bf-approve-anchor", goto: "#bf-goto-anchor" };
 async function bfOpen(url, what, action) {
   const key = `open-${action || "open"}`;
   const opts = { where: `Opening ${what}`, anchor: BF_OPEN_ANCHOR[action] || "#bf-open-anchor", retryRun: () => bfOpen(url, what, action), retryLabel: `Open ${what}` };
-  const r = await bfCall(key, "bookforgeOpenUrl", [url || ""], opts);
+  const r = await bfCall(key, "akoweOpenUrl", [url || ""], opts);
   if (r && r.ok) { bfActionOk(key); bfMsg(""); }
   else if (r) bfActionProblem(key, r.error || "OPEN_FAILED", Object.assign({ msg: r.message }, opts));
 }
-if (el("btn-bf-approve")) el("btn-bf-approve").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
-if (el("btn-bf-goto-task")) el("btn-bf-goto-task").onclick = () => { const s = bf.snap || {}; const b = s.bookforge || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the current task", "goto"); };
-if (el("btn-bf-open")) el("btn-bf-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "BookForge", "open");
+if (el("btn-bf-approve")) el("btn-bf-approve").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.approvals && b.approvals.url) || bfOpenFor(s), "the approvals page", "approve"); };
+if (el("btn-bf-goto-task")) el("btn-bf-goto-task").onclick = () => { const s = bf.snap || {}; const b = s.akowe || {}; bfOpen((b.current_task && b.current_task.url) || bfOpenFor(s), "the current task", "goto"); };
+if (el("btn-bf-open")) el("btn-bf-open").onclick = () => bfOpen(bfOpenFor(bf.snap || {}), "Akọwe", "open");
 // 🔁 Reload an AI's window (the app's own reload).
 async function bfReloadPane(site, L) {
   if (!site) return;
   const r = await bfCall(`reload-${site}`, "reloadSite", [site], { where: `Reloading ${L || site}`, anchor: `ai:${site}`, retryRun: () => bfReloadPane(site, L), retryLabel: `Reload ${L || site}` });
   if (r && r.ok === false) bfActionProblem(`reload-${site}`, "IPC_FAILED", { where: `Reloading ${L || site}`, anchor: `ai:${site}`, tech: `reloadSite -> ${r.error || "failed"}` });
   else if (r) { bfActionOk(`reload-${site}`); bfMsg(`Reloading ${L || site}… give it a few seconds to load.`); }
-  setTimeout(() => { bookforgeRefresh(); }, 3000);
+  setTimeout(() => { akoweRefresh(); }, 3000);
 }
 
 // --- 📋 Copy diagnostics (safe: no key, codes, prompts or replies) ---------------
 async function bfCopyDiagnostics() {
   const extra = { panelProblems: bf.problems.map((p) => p.code) };
   const opts = { where: "📋 Copy diagnostics", anchor: "#bf-diag-anchor", retryRun: () => bfCopyDiagnostics(), retryLabel: "Copy diagnostics" };
-  const r = await bfCall("diag", "bookforgeCopyDiagnostics", [extra], opts);
+  const r = await bfCall("diag", "akoweCopyDiagnostics", [extra], opts);
   if (r && r.ok) { bfActionOk("diag"); bfMsg("✓ Diagnostics copied — paste them into your message. They never contain your key, codes, prompts or replies."); return; }
   if (r && r.text) { // no clipboard: show the text to copy by hand
     bfActionOk("diag");
@@ -4246,11 +4246,11 @@ if (el("btn-bf-diag")) el("btn-bf-diag").onclick = bfSafe(() => bfCopyDiagnostic
 // --- Other ways: the key by hand ---------------------------------------------------
 async function bfCopyKey() {
   const opts = { where: "📋 Copy connection key", anchor: "#bf-copy-anchor", retryRun: () => bfCopyKey(), retryLabel: "Copy the key" };
-  const r = await bfCall("copykey", "bookforgeCopyToken", [], opts);
+  const r = await bfCall("copykey", "akoweCopyToken", [], opts);
   if (r && r.ok) {
     bfActionOk("copykey");
     bfStore.set("bf-key-copied", "1");
-    bfMsg("✓ Connection key copied. Now in BookForge open Settings → Connect AutoInjector and paste it (Ctrl+V).");
+    bfMsg("✓ Connection key copied. Now in Akọwe open Settings → Connect AutoInjector and paste it (Ctrl+V).");
   } else if (r) bfActionProblem("copykey", r.error || "NO_CLIPBOARD", opts);
 }
 if (el("btn-bf-copy")) el("btn-bf-copy").onclick = bfSafe(() => bfCopyKey(), "Copy connection key");
@@ -4259,7 +4259,7 @@ async function bfRevealKey() {
   if (!box) return;
   if (box.style.display !== "none") { box.style.display = "none"; box.textContent = ""; el("btn-bf-reveal").textContent = "Show key"; return; }
   const opts = { where: "Show key", anchor: "#bf-reveal-anchor", retryRun: () => bfRevealKey(), retryLabel: "Show the key" };
-  const r = await bfCall("reveal", "bookforgeRevealToken", [], opts);
+  const r = await bfCall("reveal", "akoweRevealToken", [], opts);
   if (r && r.ok) {
     bfActionOk("reveal");
     box.textContent = r.token; box.style.display = "block"; el("btn-bf-reveal").textContent = "Hide key";
@@ -4268,17 +4268,17 @@ async function bfRevealKey() {
 }
 if (el("btn-bf-reveal")) el("btn-bf-reveal").onclick = bfSafe(() => bfRevealKey(), "Show key");
 async function bfRegenKey() {
-  if (!window.confirm("Make a new connection key?\n\nThe old key stops working right away, so BookForge is disconnected until it gets the new key (press Connect BookForge again).\n\nOnly do this if you think someone else has seen your key.")) return;
+  if (!window.confirm("Make a new connection key?\n\nThe old key stops working right away, so Akọwe is disconnected until it gets the new key (press Connect Akọwe again).\n\nOnly do this if you think someone else has seen your key.")) return;
   const opts = { where: "Make a new key", anchor: "#bf-regen-anchor" };
-  const s = await bfCall("regen", "bookforgeRegenerateToken", [], opts);
+  const s = await bfCall("regen", "akoweRegenerateToken", [], opts);
   if (s && s.ok) {
     bfActionOk("regen");
     bfStore.set("bf-key-copied", null);
     const box = el("bf-token");
     if (box) { box.style.display = "none"; box.textContent = ""; }
     if (el("btn-bf-reveal")) el("btn-bf-reveal").textContent = "Show key";
-    bookforgeRender(s);
-    bfMsg("New connection key made. Press “🔗 Connect BookForge” to hand it to BookForge.");
+    akoweRender(s);
+    bfMsg("New connection key made. Press “🔗 Connect Akọwe” to hand it to Akọwe.");
   } else if (s) bfActionProblem("regen", s.error || "TOKEN_WRITE_FAILED", opts);
 }
 if (el("btn-bf-regen")) el("btn-bf-regen").onclick = bfSafe(() => bfRegenKey(), "Make a new key");
@@ -4296,7 +4296,7 @@ function bfTestStep(p) {
   if (p.total && el("bf-test-summary") && bf.test.running) el("bf-test-summary").textContent = `Testing… ${Math.min(p.index + (p.status === "running" ? 1 : 0), p.total)} of ${p.total}`;
   bfRenderAll();
 }
-if (window.api && window.api.onBookforgeLinkTestProgress) window.api.onBookforgeLinkTestProgress((p) => {
+if (window.api && window.api.onAkoweLinkTestProgress) window.api.onAkoweLinkTestProgress((p) => {
   try {
     if (!p) return;
     if (p.status === "start" || p.status === "done") return; // handled by the run() call itself
@@ -4315,7 +4315,7 @@ async function bfRunLinkTest() {
   bfRenderAll();
   const opts = { where: "🧪 Test the connection", anchor: "#bf-test-anchor", retryRun: () => bfRunLinkTest(), retryLabel: "Run the test again" };
   let r = null;
-  try { r = await bfCall("linktest", "bookforgeLinkTestRun", [], opts); }
+  try { r = await bfCall("linktest", "akoweLinkTestRun", [], opts); }
   finally { bf.test.running = false; bfTestButtons(false); }
   if (r && r.ok) {
     bfActionOk("linktest");
@@ -4328,17 +4328,17 @@ async function bfRunLinkTest() {
     bfActionProblem("linktest", r.error === "ALREADY_RUNNING" ? "ALREADY_RUNNING" : "LINKTEST_COULDNT_RUN", Object.assign({ tech: `linktest-run -> ${String(r.error || "error").slice(0, 120)}` }, opts));
   } else if (sum) { sum.textContent = ""; }
   bfRenderAll();
-  bookforgeRefresh();
+  akoweRefresh();
 }
 if (el("btn-bf-test")) el("btn-bf-test").onclick = bfSafe(() => bfRunLinkTest(), "Test the connection");
 if (el("btn-bf-test-stop")) el("btn-bf-test-stop").onclick = bfSafe(async () => {
-  const r = await bfCall("linkstop", "bookforgeLinkTestStop", [], { where: "■ Stop test", anchor: "#bf-test-anchor" });
+  const r = await bfCall("linkstop", "akoweLinkTestStop", [], { where: "■ Stop test", anchor: "#bf-test-anchor" });
   if (r && el("bf-test-summary")) el("bf-test-summary").textContent = "Stopping… (finishing the current check)";
 }, "Stop test");
 if (el("btn-bf-test-report")) el("btn-bf-test-report").onclick = bfSafe(async () => {
   if (!bf.test.report) return;
   const opts = { where: "📄 Last report", anchor: "#bf-report-anchor", tech: "report file in the logs folder" };
-  const r = await bfCall("report", "bookforgeOpenLinkTestReport", [bf.test.report], opts);
+  const r = await bfCall("report", "akoweOpenLinkTestReport", [bf.test.report], opts);
   if (r && r.ok) bfActionOk("report");
   else if (r) bfActionProblem("report", r.error === "BAD_FILE" ? "BAD_FILE" : "BAD_FILE", Object.assign({}, opts, { tech: `open-report -> ${String(r.error || "error").slice(0, 80)}` }));
 }, "Open report");
@@ -4349,7 +4349,7 @@ el("btn-clear").onclick = async () => {
 };
 
 // ⤓ Extract (P16): the button opens a small dialog that asks what goes into the
-// file — "This BookForge book only" (the default when a book is known), a time
+// file — "This Akọwe book only" (the default when a book is known), a time
 // range, or Everything (with a warning) — shows the counts and the first lines,
 // and saves only on "Save". main builds the text (log-extract.js) and redacts it.
 const exState = { opts: null, timer: null, seq: 0, open: false };
@@ -4388,7 +4388,7 @@ async function exRefreshPreview() {
   if (my !== exState.seq || !exState.open) return; // a newer choice is already being previewed
   const save = el("btn-extract-save");
   if (!r || !r.ok) {
-    counts.textContent = r && r.error === "NO_BOOK" ? "No BookForge book has been recorded yet — choose a time range instead." : `Preview failed: ${(r && r.error) || "unknown error"}`;
+    counts.textContent = r && r.error === "NO_BOOK" ? "No Akọwe book has been recorded yet — choose a time range instead." : `Preview failed: ${(r && r.error) || "unknown error"}`;
     el("ex-preview").textContent = "";
     el("ex-file").textContent = "";
     if (save) save.disabled = true;
@@ -4440,8 +4440,8 @@ async function exOpen() {
   if (sel.parentElement) sel.parentElement.hidden = !books.length; // no empty picker when no book is known
   bookRow.classList.toggle("disabled", !books.length);
   el("ex-book-why").textContent = books.length
-    ? "Only the AIs' replies to BookForge's requests for this book, and the activity of those requests. Your other conversations are left out."
-    : "No BookForge book has been recorded yet (BookForge hasn't sent this app any requests).";
+    ? "Only the AIs' replies to Akọwe's requests for this book, and the activity of those requests. Your other conversations are left out."
+    : "No Akọwe book has been recorded yet (Akọwe hasn't sent this app any requests).";
   const def = (o && o.default) || { scope: "time", preset: "day" };
   // Never "Everything" by default — the safe one-click choice is the book, else a time range.
   const scope = def.scope === "book" && books.length ? "book" : "time";
@@ -4516,8 +4516,8 @@ el("extract-modal").addEventListener("keydown", (e) => { if (e.key === "Escape")
     setStatus("Ready.");
   }
   databaseRefresh();
-  bookforgeRefresh();
-  setInterval(bookforgeRefresh, 4000);
+  akoweRefresh();
+  setInterval(akoweRefresh, 4000);
 })();
 
 // ---------------------------------------------------------------------------

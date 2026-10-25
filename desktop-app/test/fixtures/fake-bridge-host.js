@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * fake-bridge-host.js — runs the REAL ../../bookforge-bridge.js HTTP server with
- * fake chat panes (no Electron), for cross-process tests of the BookForge side
- * (contract v1: docs/BOOKFORGE_AUTOINJECTOR_BRIDGE.md).
+ * fake-bridge-host.js — runs the REAL ../../akowe-bridge.js HTTP server with
+ * fake chat panes (no Electron), for cross-process tests of the Akọwe side
+ * (contract v1: docs/AKOWE_AUTOINJECTOR_BRIDGE.md).
  *
  * Each fake pane's sendToSite records the prompt and, after --delay-ms, calls
  * bridge.onCaptured({ site, text }) with a reply produced by a responder, ending
@@ -11,8 +11,8 @@
  *
  * CLI (stable — a Python integration test depends on it):
  *   node test/fixtures/fake-bridge-host.js [options]
- *     --port N          port on 127.0.0.1 (default $AUTOINJECTOR_BOOKFORGE_PORT or 17891; 0 = pick a free port)
- *     --token T         bearer token (default $AUTOINJECTOR_BOOKFORGE_TOKEN or "fake-bridge-token-0123456789abcdef")
+ *     --port N          port on 127.0.0.1 (default $AUTOINJECTOR_AKOWE_PORT or 17891; 0 = pick a free port)
+ *     --token T         bearer token (default $AUTOINJECTOR_AKOWE_TOKEN or "fake-bridge-token-0123456789abcdef")
  *     --mode M          valid | invalid-then-valid | timeout | busy   (default $FAKE_BRIDGE_MODE or valid)
  *                         valid              every reply is the default schema-satisfying JSON answer
  *                         invalid-then-valid per site, odd-numbered replies (1st, 3rd, ...) are an invalid
@@ -34,8 +34,8 @@
  *     --pairing-code-file P   (contract v1.1) make a one-time pairing code with the bridge's
  *                       createPairingCode() and write it (just the code) to file P before READY.
  *                       Each SIGUSR2 (not on Windows) makes a new code and rewrites P.
- *     --status-file P   (contract v1.1) whenever BookForge POSTs /v1/status, write the bridge's
- *                       sanitized view of it (status().bookforge, JSON) to file P.
+ *     --status-file P   (contract v1.1) whenever Akọwe POSTs /v1/status, write the bridge's
+ *                       sanitized view of it (status().akowe, JSON) to file P.
  *     --site-state LIST (contract v1.2) pin self-repair states, e.g.
  *                       "chatgpt=needs_user:LOGGED_OUT,gemini=repairing:NO_REPLY_FOUND" (state[:PROBLEM]).
  *                       Pinned sites show that state in /v1/health (ready:false unless ok/unknown) and
@@ -43,7 +43,7 @@
  *                       "unknown"; POST /v1/probe marks them "ok" (last_probe_ok_at = now) after --delay-ms.
  *                       Each SIGUSR1 (not on Windows) clears every pinned state (-> "ok"), so a test can
  *                       watch an AI recover.
- *   Env equivalents: AUTOINJECTOR_BOOKFORGE_PORT, AUTOINJECTOR_BOOKFORGE_TOKEN, FAKE_BRIDGE_MODE,
+ *   Env equivalents: AUTOINJECTOR_AKOWE_PORT, AUTOINJECTOR_AKOWE_TOKEN, FAKE_BRIDGE_MODE,
  *   FAKE_BRIDGE_DELAY_MS, FAKE_BRIDGE_TIME_SCALE. CLI flags win over env.
  *
  *   Prints exactly one line `READY <port>` on stdout once listening (and, in busy mode, once
@@ -61,7 +61,7 @@
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { createBridge } = require('../../bookforge-bridge');
+const { createBridge } = require('../../akowe-bridge');
 
 const SITES = ['chatgpt', 'claude', 'gemini'];
 const DEFAULT_TOKEN = 'fake-bridge-token-0123456789abcdef';
@@ -333,8 +333,8 @@ async function cli() {
   }
   const env = process.env;
   const opts = {
-    port: args.port != null ? args.port : env.AUTOINJECTOR_BOOKFORGE_PORT != null && env.AUTOINJECTOR_BOOKFORGE_PORT !== '' ? Number(env.AUTOINJECTOR_BOOKFORGE_PORT) : 17891,
-    token: args.token || env.AUTOINJECTOR_BOOKFORGE_TOKEN || DEFAULT_TOKEN,
+    port: args.port != null ? args.port : env.AUTOINJECTOR_AKOWE_PORT != null && env.AUTOINJECTOR_AKOWE_PORT !== '' ? Number(env.AUTOINJECTOR_AKOWE_PORT) : 17891,
+    token: args.token || env.AUTOINJECTOR_AKOWE_TOKEN || DEFAULT_TOKEN,
     mode: args.mode || env.FAKE_BRIDGE_MODE || 'valid',
     delayMs: args.delayMs != null ? args.delayMs : env.FAKE_BRIDGE_DELAY_MS ? Number(env.FAKE_BRIDGE_DELAY_MS) : 50,
     timeScale: args.timeScale != null ? args.timeScale : env.FAKE_BRIDGE_TIME_SCALE ? Number(env.FAKE_BRIDGE_TIME_SCALE) : 1,
@@ -359,7 +359,7 @@ async function cli() {
   if (args.statusFile) {
     let lastAt = null;
     const t = setInterval(() => {
-      const b = host.bridge.bookforgeStatus();
+      const b = host.bridge.akoweStatus();
       if (b && b.receivedAt !== lastAt) { lastAt = b.receivedAt; try { fs.writeFileSync(args.statusFile, JSON.stringify(b)); } catch (_) {} }
     }, 50);
     t.unref();

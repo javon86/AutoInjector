@@ -1,7 +1,7 @@
 'use strict';
-// verify-bf-panel.e2e.js — acceptance look at AutoInjector's own window with the BookForge panel: launch the REAL
-// Electron app (xvfb), point it at a running BookForge (BF_URL + BF_TOKEN), press "🔗 Connect BookForge" like the
-// author, finish the pairing the way BookForge's #/pair page does, and screenshot the panel in each state.
+// verify-bf-panel.e2e.js — acceptance look at AutoInjector's own window with the Akọwe panel: launch the REAL
+// Electron app (xvfb), point it at a running Akọwe (BF_URL + BF_TOKEN), press "🔗 Connect Akọwe" like the
+// author, finish the pairing the way Akọwe's #/pair page does, and screenshot the panel in each state.
 //   xvfb-run -a env BF_URL=http://127.0.0.1:PORT/ BF_TOKEN=... SHOTS=dir node test/e2e/verify-bf-panel.e2e.js
 const fs = require('fs');
 const os = require('os');
@@ -38,8 +38,8 @@ async function main() {
   const port = await freePort();
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'], cwd: path.join(__dirname, '..', '..'),
-    env: Object.assign({}, process.env, { HOME: home, AUTOINJECTOR_BOOKFORGE_PORT: String(port), AUTOINJECTOR_BOOKFORGE_APP_URL: `${BF_URL}/api/ping`,
-      AUTOINJECTOR_BOOKFORGE_DIR: empty, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }),
+    env: Object.assign({}, process.env, { HOME: home, AUTOINJECTOR_AKOWE_PORT: String(port), AUTOINJECTOR_AKOWE_APP_URL: `${BF_URL}/api/ping`,
+      AUTOINJECTOR_AKOWE_DIR: empty, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' }),
   });
   const shotsTaken = [];
   try {
@@ -48,7 +48,7 @@ async function main() {
       for (const w of app.windows()) { try { if (await w.$('#btn-bf-connect')) controls = w; } catch (_) {} }
       if (!controls) await sleep(400);
     }
-    assert(!!controls, 'control panel with the BookForge panel appears');
+    assert(!!controls, 'control panel with the Akọwe panel appears');
     if (!controls) return 1;
     await controls.setViewportSize({ width: 1366, height: 860 }).catch(() => {});
     const errors = [];
@@ -69,14 +69,14 @@ async function main() {
     await controls.click('#btn-bf-connect');
     let link = null;
     for (let i = 0; i < 40 && !link; i++) { link = (await app.evaluate(() => global.__opened)).find((u) => /#\/pair\?code=/.test(u)); if (!link) await sleep(250); }
-    assert(!!link, `Connect opens BookForge's pairing link (${link})`);
+    assert(!!link, `Connect opens Akọwe's pairing link (${link})`);
     await sleep(500);
     await shot('ai_02_bf_waiting');
     console.log('--- panel (waiting):\n' + (await panelText()).slice(0, 600));
     if (link) {
       const m = /code=([A-Za-z0-9]+)&bridge=([^&]+)/.exec(link);
       const pr = await bf('POST', '/api/slots/pair-autoinjector', { code: m[1], bridge_url: decodeURIComponent(m[2]) });
-      assert(pr.status === 200 && pr.json && pr.json.connected, `BookForge pairs with the real app's bridge (HTTP ${pr.status}; slots ${JSON.stringify((pr.json || {}).slots || []).slice(0, 300)})`);
+      assert(pr.status === 200 && pr.json && pr.json.connected, `Akọwe pairs with the real app's bridge (HTTP ${pr.status}; slots ${JSON.stringify((pr.json || {}).slots || []).slice(0, 300)})`);
       let txt = '';
       for (let i = 0; i < 40; i++) { txt = await panelText(); if (/Connected/i.test(await controls.$eval('#bf-status', (e) => e.textContent))) break; await sleep(500); }
       await sleep(1500);
@@ -90,7 +90,7 @@ async function main() {
         for (const e of p.querySelectorAll('*')) { const r = e.getBoundingClientRect(); if (r.width && r.right > W + 1) out.push(`${e.tagName}#${e.id}.${String(e.className).slice(0, 20)} +${Math.round(r.right - W)}px`); }
         return out.slice(0, 10);
       });
-      assert(over.length === 0, `nothing in the BookForge panel sticks out of it at 1366 px (${over.join('; ')})`);
+      assert(over.length === 0, `nothing in the Akọwe panel sticks out of it at 1366 px (${over.join('; ')})`);
     }
     assert(errors.length === 0, `no console errors in the control panel (${errors.slice(0, 3).join(' | ')})`);
     console.log('screenshots:', shotsTaken.join(', '));

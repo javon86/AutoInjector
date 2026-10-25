@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Akọwe</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+<header class="topbar" role="banner">
+  <button type="button" id="nav-toggle" class="nav-toggle" aria-controls="sidenav" aria-expanded="false">
+    <span aria-hidden="true">&#9776;</span> Menu
+  </button>
+  <a class="brand" href="#/">Akọwe</a>
+  <div class="topbar-context" id="context-bar" aria-label="Current project"></div>
+  <button type="button" id="jump-btn" class="tb-btn jump-btn" aria-haspopup="dialog" aria-keyshortcuts="Control+K /" title="Jump to any module, set or page (Ctrl+K or /)">
+    <span aria-hidden="true">&#128269;</span> <span class="tb-label">Jump</span><kbd class="tb-kbd">Ctrl K</kbd>
+  </button>
+  <div class="tb-menu" id="sets-menu">
+    <button type="button" id="sets-btn" class="tb-btn sets-btn" aria-haspopup="true" aria-expanded="false" aria-controls="sets-pop">
+      <span aria-hidden="true">&#129513;</span> Sets
+    </button>
+    <div id="sets-pop" class="tb-pop sets-pop" hidden></div>
+  </div>
+  <nav class="topbar-links" aria-label="Workspace pages" id="top-links"></nav>
+  <button type="button" id="mab-btn" class="tb-btn mab-btn" aria-haspopup="dialog" aria-label="Make a book for me" title="⚡ Make a book for me: the AI makes a whole new book while you watch">
+    <span aria-hidden="true">&#9889;</span> <span class="tb-label">Make a book</span>
+  </button>
+  <button type="button" id="health-btn" class="tb-btn health-btn" aria-haspopup="dialog" aria-label="Health" data-state="unknown" title="Health checks">
+    <span class="hb-ico" aria-hidden="true">&#129293;</span>
+  </button>
+  <button type="button" id="wf-btn" class="tb-btn wf-btn" aria-controls="wf-drawer" aria-expanded="false" aria-label="Test workflow" title="Test each part of the book process with your real AI (in a separate test book)">
+    <span aria-hidden="true">&#129514;</span> <span class="tb-label">Test workflow</span>
+  </button>
+  <div class="tb-menu" id="more-menu">
+    <button type="button" id="more-btn" class="tb-btn" aria-haspopup="true" aria-expanded="false" aria-controls="more-pop">
+      More <span aria-hidden="true">&#9662;</span><span id="more-dot" class="more-dot" hidden></span>
+    </button>
+    <div id="more-pop" class="tb-pop more-pop" hidden>
+      <div id="more-links" class="more-links"></div>
+      <button type="button" id="bible-btn" class="bible-btn" aria-haspopup="dialog">
+        <span aria-hidden="true">&#128214;</span> Bible Builder
+      </button>
+      <button type="button" id="selftest-btn" class="selftest-btn" aria-haspopup="dialog">
+        <span aria-hidden="true">&#129514;</span> Test everything<span id="selftest-btn-state" class="selftest-btn-state"></span>
+      </button>
+    </div>
+  </div>
+</header>
+<div class="shell">
+  <nav id="sidenav" class="sidenav" aria-label="Operation sets"></nav>
+  <main id="main" tabindex="-1">
+    <noscript><p class="notice">Akọwe needs JavaScript enabled in this browser.</p></noscript>
+    <p class="state-loading">Loading workspace&hellip;</p>
+  </main>
+</div>
+<div id="live" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="selftest-dialog" class="selftest-dialog" aria-labelledby="selftest-title"></dialog>
+<dialog id="bible-dialog" class="selftest-dialog bible-dialog" aria-labelledby="bible-title"></dialog>
+<dialog id="set-dialog" class="set-panel" aria-labelledby="set-panel-title"></dialog>
+<dialog id="make-dialog" class="selftest-dialog make-dialog" aria-labelledby="make-title"></dialog>
+<dialog id="jump-dialog" class="jump-dialog" aria-labelledby="jump-title"></dialog>
+<dialog id="mab-dialog" class="selftest-dialog mab-dialog" aria-labelledby="mab-title"></dialog>
+<dialog id="health-dialog" class="selftest-dialog health-dialog" aria-labelledby="health-title"></dialog>
+<aside id="ai-dock" class="ai-dock" aria-label="Fill with AI panels"></aside>
+<aside id="wf-drawer" class="wf-drawer" aria-labelledby="wf-title" hidden></aside>
+</body>
+</html>

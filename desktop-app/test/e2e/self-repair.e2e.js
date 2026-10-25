@@ -43,7 +43,7 @@ async function main() {
       AUTOINJECTOR_PROBE_DELAY_MS: '1500', AUTOINJECTOR_CHECKIN_STARTUP_DELAY_MS: '800', AUTOINJECTOR_CHECKIN_TICK_MS: '700',
       AUTOINJECTOR_PROBE_TIMEOUT_MS: '20000', AUTOINJECTOR_PROBE_EARLY_MS: '3000', AUTOINJECTOR_NEEDS_USER_RECHECK_MS: '1500',
       AUTOINJECTOR_RELOAD_SETTLE_MS: '600', AUTOINJECTOR_TEACH_POLL_MS: '300', AUTOINJECTOR_CAPTURE_SETTLE_MS: '400',
-      AUTOINJECTOR_BOOKFORGE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'ai-nobf-')), NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost'
+      AUTOINJECTOR_AKOWE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'ai-nobf-')), NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost'
     }),
   });
   const shots = [];
@@ -53,7 +53,7 @@ async function main() {
       for (const w of app.windows()) { try { if (await w.$('#bf-ais')) controls = w; } catch (_) {} }
       if (!controls) await sleep(400);
     }
-    assert(!!controls, 'control panel with the BookForge panel appears');
+    assert(!!controls, 'control panel with the Akọwe panel appears');
     if (!controls) return 1;
     await controls.setViewportSize({ width: 1366, height: 900 }).catch(() => {});
     const errors = [];
@@ -63,7 +63,7 @@ async function main() {
     const panelShot = async (name) => {
       // Scroll the panel into view BELOW the sticky User Panel (it would cover it).
       await controls.evaluate(() => {
-        const p = document.getElementById('col-bookforge'); if (!p) return;
+        const p = document.getElementById('col-akowe'); if (!p) return;
         p.scrollIntoView({ block: 'start' });
         const up = document.getElementById('col-userpanel');
         const top = up && getComputedStyle(up).position === 'sticky' ? up.getBoundingClientRect().bottom : 0;
@@ -73,7 +73,7 @@ async function main() {
       });
       await sleep(300);
       const f = path.join(SHOTS, `${name}.png`);
-      const panel = await controls.$('#col-bookforge');
+      const panel = await controls.$('#col-akowe');
       if (panel) await panel.screenshot({ path: f }).catch(async () => { await controls.screenshot({ path: f }); });
       else await controls.screenshot({ path: f });
       shots.push(f);
@@ -103,7 +103,7 @@ async function main() {
       const x = s.sites.chatgpt;
       if (!sawRepair && x.state === 'repairing') {
         sawRepair = x;
-        await controls.evaluate(() => window.api.bookforgeStatus({}).then(() => 0));
+        await controls.evaluate(() => window.api.akoweStatus({}).then(() => 0));
         await sleep(150);
         if (await controls.$('.bf-ai[data-site="chatgpt"][data-st="repair"]')) await panelShot('p18_01_chatgpt_repairing');
       }
@@ -161,7 +161,7 @@ async function main() {
     const N = tst ? tst.number : '0000'; const REV = N.split('').reverse().join('');
     await waitFor(() => controls.$eval('#bf-teach', (e) => !e.hidden && /Number teach/.test(e.innerText)).catch(() => false), 8000);
     const teachText = await controls.$eval('#bf-teach', (e) => e.innerText).catch(() => '');
-    assert(new RegExp(`Type\\s*${N}\\s*into Claude's message box and press Send`).test(teachText.replace(/\n/g, ' ')) && /Cancel/.test(teachText), 'the BookForge panel box says exactly what to type, with Cancel');
+    assert(new RegExp(`Type\\s*${N}\\s*into Claude's message box and press Send`).test(teachText.replace(/\n/g, ' ')) && /Cancel/.test(teachText), 'the Akọwe panel box says exactly what to type, with Cancel');
     await panelShot('p38_02_number_teach_type');
     await sleep(600);
     const banner = await inPane('claude', 'String((document.querySelector("[data-autoinjector-overlay]") || {}).textContent || "")');
@@ -240,7 +240,7 @@ async function main() {
     await sleep(1200);
     await panelShot('p18_08_all_ok');
 
-    const diag = await controls.evaluate(() => window.api.bookforgeDiagnostics({}));
+    const diag = await controls.evaluate(() => window.api.akoweDiagnostics({}));
     assert(diag && diag.ok && /Self-repair chatgpt: state ok/.test(diag.text) && /Self-repair claude: state ok/.test(diag.text) && /Self-repair claude: .*🎯 saved .*assistant\(number/.test(diag.text) && /Self-repair chatgpt: .*🎯 saved assistant\(pick/.test(diag.text), `diagnostics list the self-repair and the saved picks per AI [${diag && String(diag.text).split('\n').filter((l) => /Self-repair/.test(l)).join(' | ')}]`);
     assert(!/Repeat this number|Reply with only this word|backwards, digits only/.test(diag.text), 'diagnostics carry no message text');
     assert(errors.length === 0, `no page errors in the control panel (${errors.slice(0, 3).join(' | ')})`);
