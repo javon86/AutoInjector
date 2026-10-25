@@ -1,0 +1,11 @@
+# What the pytest suite needs on top of requirements.txt (the app itself needs only jsonschema).
+# The export tests read the generated PDF / EPUB / DOCX back with these; CI installs this file.
+#   python -m pip install -r requirements.txt -r requirements-test.txt
+pytest
+pypdf
+pypdfium2
+lxml
+python-docx
+pillow
+# Optional, not listed: `playwright` (+ `python -m playwright install chromium`) for tests/campaign/ui, which are
+# skipped without it; LibreOffice (soffice), qpdf and an EPUBCheck jar (BF_EPUBCHECK_JAR) for a few export checks.

@@ -542,7 +542,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   them; (f) the editor's context gets `fact_checks` as data (no change to `editor_rubric.py`), so the AI editor may or
   may not turn them into findings; (g) the trade-facts list and repeat labels travel inside `book.bookforge` (all
   companion settings do) but are now in the book bible too (`trade_terms` with the author's ✔/✕ decisions and the story year, `repeat_labels`), and a 🔁 rerun starts with them (FIXED 2026-10-25).
-- **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
-  changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
-  (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the
-  campaign bridge e2e or mark it as a separate job).
+- **GitHub checks don't cover BookForge.** *Addressed:* `.github/workflows/bookforge-tests.yml` runs on PRs and
+  pushes to main that touch `bookforge/**` (or the Node bridge files the cross-process tests use). Job `test`
+  installs `bookforge/requirements.txt` + `requirements-test.txt` on Python 3.13 with Node 22 and runs
+  `python -m pytest -q` in `bookforge/` (UI tests skip there: no Playwright); job `ui-test` installs Playwright +
+  Chromium and runs `tests/campaign/ui`. Still not on CI: the AutoInjector desktop-app bridge e2e
+  (`tests/campaign/bridge`, needs `desktop-app/node_modules`), EPUBCheck and LibreOffice checks (skipped there).
+  Earlier, `desktop-app-tests.yml` only ran for `desktop-app/**`, so BookForge-only PRs (Sections 3–5) were merged
+  on the full local suite.

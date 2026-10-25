@@ -677,7 +677,7 @@ SKIPPED and a manual candidate keeps dependent rows going. Projects with `workfl
 
 ## Tests
 
-`python -m pytest -q tests` . Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
+`python -m pytest -q tests` (test-only packages: `requirements-test.txt`; CI: `.github/workflows/bookforge-tests.yml`). Use the `h` fixture (tests/conftest.py): `h.create(op, payload)`,
 `h.dispatch(op, action, ...)`, `h.validate(ref)`, `h.accept(ref)`, `h.approve(ref)`,
 `h.create_approved(op, payload, manual_candidate=...)`, `h.set_features(magic=True)`.
 For AI paths set `engine.providers.test_adapter` to a fake with
