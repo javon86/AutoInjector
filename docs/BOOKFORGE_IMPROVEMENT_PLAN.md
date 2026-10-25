@@ -19,7 +19,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
 - **Just finished (P38 PR):** 🎯 picker rebuild + 🔢 number teach, with P37.1, P37.3, P37.4 done and P37.2 partly done [!].
-- **Next up:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
+- **Now:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 without P22 (skipped by the user): P26 + P31, then P30, P32–P35, P23, P24, P25, P27, P28 (P29 later).
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
@@ -201,7 +201,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
 ## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
 
-- [ ] **P22** Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
+- [-] **P22** (SKIPPED — user said don't do the AI tools/skills menu, 2026-10-25) Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
   place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
