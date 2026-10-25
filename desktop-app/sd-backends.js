@@ -25,6 +25,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
+const sdParams = require('./sd-params');
 
 const deps = { http, https };
 function configure(patch) { if (patch && patch.http) deps.http = patch.http; if (patch && patch.https) deps.https = patch.https; }
@@ -39,7 +40,7 @@ function request(method, url, opts = {}) {
     const ms = Math.max(200, opts.timeoutMs || 15000);
     const payload = opts.body === undefined ? null : (Buffer.isBuffer(opts.body) ? opts.body : Buffer.from(typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body)));
     const headers = { Accept: opts.binary ? '*/*' : 'application/json' };
-    if (payload) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = payload.length; }
+    if (payload) { headers['Content-Type'] = opts.contentType || 'application/json'; headers['Content-Length'] = payload.length; }
     const maxBytes = opts.maxBytes || 256 * 1024 * 1024;
     let done = false, req = null;
     const timer = setTimeout(() => { try { req && req.destroy(); } catch {} finish({ ok: false, error: 'TIMEOUT' }); }, ms);
@@ -301,8 +302,11 @@ function a1111Payload(p) {
   if (p.checkpoint) ov.sd_model_checkpoint = p.checkpoint;
   if (p.vae) ov.sd_vae = p.vae;
   if (Object.keys(ov).length) { body.override_settings = ov; body.override_settings_restore_afterwards = true; }
-  if (p.initImage) { body.init_images = [String(p.initImage).replace(/^data:image\/\w+;base64,/, '')]; body.denoising_strength = p.denoise == null ? 0.6 : p.denoise; }
-  return body;
+  // initImage may still be a data: URL when a caller built p by hand.
+  const q = p.initImage && /^data:/.test(String(p.initImage)) ? Object.assign({}, p, { initImage: String(p.initImage).replace(/^data:image\/[\w.+-]+;base64,/, '') }) : p;
+  // Hires fix, refiner, img2img / inpaint, ControlNet, ADetailer, styles, scripts,
+  // clip skip, override settings and validated extra fields (sd-params.js).
+  return sdParams.a1111Apply(body, q);
 }
 
 async function a1111Generate(base, p, opts = {}) {
@@ -349,12 +353,15 @@ function _input(info, node, name) {
   const opt = n && n.input && (n.input.optional || {});
   return comboOptions((req && req[name]) || (opt && opt[name]));
 }
+// Optional nodes whose presence decides what the built-in graph can do.
+const COMFY_FEATURE_NODES = ['UpscaleModelLoader', 'ControlNetLoader', 'ControlNetApplyAdvanced', 'CLIPSetLastLayer', 'AIO_Preprocessor', 'KSamplerAdvanced', 'VAEEncodeForInpaint', 'LoadImageMask'];
 async function comfyLists(base, ms = 8000) {
-  const nodes = ['CheckpointLoaderSimple', 'LoraLoader', 'VAELoader', 'KSampler'];
+  const nodes = ['CheckpointLoaderSimple', 'LoraLoader', 'VAELoader', 'KSampler', ...COMFY_FEATURE_NODES];
   const rs = await Promise.all(nodes.map((n) => getJson(`${base}/object_info/${n}`, ms)));
   if (!rs[0].ok) return { ok: false, error: rs[0].error, message: explain(rs[0], { base }) };
   const info = Object.assign({}, ...rs.map((r) => (r.ok && r.json && typeof r.json === 'object' ? r.json : {})));
   const emb = await getJson(`${base}/embeddings`, ms);
+  const preprocessors = _input(info, 'AIO_Preprocessor', 'preprocessor');
   return {
     ok: true, backend: 'comfy',
     checkpoints: _input(info, 'CheckpointLoaderSimple', 'ckpt_name').map((n) => ({ name: n, title: n })),
@@ -363,6 +370,11 @@ async function comfyLists(base, ms = 8000) {
     samplers: _input(info, 'KSampler', 'sampler_name'),
     schedulers: _input(info, 'KSampler', 'scheduler'),
     embeddings: (emb.ok && Array.isArray(emb.json) ? emb.json : []).map((n) => ({ name: String(n) })),
+    upscalers: ['Latent', 'Latent (bilinear)', 'Latent (bicubic)', 'Latent (area)'].concat(_input(info, 'UpscaleModelLoader', 'model_name')),
+    upscaleModels: _input(info, 'UpscaleModelLoader', 'model_name'),
+    controlnets: _input(info, 'ControlNetLoader', 'control_net_name'),
+    preprocessors: preprocessors.length ? ['none', ...preprocessors] : ['none'],
+    nodes: nodes.filter((n) => info[n]),
     current: { checkpoint: '', vae: '' },
   };
 }
@@ -378,30 +390,11 @@ function resolveName(list, name) {
   return hit || (arr.length ? '' : name);
 }
 
-// The built-in minimal txt2img graph (API format). LoRA loaders are chained
-// between the checkpoint and both the model and CLIP consumers.
-function buildComfyWorkflow(p) {
-  const g = {};
-  g['4'] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: p.checkpoint } };
-  let modelRef = ['4', 0], clipRef = ['4', 1];
-  let id = 100;
-  for (const l of p.loras || []) {
-    const nid = String(id++);
-    const w = Number(l.weight); const ww = Number.isFinite(w) ? w : 1;
-    g[nid] = { class_type: 'LoraLoader', inputs: { lora_name: l.name, strength_model: ww, strength_clip: ww, model: modelRef, clip: clipRef } };
-    modelRef = [nid, 0]; clipRef = [nid, 1];
-  }
-  g['6'] = { class_type: 'CLIPTextEncode', inputs: { text: String(p.prompt || ''), clip: clipRef } };
-  g['7'] = { class_type: 'CLIPTextEncode', inputs: { text: String(p.negativePrompt || ''), clip: clipRef } };
-  g['5'] = { class_type: 'EmptyLatentImage', inputs: { width: p.width, height: p.height, batch_size: p.batchSize || 1 } };
-  const smp = toComfySampler(p.sampler, p.scheduler);
-  g['3'] = { class_type: 'KSampler', inputs: { seed: p.seed, steps: p.steps, cfg: p.cfgScale, sampler_name: smp.sampler_name, scheduler: smp.scheduler, denoise: 1, model: modelRef, positive: ['6', 0], negative: ['7', 0], latent_image: ['5', 0] } };
-  let vaeRef = ['4', 2];
-  if (p.vae && !/^(automatic|none|)$/i.test(p.vae)) { g['20'] = { class_type: 'VAELoader', inputs: { vae_name: p.vae } }; vaeRef = ['20', 0]; }
-  g['8'] = { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: vaeRef } };
-  g['9'] = { class_type: 'SaveImage', inputs: { filename_prefix: 'AutoInjector', images: ['8', 0] } };
-  return g;
-}
+// The built-in graph (API format): checkpoint → LoRA chain → [CLIP skip] → CLIP
+// text encode ± → [ControlNet] → empty latent | encoded init picture (+ mask)
+// → KSampler (or base + refiner KSamplerAdvanced) → [hires fix] → VAE decode →
+// SaveImage. Plain txt2img keeps the classic node ids (4, 6, 7, 5, 3, 8, 9).
+function buildComfyWorkflow(p) { return sdParams.buildComfyGraph(p, toComfySampler); }
 
 // ComfyUI's 400 body → one plain sentence.
 function comfyRejectReason(json) {
@@ -422,28 +415,31 @@ function comfyRejectReason(json) {
 
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function comfyGenerate(base, p, opts = {}) {
+// Upload a picture into ComfyUI's input folder (POST /upload/image, multipart).
+// → { ok, name } where name is what LoadImage wants ("sub/file.png").
+async function comfyUpload(base, b64, filename, opts = {}) {
+  const boundary = `----AutoInjector${crypto.randomBytes(8).toString('hex')}`;
+  const safe = String(filename || 'image.png').replace(/[^\w.-]+/g, '_').slice(0, 120) || 'image.png';
+  const parts = [];
+  const field = (name, value) => parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${safe}"\r\nContent-Type: image/png\r\n\r\n`));
+  parts.push(Buffer.from(String(b64 || ''), 'base64'));
+  parts.push(Buffer.from('\r\n'));
+  field('type', opts.type || 'input');
+  field('overwrite', 'true');
+  if (opts.subfolder) field('subfolder', opts.subfolder);
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  const r = await request('POST', `${base}/upload/image`, { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}`, timeoutMs: opts.timeoutMs || 60000 });
+  if (!r.ok || !r.json || !r.json.name) return { ok: false, error: r.error || 'UPLOAD_FAILED', detail: errDetail(r), message: `ComfyUI didn't accept the picture upload${errDetail(r) ? `: ${errDetail(r)}` : ''}.` };
+  return { ok: true, name: r.json.subfolder ? `${r.json.subfolder}/${r.json.name}` : r.json.name, type: r.json.type || 'input' };
+}
+
+// Queue any API-format graph, wait for it, download every output picture.
+// → { ok, images[], promptId, outputs } | { ok:false, error, message }
+async function comfyRunGraph(base, graph, opts = {}) {
   const job = opts.job || {};
   const timeoutMs = opts.timeoutMs || 180000;
   const pollMs = opts.pollMs || 600;
-  // Pull <lora:…> tags out of the prompt into LoRA nodes.
-  const tagged = parseLoraTags(p.prompt);
-  const lists = opts.lists || await comfyLists(base);
-  if (!lists.ok) return { ok: false, error: lists.error, message: lists.message };
-  const loras = [];
-  const missing = [];
-  for (const l of [...tagged.loras, ...(p.loras || [])]) {
-    const nm = resolveName(lists.loras, l.name);
-    if (!nm) { missing.push(l.name); continue; }
-    if (!loras.some((x) => x.name === nm)) loras.push({ name: nm, weight: l.weight });
-  }
-  let ckpt = p.checkpoint ? resolveName(lists.checkpoints, p.checkpoint) : '';
-  if (!ckpt) ckpt = (lists.checkpoints[0] && lists.checkpoints[0].name) || '';
-  if (!ckpt) return { ok: false, error: 'NO_CHECKPOINT', message: explain('NO_CHECKPOINT') };
-  const vae = p.vae ? resolveName(lists.vaes, p.vae) : '';
-  const seed = p.seed == null || Number(p.seed) < 0 ? randomSeed() : Math.floor(Number(p.seed));
-  const params = Object.assign({}, p, { prompt: tagged.prompt, loras, checkpoint: ckpt, vae, seed });
-  const graph = buildComfyWorkflow(params);
   const clientId = job.clientId || crypto.randomUUID();
   job.clientId = clientId;
   _comfySocket(base, clientId, job);
@@ -485,14 +481,82 @@ async function comfyGenerate(base, p, opts = {}) {
             const v = await request('GET', `${base}/view?${qs}`, { binary: true, timeoutMs: 30000 });
             if (v.ok && v.buffer && v.buffer.length) images.push(v.buffer.toString('base64'));
           }
-          if (!images.length) return { ok: false, error: 'NO_IMAGE', message: 'ComfyUI finished but AutoInjector could not download the picture from it (/view).' };
-          return { ok: true, images, seed, promptId, info: { seed, prompt: params.prompt, checkpoint: ckpt, loras }, missingLoras: missing, workflow: graph };
+          if (!images.length) return { ok: false, error: 'NO_IMAGE', message: opts.allowNoImage ? 'The workflow ran but made no picture.' : 'ComfyUI finished but AutoInjector could not download the picture from it (/view).', promptId, outputs };
+          return { ok: true, images, promptId, outputs };
         }
       }
       await _sleep(pollMs);
     }
     return { ok: false, error: 'TIMEOUT', message: explain('TIMEOUT', { base }) };
   } finally { job.closeWs && job.closeWs(); }
+}
+
+// Resolve names, upload pictures, refuse what ComfyUI can't do → the graph.
+// → { ok, graph, params, missing, seed } | { ok:false, … }
+async function comfyPrepare(base, p, opts = {}) {
+  const tagged = parseLoraTags(p.prompt);
+  const lists = opts.lists || await comfyLists(base);
+  if (!lists.ok) return { ok: false, error: lists.error, message: lists.message };
+  const nodes = Array.isArray(lists.nodes) ? new Set([...lists.nodes, 'CheckpointLoaderSimple', 'LoraLoader', 'VAELoader', 'KSampler']) : null;
+  const unsup = sdParams.unsupportedOn('comfy', p, { nodes });
+  if (unsup) return unsup;
+  const loras = [];
+  const missing = [];
+  for (const l of [...tagged.loras, ...(p.loras || [])]) {
+    const nm = resolveName(lists.loras, l.name);
+    if (!nm) { missing.push(l.name); continue; }
+    if (!loras.some((x) => x.name === nm)) loras.push({ name: nm, weight: l.weight });
+  }
+  let ckpt = p.checkpoint ? resolveName(lists.checkpoints, p.checkpoint) : '';
+  if (!ckpt) ckpt = (lists.checkpoints[0] && lists.checkpoints[0].name) || '';
+  if (!ckpt) return { ok: false, error: 'NO_CHECKPOINT', message: explain('NO_CHECKPOINT') };
+  const vae = p.vae ? resolveName(lists.vaes, p.vae) : '';
+  const seed = p.seed == null || Number(p.seed) < 0 ? randomSeed() : Math.floor(Number(p.seed));
+  const params = Object.assign({}, p, { prompt: tagged.prompt, loras, checkpoint: ckpt, vae, seed });
+  const bad = (field, value, list) => ({ ok: false, error: 'UNKNOWN_VALUE', code: 'UNKNOWN_VALUE', field, message: `ComfyUI doesn't have ${field} “${value}”.`, hint: list && list.length ? `Choose one of: ${list.slice(0, 12).join(', ')}` : 'Put the file into the matching ComfyUI models folder and press Refresh.' });
+  if (p.refiner && p.refiner.checkpoint) {
+    const r = resolveName(lists.checkpoints, p.refiner.checkpoint);
+    if (!r || (lists.checkpoints.length && !lists.checkpoints.some((c) => c.name === r))) return bad('refiner.checkpoint', p.refiner.checkpoint, lists.checkpoints.map((c) => c.name));
+    params.refiner = Object.assign({}, p.refiner, { checkpoint: r });
+  }
+  if (p.hires) {
+    params.hires = Object.assign({}, p.hires);
+    const up = p.hires.upscaler;
+    if (up && !sdParams.latentMethod(up)) {
+      const m = resolveName(lists.upscaleModels || [], up);
+      if (!m || !(lists.upscaleModels || []).includes(m)) return bad('hires.upscaler', up, lists.upscalers);
+      params.hires.upscalerModel = m;
+    }
+  }
+  if (p.controlnet) {
+    params.controlnet = [];
+    for (let i = 0; i < p.controlnet.length; i++) {
+      const u = Object.assign({}, p.controlnet[i]);
+      const m = resolveName(lists.controlnets || [], u.model);
+      if (!u.model || !m || !(lists.controlnets || []).includes(m)) return bad(`controlnet[${i}].model`, u.model || '(none)', lists.controlnets);
+      u.model = m;
+      if (u.module && !/^none$/i.test(u.module) && Array.isArray(lists.preprocessors) && lists.preprocessors.length > 1 && !lists.preprocessors.includes(u.module)) return bad(`controlnet[${i}].module`, u.module, lists.preprocessors);
+      params.controlnet.push(u);
+    }
+  }
+  // Pictures go into ComfyUI's input folder first.
+  const stamp = Date.now().toString(36);
+  const up = async (b64, name) => { const r = await comfyUpload(base, b64, name); if (!r.ok) throw Object.assign(new Error(r.message), { result: r }); return r.name; };
+  try {
+    if (p.initImage) params.initImageName = await up(p.initImage, `autoinjector-init-${stamp}.png`);
+    if (p.mask) params.maskName = await up(p.mask, `autoinjector-mask-${stamp}.png`);
+    if (params.controlnet) for (let i = 0; i < params.controlnet.length; i++) if (params.controlnet[i].image) params.controlnet[i].imageName = await up(params.controlnet[i].image, `autoinjector-cn${i}-${stamp}.png`);
+  } catch (e) { return e.result || { ok: false, error: 'UPLOAD_FAILED', message: String(e.message || e) }; }
+  return { ok: true, graph: buildComfyWorkflow(params), params, missing, seed, lists };
+}
+
+async function comfyGenerate(base, p, opts = {}) {
+  const prep = await comfyPrepare(base, p, opts);
+  if (!prep.ok) return prep;
+  const r = await comfyRunGraph(base, prep.graph, opts);
+  if (!r.ok) return r;
+  const pp = prep.params;
+  return { ok: true, images: r.images, seed: prep.seed, promptId: r.promptId, info: { seed: prep.seed, prompt: pp.prompt, checkpoint: pp.checkpoint, loras: pp.loras }, missingLoras: prep.missing, workflow: prep.graph };
 }
 
 // Live step progress from ComfyUI's websocket, when this runtime has one.
@@ -543,4 +607,5 @@ module.exports = {
   parseLoraTags, loraTag, a1111Prompt, toComfySampler, randomSeed,
   a1111Lists, a1111Payload, a1111Generate, a1111Progress, a1111Interrupt,
   comboOptions, comfyLists, resolveName, buildComfyWorkflow, comfyRejectReason, comfyGenerate, comfyProgress, comfyInterrupt,
+  comfyUpload, comfyRunGraph, comfyPrepare, COMFY_FEATURE_NODES, getJson, postJson,
 };

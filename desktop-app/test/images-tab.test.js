@@ -58,6 +58,15 @@ function makeSd(over = {}) {
     installModel: async (id) => { calls.push(['installModel', id]); return { ok: true }; },
     installCancel: async () => ({ ok: true }), openInstallFolder: async () => ({ ok: true }),
     onRunner: () => {}, onInstall: () => {}, onConnected: () => {},
+    // the advanced sections
+    extras: async () => { calls.push(['extras']); const comfy = status.backend === 'comfy'; return { ok: true, backend: comfy ? 'comfy' : 'a1111', upscalers: comfy ? ['Latent', '4x-UltraSharp.pth'] : ['Latent', 'Latent (bicubic)', 'R-ESRGAN 4x+', '4x-UltraSharp'], upscaleModels: comfy ? ['4x-UltraSharp.pth'] : ['None', 'R-ESRGAN 4x+', '4x-UltraSharp'], controlnet: { models: ['control_v11p_sd15_canny [d14c016b]'], modules: ['none', 'canny'] }, adetailer: comfy ? null : { models: ['face_yolov8n.pt', 'hand_yolov8n.pt'] }, styles: comfy ? [] : ['Cinematic', 'Oil painting'], scripts: comfy ? null : { txt2img: ['x/y/z plot'], img2img: ['loopback'] }, optionKeys: comfy ? [] : ['CLIP_stop_at_last_layers', 'jpeg_quality'], workflows: [{ id: 'portrait-flow', name: 'Portrait flow', params: ['prompt', 'seed'] }] }; },
+    img2img: async (req) => { calls.push(['img2img', req]); return { ok: true, seed: 3, warnings: [], settings: Object.assign({}, req), images: [{ path: '/out/images/img2img-1.png', url: 'file:///out/images/img2img-1.png', seed: 3 }] }; },
+    inpaint: async (req) => { calls.push(['inpaint', req]); return { ok: true, seed: 4, warnings: [], settings: Object.assign({}, req), images: [{ path: '/out/images/inpaint-1.png', url: 'file:///out/images/inpaint-1.png', seed: 4 }] }; },
+    upscale: async (req) => { calls.push(['upscale', req]); return { ok: true, settings: { kind: 'upscale', factor: req.factor, upscaler: req.upscaler }, images: [{ path: '/out/images/upscale-1.png', url: 'file:///out/images/upscale-1.png' }] }; },
+    optionsGet: async (keys) => { calls.push(['optionsGet', keys]); return { ok: true, options: { [keys[0]]: 1 } }; },
+    optionsSet: async (o) => { calls.push(['optionsSet', o]); return { ok: true }; },
+    workflowSave: async (w) => { calls.push(['workflowSave', w]); return { ok: true, workflow: { id: 'my-flow', name: w.name, params: ['prompt'] } }; },
+    workflowRun: async (r) => { calls.push(['workflowRun', r]); return { ok: true, settings: { kind: 'workflow', workflowName: 'Portrait flow' }, images: [{ path: '/out/images/workflow-1.png', url: 'file:///out/images/workflow-1.png' }] }; },
   };
   return { sd, calls, setStatus: (s) => { status = Object.assign({}, status, s); } };
 }
@@ -195,6 +204,134 @@ async function load(over) {
   t.click('btn-sd-install');
   await tick(80);
   assert(t.calls.some((c) => c[0] === 'install') && /installed \(checksum verified\)/.test(t.$('sd-install-msg').textContent), '⬇ Install runs and reports the verified install');
+
+  console.log('== more settings: hires, refiner, clip skip, extra fields ==');
+  t.click('sd-sub-generate');
+  await tick(20);
+  assert(t.calls.some((c) => c[0] === 'extras') && [...t.$('sd-hr-upscaler').options].some((o) => o.value === 'R-ESRGAN 4x+') && [...t.$('sd-rf-checkpoint').options].some((o) => /juggernaut/.test(o.value)), 'after connecting, the sections get the upscalers and checkpoints');
+  assert(!t.$('sd-sec-ad').hidden && t.$('sd-sec-wf').hidden && [...t.$('sd-adv-styles').options].length === 2 && [...t.$('sd-opt-keys').options].length === 2, 'Forge: ADetailer / styles / settings shown; the ComfyUI workflow picker hidden');
+  assert([...t.d.querySelectorAll('details.sd-adv')].every((d) => !d.open) && !t.$('sd-hr-on').checked && t.$('sd-i2i-mode').value === '', 'all sections start closed and off (the plain form is unchanged)');
+  t.$('sd-prompt').value = 'a lighthouse at dusk';
+  t.$('sd-hr-on').checked = true; t.fire(t.$('sd-hr-on'), 'change');
+  t.$('sd-hr-scale').value = '1.5'; t.$('sd-hr-upscaler').value = 'R-ESRGAN 4x+'; t.$('sd-hr-denoise').value = '0.35';
+  t.$('sd-rf-on').checked = true; t.$('sd-rf-checkpoint').value = 'juggernautXL_v9.safetensors [c9]';
+  t.$('sd-adv-clipskip').value = '2'; t.$('sd-adv-restore').checked = true;
+  t.$('sd-adv-styles').options[0].selected = true;
+  t.$('sd-adv-script').value = 'x/y/z plot'; t.$('sd-adv-script-args').value = '[1, "10,20"]';
+  t.$('sd-adv-extra').value = '{ "s_churn": 0.5 }';
+  t.$('sd-adv-override').value = '{ "eta_noise_seed_delta": 31337 }';
+  t.$('sd-ad-on').checked = true; t.$('sd-ad-model').value = 'hand_yolov8n.pt';
+  t.fire(t.$('sd-adv-extra'), 'input');
+  assert(/on ×1\.5/.test(t.$('sd-hr-badge').textContent) && /clip skip 2/.test(t.$('sd-adv-badge').textContent) && /extra/.test(t.$('sd-adv-badge').textContent), 'section headers show what is switched on');
+  let n0 = t.calls.filter((c) => c[0] === 'generate').length;
+  t.click('btn-sd-generate');
+  await tick(900);
+  let g2 = t.calls.filter((c) => c[0] === 'generate')[n0];
+  assert(g2 && g2[1].hires.scale === 1.5 && g2[1].hires.upscaler === 'R-ESRGAN 4x+' && g2[1].hires.denoise === 0.35 && g2[1].refiner.checkpoint === 'juggernautXL_v9.safetensors [c9]' && g2[1].refiner.switchAt === 0.8, 'Generate sends hires fix + refiner');
+  assert(g2[1].clipSkip === 2 && g2[1].restoreFaces === true && g2[1].styles[0] === 'Cinematic' && g2[1].script.name === 'x/y/z plot' && g2[1].script.args[1] === '10,20' && g2[1].extra.s_churn === 0.5 && g2[1].overrideSettings.eta_noise_seed_delta === 31337 && g2[1].adetailer[0].model === 'hand_yolov8n.pt', '…and clip skip, restore faces, styles, script, extra fields, override settings, ADetailer');
+  t.$('sd-adv-extra').value = '{ s_churn: 0.5 ';
+  n0 = t.calls.filter((c) => c[0] === 'generate').length;
+  t.click('btn-sd-generate');
+  await tick(30);
+  assert(t.calls.filter((c) => c[0] === 'generate').length === n0 && /Extra fields: that isn't valid JSON/.test(t.$('sd-msg').textContent), 'bad JSON in Extra fields → a plain message, nothing sent');
+  for (const id of ['sd-hr-on', 'sd-rf-on', 'sd-adv-restore', 'sd-ad-on']) t.$(id).checked = false;
+  for (const id of ['sd-adv-clipskip', 'sd-adv-extra', 'sd-adv-override', 'sd-adv-script-args']) t.$(id).value = '';
+  t.$('sd-adv-script').value = ''; t.$('sd-adv-styles').options[0].selected = false;
+
+  console.log('== img2img / inpaint with the mask brush, ControlNet, upscale ==');
+  const W = t.dom.window;
+  const ctxCalls = [];
+  W.HTMLCanvasElement.prototype.getContext = function () { const c = this; return { clearRect: () => ctxCalls.push('clear'), fillRect: () => ctxCalls.push('fillRect'), drawImage: () => ctxCalls.push('drawImage'), beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => ctxCalls.push('stroke'), arc: () => {}, fill: () => ctxCalls.push('dot'), set fillStyle(v) { c._fill = v; }, set strokeStyle(v) {}, set lineWidth(v) {}, set lineCap(v) {}, set lineJoin(v) {}, set globalCompositeOperation(v) { c._op = v; } }; };
+  W.HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,TUFTSw==';
+  t.d.querySelector('#sd-gallery img').dispatchEvent(new W.Event('click', { bubbles: true }));
+  await tick(10);
+  t.$('sd-i2i-mode').value = 'img2img'; t.fire(t.$('sd-i2i-mode'), 'change');
+  t.click('btn-sd-generate');
+  await tick(30);
+  assert(/Choose the start picture first/.test(t.$('sd-msg').textContent), 'img2img without a start picture → says what to do');
+  t.click('btn-sd-i2i-current');
+  await tick(10);
+  assert(!t.$('sd-mask-wrap').hidden && /old\.png/.test(t.$('sd-i2i-img').src) && /img2img/.test(t.$('btn-sd-generate').textContent), '"Use result" puts the shown picture in as the start picture');
+  t.$('sd-i2i-denoise').value = '0.45'; t.$('sd-i2i-resize').value = 'crop and resize';
+  t.click('btn-sd-generate');
+  await tick(60);
+  let ic = t.calls.find((c) => c[0] === 'img2img');
+  assert(ic && ic[1].initImage === '/out/images/old.png' && ic[1].denoise === 0.45 && ic[1].resizeMode === 'crop and resize' && !ic[1].mask, 'img2img → api.img2img with the picture\'s path, denoise, resize mode');
+  t.$('sd-i2i-mode').value = 'inpaint'; t.fire(t.$('sd-i2i-mode'), 'change');
+  assert(!t.$('sd-inpaint-opts').hidden && !t.$('sd-mask-tools').hidden && /Inpaint/.test(t.$('btn-sd-generate').textContent), 'Inpaint mode shows the brush tools and inpaint options');
+  t.click('btn-sd-generate');
+  await tick(30);
+  assert(/Brush over the part to repaint/.test(t.$('sd-msg').textContent) && !t.calls.some((c) => c[0] === 'inpaint'), 'Inpaint with an empty mask → asks you to brush first');
+  const cv = t.$('sd-mask-canvas');
+  cv.dispatchEvent(new W.MouseEvent('pointerdown', { clientX: 10, clientY: 10, bubbles: true }));
+  cv.dispatchEvent(new W.MouseEvent('pointermove', { clientX: 40, clientY: 30, bubbles: true }));
+  cv.dispatchEvent(new W.MouseEvent('pointerup', { bubbles: true }));
+  assert(ctxCalls.includes('dot') && ctxCalls.includes('stroke') && cv._op === 'source-over', 'brushing paints white strokes on the mask canvas');
+  t.$('sd-ip-fill').value = 'latent noise'; t.$('sd-ip-blur').value = '8'; t.$('sd-ip-only').checked = true; t.$('sd-ip-pad').value = '48';
+  t.click('btn-sd-generate');
+  await tick(60);
+  ic = t.calls.find((c) => c[0] === 'inpaint');
+  assert(ic && ic[1].initImage === '/out/images/old.png' && ic[1].mask === 'data:image/png;base64,TUFTSw==' && ic[1].inpaint.fill === 'latent noise' && ic[1].inpaint.maskBlur === 8 && ic[1].inpaint.onlyMasked === true && ic[1].inpaint.padding === 48, 'Inpaint → api.inpaint with the mask (white on black PNG) and the inpaint options');
+  assert(ctxCalls.includes('fillRect') && ctxCalls.includes('drawImage'), 'the mask is exported on a black background');
+  t.$('sd-i2i-mode').value = ''; t.fire(t.$('sd-i2i-mode'), 'change');
+  t.click('btn-sd-cn-add');
+  await tick(10);
+  const unit = t.d.querySelector('.sd-cn-unit');
+  assert(unit && unit.querySelector('.cn-model').value === 'control_v11p_sd15_canny [d14c016b]' && [...unit.querySelector('.cn-module').options].some((o) => o.value === 'canny') && /1 unit/.test(t.$('sd-cn-badge').textContent), '＋ Add a ControlNet unit: models and preprocessors listed');
+  t.click('btn-sd-generate');
+  await tick(30);
+  assert(/needs a control picture/.test(t.$('sd-msg').textContent), 'a unit without a control picture → plain message');
+  unit.querySelector('.cn-current').dispatchEvent(new W.Event('click', { bubbles: true }));
+  unit.querySelector('.cn-module').value = 'canny'; unit.querySelector('.cn-weight').value = '0.7'; unit.querySelector('.cn-pp').checked = true;
+  n0 = t.calls.filter((c) => c[0] === 'generate').length;
+  t.click('btn-sd-generate');
+  await tick(900);
+  g2 = t.calls.filter((c) => c[0] === 'generate')[n0];
+  assert(g2 && g2[1].controlnet.length === 1 && g2[1].controlnet[0].image === '/out/images/inpaint-1.png' && g2[1].controlnet[0].module === 'canny' && g2[1].controlnet[0].weight === 0.7 && g2[1].controlnet[0].pixelPerfect === true && g2[1].controlnet[0].controlMode === 'Balanced', 'Generate sends the ControlNet unit (picture, preprocessor, model, weight, pixel perfect, mode)');
+  unit.querySelector('.cn-remove').dispatchEvent(new W.Event('click', { bubbles: true }));
+  assert(!t.d.querySelector('.sd-cn-unit') && t.$('sd-cn-badge').textContent === '', '× removes the unit');
+  assert(!t.$('btn-sd-upscale').disabled, 'Upscale is enabled when a picture is shown');
+  t.$('sd-up-upscaler').value = '4x-UltraSharp'; t.$('sd-up-factor').value = '3';
+  t.click('btn-sd-upscale');
+  await tick(60);
+  const uc = t.calls.find((c) => c[0] === 'upscale');
+  assert(uc && uc[1].upscaler === '4x-UltraSharp' && uc[1].factor === 3 && /upscale-1\.png/.test(t.$('sd-preview').src) && /Upscaled/.test(t.$('sd-msg').textContent), '⤢ Upscale → api.upscale(picture, upscaler, factor); the result is shown');
+
+  console.log('== settings menu: read / set any option ==');
+  t.$('sd-opt-key').value = 'CLIP_stop_at_last_layers';
+  t.click('btn-sd-opt-get');
+  await tick(20);
+  assert(t.calls.some((c) => c[0] === 'optionsGet' && c[1][0] === 'CLIP_stop_at_last_layers') && t.$('sd-opt-value').value === '1', 'Read shows the option\'s current value');
+  t.$('sd-opt-value').value = '2';
+  t.click('btn-sd-opt-set');
+  await tick(20);
+  assert(t.calls.some((c) => c[0] === 'optionsSet' && c[1].CLIP_stop_at_last_layers === 2) && /is now 2/.test(t.$('sd-opt-msg').textContent), 'Set sends the value (JSON-parsed: 2 is a number)');
+
+  console.log('== ComfyUI: the workflow picker ==');
+  const tc = await load({ connect: (url) => { tc.setStatus({ enabled: true, endpoint: url, backend: 'comfy', base: url, label: 'ComfyUI' }); return { ok: true, kind: 'comfy', label: 'ComfyUI', port: 8188, message: 'Connected to ComfyUI on :8188', status: Object.assign({}, { enabled: true, endpoint: url, backend: 'comfy', base: url, label: 'ComfyUI' }) }; } });
+  tc.click('tab-app-images');
+  await tick(60);
+  tc.$('sd-url').value = 'http://127.0.0.1:8188';
+  tc.click('btn-sd-connect');
+  await tick(80);
+  assert(!tc.$('sd-sec-wf').hidden && tc.$('sd-sec-ad').hidden && [...tc.$('sd-wf-pick').options].some((o) => o.value === 'portrait-flow'), 'ComfyUI: the workflow picker is shown (ADetailer hidden) and lists saved workflows');
+  tc.$('sd-wf-pick').value = 'portrait-flow'; tc.fire(tc.$('sd-wf-pick'), 'change');
+  assert(/prompt, seed/.test(tc.$('sd-wf-params-list').textContent), 'picking one shows its parameters');
+  tc.$('sd-prompt').value = 'an old sailor';
+  tc.$('sd-wf-params').value = '{ "seed": 42 }';
+  tc.click('btn-sd-wf-run');
+  await tick(60);
+  const wr = tc.calls.find((c) => c[0] === 'workflowRun');
+  assert(wr && wr[1].id === 'portrait-flow' && wr[1].params.seed === 42 && wr[1].params.prompt === 'an old sailor' && /workflow-1\.png/.test(tc.$('sd-preview').src), '▶ Run workflow sends the params (prompt from the prompt box) and shows the picture');
+  tc.$('sd-wf-json').value = '{ "3": { "class_type": "KSampler", "inputs": {} } }'; tc.$('sd-wf-name').value = 'My flow';
+  tc.click('btn-sd-wf-save');
+  await tick(40);
+  const ws = tc.calls.find((c) => c[0] === 'workflowSave');
+  assert(ws && ws[1].name === 'My flow' && ws[1].workflow['3'].class_type === 'KSampler' && /Saved “My flow”/.test(tc.$('sd-wf-msg').textContent), 'Save workflow sends the pasted API JSON');
+  tc.$('sd-wf-json').value = '{ nope';
+  tc.click('btn-sd-wf-save');
+  await tick(20);
+  assert(/isn't valid JSON/.test(tc.$('sd-wf-msg').textContent), 'pasting bad JSON → plain message');
 
   console.log('== the --api mistake ==');
   t = await load({

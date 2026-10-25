@@ -637,7 +637,8 @@ function directToolFor(text) {
 // ----------------------------------------------------------------------------- schema validation
 /** A validated pass-through value (settings patches, raw SD payload fields): plain JSON, bounded size and
  *  depth, safe key names. The receiving module validates the meaning. */
-const PASS_KEY = /^[A-Za-z_][A-Za-z0-9_.\- ]{0,79}$/;
+// keys may start with a digit: ComfyUI node ids ("3") and "<node>.<input>" params ("7.text")
+const PASS_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.\- ]{0,79}$/;
 function checkPassthrough(v, at) {
   let n = 0;
   const walk = (x, d, where) => {
@@ -687,6 +688,8 @@ function checkValue(v, s, at) {
       return null;
     case 'object': {
       if (s['x-passthrough']) return checkPassthrough(v, at);
+      // an open object from a module schema (e.g. a ComfyUI workflow graph): plain JSON, safe keys, size-capped
+      if (!s.properties && s.additionalProperties === true) return checkPassthrough(v, at);
       if (!v || typeof v !== 'object' || Array.isArray(v)) return `${at} must be an object`;
       if (JSON.stringify(v).length > 8000) return `${at} is too big`;
       const props = s.properties || {};

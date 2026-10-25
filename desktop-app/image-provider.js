@@ -13,10 +13,19 @@
 // generate(prompt, opts) → { ok, imageBase64, images[], info, seed, backend, params }
 // opts may override any setting for one call (steps, width, height, cfgScale,
 // seed, sampler, scheduler, checkpoint, vae, batchSize, batchCount) and add
-// loras: [{ name, weight }], initImage (A1111 img2img), denoise.
+// loras: [{ name, weight }] plus every advanced setting of sd-params.js
+// (hires, refiner, initImage/denoise/mask/inpaint, controlnet, adetailer,
+// clipSkip, restoreFaces, tiling, styles, variation, script, alwaysonScripts,
+// overrideSettings, extra) — checked against the server before sending.
+// Also: upscale(o) (A1111 Extras / ComfyUI upscale model) and runWorkflow()
+// (any ComfyUI API-format workflow with named parameters).
 // The caller (main.js) saves the PNGs and records them — this module stays pure.
+const fs = require('fs');
 const { URL } = require('url');
 const sd = require('./sd-backends');
+const sdParams = require('./sd-params');
+const control = require('./sd-control');
+const workflows = require('./sd-workflows');
 
 let settings = {
   enabled: false,
@@ -121,7 +130,7 @@ function _num(v, d) { const n = Number(v); return Number.isFinite(n) && n > 0 ? 
 function resolveParams(prompt, opts = {}) {
   const s = settings;
   const seedRaw = opts.seed != null && opts.seed !== '' ? Number(opts.seed) : s.seed;
-  return {
+  const base = {
     prompt: String(prompt || '').trim(),
     negativePrompt: String(opts.negativePrompt != null ? opts.negativePrompt : ''),
     steps: Math.round(_num(opts.steps, s.steps)), cfgScale: _num(opts.cfgScale, s.cfgScale),
@@ -134,28 +143,38 @@ function resolveParams(prompt, opts = {}) {
     batchSize: Math.round(_num(opts.batchSize, s.batchSize)),
     batchCount: Math.round(_num(opts.batchCount, s.batchCount)),
     loras: Array.isArray(opts.loras) ? opts.loras.filter((l) => l && l.name).map((l) => ({ name: String(l.name), weight: Number.isFinite(Number(l.weight)) ? Number(l.weight) : 1 })) : [],
-    initImage: opts.initImage || null, denoise: opts.denoise,
   };
+  // Hires fix, refiner, img2img / inpaint, ControlNet, ADetailer, … (validated; images loaded).
+  const n = sdParams.normalize(opts);
+  const p = Object.assign(base, n.adv);
+  Object.defineProperty(p, '_errors', { value: n.errors, enumerable: false });
+  return p;
 }
+// The settings to record with a picture: no big base64 blobs.
+function publicParams(p) {
+  const u = Object.assign({}, p);
+  for (const k of ['initImage', 'mask']) if (u[k]) u[k] = '[image]';
+  if (Array.isArray(u.controlnet)) u.controlnet = u.controlnet.map((c) => Object.assign({}, c, c.image ? { image: '[image]' } : {}, c.mask ? { mask: '[image]' } : {}));
+  if (u.extra) { u.extra = Object.assign({}, u.extra); for (const [k, v] of Object.entries(u.extra)) if (typeof v === 'string' && v.length > 2000) u.extra[k] = '[data]'; }
+  return u;
+}
+function _firstError(errors) { const e = errors[0]; return Object.assign({ ok: false, error: e.code, code: e.code, hint: e.hint || '' }, e, { message: errors.map((x) => x.message).join(' ') }); }
 
-async function generate(prompt, opts = {}) {
-  const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : () => {};
-  const p = resolveParams(prompt, opts);
-  if (!p.prompt) return { ok: false, error: 'NEED_PROMPT', message: sd.explain('NEED_PROMPT') };
+// Common checks + the one-job-at-a-time slot for any render (generate / upscale / workflow).
+function _preflight() {
   if (!settings.enabled) return { ok: false, error: 'IMAGE_DISABLED', message: sd.explain('IMAGE_DISABLED') };
   if (!settings.endpoint) return { ok: false, error: 'NO_ENDPOINT', message: sd.explain('NO_ENDPOINT') };
   try { new URL(settings.endpoint); } catch { return { ok: false, error: 'BAD_ENDPOINT', message: sd.explain('BAD_URL') }; }
   if (job) return { ok: false, error: 'BUSY', message: 'A picture is already being made — wait for it or press Stop.' };
+  return null;
+}
+async function _withJob(steps, fn) {
   const backend = backendOf();
   const base = baseUrl();
-  const myJob = { backend, base, startedAt: Date.now(), steps: p.steps };
+  const myJob = { backend, base, startedAt: Date.now(), steps };
   job = myJob;
-  onEvent({ type: 'image-start', content: p.prompt });
   let r;
-  try {
-    if (backend === 'comfy') r = await sd.comfyGenerate(base, p, { job: myJob, timeoutMs: settings.timeoutMs, pollMs: opts.pollMs });
-    else r = await sd.a1111Generate(base, p, { endpoint: settings.endpoint, timeoutMs: settings.timeoutMs });
-  } catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
+  try { r = await fn(myJob, backend, base); } catch (e) { r = { ok: false, error: String((e && e.message) || e) }; }
   finally { if (job === myJob) job = null; }
   if (myJob.cancelled) r = { ok: false, error: 'CANCELLED', message: sd.explain('CANCELLED') };
   if (!r || !r.ok) {
@@ -163,11 +182,83 @@ async function generate(prompt, opts = {}) {
     if (!out.message) out.message = sd.explain(out, { base });
     return out;
   }
+  return Object.assign(r, { backend });
+}
+
+async function generate(prompt, opts = {}) {
+  const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : () => {};
+  const p = resolveParams(prompt, opts);
+  if (!p.prompt && !p.initImage) return { ok: false, error: 'NEED_PROMPT', message: sd.explain('NEED_PROMPT') };
+  if (p._errors.length) return _firstError(p._errors);
+  const pre = _preflight();
+  if (pre) return pre;
+  onEvent({ type: 'image-start', content: p.prompt });
+  let warnings = [];
+  const r = await _withJob(p.steps, async (myJob, backend, base) => {
+    if (backend === 'comfy') return sd.comfyGenerate(base, p, { job: myJob, timeoutMs: settings.timeoutMs, pollMs: opts.pollMs });
+    const chk = await control.a1111Check(base, p, p.initImage ? 'img2img' : 'txt2img');
+    if (!chk.ok) return chk;
+    warnings = chk.warnings || [];
+    return sd.a1111Generate(base, p, { endpoint: settings.endpoint, timeoutMs: settings.timeoutMs });
+  });
+  if (!r.ok) return r;
+  const backend = r.backend;
   onEvent({ type: 'image', content: `${r.images.length} image(s), ${r.images[0].length} base64 chars` });
-  const used = Object.assign({}, p, { seed: r.seed != null ? r.seed : p.seed, initImage: undefined });
+  const used = publicParams(Object.assign({}, p, { seed: r.seed != null ? r.seed : p.seed }));
   if (backend === 'comfy' && r.info) { used.checkpoint = r.info.checkpoint || used.checkpoint; used.loras = r.info.loras || used.loras; used.prompt = r.info.prompt != null ? r.info.prompt : used.prompt; }
   if (backend === 'a1111' && r.info && r.info.sd_model_name && !used.checkpoint) used.checkpoint = r.info.sd_model_name;
-  return { ok: true, imageBase64: r.images[0], images: r.images, info: r.rawInfo != null ? r.rawInfo : (r.info || ''), infoObj: r.info || {}, seed: used.seed, seeds: r.seeds, backend, label: settings.label, params: used, missingLoras: r.missingLoras || [] };
+  return { ok: true, imageBase64: r.images[0], images: r.images, info: r.rawInfo != null ? r.rawInfo : (r.info || ''), infoObj: r.info || {}, seed: used.seed, seeds: r.seeds, backend, label: settings.label, params: used, missingLoras: r.missingLoras || [], warnings, payload: r.payload ? publicParams(r.payload) : undefined, workflow: r.workflow };
+}
+
+// Upscale one picture: A1111 Extras (/extra-single-image) or a ComfyUI upscale-model graph.
+async function upscale(o = {}) {
+  const errors = [];
+  const q = sdParams.checkValue(sdParams.UPSCALE_SCHEMA, Object.assign({}, o, { image: undefined, from: undefined, pollMs: undefined, returnImage: undefined }), 'upscale', errors);
+  if (errors.length) return _firstError(errors);
+  if (!o.image) return { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'image', message: 'Give the picture to upscale (image).' };
+  const pre = _preflight();
+  if (pre) return pre;
+  const args = Object.assign({}, q, { image: o.image });
+  const r = await _withJob(1, (myJob, backend, base) => (backend === 'comfy' ? control.comfyUpscale(base, args, { job: myJob, timeoutMs: settings.timeoutMs, pollMs: o.pollMs }) : control.a1111Upscale(base, args, { timeoutMs: settings.timeoutMs })));
+  if (!r.ok) return r;
+  return Object.assign(r, { label: settings.label, params: Object.assign({ kind: 'upscale' }, q, { upscaler: r.upscaler || q.upscaler || '' }) });
+}
+
+// Run any ComfyUI API-format workflow with named params (see sd-workflows.js).
+// spec: { workflow, bindings?, params? } → { ok, images, applied, workflow }
+const IMG_EXT = /\.(png|jpe?g|webp|bmp)$/i;
+async function runWorkflow(spec = {}, opts = {}) {
+  if (backendOf() !== 'comfy' || !settings.endpoint) {
+    if (!settings.endpoint) return { ok: false, error: 'NO_ENDPOINT', message: sd.explain('NO_ENDPOINT') };
+    return control.unsupported('Running a ComfyUI workflow', 'a1111', 'Workflows are ComfyUI graphs. Connect to ComfyUI (http://127.0.0.1:8188) to run them; on Forge/A1111 use images.generate with hires / controlnet / extra fields.');
+  }
+  const chk = workflows.checkWorkflow(spec.workflow);
+  if (!chk.ok) return chk;
+  const pre = _preflight();
+  if (pre) return pre;
+  const params = Object.assign({}, spec.params || {});
+  const r = await _withJob(Number(params.steps) || 20, async (myJob, backend, base) => {
+    // Pictures bound to LoadImage / LoadImageMask inputs are uploaded first.
+    for (const [name, v] of Object.entries(params)) {
+      const targets = workflows.resolveTargets(chk.workflow, name, spec.bindings);
+      if (!targets.some((t) => /^LoadImage/.test((chk.workflow[t.node] || {}).class_type || '') && t.input === 'image')) continue;
+      if (typeof v === 'string' && IMG_EXT.test(v) && !/[\\/]/.test(v) && !fs.existsSync(v)) continue; // already a file in ComfyUI's input folder
+      const img = sdParams.loadImage(v, name);
+      if (img.error) return Object.assign({ ok: false, error: img.error.code }, img.error);
+      const up = await sd.comfyUpload(base, img.b64, `autoinjector-${name.replace(/[^\w]/g, '_')}-${Date.now().toString(36)}.png`);
+      if (!up.ok) return up;
+      params[name] = up.name;
+    }
+    let seed;
+    const sub = workflows.substitute(chk.workflow, params, spec.bindings, { randomSeed: () => (seed = sd.randomSeed()), mapSampler: (x) => sd.toComfySampler(x).sampler_name });
+    if (!sub.ok) return sub;
+    const run = await sd.comfyRunGraph(base, sub.workflow, { job: myJob, timeoutMs: settings.timeoutMs, pollMs: opts.pollMs });
+    if (!run.ok) return run;
+    const sp = sub.applied.find((a) => (workflows.ALIASES[a.param] || a.param) === 'seed');
+    return { ok: true, images: run.images, applied: sub.applied, workflow: sub.workflow, promptId: run.promptId, seed: sp ? sub.workflow[sp.node].inputs[sp.input] : seed };
+  });
+  if (!r.ok) return r;
+  return Object.assign(r, { label: settings.label });
 }
 
 async function progress() {
@@ -193,4 +284,4 @@ function testRender(opts = {}) {
   return generate(opts.prompt || 'a red apple on a white table, studio photo, simple', Object.assign({ width: 512, height: 512, steps: Math.min(settings.steps || 20, 20), batchSize: 1, batchCount: 1, seed: -1 }, opts));
 }
 
-module.exports = { getSettings, setSettings, status, generate, connect, lists, progress, cancel, testRender, backendOf, resolveParams, explain: sd.explain };
+module.exports = { getSettings, setSettings, status, generate, upscale, runWorkflow, connect, lists, progress, cancel, testRender, backendOf, baseUrl, resolveParams, publicParams, explain: sd.explain };

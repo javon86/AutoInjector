@@ -225,6 +225,8 @@ const EXCLUDED = {
   'sequence-editor:close': 'window chrome',
   'panes:sync': 'internal layout sync (not a user action)',
   'ui:log': 'internal UI logging (not a user action)',
+  'sd:extras': 'internal: the Images tab\'s one-call bundle (upscalers, ControlNet, ADetailer, styles, scripts, options, workflows); Alfred reads each through sd_call (sd.upscalers, sd.controlnet.*, sd.adetailer.models, sd.styles, sd.scripts, sd.options.get, sd.workflows.list)',
+  'sd:capabilities': 'internal: Alfred reads sd-api capabilities() directly when he builds his sd_call method list and schemas (alfred-main.js sdMethodsOf)',
   'akowe-view:tab': 'internal: the tab tells main it is showing (Alfred uses ui.show_tab / open_akowe_page)',
 };
 /** IPC channels that a dedicated Alfred tool covers (alfred-tools.js). */
@@ -241,6 +243,10 @@ const TOOL_CHANNELS = {
   'sdlib:list': 'sd_call:library.find', 'sdlib:scan': 'sd_call:library.scan', 'sdlib:locks': 'sd_call:library.locks',
   'sd:targets': 'sd_call:sd.targets', 'sd:start': 'sd_call:sd.start', 'sd:stop': 'sd_call:sd.stop',
   'sd:install-check': 'sd_call:sd.install.check', 'sd:install': 'sd_call:sd.install.install', 'sd:install-model': 'sd_call:sd.install.downloadModel', 'sd:install-cancel': 'sd_call:sd.install.cancel',
+  'sd:img2img': 'sd_call:images.img2img', 'sd:inpaint': 'sd_call:images.inpaint', 'sd:upscale': 'sd_call:images.upscale',
+  'sd:options-get': 'sd_call:sd.options.get', 'sd:options-set': 'sd_call:sd.options.set', 'sd:interrupt': 'sd_call:sd.interrupt', 'sd:skip': 'sd_call:sd.skip',
+  'sd:refresh': 'sd_call:sd.refresh', 'sd:memory': 'sd_call:sd.memory', 'sd:workflows': 'sd_call:sd.workflows.list', 'sd:workflow-get': 'sd_call:sd.workflows.get',
+  'sd:workflow-save': 'sd_call:sd.workflows.save', 'sd:workflow-delete': 'sd_call:sd.workflows.delete', 'sd:workflow-run': 'sd_call:sd.workflows.run',
 };
 
 function get(id) { return ACTIONS.find((a) => a.id === id) || null; }

@@ -93,6 +93,23 @@
     .sd-badge[data-base="Flux"] { background:#3a2a1a; border-color:#7a5a2a; }
     .sd-warn { font-size:11.5px; color:#f0c674; margin:3px 0; }
     .sd-warn[data-level="hard"] { color:#ff8c8c; }
+    /* 🎨 Generate → collapsible "more settings" sections (hires, refiner, img2img/inpaint, ControlNet, …) */
+    details.sd-adv { border:1px solid #262626; border-radius:6px; margin:5px 0 0; background:#141414; }
+    details.sd-adv > summary { cursor:pointer; padding:4px 8px; font-size:11.5px; opacity:.85; list-style:none; display:flex; gap:6px; align-items:center; }
+    details.sd-adv > summary::-webkit-details-marker { display:none; }
+    details.sd-adv > summary::before { content:'▸'; font-size:10px; opacity:.7; }
+    details.sd-adv[open] > summary::before { content:'▾'; }
+    details.sd-adv > summary .sd-on { font-size:10px; color:#8ef0b0; }
+    details.sd-adv > .sd-adv-body { padding:2px 8px 8px; }
+    details.sd-adv[hidden], #sd-advanced [hidden] { display:none !important; }
+    .sd-adv-body .sd-note { font-size:11px; opacity:.6; margin:3px 0; }
+    .sd-adv-body textarea { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:11px; }
+    #sd-mask-wrap { position:relative; margin-top:5px; max-width:100%; line-height:0; }
+    #sd-mask-wrap[hidden] { display:none; }
+    #sd-i2i-img { display:block; max-width:100%; border-radius:4px; }
+    #sd-mask-canvas { position:absolute; inset:0; width:100%; height:100%; opacity:.55; cursor:crosshair; touch-action:none; }
+    .sd-cn-unit { border:1px solid #2a2a2a; border-radius:6px; padding:5px 6px; margin:4px 0; }
+    .sd-cn-unit .sd-small { display:block; }
     #sd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
     #sd-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
     #sd-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
@@ -1123,6 +1140,82 @@
             <option value="">Size…</option><option value="512x512">512² (SD1.5)</option><option value="512x768">512×768 portrait</option><option value="768x512">768×512 wide</option>
             <option value="1024x1024">1024² (SDXL)</option><option value="832x1216">832×1216 portrait</option><option value="1216x832">1216×832 wide</option>
           </select>
+        </div>
+        <div id="sd-advanced" aria-label="More settings">
+          <details class="sd-adv" id="sd-sec-hires"><summary>Hires fix <span class="sd-on" id="sd-hr-badge"></span></summary><div class="sd-adv-body">
+            <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-hr-on"> Render small, upscale, then add detail</label>
+            <div class="sd-row"><div><label class="sd-l" for="sd-hr-upscaler">Upscaler</label><select id="sd-hr-upscaler"><option value="">Latent</option></select></div>
+              <div><label class="sd-l" for="sd-hr-scale">Upscale by</label><input type="number" id="sd-hr-scale" min="1" max="4" step="0.05" value="2"></div></div>
+            <div class="sd-row"><div><label class="sd-l" for="sd-hr-steps">Hires steps (0 = same)</label><input type="number" id="sd-hr-steps" min="0" max="150" value="0"></div>
+              <div><label class="sd-l" for="sd-hr-denoise">Denoising</label><input type="number" id="sd-hr-denoise" min="0" max="1" step="0.05" value="0.5"></div></div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-refiner"><summary>Refiner (SDXL) <span class="sd-on" id="sd-rf-badge"></span></summary><div class="sd-adv-body">
+            <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-rf-on"> Finish with a refiner checkpoint</label>
+            <div class="sd-row"><div><label class="sd-l" for="sd-rf-checkpoint">Refiner</label><select id="sd-rf-checkpoint"><option value="">(choose)</option></select></div>
+              <div><label class="sd-l" for="sd-rf-switch">Switch at</label><input type="number" id="sd-rf-switch" min="0.05" max="1" step="0.05" value="0.8"></div></div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-img2img"><summary>img2img / Inpaint <span class="sd-on" id="sd-i2i-badge"></span></summary><div class="sd-adv-body">
+            <div class="sd-row"><div><label class="sd-l" for="sd-i2i-mode">Start from a picture</label><select id="sd-i2i-mode"><option value="">Off (txt2img)</option><option value="img2img">img2img — change the whole picture</option><option value="inpaint">Inpaint — repaint what I brush</option></select></div></div>
+            <div class="sd-row" style="margin-top:4px;"><input type="file" id="sd-i2i-file" accept="image/png,image/jpeg,image/webp" aria-label="Choose a start picture"><button class="sd-fixed" id="btn-sd-i2i-current" title="Use the picture shown under Result">Use result</button></div>
+            <div id="sd-mask-wrap" hidden><img id="sd-i2i-img" alt="Start picture"><canvas id="sd-mask-canvas" aria-label="Mask: brush over what to repaint"></canvas></div>
+            <div class="sd-row" id="sd-mask-tools" hidden style="margin-top:4px;">
+              <label class="sd-fixed" for="sd-mask-brush" style="font-size:11.5px;">Brush</label><input type="range" id="sd-mask-brush" min="4" max="160" value="40">
+              <label class="sd-fixed" style="font-size:11.5px;"><input type="checkbox" id="sd-mask-erase"> Erase</label>
+              <button class="sd-fixed" id="btn-sd-mask-clear">Clear mask</button>
+            </div>
+            <div class="sd-row"><div><label class="sd-l" for="sd-i2i-denoise">Denoising (how much changes)</label><input type="number" id="sd-i2i-denoise" min="0" max="1" step="0.05" value="0.6"></div>
+              <div><label class="sd-l" for="sd-i2i-resize">Resize</label><select id="sd-i2i-resize"><option value="">Just resize</option><option value="crop and resize">Crop and resize</option><option value="resize and fill">Resize and fill</option><option value="just resize (latent upscale)">Just resize (latent upscale)</option></select></div></div>
+            <div id="sd-inpaint-opts" hidden>
+              <div class="sd-row"><div><label class="sd-l" for="sd-ip-fill">Masked content</label><select id="sd-ip-fill"><option value="original">original</option><option value="fill">fill</option><option value="latent noise">latent noise</option><option value="latent nothing">latent nothing</option></select></div>
+                <div><label class="sd-l" for="sd-ip-blur">Mask blur</label><input type="number" id="sd-ip-blur" min="0" max="64" value="4"></div></div>
+              <div class="sd-row"><label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-ip-only"> Only masked area (full res)</label><div><label class="sd-l" for="sd-ip-pad">Padding</label><input type="number" id="sd-ip-pad" min="0" max="256" value="32"></div></div>
+              <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-ip-invert"> Repaint what is NOT brushed</label>
+            </div>
+            <div class="sd-note" id="sd-i2i-note"></div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-cn"><summary>ControlNet <span class="sd-on" id="sd-cn-badge"></span></summary><div class="sd-adv-body">
+            <div id="sd-cn-units"></div>
+            <button id="btn-sd-cn-add">＋ Add a ControlNet unit</button>
+            <div class="sd-note" id="sd-cn-note"></div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-ad" data-backend="a1111"><summary>ADetailer (fix faces / hands) <span class="sd-on" id="sd-ad-badge"></span></summary><div class="sd-adv-body">
+            <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-ad-on"> Detect and repaint after the picture is made</label>
+            <div class="sd-row"><div><label class="sd-l" for="sd-ad-model">Detector</label><select id="sd-ad-model"><option value="face_yolov8n.pt">face_yolov8n.pt</option></select></div>
+              <div><label class="sd-l" for="sd-ad-conf">Confidence</label><input type="number" id="sd-ad-conf" min="0" max="1" step="0.05" value="0.3"></div>
+              <div><label class="sd-l" for="sd-ad-denoise">Denoising</label><input type="number" id="sd-ad-denoise" min="0" max="1" step="0.05" value="0.4"></div></div>
+            <label class="sd-l" for="sd-ad-prompt">Prompt for the fixed area (empty = main prompt)</label><input type="text" id="sd-ad-prompt">
+            <div class="sd-note" id="sd-ad-note"></div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-up"><summary>Upscale the result</summary><div class="sd-adv-body">
+            <div class="sd-row"><div><label class="sd-l" for="sd-up-upscaler">Upscaler</label><select id="sd-up-upscaler"><option value="">(default)</option></select></div>
+              <div><label class="sd-l" for="sd-up-factor">Factor</label><input type="number" id="sd-up-factor" min="1" max="8" step="0.25" value="2"></div></div>
+            <button id="btn-sd-upscale" style="margin-top:5px;" disabled>⤢ Upscale the picture under Result</button>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-adv"><summary>Advanced: any setting / extra fields <span class="sd-on" id="sd-adv-badge"></span></summary><div class="sd-adv-body">
+            <div class="sd-row"><div><label class="sd-l" for="sd-adv-clipskip">CLIP skip</label><input type="number" id="sd-adv-clipskip" min="1" max="12" placeholder="1"></div>
+              <label class="sd-fixed" style="font-size:12px;" data-backend="a1111"><input type="checkbox" id="sd-adv-restore"> Restore faces</label>
+              <label class="sd-fixed" style="font-size:12px;" data-backend="a1111"><input type="checkbox" id="sd-adv-tiling"> Tiling</label></div>
+            <div data-backend="a1111">
+              <label class="sd-l" for="sd-adv-styles">Styles</label><select id="sd-adv-styles" multiple size="3"></select>
+              <div class="sd-row"><div><label class="sd-l" for="sd-adv-script">Script</label><select id="sd-adv-script"><option value="">None</option></select></div>
+                <div><label class="sd-l" for="sd-adv-script-args">Script args (JSON list)</label><input type="text" id="sd-adv-script-args" placeholder="[]"></div></div>
+              <label class="sd-l" for="sd-adv-override">Override settings for this picture (JSON)</label><textarea id="sd-adv-override" rows="2" placeholder='{ "eta_noise_seed_delta": 31337 }'></textarea>
+              <label class="sd-l" for="sd-adv-extra">Extra txt2img / img2img fields (JSON, checked against the server)</label><textarea id="sd-adv-extra" rows="2" placeholder='{ "s_churn": 0.5, "eta": 0.67 }'></textarea>
+              <label class="sd-l" for="sd-opt-key">Settings menu: read / change any option</label>
+              <div class="sd-row"><input type="text" id="sd-opt-key" list="sd-opt-keys" placeholder="CLIP_stop_at_last_layers" autocomplete="off"><input type="text" id="sd-opt-value" placeholder="value (JSON)"><button class="sd-fixed" id="btn-sd-opt-get">Read</button><button class="sd-fixed" id="btn-sd-opt-set">Set</button></div>
+              <datalist id="sd-opt-keys"></datalist>
+              <div class="sd-note" id="sd-opt-msg"></div>
+            </div>
+          </div></details>
+          <details class="sd-adv" id="sd-sec-wf" data-backend="comfy"><summary>ComfyUI workflow</summary><div class="sd-adv-body">
+            <div class="sd-row"><div><label class="sd-l" for="sd-wf-pick">Saved workflow</label><select id="sd-wf-pick"><option value="">(none saved yet)</option></select></div></div>
+            <div class="sd-note" id="sd-wf-params-list"></div>
+            <label class="sd-l" for="sd-wf-params">Parameters (JSON) — empty "prompt" = the prompt above</label><textarea id="sd-wf-params" rows="2" placeholder='{ "seed": 42, "6.text": "…" }'></textarea>
+            <button id="btn-sd-wf-run" style="margin-top:4px;">▶ Run workflow</button>
+            <label class="sd-l" for="sd-wf-json">Add a workflow: paste ComfyUI's “Export (API)” JSON</label><textarea id="sd-wf-json" rows="2"></textarea>
+            <div class="sd-row"><input type="text" id="sd-wf-name" placeholder="Name"><button class="sd-fixed" id="btn-sd-wf-save">Save workflow</button></div>
+            <div class="sd-note" id="sd-wf-msg"></div>
+          </div></details>
         </div>
         <div class="sd-row" style="margin-top:8px;">
           <button id="btn-sd-generate" class="primary">🎨 Generate</button>

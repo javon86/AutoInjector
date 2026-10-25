@@ -93,6 +93,7 @@ const IPC_INVENTORY = [
   'sd:cancel', 'sd:connect', 'sd:detect', 'sd:gallery', 'sd:generate', 'sd:install', 'sd:install-cancel', 'sd:install-check', 'sd:install-model',
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test',
+  'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
@@ -144,7 +145,8 @@ const AKOWE_BRIDGE_ROUTES = {
 // The 🎨 Images module (sd-api.js): every method through sd_call (new methods appear automatically).
 const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', 'images.cancel', 'images.gallery', 'images.test', 'sd.status', 'sd.detect', 'sd.connect',
   'sd.targets', 'sd.start', 'sd.stop', 'sd.install.check', 'sd.install.install', 'sd.install.downloadModel', 'sd.install.cancel', 'library.find', 'library.get',
-  'library.characterLock', 'library.locks', 'library.scan'];
+  'library.characterLock', 'library.locks', 'library.scan',
+  'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
   'GET /api/projects': 'book_status, list_books', 'GET /api/autobook': 'book_status, pause_run/resume_run/cancel_run', 'GET /api/slots/states': 'book_status',
@@ -313,11 +315,19 @@ async function main() {
   d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'harbor at night', steps: 33, cfgScale: 5.5, sampler: 'DPM++ 2M', seed: 42, count: 2 } });
   check('sd_call', d.carded && forge.state.lastTxt2img.steps === 33 && forge.state.lastTxt2img.cfg_scale === 5.5 && forge.state.lastTxt2img.sampler_name === 'DPM++ 2M' && forge.state.lastTxt2img.seed === 42 && d.result && d.result.ok, 'images.generate sets the generation fields (steps, CFG, sampler, seed, count) on Forge');
   mark('sd:images.generate', 'real sd-api + fake Forge');
-  d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'x y', extra: { enable_hr: true, hr_scale: 2 }, options: { CLIP_stop_at_last_layers: 2 } } });
-  const lastToolMsg = JSON.stringify(llm.requests.slice(-1)[0].body.messages.slice(-2));
-  const refused = /needs the full Stable Diffusion controls/.test(lastToolMsg);
-  const forwarded = !refused && d.carded && forge.state.lastTxt2img.prompt === 'x y' && forge.state.lastTxt2img.enable_hr === true;
-  assert(refused ? (!d.carded && forge.state.lastTxt2img.prompt !== 'x y') : forwarded, `raw pass-through (extra A1111 fields / options / ComfyUI workflow): ${forwarded ? 'forwarded to Forge' : 'validated, then refused plainly — this build\'s Images module has no full-controls support yet (comes with sd-full); nothing was generated'}`);
+  // full controls: hires fix (structured) + a settings-menu option for this picture + a raw A1111 field
+  d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'x y', hires: { scale: 2, upscaler: 'R-ESRGAN 4x+', denoise: 0.4 }, overrideSettings: { CLIP_stop_at_last_layers: 2 }, extra: { s_noise: 1.01 } } });
+  const lt = forge.state.lastTxt2img;
+  check('sd_call', d.carded && d.result && d.result.ok && lt.prompt === 'x y' && lt.enable_hr === true && lt.hr_scale === 2 && lt.hr_upscaler === 'R-ESRGAN 4x+' && lt.override_settings && lt.override_settings.CLIP_stop_at_last_layers === 2 && lt.s_noise === 1.01,
+    'full controls: hires fix + per-picture setting override + raw A1111 field all reach Forge');
+  d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'z', extra: { no_such_field_xyz: 1 } } });
+  assert(!(d.result && d.result.ok) && forge.state.lastTxt2img.prompt !== 'z', 'a raw field Forge does not have is refused before anything is sent');
+  d = await drive('sd_call', { method: 'sd.options.get', args: {} });
+  if (assert(!d.carded && d.result && d.result.ok !== false && JSON.stringify(d.result).includes('CLIP_stop_at_last_layers'), 'sd.options.get: reads every settings-menu option without a card')) mark('sd:sd.options.get', 'real sd-api + fake Forge');
+  d = await drive('sd_call', { method: 'sd.options.set', args: { options: { jpeg_quality: 95 } } });
+  if (assert(d.carded && forge.state.options.jpeg_quality === 95, 'sd.options.set: asks first, then changes a settings-menu option on Forge')) mark('sd:sd.options.set', 'real sd-api + fake Forge');
+  d = await drive('sd_call', { method: 'images.upscale', args: { image: png, factor: 2, upscaler: 'R-ESRGAN 4x+' } });
+  if (assert(d.carded && !!forge.state.lastExtras, 'images.upscale: asks first, then upscales the picture on Forge (Extras)')) mark('sd:images.upscale', 'real sd-api + fake Forge');
   for (const m of ['images.status', 'images.progress', 'images.gallery', 'sd.status', 'sd.targets', 'sd.detect', 'sd.install.check', 'library.locks']) {
     d = await drive('sd_call', { method: m, args: m === 'images.gallery' ? { limit: 5 } : {} });
     if (assert(!d.carded && d.result && d.result.ok !== false && d.result.data !== undefined, `sd_call ${m}: read-only, runs directly against the real module`)) mark(`sd:${m}`, 'real sd-api');
@@ -352,11 +362,61 @@ async function main() {
     d = await drive('sd_call', { method: m, args: m === 'sd.install.downloadModel' ? { id: 'sd15' } : {} }, { confirm: false });
     if (assert(d.carded, `sd_call ${m}: shows the "I will" card (not run here: it downloads / renders for real)`)) { await call('alfred:reject', { id: d.card.id }); mark(`sd:${m}`, 'card (✖ No)'); }
   }
+  // more full controls on Forge: img2img / inpaint (a picture + a mask), read-only lists, interrupt / skip / refresh
+  d = await drive('sd_call', { method: 'images.img2img', args: { prompt: 'same harbor, at dawn', initImage: png, denoise: 0.45 } });
+  if (assert(d.carded && forge.state.lastPath === '/sdapi/v1/img2img' && forge.state.lastTxt2img.denoising_strength === 0.45 && /dawn/.test(forge.state.lastTxt2img.prompt), 'images.img2img: asks first, then changes a picture on Forge (denoise)')) mark('sd:images.img2img', 'real sd-api + fake Forge');
+  d = await drive('sd_call', { method: 'images.inpaint', args: { prompt: 'a red door', initImage: png, mask: png, denoise: 0.8, inpaint: { maskBlur: 8 } } });
+  if (assert(d.carded && forge.state.lastPath === '/sdapi/v1/img2img' && !!forge.state.lastTxt2img.mask && forge.state.lastTxt2img.mask_blur === 8, 'images.inpaint: asks first, then sends picture + mask + blur to Forge')) mark('sd:images.inpaint', 'real sd-api + fake Forge');
+  for (const [m, args] of [['sd.lists', {}], ['sd.options.schema', {}], ['sd.controlnet.models', {}], ['sd.controlnet.modules', {}], ['sd.adetailer.models', {}], ['sd.styles', {}], ['sd.scripts', {}], ['sd.embeddings', {}], ['sd.upscalers', {}], ['sd.extraFields', { kind: 'txt2img' }], ['sd.memory', {}]]) {
+    d = await drive('sd_call', { method: m, args });
+    if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `sd_call ${m}: read-only, runs directly on Forge`)) mark(`sd:${m}`, 'real sd-api + fake Forge');
+  }
+  forge.state.refreshed = [];
+  d = await drive('sd_call', { method: 'sd.refresh', args: { what: 'loras' } });
+  if (assert(d.carded && forge.state.refreshed.includes('refresh-loras'), 'sd.refresh: asks first, then rescans the LoRA folder on Forge')) mark('sd:sd.refresh', 'real sd-api + fake Forge');
+  d = await drive('sd_call', { method: 'sd.skip', args: {} });
+  if (assert(forge.state.skipped === true, 'sd.skip: skips the current picture on Forge')) mark('sd:sd.skip', 'real sd-api + fake Forge');
+  forge.state.interrupted = false;
+  d = await drive('sd_call', { method: 'sd.interrupt', args: {} });
+  if (assert(forge.state.interrupted === true, 'sd.interrupt: stops the render on Forge')) mark('sd:sd.interrupt', 'real sd-api + fake Forge');
+  forge.state.interrupted = false;
   // ComfyUI: connect + generate through the same tool
   d = await drive('sd_call', { method: 'sd.connect', args: { url: comfy.base } });
   d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'a ferry in fog', steps: 12, checkpoint: 'sd15/dreamshaper_8.safetensors' } });
   const g = comfy.state.lastGraph && JSON.stringify(comfy.state.lastGraph);
   assert(d.carded && g && /a ferry in fog/.test(g) && /"steps":12/.test(g), 'sd_call images.generate on a fake ComfyUI: the built-in graph carries the prompt and steps');
+  {
+    // ComfyUI: any workflow with named params, node types, queue, upload, free VRAM
+    const WF = {
+      3: { class_type: 'KSampler', inputs: { seed: 1, steps: 20, cfg: 7, sampler_name: 'euler', scheduler: 'normal', denoise: 1, model: ['4', 0], positive: ['6', 0], negative: ['7', 0], latent_image: ['5', 0] } },
+      4: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'sd15/dreamshaper_8.safetensors' } },
+      5: { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: 1 } },
+      6: { class_type: 'CLIPTextEncode', inputs: { text: 'a cat', clip: ['4', 1] } },
+      7: { class_type: 'CLIPTextEncode', inputs: { text: 'blurry', clip: ['4', 1] } },
+      8: { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
+      9: { class_type: 'SaveImage', inputs: { filename_prefix: 'ComfyUI', images: ['8', 0] } },
+    };
+    d = await drive('sd_call', { method: 'sd.workflows.save', args: { name: 'Alfred wf', workflow: WF } });
+    const wfId = d.result && d.result.data && d.result.data.workflow && d.result.data.workflow.id;
+    if (assert(d.carded && !!wfId, `sd.workflows.save: asks first, then saves a ComfyUI workflow (${wfId})`)) mark('sd:sd.workflows.save', 'real sd-api + fake ComfyUI');
+    d = await drive('sd_call', { method: 'sd.workflows.list', args: {} });
+    if (assert(!d.carded && JSON.stringify(d.result).includes(String(wfId)), 'sd.workflows.list: lists it without a card')) mark('sd:sd.workflows.list', 'real sd-api');
+    d = await drive('sd_call', { method: 'sd.workflows.get', args: { id: wfId } });
+    if (assert(!d.carded && d.result && d.result.ok !== false && JSON.stringify(d.result).includes('KSampler'), 'sd.workflows.get: reads it back')) mark('sd:sd.workflows.get', 'real sd-api');
+    d = await drive('sd_call', { method: 'sd.workflows.run', args: { id: wfId, params: { prompt: 'a lighthouse keeper', steps: 9 } } });
+    const wg = JSON.stringify(comfy.state.lastGraph || {});
+    if (assert(d.carded && /a lighthouse keeper/.test(wg) && /"steps":9/.test(wg), 'sd.workflows.run: asks first, then runs the saved workflow with named params on ComfyUI')) mark('sd:sd.workflows.run', 'real sd-api + fake ComfyUI');
+    d = await drive('sd_call', { method: 'sd.workflows.delete', args: { id: wfId } });
+    if (assert(d.carded && d.result && d.result.ok !== false, 'sd.workflows.delete: asks first, then deletes it')) mark('sd:sd.workflows.delete', 'real sd-api');
+    for (const m of ['sd.comfy.objectInfo', 'sd.comfy.queue']) {
+      d = await drive('sd_call', { method: m, args: {} });
+      if (assert(!d.carded && d.result && d.result.ok !== false, `sd_call ${m}: read-only, runs directly on ComfyUI`)) mark(`sd:${m}`, 'real sd-api + fake ComfyUI');
+    }
+    d = await drive('sd_call', { method: 'sd.comfy.upload', args: { image: png, name: 'alfred.png' } });
+    if (assert(d.carded && comfy.state.uploads.length > 0, 'sd.comfy.upload: asks first, then uploads a picture to ComfyUI')) mark('sd:sd.comfy.upload', 'real sd-api + fake ComfyUI');
+    d = await drive('sd_call', { method: 'sd.comfy.free', args: {} });
+    if (assert(comfy.state.freed !== null, 'sd.comfy.free: frees VRAM on ComfyUI')) mark('sd:sd.comfy.free', 'real sd-api + fake ComfyUI');
+  }
   d = await drive('sd_call', { method: 'nope.method', args: {} });
   assert(!d.carded && /has no method/.test(JSON.stringify(llm.requests.slice(-1)[0].body.messages.slice(-1))), 'sd_call refuses a method the module does not have');
   {

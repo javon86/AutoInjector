@@ -108,8 +108,12 @@ scheduler, seed, checkpoint, VAE, count, init image, denoise …), status / prog
 connect / detect / start / stop, the installer, and the model library. It is built from the module itself: when the
 module lists its operations (`capabilities()` — the full-controls build with hires fix, upscalers, ControlNet,
 inpainting, refiner, ADetailer, A1111 options, ComfyUI workflows and raw `extra` payload fields), those appear in
-`sd_call` automatically with their own schemas. On a build without them, `extra` / `options` / `workflow` are
-validated and then refused with a plain message (nothing is generated).
+`sd_call` automatically with their own schemas. This build has them (51 operations): the coverage test drives every
+one through Alfred against fake Forge and ComfyUI servers. That covers hires fix, per-picture setting overrides,
+raw A1111 fields (checked against the server's `/openapi.json`), img2img and inpaint, upscale, reading and changing
+settings-menu options, lists, interrupt, skip and refresh, plus ComfyUI workflows (save, list, get, run with named
+params, delete), node info, queue, upload and freeing VRAM. A setting the connected app can't do comes back as
+`UNSUPPORTED_ON_BACKEND`, with a hint.
 
 **🧪 Open Interpreter (optional)** — off unless you tick it in ⚙. Even then he always shows the
 **exact code** on the card and asks first, can never be "always allowed", and refuses it when a direct

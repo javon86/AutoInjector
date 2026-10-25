@@ -33,7 +33,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); B5 parked; first real test next).
+- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; B5 parked; first real test next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -298,6 +298,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   pictures saved with their settings (Remake); the Model & LoRA library (Stability Matrix `Data/Models`,
   safetensors headers + Civitai/SM sidecars, base-model mismatch warnings, tags/collections/★/notes) and
   **character locks**; it can start Stability Matrix packages itself or install the official ComfyUI portable.
+  Full controls (2026-10-25): every A1111/Forge txt2img/img2img field can be reached (58 fields each, 0 unreachable).
+  This covers hires fix, the SDXL refiner, img2img and inpaint with a mask brush, ControlNet units, ADetailer, Extras
+  upscale, any settings-menu option, and raw extra fields. ComfyUI gets its built-in graph for the main features plus
+  saved workflows with named params. `capabilities()` lists 51 operations, and 🎩 Alfred can use all of them, each
+  one tested. See `STABLE_DIFFUSION_PLAN.md`.
   Akọwe can ask via `POST /image/request` with a character lock (`docs/SD_IMAGE_API.md`). Setup guide:
   `docs/STABLE_DIFFUSION_SETUP.md`. Still to do: the Akọwe side (store pictures as book assets, UI) — with B3/B5.
 - [ ] **B2** 🎬 Video: hook up AutoInjector's Video Generation panel for book trailers / scenes.
