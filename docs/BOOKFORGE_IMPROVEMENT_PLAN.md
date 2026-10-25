@@ -19,7 +19,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
 
 - **Done and in `main`:** Sections 1–6 (P3, P4–P18, P20, P21). 
 - **Just finished (P38 PR):** 🎯 picker rebuild + 🔢 number teach, with P37.1, P37.3, P37.4 done and P37.2 partly done [!].
-- **Next up:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 (suggested: P22 + P26 + P31 together, then P30, P32–P35, P23, P24).
+- **Now:** Section 8 remaining (P36, P37.5) — fixes from the book-2 run log; then Section 7 without P22 (skipped by the user): P26 + P31, then P30, P32–P35, P23, P24, P25, P27, P28 (P29 later).
 - **Latest feedback:** ChatGPT's 2026-10-24 comparison of book 1 vs book 2 — book 2 better on character (5→8), voices (5→8), subtext (5→8), peril (4→7), realism (5→7); weaker on closure (9→6) and scope (9→6); added P30–P35 from it.
 - **Back burner (later, by the user's call):** images + Stable Diffusion, video, covers and pictures, local AI book manager (B1–B4).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
@@ -173,10 +173,15 @@ requests in 16 min; ChatGPT never took part; Gemini's reply reading broke in the
 editor passed every chapter and scored the book 10/10 on 10 of 13 criteria while ChatGPT's own review
 gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 
-- [ ] **P36** Tougher, calibrated reviewer: must name its weakest passages and at least 3 concrete
+- [x] **P36** Tougher, calibrated reviewer: must name its weakest passages and at least 3 concrete
   problems; reviews with near-perfect scores and no findings are distrusted (re-asked or flagged);
   add trade/logic/timeline checks to the rubric; use two reviewers when available and take the lower
-  score; track each AI's leniency over time.
+  score; track each AI's leniency over time. Done: `calibration.py` + editor.py — a 9/10 needs a quoted proof and an
+  average ≥ 8.5 needs 3 quoted problems, else one stricter re-ask, then ⚠️ flagged, unproven scores count as 7 and
+  pattern-check notes are added so the rewrite runs; new rubric points trade_terms / cause_effect / timeline; a second
+  editor (not the writer, not the first editor's AI) when one works, lower score per point; leniency per AI in
+  `reviewer_leniency` (vs the other editor, the pattern check and whole-book reviewers), lenient AIs lowered by up to 2,
+  shown on the 🖋 Editor card and the 📊 Book report.
 - [x] **P37.1** Self-repair page search must learn a selector that matches every reply, not one message
   (ChatGPT learned `div[data-content-search-unit-key="fallback-turn-7:2:assistant"]`). Done: per-message
   numbers/ids/keys are never part of a learned selector (that key becomes `[…$=":assistant"]`), and with
@@ -196,18 +201,28 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   automatically; one notice (card flash + ⚠️ with 🎯 / 🔢, optional 🔔 sound); re-checks after 5 → 15 → 60 min.
 - [x] **P37.4** Never send "missing [TO:] tag" nags for check-in answers (48 nags to ChatGPT). Done (also
   for late / unproven check-in answers and the number-teach answers; they are held, not relayed).
-- [ ] **P37.5** Before a book starts: a clear "ChatGPT isn't working — here's why / fix" so the user can fix
-  it first instead of the AI silently sitting out.
+- [x] **P37.5** Before a book starts: a clear "ChatGPT isn't working — here's why / fix" so the user can fix
+  it first instead of the AI silently sitting out. Done: `ai_check.py` + `GET/POST /api/ai-check` (fresh /v1/health,
+  🔁 check again = /v1/probe first); every run start (⚡ Make a book, variant, 🔁 rerun, ▶ continue, ✍ Write all) shows
+  which AI, what is wrong (LOGGED_OUT, CAPTCHA, USAGE_LIMIT, … in plain words) and how to fix it, with Check again /
+  Start without it (roles reassigned, said in the run) / Cancel; the run window shows a ⚠️ notice for every AI not
+  working at the start or stopping mid-run (and ✔ when it is back). No desktop-app change was needed.
 
 ## Section 7 — Tools for the AIs and better feedback  (proposed, not started — user picks)
 
-- [ ] **P22** Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
+- [-] **P22** (SKIPPED — user said don't do the AI tools/skills menu, 2026-10-25) Tool menu for the AIs: the AI can ask BookForge for a lookup mid-task (T1 look up character /
   place / rule, T2 search earlier chapters, T3 timeline + age calculator, T4 trade/period glossary, T5
   voice-fitting thesaurus, T6 name generator, T7 word count / pacing, T8 fact check against the book bible,
   T9 optional web research); bounded requests per step, all logged.
 - [ ] **P23** Beta-reader AI: reads as the target audience and marks confusion, boredom, guessed twists.
-- [ ] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
+- [x] **P24** Readability and pacing scores (reading level, sentence variety, dialogue share, scene length)
   matched to the profile's audience.
+  *(bookforge/readability.py, no AI: Flesch reading ease + grade, words per sentence, variety, long/short share,
+  dialogue share, paragraph length, scenes per chapter (scene-break lines), pace fast/steady/slow; audience matched
+  from the profile's free text (children / middle grade / young adult / adult, literary +2 grades); findings for
+  too hard / too simple, long sentences, low variety, little or only dialogue, chapters that read differently, very
+  short scenes; 📖 card + per-chapter table on the 📊 report page, Markdown/PDF section, up to 2 items in What to try
+  next; numbers only, never breaks the report.)*
 - [ ] **P25** Your writing style: learn the narrator's voice from samples of the user's own writing.
 - [ ] **P26** Timeline checker + terminology check in the editor (the second book had "wick-key" on a gas
   lamp and age arithmetic to verify).
@@ -258,6 +273,9 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for BookForge (see Problems).
 
 ## Problems to come back to
+
+- P24 readability: the syllable counter and the reading-level formulas are English-only and approximate;
+  audience targets are rules of thumb (not tuned on real books yet).
 
 - **P18.9 / P3.1 (BookForge side) — not yet tried against the live sites.** Tested with fakes, an in-process
   v1.2 bridge and the desktop app's real `bookforge-bridge.js` (fake host `--site-state`), not with real
@@ -441,6 +459,27 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - **P37.4 limit:** a short reply (≤ 300 characters, tags stripped) that holds a check-in word from the last hour is
   treated as a check-in answer (held, not relayed, not nagged) when no BookForge request is waiting for that AI — a
   genuine short reply that happens to use the same unusual word ("quokka") would be held too.
+- **P36 / P37.5 — not tried with the real AIs.** Tested with the fake AI (unit, Make-a-book runs, Playwright
+  `tests/campaign/ui/test_ui_section8.py`). On the first real book check: (1) do web AIs fill `score_evidence` and
+  `weakest`? If not, every near-perfect review costs one extra re-ask (watch "asked once more" in the run log);
+  (2) two editors per chapter means one more AI answer per chapter and per rewrite check (Settings › Editor › "Two
+  editors" turns it off); (3) the thresholds (average 8.5, 3 problems, cap 7, discount from +1.0 after 3 reviews, max 2)
+  are first guesses — `calibration.py` constants; (4) the pattern-check part of leniency only counts scores ABOVE the
+  ceiling, so it can only push an AI towards "generous", never "strict".
+- **P36 design choices to confirm:** (a) a flagged review with at least one note is forced to REVISE even when its capped
+  scores would pass — with no note at all (no pattern finding either) it stays PASS but ⚠️ flagged; (b) leniency is kept
+  per AI family across all books (one global settings key), measured on raw scores (before caps/discount); (c) a lenient
+  AI's discount is applied to every score (not only high ones), floor 1; (d) in a rewrite round the earlier round's
+  discounts and second editor are reused so the two versions stay comparable; (e) an editor the author picks by hand
+  (🖋 with a slot) stays the only editor.
+- **P37.5 design choices to confirm:** (a) "Start without it" does not lock the AI out: if it starts working during the
+  run BookForge uses it again (the run says so); (b) when the AI picked to write is skipped, the run switches to Automatic;
+  (c) "unknown" from a v1.2 bridge (not checked yet) counts as not ok and the notice offers 🔁 Check again (a probe, up
+  to 45 s); an older v1.0/1.1 bridge without states counts as ok; (d) the server does not refuse a start without the
+  check (older pages / API) — the run window shows the ⚠️ notice instead.
+- **Pre-existing UI test failure (seen during Section 8, not caused by it):** `tests/campaign/ui/test_ui_followthrough.py::
+  test_wizard_to_downloaded_book` fails "stuck on Write the chapters: ✔ Done: Approved 1 of 1." on unmodified `main` too
+  (the Playwright UI tests only run when the Python `playwright` package is installed, so the normal suite skips them).
 - **GitHub checks don't cover BookForge.** `.github/workflows/desktop-app-tests.yml` only runs for `desktop-app/**`
   changes, so BookForge-only PRs (Sections 3–5) were merged on the full local suite. Add a BookForge workflow
   (`pip install -r bookforge/requirements.txt pytest` + `pytest -q bookforge/tests`, plus Node/Electron for the

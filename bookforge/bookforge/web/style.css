@@ -1072,3 +1072,17 @@ ul.samples q { font-style: italic; }
   .save-box > button, .open-list .r-badges button { flex: 0 0 auto; }
   .open-list .record-item { flex-wrap: wrap; }
 }
+
+/* 🩺 P37.5 AI check before a run, and AI notices in the run window */
+.ai-check-dialog { max-width: 640px; }
+.aic-list { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.aic-list > li { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.aic-list > li.aic-bad { border-color: var(--warn-line); background: var(--warn-soft); }
+.aic-list > li.aic-ok { color: var(--ok); }
+.aic-list p { margin: 4px 0; }
+.aic-fix ol { margin: 4px 0 0; padding-left: 20px; }
+.mb-ai-alerts { display: grid; gap: 6px; margin: 6px 0; }
+.mb-ai-alert p { margin: 0; }
+/* 🎯 P36 calibrated editor */
+.ed-cal { margin: 8px 0; }
+.ed-cal ul { margin: 4px 0; }
