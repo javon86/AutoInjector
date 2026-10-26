@@ -2748,6 +2748,22 @@ async function testManagerGenerateImageAction() {
   assert(imageGenCalls.length === 0, "a GENERATE_IMAGE with no prompt is rejected and never rendered");
   assert(st2.manager.previousManagerActions.some((a) => a.action === "GENERATE_IMAGE" && a.rejected), "the promptless GENERATE_IMAGE is recorded as rejected");
   await call("manager:stop", {});
+
+  // A failed render folds back the same plain sentence as the Images tab (sd-errors.js),
+  // not the raw 500 dump (the A1111 "state_dict for AutoencoderKL" body from a real log).
+  resetManagerStub();
+  const savedGen = imageProvider.generate;
+  const vaeBody = { error: "RuntimeError", detail: "", body: "", errors: "Error(s) in loading state_dict for AutoencoderKL:\n\tMissing key(s) in state_dict: \"encoder.conv_in.weight\"" };
+  imageProvider.generate = async () => require(path.join(__dirname, "..", "sd-errors")).annotate({ ok: false, error: "HTTP_500", status: 500, raw: JSON.stringify(vaeBody), message: "x" }, { vae: "taesd_decoder" });
+  try {
+    queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a lighthouse", reason: "picture", confidence: 0.9 });
+    queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.95 });
+    await call("manager:start-task", { userRequest: "picture of a lighthouse" });
+    await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager && s.manager.images && s.manager.images.length; }, { label: "the failed image step is recorded" });
+    const st3 = await call("manager:get-state", {});
+    const e = st3.manager.images[st3.manager.images.length - 1];
+    assert(e && !e.ok && /^VAE_LOAD_FAILED: The VAE you picked \(“taesd_decoder”\) can't be loaded/.test(e.error) && /Automatic/.test(e.error) && !/state_dict|HTTP_500/.test(e.error), `a failed render is explained in plain words (${String(e && e.error).slice(0, 80)}…)`);
+  } finally { imageProvider.generate = savedGen; await call("manager:stop", {}); }
 }
 
 // Self-install: the supervisor's SETUP action installs a dependency from the

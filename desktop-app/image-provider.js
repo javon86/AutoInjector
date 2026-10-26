@@ -26,6 +26,7 @@ const sd = require('./sd-backends');
 const sdParams = require('./sd-params');
 const control = require('./sd-control');
 const workflows = require('./sd-workflows');
+const sdErrors = require('./sd-errors');
 
 let settings = {
   enabled: false,
@@ -168,7 +169,8 @@ function _preflight() {
   if (job) return { ok: false, error: 'BUSY', message: 'A picture is already being made — wait for it or press Stop.' };
   return null;
 }
-async function _withJob(steps, fn) {
+// ctx: { vae, checkpoint } for the plain-English failure (sd-errors.js).
+async function _withJob(steps, fn, ctx) {
   const backend = backendOf();
   const base = baseUrl();
   const myJob = { backend, base, startedAt: Date.now(), steps };
@@ -180,6 +182,8 @@ async function _withJob(steps, fn) {
   if (!r || !r.ok) {
     const out = Object.assign({ ok: false, backend }, r || { error: 'FAILED' });
     if (!out.message) out.message = sd.explain(out, { base });
+    // Read the server's own error (VAE / checkpoint load failure, OOM, NaN, missing LoRA …).
+    if (out.error !== 'CANCELLED') sdErrors.annotate(out, Object.assign({ base, backend }, ctx || {}));
     return out;
   }
   return Object.assign(r, { backend });
@@ -200,7 +204,7 @@ async function generate(prompt, opts = {}) {
     if (!chk.ok) return chk;
     warnings = chk.warnings || [];
     return sd.a1111Generate(base, p, { endpoint: settings.endpoint, timeoutMs: settings.timeoutMs });
-  });
+  }, { vae: p.vae, checkpoint: p.checkpoint });
   if (!r.ok) return r;
   const backend = r.backend;
   onEvent({ type: 'image', content: `${r.images.length} image(s), ${r.images[0].length} base64 chars` });

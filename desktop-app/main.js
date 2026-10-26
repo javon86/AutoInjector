@@ -2753,7 +2753,8 @@ async function executeManagerAction(decision) {
         } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; }
       }
       // E09: surface the backend's real reason (e.g. the xFormers error) not a bare code.
-      const failReason = r && r.error ? (r.detail ? `${r.error}: ${r.detail}` : r.error) : (savedPath ? null : "no image");
+      // …now read into one plain sentence by sd-errors.js (code + message, e.g. VAE_LOAD_FAILED: The VAE you picked … can't be loaded).
+      const failReason = r && r.error ? (r.code && r.message ? `${r.code}: ${r.message}${r.fix ? ` Fix: ${r.fix}` : ""}` : (r.detail ? `${r.error}: ${r.detail}` : r.error)) : (savedPath ? null : "no image");
       const entry = { id: m.images.length + 1, prompt: decision.prompt, path: savedPath, paths: savedPaths, count: savedPaths.length, ok: !!(r && r.ok && savedPath), error: failReason, ts: Date.now() };
       m.images.push(entry);
       if (m.images.length > 30) m.images.shift();
@@ -5658,7 +5659,7 @@ ipcMain.handle("image:generate", async (_evt, { prompt, negativePrompt } = {}) =
   const r = await imageProvider.generate(prompt, { negativePrompt });
   if (!r || !r.ok || !r.imageBase64) {
     // E09: pass the backend's real reason through, not just a bare code.
-    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED", message: (r && r.message) || null };
+    return { ok: false, error: (r && (r.detail ? `${r.error}: ${r.detail}` : r.error)) || "FAILED", code: (r && r.code) || undefined, message: (r && r.message) || null, fix: (r && r.fix) || undefined };
   }
   try {
     // E09: save every image the batch produced; preview the first inline.
@@ -5722,6 +5723,8 @@ ipcMain.handle("sd:lists", sdSafe(() => sdStudio().lists()));
 ipcMain.handle("sd:settings", sdSafe((a) => sdStudio().settings(a.patch || {})));
 ipcMain.handle("sd:generate", sdSafe((a) => sdStudio().generate(a, "images-tab")));
 ipcMain.handle("sd:test", sdSafe(() => sdStudio().test()));
+// A failure's one-click fix (result.actions, e.g. "Use Automatic VAE and retry"): apply it, retry once.
+ipcMain.handle("sd:fix-retry", sdSafe((a) => sdStudio().fixAndRetry(a.fix, a.request || {}, "images-tab:fix")));
 ipcMain.handle("sd:progress", sdSafe(() => sdStudio().progress()));
 ipcMain.handle("sd:cancel", sdSafe(() => sdStudio().cancel()));
 ipcMain.handle("sd:gallery", sdSafe((a) => sdStudio().gallery(a.limit)));
@@ -6022,7 +6025,8 @@ async function butlerCapabilityTest() {
         let r = await _withTimeout(imageProvider.generate("a small red circle centered on a white background, simple test image", { onEvent: () => {} }), (im.timeoutMs || 180000) + 5000);
         let saved = null;
         if (r && r.ok && r.imageBase64) { try { saved = outputManager.saveBuffer(outputManager.imagesDir(), `captest-${Date.now()}.png`, Buffer.from(r.imageBase64, "base64")); } catch (e) { r = { ok: false, error: `SAVE_FAILED: ${e}` }; } }
-        step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && r.error) || "no image"}`);
+        // The same plain sentence as the Images tab (sd-errors.js), not the raw 500 dump.
+        step("Image generation", !!(r && r.ok && saved), saved ? `rendered & saved ${path.basename(saved)}` : `couldn't render: ${(r && (r.message || r.error)) || "no image"}${r && r.fix ? ` — ${r.fix}` : ""}`);
       }
     } catch (e) { step("Image generation", false, String(e)); }
 

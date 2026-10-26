@@ -1,11 +1,19 @@
 'use strict';
 // fake-sd.js — tiny fake Stable Diffusion servers for the tests:
-//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions })
+//   fakeA1111({ flavor, noApi, oom, slow, noOpenapi, noExtensions, badVae, failWith })
+//       badVae: a VAE name (also listed by /sd-vae) that fails EVERY txt2img/img2img
+//       with A1111's real 500 body ("Error(s) in loading state_dict for
+//       AutoencoderKL: Missing key(s) …") while it is the effective VAE
+//       (override_settings.sd_vae, else options.sd_vae) — so "Use Automatic VAE
+//       and retry" really fixes it. failWith (or state.failWith at run time):
+//       'vae' | 'oom' | 'nan' | 'ckpt' | 'lora' | 'html' | 'traceback' → that 500.
 //       /sdapi/v1/* like A1111 / Forge / SD.Next — incl. /openapi.json (real field
 //       names, test/fixtures/a1111-openapi.js), options get/set, upscalers, latent
 //       modes, prompt-styles, scripts + script-info, extra-single-image, skip,
 //       refresh-*, memory, and the ControlNet + ADetailer extension routes
-//   fakeComfy({ slow, failWith, aux })
+//   fakeComfy({ slow, failWith, failNode, nodeErrors, aux })
+//       nodeErrors: a node_errors object /prompt answers with (400), e.g. a VAELoader
+//       that can't load its file; failNode: node_type of the failWith execution_error.
 //       /system_stats, /object_info (all + per node; unknown → {}), /prompt (refuses
 //       unknown node types, dangling links, missing uploads), /history, /view,
 //       /queue, /interrupt, /upload/image (multipart), /free. aux: true adds
@@ -23,6 +31,17 @@ function makePng() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(Buffer.from([0, 200, 30, 30]))), chunk('IEND', Buffer.alloc(0))]);
 }
 const PNG = makePng();
+
+// Real-shaped A1111 / Forge 500 bodies (modules/api/api.py: {error, detail, body, errors}).
+const VAE_MISSING = 'Error(s) in loading state_dict for AutoencoderKL:\n\tMissing key(s) in state_dict: "encoder.conv_in.weight", "encoder.conv_in.bias", "encoder.down.0.block.0.norm1.weight", "encoder.down.0.block.0.norm1.bias", "encoder.down.0.block.0.conv1.weight", "encoder.down.0.block.0.conv1.bias", "encoder.down.0.block.0.norm2.weight", "encoder.down.0.block.0.norm2.bias", "encoder.down.0.block.0.conv2.weight", "encoder.down.0.block.0.conv2.bias", "encoder.mid.attn_1.q.weight", "quant_conv.weight", "quant_conv.bias".';
+const A1111_ERRORS = {
+  vae: { error: 'RuntimeError', detail: '', body: '', errors: VAE_MISSING },
+  oom: { error: 'OutOfMemoryError', detail: '', body: '', errors: 'CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 8.00 GiB total capacity; 6.10 GiB already allocated; 512.00 MiB free; 6.50 GiB reserved in total by PyTorch)' },
+  nan: { error: 'NansException', detail: '', body: '', errors: 'A tensor with all NaNs was produced in VAE. This could be because there\'s not enough precision to represent the picture. Try adding --no-half-vae commandline argument to fix this. Use --disable-nan-check commandline argument to disable this check.' },
+  ckpt: { error: 'SafetensorError', detail: '', body: '', errors: 'Error while deserializing header: MetadataIncompleteBuffer' },
+  lora: { error: 'RuntimeError', detail: '', body: '', errors: "Couldn't find Lora with name missing_face" },
+  traceback: { error: 'KeyError', detail: '', body: '', errors: "Traceback (most recent call last):\n  File \"modules/processing.py\", line 732, in process_images\nKeyError: 'sd_xl_refiner'" },
+};
 const PNG_B64 = PNG.toString('base64');
 
 function send(res, code, body, type) {
@@ -96,7 +115,7 @@ async function fakeA1111(opts = {}) {
       ]);
       case '/sdapi/v1/samplers': return send(res, 200, [{ name: 'Euler a', aliases: [] }, { name: 'DPM++ 2M', aliases: [] }]);
       case '/sdapi/v1/schedulers': return send(res, 200, [{ name: 'automatic', label: 'Automatic' }, { name: 'karras', label: 'Karras' }]);
-      case '/sdapi/v1/sd-vae': return send(res, 200, [{ model_name: 'vae-ft-mse-840000', filename: '/models/VAE/vae-ft-mse-840000.safetensors' }]);
+      case '/sdapi/v1/sd-vae': return send(res, 200, [{ model_name: 'vae-ft-mse-840000', filename: '/models/VAE/vae-ft-mse-840000.safetensors' }].concat(opts.badVae ? [{ model_name: opts.badVae, filename: `/models/VAE/${opts.badVae}.safetensors` }] : []));
       case '/sdapi/v1/embeddings': return send(res, 200, { loaded: { easynegative: { step: null } }, skipped: {} });
       case '/sdapi/v1/progress': return send(res, 200, state.running ? { progress: 0.5, eta_relative: 3.2, state: { job: 'txt2img', job_count: 1, sampling_step: 10, sampling_steps: 20 }, current_image: null, textinfo: null } : { progress: 0, eta_relative: 0, state: { job: '', sampling_step: 0, sampling_steps: 0 } });
       case '/sdapi/v1/interrupt': state.interrupted = true; return send(res, 200, {});
@@ -104,6 +123,12 @@ async function fakeA1111(opts = {}) {
       case '/sdapi/v1/img2img': {
         state.lastTxt2img = body; state.lastPath = u.pathname;
         if (opts.oom) return send(res, 500, { error: 'OutOfMemoryError', detail: 'CUDA out of memory. Tried to allocate 2.00 GiB', body: '', errors: '' });
+        state.txt2imgCalls = (state.txt2imgCalls || 0) + 1;
+        const effVae = (body.override_settings && body.override_settings.sd_vae) || state.options.sd_vae;
+        if (opts.badVae && effVae === opts.badVae) return send(res, 500, A1111_ERRORS.vae);
+        const fw = state.failWith || opts.failWith;
+        if (fw === 'html') return send(res, 500, '<html><head><title>500 Internal Server Error</title></head><body><h1>Internal Server Error</h1></body></html>');
+        if (fw && A1111_ERRORS[fw]) return send(res, 500, A1111_ERRORS[fw]);
         if (opts.slow) { state.running = true; const t0 = Date.now(); while (!state.interrupted && Date.now() - t0 < 5000) await sleep(40); state.running = false; }
         const n = (body.batch_size || 1) * (body.n_iter || 1);
         const seed = body.seed >= 0 ? body.seed : 1234;
@@ -162,6 +187,7 @@ async function fakeComfy(opts = {}) {
     if (u.pathname === '/prompt' && req.method === 'POST') {
       const g = body.prompt || {};
       state.lastGraph = g;
+      if (opts.nodeErrors) return send(res, 400, { error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation', details: '' }, node_errors: opts.nodeErrors });
       for (const [id, n] of Object.entries(g)) {
         if (!NODES[n.class_type]) return send(res, 400, { error: { type: 'invalid_prompt', message: `Cannot execute because node ${n.class_type} does not exist.`, details: `Node ID '#${id}'` }, node_errors: {} });
         for (const [k, v] of Object.entries(n.inputs || {})) if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'string' && Number.isInteger(v[1]) && !g[v[0]]) return reject(res, id, n.class_type, 'invalid_link', 'Linked node missing', `${k} -> ${v[0]}`);
@@ -178,7 +204,7 @@ async function fakeComfy(opts = {}) {
       if (!p) return send(res, 200, {});
       p.polls++;
       if (state.interrupted) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_start', {}], ['execution_interrupted', { prompt_id: id }]] } } });
-      if (opts.failWith) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: 'KSampler', exception_message: opts.failWith }]] } } });
+      if (opts.failWith) return send(res, 200, { [id]: { outputs: {}, status: { status_str: 'error', completed: false, messages: [['execution_error', { node_type: opts.failNode || 'KSampler', exception_type: opts.failType || 'RuntimeError', exception_message: opts.failWith }]] } } });
       if (opts.slow ? true : p.polls < 2) return send(res, 200, {});
       const nodes = Object.values(p.graph);
       const lat = nodes.find((n) => n.class_type === 'EmptyLatentImage');
@@ -206,4 +232,4 @@ async function fakeOther(opts = {}) {
 }
 async function freePort() { const s = http.createServer(); const p = await listen(s); await new Promise((r) => s.close(r)); return p; }
 
-module.exports = { fakeA1111, fakeComfy, fakeOther, freePort, PNG_B64, PNG };
+module.exports = { fakeA1111, fakeComfy, fakeOther, freePort, PNG_B64, PNG, A1111_ERRORS, VAE_MISSING };

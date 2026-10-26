@@ -121,6 +121,7 @@ contextBridge.exposeInMainWorld("api", {
     settings: (patch) => ipcRenderer.invoke("sd:settings", { patch }),
     generate: (req) => ipcRenderer.invoke("sd:generate", req),
     test: () => ipcRenderer.invoke("sd:test"),
+    fixAndRetry: (fix, request) => ipcRenderer.invoke("sd:fix-retry", { fix, request }),
     progress: () => ipcRenderer.invoke("sd:progress"),
     cancel: () => ipcRenderer.invoke("sd:cancel"),
     gallery: (limit) => ipcRenderer.invoke("sd:gallery", { limit }),
