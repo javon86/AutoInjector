@@ -323,7 +323,11 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   `note` on `POST …/review/fix`. See `docs/ALFRED.md`.
   - Still open from the original B4 idea: "live changes" mid-run at a safe point (today: pause → change → resume, each
     confirmed), chapter summaries for the user, continuity hints — later, by the user's call.
-- [ ] **B5** 🗂 Character Forge dossiers (LATER — not started): Deeper character/item/place/magic-system profiles like
+- [~] **B5** 🗂 Character Forge dossiers — characters DONE 2026-10-26 (`docs/CHARACTER_FORGE.md`): 14-section lettered
+  dossiers that reuse the character sheet / voice card / canon record, ✨ Invent the rest as proposals, approvals with
+  revisions, portrait + ten views (+ turnaround sheet) through AutoInjector `/image/request` or uploads, the dark
+  dossier PDF, letters in chapter prompts, the Moki Vey example. Still open: items / places / magic systems (the
+  machinery is ready), a manuscript check of the dossier. Original idea: Deeper character/item/place/magic-system profiles like
   the ChatGPT 'Character Forge' plugin (sample: Moki Vey dossier): extra sections (detailed appearance, fighting,
   weapons, magic, skills, physical, knowledge, backstory timeline, storyline, continuity), category letters C P V A F
   M K R S E on every entry so scenes only get the letters they need, 'invent the rest' with invented details as

@@ -1,0 +1,1326 @@
+{
+ "schema_version": 1,
+ "name": "Moki Vey",
+ "tagline": "The man who holds the line",
+ "summary": [
+  "A compact, subtly mutated repairer in a city built on borrowed time.",
+  "Supplied appearance preserved. Additional character details are proposed.",
+  "Complete profile, ten-view reference plate and story arc."
+ ],
+ "source": "The author's own Moki Vey Character Forge sample (text and pictures used with permission).",
+ "fields": {
+  "supplied_canon": {
+   "letters": [
+    "C",
+    "A"
+   ],
+   "status": "supplied",
+   "protected": true,
+   "text": "Black futuristic male character; small build with defined muscles; dark platinum short twists; five o'clock shadow; long coat; exposed arms; somewhat mutated. These appearance details are protected."
+  },
+  "proposed_additions": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "All names, numbers, setting details, relationships, mutation mechanics and story events below are invented proposals. Record readiness: Draft. Approval of the concept does not automatically establish every proposal as canon."
+  },
+  "name": {
+   "letters": [
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Moki Vey. Nickname: Patch, used only by his sister. Working alias: Vale, used on service manifests."
+  },
+  "role": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Main character; a maintenance specialist pulled into a struggle over who controls his city's essential infrastructure."
+  },
+  "identity": {
+   "letters": [
+    "C",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "32; he/him; human with an acquired biological mutation. Independent pump and transit mechanic in the vertical coastal city of Nacre, year 2189."
+  },
+  "traits": {
+   "letters": [
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Observant, dryly funny, fiercely reliable and slow to trust. He repairs other people's mistakes but resents needing help with his own."
+  },
+  "appearance": {
+   "letters": [
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Compact and lean, with sharply defined muscles rather than bodybuilder bulk. Dark brown skin and restrained teal markings contrast with his weathered charcoal coat."
+  },
+  "background": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Raised in Nacre's lower service decks, he survived a coolant-system accident during a corporate trial. His employer erased the trial and labeled him responsible."
+  },
+  "goals": {
+   "letters": [
+    "S",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Keep his district supplied with clean water, remove a false negligence finding, and stop the company repeating the trial on residents."
+  },
+  "constraints": {
+   "letters": [
+    "P",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Will not abandon someone inside a failing structure. Cannot sustain his mutation under prolonged strain. Refuses to treat workers as expendable."
+  },
+  "facts": {
+   "letters": [
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Born 2157; accident in 2186 at age 29; opening in 2189 at age 32. Younger sister Imani is 27. No missing limbs or permanent facial injuries."
+  },
+  "record_controls": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "CH-001 / revision 1 / effective story time: opening of 2189. Appearance: Protected yes for supplied details; Protected no for proposed specifics. Related IDs remain provisional, not database records."
+  },
+  "wants": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "\"Let me fix the system and leave my people out of your experiment.\" He seeks a practical solution he can personally control."
+  },
+  "needs": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Accept that trust, shared evidence and collective decisions protect people better than making himself indispensable."
+  },
+  "fear": {
+   "letters": [
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Being restrained while a machine fails nearby; becoming a danger to someone who trusts his hands."
+  },
+  "secret": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "He ignored a faint warning vibration before the accident because a supervisor threatened his crew's jobs. He did not cause the trial, but he carries guilt over staying quiet."
+  },
+  "false_belief": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "If he can do a job himself, delegating it is a moral failure. This belief exhausts him and gives others too much power over his choices."
+  },
+  "stress": {
+   "letters": [
+    "P",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Stop explaining, count exits and tighten their jaw. He gives precise orders before noticing that nobody agreed to follow him."
+  },
+  "never_say": {
+   "letters": [
+    "P",
+    "V"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "\"If I stop being useful, I don't know why anyone would stay.\""
+  },
+  "private_memory": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "At nine, he held a lamp while his mother repaired their apartment pump. After the water returned, she let him believe holding the light had been the hard part."
+  },
+  "change_limits": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "He can learn to ask and listen, admit uncertainty and share responsibility. He will remain impatient with careless work and loyal to people who keep promises."
+  },
+  "own_wish": {
+   "letters": [
+    "P",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "As the lead, his independent private wish is still relevant: build a quiet workshop with a real window and mornings that begin without alarms."
+  },
+  "public_private": {
+   "letters": [
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Publicly calm and exacting; privately sleepless, tender with his sister, and compulsive about checking doors. He values competence, consent and keeping one's word."
+  },
+  "relationship_1": {
+   "letters": [
+    "R",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "Imani Vey / CH-002",
+   "text": "Sister and water-quality analyst, 27. She once covered his rent; he mistakes that kindness for a debt. She wants him to respect her evidence instead of trying to keep her outside danger."
+  },
+  "relationship_2": {
+   "letters": [
+    "R",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "Dr. Sera Noll / CH-003",
+   "text": "Former trial clinician, 46. She helped stabilize him but signed an incomplete incident report. She knows the mutation's heat limits; he must decide whether practical help can coexist with mistrust."
+  },
+  "relationship_3": {
+   "letters": [
+    "R",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "Tavi Rook / CH-004",
+   "text": "Transit courier, 30, and former coworker. Moki once left Tavi to finish an evacuation alone. Tavi will help only if given a real say in the plan."
+  },
+  "relationship_4": {
+   "letters": [
+    "R",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "Director Oren Sael / CH-005",
+   "text": "Employer and antagonist, 51. Sael approved the trial and now offers Moki a clean record in return for silence. He regards infrastructure access as permission to govern residents."
+  },
+  "relationship_5": {
+   "letters": [
+    "R",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "Mother: Amara Vey",
+   "text": "Retired building mechanic, 61; alive outside Nacre. Her practical kindness underlies his values. She knows he was hurt, but not that he still blames himself."
+  },
+  "must_show_1": {
+   "letters": [
+    "E",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "His small frame and precise strength make a repair possible where a larger worker cannot fit. Verification pending: no manuscript supplied."
+  },
+  "must_show_2": {
+   "letters": [
+    "E",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Teal wrist lines brighten before a visible hand tremor. The warning must precede a later power failure. Verification pending."
+  },
+  "must_show_3": {
+   "letters": [
+    "E",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "He refuses help, then pays a clear physical or relational cost. Verification pending."
+  },
+  "must_show_4": {
+   "letters": [
+    "E",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Imani challenges a decision, and he changes the plan because her reasoning is better. Verification pending."
+  },
+  "must_show_5": {
+   "letters": [
+    "E",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "At the climax, he entrusts a crucial task to Tavi rather than taking it back. Verification pending."
+  },
+  "rhythm": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Usually short declarative sentences, followed by one practical question. Longer explanations appear when teaching someone he trusts."
+  },
+  "register": {
+   "letters": [
+    "V"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Plain contemporary speech with precise trade vocabulary; restrained slang. Humor lands as an understated observation rather than a performance."
+  },
+  "vocabulary": {
+   "letters": [
+    "V",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Head pressure; return line; service deck; load; isolation; bypass; purge; seal; drift; mesh; outage; clearance. Twelve characteristic terms."
+  },
+  "phrases": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "\"Show me where it failed.\" / \"Give it a second.\" / \"That's the symptom.\" / \"Keep your word.\" Four recurring phrases, used sparingly."
+  },
+  "never_words": {
+   "letters": [
+    "V"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Synergy, destiny, peasant, beloved, optimize, glorious. These feel corporate, theatrical or falsely intimate in his ordinary voice."
+  },
+  "habits": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Looks at hands while assessing honesty; leaves a beat before answering; asks for a measurement; repeats an exact promise; lowers his voice when serious. Five habits."
+  },
+  "speech_fear": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Becomes overly literal and repeats times or distances. Fear removes humor; he may answer a human question with a mechanical observation."
+  },
+  "speech_anger": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fewer words and sharper consonants. He names the action that broke trust rather than making sweeping insults."
+  },
+  "speech_grief": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Incomplete sentences and long silence. He talks about a task associated with the missing person before saying their name."
+  },
+  "talks_around": {
+   "letters": [
+    "V",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "The accident. He calls it \"the shutdown\" and describes equipment until someone asks whose decision it was."
+  },
+  "samples": {
+   "letters": [
+    "V",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "\"A quiet pump isn't always a healthy pump.\"\n\"You needed my signature. You never needed my permission.\"\n\"I can hold it. I need you to finish it.\""
+  },
+  "physique": {
+   "letters": [
+    "A",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Proposed height 168 cm (5 ft 6 in), weight 65 kg (143 lb). Small lean frame, narrow waist, compact shoulders and defined arms, chest and abdomen; balanced human proportions."
+  },
+  "face": {
+   "letters": [
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Angular oval face, broad natural nose, strong cheekbones and full lips. Short five o'clock shadow stays close to the skin."
+  },
+  "eyes": {
+   "letters": [
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Deep brown, steady and slightly hooded. No permanent eye glow; fatigue makes his focus drift rather than changing eye color."
+  },
+  "hair": {
+   "letters": [
+    "A",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Short dark platinum twists with charcoal roots; tightly textured, approximately 4-6 cm long. Keep the short twist silhouette across views."
+  },
+  "skin": {
+   "letters": [
+    "A",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Rich dark brown skin with natural pores and uneven work-worn texture. Mutation never lightens his identity or replaces his face with a different species."
+  },
+  "markings": {
+   "letters": [
+    "A",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fine raised graphite ridges trace outer forearms. Faint teal lines at wrists brighten with exertion. Small old burn near left elbow; no tattoos proposed."
+  },
+  "anatomy": {
+   "letters": [
+    "A",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Entirely human silhouette, normal hands and feet, no extra limbs. Subdermal filament tissue subtly reinforces forearms and tendons; no giant claws or armor plates."
+  },
+  "clothing": {
+   "letters": [
+    "A",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Long sleeveless charcoal coat, fitted black sleeveless top, graphite trousers and black service boots. Coat opens enough to preserve the lean silhouette and exposed arms."
+  },
+  "combat_clothing": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Same outfit with flexible impact lining inside torso panels. Bare arms remain visible; clothing provides limited abrasion protection and is not ballistic armor."
+  },
+  "accessories": {
+   "letters": [
+    "A",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Utility belt, service tag, compact diagnostic meter and a folding work light. Keeps an old brass washer from his mother inside the coat."
+  },
+  "posture": {
+   "letters": [
+    "A",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Balanced weight, shoulders relaxed, chin slightly lowered; becomes rigid when someone blocks an exit."
+  },
+  "gait": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Short economical steps, quiet heel placement and quick direction changes. He does not stride like a much taller or heavier character."
+  },
+  "presence": {
+   "letters": [
+    "A",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "A raised eyebrow carries most of his humor. The overall impression is contained strength, watchfulness and lived-in practicality rather than flamboyant menace."
+  },
+  "primary_style": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fictional service-crew defensive training: stable balance, protecting others and creating room to withdraw. His goal is escape or rescue, not a display of dominance."
+  },
+  "secondary_style": {
+   "letters": [
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Short-range rescue-baton handling learned for hazardous evacuations; basic proficiency, with no elite military background."
+  },
+  "training": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Two years of workplace drills and six years of difficult evacuations; only a few real confrontations. His confidence around machinery exceeds his experience against trained opponents."
+  },
+  "preferred_range": {
+   "letters": [
+    "F",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Close enough to use compact movement, but he prefers separation when safe. Long open spaces favor larger or better-equipped opponents."
+  },
+  "stance": {
+   "letters": [
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Low, balanced posture with economical steps. He adjusts around narrow catwalks and avoids overcommitting his lighter body weight."
+  },
+  "approach": {
+   "letters": [
+    "F",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Brief decisive interruptions followed by retreat; defense prioritizes keeping an exit open and shielding a companion."
+  },
+  "signature_moves": {
+   "letters": [
+    "F",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "\"Anchor\": a momentary reinforced brace. \"Slipline\": a quick direction change followed by withdrawal. These are fictional character beats, not detailed fighting instructions."
+  },
+  "tactics": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Reads structural hazards well but can overestimate how much time a civilian needs to move. His strongest plans include a separate evacuation lead."
+  },
+  "surroundings": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Uses barriers, lighting and familiar access routes to avoid confrontation. Improvisation is strongest with known service equipment and weaker in unfamiliar spaces."
+  },
+  "teamwork": {
+   "letters": [
+    "F",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Initially gives orders without checking readiness. Growth means agreeing on roles, listening to a stop call and trusting another person's timing."
+  },
+  "courage": {
+   "letters": [
+    "F",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Brave in emergencies, less brave in emotional honesty. Reckless when a trapped person reminds him of the accident."
+  },
+  "outmatched": {
+   "letters": [
+    "F",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fear narrows his speech; injury reduces fine control; exhaustion disables reinforcement. When outmatched he seeks escape and help rather than a sudden unexplained power increase."
+  },
+  "exploitable_habits": {
+   "letters": [
+    "F",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Checks on others before his own injuries; telegraphs exhaustion through his left hand; hesitates when a threat invokes his old crew."
+  },
+  "combat_boundaries": {
+   "letters": [
+    "F",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Will not endanger bystanders for a tactical gain. Can improve judgment and cooperation; he will not become invulnerable or an expert in every weapon."
+  },
+  "primary_weapon": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Telescoping rescue baton, moderate proficiency. Issued by his old evacuation crew and retained legally within the fictional setting; dark ceramic exterior with a worn grip."
+  },
+  "weapon_properties": {
+   "letters": [
+    "F",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "No magical effects, projectile function or concealed lethal mode. Its practical value is familiarity and visibility during emergencies."
+  },
+  "weapon_maintenance": {
+   "letters": [
+    "F",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Checks its lock and surface after use; damaged segments must be replaced. Saltwater contamination can make it unreliable."
+  },
+  "weapon_signature": {
+   "letters": [
+    "F",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Usually remains clipped to his belt. Drawing it signals that he has run out of ordinary ways to keep space around a rescue."
+  },
+  "weapon_weaknesses": {
+   "letters": [
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Limited reach, occupies one hand and cannot solve a ranged threat. Carrying it makes corporate checkpoints more suspicious."
+  },
+  "backup_weapon": {
+   "letters": [
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Unused: no secondary dedicated weapon. A work light is equipment, not a secret weapon slot."
+  },
+  "ranged_option": {
+   "letters": [
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Unused. He has no established firearm or ranged-weapon training."
+  },
+  "signature_possessions": {
+   "letters": [
+    "K",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Diagnostic meter bought with Imani's first paycheck; patched coat from his service years; brass washer from his mother. Losing these has emotional and practical consequences."
+  },
+  "resources": {
+   "letters": [
+    "K",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "A rented workshop, limited savings, a small repair network and legitimate service maps. He lacks unrestricted corporate credentials or unlimited replacement parts."
+  },
+  "power_source": {
+   "letters": [
+    "M",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Non-magical acquired mutation: experimental coolant carried adaptive biofilaments into damaged tissue during the 2186 accident. This is invented science-fiction biology, not a real medical mechanism."
+  },
+  "power_access": {
+   "letters": [
+    "M",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Biological access began after exposure. Recognizing warning signs and pacing use required rehabilitation; no spell training exists."
+  },
+  "activation": {
+   "letters": [
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "No casting. Intentional muscle recruitment and a controlled breath trigger reinforcement; panic can activate it unevenly."
+  },
+  "named_power_1": {
+   "letters": [
+    "M",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Anchor: Reinforces tendons and forearm support for a brief brace or controlled lift. Normal skin and bones remain vulnerable."
+  },
+  "named_power_2": {
+   "letters": [
+    "M",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Resonance: Through direct touch, distinguishes broad vibration changes in machinery he understands. It cannot read data, identify every fault or reveal a person's thoughts."
+  },
+  "power_effects": {
+   "letters": [
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Anchor lasts up to eight seconds per burst; three bursts within ten minutes are his practical ceiling. Resonance needs contact and several quiet seconds; accuracy drops with ambient vibration."
+  },
+  "power_signs": {
+   "letters": [
+    "M",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Wrist lines glow faint teal; ridges become more pronounced; skin feels warm. A fine hand tremor is a stop signal, not evidence of another stronger phase."
+  },
+  "power_costs": {
+   "letters": [
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Use produces heat, dehydration and loss of fine motor control. After the third burst he needs at least twenty minutes of cooling and rest; full recovery may require hours."
+  },
+  "power_limits": {
+   "letters": [
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "No electricity generation, teleportation, bullet resistance or remote control. Heat, dehydration and sustained exertion counter the advantage; insulated gloves impair vibration sensing."
+  },
+  "power_failure": {
+   "letters": [
+    "M",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Ignoring tremor can cause painful involuntary contraction and collapse. A burst can fail early when feverish or injured; he cannot select a reliable emergency override."
+  },
+  "power_growth": {
+   "letters": [
+    "M",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Holds a failing mechanism steady while another person completes the repair. Growth improves timing and interpretation, not unlimited strength or duration."
+  },
+  "practical_skills": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Advanced pump repair: apprenticeship and fourteen years of work. Demonstrated by restoring a flooded intake. Requires tools and safe access; cannot improvise missing precision parts."
+  },
+  "combat_skills": {
+   "letters": [
+    "K",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Competent defensive movement from crew drills, demonstrated during an evacuation. Needs footing and awareness; limited against experts. Knowing a maneuver does not guarantee execution."
+  },
+  "social_skills": {
+   "letters": [
+    "K",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Competent crisis coordination from leading small repair crews. Gives clear tasks under time pressure; weak at delegation and formal politics. Must earn consent outside his old team."
+  },
+  "survival_stealth": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Competent in Nacre's service routes; learned through shifts and outages. Can navigate a dark familiar deck, but unfamiliar terrain and surveillance expose him."
+  },
+  "technical_skills": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Advanced mechanical diagnosis; competent low-voltage instrumentation. Can repair a sensor circuit with proper parts; cannot rewrite secure city software or design every machine."
+  },
+  "natural_talents": {
+   "letters": [
+    "K",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Strong spatial memory and fine manual control; shown by recalling pipe layouts. Both degrade with fatigue and do not replace measurements."
+  },
+  "supernatural_abilities": {
+   "letters": [
+    "M",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "None. Anchor and Resonance are fictional biological abilities described in the mutation rules, with fixed limitations."
+  },
+  "passive_abilities": {
+   "letters": [
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Reinforced connective tissue modestly improves load tolerance. It does not protect organs, prevent concussion or grant automatic rapid healing."
+  },
+  "senses": {
+   "letters": [
+    "M",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Resonance adds contact vibration interpretation. Ordinary human hearing, sight and smell remain unchanged; noisy machinery can produce false interpretations."
+  },
+  "transformations": {
+   "letters": [
+    "M",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "No alternate form. Only transient wrist glow and slightly raised ridges appear under strain. Extreme emotion does not unlock an unestablished monster body."
+  },
+  "strength": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Normally carries a 25 kg tool case up several flights with rests. Anchor lets him briefly brace a counterweighted mechanism exerting about 60 kg-equivalent force; it does not mean he can freely lift 60 kg overhead."
+  },
+  "speed": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fit human sprinting over short distances, roughly 25 km/h at peak on level ground. Boots, coat and wet flooring reduce useful speed."
+  },
+  "agility": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Moves through narrow access spaces and over waist-high barriers. Needs a visible landing and cannot perform effortless rooftop leaps across large gaps."
+  },
+  "reflexes": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Well-practiced responses to machinery movement; ordinary human reaction limits elsewhere. Cannot evade a projectile after it is fired by watching it approach."
+  },
+  "stamina": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Can work a demanding shift with meals and breaks. Repeated sprints quickly affect speech and precision; mutation use shortens rather than extends this reserve."
+  },
+  "endurance": {
+   "letters": [
+    "A",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Can walk several hours at a steady pace with manageable gear. Sleep loss and humid heat substantially reduce performance the following day."
+  },
+  "durability": {
+   "letters": [
+    "A",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Forearms tolerate modest strain better than expected for his size. Cuts, burns, broken bones and internal injuries remain serious; no armor-like skin."
+  },
+  "recovery": {
+   "letters": [
+    "A",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Ordinary human wound healing. Rest reverses transient mutation fatigue but does not instantly heal injuries. Continuing through tremor risks a recovery measured in days."
+  },
+  "education": {
+   "letters": [
+    "K",
+    "C"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Completed municipal trade training and advanced pump certification. No medical degree, military academy background or universal engineering expertise."
+  },
+  "languages": {
+   "letters": [
+    "K",
+    "V"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fluent English and Nacre Dock Cant, a proposed local trade register. Basic reading of older service symbols; no unexplained fluency in other languages."
+  },
+  "cultural_knowledge": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Knows service-deck etiquette, neighborhood mutual-aid customs and outage rituals. Misreads elite meeting etiquette and the quiet leverage of contract language."
+  },
+  "specialist_subjects": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Pump curves, fluid systems, vibration trends, corrosion and transit utility interfaces. Familiarity is practical and equipment-specific."
+  },
+  "practical_experience": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Fourteen years from apprentice work at 18 to independent contracting at 32, including post-accident rehabilitation with reduced hours."
+  },
+  "learning_sources": {
+   "letters": [
+    "K",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Mother's teaching, apprenticeship mentors, repair logs and hard-earned failures. Sera supplies medical interpretation; Imani supplies laboratory evidence he cannot generate alone."
+  },
+  "misconceptions": {
+   "letters": [
+    "K",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Believes a sufficiently good repair can neutralize a political decision. Assumes clear facts will automatically compel a powerful person to act honestly."
+  },
+  "blind_spots": {
+   "letters": [
+    "K",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Contract ownership, public persuasion and his tendency to silence disagreement by working harder. These cause concrete setbacks before he learns."
+  },
+  "unknowns": {
+   "letters": [
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "The full trial population, Sael's private agreements, Sera's original warning or whether the biofilaments can safely be removed."
+  },
+  "reader_knowledge": {
+   "letters": [
+    "K",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "At the opening he knows his body changed and his record was falsified. The reader sees the symptoms first; the wider trial and signed warning emerge at midpoint. No narrator gives Moki information he has not obtained."
+  },
+  "backstory_1": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2157-2166 / foundations",
+   "text": "Born on Nacre's lower decks to Amara and dock electrician Jalen Vey. At nine, holding the repair lamp becomes his model of love: useful hands and steady presence. Jalen later leaves the city for work; he is distant, not secretly dead."
+  },
+  "backstory_2": {
+   "letters": [
+    "C",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2175 / apprenticeship",
+   "text": "At 18, Moki enters municipal trade training. A supervisor rewards him for finishing jobs alone, reinforcing a habit that initially looks like independence."
+  },
+  "backstory_3": {
+   "letters": [
+    "C",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2179 / responsibility",
+   "text": "At 22, he helps Imani stay in school during a housing crisis. She later repays that support by funding his meter; neither understands how deeply he confuses care with debt."
+  },
+  "backstory_4": {
+   "letters": [
+    "C",
+    "F"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2183 / first evacuation",
+   "text": "At 26, he and Tavi evacuate a stalled transit deck. Moki returns for a trapped passenger without telling Tavi, who must finish clearing the crowd alone. Their trust frays despite a successful rescue."
+  },
+  "backstory_5": {
+   "letters": [
+    "C",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2186 / accident",
+   "text": "At 29, he hears an unfamiliar vibration during a new coolant trial. Threatened with crew layoffs, he delays escalating it. A failure exposes him to adaptive biofilaments; the company conceals the unauthorized trial behind a negligence finding."
+  },
+  "backstory_6": {
+   "letters": [
+    "C",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2186-2188 / rehabilitation",
+   "text": "Sera helps him regain hand control while withholding her own signed warning. Moki leaves corporate employment and builds a small repair business; Imani starts collecting water samples after noticing unexplained residues."
+  },
+  "backstory_7": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "title": "2189 / opening position",
+   "text": "At 32, he has reliable clients but no financial cushion. Another failure in the same district makes staying quiet impossible. The personal wound, technical mystery and public stakes converge."
+  },
+  "opening": {
+   "letters": [
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Moki keeps a neglected neighborhood running through small repairs. He quietly trades his health for reliability, hides his tremor and refuses Tavi's offer of a regular partnership."
+  },
+  "inciting_incident": {
+   "letters": [
+    "S",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "A water intake fails with the same vibration he heard in 2186. Inside its housing he finds a trial component absent from the maintenance record. Imani's sample results show the problem reaches inhabited districts."
+  },
+  "objective": {
+   "letters": [
+    "S",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Before a planned citywide restart in seventy-two hours, obtain the trial logs and force a safe isolation of contaminated lines. Failure means mass exposure and another convenient worker blamed."
+  },
+  "obstacles": {
+   "letters": [
+    "S",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Sael cancels his access, offers to erase his negligence finding and brands his repair work unauthorized. Moki rejects the offer but hides the deadline from his allies, causing Tavi to miss a critical transfer window."
+  },
+  "midpoint": {
+   "letters": [
+    "S",
+    "K"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Sera provides her original warning and proof that the trial was never safely closed. Moki learns his symptoms are evidence of an ongoing program, not an isolated accident. She also admits signing the sanitized report; accepting her help no longer requires pretending she was innocent."
+  },
+  "setback": {
+   "letters": [
+    "S",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Moki attempts a service intervention alone, overuses Anchor and collapses before the evidence relay completes. His workshop is sealed, the component seized and Tavi refuses another plan built on withheld information."
+  },
+  "decisive_choice": {
+   "letters": [
+    "S",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "He tells Imani and Tavi the entire accident history, including the warning he ignored. Instead of demanding forgiveness, he gives them the evidence and authority to decide their own roles. They build a plan around distributed access and public witnesses."
+  },
+  "climax": {
+   "letters": [
+    "S",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "During the restart, Moki briefly holds a failing actuator while Tavi completes the isolation and Imani releases verified samples and logs. When his tremor starts, he follows the agreed handoff rather than taking control back. Neighborhood crews sustain the shutdown long enough to prevent exposure."
+  },
+  "resolution": {
+   "letters": [
+    "S",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "The restart is halted and an independent inquiry begins; neither instant justice nor a miracle cure is promised. Moki shares the workshop lease with Tavi and accepts Imani's condition that family care is not a ledger."
+  },
+  "change_hook": {
+   "letters": [
+    "S",
+    "P"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "He still fixes things, but now asks who else should hold the light. A missing trial shipment offers a possible later story; the first arc resolves his choice to trust without requiring a sequel."
+  },
+  "visual_anchors": {
+   "letters": [
+    "C",
+    "A"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Small compact defined physique; Black identity and dark brown skin; dark platinum short twists; five o'clock shadow; long charcoal sleeveless coat and exposed arms. Proposed mutation stays subtle and anatomically human."
+  },
+  "power_ledger": {
+   "letters": [
+    "C",
+    "M"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Eight seconds maximum per Anchor burst; three bursts per ten minutes; at least twenty minutes rest after third use. Heat and tremor constrain subsequent scenes. No automatic reset at a scene cut."
+  },
+  "timeline_ledger": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Opening and climax occur within seventy-two hours in 2189. Collapse at the setback leaves fatigue during the climax; dialogue and movement must reflect it. No overnight full recovery from a major injury."
+  },
+  "secrets_ledger": {
+   "letters": [
+    "K",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Ignored vibration: Moki initially, allies after his confession. Original warning: Sera initially, group at midpoint. Trial scope: Sael and a small management circle until evidence is recovered."
+  },
+  "reveal_points": {
+   "letters": [
+    "S",
+    "E"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "First scene: appearance and repair skill. Early second movement: glow and tremor. Midpoint: continuing trial and Sera's omission. Late second movement: Moki's silence before the accident. Climax: learned trust in action."
+  },
+  "component_readiness": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Supplied visual brief: Ready, Protected yes. Proposed name, setting, abilities, relationships and arc: Draft, Protected no. Manuscript continuity check: Empty / verification pending. Magical spell list: Not applicable. No conflicts identified within this proposal."
+  },
+  "linked_records": {
+   "letters": [
+    "C",
+    "R"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "CH-002 Imani; CH-003 Sera; CH-004 Tavi; CH-005 Sael; PL-001 Nacre; AR-001 rescue baton. IDs are suggested cross-references only; related dossiers do not yet exist. MG record: Not applicable."
+  },
+  "unresolved_choices": {
+   "letters": [
+    "C",
+    "S"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "User may rename Moki, change exact age or measurements, select another mutation color, or accept the proposed world. These are optional choices, not gaps requiring answers before using the dossier."
+  },
+  "artwork_note": {
+   "letters": [
+    "C",
+    "E"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "Portrait plus ten full-body reference views are included. The movement plate uses a tool-reach draw study and an empty-hand attack study. It is visual guidance, not a guaranteed production model sheet; small generative variations remain possible."
+  },
+  "verification_scope": {
+   "letters": [
+    "C",
+    "E"
+   ],
+   "status": "proposed",
+   "protected": false,
+   "text": "This dossier was checked for internal dates, ages, stated power limits, field coverage and embedded artwork. No unseen manuscript, external character database or BookForge integration was inspected."
+  }
+ },
+ "art": {
+  "portrait": "portrait.jpg",
+  "views": {
+   "front": "front.jpg",
+   "three_quarter_front": "three_quarter_front.jpg",
+   "side": "side.jpg",
+   "three_quarter_back": "three_quarter_back.jpg",
+   "back": "back.jpg",
+   "idle": "idle.jpg",
+   "draw": "draw.jpg",
+   "attack": "attack.jpg",
+   "dash": "dash.jpg",
+   "defend": "defend.jpg"
+  }
+ }
+}

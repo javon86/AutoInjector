@@ -15,6 +15,9 @@
 * ``story_choices`` (P12): the author's style choices (and the ending-state matrix in the last chapter).
 * ``length`` (P15): the chapter's word target, scenes and words per scene, and whether it is written scene by scene.
 * ``narrator_style`` (P25): the author's own style card (style_card.py) when the book writes in the author's style.
+* ``character_details`` (B5): accepted Character Forge dossier fields with only the letters the chapter needs (E; A on
+  a character's first appearance; F / M when the plan reads like a fight / powers), ≤ 2 500 characters
+  (``forge.chapter_brief``).
 
 P14: a book made with parts of the pipeline switched off (pipeline.py: scenes / voices / rules / planned) gets no
 scene cards / voice cards / story rules and texture / must-show details here, even when such data exists.
@@ -63,6 +66,10 @@ RULES = {
                     "mystery stays unexplained (nobody explains it, not even the narrator)."),
     "must_show": ("These details must reach the page in this chapter (context.writing_brief.must_show): show each one "
                   "through action, dialogue or memory — a name must be written on the page."),
+    "character_details": ("Character details (context.writing_brief.character_details) are the author's approved "
+                          "Character Forge facts this chapter needs (appearance on a first appearance, fighting, "
+                          "powers and their limits, essential on-page details): keep every one exactly; show them "
+                          "through action and description, never as a list."),
 }
 
 
@@ -77,6 +84,29 @@ def _chapter_item(outline: dict, chapter_id: str) -> dict | None:
                     and f.get("subject_id") == chapter_id:
                 return it
     return None
+
+
+def _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts) -> list:
+    """🗂 B5: the Character Forge letters each present character needs here — E always, A on their first appearance
+    (no earlier outline chapter mentions them), F / M when the chapter's plan reads like a fight / powers. Only
+    accepted dossier fields; the voice card and sheet parts (V, P) are already in voice_cards. Never raises."""
+    try:
+        from . import forge  # noqa: PLC0415
+        from .book_path import BookPath  # noqa: PLC0415
+        order = [c["chapter_id"] for c in BookPath.outline_chapters(None, outline)]
+        earlier = order[:order.index(chapter_id)] if chapter_id in order else []
+        seen = set()
+        for cid in earlier:
+            it = _chapter_item(outline, cid) or {}
+            facts = [f for f in it.get("facts") or [] if isinstance(f, dict)]
+            t = [str(it.get("summary") or "")] + [str(f.get("value")) for f in facts if isinstance(f.get("value"), str)]
+            ids = [f.get("subject_id") for f in facts] + [f.get("value") for f in facts if isinstance(f.get("value"), str)]
+            seen |= {c["record_id"] for c in chars_mod.present_in(cs, *t, ids=ids)}
+        letters = {c["record_id"]: forge.letters_for(texts, c["record_id"] not in seen) for c in present}
+        return forge.chapter_brief(store, pid, branch, present, letters)
+    except Exception:  # noqa: BLE001 - a brief is best effort
+        log.exception("character details for the brief failed")
+        return []
 
 
 def _pov_view(c: dict) -> dict:
@@ -132,6 +162,10 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
                 break
         brief = {"pov": _pov_view(pov) if pov else None, "voice_cards": vb["cards"], "other_voices": vb["others"],
                  "scene_cards": cards, "planned_details": planned}
+        details = _forge_details(store, pid, branch, outline, chapter_id, present, cs, texts) if flags["voices"] \
+            else []
+        if details:  # 🗂 B5: approved dossier fields with only the letters this chapter needs (≤ 2 500 chars)
+            brief["character_details"] = details
         extra = _section4(store, pid, branch, outline, chapter_id, cards, texts)
         if not flags["rules"]:
             extra.pop("story_rules", None)
@@ -158,6 +192,8 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
             rules.append(TEXTURE_RULE)
         if brief.get("must_show"):
             rules.append(RULES["must_show"])
+        if brief.get("character_details"):
+            rules.append(RULES["character_details"])
         trade = _trade_terms(store, pid, branch, texts + [json.dumps(cards, ensure_ascii=False)])  # P31
         if trade:
             from .terms import RULE as TERMS_RULE  # noqa: PLC0415
@@ -184,6 +220,7 @@ def build(store, pid: str, branch: str, outline: dict | None, chapter_id: str) -
         brief["rules"] = rules
         if not (cards or vb["cards"] or vb["others"] or pov or planned or extra.get("story_rules")
                 or extra.get("world_texture") or extra.get("story_choices") or length or style
+                or brief.get("character_details")
                 or any(k in brief for k in ("physical_state", "character_state", "two_readings", "version_changes"))):
             return None, meta
         meta.update(characters=[c["record_id"] for c in present], voice_cards=len(vb["cards"]),

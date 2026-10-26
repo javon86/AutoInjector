@@ -5,6 +5,7 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
+import { viewForge, viewForgeList } from './forge.js';  // 🗂 B5 Character Forge dossiers
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -650,6 +651,7 @@ async function pickView(parts) {
     if (rest[0] === 'world') return viewWorld;
     if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
+    if (rest[0] === 'forge') return m => (rest[1] ? viewForge(m, rest[1], forgeUI()) : viewForgeList(m, forgeUI()));  // 🗂 B5
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -711,6 +713,7 @@ function renderTop(parts) {
     add(more, link('p', S.pid, S.branch, 'costs'), '⏱ Time and AI use');
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
+    add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -2891,6 +2894,7 @@ async function viewSettings(main) {
   main.appendChild(editorSettingsCard());
   main.appendChild(lengthSettingsCard());
   main.appendChild(booksFolderCard());
+  main.appendChild(pictureBridgeCard());  // 🗂 B5: where AutoInjector makes the Character Forge pictures
   main.appendChild(backupsCard());
   main.appendChild(helpCard());
 }
@@ -6004,13 +6008,20 @@ const TIP_SHEET = () => [
   h('p', null, 'The voice card says how they talk: rhythm, register, their own words, favourite phrases, words they would never use, habits, and how their speech changes under fear, anger or grief.'),
   h('p', null, 'The writer gets the voice cards of the characters in each chapter, and the editor checks that every character sounds like themselves. Changing them here does not change the character’s approved record.')];
 
+/** What the 🗂 Character Forge pages (forge.js) need from this file. */
+function forgeUI() {
+  return { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route, loadingState, stateBox };
+}
+
 function characterCard(cur) {
   const rid = cur.record_id;
   const body = h('div', null, loadingState('Loading the character sheet…'));
   const msg = h('div', { 'aria-live': 'polite' });
   const prog = h('div', { 'aria-live': 'polite' });
   const card = h('section', { class: 'card char-card', 'aria-labelledby': 'cc-h', 'data-testid': 'character-card' },
-    h('div', { class: 'row space' }, h('h2', { id: 'cc-h' }, '🎭 Who they are and how they talk'), infoTip('Character sheet and voice card', ...TIP_SHEET())),
+    h('div', { class: 'row space' }, h('h2', { id: 'cc-h' }, '🎭 Who they are and how they talk'),
+      h('div', { class: 'row' }, h('a', { class: 'btn small forge-entry', href: plink('forge', rid), 'data-testid': 'open-forge', title: 'The full Character Forge dossier: 14 sections, letters, portrait and ten reference views' }, '🗂 Character Forge'),
+        infoTip('Character sheet and voice card', ...TIP_SHEET()))),
     msg, prog, body);
   let info = null;
   const load = async () => {
@@ -8195,6 +8206,34 @@ function booksFolderCard() {
       h('div', { class: 'field row' }, auto, h('label', { for: 'bf-auto' }, ' Save books automatically while they are made and when they are finished (at most every 2 minutes)'),
         h('button', { type: 'button', class: 'small', onclick: () => save({ auto_save: auto.checked }) }, 'Save')),
       cur.local ? null : h('p', { class: 'small muted' }, '⚠️ You use Akọwe from another device: folders can only be opened on the computer Akọwe runs on.'),
+      out);
+  };
+  load();
+  return card;
+}
+/** 🎨 Pictures (Character Forge): AutoInjector's bridge address and token for POST /image/request. */
+function pictureBridgeCard() {
+  const box = h('div', { 'aria-live': 'polite' });
+  const card = h('section', { class: 'card', 'aria-labelledby': 'pb-h', 'data-testid': 'picture-bridge' }, h('h2', { id: 'pb-h' }, '🎨 Pictures (Character Forge)'),
+    h('p', { class: 'small' }, 'Portraits and the ten reference views are made by AutoInjector (Stable Diffusion or ChatGPT). Leave the address empty to use the default; paste AutoInjector’s bridge token if it uses one.'), box);
+  const load = async () => {
+    let cur;
+    try { cur = await api('GET', '/settings/image-bridge'); } catch (e) { put(clear(box), problemBox(toProblem(e, { step: 'Settings › Pictures' }), { retry: load })); return; }
+    const url = h('input', { type: 'text', id: 'pb-url', value: cur.url || '', placeholder: cur.default_url, spellcheck: 'false', autocomplete: 'off' });
+    const tok = h('input', { type: 'password', id: 'pb-token', value: '', placeholder: cur.has_token ? '•••••• (saved)' : 'bridge token (optional)', autocomplete: 'off' });
+    const out = h('div', { 'aria-live': 'polite' });
+    const save = async () => {
+      clear(out);
+      const body = { url: url.value.trim() };
+      if (tok.value.trim()) body.token = tok.value.trim();
+      try { await api('PUT', '/settings/image-bridge', { body }); toast('Saved'); load(); }
+      catch (e) { out.appendChild(problemBox(toProblem(e, { step: 'Settings › Pictures' }))); }
+    };
+    put(clear(box),
+      h('div', { class: 'field' }, h('label', { for: 'pb-url' }, 'AutoInjector bridge address'), url, h('span', { class: 'hint' }, `Only this computer (127.0.0.1 / localhost). Akọwe asks: ${(cur.uses || []).join(', ') || cur.default_url}`)),
+      h('div', { class: 'field' }, h('label', { for: 'pb-token' }, 'Bridge token'), tok),
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'small primary', 'data-testid': 'pb-save', onclick: save }, 'Save'),
+        cur.has_token ? h('button', { type: 'button', class: 'small', onclick: async () => { try { await api('PUT', '/settings/image-bridge', { body: { token: null } }); toast('Token removed'); load(); } catch (e) { out.appendChild(problemBox(toProblem(e))); } } }, 'Remove the token') : null),
       out);
   };
   load();

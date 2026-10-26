@@ -10,6 +10,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
+    Character Forge/  <code> <name> - Character Forge dossier.pdf/.json per saved dossier + its pictures (B5)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -93,6 +94,7 @@ Book Bible/    Everything the book is built on: the book profile, ending and sty
                book-bible.md is for reading; book-bible.json is what Akọwe reads back.
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
+Character Forge/  Each character's dossier (PDF to read, JSON for Akọwe) and its pictures.
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -375,6 +377,29 @@ class SaveService:
         return base / cand
 
     # ------------------------------------------------------------------ what goes into the folder
+    def _forge_files(self, pid: str, branch: str, files: dict, text) -> None:
+        from . import forge  # noqa: PLC0415
+        app, store = self.app, self.store
+        for item in forge.list_dossiers(store, pid, branch):
+            rid = item["record_id"]
+            entry = forge.raw_entry(store, pid, branch, rid)
+            if not entry.get("history"):
+                continue  # never opened in the Character Forge
+            data, name = forge.pdf_bytes(app, pid, branch, rid)
+            base = name[:-len(".pdf")]
+            files[f"Character Forge/{base}.pdf"] = data
+            d = forge.public(store, pid, branch, rid)
+            d.pop("history", None)
+            text(f"Character Forge/{base}.json", json.dumps(d, ensure_ascii=False, indent=1))
+            art = entry.get("art") or {}
+            slots = [("portrait", art.get("portrait")), ("sheet", art.get("sheet"))] + \
+                [(v, (art.get("views") or {}).get(v)) for v in forge.VIEW_KEYS]
+            for slot, a in slots:
+                pic = forge.picture_bytes(store, pid, branch, a)
+                if pic:
+                    ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
+                    files[f"Character Forge/{item['code']} pictures/{slot}.{ext}"] = pic
+
     def collect(self, pid: str, branch: str, *, on_phase=None) -> tuple[dict, dict]:
         """{relative path: bytes} for everything that exists now, and info about it (read-only)."""
         app, store = self.app, self.store
@@ -455,6 +480,11 @@ class SaveService:
         co = continuity.render_markdown(app, pid, branch)
         if co:
             text("Reports/Continuity.md", co)
+        # Character Forge/ (B5): the dossiers the author has worked on, their PDFs and pictures
+        try:
+            self._forge_files(pid, branch, files, text)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("character forge files for the save failed")
         # Log/
         phase("Writing the log")
         try:
