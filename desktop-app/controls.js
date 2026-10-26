@@ -1775,6 +1775,32 @@ function capReelStep(c) {
 }
 if (window.api.onCapabilityTestStep) window.api.onCapabilityTestStep((c) => { if (capReelActive) capReelStep(c); });
 
+// A one-click fix offered next to a failed capability (main sends c.fix =
+// { action, label }). Only known actions get a button.
+const CAP_FIXES = {
+  "voice:redownload": async () => {
+    if (!window.api.voiceRedownload) return { ok: false, message: "Re-download isn't available in this version." };
+    return window.api.voiceRedownload();
+  },
+};
+function capFixButton(c) {
+  const fix = c && c.fix;
+  const run = fix && CAP_FIXES[fix.action];
+  if (!run) return null;
+  const b = document.createElement("button");
+  b.className = "cap-fix-btn";
+  b.dataset.fix = fix.action;
+  b.textContent = `🔧 ${fix.label || "Fix it"}`;
+  b.onclick = async () => {
+    uiLog("click", { id: "cap-fix", msg: fix.action });
+    b.disabled = true; const prev = b.textContent; b.textContent = "⏳ Working…";
+    let r; try { r = await run(); } catch (e) { r = { ok: false, message: String(e) }; }
+    b.disabled = false; b.textContent = r && r.ok ? "✅ Done" : prev;
+    logToCenter((r && r.message) || (r && r.ok ? "Done." : `Couldn't fix it: ${(r && r.error) || "failed"}`), { tag: "setup", err: !(r && r.ok) });
+  };
+  return b;
+}
+
 // Fill and open the 3-bucket results pop-up.
 function openCapModal(r) {
   const modal = el("cap-modal"); if (!modal) return;
@@ -1789,7 +1815,10 @@ function openCapModal(r) {
       let html = `<span class="nm">${gpuEsc(c.name)}</span>`;
       if (c.detail) html += `<span class="why">${gpuEsc(c.detail)}</span>`;
       if (withTip) html += `<span class="tip">💡 ${gpuEsc(capTipFor(c))}</span>`;
-      item.innerHTML = html; box.appendChild(item);
+      item.innerHTML = html;
+      const fixBtn = capFixButton(c);
+      if (fixBtn) item.appendChild(fixBtn);
+      box.appendChild(item);
     }
   };
   el("cap-n-working").textContent = buckets.working.length;
@@ -4357,7 +4386,28 @@ el("btn-clear").onclick = async () => {
 // file — "This Akọwe book only" (the default when a book is known), a time
 // range, or Everything (with a warning) — shows the counts and the first lines,
 // and saves only on "Save". main builds the text (log-extract.js) and redacts it.
-const exState = { opts: null, timer: null, seq: 0, open: false };
+const exState = { opts: null, timer: null, seq: 0, open: false, everything: null };
+// The last choice is remembered for next time (this viewer only) — except
+// Everything, which is never pre-selected: it always takes a fresh, confirmed pick.
+const EX_LAST_KEY = "autoinjector.extract.last";
+function exLoadLast() {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(EX_LAST_KEY) || "null");
+    if (!v || typeof v !== "object" || (v.scope !== "book" && v.scope !== "time")) return null;
+    return v;
+  } catch (_) { return null; }
+}
+function exSaveLast(opts) {
+  if (!opts || (opts.scope !== "book" && opts.scope !== "time")) return; // never Everything
+  const v = { scope: opts.scope, include: opts.include || null };
+  if (opts.scope === "book") v.bookId = opts.bookId || null;
+  if (opts.scope === "time") v.preset = opts.preset || "custom";
+  try { window.localStorage.setItem(EX_LAST_KEY, JSON.stringify(v)); } catch (_) { /* storage blocked: just don't remember */ }
+}
+function exHideConfirm() {
+  const c = el("ex-confirm-all"); if (c) c.hidden = true;
+  const save = el("btn-extract-save"); if (save) save.hidden = false;
+}
 function exPad(n) { return String(n).padStart(2, "0"); }
 function exLocalInput(ms) { const d = new Date(ms); return `${d.getFullYear()}-${exPad(d.getMonth() + 1)}-${exPad(d.getDate())}T${exPad(d.getHours())}:${exPad(d.getMinutes())}`; }
 function exShortDate(ms) { try { return ms ? new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""; } catch (_) { return ""; } }
@@ -4385,6 +4435,7 @@ function exSyncUi() {
 }
 async function exRefreshPreview() {
   exSyncUi();
+  exHideConfirm(); // a changed choice needs a fresh confirmation
   const my = ++exState.seq;
   const counts = el("ex-counts");
   const opts = exGather();
@@ -4410,6 +4461,7 @@ async function exRefreshPreview() {
   el("ex-file").textContent = r.fileName ? `File: ${r.fileName}` : "";
   el("ex-file").title = r.fileName || "";
   exState.opts = opts;
+  exState.everything = opts.scope === "everything" ? { messages: c.messages, oldestAt: r.oldestAt, text: r.everything && r.everything.text } : null;
 }
 function exPreviewSoon() { clearTimeout(exState.timer); exState.timer = setTimeout(exRefreshPreview, 120); }
 function exClose(note) {
@@ -4448,12 +4500,20 @@ async function exOpen() {
     ? "Only the AIs' replies to Akọwe's requests for this book, and the activity of those requests. Your other conversations are left out."
     : "No Akọwe book has been recorded yet (Akọwe hasn't sent this app any requests).";
   const def = (o && o.default) || { scope: "time", preset: "day" };
-  // Never "Everything" by default — the safe one-click choice is the book, else a time range.
-  const scope = def.scope === "book" && books.length ? "book" : "time";
-  if (scope === "book" && def.bookId) sel.value = def.bookId;
-  el("ex-preset").value = def.preset || "day";
+  // Never "Everything" by default — the safe one-click choice is the book, else a
+  // time range (last 24 hours). A remembered last choice (never Everything) wins
+  // when it still applies.
+  const last = exLoadLast();
+  const useLast = last && (last.scope === "time" || (last.scope === "book" && books.length));
+  const pick = useLast ? last : def;
+  const scope = pick.scope === "book" && books.length ? "book" : "time";
+  const bookId = pick.scope === "book" && pick.bookId && books.some((b) => b.id === pick.bookId) ? pick.bookId : def.bookId;
+  if (scope === "book" && bookId) sel.value = bookId;
+  const presets = ["hour", "today", "day", "custom"];
+  el("ex-preset").value = scope === "time" && presets.includes(pick.preset) ? pick.preset : (def.preset || "day");
   el(scope === "book" ? "ex-scope-book" : "ex-scope-time").checked = true;
-  const inc = def.include || {};
+  exHideConfirm();
+  const inc = (useLast && last.include) || def.include || {};
   el("ex-inc-conv").checked = inc.conversation !== false;
   el("ex-inc-act").checked = inc.activity !== false;
   el("ex-inc-relay").checked = inc.relay !== false;
@@ -4471,11 +4531,12 @@ async function exSaveDirect(opts) {
   if (btn) btn.disabled = true;
   try {
     const res = await window.api.extractAllLogs(opts);
+    if (res && res.ok) exSaveLast(opts);
     if (res && res.ok) {
       const what = res.scope === "book" ? `book “${res.book && res.book.title}” only` : res.scope === "everything" ? "everything" : "time range";
       if (status) { status.textContent = `Saved ${res.messages} messages + ${res.logEntries} log entries (${what}) → ${res.file}`; status.title = status.textContent; }
     } else if (status) {
-      status.textContent = `Extract failed: ${(res && res.error) || "unknown error"}`;
+      status.textContent = res && res.error === "CONFIRM_EVERYTHING" ? `Nothing saved — ${res.message || "Everything needs a second confirmation."}` : `Extract failed: ${(res && res.error) || "unknown error"}`;
     }
   } catch (e) {
     if (status) status.textContent = `Extract failed: ${e && e.message ? e.message : e}`;
@@ -4485,10 +4546,40 @@ async function exSaveDirect(opts) {
 }
 el("btn-extract-all").onclick = () => exOpen();
 el("btn-extract-cancel").onclick = () => exClose("Extract cancelled — nothing was saved.");
+function exDateOnly(ms) { try { return new Date(ms).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" }); } catch (_) { return ""; } }
+// Everything asks a second time, naming what is in it.
+function exShowConfirm() {
+  const box = el("ex-confirm-all"); if (!box) return false;
+  const ev = exState.everything || {};
+  const n = Number(ev.messages) || 0;
+  const inc = (exState.opts && exState.opts.include) || {};
+  const what = inc.conversation === false
+    ? `the activity log of all of the app's saved history${ev.oldestAt ? ` going back to ${exDateOnly(ev.oldestAt)}` : ""} (no AI conversation text)`
+    : (ev.text || `${n.toLocaleString("en-US")} message${n === 1 ? "" : "s"}${ev.oldestAt ? ` going back to ${exDateOnly(ev.oldestAt)}` : ""}, including older private conversations`);
+  el("ex-confirm-all-text").textContent = `⚠ Save EVERYTHING? This file will hold ${what}. Anyone you share it with can read all of it.`;
+  box.hidden = false;
+  const save = el("btn-extract-save"); if (save) save.hidden = true;
+  try { el("btn-extract-confirm-back").focus(); } catch (_) {}
+  return true;
+}
 el("btn-extract-save").onclick = async () => {
   const opts = exGather();
+  if (opts.scope === "everything") {
+    // a stale preview (still loading) must not be confirmed blind
+    if (!exState.everything || !exState.opts || exState.opts.scope !== "everything") { await exRefreshPreview(); }
+    exShowConfirm();
+    return;
+  }
   exClose(null);
   await exSaveDirect(opts);
+};
+if (el("btn-extract-confirm-back")) el("btn-extract-confirm-back").onclick = () => { exHideConfirm(); try { el("btn-extract-save").focus(); } catch (_) {} };
+if (el("btn-extract-confirm-all")) el("btn-extract-confirm-all").onclick = async () => {
+  const opts = exGather();
+  if (opts.scope !== "everything") { exHideConfirm(); return; }
+  uiLog("click", { id: "btn-extract-confirm-all", msg: "confirmed: extract everything" });
+  exClose(null);
+  await exSaveDirect(Object.assign({}, opts, { confirmEverything: true }));
 };
 for (const id of ["ex-scope-book", "ex-scope-time", "ex-scope-all", "ex-inc-conv", "ex-inc-act", "ex-inc-relay", "ex-book", "ex-preset", "ex-from", "ex-to"]) {
   const x = el(id); if (x) x.addEventListener("change", exPreviewSoon);

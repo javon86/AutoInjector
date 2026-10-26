@@ -72,6 +72,7 @@ async function main() {
   assert(registry.validate(gi, '{"prompt":"a lighthouse","width":512}').ok, 'arguments as a JSON string pass');
   assert(!registry.validate(gi, {}).ok && /prompt is required/.test(registry.validate(gi, {}).error), 'a missing required argument is refused');
   assert(!registry.validate(gi, { prompt: 5 }).ok, 'a wrong type is refused');
+  { const ex = registry.get('export_logs'); assert(registry.canAllowAlways(ex, { scope: 'book' }) && registry.canAllowAlways(ex, { scope: 'day' }) && !registry.canAllowAlways(ex, { scope: 'everything' }) && !registry.allowableKey('export_logs:everything') && registry.allowableKey('export_logs:book'), 'export_logs "everything" always asks (can never be always-allowed); book / day can'); }
   { const v = registry.validate(gi, { prompt: 'x y', evil: 1 }); assert(v.ok && !('evil' in v.args) && v.ignored.includes('evil'), 'an unknown argument is dropped (and reported), never passed on'); }
   { const v = registry.validate(gi, { args: { prompt: 'x y', width: '640' } }); assert(v.ok && v.args.prompt === 'x y' && v.args.width === 640, 'small-model slips are forgiven: arguments wrapped in "args", a number sent as text'); }
   assert(!registry.validate(gi, { args: { width: 640 } }).ok, 'a required argument is never invented');

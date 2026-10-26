@@ -14,7 +14,8 @@
  *              window(s), and the Relay Trace for those [MSG #] numbers.
  *   time       a from/to range (presets: last hour, today, last 24 h).
  *   everything the whole history (the dialog warns: includes all conversations,
- *              including older private ones).
+ *              including older private ones, and asks a second time naming what is
+ *              in it — everythingSummary(); main refuses it without that confirmation).
  *
  * The book tracker (createBookTracker) remembers, per Akọwe project
  * ({id, title} from POST /v1/status), which bridge request_ids happened while it
@@ -351,6 +352,24 @@ function fileName(sel, now) {
   return `AutoInjector log - everything - ${st}.txt`;
 }
 
+// The earliest timestamp among the chosen messages/events (null when none).
+function oldestOf(turns, events) {
+  let min = null;
+  for (const list of [turns || [], events || []]) for (const x of list) { const t = x && Number(x.ts); if (Number.isFinite(t) && (min == null || t < min)) min = t; }
+  return min;
+}
+function fmtDate(ms) { try { return new Date(ms).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }); } catch (_) { return String(ms); } }
+// What "Everything" really contains, in words — the second confirmation names it:
+// "1,204 messages going back to March 3, 2026, including older private conversations".
+function everythingSummary({ transcript, log } = {}) {
+  const turns = Array.isArray(transcript) ? transcript : [];
+  const events = Array.isArray(log) ? log : [];
+  const oldestAt = oldestOf(turns, events);
+  const n = turns.length;
+  const text = `${n.toLocaleString('en-US')} message${n === 1 ? '' : 's'}${oldestAt != null ? ` going back to ${fmtDate(oldestAt)}` : ''}, including older private conversations`;
+  return { messages: n, events: events.length, oldestAt, text };
+}
+
 /*
  * buildExtract(params) -> { text, counts, fileName, redactions, preview }
  * params: { scope:'book'|'time'|'everything', preset?, from?, to?, book (from tracker.book()),
@@ -445,7 +464,9 @@ function buildExtract(p) {
   L.push('');
   const r = redact(L.join('\n'), p.redaction || {});
   const lines = r.text.split('\n');
+  const oldestAt = oldestOf(include.conversation ? sel.turns : [], include.activity ? sel.events : []);
   return {
+    oldestAt,
     text: r.text,
     redactions: r.count,
     counts: { messages: include.conversation ? sel.turns.length : 0, events: include.activity ? sel.events.length : 0, relayMessages: include.relay ? relayCount : null },
@@ -457,4 +478,4 @@ function buildExtract(p) {
   };
 }
 
-module.exports = { createBookTracker, defaultScope, presetRange, selectEntries, redact, buildExtract, fileName, safeTitle, stamp, RUN_GAP_MS, UNKNOWN_PROJECT, PREVIEW_LINES };
+module.exports = { createBookTracker, defaultScope, presetRange, selectEntries, redact, buildExtract, everythingSummary, fileName, safeTitle, stamp, RUN_GAP_MS, UNKNOWN_PROJECT, PREVIEW_LINES };
