@@ -350,22 +350,32 @@ def({
 
 // ---- 🎨 Images ----------------------------------------------------------------------------------
 def({
-  name: 'generate_image', title: 'Generate an image', group: 'images', changes: true, allowAlways: true, timeoutMs: 240000,
-  description: 'Make a picture from a description with the local image generator (Stable Diffusion). Optional size, style and character.',
-  args: { type: 'object', required: ['prompt'], properties: {
+  name: 'generate_image', title: 'Generate an image', group: 'images', changes: true, allowAlways: true, timeoutMs: 480000,
+  description: 'Make a picture from a description. engine: "sd" = the local Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane (30–180 s), "auto" (default) = SD when connected, else ChatGPT. For a character\'s reference pictures: purpose "portrait", purpose "view" with one view (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend — AutoInjector adds the framing), or purpose "sheet" (one turnaround sheet with all ten). Optional size, style, character (their character lock is used) and appearance.',
+  args: { type: 'object', properties: {
     prompt: { type: 'string', minLength: 2, maxLength: 1000 },
     width: { type: 'integer', minimum: 256, maximum: 2048 },
     height: { type: 'integer', minimum: 256, maximum: 2048 },
     style: { type: 'string', maxLength: 200 },
     character: { type: 'string', maxLength: 200, description: 'A character name: their saved character lock is used when there is one' },
+    appearance: { type: 'string', maxLength: 1000, description: 'What the character looks like, in words' },
     negative_prompt: { type: 'string', maxLength: 1000 },
     loras: { type: 'array', maxItems: 4, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, weight: { type: 'number' } }, additionalProperties: false } },
+    engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'] },
+    purpose: { type: 'string', enum: ['free', 'portrait', 'cover', 'scene', 'illustration', 'view', 'sheet'] },
+    view: { type: 'string', enum: ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'] },
+    new_chat: { type: 'boolean', description: 'ChatGPT engine: start a fresh ChatGPT chat first' },
   }, additionalProperties: false },
-  describe: (a) => `Make an image of ${q(a.prompt)}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}, and save it in the images folder.`,
+  check(a) {
+    if (!a.prompt && !a.character && !a.appearance) return { ok: false, error: 'say what to draw (prompt), or give a character / appearance' };
+    if (a.purpose === 'view' && !a.view) return { ok: false, error: 'purpose "view" needs a view (front, side, back, …)' };
+    return { ok: true, args: a };
+  },
+  describe: (a) => `Make ${a.purpose === 'sheet' ? 'a turnaround sheet' : a.purpose === 'view' ? `the ${String(a.view || '').replace(/_/g, ' ')} reference view` : a.purpose === 'portrait' ? 'a portrait' : 'an image'}${a.prompt ? ` of ${q(a.prompt)}` : ''}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.appearance ? ` (${clip(a.appearance, 120)})` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}${a.engine === 'chatgpt' ? ' with ChatGPT' : a.engine === 'sd' ? ' with Stable Diffusion' : ''}, and save it in the images folder.`,
   async run(a, ctx) {
-    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, negativePrompt: a.negative_prompt, loras: a.loras });
+    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, appearance: a.appearance, negativePrompt: a.negative_prompt, loras: a.loras, engine: a.engine, purpose: a.purpose, view: a.view, newChat: a.new_chat });
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check the 🎨 Images tab.` };
-    return { ok: true, message: `Saved ${r.count || 1} image(s).`, data: { path: r.path, paths: r.paths || [r.path] }, image: r.path };
+    return { ok: true, message: `Saved ${r.count || 1} image(s)${r.engine === 'chatgpt' ? ' (made by ChatGPT)' : ''}.`, data: { path: r.path, paths: r.paths || [r.path], engine: r.engine || null, view: r.view || null }, image: r.path };
   },
 });
 def({
@@ -380,13 +390,15 @@ def({
 
 def({
   name: 'image_generator_status', title: 'Image generator status', group: 'images',
-  description: 'Whether Stable Diffusion is connected (which app, checkpoint, busy) and whether AutoInjector is running it. Read-only.',
+  description: 'Whether Stable Diffusion is connected (which app, checkpoint, busy), whether AutoInjector is running it, and whether ChatGPT can make pictures (its pane ready, drawing now). Read-only.',
   args: { type: 'object', properties: {}, additionalProperties: false },
   async run(_a, ctx) {
     const r = await ctx.sdStatus();
     if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'NO_IMAGES_MODULE', message: (r && r.message) || 'The image module is not available in this build.' };
     const im = r.image || {}; const mg = r.managed || {};
-    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null } };
+    const cg = r.chatgpt || null;
+    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
+      chatgpt: cg ? { ready: !!cg.ready, why: cg.why || null, drawing: !!cg.busy, seconds: cg.drawingMs ? Math.round(cg.drawingMs / 1000) : 0 } : null } };
   },
 });
 def({

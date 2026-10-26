@@ -321,11 +321,18 @@ function createServiceBridge(deps) {
       if (sdStudio && method === 'POST' && path === '/image/request') {
         const body = await readJsonBody(req);
         if (body === undefined) return reply(res, 400, { ok: false, error: 'BAD_JSON' });
-        emit('image', { type: 'request', purpose: body.purpose || 'free', characterLock: body.characterLock || null });
-        const r = await sdStudio.request(body || {});
-        emit('image', { type: 'done', ok: !!(r && r.ok) });
+        emit('image', { type: 'request', purpose: body.purpose || 'free', view: body.view || null, engine: body.engine || 'auto', characterLock: body.characterLock || null });
+        // A ChatGPT picture takes 30–180 s (callers use a ≥300 s timeout); the server
+        // itself never times this request out (see start()). A request that throws
+        // still answers.
+        let r;
+        try { r = await sdStudio.request(body || {}); } catch (e) { r = { ok: false, error: 'INTERNAL', message: `Something went wrong: ${(e && e.message) || e}` }; }
+        emit('image', { type: 'done', ok: !!(r && r.ok), engine: (r && r.engine) || null, error: r && !r.ok ? r.error : undefined });
         const CLIENT = ['NEED_PROMPT', 'NO_LOCK', 'INVALID_PARAM', 'UNKNOWN_VALUE', 'UNKNOWN_FIELD', 'BAD_TYPE', 'BAD_VALUE', 'UNKNOWN_OPTION', 'UNSUPPORTED_ON_BACKEND'];
-        const code = r && r.ok ? 200 : (r && CLIENT.includes(r.error) ? 400 : (r && (r.error === 'NO_ENDPOINT' || r.error === 'IMAGE_DISABLED') ? 503 : 502));
+        const UNAVAILABLE = ['NO_ENDPOINT', 'IMAGE_DISABLED', 'SD_NOT_CONNECTED', 'CHATGPT_NOT_READY', 'NO_IMAGE_ENGINE'];
+        const BY_CODE = { IMAGE_REFUSED: 422, IMAGE_LIMIT: 429, IMAGE_TIMEOUT: 504 };
+        const err = r && r.error;
+        const code = r && r.ok ? 200 : CLIENT.includes(err) ? 400 : UNAVAILABLE.includes(err) ? 503 : BY_CODE[err] || 502;
         return reply(res, code, Object.assign({ ok: false }, r || {}));
       }
       if (!sdStudio && (path === '/image/backend' || path === '/image/locks' || path === '/image/request')) {
@@ -382,6 +389,11 @@ function createServiceBridge(deps) {
     const port = o.port == null ? 8765 : o.port;
     return new Promise((resolve) => {
       server = http.createServer(handle);
+      // /image/request with engine "chatgpt" can run for minutes (and the Jarvis /
+      // interpreter routes too): no server-side request or idle-socket timeout —
+      // Node's default requestTimeout (5 min) would cut a long one off. Localhost
+      // only; each route has its own time limits.
+      try { server.requestTimeout = 0; server.timeout = 0; server.headersTimeout = 60000; server.keepAliveTimeout = 5000; } catch (_) {}
       server.on('error', (e) => {
         log('bridge-error', { error: String((e && e.code) || (e && e.message) || e) });
         server = null;
@@ -409,7 +421,7 @@ function createServiceBridge(deps) {
     });
   }
 
-  return { start, stop, emit, sseClientCount: () => sseClients.size };
+  return { start, stop, emit, sseClientCount: () => sseClients.size, server: () => server };
 }
 
 module.exports = { createServiceBridge };

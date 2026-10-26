@@ -21,7 +21,8 @@ first build is kept below ("Original design").
 | Workflows | `sd-workflows.js` | run **any** ComfyUI API-format workflow: saved in `<userData>/sd-workflows/`, named params via `"<node>.<input>"`, explicit bindings, `{{placeholders}}` or auto-detected names (prompt, negativePrompt, seed, steps, cfgScale, sampler, scheduler, denoise, width, height, batchSize, checkpoint, image, mask). UI-format saves refused with how to export the API format. |
 | Module API | `sd-api.js` | one API for Alfred and other main-process callers (below), with `capabilities()` and `call()`. |
 | UI | `controls.html` + `images-studio.js` | the **🎨 Images** app tab: connection bar (Find / Connect / Test 512px / Open SD UI / ▶ Start / ⏹ Stop), 🖌 Generate, 📚 Library, 🔒 Character locks, ⚙ Start & install. The Generate form has collapsible sections, all off by default: **Hires fix**, **Refiner**, **img2img / Inpaint** (with a mask brush), **ControlNet** units, **ADetailer**, **Upscale the result**, **Advanced** (CLIP skip, restore faces, tiling, styles, script + args, override settings JSON, extra fields JSON, read/set any settings-menu option), **ComfyUI workflow** (pick / run / save). Sections the connected app can't use are hidden. |
-| Bridge | `service-bridge.js` | `GET /image/backend`, `GET /image/locks`, `POST /image/request` (character lock) — `docs/SD_IMAGE_API.md`. |
+| Bridge | `service-bridge.js` | `GET /image/backend`, `GET /image/locks`, `POST /image/request` (character lock; `engine` auto / sd / chatgpt; `purpose` view + `view` / sheet) — `docs/SD_IMAGE_API.md`. |
+| ChatGPT engine | `chatgpt-image.js` + `image-views.js` | the second image engine: ChatGPT's own image generation in its logged-in pane (typed with the app's send path, the finished `<img>` read from the page, bytes fetched with the page's session, WebP → PNG, saved with a sidecar; one job at a time; the pane is held while it draws). `image-views.js`: the framing for the ten reference views and the turnaround sheet, for both engines. |
 
 Settings persisted in the app state: `imageConfig` (endpoint, backend, size, sampler…) and
 `sdManaged` (`startWithApp`, default **off**; `targetId`). Env for tests/power users:
@@ -55,6 +56,12 @@ await imagesApi.images.generate({ prompt, negativePrompt, loras:[{name,weight}],
      script:{ name:'X/Y/Z plot', args:[…] }, alwaysonScripts:{ '<extension>':{ args:[…] } },
      overrideSettings:{ '<any option>': value }, extra:{ '<any txt2img/img2img field>': value }, from:'alfred' });
      // → { ok, images:[{ path, url, seed, sha256 }], seed, warnings, settings } | { ok:false, error, code, field?, message, hint? }
+// Two engines + reference pictures: engine 'auto'|'sd'|'chatgpt', purpose 'view' + view, or purpose 'sheet'
+await imagesApi.images.generate({ engine:'chatgpt', purpose:'view', view:'side', characterLock:'Odile', appearance, newChat, series });
+     // → the POST /image/request answer: { ok, engine, purpose, view, paths:[…], images:[{ path, url, sha256, width, height }], seed:null, warnings, settings }
+await imagesApi.images.chatgptStatus();        // { ok, ready, why?, busy, phase, drawingMs, queue, freshChatPerSeries, last }
+await imagesApi.images.chatgptCancel();        // stop waiting for the picture being made
+await imagesApi.images.chatgptSettings({ freshChatPerSeries: true });   // a new ChatGPT chat per view series (default off)
 await imagesApi.images.img2img({ initImage, prompt, denoise, … });        // initImage required
 await imagesApi.images.inpaint({ initImage, mask, prompt, inpaint:{…} });  // initImage + mask required
 await imagesApi.images.upscale({ image, upscaler, factor, width, height, crop, upscaler2, upscaler2Visibility, gfpgan, codeformer, codeformerWeight });

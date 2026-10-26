@@ -138,12 +138,14 @@ function saveGeneration(dir, imagesB64, record, opts = {}) {
     const entries = { autoinjector: JSON.stringify(rec) };
     if (!already.parameters) entries.parameters = infotext(rec);
     const buf = addPngText(raw, entries);
-    const name = `${opts.prefix || 'sd'}-${stamp}${list.length > 1 ? `-${i + 1}` : ''}.png`;
+    // A JPEG (ChatGPT can serve one) keeps its bytes and gets a .jpg name; the sidecar carries its settings.
+    const ext = raw.length > 3 && raw[0] === 0xff && raw[1] === 0xd8 && raw[2] === 0xff ? 'jpg' : 'png';
+    const name = `${opts.prefix || 'sd'}-${stamp}${list.length > 1 ? `-${i + 1}` : ''}.${ext}`;
     const file = _unique(dir, name);
     fs.writeFileSync(file, buf);
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     rec.file = path.basename(file); rec.sha256 = sha256;
-    const json = file.replace(/\.png$/i, '.json');
+    const json = file.replace(/\.(png|jpe?g)$/i, '.json');
     try { fs.writeFileSync(json, JSON.stringify(rec, null, 1)); } catch { /* the PNG still carries the settings */ }
     out.push({ path: file, json, sha256, record: rec });
   }
@@ -154,12 +156,12 @@ function saveGeneration(dir, imagesB64, record, opts = {}) {
 function listGallery(dir, opts = {}) {
   const limit = opts.limit || 60;
   let names; try { names = fs.readdirSync(dir); } catch { return []; }
-  const pngs = names.filter((n) => /\.png$/i.test(n)).map((n) => { const p = path.join(dir, n); let t = 0; try { t = fs.statSync(p).mtimeMs; } catch {} return { n, p, t }; })
+  const pngs = names.filter((n) => /\.(png|jpe?g)$/i.test(n)).map((n) => { const p = path.join(dir, n); let t = 0; try { t = fs.statSync(p).mtimeMs; } catch {} return { n, p, t }; })
     .sort((a, b) => b.t - a.t).slice(0, limit);
   const out = [];
   for (const it of pngs) {
     let rec = null;
-    const j = it.p.replace(/\.png$/i, '.json');
+    const j = it.p.replace(/\.(png|jpe?g)$/i, '.json');
     try { rec = JSON.parse(fs.readFileSync(j, 'utf8')); } catch {
       if (opts.readChunks !== false) { try { const fd = fs.readFileSync(it.p); const tx = readPngText(fd); if (tx.autoinjector) rec = JSON.parse(tx.autoinjector); else if (tx.parameters) rec = { prompt: tx.parameters.split('\n')[0], infotext: tx.parameters }; } catch {} }
     }
@@ -170,7 +172,7 @@ function listGallery(dir, opts = {}) {
 
 // Settings to remake an image (from its sidecar or embedded chunk).
 function readRecord(file) {
-  try { return JSON.parse(fs.readFileSync(String(file).replace(/\.png$/i, '.json'), 'utf8')); } catch {}
+  try { return JSON.parse(fs.readFileSync(String(file).replace(/\.(png|jpe?g)$/i, '.json'), 'utf8')); } catch {}
   try { const tx = readPngText(fs.readFileSync(file)); if (tx.autoinjector) return JSON.parse(tx.autoinjector); } catch {}
   return null;
 }

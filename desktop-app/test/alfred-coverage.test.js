@@ -18,6 +18,8 @@ process.env.AUTOINJECTOR_SD_AUTOSTART = '0';
 process.env.AUTOINJECTOR_POLL_MS = process.env.AUTOINJECTOR_POLL_MS || '50';
 process.env.AUTOINJECTOR_STABLE_MS = process.env.AUTOINJECTOR_STABLE_MS || '80';
 process.env.AUTOINJECTOR_SAVE_DEBOUNCE_MS = '60';
+process.env.AUTOINJECTOR_CHATIMG_POLL_MS = '80'; // the fake ChatGPT page draws in 150 ms
+process.env.AUTOINJECTOR_CHATIMG_GRACE_MS = '300';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -94,6 +96,7 @@ const IPC_INVENTORY = [
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
   'sd:settings', 'sd:show-file', 'sd:start', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
+  'sd:request', 'sd:chatgpt-status', 'sd:chatgpt-cancel', 'sd:chatgpt-settings',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
   'selfrepair:forget-learned', 'selfrepair:probe', 'selfrepair:reload', 'selfrepair:settings', 'selfrepair:status', 'selfrepair:teach-cancel', 'selfrepair:teach-start',
@@ -108,7 +111,7 @@ const IPC_INVENTORY = [
 const EVENTS = {
   'self-repair': 'watcher: "an AI broke / was fixed" notices', 'manager-log': 'watcher: "an image finished" notices',
   'alfred': 'Alfred\'s own panel updates',
-  'akowe-activity': 'UI live update (Akọwe link feed) — book runs are watched by polling Akọwe', 'akowe-linktest-progress': 'UI live update', 'akowe-server': 'UI live update',
+  'akowe-activity': 'UI live update (Akọwe link feed) — book runs are watched by polling Akọwe', 'chatgpt-image': 'UI live update (ChatGPT is drawing / done — Alfred reads images.chatgptStatus)', 'akowe-linktest-progress': 'UI live update', 'akowe-server': 'UI live update',
   'akowe-tab-show': 'UI live update', 'brigade-progress': 'UI live update', 'capability-test-step': 'UI live update', 'capture': 'UI live update (replies → read_latest_reply)',
   'featuretest-progress': 'UI live update', 'houserule-state': 'UI live update', 'ledger-entry': 'UI live update', 'locker-changed': 'UI live update', 'log': 'UI live update',
   'manager-ack': 'UI live update', 'manager-state': 'UI live update', 'ollama-progress': 'UI live update', 'pane-health': 'UI live update (→ ai_health)', 'picker': 'UI live update',
@@ -146,7 +149,8 @@ const AKOWE_BRIDGE_ROUTES = {
 const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', 'images.cancel', 'images.gallery', 'images.test', 'images.fixAndRetry', 'sd.status', 'sd.detect', 'sd.connect',
   'sd.targets', 'sd.start', 'sd.stop', 'sd.install.check', 'sd.install.install', 'sd.install.downloadModel', 'sd.install.cancel', 'library.find', 'library.get',
   'library.characterLock', 'library.locks', 'library.scan',
-  'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free'];
+  'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free',
+  'images.chatgptStatus', 'images.chatgptCancel', 'images.chatgptSettings'];
 // The 📖 Akọwe API Alfred uses (method + path pattern) → the tool that calls it.
 const AKOWE_API_USED = {
   'GET /api/projects': 'book_status, list_books', 'GET /api/autobook': 'book_status, pause_run/resume_run/cancel_run', 'GET /api/slots/states': 'book_status',
@@ -351,6 +355,47 @@ async function main() {
   if (assert(!d.carded && /Odile/.test(d.text), 'sd_call library.characterLock: runs directly')) mark('sd:library.characterLock', 'real sd-api');
   d = await drive('generate_image', { prompt: 'at the quay', character: 'Odile' });
   check('generate_image', d.carded && /odile woman/.test(forge.state.lastTxt2img.prompt) && /red hair/.test(forge.state.lastTxt2img.prompt), 'a character name uses the saved character lock (trigger words + look)');
+
+  // ---- 🎨 the second engine: ChatGPT's own image generation, against a fake ChatGPT image page in the mock pane ----
+  {
+    const { fakeChatGptPane } = require('./fixtures/fake-chatgpt-image');
+    const cgPane = fakeChatGptPane({ mode: 'ok', delayMs: 150 });
+    const wc = mock.__registry.chatgpt.webContents;
+    const prevHook = wc.onSendAttempt;
+    wc.chatImagePage = (script) => cgPane.run(script);
+    wc.onSendAttempt = (text, fail) => { if (!fail) cgPane.send(text); if (typeof prevHook === 'function') prevHook(text, fail); };
+    const sentText = () => cgPane.state.sends.map((x) => x.text).join('\n');
+    d = await drive('sd_call', { method: 'images.chatgptStatus', args: {} });
+    if (assert(!d.carded && d.result && d.result.data && d.result.data.ready === true && d.result.data.busy === false, 'sd_call images.chatgptStatus: read-only, runs directly — the ChatGPT pane is ready')) mark('sd:images.chatgptStatus', 'real sd-api + fake ChatGPT page');
+    d = await drive('image_generator_status', {});
+    check('image_generator_status', !d.carded && d.result && d.result.data && d.result.data.chatgpt && d.result.data.chatgpt.ready === true, 'also says whether ChatGPT can make pictures');
+    const sdBefore = forge.state.lastTxt2img;
+    d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'a lighthouse keeper', engine: 'chatgpt' } });
+    const p1 = d.result && d.result.data && d.result.data.paths && d.result.data.paths[0];
+    if (assert(d.carded && d.result && d.result.ok && d.result.data.engine === 'chatgpt' && /Create an image: a lighthouse keeper/.test(sentText()) && forge.state.lastTxt2img === sdBefore && p1 && fs.existsSync(p1) && /^chatgpt-/.test(path.basename(p1)),
+      `sd_call images.generate {engine:"chatgpt"}: asks first, types the request into the ChatGPT pane, saves the picture (${p1 ? path.basename(p1) : d.text.slice(0, 120)}) — Forge untouched`)) mark('sd:images.generate', 'real sd-api + fake ChatGPT page (engine chatgpt)');
+    d = await drive('sd_call', { method: 'images.generate', args: { purpose: 'view', view: 'side', characterLock: 'Odile', engine: 'chatgpt' } });
+    assert(d.carded && d.result && d.result.ok && d.result.data.view === 'side' && d.result.data.engine === 'chatgpt' && /Create an image: Odile[^\n]*Framing: full body, head to toe, standing, seen exactly from the side \(profile\)/.test(sentText()),
+      'sd_call images.generate {purpose:"view", view:"side", characterLock} → the side framing is typed into ChatGPT, view echoed');
+    d = await drive('generate_image', { character: 'Odile', purpose: 'sheet', engine: 'chatgpt' });
+    check('generate_image', d.carded && d.result && d.result.ok && d.result.data.engine === 'chatgpt' && /Create one wide image: character turnaround sheet/.test(sentText()) && fs.existsSync(d.result.data.path),
+      'purpose "sheet" with engine "chatgpt": one wide turnaround sheet from the ChatGPT pane, saved');
+    d = await drive('generate_image', { purpose: 'view', view: 'dash', appearance: 'a wiry courier in a yellow rain cape', engine: 'chatgpt' });
+    check('generate_image', d.carded && d.result && d.result.ok && d.result.data.view === 'dash' && /a wiry courier in a yellow rain cape/.test(sentText()), 'a reference view from a typed appearance (no lock)');
+    const tr = ((await call('state:get')).transcript || []).filter((t) => t.site === 'chatgpt').map((t) => t.text).join(' ');
+    assert(!/Creating image/.test(tr), 'the image jobs\' replies are held: nothing of them reaches the conversation or the relay');
+    const ipc = await call('sd:request', { prompt: 'a red door', engine: 'chatgpt', purpose: 'illustration' });
+    assert(ipc && ipc.ok && ipc.engine === 'chatgpt' && /Create a wide image: a red door/.test(sentText()), 'the Images tab\'s sd:request (engine ChatGPT) takes the same path');
+    d = await drive('sd_call', { method: 'images.chatgptSettings', args: { freshChatPerSeries: true } });
+    if (assert(d.carded && d.result && d.result.ok && d.result.data.freshChatPerSeries === true && (await call('sd:chatgpt-status')).freshChatPerSeries === true, 'sd_call images.chatgptSettings: asks first, then "a fresh ChatGPT chat per series" is on')) mark('sd:images.chatgptSettings', 'real sd-api');
+    await call('sd:chatgpt-settings', { freshChatPerSeries: false });
+    d = await drive('sd_call', { method: 'images.chatgptCancel', args: {} });
+    if (assert(d.carded && d.result && d.result.ok !== false, 'sd_call images.chatgptCancel: asks first, then stops (nothing running here)')) mark('sd:images.chatgptCancel', 'real sd-api');
+    cgPane.state.mode = 'refuse';
+    d = await drive('sd_call', { method: 'images.generate', args: { prompt: 'something it will not draw', engine: 'chatgpt' } });
+    assert(d.carded && /IMAGE_REFUSED/.test(d.text) && /declined/.test(d.text), 'a ChatGPT refusal reaches Alfred as IMAGE_REFUSED in plain words');
+    wc.onSendAttempt = prevHook; delete wc.chatImagePage;
+  }
   d = await drive('list_images', { limit: 5 });
   check('list_images', !d.carded && Array.isArray(d.result && d.result.data) && d.result.data.length >= 1, 'lists the saved pictures');
   d = await drive('start_image_generator', {});

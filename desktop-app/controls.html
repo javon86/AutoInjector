@@ -113,6 +113,12 @@
     #sd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
     #sd-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
     #sd-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
+    #sd-engine-row { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-bottom:6px; }
+    #sd-engine-row select { width:auto; }
+    #sd-engine-note { font-size:11.5px; opacity:.85; }
+    #sd-engine-note[data-tone="warn"] { color:#ffcf7a; opacity:1; }
+    .sd-rv-buttons { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+    .sd-rv-buttons button { font-size:11.5px; padding:3px 7px; }
     #sd-error { margin:6px 0 4px; padding:9px 12px; border:1px solid #8a3a3a; background:#241212; border-radius:8px; font-size:12.5px; line-height:1.5; }
     #sd-error[hidden], #sd-error [hidden] { display:none; }
     #sd-error .sd-err-title { color:#ff9c9c; font-weight:600; white-space:pre-line; }
@@ -1116,6 +1122,15 @@
 
     <div id="sd-view-generate" class="sd-view" role="tabpanel" aria-labelledby="sd-sub-generate">
       <div class="sd-card">
+        <div id="sd-engine-row">
+          <div><label class="sd-l" for="sd-engine">Engine</label>
+            <select id="sd-engine" title="Who draws the picture">
+              <option value="sd">Stable Diffusion</option>
+              <option value="chatgpt">ChatGPT (its own image generation, in its pane)</option>
+              <option value="auto">Auto (Stable Diffusion if connected, else ChatGPT)</option>
+            </select></div>
+          <span id="sd-engine-note" role="status" aria-live="polite"></span>
+        </div>
         <h3>Prompt</h3>
         <textarea id="sd-prompt" rows="4" placeholder="Describe the picture… e.g. portrait of an old ferryman at dusk, lantern light, oil painting"></textarea>
         <label class="sd-l" for="sd-negative">Negative prompt (what to avoid)</label>
@@ -1156,6 +1171,28 @@
           </select>
         </div>
         <div id="sd-advanced" aria-label="More settings">
+          <details class="sd-adv" id="sd-sec-views"><summary>Reference views — portrait, 10 full-body views, turnaround sheet <span class="sd-on" id="sd-rv-badge"></span></summary><div class="sd-adv-body">
+            <div class="sd-row"><div><label class="sd-l" for="sd-rv-lock">Character</label><select id="sd-rv-lock"><option value="">— no lock: describe them below —</option></select></div></div>
+            <label class="sd-l" for="sd-rv-appearance">What they look like (with or without a lock)</label>
+            <textarea id="sd-rv-appearance" rows="2" placeholder="a wiry courier, yellow rain cape, short black hair, a satchel at the belt"></textarea>
+            <div class="sd-rv-buttons" id="sd-rv-buttons" role="group" aria-label="Make a reference picture">
+              <button id="btn-sd-rv-portrait" data-purpose="portrait">🖼 Portrait</button>
+              <button id="btn-sd-rv-front" data-view="front">Front</button>
+              <button id="btn-sd-rv-three_quarter_front" data-view="three_quarter_front">¾ front</button>
+              <button id="btn-sd-rv-side" data-view="side">Side</button>
+              <button id="btn-sd-rv-three_quarter_back" data-view="three_quarter_back">¾ back</button>
+              <button id="btn-sd-rv-back" data-view="back">Back</button>
+              <button id="btn-sd-rv-idle" data-view="idle">Idle</button>
+              <button id="btn-sd-rv-draw" data-view="draw" title="Reaching for a tool at the belt">Draw</button>
+              <button id="btn-sd-rv-attack" data-view="attack" title="Empty-hand strike">Attack</button>
+              <button id="btn-sd-rv-dash" data-view="dash">Dash</button>
+              <button id="btn-sd-rv-defend" data-view="defend">Defend</button>
+              <button id="btn-sd-rv-all" class="primary" title="All ten views, one after the other (one seed / one ChatGPT chat)">All 10 views</button>
+              <button id="btn-sd-rv-sheet" data-purpose="sheet" title="ONE wide picture with all ten views in a 5×2 grid">Turnaround sheet</button>
+            </div>
+            <label class="sd-fixed" style="font-size:12px;margin-top:5px;"><input type="checkbox" id="sd-rv-fresh"> ChatGPT: start a new chat for each series (off = one chat, which keeps the character the same)</label>
+            <div class="sd-note" id="sd-rv-note">Uses the Engine above. Stable Diffusion keeps one seed across the views; ChatGPT draws them in one conversation. AutoInjector writes the framing (full body, the angle, a plain light-grey background).</div>
+          </div></details>
           <details class="sd-adv" id="sd-sec-hires"><summary>Hires fix <span class="sd-on" id="sd-hr-badge"></span></summary><div class="sd-adv-body">
             <label class="sd-fixed" style="font-size:12px;"><input type="checkbox" id="sd-hr-on"> Render small, upscale, then add detail</label>
             <div class="sd-row"><div><label class="sd-l" for="sd-hr-upscaler">Upscaler</label><select id="sd-hr-upscaler"><option value="">Latent</option></select></div>

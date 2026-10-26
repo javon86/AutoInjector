@@ -35,6 +35,17 @@ module.exports = {
       'div[data-message-author-role="assistant"]',
       'article:has([data-message-author-role="assistant"])'
     ],
+    // ChatGPT's own image generation (chatgpt-image.js): the finished picture in the
+    // newest assistant turn. Best-effort like every list here — avatars, icons and
+    // anything under 200 px are filtered out by the reader, and the 🎯 picker's
+    // "Generated picture" item saves a better one if ChatGPT changes its page.
+    IMAGE_CANDIDATES: [
+      '[data-message-author-role="assistant"] img',
+      'article[data-turn="assistant"] img',
+      '[class*="imagegen"] img',
+      'img[alt*="Generated image" i]',
+      '[data-testid*="image-gen"] img'
+    ],
     // Best-effort/unverified, same as every other candidate list in this
     // file — used to deliver a real file into the chat via the CDP-based
     // attach flow in main.js's attachFileToSite(). Fix via the 🔍 Inspect

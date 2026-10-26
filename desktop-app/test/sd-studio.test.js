@@ -60,7 +60,9 @@ async function main() {
   let g = await studio.generate({ prompt: 'x' });
   assert(!g.ok && /switched off|connected/i.test(g.message), 'generate() with no SD app → a plain sentence, no throw');
   const rq0 = await studio.request({ prompt: 'x' });
-  assert(!rq0.ok && rq0.error === 'NO_ENDPOINT', 'the Akọwe request says no SD app is connected');
+  assert(!rq0.ok && rq0.error === 'NO_IMAGE_ENGINE' && /no Stable Diffusion app is connected/.test(rq0.message), 'the Akọwe request (engine auto, no ChatGPT engine here) says no SD app is connected → NO_IMAGE_ENGINE');
+  const rq1 = await studio.request({ prompt: 'x', engine: 'sd' });
+  assert(!rq1.ok && rq1.error === 'SD_NOT_CONNECTED', 'engine "sd" with no SD app → SD_NOT_CONNECTED');
 
   console.log('\n== A1111: generate + save + remake ==');
   const a = await fakeA1111();
@@ -111,6 +113,20 @@ async function main() {
   assert(rrec.from === 'bridge:akowe' && rrec.book === 'Ferry' && rrec.purpose === 'portrait', 'the record says it came from Akọwe, for which book and purpose');
   r = await req(st.port, 'POST', '/image/request', { purpose: 'cover', prompt: 'a lantern on dark water' }, TOKEN);
   assert(r.status === 200 && !r.json.images[0].imageBase64 && a.state.lastTxt2img.height === 768, 'without returnImage only paths come back; a cover is tall');
+  r = await req(st.port, 'POST', '/image/request', { purpose: 'view', view: 'side', characterLock: 'Odile' }, TOKEN);
+  let vb = a.state.lastTxt2img;
+  assert(r.status === 200 && r.json.engine === 'sd' && r.json.view === 'side' && r.json.purpose === 'view' && /^odile woman, silver hair, navy coat, full body, head to toe, standing, seen exactly from the side \(profile\)/.test(vb.prompt) && /cut off feet/.test(vb.negative_prompt) && /smiling/.test(vb.negative_prompt),
+    `a reference view on SD (engine auto → sd): the lock's words, then the side framing; a negative that keeps the body in frame (${vb.prompt.slice(0, 80)}…)`);
+  assert(vb.width === 512 && vb.height === 768 && r.json.seed === 4242 && r.json.paths.length === 1 && /view-side-/.test(r.json.paths[0]), 'views are tall, keep the lock\'s seed across the series, and the file says view-side');
+  r = await req(st.port, 'POST', '/image/request', { purpose: 'view', view: 'back', characterLock: 'Odile', keepSeed: false, seed: 555, engine: 'sd' }, TOKEN);
+  assert(r.status === 200 && a.state.lastTxt2img.seed === 555 && /seen exactly from behind/.test(a.state.lastTxt2img.prompt), 'the caller\'s own seed is used for the next view of the series');
+  r = await req(st.port, 'POST', '/image/request', { purpose: 'sheet', characterLock: 'Odile' }, TOKEN);
+  vb = a.state.lastTxt2img;
+  assert(r.status === 200 && r.json.engine === 'sd' && /^character turnaround sheet/.test(vb.prompt) && vb.width === 1024 && vb.height === 512 && !r.json.view, 'a turnaround sheet on SD: wide, "character turnaround sheet" words');
+  r = await req(st.port, 'POST', '/image/request', { prompt: 'x', engine: 'chatgpt' }, TOKEN);
+  assert(r.status === 503 && r.json.error === 'CHATGPT_NOT_READY', 'engine chatgpt in a build without the ChatGPT engine → 503 CHATGPT_NOT_READY');
+  r = await req(st.port, 'GET', '/image/backend', null, TOKEN);
+  assert(r.json.engines && r.json.engines.sd.connected === true && r.json.engines.chatgpt.ready === false && r.json.engines.chatgpt.why, 'GET /image/backend reports both engines');
   r = await req(st.port, 'POST', '/image/request', { characterLock: 'Nobody' }, TOKEN);
   assert(r.status === 400 && r.json.error === 'NO_LOCK', 'unknown lock → 400 NO_LOCK');
   r = await req(st.port, 'POST', '/image/request', {}, TOKEN);
