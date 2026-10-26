@@ -368,7 +368,12 @@ function resetManagerTask() {
     noProgressStreak: 0, // consecutive turns without any state change, used by detectNoProgress()
     formatFailStreak: 0, // consecutive INVALID_JSON/UNKNOWN_ACTION provider replies — a "your model can't emit commands" signal
     thinkingStreak: 0, // consecutive "thinking" (PLAN/WAIT/CLASSIFY/…) turns with no real progress, used by detectManagerStall()
-    pendingApproval: null // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
+    pendingApproval: null, // a validated decision awaiting manager:approve/manager:reject, when approval mode is on (or the manager itself chose REQUEST_APPROVAL)
+    guard: managerProvider.createTaskGuard(), // loop guards: same failure twice, repeated invalid steps, no progress, adjudication count
+    adjudicationPending: null, // the pane a tier-4 adjudication is waiting on (its reply is checked for a DECLINE verdict)
+    adjudication: null, // { verdict, reason } of the last non-decline tier-4 ruling, shown to the model
+    endReason: null, // why the task ended (e.g. DECLINED, ACTION_KEEPS_FAILING, STUCK)
+    endMessage: null // the plain one-line status shown to the user
   };
 }
 resetManagerTask();
@@ -440,6 +445,21 @@ function coerceAssignments(decision) {
   // Top-level target + task (no wrapper at all).
   if ((!Array.isArray(decision.assignments) || !decision.assignments.length) && decision.target && typeof decision.task === "string" && decision.task.trim() && !decision.task.trim().startsWith("{")) {
     decision.assignments = [{ target: decision.target, task: decision.task }];
+  }
+  // The "Butler" loop: {"action":"SEND","prompt"/"task":"…"} with no target and
+  // no assignments. Repair it only when the target is obvious — named in a
+  // target/to field, or exactly one pane is enabled. Otherwise it stays invalid
+  // and the loop hands the model the exact JSON shape it needs.
+  if (!Array.isArray(decision.assignments) || !decision.assignments.length) {
+    const text = [decision.task, decision.prompt, decision.message].find((v) => typeof v === "string" && v.trim() && !v.trim().startsWith("{"));
+    if (text) {
+      const named = [decision.target, decision.to, decision.site].map((v) => String(v || "").toLowerCase().trim()).find((v) => SITES[v]);
+      let target = named || null;
+      if (!target) {
+        try { const on = SITE_IDS.filter((id) => state.enabled && state.enabled[id]); if (on.length === 1) target = on[0]; } catch (_) { target = null; }
+      }
+      if (target) { decision.assignments = [{ target, task: text }]; decision.repaired = true; }
+    }
   }
   return decision;
 }
@@ -1360,7 +1380,9 @@ function managerSnapshot() {
     costLimit: m.costLimit,
     status: m.status,
     projectDir: m.projectDir,
-    pendingApproval: m.pendingApproval
+    pendingApproval: m.pendingApproval,
+    endReason: m.endReason || null,
+    endMessage: m.endMessage || null
   };
 }
 
@@ -2386,8 +2408,13 @@ function selectManagerTier() {
 // de-escalation request, which is handled separately in handleManagerCapture().
 async function escalateManagerTier(reason, toTier) {
   const m = state.manager;
-  const next = toTier != null ? Math.max(m.currentTier || 2, Math.min(4, toTier)) : Math.min(4, (m.currentTier || 2) + 1);
-  logManagerEvent({ category: "escalation", severity: "warning", summary: `Escalating tier ${m.currentTier} -> ${next}: ${reason}`, details: { from: m.currentTier, to: next, reason } });
+  let next = toTier != null ? Math.max(m.currentTier || 2, Math.min(4, toTier)) : Math.min(4, (m.currentTier || 2) + 1);
+  // Never re-escalate the same task to cloud adjudication: one ruling per task.
+  if (next >= 4 && adjudicationSpent(m)) {
+    next = Math.min(next, 3);
+    logManagerEvent({ category: "escalation", severity: "warning", summary: "Tier 4 already ruled on this task — not escalating again", details: { reason: managerProvider.capLogText(reason) } });
+  }
+  logManagerEvent({ category: "escalation", severity: "warning", summary: `Escalating tier ${m.currentTier} -> ${next}: ${managerProvider.capLogText(reason)}`, details: { from: m.currentTier, to: next } });
   m.currentTier = next;
   m.noProgressStreak = 0;
   await runManagerTurn();
@@ -2409,7 +2436,12 @@ function assembleTaskState() {
 async function runTierFourAdjudication() {
   const m = state.manager;
   const adjudicator = (state.managerConfig.adjudicatorSite && SITES[state.managerConfig.adjudicatorSite]) ? state.managerConfig.adjudicatorSite : "claude";
-  const question = `[Manager escalation -- tier 4 cloud adjudication for task "${m.taskId}"]\nOriginal request: ${m.userRequest}\n\nConflict/disagreement: ${JSON.stringify(m.conflicts)}\n\nMissing requirements: ${JSON.stringify(m.missingRequirements)}\n\nRelevant responses so far: ${JSON.stringify(m.latestResponses)}\n\nPlease resolve this and state clearly what should happen next.`;
+  const g = m.guard || managerProvider.createTaskGuard();
+  const tried = (g.triedSinceSuccess || []).length ? `\n\nWhat has failed so far: ${Array.from(new Set(g.triedSinceSuccess)).join("; ")}` : "";
+  const question = `[Manager escalation -- tier 4 cloud adjudication for task "${m.taskId}"]\nOriginal request: ${m.userRequest}\n\nConflict/disagreement: ${JSON.stringify(m.conflicts)}\n\nMissing requirements: ${JSON.stringify(m.missingRequirements)}\n\nRelevant responses so far: ${JSON.stringify(m.latestResponses)}${tried}\n\nStart your reply with ONE line: "VERDICT: APPROVE" (carry on as planned), "VERDICT: DECLINE" (close the task — it should not or cannot be done), or "VERDICT: GUIDANCE" (carry on, with the instructions that follow). Then give one short reason, and for GUIDANCE what should happen next. A DECLINE is final: the task ends and is not escalated again.`;
+  g.adjudications = (g.adjudications || 0) + 1;
+  m.guard = g;
+  m.adjudicationPending = adjudicator;
   m.activeAssignments = [{ target: adjudicator, task: question, sentTs: Date.now() }];
   m.pendingModels = [adjudicator];
   m.status = "waiting";
@@ -2449,10 +2481,15 @@ async function runManagerTurn() {
   m.currentTier = tier;
   broadcastManagerState();
 
-  if (tier >= 4) { await runTierFourAdjudication(); return; }
+  if (tier >= 4) {
+    if (!adjudicationSpent(m)) { await runTierFourAdjudication(); return; }
+    // Tier 4 already ruled on this task (e.g. the configured baseline is 4):
+    // carry on at tier 3 rather than asking the same question again.
+    m.currentTier = 3;
+  }
 
-  logManagerEvent({ category: "decision", summary: `Asking the manager (tier ${tier}, turn ${m.turnNumber}/${m.maximumTurns})` });
-  const res = await managerProvider.askManager(assembleTaskState(), { ...state.managerConfig, tier });
+  logManagerEvent({ category: "decision", summary: `Asking the manager (tier ${m.currentTier}, turn ${m.turnNumber}/${m.maximumTurns})` });
+  const res = await managerProvider.askManager(assembleTaskState(), { ...state.managerConfig, tier: m.currentTier });
   // runManagerTurn() is always fire-and-forget from its callers (manager:stop,
   // manager:reject, etc. don't await it) so a slow provider call can still be
   // in flight when the user stops this task or starts a new one -- without
@@ -2478,6 +2515,12 @@ async function runManagerTurn() {
         return;
       }
     }
+    try {
+      if (res.error === "INVALID_JSON" || res.error === "UNKNOWN_ACTION") managerProvider.guardRecordInvalid(m.guard, { action: "reply" }, res.error);
+      else { m.guard.triedSinceSuccess.push(`manager reply → ${managerProvider.errorCode(res.error)}`); if (m.guard.triedSinceSuccess.length > 8) m.guard.triedSinceSuccess.shift(); }
+    } catch (_) { /* guard missing — skip */ }
+    maybeWarnSmallModel("rate");
+    if (await guardTurn(false)) return;
     m.noProgressStreak++;
     if (detectNoProgress()) await escalateManagerTier(`provider error: ${res.error}`);
     else await runManagerTurn();
@@ -2486,8 +2529,18 @@ async function runManagerTurn() {
 
   const validated = validateManagerAction(res.decision);
   if (!validated.ok) {
-    logManagerEvent({ category: "error", severity: "error", summary: `Manager proposed an invalid action: ${validated.error}`, details: { decision: res.decision, violations: validated.violations || null } });
-    m.previousManagerActions.push({ ...res.decision, rejected: true, rejectReason: validated.error, ts: Date.now() });
+    logManagerEvent({ category: "error", severity: "error", summary: `Manager proposed an invalid action: ${validated.error}`, details: { decision: managerProvider.summarizeDecisionForLog(res.decision), violations: validated.violations || null } });
+    let verdict = { stop: false, count: 1, hint: null };
+    try { verdict = managerProvider.guardRecordInvalid(m.guard, res.decision, validated.error); } catch (e) { logEvent("manager-guard-error", { error: String(e) }); }
+    m.previousManagerActions.push({ ...res.decision, rejected: true, rejectReason: validated.error, hint: verdict.hint || null, ts: Date.now() });
+    if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
+    maybeWarnSmallModel("rate");
+    if (verdict.stop) {
+      const what = `${(res.decision && res.decision.action) || "?"} → ${validated.error}`;
+      await finishManagedTask({ ok: false, reason: "INVALID_STEPS", message: `Stopped: the manager model couldn't produce a valid step (${what}, ${verdict.count} times).` });
+      return;
+    }
+    if (await guardTurn(false)) return;
     m.noProgressStreak++;
     if (detectNoProgress()) await escalateManagerTier(`invalid action repeated: ${validated.error}`);
     else await runManagerTurn();
@@ -2496,6 +2549,8 @@ async function runManagerTurn() {
 
   const decision = validated.decision;
   m.formatFailStreak = 0; // a valid command came back — the model can drive the butler after all
+  try { managerProvider.guardRecordValid(m.guard); } catch (_) { /* guard missing — skip */ }
+  if (decision.repaired) logManagerEvent({ category: "decision", summary: `Repaired a ${decision.action} with no assignments → ${decision.assignments[0].target}` });
   m.previousManagerActions.push({ ...decision, ts: Date.now() });
   if (m.previousManagerActions.length > 50) m.previousManagerActions.shift();
 
@@ -2507,6 +2562,7 @@ async function runManagerTurn() {
   // FINISH ends the task in executeManagerAction() anyway, so the reset here is
   // just belt-and-braces for the paths that keep the task alive.
   if (MANAGER_THINKING_ACTIONS.has(decision.action)) {
+    if (await guardTurn(false)) return;
     m.thinkingStreak++;
     if (detectManagerStall()) { await breakManagerStall(decision); return; }
   } else {
@@ -2520,7 +2576,7 @@ async function runManagerTurn() {
   if ((state.managerConfig.approvalMode || askTool) && decision.action !== "REQUEST_APPROVAL") {
     m.pendingApproval = decision;
     m.status = "paused";
-    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}${askTool ? ` (${decision.tool})` : ""}`, action: decision.action, details: decision });
+    logManagerEvent({ category: "approval", summary: `Awaiting approval: ${decision.action}${askTool ? ` (${decision.tool})` : ""}`, action: decision.action, details: managerProvider.summarizeDecisionForLog(decision) });
     broadcastManagerState();
     return;
   }
@@ -2528,6 +2584,54 @@ async function runManagerTurn() {
 }
 
 const MANAGER_DELEGATING_ACTIONS = new Set(["DELEGATE", "SEND", "FORWARD", "COMPARE", "CRITIQUE", "VERIFY"]);
+
+function adjudicationSpent(m) {
+  return !!(m && m.guard && (m.guard.adjudications || 0) >= managerProvider.MAX_ADJUDICATIONS);
+}
+
+// No-progress check: one turn ended. Returns true when the task was stopped as
+// STUCK (several turns, nothing worked, at least one failure). Never throws.
+async function guardTurn(progress) {
+  const m = state.manager;
+  let r = { stuck: false };
+  try { r = managerProvider.guardRecordTurn(m.guard, progress); } catch (e) { logEvent("manager-guard-error", { error: String(e) }); return false; }
+  if (!r.stuck) return false;
+  await finishManagedTask({ ok: false, reason: "STUCK", message: r.summary });
+  return true;
+}
+
+// Same failure twice: record an executed action's outcome. Returns true when
+// the task was stopped (the same action + args failed twice with the same
+// code); otherwise the failure is noted as blocked for the model's next turn.
+async function guardActionOutcome(decision, ok, error) {
+  const m = state.manager;
+  let r = { stop: false };
+  try { r = managerProvider.guardRecordOutcome(m.guard, decision, ok, error); } catch (e) { logEvent("manager-guard-error", { error: String(e) }); return false; }
+  if (r.stop) {
+    await finishManagedTask({ ok: false, reason: "ACTION_KEEPS_FAILING", message: r.message });
+    return true;
+  }
+  if (!ok) logManagerEvent({ category: "decision", severity: "warning", summary: `${decision.action} failed (${r.code}) — blocked for this task; the manager is told not to repeat it`, action: decision.action });
+  return guardTurn(!!ok);
+}
+
+// Model too small: warn ONCE per model (a notice, never blocking) when the
+// manager model's name says 0.5B/1B/1.5B, or when most of its steps are invalid.
+const smallModelWarned = new Set();
+function maybeWarnSmallModel(trigger) {
+  try {
+    const model = String(state.managerConfig.model || "");
+    if (!model || smallModelWarned.has(model)) return;
+    const bySize = managerProvider.isTooSmallModelName(model);
+    const byRate = trigger === "rate" && managerProvider.guardInvalidRateHigh(state.manager.guard);
+    if (!bySize && !byRate) return;
+    smallModelWarned.add(model);
+    const why = bySize ? "looks too small" : "keeps producing invalid steps, so it looks too small";
+    const text = `Heads-up: the butler's model (${managerProvider.capLogText(model, 40)}) ${why} to follow the command format reliably. qwen2.5:7b or bigger is recommended (⚙️ Local model settings). Carrying on anyway.`;
+    logManagerEvent({ category: "config", severity: "warning", summary: text, details: { model: managerProvider.capLogText(model, 40), trigger: bySize ? "name" : "invalid-rate" } });
+    broadcast("manager-ack", { taskId: state.manager.taskId, text, ts: Date.now() });
+  } catch (e) { logEvent("manager-guard-error", { error: String(e) }); }
+}
 
 // Stall-break: "thinking" actions are the ones that loop straight back into
 // runManagerTurn() without any external effect -- no pane delegated to, no code
@@ -2578,7 +2682,7 @@ async function executeManagerAction(decision) {
   const m = state.manager;
   const action = decision.action;
   const targets = decision.assignments ? decision.assignments.map((a) => a.target) : null;
-  logManagerEvent({ category: "action", action, target: targets, summary: decision.reason || action, details: decision });
+  logManagerEvent({ category: "action", action, target: targets, summary: managerProvider.capLogText(decision.reason || action, 120), details: managerProvider.summarizeDecisionForLog(decision) });
 
   if (MANAGER_DELEGATING_ACTIONS.has(action)) {
     m.status = (action === "COMPARE" || action === "CRITIQUE") ? "comparing" : (action === "VERIFY" ? "reviewing" : "delegating");
@@ -2589,6 +2693,7 @@ async function executeManagerAction(decision) {
     }
     m.status = "waiting"; // paused here until handleManagerCapture() sees every pending target reply
     m.waitingSince = Date.now();
+    try { managerProvider.guardRecordTurn(m.guard, true); } catch (_) { /* guard missing — skip */ }
     broadcastManagerState();
     return;
   }
@@ -2620,7 +2725,10 @@ async function executeManagerAction(decision) {
     case "SAVE":
     case "EXPORT":
       m.status = "saving";
-      await saveManagerFile(decision.filename, decision.content);
+      {
+        const saved = await saveManagerFile(decision.filename, decision.content);
+        if (await guardActionOutcome(decision, !!(saved && saved.ok), saved && saved.error ? `SAVE_FAILED: ${saved.error}` : "SAVE_FAILED")) break;
+      }
       await runManagerTurn();
       break;
     case "ESCALATE":
@@ -2657,9 +2765,10 @@ async function executeManagerAction(decision) {
         category: "code",
         severity: entry.ok ? "info" : "error",
         summary: entry.ok ? `Code run complete (${entry.message.length} chars)` : `Code run unavailable/failed: ${entry.error}`,
-        details: entry,
+        details: { ...entry, task: managerProvider.capLogText(entry.task) },
       });
       recordCapabilityOutcome("interpreter", "RUN_CODE", entry.ok);
+      if (await guardActionOutcome(decision, entry.ok, entry.error)) break;
       m.status = "assembling"; // an active status so the loop continues on the next turn
       await runManagerTurn();
       break;
@@ -2685,6 +2794,7 @@ async function executeManagerAction(decision) {
         summary: entry.ok ? `Tool ${entry.tool} ran (${entry.message.length} chars)` : `Tool ${entry.tool} failed: ${entry.error}`,
         details: entry,
       });
+      if (await guardActionOutcome(decision, entry.ok, entry.error)) break;
       m.status = "assembling";
       await runManagerTurn();
       break;
@@ -2697,9 +2807,10 @@ async function executeManagerAction(decision) {
       logManagerEvent({
         category: "memory",
         severity: res && res.ok ? "info" : "warn",
-        summary: res && res.ok ? `Remembered: ${fact.slice(0, 80)}` : `Memory unavailable (${(res && res.error) || "off"})`,
-        details: { fact, result: res },
+        summary: res && res.ok ? `Remembered: ${managerProvider.capLogText(fact)}` : `Memory unavailable (${(res && res.error) || "off"})`,
+        details: { fact: managerProvider.capLogText(fact), result: res },
       });
+      if (await guardTurn(!!(res && res.ok))) break;
       m.status = "assembling";
       await runManagerTurn();
       break;
@@ -2716,9 +2827,10 @@ async function executeManagerAction(decision) {
       if (m.memories.length > 40) m.memories = m.memories.slice(-40);
       logManagerEvent({
         category: "memory",
-        summary: (res && res.available) ? `Recalled ${found.length} for "${q.slice(0, 60)}"` : `Memory unavailable for recall`,
-        details: { query: q, count: found.length },
+        summary: (res && res.available) ? `Recalled ${found.length} for "${managerProvider.capLogText(q)}"` : `Memory unavailable for recall`,
+        details: { query: managerProvider.capLogText(q), count: found.length },
       });
+      if (await guardTurn(!!(res && res.available))) break;
       m.status = "assembling";
       await runManagerTurn();
       break;
@@ -2761,9 +2873,10 @@ async function executeManagerAction(decision) {
       logManagerEvent({
         category: "image",
         severity: entry.ok ? "info" : "error",
-        summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${entry.error}`,
-        details: entry,
+        summary: entry.ok ? `Image rendered -> ${savedPath}` : `Image generation unavailable/failed: ${managerProvider.capLogText(entry.error, 120)}`,
+        details: { ...entry, prompt: managerProvider.capLogText(entry.prompt), error: entry.error ? managerProvider.capLogText(entry.error, 120) : null },
       });
+      if (await guardActionOutcome(decision, entry.ok, entry.error)) break;
       m.status = "assembling";
       await runManagerTurn();
       break;
@@ -2794,6 +2907,7 @@ async function executeManagerAction(decision) {
         summary: entry.ok ? `Installed ${entry.target}: ${entry.message}` : `Setup of ${entry.target} failed: ${entry.error}`,
         details: entry,
       });
+      if (await guardActionOutcome(decision, entry.ok, entry.error)) break;
       m.status = "assembling";
       await runManagerTurn();
       break;
@@ -2827,7 +2941,26 @@ async function handleManagerCapture(turn) {
   recordCapabilityOutcome(turn.site, "DELEGATE", true); // this pane answered — it can take delegations
   logManagerEvent({ category: "response", target: [turn.site], summary: `${SITES[turn.site].label} responded (${turn.text.length} chars)` });
 
+  // A tier-4 ruling. DECLINE is final: end the task, show the adjudicator's
+  // short reason, don't de-escalate and never escalate this task again.
+  if (m.adjudicationPending && m.adjudicationPending === turn.site) {
+    m.adjudicationPending = null;
+    let ruling = { verdict: null, reason: "" };
+    try { ruling = managerProvider.parseAdjudicationVerdict(turn.text); } catch (e) { logEvent("manager-guard-error", { error: String(e) }); }
+    if (ruling.verdict === "DECLINE") {
+      const why = ruling.reason || "no reason given";
+      logManagerEvent({ category: "escalation", severity: "warning", summary: `Tier 4 (${SITES[turn.site].label}) declined — task closed`, target: [turn.site], details: { verdict: "DECLINE" } });
+      m.pendingModels = [];
+      m.waitingSince = null;
+      await finishManagedTask({ ok: false, reason: "DECLINED", message: `Declined by ${SITES[turn.site].label}: ${why}` });
+      return;
+    }
+    m.adjudication = { verdict: ruling.verdict || "GUIDANCE", reason: ruling.reason || "" };
+    logManagerEvent({ category: "escalation", summary: `Tier 4 ruling: ${m.adjudication.verdict}`, target: [turn.site] });
+  }
+
   if (m.pendingModels.length === 0) {
+    try { managerProvider.guardRecordTurn(m.guard, true); } catch (_) { /* guard missing — skip */ }
     m.status = "reviewing";
     m.noProgressStreak = 0;
     m.thinkingStreak = 0; // a pane answered -- real progress, so the stall counter starts fresh
@@ -2883,7 +3016,7 @@ async function startManagedTask(userRequest, opts = {}) {
   m.startedTs = Date.now();
   m.projectDir = await createProjectDir(m.taskId, m.userRequest);
 
-  logManagerEvent({ category: "task", summary: `Managed task started (${mode === "self" ? "🤵 handling it himself" : mode === "delegate" ? "📤 delegating to the AIs" : "auto"}): "${m.userRequest.slice(0, 120)}"`, details: { handlingMode: mode } });
+  logManagerEvent({ category: "task", summary: `Managed task started (${mode === "self" ? "🤵 handling it himself" : mode === "delegate" ? "📤 delegating to the AIs" : "auto"}): "${managerProvider.capLogText(m.userRequest)}"`, details: { handlingMode: mode } });
   // N3 auto-context: seed relevant prior facts so the butler starts already
   // knowing what it may have learned before, without an explicit RECALL turn.
   seedRelevantMemories(m);
@@ -2892,6 +3025,7 @@ async function startManagedTask(userRequest, opts = {}) {
   // turn), the way PersonalJarvis does — a sub-second "on it" so the user isn't
   // left waiting on the model. Emitted synchronously here, ahead of runManagerTurn.
   emitManagerAck(m.taskId, m.userRequest);
+  maybeWarnSmallModel("name"); // a notice only — never blocks the task
   runManagerTurn(); // fire-and-forget -- progresses asynchronously via capture events, same pattern as startSequence()
   return { ok: true, taskId: m.taskId };
 }
@@ -3433,13 +3567,19 @@ function seedRelevantMemories(m) {
   } catch { /* memory off — proceed without seeded context */ }
 }
 
-async function finishManagedTask({ ok, reason }) {
+async function finishManagedTask({ ok, reason, message }) {
   const m = state.manager;
+  if (["finished", "error"].includes(m.status) && m.finishedTs) return; // already ended — don't end it twice
   m.status = ok ? "finished" : "error";
   m.finishedTs = Date.now();
+  m.endReason = ok ? null : (reason || "unknown");
+  m.endMessage = message ? String(message).slice(0, 300) : null;
+  m.pendingModels = [];
+  m.waitingSince = null;
   await saveTaskCheckpoint();
-  logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}`, details: { reason: reason || null } });
-  speakIfEnabled(ok ? "Done." : `Stopped: ${reason || "unknown"}`); // N2
+  logManagerEvent({ category: "task", severity: ok ? "success" : "error", summary: ok ? "Task completed" : `Task ended: ${reason || "unknown"}${m.endMessage ? ` — ${m.endMessage}` : ""}`, details: { reason: reason || null } });
+  if (m.endMessage) broadcast("manager-ack", { taskId: m.taskId, text: m.endMessage, ts: Date.now() });
+  speakIfEnabled(ok ? "Done." : (m.endMessage || `Stopped: ${reason || "unknown"}`)); // N2
   broadcastManagerState();
 }
 
@@ -3498,7 +3638,7 @@ async function approveManagerAction() {
   const decision = m.pendingApproval;
   m.pendingApproval = null;
   m.status = "reviewing";
-  logManagerEvent({ category: "approval", summary: "Action approved", action: decision.action, details: decision });
+  logManagerEvent({ category: "approval", summary: "Action approved", action: decision.action, details: managerProvider.summarizeDecisionForLog(decision) });
   await executeManagerAction(decision);
   return { ok: true };
 }
