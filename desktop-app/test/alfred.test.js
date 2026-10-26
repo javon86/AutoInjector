@@ -62,7 +62,7 @@ async function main() {
   assert(new Set(names).size === names.length, `tool names are unique (${names.length} tools)`);
   assert(registry.TOOLS.every((t) => t.name && t.title && t.description && t.args && t.args.type === 'object' && typeof t.changes === 'boolean' && typeof t.run === 'function'), 'every tool has a name, title, plain description, JSON args schema, a "changes things?" flag and an implementation');
   assert(registry.TOOLS.filter((t) => t.changes).every((t) => typeof t.describe === 'function'), 'every tool that changes something says what it will do (the "I will" line)');
-  for (const n of ['image_generator_status', 'start_image_generator', 'stop_image_generator', 'find_models', 'character_locks', 'book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code']) assert(!!registry.get(n), `tool ${n} exists`);
+  for (const n of ['image_generator_status', 'start_image_generator', 'stop_image_generator', 'find_models', 'character_locks', 'book_status', 'start_book', 'pause_run', 'resume_run', 'cancel_run', 'edit_profile', 'edit_character', 'add_story_rule', 'add_world_detail', 'rewrite_chapter', 'open_akowe_page', 'make_book_report', 'save_book', 'generate_image', 'list_images', 'video_status', 'generate_video', 'send_to_ai', 'read_latest_reply', 'ai_health', 'run_checkin', 'list_outputs', 'open_output', 'export_logs', 'run_code', 'character_dossier', 'forge_character', 'approve_dossier', 'edit_dossier', 'make_character_art']) assert(!!registry.get(n), `tool ${n} exists`);
   assert(['book_status', 'list_images', 'read_latest_reply', 'ai_health', 'list_outputs', 'open_akowe_page', 'video_status'].every((n) => !registry.get(n).changes), 'status / list / read tools are read-only');
   assert(['start_book', 'edit_profile', 'generate_image', 'send_to_ai', 'run_code', 'export_logs', 'rewrite_chapter'].every((n) => registry.get(n).changes), 'tools that change or create something are flagged');
   assert(registry.get('generate_image').allowAlways && !registry.get('start_book').allowAlways && !registry.get('run_code').allowAlways && !registry.get('send_to_ai').allowAlways, '"always allow" only for harmless ones (generate image yes; start a book, send to an AI, run code no)');
@@ -326,6 +326,28 @@ async function main() {
     const ch = req('PUT', '/api/projects/proj-1/branches/main/review/characters/rec-mara')[0];
     assert(ch && ch.body.sheet.secret === 'she can not swim' && ch.body.sheet.wants === 'find her master' && ch.body.version === 2 && ch.body.voice.rhythm === 'clipped', 'edit a character sheet / voice card: found by name, other fields kept, version checked');
 
+    // 🗂 Character Forge dossiers
+    x = await run('character_dossier', { character: 'mara' });
+    const dj = JSON.parse(llm.requests.slice(-1)[0].body.messages.slice(-1)[0].content);
+    assert(!x.card && dj.data.code === 'CH-001' && dj.data.fields.proposed === 1 && dj.data.art.views_done.includes('front') && dj.data.art.views_missing.length === 9, 'dossier: read without a card (code, proposals, which art exists)');
+    x = await run('character_dossier', { character: 'CH-001', section: 'inner life' });
+    assert(JSON.parse(llm.requests.slice(-1)[0].body.messages.slice(-1)[0].content).data.section.fields[0].key === 'fear', 'dossier: one section in full, found by title (character found by code)');
+    x = await run('forge_character', { character: 'Mara' });
+    assert(x.card && /proposals/.test(x.card.steps[0].text) && ak.state.forgeCalls.some((c) => c.kind === 'forge'), '"invent the rest": asks first, then POST …/forge');
+    x = await run('edit_dossier', { character: 'mara', fields: { goals: 'Keep the lamp lit.' }, protect: true });
+    const ed = req('PUT', '/api/projects/proj-1/branches/main/forge/characters/rec-mara')[0];
+    assert(ed && ed.body.sections.record.goals.text === 'Keep the lamp lit.' && ed.body.sections.record.goals.protected === true, 'edit dossier fields: grouped under their section, optionally locked');
+    x = await run('edit_dossier', { character: 'mara', fields: { favourite_colour: 'x' } });
+    assert(!req('PUT', '/api/projects/proj-1/branches/main/forge/characters/rec-mara')[1], 'an unknown field key is refused before anything is sent');
+    x = await run('approve_dossier', { character: 'mara' });
+    assert(/EVERY proposed field/.test(x.card.steps[0].text) && ak.state.dossier.readiness === 'ready', 'approve: the card says it approves every proposal; readiness comes back');
+    x = await run('make_character_art', { character: 'mara', what: 'views', engine: 'chatgpt', views: ['side', 'back'] });
+    const art = ak.state.forgeCalls.find((c) => c.kind === 'art');
+    assert(/ChatGPT/.test(x.card.steps[0].text) && art && art.body.engine === 'chatgpt' && art.body.views.join() === 'side,back', 'art: views with ChatGPT (engine + views passed on)');
+    x = await run('make_character_art', { character: 'mara', what: 'portrait' });
+    assert(ak.state.forgeCalls.filter((c) => c.kind === 'art')[1].body.engine === 'auto', 'art: the portrait with the default engine (auto)');
+    x = await run('open_akowe_page', { page: 'forge', character: 'mara' });
+    assert(calls.openAkowePage.slice(-1)[0] === '#/p/proj-1/main/forge/rec-mara', 'open a dossier page in the 📖 Akọwe tab');
     x = await run('add_story_rule', { text: 'Ghosts cannot cross salt.', category: 'belief' });
     const rl = req('PUT', '/api/projects/proj-1/branches/main/review/world/rules')[0];
     assert(rl && rl.body.rules.length === 2 && rl.body.rules[1].text === 'Ghosts cannot cross salt.' && rl.body.version === 3, 'add a story rule: appended to the ledger with its version');
@@ -348,7 +370,8 @@ async function main() {
     assert(req('POST', '/api/projects/proj-1/branches/main/save').length === 1, 'save the book');
     const codes = calls.journal.map((j) => j.code);
     assert(['edit_profile', 'edit_character', 'add_story_rule', 'rewrite_chapter', 'save_book'].every((c) => codes.includes(c)) && calls.journal.every((j) => j.pid === 'proj-1' && j.title && !/fog|swim/.test(JSON.stringify(j))), 'book actions go to the Akọwe journal (codes and titles only)');
-    assert(!ak.requests.some((q) => q.method === 'POST' && /approve|decide/.test(q.path)), 'Alfred never approves anything in Akọwe');
+    assert(!ak.requests.some((q) => q.method === 'POST' && /approve|decide/.test(q.path) && !/\/forge\/characters\//.test(q.path)), 'Alfred never approves book drafts in Akọwe (dossier proposals only through approve_dossier\'s own card)');
+    assert(!registry.canAllowAlways(registry.get('approve_dossier'), { character: 'x' }), 'approving dossier proposals can never be "always allowed": the author says yes every time');
     // Akọwe not running: a plain message
     const offLlm = await fakeLlm(oneTool('book_status', {}, 'Akọwe is off.'));
     const off = make({ llm: offLlm, akowe: null });

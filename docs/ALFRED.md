@@ -102,6 +102,14 @@ with its reason in the file: saved passwords and connection keys, the phone/LAN 
 free command execution (the terminal's run/approve, the butler's run-command tool), developer tools and window
 chrome.
 
+**🗂 Character Forge dossiers** (the dark "Moki Vey" profile look, see `docs/CHARACTER_FORGE.md`):
+- `character_dossier` reads them: the list, one dossier's state, or one section in full.
+- `forge_character` fills empty fields as **proposals**. Nothing the author wrote or locked changes.
+- `edit_dossier` writes fields in the author's words, optionally locked.
+- `approve_dossier` approves proposals. It always shows its card and can never be "always allowed".
+- `make_character_art` makes the portrait, any of the ten reference views, or one turnaround sheet. It draws with Stable Diffusion (`engine: "sd"`, using the character lock), with ChatGPT in its pane (`"chatgpt"`), or `"auto"`.
+- `open_akowe_page` with `page: "forge"` (plus `character`) shows the dossier.
+
 **🎨 Every Stable Diffusion setting** — `sd_call` reaches every method of the 🎨 Images module (`sd-api.js`):
 `images.generate` with all generation fields (prompt, negative, LoRAs, character lock, size, steps, CFG, sampler,
 scheduler, seed, checkpoint, VAE, count, init image, denoise …), status / progress / cancel / gallery / test,

@@ -157,6 +157,12 @@ const AKOWE_API_USED = {
   'PUT /api/projects/:pid/branches/main/review/world/texture': 'add_world_detail', 'POST /api/projects/:pid/branches/main/review/fix': 'rewrite_chapter',
   'POST /api/projects/:pid/branches/main/report': 'make_book_report', 'POST /api/projects/:pid/branches/main/save': 'save_book',
   'POST /api/projects/:pid/branches/main/journal/note': '(every book action → the journal)',
+  'GET /api/projects/:pid/branches/main/forge/characters': 'character_dossier (list) and every forge tool (find the character)',
+  'GET /api/projects/:pid/branches/main/forge/characters/:rid': 'character_dossier, edit_dossier',
+  'PUT /api/projects/:pid/branches/main/forge/characters/:rid': 'edit_dossier',
+  'POST /api/projects/:pid/branches/main/forge/characters/:rid/forge': 'forge_character',
+  'POST /api/projects/:pid/branches/main/forge/characters/:rid/approve': 'approve_dossier',
+  'POST /api/projects/:pid/branches/main/forge/characters/:rid/art': 'make_character_art',
 };
 const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
@@ -205,7 +211,7 @@ async function main() {
   const shape = sdApi.createImagesApi({ studio: {}, library: {}, runner: () => ({}), installer: () => ({}) });
   sameSet('🎨 Images module (sd-api) methods', new Set(alfredMain.sdMethodsOf ? (await alfredMain.sdMethodsOf(shape)).map((m) => m.method) : []), new Set(SD_API_METHODS));
   const akoweUsed = new Set();
-  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid')}`);
+  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid')}`);
   for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', '([^']+)'/g)) akoweUsed.add(`${m[1]} ${m[2]}`);
   akoweUsed.add('GET /api/projects/:pid/branches/main/review/characters'); // via const base
   akoweUsed.add('POST /api/projects/:pid/branches/main/journal/note'); // alfred-main.js journal()
@@ -564,13 +570,18 @@ async function main() {
       ['open_akowe_page', { page: 'report' }, false, () => pages.includes('#/p/proj-1/main/report')],
       ['make_book_report', {}, true, () => hit('POST', `${B}/report`)],
       ['save_book', {}, true, () => hit('POST', `${B}/save`)],
+      ['character_dossier', { character: 'Mara Vell' }, false, () => hit('GET', `${B}/forge/characters/rec-mara`)],
+      ['forge_character', { character: 'Mara Vell' }, true, () => hit('POST', `${B}/forge/characters/rec-mara/forge`)],
+      ['edit_dossier', { character: 'Mara Vell', fields: { goals: 'Keep the lamp lit.' } }, true, () => hit('PUT', `${B}/forge/characters/rec-mara`)],
+      ['approve_dossier', { character: 'Mara Vell', fields: ['traits'] }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/approve` && x.body.fields[0] === 'traits')],
+      ['make_character_art', { character: 'Mara Vell', what: 'sheet', engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/art` && x.body.what === 'sheet' && x.body.engine === 'chatgpt')],
     ];
     for (const [tool, args, changes, effect] of cases) {
       const r = await bd(tool, args);
       check(tool, r.carded === changes && effect() && /RESULT/.test(r.text), `${changes ? 'card → ✔ → ' : 'directly → '}the right Akọwe call`, 'fake Akọwe API');
     }
     assert(['edit_profile', 'save_book', 'rewrite_chapter'].every((c) => journal.includes(c)), 'book actions are noted in the Akọwe journal');
-    assert(!ak.requests.some((x) => /approve|decide/.test(x.path)), 'no approval is ever sent to Akọwe');
+    assert(!ak.requests.some((x) => /approve|decide/.test(x.path) && !/\/forge\/characters\//.test(x.path)), 'no book-draft approval is ever sent to Akọwe (dossier proposals only via approve_dossier\'s card)');
     await ak.close(); await bl.close();
   }
 

@@ -56,6 +56,17 @@ async function fakeAkowe(token) {
     characters: [{ record_id: 'rec-mara', name: 'Mara Vell', version: 2, sheet: { wants: 'find her master', fear: 'the sea' }, voice: { rhythm: 'short' } }],
     rules: { version: 3, rules: [{ id: 'r1', category: 'hard_rule', text: 'The lamp never goes out.' }] },
     texture: { version: 1, items: [{ id: 't1', kind: 'work', detail: 'Wick trimming at dusk' }] },
+    // Character Forge (CONTRACT: docs/CHARACTER_FORGE.md)
+    dossier: { record_id: 'rec-mara', name: 'Mara Vell', code: 'CH-001', revision: 1, readiness: 'draft', tagline: 'The keeper who stayed',
+      sections: [
+        { key: 'record', n: 1, title: 'Character record', fields: [
+          { key: 'supplied_canon', label: 'Supplied canon', letters: ['C', 'A'], text: 'Grey coat, salt-white hair.', status: 'supplied', protected: true },
+          { key: 'traits', label: 'Traits', letters: ['P'], text: 'Stubborn, kind.', status: 'proposed', protected: false },
+          { key: 'goals', label: 'Goals', letters: ['S', 'P'], text: '', status: 'proposed', protected: false }] },
+        { key: 'inner_life', n: 2, title: 'Inner life', fields: [
+          { key: 'fear', label: 'What they fear', letters: ['P'], text: 'The sea.', status: 'approved', protected: false }] }],
+      art: { portrait: null, views: { front: { asset_id: 'a1' } }, sheet: null } },
+    forgeCalls: [],
   };
   const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
@@ -87,6 +98,23 @@ async function fakeAkowe(token) {
     if (m === 'POST' && p === `${B}/report`) return send(res, 202, { job_id: 'rep-1' });
     if (m === 'POST' && p === `${B}/save`) return send(res, 202, { ok: true });
     if (m === 'POST' && p === `${B}/journal/note`) return send(res, 201, { ok: true, event_id: 'evt-1' });
+    const D = st.dossier;
+    if (m === 'GET' && p === `${B}/forge/characters`) return send(res, 200, { characters: [{ record_id: D.record_id, name: D.name, kind: 'character', code: D.code, revision: D.revision, readiness: D.readiness, has_portrait: !!D.art.portrait, views_done: Object.keys(D.art.views).length }] });
+    mm = /^\/api\/projects\/proj-1\/branches\/main\/forge\/characters\/([^/]+)(?:\/(forge|approve|art))?$/.exec(p);
+    if (mm && mm[1] !== D.record_id) return send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no such dossier' }] });
+    if (mm && m === 'GET' && !mm[2]) return send(res, 200, D);
+    if (mm && m === 'PUT' && !mm[2]) {
+      for (const [sk, fields] of Object.entries((body && body.sections) || {})) {
+        const sec = D.sections.find((x) => x.key === sk); if (!sec) return send(res, 400, { errors: [{ code: 'UNKNOWN_SECTION', message: sk }] });
+        for (const [fk, v] of Object.entries(fields)) { const f = sec.fields.find((x) => x.key === fk); if (!f) return send(res, 400, { errors: [{ code: 'UNKNOWN_FIELD', message: fk }] }); f.text = v.text; f.status = 'supplied'; if (v.protected) f.protected = true; }
+      }
+      D.revision += 1; return send(res, 200, { ok: true, revision: D.revision });
+    }
+    if (mm && m === 'POST' && mm[2]) {
+      st.forgeCalls.push({ kind: mm[2], body });
+      if (mm[2] === 'approve') { for (const s2 of D.sections) for (const f of s2.fields) if (f.status === 'proposed' && f.text && (body.all || (body.fields || []).includes(f.key))) f.status = 'approved'; D.revision += 1; D.readiness = D.sections.every((s2) => s2.fields.every((f) => f.status !== 'proposed' || !f.text)) ? 'ready' : 'draft'; return send(res, 200, { ok: true, message: 'Approved.', readiness: D.readiness, revision: D.revision }); }
+      return send(res, 202, { job_id: `job-${mm[2]}` });
+    }
     return send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no such endpoint' }] });
   });
   const port = await listen(server);
