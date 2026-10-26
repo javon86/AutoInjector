@@ -325,6 +325,67 @@ async function testReplyChromeSkipped() {
   }, "?site=gemini");
 }
 
+// 🎨 ChatGPT image engine (chatgpt-image.js): the image reader and the 🎯 "Generated picture"
+// picker, in real Chromium. 1) fake-chat.html?image=ok&avatar=1 (a blurred preview, then the
+// picture, plus a 28 px avatar in the turn); 2) a page shaped like ChatGPT's real image turns as
+// far as we know them (article[data-turn="assistant"] > … > div.group/imagegen-image with a
+// blurred aria-hidden backdrop <img> and the real <img alt="Generated image">, the user's own
+// uploaded picture in the user turn) — the selectors in selectors.js IMAGE_CANDIDATES must find
+// exactly the finished picture.
+async function testChatImageSelectorsReal() {
+  console.log("\n== ChatGPT images: IMAGE_CANDIDATES + the scan script + 🎯 Generated picture (real Chromium) ==");
+  const CI = require("../chatgpt-image");
+  const SR = require("../self-repair");
+  const SITES = require("../selectors");
+  await withFixture("fake-chat.html", async (page) => {
+    const r = await page.evaluate(buildSendScript("chatgpt", "[MSG #0001]\nCreate an image: a lighthouse keeper", {}, {}));
+    assert(r && r.ok, "the image request is sent with the real send script");
+    await page.waitForFunction(() => window.__fake.dump().replies.some((x) => x.image && x.src), null, { timeout: 8000 });
+    const sc = await page.evaluate(CI.buildScanScript(CI.defaultSelectors()));
+    const good = (sc.last && sc.last.images || []).filter((i) => i.complete && !i.avatar && !i.blurred && !i.hidden && i.nw >= 200);
+    assert(sc.turns === 1 && good.length === 1 && good[0].alt === "Generated image" && good[0].nw === 512, `the scan finds exactly the finished picture in the newest turn (${JSON.stringify(sc.last && sc.last.images.map((i) => ({ alt: i.alt, nw: i.nw, avatar: i.avatar, blurred: i.blurred })))})`);
+    assert(sc.last.images.some((i) => i.avatar && i.nw === 28), "the 28 px avatar is seen and marked as an avatar (ignored)");
+    const first = await page.evaluate((sel) => { const l = document.querySelectorAll(sel); return l.length; }, SITES.chatgpt.IMAGE_CANDIDATES[0]);
+    assert(first >= 1, `IMAGE_CANDIDATES[0] (${SITES.chatgpt.IMAGE_CANDIDATES[0]}) matches in the assistant turn`);
+    // 🎯 Generated picture: clicking the picture saves a selector for it; the avatar is refused
+    let pick = page.evaluate(SR.buildPickScript("chatgpt", "image", "ChatGPT", SITES, 8000));
+    await page.waitForTimeout(150);
+    await page.click('img[alt="Generated image"]');
+    let res = await pick;
+    const n = res && res.ok ? await page.evaluate((sel) => document.querySelectorAll(sel).length, res.selector) : 0;
+    assert(res && res.ok && res.role === "image" && res.selector !== "img" && n >= 1 && n <= 3 && /Picture found \(512×768\)/.test(res.preview), `🎯 Generated picture: a click on the picture gives a selector for it (${res && res.selector}, ${n} match)`);
+    pick = page.evaluate(SR.buildPickScript("chatgpt", "image", "ChatGPT", SITES, 8000));
+    await page.waitForTimeout(150);
+    await page.click("img.avatar");
+    res = await pick;
+    assert(res && !res.ok && res.error === "TOO_SMALL", `clicking the 28 px avatar is refused (${res && res.error})`);
+  }, "?site=chatgpt&quirks=none&image=ok&avatar=1&imgdelay=400&speed=0.3");
+
+  await withFixture("fake-chat.html", async (page) => {
+    // ChatGPT-like markup, built in the page (pictures drawn on canvases so they really load)
+    await page.evaluate(async () => {
+      const draw = (w, h, c) => { const k = document.createElement("canvas"); k.width = w; k.height = h; const g = k.getContext("2d"); g.fillStyle = c; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(w / 4, h / 4, w / 2, h / 2); return k.toDataURL("image/png"); };
+      document.getElementById("log").innerHTML = `
+        <article data-testid="conversation-turn-1" data-turn="user"><div data-message-author-role="user"><img id="upload" alt="Uploaded image" src="${draw(600, 600, "#a33")}" style="width:300px"><div class="whitespace-pre-wrap">make her from the side</div></div></article>
+        <article data-testid="conversation-turn-2" data-turn="assistant"><div data-message-author-role="assistant"><div class="markdown"><p>Here you go.</p></div></div>
+          <div class="group/imagegen-image relative"><img aria-hidden="true" class="absolute blur-2xl" alt="" src="${draw(1024, 1536, "#335")}" style="width:256px;height:384px">
+          <img id="final" alt="Generated image" class="w-full" src="${draw(1024, 1536, "#335")}" style="width:256px;height:384px"></div>
+          <div class="flex"><button aria-label="Copy"><img alt="" src="${draw(16, 16, "#000")}" width="16" height="16"></button></div></article>`;
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    const sc = await page.evaluate(CI.buildScanScript(CI.defaultSelectors()));
+    const good = (sc.last && sc.last.images || []).filter((i) => i.complete && !i.avatar && !i.blurred && !i.hidden && i.nw >= 200);
+    assert(sc.turns === 1 && good.length === 1 && good[0].alt === "Generated image" && good[0].nw === 1024, `ChatGPT-like markup: only the finished picture qualifies — not the blurred backdrop, the button icon or the user's upload (${JSON.stringify((sc.last && sc.last.images || []).map((i) => ({ alt: i.alt, nw: i.nw, blurred: i.blurred, hidden: i.hidden, avatar: i.avatar })))})`);
+    assert(!sc.srcs.some((x) => x === (sc.last && sc.last.images.find((i) => i.alt === "Uploaded image") || {}).src), "the user's own upload is never a candidate");
+    const pick = page.evaluate(SR.buildPickScript("chatgpt", "image", "ChatGPT", SITES, 8000));
+    await page.waitForTimeout(150);
+    await page.click("#final", { force: true });
+    const res = await pick;
+    const matches = res && res.ok ? await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => e.id || e.getAttribute("aria-hidden") || "?"), res.selector) : [];
+    assert(res && res.ok && matches.includes("final") && !matches.includes("upload"), `🎯 on ChatGPT-like markup: ${res && res.selector} → ${JSON.stringify(matches)}`);
+  }, "?site=chatgpt&quirks=none");
+}
+
 async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
@@ -345,6 +406,7 @@ async function main() {
   await testNoStopButtonStreaming();
   await testWrapperHiddenFallback();
   await testReplyChromeSkipped();
+  await testChatImageSelectorsReal();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

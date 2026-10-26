@@ -12,8 +12,16 @@
  * scripts / upscalers lists, interrupt / skip / refresh / memory, the validated
  * pass-through schema, ComfyUI node types / queue / uploads, saved workflows.
  *
+ * Two image engines behind request(): Stable Diffusion (this file) and ChatGPT's
+ * own image generation in its logged-in pane (chatgpt-image.js, passed in as
+ * deps.chatgpt). engine "auto" = SD when an SD app is connected, else ChatGPT when
+ * its pane is ready, else NO_IMAGE_ENGINE. Reference pictures for Akọwe's
+ * Character Forge: purpose "view" (+ one of ten views) and "sheet" — the words
+ * live in image-views.js.
+ *
  * main.js passes: imageProvider, library, imagesDir(), recordImage(entry),
- * persist() (save settings), log(type, data), fileUrl(path), workflowsDir().
+ * persist() (save settings), log(type, data), fileUrl(path), workflowsDir(),
+ * chatgpt (the ChatGPT engine: generate(job) / status() / readiness()).
  */
 const sdImages = require('./sd-images');
 const sdBackends = require('./sd-backends');
@@ -21,11 +29,14 @@ const sdParams = require('./sd-params');
 const control = require('./sd-control');
 const sdWorkflows = require('./sd-workflows');
 const sdErrors = require('./sd-errors');
+const views = require('./image-views');
 
-const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free'];
+const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'];
+const ENGINES = ['auto', 'sd', 'chatgpt'];
 
 // Width × height for a purpose on a model family (multiples of 64).
 function sizeFor(purpose, base) {
+  if (purpose === 'view' || purpose === 'sheet') return views.sdSize(purpose, base);
   const big = ['SDXL', 'Pony', 'Illustrious', 'NoobAI', 'Flux', 'SD3'].includes(base);
   if (purpose === 'portrait' || purpose === 'cover') return big ? { width: 832, height: 1216 } : { width: 512, height: 768 };
   if (purpose === 'scene' || purpose === 'illustration') return big ? { width: 1216, height: 832 } : { width: 768, height: 512 };
@@ -41,6 +52,7 @@ function createSdStudio(deps) {
   const imagesDir = deps.imagesDir;
   const recordImage = deps.recordImage || (() => {});
   const wfStore = deps.workflowsDir ? sdWorkflows.createWorkflowStore({ dir: deps.workflowsDir() }) : null;
+  const chatgpt = deps.chatgpt || null; // chatgpt-image.js engine (optional)
   let lastLists = null;
 
   function withUrls(item) { return item && item.preview ? Object.assign({}, item, { previewUrl: fileUrl(item.preview) }) : item; }
@@ -92,7 +104,14 @@ function createSdStudio(deps) {
       for (const k of ['checkpoint', 'seed', 'width', 'height']) if (a[k] != null && (opts[k] == null || opts[k] === '')) opts[k] = a[k];
     }
     // Purpose → a sensible size when none was given.
-    const purpose = PURPOSES.includes(r.purpose) ? r.purpose : 'free';
+    const purpose = PURPOSES.includes(r.purpose) ? r.purpose : (views.isView(r.view) ? 'view' : 'free');
+    // A reference view / a turnaround sheet: the framing words (after the lock's words) and a negative that keeps the body in frame.
+    const view = purpose === 'view' && views.isView(r.view) ? r.view : undefined;
+    if (purpose === 'view' || purpose === 'sheet') {
+      const vp = views.sdPrompt({ prompt: [prompt, String(r.appearance || '').trim()].filter(Boolean).join(', '), purpose, view });
+      prompt = vp.prompt;
+      opts.negativePrompt = views.mergeNegative(opts.negativePrompt, vp.negative);
+    }
     if (!opts.width || !opts.height) {
       const ck = opts.checkpoint || ip.status().checkpoint || ip.status().model;
       const base = lib ? lib.checkLoras([], ck).checkpointBase : '';
@@ -100,7 +119,7 @@ function createSdStudio(deps) {
     }
     for (const k of Object.keys(opts)) if (opts[k] === undefined || opts[k] === '') delete opts[k];
     if (opts.negativePrompt === undefined) opts.negativePrompt = '';
-    return { prompt, opts, lock, purpose };
+    return { prompt, opts, lock, purpose, view };
   }
 
   // Generate + save + record. from = 'images-tab' | 'bridge:akowe' | …
@@ -133,19 +152,19 @@ function createSdStudio(deps) {
     if (Array.isArray(r.warnings)) warnings.push(...r.warnings);
     if (r.missingLoras && r.missingLoras.length) warnings.push({ level: 'hard', name: r.missingLoras.join(', '), message: `ComfyUI doesn't have these LoRAs, so they were left out: ${r.missingLoras.join(', ')}` });
     const record = Object.assign({}, r.params, {
-      backend: r.backend, label: r.label || ip.status().label, seeds: r.seeds, purpose: b.purpose, from: from || 'images-tab',
+      backend: r.backend, label: r.label || ip.status().label, seeds: r.seeds, purpose: b.purpose, view: b.view, engine: 'sd', from: from || 'images-tab',
       characterLock: b.lock ? { id: b.lock.id, character: b.lock.character, book: b.lock.book } : undefined,
       book: req && req.book ? String(req.book).slice(0, 200) : undefined,
     });
     if (record.backend === 'a1111' && r.infoObj && r.infoObj.sd_model_name && !record.checkpoint) record.checkpoint = r.infoObj.sd_model_name;
     let saved;
-    const prefix = b.purpose !== 'free' ? b.purpose : b.opts.mask ? 'inpaint' : b.opts.initImage ? 'img2img' : 'sd';
+    const prefix = b.view ? `view-${b.view}` : b.purpose !== 'free' ? b.purpose : b.opts.mask ? 'inpaint' : b.opts.initImage ? 'img2img' : 'sd';
     try { saved = sdImages.saveGeneration(imagesDir(), r.images, record, { prefix }); }
     catch (e) { return { ok: false, error: 'SAVE_FAILED', message: `The picture was made but couldn't be saved: ${e.message || e}` }; }
     for (const s of saved) { try { recordImage({ path: s.path, prompt: s.record.prompt, seed: s.record.seed, model: s.record.checkpoint || '', from: from || 'images-tab', sha256: s.sha256 }); } catch (_) {} }
     log('sd-generate', { ok: true, from, count: saved.length, backend: r.backend, lock: b.lock ? b.lock.character : null });
     const out = {
-      ok: true, backend: r.backend, seed: r.seed, warnings, settings: record,
+      ok: true, engine: 'sd', backend: r.backend, seed: r.seed, warnings, settings: record,
       images: saved.map((s) => ({ path: s.path, url: fileUrl(s.path), json: s.json, seed: s.record.seed, sha256: s.sha256 })),
     };
     if (req && req.returnImage) out.images.forEach((im, i) => { im.imageBase64 = r.images[i]; });
@@ -375,25 +394,123 @@ function createSdStudio(deps) {
   function libList(f) { const r = lib.list(f || {}); r.items = r.items.map(withUrls); r.folders = lib.folders(); return r; }
   function libScan() { const r = lib.scan(); return r; }
 
-  // ---- the Akọwe contract (POST /image/request)
-  async function request(body) {
-    const b = body || {};
-    if (!b.prompt && !b.characterLock && !b.character) return { ok: false, error: 'NEED_PROMPT', message: 'Send a prompt (what to draw) and/or a characterLock.' };
-    const st = ip.status();
-    if (!st.endpoint) return { ok: false, error: 'NO_ENDPOINT', message: sdBackends.explain('NO_ENDPOINT') };
-    const r = await generate(Object.assign({}, b, { batchSize: Math.max(1, Math.min(4, Number(b.count) || 1)) }), `bridge:${String(b.from || 'akowe').slice(0, 40)}`);
-    if (!r.ok) return r;
-    return { ok: true, purpose: r.settings.purpose, backend: r.backend, seed: r.seed, warnings: r.warnings, settings: r.settings,
-      images: r.images.map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.imageBase64) o.imageBase64 = im.imageBase64; return o; }) };
+  // ---- the Akọwe contract (POST /image/request) — both engines
+  function sdConnected() { const st = ip.status(); return !!(st.endpoint && st.enabled !== false); }
+  function chatgptReadiness() {
+    if (!chatgpt) return { ready: false, code: 'NOT_WIRED', why: 'this build has no ChatGPT image engine' };
+    try {
+      const r = typeof chatgpt.readiness === 'function' ? chatgpt.readiness() : chatgpt.status();
+      return { ready: !!(r && r.ready), code: (r && r.code) || '', why: (r && r.why) || (r && r.ready ? '' : 'the ChatGPT pane is not ready') };
+    } catch (e) { return { ready: false, code: 'ERROR', why: 'the ChatGPT pane could not be checked' }; }
   }
-  function backendInfo() { const s = ip.status(); return { ok: true, connected: !!(s.enabled && s.endpoint), backend: s.backend, label: s.label, base: s.base, checkpoint: s.checkpoint || s.model, busy: s.busy }; }
+  const SD_ONLY = ['loras', 'steps', 'cfgScale', 'sampler', 'scheduler', 'checkpoint', 'vae', 'negativePrompt', 'seed', 'hires', 'refiner', 'controlnet', 'adetailer', 'initImage', 'mask'];
+  // Check a request and pick the engine: { engine, purpose, view } | { error result }.
+  function resolveEngine(b) {
+    const engine = b.engine == null || b.engine === '' ? 'auto' : String(b.engine).toLowerCase();
+    if (!ENGINES.includes(engine)) return { fail: { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'engine', message: `There is no image engine called “${b.engine}”.`, hint: 'engine is "auto" (default), "sd" or "chatgpt".' } };
+    let purpose = b.purpose == null || b.purpose === '' ? (b.view ? 'view' : 'free') : String(b.purpose);
+    if (!PURPOSES.includes(purpose)) return { fail: { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'purpose', message: `“${b.purpose}” is not a purpose.`, hint: `purpose is one of: ${PURPOSES.filter((p) => p !== 'test').join(', ')}.` } };
+    if (purpose === 'view' && !views.isView(b.view)) return { fail: { ok: false, error: 'INVALID_PARAM', code: 'INVALID_PARAM', field: 'view', message: b.view ? `“${b.view}” is not a reference view.` : 'purpose "view" needs a view.', hint: `view is one of: ${views.VIEW_IDS.join(', ')}.` } };
+    if (!b.prompt && !b.characterLock && !b.character && !b.appearance) return { fail: { ok: false, error: 'NEED_PROMPT', message: 'Send a prompt (what to draw) and/or a characterLock.' } };
+    const sdOn = sdConnected();
+    const sdWhy = 'no Stable Diffusion app is connected';
+    if (engine === 'sd') {
+      if (!sdOn) return { fail: { ok: false, engine: 'sd', error: 'SD_NOT_CONNECTED', code: 'SD_NOT_CONNECTED', message: `No Stable Diffusion app is connected. ${sdBackends.explain('NO_ENDPOINT')}`, hint: 'Start Forge / A1111 / ComfyUI (🎨 Images → ▶ Start or 🔍 Find my SD app), or ask with engine "chatgpt" or "auto".' } };
+      return { engine: 'sd', purpose };
+    }
+    const cg = chatgptReadiness();
+    if (engine === 'chatgpt') {
+      if (!cg.ready) return { fail: { ok: false, engine: 'chatgpt', error: 'CHATGPT_NOT_READY', code: 'CHATGPT_NOT_READY', message: `ChatGPT can't make pictures right now: ${cg.why}.`, hint: 'Open AutoInjector, make sure the ChatGPT pane is logged in and shows its message box, then try again (or use engine "sd").' } };
+      return { engine: 'chatgpt', purpose };
+    }
+    if (sdOn) return { engine: 'sd', purpose };
+    if (cg.ready) return { engine: 'chatgpt', purpose };
+    return { fail: { ok: false, error: 'NO_IMAGE_ENGINE', code: 'NO_IMAGE_ENGINE', message: `No image engine is available: ${sdWhy}, and ChatGPT can't be used (${cg.why}).`, hint: 'Start a Stable Diffusion app (🎨 Images → ▶ Start), or open AutoInjector with ChatGPT logged in.' } };
+  }
+  // The contract's answer: today's shape + engine, view echoed, paths.
+  function contractShape(r, engine, purpose, view, withUrl) {
+    const images = (r.images || []).map((im) => { const o = { path: im.path, seed: im.seed, sha256: im.sha256 }; if (im.width) { o.width = im.width; o.height = im.height; } if (withUrl && im.url) o.url = im.url; if (im.imageBase64) o.imageBase64 = im.imageBase64; return o; });
+    const out = { ok: true, engine, purpose: (r.settings && r.settings.purpose) || purpose, backend: r.backend || engine, seed: r.seed == null ? null : r.seed, warnings: r.warnings || [], settings: r.settings, paths: images.map((im) => im.path), images };
+    if (view) out.view = view;
+    return out;
+  }
+  async function viaChatgpt(b, purpose, from) {
+    let lock = null;
+    const lockKey = b.characterLock || b.lockId || b.character;
+    if (lockKey && lib) {
+      lock = lib.getLock(lockKey);
+      if (!lock && (b.characterLock || b.lockId)) return { ok: false, engine: 'chatgpt', error: 'NO_LOCK', message: `There's no character lock called “${lockKey}”. Make one in 🎨 Images → Library → Character locks.` };
+    }
+    const subject = views.describeSubject({ character: lock ? lock.character : (b.character || ''), looks: lock ? lock.prompt : '', appearance: b.appearance, prompt: b.prompt });
+    const view = purpose === 'view' ? b.view : undefined;
+    const text = views.chatgptPrompt({ subject, purpose, view });
+    const warnings = [];
+    if (Number(b.count) > 1) warnings.push({ level: 'soft', kind: 'engine', message: 'ChatGPT makes one picture per request — ask again for more.' });
+    const ignored = SD_ONLY.filter((k) => b[k] !== undefined && b[k] !== null && b[k] !== '' && !(Array.isArray(b[k]) && !b[k].length) && !(k === 'seed' && Number(b[k]) === -1));
+    if (ignored.length) warnings.push({ level: 'soft', kind: 'engine', message: `ChatGPT doesn't use these Stable Diffusion settings: ${ignored.join(', ')}.` });
+    const series = b.series ? String(b.series).slice(0, 120) : purpose === 'view' ? `view:${lock ? lock.id : subject.slice(0, 80)}` : undefined;
+    const record = {
+      prompt: String(b.prompt || '').trim() || subject, appearance: b.appearance ? String(b.appearance).slice(0, 2000) : undefined,
+      characterLock: lock ? { id: lock.id, character: lock.character, book: lock.book } : undefined,
+      book: b.book ? String(b.book).slice(0, 200) : undefined, from,
+    };
+    log('chatgpt-image-request', { from, purpose, view, lock: lock ? lock.character : null });
+    let r;
+    try { r = await chatgpt.generate({ text, purpose, view, series, newChat: !!b.newChat, timeoutMs: b.timeoutMs, returnImage: !!b.returnImage, from, record }); }
+    catch (e) { r = { ok: false, engine: 'chatgpt', error: 'INTERNAL', message: `Something went wrong: ${(e && e.message) || e}` }; }
+    if (!r || !r.ok) return Object.assign({ ok: false, engine: 'chatgpt' }, r || {}, { warnings });
+    return Object.assign(r, { warnings: (r.warnings || []).concat(warnings) });
+  }
+  // One request from any caller (the bridge, the Images tab, Alfred): from = 'bridge:akowe' | 'images-tab' | 'api:alfred' …
+  async function requestFrom(body, from) {
+    const b = Object.assign({}, body || {});
+    const pick = resolveEngine(b);
+    if (pick.fail) { log('image-request', { from, ok: false, error: pick.fail.error, engine: b.engine || 'auto' }); return pick.fail; }
+    const view = pick.purpose === 'view' ? b.view : undefined;
+    if (pick.engine === 'chatgpt') {
+      const r = await viaChatgpt(b, pick.purpose, from);
+      return r.ok ? contractShape(r, 'chatgpt', pick.purpose, view, !String(from).startsWith('bridge:')) : r;
+    }
+    const st = ip.status();
+    if (!st.endpoint) return { ok: false, engine: 'sd', error: 'SD_NOT_CONNECTED', code: 'SD_NOT_CONNECTED', message: `No Stable Diffusion app is connected. ${sdBackends.explain('NO_ENDPOINT')}`, hint: 'Start Forge / A1111 / ComfyUI, or ask with engine "chatgpt".' };
+    for (const k of ['engine', 'series', 'newChat', 'timeoutMs']) delete b[k];
+    const r = await generate(Object.assign(b, { purpose: pick.purpose, batchSize: Math.max(1, Math.min(4, Number(b.count) || 1)) }), from);
+    if (!r.ok) return Object.assign({ engine: 'sd' }, r);
+    return contractShape(r, 'sd', pick.purpose, view, !String(from).startsWith('bridge:'));
+  }
+  function request(body) { return requestFrom(body, `bridge:${String((body && body.from) || 'akowe').slice(0, 40)}`); }
+  function chatgptStatus() {
+    if (!chatgpt) return { ok: true, engine: 'chatgpt', ready: false, why: 'this build has no ChatGPT image engine', busy: false };
+    try { return Object.assign({ ok: true }, chatgpt.status()); } catch (e) { return { ok: false, error: 'INTERNAL', message: String((e && e.message) || e) }; }
+  }
+  function chatgptSettings(patch) {
+    if (!chatgpt || typeof chatgpt.settings !== 'function') return { ok: false, error: 'NOT_WIRED', code: 'NOT_WIRED', message: 'This build has no ChatGPT image engine.' };
+    const r = chatgpt.settings(patch || {});
+    try { if (deps.persistChatgpt) deps.persistChatgpt({ freshChatPerSeries: !!r.freshChatPerSeries }); } catch (_) {}
+    log('chatgpt-image-settings', { freshChatPerSeries: !!r.freshChatPerSeries });
+    return Object.assign({ ok: true }, r);
+  }
+  function chatgptCancel() {
+    if (!chatgpt || typeof chatgpt.cancel !== 'function') return { ok: true, cancelled: false };
+    return chatgpt.cancel();
+  }
+  function backendInfo() {
+    const s = ip.status();
+    const cg = chatgptReadiness();
+    let cgs = {};
+    try { cgs = chatgpt && typeof chatgpt.status === 'function' ? chatgpt.status() || {} : {}; } catch (_) { cgs = {}; }
+    const sd = { connected: !!(s.enabled && s.endpoint), backend: s.backend, label: s.label, base: s.base, checkpoint: s.checkpoint || s.model, busy: !!s.busy };
+    const cgOut = { ready: cg.ready, busy: !!cgs.busy };
+    if (!cg.ready) cgOut.why = cg.why;
+    return Object.assign({ ok: true }, sd, { engines: { sd, chatgpt: cgOut } });
+  }
   function locks() { return lib ? lib.listLocks() : { ok: true, locks: [] }; }
 
-  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, backendInfo, locks,
+  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, requestFrom, chatgptStatus, chatgptSettings, chatgptCancel, backendInfo, locks,
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
     progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()),
     test: () => testRender() };
 }
 
-module.exports = { createSdStudio, sizeFor, PURPOSES };
+module.exports = { createSdStudio, sizeFor, PURPOSES, ENGINES };

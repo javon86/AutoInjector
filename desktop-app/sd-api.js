@@ -11,6 +11,11 @@
  *
  *   images.status() · generate(opts) · img2img(opts) · inpaint(opts) · upscale(opts)
  *          · progress() · cancel() · gallery(limit) · test() · fixAndRetry(fix, request)
+ *          · chatgptStatus() · chatgptCancel() · chatgptSettings({ freshChatPerSeries })
+ *     generate also takes engine: "auto" | "sd" | "chatgpt" (ChatGPT's own image generation in
+ *     its logged-in pane), purpose "view" + view (front, three_quarter_front, side,
+ *     three_quarter_back, back, idle, draw, attack, dash, defend) or purpose "sheet", appearance,
+ *     newChat, series → the same answer as POST /image/request (+ engine, view, paths).
  *     generate accepts everything in sd-params.js GENERATE_SCHEMA: prompt, negativePrompt,
  *     loras, characterLock, purpose, checkpoint, vae, sampler, scheduler, steps, cfgScale,
  *     width, height, seed, count, batchCount, variation, clipSkip, restoreFaces, tiling,
@@ -56,7 +61,7 @@ const OPS = [
   { name: 'capabilities', description: 'Every operation and parameter this API supports for the connected Stable Diffusion app', params: O(), args: [], backends: ['*'] },
   { name: 'call', description: 'Call any operation by name with a params object', params: O({ name: { type: 'string', description: 'Operation name, e.g. "images.generate"' }, params: OPEN('Its parameters') }, ['name']), args: ['name', 'params'], backends: ['*'] },
   { name: 'images.status', description: 'Is an SD app connected, which one, is it busy', params: O(), args: [], backends: ['*'] },
-  { name: 'images.generate', description: 'Make pictures (txt2img; img2img when initImage is given; inpaint with mask). Saved to images/ with settings embedded', params: 'GENERATE', args: 'object', backends: BOTH },
+  { name: 'images.generate', description: 'Make pictures (txt2img; img2img when initImage is given; inpaint with mask). engine "chatgpt" / "auto" uses ChatGPT\'s own image generation when no SD app is connected; purpose "view" + view / "sheet" make character reference pictures. Saved to images/ with settings embedded', params: 'GENERATE', args: 'object', backends: ['*'] },
   { name: 'images.img2img', description: 'Change an existing picture (initImage required)', params: 'IMG2IMG', args: 'object', backends: BOTH },
   { name: 'images.inpaint', description: 'Repaint the masked part of a picture (initImage + mask required)', params: 'INPAINT', args: 'object', backends: BOTH },
   { name: 'images.upscale', description: 'Upscale a picture (A1111 Extras / ComfyUI upscale model)', params: P.UPSCALE_SCHEMA, args: 'object', backends: BOTH, feature: 'extras' },
@@ -64,6 +69,9 @@ const OPS = [
   { name: 'images.cancel', description: 'Stop the picture AutoInjector is making', params: O(), args: [], backends: ['*'] },
   { name: 'images.gallery', description: 'Recent saved pictures with their settings', params: O({ limit: { type: 'integer', minimum: 1, maximum: 500 } }), args: ['limit'], backends: ['*'] },
   { name: 'images.test', description: 'Make a 512×512 test picture', params: O(), args: [], backends: BOTH },
+  { name: 'images.chatgptStatus', description: 'The ChatGPT image engine: is its pane ready (and why not), is it drawing, for how long, the last result', params: O(), args: [], backends: ['*'] },
+  { name: 'images.chatgptCancel', description: 'Stop waiting for the ChatGPT picture being made', params: O(), args: [], backends: ['*'] },
+  { name: 'images.chatgptSettings', description: 'ChatGPT image engine settings: freshChatPerSeries = a new ChatGPT chat for each reference-view series (default: one chat, which keeps the character the same)', params: O({ freshChatPerSeries: { type: 'boolean' }, timeoutMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }), args: 'object', backends: ['*'] },
   { name: 'images.fixAndRetry', description: 'Apply the one-click fix a failed picture offered (its actions[].id, e.g. "vae-automatic" = VAE → Automatic, also in A1111\'s settings) and try the same request once more', params: O({ fix: { type: 'string', enum: ['vae-automatic'] }, request: OPEN('The images.generate params that failed') }, ['fix']), args: ['fix', 'request'], backends: BOTH },
   { name: 'sd.status', description: 'Image module + managed runner + installer state', params: O(), args: [], backends: ['*'] },
   { name: 'sd.detect', description: 'Look for SD apps on this PC (ports 7860–7865, 8188, …)', params: O(), args: [], backends: ['*'] },
@@ -136,7 +144,17 @@ function createImagesApi(d) {
   const api = {
     images: {
       status: wrap(async () => Object.assign(studio.status(), { managed: runner ? runner().status() : null })),
-      generate: wrap((opts) => checkGenKeys(opts) || studio.generate(Object.assign({}, opts || {}, { batchSize: (opts && (opts.count || opts.batchSize)) || 1 }), `api:${String((opts && opts.from) || 'alfred').slice(0, 40)}`)),
+      // engine / view / sheet → the two-engine path (the same as POST /image/request); otherwise plain SD as before.
+      generate: wrap((opts) => {
+        const bad = checkGenKeys(opts); if (bad) return bad;
+        const o = opts || {}; const from = `api:${String(o.from || 'alfred').slice(0, 40)}`;
+        if ((o.engine && o.engine !== 'sd') || o.purpose === 'view' || o.purpose === 'sheet' || o.view || o.appearance) {
+          if (typeof studio.requestFrom !== 'function') return notWired('The ChatGPT image engine');
+          return studio.requestFrom(Object.assign({}, o), from);
+        }
+        const q = Object.assign({}, o); delete q.engine;
+        return studio.generate(Object.assign(q, { batchSize: o.count || o.batchSize || 1 }), from);
+      }),
       img2img: wrap((opts) => checkGenKeys(opts) || S('img2img', Object.assign({}, opts || {}, { batchSize: (opts && (opts.count || opts.batchSize)) || 1 }), `api:${String((opts && opts.from) || 'alfred').slice(0, 40)}`)),
       inpaint: wrap((opts) => checkGenKeys(opts) || S('inpaint', Object.assign({}, opts || {}, { batchSize: (opts && (opts.count || opts.batchSize)) || 1 }), `api:${String((opts && opts.from) || 'alfred').slice(0, 40)}`)),
       upscale: wrap((opts) => S('upscale', opts || {}, `api:${String((opts && opts.from) || 'alfred').slice(0, 40)}`)),
@@ -144,6 +162,9 @@ function createImagesApi(d) {
       cancel: wrap(() => studio.cancel()),
       gallery: wrap(async (limit) => studio.gallery(limit)),
       test: wrap(() => studio.test()),
+      chatgptStatus: wrap(async () => S('chatgptStatus')),
+      chatgptCancel: wrap(async () => S('chatgptCancel')),
+      chatgptSettings: wrap(async (o) => S('chatgptSettings', o || {})),
       fixAndRetry: wrap((fix, request) => S('fixAndRetry', fix, request || {}, `api:${String((request && request.from) || 'alfred').slice(0, 40)}`)),
     },
     sd: {

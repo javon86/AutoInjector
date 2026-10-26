@@ -70,12 +70,14 @@ async function main() {
   const gi = registry.get('generate_image');
   assert(registry.validate(gi, { prompt: 'a lighthouse' }).ok, 'valid arguments pass');
   assert(registry.validate(gi, '{"prompt":"a lighthouse","width":512}').ok, 'arguments as a JSON string pass');
-  assert(!registry.validate(gi, {}).ok && /prompt is required/.test(registry.validate(gi, {}).error), 'a missing required argument is refused');
+  const oo = registry.get('open_output'); // generate_image's prompt is optional now (a reference view can come from a character alone) — open_output's path is required
+  assert(!registry.validate(oo, {}).ok && /path is required/.test(registry.validate(oo, {}).error), 'a missing required argument is refused');
+  assert(registry.get('generate_image').check({}).ok === false && registry.get('generate_image').check({ character: 'Odile', purpose: 'view', view: 'side' }).ok && !registry.get('generate_image').check({ character: 'Odile', purpose: 'view' }).ok, 'generate_image: something to draw (prompt, character or appearance) is still required; purpose "view" needs a view');
   assert(!registry.validate(gi, { prompt: 5 }).ok, 'a wrong type is refused');
   { const ex = registry.get('export_logs'); assert(registry.canAllowAlways(ex, { scope: 'book' }) && registry.canAllowAlways(ex, { scope: 'day' }) && !registry.canAllowAlways(ex, { scope: 'everything' }) && !registry.allowableKey('export_logs:everything') && registry.allowableKey('export_logs:book'), 'export_logs "everything" always asks (can never be always-allowed); book / day can'); }
   { const v = registry.validate(gi, { prompt: 'x y', evil: 1 }); assert(v.ok && !('evil' in v.args) && v.ignored.includes('evil'), 'an unknown argument is dropped (and reported), never passed on'); }
   { const v = registry.validate(gi, { args: { prompt: 'x y', width: '640' } }); assert(v.ok && v.args.prompt === 'x y' && v.args.width === 640, 'small-model slips are forgiven: arguments wrapped in "args", a number sent as text'); }
-  assert(!registry.validate(gi, { args: { width: 640 } }).ok, 'a required argument is never invented');
+  assert(!registry.validate(oo, { args: { width: 640 } }).ok, 'a required argument is never invented');
   assert(!registry.validate(gi, { prompt: 'x y', width: 99999 }).ok, 'a number out of range is refused');
   assert(!registry.validate(registry.get('send_to_ai'), { to: 'bing', message: 'hi' }).ok, 'an enum outside its choices is refused');
   assert(!registry.validate(gi, 'not json').ok, 'arguments that are not JSON are refused');

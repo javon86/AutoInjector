@@ -7,8 +7,10 @@
  * locks, pictures saved in the images/ output folder with their settings. Only when that module is
  * not registered (older builds, some tests) does it fall back to the plain image-provider path
  * (the manager's GENERATE_IMAGE path). The tool contract stays the same either way:
- *   {prompt, width, height, style, character, loras, negativePrompt}
- *     -> {ok, path, paths, count, warnings} | {ok:false, error, message}
+ *   {prompt, width, height, style, character, loras, negativePrompt, engine, purpose, view, appearance, newChat}
+ *     -> {ok, path, paths, count, warnings, engine, view} | {ok:false, error, message}
+ * engine "chatgpt" / "auto" and purpose "view" / "sheet" need the module (sd-api); the plain
+ * image-provider fallback is Stable Diffusion only.
  */
 const crypto = require('crypto');
 
@@ -31,14 +33,18 @@ function createImageAdapter({ imageProvider, outputManager, dbService, sdApi, fr
     if (o.height) req.height = o.height;
     if (o.negativePrompt) req.negativePrompt = o.negativePrompt;
     if (Array.isArray(o.loras) && o.loras.length) req.loras = o.loras;
+    // the second engine (ChatGPT) and reference views / sheets — sd-api routes them
+    for (const k of ['engine', 'purpose', 'view', 'appearance', 'newChat']) if (o[k] !== undefined && o[k] !== null && o[k] !== '') req[k] = o[k];
+    if (!req.prompt) delete req.prompt;
     const r = await m.images.generate(req);
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || 'The image could not be made.' };
     const paths = (r.images || []).map((x) => x.path).filter(Boolean);
     if (!paths.length) return { ok: false, error: 'NO_IMAGE', message: 'The image generator answered without a picture.' };
-    return { ok: true, path: paths[0], paths, count: paths.length, warnings: r.warnings || [], characterLock: characterLock || null };
+    return { ok: true, path: paths[0], paths, count: paths.length, warnings: r.warnings || [], characterLock: characterLock || null, engine: r.engine || 'sd', view: r.view || undefined };
   }
 
   async function viaProvider(o) {
+    if ((o.engine && o.engine !== 'sd') || o.purpose === 'view' || o.purpose === 'sheet') return { ok: false, error: 'NOT_WIRED', message: 'ChatGPT pictures and reference views need the 🎨 Images module, which this build does not have.' };
     let full = String(o.prompt || '').trim();
     if (o.character) full += `, featuring ${String(o.character).trim()}`;
     if (o.style) full += `, in the style of ${String(o.style).trim()}`;

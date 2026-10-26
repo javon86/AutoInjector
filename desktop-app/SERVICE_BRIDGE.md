@@ -45,9 +45,9 @@ All responses are JSON with an `ok` boolean. Participant ids are `chatgpt`,
 | `POST /jarvis/start` | `{goal}` | give Jarvis a goal; it plans, delegates to the Council, and runs code to reach it |
 | `POST /jarvis/stop` | — | stop the current Jarvis task |
 | `GET /image/status` · `POST /image/settings` · `POST /image/generate` | `{prompt, negativePrompt}` | Stable Diffusion: status / settings / a plain render (outcome only, no image bytes) |
-| `GET /image/backend` | — | 🎨 which SD app is connected (`{connected, backend, label, base, checkpoint, busy}`) |
+| `GET /image/backend` | — | 🎨 which SD app is connected (`{connected, backend, label, base, checkpoint, busy}`) and both engines: `engines: {sd: {…}, chatgpt: {ready, busy, why?}}` |
 | `GET /image/locks` | — | 🎨 the character locks (`{locks:[…]}`) |
-| `POST /image/request` | `{purpose, prompt, characterLock, …}` | 🎨 make + save a picture (portrait / cover / scene) with a character lock → `{images:[{path, seed, sha256}], settings, warnings}` — full contract: [`docs/SD_IMAGE_API.md`](../docs/SD_IMAGE_API.md) |
+| `POST /image/request` | `{engine, purpose, view, prompt, characterLock, appearance, …}` | 🎨 make + save a picture (portrait / cover / scene / one of ten reference views / a turnaround sheet) with Stable Diffusion or ChatGPT's own image generation (`engine`: auto / sd / chatgpt) → `{engine, view?, paths, images:[{path, seed, sha256}], settings, warnings}`. ChatGPT takes 30–180 s: use a ≥300 s client timeout — full contract: [`docs/SD_IMAGE_API.md`](../docs/SD_IMAGE_API.md) |
 | `GET /events` | — | **SSE** live event stream (see below) |
 
 **Jarvis** is AutoInjector's own supervisor (the System AI): given a goal it

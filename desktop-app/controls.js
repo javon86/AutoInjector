@@ -40,9 +40,11 @@ const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 2;
 const PICK_ROLES = ["input", "send", "assistant"];
 // P38 🎯 picker card: the three things the user can point at (one at a time).
-const PICK_ROLE_NAME = { input: "Message box", send: "Send button", assistant: "AI's reply" };
-const PICK_ROLE_HINT = { input: "where you type", send: "", assistant: "pick the latest answer" };
-const PICK_ROLE_TARGET_DESC = { input: "the message box (where you type)", send: "the Send button", assistant: "the AI's latest reply" };
+const PICK_ROLE_NAME = { input: "Message box", send: "Send button", assistant: "AI's reply", image: "Generated picture" };
+const PICK_ROLE_HINT = { input: "where you type", send: "", assistant: "pick the latest answer", image: "a picture ChatGPT made — for 🎨 ChatGPT images" };
+const PICK_ROLE_TARGET_DESC = { input: "the message box (where you type)", send: "the Send button", assistant: "the AI's latest reply", image: "a picture ChatGPT made" };
+// 🎨 ChatGPT also has a "Generated picture" item (chatgpt-image.js reads its pictures with it).
+const pickRolesFor = (site) => (site === "chatgpt" ? PICK_ROLES.concat(["image"]) : PICK_ROLES);
 
 const el = (id) => document.getElementById(id);
 const setStatus = (s) => { el("status").textContent = s; };
@@ -95,7 +97,7 @@ function openPicker(site, role) {
   const col = el(`col-${site}`);
   if (col && !col.classList.contains("state-open")) { try { setColumnState(site, "open"); } catch (_) {} }
   menu.classList.remove("collapsed");
-  if (role && PICK_ROLES.includes(role)) pickerState(site).role = role;
+  if (role && pickRolesFor(site).includes(role)) pickerState(site).role = role;
   renderPicker(site);
   refreshPicker(site);
   try { menu.scrollIntoView({ block: "nearest" }); } catch (_) {}
@@ -111,6 +113,7 @@ const PICK_REJECT = {
   LOOKS_LIKE_USER: () => "that is your own message — click the AI's latest answer instead",
   LOOKS_LIKE_ECHO: () => "that looks like the last message sent, not a real reply — click the AI's answer",
   TOO_GENERIC: () => "that would match too many things on the page — click more precisely",
+  TOO_SMALL: () => "that picture is too small (an icon or avatar) — click the big picture ChatGPT made",
   TOO_BROAD: () => "that matches too many things on the page — click the AI's answer text itself",
   NO_STABLE_SELECTOR: () => "AutoInjector couldn't find a reliable way to recognise it — try clicking a different part of it",
   ONLY_ONE_MESSAGE: () => "that only matches this one message, not every reply — try clicking the middle of the answer text",
@@ -124,7 +127,7 @@ const PICK_REJECT = {
 async function runPick(site, role) {
   const ps = pickerState(site);
   const desc = PICK_ROLE_TARGET_DESC[role];
-  if (!role) { pickerSay(site, "Choose one of the three first (Message box, Send button or AI's reply), then press OK.", "warn"); return; }
+  if (!role) { pickerSay(site, site === "chatgpt" ? "Choose one of the four first (Message box, Send button, AI's reply or Generated picture), then press OK." : "Choose one of the three first (Message box, Send button or AI's reply), then press OK.", "warn"); return; }
   ps.role = role; ps.busy = role;
   if (ps.status && ps.status.items && ps.status.items[role]) ps.status.items[role].picking = true;
   renderPicker(site);
@@ -207,7 +210,7 @@ function renderPicker(site, menuEl) {
     menu.appendChild(head);
     body = document.createElement("div");
     body.className = "pk-body";
-    for (const role of PICK_ROLES) {
+    for (const role of pickRolesFor(site)) {
       const row = document.createElement("div");
       row.className = "pk-row"; row.dataset.role = role;
       const lab = document.createElement("label");
@@ -243,7 +246,7 @@ function renderPicker(site, menuEl) {
     teach.className = "pk-teach"; teach.hidden = true;
     menu.appendChild(teach);
   }
-  for (const role of PICK_ROLES) {
+  for (const role of pickRolesFor(site)) {
     const row = body.querySelector(`.pk-row[data-role="${role}"]`);
     const item = (st.items || {})[role] || { state: "none" };
     const c = pickChip(Object.assign({}, item, { picking: item.picking || ps.busy === role }));

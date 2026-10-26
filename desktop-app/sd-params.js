@@ -39,7 +39,9 @@ const RESIZE_MODES = ['just resize', 'crop and resize', 'resize and fill', 'just
 const INPAINT_FILL = ['fill', 'original', 'latent noise', 'latent nothing'];
 const CN_CONTROL_MODES = ['Balanced', 'My prompt is more important', 'ControlNet is more important'];
 const CN_RESIZE_MODES = ['Just Resize', 'Crop and Resize', 'Resize and Fill'];
-const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free'];
+const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'];
+const ENGINES = ['auto', 'sd', 'chatgpt'];
+const VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
 
 // ------------------------------------------------------------------ the schema
 const LORA = T.obj('A LoRA to apply', { name: T.str('LoRA name (as listed by the SD app / library)'), weight: T.num('Strength, usually 0.3–1', -5, 5) });
@@ -81,7 +83,12 @@ const GENERATE_SCHEMA = {
     negativePrompt: Object.assign(T.str('What to avoid'), { 'x-a1111': ['negative_prompt'], 'x-comfy': 'yes' }),
     characterLock: Object.assign(T.str('A character lock id or name (same face every time)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     keepSeed: Object.assign(T.bool('false = ignore the character lock\'s seed'), { 'x-a1111': [], 'x-comfy': 'yes' }),
-    purpose: Object.assign(T.str('Picks a size when none is given', { enum: PURPOSES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    purpose: Object.assign(T.str('Picks a size when none is given; "view" = one full-body reference view (needs view), "sheet" = one turnaround sheet with all ten views', { enum: PURPOSES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    engine: Object.assign(T.str('"sd" = Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane, "auto" = SD when connected, else ChatGPT', { enum: ENGINES }), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    view: Object.assign(T.str('Which reference view (with purpose "view"); AutoInjector adds the framing words', { enum: VIEWS }), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    appearance: Object.assign(T.str('What the character looks like, in words (instead of / besides a character lock)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    newChat: Object.assign(T.bool('ChatGPT engine: start a fresh ChatGPT chat for this picture'), { 'x-a1111': [], 'x-comfy': 'yes' }),
+    series: Object.assign(T.str('ChatGPT engine: a name for a view series (with the "fresh chat per series" setting, a new series opens a new chat)'), { 'x-a1111': [], 'x-comfy': 'yes' }),
     loras: Object.assign(T.arr('LoRAs', LORA), { 'x-a1111': ['prompt'], 'x-comfy': 'yes', 'x-comfy-note': 'LoraLoader chain' }),
     checkpoint: Object.assign(T.str('Checkpoint (model) for this picture'), { 'x-a1111': ['override_settings.sd_model_checkpoint'], 'x-comfy': 'yes' }),
     vae: Object.assign(T.str('VAE ("Automatic" = the model\'s own)'), { 'x-a1111': ['override_settings.sd_vae'], 'x-comfy': 'yes', 'x-comfy-note': 'VAELoader' }),
@@ -646,7 +653,7 @@ function a1111FieldMap() {
 function isA1111Internal(f) { return A1111_INTERNAL.includes(f); }
 
 module.exports = {
-  GENERATE_SCHEMA, UPSCALE_SCHEMA, ADV_KEYS, RESIZE_MODES, INPAINT_FILL, CN_CONTROL_MODES, CN_RESIZE_MODES, PURPOSES, A1111_INTERNAL,
+  GENERATE_SCHEMA, UPSCALE_SCHEMA, ADV_KEYS, RESIZE_MODES, INPAINT_FILL, CN_CONTROL_MODES, CN_RESIZE_MODES, PURPOSES, ENGINES, VIEWS, A1111_INTERNAL,
   loadImage, checkValue, normalize, a1111Apply, cnUnitA1111, adUnitA1111, unsupportedOn,
   buildComfyGraph, buildComfyUpscaleGraph, latentMethod, modelScaleOf,
   openapiRequestSchema, propTypes, validateFields, validateOptions, suggest, a1111FieldMap, isA1111Internal,

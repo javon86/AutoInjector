@@ -390,6 +390,58 @@ async function load(over) {
     assert(!tf.$('sd-error').hidden && !tf.$('sd-error-actions').querySelector('button[data-fix="vae-automatic"]') && tf.calls.filter((c) => c[0] === 'fixAndRetry').length === 2, 'a fix that did not help is not offered again (one retry only)');
   }
 
+  console.log('== Engine: ChatGPT, its progress and error box; Reference views ==');
+  {
+    const t2 = await load();
+    const reqs = []; let cgBusy = false; let delay = 700; let nextReq = null;
+    t2.sd.chatgptStatus = async () => ({ ok: true, ready: true, busy: cgBusy, phase: cgBusy ? 'drawing' : 'idle', drawingMs: cgBusy ? 45000 : 0, freshChatPerSeries: false });
+    t2.sd.chatgptCancel = async () => { t2.calls.push(['chatgptCancel']); return { ok: true }; };
+    t2.sd.chatgptSettings = async (p) => { t2.calls.push(['chatgptSettings', p]); return { ok: true }; };
+    t2.sd.request = async (b) => {
+      reqs.push(b); cgBusy = b.engine !== 'sd'; await tick(delay); cgBusy = false;
+      if (nextReq) { const r = nextReq; nextReq = null; return r; }
+      const sd = b.engine === 'sd';
+      return { ok: true, engine: sd ? 'sd' : 'chatgpt', purpose: b.purpose || 'free', view: b.view, seed: sd ? (b.seed || 321) : null, warnings: [], settings: { prompt: b.prompt || 'x', engine: sd ? 'sd' : 'chatgpt', seconds: 45 }, paths: ['/out/images/cg-1.png'], images: [{ path: '/out/images/cg-1.png', url: 'file:///out/images/cg-1.png', seed: sd ? 321 : null }] };
+    };
+    t2.click('tab-app-images'); await tick(60);
+    const eng = t2.$('sd-engine');
+    assert(eng && [...eng.options].map((o) => o.value).join() === 'sd,chatgpt,auto' && eng.value === 'sd', 'Engine: Stable Diffusion / ChatGPT / Auto (Stable Diffusion by default)');
+    eng.value = 'chatgpt'; t2.fire(eng, 'change'); await tick(40);
+    assert(/ChatGPT is ready/.test(t2.$('sd-engine-note').textContent), `the note says ChatGPT is ready ("${t2.$('sd-engine-note').textContent}")`);
+    t2.$('sd-prompt').value = 'a ferry at dawn';
+    t2.click('btn-sd-generate'); await tick(620);
+    assert(/ChatGPT is drawing… 45 s/.test(t2.$('sd-msg').textContent), `while it works: "${t2.$('sd-msg').textContent}"`);
+    await tick(300);
+    assert(reqs.length === 1 && reqs[0].engine === 'chatgpt' && reqs[0].prompt === 'a ferry at dawn' && !('steps' in reqs[0]) && !t2.calls.some((c) => c[0] === 'generate'), 'Generate with ChatGPT sends only the words (no SD settings) through sd:request');
+    assert(/drawn by ChatGPT in 45 s/.test(t2.$('sd-msg').textContent) && /cg-1\.png/.test(t2.$('sd-preview').src), `the result: "${t2.$('sd-msg').textContent.split('\n')[0]}", shown under Result`);
+    nextReq = { ok: false, engine: 'chatgpt', error: 'IMAGE_REFUSED', code: 'IMAGE_REFUSED', message: 'ChatGPT declined to make this picture: “I can\'t create that.”', hint: 'Change the wording, or use engine "sd".' };
+    t2.click('btn-sd-generate'); await tick(900);
+    assert(!t2.$('sd-error').hidden && /declined to make this picture/.test(t2.$('sd-error-msg').textContent) && /How to fix: Change the wording/.test(t2.$('sd-error-fix').textContent), 'a refusal → the same red error box as SD errors, with the fix');
+    try { assert(t2.dom.window.localStorage.getItem('sd-engine') === 'chatgpt', 'the engine choice is remembered'); } catch (_) {}
+
+    // Reference views
+    t2.$('sd-rv-appearance').value = 'a wiry courier in a yellow rain cape';
+    t2.click('btn-sd-rv-side'); await tick(900);
+    let last = reqs[reqs.length - 1];
+    assert(last.purpose === 'view' && last.view === 'side' && last.engine === 'chatgpt' && last.appearance === 'a wiry courier in a yellow rain cape' && /^rv:/.test(last.series) && t2.$('sd-error').hidden, 'Reference views → Side: {purpose:"view", view:"side", appearance} with ChatGPT');
+    t2.click('btn-sd-rv-sheet'); await tick(900);
+    last = reqs[reqs.length - 1];
+    assert(last.purpose === 'sheet' && !last.view, 'Turnaround sheet → {purpose:"sheet"}');
+    t2.click('btn-sd-rv-portrait'); await tick(900);
+    assert(reqs[reqs.length - 1].purpose === 'portrait', 'Portrait → {purpose:"portrait"}');
+    const fresh = t2.$('sd-rv-fresh'); fresh.checked = true; t2.fire(fresh, 'change'); await tick(20);
+    assert(t2.calls.some((c) => c[0] === 'chatgptSettings' && c[1].freshChatPerSeries === true), '"new chat for each series" is saved as the ChatGPT engine setting');
+    // All 10 on Stable Diffusion: one seed for the whole series
+    t2.$('sd-url').value = 'http://127.0.0.1:7860'; t2.click('btn-sd-connect'); await tick(120);
+    eng.value = 'sd'; t2.fire(eng, 'change'); await tick(20);
+    delay = 20; const n0 = reqs.length;
+    t2.click('btn-sd-rv-all'); await tick(1200);
+    const ten = reqs.slice(n0);
+    assert(ten.length === 10 && ten.map((x) => x.view).join() === 'front,three_quarter_front,side,three_quarter_back,back,idle,draw,attack,dash,defend' && ten.every((x) => x.engine === 'sd' && x.series === ten[0].series), `All 10 views: ten requests in order, one series (${ten.length})`);
+    assert(ten[0].seed === undefined && ten.slice(1).every((x) => x.seed === 321 && x.keepSeed === false), 'Stable Diffusion: the first view\'s seed is reused for the other nine');
+    assert(/All 10 reference views saved \(one seed: 321\)/.test(t2.$('sd-msg').textContent), `"${t2.$('sd-msg').textContent}"`);
+  }
+
   console.log('== the --api mistake ==');
   t = await load({
     detect: { ok: true, found: [], problems: [{ kind: 'webui-no-api', port: 7860, base: 'http://127.0.0.1:7860', usable: false, message: 'A Stable Diffusion WebUI is running on port 7860, but its API is switched off… In Stability Matrix: … tick “API” (or type --api …)' }], best: null, message: 'x' },

@@ -111,6 +111,12 @@ class FakeWebContents extends EventEmitter {
       if (this.selfRepairPage) return require("./fake-dom").runScript(script, this.selfRepairPage);
       return { ok: false, error: "NO_FAKE_DOM" };
     }
+    // 🎨 chatgpt-image.js page scripts (scan / fetch / convert): answered by a fake
+    // ChatGPT image page when the test gave one (test/fixtures/fake-chatgpt-image.js).
+    if (script.includes("__AUTOINJECTOR_CHATIMG__")) {
+      if (typeof this.chatImagePage === "function") return this.chatImagePage(script);
+      return { ok: false, error: "NO_FAKE_PAGE" };
+    }
     if (script.includes("__AUTOINJECTOR_PICK__")) {
       const roleMatch = script.match(/const ROLE = "([^"]+)"/);
       this.pickCalls.push({ role: roleMatch ? roleMatch[1] : null });

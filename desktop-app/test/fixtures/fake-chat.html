@@ -37,6 +37,22 @@
               login    a signed-out page: no message box, "Log in" / "Sign up"
               limit    the chat, plus a usage-limit banner (role=alert)
               error    no message box, an "Something went wrong" alert
+    image   (ChatGPT image generation, chatgpt-image.js) what a message that asks
+            "Create an image…" gets: ok (default) | webp | refuse | limit | banner
+            | words | never | outside
+              ok       "Creating image…" + a spinner, then a blurred low-res preview,
+                       then the finished <img alt="Generated image"> (a real PNG
+                       drawn on a canvas, served as a blob: URL)
+              webp     the same, but the picture is a real WebP
+              refuse   a words-only refusal ("I'm sorry, but I can't create …")
+              limit    a words-only "You've reached your image creation limit…"
+              banner   a usage-limit banner (role=alert) appears while it "draws"
+              words    words only, no refusal and no picture
+              never    "Creating image…" forever (the picture never arrives)
+              outside  the picture is in an article[data-turn="assistant"] wrapper
+                       OUTSIDE the message's [data-message-author-role] div
+    imgdelay  ms until the finished picture (default 1500 × speed)
+    avatar    1 = every assistant turn also has a 28 px avatar <img> (to ignore)
   Check-ins: "Reply with only this word: X" is answered with X (tagged). A typed
   "Repeat this number: 1234" (the old teach step, no [MSG #]) is answered with the
   number, untagged — like a real AI would. P38 number teach: a typed bare "4827" is
@@ -82,6 +98,9 @@
   const SPEED = Number(Q.get("speed")) || 1;
   const LAYOUT = (Q.get("layout") || "default").toLowerCase();
   const PAGE = (Q.get("page") || "chat").toLowerCase();
+  const IMAGE_MODE = (Q.get("image") || "ok").toLowerCase();
+  const IMG_DELAY = Q.has("imgdelay") ? Number(Q.get("imgdelay")) : 1500 * (Number(Q.get("speed")) || 1);
+  const AVATAR = Q.get("avatar") === "1";
   const ALL_QUIRKS = ["rich", "disabledsend", "stop", "stream", "redraw", "hiddensend", "wrapper", "slowclear", "nofrom"];
   const SITE_DEFAULTS = {
     chatgpt: ["rich", "disabledsend", "stop", "stream", "hiddensend", "wrapper", "slowclear", "nofrom"],
@@ -287,7 +306,59 @@
     }
     if (SITE === "gemini") el("p", { text: "PDF", class: "chip" }, md); // only Gemini has citation chips
   }
+  // ---- ChatGPT image generation (?image=…) ------------------------------------
+  function drawPicture(w, h, type, seedText) {
+    return new Promise((resolve) => {
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      const g = c.getContext("2d");
+      const grd = g.createLinearGradient(0, 0, w, h); grd.addColorStop(0, "#c9d6df"); grd.addColorStop(1, "#52616b");
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      let x = hash(seedText || "pic");
+      for (let i = 0; i < 400; i++) { x = (Math.imul(x, 1103515245) + 12345) >>> 0; g.fillStyle = "hsl(" + (x % 360) + ",60%," + (30 + (x >> 8) % 40) + "%)"; g.fillRect((x >> 3) % w, (x >> 11) % h, 4 + (x >> 5) % 18, 4 + (x >> 7) % 18); }
+      g.fillStyle = "#1e2a33"; g.beginPath(); g.arc(w / 2, h * 0.22, w * 0.1, 0, 7); g.fill(); g.fillRect(w * 0.4, h * 0.3, w * 0.2, h * 0.45);
+      c.toBlob((b) => resolve(URL.createObjectURL(b)), type || "image/png");
+    });
+  }
+  function avatarImg(parent) {
+    const c = document.createElement("canvas"); c.width = 28; c.height = 28; const g = c.getContext("2d"); g.fillStyle = "#10a37f"; g.fillRect(0, 0, 28, 28);
+    el("img", { alt: "ChatGPT avatar", class: "avatar", width: "28", height: "28", src: c.toDataURL("image/png") }, parent);
+  }
+  async function imageReply(msg) {
+    const k = ++replyNo;
+    const rec = { k, image: true, mode: IMAGE_MODE, text: "", startedAt: Date.now(), finishedAt: null, src: null };
+    F.replies.push(rec);
+    setGenerating(true);
+    await sleep(between(150, 300));
+    let host, md;
+    if (IMAGE_MODE === "outside") { host = el("article", { "data-turn": "assistant", "data-testid": "conversation-turn-" + k }, log); const b = el("div", { "data-message-author-role": "assistant" }, host); md = el("div", { class: "markdown" }, b); }
+    else { host = el("div", { "data-message-author-role": "assistant" }, log); md = el("div", { class: "markdown" }, host); }
+    if (AVATAR) avatarImg(host);
+    const words = (t) => { md.innerHTML = ""; for (const l of t.split("\n")) el("p", { text: l }, md); rec.text = t; };
+    if (IMAGE_MODE === "refuse" || IMAGE_MODE === "limit" || IMAGE_MODE === "words") {
+      await sleep(Math.round(IMG_DELAY / 2));
+      words(IMAGE_MODE === "refuse" ? "I'm sorry, but I can't create that image because it goes against our content policy. If you'd like, I can help with a different idea."
+        : IMAGE_MODE === "limit" ? "You've reached your image creation limit. Your limit resets in 4 hours. You can still chat with me in the meantime."
+        : "Here is how that character could look: tall, a grey travelling coat, a lantern at the belt.\nWould you like me to draw it?");
+      rec.finishedAt = Date.now(); setGenerating(false); return;
+    }
+    words("Creating image");
+    const spin = el("div", { role: "progressbar", "aria-busy": "true", text: "…" }, host);
+    if (IMAGE_MODE === "banner") { const b = el("div", { role: "alert", text: "You've reached the limit for image generation requests. Please try again later." }); document.body.insertBefore(b, log); await sleep(IMG_DELAY); setGenerating(false); spin.remove(); return; }
+    if (IMAGE_MODE === "never") { await sleep(IMG_DELAY); setGenerating(false); return; }
+    // the blurred low-res preview (ChatGPT shows one while it draws)
+    await sleep(Math.round(IMG_DELAY / 3));
+    const prevSrc = await drawPicture(512, 768, "image/png", "preview" + k);
+    const wrap = el("div", { class: "imagegen-wrap" }, IMAGE_MODE === "outside" ? host : md.parentNode);
+    const prev = el("img", { alt: "Generated image", src: prevSrc, style: "width:256px;height:384px;filter:blur(12px)" }, wrap);
+    await sleep(Math.round(IMG_DELAY * 2 / 3));
+    const finalSrc = await drawPicture(512, 768, IMAGE_MODE === "webp" ? "image/webp" : "image/png", "final" + k);
+    prev.remove(); spin.remove(); md.innerHTML = "";
+    el("img", { alt: "Generated image", src: finalSrc, style: "width:256px;height:384px" }, wrap);
+    rec.src = finalSrc; rec.finishedAt = Date.now(); F.images = (F.images || []).concat([finalSrc]);
+    setGenerating(false);
+  }
   async function reply(msg) {
+    if (/Create (?:an|one|a)(?: wide| tall)? image|Create an image in a/i.test(msg)) return imageReply(msg);
     const seq = (/^\[MSG #(\d+)\]/.exec(msg) || [])[1];
     let r;
     aborted = false;
