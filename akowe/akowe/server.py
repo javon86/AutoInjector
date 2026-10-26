@@ -167,6 +167,8 @@ class App:
         self.backups.on_restored.append(self.health.forget)  # a restored database must be checked afresh
         self.saver = SaveService(self)         # 💾 P20 one folder per book in the books folder
         self.opener = OpenService(self)        # 📂 P21 open a saved book / 🔁 rerun from its book bible
+        from .forge import ForgeService  # noqa: PLC0415
+        self.forge = ForgeService(self)        # 🗂 B5 Character Forge dossiers (jobs run in self.review)
         self._client = threading.local()       # the address of the request being answered (localhost-only routes)
         self.port: int | None = None
         self._last_project: dict | None = None
@@ -440,6 +442,9 @@ class App:
             return self.route_workflow(method, parts, query, body)
         if parts and parts[0] in ("books", "books-folder") or parts[:2] == ["settings", "books-folder"]:
             return self.route_books(method, parts, query, body, principal, headers)
+        if parts == ["settings", "image-bridge"] and method in ("GET", "PUT"):  # 🗂 B5: where AutoInjector makes pictures
+            from . import forge  # noqa: PLC0415
+            return 200, forge.bridge_info(self) if method == "GET" else forge.save_bridge_settings(self, body)
         if parts and parts[0] in ("autobook", "jobs", "health", "diagnostics", "backups", "shelf", "settings",
                                   "story-choices", "lengths", "pipeline", "compare"):
             return self.route_ops(method, parts, query, body, principal)
@@ -505,6 +510,9 @@ class App:
                     return self.route_grid_costs(rest[0], query, principal, pid, branch)
                 if rest and rest[0] == "report":
                     return self.route_report(method, rest[1:], query, body, principal, pid, branch)
+                if rest and rest[0] == "forge":  # 🗂 B5 Character Forge dossiers (forge.py)
+                    from . import forge  # noqa: PLC0415
+                    return forge.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
                     from . import beta_reader  # noqa: PLC0415
                     return beta_reader.route(self, method, rest, body, principal, pid, branch)
@@ -858,6 +866,11 @@ class App:
             b = {"record_ids": r.get("record_ids"), "slot_id": r.get("slot_id")} if r.get("kind") == "review" else \
                 {"record_id": (r.get("record_ids") or [None])[0], "slot_id": r.get("slot_id")}
             new = fn(principal, r["project_id"], r["branch_id"], b)
+        elif kind == "review_forge":  # 🗂 B5 "Invent the rest": only empty fields are filled, so it is safe to rerun
+            rid = (r.get("record_ids") or [None])[0]
+            if not rid:
+                raise ApiError(400, "INVALID_INPUT", "/job_id", "this job has nothing left to resume")
+            new = self.forge.start_forge(principal, r["project_id"], r["branch_id"], rid, {"slot_id": r.get("slot_id")})
         elif kind == "bible":
             new = self.assist.create_bible(principal, {"project_id": j.get("project_id"), "branch_id": j.get("branch_id"),
                                                        "idea": r.get("idea"), "counts": r.get("counts"),

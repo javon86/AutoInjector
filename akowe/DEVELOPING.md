@@ -60,6 +60,10 @@ akowe/
     terms.py               🔧 P31 trade facts (settings trade_terms:<pid>:<branch>) + the P26 terminology check
     repetition.py          🔁 P30 repetition sorter: voice / motif / filler / accident, trim plan, author labels
                            (settings repetition_labels:<pid>:<branch>)
+    forge.py               🗂 B5 Character Forge dossiers: 14 sections / 148 lettered fields, storage (forge:<pid>:<b>), sync
+                           with the sheet / voice card / canon, "Invent the rest" job, approvals, art via AutoInjector
+                           POST /image/request, routes …/forge/…, chapter_brief helper; forge_pdf.py (the dark dossier PDF),
+                           forge_example.py + examples/moki_vey/ (the Moki Vey example); web/forge.js; docs/CHARACTER_FORGE.md
     fact_checks.py         🔎 Section 7a glue: chapter/book views, editor context + keep list, fixes, run report, HTTP
     continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
                            AI tracking + run hooks (approved under the run consent), brief section, review context,
@@ -569,6 +573,23 @@ request; the base handler uses it after the kernel validates it against OUTPUT.
   Windows-unsafe titles and long paths, package round trip on the same and another data folder, continue an unfinished
   opened book and resume its imported run, damaged/newer/foreign packages refused, store helpers never overwrite,
   rerun with and without the plan, a book-bible.json upload (multipart) and refusals, localhost-only routes over HTTP).
+
+## 🗂 B5 Character Forge dossiers (forge.py, forge_pdf.py, forge_example.py, web/forge.js)
+
+The full description (model, sync rules, API, AI groups, pictures, PDF, letters in prompts) is
+`../docs/CHARACTER_FORGE.md`; the shared contract with AutoInjector's `/image/request` is `../docs/SD_IMAGE_API.md`.
+* **Data**: companion settings `forge:<pid>:<branch>` (per kind and A01 record id); mirrored fields keep `sync` (what
+  the dossier last wrote to the sheet / voice card) so an edit on the character page wins; proposals are never written
+  through (`mutate(..., write=False)`). Codes: the lowest free `CH-nnn` in canon order (`provisional_codes`).
+* **Jobs** run in `ReviewService` (`ForgeJob(ReviewJob)` with `total`): poll `review/ai/{job}`; kind `review_forge` is
+  resumable from the jobs list. Art jobs map bridge error codes to `ArtProblem` → `job.error {code, message, fix}`.
+* **PDF writer**: `exporters/pdf.py` gained `Page.size` (per-page MediaBox), `Page.background`, ops `rect` / `line` and
+  an optional colour on `text`; existing exports are unchanged.
+* **Brief**: `chapter_brief._forge_details` → `forge.chapter_brief` (accepted fields only, ≤ 2 500 chars).
+* **Book save**: `Character Forge/<code> <name> - Character Forge dossier.pdf/.json` and `<code> pictures/`.
+* Tests: `tests/test_forge.py` (fake AI `ForgeFake`, fake image bridge `FakeImageBridge`), UI
+  `tests/campaign/ui/test_ui_forge.py`. Example data was built once from the author's sample with Pillow (not a runtime
+  dependency).
 
 ## 🔎 Section 7a: timeline (P26), trade facts (P31), repetition sorter (P30)
 
