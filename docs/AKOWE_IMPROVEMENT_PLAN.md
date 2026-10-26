@@ -33,7 +33,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 parked; book #2 next).
+- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 Character Forge for characters done (2026-10-26) with ChatGPT or Stable Diffusion pictures; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -326,7 +326,7 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [~] **B5** 🗂 Character Forge dossiers — characters DONE 2026-10-26 (`docs/CHARACTER_FORGE.md`): 14-section lettered
   dossiers that reuse the character sheet / voice card / canon record, ✨ Invent the rest as proposals, approvals with
   revisions, portrait + ten views (+ turnaround sheet) through AutoInjector `/image/request` or uploads, the dark
-  dossier PDF, letters in chapter prompts, the Moki Vey example. Still open: items / places / magic systems (the
+  dossier PDF, letters in chapter prompts, the Moki Vey example. Pictures come from Stable Diffusion **or ChatGPT** (AutoInjector's new ChatGPT image engine draws in its pane; `engine` sd/chatgpt/auto); AutoInjector hands Akọwe the bridge address + token itself; 🎩 Alfred has 5 dossier tools (read, invent the rest, edit, approve, make art). Checked across the two real programs (Akọwe art job → bridge → Stable Diffusion stand-in → book assets → PDF). Still open: real ChatGPT/GPU run; items / places / magic systems (the
   machinery is ready), a manuscript check of the dossier. Original idea: Deeper character/item/place/magic-system profiles like
   the ChatGPT 'Character Forge' plugin (sample: Moki Vey dossier): extra sections (detailed appearance, fighting,
   weapons, magic, skills, physical, knowledge, backstory timeline, storyline, continuity), category letters C P V A F
