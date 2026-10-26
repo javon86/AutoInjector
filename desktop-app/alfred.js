@@ -52,6 +52,12 @@ const SYSTEM_PROMPT = [
 ].join(' ');
 
 const safeName = (s) => String(s == null ? '' : s).replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40) || '?';
+// Ollama names: "qwen2.5" means "qwen2.5:latest".
+const modelKey = (m) => { const t = String(m || '').trim().toLowerCase(); return t && !t.includes(':') ? `${t}:latest` : t; };
+const hasModel = (list, m) => (list || []).some((x) => modelKey(x) === modelKey(m));
+/** Billions of parameters from a model name ("qwen2.5:0.5b" -> 0.5), or null when the name doesn't say. */
+function modelBillions(m) { const x = /(?:^|[:\-_])(\d+(?:\.\d+)?)b(?:$|[-_:.])/i.exec(String(m || '')); return x ? Number(x[1]) : null; }
+const SMALL_MODEL_NOTE = (m) => `Note: "${m}" is a very small model; it often picks the wrong tool or the wrong arguments. qwen2.5:7b (or bigger) works much better.`;
 function clone(v) { return JSON.parse(JSON.stringify(v)); }
 
 function plainAiError(r, cfg) {
@@ -63,7 +69,7 @@ function plainAiError(r, cfg) {
       ? `I can't reach my AI — nothing answered at ${brainLib.baseUrl(cfg.endpoint)}. Is Ollama running, with the model "${cfg.model}" pulled (ollama pull ${cfg.model})? Or choose a connected AI for me in 🎩 settings.${tail}`
       : `I can't reach my AI (${where}).${tail}`;
     case 'http': return r.status === 404 && cfg.kind !== 'pane'
-      ? `My AI (${where}) doesn't have the model "${cfg.model}". Pull it (ollama pull ${cfg.model}) or pick another model in 🎩 settings.${tail}`
+      ? `My AI (${where}) doesn't have the model "${cfg.model}". ${r.installed && r.installed.length ? `It has: ${r.installed.slice(0, 8).join(', ')} — pick one in 🎩 ⚙ (Model), or` : 'Either'} pull it (ollama pull ${cfg.model}) or pick another model in 🎩 settings.${tail}`
       : `My AI (${where}) answered with an error (HTTP ${r.status}).${tail}`;
     case 'config': return r.error === 'NO_AI' ? `I don't have an AI to think with yet: install Ollama and a model (see docs/ALFRED.md), or pick a connected AI in 🎩 settings.${tail}` : `My AI isn't set up (${r.error}). Open 🎩 settings.${tail}`;
     case 'bad-body': return `My AI (${where}) sent back something I couldn't read.${tail}`;
@@ -230,6 +236,7 @@ function createAlfred(deps = {}) {
     return r;
   }
   function toolMessage(call, content) {
+    if (call.ignored && call.ignored.length && content && typeof content === 'object') content = Object.assign({}, content, { ignored_arguments: call.ignored, note: `${call.name} doesn't take: ${call.ignored.join(', ')} (ignored).` });
     const text = typeof content === 'string' ? content : JSON.stringify(content);
     const c = text.length > 6000 ? `${text.slice(0, 6000)}… (cut)` : text;
     return call.native ? { role: 'tool', tool_call_id: call.id, name: call.name, content: c } : { role: 'user', _toolResult: true, _tool: call.name, content: `Result of ${call.name}: ${c}` };
@@ -285,6 +292,7 @@ function createAlfred(deps = {}) {
       if (!res || !res.ok) {
         lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model || cfg.site || null };
         log('alfred-ai-error', { brain: cfg.kind, code: safeName((res && (res.status ? `HTTP_${res.status}` : res.kind)) || 'error') });
+        if (res && res.status === 404 && cfg.kind === 'local') res.installed = await installedModels(cfg.endpoint);
         const lastMsg = history[history.length - 1];
         if (lastMsg && lastMsg.role === 'user' && !lastMsg._toolResult) history.pop(); // keep the conversation clean for next time
         return reply(plainAiError(res, cfg), { notice: true, unreachable: res && (res.kind === 'network' || res.kind === 'timeout') });
@@ -310,6 +318,7 @@ function createAlfred(deps = {}) {
           continue;
         }
         let v = registry.validate(tool, call.args);
+        if (v.ok && v.ignored) call.ignored = v.ignored;
         if (v.ok && typeof tool.check === 'function') {
           let c;
           try { c = await tool.check(v.args, deps.ctx || {}); } catch (_) { c = { ok: false, error: 'the arguments could not be checked' }; }
@@ -468,6 +477,11 @@ function createAlfred(deps = {}) {
   }
   function stopWatch() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 
+  /** Installed Ollama models (null when unknown). */
+  async function installedModels(endpoint) {
+    if (typeof deps.listModels !== 'function') return null;
+    try { const r = await deps.listModels(endpoint); return r && r.ok && Array.isArray(r.models) ? r.models : null; } catch (_) { return null; }
+  }
   /** "Test my AI": one probe (no prompt is sent). */
   async function testAi() {
     if (!settings.enabled) return { ok: false, error: 'OFF' };
@@ -475,9 +489,21 @@ function createAlfred(deps = {}) {
     if (cfg.kind === 'pane') return { ok: true, kind: 'pane', site: cfg.site, message: `I'll think with ${registry.SITE_LABEL[cfg.site]} (its pane must be logged in).` };
     if (cfg.missing) return { ok: false, kind: cfg.kind, message: plainAiError({ kind: 'config', error: 'NO_AI' }, cfg) };
     const pr = await brainLib.probe({ endpoint: cfg.endpoint, apiKey: cfg.apiKey, timeoutMs: 4000 });
-    lastAi = { kind: cfg.kind, ok: pr.reachable, at: now(), model: cfg.model };
+    if (!pr.reachable) { lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model }; emitState(); return { ok: false, kind: cfg.kind, message: plainAiError({ kind: 'network' }, cfg) }; }
+    // The server answering is not enough: the model must be installed (otherwise every question fails with a 404).
+    let installed = null;
+    if (cfg.kind === 'local') installed = await installedModels(cfg.endpoint);
+    if (installed && !hasModel(installed, cfg.model)) {
+      lastAi = { kind: cfg.kind, ok: false, at: now(), model: cfg.model }; emitState();
+      log('alfred-ai-error', { brain: cfg.kind, code: 'MODEL_NOT_INSTALLED' });
+      return { ok: false, kind: cfg.kind, model: cfg.model, installed, message: installed.length
+        ? `Ollama is running, but the model "${cfg.model}" isn't installed. It has: ${installed.slice(0, 8).join(', ')}. Pick one in Model and Save, or run: ollama pull ${cfg.model}`
+        : `Ollama is running but has no models yet. Run: ollama pull ${cfg.model || 'qwen2.5:7b'}` };
+    }
+    lastAi = { kind: cfg.kind, ok: true, at: now(), model: cfg.model };
     emitState();
-    return pr.reachable ? { ok: true, kind: cfg.kind, model: cfg.model, message: `My AI answers (${cfg.kind === 'local' ? 'Ollama' : 'the connected AI'}, model ${cfg.model}).` } : { ok: false, kind: cfg.kind, message: plainAiError({ kind: 'network' }, cfg) };
+    const b = modelBillions(cfg.model);
+    return { ok: true, kind: cfg.kind, model: cfg.model, small: b != null && b < 3, message: `My AI answers (${cfg.kind === 'local' ? 'Ollama' : 'the connected AI'}, model ${cfg.model}).${b != null && b < 3 ? ` ${SMALL_MODEL_NOTE(cfg.model)}` : ''}` };
   }
 
   if (settings.enabled) startWatch();
