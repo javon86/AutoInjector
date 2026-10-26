@@ -123,6 +123,15 @@ function main() {
 
   console.log('\n== scope "everything" (warned) ==');
   const re = lx.buildExtract(Object.assign({}, base, { scope: 'everything' }));
+  {
+    const sum = lx.everythingSummary({ transcript: base.transcript, log: base.log });
+    const oldest = Math.min(...base.transcript.map((t) => t.ts), ...base.log.map((e) => e.ts));
+    assert(sum.messages === base.transcript.length && sum.oldestAt === oldest, `everythingSummary counts every message and finds the oldest date (${sum.messages}, ${sum.oldestAt})`);
+    assert(/^\d[\d,]* messages going back to .+, including older private conversations$/.test(sum.text), `…and says it in words: "${sum.text}"`);
+    assert(re.oldestAt === oldest, 'buildExtract reports the oldest timestamp in the file');
+    const empty = lx.everythingSummary({});
+    assert(empty.messages === 0 && empty.oldestAt === null && /^0 messages, including older private conversations$/.test(empty.text), 'an empty history is summarised safely');
+  }
   assert(re.counts.messages === 6 && /PRIVATE_LEGAL/.test(re.text), 'everything is in');
   assert(/includes ALL conversations, including older private ones/.test(re.header), 'with the warning in the header');
   assert(/RELAY TRACE — seqs all/.test(re.text), 'and the full Relay Trace');

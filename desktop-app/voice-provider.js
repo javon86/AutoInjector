@@ -16,6 +16,8 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const { spawn } = require('child_process');
+const os = require('os');
+const { redact } = require('./log-extract');
 
 let settings = {
   enabled: false,
@@ -68,11 +70,49 @@ function _bodyDetail(buf) {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+// Paths in a message are shown the way the log extract shows them: your home
+// folder as ~ (and any other private path as [private path]) — never a raw
+// "C:\Users\<your name>\…". Same redaction code as log-extract.js.
+// main.js hands in the same options the log extract uses (home + the app's own
+// folders, which stay readable as ~/…; anything else private is [private path]).
+let _home = '';
+try { _home = os.homedir(); } catch { _home = ''; }
+let _redactionProvider = null;
+function setRedactionProvider(fn) { _redactionProvider = typeof fn === 'function' ? fn : null; }
+function redactPaths(text) {
+  const s = String(text == null ? '' : text);
+  let opts = null;
+  try { opts = _redactionProvider ? _redactionProvider() : null; } catch { opts = null; }
+  if (!opts || typeof opts !== 'object') opts = { home: _home };
+  try { return redact(s, opts).text; } catch { return s; }
+}
+
+// A voice model that onnxruntime can't load: piper's "[ONNXRuntimeError] : 1 :
+// FAIL : Load model from …\models\voice\en_US-lessac-medium.onnx failed: …",
+// "Protobuf parsing failed", … — the .onnx file is corrupt or only partly
+// downloaded. Returns { file } (the voice file's name, when it can be read) or null.
+const ONNX_LOAD_RE = /ONNXRuntimeError|Load model from|Protobuf parsing failed|INVALID_PROTOBUF|\bonnx\b[^\n]{0,80}\b(?:corrupt|truncated|invalid model)/i;
+function voiceModelProblem(r) {
+  if (!r || r.ok !== false) return null;
+  const parts = [r.error, r.detail, r.reason, r.stderr];
+  try { if (r.body) parts.push(_bodyDetail(r.body)); } catch { /* ignore */ }
+  const raw = parts.filter((x) => typeof x === 'string' && x).join(' ');
+  if (!raw || !ONNX_LOAD_RE.test(raw)) return null;
+  const m = raw.match(/([^\\/\s"'`:]+\.onnx)(?![A-Za-z0-9.])/i);
+  return { file: m ? m[1] : '', raw };
+}
+const REDOWNLOAD_HOW = 'press "Re-download the voice" in the capability test results (it fetches a fresh copy and checks its size), or delete that file from the models/voice folder and run Setup Wizard → Installs → "Voice model"';
+
 // explainError({ error, body? }, endpoint?) -> one or two plain sentences.
 function explainError(r, endpoint) {
   const code = String((r && r.error) || 'UNKNOWN');
   const ep = endpoint != null ? String(endpoint) : settings.endpoint;
   const at = ep ? ` at ${ep}` : '';
+  const bad = voiceModelProblem(r);
+  if (bad || code === 'VOICE_MODEL_DAMAGED') {
+    const file = (bad && bad.file) || (r && r.voiceFile) || '';
+    return `The voice file${file ? ` (${file})` : ''} is damaged or incomplete — re-download it: ${REDOWNLOAD_HOW}.`;
+  }
   if (code === 'VOICE_DISABLED') return `Voice is turned off. Tick "Speak the butler's replies aloud" in ${WHERE_SETTINGS} and press Save.`;
   if (code === 'NO_ENDPOINT') return `No voice service address is set. Enter it in ${WHERE_SETTINGS} (usually ${DEFAULT_ENDPOINT}) and press Save.`;
   if (code === 'BAD_ENDPOINT') return `The voice address "${ep}" isn't a valid web address. Use something like ${DEFAULT_ENDPOINT} in ${WHERE_SETTINGS}.`;
@@ -91,13 +131,27 @@ function explainError(r, endpoint) {
   if (code === 'ECONNRESET' || code === 'EPIPE') return `The voice service${at} dropped the connection — it may have crashed. Restart it (${HOW_TO_START.charAt(0).toLowerCase()}${HOW_TO_START.slice(1)}).`;
   if (code === 'HTTP_404' || code === 'HTTP_405' || code === 'BAD_JSON') return `Something is answering${at}, but it isn't the AutoInjector voice service. Check the voice address in ${WHERE_SETTINGS} — it should point at the voice shim (default ${DEFAULT_ENDPOINT}).`;
   if (/^HTTP_\d+$/.test(code)) {
-    const d = _bodyDetail(r && r.body);
+    const d = redactPaths(_bodyDetail(r && r.body));
     return `The voice service${at} reported an error (${code.replace('_', ' ')}${d ? `: ${d}` : ''}). Check the voice service's window or the app log for details.`;
   }
-  return `Voice didn't work${at}: ${code}.`;
+  return `Voice didn't work${at}: ${redactPaths(code).slice(0, 300)}.`;
 }
 // Attach the plain-language message to a failed result (success passes through).
-function _withMessage(r) { return r && r.ok === false ? { ...r, message: explainError(r) } : r; }
+// A damaged voice file becomes error VOICE_MODEL_DAMAGED with a one-click fix
+// (fix.action "voice:redownload"); the raw onnxruntime text is kept, paths redacted.
+function _withMessage(r) {
+  if (!r || r.ok !== false) return r;
+  const bad = voiceModelProblem(r);
+  if (bad) {
+    const out = { ...r, error: 'VOICE_MODEL_DAMAGED', rawError: redactPaths(bad.raw).slice(0, 400), voiceFile: bad.file || '', fix: { action: 'voice:redownload', label: 'Re-download the voice' } };
+    delete out.body;
+    out.message = explainError(out);
+    return out;
+  }
+  const out = { ...r, message: explainError(r) };
+  if (typeof out.error === 'string') out.error = redactPaths(out.error);
+  return out;
+}
 
 // ---- cheap connectivity check (GET /health) ---------------------------------
 // Used by diagnostics and the settings Test so a dead address is reported in
@@ -242,4 +296,4 @@ function stopManaged() {
   return { ok: true, stopped: false };
 }
 
-module.exports = { DEFAULT_ENDPOINT, getSettings, setSettings, status, speak, listen, checkConnection, explainError, startManaged, stopManaged };
+module.exports = { DEFAULT_ENDPOINT, getSettings, setSettings, status, speak, listen, checkConnection, explainError, voiceModelProblem, redactPaths, setRedactionProvider, startManaged, stopManaged, _setHome: (h) => { _home = String(h || ''); } };

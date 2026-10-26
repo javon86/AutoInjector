@@ -82,7 +82,7 @@ function makeApi({ initialPrompts, pickResult, selfTestResult, tunerRunResult, l
     extractAllLogs: async (opts) => { calls.push({ fn: "extractAllLogs", opts }); return { ok: true, file: "/tmp/AutoInjector/output/logs/My Book - AutoInjector log - x.txt", messages: 3, logEntries: 5, scope: (opts && opts.scope) || "book", book: { id: "p1", title: "My Book" } }; },
     // P16: the Extract dialog's options + preview.
     extractOptions: async () => { calls.push({ fn: "extractOptions" }); return calls._exOptions || { ok: true, connected: true, books: [{ id: "p1", title: "My Book", requests: 4, lastAt: Date.now(), current: true }, { id: "p0", title: "Older Book", requests: 2, lastAt: Date.now() - 86400000, current: false }], default: { scope: "book", bookId: "p1", include: { conversation: true, activity: true, relay: true } }, totals: { messages: 50, events: 300 } }; },
-    extractPreview: async (opts) => { calls.push({ fn: "extractPreview", opts }); return { ok: true, scope: opts.scope, counts: { messages: opts.scope === "everything" ? 50 : 3, events: 5, relayMessages: 4 }, redactions: 1, fileName: "My Book - AutoInjector log - x.txt", preview: "AutoInjector — Extract (this Akọwe book only)\nWHAT IS IN THIS FILE" }; },
+    extractPreview: async (opts) => { calls.push({ fn: "extractPreview", opts }); return { ok: true, scope: opts.scope, counts: { messages: opts.scope === "everything" ? 50 : 3, events: 5, relayMessages: 4 }, redactions: 1, fileName: "My Book - AutoInjector log - x.txt", preview: "AutoInjector — Extract (this Akọwe book only)\nWHAT IS IN THIS FILE", oldestAt: opts.scope === "everything" ? Date.UTC(2026, 2, 3, 12) : null, everything: opts.scope === "everything" ? { messages: 50, oldestAt: Date.UTC(2026, 2, 3, 12), text: "50 messages going back to March 3, 2026, including older private conversations" } : undefined }; },
     inspectSite: noop,
     listSites: async () => ({ ok: true, sites: { chatgpt: null, claude: null, gemini: null } }),
     toggleWindowCollapse: async (which) => { calls.push({ fn: "toggleWindowCollapse", which }); return { ok: true, which, collapsed: true }; },
@@ -1354,6 +1354,22 @@ async function testDeepCapabilityCheck() {
   click(dom, "btn-cap-modal-close");
   assert(!modal.classList.contains("on"), "the pop-up closes on Close");
 
+  // A damaged voice file: the failure carries a one-click "Re-download the voice".
+  const realCap = api.butlerCapabilityTest;
+  api.butlerCapabilityTest = async () => ({ ok: true, deep: true, okCount: 0, failCount: 1, total: 1, checks: [{ name: "Voice (speak)", ok: false, detail: "couldn't speak: The voice file (en_US-lessac-medium.onnx) is damaged or incomplete — re-download it", tip: "The voice file is damaged or incomplete — press Re-download the voice to fetch a fresh copy.", fix: { action: "voice:redownload", label: "Re-download the voice" } }] });
+  api.voiceRedownload = async () => { api.calls.push({ fn: "voiceRedownload" }); return { ok: true, message: "Downloaded a fresh copy of the voice and restarted the voice engine." }; };
+  click(dom, "btn-cap-run");
+  await new Promise((r) => setTimeout(r, 30));
+  const fixBtn = doc.querySelector('#cap-list-failed .cap-fix-btn[data-fix="voice:redownload"]');
+  assert(fixBtn && /Re-download the voice/.test(fixBtn.textContent), "a damaged-voice failure shows a 🔧 Re-download the voice button");
+  assert(/press Re-download the voice/.test(doc.getElementById("cap-list-failed").textContent), "with its own fix-it tip");
+  fixBtn.click();
+  await new Promise((r) => setTimeout(r, 30));
+  assert(api.calls.some((c) => c.fn === "voiceRedownload"), "clicking it runs the re-download");
+  assert(/Downloaded a fresh copy of the voice/.test(log.textContent) && /Done/.test(fixBtn.textContent), "and reports the result");
+  click(dom, "btn-cap-modal-close");
+  api.butlerCapabilityTest = realCap;
+
   // The User Panel button and the System-Check deep toggle run the same test.
   assert(doc.getElementById("btn-capability-test"), "the User Panel also has a 🧪 Capability Test button");
   doc.getElementById("cb-deep-check").checked = true;
@@ -1873,6 +1889,38 @@ async function testExtractAllButton() {
   await wait(30);
   const sv2 = api2.calls.find((c) => c.fn === "extractAllLogs");
   assert(sv2 && sv2.opts.scope === "time" && sv2.opts.preset === "day", "one-click Save uses that safe default");
+
+  // The last choice is remembered (the first window saved "last hour")…
+  click(dom, "btn-extract-all");
+  await wait(60);
+  assert(doc.getElementById("ex-scope-time").checked && doc.getElementById("ex-preset").value === "hour" && doc.getElementById("ex-inc-relay").checked === false, "reopening remembers the last saved choice (time range · last hour · no relay trace)");
+
+  // …Everything needs an explicit second confirmation that names what's in it.
+  const allR = doc.getElementById("ex-scope-all");
+  allR.checked = true; allR.dispatchEvent(new dom.window.Event("change"));
+  await wait(200);
+  const before = api.calls.filter((c) => c.fn === "extractAllLogs").length;
+  click(dom, "btn-extract-save");
+  await wait(40);
+  const conf = doc.getElementById("ex-confirm-all");
+  assert(conf && !conf.hidden, "Save on Everything first asks for a second confirmation");
+  assert(api.calls.filter((c) => c.fn === "extractAllLogs").length === before, "…and saves nothing yet");
+  assert(/50 messages going back to March 3, 2026, including older private conversations/.test(doc.getElementById("ex-confirm-all-text").textContent), `the confirmation names what's included (${doc.getElementById("ex-confirm-all-text").textContent})`);
+  assert(doc.getElementById("btn-extract-save").hidden, "the plain Save button steps aside while confirming");
+  click(dom, "btn-extract-confirm-back");
+  assert(conf.hidden && !doc.getElementById("btn-extract-save").hidden && modal.classList.contains("on"), "Back returns to the dialog without saving");
+  click(dom, "btn-extract-save");
+  await wait(40);
+  click(dom, "btn-extract-confirm-all");
+  await wait(40);
+  const svAll = api.calls.filter((c) => c.fn === "extractAllLogs").pop();
+  assert(svAll && svAll.opts.scope === "everything" && svAll.opts.confirmEverything === true, "confirming saves Everything, marked as confirmed");
+  // Switching away from Everything after the question hides it again.
+  click(dom, "btn-extract-all");
+  await wait(60);
+  assert(!doc.getElementById("ex-scope-all").checked && doc.getElementById("ex-scope-time").checked && doc.getElementById("ex-preset").value === "hour", "Everything is never remembered — reopening goes back to the last safe choice");
+  assert(doc.getElementById("ex-confirm-all").hidden, "the confirmation is not left showing");
+  click(dom, "btn-extract-cancel");
 }
 
 main().catch((e) => {

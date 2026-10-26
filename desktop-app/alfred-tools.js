@@ -522,7 +522,9 @@ def({
   name: 'export_logs', title: 'Export logs', group: 'files', changes: true, allowAlways: true,
   description: 'Export the logs to a text file in the logs folder: "book" = this Akọwe book only, "day" = the last day, "everything".',
   args: { type: 'object', properties: { scope: { type: 'string', enum: ['book', 'day', 'everything'] }, book_id: { type: 'string', maxLength: 80 } }, additionalProperties: false },
-  describe: (a) => `Export the logs (${a.scope === 'everything' ? 'everything' : a.scope === 'day' ? 'the last day' : 'this book only'}) to a file in the logs folder (secrets are taken out).`,
+  describe: (a) => a.scope === 'everything'
+    ? 'Export EVERYTHING — every saved conversation, including older private ones — to a file in the logs folder (secrets are taken out).'
+    : `Export the logs (${a.scope === 'day' ? 'the last day' : 'this book only'}) to a file in the logs folder (secrets are taken out).`,
   async run(a, ctx) {
     const r = await ctx.exportLogs({ scope: a.scope || 'book', bookId: a.book_id });
     return r && r.ok ? { ok: true, message: `Saved ${r.file}.`, data: { file: r.file } } : { ok: false, error: (r && r.error) || 'EXPORT_FAILED', message: r && r.error === 'NO_BOOK' ? 'There is no Akọwe book in the logs yet — try scope "day".' : "I couldn't export the logs." };

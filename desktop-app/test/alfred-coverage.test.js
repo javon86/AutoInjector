@@ -101,7 +101,7 @@ const IPC_INVENTORY = [
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',
   'terminal:approve', 'terminal:clear', 'terminal:input', 'terminal:reject', 'terminal:run', 'terminal:send-output', 'terminal:settings', 'terminal:start',
   'terminal:state', 'terminal:stop', 'tools:list', 'tools:run', 'trace:report', 'transcript:clear', 'transcript:toggle-pin', 'tuner:run', 'ui:log',
-  'video:configure', 'video:generate', 'video:status', 'voice:check', 'voice:configure', 'voice:listen', 'voice:speak', 'voice:status',
+  'video:configure', 'video:generate', 'video:status', 'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.

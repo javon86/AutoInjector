@@ -356,6 +356,7 @@
     .cap-item .nm { font-weight:600; }
     .cap-item .why { opacity:.75; display:block; margin-top:1px; }
     .cap-item .tip { display:block; margin-top:3px; color:#ffd479; font-size:11.5px; }
+    .cap-item .cap-fix-btn { display:inline-block; margin-top:4px; font-size:11.5px; padding:2px 8px; }
     #cap-modal .foot { display:flex; align-items:center; gap:10px; margin-top:14px; }
     #cap-modal .foot .spacer { flex:1; }
 
@@ -380,6 +381,8 @@
     #ex-preview { background:#0a0d11; border:1px solid #232a33; border-radius:8px; padding:8px 9px; font-size:11px; line-height:1.35; max-height:210px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
     #extract-modal .foot { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
     #extract-modal .foot .spacer { flex:1; }
+    #ex-confirm-all { border:1px solid #8a3a3f; background:#2a1215; border-radius:9px; padding:9px 11px; margin:8px 0 0; color:#ffd6d8; }
+    #ex-confirm-all .row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; flex-wrap:wrap; }
     #ex-file { opacity:.7; font-size:11px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 
     /* ---- Butler chat/activity log: system vs butler vs each AI vs to-ME. A
@@ -2059,6 +2062,13 @@
       </div>
       <div id="ex-counts" aria-live="polite">Loading preview…</div>
       <pre id="ex-preview" aria-label="Preview of the first lines"></pre>
+      <div id="ex-confirm-all" role="alertdialog" aria-labelledby="ex-confirm-all-text" hidden>
+        <div id="ex-confirm-all-text"></div>
+        <div class="row">
+          <button id="btn-extract-confirm-back">← Back</button>
+          <button id="btn-extract-confirm-all" class="danger">Yes, save everything</button>
+        </div>
+      </div>
       <div class="foot">
         <span id="ex-file"></span>
         <span class="spacer"></span>

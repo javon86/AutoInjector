@@ -1187,6 +1187,21 @@ async function testSelfTestConnectivity() {
   s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "selftest-error" && l.detail.site === "gemini" && l.detail.error === "REPLY_MISMATCH" && l.detail.capturedText.includes("unrelated reply")), "the Activity Log records the mismatch AND what was actually captured instead");
 
+  // Gemini RAN CODE to reverse it: the original token sits inside its code and
+  // the reversed token is the output (a real user's log) -- that's a good reply,
+  // not a too-broad reader. The prompt now also asks for no code or tools.
+  await resetAllParticipants();
+  const codePromise = call("selftest:run", { site: "gemini" });
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
+  const codeSent = sentLog("gemini")[0].text;
+  assert(/do not run code or use any tools/i.test(codeSent), "the self-test prompt asks for the reversed text without running code or tools");
+  const codeToken = extractSelftestToken(codeSent);
+  sayRaw("gemini", `Pythontoken = "${codeToken}"\nprint(token[::-1])\n\nCode output${reverseStr(codeToken)}\n\n${reverseStr(codeToken)}`);
+  const codeRes = await codePromise;
+  assert(codeRes.ok === true, `a reply that ran code (original only inside the code, reversed on its own line) passes (got ${JSON.stringify(codeRes)})`);
+  s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-ok" && l.detail.site === "gemini" && l.detail.ranCode === true), "the Activity Log notes the AI ran code to answer");
+
   // a send that never actually goes through is reported at the send stage, without waiting on any reply at all
   await resetAllParticipants();
   reg("chatgpt").webContents._forceSendFail = true;

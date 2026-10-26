@@ -24,6 +24,8 @@ const path = require("path");
 const fs = require("fs");
 const { pathToFileURL } = require("url");
 const SITES = require("./selectors");
+const { cleanReplyText } = require("./reply-clean");
+const { selftestPrompt, classifySelftestReply } = require("./selftest-verdict");
 const { buildSendScript, buildReadScript, buildFileInputFinderExpression, buildPickScript, buildLoginFillScript, buildProbeScript, isBareTagSelector } = require("./automation");
 const managerProvider = require("./manager-provider");
 const dbService = require("./db-service");
@@ -1838,15 +1840,14 @@ const testRunInFlight = new Set(); // sites currently in a connectivity "Test" r
 function makeSelftestToken() {
   return "AUTOINJ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 }
-async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs) {
+// The verdict itself lives in selftest-verdict.js: an AI that RAN CODE to reverse
+// the token (original inside its code, reversed as its own line) passes; a capture
+// that holds the sent message itself is still SELECTOR_TOO_BROAD.
+async function waitForTestReply(site, token, reversedToken, sentTs, timeoutMs, prompt) {
   const classify = (cap) => {
     if (!cap || cap.ts < sentTs) return null;
-    const hasReversed = cap.text.includes(reversedToken);
-    const hasOriginal = cap.text.includes(token);
-    if (hasReversed && hasOriginal) return { ok: false, error: "SELECTOR_TOO_BROAD", text: cap.text.slice(0, 200) };
-    if (hasReversed) return { ok: true };
-    if (hasOriginal) return { ok: false, error: "REPLY_ECHO", text: cap.text.slice(0, 200) };
-    return null;
+    try { return classifySelftestReply(String(cap.text || ""), token, reversedToken, prompt || ""); }
+    catch (_) { return null; }
   };
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -3763,6 +3764,11 @@ async function pollSite(site) {
     // Gemini's citation chips ("PDF", "+ 1") can land AFTER the [FROM:] tag and
     // hide it — drop them before any completion check sees the text (TR-17).
     let text = site === "gemini" ? stripUiChips((res && res.text) || "") : ((res && res.text) || "");
+    // Page chrome the read script couldn't skip by element ("ChatGPT said:",
+    // "Claude responded: …", Claude's thinking summary, "just now", Gemini's
+    // glued code labels) — cleaned here, before the envelope parser, the dedup
+    // key, the check-in matcher or the Akọwe bridge ever see the text.
+    try { text = cleanReplyText(site, text); } catch (_) {}
     const pend = state.pending[site];
     // The site's own "still generating" signal (its Stop button is showing, or
     // Send is disabled). This is the reliable "are they done speaking?" answer —
@@ -4850,6 +4856,9 @@ function knownSecrets() {
   for (const k of Object.keys(process.env)) if (/^AUTOINJECTOR_.*(KEY|TOKEN|SECRET)/i.test(k) && process.env[k]) out.push(process.env[k]);
   return out;
 }
+// The voice provider's messages show paths the same way (a damaged voice file's
+// onnxruntime error carries the full path to it).
+try { voiceProvider.setRedactionProvider(() => extractRedaction()); } catch (_) {}
 function extractRedaction() {
   const appDirs = [];
   try { appDirs.push(contentBaseFolder()); } catch (_) {}
@@ -4911,7 +4920,9 @@ ipcMain.handle("logs:extract-preview", (_evt, opts) => {
   try {
     const r = buildExtract(opts);
     if (!r.ok) return r;
-    return { ok: true, scope: r.scope, counts: r.counts, redactions: r.redactions, fileName: r.fileName, preview: r.preview, header: r.header, from: r.from, to: r.to, book: r.book };
+    const out = { ok: true, scope: r.scope, counts: r.counts, redactions: r.redactions, fileName: r.fileName, preview: r.preview, header: r.header, from: r.from, to: r.to, book: r.book, oldestAt: r.oldestAt };
+    if (r.scope === "everything") out.everything = logExtract.everythingSummary({ transcript: state.transcript, log: state.log });
+    return out;
   } catch (e) { return { ok: false, error: String(e) }; }
 });
 // TR-13: the Relay Trace on its own — { report, text }, or { save:true } to
@@ -4933,8 +4944,17 @@ ipcMain.handle("trace:report", (_evt, { save, reset } = {}) => {
     return { ok: true, report, text, file };
   } catch (e) { return { ok: false, error: String(e) }; }
 });
+// "Everything" holds every conversation ever saved — older private ones too — so
+// it is only written with an explicit second confirmation (opts.confirmEverything,
+// set by the dialog's "Yes, save everything" step). Without it nothing is saved and
+// the caller gets what it would contain, in words.
 ipcMain.handle("logs:extract-all", (_evt, opts) => {
   try {
+    if (opts && typeof opts === "object" && opts.scope === "everything" && opts.confirmEverything !== true) {
+      const sum = logExtract.everythingSummary({ transcript: state.transcript, log: state.log });
+      logEvent("extract-all-needs-confirm", { messages: sum.messages });
+      return { ok: false, error: "CONFIRM_EVERYTHING", messages: sum.messages, oldestAt: sum.oldestAt, message: `Everything would save ${sum.text}. Confirm to save it.` };
+    }
     const r = buildExtract(opts);
     if (!r.ok) { logEvent("extract-all-error", { error: r.error }); return r; }
     const file = outputManager.saveBuffer(outputManager.logsDir(), r.fileName, r.text);
@@ -5397,7 +5417,9 @@ async function runConnectivityTest(site) {
     const token = makeSelftestToken();
     const reversedToken = token.split("").reverse().join("");
     logEvent("selftest-started", { site, token, reversedToken });
-    const prompt = `[AutoInjector connectivity test -- not a real task, no need to elaborate] Reverse the letters of this token and reply with ONLY the reversed result, nothing else -- no punctuation, no explanation: ${token}`;
+    // Asks for the reversed text as plain words, without running code or tools
+    // (Gemini otherwise runs Python and shows the original token in its code).
+    const prompt = selftestPrompt(token);
     const sentTs = Date.now();
     const sendRes = await sendTextTo(site, prompt, null);
     if (!sendRes || !sendRes.ok) {
@@ -5405,8 +5427,8 @@ async function runConnectivityTest(site) {
       return { ok: false, stage: "send", error: (sendRes && sendRes.error) || "unknown" };
     }
     logEvent("selftest-waiting-for-reply", { site, token, timeoutMs: SELFTEST_TIMEOUT_MS });
-    const waitRes = await waitForTestReply(site, token, reversedToken, sentTs, SELFTEST_TIMEOUT_MS);
-    logEvent(waitRes.ok ? "selftest-ok" : "selftest-error", { site, token, error: waitRes.error || null, capturedText: waitRes.text || null });
+    const waitRes = await waitForTestReply(site, token, reversedToken, sentTs, SELFTEST_TIMEOUT_MS, prompt);
+    logEvent(waitRes.ok ? "selftest-ok" : "selftest-error", { site, token, error: waitRes.error || null, capturedText: waitRes.text || null, ranCode: waitRes.ranCode ? true : undefined });
     return { ok: waitRes.ok, stage: "reply", error: waitRes.error, text: waitRes.text };
   } finally {
     selftestInFlight.delete(site);
@@ -5641,6 +5663,40 @@ ipcMain.handle("voice:configure", (_evt, patch) => {
 // and how to start it or change the address) — the UI shows the message.
 ipcMain.handle("voice:speak", async (_evt, { text, who, voice } = {}) => voiceProvider.speak(text, { who, voice }));
 ipcMain.handle("voice:listen", async (_evt, opts = {}) => voiceProvider.listen(opts || {}));
+// One-click fix for a damaged voice model (VOICE_MODEL_DAMAGED: onnxruntime
+// couldn't load the .onnx — a corrupt or half-finished download). Re-fetches the
+// voice-model files with the same setup-manager download that got them first
+// (forced, size-checked, the old copy kept until the new one is complete), then
+// restarts the voice engine so it loads the fresh file. Progress streams over
+// "setup-progress" like any install.
+let voiceRedownloadInFlight = false;
+async function redownloadVoice() {
+  if (voiceRedownloadInFlight) return { ok: false, error: "ALREADY_RUNNING", message: "The voice is already being re-downloaded." };
+  voiceRedownloadInFlight = true;
+  const target = "voice-model";
+  try {
+    logEvent("voice-redownload-start", {});
+    // the running engine may hold the old file open (Windows won't replace it then)
+    let wasManaged = false;
+    try { wasManaged = !!voiceProvider.status().managed; if (wasManaged) voiceProvider.stopManaged(); } catch (_) {}
+    let r;
+    try { r = await setupManager.install(target, { force: true, onProgress: (line) => broadcast("setup-progress", { target, line }) }); }
+    catch (e) { r = { ok: false, error: String(e) }; }
+    if (r && r.ok) { try { await autoWireAfterSetup(target); } catch (e) { logEvent("setup-autowire-error", { target, error: String(e) }); } }
+    else if (wasManaged) { try { await startManagedVoice(setupManager.pythonBin()); } catch (_) {} }
+    refreshSetupStatus();
+    const err = r && r.error ? voiceProvider.redactPaths(String(r.error)) : null;
+    const message = r && r.ok ? "Downloaded a fresh copy of the voice and restarted the voice engine. Try speaking again." : `Couldn't re-download the voice: ${err || "failed"}. Check your internet connection and try again.`;
+    broadcast("setup-progress", { target, line: r && r.ok ? `✓ ${message}` : `⚠ ${message}`, done: true, ok: !!(r && r.ok) });
+    logEvent(r && r.ok ? "voice-redownload-ok" : "voice-redownload-failed", { error: err, severity: r && r.ok ? "info" : "error" });
+    return { ok: !!(r && r.ok), error: err || undefined, message };
+  } catch (e) {
+    return { ok: false, error: String(e), message: `Couldn't re-download the voice: ${voiceProvider.redactPaths(String(e))}` };
+  } finally {
+    voiceRedownloadInFlight = false;
+  }
+}
+ipcMain.handle("voice:redownload", async () => redownloadVoice());
 // OP-12: cheap connectivity check (GET /health on the voice address).
 ipcMain.handle("voice:check", async () => { try { return await voiceProvider.checkConnection(); } catch (e) { return { ok: false, reachable: false, error: String(e), message: `Couldn't check the voice service: ${e}` }; } });
 
@@ -5935,14 +5991,17 @@ async function butlerCapabilityTest() {
   if (capabilityTestInFlight) return { ok: false, error: "ALREADY_RUNNING" };
   capabilityTestInFlight = true;
   const checks = [];
-  const step = (name, ok, detail) => {
+  const step = (name, ok, detail, extra) => {
     const c = { name, ok, detail: detail || "" };
+    // extra: { tip, fix } — a specific fix-it hint and a one-click fix the pop-up
+    // shows as a button (e.g. fix.action "voice:redownload").
+    if (extra && typeof extra === "object") { if (extra.tip) c.tip = String(extra.tip); if (extra.fix && extra.fix.action) c.fix = { action: String(extra.fix.action), label: String(extra.fix.label || "Fix it") }; }
     checks.push(c);
     // Full detail goes to the one Activity Log (via the normal log broadcast)
     // with a ready-to-read summary; a lightweight per-step event also drives the
     // live "reel" of chips in the butler panel while the sweep runs.
     const mark = ok === true ? "✅" : ok === false ? "❌" : "⚪";
-    broadcast("capability-test-step", { name, ok, detail: c.detail, index: checks.length });
+    broadcast("capability-test-step", { name, ok, detail: c.detail, index: checks.length, fix: c.fix });
     logEvent("capability-test-step", { name, ok, detail: String(detail || "").slice(0, 200), summary: `${mark} ${name}${detail ? " — " + detail : ""}`, severity: ok === false ? "error" : "info" });
     return c;
   };
@@ -6053,7 +6112,11 @@ async function butlerCapabilityTest() {
         step("Voice (speak)", false, `couldn't speak: ${msg}`);
       } else {
         const r = await _withTimeout(voiceProvider.speak("Capability test.", { who: "butler" }), 15000);
-        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${(r && (r.message || r.error)) || "failed"}`);
+        // A damaged voice file comes back as VOICE_MODEL_DAMAGED with a fix: offer
+        // the one-click re-download instead of a raw onnxruntime error.
+        const damaged = !!(r && r.error === "VOICE_MODEL_DAMAGED");
+        step("Voice (speak)", !!(r && r.ok), r && r.ok ? "spoke a test phrase" : `couldn't speak: ${voiceProvider.redactPaths((r && (r.message || r.error)) || "failed")}`,
+          damaged ? { tip: "The voice file is damaged or incomplete — press Re-download the voice to fetch a fresh copy.", fix: r.fix || { action: "voice:redownload", label: "Re-download the voice" } } : null);
       }
     } catch (e) { step("Voice (speak)", false, String(e)); }
 

@@ -60,7 +60,7 @@ async function main() {
   // Point the voice-model target's files at the stub by overriding just its urls.
   const t = sm.get('voice-model');
   const realFiles = t.files.map((f) => ({ ...f }));
-  t.files.forEach((f) => { f.url = `http://127.0.0.1:${port}/${f.name}`; });
+  t.files.forEach((f) => { f.url = `http://127.0.0.1:${port}/${f.name}`; delete f.minBytes; delete f.json; });
   sm.configure({ modelsDir: (cat) => { const d = path.join(modelsBase, cat); fs.mkdirSync(d, { recursive: true }); return d; } });
   const dl = await sm.install('voice-model', { onProgress: () => {} });
   assert(dl.ok, 'the download target resolves ok against a reachable server');
@@ -68,6 +68,51 @@ async function main() {
   const det = await sm.detect('voice-model');
   assert(det.installed === true, 'detect() sees the downloaded files as installed');
   stub.close();
+
+  console.log('\n== a damaged voice model is detected and re-downloaded (size checks, force) ==');
+  {
+    // a server that serves a "model" of a known size; can also cut the body short
+    let cut = false, hits = 0;
+    const BODY = 'M'.repeat(2048);
+    const srv = http.createServer((req, res) => {
+      hits++;
+      if (/\.json$/.test(req.url)) { const j = '{"audio":{"sample_rate":22050},"pad":"' + 'x'.repeat(600) + '"}'; res.writeHead(200, { 'Content-Length': String(Buffer.byteLength(j)) }); return res.end(j); }
+      res.writeHead(200, { 'Content-Length': String(BODY.length) });
+      if (cut) { res.write(BODY.slice(0, 100)); setTimeout(() => res.destroy(), 20); return; }
+      res.end(BODY);
+    });
+    const p2 = await listen(srv);
+    const base2 = fs.mkdtempSync(path.join(os.tmpdir(), 'setupmodels2-'));
+    sm.configure({ modelsDir: (cat) => { const d = path.join(base2, cat); fs.mkdirSync(d, { recursive: true }); return d; } });
+    t.files.forEach((f, i) => { f.url = `http://127.0.0.1:${p2}/${f.name}`; f.minBytes = i === 0 ? 1024 : 500; if (i === 1) f.json = true; });
+    const onnx = path.join(base2, 'voice', 'en_US-lessac-medium.onnx');
+    fs.mkdirSync(path.dirname(onnx), { recursive: true });
+    fs.writeFileSync(onnx, 'tiny'); // a partial download from before
+    fs.writeFileSync(onnx + '.json', '{"ok":true,"pad":"' + 'y'.repeat(600) + '"}');
+    const d0 = await sm.detect('voice-model');
+    assert(d0.installed === false && d0.damaged === true && /damaged or incomplete/.test(d0.reason), `detect() reports a too-small model as damaged (got ${JSON.stringify(d0)})`);
+    assert(sm.fileProblem(onnx, t.files[0]) && !sm.fileProblem(onnx + '.json', t.files[1]), 'fileProblem flags the short .onnx, passes a valid .json');
+    const lines2 = [];
+    const r1 = await sm.install('voice-model', { onProgress: (l) => lines2.push(l) });
+    assert(r1.ok && fs.statSync(onnx).size === 2048, 'install() fetches a damaged file again instead of "already present"');
+    assert(lines2.some((l) => /damaged/.test(l)), 'progress says the file was damaged');
+    // force: re-download even when the file looks fine (onnxruntime said it can't load it)
+    hits = 0;
+    const r2 = await sm.install('voice-model', { force: true, onProgress: () => {} });
+    assert(r2.ok && hits === 2 && /Re-downloaded/.test(r2.message), 'force re-downloads both files');
+    // a dropped connection mid-download is a failure, and the old copy is kept
+    cut = true;
+    const r3 = await sm.install('voice-model', { force: true, onProgress: () => {} });
+    assert(!r3.ok && /download failed/.test(r3.error), `a body cut short is reported as a failed download (got ${JSON.stringify(r3)})`);
+    assert(fs.statSync(onnx).size === 2048, 'the previous good copy is left in place');
+    assert(!fs.existsSync(onnx + '.part'), 'no .part file is left behind');
+    cut = false;
+    // a broken .json is caught too
+    fs.writeFileSync(onnx + '.json', 'not json'.repeat(100));
+    const d1 = await sm.detect('voice-model');
+    assert(d1.installed === false && /not valid JSON/.test(d1.reason), 'a .json that does not parse is damaged');
+    srv.close();
+  }
   t.files.splice(0, t.files.length, ...realFiles); // restore real urls for other tests/runs
 
   console.log('\n== ollama target validates the model name and delegates to the puller ==');
