@@ -234,6 +234,7 @@ const state = {
     costLimit: 5
   },
   sdManaged: { startWithApp: false, targetId: "" }, // 🎨 "Start Stable Diffusion with AutoInjector" (default off) + which package to start
+  chatImage: { freshChatPerSeries: false }, // 🎨 ChatGPT image engine: a new ChatGPT chat for each reference-view series (default: one chat, keeps the character)
   imageConfig: null, // Stable Diffusion settings mirror (imageProvider owns the live copy); persisted so the endpoint survives a restart
   videoConfig: null, // text-to-video settings mirror (videoProvider owns the live copy); persisted so the endpoint survives a restart
   voiceConfig: null, // voice settings the USER saved (voiceProvider owns the live copy); persisted so they survive a restart. Only set on a user change or a restore, so a managed/env-started shim's address isn't written as if the user chose it
@@ -687,6 +688,7 @@ function saveStateDebounced() {
         savedLogins: state.savedLogins, // safe to persist as-is -- every password in here is already safeStorage ciphertext, not plaintext
         managerConfig: sealManagerConfig(state.managerConfig), // AI-001: the API key is sealed (apiKeyEnc), never written plaintext
         sdManaged: state.sdManaged,
+        chatImage: state.chatImage,
         imageConfig: state.imageConfig || imageProvider.getSettings(), // Stable Diffusion endpoint/size — no secret, stored as-is
         videoConfig: state.videoConfig || videoProvider.getSettings(), // text-to-video endpoint/size — no secret, stored as-is
         voiceConfig: state.voiceConfig || null, // voice address/on-off/speaker voices/devices — no secret (the voice shim has no key), stored as-is
@@ -797,6 +799,7 @@ function loadPersistedState() {
     }
     state.nextLoginId = maxId + 1;
   }
+  if (snap.chatImage && typeof snap.chatImage === "object") state.chatImage = { freshChatPerSeries: !!snap.chatImage.freshChatPerSeries };
   if (snap.sdManaged && typeof snap.sdManaged === "object") {
     state.sdManaged = { startWithApp: !!snap.sdManaged.startWithApp, targetId: String(snap.sdManaged.targetId || "") };
   }
@@ -981,7 +984,7 @@ function siteNewChat(site) { return siteUrlOverride(site) || SITES[site].newChat
 // wins over it — the newest proven selector is used. While a 🔢 number teach runs,
 // what it just learned is used for its own follow-up message.
 const PICK_VERSION = 1;
-const PICK_ROLES_ALL = ["input", "send", "assistant", "user"];
+const PICK_ROLES_ALL = ["input", "send", "assistant", "user", "image"];
 const teachOverrides = {}; // site -> { input?, send? } (memory only, while a number teach runs)
 function effectiveOverrides(site) {
   const out = { ...(state.selectorOverrides[site] || {}) };
@@ -1612,6 +1615,34 @@ async function waitForPendingCapture(target, seq, fromSite, { noForce = false, i
 // AUTOINJECTOR_PANE_ZOOM env var, e.g. 1 for 100%).
 const DEFAULT_PANE_ZOOM = Math.max(0.4, Math.min(2, Number(process.env.AUTOINJECTOR_PANE_ZOOM) || 0.6));
 const paneZoom = {};
+// 🎨 ChatGPT image engine (chatgpt-image.js): while an image job holds the ChatGPT
+// pane, nothing else types into it (relays / Akọwe sends to ChatGPT wait, no check-in
+// starts) and its replies are held — never relayed, never nagged about tags. A short
+// grace after the job lets the last read of the finished turn be held too (it ends as
+// soon as that read is done, at most CHAT_IMAGE_GRACE_MS); waiting sends go in after it.
+const CHAT_IMAGE_SITE = "chatgpt";
+const CHAT_IMAGE_GRACE_MS = Number(process.env.AUTOINJECTOR_CHATIMG_GRACE_MS) || 8000;
+let chatImageHold = null; // { since, job } while a job runs
+let chatImageReleasedAt = 0;
+function chatImageHolds(site) { return site === CHAT_IMAGE_SITE && (!!chatImageHold || Date.now() - chatImageReleasedAt < CHAT_IMAGE_GRACE_MS); }
+// A reply read while an image job holds the pane: recorded as captured (so it is
+// never taken for a new, untagged reply later), shown nowhere, relayed nowhere.
+function holdImageReply(site, text, generating) {
+  state.pending[site] = { text, sinceTs: Date.now(), reprompted: true };
+  if (generating || !text) return;
+  const c = state.captured[site];
+  if (c && (c.text === text || c.rawText === text)) return;
+  const id = state.nextTurnId++;
+  state.captured[site] = { id, site, label: SITES[site].label, text, ts: Date.now(), pinned: false, imageJob: true };
+  markCaptured(site);
+  try { relayTrace.noteHeld(id, "image"); } catch (_) {}
+  if (state.waiting[site]) {
+    state.waiting[site] = false;
+    state.waitingSince[site] = null;
+    broadcast("waiting-changed", { site, waiting: false });
+  }
+  logEvent("image-reply-held", { site, chars: text.length });
+}
 function withSendQueue(target, fn) {
   const prior = sendQueues[target];
   const run = prior ? prior.then(fn, fn) : fn();
@@ -1635,6 +1666,17 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
     logEvent("send-error", { target, from: fromSite || null, error: "SITE_REPAIRING", note: "you are showing AutoInjector this AI's page right now — try again when that is done" });
     broadcast("send-error", { target, error: "SITE_REPAIRING" });
     return { ok: false, error: "SITE_REPAIRING" };
+  }
+  // 🎨 An image job holds ChatGPT: any other send to it waits until the picture is in
+  // (a withdrawn send stops waiting at once). The image job's own send passes.
+  if (!opts.chatImage && chatImageHolds(target)) {
+    logEvent("send-waits-image", { target, from: fromSite || null, note: "ChatGPT is drawing a picture — this message goes in when it is done" });
+    const t0 = Date.now();
+    while (chatImageHolds(target) && Date.now() - t0 < 30 * 60000) {
+      if (opts.cancelToken && opts.cancelToken.cancelled) return { ok: false, error: "CANCELLED" };
+      if (fromSite && !state.relayEnabled) return { ok: false, error: "RELAY_STOPPED" };
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
   const label = fromSite ? SITES[fromSite]?.label : null;
   const roleClause = state.customRole[target] ? `(You're playing the role of: ${state.customRole[target]}. Keep that in mind in your reply.)\n\n` : "";
@@ -3942,6 +3984,9 @@ async function pollSite(site) {
       broadcast("generation", { site, generating });
     }
 
+    // 🎨 An image job holds this pane: its turn belongs to the job (chatgpt-image.js).
+    if (chatImageHolds(site)) { holdImageReply(site, text, generating); return; }
+
     if (!text) { state.pending[site] = { text: "", sinceTs: Date.now(), reprompted: false }; return; }
 
     if (generating) {
@@ -5350,7 +5395,7 @@ ipcMain.handle("selector:clear", (_evt, { site, role }) => {
 // be saved at any time. Test it = a check-in. A saved pick that no longer matches the
 // page shows red ⚠️. The page script is self-repair.js pageKit (P37.1 general
 // selectors: it matches EVERY reply, never one message).
-const PICK_UI_ROLES = ["input", "send", "assistant"];
+const PICK_UI_ROLES = ["input", "send", "assistant", "image"]; // "image" = a picture ChatGPT made (chatgpt-image.js), ChatGPT only
 const pickDrafts = {}; // site -> { role: { selector, preview, pickedAt, count, latest } } (memory only — never logged)
 const pickRunning = {}; // site -> role being picked right now
 const PICK_TIMEOUT_MS = Number(process.env.AUTOINJECTOR_PICK_TIMEOUT_MS) || 90000;
@@ -5374,8 +5419,8 @@ async function pickerStatus(site) {
     if (d) st = "picked";
     else if (sel) {
       const c = check && check.ok && check.roles ? check.roles[role] : null;
-      // a saved reply pick on a page with no replies yet isn't "broken"
-      const stale = c && !c.ok && !(role === "assistant" && !(check.repliesOnPage > 0) && !c.bad);
+      // a saved reply pick on a page with no replies yet isn't "broken"; nor is a saved picture pick on a chat with no pictures
+      const stale = c && !c.ok && (role === "image" ? !!c.bad : !(role === "assistant" && !(check.repliesOnPage > 0) && !c.bad));
       st = stale ? "stale" : "saved";
     }
     items[role] = { state: st, preview: d ? d.preview : null, latest: d ? d.latest !== false : null, savedAt: sel ? (m ? m.savedAt || null : null) : null, how: sel ? (m ? m.how : "pick") : null, rev: m ? m.rev : null, picking: pickRunning[site] === role, selector: d ? d.selector : sel || null };
@@ -5394,7 +5439,7 @@ ipcMain.handle("picker:status", async (_evt, payload) => {
 ipcMain.handle("picker:start", async (_evt, payload) => {
   const site = payload && payload.site; const role = payload && payload.role;
   if (!SITES[site]) return { ok: false, error: "BAD_SITE" };
-  if (!PICK_UI_ROLES.includes(role)) return { ok: false, error: "BAD_ROLE" };
+  if (!PICK_UI_ROLES.includes(role) || (role === "image" && site !== CHAT_IMAGE_SITE)) return { ok: false, error: "BAD_ROLE" };
   const view = siteViews[site];
   if (!view || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
   if (selfRepair.teachActive(site)) return { ok: false, error: "TEACHING" };
@@ -5894,10 +5939,102 @@ function sdLibrary() {
   });
   return _sdLibrary;
 }
+// ---- 🎨 ChatGPT as the second image engine (chatgpt-image.js) -----------------
+// Types the request into the logged-in ChatGPT pane through sendTextTo (verified,
+// retried), reads the page until the picture is finished, takes its bytes with the
+// page's own session and saves it next to the SD pictures. One job at a time.
+const chatImageMod = require("./chatgpt-image");
+const CHAT_IMAGE_FETCH_TIMEOUT_MS = 120000;
+function chatImageReady() {
+  const p = akoweSiteProblem(CHAT_IMAGE_SITE);
+  if (!p || p.code === "CHECKING") return { ready: true, code: p ? p.code : "OK" }; // not checked yet: the job's own page read decides
+  return { ready: false, code: p.code, why: p.say };
+}
+async function chatImageRunPage(script) {
+  const view = siteViews[CHAT_IMAGE_SITE];
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return { ok: false, error: "NO_VIEW" };
+  const ms = /CHATIMG__ (fetch|convert) \*\//.test(script) ? CHAT_IMAGE_FETCH_TIMEOUT_MS : PAGE_SCRIPT_TIMEOUT_MS;
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve({ ok: false, error: "SCRIPT_TIMEOUT" }), ms); });
+  try {
+    const r = await Promise.race([Promise.resolve(view.webContents.executeJavaScript(script, true)), timeout]);
+    return r && typeof r === "object" ? r : { ok: false, error: "NO_RESULT" };
+  } catch (e) { return { ok: false, error: "SCRIPT_FAILED" }; }
+  finally { clearTimeout(timer); }
+}
+function chatImageSelectors() {
+  const S = SITES[CHAT_IMAGE_SITE] || {};
+  const ov = effectiveOverrides(CHAT_IMAGE_SITE);
+  const pre = (sel, list) => (sel ? [sel] : []).concat(list || []);
+  return { image: pre(ov.image, S.IMAGE_CANDIDATES), assistant: pre(ov.assistant, S.ASSISTANT_CANDIDATES), stop: pre(ov.stop, S.STOP_CANDIDATES), input: pre(ov.input, S.INPUT_CANDIDATES) };
+}
+let _chatImage = null;
+function chatImage() {
+  if (_chatImage) return _chatImage;
+  let nativeImage = null;
+  try { nativeImage = require("electron").nativeImage || null; } catch (_) { nativeImage = null; }
+  _chatImage = chatImageMod.createChatGptImage({
+    paneReady: () => chatImageReady(),
+    send: (text, o) => sendTextTo(CHAT_IMAGE_SITE, text, null, { bridge: true, automatic: true, chatImage: true, cancelToken: o && o.cancelToken }),
+    runPage: (script) => chatImageRunPage(script),
+    selectors: () => chatImageSelectors(),
+    hold: (on, info) => {
+      if (on) chatImageHold = { since: Date.now(), job: info && info.job };
+      else { chatImageHold = null; chatImageReleasedAt = Date.now(); }
+      broadcast("chatgpt-image", { busy: !!on });
+    },
+    // Before the hold: a reply ChatGPT is still writing / owes (a relay, an Akọwe prompt) finishes and is captured first.
+    prepare: async (token) => {
+      const S0 = CHAT_IMAGE_SITE; const t0 = Date.now(); let logged = false;
+      while (Date.now() - t0 < 180000 && !(token && token.cancelled)) {
+        const busy = state.generating[S0] || state.stopShown[S0] || !!sendQueues[S0] || hasUncapturedReply(S0) || akoweAwaitingReply(S0);
+        if (!busy) return;
+        if (!logged) { logged = true; logEvent("chatgpt-image-waits", { note: "ChatGPT is still busy with another message — the picture request goes in after it" }); }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    },
+    makeWay: (token) => selfRepairMakeWay(CHAT_IMAGE_SITE, token),
+    // One more read while the grace still holds the pane, so the finished turn is held, not nagged.
+    afterJob: async () => {
+      for (let i = 0; state.busy[CHAT_IMAGE_SITE] && i < 50; i++) await new Promise((r) => setTimeout(r, 40));
+      try { await pollSite(CHAT_IMAGE_SITE); } catch (_) {}
+      chatImageReleasedAt = 0; // the grace ends here: waiting messages for ChatGPT go in now, and their replies are normal replies again
+    },
+    newChat: () => selfRepairReload(CHAT_IMAGE_SITE, { home: true }),
+    fetchViaSession: async (url) => {
+      const view = siteViews[CHAT_IMAGE_SITE];
+      const ses = view && view.webContents && view.webContents.session;
+      if (!ses || typeof ses.fetch !== "function") return { ok: false, error: "NO_SESSION_FETCH" };
+      try {
+        const r = await ses.fetch(url, { credentials: "include" });
+        if (!r.ok) return { ok: false, error: `HTTP_${r.status}` };
+        return { ok: true, buffer: Buffer.from(await r.arrayBuffer()), mime: r.headers.get("content-type") || "" };
+      } catch (e) { return { ok: false, error: "SESSION_FETCH_FAILED", detail: String((e && e.message) || e).slice(0, 200) }; }
+    },
+    toPng: (buf) => {
+      if (!nativeImage || typeof nativeImage.createFromBuffer !== "function") return null;
+      try { const im = nativeImage.createFromBuffer(buf); return im && !im.isEmpty() ? im.toPNG() : null; } catch (_) { return null; }
+    },
+    imagesDir: () => outputManager.imagesDir(),
+    recordImage: (e) => dbService.recordImage(e),
+    log: (t, d) => logEvent(t, d),
+    fileUrl: (p) => { try { return pathToFileURL(p).href; } catch (_) { return ""; } },
+    options: {
+      freshChatPerSeries: !!(state.chatImage && state.chatImage.freshChatPerSeries),
+      timeoutMs: Number(process.env.AUTOINJECTOR_CHATIMG_TIMEOUT_MS) || undefined,
+      pollMs: Number(process.env.AUTOINJECTOR_CHATIMG_POLL_MS) || undefined,
+      textSettleMs: Number(process.env.AUTOINJECTOR_CHATIMG_SETTLE_MS) || undefined,
+      noImageMs: Number(process.env.AUTOINJECTOR_CHATIMG_NOIMAGE_MS) || undefined,
+    },
+  });
+  return _chatImage;
+}
 let _sdStudio = null;
 function sdStudio() {
   if (_sdStudio) return _sdStudio;
   _sdStudio = createSdStudio({
+    chatgpt: chatImage(),
+    persistChatgpt: (o) => { state.chatImage = { freshChatPerSeries: !!(o && o.freshChatPerSeries) }; saveStateDebounced(); },
     imageProvider,
     library: sdLibrary(),
     imagesDir: () => outputManager.imagesDir(),
@@ -5944,6 +6081,11 @@ ipcMain.handle("sd:workflow-get", sdSafe((a) => sdStudio().workflowGet(a.id)));
 ipcMain.handle("sd:workflow-save", sdSafe((a) => sdStudio().workflowSave(a.workflow || {})));
 ipcMain.handle("sd:workflow-delete", sdSafe((a) => sdStudio().workflowDelete(a.id)));
 ipcMain.handle("sd:workflow-run", sdSafe((a) => sdStudio().runWorkflow(a, "images-tab:workflow")));
+// 🎨 Both engines (Stable Diffusion / ChatGPT / Auto) + reference views and sheets — the same path as POST /image/request.
+ipcMain.handle("sd:request", sdSafe((a) => sdStudio().requestFrom(a, "images-tab")));
+ipcMain.handle("sd:chatgpt-status", sdSafe(() => sdStudio().chatgptStatus()));
+ipcMain.handle("sd:chatgpt-cancel", sdSafe(() => sdStudio().chatgptCancel()));
+ipcMain.handle("sd:chatgpt-settings", sdSafe((a) => sdStudio().chatgptSettings({ freshChatPerSeries: a.freshChatPerSeries, timeoutMs: a.timeoutMs })));
 ipcMain.handle("sd:capabilities", sdSafe(() => sdApiMod.get() ? sdApiMod.get().capabilities() : { ok: false, error: "NOT_WIRED" }));
 ipcMain.handle("sdlib:list", sdSafe((a) => sdStudio().libList(a.filters || {})));
 ipcMain.handle("sdlib:scan", sdSafe(() => sdStudio().libScan()));
@@ -6829,6 +6971,7 @@ function selfRepairBusy(site, level) {
   try { if (typeof view.webContents.isLoading === "function" && view.webContents.isLoading()) return "not_ready"; } catch (_) {}
   if (state.generating[site] || state.stopShown[site]) return "busy";
   if (sendQueues[site]) return "sending";
+  if (chatImageHolds(site)) return "image"; // 🎨 ChatGPT is drawing a picture for an image job
   try { const st = akoweBridge && akoweBridge.status(); if (st && st.active && st.active[site]) return "akowe"; } catch (_) {}
   if (akoweAwaitingReply(site)) return "akowe"; // a typed Akọwe prompt (incl. its late window) owes its answer
   if (forceAcceptUntagged.has(site)) return "sending";
@@ -7627,6 +7770,18 @@ function akoweServerLogFile() {
   try { dir = outputManager.logsDir(); } catch (_) {}
   return path.join(dir || userDataDir(), "akowe-server.log");
 }
+// Akọwe's Character Forge asks this app's service bridge for pictures (POST /image/request): tell the
+// Akọwe we start where the bridge is and its token, so the author never has to paste them.
+function akoweChildEnv() {
+  const env = Object.assign({}, process.env);
+  try {
+    const port = (bridgeRuntime && bridgeRuntime.port) || Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
+    if (!env.AKOWE_IMAGE_BRIDGE) env.AKOWE_IMAGE_BRIDGE = `http://127.0.0.1:${port}`;
+    const token = bridgeToken();
+    if (token && !env.AUTOINJECTOR_BRIDGE_TOKEN) env.AUTOINJECTOR_BRIDGE_TOKEN = token;
+  } catch (_) { /* no bridge info: Akọwe falls back to its own setting */ }
+  return env;
+}
 function initAkoweServer() {
   if (akoweServer) return akoweServer;
   const ms = (k) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? n : undefined; };
@@ -7637,6 +7792,7 @@ function initAkoweServer() {
     onChange: (st) => akoweServerChanged(st),
     healthTimeoutMs: ms("AUTOINJECTOR_AKOWE_HEALTH_MS"),
     reuseWatchMs: ms("AUTOINJECTOR_AKOWE_WATCH_MS"),
+    env: akoweChildEnv(),
   });
   return akoweServer;
 }

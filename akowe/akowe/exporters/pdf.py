@@ -101,6 +101,17 @@ class PdfWriter:
         return bytes(out)
 
 
+def _rgb(color, op: str) -> str:
+    """A colour as PDF operands: (r, g, b) 0-255 ints or 0-1 floats, or "#rrggbb"; op is rg (fill) or RG (stroke)."""
+    if isinstance(color, str):
+        c = color.lstrip("#")
+        color = tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (float(v) for v in color)
+    if max(r, g, b) > 1:
+        r, g, b = r / 255.0, g / 255.0, b / 255.0
+    return f"{num(r)} {num(g)} {num(b)} {op}"
+
+
 def image_matrix(orientation: int, x: float, y: float, dw: float, dh: float) -> tuple:
     """cm matrix that maps the image unit square onto the display box (x, y, dw, dh), applying the EXIF
     orientation of the stored pixels (1 = as stored; 2-8 mirror/rotate as cameras record them)."""
@@ -159,11 +170,29 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
         content = bytearray()
         if bleed:
             content += f"1 0 0 1 {num(bleed)} {num(bleed)} cm\n".encode("ascii")
+        pw, ph = page.size if page.size else (page_width, page_height)
+        if page.background:  # a full-bleed page colour (the dossier's dark pages)
+            content += (f"q {_rgb(page.background, 'rg')} 0 0 {num(pw + 2 * bleed)} {num(ph + 2 * bleed)} re f Q\n"
+                        ).encode("ascii")
         for op in page.ops:
             if op[0] == "text":
-                _, font, size, x, y, text, tw = op
-                content += (f"BT /{font_objs[font][0]} {num(size)} Tf {num(tw)} Tw {num(x)} {num(y)} Td ").encode("ascii")
+                _, font, size, x, y, text, tw = op[:7]
+                color = op[7] if len(op) > 7 else None
+                content += (f"BT /{font_objs[font][0]} {num(size)} Tf {num(tw)} Tw "
+                            + (f"{_rgb(color, 'rg')} " if color else "") + f"{num(x)} {num(y)} Td ").encode("ascii")
                 content += pdf_string(text) + b" Tj ET\n"
+            elif op[0] == "rect":
+                _, x, y, rw, rh, fill, stroke, lw = op
+                if not fill and not stroke:
+                    continue
+                paint = "B" if fill and stroke else "f" if fill else "S"
+                content += ("q " + (f"{_rgb(fill, 'rg')} " if fill else "") + (f"{_rgb(stroke, 'RG')} " if stroke else "")
+                            + (f"{num(lw)} w " if stroke else "") + f"{num(x)} {num(y)} {num(rw)} {num(rh)} re {paint} Q\n"
+                            ).encode("ascii")
+            elif op[0] == "line":
+                _, x0, y0, x1, y1, stroke, lw = op
+                content += (f"q {_rgb(stroke, 'RG')} {num(lw)} w {num(x0)} {num(y0)} m {num(x1)} {num(y1)} l S Q\n"
+                            ).encode("ascii")
             elif op[0] == "img":
                 _, key, x, y, dw, dh, clip = op
                 content += b"q\n"
@@ -188,10 +217,11 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
             annots.append(w.add((f"<< /Type /Annot /Subtype /Link /Rect [{num(x0 + bleed)} {num(y0 + bleed)} "
                                  f"{num(x1 + bleed)} {num(y1 + bleed)}] /Border [0 0 0] /Dest {pdf_name(hid)} >>")
                                 .encode("ascii")))
-        boxes = f"/MediaBox [0 0 {num(mw)} {num(mh)}]"
+        pmw, pmh = (pw + 2 * bleed, ph + 2 * bleed) if page.size else (mw, mh)
+        boxes = f"/MediaBox [0 0 {num(pmw)} {num(pmh)}]"
         if bleed:
-            boxes += (f" /BleedBox [0 0 {num(mw)} {num(mh)}] /TrimBox [{num(bleed)} {num(bleed)} "
-                      f"{num(bleed + page_width)} {num(bleed + page_height)}]")
+            boxes += (f" /BleedBox [0 0 {num(pmw)} {num(pmh)}] /TrimBox [{num(bleed)} {num(bleed)} "
+                      f"{num(bleed + pw)} {num(bleed + ph)}]")
         body = f"<< /Type /Page /Parent {pages_obj} 0 R {boxes} /Resources {res} /Contents {content_obj} 0 R"
         if annots:
             body += " /Annots [" + " ".join(f"{a} 0 R" for a in annots) + "]"

@@ -24,7 +24,7 @@ const LENGTHS = ['short_story', 'novelette', 'novella', 'novel'];
 const RULE_KINDS = ['hard_rule', 'seen', 'belief', 'mystery'];
 const DETAIL_KINDS = ['work', 'weather', 'institution', 'people', 'economy'];
 const PROFILE_KEYS = ['title', 'author', 'genre', 'audience', 'length', 'tone', 'idea', 'chapters'];
-const AKOWE_PAGES = { book: 'book', report: 'report', grid: 'grid', journal: 'journal', world: 'world', review: 'review', home: null, shelf: null };
+const AKOWE_PAGES = { book: 'book', report: 'report', grid: 'grid', journal: 'journal', world: 'world', review: 'review', forge: 'forge', home: null, shelf: null };
 const OUTPUT_CATEGORIES = ['images', 'videos', 'books', 'logs', 'uploads'];
 
 // ----------------------------------------------------------------------------- small helpers
@@ -305,20 +305,167 @@ def({
 });
 def({
   name: 'open_akowe_page', title: 'Open an Akọwe page', group: 'books',
-  description: 'Show a page of the book in the 📖 Akọwe tab: book (checklist), report, grid (scene grid), journal, world, review, or home/shelf. Read-only (it only changes what is shown).',
+  description: 'Show a page of the book in the 📖 Akọwe tab: book (checklist), report, grid (scene grid), journal, world, review, forge (Character Forge dossiers; with "character" that dossier), or home/shelf. Read-only (it only changes what is shown).',
   args: { type: 'object', required: ['page'], properties: {
     page: { type: 'string', enum: Object.keys(AKOWE_PAGES) },
     project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', maxLength: 120, description: 'Only with page "forge": open this character\'s dossier' },
   }, additionalProperties: false },
   async run(a, ctx) {
     let hash = a.page === 'shelf' ? '#/shelf' : '#/';
-    if (AKOWE_PAGES[a.page]) {
+    if (a.page === 'forge' && a.character) {
+      const r = await resolveDossier(ctx, a);
+      if (!r.ok) return r;
+      hash = `#/p/${enc(r.pid)}/main/forge/${enc(r.d.record_id)}`;
+    } else if (AKOWE_PAGES[a.page]) {
       const b = await resolveBook(ctx, a);
       if (!b.ok) return b;
       hash = `#/p/${enc(b.pid)}/main/${AKOWE_PAGES[a.page]}`;
     }
     const r = await ctx.openAkowePage(hash);
     return r && r.ok ? { ok: true, message: `Showing the ${a.page} page in the 📖 Akọwe tab.` } : { ok: false, error: (r && r.error) || 'OPEN_FAILED', message: "I couldn't show that page — is Akọwe running (📖 Akọwe tab)?" };
+  },
+});
+// ---- 🗂 Character Forge dossiers (Akọwe; the dark "Moki Vey" look) --------------------------------------
+const FORGE_VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
+const IMAGE_ENGINES = ['auto', 'sd', 'chatgpt'];
+/** The book + the character's dossier entry (by name or record id). */
+async function resolveDossier(ctx, a) {
+  const b = await resolveBook(ctx, a);
+  if (!b.ok) return b;
+  const list = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/forge/characters`);
+  if (!okStatus(list)) return akoweError(list);
+  const all = (list.json && (list.json.characters || list.json.dossiers || (Array.isArray(list.json) ? list.json : null))) || [];
+  if (!a.character) return { ok: true, pid: b.pid, list: all };
+  const want = String(a.character).trim().toLowerCase();
+  const d = all.find((x) => x.record_id === a.character || String(x.code || '').toLowerCase() === want)
+    || all.find((x) => String(x.name || '').toLowerCase() === want) || all.find((x) => String(x.name || '').toLowerCase().includes(want));
+  if (!d) return { ok: false, error: 'NO_CHARACTER', message: `I couldn't find a character called ${q(a.character)}. Characters: ${all.map((x) => x.name).join(', ') || 'none yet'}.` };
+  return { ok: true, pid: b.pid, list: all, d };
+}
+function dossierBrief(j) {
+  if (!j) return null;
+  const fields = []; for (const s of j.sections || []) for (const f of s.fields || []) fields.push(f);
+  const by = (st) => fields.filter((f) => f.status === st && str(f.text, 1)).length;
+  const art = j.art || {}; const views = art.views || {};
+  return {
+    record_id: j.record_id, name: j.name, code: j.code, revision: j.revision, readiness: j.readiness, tagline: clip(j.tagline, 120),
+    fields: { filled: fields.filter((f) => str(f.text, 1)).length, empty: fields.filter((f) => !str(f.text, 1)).length, proposed: by('proposed'), approved: by('approved'), supplied: by('supplied') },
+    sections: (j.sections || []).map((s) => ({ n: s.n, title: s.title, proposed: (s.fields || []).filter((f) => f.status === 'proposed').map((f) => f.key) })),
+    art: { portrait: !!art.portrait, sheet: !!art.sheet, views_done: FORGE_VIEWS.filter((v) => views[v]), views_missing: FORGE_VIEWS.filter((v) => !views[v]) },
+  };
+}
+def({
+  name: 'character_dossier', title: 'Character Forge: read a dossier', group: 'books', book: true,
+  description: 'Read Character Forge dossiers (deep character profiles with portrait + ten-view art): without "character" the list; with it that dossier\'s state (filled / proposed fields per section, readiness, which art exists). With "section" also that section\'s text.',
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', maxLength: 120, description: 'Name, record id or code (CH-001)' },
+    section: { type: 'string', maxLength: 60, description: 'Optional: a section number or title to read in full' },
+  }, additionalProperties: false },
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    if (!r.d) return { ok: true, message: `${r.list.length} dossier(s).`, data: { project_id: r.pid, dossiers: r.list.slice(0, 40).map((x) => ({ name: x.name, code: x.code, readiness: x.readiness, has_portrait: !!x.has_portrait, views_done: x.views_done })) } };
+    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`);
+    if (!okStatus(g)) return akoweError(g);
+    const data = dossierBrief(g.json);
+    if (a.section) {
+      const want = String(a.section).trim().toLowerCase();
+      const s = (g.json.sections || []).find((x) => String(x.n) === want.replace(/^0+/, '') || String(x.title || '').toLowerCase().includes(want) || x.key === want);
+      if (s) data.section = { n: s.n, title: s.title, fields: (s.fields || []).map((f) => ({ key: f.key, label: f.label, letters: f.letters, status: f.status, protected: !!f.protected, text: clip(f.text, 600) })) };
+      else data.section_missing = `No section ${q(a.section)}.`;
+    }
+    return { ok: true, message: `${data.name} (${data.code}, ${data.readiness}).`, data };
+  },
+});
+def({
+  name: 'forge_character', title: 'Character Forge: invent the rest', group: 'books', changes: true, book: true,
+  description: 'Fill a character\'s empty dossier fields with AI proposals (appearance, inner life, voice, fighting, powers, skills, backstory, storyline, continuity…). Supplied and protected text is never changed; everything new is a PROPOSAL the author approves. Runs in the background.',
+  args: { type: 'object', required: ['character'], properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', minLength: 1, maxLength: 120 },
+  }, additionalProperties: false },
+  describe: (a) => `Let the book's AI fill ${q(a.character)}'s empty dossier fields as proposals (nothing you wrote or protected changes; you approve each proposal).`,
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/forge`, {});
+    if (!okStatus(p)) return akoweError(p);
+    return { ok: true, message: `Inventing the rest of ${r.d.name}'s dossier in the background. The new details arrive as proposals for you to approve.`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
+  },
+});
+def({
+  name: 'approve_dossier', title: 'Character Forge: approve proposals', group: 'books', changes: true, book: true,
+  description: 'Approve proposed dossier fields (all, or the listed field keys). Approved details become part of the character.',
+  args: { type: 'object', required: ['character'], properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', minLength: 1, maxLength: 120 },
+    fields: { type: 'array', maxItems: 120, items: { type: 'string', maxLength: 60 }, description: 'Field keys; leave out to approve every proposal' },
+  }, additionalProperties: false },
+  describe: (a) => (a.fields && a.fields.length ? `Approve ${a.fields.length} proposed field(s) on ${q(a.character)}'s dossier: ${a.fields.slice(0, 8).join(', ')}${a.fields.length > 8 ? '…' : ''}.` : `Approve EVERY proposed field on ${q(a.character)}'s dossier.`),
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/approve`, a.fields && a.fields.length ? { fields: a.fields } : { all: true });
+    if (!okStatus(p)) return akoweError(p);
+    return { ok: true, message: clip((p.json && p.json.message) || 'Approved.', 200), data: { readiness: p.json && p.json.readiness, revision: p.json && p.json.revision } };
+  },
+});
+def({
+  name: 'edit_dossier', title: 'Character Forge: edit dossier fields', group: 'books', changes: true, book: true,
+  description: 'Write dossier fields yourself (the author\'s words, status "supplied"). fields = { "<field_key>": "text" } — keys from character_dossier with "section".',
+  args: { type: 'object', required: ['character', 'fields'], properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', minLength: 1, maxLength: 120 },
+    fields: { type: 'object', description: 'field_key -> new text (max 1200 characters each)' },
+    protect: { type: 'boolean', description: 'Also lock these fields so "invent the rest" never changes them' },
+  }, additionalProperties: false },
+  describe: (a) => `Set ${Object.keys(a.fields || {}).length} field(s) on ${q(a.character)}'s dossier (${Object.keys(a.fields || {}).slice(0, 6).join(', ')})${a.protect ? ' and lock them' : ''}.`,
+  async check(a) {
+    const keys = Object.keys(a.fields || {});
+    if (!keys.length || keys.length > 60) return { ok: false, error: 'give 1–60 fields' };
+    for (const k of keys) { if (!/^[a-z0-9_]{1,60}$/.test(k)) return { ok: false, error: `"${str(k, 40)}" is not a field key` }; if (typeof a.fields[k] !== 'string' || a.fields[k].length > 1200) return { ok: false, error: `${k} must be text up to 1200 characters` }; }
+    return { ok: true };
+  },
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    const g = await ctx.akowe('GET', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`);
+    if (!okStatus(g)) return akoweError(g);
+    const where = {}; for (const s of (g.json && g.json.sections) || []) for (const f of s.fields || []) where[f.key] = s.key;
+    const unknown = Object.keys(a.fields).filter((k) => !where[k]);
+    if (unknown.length) return { ok: false, error: 'UNKNOWN_FIELD', message: `The dossier has no field ${unknown.map(q).join(', ')}. Ask character_dossier with a section to see the keys.` };
+    const sections = {};
+    for (const [k, text] of Object.entries(a.fields)) { sections[where[k]] = sections[where[k]] || {}; sections[where[k]][k] = Object.assign({ text }, a.protect ? { protected: true } : {}); }
+    const p = await ctx.akowe('PUT', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}`, { sections });
+    if (!okStatus(p)) return akoweError(p);
+    return { ok: true, message: `Saved ${Object.keys(a.fields).length} field(s) on ${r.d.name}'s dossier.` };
+  },
+});
+def({
+  name: 'make_character_art', title: 'Character Forge: make the portrait / ten views', group: 'books', changes: true, book: true,
+  description: 'Make a character\'s dossier art: the portrait, any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
+  args: { type: 'object', required: ['character', 'what'], properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    character: { type: 'string', minLength: 1, maxLength: 120 },
+    what: { type: 'string', enum: ['portrait', 'views', 'sheet'] },
+    engine: { type: 'string', enum: IMAGE_ENGINES },
+    views: { type: 'array', maxItems: 10, items: { type: 'string', enum: FORGE_VIEWS }, description: 'Only with what="views": which ones (default: the missing ones)' },
+  }, additionalProperties: false },
+  describe: (a) => {
+    const eng = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'Stable Diffusion if connected, else ChatGPT' }[a.engine || 'auto'];
+    const what = a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
+    return `Make ${what} for ${q(a.character)}'s dossier with ${eng}. It runs in the background and the pictures are saved into the book.`;
+  },
+  async run(a, ctx) {
+    const r = await resolveDossier(ctx, a);
+    if (!r.ok) return r;
+    const body = { what: a.what, engine: a.engine || 'auto' };
+    if (a.what === 'views' && a.views && a.views.length) body.views = a.views;
+    const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/art`, body);
+    if (!okStatus(p)) return akoweError(p);
+    return { ok: true, message: `Making ${a.what === 'views' ? 'the reference views' : `the ${a.what}`} for ${r.d.name} in the background (${body.engine === 'chatgpt' ? 'ChatGPT takes about a minute per picture' : 'watch the 🎨 Images tab'}).`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
   },
 });
 def({
@@ -350,22 +497,32 @@ def({
 
 // ---- 🎨 Images ----------------------------------------------------------------------------------
 def({
-  name: 'generate_image', title: 'Generate an image', group: 'images', changes: true, allowAlways: true, timeoutMs: 240000,
-  description: 'Make a picture from a description with the local image generator (Stable Diffusion). Optional size, style and character.',
-  args: { type: 'object', required: ['prompt'], properties: {
+  name: 'generate_image', title: 'Generate an image', group: 'images', changes: true, allowAlways: true, timeoutMs: 480000,
+  description: 'Make a picture from a description. engine: "sd" = the local Stable Diffusion, "chatgpt" = ChatGPT\'s own image generation in its logged-in pane (30–180 s), "auto" (default) = SD when connected, else ChatGPT. For a character\'s reference pictures: purpose "portrait", purpose "view" with one view (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend — AutoInjector adds the framing), or purpose "sheet" (one turnaround sheet with all ten). Optional size, style, character (their character lock is used) and appearance.',
+  args: { type: 'object', properties: {
     prompt: { type: 'string', minLength: 2, maxLength: 1000 },
     width: { type: 'integer', minimum: 256, maximum: 2048 },
     height: { type: 'integer', minimum: 256, maximum: 2048 },
     style: { type: 'string', maxLength: 200 },
     character: { type: 'string', maxLength: 200, description: 'A character name: their saved character lock is used when there is one' },
+    appearance: { type: 'string', maxLength: 1000, description: 'What the character looks like, in words' },
     negative_prompt: { type: 'string', maxLength: 1000 },
     loras: { type: 'array', maxItems: 4, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, weight: { type: 'number' } }, additionalProperties: false } },
+    engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'] },
+    purpose: { type: 'string', enum: ['free', 'portrait', 'cover', 'scene', 'illustration', 'view', 'sheet'] },
+    view: { type: 'string', enum: ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'] },
+    new_chat: { type: 'boolean', description: 'ChatGPT engine: start a fresh ChatGPT chat first' },
   }, additionalProperties: false },
-  describe: (a) => `Make an image of ${q(a.prompt)}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}, and save it in the images folder.`,
+  check(a) {
+    if (!a.prompt && !a.character && !a.appearance) return { ok: false, error: 'say what to draw (prompt), or give a character / appearance' };
+    if (a.purpose === 'view' && !a.view) return { ok: false, error: 'purpose "view" needs a view (front, side, back, …)' };
+    return { ok: true, args: a };
+  },
+  describe: (a) => `Make ${a.purpose === 'sheet' ? 'a turnaround sheet' : a.purpose === 'view' ? `the ${String(a.view || '').replace(/_/g, ' ')} reference view` : a.purpose === 'portrait' ? 'a portrait' : 'an image'}${a.prompt ? ` of ${q(a.prompt)}` : ''}${a.width && a.height ? ` at ${a.width}×${a.height}` : ''}${a.style ? `, style ${q(a.style)}` : ''}${a.character ? `, with ${q(a.character)} (their character lock if saved)` : ''}${a.appearance ? ` (${clip(a.appearance, 120)})` : ''}${a.loras && a.loras.length ? `, LoRAs ${a.loras.map((l) => l.name).join(', ')}` : ''}${a.engine === 'chatgpt' ? ' with ChatGPT' : a.engine === 'sd' ? ' with Stable Diffusion' : ''}, and save it in the images folder.`,
   async run(a, ctx) {
-    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, negativePrompt: a.negative_prompt, loras: a.loras });
+    const r = await ctx.generateImage({ prompt: a.prompt, width: a.width, height: a.height, style: a.style, character: a.character, appearance: a.appearance, negativePrompt: a.negative_prompt, loras: a.loras, engine: a.engine, purpose: a.purpose, view: a.view, newChat: a.new_chat });
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || `The image couldn't be made (${(r && r.error) || 'unknown'}). Check the 🎨 Images tab.` };
-    return { ok: true, message: `Saved ${r.count || 1} image(s).`, data: { path: r.path, paths: r.paths || [r.path] }, image: r.path };
+    return { ok: true, message: `Saved ${r.count || 1} image(s)${r.engine === 'chatgpt' ? ' (made by ChatGPT)' : ''}.`, data: { path: r.path, paths: r.paths || [r.path], engine: r.engine || null, view: r.view || null }, image: r.path };
   },
 });
 def({
@@ -380,13 +537,15 @@ def({
 
 def({
   name: 'image_generator_status', title: 'Image generator status', group: 'images',
-  description: 'Whether Stable Diffusion is connected (which app, checkpoint, busy) and whether AutoInjector is running it. Read-only.',
+  description: 'Whether Stable Diffusion is connected (which app, checkpoint, busy), whether AutoInjector is running it, and whether ChatGPT can make pictures (its pane ready, drawing now). Read-only.',
   args: { type: 'object', properties: {}, additionalProperties: false },
   async run(_a, ctx) {
     const r = await ctx.sdStatus();
     if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'NO_IMAGES_MODULE', message: (r && r.message) || 'The image module is not available in this build.' };
     const im = r.image || {}; const mg = r.managed || {};
-    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null } };
+    const cg = r.chatgpt || null;
+    return { ok: true, data: { connected: !!(im.enabled && im.endpoint), app: im.label || im.backend || null, checkpoint: im.checkpoint || im.model || null, busy: !!im.busy, started_by_autoinjector: mg.phase || null, endpoint: im.endpoint || null,
+      chatgpt: cg ? { ready: !!cg.ready, why: cg.why || null, drawing: !!cg.busy, seconds: cg.drawingMs ? Math.round(cg.drawingMs / 1000) : 0 } : null } };
   },
 });
 def({

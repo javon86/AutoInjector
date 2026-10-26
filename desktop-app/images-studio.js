@@ -15,6 +15,11 @@
  *     Upscale, Advanced (clip skip, restore faces, tiling, styles, scripts,
  *     override settings, extra fields JSON, read/set any settings-menu option),
  *     ComfyUI workflow picker. All off by default — the plain form is unchanged.
+ *   • Engine: Stable Diffusion / ChatGPT (its own image generation, in its logged-in
+ *     pane — chatgpt-image.js) / Auto; "ChatGPT is drawing… 45 s" while it works;
+ *   • Reference views: a character lock or a typed appearance → a portrait, any of
+ *     the ten full-body views, all ten in one series, or one turnaround sheet
+ *     (the same path as Akọwe's POST /image/request).
  * Talks only to window.api.sd (preload.js). If that is missing the tab says so.
  */
 (function () {
@@ -26,6 +31,7 @@
     connected: false, status: null, lists: null, loras: [], locks: [], lib: null, libSel: null, lockSel: null,
     chips: [], generating: false, pollTimer: null, lastSeed: null, current: null, libItemsById: new Map(), loaded: false,
     extras: null, i2i: null, maskDirty: false, cnUnits: [], fail: null,
+    engine: 'sd', jobEngine: 'sd', rvStop: false, rvSeries: '',
   };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -511,9 +517,22 @@
     $('btn-sd-generate').disabled = on; $('btn-sd-test').disabled = on; $('btn-sd-stop').disabled = !on;
     if (!on) { clearInterval(st.pollTimer); st.pollTimer = null; }
   }
+  const CG_PHASE = { checking: 'checking ChatGPT…', waiting: 'waiting for ChatGPT to be free…', 'new-chat': 'opening a new ChatGPT chat…', sending: 'typing the request into ChatGPT…', drawing: 'ChatGPT is drawing…', finishing: 'ChatGPT is finishing the picture…', saving: 'saving the picture…' };
+  function chatgptLine(p, prefix) {
+    const secs = Math.round(((p && (p.drawingMs || p.elapsedMs)) || 0) / 1000);
+    return `🎨 ${prefix || ''}${(p && CG_PHASE[p.phase]) || 'ChatGPT is drawing…'}${secs ? ` ${secs} s` : ''}${p && p.queue ? ` (${p.queue} more waiting)` : ''}`;
+  }
   function startPolling() {
     clearInterval(st.pollTimer);
     st.pollTimer = setInterval(async () => {
+      if (st.jobEngine === 'chatgpt') {
+        const p = await call('chatgptStatus');
+        if (!st.generating || !p || !p.busy) return;
+        const frac = Math.min(0.95, ((p.drawingMs || 0) / 1000) / 90);
+        $('sd-progress-bar').style.width = `${Math.round(frac * 100)}%`;
+        msg(chatgptLine(p, st.jobPrefix || ''));
+        return;
+      }
       const p = await call('progress');
       if (!st.generating || !p || !p.busy) return;
       const frac = Math.max(0, Math.min(1, Number(p.progress) || 0));
@@ -573,6 +592,14 @@
       try { r0 = Object.assign(r0, advancedRequest()); } catch (e) { msg(`✖ ${e.message}`); return; }
     }
     if (!isTest && !String(r0.prompt || '').trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
+    // ChatGPT (or Auto with no SD app connected): the two-engine path, only the words go to ChatGPT.
+    if (!isTest && !req && (st.engine === 'chatgpt' || (st.engine === 'auto' && !st.connected))) {
+      const body = { engine: st.engine, prompt: r0.prompt, characterLock: r0.characterLock };
+      st.jobEngine = 'chatgpt'; st.jobPrefix = '';
+      await render(() => call('request', body), false, body, st.engine === 'chatgpt' ? '🎨 Asking ChatGPT for the picture… (it usually takes 30–180 s)' : '🎨 No Stable Diffusion app is connected — asking ChatGPT…');
+      return;
+    }
+    st.jobEngine = 'sd';
     if (!st.connected) { msg('Connecting first…'); await find(); if (!st.connected) { msg('No Stable Diffusion app is connected — see the note above.'); return; } }
     const key = settingsKey(r0, isTest);
     if (st.fail && st.fail.count >= 2 && st.fail.key === key) {
@@ -605,13 +632,97 @@
     }
     st.lastSeed = r.seed;
     const warn = (r.warnings || []).map((w) => `⚠ ${w.message}`).join('\n');
-    msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''}${r.retried && r.fixed === 'vae-automatic' ? ' — VAE is now Automatic' : ''} (seed ${r.seed})${warn ? `\n${warn}` : ''}`);
+    const by = r.engine === 'chatgpt' ? ` — drawn by ChatGPT${r.settings && r.settings.seconds ? ` in ${r.settings.seconds} s` : ''}` : ` (seed ${r.seed})`;
+    msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''}${r.retried && r.fixed === 'vae-automatic' ? ' — VAE is now Automatic' : ''}${by}${warn ? `\n${warn}` : ''}`);
     if (r.images[0]) showImage({ path: r.images[0].path, url: r.images[0].url, record: Object.assign({}, r.settings, { seed: r.images[0].seed }) });
     refreshGallery();
   }
   $('btn-sd-generate').onclick = () => runGenerate();
   $('sd-prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runGenerate(); } });
-  $('btn-sd-stop').onclick = async () => { msg('Stopping…'); await call('cancel'); };
+  $('btn-sd-stop').onclick = async () => { msg('Stopping…'); st.rvStop = true; if (st.jobEngine !== 'sd') await call('chatgptCancel'); await call('cancel'); };
+
+  // ------------------------------------------------------------ engine choice
+  function loadEngine() { let v = 'sd'; try { v = window.localStorage.getItem('sd-engine') || 'sd'; } catch (_) {} return ['sd', 'chatgpt', 'auto'].includes(v) ? v : 'sd'; }
+  st.engine = loadEngine();
+  if ($('sd-engine')) {
+    $('sd-engine').value = st.engine;
+    $('sd-engine').onchange = (e) => { st.engine = e.target.value; try { window.localStorage.setItem('sd-engine', st.engine); } catch (_) {} engineNote(); };
+  }
+  async function engineNote() {
+    const n = $('sd-engine-note'); if (!n) return;
+    if (st.engine === 'sd') { n.textContent = st.connected ? '' : 'Stable Diffusion is not connected yet (see above) — or choose ChatGPT.'; n.dataset.tone = st.connected ? '' : 'warn'; return; }
+    const c = await call('chatgptStatus');
+    if (st.engine === 'auto' && st.connected) { n.textContent = 'Auto: Stable Diffusion is connected, so it draws.'; n.dataset.tone = ''; return; }
+    if (c && c.ok && c.ready) { n.textContent = c.busy ? chatgptLine(c) : '✔ ChatGPT is ready — pictures take about 30–180 s.'; n.dataset.tone = ''; }
+    else { n.textContent = `⚠ ChatGPT can't draw right now: ${(c && (c.why || c.message)) || 'its pane is not ready'}.`; n.dataset.tone = 'warn'; }
+    if ($('sd-rv-fresh') && c && c.ok && typeof c.freshChatPerSeries === 'boolean') $('sd-rv-fresh').checked = c.freshChatPerSeries;
+  }
+  if (api && api.onChatgptImage) api.onChatgptImage(() => { if (!st.generating) engineNote(); });
+
+  // ------------------------------------------------------------ reference views (portrait · 10 views · sheet)
+  const RV_VIEWS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
+  const RV_LABEL = { front: 'front', three_quarter_front: '¾ front', side: 'side', three_quarter_back: '¾ back', back: 'back', idle: 'idle', draw: 'draw', attack: 'attack', dash: 'dash', defend: 'defend' };
+  function rvBase() {
+    const lock = $('sd-rv-lock') ? $('sd-rv-lock').value : '';
+    const appearance = $('sd-rv-appearance') ? $('sd-rv-appearance').value.trim() : '';
+    return { lock, appearance };
+  }
+  function rvEngine() { return st.engine === 'sd' ? 'sd' : st.engine === 'chatgpt' ? 'chatgpt' : (st.connected ? 'sd' : 'auto'); }
+  function rvBody(purpose, view, extra) {
+    const b = rvBase();
+    const body = Object.assign({ engine: rvEngine(), purpose }, extra || {});
+    if (view) body.view = view;
+    if (b.lock) body.characterLock = b.lock;
+    if (b.appearance) body.appearance = b.appearance;
+    return body;
+  }
+  function rvReady() {
+    const b = rvBase();
+    if (!b.lock && !b.appearance) { msg('Choose a character lock or describe what they look like first.'); if ($('sd-rv-appearance')) $('sd-rv-appearance').focus(); return false; }
+    if (rvEngine() === 'sd' && !st.connected) { msg('No Stable Diffusion app is connected — connect one above, or choose Engine: ChatGPT.'); return false; }
+    return true;
+  }
+  // One reference picture; resolves with the result (errors go to the red box).
+  async function rvOne(body, label, prefix) {
+    st.jobEngine = body.engine === 'sd' ? 'sd' : 'chatgpt'; st.jobPrefix = prefix || '';
+    let out = null;
+    await render(async () => { out = await call('request', body); return out; }, false, body, `🎨 ${prefix || ''}Making the ${label}${body.engine === 'sd' ? '' : ' — ChatGPT usually takes 30–180 s'}…`);
+    return out;
+  }
+  async function rvSingle(purpose, view) {
+    if (st.generating || !rvReady()) return;
+    const b = rvBase();
+    const series = `rv:${b.lock || b.appearance.slice(0, 60)}`;
+    const extra = { series };
+    if (rvEngine() !== 'sd' && $('sd-rv-fresh') && $('sd-rv-fresh').checked && st.rvSeries !== series) extra.newChat = true;
+    st.rvSeries = series;
+    await rvOne(rvBody(purpose, view, extra), purpose === 'sheet' ? 'turnaround sheet' : purpose === 'portrait' ? 'portrait' : `${RV_LABEL[view]} view`);
+  }
+  async function rvAll() {
+    if (st.generating || !rvReady()) return;
+    st.rvStop = false;
+    const b = rvBase();
+    const series = `rv:${b.lock || b.appearance.slice(0, 60)}:${Date.now()}`;
+    st.rvSeries = series;
+    let seed = null; let made = 0;
+    for (let i = 0; i < RV_VIEWS.length; i++) {
+      if (st.rvStop) { msg(`Stopped after ${made} of ${RV_VIEWS.length} views.`); return; }
+      const v = RV_VIEWS[i];
+      const extra = { series };
+      if (seed != null) { extra.seed = seed; extra.keepSeed = false; }
+      if (i === 0 && rvEngine() !== 'sd' && $('sd-rv-fresh') && $('sd-rv-fresh').checked) extra.newChat = true;
+      const r = await rvOne(rvBody('view', v, extra), `${RV_LABEL[v]} view`, `View ${i + 1}/${RV_VIEWS.length} (${RV_LABEL[v]}): `);
+      if (!r || !r.ok) { if (r && r.error !== 'CANCELLED') msg(`✖ View ${i + 1}/${RV_VIEWS.length} (${RV_LABEL[v]}) failed — see the red box. ${made} saved.`); return; }
+      made++;
+      if (seed == null && r.engine === 'sd' && Number.isFinite(Number(r.seed))) seed = Number(r.seed);
+    }
+    msg(`✔ All ${made} reference views saved${seed != null ? ` (one seed: ${seed})` : ' (one ChatGPT conversation)'}.`);
+  }
+  for (const btn of document.querySelectorAll('#sd-rv-buttons button[data-view]')) btn.onclick = () => rvSingle('view', btn.dataset.view);
+  if ($('btn-sd-rv-portrait')) $('btn-sd-rv-portrait').onclick = () => rvSingle('portrait');
+  if ($('btn-sd-rv-sheet')) $('btn-sd-rv-sheet').onclick = () => rvSingle('sheet');
+  if ($('btn-sd-rv-all')) $('btn-sd-rv-all').onclick = () => rvAll();
+  if ($('sd-rv-fresh')) $('sd-rv-fresh').onchange = (e) => { call('chatgptSettings', { freshChatPerSeries: !!e.target.checked }); };
 
   function showImage(g) {
     st.current = g;
@@ -805,6 +916,13 @@
     pick.textContent = ''; const o0 = document.createElement('option'); o0.value = ''; o0.textContent = '— none —'; pick.appendChild(o0);
     for (const l of st.locks) { const o = document.createElement('option'); o.value = l.id; o.textContent = `${l.character}${l.book ? ` (${l.book})` : ''}`; pick.appendChild(o); }
     pick.value = st.locks.some((l) => l.id === cur) ? cur : '';
+    const rv = $('sd-rv-lock');
+    if (rv) {
+      const rvCur = rv.value; rv.textContent = '';
+      const r0 = document.createElement('option'); r0.value = ''; r0.textContent = '— no lock: describe them below —'; rv.appendChild(r0);
+      for (const l of st.locks) { const o = document.createElement('option'); o.value = l.id; o.textContent = `${l.character}${l.book ? ` (${l.book})` : ''}`; rv.appendChild(o); }
+      rv.value = st.locks.some((l) => l.id === rvCur) ? rvCur : '';
+    }
     const list = $('sd-lock-list'); list.textContent = '';
     $('sd-lock-empty').hidden = st.locks.length > 0;
     for (const l of st.locks) {
@@ -985,6 +1103,7 @@
     refreshLocks();
     refreshGallery();
     refreshTargets();
+    engineNote();
   }
   // Keep the dot honest without opening the tab: a cheap status read at start.
   if (api) call('status').then((s) => { if (s && s.ok && s.enabled && s.endpoint && $('sd-tab-dot')) $('sd-tab-dot').dataset.tone = 'ok'; });

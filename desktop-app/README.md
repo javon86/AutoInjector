@@ -592,10 +592,21 @@ ComfyUI install, or a standalone Forge/A1111/ComfyUI): **[docs/STABLE_DIFFUSION_
 - **🔒 Character locks:** LoRA + trigger words + fixed looks for one book character (same face every
   time). Akọwe can ask for a portrait/cover with one: `POST /image/request` on the service bridge
   ([docs/SD_IMAGE_API.md](../docs/SD_IMAGE_API.md)).
-- Code: `sd-backends.js`, `image-provider.js`, `sd-library.js`, `sd-images.js`, `sd-studio.js`,
+- **Engine: Stable Diffusion / ChatGPT / Auto.** ChatGPT's own image generation is the second
+  engine: AutoInjector types the request into the logged-in ChatGPT pane, waits for the finished
+  picture (30–180 s, “ChatGPT is drawing… 45 s”), takes it from the page with ChatGPT's own session
+  and saves it next to the SD pictures with a `.json` of what made it. One picture at a time; while
+  ChatGPT draws, other messages for it wait and its reply is never relayed. If ChatGPT changes its
+  page and pictures stop being picked up: 🎯 on ChatGPT's pane → **Generated picture**.
+- **Reference views:** a character lock or a typed appearance → a portrait, any of ten full-body
+  views (front, ¾ front, side, ¾ back, back, idle, draw, attack, dash, defend), all ten as one
+  series (one SD seed / one ChatGPT chat) or one turnaround sheet — what Akọwe's Character Forge
+  asks for over `POST /image/request` (`engine`, `purpose:"view"` + `view`, `purpose:"sheet"`).
+- Code: `sd-backends.js`, `image-provider.js`, `sd-library.js`, `sd-images.js`, `sd-studio.js`, `chatgpt-image.js`, `image-views.js`,
   `sd-runner.js`, `sd-installer.js`, `sd-api.js` (module API for Alfred), `images-studio.js`; design
   and limits in [STABLE_DIFFUSION_PLAN.md](STABLE_DIFFUSION_PLAN.md). Tests: `test/sd-*.test.js`,
-  `test/images-tab.test.js`, `test/e2e/sd-images.e2e.js` (fake servers, nothing real downloaded).
+  `test/images-tab.test.js`, `test/chatgpt-image.test.js`, `test/e2e/sd-images.e2e.js`,
+  `test/e2e/chatgpt-image.e2e.js` (fake servers and a fake ChatGPT page, nothing real downloaded).
 
 ## Akọwe inside AutoInjector (one app, one launcher)
 

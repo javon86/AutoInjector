@@ -142,10 +142,14 @@ def check_geometry(g: Geometry, typo: Typography) -> list[str]:
 
 @dataclass
 class Page:
-    ops: list = field(default_factory=list)   # ("text", font, size, x, y, str, tw) | ("img", key, x, y, w, h, clip)
+    # ("text", font, size, x, y, str, tw[, colour]) | ("img", key, x, y, w, h, clip)
+    # | ("rect", x, y, w, h, fill colour|None, stroke colour|None, line width) | ("line", x0, y0, x1, y1, colour, width)
+    ops: list = field(default_factory=list)
     links: list = field(default_factory=list)  # (x0, y0, x1, y1, heading_id)
     number: int = 0
     section_kind: str = ""
+    size: tuple | None = None        # (width, height) pt when this page differs from the document (a landscape plate)
+    background: tuple | str | None = None  # a full-page fill colour
 
 
 @dataclass

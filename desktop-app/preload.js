@@ -146,6 +146,12 @@ contextBridge.exposeInMainWorld("api", {
     workflowDelete: (id) => ipcRenderer.invoke("sd:workflow-delete", { id }),
     workflowRun: (req) => ipcRenderer.invoke("sd:workflow-run", req),
     capabilities: () => ipcRenderer.invoke("sd:capabilities"),
+    // 🎨 two engines (Stable Diffusion / ChatGPT / Auto) + reference views & sheets (= POST /image/request)
+    request: (req) => ipcRenderer.invoke("sd:request", req),
+    chatgptStatus: () => ipcRenderer.invoke("sd:chatgpt-status"),
+    chatgptCancel: () => ipcRenderer.invoke("sd:chatgpt-cancel"),
+    chatgptSettings: (patch) => ipcRenderer.invoke("sd:chatgpt-settings", patch || {}),
+    onChatgptImage: (cb) => ipcRenderer.on("chatgpt-image", (_e, st) => cb(st)),
     libList: (filters) => ipcRenderer.invoke("sdlib:list", { filters }),
     libScan: () => ipcRenderer.invoke("sdlib:scan"),
     libUpdate: (id, patch) => ipcRenderer.invoke("sdlib:update", { id, patch }),

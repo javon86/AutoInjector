@@ -42,9 +42,14 @@ async function invokeChannel(channel, ...args) {
 const str = { type: 'string', maxLength: 2000 };
 const LORAS = { type: 'array', maxItems: 12, items: { type: 'object', required: ['name'], properties: { name: { type: 'string', maxLength: 200 }, weight: { type: 'number', minimum: -5, maximum: 5 } }, additionalProperties: false } };
 const PASS = { 'x-passthrough': true };
-const GENERATE_SCHEMA = { type: 'object', additionalProperties: false, required: ['prompt'], properties: {
+const VIEW_IDS = ['front', 'three_quarter_front', 'side', 'three_quarter_back', 'back', 'idle', 'draw', 'attack', 'dash', 'defend'];
+const GENERATE_SCHEMA = { type: 'object', additionalProperties: false, required: [], properties: {
   prompt: { type: 'string', minLength: 1, maxLength: 4000 }, negativePrompt: str, loras: LORAS, characterLock: { type: 'string', maxLength: 120 },
-  purpose: { type: 'string', enum: ['portrait', 'cover', 'scene', 'illustration', 'test', 'free'] },
+  purpose: { type: 'string', enum: ['portrait', 'cover', 'scene', 'illustration', 'test', 'free', 'view', 'sheet'] },
+  engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'], description: 'sd = Stable Diffusion, chatgpt = ChatGPT\'s own image generation in its pane, auto = SD when connected, else ChatGPT' },
+  view: { type: 'string', enum: VIEW_IDS, description: 'with purpose "view": which full-body reference view' },
+  appearance: { type: 'string', maxLength: 2000, description: 'what the character looks like, in words' },
+  newChat: { type: 'boolean', description: 'ChatGPT engine: start a fresh ChatGPT chat' }, series: { type: 'string', maxLength: 120 },
   width: { type: 'integer', minimum: 64, maximum: 4096 }, height: { type: 'integer', minimum: 64, maximum: 4096 },
   steps: { type: 'integer', minimum: 1, maximum: 200 }, cfgScale: { type: 'number', minimum: 0, maximum: 40 }, seed: { type: 'integer' },
   sampler: { type: 'string', maxLength: 80 }, scheduler: { type: 'string', maxLength: 80 }, checkpoint: { type: 'string', maxLength: 300 }, vae: { type: 'string', maxLength: 300 },
@@ -62,6 +67,9 @@ const SD_META = {
   'images.generate': { changes: true, schema: GENERATE_SCHEMA, call: (a) => [Object.assign({ from: 'alfred' }, a)] },
   'images.cancel': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'images.test': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.chatgptStatus': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.chatgptCancel': { changes: true, schema: { type: 'object', properties: {}, additionalProperties: false } },
+  'images.chatgptSettings': { changes: true, schema: { type: 'object', properties: { freshChatPerSeries: { type: 'boolean' }, timeoutMs: { type: 'integer', minimum: 10000, maximum: 1800000 } }, additionalProperties: false }, call: (a) => [a] },
   'sd.status': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'sd.targets': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
   'sd.detect': { changes: false, schema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -233,7 +241,13 @@ function installAlfred(h) {
     openAkowePage,
     generateImage: (o) => image.generate(o),
     // Stable Diffusion module (sd-api.js) — the 🎨 Images tab's own API
-    sdStatus: async () => { const m = image.module(); return m ? m.sd.status() : { ok: false, error: 'NO_IMAGES_MODULE' }; },
+    sdStatus: async () => {
+      const m = image.module();
+      if (!m) return { ok: false, error: 'NO_IMAGES_MODULE' };
+      const r = await m.sd.status();
+      if (r && r.ok !== false && m.images && typeof m.images.chatgptStatus === 'function') { try { r.chatgpt = await m.images.chatgptStatus(); } catch (_) {} }
+      return r;
+    },
     sdStart: async (t) => { const m = image.module(); return m ? m.sd.start(t) : { ok: false, error: 'NO_IMAGES_MODULE' }; },
     sdStop: async () => { const m = image.module(); return m ? m.sd.stop() : { ok: false, error: 'NO_IMAGES_MODULE' }; },
     libraryFind: async (q, f) => { const m = image.module(); return m ? m.library.find(q, f) : { ok: false, error: 'NO_IMAGES_MODULE' }; },

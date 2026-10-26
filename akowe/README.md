@@ -198,6 +198,29 @@ never your text. What the editor checks is written in one plain file, `akowe/edi
   plan kept** (goals, the obstacle and the unsaid thing really on the page). The pattern check (no AI) adds a **voice
   check**: per speaker words per line, questions, shared words, favourite phrases used and **never-words** used.
 
+## 🗂 Character Forge: a full dossier for every character
+
+Every character gets a **dossier** (🗂 Character Forge on the character's card, or More ▾ → 🗂 Character Forge): 14
+numbered sections — record, inner life, relationships and page essentials, voice card, detailed appearance, fighting
+style, weapons and possessions, powers and their rules, skills, physical limits, knowledge, a backstory timeline, the
+storyline and a continuity reference — in a dark, gold-and-teal look with the portrait and a **ten-view reference
+plate** (front, 3/4 front, side, 3/4 back, back, idle, tool reach, empty-hand attack, dash, defend).
+
+- **Letters** on every entry (C Canon · P Personality · V Voice · A Appearance · F Fighting · M Magic · K Knowledge ·
+  R Relationships · S Story · E Essential on-page detail): click letters to see only those cards. Chapters get only the
+  approved details whose letters they need (appearance when a character first appears, fighting in a fight…).
+- **✨ Invent the rest**: your AI fills the empty fields as **proposals** (a few short AI calls). Your own text and
+  🔒 protected fields are never changed. ✔ Approve each proposal, ✎ edit it, or ✔ Approve all proposals; the dossier
+  is READY when nothing waits.
+- **One truth**: the inner life, relationships, "must reach the page" and the voice card ARE the character sheet and
+  voice card (an approved change in one shows in the other); the role, identity, traits… come from the character
+  record when it has them.
+- **Pictures**: 🎨 Stable Diffusion or 💬 ChatGPT through AutoInjector (portrait, each view, all ten views with one
+  seed, or one turnaround sheet), or ⬆ upload your own. Settings → 🎨 Pictures has AutoInjector's address and key.
+- **⬇ Dossier PDF**: cover with the portrait, the landscape ten-view plate, then every section as cards — saved with
+  the book in `Character Forge/` too.
+- **🧪 Load the Moki Vey example** to see a finished dossier straight away. Details: `docs/CHARACTER_FORGE.md`.
+
 ## 🌍 Story rules, world texture, the plan on the page, ending and style
 
 - **🎚️ Ending and style (book profile, all optional).** In the 🚀 wizard, the book profile (Edit) and ⚡ Make a book's quick

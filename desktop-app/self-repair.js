@@ -473,6 +473,29 @@ function pageKit() {
       return firstShown === box;
     });
   }
+  // 🎨 A picture ChatGPT made: a selector that finds it (and the next ones like it)
+  // without matching every <img> on the page — anchored on its message / turn /
+  // image container, else its alt text or an image-ish class.
+  function deriveImage(doc, img) {
+    const okSel = (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 60 && l.indexOf(img) >= 0; };
+    const cands = [];
+    const tokOk = (t) => t && t.length <= 40 && !/[:/\[\]()!@%]/.test(t) && /image|img|picture|media|imagegen/i.test(t);
+    let a = img.parentElement;
+    for (let i = 0; a && i < 10 && a.tagName !== 'BODY'; i++, a = a.parentElement) {
+      if (inOverlay(a)) break;
+      const tag = a.localName;
+      const role = a.getAttribute('data-message-author-role'); if (role) cands.push('[data-message-author-role=' + q(role) + '] img');
+      const turn = a.getAttribute('data-turn'); if (turn) cands.push(tag + '[data-turn=' + q(turn) + '] img');
+      const tid = a.getAttribute('data-testid'); if (tid) { const m = /^(.*?-)\d+$/.exec(tid); cands.push(m ? '[data-testid^=' + q(m[1]) + '] img' : '[data-testid=' + q(tid) + '] img'); }
+      for (const t of String((a.className && a.className.baseVal !== undefined ? a.className.baseVal : a.className) || '').split(/\s+/)) if (tokOk(t)) cands.push('.' + t + ' img');
+    }
+    const alt = String(img.getAttribute('alt') || '').trim();
+    if (alt && alt.length <= 40) cands.push('img[alt=' + q(alt) + ']');
+    else if (alt) cands.push('img[alt^=' + q(alt.slice(0, 24)) + ']');
+    for (const t of String(img.className || '').split(/\s+/)) if (tokOk(t)) cands.push('img.' + t);
+    for (const c of cands) if (okSel(c)) return c;
+    return null;
+  }
   function deriveSend(doc, btn) {
     return deriveFor(doc, btn, 'send', (sel) => { const l = qsa(doc, sel); return !!l && l.length >= 1 && l.length <= 3 && l.filter(shown)[0] === btn; });
   }
@@ -607,6 +630,15 @@ function pageKit() {
       return n ? outerEditable(n) : null;
     }
     if (cfg.role === 'send') return el.closest ? el.closest('button, [role="button"], input[type="submit"]') : null;
+    if (cfg.role === 'image') {
+      if (el.tagName === 'IMG') return el;
+      // a click on an overlay / wrapper over the picture: the biggest shown <img> nearby
+      for (let p = el, i = 0; p && i < 4; p = p.parentElement, i++) {
+        const k = (qsa(p, 'img') || []).filter((x) => shown(x) && !inOverlay(x));
+        if (k.length) { k.sort((a, b) => (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight)); return k[0]; }
+      }
+      return null;
+    }
     for (const m of cfg.markers || []) { try { const c = el.closest(m); if (c) return c; } catch (_) {} }
     return el;
   }
@@ -617,6 +649,12 @@ function pageKit() {
       if (!isEditable(target)) return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
       const sel = deriveInput(doc, target);
       return sel ? { ok: true, role: 'input', selector: sel, preview: 'Message box found', count: (qsa(doc, sel) || []).length, tag: target.localName } : { ok: false, error: 'NO_STABLE_SELECTOR' };
+    }
+    if (cfg.role === 'image') {
+      if (target.tagName !== 'IMG') return { ok: false, error: 'WRONG_ELEMENT_TYPE' };
+      if ((target.naturalWidth || 0) < 200 || (target.naturalHeight || 0) < 200) return { ok: false, error: 'TOO_SMALL' };
+      const sel = deriveImage(doc, target);
+      return sel ? { ok: true, role: 'image', selector: sel, preview: 'Picture found (' + target.naturalWidth + '×' + target.naturalHeight + ')', count: (qsa(doc, sel) || []).length, tag: 'img' } : { ok: false, error: 'NO_STABLE_SELECTOR' };
     }
     if (cfg.role === 'send') {
       const sel = deriveSend(doc, target);
@@ -686,7 +724,7 @@ function pageKit() {
     return { ok: true, roles: out, repliesOnPage };
   }
 
-  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, deriveInput, deriveSend, pickStart, pickCancel, pickResolve, matchCheck };
+  return { findText, candidatesFor, validateReply, validateBlocks, learnReply, learnReplyFrom, userTest, turnOf, peersOf, wholeText, scan, tryAlternatives, signals, pressStop, teachInstall, teachRemove, teachStep, teachAsked, teachSummary, teachState, deriveInput, deriveSend, deriveImage, pickStart, pickCancel, pickResolve, matchCheck };
 }
 
 // ---- script builders ----------------------------------------------------------------
@@ -752,7 +790,7 @@ function buildTeachStopScript() {
   return kitScript('return K.teachRemove(document, window);');
 }
 // P38 🎯 picker
-const PICK_THING = { input: 'the message box (where you type)', send: 'the Send button', assistant: "the AI's latest reply" };
+const PICK_THING = { input: 'the message box (where you type)', send: 'the Send button', assistant: "the AI's latest reply", image: 'a picture ChatGPT made' };
 function pickBanner(label, role) { return `🎯 Click ${PICK_THING[role] || 'it'} in this window  (${label} · Esc = cancel)`; }
 function replyMarkers(site, SITES) {
   const cfg = siteDefaults(SITES, site);

@@ -248,6 +248,8 @@ const TOOL_CHANNELS = {
   'sd:options-get': 'sd_call:sd.options.get', 'sd:options-set': 'sd_call:sd.options.set', 'sd:interrupt': 'sd_call:sd.interrupt', 'sd:skip': 'sd_call:sd.skip',
   'sd:refresh': 'sd_call:sd.refresh', 'sd:memory': 'sd_call:sd.memory', 'sd:workflows': 'sd_call:sd.workflows.list', 'sd:workflow-get': 'sd_call:sd.workflows.get',
   'sd:workflow-save': 'sd_call:sd.workflows.save', 'sd:workflow-delete': 'sd_call:sd.workflows.delete', 'sd:workflow-run': 'sd_call:sd.workflows.run',
+  // 🎨 the second engine (ChatGPT) + reference views / sheets: images.generate with engine / purpose / view is the same path as sd:request
+  'sd:request': 'sd_call:images.generate', 'sd:chatgpt-status': 'sd_call:images.chatgptStatus', 'sd:chatgpt-cancel': 'sd_call:images.chatgptCancel', 'sd:chatgpt-settings': 'sd_call:images.chatgptSettings',
 };
 
 function get(id) { return ACTIONS.find((a) => a.id === id) || null; }
