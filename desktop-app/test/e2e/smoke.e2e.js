@@ -159,6 +159,26 @@ async function main() {
     }
     await shot(controls, 'control-panel-extracted');
 
+    console.log('\n== ⤓ Everything needs a second, explicit confirmation that names what is in it ==');
+    await controls.click('#btn-extract-all');
+    await controls.waitForFunction(() => { const c = document.getElementById('ex-counts'); return !!(c && /Will save:/.test(c.textContent)); }, { timeout: 6000 }).catch(() => {});
+    await controls.click('#ex-scope-all');
+    await controls.waitForFunction(() => document.getElementById('ex-scope-all-row').classList.contains('sel'), { timeout: 6000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400));
+    await controls.click('#btn-extract-save');
+    const asked = await controls.waitForFunction(
+      () => { const c = document.getElementById('ex-confirm-all'); const t = document.getElementById('ex-confirm-all-text'); return !!(c && !c.hidden && t && /messages? .*including older private conversations/.test(t.textContent)); },
+      { timeout: 6000 }).then(() => true).catch(() => false);
+    assert(asked, 'Save on Everything asks a second time, naming the messages and older private conversations');
+    const noEverythingFile = !outRoot || !fs.existsSync(pathMod.join(outRoot, 'logs')) || !fs.readdirSync(pathMod.join(outRoot, 'logs')).some((f) => /everything/.test(f));
+    assert(noEverythingFile, 'nothing is written before the confirmation');
+    await controls.click('#btn-extract-confirm-back');
+    await controls.click('#btn-extract-cancel');
+    await controls.click('#btn-extract-all');
+    await controls.waitForFunction(() => { const c = document.getElementById('ex-counts'); return !!(c && /Will save:/.test(c.textContent)); }, { timeout: 6000 }).catch(() => {});
+    assert(await controls.evaluate(() => !document.getElementById('ex-scope-all').checked && document.getElementById('ex-scope-time').checked), 'reopening remembers the last saved choice, never Everything');
+    await controls.click('#btn-extract-cancel');
+
     console.log('\n== 🧙 Setup opens the lean wizard (Local AI + Advanced) ==');
     await controls.click('#btn-open-wizard');
     const wizard = await findWindow(app, '#panel-localai', 20000);

@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"/><title>Reply page-chrome fixture</title>
+<style>
+  /* the usual screen-reader-only rule: invisible, but innerText still reads it */
+  .sr-only, .cdk-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  .code-block-decoration { display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <!-- Reconstructed from the captures in a user's log: what each site wraps around
+       a reply. ?site=chatgpt|claude|gemini shows only that site's part. -->
+  <div id="chatgpt" hidden>
+    <article data-turn="user"><div data-message-author-role="user">Reverse AUTOINJ-4MKVAK</div></article>
+    <article data-turn="assistant" data-testid="conversation-turn-2">
+      <h5 class="sr-only">ChatGPT said:</h5>
+      <div data-message-author-role="assistant"><div class="markdown prose"><p>KVA4MK-JNIOTUA</p></div></div>
+    </article>
+  </div>
+  <div id="claude" hidden>
+    <div data-testid="user-message">Reverse AUTOINJ-GW51LM</div>
+    <div class="font-claude-response" data-is-streaming="false">
+      <span class="sr-only">Claude responded: ML15WG-JNIOTUA</span>
+      <div data-testid="thinking-block">
+        <button aria-expanded="false"><span>Reversing the given character string.</span></button>
+        <div><div>Reversing the given character string.</div></div>
+      </div>
+      <div class="standard-markdown"><p class="font-claude-response-body">ML15WG-JNIOTUA</p></div>
+      <div data-message-action-bar><span><time datetime="2026-10-26T10:00:00Z">just now</time></span></div>
+    </div>
+  </div>
+  <div id="gemini" hidden>
+    <user-query>Reverse AUTOINJ-UYORFD</user-query>
+    <model-response><message-content><div class="markdown markdown-main-panel">
+      <span class="cdk-visually-hidden">Gemini said</span>
+      <code-block><div class="code-block-decoration header-formatted"><span>Python</span><button>Copy code</button></div><pre><code>token = "AUTOINJ-UYORFD"
+print(token[::-1])</code></pre></code-block>
+      <p>DFROYU-JNIOTUA</p>
+    </div></message-content></model-response>
+  </div>
+  <script>
+    const site = new URLSearchParams(location.search).get("site");
+    if (site) document.getElementById(site).hidden = false;
+  </script>
+</body>
+</html>

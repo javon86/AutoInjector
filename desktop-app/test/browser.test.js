@@ -300,6 +300,31 @@ async function testFileInputFinderExpressionReal() {
   });
 }
 
+// Page chrome around a reply (screen-reader headings, Claude's thinking summary,
+// code-block headers, timestamps) is skipped by element — with real layout, where
+// innerText DOES read sr-only text, unlike jsdom.
+async function testReplyChromeSkipped() {
+  console.log("\n== reply page chrome is skipped by element (real innerText) ==");
+  await withFixture("reply-chrome.html", async (page) => {
+    const res = await page.evaluate(buildReadScript("chatgpt"));
+    assert(res.ok && res.text.trim() === "KVA4MK-JNIOTUA", `ChatGPT: no "ChatGPT said:" heading (got ${JSON.stringify(res.text)})`);
+  }, "?site=chatgpt");
+  await withFixture("reply-chrome.html", async (page) => {
+    const res = await page.evaluate(buildReadScript("claude"));
+    assert(res.ok && res.text.trim() === "ML15WG-JNIOTUA", `Claude: no preview line, thinking summary or "just now" (got ${JSON.stringify(res.text)})`);
+    const styled = await page.evaluate(() => document.querySelectorAll("[style]").length);
+    assert(styled === 0, "Claude: the hidden parts are restored exactly (no inline style left behind)");
+    const shown = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="thinking-block"]')).display);
+    assert(shown !== "none", "Claude: the thinking block is visible again after the read");
+  }, "?site=claude");
+  await withFixture("reply-chrome.html", async (page) => {
+    const res = await page.evaluate(buildReadScript("gemini"));
+    assert(res.ok && !/Gemini said/.test(res.text), `Gemini: no "Gemini said" (got ${JSON.stringify(res.text)})`);
+    assert(!/Python|Copy code/.test(res.text), "Gemini: the code-block label and copy button are skipped");
+    assert(/^token = "AUTOINJ-UYORFD"$/m.test(res.text) && /^DFROYU-JNIOTUA$/m.test(res.text), "Gemini: the code and the answer keep their own lines");
+  }, "?site=gemini");
+}
+
 async function main() {
   await testClaudeReadReal();
   await testClaudeReadMultiParagraph();
@@ -319,6 +344,7 @@ async function main() {
   await testSplitReplyClimb();
   await testNoStopButtonStreaming();
   await testWrapperHiddenFallback();
+  await testReplyChromeSkipped();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

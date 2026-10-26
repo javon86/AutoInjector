@@ -9,6 +9,7 @@
 // Splitting these lets main.js route messages freely between panes (any pane to
 // any other pane, on demand or automatically) instead of a fixed turn order.
 const SITES = require("./selectors");
+const { excludeSelectorsFor } = require("./reply-clean");
 
 // TR-24: a selector that is only a tag name ("span", "p", "div") matches
 // hundreds of unrelated elements — never a usable override. Shared by the
@@ -412,7 +413,11 @@ function buildReadScript(site, overrides) {
     INPUT_CANDIDATES: usableOverride(ov.input) ? [ov.input, ...(cfg.INPUT_CANDIDATES || [])] : (cfg.INPUT_CANDIDATES || []),
     // P37.2: the element that holds ONE whole AI message on each site — the reader
     // uses its full text when the matched node only has part of the reply.
-    MESSAGE_CONTAINERS: MESSAGE_CONTAINERS[site] || MESSAGE_CONTAINERS.generic
+    MESSAGE_CONTAINERS: MESSAGE_CONTAINERS[site] || MESSAGE_CONTAINERS.generic,
+    // Page chrome inside a reply that is never part of its words (screen-reader
+    // headings, Claude's thinking summary, code-block headers, timestamps) —
+    // see reply-clean.js. Skipped when the reply's text is read.
+    EXCLUDE: excludeSelectorsFor(site).join(", ")
   });
 
   // Returns { ok, text, generating, sendReady }. `generating` is the site's own
@@ -438,6 +443,50 @@ function buildReadScript(site, overrides) {
       try { return !!el.disabled || el.getAttribute("aria-disabled") === "true" || el.getAttribute("disabled") !== null; } catch (_) { return false; }
     }
 
+    // The reply's text WITHOUT page chrome (CFG.EXCLUDE). With nothing to skip
+    // this is exactly innerText / textContent. Otherwise: textContent from a copy
+    // with those parts removed; innerText (which needs layout, so no detached
+    // copy) by hiding them for the length of this one synchronous read and then
+    // restoring their inline style — nothing paints in between.
+    function chromeIn(n) {
+      if (!n || !CFG.EXCLUDE || !n.querySelectorAll) return [];
+      try { return Array.from(n.querySelectorAll(CFG.EXCLUDE)); } catch (_) { return []; }
+    }
+    function tcOf(n) {
+      if (!n) return "";
+      const skip = chromeIn(n);
+      if (!skip.length) return String(n.textContent || "");
+      try {
+        const copy = n.cloneNode(true);
+        copy.querySelectorAll(CFG.EXCLUDE).forEach((e) => { try { e.remove(); } catch (_) {} });
+        return String(copy.textContent || "");
+      } catch (_) { return String(n.textContent || ""); }
+    }
+    function innerOf(n) {
+      if (!n) return "";
+      let raw;
+      try { raw = n.innerText; } catch (_) { raw = undefined; }
+      if (typeof raw !== "string") return tcOf(n); // no layout engine (tests) — the plain-text path
+      const skip = chromeIn(n);
+      if (!skip.length) return raw;
+      const saved = [];
+      try {
+        for (const e of skip) {
+          saved.push([e, e.style.getPropertyValue("display"), e.style.getPropertyPriority("display")]);
+          e.style.setProperty("display", "none", "important");
+        }
+        const t = n.innerText;
+        return typeof t === "string" ? t : raw;
+      } catch (_) {
+        return raw;
+      } finally {
+        for (const [e, v, pr] of saved) {
+          try { if (v) e.style.setProperty("display", v, pr); else e.style.removeProperty("display"); if (!e.getAttribute("style")) e.removeAttribute("style"); } catch (_) {}
+        }
+      }
+    }
+    const textOf = (n) => innerOf(n) || tcOf(n);
+
     let all = [];
     if (CFG.STRICT) { try { all = Array.from(document.querySelectorAll(CFG.OVERRIDE)); } catch (_) { all = []; } }
     const strictHit = all.length > 0;
@@ -445,7 +494,7 @@ function buildReadScript(site, overrides) {
       try { document.querySelectorAll(sel).forEach((n) => all.push(n)); } catch (_) {}
     }
     let node = all.length ? all[all.length - 1] : null;
-    let text = node ? (node.innerText || node.textContent || "") : "";
+    let text = node ? textOf(node) : "";
     // TR-23: a saved "reply" selector that only reaches PART of the reply (a
     // single paragraph — e.g. just the "[FROM: X]" line) made whole replies
     // look empty. If the built-in selectors find a reply whose text ENDS WITH
@@ -457,7 +506,7 @@ function buildReadScript(site, overrides) {
       for (const sel of CFG.DEFAULT_ASSISTANT) {
         try { const list = document.querySelectorAll(sel); if (list.length) { full = list[list.length - 1]; break; } } catch (_) {}
       }
-      const fullText = full ? (full.innerText || full.textContent || "") : "";
+      const fullText = full ? textOf(full) : "";
       if (full && fullText.trim().length > text.trim().length && fullText.trim().endsWith(text.trim())) { node = full; text = fullText; fragmentFixed = "defaults"; }
     }
     // Still only part of a reply (it closes with [FROM:] but has no [TO:] —
@@ -475,7 +524,7 @@ function buildReadScript(site, overrides) {
         const p = cur.parentElement;
         let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS); } catch (_) {}
         if (hasUser) break;
-        const t = p.innerText || p.textContent || "";
+        const t = textOf(p);
         if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break; // that's more than one reply
         cur = p;
         const m = /(^|\\n)[ \\t]*\\[\\s*TO\\s*:[^\\]]*\\][\\s\\S]*\\[\\s*FROM\\s*:/i.exec(t); // the tag must start a line
@@ -500,7 +549,7 @@ function buildReadScript(site, overrides) {
         const p = cur.parentElement;
         let hasUser = false; try { hasUser = !!p.querySelector(USER_MARKERS2); } catch (_) {}
         if (hasUser) break;
-        const t = p.innerText || p.textContent || "";
+        const t = textOf(p);
         if ((t.match(/\\[\\s*FROM\\s*:/gi) || []).length > 1) break;
         cur = p;
         // the FIRST line-start [TO: — the reply's own tag (a quoted example later
@@ -518,13 +567,13 @@ function buildReadScript(site, overrides) {
     // the node we read is just the envelope start, or much shorter than the AI
     // message it belongs to, use that message's full text. Never a container that
     // holds the user's message or more than one reply.
-    const fullOf = (n) => { let t = ""; try { t = n.innerText || ""; } catch (_) {} const tc = String(n.textContent || ""); return t.trim().length >= tc.trim().length * 0.6 ? t : tc; };
+    const fullOf = (n) => { let t = ""; try { t = innerOf(n) || ""; } catch (_) {} const tc = tcOf(n); return t.trim().length >= tc.trim().length * 0.6 ? t : tc; };
     const squash = (s) => String(s || "").replace(/\\s+/g, " ").trim();
     let containerChars = null;
     if (node && !fragmentFixed) {
       // innerText of a part the page hasn't laid out (collapsed / not yet painted)
       // can be shorter than its real text
-      const tcText = String(node.textContent || "");
+      const tcText = tcOf(node);
       if (text.trim().length <= 40 && tcText.trim().length > text.trim().length + 5) { text = tcText; fragmentFixed = "textcontent"; }
       let box = null;
       for (const sel of CFG.MESSAGE_CONTAINERS || []) { try { const c = node.closest(sel); if (c && (!box || box.contains(c))) box = c; } catch (_) {} }

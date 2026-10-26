@@ -139,7 +139,20 @@
     await api.alfredSettings(patch);
     $('alfred-set-msg').textContent = 'Saved.';
   }
-  async function testAi() { $('alfred-set-msg').textContent = 'Checking…'; const r = await api.alfredTestAi(); $('alfred-set-msg').textContent = (r && r.message) || (r && r.ok ? 'OK' : 'Not reachable'); }
+  async function testAi() {
+    const box = $('alfred-set-msg');
+    box.textContent = 'Checking…';
+    let r = null; try { r = await api.alfredTestAi(); } catch (_) { r = null; }
+    box.textContent = (r && r.message) || (r && r.ok ? 'OK' : 'Not reachable');
+    // The model isn't installed: one click picks an installed one and saves.
+    if (r && !r.ok && Array.isArray(r.installed) && r.installed.length) {
+      const row = h('div', { class: 'alfred-pick-model', style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px' });
+      for (const m of r.installed.slice(0, 6)) {
+        row.append(h('button', { type: 'button', onclick: async () => { $('alfred-set-model').value = m; await saveSettings(); testAi(); } }, `Use ${m}`));
+      }
+      box.append(row);
+    }
+  }
   async function resetAllow() {
     const s = last && last.settings; if (!s) return;
     const off = {}; for (const k of Object.keys(s.alwaysAllow || {})) off[k] = false;

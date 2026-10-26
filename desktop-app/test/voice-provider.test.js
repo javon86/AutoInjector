@@ -123,6 +123,45 @@ async function main() {
   assert(vp.status().managed === false, 'restoring settings never starts the voice shim');
   vp.setSettings({ enabled: false, endpoint: '' });
 
+  console.log('\n== a damaged voice model (onnxruntime "Load model" failure) → plain message + one-click fix ==');
+  {
+    // The real message from a user's capability test (Windows, piper en_US-lessac).
+    // the same redaction options main.js gives the log extract: home + the app's folders
+    vp.setRedactionProvider(() => ({ home: 'C:\\Users\\Javon Christian', appDirs: ['C:\\Users\\Javon Christian\\stuff and thing'] }));
+    const shimErr = 'TTS_FAILED: [ONNXRuntimeError] : 1 : FAIL : Load model from C:\\Users\\Javon Christian\\stuff and thing\\models\\voice\\en_US-lessac-medium.onnx failed:Protobuf parsing failed.';
+    const bad = http.createServer((req, res) => {
+      let b = ''; req.on('data', (d) => { b += d; });
+      req.on('end', () => {
+        if (req.url === '/speak') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ ok: false, error: shimErr })); }
+        if (req.url === '/listen') { res.writeHead(500, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ detail: shimErr })); }
+        res.writeHead(200); res.end('{"ok":true}');
+      });
+    });
+    const bp = await listen(bad);
+    vp.setSettings({ enabled: true, endpoint: `http://127.0.0.1:${bp}` });
+    const r = await vp.speak('Capability test.');
+    assert(r.ok === false && r.error === 'VOICE_MODEL_DAMAGED', `the ONNX load failure is classified VOICE_MODEL_DAMAGED (got ${r.error})`);
+    assert(/damaged or incomplete — re-download it/.test(r.message), 'the message says plainly: the voice file is damaged or incomplete — re-download it');
+    assert(/en_US-lessac-medium\.onnx/.test(r.message), 'the message names the voice file (just its name)');
+    assert(!/Javon|Users/.test(r.message) && !/Javon/.test(r.rawError) && !/Javon/.test(JSON.stringify(r)), 'the user\'s name / raw Windows path never appears');
+    assert(/~\\stuff and thing\\models\\voice/.test(r.rawError), `the kept raw error shows the path from ~ (got ${r.rawError})`);
+    assert(r.fix && r.fix.action === 'voice:redownload' && /Re-download/.test(r.fix.label), 'a one-click fix (voice:redownload) comes with it');
+    const l = await vp.listen({ seconds: 1 });
+    assert(l.error === 'VOICE_MODEL_DAMAGED', 'the same failure inside an HTTP error body is caught too');
+    const trunc = vp.explainError({ ok: false, error: 'TTS_FAILED: [ONNXRuntimeError] : 1 : FAIL : Load model from C:\\Users\\Javon Christian\\stuff and thing\\models\\voice\\en_US-les…' });
+    assert(/damaged or incomplete/.test(trunc) && !/Javon/.test(trunc), 'a truncated path still gets the plain message, without the path');
+    assert(vp.voiceModelProblem({ ok: false, error: 'ECONNREFUSED' }) === null && vp.voiceModelProblem({ ok: true }) === null, 'other errors / successes are not taken for a damaged model');
+    const other = vp.explainError({ ok: false, error: 'TTS_FAILED: no such voice at C:\\Users\\Javon Christian\\x\\y.txt' });
+    assert(!/Javon/.test(other) && /\[private path\]/.test(other), `a private path outside the app's folders is hidden, like the log extract does (got ${other})`);
+    vp.setRedactionProvider(() => { throw new Error('boom'); });
+    vp._setHome('C:\\Users\\Javon Christian');
+    assert(!/Javon/.test(vp.redactPaths('at C:\\Users\\Javon Christian\\a\\b.onnx')), 'a failing redaction provider falls back to the home folder');
+    vp.setRedactionProvider(null);
+    bad.close();
+    vp.setSettings({ enabled: false, endpoint: '' });
+    vp._setHome(require('os').homedir());
+  }
+
   console.log('\n== managed mode requires a command ==');
   assert((await vp.startManaged({})).error === 'NO_COMMAND', 'startManaged with no command -> NO_COMMAND');
   assert(vp.stopManaged().ok === true, 'stopManaged is a safe no-op when nothing is running');

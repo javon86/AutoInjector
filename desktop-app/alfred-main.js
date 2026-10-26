@@ -260,6 +260,7 @@ function installAlfred(h) {
     managerConfig: () => { const c = h.state.managerConfig || {}; return c.endpoint && c.model ? { endpoint: c.endpoint, apiKey: c.apiKey, model: c.model } : null; },
     managedOllama: () => { try { return h.ollamaManager.managedStatus(); } catch (_) { return null; } },
     paneAsk,
+    listModels: (endpoint) => h.ollamaManager.listInstalled(String(endpoint || 'http://127.0.0.1:11434/v1').replace(/\/v1\/?$/, '').replace(/\/+$/, ''), 3000),
     akoweReady: () => !!h.akoweServerBase(),
     connected: () => {
       const im = h.imageProvider.status(); const vi = h.videoProvider.status(); const oi = h.interpreterProvider.status();

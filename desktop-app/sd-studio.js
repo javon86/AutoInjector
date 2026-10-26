@@ -20,6 +20,7 @@ const sdBackends = require('./sd-backends');
 const sdParams = require('./sd-params');
 const control = require('./sd-control');
 const sdWorkflows = require('./sd-workflows');
+const sdErrors = require('./sd-errors');
 
 const PURPOSES = ['portrait', 'cover', 'scene', 'illustration', 'test', 'free'];
 
@@ -111,10 +112,23 @@ function createSdStudio(deps) {
       const ck = b.opts.checkpoint || ip.status().checkpoint || ip.status().model || (lastLists && lastLists.current && lastLists.current.checkpoint) || '';
       try { warnings.push(...lib.checkLoras(b.opts.loras, ck).warnings); } catch (_) {}
     }
+    // The chosen VAE against the library's header check (not a full VAE / wrong family).
+    const vaeName = b.opts.vae != null ? b.opts.vae : ip.status().vae;
+    let vaeInfo = null;
+    if (lib && typeof lib.checkVae === 'function' && vaeName) {
+      try {
+        const ck = b.opts.checkpoint || ip.status().checkpoint || ip.status().model || (lastLists && lastLists.current && lastLists.current.checkpoint) || '';
+        vaeInfo = lib.checkVae(vaeName, ck);
+        if (vaeInfo && (vaeInfo.level === 'hard' || vaeInfo.level === 'soft')) warnings.push({ level: vaeInfo.level, name: vaeInfo.name, kind: 'vae', message: vaeInfo.message });
+      } catch (_) { vaeInfo = null; }
+    }
     const r = await ip.generate(b.prompt, b.opts);
     if (!r || !r.ok) {
-      log('sd-generate', { ok: false, from, error: r && r.error });
-      return Object.assign({ ok: false, warnings }, r || {}, { message: (r && r.message) || sdBackends.explain(r) });
+      const out = Object.assign({ ok: false, warnings }, r || {}, { message: (r && r.message) || sdBackends.explain(r) });
+      if (out.code === 'VAE_LOAD_FAILED') await explainVae(out, vaeName, vaeInfo);
+      // Log the cause, never the prompt (the log is shared with the user).
+      log('sd-generate', { ok: false, from, error: out.error, code: out.code || out.error, status: out.status, backend: out.backend, vae: vaeName || undefined });
+      return out;
     }
     if (Array.isArray(r.warnings)) warnings.push(...r.warnings);
     if (r.missingLoras && r.missingLoras.length) warnings.push({ level: 'hard', name: r.missingLoras.join(', '), message: `ComfyUI doesn't have these LoRAs, so they were left out: ${r.missingLoras.join(', ')}` });
@@ -137,6 +151,41 @@ function createSdStudio(deps) {
     if (req && req.returnImage) out.images.forEach((im, i) => { im.imageBase64 = r.images[i]; });
     return out;
   }
+
+  // A VAE that can't be loaded: name it (the form's choice, else the VAE A1111
+  // itself is set to) and add what the library's header check found.
+  async function explainVae(out, vaeName, vaeInfo) {
+    try {
+      let name = vaeName && !/^(automatic|none)$/i.test(vaeName) ? vaeName : '';
+      const st = ip.status();
+      if (!name && st.backend === 'a1111' && st.base) { const o = await control.options(st.base); if (o.ok && o.options.sd_vae && !/^(automatic|none)$/i.test(o.options.sd_vae)) name = o.options.sd_vae; }
+      let info = vaeInfo;
+      if (name && (!info || !info.known) && lib && typeof lib.checkVae === 'function') info = lib.checkVae(name, '');
+      const ex = sdErrors.explainSdError(out, { vae: name, vaeInfo: info && info.problem ? { problem: info.problem } : null });
+      if (ex.code === 'VAE_LOAD_FAILED') { out.message = ex.message; out.fix = ex.fix; out.actions = ex.actions; }
+    } catch (_) { /* keep the first explanation */ }
+  }
+
+  // One-click fixes offered with a failure (result.actions). Applies the fix and
+  // retries ONCE. 'vae-automatic': VAE → Automatic in the form defaults and in
+  // A1111's own settings (sd_vae), then the same request again with vae Automatic.
+  async function fixAndRetry(fix, req, from) {
+    if (fix !== 'vae-automatic') return { ok: false, error: 'UNKNOWN_FIX', code: 'UNKNOWN_FIX', message: `There is no fix called “${fix}”.`, hint: 'Known fixes: vae-automatic' };
+    const applied = [];
+    try { ip.setSettings({ vae: '' }); persist(); applied.push('form'); } catch (_) {}
+    const st = ip.status();
+    if (st.backend === 'a1111' && st.base) {
+      try { const o = await control.setOptions(st.base, { sd_vae: 'Automatic' }); if (o && o.ok) applied.push('sd_vae'); else log('sd-fix', { fix, step: 'sd_vae', ok: false, code: o && (o.code || o.error) }); }
+      catch (e) { log('sd-fix', { fix, step: 'sd_vae', ok: false, error: String((e && e.message) || e) }); }
+    }
+    log('sd-fix', { fix, applied });
+    const q = Object.assign({}, req || {}, { vae: 'Automatic' });
+    const r = q.test ? await testRender({ vae: 'Automatic' }) : q.mask ? await inpaint(q, from || 'images-tab:fix') : q.initImage ? await img2img(q, from || 'images-tab:fix') : await generate(q, from || 'images-tab:fix');
+    return Object.assign(r || { ok: false }, { fixed: fix, applied, retried: true });
+  }
+
+  // "🧪 Test: make a 512px image" (o: overrides, e.g. { vae: 'Automatic' } for the retry)
+  function testRender(o) { return generate(Object.assign({ prompt: 'a red apple on a white table, studio photo, simple', width: 512, height: 512, steps: Math.min(ip.status().steps || 20, 20), batchSize: 1, seed: -1, purpose: 'test' }, o || {}), 'images-tab:test'); }
 
   // Save pictures that are not from generate() (upscale, workflows) the same way.
   function saveOther(r, record, prefix, from, req) {
@@ -340,11 +389,11 @@ function createSdStudio(deps) {
   function backendInfo() { const s = ip.status(); return { ok: true, connected: !!(s.enabled && s.endpoint), backend: s.backend, label: s.label, base: s.base, checkpoint: s.checkpoint || s.model, busy: s.busy }; }
   function locks() { return lib ? lib.listLocks() : { ok: true, locks: [] }; }
 
-  return { detect, connect, lists, settings, buildRequest, generate, gallery, record, libList, libScan, request, backendInfo, locks,
+  return { detect, connect, lists, settings, buildRequest, generate, fixAndRetry, gallery, record, libList, libScan, request, backendInfo, locks,
     img2img, inpaint, upscale, optionsGet, optionsSet, optionsSchema, upscalers, controlnetModels, controlnetModules, adetailerModels, styles, scripts, embeddings, extraFields,
     interrupt, skip, refresh, memory, objectInfo, queue, uploadImage, free, workflowsList, workflowGet, workflowSave, workflowDelete, runWorkflow, extras, features,
     progress: () => ip.progress(), cancel: () => ip.cancel(), status: () => Object.assign({ ok: true }, ip.status()),
-    test: async () => generate({ prompt: 'a red apple on a white table, studio photo, simple', width: 512, height: 512, steps: Math.min(ip.status().steps || 20, 20), batchSize: 1, seed: -1, purpose: 'test' }, 'images-tab:test') };
+    test: () => testRender() };
 }
 
 module.exports = { createSdStudio, sizeFor, PURPOSES };

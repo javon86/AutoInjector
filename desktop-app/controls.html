@@ -113,6 +113,16 @@
     #sd-progress { height:8px; background:#222; border-radius:4px; overflow:hidden; margin:6px 0 2px; }
     #sd-progress-bar { height:100%; width:0; background:linear-gradient(90deg,#5a4ca0,#8a6cf0); transition:width .3s; }
     #sd-msg { font-size:12px; opacity:.9; min-height:18px; white-space:pre-line; }
+    #sd-error { margin:6px 0 4px; padding:9px 12px; border:1px solid #8a3a3a; background:#241212; border-radius:8px; font-size:12.5px; line-height:1.5; }
+    #sd-error[hidden], #sd-error [hidden] { display:none; }
+    #sd-error .sd-err-title { color:#ff9c9c; font-weight:600; white-space:pre-line; }
+    #sd-error .sd-err-fix { margin-top:4px; opacity:.9; white-space:pre-line; }
+    #sd-error .sd-err-actions { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+    #sd-error details { margin-top:6px; font-size:11.5px; }
+    #sd-error details summary { cursor:pointer; opacity:.7; }
+    #sd-error pre { white-space:pre-wrap; word-break:break-word; max-height:180px; overflow:auto; margin:4px 0 0; padding:6px; background:#160c0c; border-radius:4px; font-size:11px; }
+    #sd-vae option[data-bad] { color:#8a8a8a; }
+    #sd-vae-warn[hidden] { display:none; }
     #sd-final-prompt { font-size:11px; opacity:.6; word-break:break-word; margin-top:3px; }
     #sd-preview { display:block; max-width:100%; max-height:62vh; margin:0 auto; border-radius:6px; border:1px solid #2a2a2a; }
     #sd-preview-empty { padding:40px 12px; text-align:center; opacity:.5; border:1px dashed #2a2a2a; border-radius:8px; }
@@ -356,6 +366,7 @@
     .cap-item .nm { font-weight:600; }
     .cap-item .why { opacity:.75; display:block; margin-top:1px; }
     .cap-item .tip { display:block; margin-top:3px; color:#ffd479; font-size:11.5px; }
+    .cap-item .cap-fix-btn { display:inline-block; margin-top:4px; font-size:11.5px; padding:2px 8px; }
     #cap-modal .foot { display:flex; align-items:center; gap:10px; margin-top:14px; }
     #cap-modal .foot .spacer { flex:1; }
 
@@ -380,6 +391,8 @@
     #ex-preview { background:#0a0d11; border:1px solid #232a33; border-radius:8px; padding:8px 9px; font-size:11px; line-height:1.35; max-height:210px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:0; }
     #extract-modal .foot { display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap; }
     #extract-modal .foot .spacer { flex:1; }
+    #ex-confirm-all { border:1px solid #8a3a3f; background:#2a1215; border-radius:9px; padding:9px 11px; margin:8px 0 0; color:#ffd6d8; }
+    #ex-confirm-all .row { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; flex-wrap:wrap; }
     #ex-file { opacity:.7; font-size:11px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 
     /* ---- Butler chat/activity log: system vs butler vs each AI vs to-ME. A
@@ -1120,6 +1133,7 @@
           <div><label class="sd-l" for="sd-checkpoint">Checkpoint (model)</label><select id="sd-checkpoint"><option value="">(the one loaded in your SD app)</option></select></div>
           <div><label class="sd-l" for="sd-vae">VAE</label><select id="sd-vae"><option value="">Automatic</option></select></div>
         </div>
+        <div id="sd-vae-warn" class="sd-warn" role="note" hidden></div>
         <div class="sd-row">
           <div><label class="sd-l" for="sd-sampler">Sampler</label><select id="sd-sampler"><option value="">(default)</option></select></div>
           <div><label class="sd-l" for="sd-scheduler">Scheduler</label><select id="sd-scheduler"><option value="">(default)</option></select></div>
@@ -1223,6 +1237,12 @@
         </div>
         <div id="sd-progress" aria-hidden="true"><div id="sd-progress-bar"></div></div>
         <div id="sd-msg" role="status" aria-live="polite"></div>
+        <div id="sd-error" role="alert" hidden>
+          <div id="sd-error-msg" class="sd-err-title"></div>
+          <div id="sd-error-fix" class="sd-err-fix"></div>
+          <div id="sd-error-actions" class="sd-err-actions"></div>
+          <details id="sd-error-details"><summary>details (what the SD app said)</summary><pre id="sd-error-raw"></pre></details>
+        </div>
         <div id="sd-final-prompt"></div>
       </div>
       <div class="sd-card">
@@ -2059,6 +2079,13 @@
       </div>
       <div id="ex-counts" aria-live="polite">Loading preview…</div>
       <pre id="ex-preview" aria-label="Preview of the first lines"></pre>
+      <div id="ex-confirm-all" role="alertdialog" aria-labelledby="ex-confirm-all-text" hidden>
+        <div id="ex-confirm-all-text"></div>
+        <div class="row">
+          <button id="btn-extract-confirm-back">← Back</button>
+          <button id="btn-extract-confirm-all" class="danger">Yes, save everything</button>
+        </div>
+      </div>
       <div class="foot">
         <span id="ex-file"></span>
         <span class="spacer"></span>

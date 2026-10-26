@@ -108,6 +108,7 @@ contextBridge.exposeInMainWorld("api", {
   voiceSpeak: (text, who) => ipcRenderer.invoke("voice:speak", { text, who }),
   voiceListen: (opts) => ipcRenderer.invoke("voice:listen", opts || {}),
   voiceCheck: () => ipcRenderer.invoke("voice:check"),
+  voiceRedownload: () => ipcRenderer.invoke("voice:redownload"),
   // Image generation (Stable Diffusion)
   imageStatus: () => ipcRenderer.invoke("image:status"),
   configureImage: (patch) => ipcRenderer.invoke("image:configure", patch),
@@ -121,6 +122,7 @@ contextBridge.exposeInMainWorld("api", {
     settings: (patch) => ipcRenderer.invoke("sd:settings", { patch }),
     generate: (req) => ipcRenderer.invoke("sd:generate", req),
     test: () => ipcRenderer.invoke("sd:test"),
+    fixAndRetry: (fix, request) => ipcRenderer.invoke("sd:fix-retry", { fix, request }),
     progress: () => ipcRenderer.invoke("sd:progress"),
     cancel: () => ipcRenderer.invoke("sd:cancel"),
     gallery: (limit) => ipcRenderer.invoke("sd:gallery", { limit }),

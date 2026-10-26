@@ -522,7 +522,12 @@ def({
   name: 'export_logs', title: 'Export logs', group: 'files', changes: true, allowAlways: true,
   description: 'Export the logs to a text file in the logs folder: "book" = this Akọwe book only, "day" = the last day, "everything".',
   args: { type: 'object', properties: { scope: { type: 'string', enum: ['book', 'day', 'everything'] }, book_id: { type: 'string', maxLength: 80 } }, additionalProperties: false },
-  describe: (a) => `Export the logs (${a.scope === 'everything' ? 'everything' : a.scope === 'day' ? 'the last day' : 'this book only'}) to a file in the logs folder (secrets are taken out).`,
+  // "everything" holds old private conversations: it always asks, it can never be "always allowed".
+  allowAlwaysFor: (a) => ((a && (a.scope || a.action)) || 'book') !== 'everything',
+  allowKey: (a) => `export_logs:${(a && a.scope) || 'book'}`,
+  describe: (a) => a.scope === 'everything'
+    ? 'Export EVERYTHING — every saved conversation, including older private ones — to a file in the logs folder (secrets are taken out).'
+    : `Export the logs (${a.scope === 'day' ? 'the last day' : 'this book only'}) to a file in the logs folder (secrets are taken out).`,
   async run(a, ctx) {
     const r = await ctx.exportLogs({ scope: a.scope || 'book', bookId: a.book_id });
     return r && r.ok ? { ok: true, message: `Saved ${r.file}.`, data: { file: r.file } } : { ok: false, error: (r && r.error) || 'EXPORT_FAILED', message: r && r.error === 'NO_BOOK' ? 'There is no Akọwe book in the logs yet — try scope "day".' : "I couldn't export the logs." };
@@ -716,8 +721,36 @@ function validate(tool, args) {
   if (a == null || a === '') a = {};
   if (typeof a === 'string') { try { a = JSON.parse(a); } catch (_) { return { ok: false, error: 'the arguments were not valid JSON' }; } }
   if (!a || typeof a !== 'object' || Array.isArray(a)) return { ok: false, error: 'the arguments must be an object' };
+  const ignored = [];
+  a = tidyArgs(a, tool.args, ignored);
   const e = checkValue(a, tool.args, 'args');
-  return e ? { ok: false, error: e } : { ok: true, args: a };
+  return e ? { ok: false, error: e } : Object.assign({ ok: true, args: a }, ignored.length ? { ignored } : {});
+}
+/**
+ * Forgive the usual small-model slips before checking (the real limits are still checked after):
+ * arguments wrapped once more ({"args": {...}}), extra keys the tool doesn't take (dropped), and
+ * numbers / true-false sent as text. Required arguments are never invented. Dropped names go in `ignored`
+ * (the AI is told, so nothing it meant is lost silently).
+ */
+function tidyArgs(a, schema, ignored = []) {
+  if (!schema || schema.type !== 'object' || !schema.properties) return a;
+  const props = schema.properties;
+  const keys = Object.keys(a);
+  if (keys.length === 1 && !props[keys[0]] && ['args', 'arguments', 'parameters', 'params', 'input'].includes(keys[0])) {
+    let inner = a[keys[0]];
+    if (typeof inner === 'string') { try { inner = JSON.parse(inner); } catch (_) { inner = null; } }
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)) a = inner;
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(a)) {
+    const p = props[k];
+    if (!p) { if (schema.additionalProperties === false) { ignored.push(String(k).slice(0, 40)); continue; } out[k] = v; continue; }
+    if (typeof v === 'string' && (p.type === 'integer' || p.type === 'number') && /^\s*-?\d+(\.\d+)?\s*$/.test(v)) out[k] = Number(v);
+    else if (typeof v === 'string' && p.type === 'boolean' && /^(true|false)$/i.test(v.trim())) out[k] = v.trim().toLowerCase() === 'true';
+    else if ((v === '' || v === null) && !(schema.required || []).includes(k) && p.type !== 'string') continue; // an empty optional value = not given
+    else out[k] = v;
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------- registry API

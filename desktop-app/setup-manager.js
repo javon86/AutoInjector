@@ -59,13 +59,18 @@ const TARGETS = {
     kind: 'download',
     category: 'voice',
     files: [
+      // minBytes: a sanity floor (the real files are ~63 MB and ~5 KB) — a file
+      // below it is a partial download and is fetched again; json: must parse.
       {
         url: 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx',
         name: 'en_US-lessac-medium.onnx',
+        minBytes: 20 * 1024 * 1024,
       },
       {
         url: 'https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json',
         name: 'en_US-lessac-medium.onnx.json',
+        minBytes: 500,
+        json: true,
       },
     ],
     note: 'A natural US-English voice for piper, downloaded into models/voice so the voice engine has something to speak with.',
@@ -281,7 +286,11 @@ async function detect(id) {
       try { dir = deps.modelsDir ? deps.modelsDir(t.category) : null; } catch (_) { dir = null; }
       if (!dir) return { id, installed: null, reason: 'models folder not ready' };
       const all = t.files.every((f) => { try { return deps.fs.existsSync(path.join(dir, f.name)); } catch (_) { return false; } });
-      return { id, installed: all };
+      if (!all) return { id, installed: false };
+      // present but clearly broken (a partial download) → not installed
+      const bad = t.files.map((f) => ({ f, why: fileProblem(path.join(dir, f.name), f) })).find((x) => x.why);
+      if (bad) return { id, installed: false, damaged: true, reason: `${bad.f.name} is damaged or incomplete (${bad.why}) — re-download it` };
+      return { id, installed: true };
     }
     if (t.kind === 'ollama') {
       if (!deps.detectOllama) return { id, installed: null, reason: 'no ollama detector' };
@@ -329,7 +338,26 @@ function _runProcess(command, args, onProgress) {
   });
 }
 
+// Is a downloaded file clearly broken? Checks what the target declares: a size
+// floor (minBytes) and, for a .json, that it parses. Returns a short reason or ''.
+// (No checksum is published next to these files, so size + the download's own
+// Content-Length — see _download — are the checks available.)
+function fileProblem(filePath, spec) {
+  const f = spec || {};
+  let st;
+  try { st = deps.fs.statSync(filePath); } catch (e) { return 'missing'; }
+  const size = st && Number.isFinite(st.size) ? st.size : null;
+  if (size === 0) return 'empty file';
+  if (f.minBytes && size != null && size < f.minBytes) return `only ${size} bytes, expected at least ${f.minBytes}`;
+  if (f.json) {
+    try { JSON.parse(String(deps.fs.readFileSync(filePath, 'utf8'))); } catch (_) { return 'not valid JSON'; }
+  }
+  return '';
+}
+
 // HTTPS GET to a file, following redirects (HuggingFace resolves to a CDN).
+// A body shorter than its Content-Length (a dropped connection) is a failure,
+// never saved — that's how a half-downloaded voice model used to land on disk.
 function _download(fileUrl, destPath, onProgress, redirects) {
   return new Promise((resolve) => {
     let url;
@@ -360,9 +388,12 @@ function _download(fileUrl, destPath, onProgress, redirects) {
         }
       });
       res.pipe(file);
+      res.on('aborted', () => fail('connection dropped mid-download'));
       file.on('finish', () => {
         file.close(() => {
-          try { deps.fs.renameSync(tmp, destPath); resolve({ ok: true, path: destPath }); }
+          if (settled) return;
+          if (total && got !== total) return fail(`incomplete download (${got} of ${total} bytes)`);
+          try { deps.fs.renameSync(tmp, destPath); settled = true; resolve({ ok: true, path: destPath, bytes: got }); }
           catch (e) { fail(String((e && e.message) || e)); }
         });
       });
@@ -375,7 +406,8 @@ function _download(fileUrl, destPath, onProgress, redirects) {
 
 const OLLAMA_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,80}$/;
 
-// install(id, { model?, onProgress? }) -> { ok, message?, error? }
+// install(id, { model?, onProgress?, force? }) -> { ok, message?, error? }
+// force (download targets): fetch the files again even when present.
 async function install(id, opts = {}) {
   const t = TARGETS[id];
   if (!t) return { ok: false, error: 'UNKNOWN_TARGET', target: id };
@@ -411,13 +443,22 @@ async function install(id, opts = {}) {
       const saved = [];
       for (const f of t.files) {
         const dest = path.join(dir, f.name);
-        if (deps.fs.existsSync(dest)) { onProgress(`${f.name} already present`); saved.push(dest); continue; }
-        onProgress(`Downloading ${f.name}…`);
+        // opts.force: re-download even if present (a file the engine can't load).
+        // A present file that fails its own checks is fetched again too.
+        if (deps.fs.existsSync(dest)) {
+          const why = opts.force ? 'forced' : fileProblem(dest, f);
+          if (!why) { onProgress(`${f.name} already present`); saved.push(dest); continue; }
+          onProgress(why === 'forced' ? `Re-downloading ${f.name}…` : `${f.name} is damaged (${why}) — downloading it again…`);
+          // Keep the old copy until the new one is complete (a failed download
+          // leaves things no worse than before); the .part is renamed over it.
+        } else onProgress(`Downloading ${f.name}…`);
         const r = await _download(f.url, dest, onProgress, 0);
         if (!r.ok) return { ok: false, error: `download failed (${f.name}): ${r.error}` };
+        const why = fileProblem(dest, f);
+        if (why) { try { deps.fs.unlinkSync(dest); } catch (_) {} return { ok: false, error: `download failed (${f.name}): the file is damaged (${why})` }; }
         saved.push(r.path);
       }
-      return { ok: true, message: `Downloaded ${saved.length} file(s) into ${dir}`, paths: saved };
+      return { ok: true, message: `${opts.force ? 'Re-downloaded' : 'Downloaded'} ${saved.length} file(s) into ${dir}`, paths: saved };
     }
 
     if (t.kind === 'ollama') {
@@ -460,4 +501,4 @@ async function auto(opts = {}) {
   return { ok: okCount > 0, results, installed: okCount, total: results.length };
 }
 
-module.exports = { TARGETS, AUTO_ORDER, configure, pythonBin, resolvePython, pythonStatus, _resetPython, _pyCandidates, has, get, list, detect, detectAll, install, auto };
+module.exports = { TARGETS, AUTO_ORDER, fileProblem, configure, pythonBin, resolvePython, pythonStatus, _resetPython, _pyCandidates, has, get, list, detect, detectAll, install, auto };

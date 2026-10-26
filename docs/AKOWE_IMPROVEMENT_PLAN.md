@@ -33,7 +33,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; B5 parked; first real test next).
+- Last updated: 2026-10-25 (Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 parked; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -343,6 +343,23 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - GitHub checks for Akọwe (see Problems).
 
 ## Problems to come back to
+
+- **Refinement from the user's 2026-10-25 evening log (FIXED, 2026-10-26)**, one update:
+  1. **🎩 Alfred:** "Test my AI" said OK while the model wasn't installed, so every question failed with HTTP 404. It now checks the model, lists the installed ones with **Use …** buttons, and warns about tiny models. Small-model argument slips are forgiven.
+  2. **🎨 Images:** after a broken VAE was picked, every Generate failed with a bare HTTP 500 (about 15 clicks).
+     - Failures are now explained in plain words (`sd-errors.js`) with a one-click "Use Automatic VAE and retry".
+     - Unusable VAE files are flagged in the dropdown.
+     - A repeat guard asks before trying the same failure again.
+  3. **Old Butler:** it looped 20 turns retrying the same broken image and ignored Claude's decline three times.
+     - The same failure twice stops the task.
+     - A decline is final.
+     - The same invalid step 3 times, or 4 turns without progress, stops it.
+     - It warns about tiny models.
+     - Prompts in log events are capped at 60 characters.
+  4. **Reply capture:** page clutter is removed: "ChatGPT said:", "Claude responded:", "just now", Claude's thinking summary, and Gemini's code labels.
+  5. **Gemini self-test:** it no longer fails when Gemini runs code.
+  6. **Voice:** a damaged voice file is detected, with a one-click re-download. Partial downloads are no longer kept.
+  7. **Log export:** "Everything" needs a second confirmation that says what it includes, and Alfred can never "always allow" it.
 
 - **Stable Diffusion (B1) — not yet tried on a real GPU:** everything was tested against fake Forge/ComfyUI
   servers, fake processes and a fake download server. First real run on the user's PC: Stability Matrix package

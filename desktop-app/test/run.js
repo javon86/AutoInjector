@@ -1187,6 +1187,21 @@ async function testSelfTestConnectivity() {
   s = await call("state:get", {});
   assert(s.log.some((l) => l.kind === "selftest-error" && l.detail.site === "gemini" && l.detail.error === "REPLY_MISMATCH" && l.detail.capturedText.includes("unrelated reply")), "the Activity Log records the mismatch AND what was actually captured instead");
 
+  // Gemini RAN CODE to reverse it: the original token sits inside its code and
+  // the reversed token is the output (a real user's log) -- that's a good reply,
+  // not a too-broad reader. The prompt now also asks for no code or tools.
+  await resetAllParticipants();
+  const codePromise = call("selftest:run", { site: "gemini" });
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "test prompt sent to gemini" });
+  const codeSent = sentLog("gemini")[0].text;
+  assert(/do not run code or use any tools/i.test(codeSent), "the self-test prompt asks for the reversed text without running code or tools");
+  const codeToken = extractSelftestToken(codeSent);
+  sayRaw("gemini", `Pythontoken = "${codeToken}"\nprint(token[::-1])\n\nCode output${reverseStr(codeToken)}\n\n${reverseStr(codeToken)}`);
+  const codeRes = await codePromise;
+  assert(codeRes.ok === true, `a reply that ran code (original only inside the code, reversed on its own line) passes (got ${JSON.stringify(codeRes)})`);
+  s = await call("state:get", {});
+  assert(s.log.some((l) => l.kind === "selftest-ok" && l.detail.site === "gemini" && l.detail.ranCode === true), "the Activity Log notes the AI ran code to answer");
+
   // a send that never actually goes through is reported at the send stage, without waiting on any reply at all
   await resetAllParticipants();
   reg("chatgpt").webContents._forceSendFail = true;
@@ -1492,9 +1507,9 @@ async function testManagerApprovalModeAndRejection() {
 }
 
 async function testManagerValidationEscalationAndMaxTurns() {
-  console.log("\n== Manager: an invalid decision is rejected, escalates the tier after repeating, and a small maximumTurns cap still ends the task ==");
+  console.log("\n== Manager: an invalid decision is rejected, escalates the tier after repeating, and the same invalid step 3 times ends the task early ==");
   await resetManagerState();
-  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 3, approvalMode: false });
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 20, approvalMode: false });
 
   // this DELEGATE names a target outside chatgpt/claude/gemini -- valid per
   // manager-provider.js's own action vocabulary, but rejected by main.js's
@@ -1505,11 +1520,14 @@ async function testManagerValidationEscalationAndMaxTurns() {
   const startRes = await call("manager:start-task", { userRequest: "This will keep failing validation." });
   assert(startRes.ok, "the task itself starts fine -- the failure is in what the manager proposes, not in starting");
 
-  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "repeated invalid decisions eventually exhaust maximumTurns and end the task" });
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "repeated invalid decisions end the task" });
   const s = await call("state:get", {});
+  const mine = s.managerLog.filter((l) => l.taskId === s.manager.taskId);
   assert(s.manager.currentTier > 2, `the tier escalated at least once while repeatedly failing to make progress (got tier ${s.manager.currentTier})`);
   assert(s.manager.previousManagerActions.some((a) => a.rejected && a.rejectReason === "BAD_ASSIGNMENT"), "each rejected decision is recorded with the specific reason it was rejected for");
-  assert(s.managerLog.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), "the Manager Activity Log explains exactly why the task ended, not just that it did");
+  assert(mine.some((l) => l.summary.includes("INVALID_STEPS")), "the Manager Activity Log explains exactly why the task ended (the same invalid step 3 times), not just that it did");
+  assert(s.manager.endReason === "INVALID_STEPS" && /couldn't produce a valid step/.test(s.manager.endMessage || ""), "the user sees a plain status: the manager model couldn't produce a valid step");
+  assert(s.manager.turnNumber === 3 && !mine.some((l) => l.summary.includes("MAX_TURNS_EXCEEDED")), `it stopped after 3 invalid steps (turn ${s.manager.turnNumber}), not at the 20-turn cap`);
   assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "an invalid target never results in an actual send to anyone");
 }
 
@@ -1559,6 +1577,145 @@ async function testManagerEscalateActionAndTierFourAdjudication() {
   s = await call("state:get", {});
   assert(s.manager.currentTier < 4, `de-escalated back down from Tier 4 after making progress again (got tier ${s.manager.currentTier})`);
   assert(managerAskCalls.length === 2, "exactly one real call to the configured provider happened after de-escalating, to produce the FINISH decision");
+}
+
+// --- The "Butler" loop guards (one real task from the user's log: a 0.5B
+// manager re-asked a failing GENERATE_IMAGE ~8 times, sent SEND with no
+// assignments over and over, and ignored three tier-4 "decline" rulings until
+// MAX_TURNS_EXCEEDED). Scripted fake manager model + a fake image generator
+// that always answers HTTP 500, against the real main.js loop. ---
+async function withFailingImages(fn) {
+  const saved = imageProvider.generate;
+  imageProvider.generate = async (prompt) => { imageGenCalls.push(prompt); return { ok: false, error: "HTTP_500", detail: "NansException: a tensor with all NaNs was produced in VAE" }; };
+  try { return await fn(); } finally { imageProvider.generate = saved; }
+}
+function taskLog(s) { return s.managerLog.filter((l) => l.taskId === s.manager.taskId); }
+
+async function testButlerSameFailureTwiceStops() {
+  console.log("\n== Butler loop: the same image failing twice with the same error stops the task with a plain status ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  const longPrompt = "A cozy reading nook by a rainy window, warm lamp light, a sleeping cat on a knitted blanket, watercolor style";
+  queueManagerDecisionRepeating({ action: "GENERATE_IMAGE", prompt: longPrompt, reason: "the user wants a picture" });
+  await withFailingImages(async () => {
+    const before = imageGenCalls.length;
+    assert((await call("manager:start-task", { userRequest: "Make me a picture of a reading nook." })).ok, "the task starts");
+    await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the repeated image failure ends the task" });
+    const s = await call("state:get", {});
+    assert(imageGenCalls.length - before === 2, `the identical image request ran exactly twice, not ~8 times (ran ${imageGenCalls.length - before})`);
+    assert(s.manager.endReason === "ACTION_KEEPS_FAILING", `ended as ACTION_KEEPS_FAILING (got ${s.manager.endReason})`);
+    assert(/^Stopped: image generation keeps failing — /.test(s.manager.endMessage || ""), `the user sees "Stopped: image generation keeps failing — …" (got ${s.manager.endMessage})`);
+    assert(/HTTP 500/.test(s.manager.endMessage || "") && !/NansException/.test(s.manager.endMessage || ""), "the error is plain (HTTP 500), not a raw backend dump");
+    assert(s.manager.turnNumber === 2 && !taskLog(s).some((l) => /MAX_TURNS_EXCEEDED/.test(l.summary)), `stopped on turn 2, not the 20-turn cap (turn ${s.manager.turnNumber})`);
+    const second = managerAskCalls[1] && managerAskCalls[1].managerState;
+    const notes = second ? managerProvider.guardNotes(second.guard) : [];
+    assert(notes.some((n) => /GENERATE_IMAGE failed with HTTP_500/.test(n) && /blocked for this task/.test(n)), "after the first failure, the next turn tells the model that action is blocked for this task");
+    const actionEvents = taskLog(s).filter((l) => l.category === "action");
+    assert(actionEvents.length >= 1 && actionEvents.every((l) => !l.details.prompt || l.details.prompt.length <= 61), "manager-action log events cap the image prompt to ~60 chars");
+    assert(!JSON.stringify(taskLog(s)).includes(longPrompt), "the full image prompt never appears in the log events");
+  });
+}
+
+async function testButlerDeclineIsFinal() {
+  console.log("\n== Butler loop: a tier-4 DECLINE ruling ends the task as DECLINED — no de-escalation, no re-escalation ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 20, approvalMode: false, adjudicatorSite: "claude" });
+  queueManagerDecision({ action: "ESCALATE", toTier: 4, reason: "stuck, ask the cloud" });
+  queueManagerDecisionRepeating({ action: "ESCALATE", toTier: 4, reason: "ask again" }); // what the small model did after each ruling
+  assert((await call("manager:start-task", { userRequest: "Make the picture anyway." })).ok, "the task starts");
+  await waitUntil(() => sentLog("claude").length === 1, { label: "the case goes to the tier-4 adjudicator" });
+  assert(/VERDICT: APPROVE/.test(sentLog("claude")[0].text) && /VERDICT: DECLINE/.test(sentLog("claude")[0].text) && /VERDICT: GUIDANCE/.test(sentLog("claude")[0].text), "the adjudication prompt asks for a one-line verdict first (APPROVE / DECLINE / GUIDANCE)");
+  const asksBefore = managerAskCalls.length;
+  say("claude", "Ruling for task-123: decline. The image backend is broken and repeating the request will not help, so close the task.");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the decline ends the task" });
+  await new Promise((r) => setTimeout(r, 300));
+  const s = await call("state:get", {});
+  assert(s.manager.endReason === "DECLINED", `ended as DECLINED (got ${s.manager.endReason})`);
+  assert(/^Declined by Claude: /.test(s.manager.endMessage || "") && (s.manager.endMessage || "").length < 260, `the adjudicator's short reason is shown (got ${s.manager.endMessage})`);
+  assert(s.manager.currentTier === 4 && !taskLog(s).some((l) => /De-escalating/.test(l.summary)), "no de-escalation after a decline");
+  assert(managerAskCalls.length === asksBefore, "the small model was NOT asked again after the decline");
+  assert(sentLog("claude").length === 1, "the same task was never escalated to the adjudicator again");
+}
+
+async function testButlerGuidanceThenNoSecondAdjudication() {
+  console.log("\n== Butler loop: after a non-decline ruling, the task is never sent to tier 4 a second time ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, tier: 2, maximumTurns: 20, approvalMode: false, adjudicatorSite: "claude" });
+  queueManagerDecision({ action: "ESCALATE", toTier: 4, reason: "first" });
+  assert((await call("manager:start-task", { userRequest: "Sort this out." })).ok, "the task starts");
+  await waitUntil(() => sentLog("claude").length === 1, { label: "first adjudication sent" });
+  queueManagerDecision({ action: "ESCALATE", toTier: 4, reason: "again" });
+  queueManagerDecision({ action: "FINISH", reason: "done" });
+  say("claude", "VERDICT: GUIDANCE\nAsk Gemini for a summary, then finish.");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "the task carries on and finishes" });
+  const s = await call("state:get", {});
+  assert(sentLog("claude").length === 1, "the second ESCALATE did not reach the adjudicator again");
+  assert(taskLog(s).some((l) => /Tier 4 already ruled/.test(l.summary)), "the log says why it did not re-escalate");
+}
+
+async function testButlerMissingAssignments() {
+  console.log("\n== Butler loop: SEND without assignments gets a corrective hint, is repaired when the target is obvious, and 3 repeats end the task ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  queueManagerDecisionRepeating({ action: "SEND", prompt: "Please describe a cozy reading nook in detail.", reason: "ask an AI" });
+  assert((await call("manager:start-task", { userRequest: "Describe a reading nook." })).ok, "the task starts");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "repeated MISSING_ASSIGNMENTS ends the task" });
+  let s = await call("state:get", {});
+  assert(s.manager.endReason === "INVALID_STEPS" && /couldn't produce a valid step/.test(s.manager.endMessage || ""), `ends as "the manager model couldn't produce a valid step" (got ${s.manager.endReason}: ${s.manager.endMessage})`);
+  assert(s.manager.turnNumber <= 3, `ended early on turn ${s.manager.turnNumber}, not after 20 turns`);
+  const second = managerAskCalls[1] && managerAskCalls[1].managerState;
+  const notes = second ? managerProvider.guardNotes(second.guard) : [];
+  assert(notes.some((n) => n.includes('"assignments":[{"target":"claude","task":')), "the next turn hands the model the exact JSON shape it needs");
+  assert(sentLog("chatgpt").length === 0 && sentLog("claude").length === 0 && sentLog("gemini").length === 0, "nothing was sent anywhere");
+
+  // Obvious single target (named in a "target"/"to" field): repaired and sent.
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  queueManagerDecision({ action: "SEND", to: "gemini", prompt: "Summarize the plan in three bullets.", reason: "need a summary" });
+  assert((await call("manager:start-task", { userRequest: "Summarize the plan." })).ok, "the task starts");
+  await waitUntil(() => sentLog("gemini").length === 1, { label: "the repaired SEND reaches Gemini" });
+  assert(sentLog("gemini")[0].text.includes("Summarize the plan in three bullets."), "the repaired assignment carries the model's prompt");
+  s = await call("state:get", {});
+  assert(taskLog(s).some((l) => /Repaired a SEND with no assignments → gemini/.test(l.summary)), "the repair is logged");
+  await call("manager:stop", {});
+}
+
+async function testButlerNoProgressStops() {
+  console.log("\n== Butler loop: 4 turns with no successful action end the task as STUCK, with a summary of what was tried ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, maximumTurns: 20, approvalMode: false });
+  // Different prompts each time, so the same-failure rule doesn't fire first.
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a red barn", reason: "try 1" });
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a blue barn", reason: "try 2" });
+  queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a green barn", reason: "try 3" });
+  queueManagerDecisionRepeating({ action: "GENERATE_IMAGE", prompt: "a yellow barn", reason: "try 4" });
+  await withFailingImages(async () => {
+    assert((await call("manager:start-task", { userRequest: "Draw a barn." })).ok, "the task starts");
+    await waitUntil(async () => (await call("state:get", {})).manager.status === "error", { label: "the no-progress check ends the task" });
+    const s = await call("state:get", {});
+    assert(s.manager.endReason === "STUCK", `ended as STUCK (got ${s.manager.endReason})`);
+    assert(/no step has worked in the last 4 turns/.test(s.manager.endMessage || "") && /GENERATE_IMAGE → HTTP_500/.test(s.manager.endMessage || ""), `the status summarises what was tried (got ${s.manager.endMessage})`);
+    assert(s.manager.turnNumber === 4, `stopped on turn 4 (got ${s.manager.turnNumber})`);
+  });
+}
+
+async function testButlerSmallModelWarning() {
+  console.log("\n== Butler loop: a manager model named 0.5b gets ONE non-blocking 'too small' notice recommending qwen2.5:7b ==");
+  await resetManagerState();
+  await call("manager:configure-provider", { ...MANAGER_TEST_CONFIG, model: "qwen2.5:0.5b", maximumTurns: 20, approvalMode: false });
+  queueManagerDecision({ action: "FINISH", reason: "done" });
+  assert((await call("manager:start-task", { userRequest: "Say hi." })).ok, "the task still starts — the warning never blocks");
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "the task runs to completion" });
+  let s = await call("state:get", {});
+  const warn = (l) => l.category === "config" && /too small/.test(l.summary) && /qwen2\.5:7b or bigger/.test(l.summary);
+  assert(taskLog(s).some(warn), "the too-small warning fired and recommends qwen2.5:7b or bigger");
+  await resetManagerState();
+  queueManagerDecision({ action: "FINISH", reason: "done" });
+  await call("manager:start-task", { userRequest: "Say hi again." });
+  await waitUntil(async () => (await call("state:get", {})).manager.status === "finished", { label: "second task finishes" });
+  s = await call("state:get", {});
+  assert(!taskLog(s).some(warn), "the warning is shown only once, not on every task");
+  await call("manager:configure-provider", { model: MANAGER_TEST_CONFIG.model });
 }
 
 async function testManagerSaveActionWritesRealFiles() {
@@ -2748,6 +2905,22 @@ async function testManagerGenerateImageAction() {
   assert(imageGenCalls.length === 0, "a GENERATE_IMAGE with no prompt is rejected and never rendered");
   assert(st2.manager.previousManagerActions.some((a) => a.action === "GENERATE_IMAGE" && a.rejected), "the promptless GENERATE_IMAGE is recorded as rejected");
   await call("manager:stop", {});
+
+  // A failed render folds back the same plain sentence as the Images tab (sd-errors.js),
+  // not the raw 500 dump (the A1111 "state_dict for AutoencoderKL" body from a real log).
+  resetManagerStub();
+  const savedGen = imageProvider.generate;
+  const vaeBody = { error: "RuntimeError", detail: "", body: "", errors: "Error(s) in loading state_dict for AutoencoderKL:\n\tMissing key(s) in state_dict: \"encoder.conv_in.weight\"" };
+  imageProvider.generate = async () => require(path.join(__dirname, "..", "sd-errors")).annotate({ ok: false, error: "HTTP_500", status: 500, raw: JSON.stringify(vaeBody), message: "x" }, { vae: "taesd_decoder" });
+  try {
+    queueManagerDecision({ action: "GENERATE_IMAGE", prompt: "a lighthouse", reason: "picture", confidence: 0.9 });
+    queueManagerDecision({ action: "FINISH", reason: "done", confidence: 0.95 });
+    await call("manager:start-task", { userRequest: "picture of a lighthouse" });
+    await waitUntil(async () => { const s = await call("manager:get-state", {}); return s.manager && s.manager.images && s.manager.images.length; }, { label: "the failed image step is recorded" });
+    const st3 = await call("manager:get-state", {});
+    const e = st3.manager.images[st3.manager.images.length - 1];
+    assert(e && !e.ok && /^VAE_LOAD_FAILED: The VAE you picked \(“taesd_decoder”\) can't be loaded/.test(e.error) && /Automatic/.test(e.error) && !/state_dict|HTTP_500/.test(e.error), `a failed render is explained in plain words (${String(e && e.error).slice(0, 80)}…)`);
+  } finally { imageProvider.generate = savedGen; await call("manager:stop", {}); }
 }
 
 // Self-install: the supervisor's SETUP action installs a dependency from the
@@ -3331,6 +3504,12 @@ async function main() {
   await testManagerValidationEscalationAndMaxTurns();
   await testManagerStallBreak();
   await testManagerEscalateActionAndTierFourAdjudication();
+  await testButlerSameFailureTwiceStops();
+  await testButlerDeclineIsFinal();
+  await testButlerGuidanceThenNoSecondAdjudication();
+  await testButlerMissingAssignments();
+  await testButlerNoProgressStops();
+  await testButlerSmallModelWarning();
   await testManagerSaveActionWritesRealFiles();
   await testManagerPauseResumeStop();
   await testAlwaysOnTagRouting();

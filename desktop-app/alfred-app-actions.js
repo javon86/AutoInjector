@@ -133,6 +133,7 @@ A('voice.status', 'voice:status', { t: 'Voice status', c: false });
 A('voice.check', 'voice:check', { t: 'Check the voice service', c: false });
 A('voice.configure', 'voice:configure', { t: 'Change voice settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { enabled: true } } });
 A('voice.speak', 'voice:speak', { t: 'Say something out loud', c: true, aa: true, a: { text: text(2000), who: opt(40) }, r: ['text'], ex: { text: 'Good evening.' } });
+A('voice.redownload', 'voice:redownload', { t: 'Re-download the voice file (when it is damaged or incomplete)', c: true, ex: {} });
 A('voice.listen', 'voice:listen', { t: 'Listen with the microphone', c: true, a: { seconds: { type: 'integer', minimum: 1, maximum: 60 } }, ex: { seconds: 5 } });
 A('image.status', 'image:status', { t: 'Image generator settings', c: false });
 A('image.configure', 'image:configure', { t: 'Change image generator settings', c: true, a: { settings: pass }, r: ['settings'], call: (a) => [a.settings], ex: { settings: { steps: 25 } } });
@@ -239,7 +240,7 @@ const TOOL_CHANNELS = {
   'video:status': 'video_status',
   'akowe:open-url': 'open_akowe_page',
   'sd:status': 'sd_call:images.status', 'sd:detect': 'sd_call:sd.detect', 'sd:connect': 'sd_call:sd.connect', 'sd:generate': 'sd_call:images.generate',
-  'sd:test': 'sd_call:images.test', 'sd:progress': 'sd_call:images.progress', 'sd:cancel': 'sd_call:images.cancel', 'sd:gallery': 'sd_call:images.gallery',
+  'sd:test': 'sd_call:images.test', 'sd:fix-retry': 'sd_call:images.fixAndRetry', 'sd:progress': 'sd_call:images.progress', 'sd:cancel': 'sd_call:images.cancel', 'sd:gallery': 'sd_call:images.gallery',
   'sdlib:list': 'sd_call:library.find', 'sdlib:scan': 'sd_call:library.scan', 'sdlib:locks': 'sd_call:library.locks',
   'sd:targets': 'sd_call:sd.targets', 'sd:start': 'sd_call:sd.start', 'sd:stop': 'sd_call:sd.stop',
   'sd:install-check': 'sd_call:sd.install.check', 'sd:install': 'sd_call:sd.install.install', 'sd:install-model': 'sd_call:sd.install.downloadModel', 'sd:install-cancel': 'sd_call:sd.install.cancel',

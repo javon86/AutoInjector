@@ -59,7 +59,7 @@ const EXACT = {
   'db-init': 'memory', 'db-init-error': 'memory',
   // Files
   'file-attached': 'files', 'file-attach-error': 'files', 'ai-download': 'files', 'ai-download-error': 'files',
-  'logs-download-all': 'files', 'logs-download-all-error': 'files', 'extract-all': 'files', 'extract-all-error': 'files',
+  'logs-download-all': 'files', 'logs-download-all-error': 'files', 'extract-all': 'files', 'extract-all-error': 'files', 'extract-all-needs-confirm': 'files',
   // You (UI)
   'ui-click': 'user', 'ui-panel': 'user', 'role-changed': 'user', 'reload': 'user',
   'regenerate': 'user', 'inspect-opened': 'user', 'new-chat-all': 'user', 'new-chat-error': 'user',

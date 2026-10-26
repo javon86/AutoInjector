@@ -140,7 +140,15 @@ async function main() {
   fs.unlinkSync(tr.file);
   assert(/UNRELATED_CHAT/.test(tbody) && /BOOK_A_CHAPTER/.test(tbody) && !/PRIVATE_LEGAL/.test(tbody) && /AutoInjector log - last 24 h - /.test(tr.file), "last 24 h: today's chats, not the 20-day-old private one");
   assert(!tbody.includes(token), "the planted connection key is redacted in a time-range extract");
-  const ev = await call("logs:extract-all", { scope: "everything" });
+  // Everything is refused without the explicit second confirmation — and says what it would hold.
+  const logsDirFiles = () => { try { return fs.readdirSync(path.dirname(tr.file)).filter((f) => /everything/.test(f)); } catch (_) { return []; } };
+  const unconfirmed = await call("logs:extract-all", { scope: "everything" });
+  assert(unconfirmed.ok === false && unconfirmed.error === "CONFIRM_EVERYTHING" && !unconfirmed.file, "Everything without confirmEverything is refused and nothing is written");
+  assert(/\d+ messages? going back to .+, including older private conversations/.test(unconfirmed.message) && unconfirmed.messages >= 1 && Number.isFinite(unconfirmed.oldestAt), `…naming what it would contain (${unconfirmed.message})`);
+  assert(logsDirFiles().length === 0, "no 'everything' file exists after the refusal");
+  const evPv = await call("logs:extract-preview", { scope: "everything" });
+  assert(evPv.ok && evPv.everything && /including older private conversations/.test(evPv.everything.text) && Number.isFinite(evPv.oldestAt), "the preview of Everything carries the same summary for the dialog's question");
+  const ev = await call("logs:extract-all", { scope: "everything", confirmEverything: true });
   const ebody = fs.readFileSync(ev.file, "utf8");
   fs.unlinkSync(ev.file);
   assert(/PRIVATE_LEGAL/.test(ebody) && /includes ALL conversations, including older private ones/.test(ebody), "Everything has it all, with the warning in the header");

@@ -26,6 +26,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 const sdParams = require('./sd-params');
+const sdErrors = require('./sd-errors');
 
 const deps = { http, https };
 function configure(patch) { if (patch && patch.http) deps.http = patch.http; if (patch && patch.https) deps.https = patch.https; }
@@ -315,10 +316,11 @@ async function a1111Generate(base, p, opts = {}) {
   const url = opts.endpoint && !p.initImage ? opts.endpoint : `${base}${path}`;
   const r = await postJson(url, body, opts.timeoutMs || 180000);
   if (!r.ok) {
-    const out = { ok: false, error: r.status === 404 ? 'NO_API' : (r.error || 'ERROR'), detail: errDetail(r), status: r.status };
+    // raw: what the server said (sd-errors.js reads it: VAE / checkpoint load failures, OOM, NaN …)
+    const out = { ok: false, error: r.status === 404 ? 'NO_API' : (r.error || 'ERROR'), detail: errDetail(r), status: r.status, raw: String(r.text || '').slice(0, 4000) };
     if (r.status && r.status >= 400 && r.status !== 404) out.error = `HTTP_${r.status}`;
     out.message = explain(out, { base });
-    return out;
+    return sdErrors.annotate(out, { base, vae: p.vae, checkpoint: p.checkpoint, backend: 'a1111' });
   }
   if (!r.json || typeof r.json !== 'object') return { ok: false, error: 'BAD_JSON', message: 'The image server sent back something that isn\'t JSON.' };
   const imgs = Array.isArray(r.json.images) ? r.json.images.map((s) => String(s || '').replace(/^data:image\/\w+;base64,/, '')).filter(Boolean) : [];
@@ -447,9 +449,9 @@ async function comfyRunGraph(base, graph, opts = {}) {
   if (!q.ok || !q.json || !q.json.prompt_id) {
     job.closeWs && job.closeWs();
     const detail = comfyRejectReason(q.json) || errDetail(q);
-    const out = { ok: false, error: q.status === 400 ? 'COMFY_REJECTED' : (q.error || 'COMFY_ERROR'), detail };
+    const out = { ok: false, error: q.status === 400 ? 'COMFY_REJECTED' : (q.error || 'COMFY_ERROR'), detail, status: q.status, raw: String(q.text || '').slice(0, 4000) };
     out.message = explain(out, { base });
-    return out;
+    return sdErrors.annotate(out, { base, backend: 'comfy' });
   }
   const promptId = q.json.prompt_id;
   job.promptId = promptId;
@@ -465,9 +467,10 @@ async function comfyRunGraph(base, graph, opts = {}) {
           const msg = (st.messages || []).find((m) => m && m[0] === 'execution_error');
           const d = msg && msg[1] ? `${msg[1].node_type || ''}: ${msg[1].exception_message || ''}`.trim() : 'the workflow failed';
           if (/interrupt/i.test(d) || (st.messages || []).some((m) => m && m[0] === 'execution_interrupted')) return { ok: false, error: 'CANCELLED', message: explain('CANCELLED') };
-          const out = { ok: false, error: 'COMFY_ERROR', detail: d };
+          const m1 = (msg && msg[1]) || {};
+          const out = { ok: false, error: 'COMFY_ERROR', detail: d, raw: JSON.stringify({ node_type: m1.node_type || '', exception_type: m1.exception_type || '', exception_message: String(m1.exception_message || '').slice(0, 3000) }) };
           out.message = explain(out, { base });
-          return out;
+          return sdErrors.annotate(out, { base, backend: 'comfy' });
         }
         if ((st.messages || []).some((m) => m && m[0] === 'execution_interrupted')) return { ok: false, error: 'CANCELLED', message: explain('CANCELLED') };
         const outputs = entry.outputs || {};
@@ -602,6 +605,7 @@ async function comfyInterrupt(base, job) {
 }
 
 module.exports = {
+  explainSdError: sdErrors.explainSdError,
   configure, request, baseOf, portOf, errDetail, explain, noApiMessage, NO_API_HINT,
   identify, detect, DETECT_PORTS,
   parseLoraTags, loraTag, a1111Prompt, toComfySampler, randomSeed,

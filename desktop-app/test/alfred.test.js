@@ -72,7 +72,10 @@ async function main() {
   assert(registry.validate(gi, '{"prompt":"a lighthouse","width":512}').ok, 'arguments as a JSON string pass');
   assert(!registry.validate(gi, {}).ok && /prompt is required/.test(registry.validate(gi, {}).error), 'a missing required argument is refused');
   assert(!registry.validate(gi, { prompt: 5 }).ok, 'a wrong type is refused');
-  assert(!registry.validate(gi, { prompt: 'x y', evil: 1 }).ok, 'an unknown argument is refused');
+  { const ex = registry.get('export_logs'); assert(registry.canAllowAlways(ex, { scope: 'book' }) && registry.canAllowAlways(ex, { scope: 'day' }) && !registry.canAllowAlways(ex, { scope: 'everything' }) && !registry.allowableKey('export_logs:everything') && registry.allowableKey('export_logs:book'), 'export_logs "everything" always asks (can never be always-allowed); book / day can'); }
+  { const v = registry.validate(gi, { prompt: 'x y', evil: 1 }); assert(v.ok && !('evil' in v.args) && v.ignored.includes('evil'), 'an unknown argument is dropped (and reported), never passed on'); }
+  { const v = registry.validate(gi, { args: { prompt: 'x y', width: '640' } }); assert(v.ok && v.args.prompt === 'x y' && v.args.width === 640, 'small-model slips are forgiven: arguments wrapped in "args", a number sent as text'); }
+  assert(!registry.validate(gi, { args: { width: 640 } }).ok, 'a required argument is never invented');
   assert(!registry.validate(gi, { prompt: 'x y', width: 99999 }).ok, 'a number out of range is refused');
   assert(!registry.validate(registry.get('send_to_ai'), { to: 'bing', message: 'hi' }).ok, 'an enum outside its choices is refused');
   assert(!registry.validate(gi, 'not json').ok, 'arguments that are not JSON are refused');
@@ -197,7 +200,7 @@ async function main() {
     const toolMsg = llm.requests[1].body.messages.find((m) => m.role === 'tool');
     assert(toolMsg && /UNKNOWN_TOOL/.test(toolMsg.content), 'the refusal goes back to the AI');
     assert(logs.some((l) => l.k === 'alfred-refused' && l.d.reason === 'UNKNOWN_TOOL' && l.d.tool === 'format_disk'), 'the refusal is logged (name only)');
-    const llm2 = await fakeLlm((body) => (lastMsg(body).role === 'tool' ? { content: 'ok' } : toolCall('generate_image', { prompt: 'x y', evil: true })));
+    const llm2 = await fakeLlm((body) => (lastMsg(body).role === 'tool' ? { content: 'ok' } : toolCall('generate_image', { prompt: 7 })));
     const m2 = make({ llm: llm2 });
     await m2.a.ask('image please');
     assert(m2.calls.generateImage.length === 0 && m2.logs.some((l) => l.k === 'alfred-refused' && l.d.reason === 'BAD_ARGS'), 'bad arguments are refused before anything runs');
@@ -255,6 +258,22 @@ async function main() {
     const m3 = make({ settings: { brain: 'api' }, deps: { managerConfig: () => null } });
     const r3 = await m3.a.ask('hi');
     assert(r3.notice && /don't have an AI/.test(r3.text), '"connected AI" chosen but none is connected: a plain notice');
+    // the user's real log: "Test my AI" said OK (Ollama answered) but the model wasn't installed, so every question got a 404
+    const installed = ['qwen2.5:0.5b', 'llama3.1:latest'];
+    const listModels = async () => ({ ok: true, models: installed });
+    const m4 = make({ llm: llm404, settings: { local: { endpoint: llm404.base, model: 'qwen2.5:7b' } }, deps: { listModels } });
+    const r4 = await m4.a.ask('hi');
+    assert(/It has: qwen2\.5:0\.5b, llama3\.1:latest/.test(r4.text) && /ollama pull qwen2\.5:7b/.test(r4.text), 'a 404 names the models Ollama DOES have');
+    const t4 = await m4.a.testAi();
+    assert(!t4.ok && /isn't installed/.test(t4.message) && t4.installed.includes('qwen2.5:0.5b') && m4.logs.some((l) => l.k === 'alfred-ai-error' && l.d.code === 'MODEL_NOT_INSTALLED'), '"Test my AI" checks the model is installed, not only that Ollama answers (and offers the installed ones)');
+    const m5 = make({ llm: llm404, settings: { local: { endpoint: llm404.base, model: 'qwen2.5:0.5b' } }, deps: { listModels } });
+    const t5 = await m5.a.testAi();
+    assert(t5.ok && t5.small && /very small model/.test(t5.message), 'an installed but tiny model passes, with a plain warning');
+    const m6 = make({ llm: llm404, settings: { local: { endpoint: llm404.base, model: 'llama3.1' } }, deps: { listModels } });
+    const t6 = await m6.a.testAi();
+    assert(t6.ok && !t6.small, '"llama3.1" matches the installed "llama3.1:latest"');
+    const m7 = make({ llm: llm404, settings: { local: { endpoint: llm404.base, model: 'qwen2.5:7b' } }, deps: { listModels: async () => ({ ok: true, models: [] }) } });
+    assert(/has no models yet/.test((await m7.a.testAi()).message), 'Ollama with no models: says to pull one');
     await llm404.close();
   }
 

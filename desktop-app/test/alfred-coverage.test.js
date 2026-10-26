@@ -92,7 +92,7 @@ const IPC_INVENTORY = [
   'routing:auto-all', 'routing:pause-all', 'routing:set', 'routing:stop-all',
   'sd:cancel', 'sd:connect', 'sd:detect', 'sd:gallery', 'sd:generate', 'sd:install', 'sd:install-cancel', 'sd:install-check', 'sd:install-model',
   'sd:lists', 'sd:open-images-folder', 'sd:open-install-folder', 'sd:open-log', 'sd:open-ui', 'sd:progress', 'sd:record', 'sd:set-autostart',
-  'sd:settings', 'sd:show-file', 'sd:start', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test',
+  'sd:settings', 'sd:show-file', 'sd:start', 'sd:status', 'sd:stop', 'sd:targets', 'sd:test', 'sd:fix-retry',
   'sd:img2img', 'sd:inpaint', 'sd:upscale', 'sd:extras', 'sd:options-get', 'sd:options-set', 'sd:interrupt', 'sd:skip', 'sd:refresh', 'sd:memory', 'sd:workflows', 'sd:workflow-get', 'sd:workflow-save', 'sd:workflow-delete', 'sd:workflow-run', 'sd:capabilities',
   'sdlib:add-folder', 'sdlib:check', 'sdlib:collection', 'sdlib:delete-lock', 'sdlib:folders', 'sdlib:list', 'sdlib:locks', 'sdlib:remove-folder',
   'sdlib:save-lock', 'sdlib:scan', 'sdlib:update', 'selector:clear', 'selector:pick',
@@ -101,7 +101,7 @@ const IPC_INVENTORY = [
   'setup:auto', 'setup:detect', 'setup:install', 'setup:list', 'site:inspect', 'site:list', 'site:reload', 'site:zoom', 'sites:new-chat-all', 'state:get',
   'terminal:approve', 'terminal:clear', 'terminal:input', 'terminal:reject', 'terminal:run', 'terminal:send-output', 'terminal:settings', 'terminal:start',
   'terminal:state', 'terminal:stop', 'tools:list', 'tools:run', 'trace:report', 'transcript:clear', 'transcript:toggle-pin', 'tuner:run', 'ui:log',
-  'video:configure', 'video:generate', 'video:status', 'voice:check', 'voice:configure', 'voice:listen', 'voice:speak', 'voice:status',
+  'video:configure', 'video:generate', 'video:status', 'voice:check', 'voice:configure', 'voice:listen', 'voice:redownload', 'voice:speak', 'voice:status',
   'window:toggle-collapse', 'wizard-window:close', 'wizard:catalog', 'wizard:open',
 ];
 // Live updates the window listens to (not actions). The ones that matter to the user feed Alfred's watcher.
@@ -143,7 +143,7 @@ const AKOWE_BRIDGE_ROUTES = {
   '/v1/probe': 'run_checkin', '/v1/health': 'ai_health', '/v1/complete': 'EXCLUDE: Akọwe\'s own prompts to the AIs (Alfred uses send_to_ai / the book tools)',
 };
 // The 🎨 Images module (sd-api.js): every method through sd_call (new methods appear automatically).
-const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', 'images.cancel', 'images.gallery', 'images.test', 'sd.status', 'sd.detect', 'sd.connect',
+const SD_API_METHODS = ['images.status', 'images.generate', 'images.progress', 'images.cancel', 'images.gallery', 'images.test', 'images.fixAndRetry', 'sd.status', 'sd.detect', 'sd.connect',
   'sd.targets', 'sd.start', 'sd.stop', 'sd.install.check', 'sd.install.install', 'sd.install.downloadModel', 'sd.install.cancel', 'library.find', 'library.get',
   'library.characterLock', 'library.locks', 'library.scan',
   'images.img2img', 'images.inpaint', 'images.upscale', 'sd.lists', 'sd.options.get', 'sd.options.set', 'sd.options.schema', 'sd.controlnet.models', 'sd.controlnet.modules', 'sd.adetailer.models', 'sd.styles', 'sd.scripts', 'sd.embeddings', 'sd.upscalers', 'sd.extraFields', 'sd.interrupt', 'sd.skip', 'sd.refresh', 'sd.memory', 'sd.workflows.list', 'sd.workflows.get', 'sd.workflows.save', 'sd.workflows.delete', 'sd.workflows.run', 'sd.comfy.objectInfo', 'sd.comfy.queue', 'sd.comfy.upload', 'sd.comfy.free'];
@@ -328,6 +328,9 @@ async function main() {
   if (assert(d.carded && forge.state.options.jpeg_quality === 95, 'sd.options.set: asks first, then changes a settings-menu option on Forge')) mark('sd:sd.options.set', 'real sd-api + fake Forge');
   d = await drive('sd_call', { method: 'images.upscale', args: { image: png, factor: 2, upscaler: 'R-ESRGAN 4x+' } });
   if (assert(d.carded && !!forge.state.lastExtras, 'images.upscale: asks first, then upscales the picture on Forge (Extras)')) mark('sd:images.upscale', 'real sd-api + fake Forge');
+  // the one-click fix a failed picture offers (VAE → Automatic, also in Forge's own settings) + one retry
+  d = await drive('sd_call', { method: 'images.fixAndRetry', args: { fix: 'vae-automatic', request: { prompt: 'retry the lighthouse' } } });
+  if (assert(d.carded && d.result && d.result.ok && forge.state.options.sd_vae === 'Automatic' && /retry the lighthouse/.test(forge.state.lastTxt2img.prompt), 'images.fixAndRetry: asks first, then sets VAE → Automatic on Forge and makes the picture again')) mark('sd:images.fixAndRetry', 'real sd-api + fake Forge');
   for (const m of ['images.status', 'images.progress', 'images.gallery', 'sd.status', 'sd.targets', 'sd.detect', 'sd.install.check', 'library.locks']) {
     d = await drive('sd_call', { method: m, args: m === 'images.gallery' ? { limit: 5 } : {} });
     if (assert(!d.carded && d.result && d.result.ok !== false && d.result.data !== undefined, `sd_call ${m}: read-only, runs directly against the real module`)) mark(`sd:${m}`, 'real sd-api');

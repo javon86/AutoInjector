@@ -28,7 +28,7 @@ he makes no more calls.
 | **The connected AI** | the AI already set up for the butler/manager (RunPod, LM Studio, any OpenAI-compatible address + key) |
 | **A web AI pane** | ChatGPT, Claude or Gemini in their pane — no install needed, but slower, and the replies show in that pane |
 
-**Test my AI** in ⚙ checks the connection (it sends no question).
+**Test my AI** in ⚙ checks the connection (it sends no question) **and that the model is really installed** in Ollama. If it isn't, it lists the installed models with a **Use …** button for each. Very small models (under 3B, e.g. `qwen2.5:0.5b`) work but often pick the wrong tool, and he says so. Small slips by the model (arguments wrapped twice, extra arguments, numbers sent as text) are forgiven; extra arguments are dropped and he is told which.
 
 ### Installing a local model on Windows (plain steps)
 
