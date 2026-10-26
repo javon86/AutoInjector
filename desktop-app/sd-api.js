@@ -10,13 +10,15 @@
  *   await imagesApi.call('images.generate', { prompt: 'a cat', hires: { scale: 2 } });   // generic dispatcher
  *
  *   images.status() · generate(opts) · img2img(opts) · inpaint(opts) · upscale(opts)
- *          · progress() · cancel() · gallery(limit) · test()
+ *          · progress() · cancel() · gallery(limit) · test() · fixAndRetry(fix, request)
  *     generate accepts everything in sd-params.js GENERATE_SCHEMA: prompt, negativePrompt,
  *     loras, characterLock, purpose, checkpoint, vae, sampler, scheduler, steps, cfgScale,
  *     width, height, seed, count, batchCount, variation, clipSkip, restoreFaces, tiling,
  *     styles, hires{…}, refiner{…}, initImage, denoise, resizeMode, mask, inpaint{…},
  *     controlnet[…], adetailer[…], script{name,args}, alwaysonScripts, overrideSettings, extra
  *        → { ok, images:[{ path, seed, sha256 }], seed, warnings, settings } | { ok:false, error, code, message, hint }
+ *        a failure the server explained also has fix, serverError and maybe actions:[{id,label}]
+ *        (sd-errors.js: VAE_LOAD_FAILED, OOM, NAN, CHECKPOINT_LOAD_FAILED, LORA_MISSING, …)
  *   sd.status() / detect() / connect(url) / start(targetId?) / stop() / targets()
  *   sd.install.check() / install(opts) / downloadModel('sd15'|'sdxl') / cancel()
  *   sd.options.get(keys?) / set({key: value}) / schema()       (A1111 settings menu, validated)
@@ -62,6 +64,7 @@ const OPS = [
   { name: 'images.cancel', description: 'Stop the picture AutoInjector is making', params: O(), args: [], backends: ['*'] },
   { name: 'images.gallery', description: 'Recent saved pictures with their settings', params: O({ limit: { type: 'integer', minimum: 1, maximum: 500 } }), args: ['limit'], backends: ['*'] },
   { name: 'images.test', description: 'Make a 512×512 test picture', params: O(), args: [], backends: BOTH },
+  { name: 'images.fixAndRetry', description: 'Apply the one-click fix a failed picture offered (its actions[].id, e.g. "vae-automatic" = VAE → Automatic, also in A1111\'s settings) and try the same request once more', params: O({ fix: { type: 'string', enum: ['vae-automatic'] }, request: OPEN('The images.generate params that failed') }, ['fix']), args: ['fix', 'request'], backends: BOTH },
   { name: 'sd.status', description: 'Image module + managed runner + installer state', params: O(), args: [], backends: ['*'] },
   { name: 'sd.detect', description: 'Look for SD apps on this PC (ports 7860–7865, 8188, …)', params: O(), args: [], backends: ['*'] },
   { name: 'sd.connect', description: 'Connect to an SD app (empty url = find one)', params: O({ url: { type: 'string', description: 'e.g. http://127.0.0.1:7860' } }), args: ['url'], backends: ['*'] },
@@ -141,6 +144,7 @@ function createImagesApi(d) {
       cancel: wrap(() => studio.cancel()),
       gallery: wrap(async (limit) => studio.gallery(limit)),
       test: wrap(() => studio.test()),
+      fixAndRetry: wrap((fix, request) => S('fixAndRetry', fix, request || {}, `api:${String((request && request.from) || 'alfred').slice(0, 40)}`)),
     },
     sd: {
       status: wrap(async () => ({ ok: true, image: studio.status(), managed: runner ? runner().status() : null, install: installer ? installer().status() : null })),

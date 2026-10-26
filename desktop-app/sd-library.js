@@ -32,6 +32,7 @@ const KINDS = ['checkpoint', 'lora', 'vae', 'embedding'];
 const MAX_HEADER = 64 * 1024 * 1024; // a sane safetensors header is a few hundred KB
 const MAX_SIDECAR = 4 * 1024 * 1024;
 const MAX_FILES = 20000;
+const ITEM_V = 2; // bump when describeFile() learns something new → cached items are re-read once
 
 // Folder name → what lives in it (Stability Matrix, A1111/Forge, ComfyUI, ours).
 const FOLDER_KINDS = {
@@ -143,6 +144,45 @@ function kindFromTensors(names, size) {
   return 'checkpoint';
 }
 
+// A file in the VAE folder: is it a full VAE A1111 / ComfyUI can load? A full
+// (AutoencoderKL) VAE has top-level encoder.conv_in.* AND decoder.conv_in.*
+// tensors. Without them A1111 fails with "Error(s) in loading state_dict for
+// AutoencoderKL: Missing key(s) … encoder.conv_in.weight" on every picture.
+// Latent channels (decoder.conv_in shape [_, C, _, _]): 4 = SD1.5 / SD2 / SDXL,
+// 16 = SD3 / Flux. SD1.5 and SDXL VAEs have the SAME shapes, so which of those
+// two a VAE is for can only be guessed from its name / sidecar.
+// → { full, encoder, decoder, latentChannels, latentFamily, problem }
+function vaeCheck(names, tensors) {
+  const n = names || [];
+  const has = (re) => n.some((k) => re.test(k));
+  const encIn = n.includes('encoder.conv_in.weight'), decIn = n.includes('decoder.conv_in.weight');
+  const encAny = has(/^encoder\./), decAny = has(/^decoder\./);
+  const t = tensors && tensors['decoder.conv_in.weight'];
+  const ch = t && Array.isArray(t.shape) && t.shape.length === 4 ? Number(t.shape[1]) || 0 : 0;
+  let problem = '';
+  if (has(/lora_down|lora_up|lora_A|lora_B|hada_w1|lokr_w1/)) problem = 'it is a LoRA, not a VAE (move it to the Lora folder)';
+  else if (has(/^model\.diffusion_model\.|^first_stage_model\./) && !encIn) problem = 'it is a whole checkpoint, not a VAE (move it to the StableDiffusion / checkpoints folder)';
+  else if (encAny && decAny && !(encIn && decIn)) problem = 'it is a tiny autoencoder (TAESD), not a full VAE';
+  else if (!encAny && !decAny) problem = 'it has no encoder / decoder weights (a TAESD file or not a VAE at all)';
+  else if (!encIn) problem = 'it is decoder-only (no encoder), not a full VAE';
+  else if (!decIn) problem = 'it is encoder-only (no decoder), not a full VAE';
+  return { full: !problem, encoder: encIn, decoder: decIn, latentChannels: ch || null, latentFamily: ch === 16 ? 'SD3/Flux' : ch === 4 ? 'SD1.5/SDXL' : '', problem };
+}
+// Does a VAE fit the checkpoint? Channels are certain; SD1.5 vs SDXL is a name guess.
+function vaeCompat(item, ckptBase, itemName) {
+  const nm = itemName ? `The VAE “${itemName}” ` : 'This VAE ';
+  const b = archOf(ckptBase);
+  const v = item && item.vae;
+  if (v && !v.full) return { level: 'hard', message: `${nm}can't be used: ${v.problem}. Set VAE to Automatic.` };
+  if (!b) return { level: 'unknown', message: '' };
+  const big = b === 'sd3' || b === 'flux';
+  if (v && v.latentChannels === 16 && !big) return { level: 'hard', message: `${nm}is an SD3 / Flux VAE (16 channels), but the checkpoint is ${ckptBase} — it won't load. Set VAE to Automatic.` };
+  if (v && v.latentChannels === 4 && big) return { level: 'hard', message: `${nm}is an SD1.5 / SDXL VAE (4 channels), but the checkpoint is ${ckptBase} — it won't load. Set VAE to Automatic.` };
+  const a = archOf(item && item.base);
+  if (a && a !== b && ['sd1', 'sd2', 'sdxl'].includes(a) && ['sd1', 'sd2', 'sdxl'].includes(b)) return { level: 'soft', message: `${nm}looks like it is for ${item.base} (going by its name), but the checkpoint is ${ckptBase} — colours may come out wrong. Automatic is the safe choice.` };
+  return { level: 'ok', message: '' };
+}
+
 function _splitWords(s) {
   return String(s || '').split(/[,\n]/).map((x) => x.trim()).filter((x) => x && x.length <= 120);
 }
@@ -231,6 +271,7 @@ function describeFile(file, kindHint, folderRoot) {
   if (!base) { const b = baseFromName(stem); if (b) { base = b; baseSource = 'filename'; } }
   const rel = folderRoot ? path.relative(folderRoot, file) : path.basename(file);
   return {
+    v: ITEM_V, vae: kind === 'vae' && hdr ? vaeCheck(hdr.tensorNames, hdr.tensors) : null,
     id: itemId(kind, stem), kind, name: stem, file, relPath: rel, folder: folderRoot || path.dirname(file), ext, size: st.size, mtime: Math.round(st.mtimeMs),
     base, baseSource, triggerWords: _uniq([...sc.triggers, ...hm.triggers]), datasetTags: hm.datasetTags, title: sc.title || hm.title || '',
     civitai: sc.civitai, preferredWeight: sc.preferredWeight, sidecarNotes: sc.notes, suggestedNegative: sc.negative, preview: sc.preview,
@@ -405,7 +446,7 @@ function createLibrary(opts = {}) {
         const key = w.file;
         const c = db.cache[key];
         let it;
-        if (c && c.size === st.size && c.mtime === Math.round(st.mtimeMs) && c.item && c.sideStamp === _sideStamp(w.file)) it = c.item;
+        if (c && c.size === st.size && c.mtime === Math.round(st.mtimeMs) && c.item && c.item.v === ITEM_V && c.sideStamp === _sideStamp(w.file)) it = c.item;
         else { it = describeFile(w.file, w.kind, f.path); reread++; }
         if (!it) continue;
         it.source = f.source;
@@ -496,7 +537,10 @@ function createLibrary(opts = {}) {
       const ck = findItem('checkpoint', f.checkpoint);
       compatWith = (ck && ck.base) || baseFromName(f.checkpoint) || '';
     }
-    for (const x of all) x.compat = compatWith && x.kind !== 'checkpoint' && x.kind !== 'vae' ? compat(x.base, compatWith, x.name) : { level: 'unknown', message: '' };
+    for (const x of all) {
+      if (x.kind === 'vae') x.compat = vaeCompat(x, compatWith, x.name);
+      else x.compat = compatWith && x.kind !== 'checkpoint' ? compat(x.base, compatWith, x.name) : { level: 'unknown', message: '' };
+    }
     all.sort((a, b) => (b.favorite - a.favorite) || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     const limit = f.limit || 2000;
     return { ok: true, items: all.slice(0, limit), total: all.length, collections: db.collections.slice(), tags: allTags(), lastScan: lastScan || db.lastScan || null, checkpointBase: compatWith || '' };
@@ -604,13 +648,25 @@ function createLibrary(opts = {}) {
     return { checkpointBase: ckBase || '', warnings };
   }
 
+  // The chosen VAE against the library: not a full VAE? wrong model family?
+  // → { ok, known, vae: vaeCheck|null, level, message } ('' / Automatic / None → nothing to check)
+  function checkVae(vae, checkpoint) {
+    if (!vae || /^(automatic|none|auto)$/i.test(String(vae).trim())) return { ok: true, known: false, level: 'ok', message: '' };
+    const it = findItem('vae', vae);
+    if (!it) return { ok: true, known: false, level: 'unknown', message: '' };
+    const ck = findItem('checkpoint', checkpoint);
+    const ckBase = (ck && ck.base) || baseFromName(checkpoint || '');
+    const c = vaeCompat(it, ckBase, it.name);
+    return { ok: true, known: true, name: it.name, vae: it.vae || null, problem: it.vae && !it.vae.full ? it.vae.problem : '', level: c.level, message: c.message };
+  }
+
   // A small preview picture (for the renderer), read only if it is an image file and not huge.
   function previewPath(id) { const it = get(id); return it && it.preview ? it.preview : null; }
 
-  return { load, save, folders, addFolder, removeFolder, scan, mergeBackend, list, get, findItem, update, addCollection, renameCollection, deleteCollection, listLocks, getLock, saveLock, deleteLock, applyLock, checkLoras, previewPath, _db: () => db };
+  return { load, save, folders, addFolder, removeFolder, scan, mergeBackend, list, get, findItem, update, addCollection, renameCollection, deleteCollection, listLocks, getLock, saveLock, deleteLock, applyLock, checkLoras, checkVae, previewPath, _db: () => db };
 }
 
 module.exports = {
   createLibrary, readSafetensorsHeader, parseHeaderMeta, readSidecars, describeFile, normalizeBase, archOf, compat, baseFromTensors, baseFromName,
-  kindForFolderName, kindFromTensors, expandFolder, walk, findStabilityMatrix, itemId, KINDS,
+  kindForFolderName, kindFromTensors, expandFolder, walk, findStabilityMatrix, itemId, KINDS, vaeCheck, vaeCompat,
 };

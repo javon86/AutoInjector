@@ -25,7 +25,7 @@
   const st = {
     connected: false, status: null, lists: null, loras: [], locks: [], lib: null, libSel: null, lockSel: null,
     chips: [], generating: false, pollTimer: null, lastSeed: null, current: null, libItemsById: new Map(), loaded: false,
-    extras: null, i2i: null, maskDirty: false, cnUnits: [],
+    extras: null, i2i: null, maskDirty: false, cnUnits: [], fail: null,
   };
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -138,6 +138,7 @@
     const s = st.status || {};
     fillSelect('sd-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), s.checkpoint || '', l.backend === 'comfy' ? '(first checkpoint)' : `(loaded: ${l.current.checkpoint || 'whatever is loaded'})`);
     fillSelect('sd-vae', l.vaes.filter((v) => v !== 'Automatic'), s.vae || '', 'Automatic');
+    markVaes();
     fillSelect('sd-sampler', l.samplers, s.sampler || '', '(default)');
     fillSelect('sd-scheduler', l.schedulers, s.scheduler || '', '(default)');
     fillSelect('sd-lk-checkpoint', l.checkpoints.map((c) => ({ value: c.name, label: c.title || c.name })), null, '(whatever is chosen)');
@@ -164,7 +165,7 @@
   $('btn-sd-seed-rand').onclick = () => { $('sd-seed').value = '-1'; };
   $('btn-sd-seed-last').onclick = () => { if (st.lastSeed != null) $('sd-seed').value = String(st.lastSeed); };
   $('sd-size-preset').onchange = (e) => { const v = e.target.value; if (!v) return; const [w, h] = v.split('x'); setSlider('sd-width', w); setSlider('sd-height', h); e.target.value = ''; };
-  $('sd-checkpoint').onchange = () => { checkCompat(); };
+  $('sd-checkpoint').onchange = () => { checkCompat(); refreshLibraryData().catch(() => {}); };
 
   function formRequest() {
     const num = (id) => Number($(id).value);
@@ -525,6 +526,46 @@
       msg(`🎨 Making your picture… ${bits.join(' · ')}`);
     }, 500);
   }
+  // ---- failures: a red box with the plain cause, the fix, one-click fix buttons
+  // and the server's own words under "details" (sd-errors.js did the reading).
+  function hideError() { const b = $('sd-error'); if (b) b.hidden = true; }
+  function showError(r, ctx) {
+    const b = $('sd-error'); if (!b) return;
+    setText('sd-error-msg', `✖ ${(r && r.message) || (r && r.error) || 'Failed.'}`);
+    const fix = (r && (r.fix || r.hint)) || '';
+    setText('sd-error-fix', fix ? `How to fix: ${fix}` : ''); $('sd-error-fix').hidden = !fix;
+    const acts = $('sd-error-actions'); acts.textContent = '';
+    // A fix that was just tried (and failed again) is not offered a second time.
+    for (const a of (r && r.actions) || []) {
+      if (r.retried && r.fixed === a.id) continue;
+      const btn = document.createElement('button'); btn.className = 'primary'; btn.dataset.fix = a.id; btn.textContent = a.label || a.id;
+      btn.onclick = () => applyFix(a.id, ctx);
+      acts.appendChild(btn);
+    }
+    acts.hidden = !acts.children.length;
+    const raw = (r && r.serverError) || '';
+    setText('sd-error-raw', raw.slice(0, 600)); $('sd-error-details').hidden = !raw; $('sd-error-details').open = false;
+    b.hidden = false;
+    try { b.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (_) {}
+  }
+  async function applyFix(id, ctx) {
+    if (st.generating) return;
+    if (id === 'vae-automatic') { $('sd-vae').value = ''; vaeWarn(); }
+    for (const btn of document.querySelectorAll('#sd-error-actions button')) btn.disabled = true;
+    const req = ctx && ctx.isTest ? { test: true } : Object.assign({}, (ctx && ctx.req) || {}, id === 'vae-automatic' ? { vae: 'Automatic' } : {});
+    await render(() => call('fixAndRetry', id, req), ctx && ctx.isTest, req, '🔧 Fixed — trying again once…');
+  }
+  // The repeat guard: the same error code twice in a row with the same settings
+  // → the next Generate asks first instead of hammering the SD app again.
+  function settingsKey(r0, isTest) { try { return isTest ? 'test' : JSON.stringify(r0); } catch (_) { return String(Math.random()); } }
+  function noteResult(r, key) {
+    if (r && r.ok) { st.fail = null; return; }
+    const code = (r && (r.code || r.error)) || 'FAILED';
+    if (code === 'CANCELLED') return;
+    if (st.fail && st.fail.code === code && st.fail.key === key) { st.fail.count++; st.fail.message = (r && r.message) || code; }
+    else st.fail = { code, key, count: 1, message: (r && r.message) || code };
+  }
+
   async function runGenerate(req, isTest) {
     if (st.generating) return;
     let r0 = req || formRequest();
@@ -533,21 +574,38 @@
     }
     if (!isTest && !String(r0.prompt || '').trim() && !r0.characterLock && !r0.initImage) { msg('Type a prompt first.'); $('sd-prompt').focus(); return; }
     if (!st.connected) { msg('Connecting first…'); await find(); if (!st.connected) { msg('No Stable Diffusion app is connected — see the note above.'); return; } }
+    const key = settingsKey(r0, isTest);
+    if (st.fail && st.fail.count >= 2 && st.fail.key === key) {
+      let go = false;
+      try { go = window.confirm(`This failed twice with the same error: ${st.fail.message}\n\nTry again anyway?`); } catch (_) { go = false; }
+      if (!go) { msg('Not sent — change a setting (or use the fix above) first.'); return; }
+    }
+    await render(() => (isTest ? call('test') : call(r0.mask ? 'inpaint' : r0.initImage ? 'img2img' : 'generate', r0)), isTest, r0);
+  }
+
+  // Run one render call with the busy state / progress, then show the result or the error box.
+  async function render(fn, isTest, r0, startText) {
+    if (st.generating) return;
     setBusy(true);
+    hideError();
     $('sd-progress-bar').style.width = '0%';
-    msg(isTest ? '🧪 Making a 512×512 test picture… (the first one after starting can take a minute while the model loads)' : '🎨 Making your picture…');
+    msg(startText || (isTest ? '🧪 Making a 512×512 test picture… (the first one after starting can take a minute while the model loads)' : '🎨 Making your picture…'));
     startPolling();
-    const r = isTest ? await call('test') : await call(r0.mask ? 'inpaint' : r0.initImage ? 'img2img' : 'generate', r0);
+    let r;
+    try { r = await fn(); } catch (e) { r = { ok: false, error: String(e), message: String((e && e.message) || e) }; }
     setBusy(false);
     $('sd-progress-bar').style.width = r && r.ok ? '100%' : '0%';
+    noteResult(r, settingsKey(r0, isTest));
     if (!r || !r.ok) {
-      msg(`✖ ${(r && r.message) || (r && r.error) || 'Failed.'}${r && r.hint ? `\n${r.hint}` : ''}`);
+      if (r && r.error === 'CANCELLED') { msg('Stopped.'); return; }
+      msg('✖ The picture failed — see the red box below.');
+      showError(r, { req: r0, isTest });
       if (r && (r.error === 'NO_API' || /--api/.test(r.message || ''))) hint(r.message, 'warn');
       return;
     }
     st.lastSeed = r.seed;
     const warn = (r.warnings || []).map((w) => `⚠ ${w.message}`).join('\n');
-    msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''} (seed ${r.seed})${warn ? `\n${warn}` : ''}`);
+    msg(`✔ ${r.images.length} picture${r.images.length > 1 ? 's' : ''} saved${isTest ? ' — Stable Diffusion works!' : ''}${r.retried && r.fixed === 'vae-automatic' ? ' — VAE is now Automatic' : ''} (seed ${r.seed})${warn ? `\n${warn}` : ''}`);
     if (r.images[0]) showImage({ path: r.images[0].path, url: r.images[0].url, record: Object.assign({}, r.settings, { seed: r.images[0].seed }) });
     refreshGallery();
   }
@@ -594,10 +652,37 @@
   }
 
   // ------------------------------------------------------------ library
+  // VAE dropdown + the library's header check: files that aren't a full VAE are
+  // greyed and labelled; a VAE for another model family gets a ⚠.
+  function libIdOf(kind, name) { return `${kind}:${String(name || '').replace(/\\/g, '/').split('/').pop().replace(/\s*\[[0-9a-f]{6,}\]$/i, '').replace(/\.(safetensors|ckpt|pt|pth|bin|gguf)$/i, '').toLowerCase()}`; }
+  function vaeItem(name) { return name ? st.libItemsById.get(libIdOf('vae', name)) || null : null; }
+  function markVaes() {
+    const sel = $('sd-vae'); if (!sel) return;
+    for (const o of sel.options) {
+      if (!o.value) continue;
+      if (!o.dataset.name) o.dataset.name = o.textContent;
+      const it = vaeItem(o.value);
+      delete o.dataset.bad; delete o.dataset.warn;
+      let label = o.dataset.name;
+      if (it && it.vae && it.vae.full === false) { o.dataset.bad = '1'; label = `⛔ ${o.dataset.name} — not a full VAE`; }
+      else if (it && it.compat && (it.compat.level === 'hard' || it.compat.level === 'soft')) { o.dataset.warn = it.compat.level; label = `⚠ ${o.dataset.name} — may not fit this checkpoint`; }
+      o.textContent = label;
+    }
+    vaeWarn();
+  }
+  function vaeWarn() {
+    const w = $('sd-vae-warn'); if (!w) return;
+    const it = vaeItem($('sd-vae').value);
+    const bad = it && it.vae && it.vae.full === false;
+    const m = bad ? `⛔ “${it.name}” can't be used as a VAE: ${it.vae.problem}. Generating will fail — pick Automatic.` : it && it.compat && (it.compat.level === 'hard' || it.compat.level === 'soft') ? `${it.compat.level === 'hard' ? '⛔' : '⚠'} ${it.compat.message}` : '';
+    w.textContent = m; w.hidden = !m; w.dataset.level = bad ? 'hard' : (it && it.compat && it.compat.level) || '';
+  }
+  $('sd-vae').addEventListener('change', vaeWarn);
+
   async function refreshLibraryData() {
     const f = { q: $('sd-lib-q').value, kind: $('sd-lib-kind').value, base: $('sd-lib-base').value, collection: $('sd-lib-coll').value, favorite: $('sd-lib-fav').checked, checkpoint: $('sd-checkpoint').value || (st.status && st.status.checkpoint) || (st.lists && st.lists.current && st.lists.current.checkpoint) || '' };
     const all = await call('libList', { checkpoint: f.checkpoint });
-    if (all && all.ok) { st.lib = all; st.libItemsById = new Map(all.items.map((x) => [x.id, x])); }
+    if (all && all.ok) { st.lib = all; st.libItemsById = new Map(all.items.map((x) => [x.id, x])); markVaes(); }
     return f;
   }
   async function refreshLibrary() {
@@ -633,7 +718,7 @@
         <div class="sd-badges"><span class="sd-badge">${esc(it.kind)}</span>${it.base ? `<span class="sd-badge" data-base="${esc(it.base)}">${esc(it.base)}</span>` : '<span class="sd-badge">base ?</span>'}${it.size ? `<span class="sd-small">${fmtSize(it.size)}</span>` : ''}${it.onDisk ? '' : '<span class="sd-small">in SD app only</span>'}</div>
         <div class="sd-tr" title="${esc((it.triggerWords || []).join(', '))}">${it.triggerWords && it.triggerWords.length ? '🔑 ' + esc(it.triggerWords.join(', ')) : ''}</div>
         <div class="sd-tr">${esc([...(it.collections || []), ...(it.tags || []).map((t) => '#' + t)].join(' '))}</div>
-        ${it.compat && (it.compat.level === 'hard' || it.compat.level === 'soft') ? `<div class="sd-warn" data-level="${it.compat.level}">${it.compat.level === 'hard' ? '⛔ wrong base for this checkpoint' : '⚠ may look off on this checkpoint'}</div>` : ''}`;
+        ${it.kind === 'vae' && it.vae && it.vae.full === false ? `<div class="sd-warn" data-level="hard" title="${esc(it.vae.problem)}">⛔ not a full VAE</div>` : it.compat && (it.compat.level === 'hard' || it.compat.level === 'soft') ? `<div class="sd-warn" data-level="${it.compat.level}">${it.compat.level === 'hard' ? '⛔ wrong base for this checkpoint' : '⚠ may look off on this checkpoint'}</div>` : ''}`;
       card.onclick = () => selectLib(it.id);
       card.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectLib(it.id); } };
       grid.appendChild(card);

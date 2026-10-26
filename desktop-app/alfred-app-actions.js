@@ -239,7 +239,7 @@ const TOOL_CHANNELS = {
   'video:status': 'video_status',
   'akowe:open-url': 'open_akowe_page',
   'sd:status': 'sd_call:images.status', 'sd:detect': 'sd_call:sd.detect', 'sd:connect': 'sd_call:sd.connect', 'sd:generate': 'sd_call:images.generate',
-  'sd:test': 'sd_call:images.test', 'sd:progress': 'sd_call:images.progress', 'sd:cancel': 'sd_call:images.cancel', 'sd:gallery': 'sd_call:images.gallery',
+  'sd:test': 'sd_call:images.test', 'sd:fix-retry': 'sd_call:images.fixAndRetry', 'sd:progress': 'sd_call:images.progress', 'sd:cancel': 'sd_call:images.cancel', 'sd:gallery': 'sd_call:images.gallery',
   'sdlib:list': 'sd_call:library.find', 'sdlib:scan': 'sd_call:library.scan', 'sdlib:locks': 'sd_call:library.locks',
   'sd:targets': 'sd_call:sd.targets', 'sd:start': 'sd_call:sd.start', 'sd:stop': 'sd_call:sd.stop',
   'sd:install-check': 'sd_call:sd.install.check', 'sd:install': 'sd_call:sd.install.install', 'sd:install-model': 'sd_call:sd.install.downloadModel', 'sd:install-cancel': 'sd_call:sd.install.cancel',

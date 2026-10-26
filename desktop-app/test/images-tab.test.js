@@ -33,7 +33,8 @@ function makeSd(over = {}) {
     lists: async () => ({ ok: true, backend: 'a1111', checkpoints: [{ name: 'dreamshaper_8.safetensors [879db523c3]', title: 'dreamshaper_8.safetensors [879db523c3]' }, { name: 'juggernautXL_v9.safetensors [c9]', title: 'juggernautXL_v9' }], loras: [{ name: 'odile_face', alias: 'odile_face' }], samplers: ['Euler a', 'DPM++ 2M'], schedulers: ['Automatic', 'Karras'], vaes: ['Automatic', 'None', 'vae-ft-mse'], embeddings: [], current: { checkpoint: 'dreamshaper_8.safetensors [879db523c3]' } }),
     settings: async () => ({ ok: true }),
     check: async (loras, ck) => { calls.push(['check', loras.map((l) => l.name).join(), ck]); return /XL/i.test(ck) ? { ok: true, checkpointBase: 'SDXL', warnings: [{ name: 'odile_face', level: 'hard', message: '“odile_face” was made for SD1.5, but the checkpoint is SDXL — it won\'t work' }] } : { ok: true, warnings: [] }; },
-    generate: async (req) => { calls.push(['generate', req]); progressSeq.push('gen'); await tick(700); return { ok: true, seed: 1234, warnings: [], settings: Object.assign({}, req, { backend: 'a1111', seed: 1234 }), images: [{ path: '/out/images/sd-1.png', url: 'file:///out/images/sd-1.png', seed: 1234 }] }; },
+    fixAndRetry: async (fix, req) => { calls.push(['fixAndRetry', fix, req]); return over.fixAndRetry ? over.fixAndRetry(fix, req) : { ok: true, retried: true, fixed: fix, seed: 9, warnings: [], settings: Object.assign({}, req), images: [{ path: '/out/images/sd-9.png', url: 'file:///out/images/sd-9.png', seed: 9 }] }; },
+    generate: async (req) => { calls.push(['generate', req]); if (over.generate) return over.generate(req); progressSeq.push('gen'); await tick(700); return { ok: true, seed: 1234, warnings: [], settings: Object.assign({}, req, { backend: 'a1111', seed: 1234 }), images: [{ path: '/out/images/sd-1.png', url: 'file:///out/images/sd-1.png', seed: 1234 }] }; },
     test: async () => { calls.push(['test']); return { ok: true, seed: 5, warnings: [], settings: { prompt: 'a red apple', width: 512, height: 512, purpose: 'test' }, images: [{ path: '/out/images/test-1.png', url: 'file:///out/images/test-1.png', seed: 5 }] }; },
     progress: async () => { calls.push(['progress']); return { ok: true, busy: true, progress: 0.5, step: 10, steps: 20, etaSeconds: 3, elapsed: 2 }; },
     cancel: async () => { calls.push(['cancel']); return { ok: true }; },
@@ -41,7 +42,7 @@ function makeSd(over = {}) {
     record: async () => ({ ok: true }),
     openImagesFolder: async () => { calls.push(['openFolder']); return { ok: true }; },
     openUi: async () => ({ ok: true }), showFile: async (p) => { calls.push(['showFile', p]); return { ok: true }; },
-    libList: async (f) => { calls.push(['libList', f]); let items = libItems; if (f && f.kind) items = items.filter((x) => x.kind === f.kind); return { ok: true, items, total: items.length, collections: ['Characters', 'Styles'], tags: ['face'], lastScan: { count: 2 }, folders: [{ path: 'C:/SM/Data/Models/Lora', kind: 'lora', source: 'Stability Matrix', exists: true }], checkpointBase: 'SD1.5' }; },
+    libList: async (f) => { calls.push(['libList', f]); let items = libItems.concat(over.libExtra || []); if (f && f.kind) items = items.filter((x) => x.kind === f.kind); return { ok: true, items, total: items.length, collections: ['Characters', 'Styles'], tags: ['face'], lastScan: { count: 2 }, folders: [{ path: 'C:/SM/Data/Models/Lora', kind: 'lora', source: 'Stability Matrix', exists: true }], checkpointBase: 'SD1.5' }; },
     libScan: async () => { calls.push(['libScan']); return { ok: true, count: 2 }; },
     libUpdate: async (id, patch) => { calls.push(['libUpdate', id, patch]); return { ok: true }; },
     libFolders: async () => ({ ok: true, folders: [] }), libAddFolder: async () => ({ ok: false, error: 'CANCELLED' }), libRemoveFolder: async () => ({ ok: true }),
@@ -332,6 +333,62 @@ async function load(over) {
   tc.click('btn-sd-wf-save');
   await tick(20);
   assert(/isn't valid JSON/.test(tc.$('sd-wf-msg').textContent), 'pasting bad JSON → plain message');
+
+  console.log('== a failed picture: the red box, the fix button, the repeat guard ==');
+  {
+    const VAE_FAIL = { ok: false, error: 'HTTP_500', code: 'VAE_LOAD_FAILED', status: 500, backend: 'a1111', warnings: [],
+      message: 'The VAE you picked (“taesd_decoder”) can\'t be loaded. It isn\'t a full VAE or doesn\'t match this model.',
+      fix: 'Set VAE to Automatic (or None).', actions: [{ id: 'vae-automatic', label: 'Use Automatic VAE and retry' }],
+      serverError: 'RuntimeError: Error(s) in loading state_dict for AutoencoderKL: Missing key(s) in state_dict: "encoder.conv_in.weight"' };
+    let slow = false;
+    const tf = await load({
+      generate: async () => { if (slow) await tick(300); return VAE_FAIL; },
+      libExtra: [
+        { id: 'vae:taesd_decoder', kind: 'vae', name: 'taesd_decoder', base: '', triggerWords: [], tags: [], collections: [], onDisk: true, relPath: 'taesd_decoder.safetensors', vae: { full: false, problem: 'it is decoder-only (no encoder), not a full VAE' }, compat: { level: 'hard', message: 'x' } },
+        { id: 'vae:vae-ft-mse', kind: 'vae', name: 'vae-ft-mse', base: 'SD1.5', triggerWords: [], tags: [], collections: [], onDisk: true, relPath: 'vae-ft-mse.safetensors', vae: { full: true, problem: '' }, compat: { level: 'ok', message: '' } },
+      ],
+    });
+    tf.sd.lists = async () => ({ ok: true, backend: 'a1111', checkpoints: [{ name: 'dreamshaper_8', title: 'dreamshaper_8' }], loras: [], samplers: [], schedulers: [], vaes: ['Automatic', 'None', 'vae-ft-mse', 'taesd_decoder'], embeddings: [], current: { checkpoint: 'dreamshaper_8' } });
+    let asked = null; tf.dom.window.confirm = (q) => { asked = q; return false; };
+    tf.click('tab-app-images'); await tick(60);
+    tf.click('btn-sd-find'); await tick(120);
+    const opt = [...tf.$('sd-vae').options].find((o) => o.value === 'taesd_decoder');
+    assert(opt && /not a full VAE/.test(opt.textContent) && opt.dataset.bad === '1' && !/not a full/.test([...tf.$('sd-vae').options].find((o) => o.value === 'vae-ft-mse').textContent), 'the VAE dropdown labels (and greys) a file the library found is not a full VAE');
+    tf.$('sd-vae').value = 'taesd_decoder'; tf.fire(tf.$('sd-vae'), 'change');
+    assert(!tf.$('sd-vae-warn').hidden && /decoder-only/.test(tf.$('sd-vae-warn').textContent) && /pick Automatic/.test(tf.$('sd-vae-warn').textContent), 'picking it shows a warning right under the dropdown');
+    tf.$('sd-prompt').value = 'a quiet harbour';
+    slow = true;
+    tf.click('btn-sd-generate'); await tick(40);
+    assert(tf.$('btn-sd-generate').disabled && tf.$('btn-sd-test').disabled, 'Generate (and Test) are disabled while the render runs');
+    tf.click('btn-sd-generate'); await tick(20);
+    await tick(400);
+    slow = false;
+    assert(tf.calls.filter((c) => c[0] === 'generate').length === 1, 'a click while rendering sends nothing');
+    assert(!tf.$('sd-error').hidden && /The VAE you picked \(“taesd_decoder”\) can't be loaded/.test(tf.$('sd-error-msg').textContent), 'the red error box shows the plain message');
+    assert(/Set VAE to Automatic/.test(tf.$('sd-error-fix').textContent) && tf.$('sd-error-actions').querySelector('button[data-fix="vae-automatic"]') && /Use Automatic VAE and retry/.test(tf.$('sd-error-actions').textContent), '…the fix, and a "Use Automatic VAE and retry" button');
+    assert(!tf.$('sd-error-details').hidden && /AutoencoderKL/.test(tf.$('sd-error-raw').textContent) && !tf.$('sd-error-details').open, '…and the server\'s words under a closed "details"');
+    assert(/see the red box/.test(tf.$('sd-msg').textContent), 'the status line points at the box');
+    tf.click('btn-sd-generate'); await tick(60);
+    assert(tf.calls.filter((c) => c[0] === 'generate').length === 2 && asked === null, 'the second identical try is sent (no question yet)');
+    tf.click('btn-sd-generate'); await tick(60);
+    assert(asked && /This failed twice with the same error: The VAE you picked/.test(asked) && /Try again anyway\?/.test(asked), `the third try asks first: "${(asked || '').split('\n')[0].slice(0, 70)}…"`);
+    assert(tf.calls.filter((c) => c[0] === 'generate').length === 2, 'answering No sends nothing');
+    tf.$('sd-steps').value = '30'; tf.fire(tf.$('sd-steps'), 'input'); asked = null;
+    tf.click('btn-sd-generate'); await tick(60);
+    assert(asked === null && tf.calls.filter((c) => c[0] === 'generate').length === 3, 'with a changed setting it is sent without asking');
+    tf.$('sd-steps').value = '20'; tf.fire(tf.$('sd-steps'), 'input');
+    tf.d.querySelector('#sd-error-actions button[data-fix="vae-automatic"]').dispatchEvent(new tf.dom.window.Event('click', { bubbles: true }));
+    await tick(80);
+    const fx = tf.calls.find((c) => c[0] === 'fixAndRetry');
+    assert(fx && fx[1] === 'vae-automatic' && fx[2].vae === 'Automatic' && fx[2].prompt === 'a quiet harbour', 'the button calls fixAndRetry(vae-automatic) with the same request and VAE Automatic');
+    assert(tf.$('sd-vae').value === '' && tf.$('sd-error').hidden && /VAE is now Automatic/.test(tf.$('sd-msg').textContent) && /sd-9\.png/.test(tf.$('sd-preview').src), 'the form shows Automatic, the box goes away, the picture is shown');
+    // the retry fails again → the box comes back WITHOUT the same fix button (it was tried once)
+    tf.sd.fixAndRetry = async (fix, req) => { tf.calls.push(['fixAndRetry', fix, req]); return Object.assign({}, VAE_FAIL, { retried: true, fixed: fix }); };
+    tf.click('btn-sd-generate'); await tick(60);
+    tf.d.querySelector('#sd-error-actions button[data-fix="vae-automatic"]').dispatchEvent(new tf.dom.window.Event('click', { bubbles: true }));
+    await tick(80);
+    assert(!tf.$('sd-error').hidden && !tf.$('sd-error-actions').querySelector('button[data-fix="vae-automatic"]') && tf.calls.filter((c) => c[0] === 'fixAndRetry').length === 2, 'a fix that did not help is not offered again (one retry only)');
+  }
 
   console.log('== the --api mistake ==');
   t = await load({

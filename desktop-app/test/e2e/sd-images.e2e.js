@@ -30,7 +30,13 @@ async function main() {
   writeSafetensors(path.join(models, 'Lora', 'odile_face.safetensors'), { ss_base_model_version: 'sd_v1', 'modelspec.trigger_phrase': 'odile woman' });
   writeSafetensors(path.join(models, 'Lora', 'xl_inkwash.safetensors'), { ss_base_model_version: 'sdxl_base_v1-0' });
   writeSafetensors(path.join(models, 'StableDiffusion', 'dreamshaper_8.safetensors'), { 'modelspec.architecture': 'stable-diffusion-v1' });
-  const forge = await fakeA1111({ flavor: 'forge', loraFile: path.join(models, 'Lora', 'odile_face.safetensors') });
+  { // a decoder-only "VAE" (TAESD-style): A1111 fails every picture with it (the case from the user's log)
+    const json = Buffer.from(JSON.stringify({ __metadata__: {}, 'decoder.conv_in.weight': { dtype: 'F16', shape: [64, 4, 3, 3], data_offsets: [0, 4] } }));
+    const len = Buffer.alloc(8); len.writeBigUInt64LE(BigInt(json.length));
+    fs.mkdirSync(path.join(models, 'VAE'), { recursive: true });
+    fs.writeFileSync(path.join(models, 'VAE', 'taesd_decoder.safetensors'), Buffer.concat([len, json, Buffer.from([1, 2, 3, 4])]));
+  }
+  const forge = await fakeA1111({ flavor: 'forge', loraFile: path.join(models, 'Lora', 'odile_face.safetensors'), badVae: 'taesd_decoder' });
   const userData = path.join(tmp, 'userdata');
   let file = null; // the picture the test makes (removed afterwards)
   const t0 = Date.now() - 1000;
@@ -145,6 +151,24 @@ async function main() {
     await c.waitForSelector('.sd-lockitem', { timeout: 5000 }).catch(() => {});
     assert((await c.$$('.sd-lockitem')).length === 1, 'a character lock was saved');
     await shot(c, '05-images-locks');
+
+    // ---- a VAE that can't be loaded: labelled in the dropdown, a red box with the fix, one click fixes it
+    await c.click('#sd-sub-generate');
+    const vaeLabel = await c.$eval('#sd-vae', (sel) => { const o = [...sel.options].find((x) => x.value === 'taesd_decoder'); return o ? o.textContent : ''; });
+    assert(/not a full VAE/.test(vaeLabel), `the VAE dropdown flags the decoder-only file ("${vaeLabel}")`);
+    await c.selectOption('#sd-vae', 'taesd_decoder');
+    assert(/decoder-only/.test(await c.textContent('#sd-vae-warn')), 'picking it shows a warning under the dropdown');
+    await c.click('#btn-sd-generate');
+    await c.waitForSelector('#sd-error:not([hidden])', { timeout: 20000 }).catch(() => {});
+    const errMsg = await c.textContent('#sd-error-msg');
+    assert(/The VAE you picked \(“taesd_decoder”\) can't be loaded/.test(errMsg), `the red box explains the 500: "${errMsg.slice(0, 90)}…"`);
+    assert(/AutoencoderKL/.test(await c.textContent('#sd-error-raw')), 'details hold what Forge said');
+    await shot(c, '05b-images-vae-error');
+    const optsBefore = forge.state.optionsSet.length;
+    await c.click('#sd-error-actions button[data-fix="vae-automatic"]');
+    await c.waitForFunction(() => /saved/.test(document.getElementById('sd-msg').textContent) && !document.getElementById('btn-sd-generate').disabled, null, { timeout: 20000 }).catch(() => {});
+    assert(/VAE is now Automatic/.test(await c.textContent('#sd-msg')) && await c.$eval('#sd-error', (e) => e.hidden) && (await c.inputValue('#sd-vae')) === '', '"Use Automatic VAE and retry" → the picture is made, the box goes away, the form says Automatic');
+    assert(forge.state.optionsSet.slice(optsBefore).some((o) => o.sd_vae === 'Automatic') && forge.state.options.sd_vae === 'Automatic', 'Forge\'s own sd_vae setting is Automatic now');
 
     await c.click('#sd-sub-setup');
     await c.waitForFunction(() => document.getElementById('sd-install-check').textContent.length > 10, null, { timeout: 15000 }).catch(() => {});
