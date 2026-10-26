@@ -7627,6 +7627,18 @@ function akoweServerLogFile() {
   try { dir = outputManager.logsDir(); } catch (_) {}
   return path.join(dir || userDataDir(), "akowe-server.log");
 }
+// Akọwe's Character Forge asks this app's service bridge for pictures (POST /image/request): tell the
+// Akọwe we start where the bridge is and its token, so the author never has to paste them.
+function akoweChildEnv() {
+  const env = Object.assign({}, process.env);
+  try {
+    const port = (bridgeRuntime && bridgeRuntime.port) || Number(process.env.AUTOINJECTOR_BRIDGE_PORT) || 8765;
+    if (!env.AKOWE_IMAGE_BRIDGE) env.AKOWE_IMAGE_BRIDGE = `http://127.0.0.1:${port}`;
+    const token = bridgeToken();
+    if (token && !env.AUTOINJECTOR_BRIDGE_TOKEN) env.AUTOINJECTOR_BRIDGE_TOKEN = token;
+  } catch (_) { /* no bridge info: Akọwe falls back to its own setting */ }
+  return env;
+}
 function initAkoweServer() {
   if (akoweServer) return akoweServer;
   const ms = (k) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? n : undefined; };
@@ -7637,6 +7649,7 @@ function initAkoweServer() {
     onChange: (st) => akoweServerChanged(st),
     healthTimeoutMs: ms("AUTOINJECTOR_AKOWE_HEALTH_MS"),
     reuseWatchMs: ms("AUTOINJECTOR_AKOWE_WATCH_MS"),
+    env: akoweChildEnv(),
   });
   return akoweServer;
 }
