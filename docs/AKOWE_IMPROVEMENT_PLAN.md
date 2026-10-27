@@ -414,6 +414,36 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - Series support: reuse characters and world across books.
 - GitHub checks for Akọwe (see Problems).
 
+## Prevention pass (2026-10-27, "solve problems before they become problems")
+
+- [x] **Alfred's local AI connection:**
+  - It talks to Ollama through Ollama's own `/api/chat`, with a context window sized to the request (8k–32k).
+    Alfred's tool list is about 10k tokens, and Ollama's default of 2–4k silently cut it off; that was the likely cause
+    of the "BAD_ARGS" errors in the user's log.
+  - qwen3 gets `/no_think`, and `<think>` text is removed.
+  - A local model gets a timeout of at least 5 minutes.
+  - The app's own Ollama runs with a 16k context, keeps the model loaded for 30 minutes, and uses flash attention plus
+    an 8-bit cache.
+  - A wrong tool call is answered with the right shape.
+- [x] **Safe Stable Diffusion requests** (`sd-sanitize.js`), for every caller:
+  - Names (sampler, scheduler, checkpoint, VAE, LoRA, upscaler) are matched to the SD app's own lists, unknown ones are
+    replaced with a note, and numbers are clamped.
+  - It retries once: with the basics after an unexplained 500, smaller after out-of-memory, and with Automatic VAE
+    (not in the Images tab, which keeps its button).
+- [x] **🩺 Health watch** (`health-watch.js`): warns before things break — Alfred's Ollama or model missing, low disk
+  (under 15 GB / 5 GB), Stable Diffusion or Akọwe down, a pane that self-repair gave up on, a huge logs folder.
+  - Each warning has a one-click fix and is shown at most once an hour, with an "✔ … again" line when it clears.
+  - It shows in Alfred's notices, the Butler activity log and the app log.
+  - Alfred has `health.status` and `health.fix`.
+- [x] **Weekly live check** (`scripts/live-check.js` + `.github/workflows/live-sites.yml`): every Monday GitHub checks
+  the outside sites the app needs and opens an issue if one changed. That covers:
+  - the Ollama and Hugging Face search;
+  - the Ollama, ComfyUI and model download links (with exact sizes for the video models);
+  - the voice files and setup pages.
+- [x] **Packaging guard:** `sd-errors.js`, `diagnostics.js` and `log-extract.js` were missing from the installer's file
+  list, so an installed copy would have crashed when it reached them. They are added, and `test/build-files.test.js`
+  now fails whenever a file the app loads isn't shipped.
+
 ## Problems to come back to
 
 - **Refinement from the user's 2026-10-25 evening log (FIXED, 2026-10-26)**, one update:
