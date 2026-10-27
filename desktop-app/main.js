@@ -4567,7 +4567,7 @@ function llmLoadHfToken() {
 let llmCatalog = null;
 function llmGetCatalog() {
   if (llmCatalog || !modelCatalogLib || typeof modelCatalogLib.createCatalog !== "function") return llmCatalog;
-  try { llmCatalog = modelCatalogLib.createCatalog({ fetch: (...a) => fetch(...a), hfToken: () => llmLoadHfToken(), timeoutMs: 15000 }); } catch (_) { llmCatalog = null; }
+  try { llmCatalog = modelCatalogLib.createCatalog({ fetch: (...a) => fetch(...a), hfToken: () => llmLoadHfToken(), timeoutMs: 15000, ollamaBase: process.env.AUTOINJECTOR_OLLAMA_LIBRARY || undefined, hfBase: process.env.AUTOINJECTOR_HF_BASE || undefined }); } catch (_) { llmCatalog = null; }
   return llmCatalog;
 }
 const llmSetup = llmSetupLib.createLlmSetup({

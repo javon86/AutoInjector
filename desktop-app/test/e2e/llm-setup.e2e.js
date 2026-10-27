@@ -56,6 +56,8 @@ async function main() {
   const app = await electron.launch({
     args: ['.', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'], cwd: APP_DIR,
     env: Object.assign({}, process.env, {
+      // no internet for the model finder, even where the machine has it (CI): a closed local port
+      AUTOINJECTOR_OLLAMA_LIBRARY: 'http://127.0.0.1:9', AUTOINJECTOR_HF_BASE: 'http://127.0.0.1:9',
       HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), PATH: `${bin}:${process.env.PATH || ''}`,
       OLLAMA_BIN: ollamaBin, NVIDIA_SMI: smiBin, AUTOINJECTOR_OLLAMA_HOST: `127.0.0.1:${port}`,
       AUTOINJECTOR_AKOWE_SERVER: '0', AUTOINJECTOR_CHECKIN: '0', AUTOINJECTOR_BRIDGE: '0',

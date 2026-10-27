@@ -67,6 +67,27 @@ function fakeOllama() {
   process.env.AUTOINJECTOR_OLLAMA_HOST = `127.0.0.1:${port}`;
   const fake = fakeOllama();
   await new Promise((r) => fake.server.listen(port, '127.0.0.1', r));
+  // Live look (information only, never a pass/fail): when this machine can reach ollama.com / huggingface.co
+  // (CI can), print what the real model finder gets, so a changed site layout shows up in the log.
+  try {
+    const live = require('../model-catalog').createCatalog({ fetch: (...a) => fetch(...a), hfToken: () => null, timeoutMs: 8000 });
+    for (const [src, fn] of [['ollama', () => live.searchOllama('qwen')], ['hf', () => live.searchHf('qwen gguf', { limit: 5 })]]) {
+      const lr = await fn();
+      console.log(`  (live ${src}: ${lr.ok ? `${lr.models.length} models, e.g. ${lr.models.slice(0, 3).map((m) => m.pullName).join(', ')}` : `not ok — ${lr.error}`})`);
+    }
+  } catch (e) { console.log(`  (live look skipped: ${String((e && e.message) || e).slice(0, 120)})`); }
+  // The checks below never touch the internet: ollama.com / huggingface.co answer from the test fixtures.
+  const realFetch = global.fetch;
+  const FIX = path.join(__dirname, 'fixtures', 'llm');
+  global.fetch = async (url, opts) => {
+    const u = String(url && url.url ? url.url : url);
+    const reply = (file, type) => new Response(fs.readFileSync(path.join(FIX, file)), { status: 200, headers: { 'Content-Type': type } });
+    if (/^https:\/\/ollama\.com\//.test(u)) return reply('ollama-search.html', 'text/html');
+    if (/^https:\/\/huggingface\.co\/api\/models\?/.test(u)) return reply('hf-search.json', 'application/json');
+    if (/^https:\/\/huggingface\.co\/api\/models\//.test(u)) return reply('hf-model-qwen.json', 'application/json');
+    if (/^https?:\/\/(?!127\.0\.0\.1|localhost)/.test(u)) throw new TypeError('fetch failed (offline in this test)');
+    return realFetch(url, opts);
+  };
   require('../main.js');
   await sleep(300);
   require('../output-manager').init(path.join(TMP, 'content'));
@@ -89,7 +110,7 @@ function fakeOllama() {
   r = await call('llm:curated', { uncensored: true });
   assert(r.ok && r.models.length >= 1 && r.models.every((m) => m.pullName && m.fit && m.fit.label), `curated: rated picks (${r.models.map((m) => m.pullName).join(', ')})`);
   r = await call('llm:search', 'qwen', { sources: ['ollama'] });
-  assert(r && typeof r === 'object' && (r.ok || /isn't part of this build|internet|reach|search/i.test(r.error || JSON.stringify(r.errors || ''))), 'search answers (finder present) or says the finder is missing — never throws');
+  assert(r && r.ok && Array.isArray(r.models) && r.models.length > 0 && r.models.every((m) => m.fit && m.fit.label), `search: Ollama library results, each rated for this PC (${r && r.ok ? r.models.slice(0, 3).map((m) => m.pullName).join(', ') : JSON.stringify(r).slice(0, 300)})`);
   r = await call('llm:hf-files', 'not a repo');
   assert(r && r.ok === false && typeof r.error === 'string', 'hf-files: bad input → plain error');
 
