@@ -1457,6 +1457,12 @@
           <button id="btn-sd-runlog" class="sd-fixed" title="Stable Diffusion's own output (no passwords or tokens in it)">📄 Open log</button>
           <button id="btn-sd-refresh-targets" class="sd-fixed" title="Look for Stability Matrix packages again">↻ Look again</button>
         </div>
+        <div id="sd-run-why" class="sd-small" hidden style="white-space:pre-line; margin:6px 0 0;"></div>
+        <details id="sd-run-tail-box" hidden style="margin:4px 0 0;"><summary class="sd-small">What it printed last</summary><pre id="sd-run-tail" class="sd-small" style="white-space:pre-wrap; margin:4px 0 0;"></pre></details>
+        <div class="sd-row" id="sd-run-fixes" hidden style="margin-top:6px;">
+          <button id="btn-sd-run-cpu" class="sd-fixed" hidden title="Starts ComfyUI with --cpu: no graphics card needed, but a picture takes minutes">🐢 Start on the processor (slow, but works on any PC)</button>
+          <button id="btn-sd-other-build" class="sd-fixed" hidden title="Switches to (or downloads) the other ComfyUI portable build for your graphics card; your models are shared">🔁 Use the other ComfyUI build</button>
+        </div>
         <label class="sd-l"><input type="checkbox" id="sd-autostart"> Start Stable Diffusion with AutoInjector</label>
         <p class="sd-small" id="sd-run-help">AutoInjector looks for packages installed by Stability Matrix (Forge, reForge, Automatic1111, SD.Next, ComfyUI) and for the ComfyUI it installed itself. It starts them hidden, with the API switched on, restarts them if they crash, and stops them when you quit. Models stay in Stability Matrix's shared Data\Models folder.</p>
       </div>
@@ -1603,9 +1609,12 @@
       <div class="sd-card" style="max-width:760px;">
         <h3>1 · ComfyUI (the engine)</h3>
         <div id="vd-setup-comfy" style="font-size:12.5px;line-height:1.5;">Checking…</div>
+        <div id="vd-run-state" role="status" aria-live="polite" hidden style="font-size:12.5px;line-height:1.5;white-space:pre-line;margin-top:4px;"></div>
         <div class="sd-row" style="margin-top:6px;">
           <button class="sd-fixed primary" id="btn-vd-install-all" title="Installs ComfyUI (if there is none) and the recommended video model">⬇ Install ComfyUI + video model</button>
           <button class="sd-fixed" id="btn-vd-start" title="Start the installed ComfyUI (the same one 🎨 Images uses)">▶ Start ComfyUI</button>
+          <button class="sd-fixed" id="btn-vd-start-cpu" hidden title="Starts ComfyUI with --cpu: no graphics card needed, but very slow for video">🐢 Start on the processor (slow, but works on any PC)</button>
+          <button class="sd-fixed" id="btn-vd-other-build" hidden title="Switches to (or downloads) the other ComfyUI portable build; your models are shared">🔁 Use the other ComfyUI build</button>
           <button class="sd-fixed" id="btn-vd-recheck">↻ Check again</button>
           <button class="sd-fixed" id="btn-vd-test" title="Make a tiny 1-second video to prove it works">🧪 1-second test</button>
         </div>

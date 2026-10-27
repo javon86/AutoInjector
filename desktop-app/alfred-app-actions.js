@@ -214,6 +214,8 @@ A('sd.show_file', 'sd:show-file', { t: 'Show a picture in its folder', c: true, 
 A('sd.open_log', 'sd:open-log', { t: 'Open the Stable Diffusion log', c: true, aa: true });
 A('sd.set_autostart', 'sd:set-autostart', { t: 'Start Stable Diffusion with AutoInjector on/off', c: true, a: { on: { type: 'boolean' } }, r: ['on'], ex: { on: false } });
 A('sd.open_install_folder', 'sd:open-install-folder', { t: 'Open the Stable Diffusion install folder', c: true, aa: true });
+A('sd.start_cpu', 'sd:start-cpu', { t: 'Start ComfyUI on the processor (slow, but works on any PC) — when it crashes on the graphics card', c: true, a: { id: opt(300) }, ex: { id: 'portable:comfyui' } });
+A('sd.use_other_build', 'sd:use-other-build', { t: 'Use the other ComfyUI build (switches to, or downloads, the other portable build for this graphics card, then starts it)', c: true });
 A('sdlib.update', 'sdlib:update', { t: 'Edit a library entry (tags, ★, notes, base, weight, triggers)', c: true, a: { id: text(300), patch: pass }, r: ['id', 'patch'], ex: { id: 'lora:odile_face', patch: { favorite: true } } });
 A('sdlib.folders', 'sdlib:folders', { t: 'Library model folders', c: false });
 A('sdlib.add_folder', 'sdlib:add-folder', { t: 'Add a models folder to the library', c: true, a: { path: text(1000), kind: { type: 'string', enum: ['checkpoint', 'lora', 'vae', 'embedding', 'auto'] } }, r: ['path'], ex: { path: 'C:/StabilityMatrix/Data/Models' } });

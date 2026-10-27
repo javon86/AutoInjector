@@ -229,16 +229,46 @@ async function extract(archive, destDir, opts = {}) {
 }
 
 // Find the unpacked portable folder (…/ComfyUI_windows_portable with python_embeded + ComfyUI/main.py).
+// Which build is installed where (written by install()): { active, builds: { <build>: { root, models } } }.
+// A second build ("Use the other ComfyUI build") goes into <home>/build-<name>/ and reads
+// the first one's models through ComfyUI's extra_model_paths.yaml, so nothing is downloaded twice.
+const BUILD_FILE = 'autoinjector-build.json';
+function readBuilds(home) {
+  try { const j = JSON.parse(fs.readFileSync(path.join(home, BUILD_FILE), 'utf8')); return j && typeof j === 'object' ? Object.assign({ active: null, builds: {} }, j) : { active: null, builds: {} }; } catch { return { active: null, builds: {} }; }
+}
+function writeBuilds(home, rec) { try { fs.mkdirSync(home, { recursive: true }); fs.writeFileSync(path.join(home, BUILD_FILE), JSON.stringify(rec, null, 2)); } catch {} }
+// The other build to try when ComfyUI crashes on this PC (null: there is none, use the CPU).
+const OTHER_BUILD = { nvidia: 'nvidia_cu126', nvidia_cu126: 'nvidia' };
 function findPortable(home) {
+  const rec = readBuilds(home);
+  const act = rec.active && rec.builds[rec.active];
+  if (act && act.root) {
+    const p = _portableAt(act.root);
+    if (p) return Object.assign(p, { build: rec.active }, act.models && fs.existsSync(act.models) ? { models: act.models } : {});
+  }
+  const p = _scanPortable(home);
+  if (p && rec.active && rec.builds[rec.active] && !rec.builds[rec.active].root) p.build = rec.active;
+  return p;
+}
+function _portableAt(d) {
+  if (!fs.existsSync(path.join(d, 'ComfyUI', 'main.py'))) return null;
+  const py = ['python_embeded', 'python_embedded'].map((p) => path.join(d, p, process.platform === 'win32' || fs.existsSync(path.join(d, p, 'python.exe')) ? 'python.exe' : 'python')).find((p) => fs.existsSync(p)) || null;
+  return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models') };
+}
+function _scanPortable(home) {
   const cands = [home, path.join(home, 'ComfyUI_windows_portable')];
   try { for (const e of fs.readdirSync(home, { withFileTypes: true })) if (e.isDirectory()) cands.push(path.join(home, e.name)); } catch {}
-  for (const d of cands) {
-    if (fs.existsSync(path.join(d, 'ComfyUI', 'main.py'))) {
-      const py = ['python_embeded', 'python_embedded'].map((p) => path.join(d, p, process.platform === 'win32' || fs.existsSync(path.join(d, p, 'python.exe')) ? 'python.exe' : 'python')).find((p) => fs.existsSync(p)) || null;
-      return { root: d, comfy: path.join(d, 'ComfyUI'), python: py, models: path.join(d, 'ComfyUI', 'models') };
-    }
-  }
+  for (const d of cands) { const p = _portableAt(d); if (p) { const rec = readBuilds(home); const b = Object.keys(rec.builds).find((k) => rec.builds[k] && rec.builds[k].root && path.resolve(rec.builds[k].root) === path.resolve(d)); if (b) p.build = b; return p; } }
   return null;
+}
+// Let a second ComfyUI read the first one's model folders (ComfyUI loads ComfyUI/extra_model_paths.yaml by itself).
+function linkModels(comfyDir, modelsDir) {
+  const f = path.join(comfyDir, 'extra_model_paths.yaml');
+  if (fs.existsSync(f)) return false; // never overwrite the user's own file
+  const q = (p) => JSON.stringify(String(p).replace(/\\/g, '/'));
+  const kinds = ['checkpoints', 'clip', 'clip_vision', 'configs', 'controlnet', 'diffusion_models', 'embeddings', 'loras', 'upscale_models', 'vae', 'text_encoders', 'unet', 'vae_approx', 'hypernetworks', 'style_models', 'photomaker', 'gligen', 'audio_encoders', 'model_patches'];
+  const body = ['# Written by AutoInjector: this ComfyUI also uses the models of the first ComfyUI it installed.', 'autoinjector_shared:', `  base_path: ${q(modelsDir)}`, '  is_default: true', ...kinds.map((k) => `  ${k}: ${k}/`)].join('\n') + '\n';
+  try { fs.writeFileSync(f, body); return true; } catch { return false; }
 }
 
 // ------------------------------------------------------------------ the installer
@@ -255,8 +285,10 @@ function createInstaller(opts = {}) {
   function set(p) { st = Object.assign({}, st, p); try { onChange(status()); } catch {} }
   function status() { return Object.assign({ home, installed: !!findPortable(home), busy: !!job }, st); }
 
+  let lastGpu = null;
   async function check() {
     const gpu = await detectGpu({ run: opts.run, platform });
+    lastGpu = gpu;
     const archiveBytes = BUILDS[gpu.build].approxBytes;
     const need = archiveBytes * 3.5 + 2.2 * GB; // archive + unpacked (~2.5×) + a small model
     const free = freeBytes(home);
@@ -273,35 +305,45 @@ function createInstaller(opts = {}) {
     if (job) return { ok: false, error: 'BUSY', message: 'An install is already running.' };
     const c = await check();
     if (!c.supported) return { ok: false, error: 'NOT_WINDOWS', message: 'The one-click install is for Windows. On this computer install ComfyUI or Forge yourself (see docs/STABLE_DIFFUSION_SETUP.md); AutoInjector will find and drive it.' };
-    if (c.installed) { set({ phase: 'installed', message: 'ComfyUI is already installed.' }); return { ok: true, already: true, portable: c.portable }; }
+    const alongside = !!(o.alongside && c.installed && o.build && BUILDS[o.build]);
+    if (c.installed && !alongside) { set({ phase: 'installed', message: 'ComfyUI is already installed.' }); return { ok: true, already: true, portable: c.portable }; }
     if (c.enoughSpace === false && !o.ignoreSpace) return { ok: false, error: 'NO_SPACE', message: `Not enough free disk space. ${c.spaceMessage}` };
     const build = o.build && BUILDS[o.build] ? o.build : c.gpu.build;
     const asset = BUILDS[build].asset;
+    const dest = alongside ? path.join(home, `build-${build}`) : home;
+    const firstModels = alongside && c.portable ? c.portable.models : null;
     job = { cancelled: false };
     const myJob = job;
     try {
       set({ phase: 'downloading', step: 'download', pct: 0, error: null, message: `Downloading ComfyUI (${BUILDS[build].label})…` });
-      log('sd-install-start', { build, home });
+      log('sd-install-start', { build, home, alongside });
       // Size + SHA-256 from GitHub when it publishes them (never fatal if not).
       let expectedSize = null, expectedSha256 = null;
       const rel = await _json(urls.githubApi, deps);
       const a = rel && Array.isArray(rel.assets) ? rel.assets.find((x) => x.name === asset) : null;
       if (a) { expectedSize = Number(a.size) || null; const m = String(a.digest || '').match(/^sha256:([0-9a-f]{64})$/i); if (m) expectedSha256 = m[1]; }
-      const archive = path.join(home, asset);
+      const archive = path.join(dest, asset);
       const d = await download(a && a.browser_download_url ? a.browser_download_url : urls.downloadBase + asset, archive, {
         deps, job: myJob, expectedSize, expectedSha256,
         onProgress: (p) => set({ step: 'download', pct: p.pct, done: p.done, total: p.total, message: `Downloading ComfyUI… ${fmtBytes(p.done)}${p.total ? ` of ${fmtBytes(p.total)}` : ''}` }),
       });
       if (!d.ok) { set({ phase: d.error === 'CANCELLED' ? 'paused' : 'failed', error: d.error, message: d.message }); log('sd-install-download-failed', { error: d.error }); return d; }
       set({ phase: 'extracting', step: 'extract', pct: 0, message: 'Unpacking ComfyUI… (a few minutes)' });
-      const x = await extract(archive, home, { spawn: deps.spawn, sevenZip: opts.sevenZip, tar: opts.tar, env: opts.env });
+      const x = await extract(archive, dest, { spawn: deps.spawn, sevenZip: opts.sevenZip, tar: opts.tar, env: opts.env });
       if (!x.ok) { set({ phase: 'failed', error: x.error, message: x.message }); log('sd-install-extract-failed', { detail: x.detail }); return x; }
-      const portable = findPortable(home);
-      if (!portable) { const r = { ok: false, error: 'NOT_FOUND_AFTER_EXTRACT', message: 'ComfyUI was unpacked, but its main.py was not found where expected. Open the folder and check, or press Install again.' }; set({ phase: 'failed', error: r.error, message: r.message }); return r; }
+      const found = _scanPortable(dest);
+      if (!found) { const r = { ok: false, error: 'NOT_FOUND_AFTER_EXTRACT', message: 'ComfyUI was unpacked, but its main.py was not found where expected. Open the folder and check, or press Install again.' }; set({ phase: 'failed', error: r.error, message: r.message }); return r; }
       // The archive is our own download; it is safe to remove now that it is unpacked.
       try { fs.unlinkSync(archive); } catch {}
-      log('sd-install-done', { tool: x.tool, sha256: d.sha256 ? 'checked' : 'not published' });
-      set({ phase: 'installed', step: null, pct: 1, message: `✔ ComfyUI is installed in ${portable.root}.`, verified: !!d.sha256 });
+      // Remember which build this is (and, for a second build, share the first one's models).
+      const rec = readBuilds(home);
+      if (firstModels && fs.existsSync(firstModels)) linkModels(found.comfy, firstModels);
+      rec.builds[build] = { root: found.root, models: firstModels && fs.existsSync(firstModels) ? firstModels : null };
+      rec.active = build;
+      writeBuilds(home, rec);
+      const portable = findPortable(home);
+      log('sd-install-done', { build, alongside, tool: x.tool, sha256: d.sha256 ? 'checked' : 'not published' });
+      set({ phase: 'installed', step: null, pct: 1, message: `✔ ComfyUI${alongside ? ` (${BUILDS[build].label} build)` : ''} is installed in ${portable.root}.`, verified: !!d.sha256 });
       return { ok: true, portable, verified: !!d.sha256, build, cpuOnly: !!c.gpu.cpuOnly };
     } finally { if (job === myJob) job = null; }
   }
@@ -329,7 +371,45 @@ function createInstaller(opts = {}) {
   }
 
   function cancel() { if (job && job.cancel) job.cancel(); else if (job) job.cancelled = true; return { ok: true }; }
-  return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home) };
+  // The build in use: recorded at install; for an older install, the one the GPU check picks.
+  function currentBuild() { const p = findPortable(home); if (!p) return null; return p.build || readBuilds(home).active || (lastGpu && lastGpu.build) || null; }
+  // The other build worth trying after a crash → { build, label, installed } | null (AMD / Intel: only one build — use the CPU instead).
+  function otherBuild() {
+    const cur = currentBuild();
+    if (!cur && !findPortable(home)) return null;
+    const v = lastGpu && lastGpu.vendor;
+    // The card isn't NVIDIA but an NVIDIA build is installed → its own build; no GPU at all → only the CPU helps.
+    const alt = (v === 'amd' || v === 'intel') && /^nvidia/.test(cur || 'nvidia') ? lastGpu.build : v === 'none' ? null : OTHER_BUILD[cur || 'nvidia'];
+    if (!alt || alt === cur) return null;
+    const rec = readBuilds(home);
+    return { build: alt, label: BUILDS[alt].label, from: cur, installed: !!(rec.builds[alt] && rec.builds[alt].root && _portableAt(rec.builds[alt].root)) };
+  }
+  // Switch to the other build: use it when it is already there, else download it next to the first one.
+  async function useOtherBuild(o = {}) {
+    if (!readBuilds(home).active && !lastGpu) { try { await check(); } catch {} }
+    const alt = otherBuild();
+    if (!alt) return { ok: false, error: 'NO_OTHER_BUILD', message: 'There is no other ComfyUI build for this graphics card. Use “Start on the processor (slow)” instead, or update the graphics driver.' };
+    const rec = readBuilds(home);
+    if (alt.installed) {
+      rec.active = alt.build; writeBuilds(home, rec);
+      log('sd-install-switch-build', { build: alt.build, from: alt.from || null });
+      set({ phase: 'installed', message: `✔ Switched to ComfyUI's ${alt.label} build.` });
+      return { ok: true, switched: true, build: alt.build, portable: findPortable(home) };
+    }
+    // An older install without a record: remember what it is before adding the second one.
+    const p = findPortable(home);
+    if (p && alt.from && !rec.builds[alt.from]) { rec.builds[alt.from] = { root: p.root, models: null }; rec.active = alt.from; writeBuilds(home, rec); }
+    const r = await install(Object.assign({}, o, { build: alt.build, alongside: true }));
+    return Object.assign({ build: alt.build }, r);
+  }
+  // Back to a build that is installed (e.g. the first one).
+  function useBuild(build) {
+    const rec = readBuilds(home);
+    if (!rec.builds[build] || !_portableAt(rec.builds[build].root)) return { ok: false, error: 'NOT_INSTALLED', message: 'That ComfyUI build is not installed.' };
+    rec.active = build; writeBuilds(home, rec);
+    return { ok: true, build, portable: findPortable(home) };
+  }
+  return { status, check, install, downloadModel, cancel, home, portable: () => findPortable(home), currentBuild, otherBuild, useOtherBuild, useBuild, gpu: () => lastGpu };
 }
 
-module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE };
+module.exports = { createInstaller, detectGpu, chooseBuild, download, extract, find7z, findPortable, readBuilds, linkModels, OTHER_BUILD, BUILD_FILE, freeBytes, defaultHome, fmtBytes, BUILDS, STARTER_MODELS, GITHUB_API, DOWNLOAD_BASE };
