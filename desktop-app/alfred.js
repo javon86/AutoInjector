@@ -436,7 +436,10 @@ function createAlfred(deps = {}) {
     const isChange = !!tool.changes && !readOnly;
     if (isChange) addActivity(entry);
     // Activity log: the tool, its fixed title and the outcome code — never arguments, prompts or text.
-    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), auto: auto || undefined });
+    // which settings he passed (names only — never the values, which can hold the user's words)
+    const passed = args && typeof args === 'object' ? (args.params && typeof args.params === 'object' && !Array.isArray(args.params) ? args.params : args) : null;
+    const argNames = passed ? Object.keys(passed).filter((k) => !['action', 'method', 'params'].includes(k)).slice(0, 24).map(safeName) : undefined;
+    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), args: argNames && argNames.length ? argNames : undefined, auto: auto || undefined });
     if (isChange && tool.book && r.ok && deps.journal) {
       const pid = r.project_id || (args && args.project_id) || null;
       if (pid) Promise.resolve(deps.journal(pid, tool.name, tool.title)).catch(() => {});
@@ -534,7 +537,7 @@ function createAlfred(deps = {}) {
           v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: (c && c.error) || 'not allowed' };
         }
         if (!v.ok) {
-          log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS' });
+          log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS', why: String(v.error || '').replace(/"[^"]*"|'[^']*'|“[^”]*”/g, '…').slice(0, 140) });
           history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}.` }));
           continue;
         }
