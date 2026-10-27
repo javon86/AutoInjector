@@ -166,7 +166,12 @@ function createSdStudio(deps) {
       const out = Object.assign({ ok: false, warnings }, r || {}, { message: (r && r.message) || sdBackends.explain(r) });
       if (out.code === 'VAE_LOAD_FAILED') await explainVae(out, vaeName, vaeInfo);
       // Log the cause, never the prompt (the log is shared with the user).
-      log('sd-generate', { ok: false, from, error: out.error, code: out.code || out.error, status: out.status, backend: out.backend, vae: vaeName || undefined });
+      // …plus the server's own first line (why) and the settings used, so a bare "HTTP 500" can be diagnosed from the log.
+      const o = b.opts || {};
+      let why; try { const t = sdErrors.serverText(out) || ''; why = (t ? sdErrors.firstUsefulLine(t) : '').slice(0, 200) || undefined; } catch (_) { why = undefined; }
+      const used = { w: o.width, h: o.height, steps: o.steps, cfg: o.cfgScale, sampler: o.sampler, scheduler: o.scheduler, checkpoint: o.checkpoint, loras: o.loras && o.loras.length ? o.loras.length : undefined, extra: o.extra && typeof o.extra === 'object' ? Object.keys(o.extra).slice(0, 12) : undefined, options: o.options && typeof o.options === 'object' ? Object.keys(o.options).slice(0, 12) : undefined };
+      for (const k of Object.keys(used)) if (used[k] === undefined || used[k] === '') delete used[k];
+      log('sd-generate', { ok: false, from, error: out.error, code: out.code || out.error, status: out.status, backend: out.backend, vae: vaeName || undefined, why, used: Object.keys(used).length ? used : undefined });
       return out;
     }
     if (Array.isArray(r.warnings)) warnings.push(...r.warnings);

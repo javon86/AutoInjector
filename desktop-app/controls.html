@@ -452,7 +452,7 @@
     /* Friendlier idle state: centre a short, welcoming hint instead of a flat line. */
     .butler-chat-log:empty { align-items:center; justify-content:center; text-align:center; }
     .butler-chat-log:empty::before {
-      content:"🤵  Your butler is standing by.\A\AGive him a goal on the left, or press System Check\Ato see what he can do — his thoughts and actions show up here.";
+      content:"🎩  Alfred is standing by.\A\ATalk to him in his side panel (◂ Panel, or Ctrl+Shift+A).\AWhat he does shows up here.";
       white-space:pre-line; opacity:.5; max-width:34ch; font-family:system-ui, sans-serif; font-size:12px; line-height:1.6;
     }
     .butler-chat-log > div { padding:2px 0; border-bottom:1px solid #141414; }
@@ -465,6 +465,13 @@
     /* B6 🎩 Alfred's AI setup (llm-setup-ui.js) */
     #butler-controls > #llm-zone { flex:1 1 100%; display:flex; flex-direction:column; gap:8px; }
     #llm-zone > div:empty { display:none; }
+    /* Personality + saved set-ups (left half) beside the other settings (right half). */
+    #llm-zone .llm-pair { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; align-items:start; }
+    @media (max-width: 1100px) { #llm-zone .llm-pair { grid-template-columns:minmax(0,1fr); } }
+    #butler-more { display:flex; flex-direction:column; gap:6px; border:1px solid #1c2a20; border-radius:9px; padding:8px 10px; background:#0b110d; }
+    #butler-more .butler-more-title { font-weight:600; font-size:12.5px; }
+    #butler-more > details.sai-sec { margin:0; width:auto; flex:none; }
+    #butler-legacy[hidden] { display:none !important; }
     .llm-setup [hidden] { display:none !important; }
     .llm-setup { background:#0c130e; border:1px solid #2f5c3e; border-radius:9px; padding:9px 11px; }
     .llm-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
@@ -1914,31 +1921,13 @@
          collapse mechanism + tests keep working. -->
     <div id="col-systemai" class="yc-panel butler-bar">
       <div class="yc-head">
-        <h2>🤵 Butler — oversees ChatGPT · Claude · Gemini</h2><span class="spacer"></span>
+        <h2>🎩 Butler — set up Alfred's AI · activity</h2><span class="spacer"></span>
         <span id="lsi-status" style="font-size:11px; opacity:.7;"></span>
         <button class="collapse-btn" id="btn-collapse-systemai" title="Minimize this panel" aria-label="Minimize this panel">⌄</button>
       </div>
       <div id="systemai-body" class="butler-body">
         <!-- TWO-THIRDS: everything else — the goal box + all of his controls. -->
         <div id="butler-main">
-          <label style="display:flex; align-items:center; gap:6px; margin:0 0 4px;"><input type="checkbox" id="lsi-enabled"> <span>Let the butler help run the system</span></label>
-          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Tell the butler what to do</div>
-          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One box — type a goal or a task; he plans, delegates to the three AIs, runs code, and makes images/video to reach it. Needs a local model (⚙️ below).</p>
-          <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
-          <div class="btns" style="margin:4px 0; align-items:center;">
-            <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
-            <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
-            <button id="btn-device-ptt" title="Push to talk — click, speak, it transcribes into the box and sends">🎤 Talk</button>
-            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;" title="Keep listening and act on what you say (needs the voice engine)"><input type="checkbox" id="device-openmic"> open mic</label>
-            <span style="flex:1;"></span>
-            <button id="btn-cap-run" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Watch the reel; a full report pops up when it's done.">🧪 Test all capabilities</button>
-          </div>
-          <div id="cap-reel" aria-live="polite"></div>
-          <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
-          <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
-          <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-          <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
-
         <!-- his controls, sitting under the goal box on the 2/3 side -->
         <div id="butler-controls">
 
@@ -1947,66 +1936,10 @@
         <div id="llm-zone">
           <div id="llm-setup"></div>
           <div id="llm-models"></div>
-          <div id="alfred-persona"></div>
-        </div>
-
-        <!-- Run & check him: the former "Butler Device" panel, now folded into
-             the one butler surface. Keeps id col-device so wiring + tests hold. -->
-        <div id="col-device" class="device-sec">
-          <!-- Who's speaking: each speaker lights up in its own colour, back and forth. -->
-          <div id="speaking-indicator" class="speak-row">
-            <span class="spk-chip" data-who="butler">🤵 Butler</span>
-            <span class="spk-chip" data-who="chatgpt">ChatGPT</span>
-            <span class="spk-chip" data-who="claude">Claude</span>
-            <span class="spk-chip" data-who="gemini">Gemini</span>
-          </div>
-
-          <div class="btns" style="margin:7px 0 5px;">
-            <button id="btn-selfcheck" class="primary">🩺 System Check</button>
-            <button id="btn-install-missing">⚙️ Install Missing</button>
-            <button id="btn-send-intro">📣 Send Intro</button>
-            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;"><input type="checkbox" id="device-speak"> 🔊 speak</label>
-          </div>
-          <label id="deep-check-row" style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:0 0 5px; cursor:pointer;" title="Instead of only checking what's configured, actually make the butler do each thing once: render a test image, make a short video, run a line of code, write & read a file, remember & recall, call a tool, speak, and ping each AI. Slower, and it really generates files.">
-            <input type="checkbox" id="cb-deep-check"> <span>🧪 Actually run each capability (slower — really generates a test image/video &amp; pings the AIs)</span>
-          </label>
-          <p style="opacity:.6; font-size:11px; margin:3px 0 0;">Results, install progress and intro output all stream to the <b>Activity Log</b> at the bottom.</p>
-        </div>
-
-        <p style="opacity:.78; margin:2px 0 4px; font-size:11.5px;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). It never touches the three chat AIs' logins.</p>
-        <details class="sai-sec">
-          <summary>⚙️ Local model settings</summary>
-          <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
-            <li>Install Ollama (link appears below if missing), then <b>Download</b> or <b>Get</b> a model.</li>
-            <li>Pick it in <b>Model</b>, then press <b>Save settings</b>.</li>
-            <li>Press <b>Test</b> to confirm — then give the Butler a goal below.</li>
-          </ol>
-          <div class="btns" style="margin:4px 0;">
-            <input id="lsi-endpoint" type="text" value="http://127.0.0.1:11434/v1/chat/completions" placeholder="http://127.0.0.1:11434/v1/chat/completions" title="Ollama's local address (default). Erase or change it if you use a different backend." style="flex:1 1 150px; min-width:0;">
-            <button id="btn-lsi-test">Test</button>
-          </div>
-          <div class="btns" style="margin:4px 0;">
-            <span class="row-label">Model</span>
-            <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
-            <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
-          </div>
-          <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
-          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:2px 0;" title="Suggest UNCENSORED models that still follow the butler's command format (Dolphin / Hermes). Avoids refusals without breaking his JSON commands — llama2-uncensored is too weak for that.">
-            <input type="checkbox" id="lsi-uncensored"> 🔓 Prefer uncensored models (that still take commands)
-          </label>
-          <div class="btns" style="margin:4px 0;">
-            <span class="row-label">Get</span>
-            <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
-            <button id="btn-lsi-download" title="Download &amp; install this recommended model with Ollama" aria-label="Download &amp; install this recommended model with Ollama">⬇ Download</button>
-          </div>
-          <div class="btns" style="margin:4px 0;">
-            <input id="lsi-pull-name" type="text" placeholder="…or pull ANY model by name (e.g. llama3.1:8b)" style="flex:1 1 150px; min-width:0;">
-            <button id="btn-lsi-pull" title="Download any Ollama model by name — your choice of model" aria-label="Download any Ollama model by name">⬇ Get</button>
-          </div>
-          <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
-          <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
-        </details>
-
+          <div class="llm-pair">
+            <div id="alfred-persona"></div>
+            <div id="butler-more">
+              <div class="butler-more-title">⚙ More settings</div>
         <details class="sai-sec">
           <summary>📁 Downloads &amp; creations folder ("stuff and thing")</summary>
           <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One folder inside AutoInjector holds everything — downloaded models/LoRAs/voice under <b>models/</b>, and everything the app makes (images, videos, books) at the top. Open it and drop files into the matching subfolder; each folder's README says how to point its backend here.</p>
@@ -2073,12 +2006,97 @@
           </div>
           <div id="voice-msg" style="font-size:11.5px; opacity:.8;"></div>
         </details>
+            </div>
+          </div>
+        </div>
+
+        <!-- The old Butler's own controls (goal box, System Check, local model settings…). Replaced by
+             Alfred (talk to him in his side panel) and the one-button setup above; kept out of sight so
+             the app's existing wiring keeps working. -->
+        <div id="butler-legacy" hidden>
+          <label style="display:flex; align-items:center; gap:6px; margin:0 0 4px;"><input type="checkbox" id="lsi-enabled"> <span>Let the butler help run the system</span></label>
+          <div style="font-weight:600; font-size:12px; margin:2px 0 3px;">🤵 Tell the butler what to do</div>
+          <p style="opacity:.7; font-size:11px; margin:2px 0 5px;">One box — type a goal or a task; he plans, delegates to the three AIs, runs code, and makes images/video to reach it. Needs a local model (⚙️ below).</p>
+          <textarea id="jarvis-goal" rows="2" placeholder="e.g. Research the top 3 approaches across the AIs, then compute a comparison table" style="width:100%; resize:vertical; box-sizing:border-box;"></textarea>
+          <div class="btns" style="margin:4px 0; align-items:center;">
+            <button id="btn-jarvis-start" class="primary">▶ Start Butler</button>
+            <button id="btn-jarvis-stop" class="danger" style="display:none;">⏹ Stop</button>
+            <button id="btn-device-ptt" title="Push to talk — click, speak, it transcribes into the box and sends">🎤 Talk</button>
+            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;" title="Keep listening and act on what you say (needs the voice engine)"><input type="checkbox" id="device-openmic"> open mic</label>
+            <span style="flex:1;"></span>
+            <button id="btn-cap-run" title="Actually run each of the butler's capabilities once (code, file, tool, memory, image, video, voice, and ping each AI). Watch the reel; a full report pops up when it's done.">🧪 Test all capabilities</button>
+          </div>
+          <div id="cap-reel" aria-live="polite"></div>
+          <div id="jarvis-ack" style="font-size:12px; color:#8ef0b0; min-height:15px; margin:2px 0;"></div>
+          <div id="jarvis-status" style="font-size:11.5px; opacity:.85; margin:2px 0;">Idle.</div>
+          <div id="jarvis-awareness" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+          <div id="jarvis-memory" style="font-size:11px; opacity:.8; margin:2px 0;"></div>
+
+        <!-- Run & check him: the former "Butler Device" panel, now folded into
+             the one butler surface. Keeps id col-device so wiring + tests hold. -->
+        <div id="col-device" class="device-sec">
+          <!-- Who's speaking: each speaker lights up in its own colour, back and forth. -->
+          <div id="speaking-indicator" class="speak-row">
+            <span class="spk-chip" data-who="butler">🤵 Butler</span>
+            <span class="spk-chip" data-who="chatgpt">ChatGPT</span>
+            <span class="spk-chip" data-who="claude">Claude</span>
+            <span class="spk-chip" data-who="gemini">Gemini</span>
+          </div>
+
+          <div class="btns" style="margin:7px 0 5px;">
+            <button id="btn-selfcheck" class="primary">🩺 System Check</button>
+            <button id="btn-install-missing">⚙️ Install Missing</button>
+            <button id="btn-send-intro">📣 Send Intro</button>
+            <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.85;"><input type="checkbox" id="device-speak"> 🔊 speak</label>
+          </div>
+          <label id="deep-check-row" style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:0 0 5px; cursor:pointer;" title="Instead of only checking what's configured, actually make the butler do each thing once: render a test image, make a short video, run a line of code, write & read a file, remember & recall, call a tool, speak, and ping each AI. Slower, and it really generates files.">
+            <input type="checkbox" id="cb-deep-check"> <span>🧪 Actually run each capability (slower — really generates a test image/video &amp; pings the AIs)</span>
+          </label>
+          <p style="opacity:.6; font-size:11px; margin:3px 0 0;">Results, install progress and intro output all stream to the <b>Activity Log</b> at the bottom.</p>
+        </div>
+
+        <p style="opacity:.78; margin:2px 0 4px; font-size:11.5px;">A small local AI that helps <b>run the system</b> (smart routing, duplicate filtering). It never touches the three chat AIs' logins.</p>
+        <details class="sai-sec">
+          <summary>⚙️ Local model settings</summary>
+          <ol style="opacity:.8; font-size:11px; margin:4px 0 6px; padding-left:16px;">
+            <li>Install Ollama (link appears below if missing), then <b>Download</b> or <b>Get</b> a model.</li>
+            <li>Pick it in <b>Model</b>, then press <b>Save settings</b>.</li>
+            <li>Press <b>Test</b> to confirm — then give the Butler a goal below.</li>
+          </ol>
+          <div class="btns" style="margin:4px 0;">
+            <input id="lsi-endpoint" type="text" value="http://127.0.0.1:11434/v1/chat/completions" placeholder="http://127.0.0.1:11434/v1/chat/completions" title="Ollama's local address (default). Erase or change it if you use a different backend." style="flex:1 1 150px; min-width:0;">
+            <button id="btn-lsi-test">Test</button>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Model</span>
+            <select id="lsi-model" style="flex:1 1 150px; min-width:0;"><option value="">(choose a model)</option></select>
+            <button id="btn-lsi-models" title="Refresh installed models" aria-label="Refresh installed models">⟳</button>
+          </div>
+          <div id="lsi-recommend" style="font-size:11px; opacity:.75; margin:2px 0;"></div>
+          <label style="display:flex; align-items:center; gap:5px; font-size:11.5px; opacity:.9; margin:2px 0;" title="Suggest UNCENSORED models that still follow the butler's command format (Dolphin / Hermes). Avoids refusals without breaking his JSON commands — llama2-uncensored is too weak for that.">
+            <input type="checkbox" id="lsi-uncensored"> 🔓 Prefer uncensored models (that still take commands)
+          </label>
+          <div class="btns" style="margin:4px 0;">
+            <span class="row-label">Get</span>
+            <select id="lsi-download-model" style="flex:1 1 120px; min-width:0;"></select>
+            <button id="btn-lsi-download" title="Download &amp; install this recommended model with Ollama" aria-label="Download &amp; install this recommended model with Ollama">⬇ Download</button>
+          </div>
+          <div class="btns" style="margin:4px 0;">
+            <input id="lsi-pull-name" type="text" placeholder="…or pull ANY model by name (e.g. llama3.1:8b)" style="flex:1 1 150px; min-width:0;">
+            <button id="btn-lsi-pull" title="Download any Ollama model by name — your choice of model" aria-label="Download any Ollama model by name">⬇ Get</button>
+          </div>
+          <div class="btns" style="margin:4px 0;"><button id="btn-lsi-save">Save settings</button></div>
+          <div id="lsi-msg" style="font-size:11.5px; opacity:.8;"></div>
+        </details>
+
+        </div>
+
         </div><!-- /butler-controls -->
         </div><!-- /butler-main (2/3) -->
 
         <!-- ONE-THIRD: the butler's chat window. -->
         <div id="butler-chat">
-          <div class="butler-chat-title">📜 Butler chat &amp; activity</div>
+          <div class="butler-chat-title">📜 Activity — what Alfred and the Butler did</div>
           <div id="jarvis-log" class="butler-chat-log"></div>
         </div>
       </div><!-- /systemai-body -->

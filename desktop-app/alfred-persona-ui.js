@@ -47,7 +47,8 @@
       #alfred-persona { flex:1 1 100%; background:#0b0e16; border:1px solid #26304a; border-radius:9px; padding:8px 11px; font-size:12px; color:#e8ecf5; box-sizing:border-box; }
       #alfred-persona h3 { margin:0 0 6px; font-size:13px; }
       #alfred-persona .ap-cols { display:flex; flex-wrap:wrap; gap:12px; }
-      #alfred-persona .ap-col { flex:1 1 280px; min-width:240px; }
+      #alfred-persona .ap-col { flex:1 1 100%; min-width:0; } /* personality, then saved set-ups underneath */
+      #alfred-persona .ap-col + .ap-col { border-top:1px solid #1b2236; padding-top:8px; }
       #alfred-persona .ap-grid { display:grid; grid-template-columns:auto 1fr; gap:5px 8px; align-items:center; }
       #alfred-persona .ap-grid .full { grid-column:1 / -1; }
       #alfred-persona input[type=text], #alfred-persona select, #alfred-persona textarea { width:100%; box-sizing:border-box; background:#070910; color:#e8ecf5; border:1px solid #2b3550; border-radius:5px; padding:3px 5px; font:inherit; font-size:12px; }

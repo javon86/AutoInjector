@@ -19,23 +19,35 @@ turn him on.
 Press the switch again to turn him **off**: the panel disappears, he stops what he was doing, and
 he makes no more calls.
 
-### His side panel: floating over everything (or docked)
+### His side panel (it moves the app over, on every tab)
 
-- **Floating (over everything)** — the default. His panel is its own small window that floats over the
-  whole app: over the AI panes, the 📖 Akọwe tab, everything. Drag it by its header, resize it from its
-  edges; it remembers where you put it (and comes back on screen if that monitor is gone). The first
-  time it sits against the app's right edge. It moves with the app and stays above it.
-  ⚙ → **Stay on top of other programs too** keeps it above other programs as well.
-- **Docked (beside)** — ⚙ → *His panel* → *Docked*: the drawer on the right of the control panel, the
-  way it used to be (the app makes room for it).
-- **Ctrl+Shift+A** (**Cmd+Shift+A** on a Mac) shows / hides the panel from anywhere in the app — also
-  from inside an AI pane. The title-bar **🗗 Panel** button does the same. Closing the panel only hides
-  it: Alfred stays on. **Escape** hides the floating panel, but never while an "I will" card waits.
-- Quick buttons: **📊 Status**, **🩺 Check his AI**, **🎨 Make a picture**, **📖 My book**,
-  **⚙ Set up his AI** (opens the 🤵 Butler section). The set-up list in the header switches between
-  saved set-ups; 💾 saves the current one.
+- His panel sits on the **right** of the window. The app **makes room** for it: the AI panes, 📖 Akọwe,
+  🎨 Images and 🎬 Video are all laid out beside it, never under it. It stays there when you change tabs.
+  The title-bar **▸ Panel / ◂ Panel** button hides / shows it.
+- **Ctrl+Shift+A** (**Cmd+Shift+A** on a Mac) shows / hides it from anywhere in the app, even from inside an
+  AI pane. Hiding the panel does not turn Alfred off.
+- Quick buttons: **📊 Status**, **🩺 Check his AI**, **🎨 Make a picture**, **📖 My book**, and
+  **⚙ Set up his AI**, which opens the 🎩 Butler section. The list in the header switches between saved
+  set-ups, and 💾 saves the current one.
+- If you'd rather have him in a separate window over the app, choose ⚙ → *His panel* → **Separate
+  window**. A tick box there keeps that window above other programs too.
 
-### His personality and saved set-ups (🤵 Butler section)
+### The 🎩 Butler section (set-up + activity)
+
+From top to bottom:
+1. **Alfred's AI:** the one button, 🩺 Check everything, Start/Stop Ollama, and the models on this PC.
+2. **🔎 Find a model:** compact cards, about three to a row.
+3. **Personality and saved set-ups**, stacked one under the other on the left half. **⚙ More settings**
+   (the downloads folder, safeguards, tools and voice) is on the right half.
+4. On the far right, the **activity log**: what Alfred did and what his AI setup did.
+
+The old Butler's own controls are gone from view, because Alfred and the one button replace them:
+- the "Tell the butler what to do" box;
+- System Check, Install Missing and Send Intro;
+- the old "Local model settings".
+The one button also sets the Butler's local model.
+
+### His personality and saved set-ups (🎩 Butler section)
 
 - **Personality**: Butler (default), Friendly, Brief, Witty, Coach or Custom (your own words, up to 1500
   characters); his name; a tone; chattiness 1–5. It changes **how he talks only** — never what he may do:

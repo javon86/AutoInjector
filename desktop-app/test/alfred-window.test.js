@@ -186,10 +186,12 @@ async function main() {
   const mainWin = mock.__windowRegistry[Object.keys(mock.__windowRegistry).find((t) => /Automation/.test(t))];
   assert(made().length === 0 && (await call('alfred:status')).enabled === false, 'Alfred off by default: no panel window');
   let p = await call('alfred:panel');
-  assert(p.ok && p.mode === 'floating' && p.exists === false && /Shift\+A/.test(p.shortcut), `alfred:panel reports the mode (Floating by default) and the shortcut (${p.shortcut})`);
+  assert(p.ok && p.mode === 'docked' && p.exists === false && /Shift\+A/.test(p.shortcut), `alfred:panel reports the mode (the side panel by default) and the shortcut (${p.shortcut})`);
   await call('alfred:set-enabled', { on: true });
+  assert(made().length === 0, 'turning him on uses the side panel: no separate window');
+  await call('alfred:panel', { mode: 'floating' });
   const w = made()[0];
-  assert(!!w && w.isVisible() && w.getParentWindow() === mainWin, 'turning him on opens the floating panel as a child of the main window');
+  assert(!!w && w.isVisible() && w.getParentWindow() === mainWin, 'choosing "Separate window" opens it as a child of the main window');
   controls.webContents.removeAllListeners('ipc-send');
   const toControls = []; controls.webContents.on('ipc-send', (ch, pl) => { if (ch === 'alfred') toControls.push(pl); });
   const n0 = w.webContents.sentLog.length;

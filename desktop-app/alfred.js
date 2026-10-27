@@ -36,7 +36,7 @@ const DEFAULTS = Object.freeze({
   personality: { preset: 'butler', name: 'Alfred', tone: '', chattiness: 3, custom: '' }, // his VOICE only
   profiles: [],                  // saved set-ups: [{ name, brain, local:{endpoint, model}, pane:{site}, maxSteps, personality }]
   activeProfile: '',             // the name of the set-up last switched to ('' = none)
-  panel: { mode: 'floating', otherApps: false, open: true, bounds: null }, // where his panel lives (alfred-window.js)
+  panel: { mode: 'docked', otherApps: false, open: true, bounds: null, v: 2 }, // where his panel lives: the side panel (docked) unless a window was chosen (alfred-window.js)
 });
 // ---- personality: changes his VOICE and wording only (never tools, cards, approvals or safety) ----------------
 const PERSONALITY_PRESETS = Object.freeze({
@@ -120,7 +120,9 @@ function sanitizePanel(p) {
   const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
   const bounds = b && [b.x, b.y, b.width, b.height].every((v) => n(v) != null) && b.width > 0 && b.height > 0 && b.width < 20000 && b.height < 20000
     ? { x: n(b.x), y: n(b.y), width: n(b.width), height: n(b.height) } : null;
-  return { mode: x.mode === 'docked' ? 'docked' : d.mode, otherApps: x.otherApps === true, open: x.open !== false, bounds };
+  // v2: the side panel is the default. A "floating" saved before v2 was the old default, not a choice → docked.
+  const mode = x.mode === 'floating' && x.v === 2 ? 'floating' : 'docked';
+  return { mode, otherApps: x.otherApps === true, open: x.open !== false, bounds, v: 2 };
 }
 const NOTICE_MIN_GAP_MS = 5 * 60 * 1000;   // same notice at most every 5 minutes
 const NOTICE_WINDOW_MS = 10 * 60 * 1000;   // and at most NOTICE_MAX notices per 10 minutes overall
@@ -434,7 +436,10 @@ function createAlfred(deps = {}) {
     const isChange = !!tool.changes && !readOnly;
     if (isChange) addActivity(entry);
     // Activity log: the tool, its fixed title and the outcome code — never arguments, prompts or text.
-    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), auto: auto || undefined });
+    // which settings he passed (names only — never the values, which can hold the user's words)
+    const passed = args && typeof args === 'object' ? (args.params && typeof args.params === 'object' && !Array.isArray(args.params) ? args.params : args) : null;
+    const argNames = passed ? Object.keys(passed).filter((k) => !['action', 'method', 'params'].includes(k)).slice(0, 24).map(safeName) : undefined;
+    log('alfred-tool', { tool: tool.name, title: tool.title, action: args && (args.action || args.method) ? safeName(args.action || args.method) : undefined, changes: isChange, ok: !!r.ok, error: r.ok ? undefined : safeName(r.error), args: argNames && argNames.length ? argNames : undefined, auto: auto || undefined });
     if (isChange && tool.book && r.ok && deps.journal) {
       const pid = r.project_id || (args && args.project_id) || null;
       if (pid) Promise.resolve(deps.journal(pid, tool.name, tool.title)).catch(() => {});
@@ -532,7 +537,7 @@ function createAlfred(deps = {}) {
           v = c && c.ok ? { ok: true, args: c.args || v.args } : { ok: false, error: (c && c.error) || 'not allowed' };
         }
         if (!v.ok) {
-          log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS' });
+          log('alfred-refused', { req: r.id, tool: tool.name, reason: 'BAD_ARGS', why: String(v.error || '').replace(/"[^"]*"|'[^']*'|“[^”]*”/g, '…').slice(0, 140) });
           history.push(toolMessage(call, { ok: false, error: 'BAD_ARGS', message: `The arguments for ${tool.name} were not right: ${v.error}.` }));
           continue;
         }

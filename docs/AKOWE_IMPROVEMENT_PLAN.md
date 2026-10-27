@@ -389,6 +389,15 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
     📖 Akọwe included), with an option to stay on top of other programs too. You can drag and resize it, it remembers
     its place, Ctrl/Cmd+Shift+A toggles it, and it has quick buttons and a set-up switcher. "Docked (beside)" keeps the
     old drawer (`alfred-window.js`).
+  - **Simplified (2026-10-27, the user's feedback):**
+    - His panel is a **side panel again by default**: it moves the app over on every tab, the Video tab included,
+      and never covers anything. The separate window is an option in ⚙, and a saved "floating" from the old
+      default becomes the side panel.
+    - The Butler section is now: the one button and the check at the top; model cards about three to a row;
+      personality and saved set-ups stacked in the left half, with ⚙ More settings in the right half; the activity log,
+      which now also lists what Alfred and his setup did.
+    - The old Butler's goal box, System Check and local-model settings are out of view, replaced by Alfred and the one
+      button.
   - Alfred can drive all of it (`llm.*` app controls: status, check, fix, setup-all, search, curated, pull, use, remove…).
   - **Still to try for real:** the installer and the online search have not been run against the live ollama.com /
     huggingface.co, and nothing has been run on a real GPU.
