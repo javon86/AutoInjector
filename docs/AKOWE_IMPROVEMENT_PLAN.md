@@ -28,12 +28,13 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   drawer on every tab, a fixed tool registry, "I will" cards before any change, proactive notices; OFF by default
   (🎩 switch); a local model via Ollama or a connected AI. See `docs/ALFRED.md`.
 - **Back burner (later, by the user's call):** images + Stable Diffusion (B1: AutoInjector side done — 🎨 Images tab),
-  video (B2), covers and pictures (B3), Character Forge dossiers (B5).
+  video (B2), covers and pictures (B3), Character Forge dossiers (B5), and B6: Alfred's always-on-top side panel
+  and one-button AI setup (model downloads, saved set-ups, personality).
 - **Still to try for real:** everything above has only been tested with stand-in AIs — the first real
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; book #2 next).
+- Last updated: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; B6 Alfred side panel + one-button AI setup added to the back burner; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -373,6 +374,22 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
   M K R S E on every entry so scenes only get the letters they need, 'invent the rest' with invented details as
   proposals, illustrated dark/gold PDF per character/item/place/magic system; portrait + ten-view art waits for image
   generation (upload your own meanwhile). Phases: 1 deeper profiles + letters, 2 dossier PDFs, 3 generated art.
+
+- [ ] **B6** 🎩 Alfred: the side panel becomes his home, plus one-button AI setup. Asked 2026-10-27; not started, by the user's call.
+  - **🎩 Butler section stays, for setup and the record.** It keeps the activity log ("what Alfred did") and the AI setup. That
+    screen is only for getting him running; you don't need to go back to it to talk to him.
+  - **The side panel is where you talk to Alfred.**
+    - Chat, the "I will" cards, his buttons and everything else he does live in the panel.
+    - **It floats over the whole app and stays on top:** over every tab, the AI panes and the 📖 Akọwe page, instead of pushing them aside as
+      the drawer does today.
+    - It needs its own always-on-top window, or an overlay layer above the native panes, because the native panes draw over normal HTML.
+    - It can be opened and closed from anywhere (a button and a shortcut) and remembers its size and position.
+  - **One-button AI setup (later):**
+    - one button that finds or installs Ollama, starts it, and pulls a recommended model for the PC's GPU or RAM, with progress, a
+      size warning and plain error messages;
+    - getting new models to run him: browse, download, test and switch;
+    - saving set-ups;
+    - a **personality** you can give him (name, tone, how chatty, how careful), saved and switchable.
 
 ### Other ideas parked from earlier lists (not scheduled)
 
