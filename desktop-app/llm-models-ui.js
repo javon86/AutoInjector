@@ -50,8 +50,13 @@
       '#llm-models .llmm-chip[aria-pressed=true]{background:#1f3a29;border-color:#3f7a55;}',
       '#llm-models .llmm-msg{min-height:14px;opacity:.85;font-size:11.5px;}',
       '#llm-models .llmm-err{color:#f0b08e;}',
-      '#llm-models .llmm-results{display:flex;flex-direction:column;gap:6px;max-height:520px;overflow:auto;}',
-      '#llm-models .llmm-card{border:1px solid #23362a;border-radius:7px;padding:6px 8px;background:#0d150f;}',
+      '#llm-models .llmm-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;max-height:560px;overflow:auto;align-content:start;}',
+      '#llm-models .llmm-results>.llmm-desc{grid-column:1/-1;}',
+      '#llm-models .llmm-card{border:1px solid #23362a;border-radius:8px;padding:7px 8px;background:#0d150f;display:flex;flex-direction:column;gap:3px;min-width:0;}',
+      '#llm-models .llmm-card .llmm-desc,#llm-models .llmm-card .llmm-reason{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}',
+      '#llm-models .llmm-card .llmm-row{margin:auto 0 0;padding-top:4px;}',
+      '#llm-models .llmm-card .llmm-variant{flex:1 1 100%;min-width:0;max-width:100%;}',
+      '#llm-models .llmm-card .llmm-dl{flex:1 1 auto;}',
       '#llm-models .llmm-card[data-rating="too-big"]{opacity:.75;}',
       '#llm-models .llmm-title{font-weight:600;}',
       '#llm-models .llmm-badge{display:inline-block;font-size:10.5px;border:1px solid #2c4434;border-radius:9px;padding:0 6px;margin-left:4px;}',
@@ -60,6 +65,7 @@
       '#llm-models .llmm-fit[data-rating=great]{color:#8ef0b0;}#llm-models .llmm-fit[data-rating=good]{color:#c8f08e;}',
       '#llm-models .llmm-fit[data-rating=slow]{color:#f0d88e;}#llm-models .llmm-fit[data-rating="too-big"]{color:#f09a8e;}',
       '#llm-models .llmm-reason{opacity:.8;font-size:11px;}',
+      '#llm-models .llmm-link{color:#8fb3ff;white-space:nowrap;}',
       '#llm-models .llmm-prog{font-size:11px;opacity:.9;}',
     ].join('\n');
     (document.head || document.body).appendChild(style);
@@ -153,9 +159,9 @@
     return `<div class="llmm-card" data-i="${i}" data-id="${esc(m.id)}" data-rating="${esc(f.rating)}" data-uncensored="${m.uncensored ? 1 : 0}">
       <div><span class="llmm-title">${esc(m.title || m.name)}</span>${badges(m)}
         ${m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener" class="llmm-link" style="font-size:10.5px;margin-left:6px;">page ↗</a>` : ''}</div>
-      ${m.description ? `<div class="llmm-desc">${esc(m.description)}</div>` : ''}
+      ${m.description ? `<div class="llmm-desc" title="${esc(m.description)}">${esc(m.description)}</div>` : ''}
       <div><span class="llmm-fit" data-rating="${esc(f.rating)}">${esc(f.label)}</span> <span class="llmm-size" style="opacity:.75;">· ${esc(size)}${stats ? ` · ${esc(stats)}` : ''}</span></div>
-      <div class="llmm-reason">${esc(f.reason || '')}</div>
+      <div class="llmm-reason" title="${esc(f.reason || '')}">${esc(f.reason || '')}</div>
       <div class="llmm-row">
         ${opts ? `<select class="llmm-variant" aria-label="Size">${opts}</select>` : ''}
         ${m.source === 'hf' && !m.filesLoaded ? '<button class="llmm-files" title="Look up the exact files and sizes on Hugging Face">📂 Exact sizes</button>' : ''}

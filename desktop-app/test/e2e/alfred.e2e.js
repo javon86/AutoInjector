@@ -131,16 +131,30 @@ async function main() {
     assert(made === 201, `a book "The Lighthouse Keeper" exists in Akọwe (${made})`);
     await controls.click('#tab-app-main');
 
-    console.log('\n== turn him On: his floating side panel opens OVER the app ==');
+    console.log('\n== turn him On: his side panel (default), then the separate window ==');
     const con = await controls.evaluate((u) => window.api.sd.connect(u), sd.base);
     assert(con && con.ok !== false, `Stable Diffusion (fake Forge) connected through the 🎨 Images module (${con && (con.label || con.message || con.error)})`);
     await controls.click('#btn-alfred-switch');
     const on = await until(async () => (await controls.textContent('#btn-alfred-switch')) === '🎩 Alfred: On', 5000, 150);
     assert(!!on, 'the switch reads On');
+    // The default is the SIDE PANEL: it moves the app over (every tab), it never covers anything.
+    const side = await until(() => controls.isVisible('#alfred-drawer'), 8000, 150);
+    assert(!!side && await controls.evaluate(() => document.body.classList.contains('alfred-open')), 'the default is his side panel (docked): the drawer opens and the page makes room');
+    for (const t of ['main', 'akowe', 'images', 'video']) {
+      await controls.click(`#tab-app-${t}`); await sleep(250);
+      const ok = await controls.evaluate((id) => { const e = document.getElementById(id); const d = document.getElementById('alfred-drawer'); return !!(e && d && !d.hidden && e.getBoundingClientRect().right <= d.getBoundingClientRect().left + 1); }, t === 'main' ? 'wrap' : `${t}-tab`);
+      assert(ok, `on the ${t} tab the side panel stays and the page is laid out beside it`);
+    }
+    await controls.click('#tab-app-main');
+    assert(!(await until(async () => { for (const w of app.windows()) { try { if (/alfred-window\.html/.test(w.url())) return true; } catch (_) {} } return false; }, 1500, 150)), 'no separate window by default');
+    // The separate window is still a choice in ⚙ ("Separate window (over the app)"): the rest of this test drives it.
+    await controls.click('#alfred-btn-settings');
+    await controls.selectOption('#alfred-set-mode', 'floating');
+    await controls.click('#alfred-set-save');
     const panel = await until(async () => { for (const w of app.windows()) { try { if (/alfred-window\.html/.test(w.url()) && await w.$('#alfred-input')) return w; } catch (_) {} } return null; }, 15000, 200);
     assert(!!panel, 'his floating panel window opens (alfred-window.html, the same chat UI)');
     if (!panel) return 1;
-    assert(!(await controls.$('#alfred-drawer')) && !(await controls.evaluate(() => document.body.classList.contains('alfred-open'))), 'Floating is the default: no drawer, the control panel keeps its full width');
+    assert(!(await controls.evaluate(() => document.body.classList.contains('alfred-open'))), 'with the separate window, the control panel keeps its full width');
     const geo = () => app.evaluate(({ BaseWindow, BrowserWindow, screen }) => {
       const p = BrowserWindow.getAllWindows().find((w) => /alfred-window\.html/.test(w.webContents.getURL()));
       const m = BaseWindow.getAllWindows().find((w) => /Automation/.test(w.getTitle()));
@@ -243,9 +257,9 @@ async function main() {
     keep('06-floating-panel-over-the-app-fullscreen', 'alfred-floating-panel.png');
     await controls.click('#tab-app-main');
 
-    console.log('\n== Docked (beside): the drawer, exactly as before ==');
+    console.log('\n== back to the side panel (docked) ==');
     await panel.click('#alfred-btn-settings');
-    assert(await panel.inputValue('#alfred-set-mode') === 'floating', '⚙ shows "His panel: Floating (over everything)"');
+    assert(await panel.inputValue('#alfred-set-mode') === 'floating', '⚙ shows "His panel: Separate window (over the app)"');
     await panel.selectOption('#alfred-set-mode', 'docked');
     await panel.click('#alfred-set-save');
     const gone = await until(async () => (await geo()) === null, 6000, 150);

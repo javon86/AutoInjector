@@ -646,7 +646,9 @@ async function main() {
     const b = createAlfred({ settingsFile: file, noTimers: true });
     const bs = b.status().settings;
     assert(bs.profiles.length === 1 && bs.profiles[0].brain === 'auto' && bs.profiles[0].maxSteps === 20 && bs.profiles[0].personality.chattiness === 1 && bs.activeProfile === '', 'a corrupt file is cleaned: bad entries dropped, duplicates (any case) dropped, values clamped');
-    assert(bs.panel.mode === 'floating' && bs.panel.bounds === null && bs.panel.open === true && bs.panel.otherApps === false, 'panel settings default to Floating, open, in the app only');
+    assert(bs.panel.mode === 'docked' && bs.panel.bounds === null && bs.panel.open === true && bs.panel.otherApps === false, 'panel settings default to the side panel (docked), open, in the app only');
+    fs.writeFileSync(file, JSON.stringify({ enabled: true, panel: { mode: 'floating' } }));
+    assert(createAlfred({ settingsFile: file, noTimers: true }).status().settings.panel.mode === 'docked', 'a "floating" saved by the old default becomes the side panel');
     assert(b.setSettings({ profiles: [], activeProfile: 'x' }).profiles.length === 1, 'set-ups change only through the set-up functions (not alfred:settings)');
   }
 
@@ -656,10 +658,12 @@ async function main() {
     const n = events.length;
     let p = a.setPanel({ bounds: { x: 10, y: 20, width: 400, height: 600 } }, { quiet: true });
     assert(p.bounds.width === 400 && events.length === n, 'bounds are saved quietly (no UI refresh on every move)');
+    p = a.setPanel({ mode: 'floating' });
+    assert(p.mode === 'floating' && events.slice(n).some((e) => e.type === 'state'), 'choosing the separate window tells both panels');
     p = a.setPanel({ mode: 'docked' });
-    assert(p.mode === 'docked' && events.slice(n).some((e) => e.type === 'state'), 'switching the mode tells both panels');
+    assert(p.mode === 'docked', 'and back to the side panel');
     p = a.setPanel({ mode: 'weird', otherApps: 'yes', bounds: { x: 1, y: 2, width: -5, height: 10 } });
-    assert(p.mode === 'floating' && p.otherApps === false && p.bounds === null, 'bad values are cleaned (unknown mode -> Floating, otherApps only when true, bad bounds dropped)');
+    assert(p.mode === 'docked' && p.otherApps === false && p.bounds === null, 'bad values are cleaned (unknown mode -> the side panel, otherApps only when true, bad bounds dropped)');
   }
 
   console.log('\n== the same panel UI renders in the floating window and in the drawer ==');

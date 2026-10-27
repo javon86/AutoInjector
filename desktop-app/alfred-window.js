@@ -106,7 +106,7 @@ function createAlfredWindow(deps = {}) {
   const watchedMains = new WeakSet();
 
   const settings = () => { try { return (deps.getSettings && deps.getSettings()) || {}; } catch (_) { return {}; } };
-  const panel = () => Object.assign({ mode: 'floating', otherApps: false, open: true, bounds: null }, settings().panel || {});
+  const panel = () => Object.assign({ mode: 'docked', otherApps: false, open: true, bounds: null }, settings().panel || {});
   const mainWin = () => { try { const m = deps.getMainWindow && deps.getMainWindow(); return m && !(m.isDestroyed && m.isDestroyed()) ? m : null; } catch (_) { return null; } };
   const alive = () => !!win && !(win.isDestroyed && win.isDestroyed());
   const displays = () => { try { return deps.screen && deps.screen.getAllDisplays ? deps.screen.getAllDisplays() : []; } catch (_) { return []; } };

@@ -223,7 +223,10 @@
       if (ev.type === 'progress') progress(ev);
       else if (ev.type === 'step') { renderStep(ev); if (ev.state === 'running') msg(ev.message); }
       else if (ev.type === 'log') logLine(ev.message, ev.level);
-      else if (ev.type === 'done') { logLine(ev.message, ev.ok ? 'good' : 'bad'); refreshSoon(); }
+      else if (ev.type === 'done') {
+        logLine(ev.message, ev.ok ? 'good' : 'bad'); refreshSoon();
+        if (ev.message && typeof window.appendButlerLine === 'function') { try { window.appendButlerLine({ cls: 'bl-butler', who: '🧠 His AI', text: `${ev.ok ? '✔' : '✖'} ${ev.message}` }); } catch (_) {} }
+      }
       else if (ev.type === 'check' && ev.result && !running) renderRows(ev.result);
       else if (ev.type === 'models-changed' || ev.type === 'model-changed' || ev.type === 'server') refreshSoon();
     });

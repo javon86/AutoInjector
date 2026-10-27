@@ -58,9 +58,13 @@ function load(api, opts = {}) {
   const d = dom.window.document;
   const bc = d.getElementById('butler-controls');
   assert(bc && bc.firstElementChild && bc.firstElementChild.id === 'llm-zone', '#llm-zone is the first thing in #butler-controls');
-  assert(['llm-setup', 'llm-models', 'alfred-persona'].every((id) => d.getElementById(id) && d.getElementById(id).parentElement.id === 'llm-zone'), '#llm-setup, then #llm-models and #alfred-persona below it');
-  const order = [...d.getElementById('llm-zone').children].map((e) => e.id).join(',');
-  assert(order === 'llm-setup,llm-models,alfred-persona', `in that order (${order})`);
+  assert(['llm-setup', 'llm-models'].every((id) => d.getElementById(id) && d.getElementById(id).parentElement.id === 'llm-zone'), '#llm-setup, then #llm-models');
+  const order = [...d.getElementById('llm-zone').children].map((e) => e.id || e.className).join(',');
+  assert(order === 'llm-setup,llm-models,llm-pair', `in that order, then the pair row (${order})`);
+  const pair = [...d.querySelector('#llm-zone .llm-pair').children].map((e) => e.id).join(',');
+  assert(pair === 'alfred-persona,butler-more', `personality (half) beside ⚙ More settings (${pair})`);
+  const legacy = d.getElementById('butler-legacy');
+  assert(legacy && legacy.hidden && legacy.contains(d.getElementById('jarvis-goal')) && legacy.contains(d.getElementById('lsi-model')) && legacy.contains(d.getElementById('col-device')), 'the old Butler controls are out of sight (still wired)');
   const scripts = [...d.querySelectorAll('script[src]')].map((s) => s.getAttribute('src'));
   assert(['llm-setup-ui.js', 'llm-models-ui.js', 'alfred-persona-ui.js'].every((s) => scripts.includes(s)) && scripts.indexOf('llm-setup-ui.js') > scripts.indexOf('controls.js'), 'the three <script> tags, after controls.js');
   assert(scripts.includes('llm-hardware.js') && scripts.indexOf('llm-hardware.js') < scripts.indexOf('llm-models-ui.js'), 'llm-hardware.js loads before llm-models-ui.js');

@@ -46,7 +46,7 @@
     const s = document.createElement('style');
     s.id = 'alfred-style';
     s.textContent = `
-      body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab { margin-right:${W}px; }
+      body.alfred-open #wrap, body.alfred-open #akowe-tab, body.alfred-open #images-tab, body.alfred-open #video-tab { margin-right:${W}px; }
       .al-root { display:flex; flex-direction:column; background:#0d0f14; color:#e8ecf5; font-size:13px; }
       #alfred-drawer { position:fixed; top:38px; right:0; bottom:0; width:${W}px; z-index:50; border-left:1px solid #2b3550; }
       #alfred-window { position:fixed; inset:0; border:1px solid #2b3550; box-sizing:border-box; }
@@ -174,8 +174,8 @@
       h('label', { for: 'alfred-set-steps' }, 'Max steps'),
       h('input', { id: 'alfred-set-steps', type: 'number', min: '1', max: '20' }),
       h('label', { for: 'alfred-set-mode' }, 'His panel'),
-      h('select', { id: 'alfred-set-mode' }, opt('floating', 'Floating (over everything)'), opt('docked', 'Docked (beside)')),
-      h('label', { class: 'full' }, h('input', { id: 'alfred-set-ontop', type: 'checkbox' }), ' Stay on top of other programs too (floating panel)'),
+      h('select', { id: 'alfred-set-mode', onchange: () => { const r = $('alfred-set-ontop-row'); if (r) r.hidden = $('alfred-set-mode').value !== 'floating'; } }, opt('docked', 'Side panel (moves the app over)'), opt('floating', 'Separate window (over the app)')),
+      h('label', { class: 'full', id: 'alfred-set-ontop-row', hidden: true }, h('input', { id: 'alfred-set-ontop', type: 'checkbox' }), ' Keep the window on top of other programs too'),
       h('label', { class: 'full' }, h('input', { id: 'alfred-set-notices', type: 'checkbox' }), ' Tell me when something happens (AI fixed, book paused/finished, image ready)'),
       h('label', { class: 'full' }, h('input', { id: 'alfred-set-interpreter', type: 'checkbox' }), ' Allow Open Interpreter (runs code on this computer — he always shows the exact code and asks first)'),
       h('div', { class: 'full warn' }, 'Open Interpreter stays off unless you tick it, and is never used when a direct tool exists.'),
@@ -192,6 +192,7 @@
     $('alfred-set-notices').checked = !!s.notices; $('alfred-set-interpreter').checked = !!s.interpreter;
     const p = s.panel || { mode: 'docked', otherApps: false };
     $('alfred-set-mode').value = p.mode === 'floating' ? 'floating' : 'docked'; $('alfred-set-ontop').checked = !!p.otherApps;
+    $('alfred-set-ontop-row').hidden = p.mode !== 'floating';
     Promise.resolve(api.alfredModels && api.alfredModels()).then((r) => {
       const dl = $('alfred-models'); if (!dl || !r || !Array.isArray(r.models)) return;
       dl.textContent = ''; for (const m of r.models) dl.append(h('option', { value: m }));
@@ -310,9 +311,22 @@
     if (s.brain === 'local') return `Ollama · ${s.local.model}`;
     return `automatic (Ollama · ${s.local.model}, else the connected AI)`;
   }
+  // What Alfred did also goes into the 🎩 Butler section's activity log (control panel only), once each.
+  let mirroredTs = null;
+  function mirrorActivity(st) {
+    if (IN_WINDOW || typeof window.appendButlerLine !== 'function') return;
+    const acts = Array.isArray(st.activity) ? st.activity : [];
+    if (mirroredTs == null) { mirroredTs = acts.reduce((m, a) => Math.max(m, a.ts || 0), 0); return; } // history stays in his panel
+    for (const a of acts) {
+      if (!a || !(a.ts > mirroredTs)) continue;
+      try { window.appendButlerLine({ cls: 'bl-butler', who: '🎩 Alfred', text: `${a.ok ? '✔' : '✖'} ${a.text}${a.ok ? '' : ` — ${a.message || ''}`}` }); } catch (_) {}
+    }
+    mirroredTs = acts.reduce((m, a) => Math.max(m, a.ts || 0), mirroredTs);
+  }
   function render(st) {
     if (!st) return;
     last = st;
+    mirrorActivity(st);
     if (sw) {
       sw.setAttribute('aria-checked', String(!!st.enabled));
       sw.textContent = st.enabled ? '🎩 Alfred: On' : '🎩 Alfred: Off';
