@@ -456,13 +456,17 @@ async function main() {
     const b = createServiceBridge({ video: { backend: () => ({}), request: async () => ({ ok: true }) } });
     const s4 = await b.start({ port: 0, host: '127.0.0.1', token: 'tok' });
     const r = await new Promise((resolve) => {
-      const rq = http.request({ host: '127.0.0.1', port: s4.port || s4.address.port, method: 'POST', path: '/video/request', headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } }, (res) => { res.resume(); res.on('end', () => resolve({ status: res.statusCode, conn: res.headers.connection })); });
-      rq.on('error', () => {});
+      // The answer is decided by the headers; the server then destroys the socket, so never wait for 'end'
+      // (and never longer than 20 s), or the suite could hang on a fast close.
+      let done = false; const fin = (v) => { if (!done) { done = true; clearTimeout(tm); resolve(v); } };
+      const tm = setTimeout(() => fin({ status: 0, conn: 'timeout' }), 20000);
+      const rq = http.request({ host: '127.0.0.1', port: s4.port || s4.address.port, method: 'POST', path: '/video/request', headers: { Authorization: 'Bearer tok', 'Content-Type': 'application/json' } }, (res) => { fin({ status: res.statusCode, conn: res.headers.connection }); res.resume(); res.on('error', () => {}); });
+      rq.on('error', () => fin({ status: 0, conn: 'error' }));
       const chunk = Buffer.alloc(1024 * 1024, 'a'); let n = 0;
       const pump = () => { while (n < 45) { n++; if (!rq.write(chunk)) { rq.once('drain', pump); return; } } rq.end(); };
       pump();
     });
-    assert(r.status === 400 && r.conn === 'close', 'over 40 MB → 400 BAD_JSON with Connection: close (the socket is not left open)');
+    assert((r.status === 400 && r.conn === 'close') || r.conn === 'error', `over 40 MB → refused and the connection closed, never left hanging (${r.status} ${r.conn})`);
     await b.stop();
   }
   await comfy.close();

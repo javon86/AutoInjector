@@ -102,7 +102,7 @@ function createServiceBridge(deps) {
     }, extraHeaders || {}, res.req && res.req.bodyTooBig ? { Connection: 'close' } : {}));
     // A body over the limit was left unread: close the connection after answering, or (with no
     // server timeouts) its socket would stay open forever.
-    if (res.req && res.req.bodyTooBig) res.end(data, () => { try { res.req.destroy(); } catch (_) {} });
+    if (res.req && res.req.bodyTooBig) res.end(data, () => { const t = setTimeout(() => { try { res.req.destroy(); } catch (_) {} }, 2000); if (t.unref) t.unref(); });
     else res.end(data);
   }
 
@@ -119,7 +119,7 @@ function createServiceBridge(deps) {
     return new Promise((resolve) => {
       let buf = '';
       let tooBig = false;
-      req.on('data', (c) => { if (tooBig) return; buf += c; if (buf.length > limit) { tooBig = true; buf = ''; req.bodyTooBig = true; try { req.pause(); } catch (_) {} resolve(undefined); } });
+      req.on('data', (c) => { if (tooBig) return; buf += c; if (buf.length > limit) { tooBig = true; buf = ''; req.bodyTooBig = true; resolve(undefined); } }); // the rest is read and dropped; reply() closes the socket
       req.on('end', () => {
         if (tooBig) return resolve(undefined);
         if (!buf) return resolve({});
