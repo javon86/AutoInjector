@@ -193,6 +193,18 @@ def render_pdf(layout: Layout, *, page_width: float, page_height: float, bleed: 
                 _, x0, y0, x1, y1, stroke, lw = op
                 content += (f"q {_rgb(stroke, 'RG')} {num(lw)} w {num(x0)} {num(y0)} m {num(x1)} {num(y1)} l S Q\n"
                             ).encode("ascii")
+            elif op[0] == "circle":  # 🖼 B3 the vector map's places: four Bezier arcs
+                _, cx, cy, r, fill, stroke, lw = op
+                if not fill and not stroke:
+                    continue
+                k = r * 0.5523
+                path = (f"{num(cx + r)} {num(cy)} m {num(cx + r)} {num(cy + k)} {num(cx + k)} {num(cy + r)} {num(cx)} "
+                        f"{num(cy + r)} c {num(cx - k)} {num(cy + r)} {num(cx - r)} {num(cy + k)} {num(cx - r)} {num(cy)} c "
+                        f"{num(cx - r)} {num(cy - k)} {num(cx - k)} {num(cy - r)} {num(cx)} {num(cy - r)} c {num(cx + k)} "
+                        f"{num(cy - r)} {num(cx + r)} {num(cy - k)} {num(cx + r)} {num(cy)} c")
+                paint = "B" if fill and stroke else "f" if fill else "S"
+                content += ("q " + (f"{_rgb(fill, 'rg')} " if fill else "") + (f"{_rgb(stroke, 'RG')} " if stroke else "")
+                            + (f"{num(lw)} w " if stroke else "") + f"{path} {paint} Q\n").encode("ascii")
             elif op[0] == "img":
                 _, key, x, y, dw, dh, clip = op
                 content += b"q\n"

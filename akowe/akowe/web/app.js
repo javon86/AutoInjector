@@ -5,7 +5,9 @@ import { AI_STATE, plainCheck, problemFor, siteProblemWords, slugName } from './
 import { viewContinuity } from './continuity.js';   // 🧭 Section 7 (P32–P35)
 import { estimateBox, runCostLine, viewCosts, viewSceneGrid } from './grid.js';  // 🗂 P27 · ⏱ P28
 import * as S7C from './section7c.js';  // P23 beta reader + P25 your writing style (Section 7c)
-import { viewForge, viewForgeList } from './forge.js';  // 🗂 B5 Character Forge dossiers
+import { forgeRoute } from './forge.js';  // 🗂 B5 Character Forge dossiers (characters, items, places, magic)
+import { viewPictures } from './pictures.js';  // 🖼 B3 chapter/scene pictures and the map
+import { viewCover } from './cover.js';  // 🎨 B3 book covers
 
 /* ======================================================================= constants */
 // Fallback names; the full guide (purpose, build order, featured actions) comes from GET /api/sets.
@@ -651,7 +653,9 @@ async function pickView(parts) {
     if (rest[0] === 'world') return viewWorld;
     if (rest[0] === 'continuity') return m => viewContinuity(m, { h, clear, api, bpath, plink, S, crumbs, problemBox, toProblem, runAiJob, choiceDialog, toast, infoTip, route });
     if (rest[0] === 'report') return viewReport;
-    if (rest[0] === 'forge') return m => (rest[1] ? viewForge(m, rest[1], forgeUI()) : viewForgeList(m, forgeUI()));  // 🗂 B5
+    if (rest[0] === 'forge') return m => forgeRoute(m, rest.slice(1), forgeUI());  // 🗂 B5 (…/forge/<rid>, …/forge/items/<rid>)
+    if (rest[0] === 'pictures') return m => viewPictures(m, forgeUI());  // 🖼 B3
+    if (rest[0] === 'cover') return m => viewCover(m, forgeUI());  // 🎨 B3 cover designer
     if (rest[0] === 'manifest') return viewManifest;
     if (rest[0] === 'activity') return viewActivity;
     if (rest[0] === 'progress') return viewProgress;
@@ -714,6 +718,8 @@ function renderTop(parts) {
     add(more, link('p', S.pid, S.branch, 'world'), '🌍 Story rules and world');
     add(more, link('p', S.pid, S.branch, 'continuity'), '🧭 Continuity');
     add(more, link('p', S.pid, S.branch, 'forge'), '🗂 Character Forge');
+    add(more, link('p', S.pid, S.branch, 'pictures'), '🖼 Pictures');
+    add(more, link('p', S.pid, S.branch, 'cover'), '🎨 Cover');
     add(more, link('p', S.pid, S.branch, 'progress'), '📊 Progress');
     add(more, link('p', S.pid, S.branch, 'activity'), '🕘 Activity');
     add(more, link('p', S.pid, S.branch, 'manifest'), '🎛️ Book features');
@@ -5294,7 +5300,8 @@ function renderBook(holder, book, redraw) {
       li.appendChild(h('div', { class: 'downloads' }, h('strong', null, '⬇ Download my book: '),
         s.files.map(f => h('button', { type: 'button', class: f.out_of_date ? 'small' : 'primary small', title: f.out_of_date ? `Made with the old title “${f.title || ''}”: export again for the new one` : null,
           onclick: () => downloadAsset(f) }, f.format, f.out_of_date ? ' (out of date)' : '')),
-        s.files.some(f => f.out_of_date) ? h('p', { class: 'small notice' }, '⚠️ These files still carry the old title/author. Make the book format again and export again to update them.') : null));
+        s.files.some(f => f.out_of_date) ? h('p', { class: 'small notice' }, '⚠️ These files still carry the old title/author. Make the book format again and export again to update them.') : null,
+        h('p', { class: 'small' }, h('a', { href: link('p', S.pid, S.branch, 'cover'), 'data-testid': 'book-cover-link' }, '🎨 Design the cover'), ' — the ebook and print covers, and these files with the cover.')));
     }
     if (acts.childNodes.length) li.appendChild(acts);
     ol.appendChild(li);
@@ -6189,7 +6196,7 @@ async function viewScenes(main, cid) {
   main.appendChild(h('div', { class: 'page-head' }, h('div', null,
     crumbs(['Your books', '#/'], [S.project.name, plink()], ['Make my book', plink('book')], `${label}: scene cards`),
     h('h1', null, `🎬 Scene cards — ${label}`)),
-  h('div', { class: 'row' }, infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
+  h('div', { class: 'row' }, h('a', { class: 'btn small', href: plink('pictures'), 'data-testid': 'scenes-illustrate', title: 'Make a picture of this chapter or one of its scenes (🖼 Pictures)' }, '🖼 Illustrate'), infoTip('Scene cards', h('p', null, 'Before a chapter is written, its scenes are planned: for each scene the place and time, who is there, what each one wants (and hides), an obstacle from the book’s world, what changes and what stays unsaid.'),
     h('p', null, 'The chapter outline stays the plan of the whole chapter; scene cards refine it. The writer follows them and the editor checks the chapter against them.')))));
   main.appendChild(h('p', { class: 'notice small' }, h('strong', null, 'The outline says: '), plainText(ch.objective || ch.summary || '')));
   const msg = h('div', { 'aria-live': 'polite' });

@@ -33,7 +33,7 @@ Legend: `[ ]` to do · `[~]` in progress · `[x]` done · `[!]` problem (see "Pr
   run on the user's PC is the real test (see "Problems to come back to").
 - **One app, one launcher (done 2026-10-25):** start AutoInjector — Akọwe starts with it (📖 Akọwe tab, connected
   by itself). `akowe/run-akowe.*` remain optional for Akọwe alone.
-- Last updated: 2026-10-27 (B2 video: local Wan engine + 🎬 Video tab + Character Forge motion clips, all usable by Alfred; Section 7 and 8 done; Akọwe merged into AutoInjector's window; 🎩 Alfred added (B4); full Stable Diffusion controls, all usable by Alfred; refinement from the 2026-10-25 log; B5 Character Forge for characters done (2026-10-26) with ChatGPT or Stable Diffusion pictures; book #2 next).
+- Last updated: 2026-10-27 (B1 pictures in books, B3 covers (designer + print wrap) and B5 items / places / magic systems + the manuscript check DONE, all usable by 🎩 Alfred; earlier: video, Character Forge, 360 scan; book #2 next).
 
 ## Section 1 — AIs that always answer (self-repair) and independent review  (Phase 1)
 
@@ -322,6 +322,25 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [ ] **B3 (P19)** 🎨 Book cover and pictures (LATER — not started): cover design (title/author on a template,
   AI-generated artwork when an image AI is connected), chapter images/illustrations, maps; placement in
   PDF/EPUB/DOCX; print-ready cover size and spine.
+  - 🖼 **Interior pictures DONE 2026-10-27** (`docs/PICTURES.md`): the 🖼 Pictures page — a book-wide art style,
+    🖼 Illustrate per chapter or scene card (prompt from the scene card + the characters' approved looks + the
+    character lock, ≤ 1 200 characters; `/image/request` `purpose: "illustration"`, 1-3 candidates to pick from),
+    upload, caption / alt text / placement (a page before the chapter, under the heading, after scene n, the end),
+    the map (SVG drawn from the places, illustrated `purpose: "map"`, or uploaded; before chapter 1), "Illustrate
+    every chapter" as a job with Stop. Placed in PDF / EPUB / DOCX with captions (snapshot at "Put the book
+    together"). The SVG map is never rasterised (no Pillow): EPUB carries the SVG, the PDF draws it as vectors, the
+    DOCX names where it is. In the book save (`Pictures/`). Still open: a real ChatGPT/GPU run.
+  - [x] **Covers (lane A), DONE 2026-10-27**: the 🎨 Cover page (`#/p/<pid>/<b>/cover`). It has seven typographic
+    templates (light and dark, by genre), colours, title fitting (autoscale, balanced line breaks, safe area 0.375 in),
+    scrims over the artwork, and AI art through AutoInjector `/image/request` `purpose:"cover"` (with `size`, `upscale`
+    and the character lock), upload, or no art.
+    - The ebook cover is a PDF or SVG. The EPUB uses the art as its cover image plus an inline-SVG cover page; the
+      DOCX gets a cover page.
+    - The print wrap PDF has 0.125 in bleed, a KDP spine (white 0.002252 in / cream 0.0025 in per page), spine text
+      from 100 pages (rotated and centred), a back cover with the blurb and author bio, and a blank 2 × 1.2 in barcode
+      box.
+    - The exported PDF/EPUB/DOCX can be had with the cover, and the book save writes `Cover/`.
+    - No Pillow: Akọwe does not rasterise (see `docs/COVERS.md`).
 - [x] **B4** 🧭 Local AI book manager — DONE 2026-10-25 as **🎩 Alfred (app-wide)**: not only a book manager but the
   user's assistant for the whole of AutoInjector (books, images, video, the three AI panes, files/logs). A local LLM
   through Ollama (or a connected AI / a web pane) with a FIXED tool registry (direct controls, no free code): book
@@ -339,8 +358,16 @@ gave 7–8 and found real flaws, so the editor's rewrite loop never ran.
 - [~] **B5** 🗂 Character Forge dossiers — characters DONE 2026-10-26 (`docs/CHARACTER_FORGE.md`): 14-section lettered
   dossiers that reuse the character sheet / voice card / canon record, ✨ Invent the rest as proposals, approvals with
   revisions, portrait + ten views (+ turnaround sheet) through AutoInjector `/image/request` or uploads, the dark
-  dossier PDF, letters in chapter prompts, the Moki Vey example. Pictures come from Stable Diffusion **or ChatGPT** (AutoInjector's new ChatGPT image engine draws in its pane; `engine` sd/chatgpt/auto); AutoInjector hands Akọwe the bridge address + token itself; 🎩 Alfred has 5 dossier tools (read, invent the rest, edit, approve, make art). Checked across the two real programs (Akọwe art job → bridge → Stable Diffusion stand-in → book assets → PDF). 🎬 Motion clips DONE 2026-10-27 (with B2): a looping 4 s clip from the portrait via `/video/request`, upload your own, MOTION STUDY still in the PDF, in the book save. Still open: real ChatGPT/GPU run; items / places / magic systems (the
-  machinery is ready), a manuscript check of the dossier. Original idea: Deeper character/item/place/magic-system profiles like
+  dossier PDF, letters in chapter prompts, the Moki Vey example. Pictures come from Stable Diffusion **or ChatGPT** (AutoInjector's new ChatGPT image engine draws in its pane; `engine` sd/chatgpt/auto); AutoInjector hands Akọwe the bridge address + token itself; 🎩 Alfred has 5 dossier tools (read, invent the rest, edit, approve, make art). Checked across the two real programs (Akọwe art job → bridge → Stable Diffusion stand-in → book assets → PDF). 🎬 Motion clips DONE 2026-10-27 (with B2): a looping 4 s clip from the portrait via `/video/request`, upload your own, MOTION STUDY still in the PDF, in the book save. Items, places and magic systems DONE 2026-10-27 (lane C,
+  `forge_kinds.py`): AR-/PL-/MG- dossiers (8 / 9 / 11 sections, 69-70 lettered fields) with the same proposals,
+  approvals, PDF look and art (item portrait + front/side/back/detail turnaround; establishing shot + day/night/interior;
+  sigil + in-use scene), "Create dossier" seeded from A04 places / A09 powers / A12 artifacts / the story rules / a
+  character's weapon, clickable cross-links between all four kinds (references in the PDFs), the example world (AR-001
+  rescue baton, PL-001 Nacre, MG-001 biofilament mutation) and in the book save. 🔎 Check against the book DONE
+  (`forge_check.py`, every kind): rule checks (ages, eye/hair colour, height, years, stated limits, who may hold an item,
+  near-miss names) + the AI slot (quotes re-checked), findings marked Fix / Fine / Change dossier (a proposal, never a
+  write), as a job with progress and Stop. Still open: real ChatGPT/GPU run; motion clips for the other kinds.
+  Original idea: Deeper character/item/place/magic-system profiles like
   the ChatGPT 'Character Forge' plugin (sample: Moki Vey dossier): extra sections (detailed appearance, fighting,
   weapons, magic, skills, physical, knowledge, backstory timeline, storyline, continuity), category letters C P V A F
   M K R S E on every entry so scenes only get the letters they need, 'invent the rest' with invented details as

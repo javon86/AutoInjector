@@ -87,6 +87,7 @@ function chatgptPrompt({ subject, purpose, view }) {
   if (purpose === 'portrait') return `Create an image: ${PORTRAIT_PHRASE}, of ${s}. ${tail}`;
   if (purpose === 'cover') return `Create an image in a tall book-cover format: ${s}. ${tail}`;
   if (purpose === 'scene' || purpose === 'illustration') return `Create a wide image: ${s}. ${tail}`;
+  if (purpose === 'map') return `Create one wide map image: ${s}. ${tail}`;
   return `Create an image: ${s}. ${tail}`;
 }
 

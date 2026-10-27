@@ -34,7 +34,8 @@ from .errors import AkoweError
 from .requests import build_request, candidate_payload
 
 PROFILE_FIELDS = {"title": 200, "author": 200, "genre": 120, "audience": 120, "length": 20, "tone": 200,
-                  "idea": 4000, "ai_slot": 20, "chapters": 3}
+                  "idea": 4000, "ai_slot": 20, "chapters": 3,
+                  "blurb": 3000, "author_bio": 1500}  # 🎨 B3: the back-cover blurb and author bio
 # P15: (label, default chapters, most chapters) per length preset (lengths.py holds the word targets).
 from .lengths import ORDER as _LENGTH_ORDER, PRESETS as _LENGTH_PRESETS  # noqa: E402
 LENGTHS = {k: (_LENGTH_PRESETS[k]["label"], _LENGTH_PRESETS[k]["default_chapters"], _LENGTH_PRESETS[k]["chapters"][1])
@@ -351,7 +352,8 @@ class BookPath:
         if asm.get("format_changed") or (made_with and cur and tuple(made_with) != tuple(cur)):
             return ("The book format changed since the book was put together (for example a new title or author): "
                     "put it together again so the title page shows it.")
-        return None
+        from . import pictures  # noqa: PLC0415 - 🖼 B3: the placed pictures are part of the assembly
+        return pictures.out_of_date(self.store, self.pid, self.branch, asm)
 
     def outline(self):
         a = self.approved("B11")
@@ -883,6 +885,8 @@ class BookPath:
         asm = {}
         asm["G02"], _ = self.create("G02", {"approved_chapter_refs": refs, "ordered_chapter_ids":
                                             [r["record_id"] for r in refs], "manifest_revision": m["revision"]})
+        from . import pictures  # noqa: PLC0415 - 🖼 B3: the chosen pictures, frozen for this assembly (its G02)
+        asm["pictures"] = pictures.snapshot(self, asm["G02"])
         compile_payload = {"ordered_manifest_ref": asm["G02"], "approved_chapter_refs": refs,
                            "section_id_policy": "STABLE_ID"}
         asm["G01_plain"], _ = self.create("G01", compile_payload)

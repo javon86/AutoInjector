@@ -34,7 +34,7 @@ function createImageAdapter({ imageProvider, outputManager, dbService, sdApi, fr
     if (o.negativePrompt) req.negativePrompt = o.negativePrompt;
     if (Array.isArray(o.loras) && o.loras.length) req.loras = o.loras;
     // the second engine (ChatGPT) and reference views / sheets — sd-api routes them
-    for (const k of ['engine', 'purpose', 'view', 'appearance', 'newChat']) if (o[k] !== undefined && o[k] !== null && o[k] !== '') req[k] = o[k];
+    for (const k of ['engine', 'purpose', 'view', 'appearance', 'newChat', 'upscale']) if (o[k] !== undefined && o[k] !== null && o[k] !== '') req[k] = o[k];
     if (!req.prompt) delete req.prompt;
     const r = await m.images.generate(req);
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'IMAGE_FAILED', message: (r && r.message) || 'The image could not be made.' };

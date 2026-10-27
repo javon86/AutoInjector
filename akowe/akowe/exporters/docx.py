@@ -96,6 +96,8 @@ def _styles(family: str, size_pt: float, leading_pt: float) -> str:
             + style("MetaLine", "Meta Line", "<w:jc w:val=\"center\"/>")
             + style("Figure", "Figure", "<w:jc w:val=\"center\"/><w:spacing w:before=\"120\" w:after=\"120\" "
                     "w:line=\"240\" w:lineRule=\"auto\"/>")
+            + style("Caption", "caption", "<w:keepLines/><w:spacing w:after=\"240\" w:line=\"240\" w:lineRule=\"auto\"/>"
+                    "<w:jc w:val=\"center\"/>", f"<w:i/><w:iCs/><w:sz w:val=\"{max(hp - 2, 12)}\"/>")
             + "<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/>"
               "<w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>"
             + "</w:styles>\n")
@@ -108,7 +110,7 @@ _ORIENT = {1: (0, False, False), 2: (0, True, False), 3: (10800000, False, False
            8: (16200000, False, False)}
 
 
-def _drawing(rid: str, n: int, cx: int, cy: int, name: str, orientation: int = 1) -> str:
+def _drawing(rid: str, n: int, cx: int, cy: int, name: str, orientation: int = 1, descr: str = "") -> str:
     """Inline picture shown at cx x cy EMU (display size, after the EXIF orientation)."""
     rot, flip_h, flip_v = _ORIENT.get(orientation, (0, False, False))
     fx, fy = (cy, cx) if orientation in (5, 6, 7, 8) else (cx, cy)  # frame before rotation
@@ -118,7 +120,7 @@ def _drawing(rid: str, n: int, cx: int, cy: int, name: str, orientation: int = 1
     ex, ey = (cx - fx) // 2, (cy - fy) // 2
     effect = f"<wp:effectExtent l=\"{ex}\" t=\"{ey}\" r=\"{ex}\" b=\"{ey}\"/>" if (ex or ey) else ""
     return ("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">"
-            f"<wp:extent cx=\"{fx}\" cy=\"{fy}\"/>{effect}<wp:docPr id=\"{n}\" name={quoteattr(name)} descr=\"\"/>"
+            f"<wp:extent cx=\"{fx}\" cy=\"{fy}\"/>{effect}<wp:docPr id=\"{n}\" name={quoteattr(name)} descr={quoteattr(descr)}/>"
             "<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>"
             "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">"
             f"<pic:pic><pic:nvPicPr><pic:cNvPr id=\"{n}\" name={quoteattr(name)}/><pic:cNvPicPr/></pic:nvPicPr>"
@@ -185,7 +187,9 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                     runs += "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
                 body.append(_p(f"TOC{min(e.get('level', 1), 2)}", runs))
             continue
-        body.append(_p("Heading1", bookmark(s["id"], _t(s["heading"]))))
+        plate = s["kind"] == "plate"  # 🖼 B3: a picture on a page of its own (no heading)
+        if not plate:
+            body.append(_p("Heading1", bookmark(s["id"], _t(s["heading"]))))
         for b in s["blocks"]:
             t = b["t"]
             if t == "p":
@@ -213,7 +217,18 @@ def build_docx(book: dict, *, created: str, family: str = "times", size_pt: floa
                     box_w, box_h = box_w * k, box_h * k
                 s_ = min(box_w / info.width, box_h / info.height)
                 body.append(_p("Figure", _drawing(img_rid[b["key"]], drawing_n, int(info.width * s_),
-                                                  int(info.height * s_), b["id"], info.orientation)))
+                                                  int(info.height * s_), b["id"], info.orientation, b.get("alt") or ""),
+                               "<w:keepNext/><w:pageBreakBefore/>" if plate else "<w:keepNext/>" if b.get("caption")
+                               else ""))
+                if b.get("caption"):
+                    body.append(_p("Caption", _t(b["caption"])))
+            elif t == "vmap":
+                # 🖼 B3: Word cannot show an SVG without a PNG copy and Akọwe makes no PNG (no Pillow at runtime):
+                # the caption and one line say where the map is (docs/PICTURES.md). An illustrated or uploaded
+                # PNG/JPEG map is placed like any picture.
+                body.append(_p("Caption", _t((b.get("caption") + " — " if b.get("caption") else "")
+                                              + "the map is in the PDF and EPUB editions of this book."),
+                               "<w:pageBreakBefore/>" if plate else ""))
     sect = ""
     if page:
         tw = lambda mm: int(round(mm * 1440 / 25.4))  # noqa: E731 - twentieths of a point

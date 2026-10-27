@@ -168,12 +168,26 @@ const AKOWE_API_USED = {
   'PUT /api/projects/:pid/branches/main/review/world/texture': 'add_world_detail', 'POST /api/projects/:pid/branches/main/review/fix': 'rewrite_chapter',
   'POST /api/projects/:pid/branches/main/report': 'make_book_report', 'POST /api/projects/:pid/branches/main/save': 'save_book',
   'POST /api/projects/:pid/branches/main/journal/note': '(every book action → the journal)',
-  'GET /api/projects/:pid/branches/main/forge/characters': 'character_dossier (list) and every forge tool (find the character)',
-  'GET /api/projects/:pid/branches/main/forge/characters/:rid': 'character_dossier, edit_dossier',
-  'PUT /api/projects/:pid/branches/main/forge/characters/:rid': 'edit_dossier',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/forge': 'forge_character',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/approve': 'approve_dossier',
-  'POST /api/projects/:pid/branches/main/forge/characters/:rid/art': 'make_character_art',
+  'GET /api/projects/:pid/branches/main/forge/:kind': 'character_dossier (list) and every forge tool (find the character)',
+  'GET /api/projects/:pid/branches/main/forge/:kind/:rid': 'character_dossier, edit_dossier',
+  'PUT /api/projects/:pid/branches/main/forge/:kind/:rid': 'edit_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/forge': 'forge_character',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/approve': 'approve_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/art': 'make_character_art',
+  'POST /api/projects/:pid/branches/main/forge/:kind': 'create_dossier',
+  'POST /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (run)',
+  'GET /api/projects/:pid/branches/main/forge/:kind/:rid/check': 'check_dossier (results)',
+  'PUT /api/projects/:pid/branches/main/forge/:kind/:rid/check/:finding': 'check_dossier (verdict)',
+  'GET /api/projects/:pid/branches/main/pictures': 'book_pictures, illustrate',
+  'GET /api/projects/:pid/branches/main/cover': 'book_cover',
+  'PUT /api/projects/:pid/branches/main/cover': 'design_cover, make_cover_art (lock / note)',
+  'POST /api/projects/:pid/branches/main/cover/art': 'make_cover_art',
+  'PUT /api/projects/:pid/branches/main/pictures/style': 'set_art_style',
+  'POST /api/projects/:pid/branches/main/pictures/illustrate-all': 'illustrate (all)',
+  'POST /api/projects/:pid/branches/main/pictures/illustrate': 'illustrate',
+  'DELETE /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture (remove)',
+  'PUT /api/projects/:pid/branches/main/pictures/:pic': 'edit_picture',
+  'POST /api/projects/:pid/branches/main/pictures/map': 'book_map',
 };
 const MENU_ITEMS = {
   'Setup Wizard': 'app_control:wizard.open', 'Relay Trace report (where every message went)': 'app_control:ledger.trace_save', 'Reset Relay Trace': 'app_control:ledger.trace_reset',
@@ -225,10 +239,12 @@ async function main() {
   assert(require('../video-api').OPS.every((o) => typeof o.changes === 'boolean' && o.params && o.params.type === 'object'), '🎬 every video-api operation has a JSON schema and a changes flag');
   sameSet('🎨 Images module (sd-api) methods', new Set(alfredMain.sdMethodsOf ? (await alfredMain.sdMethodsOf(shape)).map((m) => m.method) : []), new Set(SD_API_METHODS));
   const akoweUsed = new Set();
-  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid')}`);
+  for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', `([^`]+)`/g)) akoweUsed.add(`${m[1]} ${m[2].replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{enc\(rr\.runId\)\}\/\$\{verb\}/g, ':run/:verb').replace(/\$\{base\}\/\$\{enc\(c\.record_id\)\}/, '/api/projects/:pid/branches/main/review/characters/:rid').replace(/\$\{enc\(r\.pid\)\}/g, ':pid').replace(/\$\{enc\(r\.d\.record_id\)\}/g, ':rid').replace(/\$\{enc\(b\.pid\)\}/g, ':pid').replace(/\$\{base\}\//, '/api/projects/:pid/branches/main/pictures/').replace(/\$\{url\}/, '/api/projects/:pid/branches/main/pictures/:pic').replace(/\$\{(r\.kp|kp|a\.kind)\}/g, ':kind').replace(/\$\{enc\(a\.finding_id\)\}/g, ':finding')}`);
   for (const m of read('alfred-tools.js').matchAll(/ctx\.akowe\('([A-Z]+)', '([^']+)'/g)) akoweUsed.add(`${m[1]} ${m[2]}`);
   akoweUsed.add('GET /api/projects/:pid/branches/main/review/characters'); // via const base
   akoweUsed.add('POST /api/projects/:pid/branches/main/journal/note'); // alfred-main.js journal()
+  if (/ctx\.akowe\('DELETE', url\)/.test(read('alfred-tools.js'))) akoweUsed.add('DELETE /api/projects/:pid/branches/main/pictures/:pic'); // edit_picture (via const url)
+  if (/ctx\.akowe\('PUT', url, body\)/.test(read('alfred-tools.js'))) akoweUsed.add('PUT /api/projects/:pid/branches/main/pictures/:pic');
   const akoweUsedClean = new Set([...akoweUsed].filter((x) => !x.includes('${')));
   sameSet('📖 Akọwe API Alfred uses', akoweUsedClean, new Set(Object.keys(AKOWE_API_USED)));
   const menuSrc = read('main.js').slice(read('main.js').indexOf('function buildAppMenu'));
@@ -645,6 +661,16 @@ async function main() {
       ['forge_character', { character: 'Mara Vell' }, true, () => hit('POST', `${B}/forge/characters/rec-mara/forge`)],
       ['edit_dossier', { character: 'Mara Vell', fields: { goals: 'Keep the lamp lit.' } }, true, () => hit('PUT', `${B}/forge/characters/rec-mara`)],
       ['approve_dossier', { character: 'Mara Vell', fields: ['traits'] }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/approve` && x.body.fields[0] === 'traits')],
+      ['create_dossier', { kind: 'places', from: 'A04-x' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/places` && x.body.from === 'A04-x')],
+      ['check_dossier', { character: 'Mara Vell', action: 'run' }, true, () => ak.requests.some((x) => x.method === 'POST' && x.path === `${B}/forge/characters/rec-mara/check`)],
+      ['book_cover', {}, false, () => hit('GET', `${B}/cover`)],
+      ['design_cover', { template: 'thriller', texts: { tagline: 'Every light hides a debt.' }, print: { trim: '5.5x8.5', paper: 'white' } }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/cover` && x.body.template === 'thriller' && x.body.print.trim === '5.5x8.5')],
+      ['make_cover_art', { engine: 'sd', upscale: 2, character: 'Mara Vell', note: 'the lighthouse in a storm' }, true, () => ak.requests.some((x) => x.path === `${B}/cover/art` && x.body.upscale === 2) && ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/cover` && x.body.character_lock === 'Mara Vell')],
+      ['book_pictures', {}, false, () => hit('GET', `${B}/pictures`)],
+      ['set_art_style', { style: 'watercolour storybook' }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/pictures/style` && x.body.style === 'watercolour storybook')],
+      ['illustrate', { chapter: '2', count: 2, engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/pictures/illustrate` && x.body.chapter_id === 'ch2' && x.body.count === 2 && x.body.engine === 'chatgpt')],
+      ['edit_picture', { pic_id: 'pic-001', caption: 'At dawn', where: 'after_scene', scene: 2 }, true, () => ak.requests.some((x) => x.method === 'PUT' && x.path === `${B}/pictures/pic-001` && x.body.caption === 'At dawn' && x.body.placement.scene === 2)],
+      ['book_map', { kind: 'illustrated', engine: 'sd' }, true, () => ak.requests.some((x) => x.path === `${B}/pictures/map` && x.body.kind === 'illustrated' && x.body.engine === 'sd')],
       ['make_character_art', { character: 'Mara Vell', what: 'sheet', engine: 'chatgpt' }, true, () => ak.requests.some((x) => x.path === `${B}/forge/characters/rec-mara/art` && x.body.what === 'sheet' && x.body.engine === 'chatgpt')],
     ];
     for (const [tool, args, changes, effect] of cases) {

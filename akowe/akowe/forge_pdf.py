@@ -204,9 +204,21 @@ def _motion_study(page, im, clip: dict, x: float, y_bottom: float, w: float):
 
 
 # ====================================================================== the document
-def render(d: dict, pictures: dict) -> bytes:
+KIND_WORDS = {"character": "character", "item": "item", "place": "place", "magic": "magic system"}
+
+
+def _ref_line(x: dict) -> str:
+    return f"{x.get('code') or ''} {x.get('name') or ''}".strip()
+
+
+def render(d: dict, pictures: dict, spec: dict | None = None) -> bytes:
     """d = forge.public(...) (the dossier JSON); pictures = {slot: bytes|None} (portrait, sheet, the ten views, and
-    ``clip_poster``: the motion clip's first frame, drawn as a framed MOTION STUDY still on the cover)."""
+    ``clip_poster``: the motion clip's first frame, drawn as a framed MOTION STUDY still on the cover).
+
+    ``spec`` (an item, place or magic system: ``forge_kinds.pdf_spec``) changes the words ("ITEM FORGE"), the cover
+    picture (``spec["hero"]``: item portrait / establishing shot / sigil, each in a box of its own shape) and the
+    landscape plate (``spec["plate"]``: turnaround / mood views / in use). Fields with ``links`` show them as teal
+    references, and the dossier's ``links`` / ``backlinks`` close the document as "Linked records"."""
     images, info = {}, {}
     for key, data in (pictures or {}).items():
         if not data:
@@ -217,7 +229,9 @@ def render(d: dict, pictures: dict) -> bytes:
             log.warning("dossier picture %s cannot go into the PDF: %s", key, exc)
             continue
         images[key] = info[key] = im
-    name = safe(d.get("name") or "Character")
+    kind = (spec or {}).get("kind") or "character"
+    forge_word = (spec or {}).get("forge") or "CHARACTER FORGE"
+    name = safe(d.get("name") or ("Character" if not spec else spec.get("word", "Record").capitalize()))
     status = "READY" if d.get("readiness") == "ready" else "DRAFT"
     code_tpl = f"{d.get('code') or 'CH-000'} | REV {d.get('revision') or 1} | {status} | " + "{n}"
     pages: list[Page] = []
@@ -230,25 +244,41 @@ def render(d: dict, pictures: dict) -> bytes:
         tsize -= 1
     text_op(p, name.upper(), BOLD, tsize, MARGIN, ph - 52.0, GOLD)
     tag = (d.get("tagline") or "").strip()
-    sub = f"{tag.upper()}  /  CHARACTER FORGE" if tag else "CHARACTER FORGE"
+    sub = f"{tag.upper()}  /  {forge_word}" if tag else forge_word
     ssize = 10.5
     while ssize > 7 and tw(sub, REG, ssize) > pw - 2 * MARGIN:
         ssize -= 0.5
     text_op(p, sub, REG, ssize, MARGIN, ph - 69.0, TEAL)
     bx, by, bw, bh = 126.0, 168.0, 360.0, 542.0
-    if "clip_poster" in info:
+    hero, hero_label = "portrait", "PORTRAIT"
+    if spec:
+        hero, hero_label = spec["hero"], spec["hero_label"]
+        if kind == "place":   # a wide establishing shot
+            bx, by, bw, bh = MARGIN, 300.0, pw - 2 * MARGIN, 400.0
+        elif kind == "magic":  # a square sigil
+            bx, by, bw, bh = 141.0, 260.0, 330.0, 330.0
+    if "clip_poster" in info and not spec:
         bx = MARGIN  # the portrait moves left to make room for the motion-study still (else: unchanged)
-    _image_or_slot(p, images, "portrait", info, bx, by, bw, bh, cover=False, label="PORTRAIT",
+    _image_or_slot(p, images, hero, info, bx, by, bw, bh, cover=False, label=hero_label,
                    note="No picture yet: make one in Akowe or upload your own")
-    if "clip_poster" in info:
+    if spec and kind in ("place", "magic"):
+        refs = [_ref_line(x) for x in (d.get("links") or [])][:6]
+        if refs:  # the records it names, under the picture (the cover has room for one line)
+            line = "LINKED: " + "  /  ".join(refs)
+            while tw(line, REG, 8.5) > pw - 2 * MARGIN and len(line) > 10:
+                line = line[:-2]
+            text_op(p, line, REG, 8.5, MARGIN, by - 22.0, TEAL)
+    if "clip_poster" in info and not spec:
         _motion_study(p, info["clip_poster"], (d.get("art") or {}).get("clip") or {}, bx + bw + 16.0, by,
                       pw - MARGIN - (bx + bw + 16.0))
     lines = [x for x in d.get("summary") or [] if x][:3]
     if not lines:
         c = d.get("counts") or {}
-        lines = [f"Character dossier for {name}.", f"{c.get('filled', 0)} of {c.get('fields', 0)} fields filled; "
-                 f"{c.get('proposed', 0)} proposal(s) waiting for approval.", "Profile, ten-view reference plate and "
-                 "story arc."]
+        word = KIND_WORDS.get(kind, "character").capitalize()
+        lines = [f"{word} dossier for {name}.", f"{c.get('filled', 0)} of {c.get('fields', 0)} fields filled; "
+                 f"{c.get('proposed', 0)} proposal(s) waiting for approval.",
+                 "Profile, ten-view reference plate and story arc." if not spec else
+                 f"Profile, {spec['plate_title'].lower()} and continuity ledger."]
     y = 142.0
     for ln in lines:
         for wl in wrap_runs([(ln, REG, TEXT)], pw - 2 * MARGIN, 10.0)[:2]:
@@ -261,14 +291,24 @@ def render(d: dict, pictures: dict) -> bytes:
     # -------- page 2: the ten-view reference plate (landscape)
     lw, lh = LANDSCAPE
     p = _new_page(LANDSCAPE, 2)
-    title = f"{name.upper()} / TEN-VIEW REFERENCE"
+    title = f"{name.upper()} / " + ((spec or {}).get("plate_title") or "TEN-VIEW REFERENCE")
     t2 = 20.0
     while t2 > 12 and tw(title, BOLD, t2) > lw - 2 * MARGIN:
         t2 -= 1
     text_op(p, title, BOLD, t2, MARGIN, lh - 42.0, GOLD)
     gx, gw = MARGIN, lw - 2 * MARGIN
     top, bottom = lh - 70.0, 86.0
-    if "sheet" in info:
+    if spec:  # items: front / side / back / detail; places: day / night / interior; magic: one "in use" scene
+        plate = list(spec.get("plate") or [])
+        n = max(1, len(plate))
+        cw = gw / n
+        ch = top - bottom - 22.0
+        for i, (key, label) in enumerate(plate):
+            x = gx + i * cw
+            _image_or_slot(p, images, key, info, x + 0.5, bottom + 18.0, cw - 1.0, ch, cover=n > 1,
+                           note="No picture yet" if key not in info else None)
+            centered(p, label, BOLD, 8.0, x + cw / 2.0, bottom + 5.0, TEAL)
+    elif "sheet" in info:
         _image_or_slot(p, images, "sheet", info, gx, bottom, gw, top - bottom, cover=False)
     else:
         cw = gw / 5.0
@@ -284,8 +324,8 @@ def render(d: dict, pictures: dict) -> bytes:
     pages.append(p)
 
     # -------- the sections
-    header = f"CHARACTER FORGE / {name.upper()} / " + \
-        ("PROPOSED CHARACTER DETAILS" if status == "DRAFT" else "CHARACTER DETAILS")
+    details = (spec or {}).get("details") or "CHARACTER DETAILS"
+    header = f"{forge_word} / {name.upper()} / " + (f"PROPOSED {details}" if status == "DRAFT" else details)
     state = {"page": None, "y": 0.0}
 
     def new_section_page():
@@ -311,17 +351,7 @@ def render(d: dict, pictures: dict) -> bytes:
             yb -= LEAD
         state["y"] = y_top - hgt - 12.0
 
-    new_section_page()
-    for s in d.get("sections") or []:
-        fields = [f for f in s.get("fields") or [] if (f.get("text") or "").strip()]
-        heading = f"{int(s.get('n') or 0):02d} / {s.get('title') or ''}"
-        blocks = []
-        for f in fields:
-            tag = "[" + ",".join(f.get("letters") or []) + "]"
-            runs = [(tag, REG, TEAL), (" " + (f.get("label") or "") + ":", BOLD, TEXT), (" " + f["text"], REG, TEXT)]
-            blocks.append(wrap_runs(runs, CARD_W - 2 * PAD_X))
-        if not blocks:
-            blocks = [wrap_runs([("Not filled in yet.", REG, MUTED)], CARD_W - 2 * PAD_X)]
+    def place_blocks(heading, blocks):
         head_need = 34.0 + 19.0 + 14.0 + card_height(min(2, len(blocks[0])))
         if state["y"] < ph - 60 and room() < head_need:
             new_section_page()
@@ -346,11 +376,40 @@ def render(d: dict, pictures: dict) -> bytes:
                     new_section_page()
                     if int((room() - card_height(0)) // LEAD) < 1:
                         rest = rest[1:]  # cannot happen with this geometry; never loop
+
+    new_section_page()
+    for s in d.get("sections") or []:
+        fields = [f for f in s.get("fields") or [] if (f.get("text") or "").strip()]
+        heading = f"{int(s.get('n') or 0):02d} / {s.get('title') or ''}"
+        blocks = []
+        for f in fields:
+            tag = "[" + ",".join(f.get("letters") or []) + "]"
+            runs = [(tag, REG, TEAL), (" " + (f.get("label") or "") + ":", BOLD, TEXT), (" " + f["text"], REG, TEXT)]
+            if f.get("links"):  # cross-references to the other dossiers it names
+                runs.append(("\n-> " + "; ".join(_ref_line(x) for x in f["links"]), REG, TEAL))
+            blocks.append(wrap_runs(runs, CARD_W - 2 * PAD_X))
+        if not blocks:
+            blocks = [wrap_runs([("Not filled in yet.", REG, MUTED)], CARD_W - 2 * PAD_X)]
+        place_blocks(heading, blocks)
+    # -------- the linked records (what this dossier names, and who names it)
+    this_word = KIND_WORDS.get(kind, "record")
+    refs = []
+    for x in d.get("links") or []:
+        refs.append(wrap_runs([("[R]", REG, TEAL), (f" {_ref_line(x)}", BOLD, TEXT),
+                               (f" ({KIND_WORDS.get(x.get('kind'), x.get('kind') or '')}): named in "
+                                + ", ".join(x.get("fields") or []), REG, TEXT)], CARD_W - 2 * PAD_X))
+    for x in d.get("backlinks") or []:
+        refs.append(wrap_runs([("[R]", REG, TEAL), (f" {_ref_line(x)}", BOLD, TEXT),
+                               (f" ({KIND_WORDS.get(x.get('kind'), x.get('kind') or '')}) names this {this_word} "
+                                "in: " + ", ".join(x.get("fields") or []), REG, TEXT)], CARD_W - 2 * PAD_X))
+    if refs:
+        place_blocks("Linked records", refs)
     for i, pg in enumerate(pages, start=1):
         pg.number = i
         w = (pg.size or PORTRAIT)[0]
         _footer(pg, w, code_tpl.format(n=i))
     layout = Layout(pages, [], {}, [])
-    meta = {"title": f"{name} - Character Forge dossier", "language": "en"}
+    title_word = "Character Forge" if not spec else forge_word.title()
+    meta = {"title": f"{name} - {title_word} dossier", "language": "en"}
     return render_pdf(layout, page_width=PORTRAIT[0], page_height=PORTRAIT[1], meta=meta, images=images,
-                      extra_info={"Keywords": f"{d.get('code') or ''} Character Forge"})
+                      extra_info={"Keywords": f"{d.get('code') or ''} {title_word}"})

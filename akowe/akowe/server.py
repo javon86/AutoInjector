@@ -169,6 +169,8 @@ class App:
         self.opener = OpenService(self)        # 📂 P21 open a saved book / 🔁 rerun from its book bible
         from .forge import ForgeService  # noqa: PLC0415
         self.forge = ForgeService(self)        # 🗂 B5 Character Forge dossiers (jobs run in self.review)
+        from .cover import CoverService  # noqa: PLC0415
+        self.cover = CoverService(self)        # 🎨 B3 book covers (art jobs run in self.review)
         self._client = threading.local()       # the address of the request being answered (localhost-only routes)
         self.port: int | None = None
         self._last_project: dict | None = None
@@ -513,6 +515,12 @@ class App:
                 if rest and rest[0] == "forge":  # 🗂 B5 Character Forge dossiers (forge.py)
                     from . import forge  # noqa: PLC0415
                     return forge.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "pictures":  # 🖼 B3 chapter/scene pictures and the map (pictures.py)
+                    from . import pictures  # noqa: PLC0415
+                    return pictures.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
+                if rest and rest[0] == "cover":  # 🎨 B3 book covers (cover.py)
+                    from . import cover  # noqa: PLC0415
+                    return cover.route(self, method, rest[1:], query, body, principal, pid, branch, headers)
                 if rest and rest[0] == "beta":  # 📖 P23 (Section 7c) beta reader
                     from . import beta_reader  # noqa: PLC0415
                     return beta_reader.route(self, method, rest, body, principal, pid, branch)
@@ -1462,6 +1470,9 @@ def make_handler(app: App):
             self.end_headers()
 
         def do_DELETE(self):
+            # 🖼 B3: DELETE …/pictures/<pic_id> is the one place a DELETE means something (other paths stay 405)
+            if re.fullmatch(r"/api/projects/[^/]+/branches/[^/]+/pictures/[^/]+", urlparse(self.path).path):
+                return self._handle("DELETE")
             self._not_allowed()
 
         def do_PATCH(self):

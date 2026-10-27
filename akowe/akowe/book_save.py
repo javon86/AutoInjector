@@ -10,7 +10,9 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
-    Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier + its pictures and motion clip (B5)
+    Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier (characters, items, places, magic
+                      systems) + its pictures and motion clip (B5)
+    Pictures/      pictures.json + the chosen chapter / scene pictures (chNN … .png/.jpg) and map.svg/.png (B3)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -94,7 +96,10 @@ Book Bible/    Everything the book is built on: the book profile, ending and sty
                book-bible.md is for reading; book-bible.json is what Akọwe reads back.
 Reports/       The book report (scores, strengths, weaknesses) and the editor's and
                planned-to-page summaries, when they exist.
-Character Forge/  Each character's dossier (PDF to read, JSON for Akọwe), its pictures and motion clip.
+Character Forge/  Each dossier (characters, items, places, magic systems: PDF to read, JSON for Akọwe), its pictures
+                  and motion clip.
+Pictures/      The chapter and scene pictures and the map you chose (🖼 Pictures), with
+               pictures.json (captions, alt text and where each one goes in the book).
 Log/           The book's journal (what happened, step by step, which AI did what) and
                run-events.json (every step of the Make-a-book run). No keys, no prompts.
 Progress/      progress.json: what is done and what comes next (for an unfinished book).
@@ -411,6 +416,26 @@ class SaveService:
                 if pic:
                     ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
                     files[f"Character Forge/{item['code']} pictures/motion clip poster.{ext}"] = pic
+        # 🗂 items (AR-), places (PL-) and magic systems (MG-): forge_kinds.py
+        from . import forge_kinds  # noqa: PLC0415
+        for kind, sp in forge_kinds.SPECS.items():
+            for item in forge_kinds.list_dossiers(store, pid, branch, kind):
+                rid = item["record_id"]
+                data, _name = forge_kinds.pdf_bytes(app, pid, branch, kind, rid)
+                code = safe_name(item["code"], 12, sp["prefix"])
+                room = 60 - len(f"Character Forge/{code}  - dossier.json")
+                base = f"{code} {safe_name(item['name'], max(room, 8), sp['Word'])} - dossier"
+                files[f"Character Forge/{base}.pdf"] = data
+                d = forge_kinds.attach_links(store, pid, branch, forge_kinds.public(store, pid, branch, kind, rid))
+                d.pop("history", None)
+                text(f"Character Forge/{base}.json", json.dumps(d, ensure_ascii=False, indent=1))
+                art = forge_kinds.raw_entry(store, pid, branch, kind, rid).get("art") or {}
+                for slot in sp["slots"]:
+                    a = art.get(slot) if slot == sp["art"]["hero"] else (art.get("views") or {}).get(slot)
+                    pic = forge.picture_bytes(store, pid, branch, a)
+                    if pic:
+                        ext = "jpg" if pic[:3] == b"\xff\xd8\xff" else "png"
+                        files[f"Character Forge/{code} pictures/{slot}.{ext}"] = pic
 
     def collect(self, pid: str, branch: str, *, on_phase=None) -> tuple[dict, dict]:
         """{relative path: bytes} for everything that exists now, and info about it (read-only)."""
@@ -497,6 +522,18 @@ class SaveService:
             self._forge_files(pid, branch, files, text)
         except Exception:  # noqa: BLE001 - the rest of the save still happens
             log.exception("character forge files for the save failed")
+        # Pictures/ (B3): the chosen chapter / scene pictures and the map, with pictures.json
+        try:
+            from . import pictures  # noqa: PLC0415
+            pictures.save_files(app, pid, branch, files, text)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("picture files for the save failed")
+        # Cover/ (B3): the cover design, the ebook and print covers, the art, the book files with the cover
+        try:
+            from . import cover as cover_mod  # noqa: PLC0415
+            cover_mod.save_files(app, pid, branch, files, stem)
+        except Exception:  # noqa: BLE001 - the rest of the save still happens
+            log.exception("cover files for the save failed")
         # Log/
         phase("Writing the log")
         try:

@@ -64,6 +64,10 @@ akowe/
                            with the sheet / voice card / canon, "Invent the rest" job, approvals, art via AutoInjector
                            POST /image/request, routes …/forge/…, chapter_brief helper; forge_pdf.py (the dark dossier PDF),
                            forge_example.py + examples/moki_vey/ (the Moki Vey example); web/forge.js; docs/CHARACTER_FORGE.md
+    cover.py               🎨 B3 cover designer: design (settings cover:<pid>:<b>; blurb/author_bio in the profile), art job
+                           (AutoInjector /image/request purpose "cover"), routes …/cover/…, book save Cover/;
+                           exporters/cover.py (templates, layout, KDP print maths, PDF/SVG, cover added to PDF/EPUB/DOCX);
+                           web/cover.js; docs/COVERS.md
     fact_checks.py         🔎 Section 7a glue: chapter/book views, editor context + keep list, fixes, run report, HTTP
     continuity.py          🧭 Section 7 P32-P35: tracked state storage (physical_state:/character_state:<pid>:<branch>),
                            AI tracking + run hooks (approved under the run consent), brief section, review context,
@@ -590,6 +594,21 @@ The full description (model, sync rules, API, AI groups, pictures, PDF, letters 
 * Tests: `tests/test_forge.py` (fake AI `ForgeFake`, fake image bridge `FakeImageBridge`), UI
   `tests/campaign/ui/test_ui_forge.py`. Example data was built once from the author's sample with Pillow (not a runtime
   dependency).
+
+## 🖼 B3 interior pictures (pictures.py, web/pictures.js)
+
+The full description is `../docs/PICTURES.md`.
+* **Data**: companion settings `pictures:<pid>:<branch>` (style, pictures with candidates = I01 binary assets); the
+  snapshot `pictures_snap:<pid>:<branch>:<G02 id>` is written by `book_path.a_assemble` and read by
+  `set_g.assemble` → `pictures.overlay` → `exporters/book.place_pictures` (so G04/G07/G11-13 agree);
+  `asm["pictures"]` holds the signature and `assembly_out_of_date` compares it.
+* **Jobs** run in `ReviewService` like the forge art jobs (`PicturesJob` with `total` and `pic_id`); the bridge,
+  `ArtProblem` codes and the NO_LOCK fallback are forge.py's.
+* **Exporters**: block `img` gained optional `caption` / `alt`; new block `vmap` (SVG text) and section kind `plate`;
+  the PDF writer gained the op `circle`; `layout.winansi` for captions and map labels. Pictures are kept apart from
+  G03 art (`Assembly.pictures`), so `artwork_selected` is unchanged.
+* **HTTP**: `DELETE` is accepted for `…/pictures/<pic_id>` only (every other DELETE stays 405).
+* Tests: `tests/test_pictures.py` (fake bridge `Bridge` with `script` / `hold`), UI `tests/campaign/ui/test_ui_pictures.py`.
 
 ## 🔎 Section 7a: timeline (P26), trade facts (P31), repetition sorter (P30)
 
