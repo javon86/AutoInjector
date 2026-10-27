@@ -71,6 +71,7 @@ async function fakeAkowe(token) {
       { chapter_id: 'ch1', number: 1, title: 'The Lamp Room', state: 'chosen', pictures: [{ pic_id: 'pic-001', chosen: 0, candidates: [{}, {}], caption: 'Mara climbs', placement: { where: 'start' } }] },
       { chapter_id: 'ch2', number: 2, title: 'Fog', state: 'none', pictures: [] }], map: null },
     pictureCalls: [],
+    cover: { design: { template: 'gilded', colors: {}, texts: {}, art: null, print: { trim: '6x9', paper: 'cream', page_count: 320 } }, texts: { title: 'The Lighthouse Keeper', author: 'A. Writer' }, templates: [{ id: 'gilded' }, { id: 'thriller' }], print: { ok: true, spine_in: 0.8, notes: [] }, warnings: [] },
   };
   const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
@@ -114,6 +115,9 @@ async function fakeAkowe(token) {
       if (pm && m === 'DELETE') return send(res, 200, { ok: true });
       return send(res, 404, { errors: [{ code: 'NOT_FOUND', message: 'no such pictures endpoint' }] });
     }
+    if (p === `${B}/cover` && m === 'GET') return send(res, 200, st.cover);
+    if (p === `${B}/cover` && m === 'PUT') { Object.assign(st.cover.design, body || {}); if (body && body.print) Object.assign(st.cover.design.print, body.print); return send(res, 200, st.cover); }
+    if (p === `${B}/cover/art` && m === 'POST') return send(res, 202, { job_id: 'job-cover' });
     const D = st.dossier;
     if (m === 'GET' && p === `${B}/forge/characters`) return send(res, 200, { characters: [{ record_id: D.record_id, name: D.name, kind: 'character', code: D.code, revision: D.revision, readiness: D.readiness, has_portrait: !!D.art.portrait, views_done: Object.keys(D.art.views).length }] });
     mm = /^\/api\/projects\/proj-1\/branches\/main\/forge\/characters\/([^/]+)(?:\/(forge|approve|art))?$/.exec(p);

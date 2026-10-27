@@ -579,6 +579,77 @@ def({
   },
 });
 
+// ---- 🎨 Book cover: designer, AI art, ebook + print wrap (Akọwe docs/COVERS.md) -------------------------
+const COVER_TEMPLATES = ['gilded', 'thriller', 'romance', 'fantasy', 'literary', 'scifi', 'minimal'];
+def({
+  name: 'book_cover', title: 'Book cover: read the design', group: 'books', book: true,
+  description: 'The book cover: template, texts (title, subtitle, author, series, tagline), colours, art (yes/no), the print settings (trim, paper, pages) with the spine width and any problem or warning. Read-only.',
+  args: { type: 'object', properties: { project_id: { type: 'string', maxLength: 80 } }, additionalProperties: false },
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const g = await ctx.akowe('GET', `/api/projects/${enc(b.pid)}/branches/main/cover`);
+    if (!okStatus(g)) return akoweError(g);
+    const j = g.json || {}; const d = j.design || {}; const pr = j.print || {};
+    return { ok: true, message: `Template ${d.template || '?'}; ${d.art ? 'with' : 'no'} art; print ${pr.ok === false ? `problem: ${clip(pr.problem, 160)}` : `spine ${pr.spine_in != null ? `${pr.spine_in} in` : '?'}`}.`,
+      data: { project_id: b.pid, template: d.template, templates: (j.templates || []).map((t) => t.id || t), texts: j.texts || {}, colors: d.colors || {}, has_art: !!d.art,
+        blurb: clip(d.blurb || (j.texts && j.texts.blurb), 400), print: { trim: (d.print || {}).trim, paper: (d.print || {}).paper, page_count: (d.print || {}).page_count, spine: pr.spine_in || pr.spine, ok: pr.ok !== false, problem: pr.problem || null, notes: pr.notes || [] }, warnings: (j.warnings || []).slice(0, 8) } };
+  },
+});
+def({
+  name: 'design_cover', title: 'Book cover: change the design', group: 'books', changes: true, book: true,
+  description: `Change the cover: template (${COVER_TEMPLATES.join(', ')}), texts {title, subtitle, author, series, tagline}, colors {background, text, accent} as #rrggbb, blurb and author_bio (back cover), print {trim: 5x8 | 5.5x8.5 | 6x9, paper: white | cream, page_count}, use_art (false = typographic only). Only what you give changes.`,
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    template: { type: 'string', enum: COVER_TEMPLATES },
+    texts: { type: 'object', properties: { title: { type: 'string', maxLength: 200 }, subtitle: { type: 'string', maxLength: 200 }, author: { type: 'string', maxLength: 120 }, series: { type: 'string', maxLength: 120 }, tagline: { type: 'string', maxLength: 200 } }, additionalProperties: false },
+    colors: { type: 'object', properties: { background: { type: 'string', maxLength: 9 }, text: { type: 'string', maxLength: 9 }, accent: { type: 'string', maxLength: 9 } }, additionalProperties: false },
+    blurb: { type: 'string', maxLength: 2000 }, author_bio: { type: 'string', maxLength: 800 },
+    print: { type: 'object', properties: { trim: { type: 'string', enum: ['5x8', '5.5x8.5', '6x9'] }, paper: { type: 'string', enum: ['white', 'cream'] }, page_count: { type: 'integer', minimum: 24, maximum: 828 } }, additionalProperties: false },
+    use_art: { type: 'boolean' },
+  }, additionalProperties: false },
+  async check(a) {
+    for (const [k, v] of Object.entries(a.colors || {})) if (!/^#[0-9a-fA-F]{6}$/.test(v)) return { ok: false, error: `colors.${k} must be #rrggbb` };
+    return ['template', 'texts', 'colors', 'blurb', 'author_bio', 'print', 'use_art'].some((k) => a[k] !== undefined) ? { ok: true } : { ok: false, error: 'say what to change on the cover' };
+  },
+  describe: (a) => `Change the cover: ${[a.template && `template ${a.template}`, a.texts && `texts (${Object.keys(a.texts).join(', ')})`, a.colors && 'colours', a.blurb && 'back-cover blurb', a.author_bio && 'author bio', a.print && `print (${Object.entries(a.print).map(([k, v]) => `${k} ${v}`).join(', ')})`, a.use_art === false && 'no art (typographic)', a.use_art === true && 'use the art'].filter(Boolean).join('; ')}.`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const body = {};
+    for (const k of ['template', 'texts', 'colors', 'blurb', 'author_bio', 'print', 'use_art']) if (a[k] !== undefined) body[k] = a[k];
+    const r = await ctx.akowe('PUT', `/api/projects/${enc(b.pid)}/branches/main/cover`, body);
+    if (!okStatus(r)) return akoweError(r);
+    const pr = (r.json && r.json.print) || {};
+    return { ok: true, message: `Cover updated.${pr.ok === false && pr.problem ? ` Print note: ${clip(pr.problem, 200)}` : ''}`, data: { warnings: ((r.json && r.json.warnings) || []).slice(0, 6) } };
+  },
+});
+def({
+  name: 'make_cover_art', title: 'Book cover: make the cover art', group: 'books', changes: true, book: true,
+  description: 'Make the cover picture (no lettering — the designer sets the type): engine sd / chatgpt / auto, upscale 2 or 4 for a sharp print cover, character = whose character lock to use. Runs in the background.',
+  args: { type: 'object', properties: {
+    project_id: { type: 'string', maxLength: 80 },
+    engine: { type: 'string', enum: ['auto', 'sd', 'chatgpt'] },
+    upscale: { type: 'integer', enum: [1, 2, 4] },
+    character: { type: 'string', maxLength: 120 },
+    note: { type: 'string', maxLength: 400, description: 'What the cover picture should show' },
+  }, additionalProperties: false },
+  describe: (a) => `Make the cover art with ${{ sd: 'Stable Diffusion', chatgpt: 'ChatGPT' }[a.engine] || 'Stable Diffusion if connected, else ChatGPT'}${a.upscale > 1 ? `, upscaled ×${a.upscale}` : ''}${a.character ? `, with ${q(a.character)}'s looks` : ''}${a.note ? ` — ${q(a.note)}` : ''}. It runs in the background.`,
+  async run(a, ctx) {
+    const b = await resolveBook(ctx, a);
+    if (!b.ok) return b;
+    const base = `/api/projects/${enc(b.pid)}/branches/main/cover`;
+    if (a.character || a.note) {
+      const p0 = await ctx.akowe('PUT', base, Object.assign({}, a.character ? { character_lock: a.character } : {}, a.note ? { art_note: a.note } : {}));
+      if (!okStatus(p0)) return akoweError(p0);
+    }
+    const body = { engine: a.engine || 'auto' };
+    if (a.upscale) body.upscale = a.upscale;
+    const p = await ctx.akowe('POST', `/api/projects/${enc(b.pid)}/branches/main/cover/art`, body);
+    return okStatus(p) ? { ok: true, message: 'Making the cover art in the background (see the 🎨 Cover page).', data: { job_id: p.json && p.json.job_id } } : akoweError(p);
+  },
+});
+
 def({
   name: 'make_book_report', title: 'Make the book report', group: 'books', changes: true, book: true, allowAlways: true,
   description: 'Make (or refresh) the book report in Akọwe. It runs in the background.',
