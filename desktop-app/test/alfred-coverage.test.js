@@ -491,7 +491,7 @@ async function main() {
   d = await drive('video_status', {});
   check('video_status', !d.carded && d.result && d.result.data && d.result.data.enabled === false, 'says video is not set up');
   d = await drive('generate_video', { prompt: 'waves' });
-  check('generate_video', d.carded && /VIDEO_NOT_AVAILABLE/.test(d.text), 'asks, then reports plainly that no video backend is set up');
+  check('generate_video', d.carded && /VIDEO_NOT_SET_UP/.test(d.text), 'asks, then reports plainly that no video backend is set up');
 
   // ---- 💬 the AI panes (fake panes in mock Electron) -----------------------------------------------------
   const sentBefore = mock.__registry.claude.webContents.sentLog.length;

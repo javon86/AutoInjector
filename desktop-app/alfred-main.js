@@ -126,6 +126,8 @@ async function sdMethodsOf(api) {
 }
 function resolvePath(api, method) { return method.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), api); }
 
+function videoModule() { try { return require('./video-api').get(); } catch (_) { return null; } }
+
 function installAlfred(h) {
   const { ipcMain, shell } = h;
   const image = createImageAdapter({ imageProvider: h.imageProvider, outputManager: h.outputManager, dbService: h.dbService });
@@ -236,6 +238,18 @@ function installAlfred(h) {
       const args = meta.call ? meta.call(a || {}) : Array.isArray(a) ? a : a === undefined || (a && typeof a === 'object' && !Object.keys(a).length) ? [] : [a];
       const owner = resolvePath(api, method.split('.').slice(0, -1).join('.')) || api;
       return fn.apply(owner, args);
+    },
+    // 🎬 Video module (video-api.js) — the Video tab's own API; null in a build without it
+    videoMethods: async () => sdMethodsOf(videoModule()),
+    videoInvoke: async (method, a) => {
+      const api = videoModule();
+      if (!api) return { ok: false, code: 'VIDEO_NOT_SET_UP', error: 'NO_VIDEO_MODULE', message: 'The 🎬 Video module is not available.' };
+      const params = /^video\.(generate|animate)$/.test(method) && a && typeof a === 'object' && !Array.isArray(a) ? Object.assign({ from: 'alfred' }, a) : (a === undefined ? {} : a);
+      if (typeof api.call === 'function') return api.call(method, params);
+      const fn = resolvePath(api, method);
+      if (typeof fn !== 'function') return { ok: false, error: 'NO_METHOD' };
+      const owner = resolvePath(api, method.split('.').slice(0, -1).join('.')) || api;
+      return fn.call(owner, params);
     },
     akowe: (method, p, body) => h.akoweApi(method, p, body, 20000),
     openAkowePage,

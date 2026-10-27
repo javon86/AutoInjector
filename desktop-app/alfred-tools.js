@@ -445,17 +445,17 @@ def({
 });
 def({
   name: 'make_character_art', title: 'Character Forge: make the portrait / ten views', group: 'books', changes: true, book: true,
-  description: 'Make a character\'s dossier art: the portrait, any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
+  description: 'Make a character\'s dossier art: the portrait, a short motion clip (what="clip": the portrait brought to life with the 🎬 Video module), any of the ten full-body reference views (front, three_quarter_front, side, three_quarter_back, back, idle, draw, attack, dash, defend), or one turnaround sheet. engine: "sd" = Stable Diffusion (uses the character lock), "chatgpt" = ChatGPT draws it in its pane, "auto" = SD when connected, else ChatGPT. Runs in the background; pictures are saved into the book.',
   args: { type: 'object', required: ['character', 'what'], properties: {
     project_id: { type: 'string', maxLength: 80 },
     character: { type: 'string', minLength: 1, maxLength: 120 },
-    what: { type: 'string', enum: ['portrait', 'views', 'sheet'] },
+    what: { type: 'string', enum: ['portrait', 'views', 'sheet', 'clip'] },
     engine: { type: 'string', enum: IMAGE_ENGINES },
     views: { type: 'array', maxItems: 10, items: { type: 'string', enum: FORGE_VIEWS }, description: 'Only with what="views": which ones (default: the missing ones)' },
   }, additionalProperties: false },
   describe: (a) => {
     const eng = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'Stable Diffusion if connected, else ChatGPT' }[a.engine || 'auto'];
-    const what = a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
+    const what = a.what === 'clip' ? 'a short motion clip (the portrait brought to life, 🎬 Video module)' : a.what === 'portrait' ? 'the portrait' : a.what === 'sheet' ? 'one turnaround sheet (all ten views)' : `${a.views && a.views.length ? a.views.length : 'the missing'} reference view(s)${a.views && a.views.length ? ` (${a.views.join(', ')})` : ''}`;
     return `Make ${what} for ${q(a.character)}'s dossier with ${eng}. It runs in the background and the pictures are saved into the book.`;
   },
   async run(a, ctx) {
@@ -465,7 +465,7 @@ def({
     if (a.what === 'views' && a.views && a.views.length) body.views = a.views;
     const p = await ctx.akowe('POST', `/api/projects/${enc(r.pid)}/branches/main/forge/characters/${enc(r.d.record_id)}/art`, body);
     if (!okStatus(p)) return akoweError(p);
-    return { ok: true, message: `Making ${a.what === 'views' ? 'the reference views' : `the ${a.what}`} for ${r.d.name} in the background (${body.engine === 'chatgpt' ? 'ChatGPT takes about a minute per picture' : 'watch the 🎨 Images tab'}).`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
+    return { ok: true, message: `Making ${a.what === 'views' ? 'the reference views' : `the ${a.what}`} for ${r.d.name} in the background (${a.what === 'clip' ? 'a video takes a few minutes — watch the 🎬 Video tab' : body.engine === 'chatgpt' ? 'ChatGPT takes about a minute per picture' : 'watch the 🎨 Images tab'}).`, data: { job_id: p.json && p.json.job_id, project_id: r.pid } };
   },
 });
 def({
@@ -596,26 +596,75 @@ def({
 // ---- 🎬 Video -----------------------------------------------------------------------------------
 def({
   name: 'video_status', title: 'Video status', group: 'video',
-  description: 'Whether video generation is set up. Read-only.',
+  description: 'Whether video generation is set up: the 🎬 Video module (ComfyUI + a Wan video model) — installed models, what is missing, busy — or the older video-server setting. Read-only.',
   args: { type: 'object', properties: {}, additionalProperties: false },
   async run(_a, ctx) {
+    if (ctx.videoInvoke && ctx.videoMethods && (await ctx.videoMethods()).some((m) => m.method === 'video.status')) {
+      const r = await ctx.videoInvoke('video.status', {});
+      if (r && r.ok !== false) return { ok: true, data: shrink(r) };
+    }
     const s = ctx.videoStatus();
-    return { ok: true, data: { enabled: !!s.enabled, configured: !!s.configured, note: s.enabled && s.configured ? 'Video generation is set up.' : 'Video generation is not available yet: it needs a text-to-video backend (Setup Wizard → Video).' } };
+    return { ok: true, data: { enabled: !!s.enabled, configured: !!s.configured, note: s.enabled && s.configured ? 'Video generation is set up.' : 'Video generation is not set up yet: in the 🎬 Video tab, install ComfyUI + a video model (one click).' } };
   },
 });
 def({
-  name: 'generate_video', title: 'Generate a video', group: 'video', changes: true, timeoutMs: 620000,
-  description: 'Make a short video clip from a description — only when video generation is set up (it often is not yet).',
-  args: { type: 'object', required: ['prompt'], properties: { prompt: { type: 'string', minLength: 2, maxLength: 1000 } }, additionalProperties: false },
-  describe: (a) => `Make a short video of ${q(a.prompt)} and save it in the videos folder.`,
+  name: 'generate_video', title: 'Generate a video', group: 'video', changes: true, timeoutMs: 1200000,
+  description: 'Make a short video clip: from a description (text → video), or bring a picture to life (image = a picture path → video). character = a character lock (keeps their looks). seconds 1–10. Uses the 🎬 Video module (ComfyUI + Wan); for every other setting use video_call.',
+  args: { type: 'object', properties: {
+    prompt: { type: 'string', maxLength: 1000 },
+    image: { type: 'string', maxLength: 1000, description: 'A picture file to animate (path)' },
+    character: { type: 'string', maxLength: 120, description: 'A character lock name' },
+    seconds: { type: 'number', minimum: 1, maximum: 10 },
+    negative_prompt: { type: 'string', maxLength: 1000 },
+  }, additionalProperties: false },
+  async check(a) { return str(a.prompt, 1) || a.image || a.character ? { ok: true } : { ok: false, error: 'give a prompt, a picture (image) or a character' }; },
+  describe: (a) => `${a.image ? `Bring the picture ${q(a.image)} to life` : 'Make a short video'}${a.prompt ? ` — ${q(a.prompt)}` : ''}${a.character ? ` with ${q(a.character)}'s looks` : ''}${a.seconds ? ` (${a.seconds} s)` : ''}, and save it in the videos folder. It can take several minutes.`,
   async run(a, ctx) {
+    const methods = ctx.videoMethods ? await ctx.videoMethods() : [];
+    if (methods.some((m) => m.method === 'video.generate')) {
+      const params = { prompt: a.prompt || '', from: 'alfred' };
+      if (a.image) params.image = a.image;
+      if (a.character) params.characterLock = a.character;
+      if (a.seconds) params.seconds = a.seconds;
+      if (a.negative_prompt) params.negativePrompt = a.negative_prompt;
+      const r = await ctx.videoInvoke(a.image && methods.some((m) => m.method === 'video.animate') ? 'video.animate' : 'video.generate', params);
+      if (!r || r.ok === false) return { ok: false, error: str((r && (r.code || r.error)) || 'VIDEO_FAILED', 60), message: clip((r && (r.message || r.hint)) || 'The video could not be made.', 400) };
+      return { ok: true, message: `Saved the clip${r.seconds ? ` (${r.seconds} s)` : ''}.`, data: { path: r.path || null, poster: r.poster || null, model: r.model || null, seed: r.seed } };
+    }
+    if (a.image) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Bringing a picture to life needs the 🎬 Video module (ComfyUI + a video model): install it in the 🎬 Video tab.' };
     const s = ctx.videoStatus();
-    if (!s.enabled || !s.configured) return { ok: false, error: 'VIDEO_NOT_AVAILABLE', message: 'Video generation is not available yet: no text-to-video backend is set up (Setup Wizard → Video).' };
+    if (!s.enabled || !s.configured) return { ok: false, error: 'VIDEO_NOT_SET_UP', message: 'Video generation is not set up yet: in the 🎬 Video tab, install ComfyUI + a video model (one click).' };
     const r = await ctx.generateVideo(a.prompt);
     if (!r || !r.ok) return { ok: false, error: (r && r.error) || 'VIDEO_FAILED', message: (r && r.message) || 'The video could not be made.' };
     return { ok: true, message: 'Saved the clip.', data: { path: r.path || r.url || null } };
   },
 });
+def({
+  name: 'video_call', title: 'Use the 🎬 Video module', group: 'video', changes: true, timeoutMs: 1200000,
+  description: 'Any video control through the 🎬 Video module (video-api): method = a module method such as video.generate / video.animate (every setting: prompt, negativePrompt, image, width, height, seconds, frames, fps, model, steps, cfgScale, seed, sampler, scheduler, shift, characterLock), video.status/models/progress/cancel/gallery/capabilities, video.install.check/downloadModel/cancel, and any newer method the module lists. Read-only methods run directly; the rest ask first.',
+  args: { type: 'object', required: ['method'], properties: { method: { type: 'string', minLength: 3, maxLength: 80 }, args: { 'x-passthrough': true } }, additionalProperties: false },
+  allowAlwaysFor: () => false,
+  allowKey: (a) => `video_call:${a && a.method}`,
+  dynamicChanges: async (a, ctx) => { const m = await videoMethod(ctx, a.method); return m ? !!m.changes : true; },
+  async check(a, ctx) {
+    const m = await videoMethod(ctx, a.method);
+    if (!m) return { ok: false, error: `the Video module has no method "${str(a.method, 80)}"${ctx && ctx.videoMethods && (await ctx.videoMethods()).length ? '' : ' (the 🎬 Video module is not available in this build)'}` };
+    const args = a.args === undefined ? {} : a.args;
+    if (m.schema) { const e = checkValue(args, m.schema, 'args'); if (e) return { ok: false, error: e }; }
+    return { ok: true, args: { method: a.method, args } };
+  },
+  describe: (a) => `${a.method} in the 🎬 Video module${a.args && Object.keys(a.args).length ? ` with ${clip(JSON.stringify(a.args), 400)}` : ''}`,
+  async run(a, ctx) {
+    const r = await ctx.videoInvoke(a.method, a.args);
+    if (r && r.ok === false) return { ok: false, error: str(r.code || r.error || 'FAILED', 60), message: clip(r.message || `It didn't work (${r.code || r.error || 'failed'}).`, 400) };
+    return { ok: true, message: r && r.path ? 'Saved the clip.' : 'Done.', data: shrink(r), video: (r && r.path) || null };
+  },
+});
+async function videoMethod(ctx, name) {
+  if (!ctx || typeof ctx.videoMethods !== 'function') return null;
+  const list = await ctx.videoMethods();
+  return (list || []).find((m) => m.method === name) || null;
+}
 
 // ---- 💬 AI panes ---------------------------------------------------------------------------------
 def({
@@ -842,6 +891,8 @@ function checkValue(v, s, at) {
       return null;
     case 'number':
       if (typeof v !== 'number' || !Number.isFinite(v)) return `${at} must be a number`;
+      if (s.minimum != null && v < s.minimum) return `${at} must be at least ${s.minimum}`;
+      if (s.maximum != null && v > s.maximum) return `${at} must be at most ${s.maximum}`;
       return null;
     case 'boolean':
       return typeof v === 'boolean' ? null : `${at} must be true or false`;
