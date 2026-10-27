@@ -498,10 +498,26 @@ async function main() {
   }
 
   // ---- 🎬 video ------------------------------------------------------------------------------------------
+  // 🎬 video through the REAL video-api + video-studio against the fake ComfyUI (Wan nodes + models)
   d = await drive('video_status', {});
-  check('video_status', !d.carded && d.result && d.result.data && d.result.data.enabled === false, 'says video is not set up');
-  d = await drive('generate_video', { prompt: 'waves' });
-  check('generate_video', d.carded && /VIDEO_NOT_SET_UP/.test(d.text), 'asks, then reports plainly that no video backend is set up');
+  check('video_status', !d.carded && d.result && d.result.ok && d.result.data && d.result.data.ready === true && /comfy/.test(JSON.stringify(d.result.data)), 'reads the 🎬 Video module without a card (ComfyUI + Wan ready)', 'real video-api + fake ComfyUI');
+  const vg0 = comfy.state.videoGraphs.length;
+  d = await drive('generate_video', { prompt: 'waves at night', seconds: 1 });
+  const vpath = d.result && d.result.data && d.result.data.path;
+  check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 1 && /waves at night/.test(JSON.stringify(comfy.state.videoGraphs[vg0])) && vpath && fs.existsSync(vpath), 'card → ✔ → a Wan text→video graph on ComfyUI → the clip is saved', 'real video-api + fake ComfyUI');
+  d = await drive('generate_video', { image: png, prompt: 'he breathes', seconds: 1 });
+  check('generate_video', d.carded && comfy.state.videoGraphs.length === vg0 + 2 && /LoadImage/.test(JSON.stringify(comfy.state.videoGraphs[vg0 + 1])) && d.result.ok, 'with a picture → picture→video (the picture is uploaded and loaded)', 'real video-api + fake ComfyUI');
+  for (const m of ['video.status', 'video.models', 'video.progress', 'video.gallery', 'video.capabilities', 'video.install.check']) {
+    d = await drive('video_call', { method: m, args: {} });
+    if (assert(!d.carded && /^RESULT \{"ok":true/.test(d.text), `video_call ${m}: read-only, runs directly against the real module`)) mark(`video:${m}`, 'real video-api');
+  }
+  d = await drive('video_call', { method: 'video.generate', args: { prompt: 'a lighthouse', seconds: 1, steps: 7, cfgScale: 4.5, seed: 42 } });
+  const vg = JSON.stringify(comfy.state.videoGraphs.slice(-1)[0] || {});
+  check('video_call', d.carded && d.result && d.result.ok && /"steps":7/.test(vg) && /"cfg":4\.5/.test(vg) && /"seed":42/.test(vg), 'video.generate: every Wan setting (steps, cfg, seed) reaches ComfyUI', 'real video-api + fake ComfyUI');
+  d = await drive('video_call', { method: 'video.generate', args: { prompt: 'x', seconds: 99 } });
+  assert(!(d.result && d.result.ok) && !d.carded, 'video_call: an out-of-range setting is refused before anything runs');
+  d = await drive('video_call', { method: 'video.install.downloadModel', args: { id: 'wan21-t2v-1.3b' } }, { confirm: false });
+  if (assert(d.carded, 'video_call video.install.downloadModel: shows the "I will" card (not run here: it downloads gigabytes)')) await call('alfred:reject', { id: d.card.id });
 
   // ---- 💬 the AI panes (fake panes in mock Electron) -----------------------------------------------------
   const sentBefore = mock.__registry.claude.webContents.sentLog.length;
