@@ -1,6 +1,6 @@
 /* 🗂 Character Forge (plan item B5): the dossier list (#/p/<pid>/<b>/forge) and one character's dossier
    (#/p/<pid>/<b>/forge/<record_id>) in the look of the author's Moki Vey sample: hero portrait, gold name, teal
-   tagline, the ten-view plate, numbered section cards with category letters. Proposed fields carry a "proposed"
+   tagline, the 🎬 motion study under the portrait, the ten-view plate, numbered section cards with category letters. Proposed fields carry a "proposed"
    badge with ✔ Approve / ✎ Edit; protected fields a 🔒. The helpers of app.js are passed in (no state of its own).
    API: /forge/… (forge.py, docs/CHARACTER_FORGE.md). All styles are scoped under .forge (style.css). */
 
@@ -10,6 +10,34 @@ const ENGINE_WORDS = { sd: 'Stable Diffusion', chatgpt: 'ChatGPT', auto: 'the pi
 const VIEWS = [['front', 'FRONT'], ['three_quarter_front', '3/4 FRONT'], ['side', 'SIDE'], ['three_quarter_back', '3/4 BACK'], ['back', 'BACK'],
   ['idle', 'IDLE'], ['draw', 'DRAW / TOOL REACH'], ['attack', 'ATTACK / EMPTY HAND'], ['dash', 'DASH'], ['defend', 'DEFEND']].map(([key, label]) => ({ key, label }));
 const SOURCE_WORDS = { canon: 'from the character record', sheet: 'shared with the character sheet', voice: 'shared with the voice card' };
+
+const CLIP_MAX_MB = 40;   // forge.MAX_CLIP_BYTES
+const CLIP_TYPES = ['video/mp4', 'video/webm'];
+
+/** The first frame of a clip file as a PNG blob (the poster for the PDF), or null when the browser cannot decode it. */
+function posterFromFile(file) {
+  return new Promise(resolve => {
+    let url = null; let done = false;
+    const finish = v => { if (done) return; done = true; try { if (url) URL.revokeObjectURL(url); } catch { /* ignore */ } resolve(v); };
+    try {
+      url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.preload = 'auto';
+      v.addEventListener('error', () => finish(null));
+      v.addEventListener('loadeddata', () => { try { v.currentTime = Math.min(0.05, (v.duration || 1) / 2); } catch { finish(null); } });
+      v.addEventListener('seeked', () => {
+        try {
+          const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+          if (!c.width || !c.height) { finish(null); return; }
+          c.getContext('2d').drawImage(v, 0, 0);
+          c.toBlob(b => finish(b), 'image/png');
+        } catch { finish(null); }
+      });
+      setTimeout(() => finish(null), 8000);
+      v.src = url;
+    } catch { finish(null); }
+  });
+}
 
 /** A picture from the book's assets as a blob URL (the asset route needs the access token, so no plain <img src>). */
 async function pictureUrl(x, art) {
@@ -73,7 +101,7 @@ export async function viewForgeList(main, x) {
         h('div', { class: 'forge-tile-name' }, c.name),
         c.tagline ? h('div', { class: 'forge-tile-tag' }, c.tagline) : null,
         h('div', { class: 'forge-meter', role: 'img', 'aria-label': `${c.filled} of ${c.total} fields filled` }, h('span', { style: `width:${pct}%` })),
-        h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/10 views`, c.has_portrait ? ' · portrait' : ''))));
+        h('div', { class: 'forge-tile-stats' }, `${c.filled}/${c.total} fields`, c.proposed ? ` · ${c.proposed} proposed` : '', ` · ${c.views_done}/10 views`, c.has_portrait ? ' · portrait' : '', c.has_clip ? ' · 🎬 clip' : ''))));
   }
   body.append(grid);
   if (!chars.some(c => c.name.toLowerCase() === 'moki vey')) body.appendChild(h('div', { class: 'forge-actions forge-foot' }, exampleBtn));
@@ -96,14 +124,16 @@ export async function viewForge(main, rid, x) {
   main.appendChild(page);
   const msg = h('div', { class: 'forge-msg', 'aria-live': 'polite' });
   const prog = h('div', { class: 'forge-prog', 'aria-live': 'polite' });
+  const clipMsg = h('div', { class: 'forge-msg', 'aria-live': 'polite' });
+  const clipProg = h('div', { class: 'forge-prog', 'aria-live': 'polite', 'data-testid': 'clip-progress' });
   const fail = (e, title) => { clear(msg).appendChild(x.problemBox(x.toProblem(e, where), {}, title)); };
   const reload = async () => { try { await load(); } catch (e) { fail(e, 'Could not reload the dossier'); } render(); };
   const slotSel = h('select', { class: 'forge-select', 'aria-label': 'Which AI invents', 'data-testid': 'forge-slot' },
     h('option', { value: '' }, 'AI: automatic (AI-1 first)'), ['AI-1', 'AI-2', 'AI-3'].map(s => h('option', { value: s }, s)));
 
-  const job = async (sub, body, label) => {
+  const job = async (sub, body, label, where = prog) => {
     clear(msg);
-    const j = await x.runAiJob(`${path}/${sub}`, body, prog, label);
+    const j = await x.runAiJob(`${path}/${sub}`, body, where, label);
     if (j) { const r = (j.results || []).slice(-1)[0] || {}; x.toast(r.message || 'Done'); }
     await reload();
     return j;
@@ -159,12 +189,67 @@ export async function viewForge(main, rid, x) {
       h('button', { type: 'button', class: 'forge-mini', title: `Make the ${label} with ChatGPT`, 'data-testid': `art-gpt-${slot}`, onclick: () => art(Object.assign({ engine: 'chatgpt' }, purpose), `Making the ${label} with ChatGPT`) }, '💬 ChatGPT'),
       h('button', { type: 'button', class: 'forge-mini', title: `Upload your own ${label}`, 'data-testid': `art-up-${slot}`, onclick: () => upload(slot) }, '⬆ Upload'));
   };
+  // 🎬 the motion clip: made from the portrait (or the front view) by AutoInjector's video maker, or uploaded
+  const makeClip = async () => {
+    clear(clipMsg);
+    await job('art', { what: 'clip', engine: 'auto' }, 'Making the motion clip', clipProg);
+  };
+  const uploadClip = () => {
+    const inp = h('input', { type: 'file', accept: CLIP_TYPES.join(','), class: 'visually-hidden' });
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; inp.remove();
+      if (!f) return;
+      clear(clipMsg);
+      const bad = (title, text, fix) => clipMsg.appendChild(x.problemBox(x.toProblem({ code: 'INVALID_INPUT', message: text, fix }, where), {}, title));
+      if (f.type && !CLIP_TYPES.includes(f.type)) { bad('This clip cannot be used', 'Only MP4 and WebM clips can be used.', 'Pick an .mp4 or .webm file (AutoInjector’s 🎬 Video tab saves MP4).'); return; }
+      if (f.size > CLIP_MAX_MB * 1024 * 1024) { bad('This clip is too large', `The clip is larger than ${CLIP_MAX_MB} MB; a 3–5 second clip is usually 1–10 MB.`, 'Shorten the clip or save it smaller, then upload it again.'); return; }
+      try {
+        const out = await api('PUT', bpath(`${path}/art/clip`), { raw: f, headers: { 'Content-Type': f.type || 'application/octet-stream' } });
+        // the first frame becomes the poster (the dossier PDF uses it); best effort, the clip is kept either way
+        const poster = await posterFromFile(f);
+        if (poster) { try { await api('PUT', bpath(`${path}/art/clip_poster`), { raw: poster, headers: { 'Content-Type': 'image/png' } }); } catch { /* no poster: the PDF leaves the still out */ } }
+        x.toast(out.message || 'Clip saved');
+      } catch (e) { clipMsg.appendChild(x.problemBox(x.toProblem(e, where), {}, 'The clip could not be saved')); }
+      await reload();
+    });
+    document.body.appendChild(inp); inp.click();
+  };
   const urls = new Map();   // asset id -> blob URL (a re-render after a filter click fetches nothing again)
-  const picture = (holder, artItem, alt) => {
-    if (!artItem) return;
+  const blobOf = artItem => {
     const k = `${artItem.asset_id}@${artItem.version || 1}`;
     if (!urls.has(k)) urls.set(k, pictureUrl(x, artItem));
-    urls.get(k).then(u => { if (u) { clear(holder).appendChild(h('img', { src: u, alt })); holder.classList.add('has-img'); } }).catch(() => { /* the empty slot stays */ });
+    return urls.get(k);
+  };
+  const motion = () => {
+    const c = d.art.clip;
+    const source = d.art.portrait ? 'portrait' : d.art.views.front ? 'front view' : null;
+    const frame = h('div', { class: `forge-motion-frame${c ? ' has-clip' : ''}` });
+    if (c) {
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const vid = h('video', { class: 'forge-clip', 'data-testid': 'forge-clip', loop: true, muted: true, playsinline: true, controls: true, preload: 'metadata', 'aria-label': `${d.name}, motion study` });
+      vid.muted = true; vid.loop = true; vid.playsInline = true; vid.controls = true;
+      if (!reduce) vid.autoplay = true;
+      frame.appendChild(vid);
+      if (c.poster) blobOf(c.poster).then(u => { if (u) vid.setAttribute('poster', u); }).catch(() => { /* the first frame shows instead */ });
+      blobOf(c).then(u => { if (u) { vid.src = u; vid.addEventListener('error', () => frame.classList.add('no-play'), { once: true }); } }).catch(() => frame.classList.add('no-play'));
+    } else {
+      frame.appendChild(h('div', { class: 'forge-slot-empty' }, h('span', { class: 'forge-motion-glyph', 'aria-hidden': 'true' }, '🎬'),
+        h('span', null, source ? 'No clip yet' : 'Needs a portrait first')));
+    }
+    const meta = c ? [c.seconds ? `${c.seconds} s loop` : 'loop', c.source === 'upload' ? 'your clip' : (c.model || c.engine || null)].filter(Boolean).join(' · ') : '';
+    return h('section', { class: 'forge-motion', 'aria-labelledby': 'forge-motion-h', 'data-testid': 'forge-motion' },
+      h('div', { class: 'forge-motion-head' }, h('h3', { id: 'forge-motion-h' }, '🎬 Motion study'), meta ? h('span', { class: 'forge-motion-meta' }, meta) : null),
+      frame,
+      h('div', { class: 'forge-slot-actions' },
+        h('button', { type: 'button', class: 'forge-mini', 'data-testid': 'clip-make', disabled: !source,
+          title: source ? `A 4-second idle-motion clip made from the ${source} (AutoInjector → 🎬 Video)` : 'Make or upload the portrait first: the clip is made from it',
+          onclick: makeClip }, c ? '🎬 Make the motion clip again' : '🎬 Make the motion clip'),
+        h('button', { type: 'button', class: 'forge-mini', 'data-testid': 'clip-upload', title: `Upload your own MP4 or WebM clip (up to ${CLIP_MAX_MB} MB)`, onclick: uploadClip }, '⬆ Upload a clip')),
+      clipMsg, clipProg);
+  };
+  const picture = (holder, artItem, alt) => {
+    if (!artItem) return;
+    blobOf(artItem).then(u => { if (u) { clear(holder).appendChild(h('img', { src: u, alt })); holder.classList.add('has-img'); } }).catch(() => { /* the empty slot stays */ });
   };
 
   // ------------------------------------------------------------------ pieces
@@ -191,7 +276,7 @@ export async function viewForge(main, rid, x) {
         !d.approved_character ? h('span', { class: 'forge-note' }, 'The character itself is still a draft.') : null),
       msg, prog);
     return h('section', { class: 'forge-hero', 'aria-label': 'Cover' },
-      h('div', { class: 'forge-portrait-col' }, frame, artButtons('portrait', 'portrait')), cover);
+      h('div', { class: 'forge-portrait-col' }, frame, artButtons('portrait', 'portrait'), motion()), cover);
   };
   const stat = (n, label, cls = '') => h('div', { class: `forge-stat ${cls}` }, h('strong', null, String(n)), h('span', null, label));
   const editCover = async () => {

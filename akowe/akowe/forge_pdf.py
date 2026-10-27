@@ -1,6 +1,7 @@
 """🗂 The Character Forge dossier as a PDF, in the look of the author's Moki Vey sample (pure Python).
 
-Page 1: the cover (gold name, teal tagline, the portrait, three summary lines). Page 2 (landscape): "NAME / TEN-VIEW
+Page 1: the cover (gold name, teal tagline, the portrait, three summary lines; with a motion clip the portrait moves
+left and the clip's poster stands beside it as a small framed "MOTION STUDY" still). Page 2 (landscape): "NAME / TEN-VIEW
 REFERENCE" — the turnaround sheet when there is one, else a 5 × 2 grid of the ten views with their labels. Then the 14
 numbered sections, every field a dark bordered card: teal letter tags, a bold label, the text. Every page has the dark
 background, the letter legend and "CH-001 | REV 1 | DRAFT | n" in the footer; the section pages also the header
@@ -180,9 +181,32 @@ def _image_or_slot(page, images, key, info, x, y, w, h, *, cover, label=None, no
     return False
 
 
+def _motion_study(page, im, clip: dict, x: float, y_bottom: float, w: float):
+    """🎬 A small framed still of the motion clip (its poster), bottom-aligned with the portrait: a gold hairline
+    frame on a card, the label "MOTION STUDY" above it, a one-line caption below."""
+    pad = 5.0
+    inner_w = w - 2 * pad
+    dw, dh = _fit(im.width, im.height, inner_w, 260.0)
+    cap_y = y_bottom + 2.0
+    frame_y = cap_y + 14.0
+    frame_h = dh + 2 * pad
+    page.ops.append(("rect", x, frame_y, w, frame_h, CARD, GOLD, 0.8))
+    page.ops.append(("img", "clip_poster", x + pad + (inner_w - dw) / 2.0, frame_y + pad, dw, dh, None))
+    label_y = frame_y + frame_h + 8.0
+    text_op(page, "MOTION STUDY", BOLD, 9.0, x, label_y, TEAL)
+    page.ops.append(("line", x, label_y - 3.5, x + tw("MOTION STUDY", BOLD, 9.0), label_y - 3.5, GOLD, 0.6))
+    secs = clip.get("seconds")
+    secs = int(secs) if isinstance(secs, (int, float)) and not isinstance(secs, bool) and secs > 0 else None
+    cap = f"{secs}-second loop, first frame" if secs else "Clip, first frame"
+    while tw(cap, REG, 6.8) > w and len(cap) > 4:
+        cap = cap[:-2]
+    text_op(page, cap, REG, 6.8, x, cap_y, MUTED)
+
+
 # ====================================================================== the document
 def render(d: dict, pictures: dict) -> bytes:
-    """d = forge.public(...) (the dossier JSON); pictures = {slot: bytes|None} (portrait, sheet, the ten views)."""
+    """d = forge.public(...) (the dossier JSON); pictures = {slot: bytes|None} (portrait, sheet, the ten views, and
+    ``clip_poster``: the motion clip's first frame, drawn as a framed MOTION STUDY still on the cover)."""
     images, info = {}, {}
     for key, data in (pictures or {}).items():
         if not data:
@@ -212,8 +236,13 @@ def render(d: dict, pictures: dict) -> bytes:
         ssize -= 0.5
     text_op(p, sub, REG, ssize, MARGIN, ph - 69.0, TEAL)
     bx, by, bw, bh = 126.0, 168.0, 360.0, 542.0
+    if "clip_poster" in info:
+        bx = MARGIN  # the portrait moves left to make room for the motion-study still (else: unchanged)
     _image_or_slot(p, images, "portrait", info, bx, by, bw, bh, cover=False, label="PORTRAIT",
                    note="No picture yet: make one in Akowe or upload your own")
+    if "clip_poster" in info:
+        _motion_study(p, info["clip_poster"], (d.get("art") or {}).get("clip") or {}, bx + bw + 16.0, by,
+                      pw - MARGIN - (bx + bw + 16.0))
     lines = [x for x in d.get("summary") or [] if x][:3]
     if not lines:
         c = d.get("counts") or {}

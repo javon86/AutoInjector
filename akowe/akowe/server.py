@@ -1383,8 +1383,9 @@ def make_handler(app: App):
             ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
             if ctype.startswith("text/") or ctype in ("application/javascript",):
                 ctype += "; charset=utf-8"
-            csp = ("default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; "
-                   "script-src 'self'; connect-src 'self'; object-src 'self' blob:; frame-src 'self' blob:")
+            csp = ("default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; "  # media: 🎬 forge clips
+                   "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'self' blob:; "
+                   "frame-src 'self' blob:")
             self._send(200, target.read_bytes(), ctype, {"Content-Security-Policy": csp})
 
         def _handle(self, method: str):

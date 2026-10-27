@@ -32,6 +32,11 @@ characters, the story rules, the character's canon and the fields already filled
 against a JSON schema, clipped, and only fill fields that are still empty and unprotected, as ``proposed``. A failed
 group stops the job with a plain message; the groups already done are kept.
 
+**Motion clip.** ``start_clip`` (``POST …/art {what: "clip"}``) animates the portrait (else the front view) through
+AutoInjector's ``POST /video/request`` (picture→video, 4 s, ``purpose: "clip"``; the picture goes as a temp-file path,
+the prompt is the appearance / posture / gait / expressions fields + fixed idle-motion words) and stores the MP4/WebM
+and its poster as book assets; ``PUT …/art/clip`` takes the author's own clip.
+
 **Art.** ``start_art`` runs a job that calls AutoInjector's ``POST /image/request`` (``engine``, ``purpose``
 portrait / view / sheet, ``view``, a prompt from the appearance fields and the fixed visual anchors, ``characterLock``
 = the name, ``returnImage``) and stores each picture as a book asset; the ten views reuse the first view's seed. The
@@ -47,7 +52,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import socket
+import tempfile
 import threading
 import time
 import urllib.error
@@ -83,6 +90,13 @@ ENGINES = ("auto", "sd", "chatgpt")
 ART_TIMEOUT_S = 300.0
 MAX_ART_BYTES = 15 * 1024 * 1024
 DEFAULT_IMAGE_BRIDGE = "http://127.0.0.1:8765"
+# 🎬 the motion clip (docs/CHARACTER_FORGE.md "Motion clip"; AutoInjector POST /video/request)
+CLIP_TIMEOUT_S = 900.0
+CLIP_SECONDS = 4
+MAX_CLIP_BYTES = 40 * 1024 * 1024
+CLIP_MOTION = "subtle idle motion, breathing, cloth moving, camera still"
+CLIP_PROMPT_FIELDS = (("appearance", "Appearance"), ("posture", "Posture"), ("gait", "Gait"),
+                      ("presence", "Expressions"))
 _LOCK = threading.RLock()
 
 
@@ -506,6 +520,18 @@ def _art_public(pid, branch, a):
     return out
 
 
+def _clip_public(pid, branch, c):
+    """The motion clip of a dossier: the video asset + its poster (the first frame, PNG/JPEG) or None."""
+    out = _art_public(pid, branch, c)
+    if out is None:
+        return None
+    for k in ("model", "seconds", "fps", "frames", "width", "height"):
+        if c.get(k) is not None:
+            out[k] = c[k]
+    out["poster"] = _art_public(pid, branch, c.get("poster"))
+    return out
+
+
 def public(store, pid: str, branch: str, rid: str, *, kind: str = "character") -> dict:
     """The full dossier JSON (CONTRACT section 3)."""
     canon = _canon_of(store, pid, branch, rid)
@@ -545,7 +571,8 @@ def public(store, pid: str, branch: str, rid: str, *, kind: str = "character") -
             "summary": [clip(x, SUMMARY_MAX) for x in entry.get("summary") or [] if clip(x)][:SUMMARY_LINES],
             "sections": sections,
             "art": {"portrait": _art_public(pid, branch, art.get("portrait")), "views": views,
-                    "sheet": _art_public(pid, branch, art.get("sheet"))},
+                    "sheet": _art_public(pid, branch, art.get("sheet")),
+                    "clip": _clip_public(pid, branch, art.get("clip"))},
             "counts": {"fields": len(fields), "filled": filled, "proposed": proposed,
                        "protected": sum(1 for d in fields.values() if d["protected"]),
                        "views_done": sum(1 for v in views.values() if v)},
@@ -568,6 +595,7 @@ def list_dossiers(store, pid: str, branch: str, kind: str = "character") -> list
         out.append({"record_id": c["record_id"], "name": c["name"], "kind": kind, "code": codes[c["record_id"]],
                     "revision": d["revision"], "readiness": d["readiness"], "has_portrait": bool(d["art"]["portrait"]),
                     "views_done": d["counts"]["views_done"], "has_sheet": bool(d["art"]["sheet"]),
+                    "has_clip": bool(d["art"]["clip"]),
                     "filled": d["counts"]["filled"], "proposed": d["counts"]["proposed"],
                     "total": d["counts"]["fields"], "tagline": d["tagline"],
                     "portrait": d["art"]["portrait"]})
@@ -891,6 +919,11 @@ def store_picture(store, principal, pid, branch, data: bytes, mime: str, label: 
     actual = sniff_mime(bytes(data))
     if actual is None:
         raise AkoweError("INVALID_INPUT", "/body", "only PNG and JPEG pictures can be used", status="REJECTED")
+    return _store_asset(store, principal, pid, branch, bytes(data), actual, label)
+
+
+def _store_asset(store, principal, pid, branch, data: bytes, actual: str, label: str) -> dict:
+    """Bytes already checked -> a book asset (binary I01 record, like an upload) -> {asset_id, version, mime, at}."""
     if not store.has_scope(principal, pid, branch, "I01:create"):
         raise AkoweError("PERMISSION_DENIED", "", "missing scope I01:create", status="REJECTED")
     rid = f"I01-{new_id('import').split('-', 1)[1]}"
@@ -917,6 +950,53 @@ def picture_bytes(store, pid, branch, art: dict | None) -> bytes | None:
     except Exception:  # noqa: BLE001 - a missing picture is a placeholder, never a failure
         log.warning("dossier picture %s could not be read", art.get("asset_id"))
         return None
+
+
+def sniff_video(data: bytes) -> str | None:
+    """video/mp4 (an ISO-BMFF ``ftyp`` box first) or video/webm (an EBML header), from the bytes, never a label."""
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"\x1a\x45\xdf\xa3" and b"webm" in data[:64]:
+        return "video/webm"
+    return None
+
+
+def store_clip(store, principal, pid, branch, data: bytes, label: str) -> dict:
+    """A motion clip (MP4 or WebM, at most MAX_CLIP_BYTES) as a book asset -> {asset_id, version, mime, at}."""
+    if not isinstance(data, (bytes, bytearray)) or not data:
+        raise AkoweError("MISSING_INPUT", "/body", "the clip is empty", status="REJECTED")
+    if len(data) > MAX_CLIP_BYTES:
+        raise AkoweError("INVALID_INPUT", "/body", f"the clip is larger than {MAX_CLIP_BYTES // (1024 * 1024)} MB; "
+                         "a 3-5 second clip is usually 1-10 MB", status="REJECTED")
+    actual = sniff_video(bytes(data))
+    if actual is None:
+        raise AkoweError("INVALID_INPUT", "/body", "only MP4 and WebM clips can be used", status="REJECTED")
+    return _store_asset(store, principal, pid, branch, bytes(data), actual, label)
+
+
+def set_clip(store, pid, branch, rid, clip: dict | None = None, *, poster: dict | None = None) -> dict:
+    """Set the dossier's motion clip (its poster with it), or only a new poster for the clip already there."""
+    def fn(entry, fields, canon):
+        art = entry.setdefault("art", {"portrait": None, "views": {}, "sheet": None})
+        if clip is not None:
+            art["clip"] = dict(clip, poster=poster)
+            return {"art:clip"}, {}
+        if not isinstance(art.get("clip"), dict):
+            raise AkoweError("MISSING_INPUT", "/slot", "there is no motion clip yet: make or upload the clip first",
+                             status="REJECTED")
+        art["clip"]["poster"] = poster
+        return {"art:clip_poster"}, {}
+    by = (clip or {}).get("source") or "author"
+    return mutate(store, pid, branch, rid, fn, what="art", by=by, bump=False)
+
+
+def clip_source(store, pid, branch, rid) -> tuple[str, dict] | None:
+    """(slot, art) of the picture the clip is made from: the portrait, else the front view; None when neither."""
+    art = raw_entry(store, pid, branch, rid).get("art") or {}
+    for slot, a in (("portrait", art.get("portrait")), ("front", (art.get("views") or {}).get("front"))):
+        if isinstance(a, dict) and a.get("asset_id"):
+            return slot, a
+    return None
 
 
 def raw_entry(store, pid, branch, rid, kind="character") -> dict:
@@ -1085,13 +1165,37 @@ ART_PROBLEMS = {
     "IMAGE_BAD_ANSWER": ("AutoInjector sent no usable picture", "Try again. If it repeats, make the picture in "
                          "AutoInjector and upload it here."),
     "NO_LOCK": ("No character lock", "Make a character lock in AutoInjector → 🎨 Images → 🔒 Character locks."),
+    # 🎬 the motion clip (AutoInjector POST /video/request; the engine's codes, then Akọwe's own)
+    "VIDEO_NOT_SET_UP": ("AutoInjector cannot make video yet", "In AutoInjector's 🎬 Video tab, set up video (it uses "
+                         "the ComfyUI of 🎨 Images), then press Make the motion clip again. Or upload your own clip."),
+    "VIDEO_MODEL_MISSING": ("The video model is not downloaded yet", "In AutoInjector's 🎬 Video tab, download the "
+                            "video model (one click), then press Make the motion clip again."),
+    "VIDEO_OOM": ("The graphics card ran out of memory", "Close other programs that use the graphics card (Stable "
+                  "Diffusion too), then try again. A clip made from a picture needs about 12 GB of graphics memory."),
+    "VIDEO_TIMEOUT": ("The clip took too long", "Try again: the first clip after a start loads the video model and "
+                      "can take several minutes."),
+    "VIDEO_CANCELLED": ("The clip was stopped in AutoInjector", "Press Make the motion clip again when you are ready."),
+    "VIDEO_FAILED": ("The clip could not be made", "Try again. If it repeats, make the clip in AutoInjector's 🎬 "
+                     "Video tab and upload it here."),
+    "UNSUPPORTED_ON_BACKEND": ("This video maker cannot animate a picture", "In AutoInjector's 🎬 Video tab, switch "
+                               "to the built-in ComfyUI video, or upload your own clip."),
+    "VIDEO_NOT_WIRED": ("This AutoInjector cannot make video", "Update AutoInjector to a version with 🎬 Video, or "
+                        "upload your own clip."),
+    "VIDEO_BAD_ANSWER": ("No usable clip came back", "Try again. If it repeats, make the clip in AutoInjector's 🎬 "
+                         "Video tab and upload it here."),
 }
+# For these the fix above is always used (plain words the author can act on), the bridge's own hint never replaces it
+VIDEO_CODES = frozenset(("VIDEO_NOT_SET_UP", "VIDEO_MODEL_MISSING", "VIDEO_OOM", "VIDEO_TIMEOUT", "VIDEO_CANCELLED",
+                         "VIDEO_FAILED", "UNSUPPORTED_ON_BACKEND", "VIDEO_NOT_WIRED", "VIDEO_BAD_ANSWER"))
 
 
 class ArtProblem(Exception):
-    def __init__(self, code: str, message: str = "", hint: str = ""):
+    def __init__(self, code: str, message: str = "", hint: str = "", model: str = ""):
         super().__init__(code)
+        self.model = str(model or "")[:80]
         title, fix = ART_PROBLEMS.get(code, ("The picture could not be made", "Try again, or upload your own."))
+        if code in VIDEO_CODES:
+            hint = fix
         self.code, self.message, self.hint = code, (message or title), (hint or fix)
 
     def as_error(self) -> dict:
@@ -1158,9 +1262,12 @@ def bridge_info(app) -> dict:
             "uses": [u for u, _t in bridge_targets(app)]}
 
 
-def _post(url: str, token: str | None, body: dict, timeout_s: float) -> dict:
+def _post(url: str, token: str | None, body: dict, timeout_s: float, *, route: str = "/image/request") -> dict:
+    """One POST to the service bridge. ``route`` /image/request or /video/request (the codes for a missing route,
+    a timeout and an unusable answer follow the route; the key and reachability codes are shared)."""
+    video = route.startswith("/video/")
     data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url + "/image/request", data=data, method="POST")
+    req = urllib.request.Request(url + route, data=data, method="POST")
     req.add_header("Content-Type", "application/json; charset=utf-8")
     req.add_header("Accept", "application/json")
     if token:
@@ -1178,27 +1285,29 @@ def _post(url: str, token: str | None, body: dict, timeout_s: float) -> dict:
         code = str(b.get("error") or b.get("code") or "")
         if exc.code == 401:
             raise ArtProblem("IMAGE_BRIDGE_KEY") from None
-        if exc.code == 404 and not code:
-            raise ArtProblem("IMAGE_NOT_WIRED") from None
+        if exc.code == 404 and (not code or code == "NOT_FOUND"):
+            raise ArtProblem("VIDEO_NOT_WIRED" if video else "IMAGE_NOT_WIRED") from None
         raise ArtProblem(code or f"HTTP_{exc.code}", str(b.get("message") or "")[:300],
-                         str(b.get("hint") or "")[:300]) from None
+                         str(b.get("hint") or "")[:300], str(b.get("model") or b.get("modelId") or "")) from None
     except (socket.timeout, TimeoutError):
-        raise ArtProblem("IMAGE_TIMEOUT") from None
+        raise ArtProblem("VIDEO_TIMEOUT" if video else "IMAGE_TIMEOUT") from None
     except urllib.error.URLError as exc:
         if isinstance(exc.reason, (socket.timeout, TimeoutError)):
-            raise ArtProblem("IMAGE_TIMEOUT") from None
+            raise ArtProblem("VIDEO_TIMEOUT" if video else "IMAGE_TIMEOUT") from None
         raise ArtProblem("IMAGE_BRIDGE_UNREACHABLE", f"AutoInjector is not reachable at {url}") from None
     except (ConnectionError, OSError):
         raise ArtProblem("IMAGE_BRIDGE_UNREACHABLE", f"AutoInjector is not reachable at {url}") from None
+    bad = "VIDEO_BAD_ANSWER" if video else "IMAGE_BAD_ANSWER"
     try:
         out = json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        raise ArtProblem("IMAGE_BAD_ANSWER") from None
+        raise ArtProblem(bad) from None
     if not isinstance(out, dict):
-        raise ArtProblem("IMAGE_BAD_ANSWER")
+        raise ArtProblem(bad)
     if out.get("ok") is False:
-        raise ArtProblem(str(out.get("error") or out.get("code") or "IMAGE_BAD_ANSWER"),
-                         str(out.get("message") or "")[:300], str(out.get("hint") or "")[:300])
+        raise ArtProblem(str(out.get("error") or out.get("code") or bad),
+                         str(out.get("message") or "")[:300], str(out.get("hint") or "")[:300],
+                         str(out.get("model") or out.get("modelId") or ""))
     return out
 
 
@@ -1325,6 +1434,163 @@ def run_art(app, job, pid, branch, rid, what: str, engine: str, views: list[str]
                                                                  "book."})
 
 
+# ====================================================================== 🎬 the motion clip: POST /video/request
+def clip_prompt(dossier: dict) -> str:
+    """The name + the Appearance, Posture, Gait and Expressions fields + the fixed idle-motion words (always kept)."""
+    texts = {f["key"]: f["text"] for s in dossier["sections"] for f in s["fields"] if f["text"]}
+    parts = [dossier["name"]]
+    for key, word in CLIP_PROMPT_FIELDS:
+        t = " ".join(str(texts.get(key) or "").split())
+        if t:
+            parts.append(f"{word}: {clip(t, 300).rstrip('.')}")
+    head = ". ".join(x.strip().rstrip(".") for x in parts if x and x.strip())
+    return f"{head[:1200 - len(CLIP_MOTION) - 2]}. {CLIP_MOTION}"
+
+
+def request_video(app, body: dict, timeout_s: float | None = None) -> dict:
+    """One POST /video/request (``CLIP_TIMEOUT_S``: a clip takes minutes); the next bridge is tried only when one is
+    not reachable / has no video route."""
+    timeout_s = CLIP_TIMEOUT_S if timeout_s is None else timeout_s
+    targets = bridge_targets(app)
+    if not targets:
+        raise ArtProblem("IMAGE_BRIDGE_UNREACHABLE", "no local AutoInjector address is set")
+    last = None
+    for url, token in targets:
+        try:
+            return _post(url, token, body, timeout_s, route="/video/request")
+        except ArtProblem as exc:
+            if exc.code not in ("IMAGE_BRIDGE_UNREACHABLE", "VIDEO_NOT_WIRED"):
+                raise
+            last = exc
+    raise last
+
+
+def _read_local(path, limit: int) -> bytes | None:
+    try:
+        fp = Path(str(path))
+        if fp.is_file() and fp.stat().st_size <= limit:
+            return fp.read_bytes()
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def clip_files(resp: dict) -> tuple[bytes, bytes | None]:
+    """(video bytes, poster bytes or None) of a /video/request answer. The video is the local ``path`` (AutoInjector
+    runs on the same computer; .mp4 or .webm); the poster the base64 of ``returnPoster`` (posterBase64 / poster_base64
+    / posterImage / a data: URL in ``poster``), else the local ``poster`` file."""
+    path = resp.get("path") or resp.get("video")
+    data = _read_local(path, MAX_CLIP_BYTES + 1) if isinstance(path, str) and path else None
+    if data is None:
+        b64 = resp.get("videoBase64") or resp.get("video_base64")
+        if isinstance(b64, str) and b64:
+            try:
+                data = base64.b64decode(b64.split(",", 1)[-1] if b64.startswith("data:") else b64)
+            except (ValueError, TypeError):
+                data = None
+    if not data:
+        raise ArtProblem("VIDEO_BAD_ANSWER", "AutoInjector's answer named no clip file Akọwe can read")
+    if len(data) > MAX_CLIP_BYTES:
+        raise ArtProblem("VIDEO_BAD_ANSWER", f"the clip is larger than {MAX_CLIP_BYTES // (1024 * 1024)} MB")
+    if sniff_video(data) is None:
+        raise ArtProblem("VIDEO_BAD_ANSWER", "the clip is not an MP4 or WebM file")
+    poster = None
+    for k in ("posterBase64", "poster_base64", "posterImage", "poster"):
+        v = resp.get(k)
+        if isinstance(v, dict):
+            v = v.get("base64") or v.get("imageBase64")
+        if not isinstance(v, str) or not v:
+            continue
+        if k == "poster" and not v.startswith("data:"):
+            poster = _read_local(v, MAX_ART_BYTES)
+        else:
+            try:
+                poster = base64.b64decode(v.split(",", 1)[-1] if v.startswith("data:") else v)
+            except (ValueError, TypeError):
+                poster = None
+        from .exporters.images import sniff_mime  # noqa: PLC0415
+        if poster and sniff_mime(poster):
+            break
+        poster = None
+    return data, poster
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def run_clip(app, job, pid, branch, rid) -> None:
+    """The 🎬 motion-clip job: the portrait (else the front view) to a temp file, POST /video/request (picture→video,
+    4 s, purpose clip), then the clip and its poster as book assets. Cancellable while AutoInjector works."""
+    store = app.store
+    dossier = public(store, pid, branch, rid)
+    src = clip_source(store, pid, branch, rid)
+    pic = picture_bytes(store, pid, branch, src[1]) if src else None
+    if not pic:
+        raise ArtProblem("VIDEO_FAILED", "There is no portrait or front view to animate",
+                         "Make or upload the portrait (or the front view) first.")
+    try:
+        from .book_path import get_profile  # noqa: PLC0415
+        title = (get_profile(store, pid) or {}).get("title") or ""
+    except Exception:  # noqa: BLE001
+        title = ""
+    job.total = 1
+    job.check()
+    job.phase = (f"Making the motion clip from the {'portrait' if src[0] == 'portrait' else 'front view'} — "
+                 "a clip can take 2-10 minutes")
+    tmpdir = tempfile.mkdtemp(prefix="akowe-clip-")
+    ext = ".jpg" if pic[:3] == b"\xff\xd8\xff" else ".png"
+    img_path = os.path.join(tmpdir, f"{src[0]}{ext}")
+    with open(img_path, "wb") as fh:
+        fh.write(pic)
+    body = {"image": img_path, "prompt": clip_prompt(dossier), "seconds": CLIP_SECONDS, "purpose": "clip",
+            "from": "akowe-forge", "returnPoster": True, "book": title or None}
+    body = {k: v for k, v in body.items() if v is not None}
+    box: dict = {}
+
+    def worker():
+        try:
+            box["resp"] = request_video(app, body)
+        except ArtProblem as exc:
+            box["problem"] = exc
+        except Exception as exc:  # noqa: BLE001 - becomes a plain job error below
+            log.warning("motion clip request failed: %s", type(exc).__name__)
+            box["problem"] = ArtProblem("VIDEO_FAILED", f"unexpected problem ({type(exc).__name__})")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)  # AutoInjector has read the picture (or never will)
+    t = threading.Thread(target=worker, name="akowe-forge-clip", daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.25)
+        job.check()  # Stop: Akọwe lets go; AutoInjector's own answer is ignored when it comes
+    if "problem" in box:
+        exc = box["problem"]
+        if exc.code in VIDEO_CODES:
+            first = next((ln.strip() for ln in exc.message.splitlines() if ln.strip()), "")
+            exc.message = first or exc.message
+        if exc.code == "VIDEO_MODEL_MISSING" and exc.model and exc.model not in exc.message:
+            exc.message = f"{exc.message} (model {exc.model})"
+        raise exc
+    resp = box.get("resp") or {}
+    data, poster = clip_files(resp)
+    warnings = [str(w)[:200] for w in resp.get("warnings") or []][:5]
+    if poster is None:
+        poster = pic  # picture→video starts from this picture: the closest first frame there is
+        warnings.append("AutoInjector sent no poster; the source picture is used")
+    name = dossier["name"]
+    asset = store_clip(store, job.principal, pid, branch, data, f"{name} — motion clip")
+    p_asset = store_picture(store, job.principal, pid, branch, poster, "", f"{name} — motion clip poster")
+    asset.update(source=str(resp.get("engine") or "video"), engine=resp.get("engine"),
+                 model=str(resp.get("model"))[:80] if resp.get("model") else None, seed=_num(resp.get("seed")),
+                 seconds=_num(resp.get("seconds")) or CLIP_SECONDS, frames=_num(resp.get("frames")),
+                 fps=_num(resp.get("fps")), width=_num(resp.get("width")), height=_num(resp.get("height")),
+                 made_from=src[0], warnings=warnings or None)
+    set_clip(store, pid, branch, rid, {k: v for k, v in asset.items() if v is not None}, poster=p_asset)
+    job.done = 1
+    job.results.append({"ok": True, "slot": "clip", "engine": resp.get("engine"), "model": asset.get("model"),
+                        "message": "Motion clip made and stored with the book."})
+
+
 # ====================================================================== the service (jobs) and HTTP
 class ForgeService:
     def __init__(self, app):
@@ -1365,8 +1631,10 @@ class ForgeService:
         body = body if isinstance(body, dict) else {}
         _canon_of(self.store, pid, branch, rid)
         what = body.get("what")
-        if what not in ("portrait", "views", "sheet"):
-            raise AkoweError("INVALID_INPUT", "/what", "what: portrait, views or sheet", status="REJECTED")
+        if what not in ("portrait", "views", "sheet", "clip"):
+            raise AkoweError("INVALID_INPUT", "/what", "what: portrait, views, sheet or clip", status="REJECTED")
+        if what == "clip":
+            return self.start_clip(principal, pid, branch, rid, body)
         engine = body.get("engine", "auto")
         if engine not in ENGINES:
             raise AkoweError("INVALID_INPUT", "/engine", "engine: auto, sd or chatgpt", status="REJECTED")
@@ -1392,7 +1660,51 @@ class ForgeService:
                     j.error["message"] = f"{j.error['message']} — the {j.done} picture(s) made before are kept"
         return self.app.review._start(job, fn)
 
+    def start_clip(self, principal, pid, branch, rid, body) -> dict:
+        """POST …/art {what: "clip", engine: "auto"} -> 202 job (the motion clip from the portrait / front view)."""
+        engine = body.get("engine", "auto")
+        if engine != "auto":
+            raise AkoweError("INVALID_INPUT", "/engine", "engine: auto (AutoInjector picks its video maker)",
+                             status="REJECTED")
+        if clip_source(self.store, pid, branch, rid) is None:
+            raise AkoweError("MISSING_INPUT", "/what", "the motion clip is made from the portrait (or the front "
+                             "view): make or upload the portrait first", status="REJECTED")
+        if not self.store.has_scope(principal, pid, branch, "I01:create"):
+            raise AkoweError("PERMISSION_DENIED", "", "missing scope I01:create", status="REJECTED")
+        job = self._job("forge_clip", principal, pid, branch, rid, None)
+
+        def fn(j):
+            j.current = rid
+            try:
+                run_clip(self.app, j, pid, branch, rid)
+            except ArtProblem as exc:
+                j.status, j.phase, j.error = "error", "Failed", exc.as_error()
+        return self.app.review._start(job, fn)
+
+    def upload_clip(self, principal, pid, branch, rid, slot, body) -> dict:
+        """PUT …/art/clip (MP4/WebM bytes) or …/art/clip_poster (PNG/JPEG: the first frame, for the PDF)."""
+        canon = _canon_of(self.store, pid, branch, rid)
+        if not isinstance(body, (bytes, bytearray)):
+            what = "clip itself (MP4 or WebM bytes) with Content-Type video/mp4 or video/webm" if slot == "clip" \
+                else "poster itself (PNG or JPEG bytes) with Content-Type image/png or image/jpeg"
+            raise AkoweError("INVALID_INPUT", "/body", f"send the {what}", status="REJECTED")
+        if slot == "clip":
+            asset = store_clip(self.store, principal, pid, branch, bytes(body), f"{canon['name']} — motion clip")
+            asset["source"] = "upload"
+            out = set_clip(self.store, pid, branch, rid, asset, poster=None)
+            return {"ok": True, "slot": slot, "art": out["art"], "message": "Clip saved with the book."}
+        if not isinstance((raw_entry(self.store, pid, branch, rid).get("art") or {}).get("clip"), dict):
+            raise AkoweError("MISSING_INPUT", "/slot", "there is no motion clip yet: make or upload the clip first",
+                             status="REJECTED")
+        asset = store_picture(self.store, principal, pid, branch, bytes(body), "",
+                              f"{canon['name']} — motion clip poster")
+        asset["source"] = "upload"
+        out = set_clip(self.store, pid, branch, rid, None, poster=asset)
+        return {"ok": True, "slot": slot, "art": out["art"], "message": "Poster saved with the clip."}
+
     def upload(self, principal, pid, branch, rid, slot, body, headers) -> dict:
+        if slot in ("clip", "clip_poster"):
+            return self.upload_clip(principal, pid, branch, rid, slot, body)
         _canon_of(self.store, pid, branch, rid)
         if slot != "portrait" and slot != "sheet" and slot not in VIEW_KEYS:
             raise AkoweError("INVALID_INPUT", "/slot", "slot: portrait, sheet or one of " + ", ".join(VIEW_KEYS),
@@ -1415,6 +1727,8 @@ def pdf_bytes(app, pid, branch, rid) -> tuple[bytes, str]:
             "sheet": picture_bytes(app.store, pid, branch, art.get("sheet"))}
     for v in VIEW_KEYS:
         pics[v] = picture_bytes(app.store, pid, branch, (art.get("views") or {}).get(v))
+    if isinstance(art.get("clip"), dict):  # 🎬 the clip's poster: a framed MOTION STUDY still on the cover
+        pics["clip_poster"] = picture_bytes(app.store, pid, branch, art["clip"].get("poster"))
     data = forge_pdf.render(d, pics)
     safe = re.sub(r"[^A-Za-z0-9 _-]+", "", d["name"]).strip() or "Character"
     return data, f"{d['code']} {safe} - Character Forge dossier.pdf"

@@ -102,3 +102,90 @@ def test_forge_page_fits_a_phone(make_context, fg):
     assert overflow(page) <= 1
     shot(page, "forge-dossier-phone")
     assert_clean(page, "phone")
+
+
+def _poster_of(jpg_path) -> bytes:
+    """A 4:5 first frame cut from the example portrait (what a picture→video clip of it starts with), as PNG."""
+    import io
+    from PIL import Image
+    im = Image.open(jpg_path).convert("RGB")
+    w, hgt = im.size
+    top = int(hgt * 0.04)
+    buf = io.BytesIO()
+    im.crop((0, top, w, min(hgt, top + int(w * 1.25)))).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _webm_of(poster_png: bytes, tmp_path) -> bytes:
+    """A real 1-second WebM of the poster (ffmpeg, when there is one) so the screenshot shows a playable clip; else
+    WebM-looking bytes (the poster still shows; the player marks the clip as not playable)."""
+    import shutil
+    import subprocess
+    from test_forge_clip import WEBM
+    exe = shutil.which("ffmpeg")
+    if exe:
+        src, out = tmp_path / "poster.png", tmp_path / "clip.webm"
+        src.write_bytes(poster_png)
+        try:
+            subprocess.run([exe, "-y", "-loglevel", "error", "-loop", "1", "-i", str(src), "-t", "1", "-r", "12",
+                            "-vf", "scale=240:-2,format=yuv420p", "-c:v", "libvpx", "-b:v", "300k", str(out)],
+                           check=True, timeout=60)
+            return out.read_bytes()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return WEBM
+
+
+def test_forge_motion_clip_player(make_context, fg, tmp_path):
+    """🎬 The motion study under the portrait: Make the motion clip (progress while AutoInjector works, through a fake
+    bridge), then the looping, muted <video> with its poster; the author's own clip replaces it."""
+    from akowe import forge, forge_example
+    from test_forge import png
+    from test_forge_clip import FakeVideoBridge
+    out = forge_example.load(fg.app, "author", fg.pid, "main", {})
+    rid = out["record_id"]
+    (tmp_path / "videos").mkdir()
+    b = FakeVideoBridge(tmp_path / "videos")
+    b.delay = 2.0
+    b.poster = _poster_of(forge_example.EXAMPLE_DIR / "portrait.jpg")
+    b.video = _webm_of(b.poster, tmp_path)
+    forge.save_bridge_settings(fg.app, {"url": b.url, "token": "t"})
+    try:
+        page = open_page(make_context, fg)
+        goto(page, f"#/p/{fg.pid}/main/forge/{rid}")
+        page.wait_for_selector("[data-testid=forge-motion]", timeout=15000)
+        assert "MOTION STUDY" in page.inner_text("[data-testid=forge-motion] h3").upper()
+        assert page.locator("[data-testid=forge-clip]").count() == 0
+        assert page.is_enabled("[data-testid=clip-make]") and page.is_visible("[data-testid=clip-upload]")
+        page.click("[data-testid=clip-make]")
+        page.wait_for_selector("[data-testid=clip-progress] .spinner", timeout=5000)  # progress while it runs
+        page.wait_for_function("() => /making the motion clip/i.test(document.querySelector('[data-testid=clip-progress]').textContent)",
+                               timeout=5000)
+        page.wait_for_function("() => { const v = document.querySelector('[data-testid=forge-clip]');"
+                               " return v && (v.getAttribute('poster') || '').startsWith('blob:') && v.src.startsWith('blob:'); }",
+                               timeout=20000)
+        v = page.locator("[data-testid=forge-clip]")
+        for attr in ("loop", "muted", "playsinline", "controls"):
+            assert v.get_attribute(attr) is not None, attr
+        assert page.evaluate("() => { const v = document.querySelector('[data-testid=forge-clip]');"
+                             " return v.loop && v.muted && v.controls; }")
+        assert b.requests[0]["purpose"] == "clip" and b.requests[0]["seconds"] == 4
+        assert "wan22-ti2v-5b" in page.inner_text("[data-testid=forge-motion]")
+        settle(page, 500)
+        page.locator("[data-testid=forge-motion]").scroll_into_view_if_needed()
+        shot(page, "forge-motion-clip")
+        try:  # the hero alone, for the docs (best effort)
+            from .ui_helpers import SHOTS
+            page.locator(".forge-hero").screenshot(path=str(SHOTS / "forge-motion-hero.png"))
+        except Exception:  # noqa: BLE001
+            pass
+        assert not unnamed_controls(page)
+        assert_clean(page, "motion clip")
+        # a picture is not a clip: the page says so before anything is sent
+        with page.expect_file_chooser() as fc:
+            page.click("[data-testid=clip-upload]")
+        fc.value.set_files({"name": "still.png", "mimeType": "image/png", "buffer": png()})
+        page.wait_for_selector("[data-testid=forge-motion] .state.problem, [data-testid=forge-motion] .problem", timeout=5000)
+        assert "MP4 and WebM" in page.inner_text("[data-testid=forge-motion]")
+    finally:
+        b.close()
