@@ -55,27 +55,51 @@ he makes no more calls.
 
 **Test my AI** in ⚙ checks the connection (it sends no question) **and that the model is really installed** in Ollama. If it isn't, it lists the installed models with a **Use …** button for each. Very small models (under 3B, e.g. `qwen2.5:0.5b`) work but often pick the wrong tool, and he says so. Small slips by the model (arguments wrapped twice, extra arguments, numbers sent as text) are forgiven; extra arguments are dropped and he is told which.
 
-### Installing a local model on Windows (plain steps)
+### Setting up his AI with one button (🤵 Butler section)
 
-1. Go to **https://ollama.com/download**, download **Ollama for Windows** and run the installer
-   (Next → Install). Ollama then runs in the background (a llama icon near the clock).
-2. Open **Command Prompt** (press the Windows key, type `cmd`, press Enter).
-3. Type this and press Enter (it downloads about 4.7 GB once):
+Everything to get him running lives at the top of the **🤵 Butler** section. You only need it for setup;
+you talk to him in his side panel.
 
-   ```
-   ollama pull qwen2.5:7b
-   ```
+1. **⚡ Set up Alfred's AI (one button).** It works out your graphics card and memory, installs **Ollama**
+   if it is missing (Windows: the official installer, run silently; macOS: into ~/Applications; Linux: into
+   the app's own folder, no admin needed) and starts it. It then downloads the best recommended model that
+   **fits your PC**, makes it Alfred's model (and the Butler's, if the Butler has no other AI set), and runs
+   the check. A progress bar and plain messages show each step. Pressing it again is harmless. Tick
+   **🔓 Prefer uncensored** first if you want an uncensored model; it is still one that follows his
+   commands.
+2. **🩺 Check everything** lists:
+   - Ollama installed (and its version) and the server answering (which address);
+   - the models folder and free disk;
+   - whether a model is installed, and whether Alfred's model is installed;
+   - whether his model answers and whether it can call his tools;
+   - your graphics card, and whether the model fits it;
+   - the Butler's model.
+   Each line shows ✔, ⚠ or ✖, and a problem has a one-click **Fix** (install, start, download the
+   recommended model, use an installed one…). **Start / Stop Ollama** are next to it.
+3. **🔎 Find a model** searches the **Ollama library** and **Hugging Face**. Hugging Face models are GGUF
+   files, which Ollama downloads directly as `hf.co/<repo>:<size>`. When you're offline, a built-in
+   recommended list still works.
+   - **Your PC** line: e.g. "RTX 3060 12 GB · 32 GB RAM".
+   - **Fit rating** on every model: ★★★ Great fit, ★★ Good fit, ★ Runs, slowly, or ✖ Too big for this
+     PC, with the reason in plain words. **Only models that can run here can be downloaded**: Download is
+     switched off for "too big". For a Hugging Face model it picks the best size (quantization) that fits,
+     and you can choose another.
+   - **Badges:** 🔓 uncensored (abliterated, Dolphin, Hermes…), 🛠 can use tools (what Alfred needs),
+     👁 sees images, 🔒 gated.
+   - **Filters:** 🔓 **Uncensored** brings uncensored models to the top and widens the search. They are
+     never hidden. 🛠 **Can use tools** is the other filter.
+   - **Hugging Face token (optional):** connect yours for gated or private models. It is stored encrypted
+     on this PC and never logged.
+   - Installed models show their size and fit, with **Use** and **Remove** buttons.
+4. **Personality** and **saved set-ups** are just below (see above).
 
-   Optional but recommended (Alfred's tool list is long): give Ollama a bigger memory window — Windows key →
-   "Edit the system environment variables" → Environment Variables → New (user variable):
-   name `OLLAMA_CONTEXT_LENGTH`, value `16384` → OK, then quit Ollama from the tray icon and start it again.
+You can also ask him: "check your AI", "find me an uncensored 8B model that fits", "download it and use it"
+(each change shows an "I will" card first).
 
-   **Recommended:** `qwen2.5:7b` — good at tool calling, fits graphics cards with 8 GB of memory
-   (it also runs, slower, without one). Alternatives: `llama3.1:8b` (8 GB), `qwen3:8b`
-   (newer, 8 GB); on a small card (4–6 GB) `qwen2.5:3b` or `llama3.2:3b` (less reliable with tools);
-   on a big card (16–24 GB) `qwen2.5:14b`.
-4. In AutoInjector: 🎩 → ⚙ → **His AI: Local model (Ollama)** (or leave Automatic), **Model**:
-   `qwen2.5:7b` → **Save** → **Test my AI**. It should say "My AI answers".
+**Doing it by hand** (if the one button can't install, e.g. your PC blocks installers): get Ollama from
+**https://ollama.com/download**, run it, then use **🔎 Find a model** → **Download** → **Use**. Or, in Command
+Prompt: `ollama pull qwen2.5:7b`. Alfred's tool list is long, so a bigger context helps: set the user
+environment variable `OLLAMA_CONTEXT_LENGTH` = `16384` and restart Ollama.
 
 No local model? Choose **The connected AI** (if you set one up for the butler) or **A web AI pane**.
 
