@@ -10,7 +10,7 @@ uses both). Each book gets ONE folder, named once as ``<Book title> (<short id>)
     Chapters/      01 - <title>.md … (the approved text, or the newest draft marked DRAFT)
     Book Bible/    book-bible.json (book_bible.build) + book-bible.md
     Reports/       Book report.md/.pdf (latest), Editor summary.md, Planned to page.md, Continuity.md
-    Character Forge/  <code> <name> - Character Forge dossier.pdf/.json per saved dossier + its pictures and motion clip (B5)
+    Character Forge/  <code> <name> - dossier.pdf/.json per saved dossier + its pictures and motion clip (B5)
     Log/           Book journal.md (journal.py) + run-events.json (runs: steps, states, AI per step, times, problems)
     Progress/      progress.json (book steps, next step, the run's state)
     book.akowe the complete re-importable package (book_package.py)
@@ -385,8 +385,10 @@ class SaveService:
             entry = forge.raw_entry(store, pid, branch, rid)
             if not entry.get("history"):
                 continue  # never opened in the Character Forge
-            data, name = forge.pdf_bytes(app, pid, branch, rid)
-            base = name[:-len(".pdf")]
+            data, _name = forge.pdf_bytes(app, pid, branch, rid)
+            code = safe_name(item["code"], 12, "CH")
+            room = 60 - len(f"Character Forge/{code}  - dossier.json")  # every path inside the book's folder ≤ 60
+            base = f"{code} {safe_name(item['name'], max(room, 8), 'Character')} - dossier"
             files[f"Character Forge/{base}.pdf"] = data
             d = forge.public(store, pid, branch, rid)
             d.pop("history", None)

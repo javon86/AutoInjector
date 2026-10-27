@@ -366,7 +366,7 @@ def test_book_save_includes_the_clip(vb):
     assert files["Character Forge/CH-001 pictures/motion clip.mp4"] == MP4
     assert files["Character Forge/CH-001 pictures/motion clip poster.png"] == png(48, 60, RED)
     assert "Character Forge/CH-001 pictures/portrait.png" in names
-    j = json.loads(files["Character Forge/CH-001 Moki Vey - Character Forge dossier.json"])
+    j = json.loads(files["Character Forge/CH-001 Moki Vey - dossier.json"])
     assert j["art"]["clip"]["mime"] == "video/mp4"
 
 

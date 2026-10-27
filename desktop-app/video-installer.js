@@ -123,7 +123,10 @@ function createVideoInstaller(opts = {}) {
     const files = m.files.map((f) => {
       const hit = findFile(f, rs);
       const inComfy = !!(listed && Array.isArray(listed[f.kind]) && listed[f.kind].some((x) => String(x).replace(/\\/g, '/').split('/').pop() === f.name));
-      const present = !!(hit && hit.complete) || inComfy;
+      // When the connected ComfyUI's own list is known, that decides: a file in some OTHER ComfyUI's folder
+      // (e.g. Stability Matrix's while the portable one runs) is not usable by this one.
+      const known = !!(listed && Array.isArray(listed[f.kind]));
+      const present = known ? inComfy : !!(hit && hit.complete);
       return { kind: f.kind, name: f.name, bytes: f.bytes, url: f.url, present, inComfy, path: hit && hit.path ? hit.path : null,
         wrongSize: !!(hit && hit.path && !hit.complete), partialBytes: hit && hit.partial ? hit.partial.bytes : 0 };
     });
@@ -150,9 +153,13 @@ function createVideoInstaller(opts = {}) {
     if (job) return { ok: false, error: 'BUSY', code: 'BUSY', message: 'A download is already running. Wait for it, or press Cancel.' };
     const t = o.root ? Object.assign({ layout: 'comfy' }, o.root) : target();
     if (!t) return { ok: false, error: 'NO_COMFYUI', code: 'VIDEO_NOT_SET_UP', message: 'No ComfyUI was found to put the video model into.', fix: 'Press “Install ComfyUI + video model”, or install ComfyUI in Stability Matrix (or start your own ComfyUI), then try again.' };
-    const rs = roots();
-    if (!rs.some((r) => path.resolve(r.path) === path.resolve(t.path))) rs.unshift(t);
-    const todo = m.files.filter((f) => { const h = findFile(f, rs); return !(h && h.complete); });
+    // Only files already in the TARGET ComfyUI (or listed by the running one) count as done: a copy in another
+    // ComfyUI's folder isn't visible to this one, so "already downloaded" would be a dead end.
+    const listed = o.listed || null;
+    const todo = m.files.filter((f) => {
+      if (listed && Array.isArray(listed[f.kind]) && listed[f.kind].some((x) => String(x).replace(/\\/g, '/').split('/').pop() === f.name)) return false;
+      const h = findFile(f, [t]); return !(h && h.complete);
+    });
     if (!todo.length) { set({ phase: 'installed', model: m.id, file: null, pct: 1, error: null, message: `✔ ${m.short} is already downloaded.` }); return { ok: true, already: true, model: m.id, files: m.files.map((f) => f.name) }; }
     const need = todo.reduce((s, f) => s + f.bytes, 0);
     const free = freeBytes(t.path);

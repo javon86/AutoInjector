@@ -252,6 +252,8 @@ def render(d: dict, pictures: dict) -> bytes:
     y = 142.0
     for ln in lines:
         for wl in wrap_runs([(ln, REG, TEXT)], pw - 2 * MARGIN, 10.0)[:2]:
+            if y < FOOT_TOP:
+                break  # never into the footer's legend
             draw_line(p, wl, MARGIN, y, 10.0)
             y -= 18.0
     pages.append(p)

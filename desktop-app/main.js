@@ -1629,6 +1629,8 @@ const CHAT_IMAGE_SITE = "chatgpt";
 const CHAT_IMAGE_GRACE_MS = Number(process.env.AUTOINJECTOR_CHATIMG_GRACE_MS) || 8000;
 let chatImageHold = null; // { since, job } while a job runs
 let chatImageReleasedAt = 0;
+let chatImageWaiters = 0; // sends waiting for an image job to let go of ChatGPT (the next image job lets them in first)
+let chatImageWaiterLeftAt = 0; // when the last one stopped waiting (it still has to reach the send queue)
 function chatImageHolds(site) { return site === CHAT_IMAGE_SITE && (!!chatImageHold || Date.now() - chatImageReleasedAt < CHAT_IMAGE_GRACE_MS); }
 // A reply read while an image job holds the pane: recorded as captured (so it is
 // never taken for a new, untagged reply later), shown nowhere, relayed nowhere.
@@ -1677,10 +1679,19 @@ async function sendTextTo(target, text, fromSite, opts = {}) {
   if (!opts.chatImage && chatImageHolds(target)) {
     logEvent("send-waits-image", { target, from: fromSite || null, note: "ChatGPT is drawing a picture — this message goes in when it is done" });
     const t0 = Date.now();
-    while (chatImageHolds(target) && Date.now() - t0 < 30 * 60000) {
-      if (opts.cancelToken && opts.cancelToken.cancelled) return { ok: false, error: "CANCELLED" };
-      if (fromSite && !state.relayEnabled) return { ok: false, error: "RELAY_STOPPED" };
-      await new Promise((r) => setTimeout(r, 250));
+    chatImageWaiters += 1;
+    try {
+      while (chatImageHolds(target) && Date.now() - t0 < 30 * 60000) {
+        if (opts.cancelToken && opts.cancelToken.cancelled) return { ok: false, error: "CANCELLED" };
+        if (fromSite && !state.relayEnabled) return { ok: false, error: "RELAY_STOPPED" };
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    } finally { chatImageWaiters -= 1; chatImageWaiterLeftAt = Date.now(); }
+    // Still held after 30 minutes (a long run of pictures): never type into ChatGPT mid-drawing.
+    if (chatImageHolds(target)) {
+      logEvent("send-error", { target, from: fromSite || null, error: "CHATGPT_IMAGE_BUSY", note: "ChatGPT was still drawing pictures after 30 minutes — this message was not sent" });
+      broadcast("send-error", { target, error: "CHATGPT_IMAGE_BUSY" });
+      return { ok: false, error: "CHATGPT_IMAGE_BUSY" };
     }
   }
   const label = fromSite ? SITES[fromSite]?.label : null;
@@ -5997,7 +6008,8 @@ function chatImage() {
     prepare: async (token) => {
       const S0 = CHAT_IMAGE_SITE; const t0 = Date.now(); let logged = false;
       while (Date.now() - t0 < 180000 && !(token && token.cancelled)) {
-        const busy = state.generating[S0] || state.stopShown[S0] || !!sendQueues[S0] || hasUncapturedReply(S0) || akoweAwaitingReply(S0);
+        // chatImageWaiters: a message that waited for the previous picture goes in before the next picture starts.
+        const busy = chatImageWaiters > 0 || Date.now() - chatImageWaiterLeftAt < 1500 || state.generating[S0] || state.stopShown[S0] || !!sendQueues[S0] || hasUncapturedReply(S0) || akoweAwaitingReply(S0);
         if (!busy) return;
         if (!logged) { logged = true; logEvent("chatgpt-image-waits", { note: "ChatGPT is still busy with another message — the picture request goes in after it" }); }
         await new Promise((r) => setTimeout(r, 250));
